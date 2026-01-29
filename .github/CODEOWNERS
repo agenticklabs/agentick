@@ -1,0 +1,9 @@
+# Default owners for everything
+* @rlindgren
+
+# Package-specific owners (customize as needed)
+# /packages/core/ @core-team
+# /packages/react/ @frontend-team
+# /packages/angular/ @frontend-team
+# /website/ @docs-team
+

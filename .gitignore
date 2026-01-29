@@ -1,0 +1,40 @@
+# npm
+.npmrc
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# pnpm
+.pnpm-store/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Claude AI (local settings only)
+.claude/*.local.json
+
+# Repo
+.turbo/
+dist/
+
+# VitePress
+website/.vitepress/cache/
+website/.vitepress/dist/
+website/api/
+
+# Angular
+.angular/
+
+.env
+*.env
+
+coverage/

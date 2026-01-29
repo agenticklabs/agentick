@@ -1,0 +1,13 @@
+{
+  "compilerOptions": {
+    "tsBuildInfoFile": "dist/.tsbuildinfo.build"
+  },
+  "extends": "./tsconfig.json",
+  "references": [{ "path": "../../core/tsconfig.build.json" }],
+  "exclude": [
+    "src/**/*.spec.ts",
+    "src/**/*.spec.tsx",
+    "src/**/__tests__",
+    "src/**/*-example.ts"
+  ]
+}

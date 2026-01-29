@@ -1,0 +1,29 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pnpm build)",
+      "Bash(pnpm test)",
+      "Bash(pnpm typecheck)",
+      "Bash(pnpm lint)",
+      "Bash(pnpm format)",
+      "Read(CLAUDE.md)",
+      "Read(ARCHITECTURE.md)",
+      "Read(CONTRIBUTING.md)",
+      "Read(packages/**/ARCHITECTURE.md)"
+    ],
+    "deny": ["Bash(rm -rf:*)", "Bash(git push --force:*)", "Read(*.env)", "Write(*.env)"]
+  },
+  "env": {
+    "NODE_ENV": "development"
+  },
+  "companyAnnouncements": [
+    "📚 Tentickle - JSX framework for building AI agents",
+    "📖 Start with: CLAUDE.md, ARCHITECTURE.md, CONTRIBUTING.md",
+    "🏗️ Architecture: React patterns, Signal-based state, kernel/core separation",
+    "✅ Before committing: pnpm test (all tests must pass)",
+    "📝 Document: TSDoc comments, ARCHITECTURE.md updates, website examples",
+    "🧪 Testing: Use @tentickle/shared/testing utilities",
+    "📦 Monorepo: pnpm + Turborepo, packages are in /packages",
+    "⚙️ Local permissions: Add to .claude/settings.local.json (gitignored)"
+  ]
+}

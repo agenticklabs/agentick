@@ -1,0 +1,42 @@
+{
+  "name": "@tentickle/ai-sdk",
+  "version": "0.0.1",
+  "description": "Vercel AI SDK adapter for Tentickle",
+  "keywords": [
+    "adapter",
+    "agent",
+    "ai",
+    "ai-sdk",
+    "vercel"
+  ],
+  "license": "ISC",
+  "author": "Ryan Lindgren",
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "main": "src/index.ts",
+  "publishConfig": {
+    "access": "public",
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "test": "echo \"Tests run from workspace root\"",
+    "typecheck": "tsc -p tsconfig.build.json --noEmit",
+    "lint": "oxlint src/",
+    "format:check": "oxfmt --check src/",
+    "clean": "rm -rf dist",
+    "prepublishOnly": "pnpm build",
+    "dev": "tsc --watch"
+  },
+  "dependencies": {
+    "@tentickle/core": "workspace:*",
+    "@tentickle/shared": "workspace:*"
+  },
+  "peerDependencies": {
+    "@ai-sdk/openai": "^2.0.0",
+    "ai": "^5.0.0"
+  }
+}

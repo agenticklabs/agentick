@@ -1,0 +1,101 @@
+{
+  "name": "@tentickle/shared",
+  "version": "0.0.1",
+  "description": "Shared types and utilities for Tentickle",
+  "keywords": [
+    "agent",
+    "ai",
+    "types"
+  ],
+  "license": "ISC",
+  "author": "Ryan Lindgren",
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "main": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./blocks": "./src/blocks.ts",
+    "./block-types": "./src/block-types.ts",
+    "./tools": "./src/tools.ts",
+    "./input": "./src/input.ts",
+    "./messages": "./src/messages.ts",
+    "./streaming": "./src/streaming.ts",
+    "./models": "./src/models.ts",
+    "./timeline": "./src/timeline.ts",
+    "./errors": "./src/errors.ts",
+    "./identity": "./src/identity.ts",
+    "./testing": "./src/testing/index.ts",
+    "./utils": "./src/utils/index.ts"
+  },
+  "publishConfig": {
+    "access": "public",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "import": "./dist/index.js"
+      },
+      "./blocks": {
+        "types": "./dist/blocks.d.ts",
+        "import": "./dist/blocks.js"
+      },
+      "./block-types": {
+        "types": "./dist/block-types.d.ts",
+        "import": "./dist/block-types.js"
+      },
+      "./tools": {
+        "types": "./dist/tools.d.ts",
+        "import": "./dist/tools.js"
+      },
+      "./input": {
+        "types": "./dist/input.d.ts",
+        "import": "./dist/input.js"
+      },
+      "./messages": {
+        "types": "./dist/messages.d.ts",
+        "import": "./dist/messages.js"
+      },
+      "./streaming": {
+        "types": "./dist/streaming.d.ts",
+        "import": "./dist/streaming.js"
+      },
+      "./models": {
+        "types": "./dist/models.d.ts",
+        "import": "./dist/models.js"
+      },
+      "./timeline": {
+        "types": "./dist/timeline.d.ts",
+        "import": "./dist/timeline.js"
+      },
+      "./errors": {
+        "types": "./dist/errors.d.ts",
+        "import": "./dist/errors.js"
+      },
+      "./identity": {
+        "types": "./dist/identity.d.ts",
+        "import": "./dist/identity.js"
+      },
+      "./testing": {
+        "types": "./dist/testing/index.d.ts",
+        "import": "./dist/testing/index.js"
+      },
+      "./utils": {
+        "types": "./dist/utils/index.d.ts",
+        "import": "./dist/utils/index.js"
+      }
+    },
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "test": "echo \"Tests run from workspace root\"",
+    "typecheck": "tsc -p tsconfig.build.json --noEmit",
+    "lint": "oxlint src/",
+    "format:check": "oxfmt --check src/",
+    "clean": "rm -rf dist",
+    "prepublishOnly": "pnpm build",
+    "dev": "tsc --watch"
+  }
+}

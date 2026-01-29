@@ -1,0 +1,24 @@
+{
+  "$schema": "https://unpkg.com/@changesets/config@3.0.0/schema.json",
+  "changelog": "@changesets/cli/changelog",
+  "commit": false,
+  "fixed": [],
+  "linked": [
+    [
+      "tentickle",
+      "@tentickle/kernel",
+      "@tentickle/shared",
+      "@tentickle/client",
+      "@tentickle/server",
+      "@tentickle/express",
+      "@tentickle/nestjs",
+      "@tentickle/react",
+      "@tentickle/angular",
+      "@tentickle/devtools"
+    ]
+  ],
+  "access": "public",
+  "baseBranch": "master",
+  "updateInternalDependencies": "patch",
+  "ignore": []
+}

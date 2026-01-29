@@ -1,0 +1,50 @@
+{
+  "name": "@tentickle/google",
+  "version": "0.1.8",
+  "description": "Google AI adapter for Tentickle",
+  "keywords": [
+    "adapter",
+    "agent",
+    "ai",
+    "gemini",
+    "google"
+  ],
+  "homepage": "https://github.com/rlindgren/tentickle#readme",
+  "bugs": {
+    "url": "https://github.com/rlindgren/tentickle/issues"
+  },
+  "license": "ISC",
+  "author": "Ryan Lindgren",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/rlindgren/tentickle.git",
+    "directory": "packages/adapters/google"
+  },
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "main": "src/index.ts",
+  "publishConfig": {
+    "access": "public",
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "test": "echo \"Tests run from workspace root\"",
+    "typecheck": "tsc -p tsconfig.build.json --noEmit",
+    "lint": "oxlint src/",
+    "format:check": "oxfmt --check src/",
+    "clean": "rm -rf dist",
+    "prepublishOnly": "pnpm build",
+    "dev": "tsc --watch"
+  },
+  "dependencies": {
+    "@tentickle/core": "workspace:*",
+    "@tentickle/shared": "workspace:*"
+  },
+  "peerDependencies": {
+    "@google/genai": "^1.31.0"
+  }
+}

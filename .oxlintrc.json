@@ -1,0 +1,42 @@
+{
+  "$schema": "https://raw.githubusercontent.com/oxc-project/oxc/main/npm/oxlint/configuration_schema.json",
+  "plugins": ["typescript", "react", "vitest", "import"],
+  "categories": {
+    "correctness": "error",
+    "suspicious": "warn",
+    "perf": "warn"
+  },
+  "rules": {
+    "no-console": "off",
+    "no-await-in-loop": "off",
+    "no-unused-vars": [
+      "error",
+      {
+        "argsIgnorePattern": "^_",
+        "varsIgnorePattern": "^_",
+        "caughtErrors": "none"
+      }
+    ],
+    "react/react-in-jsx-scope": "off",
+    "react/no-string-refs": "off",
+    "react/no-children-prop": "off",
+    "vitest/no-conditional-expect": "off",
+    "vitest/expect-expect": "off",
+    "@typescript-eslint/no-this-alias": "off",
+    "@typescript-eslint/consistent-type-imports": "off",
+    "react-hooks/exhaustive-deps": "off",
+    "no-constant-condition": "off",
+    "vitest/no-disabled-tests": "off",
+    "no-unsafe-finally": "off",
+    "@typescript-eslint/no-extraneous-class": "off",
+    "import/no-unassigned-import": "off"
+  },
+  "ignorePatterns": [
+    "node_modules",
+    "dist",
+    "coverage",
+    "*.min.js",
+    "*.d.ts",
+    "website/.vitepress/cache"
+  ]
+}
