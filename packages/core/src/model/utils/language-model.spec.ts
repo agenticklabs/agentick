@@ -6,6 +6,191 @@ import { StopReason } from "@tentickle/shared";
 
 describe("language-model transformers", () => {
   describe("fromEngineState", () => {
+    describe("system message from sections fallback", () => {
+      it("should create system message from sections with audience=model when input.system is empty", async () => {
+        const input: COMInput = {
+          timeline: [
+            {
+              kind: "message",
+              message: {
+                role: "user",
+                content: [{ type: "text", text: "Hello" }],
+              },
+            },
+          ],
+          sections: {
+            instructions: {
+              id: "instructions",
+              audience: "model",
+              content: [{ type: "text", text: "You are a helpful assistant." }],
+            },
+          },
+          system: [], // Empty - should fall back to sections
+          tools: [],
+          ephemeral: [],
+          metadata: {},
+        };
+
+        const result = await fromEngineState(input);
+
+        // System message should be first
+        expect(result.messages[0].role).toBe("system");
+        expect(result.messages[0].content).toHaveLength(1);
+        expect((result.messages[0].content[0] as any).text).toBe("You are a helpful assistant.");
+      });
+
+      it("should extract text from ContentBlock[] in sections (not JSON.stringify)", async () => {
+        const input: COMInput = {
+          timeline: [],
+          sections: {
+            instructions: {
+              id: "instructions",
+              audience: "model",
+              content: [
+                { type: "text", text: "First instruction." },
+                { type: "text", text: "Second instruction." },
+              ],
+            },
+          },
+          system: [],
+          tools: [],
+          ephemeral: [],
+          metadata: {},
+        };
+
+        const result = await fromEngineState(input);
+
+        expect(result.messages[0].role).toBe("system");
+        const text = (result.messages[0].content[0] as any).text;
+        // Should be joined text, NOT JSON string
+        expect(text).toBe("First instruction.\nSecond instruction.");
+        expect(text).not.toContain('{"type"');
+        expect(text).not.toContain("\\");
+      });
+
+      it("should use formattedContent when available", async () => {
+        const input: COMInput = {
+          timeline: [],
+          sections: {
+            instructions: {
+              id: "instructions",
+              audience: "model",
+              content: [{ type: "text", text: "Raw content" }], // Raw
+              formattedContent: [{ type: "text", text: "Formatted content" }], // Formatted takes precedence
+            },
+          },
+          system: [],
+          tools: [],
+          ephemeral: [],
+          metadata: {},
+        };
+
+        const result = await fromEngineState(input);
+
+        const text = (result.messages[0].content[0] as any).text;
+        expect(text).toBe("Formatted content");
+      });
+
+      it("should include section title when present", async () => {
+        const input: COMInput = {
+          timeline: [],
+          sections: {
+            rules: {
+              id: "rules",
+              title: "Important Rules",
+              audience: "model",
+              content: [{ type: "text", text: "Follow these carefully." }],
+            },
+          },
+          system: [],
+          tools: [],
+          ephemeral: [],
+          metadata: {},
+        };
+
+        const result = await fromEngineState(input);
+
+        const text = (result.messages[0].content[0] as any).text;
+        expect(text).toBe("Important Rules: Follow these carefully.");
+      });
+
+      it("should ignore sections without audience=model", async () => {
+        const input: COMInput = {
+          timeline: [],
+          sections: {
+            userSection: {
+              id: "userSection",
+              audience: "user",
+              content: [{ type: "text", text: "For user only" }],
+            },
+            noAudience: {
+              id: "noAudience",
+              content: [{ type: "text", text: "No audience set" }],
+            },
+          },
+          system: [],
+          tools: [],
+          ephemeral: [],
+          metadata: {},
+        };
+
+        const result = await fromEngineState(input);
+
+        // No system message should be created
+        expect(result.messages.length).toBe(0);
+      });
+
+      it("should combine multiple model-audience sections", async () => {
+        const input: COMInput = {
+          timeline: [],
+          sections: {
+            persona: {
+              id: "persona",
+              audience: "model",
+              content: [{ type: "text", text: "You are helpful." }],
+            },
+            rules: {
+              id: "rules",
+              audience: "model",
+              content: [{ type: "text", text: "Be concise." }],
+            },
+          },
+          system: [],
+          tools: [],
+          ephemeral: [],
+          metadata: {},
+        };
+
+        const result = await fromEngineState(input);
+
+        const text = (result.messages[0].content[0] as any).text;
+        expect(text).toContain("You are helpful.");
+        expect(text).toContain("Be concise.");
+      });
+
+      it("should handle string content in sections", async () => {
+        const input: COMInput = {
+          timeline: [],
+          sections: {
+            simple: {
+              id: "simple",
+              audience: "model",
+              content: "Simple string content" as any, // Some sections may have string content
+            },
+          },
+          system: [],
+          tools: [],
+          ephemeral: [],
+          metadata: {},
+        };
+
+        const result = await fromEngineState(input);
+
+        const text = (result.messages[0].content[0] as any).text;
+        expect(text).toBe("Simple string content");
+      });
+    });
+
     describe("event role transformation", () => {
       it("should transform event role messages to user role with event prefix", async () => {
         const input: COMInput = {

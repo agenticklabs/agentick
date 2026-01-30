@@ -46,3 +46,5 @@
 
 export * from "./component";
 export * from "./component-hooks";
+export { TentickleComponent, createClassComponent } from "./tentickle-component";
+export type { TentickleComponentProps, TentickleContextValues } from "./tentickle-component";

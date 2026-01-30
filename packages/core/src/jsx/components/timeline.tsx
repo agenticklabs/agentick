@@ -2,20 +2,22 @@
  * Timeline Component
  *
  * Renders conversation history with optional pending messages.
+ * Uses React context to provide timeline access to descendants.
  *
  * @module tentickle/components
  */
 
-import type { JSX } from "../jsx-runtime";
+import React, { createContext, useContext, useMemo, type ReactNode } from "react";
+import type { JSX } from "react";
 import type { COMTimelineEntry } from "../../com/types";
 import type { ExecutionMessage } from "../../engine/execution-types";
-import { User, Assistant } from "./messages";
-import {
-  useConversationHistory,
-  useQueuedMessages,
-  type ConversationHistoryOptions,
-} from "../../state/hooks";
-import { createContext, useContext } from "../../state/context";
+import { useTickState } from "../../hooks/context";
+import { Logger } from "../../core/logger";
+
+const log = Logger.for("Timeline");
+
+// Helper for createElement
+const h = React.createElement;
 
 // ============================================================================
 // Types
@@ -49,15 +51,19 @@ export interface TimelineContextValue {
   byRole: (role: "user" | "assistant" | "tool" | "system") => COMTimelineEntry[];
 }
 
-// ============================================================================
-// Timeline Context
-// ============================================================================
-
 /**
- * Context for sharing timeline data with descendant components.
- * Used by Timeline.Provider and consumed via useTimeline().
+ * Conversation history options.
  */
-const TimelineContext = createContext<TimelineContextValue | null>(null, "TimelineContext");
+export interface ConversationHistoryOptions {
+  /** Filter function for entries */
+  filter?: (entry: COMTimelineEntry) => boolean;
+
+  /** Maximum number of entries to return */
+  limit?: number;
+
+  /** Only include these roles */
+  roles?: ("user" | "assistant" | "tool" | "system" | "event")[];
+}
 
 /**
  * Props for the Timeline component.
@@ -65,29 +71,16 @@ const TimelineContext = createContext<TimelineContextValue | null>(null, "Timeli
 export interface TimelineProps extends ConversationHistoryOptions {
   /**
    * Render prop for custom rendering.
-   *
-   * Receives two arguments:
-   * - history: COMTimelineEntry[] - Executed timeline entries
-   * - pending?: ExecutionMessage[] - Queued messages for next tick
-   *
-   * If not provided, uses default message rendering.
-   *
-   * @example
-   * ```tsx
-   * <Timeline>
-   *   {(history, pending) => (
-   *     <>
-   *       {history.map(entry => <Message {...entry.message} />)}
-   *       {pending?.length > 0 && (
-   *         <System>Pending: {pending.length}</System>
-   *       )}
-   *     </>
-   *   )}
-   * </Timeline>
-   * ```
+   * If not provided, renders default message components.
    */
-  children?: TimelineRenderFn;
+  children?: TimelineRenderFn | JSX.Element;
 }
+
+// ============================================================================
+// React Context
+// ============================================================================
+
+const TimelineContext = createContext<TimelineContextValue | null>(null);
 
 // ============================================================================
 // Default Message Renderer
@@ -95,6 +88,9 @@ export interface TimelineProps extends ConversationHistoryOptions {
 
 /**
  * Default renderer for a single timeline entry.
+ *
+ * Renders directly to the "entry" intrinsic element to avoid
+ * React trying to render Tentickle components that return Tentickle elements.
  */
 function DefaultMessage({
   entry,
@@ -102,7 +98,7 @@ function DefaultMessage({
   entry: COMTimelineEntry;
   key?: string | number;
 }): JSX.Element {
-  if (!entry.message) return <></>;
+  if (!entry.message) return h(React.Fragment, null);
 
   const { role, content } = entry.message;
 
@@ -112,17 +108,90 @@ function DefaultMessage({
     .map((block) => block.text)
     .join("\n");
 
-  if (!textContent) return <></>;
+  if (!textContent) return h(React.Fragment, null);
 
-  switch (role) {
-    case "user":
-      return <User>{textContent}</User>;
-    case "assistant":
-      return <Assistant>{textContent}</Assistant>;
-    default:
-      // Tool messages, system, and others - skip in default rendering
-      return <></>;
+  // Render the "entry" intrinsic element directly
+  // This avoids going through User/Assistant which return Tentickle elements
+  if (role === "user" || role === "assistant" || role === "tool") {
+    return h("entry", {
+      kind: "message",
+      message: {
+        role,
+        content: [{ type: "text", text: textContent }],
+      },
+    });
   }
+
+  // System and others - skip in default rendering
+  return h(React.Fragment, null);
+}
+
+/**
+ * Default renderer for a pending (queued) message.
+ *
+ * ExecutionMessage.content contains the actual Message object.
+ */
+function DefaultPendingMessage({
+  message,
+}: {
+  message: ExecutionMessage;
+  key?: string | number;
+}): JSX.Element {
+  // The content is the actual Message object
+  const msg = message.content as { role: string; content: unknown[] } | undefined;
+  if (!msg) return h(React.Fragment, null);
+
+  const { role, content } = msg;
+  if (!Array.isArray(content)) return h(React.Fragment, null);
+
+  // Extract text content
+  const textContent = content
+    .filter(
+      (block): block is { type: "text"; text: string } =>
+        typeof block === "object" && block !== null && (block as { type?: string }).type === "text",
+    )
+    .map((block) => block.text)
+    .join("\n");
+
+  if (!textContent) return h(React.Fragment, null);
+
+  // Render the "entry" intrinsic element
+  return h("entry", {
+    kind: "message",
+    message: {
+      role,
+      content: [{ type: "text", text: textContent }],
+    },
+  });
+}
+
+// ============================================================================
+// Helper: Apply filtering to entries
+// ============================================================================
+
+function applyFilters(
+  entries: COMTimelineEntry[],
+  options: ConversationHistoryOptions,
+): COMTimelineEntry[] {
+  let filtered = entries;
+
+  // Apply role filter
+  if (options.roles && options.roles.length > 0) {
+    const allowedRoles = options.roles as string[];
+    filtered = filtered.filter((entry) => allowedRoles.includes(entry.message.role as string));
+  }
+
+  // Apply custom filter
+  if (options.filter) {
+    filtered = filtered.filter(options.filter);
+  }
+
+  // Apply limit (take from end to get most recent)
+  if (options.limit && options.limit > 0 && filtered.length > options.limit) {
+    filtered = filtered.slice(-options.limit);
+  }
+
+  return filtered;
 }
 
 // ============================================================================
@@ -130,80 +199,85 @@ function DefaultMessage({
 // ============================================================================
 
 /**
- * Renders conversation history from previous ticks with optional pending messages.
+ * Renders conversation history from the COM timeline.
  *
- * By default, renders all messages using `<User>` and `<Assistant>` components.
- * Use the render prop for custom rendering, which receives both history and pending.
- *
- * @example Default usage (renders all messages)
+ * @example Basic usage
  * ```tsx
- * const ChatAgent = ({ message }: Props) => (
- *   <>
- *     <Model model={claude} />
- *     <System>You are helpful.</System>
- *     <Timeline />
- *     <User>{message}</User>
- *   </>
- * );
+ * <Timeline>
+ *   {(entries) => entries.map(entry => <Message key={entry.id} entry={entry} />)}
+ * </Timeline>
  * ```
  *
  * @example With filtering
  * ```tsx
- * <Timeline
- *   roles={['user', 'assistant']}
- *   limit={10}
- * />
- * ```
- *
- * @example With render prop (history and pending)
- * ```tsx
- * <Timeline>
- *   {(history, pending) => (
- *     <>
- *       <TokenBudget maxTokens={10000}>
- *         {history.map((entry, i) => (
- *           <Message key={i} {...entry.message} />
- *         ))}
- *       </TokenBudget>
- *       {pending?.length > 0 && (
- *         <System>Pending: {pending.length}</System>
- *       )}
- *     </>
- *   )}
+ * <Timeline roles={['user', 'assistant']} limit={10}>
+ *   {(entries) => entries.map(entry => ...)}
  * </Timeline>
  * ```
  */
 export function Timeline(props: TimelineProps): JSX.Element {
-  const history = useConversationHistory({
-    filter: props.filter,
-    limit: props.limit,
-    roles: props.roles,
-  });
-
-  const pending = useQueuedMessages();
-
-  // Render prop pattern - pass both history and pending
-  if (typeof props.children === "function") {
-    const result = props.children(history, pending);
-    // Wrap the result in a fragment to ensure consistent return type
-    return <>{result}</>;
+  // Get tickState from context (contains previous timeline and queued messages)
+  let tickState: ReturnType<typeof useTickState> | null = null;
+  try {
+    tickState = useTickState();
+  } catch {
+    // Outside of TentickleProvider - return empty
   }
 
-  // If children are provided but not a function, render them directly
-  // This allows Timeline to work as a wrapper/Fragment
+  // Get and filter timeline entries from tickState.previous (conversation history)
+  const entries = useMemo(() => {
+    if (!tickState?.previous?.timeline) {
+      log.debug(
+        { tick: tickState?.tick, hasPrevious: !!tickState?.previous },
+        "Timeline: No previous timeline available",
+      );
+      return [];
+    }
+    const rawEntries = tickState.previous.timeline as COMTimelineEntry[];
+    log.debug(
+      {
+        tick: tickState.tick,
+        rawCount: rawEntries.length,
+        roles: rawEntries.map((e) => e.message?.role),
+      },
+      "Timeline: Processing previous timeline",
+    );
+    return applyFilters(rawEntries, props);
+  }, [tickState?.previous?.timeline, props.filter, props.limit, props.roles]);
+
+  // Pending messages (queued for this tick)
+  const pending = useMemo(() => {
+    return (tickState?.queuedMessages ?? []) as ExecutionMessage[];
+  }, [tickState?.queuedMessages]);
+
+  log.debug(
+    { entriesCount: entries.length, pendingCount: pending.length },
+    "Timeline: Rendering with entries and pending",
+  );
+
+  // Render based on children type
   if (props.children !== undefined) {
-    return <>{props.children}</>;
+    if (typeof props.children === "function") {
+      // Render prop pattern
+      const result = props.children(entries, pending);
+      return h(React.Fragment, null, result);
+    }
+    // Regular children
+    return h(React.Fragment, null, props.children);
   }
 
-  // Default: render all messages from history
-  // Note: useConversationHistory() already includes pending messages, so we
-  // render them as part of history, not separately
-  return (
-    <>
-      {history.map((entry, i) => (
-        <DefaultMessage key={`timeline-${i}`} entry={entry} />
-      ))}
-    </>
+  // Default rendering: render history AND pending messages
+  return h(
+    React.Fragment,
+    null,
+    // Render history entries
+    ...entries.map((entry, index) =>
+      h(DefaultMessage, { key: `history-${entry.id ?? index}`, entry }),
+    ),
+    // Render pending (queued) messages
+    ...pending.map((message, index) =>
+      h(DefaultPendingMessage, { key: `pending-${message.id ?? index}`, message }),
+    ),
   );
 }
 
@@ -211,146 +285,184 @@ export function Timeline(props: TimelineProps): JSX.Element {
 // Timeline.Provider
 // ============================================================================
 
-type TimelineProviderChild = JSX.Element | TimelineRenderFn;
-
 interface TimelineProviderProps extends ConversationHistoryOptions {
-  children: TimelineProviderChild | TimelineProviderChild[];
+  children: ReactNode;
+  /** Override entries (useful for testing) */
+  entries?: COMTimelineEntry[];
+  /** Override pending messages */
+  pending?: ExecutionMessage[];
 }
 
 /**
  * Provider that exposes timeline context to descendants.
  *
- * Supports mixed children: regular components + render functions.
- * Use `useTimeline()` hook in child components to access context.
- *
- * @example Basic usage with components
+ * @example
  * ```tsx
  * <Timeline.Provider>
- *   <ConversationStats />
- *   <Timeline.Messages />
+ *   <MyComponent />
  * </Timeline.Provider>
  * ```
  *
- * @example Mixed: components + render function
+ * Children can then use:
  * ```tsx
- * <Timeline.Provider>
- *   <ConversationStats />
- *   {(history, pending) => history.map(entry => (
- *     <Message {...entry.message} />
- *   ))}
- * </Timeline.Provider>
- * ```
- *
- * @example With filtering options
- * ```tsx
- * <Timeline.Provider roles={['user', 'assistant']} limit={20}>
- *   {(history, pending) => history.map(entry => ...)}
- * </Timeline.Provider>
+ * const { entries, byRole } = useTimelineContext();
  * ```
  */
 Timeline.Provider = function TimelineProvider(props: TimelineProviderProps): JSX.Element {
-  const entries = useConversationHistory({
-    filter: props.filter,
-    limit: props.limit,
-    roles: props.roles,
-  });
+  // Get tickState from context if not overridden
+  let tickState: ReturnType<typeof useTickState> | null = null;
+  try {
+    tickState = useTickState();
+  } catch {
+    // Outside of TentickleProvider
+  }
 
-  const pending = useQueuedMessages();
+  // Use provided entries or get from tickState.previous.timeline
+  const rawEntries = props.entries ?? ((tickState?.previous?.timeline ?? []) as COMTimelineEntry[]);
+  const pending = props.pending ?? ((tickState?.queuedMessages ?? []) as ExecutionMessage[]);
 
-  const contextValue: TimelineContextValue = {
-    entries,
-    pending,
-    messageCount: entries.filter((e) => e.message).length,
-    byRole: (role) => entries.filter((e) => e.message?.role === role),
-  };
+  // Apply filters
+  const entries = useMemo(() => {
+    return applyFilters(rawEntries, props);
+  }, [rawEntries, props.filter, props.limit, props.roles]);
 
-  // Process children: render functions get called with entries and pending
-  const childArray = Array.isArray(props.children) ? props.children : [props.children];
-  const rendered = childArray.map((child) => {
-    if (typeof child === "function") {
-      return child(entries, pending);
-    }
-    return child;
-  });
+  // Create context value
+  const contextValue = useMemo((): TimelineContextValue => {
+    return {
+      entries,
+      pending,
+      messageCount: entries.length,
+      byRole: (role) => entries.filter((e) => e.message.role === role),
+    };
+  }, [entries, pending]);
 
-  return <TimelineContext.Provider value={contextValue}>{rendered}</TimelineContext.Provider>;
+  return h(TimelineContext.Provider, { value: contextValue }, props.children);
 };
 
 // ============================================================================
 // Timeline.Messages
 // ============================================================================
 
+interface TimelineMessagesProps {
+  /** Custom renderer for each entry */
+  renderEntry?: (entry: COMTimelineEntry, index: number) => JSX.Element | null;
+}
+
 /**
  * Renders messages from Timeline.Provider context.
  *
- * Must be used inside `<Timeline.Provider>`.
+ * @example
+ * ```tsx
+ * <Timeline.Provider>
+ *   <Timeline.Messages />
+ * </Timeline.Provider>
+ * ```
+ *
+ * @example With custom renderer
+ * ```tsx
+ * <Timeline.Provider>
+ *   <Timeline.Messages
+ *     renderEntry={(entry) => <CustomMessage entry={entry} />}
+ *   />
+ * </Timeline.Provider>
+ * ```
  */
-Timeline.Messages = function TimelineMessages(): JSX.Element {
+Timeline.Messages = function TimelineMessages(props: TimelineMessagesProps): JSX.Element {
   const context = useContext(TimelineContext);
 
   if (!context) {
-    // Fallback: render from state directly (not inside Provider)
-    const entries = useConversationHistory();
-    return (
-      <>
-        {entries.map((entry, i) => (
-          <DefaultMessage key={`timeline-${i}`} entry={entry} />
-        ))}
-      </>
+    return h(React.Fragment, null);
+  }
+
+  const { entries, pending } = context;
+
+  if (props.renderEntry) {
+    return h(
+      React.Fragment,
+      null,
+      entries.map((entry, index) => props.renderEntry!(entry, index)),
     );
   }
 
-  return (
-    <>
-      {context.entries.map((entry: COMTimelineEntry, i: number) => (
-        <DefaultMessage key={`timeline-${i}`} entry={entry} />
-      ))}
-    </>
+  // Default rendering: history + pending
+  return h(
+    React.Fragment,
+    null,
+    ...entries.map((entry, index) =>
+      h(DefaultMessage, { key: `history-${entry.id ?? index}`, entry }),
+    ),
+    ...pending.map((message, index) =>
+      h(DefaultPendingMessage, { key: `pending-${message.id ?? index}`, message }),
+    ),
   );
 };
 
 // ============================================================================
-// useTimeline (for use inside Timeline.Provider)
+// useTimelineContext
 // ============================================================================
 
 /**
  * Access timeline context from within Timeline.Provider.
  *
- * @returns Timeline context value including history, pending, and utility functions
- *
  * @example
  * ```tsx
- * const ConversationStats = () => {
- *   const { messageCount, pending, byRole } = useTimeline();
- *
- *   const userCount = byRole('user').length;
- *   const assistantCount = byRole('assistant').length;
- *
- *   return (
- *     <System>
- *       Conversation has {messageCount} messages
- *       ({userCount} from user, {assistantCount} from assistant).
- *       {pending.length > 0 && ` ${pending.length} pending.`}
- *     </System>
- *   );
- * };
+ * function MessageCount() {
+ *   const { messageCount, byRole } = useTimelineContext();
+ *   const userMessages = byRole('user');
+ *   return <div>User messages: {userMessages.length} / {messageCount}</div>;
+ * }
  * ```
  */
 export function useTimelineContext(): TimelineContextValue {
   const context = useContext(TimelineContext);
-
   if (!context) {
-    // Fallback: create context from hooks (not inside Provider)
-    const entries = useConversationHistory();
-    const pending = useQueuedMessages();
+    throw new Error("useTimelineContext must be used within a Timeline.Provider");
+  }
+  return context;
+}
 
-    return {
-      entries,
-      pending,
-      messageCount: entries.filter((e) => e.message).length,
-      byRole: (role) => entries.filter((e) => e.message?.role === role),
-    };
+/**
+ * Access timeline context, returning null if not within provider.
+ * Useful for optional timeline access.
+ */
+export function useTimelineContextOptional(): TimelineContextValue | null {
+  return useContext(TimelineContext);
+}
+
+// ============================================================================
+// useConversationHistory
+// ============================================================================
+
+/**
+ * Get the full conversation history from the COM.
+ *
+ * This hook returns all timeline entries directly from the COM,
+ * without needing to be within a Timeline.Provider.
+ *
+ * @example
+ * ```tsx
+ * function HistoryViewer() {
+ *   const history = useConversationHistory();
+ *   return (
+ *     <div>
+ *       {history.map(entry => (
+ *         <div key={entry.id}>{entry.message.role}: ...</div>
+ *       ))}
+ *     </div>
+ *   );
+ * }
+ * ```
+ */
+export function useConversationHistory(): COMTimelineEntry[] {
+  // Get tickState from context
+  let tickState: ReturnType<typeof useTickState> | null = null;
+  try {
+    tickState = useTickState();
+  } catch {
+    // Outside of TentickleProvider
+    return [];
   }
 
-  return context;
+  // Return timeline entries from tickState.previous
+  return (tickState?.previous?.timeline ?? []) as COMTimelineEntry[];
 }

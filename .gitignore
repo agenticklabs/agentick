@@ -38,3 +38,6 @@ website/api/
 *.env
 
 coverage/
+
+# Example app data
+example/express/data/

@@ -1,318 +1,200 @@
 /**
- * Reconciliation Scheduler
+ * V2 Reconciliation Scheduler
  *
- * Batches state changes into single reconciliation passes.
- * This is the foundation of the reactive model.
+ * Manages reconciliation timing and batching for the v2 fiber compiler.
  *
- * State change → schedule() → microtask → flush() → reconcile()
- *
- * ## Observable State
- *
- * The scheduler exposes its internal state as a Signal for DevTools and
- * component observation:
- *
- * ```typescript
- * const scheduler = new ReconciliationScheduler(compiler);
- *
- * // Subscribe to state changes
- * effect(() => {
- *   const state = scheduler.state();
- *   console.log(`Status: ${state.status}, pending: ${state.pendingReasons.length}`);
- * });
- * ```
- *
- * This enables:
- * - DevTools visualization of reconciliation cycles
- * - Real-time fiber tree status
- * - Debugging reactive flow
+ * In v2 with react-reconciler:
+ * - The React tree stays mounted (persistent fiber root)
+ * - State changes trigger React's own reconciliation
+ * - This scheduler coordinates when to notify listeners about reconciliation
+ * - Batches multiple schedule() calls in the same microtask
  */
 
 import type { FiberCompiler } from "./fiber-compiler";
-import { signal, type Signal } from "../state/signal";
+
+// ============================================================================
+// Types
+// ============================================================================
+
+export interface ReconcileEvent {
+  /** Reason for reconciliation */
+  reason: string;
+
+  /** Timestamp of reconciliation */
+  timestamp: number;
+
+  /** Whether this was during a tick (deferred) or idle */
+  deferred: boolean;
+}
 
 /**
- * Scheduler status representing the current phase.
- *
- * - `idle`: No pending work, waiting for state changes
- * - `pending`: Work scheduled, waiting for microtask flush
- * - `reconciling`: Currently reconciling fiber tree
- * - `in_tick`: Inside a tick (compile handles reconciliation)
- */
-export type SchedulerStatus = "idle" | "pending" | "reconciling" | "in_tick";
-
-/**
- * Observable scheduler state for DevTools and component observation.
- *
- * This state is exposed as a Signal, allowing reactive subscriptions
- * to scheduler lifecycle events.
+ * Current state of the reconciliation scheduler.
+ * Used for DevTools and debugging.
  */
 export interface SchedulerState {
-  /** Current scheduler phase */
-  status: SchedulerStatus;
-  /** Reasons that triggered pending reconciliation */
-  pendingReasons: readonly string[];
-  /** Timestamp of last reconciliation completion (ms since epoch) */
-  lastReconcileAt: number | null;
-  /** Duration of last reconciliation (ms) */
-  lastReconcileDuration: number | null;
-  /** Total number of reconciliations performed */
-  reconcileCount: number;
-  /** Whether currently inside a tick */
-  inTick: boolean;
+  /** Whether the scheduler is currently executing a tick */
+  isExecutingTick: boolean;
+
+  /** Whether a reconciliation is scheduled */
+  isScheduled: boolean;
+
+  /** Pending reconciliation reasons */
+  pendingReasons: string[];
+
+  /** Deferred reconciliation reasons (during tick) */
+  deferredReasons: string[];
 }
 
-/**
- * Reconciliation event for observability callbacks.
- */
-export interface ReconcileEvent {
-  /** Reasons that triggered this reconciliation */
-  reasons: string[];
-  /** Time taken to reconcile (ms) */
-  duration: number;
-  /** Whether this happened during a tick */
-  duringTick: boolean;
-}
-
-/**
- * Scheduler configuration.
- */
-export interface SchedulerConfig {
-  /** Enable debug logging */
-  debug?: boolean;
-  /** Callback when reconciliation completes (in addition to signal updates) */
+export interface ReconciliationSchedulerOptions {
+  /** Callback when reconciliation completes */
   onReconcile?: (event: ReconcileEvent) => void;
+
+  /** Delay before executing reconciliation (for debouncing) */
+  debounceMs?: number;
 }
 
+// ============================================================================
+// ReconciliationScheduler
+// ============================================================================
+
 /**
- * Reconciliation Scheduler
+ * Coordinates reconciliation timing for the fiber compiler.
  *
- * Batches multiple state changes into a single reconciliation pass.
- * Uses microtask queue for batching (like React's batching).
- *
- * Exposes observable `state` signal for DevTools and component observation.
+ * Features:
+ * - Batches multiple schedule() calls in the same microtask
+ * - Defers reconciliation during tick execution
+ * - Emits events when reconciliation completes
  */
 export class ReconciliationScheduler {
   private compiler: FiberCompiler;
-  private pending = false;
-  private _pendingReasons: string[] = [];
-  private flushPromise: Promise<void> | null = null;
-  private duringTick = false;
-  private config: SchedulerConfig;
-  private _reconcileCount = 0;
+  private options: ReconciliationSchedulerOptions;
 
-  /**
-   * Observable scheduler state.
-   *
-   * DevTools and components can subscribe to this signal to observe
-   * reconciliation lifecycle events in real-time.
-   *
-   * @example
-   * ```typescript
-   * // In DevTools
-   * effect(() => {
-   *   const state = scheduler.state();
-   *   updateUI(state.status, state.reconcileCount);
-   * });
-   *
-   * // In component (via useSchedulerState hook)
-   * const { status, pendingReasons } = useSchedulerState();
-   * ```
-   */
-  readonly state: Signal<SchedulerState>;
+  // Pending reconciliation state
+  private pendingReasons: string[] = [];
+  private isScheduled = false;
+  private isExecutingTick = false;
+  private deferredReasons: string[] = [];
 
-  constructor(compiler: FiberCompiler, config: SchedulerConfig = {}) {
+  constructor(compiler: FiberCompiler, options: ReconciliationSchedulerOptions = {}) {
     this.compiler = compiler;
-    this.config = config;
-
-    // Initialize observable state
-    this.state = signal<SchedulerState>({
-      status: "idle",
-      pendingReasons: [],
-      lastReconcileAt: null,
-      lastReconcileDuration: null,
-      reconcileCount: 0,
-      inTick: false,
-    });
-  }
-
-  /**
-   * Update the observable state.
-   * This is called internally whenever scheduler state changes.
-   */
-  private updateState(partial: Partial<SchedulerState>): void {
-    const current = this.state();
-    this.state.set({ ...current, ...partial });
-  }
-
-  /**
-   * Mark that we're currently inside a tick.
-   * During ticks, reconciliation is handled by compile().
-   */
-  enterTick(): void {
-    this.duringTick = true;
-    this.updateState({
-      status: "in_tick",
-      inTick: true,
-    });
-  }
-
-  /**
-   * Mark that we've exited the tick.
-   * Any pending reconciliation will now run.
-   */
-  exitTick(): void {
-    this.duringTick = false;
-    this.updateState({
-      status: this.pending ? "pending" : "idle",
-      inTick: false,
-    });
-    // If there's pending work, flush it
-    if (this.pending) {
-      this.scheduleFlush();
-    }
+    this.options = options;
   }
 
   /**
    * Schedule a reconciliation.
-   * Multiple calls are batched into a single reconciliation pass.
    *
-   * @param reason - Optional reason for debugging/DevTools
+   * Multiple calls in the same microtask are batched.
+   * Calls during tick execution are deferred until the tick completes.
    */
-  schedule(reason?: string): void {
-    if (reason) {
-      this._pendingReasons.push(reason);
-    }
-
-    const wasAlreadyPending = this.pending;
-    this.pending = true;
-
-    // Update observable state with new reason
-    if (!wasAlreadyPending || reason) {
-      this.updateState({
-        status: this.duringTick ? "in_tick" : "pending",
-        pendingReasons: [...this._pendingReasons],
-      });
-    }
-
-    if (wasAlreadyPending) {
-      // Already scheduled, reasons will be collected
+  schedule(reason: string): void {
+    // If we're in the middle of a tick, defer until after
+    if (this.isExecutingTick) {
+      this.deferredReasons.push(reason);
       return;
     }
 
-    // During tick, compile() will handle reconciliation
-    // We just mark that work is pending
-    if (this.duringTick) {
+    this.pendingReasons.push(reason);
+
+    // Batch multiple calls in the same microtask
+    if (!this.isScheduled) {
+      this.isScheduled = true;
+      queueMicrotask(() => this.flush());
+    }
+  }
+
+  /**
+   * Mark that a tick is starting.
+   * Reconciliation requests during a tick will be deferred.
+   */
+  enterTick(): void {
+    this.isExecutingTick = true;
+  }
+
+  /**
+   * Mark that a tick has completed.
+   * Flushes any deferred reconciliation requests.
+   */
+  exitTick(): void {
+    this.isExecutingTick = false;
+
+    // Flush any deferred reconciliation requests
+    if (this.deferredReasons.length > 0) {
+      const reasons = this.deferredReasons;
+      this.deferredReasons = [];
+
+      for (const reason of reasons) {
+        this.schedule(reason);
+      }
+    }
+  }
+
+  /**
+   * Flush pending reconciliation requests.
+   */
+  private flush(): void {
+    this.isScheduled = false;
+
+    if (this.pendingReasons.length === 0) {
       return;
     }
 
-    this.scheduleFlush();
-  }
+    const reasons = this.pendingReasons;
+    this.pendingReasons = [];
 
-  /**
-   * Schedule a flush via microtask.
-   */
-  private scheduleFlush(): void {
-    if (this.flushPromise) return;
+    // Combine reasons for the event
+    const combinedReason = reasons.join("; ");
 
-    this.flushPromise = Promise.resolve().then(() => {
-      this.flushPromise = null;
-      return this.flush();
-    });
-  }
-
-  /**
-   * Flush pending reconciliation immediately.
-   * Used by compile() to ensure fiber tree is up-to-date.
-   */
-  async flush(): Promise<void> {
-    if (!this.pending) return;
-
-    this.pending = false;
-    const reasons = this._pendingReasons;
-    this._pendingReasons = [];
-    this._reconcileCount++;
-
-    // Update state: entering reconciliation
-    this.updateState({
-      status: "reconciling",
-      pendingReasons: [],
-    });
-
-    const start = performance.now();
-
+    // Trigger reconciliation on the compiler
+    // In v2, the compiler will update the React tree
     try {
-      await this.compiler.reconcile();
-    } finally {
-      const duration = performance.now() - start;
-      const now = Date.now();
+      // The compiler's reconcile method will be called by the session
+      // when the next tick starts. We just emit the event to notify listeners.
 
-      // Update state: reconciliation complete
-      this.updateState({
-        status: this.duringTick ? "in_tick" : "idle",
-        lastReconcileAt: now,
-        lastReconcileDuration: duration,
-        reconcileCount: this._reconcileCount,
-      });
-
-      // Call legacy callback (for backward compatibility)
-      if (this.config.onReconcile) {
-        this.config.onReconcile({
-          reasons,
-          duration,
-          duringTick: this.duringTick,
+      // Emit reconcile event
+      if (this.options.onReconcile) {
+        this.options.onReconcile({
+          reason: combinedReason,
+          timestamp: Date.now(),
+          deferred: false,
         });
       }
-
-      if (this.config.debug && reasons.length > 0) {
-        console.log(`[Scheduler] Reconciled in ${duration.toFixed(2)}ms`, reasons);
-      }
+    } catch (error) {
+      console.error("[ReconciliationScheduler] Error during reconciliation:", error);
     }
   }
 
   /**
-   * Cancel pending reconciliation.
-   * Used when session is being destroyed.
+   * Check if there are pending reconciliation requests.
    */
-  cancel(): void {
-    this.pending = false;
-    this._pendingReasons = [];
-    this.flushPromise = null;
-
-    // Update state: cancelled
-    this.updateState({
-      status: "idle",
-      pendingReasons: [],
-    });
+  hasPending(): boolean {
+    return this.pendingReasons.length > 0 || this.deferredReasons.length > 0;
   }
 
   /**
-   * Dispose the scheduler and clean up resources.
-   * Call this when the session is destroyed.
+   * Clear all pending reconciliation requests.
+   */
+  clear(): void {
+    this.pendingReasons = [];
+    this.deferredReasons = [];
+    this.isScheduled = false;
+  }
+
+  /**
+   * Dispose of the scheduler.
    */
   dispose(): void {
-    this.cancel();
-    this.state.dispose();
+    this.clear();
   }
 
   /**
-   * Check if reconciliation is pending.
+   * Get the current scheduler state.
    */
-  get isPending(): boolean {
-    return this.pending;
-  }
-
-  /**
-   * Get pending reasons (for debugging).
-   */
-  get reasons(): readonly string[] {
-    return this._pendingReasons;
-  }
-
-  /**
-   * Get current status.
-   * Convenience accessor for state().status
-   */
-  get status(): SchedulerStatus {
-    return this.state().status;
+  getState(): SchedulerState {
+    return {
+      isExecutingTick: this.isExecutingTick,
+      isScheduled: this.isScheduled,
+      pendingReasons: [...this.pendingReasons],
+      deferredReasons: [...this.deferredReasons],
+    };
   }
 }

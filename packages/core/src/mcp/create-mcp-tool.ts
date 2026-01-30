@@ -12,7 +12,7 @@
  * 3. discoverMCPTools() - Batch discovery of all tools on a server
  */
 
-import { type Component } from "../component/component";
+import React from "react";
 import { MCPClient } from "./client";
 import { MCPService } from "./service";
 import type { MCPConfig, MCPServerConfig, MCPToolDefinition } from "./types";
@@ -135,38 +135,32 @@ export interface CreateMCPToolOptions extends Omit<
  */
 export function createMCPTool(
   options: CreateMCPToolOptions,
-): new (props?: Partial<CreateMCPToolOptions>) => Component {
-  // Build base props for MCPToolComponent
-  const baseProps: MCPToolComponentProps = {
-    server: options.server,
-    config: options.config,
-    // If toolName specified, only include that tool; otherwise include first tool
-    include: options.toolName ? [options.toolName] : undefined,
-    toolPrefix: options.toolPrefix,
-    mcpClient: options.client,
+): React.FC<Partial<CreateMCPToolOptions>> {
+  // Return a functional component that wraps MCPToolComponent with merged props
+  const SingleMCPToolComponent: React.FC<Partial<CreateMCPToolOptions>> = (props) => {
+    // Build merged props
+    const mergedProps: MCPToolComponentProps = {
+      server: props?.server ?? options.server,
+      config: props?.config ?? options.config,
+      // If toolName specified, only include that tool; otherwise include first tool
+      include: options.toolName ? [options.toolName] : undefined,
+      toolPrefix: props?.toolPrefix ?? options.toolPrefix,
+      mcpClient: props?.client ?? options.client,
+      runtimeConfig: props?.runtimeConfig ?? options.runtimeConfig,
+      // Pass lifecycle hooks from options
+      onMount: options.onMount,
+      onUnmount: options.onUnmount,
+      onStart: options.onStart,
+      onTickStart: options.onTickStart,
+      onTickEnd: options.onTickEnd,
+      onComplete: options.onComplete,
+      onError: options.onError,
+    };
+
+    return React.createElement(MCPToolComponent, mergedProps);
   };
 
-  // Return a class that extends MCPToolComponent with merged props
-  return class SingleMCPToolComponent extends MCPToolComponent {
-    constructor(props?: Partial<CreateMCPToolOptions>) {
-      // Merge: baseProps -> options hooks -> runtime props
-      const merged: MCPToolComponentProps = {
-        ...baseProps,
-        runtimeConfig: props?.runtimeConfig || options.runtimeConfig,
-        mcpClient: props?.client || options.client,
-        toolPrefix: props?.toolPrefix || options.toolPrefix,
-        // Pass lifecycle hooks from options
-        onMount: options.onMount,
-        onUnmount: options.onUnmount,
-        onStart: options.onStart,
-        onTickStart: options.onTickStart,
-        onTickEnd: options.onTickEnd,
-        onComplete: options.onComplete,
-        onError: options.onError,
-      };
-      super(merged);
-    }
-  };
+  return SingleMCPToolComponent;
 }
 
 // ============================================================================

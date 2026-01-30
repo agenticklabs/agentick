@@ -1,7 +1,11 @@
-import { createElement, type JSX } from "../jsx-runtime";
+import React from "react";
+import type { JSX } from "react";
 import { type ComponentBaseProps } from "../jsx-types";
-import { createPolicy } from "../../state/boundary";
+import { createPolicy } from "../../hooks/policy-context";
 import type { COMTimelineEntry } from "../../com/types";
+
+// Helper for createElement
+const h = React.createElement;
 
 /**
  * Strategy for handling token budget overflow.
@@ -153,7 +157,10 @@ async function processTokenBudget(
  * Use `useTokenBudget()` to read the current token budget settings during render.
  * Use `useBoundary(PolicyBoundary)` to get ALL active policies in scope.
  */
-const tokenBudgetPolicy = createPolicy<TokenBudgetProps>("TokenBudget", processTokenBudget);
+const tokenBudgetPolicy = createPolicy<TokenBudgetProps, COMTimelineEntry>(
+  "TokenBudget",
+  processTokenBudget,
+);
 
 /**
  * TokenBudget component.
@@ -202,7 +209,7 @@ export interface TokenBudgetComponentProps extends TokenBudgetProps, ComponentBa
 
 export function TokenBudget(props: TokenBudgetComponentProps): JSX.Element {
   const { children, ...budgetProps } = props;
-  return createElement(tokenBudgetPolicy.Provider, {
+  return h(tokenBudgetPolicy.Provider, {
     value: budgetProps,
     children,
   });

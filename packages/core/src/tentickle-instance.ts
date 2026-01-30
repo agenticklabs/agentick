@@ -74,23 +74,57 @@ export interface MiddlewareRegistry {
 }
 
 // ============================================================================
-// Session Registry (App-managed sessions)
+// Session Registry (App-managed sessions with hibernation support)
 // ============================================================================
+
+import type { SessionStore, SessionSnapshot, SessionManagementOptions } from "./app/types";
+import { createSessionStore } from "./app/sqlite-session-store";
+
+interface SessionRegistryOptions<P> {
+  // Legacy options (deprecated)
+  sessionTTL?: number;
+  maxSessions?: number;
+
+  // New session management options
+  sessions?: SessionManagementOptions;
+
+  // Callbacks
+  onSessionClose?: (sessionId: string) => void;
+  onBeforeHibernate?: (
+    session: SessionImpl<P>,
+    snapshot: SessionSnapshot,
+  ) => boolean | SessionSnapshot | void | Promise<boolean | SessionSnapshot | void>;
+  onAfterHibernate?: (sessionId: string, snapshot: SessionSnapshot) => void | Promise<void>;
+  onBeforeHydrate?: (
+    sessionId: string,
+    snapshot: SessionSnapshot,
+  ) => boolean | SessionSnapshot | void | Promise<boolean | SessionSnapshot | void>;
+  onAfterHydrate?: (session: SessionImpl<P>, snapshot: SessionSnapshot) => void | Promise<void>;
+}
 
 class SessionRegistry<P> {
   private sessions = new Map<string, SessionImpl<P>>();
   private lastActivity = new Map<string, number>();
   private sweepTimer?: ReturnType<typeof setInterval>;
 
-  constructor(
-    private readonly options: {
-      sessionTTL?: number;
-      maxSessions?: number;
-      onSessionClose?: (sessionId: string) => void;
-    },
-  ) {
-    if (options.sessionTTL && options.sessionTTL > 0) {
-      const interval = Math.max(1000, Math.min(options.sessionTTL, 30000));
+  // Resolved options
+  private readonly store?: SessionStore;
+  private readonly idleTimeout: number;
+  private readonly maxActive: number;
+  private readonly autoHibernate: boolean;
+
+  constructor(private readonly options: SessionRegistryOptions<P>) {
+    // Resolve options with backwards compatibility
+    const sessionsConfig = options.sessions ?? {};
+    // Resolve store configuration (string path, config object, or SessionStore instance)
+    this.store = createSessionStore(sessionsConfig.store);
+    this.idleTimeout = sessionsConfig.idleTimeout ?? options.sessionTTL ?? 0;
+    this.maxActive = sessionsConfig.maxActive ?? options.maxSessions ?? 0;
+    this.autoHibernate = sessionsConfig.autoHibernate ?? !!this.store;
+
+    // Start sweep timer if we have an idle timeout
+    if (this.idleTimeout > 0) {
+      const interval = Math.max(1000, Math.min(this.idleTimeout, 30000));
       this.sweepTimer = setInterval(() => this.sweep(), interval);
     }
   }
@@ -103,18 +137,141 @@ class SessionRegistry<P> {
     return session;
   }
 
+  /**
+   * Try to get a session, hydrating from store if necessary.
+   * Returns undefined if session doesn't exist anywhere.
+   */
+  async getOrHydrate(
+    sessionId: string,
+    createSession: (snapshot: SessionSnapshot) => SessionImpl<P>,
+  ): Promise<SessionImpl<P> | undefined> {
+    // Check in-memory first
+    const existing = this.get(sessionId);
+    if (existing) {
+      return existing;
+    }
+
+    // Try to hydrate from store
+    if (!this.store) {
+      return undefined;
+    }
+
+    const snapshot = await this.store.load(sessionId);
+    if (!snapshot) {
+      return undefined;
+    }
+
+    // Call onBeforeHydrate hook
+    if (this.options.onBeforeHydrate) {
+      const result = await this.options.onBeforeHydrate(sessionId, snapshot);
+      if (result === false) {
+        return undefined; // Hydration cancelled
+      }
+      if (result && typeof result === "object" && "version" in result) {
+        // Use modified snapshot
+        const session = createSession(result as SessionSnapshot);
+        this.register(session.id, session);
+
+        // Call onAfterHydrate
+        await this.options.onAfterHydrate?.(session, result as SessionSnapshot);
+
+        // Delete from store since it's now in memory
+        await this.store.delete(sessionId);
+
+        return session;
+      }
+    }
+
+    // Create session from snapshot
+    const session = createSession(snapshot);
+    this.register(session.id, session);
+
+    // Call onAfterHydrate
+    await this.options.onAfterHydrate?.(session, snapshot);
+
+    // Delete from store since it's now in memory
+    await this.store.delete(sessionId);
+
+    return session;
+  }
+
   register(sessionId: string, session: SessionImpl<P>): void {
     this.sessions.set(sessionId, session);
     this.touch(sessionId);
-    this.enforceMaxSessions();
+    this.enforceMaxActive();
   }
 
   has(sessionId: string): boolean {
     return this.sessions.has(sessionId);
   }
 
+  async isHibernated(sessionId: string): Promise<boolean> {
+    if (!this.store) {
+      return false;
+    }
+    if (this.store.has) {
+      return this.store.has(sessionId);
+    }
+    // Fallback: try to load
+    const snapshot = await this.store.load(sessionId);
+    return snapshot !== null;
+  }
+
   list(): string[] {
     return Array.from(this.sessions.keys());
+  }
+
+  async listHibernated(): Promise<string[]> {
+    if (!this.store?.list) {
+      return [];
+    }
+    return this.store.list();
+  }
+
+  /**
+   * Hibernate a session (save to store and remove from memory).
+   * Returns the snapshot if successful, null if cancelled or no store.
+   */
+  async hibernate(sessionId: string): Promise<SessionSnapshot | null> {
+    const session = this.sessions.get(sessionId);
+    if (!session) {
+      return null;
+    }
+
+    if (!this.store) {
+      // No store configured - just close the session
+      this.remove(sessionId, true);
+      return null;
+    }
+
+    // Get snapshot
+    const snapshot = session.snapshot();
+
+    // Call onBeforeHibernate hook
+    if (this.options.onBeforeHibernate) {
+      const result = await this.options.onBeforeHibernate(session, snapshot);
+      if (result === false) {
+        return null; // Hibernation cancelled
+      }
+      if (result && typeof result === "object" && "version" in result) {
+        // Use modified snapshot
+        await this.store.save(sessionId, result as SessionSnapshot);
+        this.remove(sessionId, true);
+        await this.options.onAfterHibernate?.(sessionId, result as SessionSnapshot);
+        return result as SessionSnapshot;
+      }
+    }
+
+    // Save to store
+    await this.store.save(sessionId, snapshot);
+
+    // Remove from memory (close session)
+    this.remove(sessionId, true);
+
+    // Call onAfterHibernate
+    await this.options.onAfterHibernate?.(sessionId, snapshot);
+
+    return snapshot;
   }
 
   remove(sessionId: string, closeSession = true): void {
@@ -129,6 +286,16 @@ class SessionRegistry<P> {
     }
 
     this.options.onSessionClose?.(sessionId);
+  }
+
+  /**
+   * Permanently delete a session from both memory and store.
+   */
+  async delete(sessionId: string): Promise<void> {
+    this.remove(sessionId, true);
+    if (this.store) {
+      await this.store.delete(sessionId);
+    }
   }
 
   destroy(): void {
@@ -154,25 +321,40 @@ class SessionRegistry<P> {
     this.touch(sessionId);
   }
 
-  private sweep(): void {
-    const ttl = this.options.sessionTTL;
-    if (!ttl || ttl <= 0) return;
+  private async sweep(): Promise<void> {
+    if (this.idleTimeout <= 0) return;
+
     const now = Date.now();
+    const toHibernate: string[] = [];
+
     for (const [sessionId, last] of this.lastActivity.entries()) {
-      if (now - last >= ttl) {
+      if (now - last >= this.idleTimeout) {
+        toHibernate.push(sessionId);
+      }
+    }
+
+    // Hibernate idle sessions
+    for (const sessionId of toHibernate) {
+      if (this.autoHibernate && this.store) {
+        await this.hibernate(sessionId);
+      } else {
         this.remove(sessionId, true);
       }
     }
   }
 
-  private enforceMaxSessions(): void {
-    const max = this.options.maxSessions;
-    if (!max || max <= 0) return;
+  private async enforceMaxActive(): Promise<void> {
+    if (this.maxActive <= 0) return;
 
-    while (this.sessions.size > max) {
+    while (this.sessions.size > this.maxActive) {
       const oldestId = this.sessions.keys().next().value as string | undefined;
       if (!oldestId) break;
-      this.remove(oldestId, true);
+
+      if (this.autoHibernate && this.store) {
+        await this.hibernate(oldestId);
+      } else {
+        this.remove(oldestId, true);
+      }
     }
   }
 }
@@ -193,14 +375,22 @@ class AppImpl<P extends Record<string, unknown>> implements App<P> {
     private readonly options: AppOptions,
   ) {
     this.registry = new SessionRegistry<P>({
+      // Legacy options
       sessionTTL: options.sessionTTL,
       maxSessions: options.maxSessions,
+      // New session management options
+      sessions: options.sessions,
+      // Callbacks
       onSessionClose: (sessionId) => {
         this.options.onSessionClose?.(sessionId);
         for (const handler of this.sessionCloseHandlers) {
           handler(sessionId);
         }
       },
+      onBeforeHibernate: options.onBeforeHibernate as any,
+      onAfterHibernate: options.onAfterHibernate,
+      onBeforeHydrate: options.onBeforeHydrate,
+      onAfterHydrate: options.onAfterHydrate as any,
     });
 
     this.run = createProcedure(
@@ -309,6 +499,18 @@ class AppImpl<P extends Record<string, unknown>> implements App<P> {
     return this.registry.has(sessionId);
   }
 
+  async isHibernated(sessionId: string): Promise<boolean> {
+    return this.registry.isHibernated(sessionId);
+  }
+
+  async hibernate(sessionId: string): Promise<SessionSnapshot | null> {
+    return this.registry.hibernate(sessionId);
+  }
+
+  async hibernatedSessions(): Promise<string[]> {
+    return this.registry.listHibernated();
+  }
+
   onSessionCreate(handler: (session: Session<P>) => void): () => void {
     this.sessionCreateHandlers.add(handler);
     return () => {
@@ -330,6 +532,9 @@ class AppImpl<P extends Record<string, unknown>> implements App<P> {
       devTools: options.devTools ?? this.options.devTools,
     };
     const session = new SessionImpl(this.Component, this.options, sessionOptions);
+
+    // Set hibernate callback so session.hibernate() delegates to the registry
+    session.setHibernateCallback(() => this.registry.hibernate(session.id));
 
     this.registry.register(session.id, session);
 

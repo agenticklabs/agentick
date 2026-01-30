@@ -116,6 +116,11 @@ export type {
   SendResult,
   SendInput,
   ComponentFunction,
+  // Session management
+  SessionStore,
+  SessionManagementOptions,
+  StoreConfig,
+  SqliteStoreConfig,
   // Tick snapshots (time-travel debugging)
   RecordingMode,
   TickSnapshot,
@@ -128,3 +133,10 @@ export type {
 } from "./app/types";
 
 export { SessionImpl } from "./app/session";
+export { MemorySessionStore } from "./app/session-store";
+export {
+  SqliteSessionStore,
+  createSessionStore,
+  isSqliteAvailable,
+  type SqliteSessionStoreConfig,
+} from "./app/sqlite-session-store";

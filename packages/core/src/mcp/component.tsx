@@ -5,13 +5,14 @@
  * Supports runtime configuration (auth tokens, etc.) and tool filtering.
  */
 
-import { type EngineComponent, Component } from "../component/component";
-import { COM } from "../com/object-model";
+import React, { useEffect, useRef } from "react";
+import type { EngineComponent } from "../component/component";
 import { MCPClient } from "./client";
 import { MCPService } from "./service";
 import type { MCPConfig, MCPServerConfig } from "./types";
-import { type JSX, createElement } from "../jsx/jsx-runtime";
+import type { JSX } from "../jsx/jsx-runtime";
 import type { ComponentBaseProps } from "../jsx/jsx-types";
+import { useCom } from "../hooks";
 
 /**
  * Normalizes Cursor-style config to full MCPConfig
@@ -138,113 +139,119 @@ export interface MCPToolComponentProps extends ComponentBaseProps, Partial<Engin
  * />
  * ```
  */
-class MCPToolComponent extends Component<MCPToolComponentProps> {
-  private mcpClient: MCPClient;
-  private mcpService: MCPService;
-  private baseConfig: MCPConfig;
-  private registeredToolNames: string[] = [];
+export function MCPToolComponent(props: MCPToolComponentProps): React.ReactElement | null {
+  const com = useCom();
 
-  constructor(public props: MCPToolComponentProps) {
-    super(props);
+  // Refs for managing state across renders
+  const mcpClientRef = useRef<MCPClient | null>(null);
+  const mcpServiceRef = useRef<MCPService | null>(null);
+  const registeredToolNamesRef = useRef<string[]>([]);
+  const hasInitializedRef = useRef(false);
 
-    // Use provided client or create new one
-    this.mcpClient = props.mcpClient || new MCPClient();
-    this.mcpService = new MCPService(this.mcpClient);
-
-    // Normalize base config
-    this.baseConfig = normalizeMCPConfig(props.server, props.config);
+  // Initialize refs on first render
+  if (!mcpClientRef.current) {
+    mcpClientRef.current = props.mcpClient || new MCPClient();
+    mcpServiceRef.current = new MCPService(mcpClientRef.current);
   }
 
-  async onMount(com: COM): Promise<void> {
-    // Merge base config with runtime config
-    const effectiveConfig = mergeMCPConfig(this.baseConfig, this.props.runtimeConfig);
+  // Mount/unmount effect
+  useEffect(() => {
+    if (hasInitializedRef.current) {
+      return;
+    }
+    hasInitializedRef.current = true;
 
-    try {
-      // Discover tools from MCP server
-      const tools = await this.mcpService.connectAndDiscover(effectiveConfig);
+    const baseConfig = normalizeMCPConfig(props.server, props.config);
+    const effectiveConfig = mergeMCPConfig(baseConfig, props.runtimeConfig);
+    const mcpClient = mcpClientRef.current!;
+    const mcpService = mcpServiceRef.current!;
 
-      // Filter tools based on include/exclude
-      let filteredTools = tools;
+    const initMCP = async () => {
+      try {
+        // Discover tools from MCP server
+        const tools = await mcpService.connectAndDiscover(effectiveConfig);
 
-      if (this.props.include && this.props.include.length > 0) {
-        // Whitelist: only include specified tools
-        filteredTools = tools.filter((t) => this.props.include!.includes(t.name));
-      } else if (this.props.exclude && this.props.exclude.length > 0) {
-        // Blacklist: exclude specified tools
-        filteredTools = tools.filter((t) => !this.props.exclude!.includes(t.name));
+        // Filter tools based on include/exclude
+        let filteredTools = tools;
+
+        if (props.include && props.include.length > 0) {
+          // Whitelist: only include specified tools
+          filteredTools = tools.filter((t) => props.include!.includes(t.name));
+        } else if (props.exclude && props.exclude.length > 0) {
+          // Blacklist: exclude specified tools
+          filteredTools = tools.filter((t) => !props.exclude!.includes(t.name));
+        }
+
+        // Register each filtered tool
+        for (const mcpToolDef of filteredTools) {
+          // Apply tool prefix if specified
+          const toolName = props.toolPrefix
+            ? `${props.toolPrefix}${mcpToolDef.name}`
+            : mcpToolDef.name;
+
+          // Create tool with prefixed name
+          const toolDef = {
+            ...mcpToolDef,
+            name: toolName,
+          };
+
+          mcpService.registerMCPTool(effectiveConfig, toolDef, com);
+          registeredToolNamesRef.current.push(toolName);
+        }
+
+        // Call onMount callback if provided
+        if (props.onMount) {
+          await props.onMount(com);
+        }
+      } catch (error) {
+        console.error(`Failed to initialize MCP server "${props.server}":`, error);
+        // Call onMount even on error (for error handling)
+        if (props.onMount) {
+          await props.onMount(com);
+        }
+      }
+    };
+
+    initMCP();
+
+    // Cleanup on unmount
+    return () => {
+      // Remove registered tools
+      for (const toolName of registeredToolNamesRef.current) {
+        com.removeTool(toolName);
+      }
+      registeredToolNamesRef.current = [];
+
+      // Disconnect MCP client if we created it (not shared)
+      if (!props.mcpClient && mcpClient) {
+        mcpClient.disconnect(baseConfig.serverName);
       }
 
-      // Register each filtered tool
-      for (const mcpToolDef of filteredTools) {
-        // Apply tool prefix if specified
-        const toolName = this.props.toolPrefix
-          ? `${this.props.toolPrefix}${mcpToolDef.name}`
-          : mcpToolDef.name;
-
-        // Create tool with prefixed name
-        const toolDef = {
-          ...mcpToolDef,
-          name: toolName,
-        };
-
-        this.mcpService.registerMCPTool(effectiveConfig, toolDef, com);
-        this.registeredToolNames.push(toolName);
+      // Call onUnmount callback if provided
+      if (props.onUnmount) {
+        props.onUnmount(com);
       }
+    };
+  }, [
+    com,
+    props.server,
+    props.config,
+    props.runtimeConfig,
+    props.include,
+    props.exclude,
+    props.toolPrefix,
+    props.mcpClient,
+    props.onMount,
+    props.onUnmount,
+  ]);
 
-      // Call parent onMount if provided
-      if (this.props.onMount) {
-        return this.props.onMount(com);
-      }
-    } catch (error) {
-      console.error(`Failed to initialize MCP server "${this.props.server}":`, error);
-      // Call parent onMount even on error (for error handling)
-      if (this.props.onMount) {
-        return this.props.onMount(com);
-      }
-      throw error;
-    }
-  }
-
-  async onUnmount(com: COM): Promise<void> {
-    // Remove registered tools
-    for (const toolName of this.registeredToolNames) {
-      com.removeTool(toolName);
-    }
-    this.registeredToolNames = [];
-
-    // Disconnect MCP client if we created it (not shared)
-    if (!this.props.mcpClient) {
-      await this.mcpClient.disconnect(this.baseConfig.serverName);
-    }
-
-    // Call parent onUnmount if provided
-    if (this.props.onUnmount) {
-      return this.props.onUnmount(com);
-    }
-  }
-
-  /**
-   * Update runtime configuration (useful for dynamic auth tokens, etc.)
-   * This will reconnect and re-register tools with new config.
-   */
-  async updateRuntimeConfig(com: COM, runtimeConfig: Partial<MCPConfig>): Promise<void> {
-    // Remove existing tools
-    await this.onUnmount(com);
-
-    // Update runtime config
-    this.props.runtimeConfig = runtimeConfig;
-
-    // Re-register with new config
-    await this.onMount(com);
-  }
+  // MCP components don't render anything
+  return null;
 }
 
 /**
  * Factory function for creating MCPToolComponent in JSX
  */
 export function MCPTool(props: MCPToolComponentProps): JSX.Element {
-  return createElement(MCPToolComponent, props);
+  return React.createElement(MCPToolComponent, props) as unknown as JSX.Element;
 }
-
-// Export the class
-export { MCPToolComponent };

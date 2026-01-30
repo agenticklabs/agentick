@@ -10,6 +10,7 @@
  * are defined in types.ts to keep them centralized.
  */
 
+import React, { useEffect, useRef } from "react";
 import { createEngineProcedure, isProcedure } from "../procedure";
 import type { ExtractArgs, Middleware, Procedure } from "../core/index";
 import type { ProviderToolOptions, LibraryToolOptions } from "../types";
@@ -20,17 +21,13 @@ import {
   type ToolDefinition as BaseToolDefinition,
 } from "@tentickle/shared/tools";
 import type { ContentBlock } from "@tentickle/shared/blocks";
-import {
-  type EngineComponent,
-  Component,
-  type RecoveryAction,
-  type TickState,
-} from "../component/component";
+import { type RecoveryAction, type TickState } from "../component/component";
 import { COM } from "../com/object-model";
 import type { COMInput } from "../com/types";
 import type { JSX } from "../jsx/jsx-runtime";
 import type { ComponentBaseProps } from "../jsx/jsx-types";
 import type { CompiledStructure } from "../compiler/types";
+import { useCom, useTickState, useTickStart, useTickEnd, useAfterCompile } from "../hooks";
 
 // Re-export for convenience
 export {
@@ -223,12 +220,12 @@ export interface CreateToolOptions<TInput = any, TOutput extends ContentBlock[] 
 /**
  * A ToolClass is both:
  * - An ExecutableTool (via static metadata/run) - can be passed to models
- * - A Component constructor - can be used in JSX
+ * - A functional component - can be used in JSX
  *
  * This enables the three usage patterns:
  * - engine.execute({ tools: [MyTool] })  -- passes static metadata/run
  * - await MyTool.run(input)              -- calls static run procedure
- * - <MyTool />                           -- creates component instance
+ * - <MyTool />                           -- renders component that registers tool
  */
 export interface ToolClass<TInput = any> {
   /** Tool metadata (static property) */
@@ -237,8 +234,8 @@ export interface ToolClass<TInput = any> {
   /** Run procedure (static property). Undefined for client-only tools. */
   run?: Procedure<ToolHandler<TInput>>;
 
-  /** Creates a component instance that registers the tool on mount */
-  new (props?: ComponentBaseProps): EngineComponent;
+  /** Functional component that registers the tool on mount */
+  (props?: ComponentBaseProps): React.ReactElement | null;
 }
 
 /**
@@ -360,58 +357,90 @@ export function createTool<TInput = any, TOutput extends ContentBlock[] = Conten
         )
     : undefined;
 
-  // Create component class with static tool properties
-  class ToolComponent extends Component<ComponentBaseProps> {
-    // Static properties make the CLASS itself an ExecutableTool
-    static metadata = metadata;
-    static run = run;
+  // Create functional component with static tool properties
+  // Using a functional component instead of a class ensures compatibility
+  // with React's reconciler (class components must extend React.Component)
+  const ToolComponent = function ToolComponent(
+    _props: ComponentBaseProps,
+  ): React.ReactElement | null {
+    const com = useCom();
+    // Note: useTickState returns hooks/types.ts TickState, but lifecycle callbacks
+    // expect component/component.ts TickState. They're compatible at runtime,
+    // so we use type assertion. The hooks version is a simplified subset.
+    const tickState = useTickState() as unknown as TickState;
 
-    async onMount(com: COM): Promise<void> {
-      // Register tool with COM when component mounts
-      await com.addTool({ metadata, run } as ExecutableTool);
-      if (options.onMount) await options.onMount(com);
+    // Track lifecycle callbacks (should only fire once per component lifecycle)
+    const hasCalledMountRef = useRef(false);
+
+    // Call onMount/onStart lifecycle hooks once
+    useEffect(() => {
+      if (!hasCalledMountRef.current) {
+        hasCalledMountRef.current = true;
+        if (options.onMount) {
+          Promise.resolve(options.onMount(com)).catch(console.error);
+        }
+        if (options.onStart) {
+          Promise.resolve(options.onStart(com)).catch(console.error);
+        }
+      }
+
+      return () => {
+        if (options.onUnmount) {
+          Promise.resolve(options.onUnmount(com)).catch(console.error);
+        }
+      };
+    }, [com]);
+
+    // Tick lifecycle hooks
+    if (options.onTickStart) {
+      useTickStart(() => {
+        if (options.onTickStart) {
+          Promise.resolve(options.onTickStart(com, tickState)).catch(console.error);
+        }
+      });
     }
 
-    async onUnmount(com: COM): Promise<void> {
-      // Unregister tool when component unmounts
-      com.removeTool(metadata.name);
-      if (options.onUnmount) await options.onUnmount(com);
+    if (options.onTickEnd) {
+      useTickEnd(() => {
+        if (options.onTickEnd) {
+          Promise.resolve(options.onTickEnd(com, tickState)).catch(console.error);
+        }
+      });
     }
 
-    async onStart(com: COM): Promise<void> {
-      if (options.onStart) await options.onStart(com);
+    if (options.onAfterCompile) {
+      useAfterCompile((compiled) => {
+        if (options.onAfterCompile) {
+          Promise.resolve(options.onAfterCompile(com, compiled, tickState, {})).catch(
+            console.error,
+          );
+        }
+      });
     }
 
-    async onTickStart(com: COM, state: TickState): Promise<void> {
-      if (options.onTickStart) await options.onTickStart(com, state);
+    // Render a <tool> element for the collector to find
+    // This is the declarative approach - tools are collected from the tree
+    const toolElement = React.createElement("tool", {
+      name: metadata.name,
+      description: metadata.description,
+      schema: metadata.input,
+      handler: run,
+      // Include full metadata for advanced use cases
+      metadata,
+    });
+
+    // If custom render provided, wrap both tool element and render output
+    if (options.render) {
+      const renderOutput = options.render(com, tickState);
+      return React.createElement(React.Fragment, null, toolElement, renderOutput);
     }
 
-    async onTickEnd(com: COM, state: TickState): Promise<void> {
-      if (options.onTickEnd) await options.onTickEnd(com, state);
-    }
+    return toolElement;
+  };
 
-    async onComplete(com: COM, finalState: COMInput): Promise<void> {
-      if (options.onComplete) await options.onComplete(com, finalState);
-    }
-
-    onError(com: COM, state: TickState): RecoveryAction | void {
-      if (options.onError) return options.onError(com, state);
-    }
-
-    render(com: COM, state: TickState): JSX.Element | null {
-      if (options.render) return options.render(com, state);
-      return null;
-    }
-
-    async onAfterCompile(
-      com: COM,
-      compiled: CompiledStructure,
-      state: TickState,
-      ctx: any,
-    ): Promise<void> {
-      if (options.onAfterCompile) await options.onAfterCompile(com, compiled, state, ctx);
-    }
-  }
+  // Attach static properties to make it a valid ToolClass
+  (ToolComponent as any).metadata = metadata;
+  (ToolComponent as any).run = run;
 
   return ToolComponent as unknown as ToolClass<TInput>;
 }

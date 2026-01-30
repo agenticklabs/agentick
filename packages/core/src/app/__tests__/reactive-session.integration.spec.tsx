@@ -17,7 +17,7 @@ import { fromEngineState, toEngineState } from "../../model/utils/language-model
 import { System, User } from "../../jsx/components/messages";
 import { Model, Section } from "../../jsx/components/primitives";
 import { Timeline } from "../../jsx/components/timeline";
-import { useState, useSignal, useComState, useEffect } from "../../state/hooks";
+import { useState, useEffect, useSignal, useComState } from "../../hooks";
 import type { StopReason, StreamEvent } from "@tentickle/shared";
 import { BlockType } from "@tentickle/shared";
 

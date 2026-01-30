@@ -32,26 +32,37 @@ export {
 } from "./jsx/components/index";
 
 // ============================================================================
-// Hooks (re-export from compiler)
+// React Hooks (re-exported from React)
+// ============================================================================
+export { useState, useEffect, useReducer, useMemo, useCallback, useRef } from "react";
+
+// ============================================================================
+// Tentickle Hooks
 // ============================================================================
 export {
-  useState,
-  useEffect,
-  useReducer,
-  useMemo,
-  useCallback,
-  useRef,
   useSignal,
   useComputed,
+  useCom,
+  useTickState,
+  useTickStart,
+  useTickEnd,
+  useAfterCompile,
+  useData,
+  useInvalidateData,
   useComState,
-  useQueuedMessages,
-} from "./compiler/index";
+} from "./hooks";
 
 // ============================================================================
 // Tools
 // ============================================================================
 export { createTool } from "./tool/index";
 export type { ToolDefinition, ToolMetadata } from "./tool/index";
+
+// ============================================================================
+// Class Components
+// ============================================================================
+export { TentickleComponent, createClassComponent } from "./component/tentickle-component";
+export type { TentickleComponentProps } from "./component/tentickle-component";
 
 // ============================================================================
 // Model types

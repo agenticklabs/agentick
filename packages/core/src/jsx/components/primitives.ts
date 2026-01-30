@@ -1,7 +1,12 @@
 import type { ContentBlock, Message, MessageRoles } from "@tentickle/shared";
-import { createElement, type JSX, Fragment } from "../jsx-runtime";
+import React from "react";
+import type { JSX } from "react";
+import type { JSX as TentickleJSX } from "../jsx-runtime";
 import type { StreamEvent } from "../../engine/engine-events";
 import type { ComponentBaseProps } from "../jsx-types";
+
+// Helper for createElement
+const h = React.createElement;
 
 // Re-export Timeline component from timeline.tsx
 export { Timeline, useTimelineContext } from "./timeline";
@@ -14,10 +19,10 @@ export type { TimelineProps, TimelineRenderFn, TimelineContextValue } from "./ti
  *
  * @deprecated Use <Timeline> for rendering conversation history with render props.
  */
-export function TimelineWrapper(props: JSX.IntrinsicElements["timeline"]): JSX.Element {
+export function TimelineWrapper(props: TentickleJSX.IntrinsicElements["timeline"]): JSX.Element {
   // TimelineWrapper is just a Fragment - it doesn't render anything itself
   // The renderer processes its Message children
-  return createElement(Fragment, props);
+  return h(React.Fragment, props);
 }
 
 /**
@@ -85,18 +90,20 @@ export type EntryProps = {
 }[EntryKind];
 
 export function Entry(props: EntryProps): JSX.Element {
-  return createElement(Entry, props);
+  // Use intrinsic "entry" element for react-reconciler compatibility
+  // The reconciler's hostConfig will create a TentickleNode for this
+  // Type assertion needed because React.createElement doesn't handle discriminated unions well
+  return h("entry", props as any);
 }
 
 /**
  * Section primitive component.
  * When used in JSX: <Section id="..." content="..." />
- * The JSX transformer calls createElement(Section, props), which stores Section as the type.
- * The renderer recognizes Section as a host component and processes it accordingly.
+ * Returns an intrinsic "section" element for react-reconciler compatibility.
  */
-export function Section(props: JSX.IntrinsicElements["section"]): JSX.Element {
-  // Use self-reference so it works both in JSX and when called directly
-  return createElement(Section, props);
+export function Section(props: TentickleJSX.IntrinsicElements["section"]): JSX.Element {
+  // Use intrinsic "section" element for react-reconciler compatibility
+  return h("section", props);
 }
 
 /**
@@ -143,7 +150,7 @@ export function Message(props: MessageProps): JSX.Element {
     updatedAt,
   };
 
-  return createElement(Entry, {
+  return h(Entry, {
     kind: "message",
     message,
     tags, // Entry-level props
@@ -157,9 +164,9 @@ export function Message(props: MessageProps): JSX.Element {
  * Tool primitive component.
  * When used in JSX: <Tool definition={myTool} />
  */
-export function Tool(props: JSX.IntrinsicElements["tool"]): JSX.Element {
-  // Use self-reference so it works both in JSX and when called directly
-  return createElement(Tool, props);
+export function Tool(props: TentickleJSX.IntrinsicElements["tool"]): JSX.Element {
+  // Use intrinsic "tool" element for react-reconciler compatibility
+  return h("tool", props);
 }
 
 // Re-export Model components

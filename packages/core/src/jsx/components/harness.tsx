@@ -33,10 +33,9 @@
  * @module tentickle/components/harness
  */
 
-import { createElement, type JSX } from "../jsx-runtime";
-import { Component } from "../../component/component";
+import React, { useEffect, useRef } from "react";
+import type { JSX } from "react";
 import { COM } from "../../com/object-model";
-import { type TickState } from "../../component/component";
 import { type ComponentBaseProps } from "../jsx-types";
 import { SessionImpl } from "../../app/session";
 import type { ComponentFunction, SendResult, AppOptions, SessionOptions } from "../../app/types";
@@ -120,134 +119,9 @@ export function getHarnessContext(com: COM): HarnessContext | undefined {
 }
 
 /**
- * Harness component implementation.
- *
- * Creates a child session for the specified component, runs it with the
- * provided props, and surfaces results via callbacks.
- */
-export class HarnessComponent<P = Record<string, unknown>> extends Component<HarnessProps<P>> {
-  private session: SessionImpl<P> | null = null;
-  private executionPromise: Promise<SendResult> | null = null;
-  private hasStarted = false;
-  private result: SendResult | null = null;
-  private error: Error | null = null;
-
-  /**
-   * Clean up session on unmount.
-   */
-  async onUnmount(_com: COM): Promise<void> {
-    if (this.session) {
-      this.session.close();
-      this.session = null;
-    }
-    super.onUnmount(_com);
-  }
-
-  /**
-   * Render the harness.
-   *
-   * On first render, starts the child session. Subsequent renders
-   * return null (the harness doesn't contribute to the parent's context).
-   */
-  render(com: COM, _state: TickState): JSX.Element | null {
-    const { name, component, props, model, onResult, onError, maxTicks, waitUntilComplete } =
-      this.props;
-
-    // Start execution on first render
-    if (!this.hasStarted) {
-      this.startExecution(com, name, component, props, model, maxTicks, onResult, onError);
-      this.hasStarted = true;
-    }
-
-    // If waitUntilComplete is true, register a wait handle
-    if (waitUntilComplete && this.executionPromise) {
-      this.registerWait(com);
-    }
-
-    // Harness doesn't render any content to parent context
-    return null;
-  }
-
-  /**
-   * Start the child session execution.
-   */
-  private startExecution(
-    _com: COM,
-    _name: string,
-    component: ComponentFunction<P>,
-    props: P,
-    model: ModelInstance | undefined,
-    maxTicks: number | undefined,
-    onResult: ((result: SendResult) => void | Promise<void>) | undefined,
-    onError: ((error: Error) => void | Promise<void>) | undefined,
-  ): void {
-    // Build app options
-    const appOptions: AppOptions = {};
-    if (model) {
-      appOptions.model = model;
-    }
-    if (maxTicks) {
-      appOptions.maxTicks = maxTicks;
-    }
-
-    // Create child session (SessionImpl is self-contained)
-    this.session = new SessionImpl<P>(component, appOptions, this.props.sessionOptions);
-
-    // Set up harness context for child (allows useHarness() in child)
-    // const parentContext = getHarnessContext(com);
-    // const childContext: HarnessContext = {
-    //   name,
-    //   parent: parentContext?.name,
-    //   path: [...(parentContext?.path ?? []), name],
-    //   depth: (parentContext?.depth ?? 0) + 1,
-    // };
-
-    // Execute child session using tick (starts fresh execution)
-    // Use .result to get the SendResult from the SessionExecutionHandle
-    this.executionPromise = this.session
-      .tick(props)
-      .result.then((result) => {
-        this.result = result;
-        if (onResult) {
-          return Promise.resolve(onResult(result)).then(() => result);
-        }
-        return result;
-      })
-      .catch((err: Error) => {
-        this.error = err instanceof Error ? err : new Error(String(err));
-        if (onError) {
-          onError(this.error);
-        }
-        throw this.error;
-      })
-      .finally(() => {
-        // Clean up session
-        if (this.session) {
-          this.session.close();
-          this.session = null;
-        }
-      });
-  }
-
-  /**
-   * Register wait handle if waitUntilComplete is true.
-   * Uses setState to trigger parent re-render when child completes.
-   */
-  private registerWait(_com: COM): void {
-    if (!this.executionPromise) return;
-
-    // Store the promise on the component instance
-    // The parent tick loop will wait for all harness executions
-    // if waitUntilComplete is true
-    this.executionPromise.finally(() => {
-      // Mark as complete - could trigger parent re-render via state update
-      // For now, the promise resolution handles the flow
-    });
-  }
-}
-
-/**
  * Harness component for spawning child agent sessions.
+ *
+ * Uses React hooks for lifecycle management.
  *
  * @example
  * ```tsx
@@ -259,6 +133,74 @@ export class HarnessComponent<P = Record<string, unknown>> extends Component<Har
  * />
  * ```
  */
-export function Harness<P = Record<string, unknown>>(props: HarnessProps<P>): JSX.Element {
-  return createElement(HarnessComponent, props as any);
+export function Harness<P = Record<string, unknown>>(props: HarnessProps<P>): JSX.Element | null {
+  const {
+    name,
+    component,
+    props: childProps,
+    model,
+    onResult,
+    onError,
+    maxTicks,
+    sessionOptions,
+  } = props;
+
+  const sessionRef = useRef<SessionImpl<P> | null>(null);
+  const hasStartedRef = useRef(false);
+
+  // Start execution on mount
+  useEffect(() => {
+    if (hasStartedRef.current) return;
+    hasStartedRef.current = true;
+
+    // Build app options
+    const appOptions: AppOptions = {};
+    if (model) {
+      appOptions.model = model;
+    }
+    if (maxTicks) {
+      appOptions.maxTicks = maxTicks;
+    }
+
+    // Create child session
+    const session = new SessionImpl<P>(component, appOptions, sessionOptions);
+    sessionRef.current = session;
+
+    // Execute child session
+    session
+      .tick(childProps)
+      .result.then((result) => {
+        if (onResult) {
+          return Promise.resolve(onResult(result)).then(() => result);
+        }
+        return result;
+      })
+      .catch((err: Error) => {
+        const error = err instanceof Error ? err : new Error(String(err));
+        if (onError) {
+          onError(error);
+        }
+      })
+      .finally(() => {
+        // Clean up session
+        if (sessionRef.current) {
+          sessionRef.current.close();
+          sessionRef.current = null;
+        }
+      });
+
+    // Cleanup on unmount
+    return () => {
+      if (sessionRef.current) {
+        sessionRef.current.close();
+        sessionRef.current = null;
+      }
+    };
+  }, [name, component, childProps, model, maxTicks, sessionOptions, onResult, onError]);
+
+  // Harness doesn't render any content to parent context
+  return null;
 }
+
+// Export HarnessComponent as an alias for backwards compatibility
+export const HarnessComponent = Harness;

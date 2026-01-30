@@ -28,10 +28,11 @@
 
 export {
   Renderer as ContentRenderer,
+  Renderer,
   type Formatter,
   type SemanticContentBlock,
   type SemanticNode,
   type SemanticType,
 } from "./base";
-export { MarkdownRenderer } from "./markdown";
+export { MarkdownRenderer, markdownRenderer } from "./markdown";
 export { XMLRenderer } from "./xml";

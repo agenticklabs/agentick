@@ -14,8 +14,9 @@
 
 import { describe, it, expect, vi } from "vitest";
 import { createApp, Model, System, Timeline, Message } from "../../index";
-import { useConversationHistory, useQueuedMessages, useTickState } from "../../state/hooks";
+import { useConversationHistory, useQueuedMessages, useTickState } from "../../hooks";
 import type { COMTimelineEntry } from "../../com/types";
+import type { MessageRoles } from "@tentickle/shared";
 
 // Helper to create a mock model that captures input
 function createMockModel() {
@@ -23,7 +24,7 @@ function createMockModel() {
 
   return {
     model: {
-      metadata: { id: "test-model", provider: "test", model: "test" },
+      metadata: { id: "test-model", provider: "test", model: "test", capabilities: [] },
       generate: vi.fn().mockResolvedValue({
         message: { role: "assistant", content: [{ type: "text", text: "Response" }] },
         usage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 },
@@ -100,22 +101,31 @@ describe("Message Flow Integration", () => {
       session.close();
     });
 
-    it("should include user message in conversation history during first tick", async () => {
+    it("should have empty conversation history on first tick (user message is queued, not in history)", async () => {
       const mockModel = createMockModel();
       let historyDuringRender: COMTimelineEntry[] = [];
+      let queuedDuringRender: any[] = [];
 
       const Agent = () => {
         historyDuringRender = useConversationHistory();
+        queuedDuringRender = useQueuedMessages();
         return (
           <>
             <Model model={mockModel.model} />
             <System>Test</System>
             <Timeline>
-              {(history) => (
+              {(history, pending = []) => (
                 <>
                   {history.map((entry, i) =>
                     entry.message ? <Message key={i} {...entry.message} /> : null,
                   )}
+                  {pending.map((message, i) => (
+                    <Message
+                      key={i}
+                      role={message.type as MessageRoles}
+                      {...(message.content as any[])}
+                    />
+                  ))}
                 </>
               )}
             </Timeline>
@@ -135,10 +145,58 @@ describe("Message Flow Integration", () => {
 
       await handle.result;
 
-      // History should include the user message
-      const userEntry = historyDuringRender.find((e) => e.message?.role === "user");
+      // On first tick, conversation history should be empty (no previous tick)
+      // The user message is in queuedMessages, not history
+      expect(historyDuringRender.length).toBe(0);
+
+      // User message should be in queued messages
+      const userQueued = queuedDuringRender.find((m) => m.type === "user");
+      expect(userQueued).toBeDefined();
+
+      session.close();
+    });
+
+    it("should include user message in conversation history on SECOND tick", async () => {
+      const mockModel = createMockModel();
+      let historyDuringSecondTick: COMTimelineEntry[] = [];
+      let tickNumber = 0;
+
+      const Agent = () => {
+        tickNumber++;
+        if (tickNumber >= 2) {
+          historyDuringSecondTick = useConversationHistory();
+        }
+        return (
+          <>
+            <Model model={mockModel.model} />
+            <System>Test</System>
+            <Timeline />
+          </>
+        );
+      };
+
+      const app = createApp(Agent, { maxTicks: 1 });
+      const session = app.session();
+
+      // First tick
+      await session.send({
+        message: {
+          role: "user",
+          content: [{ type: "text", text: "First message" }],
+        },
+      }).result;
+
+      // Second tick - should now see first message in history
+      await session.send({
+        message: {
+          role: "user",
+          content: [{ type: "text", text: "Second message" }],
+        },
+      }).result;
+
+      // History during second tick should include messages from first tick
+      const userEntry = historyDuringSecondTick.find((e) => e.message?.role === "user");
       expect(userEntry).toBeDefined();
-      expect(userEntry?.message?.content).toEqual([{ type: "text", text: "Test message" }]);
 
       session.close();
     });
@@ -235,12 +293,17 @@ describe("Message Flow Integration", () => {
   });
 
   describe("message deduplication", () => {
-    it("should not duplicate messages in useConversationHistory", async () => {
+    it("should not duplicate messages in useConversationHistory across ticks", async () => {
       const mockModel = createMockModel();
-      let historyDuringRender: COMTimelineEntry[] = [];
+      let historyOnSecondTick: COMTimelineEntry[] = [];
+      let tickNumber = 0;
 
       const Agent = () => {
-        historyDuringRender = useConversationHistory();
+        tickNumber++;
+        // Capture history on second tick (first tick's message should now be in history)
+        if (tickNumber >= 2) {
+          historyOnSecondTick = useConversationHistory();
+        }
         return (
           <>
             <Model model={mockModel.model} />
@@ -261,6 +324,7 @@ describe("Message Flow Integration", () => {
       const app = createApp(Agent, { maxTicks: 1 });
       const session = app.session();
 
+      // First tick - send a message
       await session.send({
         message: {
           role: "user",
@@ -268,8 +332,16 @@ describe("Message Flow Integration", () => {
         },
       }).result;
 
-      // Count how many times the exact message appears
-      const uniqueMessageCount = historyDuringRender.filter(
+      // Second tick - now the first message should be in history
+      await session.send({
+        message: {
+          role: "user",
+          content: [{ type: "text", text: "Another message" }],
+        },
+      }).result;
+
+      // Count how many times the exact message appears in history
+      const uniqueMessageCount = historyOnSecondTick.filter(
         (e) =>
           e.message?.role === "user" &&
           Array.isArray(e.message?.content) &&

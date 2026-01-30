@@ -1,7 +1,11 @@
-import { createElement, type JSX } from "../jsx-runtime";
+import React from "react";
+import type { JSX } from "react";
 import type { ContentBlock as ContentBlockType, MediaSource } from "@tentickle/shared";
 import { CodeLanguage } from "@tentickle/shared";
 import type { ComponentBaseProps } from "../jsx-types";
+
+// Helper for createElement
+const h = React.createElement;
 
 /**
  * Content component primitives for composing Message content.
@@ -19,7 +23,7 @@ function createContentBlock<TProps extends ContentBlockProps>(
   block: (props: TProps) => JSX.Element,
   props: TProps,
 ): JSX.Element {
-  return createElement(block, props);
+  return h(block, props);
 }
 
 // Re-export the type for external use

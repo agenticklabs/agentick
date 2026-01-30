@@ -1,11 +1,14 @@
-import { createElement, type JSX } from "../jsx-runtime";
+import React from "react";
+import type { JSX } from "react";
+import type { ComponentBaseProps } from "../jsx-types";
+
+// Helper for createElement
+const h = React.createElement;
 
 /**
  * Semantic content primitives for expressive rendering.
  * These provide semantic meaning to renderers beyond plain text.
  */
-
-import type { ComponentBaseProps } from "../jsx-types";
 
 interface BaseProps extends ComponentBaseProps {}
 
@@ -17,7 +20,7 @@ export interface HeaderProps extends BaseProps {
   children?: any;
 }
 export function Header(props: HeaderProps): JSX.Element {
-  return createElement(Header, props);
+  return h(Header, props);
 }
 
 /**
@@ -27,7 +30,7 @@ export interface H1Props extends BaseProps {
   children?: any;
 }
 export function H1(props: H1Props): JSX.Element {
-  return createElement(H1, props);
+  return h(H1, props);
 }
 
 /**
@@ -37,7 +40,7 @@ export interface H2Props extends BaseProps {
   children?: any;
 }
 export function H2(props: H2Props): JSX.Element {
-  return createElement(H2, props);
+  return h(H2, props);
 }
 
 /**
@@ -47,7 +50,7 @@ export interface H3Props extends BaseProps {
   children?: any;
 }
 export function H3(props: H3Props): JSX.Element {
-  return createElement(H3, props);
+  return h(H3, props);
 }
 
 /**
@@ -58,7 +61,7 @@ export interface ParagraphProps extends BaseProps {
   children?: any;
 }
 export function Paragraph(props: ParagraphProps): JSX.Element {
-  return createElement(Paragraph, props);
+  return h(Paragraph, props);
 }
 
 /**
@@ -95,7 +98,7 @@ export interface ListProps extends BaseProps {
   children?: any;
 }
 export function List(props: ListProps): JSX.Element {
-  return createElement(List, props);
+  return h(List, props);
 }
 
 /**
@@ -115,7 +118,7 @@ export interface ListItemProps extends BaseProps {
   children?: any;
 }
 export function ListItem(props: ListItemProps): JSX.Element {
-  return createElement(ListItem, props);
+  return h(ListItem, props);
 }
 
 /**
@@ -159,7 +162,7 @@ export interface TableProps extends BaseProps {
   rows?: string[][];
 }
 export function Table(props: TableProps): JSX.Element {
-  return createElement(Table, props);
+  return h(Table, props);
 }
 
 /**
@@ -171,7 +174,7 @@ export interface RowProps extends BaseProps {
 }
 export function Row(props: RowProps): JSX.Element {
   props.key ??= `row-${Math.random().toString(36).substring(2, 15)}`;
-  return createElement(Row, props);
+  return h(Row, props);
 }
 
 /**
@@ -183,7 +186,7 @@ export interface ColumnProps extends BaseProps {
 }
 export function Column(props: ColumnProps): JSX.Element {
   props.align ??= "left";
-  return createElement(Column, props);
+  return h(Column, props);
 }
 
 // Note: For inline text formatting, use lowercase intrinsic elements:

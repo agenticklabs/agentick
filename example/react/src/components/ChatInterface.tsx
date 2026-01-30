@@ -90,14 +90,12 @@ export function ChatInterface() {
         const data = payload as { messages?: Message[]; totalCount?: number };
         if (data.messages && data.messages.length > 0) {
           setServerMessages((prev) => {
-            // Append new messages
             const updated = [...prev, ...data.messages!];
             // Verify sync - if counts don't match, we may need to refetch
             if (data.totalCount !== undefined && updated.length !== data.totalCount) {
               console.warn(
                 `Timeline sync mismatch: local=${updated.length}, server=${data.totalCount}`,
               );
-              // Could trigger a full refetch here if needed
             }
             return updated;
           });
@@ -110,27 +108,9 @@ export function ChatInterface() {
     return unsubscribe;
   }, [accessor]);
 
-  // Also subscribe to user messages from other clients
-  useEffect(() => {
-    if (!accessor) return;
-
-    const channel = accessor.channel("messages");
-    const unsubscribe = channel.subscribe((payload: unknown, event: { type: string }) => {
-      if (event.type === "message_queued" && payload && typeof payload === "object") {
-        const message = payload as Message;
-        // Add to our local view immediately (server will confirm via timeline_updated)
-        setServerMessages((prev) => {
-          // Avoid duplicates by checking content
-          const signature = JSON.stringify(message.content);
-          const exists = prev.some((m) => JSON.stringify(m.content) === signature);
-          if (exists) return prev;
-          return [...prev, message];
-        });
-      }
-    });
-
-    return unsubscribe;
-  }, [accessor]);
+  // Note: We intentionally do NOT subscribe to the "messages" channel for message_queued events.
+  // The timeline_delta channel is our single source of truth. Using both would cause duplicates.
+  // The pendingMessage state provides optimistic UX for the current user's messages.
 
   // Convert server messages to display format
   const displayMessages = useMemo((): ChatMessage[] => {

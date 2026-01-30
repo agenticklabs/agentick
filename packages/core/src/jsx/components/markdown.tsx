@@ -1,7 +1,11 @@
-import { createElement, type JSX } from "../jsx-runtime";
+import React from "react";
+import type { JSX } from "react";
 import { type ComponentBaseProps } from "../jsx-types";
 import { MarkdownRenderer, type SemanticContentBlock } from "../../renderers";
-import { FormatterBoundary } from "../../state/boundary";
+import { FormatterBoundary } from "../../hooks/formatter-context";
+
+// Helper for createElement
+const h = React.createElement;
 
 /**
  * Markdown renderer component.
@@ -35,7 +39,7 @@ export function Markdown(props: MarkdownProps): JSX.Element {
   // Create renderer for this specific flavor
   const renderer = new MarkdownRenderer(props.flavor);
 
-  return createElement(FormatterBoundary.Provider, {
+  return h(FormatterBoundary.Provider, {
     value: {
       formatter: (blocks: SemanticContentBlock[]) => renderer.format(blocks),
     },

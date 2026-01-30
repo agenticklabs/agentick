@@ -498,3 +498,6 @@ export class MarkdownRenderer extends Renderer {
     }
   }
 }
+
+/** Default markdown renderer instance */
+export const markdownRenderer = new MarkdownRenderer();

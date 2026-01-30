@@ -4,6 +4,7 @@
  * @module tentickle/components/harness.spec
  */
 
+import React from "react";
 import { describe, it, expect, vi } from "vitest";
 import { Harness, HarnessComponent, getHarnessContext } from "./harness";
 import { System } from "./messages";
@@ -19,7 +20,8 @@ describe("Harness Component", () => {
         </>
       );
 
-      const element = Harness({
+      // Use React.createElement to create element without executing component
+      const element = React.createElement(Harness, {
         name: "test-harness",
         component: TestAgent,
         props: { query: "test" },
@@ -35,7 +37,7 @@ describe("Harness Component", () => {
 
       const testProps = { message: "Hello World" };
 
-      const element = Harness({
+      const element = React.createElement(Harness, {
         name: "props-test",
         component: TestAgent,
         props: testProps,
@@ -49,7 +51,7 @@ describe("Harness Component", () => {
       const TestAgent = () => <System>Test</System>;
       const onResult = vi.fn();
 
-      const element = Harness({
+      const element = React.createElement(Harness, {
         name: "callback-test",
         component: TestAgent,
         props: {},
@@ -63,7 +65,7 @@ describe("Harness Component", () => {
       const TestAgent = () => <System>Test</System>;
       const onError = vi.fn();
 
-      const element = Harness({
+      const element = React.createElement(Harness, {
         name: "error-test",
         component: TestAgent,
         props: {},
@@ -76,7 +78,7 @@ describe("Harness Component", () => {
     it("should accept waitUntilComplete option", () => {
       const TestAgent = () => <System>Test</System>;
 
-      const element = Harness({
+      const element = React.createElement(Harness, {
         name: "wait-test",
         component: TestAgent,
         props: {},
@@ -89,7 +91,7 @@ describe("Harness Component", () => {
     it("should accept maxTicks option", () => {
       const TestAgent = () => <System>Test</System>;
 
-      const element = Harness({
+      const element = React.createElement(Harness, {
         name: "ticks-test",
         component: TestAgent,
         props: {},
@@ -124,7 +126,7 @@ describe("Harness Component", () => {
         </System>
       );
 
-      const element = Harness<MyAgentProps>({
+      const element = React.createElement(Harness<MyAgentProps>, {
         name: "typed-harness",
         component: MyAgent,
         props: {

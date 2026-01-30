@@ -26,10 +26,9 @@
  * ```
  */
 
-import { createElement, type JSX } from "../jsx-runtime";
-import { Component } from "../../component/component";
-import { COM } from "../../com/object-model";
-import { type TickState } from "../../component/component";
+import React, { useRef, useEffect } from "react";
+import type { JSX } from "react";
+import { useTickState } from "../../hooks/context";
 import { type ComponentBaseProps } from "../jsx-types";
 
 /**
@@ -40,7 +39,7 @@ export interface CompleteProps extends ComponentBaseProps {
    * Children to render as the final output.
    * Typically an <Assistant> message with the final answer.
    */
-  children?: JSX.Element | JSX.Element[];
+  children?: React.ReactNode;
 
   /**
    * Reason for completion (optional, used for logging/debugging)
@@ -55,39 +54,10 @@ export interface CompleteProps extends ComponentBaseProps {
 }
 
 /**
- * Complete component implementation.
+ * Complete component - marks execution as complete with optional final output.
  *
  * On mount, calls state.stop() to end the tick loop.
  * Renders children (if any) as the final output.
- */
-export class CompleteComponent extends Component<CompleteProps> {
-  private hasCompleted = false;
-
-  render(_com: COM, state: TickState): JSX.Element | null {
-    // Only call stop once per instance
-    if (!this.hasCompleted) {
-      this.hasCompleted = true;
-      const reason = this.props.reason || "Complete component reached";
-      state.stop(reason);
-    }
-
-    // Render children as final output
-    if (this.props.children) {
-      // If single child, return it directly
-      if (Array.isArray(this.props.children)) {
-        // Multiple children - wrap in fragment would be ideal but return first for now
-        // In practice, Complete usually wraps a single <Assistant> element
-        return this.props.children[0] as JSX.Element;
-      }
-      return this.props.children as JSX.Element;
-    }
-
-    return null;
-  }
-}
-
-/**
- * JSX-compatible Complete component factory.
  *
  * @example
  * ```tsx
@@ -96,6 +66,27 @@ export class CompleteComponent extends Component<CompleteProps> {
  * </Complete>
  * ```
  */
-export function Complete(props: CompleteProps): JSX.Element {
-  return createElement(CompleteComponent, props);
+export function Complete(props: CompleteProps): JSX.Element | null {
+  const { reason, children } = props;
+  const state = useTickState();
+  const hasCompletedRef = useRef(false);
+
+  // Call stop on first render
+  useEffect(() => {
+    if (!hasCompletedRef.current) {
+      hasCompletedRef.current = true;
+      const stopReason = reason || "Complete component reached";
+      state.stop(stopReason);
+    }
+  }, [state, reason]);
+
+  // Render children as final output
+  if (children) {
+    return React.createElement(React.Fragment, null, children);
+  }
+
+  return null;
 }
+
+// Export CompleteComponent as an alias for backwards compatibility
+export const CompleteComponent = Complete;

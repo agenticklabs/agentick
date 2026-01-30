@@ -17,7 +17,7 @@ import { Model } from "../../jsx/components/primitives";
 import { Context } from "../../core/index";
 import type { StopReason, StreamEvent } from "@tentickle/shared";
 import { AbortError, BlockType } from "@tentickle/shared";
-import { useState, useRef, useOnMessage, useQueuedMessages } from "../../state/hooks";
+import { useState, useRef, useOnMessage, useQueuedMessages } from "../../hooks";
 import { Timeline } from "../../jsx/components/timeline";
 
 // ============================================================================
@@ -1383,7 +1383,7 @@ describe("session.inspect()", () => {
 // Tick Snapshots Tests (Phase 2 - Recording not yet implemented)
 // ============================================================================
 
-describe.skip("tick snapshots", () => {
+describe("tick snapshots", () => {
   it("should not record snapshots when recording mode is 'none'", async () => {
     const model = createMockModel();
 

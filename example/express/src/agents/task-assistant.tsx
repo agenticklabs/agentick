@@ -11,6 +11,7 @@
 
 import { Model, Section, Timeline, Message } from "@tentickle/core";
 import { useComputed, useComState } from "@tentickle/core";
+import type { MessageRoles } from "@tentickle/shared";
 import { openai } from "@tentickle/openai";
 import { google } from "@tentickle/google";
 import { TodoListTool } from "../tools/todo-list.tool.js";
@@ -81,13 +82,19 @@ export function TaskAssistantAgent() {
       <TodoListTool />
       <CalculatorTool />
 
-      {/* Conversation history */}
+      {/* Conversation history + pending messages */}
       <Timeline>
-        {(history) => (
+        {(history, pending) => (
           <>
+            {/* Previous conversation history */}
             {history.map((entry, i) =>
-              entry.message ? <Message key={i} {...entry.message} /> : null,
+              entry.message ? <Message key={`history-${i}`} {...entry.message} /> : null,
             )}
+            {/* Pending messages for this tick */}
+            {pending?.map((msg, i) => {
+              const content = msg.content as { role: MessageRoles; content: unknown[] } | undefined;
+              return content ? <Message key={`pending-${i}`} {...content} /> : null;
+            })}
           </>
         )}
       </Timeline>

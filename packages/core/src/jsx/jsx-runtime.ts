@@ -1,14 +1,19 @@
 /* eslint-disable @typescript-eslint/no-namespace */
+import React from "react";
 import type z from "zod";
 import type { ComponentClass, ComponentFactory } from "../component/component";
 import type { ToolClass, ExecutableTool } from "../tool/tool";
 import type { ContentBlock, MessageRoles, ToolExecutionType } from "@tentickle/shared";
 
+// Use React's createElement for all element creation
+// This ensures elements have proper $$typeof symbol
+const h = React.createElement;
+
 export namespace JSX {
   export interface Element {
     type: any;
     props: any;
-    key: string | number | null;
+    key: string | null;
   }
 
   /**
@@ -343,16 +348,19 @@ export function jsx<K extends keyof JSX.IntrinsicElements>(
 ): JSX.Element;
 // Implementation
 export function jsx(type: any, props: any, key?: string | number | null): JSX.Element {
-  // If type is already a JSX.Element, return it
-  if (type && typeof type === "object" && "type" in type && "props" in type) {
-    return type;
+  // If type is already a React element, return it
+  if (React.isValidElement(type)) {
+    return type as unknown as JSX.Element;
   }
-  const normalizedProps = { ...props };
-  return {
-    type,
-    props: normalizedProps,
-    key: key ?? props?.key ?? null,
-  };
+  // Use React.createElement to create proper React elements with $$typeof
+  const { children, ...restProps } = props || {};
+  const reactKey = key ?? props?.key ?? null;
+  // React.createElement handles children properly
+  const element =
+    children !== undefined
+      ? h(type, { ...restProps, key: reactKey }, children)
+      : h(type, { ...restProps, key: reactKey });
+  return element as unknown as JSX.Element;
 }
 
 /**
@@ -512,37 +520,31 @@ export function createElement<K extends keyof JSX.IntrinsicElements>(
 ): JSX.Element;
 // Implementation
 export function createElement(type: any, props: any, ...children: any[]): JSX.Element {
-  // If type is already a JSX.Element, return it (ignore props/children)
-  if (type && typeof type === "object" && "type" in type && "props" in type) {
-    return type;
+  // If type is already a React element, return it (ignore props/children)
+  if (React.isValidElement(type)) {
+    return type as unknown as JSX.Element;
   }
-  const normalizedProps = { ...props };
-  if (children.length > 0) {
-    normalizedProps.children = children.length === 1 ? children[0] : children;
-  }
-  return {
-    type,
-    props: normalizedProps,
-    key: props?.key || null,
-  };
+  // Use React.createElement to create proper React elements with $$typeof
+  const element = h(type, props, ...children);
+  return element as unknown as JSX.Element;
 }
 
-// Cast Fragment to any to avoid TS complaining about it not being a constructor/function
-export const Fragment: any = Symbol.for("tentickle.fragment");
+// Use React.Fragment for proper fragment support
+export const Fragment = React.Fragment;
 
 export function isElement(node: any): node is JSX.Element {
-  return node && typeof node === "object" && "type" in node && "props" in node;
+  return React.isValidElement(node);
 }
 
 export function ensureElement(element: any, props: any = {}, children: any[] = []): JSX.Element {
   if (element !== undefined) {
-    if (isElement(element)) {
-      // Already a JSX.Element
-      return element;
+    if (React.isValidElement(element)) {
+      // Already a React element
+      return element as unknown as JSX.Element;
     } else if (Array.isArray(element)) {
       // Array of ComponentDefinitions
-      const children = element.map((c) => {
-        if (isElement(c)) {
+      const mappedChildren = element.map((c) => {
+        if (React.isValidElement(c)) {
           return c;
         }
         // ComponentDefinition can be instance, class, factory, or function
@@ -560,10 +562,12 @@ export function ensureElement(element: any, props: any = {}, children: any[] = [
         // Otherwise pass through - createElement will handle it
         return createElement(c as any, {});
       });
-      return createElement(Fragment, {}, ...children);
+      return createElement(Fragment, {}, ...mappedChildren);
     } else {
       // Single ComponentDefinition
-      return isElement(element) ? element : createElement(element, props, ...children);
+      return React.isValidElement(element)
+        ? (element as unknown as JSX.Element)
+        : createElement(element, props, ...children);
     }
   }
 

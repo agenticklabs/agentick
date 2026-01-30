@@ -97,10 +97,14 @@
     "@modelcontextprotocol/sdk": "^1.25.1",
     "@tentickle/shared": "workspace:*",
     "pino": "^9.6.0",
+    "react": "^18.2.0",
+    "react-reconciler": "^0.29.2",
     "zod": "^4.2.1",
     "zod-to-json-schema": "^3.25.1"
   },
   "devDependencies": {
+    "@types/react": "^18.2.0",
+    "@types/react-reconciler": "0.28.9",
     "pino-pretty": "^13.0.0"
   }
 }

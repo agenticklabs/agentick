@@ -1,10 +1,19 @@
-import { createElement, type JSX } from "../jsx-runtime";
-import { Component } from "../../component/component";
-import { COM } from "../../com/object-model";
+/**
+ * Model component - React function component version.
+ *
+ * Uses React hooks (useEffect) for lifecycle instead of Tentickle Component class.
+ */
+
+import React, { useEffect } from "react";
+import { useCom } from "../../hooks/context";
 import type { ModelConfig, ModelInstance } from "../../model/model";
 import type { ComponentBaseProps } from "../jsx-types";
 import type { ProviderGenerationOptions } from "../../types";
 import type { MessageTransformationConfig } from "../../model/model";
+import type { COM } from "../../com/object-model";
+
+// Helper for createElement
+const h = React.createElement;
 
 /**
  * Props for Model component.
@@ -43,76 +52,55 @@ export interface ModelComponentProps extends ComponentBaseProps, Omit<ModelConfi
  * When mounted, sets the model on the COM.
  * When unmounted, clears the model.
  *
- * Model applies to the entire execution scope - all messages/timeline entries
- * will use the model set by the most recent Model component.
- *
- * If multiple Model components render in the same tick, the last one wins
- * (it becomes the active model for that tick and subsequent ticks).
- *
  * @example
  * ```tsx
- * <Fragment>
+ * <>
  *   <Model model={myModel} />
  *   <Message role="user" content="Hello" />
- * </Fragment>
- * ```
- *
- * @example
- * ```tsx
- * <Fragment>
- *   <Model model="gpt-4" />
- *   <Timeline>
- *     <Message role="user" content="Hello" />
- *   </Timeline>
- * </Fragment>
+ * </>
  * ```
  */
-export class ModelComponent extends Component<ModelComponentProps> {
-  async onMount(com: COM): Promise<void> {
-    // Set the model on COM and notify Engine
-    com.setModel(this.props.model);
+export function Model(props: ModelComponentProps): React.ReactElement {
+  const { model, onMount, onUnmount, ...options } = props;
+  const com = useCom();
+
+  // Set model on mount, clear on unmount
+  useEffect(() => {
+    com.setModel(model);
     com.resetModelOptions();
 
     // Call user's onMount if provided
-    if (this.props.onMount) {
-      await this.props.onMount(com);
+    if (onMount) {
+      const result = onMount(com);
+      if (result instanceof Promise) {
+        result.catch(() => {}); // Fire and forget
+      }
     }
-  }
 
-  async onUnmount(com: COM): Promise<void> {
-    // Clear the model when component unmounts
-    com.unsetModel();
+    return () => {
+      com.unsetModel();
 
-    // Call user's onUnmount if provided
-    if (this.props.onUnmount) {
-      await this.props.onUnmount(com);
-    }
-  }
+      // Call user's onUnmount if provided
+      if (onUnmount) {
+        const result = onUnmount(com);
+        if (result instanceof Promise) {
+          result.catch(() => {}); // Fire and forget
+        }
+      }
+    };
+  }, [model, com, onMount, onUnmount]);
 
-  render(com: COM): JSX.Element | null {
-    // Model is configuration-only - doesn't render anything
-    com.setModelOptions(omit(this.props, ["model", "onMount", "onUnmount"]));
-    return null;
-  }
+  // Set model options during render
+  useEffect(() => {
+    com.setModelOptions(options);
+  }, [com, options]);
+
+  // Model is configuration-only - doesn't render anything
+  return h(React.Fragment, null);
 }
 
-/**
- * Factory function for creating ModelComponent in JSX.
- *
- * Model is configuration-only - it sets which model adapter to use.
- * Use it as a sibling to content components, not as a container.
- *
- * @example
- * ```tsx
- * <Fragment>
- *   <Model model={myModel} />
- *   <Message role="user" content="Hello" />
- * </Fragment>
- * ```
- */
-export function Model(props: ModelComponentProps): JSX.Element {
-  return createElement(ModelComponent, props);
-}
+// Export ModelComponent as an alias for backwards compatibility in type detection
+export const ModelComponent = Model;
 
 // ============================================================================
 // ModelOptions Component
@@ -146,9 +134,6 @@ export interface ModelOptionsProps extends ComponentBaseProps {
 /**
  * ModelOptions component for configuring how content is transformed for model input.
  *
- * Sets message transformation configuration, role mapping, and other model options that affect
- * how ephemeral content (grounding) and event messages are formatted.
- *
  * @example
  * ```tsx
  * <ModelOptions
@@ -157,52 +142,21 @@ export interface ModelOptionsProps extends ComponentBaseProps {
  *       event: 'user',
  *       ephemeral: 'user',
  *     },
- *     delimiters: {
- *       event: '[Event]',
- *       ephemeral: '[Context]',
- *       useDelimiters: true,
- *     },
  *   }}
  * />
  * ```
  */
-export class ModelOptionsComponent extends Component<ModelOptionsProps> {
-  render(com: COM): JSX.Element | null {
-    // Set model options during render (not onTickStart) to ensure they're set
-    // before toInput() is called - onTickStart fires before the fiber tree exists on tick 1
-    com.setModelOptions(this.props);
-    return null;
-  }
+export function ModelOptions(props: ModelOptionsProps): React.ReactElement {
+  const com = useCom();
+
+  // Set model options during render
+  useEffect(() => {
+    com.setModelOptions(props);
+  }, [com, props]);
+
+  // ModelOptions is configuration-only - doesn't render anything
+  return h(React.Fragment, null);
 }
 
-/**
- * ModelOptions component for declarative configuration of content transformation.
- *
- * @example
- * ```tsx
- * <Fragment>
- *   <Model model={myModel} />
- *   <ModelOptions
- *     messageTransformation={{
- *       delimiters: {
- *         ephemeral: '[Context]',
- *         event: '[Event]',
- *         useDelimiters: true,
- *       }
- *     }}
- *   />
- *   <Timeline>...</Timeline>
- * </Fragment>
- * ```
- */
-export function ModelOptions(props: ModelOptionsProps): JSX.Element {
-  return createElement(ModelOptionsComponent, props);
-}
-
-function omit<T, K extends keyof T>(obj: T, keys: K[]): Omit<T, K> {
-  const result: any = { ...obj };
-  for (const key of keys) {
-    delete result[key];
-  }
-  return result;
-}
+// Export ModelOptionsComponent as an alias for backwards compatibility
+export const ModelOptionsComponent = ModelOptions;

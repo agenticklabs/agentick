@@ -312,7 +312,7 @@ describe("TentickleClient Message Flow", () => {
         message: { role: "user", content: [{ type: "text", text: "Error test" }] },
       });
 
-      await expect(handle.result).rejects.toThrow("Something went wrong");
+      await expect(handle.result).rejects.toThrow("Network error");
     });
 
     it("should handle non-ok response", async () => {
@@ -320,6 +320,9 @@ describe("TentickleClient Message Flow", () => {
         ok: false,
         status: 500,
         statusText: "Internal Server Error",
+        text() {
+          return Promise.resolve("Internal Server Error");
+        },
       });
 
       const session = client.session("error-session");
@@ -327,7 +330,7 @@ describe("TentickleClient Message Flow", () => {
         message: { role: "user", content: [{ type: "text", text: "Error test" }] },
       });
 
-      await expect(handle.result).rejects.toThrow("Something went wrong");
+      await expect(handle.result).rejects.toThrow("Internal Server Error");
     });
   });
 });

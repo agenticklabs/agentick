@@ -1,6 +1,10 @@
-import { createElement, type JSX, Fragment } from "../jsx-runtime";
+import React from "react";
+import type { JSX } from "react";
 import { type ComponentBaseProps } from "../jsx-types";
 import type { ContentRenderer } from "../../renderers";
+
+// Helper for createElement
+const h = React.createElement;
 
 /**
  * Generic Renderer component.
@@ -26,5 +30,5 @@ export function Renderer(props: RendererProps): JSX.Element {
   // Renderer is a context provider - doesn't render itself
   // The compiler detects this and applies the renderer to children
   // We return Fragment but preserve the instance prop for detection
-  return createElement(Fragment, props);
+  return h(React.Fragment, props);
 }

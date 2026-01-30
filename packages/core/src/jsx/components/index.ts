@@ -7,3 +7,4 @@ export * from "./renderer";
 export * from "./markdown";
 export * from "./xml";
 export * from "./token-budget";
+export * from "./timeline";

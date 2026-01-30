@@ -1,7 +1,11 @@
-import { createElement, type JSX } from "../jsx-runtime";
+import React from "react";
+import type { JSX } from "react";
 import { type ComponentBaseProps } from "../jsx-types";
 import { XMLRenderer, type SemanticContentBlock } from "../../renderers";
-import { FormatterBoundary } from "../../state/boundary";
+import { FormatterBoundary } from "../../hooks/formatter-context";
+
+// Helper for createElement
+const h = React.createElement;
 
 // Create a single XMLRenderer instance for all XML components
 const xmlRenderer = new XMLRenderer();
@@ -31,7 +35,7 @@ export interface XMLProps extends ComponentBaseProps {
 }
 
 export function XML(props: XMLProps): JSX.Element {
-  return createElement(FormatterBoundary.Provider, {
+  return h(FormatterBoundary.Provider, {
     value: {
       formatter: (blocks: SemanticContentBlock[]) => xmlRenderer.format(blocks),
     },

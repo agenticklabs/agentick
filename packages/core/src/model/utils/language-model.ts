@@ -650,10 +650,30 @@ export async function fromEngineState(
     const systemSections = Object.values(input.sections)
       .filter((s) => s.audience === "model")
       .map((s) => {
-        if (typeof s.content === "string") {
-          return s.title ? `${s.title}: ${s.content}` : s.content;
+        // Use formattedContent if available (already processed ContentBlocks)
+        const contentToUse = s.formattedContent ?? s.content;
+
+        if (typeof contentToUse === "string") {
+          return s.title ? `${s.title}: ${contentToUse}` : contentToUse;
         }
-        return s.title ? `${s.title}: ${JSON.stringify(s.content)}` : JSON.stringify(s.content);
+
+        // If it's an array of content blocks, extract text
+        if (Array.isArray(contentToUse)) {
+          const text = contentToUse
+            .map((block) => {
+              if (typeof block === "string") return block;
+              if (block && typeof block === "object" && "text" in block) {
+                return (block as { text: string }).text;
+              }
+              return "";
+            })
+            .filter(Boolean)
+            .join("\n");
+          return s.title ? `${s.title}: ${text}` : text;
+        }
+
+        // Fallback for other types
+        return s.title ? `${s.title}: ${String(contentToUse)}` : String(contentToUse);
       });
 
     if (systemSections.length > 0) {

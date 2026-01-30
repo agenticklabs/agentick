@@ -103,7 +103,7 @@ export interface COMSection {
   formattedContent?: ContentBlock[];
   formattedWith?: string; // Formatter ID that formatted it (for cache invalidation)
   visibility?: TimelineVisibility;
-  audience?: "model" | "human" | "system";
+  audience?: "user" | "model" | "all";
   ttlMs?: number;
   ttlTicks?: number;
   tags?: TimelineTag[];

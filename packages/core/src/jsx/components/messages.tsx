@@ -13,10 +13,14 @@
  *   <ToolResult toolCallId="..." name="weather">Sunny, 72°F</ToolResult>
  */
 
+import React from "react";
+import type { JSX } from "react";
 import type { ContentBlock, EventAllowedBlock } from "@tentickle/shared";
 import { Message as MessagePrimitive, type MessageProps } from "./primitives";
-import { createElement, type JSX } from "../jsx-runtime";
 import type { EphemeralPosition } from "../../com/types";
+
+// Helper for createElement
+const h = React.createElement;
 
 // ============================================================================
 // Common Props
@@ -55,7 +59,7 @@ export interface UserProps extends RoleMessageBaseProps {}
  */
 export function User(props: UserProps) {
   const { content, children, ...rest } = props;
-  return createElement(MessagePrimitive, {
+  return h(MessagePrimitive, {
     role: "user",
     content,
     children,
@@ -78,7 +82,7 @@ export interface AssistantProps extends RoleMessageBaseProps {}
  */
 export function Assistant(props: AssistantProps) {
   const { content, children, ...rest } = props;
-  return createElement(MessagePrimitive, {
+  return h(MessagePrimitive, {
     role: "assistant",
     content,
     children,
@@ -103,7 +107,7 @@ export interface SystemProps extends RoleMessageBaseProps {}
  */
 export function System(props: SystemProps) {
   const { content, children, ...rest } = props;
-  return createElement(MessagePrimitive, {
+  return h(MessagePrimitive, {
     role: "system",
     content,
     children,
@@ -134,7 +138,7 @@ export interface ToolResultProps extends RoleMessageBaseProps {
  */
 export function ToolResult(props: ToolResultProps) {
   const { content, children, toolCallId, name, isError, ...rest } = props;
-  return createElement(MessagePrimitive, {
+  return h(MessagePrimitive, {
     role: "tool",
     content,
     children,
@@ -184,7 +188,7 @@ export interface EventProps extends RoleMessageBaseProps {
  */
 export function Event(props: EventProps) {
   const { content, children, eventType, ...rest } = props;
-  return createElement(MessagePrimitive, {
+  return h(MessagePrimitive, {
     role: "event",
     content,
     children,
@@ -228,7 +232,7 @@ export interface UserActionProps {
  */
 export function UserAction(props: UserActionProps): JSX.Element {
   // Return JSX element - compiler will convert to block via registry
-  return createElement(UserAction, props);
+  return h(UserAction, props);
 }
 
 export interface SystemEventProps {
@@ -257,7 +261,7 @@ export interface SystemEventProps {
  */
 export function SystemEvent(props: SystemEventProps): JSX.Element {
   // Return JSX element - compiler will convert to block via registry
-  return createElement(SystemEvent, props);
+  return h(SystemEvent, props);
 }
 
 export interface StateChangeProps {
@@ -290,7 +294,7 @@ export interface StateChangeProps {
  */
 export function StateChange(props: StateChangeProps): JSX.Element {
   // Return JSX element - compiler will convert to block via registry
-  return createElement(StateChange, props);
+  return h(StateChange, props);
 }
 
 // ============================================================================
@@ -358,7 +362,7 @@ export interface EphemeralProps {
  */
 export function Ephemeral(props: EphemeralProps): JSX.Element {
   // Self-reference so compiler can recognize this component type
-  return createElement(Ephemeral, props);
+  return h(Ephemeral, props);
 }
 
 // ============================================================================
@@ -417,7 +421,7 @@ export function Grounding(props: GroundingProps): JSX.Element {
     metadata,
   } = props;
 
-  return createElement(Ephemeral, {
+  return h(Ephemeral, {
     type,
     content,
     children,
