@@ -5,8 +5,8 @@
   "keywords": [
     "agent",
     "ai",
-    "server",
     "channels",
+    "server",
     "sse",
     "websocket"
   ],
@@ -42,8 +42,8 @@
     "dev": "tsc --watch"
   },
   "dependencies": {
-    "@tentickle/shared": "workspace:*",
-    "@tentickle/core": "workspace:*"
+    "@tentickle/core": "workspace:*",
+    "@tentickle/shared": "workspace:*"
   },
   "devDependencies": {
     "typescript": "^5.8.3"

@@ -82,7 +82,8 @@ export function isZod4Schema(value: unknown): boolean {
     | undefined;
   const schemaAny = value as Record<string, unknown>;
   const hasStandardJSONSchema = typeof jsonSchema?.input === "function";
-  const hasZod4Def = typeof (schemaAny._zod as Record<string, unknown> | undefined)?.def !== "undefined";
+  const hasZod4Def =
+    typeof (schemaAny._zod as Record<string, unknown> | undefined)?.def !== "undefined";
 
   return hasStandardJSONSchema || hasZod4Def;
 }
@@ -135,9 +136,7 @@ export function isStandardJSONSchema(value: unknown): boolean {
   if (!standard || typeof standard !== "object") return false;
   const jsonSchema = standard.jsonSchema as Record<string, unknown> | undefined;
   return (
-    jsonSchema != null &&
-    typeof jsonSchema === "object" &&
-    typeof jsonSchema.input === "function"
+    jsonSchema != null && typeof jsonSchema === "object" && typeof jsonSchema.input === "function"
   );
 }
 
@@ -199,7 +198,7 @@ export function detectSchemaType(value: unknown): SchemaType {
  */
 export async function toJSONSchema(
   schema: unknown,
-  options: ToJSONSchemaOptions = {}
+  options: ToJSONSchemaOptions = {},
 ): Promise<Record<string, unknown>> {
   const { target = "draft-2020-12", stripMeta = true } = options;
 
@@ -222,9 +221,16 @@ export async function toJSONSchema(
     case "zod4": {
       // Prefer Standard JSON Schema interface when available (Zod 4).
       try {
-        const standard = (schema as Record<string, unknown>)["~standard"] as Record<string, unknown> | undefined;
-        if (standard?.jsonSchema && typeof (standard.jsonSchema as Record<string, unknown>).input === "function") {
-          result = (standard.jsonSchema as { input: (opts: { target: string }) => Record<string, unknown> }).input({ target });
+        const standard = (schema as Record<string, unknown>)["~standard"] as
+          | Record<string, unknown>
+          | undefined;
+        if (
+          standard?.jsonSchema &&
+          typeof (standard.jsonSchema as Record<string, unknown>).input === "function"
+        ) {
+          result = (
+            standard.jsonSchema as { input: (opts: { target: string }) => Record<string, unknown> }
+          ).input({ target });
           break;
         }
 
@@ -234,9 +240,22 @@ export async function toJSONSchema(
         if (typeof (schemaAny._zod as Record<string, unknown> | undefined)?.def === "undefined") {
           const zodToJsonSchemaModule = await import("zod-to-json-schema");
           const zodToJsonSchema =
-            (zodToJsonSchemaModule as { zodToJsonSchema?: (schema: unknown, options?: Record<string, unknown>) => Record<string, unknown> })
-              .zodToJsonSchema ??
-            (zodToJsonSchemaModule as { default?: (schema: unknown, options?: Record<string, unknown>) => Record<string, unknown> }).default;
+            (
+              zodToJsonSchemaModule as {
+                zodToJsonSchema?: (
+                  schema: unknown,
+                  options?: Record<string, unknown>,
+                ) => Record<string, unknown>;
+              }
+            ).zodToJsonSchema ??
+            (
+              zodToJsonSchemaModule as {
+                default?: (
+                  schema: unknown,
+                  options?: Record<string, unknown>,
+                ) => Record<string, unknown>;
+              }
+            ).default;
 
           if (typeof zodToJsonSchema === "function") {
             const targetKey = target ?? "draft-2020-12";
@@ -252,14 +271,21 @@ export async function toJSONSchema(
 
         // Zod 4 instances expose toJSONSchema directly.
         if (typeof schemaAny.toJSONSchema === "function") {
-          result = (schemaAny.toJSONSchema as (opts?: { target?: string }) => Record<string, unknown>)({ target });
+          result = (
+            schemaAny.toJSONSchema as (opts?: { target?: string }) => Record<string, unknown>
+          )({ target });
           break;
         }
 
         // Fallback to Zod module-level conversion if available.
         const zod = await import("zod");
-        if (typeof zod.toJSONSchema === "function" && typeof (schemaAny._zod as Record<string, unknown> | undefined)?.def !== "undefined") {
-          result = zod.toJSONSchema(schema as Parameters<typeof zod.toJSONSchema>[0], { target }) as Record<string, unknown>;
+        if (
+          typeof zod.toJSONSchema === "function" &&
+          typeof (schemaAny._zod as Record<string, unknown> | undefined)?.def !== "undefined"
+        ) {
+          result = zod.toJSONSchema(schema as Parameters<typeof zod.toJSONSchema>[0], {
+            target,
+          }) as Record<string, unknown>;
           break;
         }
 
@@ -279,9 +305,22 @@ export async function toJSONSchema(
       try {
         const zodToJsonSchemaModule = await import("zod-to-json-schema");
         const zodToJsonSchema =
-          (zodToJsonSchemaModule as { zodToJsonSchema?: (schema: unknown, options?: Record<string, unknown>) => Record<string, unknown> })
-            .zodToJsonSchema ??
-          (zodToJsonSchemaModule as { default?: (schema: unknown, options?: Record<string, unknown>) => Record<string, unknown> }).default;
+          (
+            zodToJsonSchemaModule as {
+              zodToJsonSchema?: (
+                schema: unknown,
+                options?: Record<string, unknown>,
+              ) => Record<string, unknown>;
+            }
+          ).zodToJsonSchema ??
+          (
+            zodToJsonSchemaModule as {
+              default?: (
+                schema: unknown,
+                options?: Record<string, unknown>,
+              ) => Record<string, unknown>;
+            }
+          ).default;
 
         if (typeof zodToJsonSchema !== "function") {
           console.warn("[schema] zod-to-json-schema export not found");
@@ -318,7 +357,7 @@ export async function toJSONSchema(
     case "standard-schema": {
       // Standard Schema without JSON Schema support - can't convert
       console.warn(
-        "Schema implements Standard Schema but not Standard JSON Schema - cannot convert to JSON Schema"
+        "Schema implements Standard Schema but not Standard JSON Schema - cannot convert to JSON Schema",
       );
       result = {};
       break;
@@ -407,7 +446,7 @@ export type ValidationResult<T = unknown> =
  */
 export async function validateSchema<T = unknown>(
   schema: unknown,
-  value: unknown
+  value: unknown,
 ): Promise<ValidationResult<T>> {
   if (schema == null) {
     return { success: false, issues: [{ message: "Schema is null or undefined" }] };
@@ -426,7 +465,10 @@ export async function validateSchema<T = unknown>(
 
       const result = zodSchema.safeParse(value) as
         | { success: true; data: T }
-        | { success: false; error: { issues: Array<{ message: string; path: (string | number)[]; code?: string }> } };
+        | {
+            success: false;
+            error: { issues: Array<{ message: string; path: (string | number)[]; code?: string }> };
+          };
 
       if (result.success) {
         return { success: true, data: result.data };
@@ -507,20 +549,19 @@ export async function validateSchema<T = unknown>(
  * @returns The validated value
  * @throws Error with validation issues if validation fails
  */
-export async function parseSchema<T = unknown>(
-  schema: unknown,
-  value: unknown
-): Promise<T> {
+export async function parseSchema<T = unknown>(schema: unknown, value: unknown): Promise<T> {
   const result = await validateSchema<T>(schema, value);
 
   if (result.success) {
     return result.data;
   }
 
-  const message = result.issues.map((i) => {
-    const path = i.path?.length ? `${i.path.join(".")}: ` : "";
-    return `${path}${i.message}`;
-  }).join("; ");
+  const message = result.issues
+    .map((i) => {
+      const path = i.path?.length ? `${i.path.join(".")}: ` : "";
+      return `${path}${i.message}`;
+    })
+    .join("; ");
 
   throw new Error(`Validation failed: ${message}`);
 }

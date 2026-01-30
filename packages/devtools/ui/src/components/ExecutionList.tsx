@@ -40,7 +40,8 @@ interface ExecutionItemProps {
 }
 
 function ExecutionItem({ execution, isSelected, onSelect }: ExecutionItemProps) {
-  const statusIcon = execution.status === "running" ? "⏳" : execution.status === "error" ? "❌" : "✓";
+  const statusIcon =
+    execution.status === "running" ? "⏳" : execution.status === "error" ? "❌" : "✓";
 
   const formatDuration = () => {
     if (!execution.endTime) return "running...";
@@ -58,30 +59,31 @@ function ExecutionItem({ execution, isSelected, onSelect }: ExecutionItemProps) 
     return new Date(timestamp).toLocaleDateString();
   };
 
-  const tokens = execution.totalUsage?.totalTokens ??
+  const tokens =
+    execution.totalUsage?.totalTokens ??
     execution.ticks.reduce((sum, t) => sum + (t.usage?.totalTokens ?? 0), 0);
 
-  const inputTokens = execution.totalUsage?.inputTokens ??
+  const inputTokens =
+    execution.totalUsage?.inputTokens ??
     execution.ticks.reduce((sum, t) => sum + (t.usage?.inputTokens ?? 0), 0);
 
-  const outputTokens = execution.totalUsage?.outputTokens ??
+  const outputTokens =
+    execution.totalUsage?.outputTokens ??
     execution.ticks.reduce((sum, t) => sum + (t.usage?.outputTokens ?? 0), 0);
 
   return (
-    <div
-      className={`execution-item ${isSelected ? "selected" : ""}`}
-      onClick={onSelect}
-    >
-      <div className={`execution-status ${execution.status}`}>
-        {statusIcon}
-      </div>
+    <div className={`execution-item ${isSelected ? "selected" : ""}`} onClick={onSelect}>
+      <div className={`execution-status ${execution.status}`}>{statusIcon}</div>
       <div className="execution-info">
         <div className="execution-name">{execution.rootComponent}</div>
         <div className="execution-meta">
           <span className="execution-meta-item" title="Ticks">
             🔄 {execution.ticks.length}
           </span>
-          <span className="execution-meta-item" title={`Input: ${inputTokens} / Output: ${outputTokens}`}>
+          <span
+            className="execution-meta-item"
+            title={`Input: ${inputTokens} / Output: ${outputTokens}`}
+          >
             📊 {tokens.toLocaleString()} tk
           </span>
           <span className="execution-meta-item" title="Duration">
@@ -89,9 +91,7 @@ function ExecutionItem({ execution, isSelected, onSelect }: ExecutionItemProps) 
           </span>
         </div>
       </div>
-      <div className="execution-time">
-        {formatRelativeTime(execution.startTime)}
-      </div>
+      <div className="execution-time">{formatRelativeTime(execution.startTime)}</div>
     </div>
   );
 }

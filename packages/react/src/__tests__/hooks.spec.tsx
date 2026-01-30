@@ -2,11 +2,24 @@
  * React Hooks Tests
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { renderHook, act, waitFor } from "@testing-library/react";
+import { describe, it, expect, vi } from "vitest";
+import { renderHook, act } from "@testing-library/react";
 import { type ReactNode } from "react";
-import { TentickleProvider, useClient, useSession, useConnectionState, useEvents, useStreamingText, useResult, useChannel } from "../index.js";
-import type { TentickleClient, ConnectionState, StreamEvent } from "@tentickle/client";
+import {
+  TentickleProvider,
+  useClient,
+  useSession,
+  useConnectionState,
+  useEvents,
+  useStreamingText,
+} from "../index";
+import type {
+  TentickleClient,
+  ConnectionState,
+  StreamEvent,
+  SessionStreamEvent,
+} from "@tentickle/client";
+import { createEventBase } from "@tentickle/shared/testing";
 
 // ============================================================================
 // Mock Client
@@ -15,16 +28,13 @@ import type { TentickleClient, ConnectionState, StreamEvent } from "@tentickle/c
 import type { StreamingTextState } from "@tentickle/client";
 
 function createMockClient(): TentickleClient & {
-  _eventHandlers: Set<(event: StreamEvent) => void>;
-  _resultHandlers: Set<(result: any) => void>;
+  _eventHandlers: Set<(event: SessionStreamEvent) => void>;
   _stateHandlers: Set<(state: ConnectionState) => void>;
   _streamingTextHandlers: Set<(state: StreamingTextState) => void>;
-  _emitEvent: (event: StreamEvent) => void;
-  _emitResult: (result: any) => void;
+  _emitEvent: (event: StreamEvent | SessionStreamEvent) => void;
   _emitState: (state: ConnectionState) => void;
 } {
-  const eventHandlers = new Set<(event: StreamEvent) => void>();
-  const resultHandlers = new Set<(result: any) => void>();
+  const eventHandlers = new Set<(event: SessionStreamEvent) => void>();
   const stateHandlers = new Set<(state: ConnectionState) => void>();
   const streamingTextHandlers = new Set<(state: StreamingTextState) => void>();
   let state: ConnectionState = "disconnected";
@@ -37,14 +47,53 @@ function createMockClient(): TentickleClient & {
     }
   };
 
+  const createHandle = () =>
+    ({
+      sessionId: "test-session",
+      executionId: "exec-1",
+      status: "completed",
+      result: Promise.resolve({
+        response: "ok",
+        outputs: {},
+        usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
+      }),
+      abort: vi.fn(),
+      queueMessage: vi.fn(),
+      submitToolResult: vi.fn(),
+      async *[Symbol.asyncIterator]() {},
+    }) as any;
+
+  const createAccessor = (id: string) =>
+    ({
+      sessionId: id,
+      isSubscribed: false,
+      subscribe: vi.fn(),
+      unsubscribe: vi.fn(),
+      send: vi.fn(() => createHandle()),
+      abort: vi.fn(async () => {}),
+      close: vi.fn(async () => {}),
+      submitToolResult: vi.fn(),
+      onEvent: vi.fn(() => () => {}),
+      onResult: vi.fn(() => () => {}),
+      onToolConfirmation: vi.fn(() => () => {}),
+      channel: vi.fn((name: string) => ({
+        name,
+        subscribe: vi.fn(() => () => {}),
+        publish: vi.fn(async () => {}),
+        request: vi.fn(async () => ({})),
+      })),
+    }) as any;
+
   return {
     _eventHandlers: eventHandlers,
-    _resultHandlers: resultHandlers,
     _stateHandlers: stateHandlers,
     _streamingTextHandlers: streamingTextHandlers,
 
-    _emitEvent(event: StreamEvent) {
-      // Also update streaming text like the real client does
+    _emitEvent(event: StreamEvent | SessionStreamEvent) {
+      const withSession: SessionStreamEvent = {
+        sessionId: "test-session",
+        ...(event as StreamEvent),
+      };
       switch (event.type) {
         case "tick_start":
           emitStreamingText({ text: "", isStreaming: true });
@@ -65,13 +114,7 @@ function createMockClient(): TentickleClient & {
       }
 
       for (const handler of eventHandlers) {
-        handler(event);
-      }
-    },
-
-    _emitResult(result: any) {
-      for (const handler of resultHandlers) {
-        handler(result);
+        handler(withSession);
       }
     },
 
@@ -86,40 +129,29 @@ function createMockClient(): TentickleClient & {
       return state;
     },
 
-    get sessionId() {
-      return "test-session";
-    },
-
     get streamingText() {
       return streamingTextState;
     },
 
-    createSession: vi.fn(async () => ({ sessionId: "new-session", status: "created" })),
-    getSessionState: vi.fn(async () => ({ sessionId: "test-session", status: "idle", tick: 0, queuedMessages: 0 })),
-    connect: vi.fn(async () => {}),
-    disconnect: vi.fn(async () => {}),
-    send: vi.fn(async () => {}),
-    tick: vi.fn(async () => {}),
+    send: vi.fn(() => createHandle()),
     abort: vi.fn(async () => {}),
+    closeSession: vi.fn(async () => {}),
+    session: vi.fn((id: string) => createAccessor(id)),
+    subscribe: vi.fn((id: string) => createAccessor(id)),
 
-    onEvent(handler: (event: StreamEvent) => void) {
+    onEvent(handler: (event: SessionStreamEvent) => void) {
       eventHandlers.add(handler);
       return () => eventHandlers.delete(handler);
     },
 
-    onResult(handler: (result: any) => void) {
-      resultHandlers.add(handler);
-      return () => resultHandlers.delete(handler);
-    },
-
-    onConnectionChange(handler: (state: ConnectionState) => void) {
+    onConnectionChange(handler: (newState: ConnectionState) => void) {
       stateHandlers.add(handler);
       return () => stateHandlers.delete(handler);
     },
 
     onStreamingText(handler: (state: StreamingTextState) => void) {
       streamingTextHandlers.add(handler);
-      handler(streamingTextState); // Immediately call with current state
+      handler(streamingTextState);
       return () => streamingTextHandlers.delete(handler);
     },
 
@@ -127,17 +159,7 @@ function createMockClient(): TentickleClient & {
       emitStreamingText({ text: "", isStreaming: false });
     },
 
-    onToolConfirmation: vi.fn(() => () => {}),
-
     on: vi.fn(() => () => {}),
-
-    channel: vi.fn((name: string) => ({
-      name,
-      subscribe: vi.fn(() => () => {}),
-      publish: vi.fn(async () => {}),
-      request: vi.fn(async () => ({})),
-    })),
-
     destroy: vi.fn(),
   } as any;
 }
@@ -148,11 +170,7 @@ function createMockClient(): TentickleClient & {
 
 function createWrapper(client: TentickleClient) {
   return function Wrapper({ children }: { children: ReactNode }) {
-    return (
-      <TentickleProvider client={client}>
-        {children}
-      </TentickleProvider>
-    );
+    return <TentickleProvider client={client}>{children}</TentickleProvider>;
   };
 }
 
@@ -210,102 +228,44 @@ describe("useConnectionState", () => {
 });
 
 describe("useSession", () => {
-  it("returns session state and methods", () => {
+  it("returns session methods for ephemeral sends", () => {
     const mockClient = createMockClient();
     const wrapper = createWrapper(mockClient);
 
-    const { result } = renderHook(() => useSession({ autoConnect: false }), { wrapper });
+    const { result } = renderHook(() => useSession(), { wrapper });
 
     expect(result.current.sessionId).toBeUndefined();
-    expect(result.current.connectionState).toBe("disconnected");
-    expect(result.current.isConnected).toBe(false);
-    expect(result.current.isConnecting).toBe(false);
-    expect(typeof result.current.connect).toBe("function");
-    expect(typeof result.current.disconnect).toBe("function");
+    expect(result.current.isSubscribed).toBe(false);
     expect(typeof result.current.send).toBe("function");
-    expect(typeof result.current.tick).toBe("function");
+    expect(typeof result.current.subscribe).toBe("function");
+    expect(typeof result.current.unsubscribe).toBe("function");
     expect(typeof result.current.abort).toBe("function");
   });
 
-  it("auto-connects by default", async () => {
+  it("uses client.send for ephemeral sends", () => {
     const mockClient = createMockClient();
     const wrapper = createWrapper(mockClient);
 
-    renderHook(() => useSession(), { wrapper });
+    const { result } = renderHook(() => useSession(), { wrapper });
 
-    await waitFor(() => {
-      expect(mockClient.createSession).toHaveBeenCalled();
-      expect(mockClient.connect).toHaveBeenCalled();
-    });
-  });
-
-  it("does not auto-connect when autoConnect is false", async () => {
-    const mockClient = createMockClient();
-    const wrapper = createWrapper(mockClient);
-
-    renderHook(() => useSession({ autoConnect: false }), { wrapper });
-
-    // Wait a bit to ensure no calls
-    await new Promise((r) => setTimeout(r, 50));
-
-    expect(mockClient.createSession).not.toHaveBeenCalled();
-    expect(mockClient.connect).not.toHaveBeenCalled();
-  });
-
-  it("connects to existing session when sessionId provided", async () => {
-    const mockClient = createMockClient();
-    const wrapper = createWrapper(mockClient);
-
-    const { result } = renderHook(
-      () => useSession({ sessionId: "existing-session", autoConnect: false }),
-      { wrapper },
-    );
-
-    await act(async () => {
-      await result.current.connect();
-    });
-
-    expect(mockClient.createSession).not.toHaveBeenCalled();
-    expect(mockClient.connect).toHaveBeenCalledWith("existing-session");
-  });
-
-  it("sends messages via send()", async () => {
-    const mockClient = createMockClient();
-    const wrapper = createWrapper(mockClient);
-
-    const { result } = renderHook(() => useSession({ autoConnect: false }), { wrapper });
-
-    await act(async () => {
-      await result.current.send("Hello!");
+    act(() => {
+      result.current.send("Hello!");
     });
 
     expect(mockClient.send).toHaveBeenCalledWith("Hello!");
   });
 
-  it("triggers tick via tick()", async () => {
+  it("uses session accessor when sessionId provided", () => {
     const mockClient = createMockClient();
     const wrapper = createWrapper(mockClient);
 
-    const { result } = renderHook(() => useSession({ autoConnect: false }), { wrapper });
+    const { result } = renderHook(() => useSession({ sessionId: "conv-123" }), { wrapper });
 
-    await act(async () => {
-      await result.current.tick({ mode: "fast" });
+    act(() => {
+      result.current.send("Hello!");
     });
 
-    expect(mockClient.tick).toHaveBeenCalledWith({ mode: "fast" });
-  });
-
-  it("aborts via abort()", async () => {
-    const mockClient = createMockClient();
-    const wrapper = createWrapper(mockClient);
-
-    const { result } = renderHook(() => useSession({ autoConnect: false }), { wrapper });
-
-    await act(async () => {
-      await result.current.abort("user requested");
-    });
-
-    expect(mockClient.abort).toHaveBeenCalledWith("user requested");
+    expect(mockClient.session).toHaveBeenCalledWith("conv-123");
   });
 });
 
@@ -319,23 +279,24 @@ describe("useEvents", () => {
     expect(result.current.event).toBeUndefined();
 
     act(() => {
-      mockClient._emitEvent({ type: "tick_start", tick: 1 });
+      mockClient._emitEvent({ type: "tick_start", tick: 1 } as any);
     });
 
-    expect(result.current.event).toEqual({ type: "tick_start", tick: 1 });
+    expect(result.current.event).toEqual({
+      type: "tick_start",
+      tick: 1,
+      sessionId: "test-session",
+    });
   });
 
   it("filters events by type", () => {
     const mockClient = createMockClient();
     const wrapper = createWrapper(mockClient);
 
-    const { result } = renderHook(
-      () => useEvents({ filter: ["content_delta"] }),
-      { wrapper },
-    );
+    const { result } = renderHook(() => useEvents({ filter: ["content_delta"] }), { wrapper });
 
     act(() => {
-      mockClient._emitEvent({ type: "tick_start", tick: 1 });
+      mockClient._emitEvent({ ...createEventBase(1), type: "tick_start", tick: 1 });
     });
 
     expect(result.current.event).toBeUndefined();
@@ -344,7 +305,11 @@ describe("useEvents", () => {
       mockClient._emitEvent({ type: "content_delta", delta: "Hello" } as any);
     });
 
-    expect(result.current.event).toEqual({ type: "content_delta", delta: "Hello" });
+    expect(result.current.event).toEqual({
+      type: "content_delta",
+      delta: "Hello",
+      sessionId: "test-session",
+    });
   });
 
   it("clears event when clear() called", () => {
@@ -354,7 +319,7 @@ describe("useEvents", () => {
     const { result } = renderHook(() => useEvents(), { wrapper });
 
     act(() => {
-      mockClient._emitEvent({ type: "tick_start", tick: 1 });
+      mockClient._emitEvent({ ...createEventBase(1), type: "tick_start", tick: 1 });
     });
 
     expect(result.current.event).toBeDefined();
@@ -373,7 +338,7 @@ describe("useEvents", () => {
     const { result } = renderHook(() => useEvents({ enabled: false }), { wrapper });
 
     act(() => {
-      mockClient._emitEvent({ type: "tick_start", tick: 1 });
+      mockClient._emitEvent({ ...createEventBase(1), type: "tick_start", tick: 1 });
     });
 
     expect(result.current.event).toBeUndefined();
@@ -391,7 +356,7 @@ describe("useStreamingText", () => {
     expect(result.current.isStreaming).toBe(false);
 
     act(() => {
-      mockClient._emitEvent({ type: "tick_start", tick: 1 });
+      mockClient._emitEvent({ ...createEventBase(1), type: "tick_start", tick: 1 });
     });
 
     expect(result.current.text).toBe("");
@@ -457,42 +422,5 @@ describe("useStreamingText", () => {
 
     expect(result.current.text).toBe("");
     expect(result.current.isStreaming).toBe(false);
-  });
-});
-
-describe("useResult", () => {
-  it("receives execution results", () => {
-    const mockClient = createMockClient();
-    const wrapper = createWrapper(mockClient);
-
-    const { result } = renderHook(() => useResult(), { wrapper });
-
-    expect(result.current).toBeUndefined();
-
-    const mockResult = {
-      response: "Hello!",
-      outputs: {},
-      usage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 },
-      stopReason: "end_turn",
-    };
-
-    act(() => {
-      mockClient._emitResult(mockResult);
-    });
-
-    expect(result.current).toEqual(mockResult);
-  });
-});
-
-describe("useChannel", () => {
-  it("returns channel accessor", () => {
-    const mockClient = createMockClient();
-    const wrapper = createWrapper(mockClient);
-
-    const { result } = renderHook(() => useChannel("todos"), { wrapper });
-
-    expect(result.current.name).toBe("todos");
-    expect(typeof result.current.subscribe).toBe("function");
-    expect(typeof result.current.publish).toBe("function");
   });
 });

@@ -10,10 +10,9 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { FiberCompiler } from "../fiber-compiler";
 import { COM } from "../../com/object-model";
-import { jsx, Fragment } from "../../jsx/jsx-runtime";
+import { jsx } from "../../jsx/jsx-runtime";
 import { Section } from "../../jsx/components/primitives";
-import { Text } from "../../jsx/components/content";
-import { useState, useEffect, useSignal, useTickState } from "../../state/hooks";
+import { useEffect, useSignal, useTickState } from "../../state/hooks";
 import type { TickState } from "../../component/component";
 
 describe("FiberCompiler - Reactive Model", () => {

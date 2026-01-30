@@ -1,6 +1,10 @@
 {
   "name": "@tentickle/devtools",
   "version": "0.0.1",
+  "files": [
+    "dist",
+    "ui/dist"
+  ],
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -10,10 +14,6 @@
       "import": "./dist/index.js"
     }
   },
-  "files": [
-    "dist",
-    "ui/dist"
-  ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json && pnpm build:ui",
     "build:ui": "cd ui && vite build",
@@ -41,7 +41,11 @@
     "react-dom": ">=18.0.0"
   },
   "peerDependenciesMeta": {
-    "react": { "optional": true },
-    "react-dom": { "optional": true }
+    "react": {
+      "optional": true
+    },
+    "react-dom": {
+      "optional": true
+    }
   }
 }

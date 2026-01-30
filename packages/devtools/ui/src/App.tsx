@@ -26,7 +26,7 @@ export function App() {
       (e) =>
         e.rootComponent.toLowerCase().includes(query) ||
         e.id.toLowerCase().includes(query) ||
-        e.status.includes(query)
+        e.status.includes(query),
     );
   }, [executions, searchQuery]);
 
@@ -41,21 +41,23 @@ export function App() {
   };
 
   // Count tool calls only (not results) for badge
-  const toolCount = selectedExecution?.ticks.flatMap(t =>
-    t.events.filter(e => e.type === "tool_call")
-  ).length ?? 0;
+  const toolCount =
+    selectedExecution?.ticks.flatMap((t) => t.events.filter((e) => e.type === "tool_call"))
+      .length ?? 0;
 
   // Aggregate stats for header
-  const runningCount = executions.filter(e => e.status === "running").length;
+  const runningCount = executions.filter((e) => e.status === "running").length;
   const totalTokens = executions.reduce((sum, e) => {
-    const usage = e.totalUsage ?? e.ticks.reduce(
-      (acc, t) => ({
-        inputTokens: acc.inputTokens + (t.usage?.inputTokens ?? 0),
-        outputTokens: acc.outputTokens + (t.usage?.outputTokens ?? 0),
-        totalTokens: acc.totalTokens + (t.usage?.totalTokens ?? 0),
-      }),
-      { inputTokens: 0, outputTokens: 0, totalTokens: 0 }
-    );
+    const usage =
+      e.totalUsage ??
+      e.ticks.reduce(
+        (acc, t) => ({
+          inputTokens: acc.inputTokens + (t.usage?.inputTokens ?? 0),
+          outputTokens: acc.outputTokens + (t.usage?.outputTokens ?? 0),
+          totalTokens: acc.totalTokens + (t.usage?.totalTokens ?? 0),
+        }),
+        { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
+      );
     return sum + usage.totalTokens;
   }, 0);
 
@@ -85,9 +87,7 @@ export function App() {
               <span className="header-stat">
                 {executions.length} exec{executions.length !== 1 ? "s" : ""}
               </span>
-              <span className="header-stat">
-                {totalTokens.toLocaleString()} tokens
-              </span>
+              <span className="header-stat">{totalTokens.toLocaleString()} tokens</span>
             </div>
           )}
           <div className="status-indicator">

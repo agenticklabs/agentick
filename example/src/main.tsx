@@ -18,7 +18,14 @@ import { fromEngineState, toEngineState } from "@tentickle/core/model/utils/lang
 import { useState, useEffect } from "@tentickle/core/hooks";
 import { Timeline, Model, Section, Message, MessageProps } from "@tentickle/core/jsx";
 import { startDevToolsServer } from "@tentickle/devtools";
-import type { StreamEvent, MessageStartEvent, ContentStartEvent, ContentEndEvent, MessageEndEvent, ContentDeltaEvent } from "@tentickle/shared/streaming";
+import type {
+  StreamEvent,
+  MessageStartEvent,
+  ContentStartEvent,
+  ContentEndEvent,
+  MessageEndEvent,
+  ContentDeltaEvent,
+} from "@tentickle/shared/streaming";
 import { BlockType, StopReason } from "@tentickle/shared";
 
 import { MyModel } from "./model/app-model";
@@ -70,7 +77,11 @@ const mockModel = createModel<ModelInput, ModelOutput, ModelInput, ModelOutput, 
         model: "mock-model",
         createdAt: new Date().toISOString(),
         message: { role: "assistant" as const, content: [{ type: "text" as const, text }] },
-        usage: { inputTokens: 50, outputTokens: text.split(" ").length * 2, totalTokens: 50 + text.split(" ").length * 2 },
+        usage: {
+          inputTokens: 50,
+          outputTokens: text.split(" ").length * 2,
+          totalTokens: 50 + text.split(" ").length * 2,
+        },
         stopReason: StopReason.STOP,
         raw: {},
       };
@@ -78,7 +89,11 @@ const mockModel = createModel<ModelInput, ModelOutput, ModelInput, ModelOutput, 
     executeStream: async function* (_input) {
       const text = getNextResponse();
       const words = text.split(" ");
-      const eventBase = { id: `evt-${Date.now()}`, tick: tickCounter, timestamp: new Date().toISOString() };
+      const eventBase = {
+        id: `evt-${Date.now()}`,
+        tick: tickCounter,
+        timestamp: new Date().toISOString(),
+      };
 
       // Start message
       yield {
@@ -121,7 +136,11 @@ const mockModel = createModel<ModelInput, ModelOutput, ModelInput, ModelOutput, 
         ...eventBase,
         type: "message_end",
         stopReason: StopReason.STOP,
-        usage: { inputTokens: 50, outputTokens: words.length * 2, totalTokens: 50 + words.length * 2 },
+        usage: {
+          inputTokens: 50,
+          outputTokens: words.length * 2,
+          totalTokens: 50 + words.length * 2,
+        },
       } as MessageEndEvent;
     },
   },
@@ -141,7 +160,8 @@ interface AgentProps {
 /**
  * A simple agent with state to test fiber serialization and DevTools
  */
-function SimpleAgent({ context = `You are a helpful assistant with access to a calculator tool.
+function SimpleAgent({
+  context = `You are a helpful assistant with access to a calculator tool.
 
 IMPORTANT RULES:
 1. When asked ANY math question, you MUST call the calculator tool
@@ -149,7 +169,8 @@ IMPORTANT RULES:
 3. ALWAYS use the calculator function for calculations
 4. After getting the calculator result, report it to the user
 
-Example: If asked "what is 2+2?", you call calculator with expression "2 + 2"` }: AgentProps) {
+Example: If asked "what is 2+2?", you call calculator with expression "2 + 2"`,
+}: AgentProps) {
   const [tickCount, setTickCount] = useState(0);
 
   // Track ticks
@@ -170,14 +191,16 @@ Example: If asked "what is 2+2?", you call calculator with expression "2 + 2"` }
           console.log("pending", pending);
           return (
             <>
-              {history.filter((e) => e.message).map((entry, i) => (
-                <Message key={i} {...entry.message} />
-              ))}
+              {history
+                .filter((e) => e.message)
+                .map((entry, i) => (
+                  <Message key={i} {...entry.message} />
+                ))}
               {pending.map((message, i) => (
                 <Message key={i} {...(message.content as MessageProps)} />
               ))}
             </>
-          )
+          );
         }}
       </Timeline>
     </>
@@ -192,11 +215,17 @@ async function main() {
   console.log("Starting DevTools example...\n");
 
   // Check if we have real API keys configured
-  const hasRealModel = !!(process.env["OPENAI_API_KEY"] || process.env["GOOGLE_API_KEY"] || process.env["GCP_PROJECT_ID"]);
+  const hasRealModel = !!(
+    process.env["OPENAI_API_KEY"] ||
+    process.env["GOOGLE_API_KEY"] ||
+    process.env["GCP_PROJECT_ID"]
+  );
 
   if (hasRealModel) {
     console.log("Using real model from MyModel component (API keys detected)");
-    console.log(`  USE_GOOGLE_MODEL: ${process.env["USE_GOOGLE_MODEL"] || "false (defaulting to OpenAI)"}`);
+    console.log(
+      `  USE_GOOGLE_MODEL: ${process.env["USE_GOOGLE_MODEL"] || "false (defaulting to OpenAI)"}`,
+    );
     console.log(`  OPENAI_MODEL: ${process.env["OPENAI_MODEL"] || "gpt-4o-mini"}`);
     console.log(`  GOOGLE_MODEL: ${process.env["GOOGLE_MODEL"] || "gemini-2.0-flash"}\n`);
   } else {
@@ -249,7 +278,9 @@ async function main() {
 
     const result = await handle.result;
     const responseText = result?.response || "(no response text)";
-    console.log(`\nResponse: ${responseText.slice(0, 100)}${responseText.length > 100 ? "..." : ""}`);
+    console.log(
+      `\nResponse: ${responseText.slice(0, 100)}${responseText.length > 100 ? "..." : ""}`,
+    );
     console.log(`Tokens: ${result?.usage?.totalTokens ?? 0}`);
 
     // Small delay between messages

@@ -14,7 +14,7 @@ import type { ModelConfig, ModelInstance } from "../model/model";
 import { ChannelService } from "../channels";
 import { EventEmitter } from "node:events";
 import { toJSONSchema } from "../utils/schema";
-import type { ExecutionHandle, ExecutionMessage } from "../engine/execution-types";
+import type { ExecutionMessage } from "../engine/execution-types";
 /**
  * Event payload types for COM events
  */
@@ -170,7 +170,6 @@ export class ContextObjectModel extends EventEmitter {
    * Can be set dynamically via Model components.
    */
   private model?: ModelInstance | string;
-
 
   /**
    * The original user input for this execution (static, doesn't change).
@@ -398,6 +397,10 @@ export class ContextObjectModel extends EventEmitter {
    * Adds a generic timeline entry.
    * Use this for events or other non-message timeline entries.
    * For messages, prefer `addMessage()` for better semantics.
+   *
+   * NOTE: With the declarative architecture, timeline entries from JSX
+   * go through the compiler's timelineEntries, not through COM accumulation.
+   * This method is still used for injecting history and for non-JSX additions.
    */
   addTimelineEntry(entry: COMTimelineEntry): void {
     this.timeline.push(entry);
@@ -574,7 +577,7 @@ export class ContextObjectModel extends EventEmitter {
       console.warn("[COM] Schema conversion returned empty object for input:", {
         hasStandard: input && typeof input === "object" && "~standard" in input,
         hasDef: input && typeof input === "object" && "_def" in input,
-        typeName: input && typeof input === "object" ? ((input as any)._def?.typeName) : undefined,
+        typeName: input && typeof input === "object" ? (input as any)._def?.typeName : undefined,
       });
     }
     return result;

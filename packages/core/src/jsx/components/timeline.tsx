@@ -195,7 +195,9 @@ export function Timeline(props: TimelineProps): JSX.Element {
     return <>{props.children}</>;
   }
 
-  // Default: render all messages
+  // Default: render all messages from history
+  // Note: useConversationHistory() already includes pending messages, so we
+  // render them as part of history, not separately
   return (
     <>
       {history.map((entry, i) => (

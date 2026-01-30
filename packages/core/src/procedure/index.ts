@@ -6,7 +6,7 @@
  * @module tentickle/procedure
  */
 
-import { applyRegistryMiddleware, wrapProcedure, isProcedure } from "../core/index.js";
+import { applyRegistryMiddleware, wrapProcedure, isProcedure } from "../core/index";
 import { errorMiddleware } from "../middleware/defaults";
 
 /**

@@ -305,8 +305,7 @@ describe("EventBuffer", () => {
     it("should remove a type-specific subscriber", () => {
       const buffer = new EventBuffer<TestEvent>();
       const received: Array<{ type: "delta"; value: string }> = [];
-      const handler = (event: { type: "delta"; value: string }) =>
-        received.push(event);
+      const handler = (event: { type: "delta"; value: string }) => received.push(event);
 
       buffer.on("delta", handler);
       buffer.push({ type: "delta", value: "first" });

@@ -1,13 +1,11 @@
 # @tentickle/nestjs
 
-NestJS module for Tentickle servers.
+NestJS integration for Tentickle with multiplexed SSE sessions.
 
 ## Installation
 
 ```bash
-npm install @tentickle/nestjs @tentickle/server @tentickle/core
-# or
-pnpm add @tentickle/nestjs @tentickle/server @tentickle/core
+pnpm add @tentickle/nestjs
 ```
 
 ## Quick Start
@@ -16,155 +14,74 @@ pnpm add @tentickle/nestjs @tentickle/server @tentickle/core
 import { Module } from "@nestjs/common";
 import { TentickleModule } from "@tentickle/nestjs";
 import { createApp } from "@tentickle/core";
-import { MyAgent } from "./my-agent";
 
 @Module({
   imports: [
     TentickleModule.forRoot({
-      sessionHandler: {
-        app: createApp(<MyAgent />),
-      },
+      app: createApp(<MyAgent />),
     }),
   ],
 })
 export class AppModule {}
 ```
 
-## API
+## Default Endpoints
 
-### TentickleModule.forRoot(options)
+| Method | Path             | Description              |
+| ------ | ---------------- | ------------------------ |
+| GET    | `/events`        | SSE stream               |
+| POST   | `/send`          | Send and stream          |
+| POST   | `/subscribe`     | Subscribe to sessions    |
+| POST   | `/abort`         | Abort execution          |
+| POST   | `/close`         | Close session            |
+| POST   | `/tool-response` | Submit tool confirmation |
+| POST   | `/channel`       | Publish to channel       |
 
-Register module with static configuration.
-
-```typescript
-TentickleModule.forRoot({
-  sessionHandler: {
-    app: createApp(<MyAgent />),
-    store: new CustomSessionStore(), // Optional
-  },
-  eventBridge: {
-    validateEvent: (conn, event) => { /* optional validation */ },
-  },
-  path: "api/ai",           // Optional: customize route prefix
-  registerController: true,  // Optional: set false for custom routes
-})
-```
-
-### TentickleModule.forRootAsync(options)
-
-Register module with async configuration.
-
-```typescript
-TentickleModule.forRootAsync({
-  imports: [ConfigModule],
-  useFactory: (config: ConfigService) => ({
-    sessionHandler: {
-      app: createApp(<MyAgent />),
-    },
-    path: config.get("TENTICKLE_PATH"),
-  }),
-  inject: [ConfigService],
-})
-```
-
-### Default Endpoints
-
-| Method | Path | Description |
-|--------|------|-------------|
-| POST | `/sessions` | Create session |
-| GET | `/sessions/:id` | Get session state |
-| POST | `/sessions/:id/messages` | Send message |
-| POST | `/sessions/:id/tick` | Trigger tick |
-| POST | `/sessions/:id/abort` | Abort execution |
-| GET | `/events?sessionId=xxx` | SSE stream |
-| POST | `/events` | Publish event |
-
-### Injection Tokens
-
-```typescript
-import { Inject } from "@nestjs/common";
-import {
-  TENTICKLE_SESSION_HANDLER,
-  TENTICKLE_EVENT_BRIDGE,
-  SessionHandler,
-  EventBridge,
-} from "@tentickle/nestjs";
-
-@Injectable()
-export class ChatService {
-  constructor(
-    @Inject(TENTICKLE_SESSION_HANDLER)
-    private sessionHandler: SessionHandler,
-    @Inject(TENTICKLE_EVENT_BRIDGE)
-    private eventBridge: EventBridge,
-  ) {}
-}
-```
-
-## Custom Routes
-
-Disable the default controller to define your own:
+## Custom Controller
 
 ```typescript
 @Module({
   imports: [
     TentickleModule.forRoot({
-      sessionHandler: { app },
+      app,
       registerController: false,
     }),
   ],
-  controllers: [MyCustomController],
+  controllers: [ChatController],
 })
 export class AppModule {}
 
 @Controller("chat")
-export class MyCustomController {
-  constructor(
-    @Inject(TENTICKLE_SESSION_HANDLER)
-    private sessionHandler: SessionHandler,
-  ) {}
+export class ChatController {
+  constructor(private tentickle: TentickleService) {}
 
-  @Post()
-  async startChat(@Body() body: StartChatDto) {
-    const { sessionId } = await this.sessionHandler.create({
-      props: { userId: body.userId },
-    });
-    return { sessionId };
+  @Post("send")
+  async send(@Body() body: SendDto, @Res() res: Response) {
+    await this.tentickle.sendAndStream(body.sessionId, body, res);
   }
 }
 ```
 
-## Configuration Options
+## TentickleService
 
 ```typescript
-interface TentickleModuleOptions {
-  sessionHandler: {
-    app: App;
-    store?: SessionStore;
-    defaultSessionOptions?: Record<string, unknown>;
-  };
-  eventBridge?: {
-    transport?: ServerTransportAdapter;
-    validateEvent?: (connection, event) => void | Promise<void>;
-  };
-  path?: string;              // Route prefix (default: none)
-  registerController?: boolean; // Register default controller (default: true)
+service.createConnection(res)             // SSE connection
+service.subscribe(connId, sessionIds)     // Subscribe
+service.unsubscribe(connId, sessionIds)   // Unsubscribe
+service.sendAndStream(sessionId, input, res)  // Send and stream
+service.abort(sessionId, reason?)         // Abort
+service.close(sessionId)                  // Close
+service.publishToChannel(sessionId, channel, type, payload)  // Channel pub
+service.getApp()                          // Direct App access
+```
+
+## Inject App Directly
+
+```typescript
+@Injectable()
+export class MyService {
+  constructor(@Inject(TENTICKLE_APP) private app: App) {
+    const session = this.app.session("conv-123");
+  }
 }
 ```
-
-## TypeScript
-
-```typescript
-import type {
-  TentickleModuleOptions,
-  TentickleModuleAsyncOptions,
-  SessionHandler,
-  EventBridge,
-  CreateSessionInput,
-  SendInput,
-} from "@tentickle/nestjs";
-```
-
-## License
-
-MIT

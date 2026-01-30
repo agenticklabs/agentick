@@ -4,11 +4,11 @@
   "private": true,
   "description": "JSX agent harness framework",
   "keywords": [
-    "ai",
-    "jsx",
     "agent",
+    "ai",
+    "framework",
     "harness",
-    "framework"
+    "jsx"
   ],
   "homepage": "https://github.com/rlindgren/tentickle#readme",
   "bugs": {

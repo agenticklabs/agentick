@@ -1,6 +1,6 @@
 # @tentickle/server Architecture
 
-Server-side SDK for running Tentickle applications.
+Server-side utilities for Tentickle applications.
 
 ## Wire Protocol
 
@@ -10,293 +10,167 @@ Server-side SDK for running Tentickle applications.
 
 ```typescript
 // Protocol types - ALWAYS from shared, never duplicated
-import type { ChannelEvent, SessionResultPayload } from "@tentickle/shared";
-import { FrameworkChannels } from "@tentickle/shared";
+import type { StreamEvent, SendInput, Message } from "@tentickle/shared";
 ```
 
 ## Design Philosophy
 
-**This package provides hooks and handlers, NOT routes.**
+**This package provides SSE utilities and type re-exports.**
 
-Your web framework (Express, Fastify, Hono, etc.) defines routes that call into these handlers. This keeps the package framework-agnostic.
+The actual session management is handled by `@tentickle/core` (`App`, `Session`).
+Framework integration is handled by `@tentickle/express` (or other adapters).
+
+This package is kept minimal - just the utilities that multiple adapters might need.
 
 ## Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                    Your Web Framework                        │
-│                  (Express, Fastify, etc.)                   │
-│                                                             │
-│   POST /sessions ──────▶ sessionHandler.create()            │
-│   GET  /sessions/:id ──▶ sessionHandler.getState()          │
-│   GET  /events ────────▶ eventBridge.registerConnection()   │
-│   POST /events ────────▶ eventBridge.handleEvent()          │
-└────────────────────────────┬────────────────────────────────┘
+│                    @tentickle/express                        │
+│                    @tentickle/nestjs                         │
+│                    @tentickle/socket.io                      │
+│                                                              │
+│   createTentickleHandler(app) / modules                      │
+└────────────────────────────┬─────────────────────────────────┘
                              │
-┌────────────────────────────▼────────────────────────────────┐
-│                     @tentickle/server                        │
-│                                                             │
-│  ┌──────────────────┐       ┌──────────────────┐            │
-│  │  SessionHandler  │◀─────▶│   EventBridge    │            │
-│  │                  │       │                  │            │
-│  │  create()        │       │  handleEvent()   │            │
-│  │  send()          │       │  registerConn()  │            │
-│  │  stream()        │       │  unregisterConn()│            │
-│  │  getState()      │       │                  │            │
-│  └────────┬─────────┘       └────────┬─────────┘            │
-│           │                          │                      │
-│  ┌────────▼─────────┐       ┌────────▼─────────┐            │
-│  │   SessionStore   │       │   SSE Utilities  │            │
-│  │   (pluggable)    │       │                  │            │
-│  └──────────────────┘       └──────────────────┘            │
-└─────────────────────────────────────────────────────────────┘
+┌────────────────────────────▼─────────────────────────────────┐
+│                     @tentickle/server                         │
+│                                                              │
+│   ┌──────────────────┐       ┌──────────────────┐            │
+│   │  SSE Utilities   │       │  Type Re-exports │            │
+│   │                  │       │                  │            │
+│   │  createSSEWriter │       │  from @shared    │            │
+│   │  setSSEHeaders   │       │  SessionState    │            │
+│   │  streamToSSE     │       │  StreamEvent     │            │
+│   └──────────────────┘       └──────────────────┘            │
+└────────────────────────────┬─────────────────────────────────┘
+                             │
+┌────────────────────────────▼─────────────────────────────────┐
+│                     @tentickle/core                           │
+│                                                              │
+│   App, Session, SessionRegistry                              │
+└──────────────────────────────────────────────────────────────┘
 ```
 
 ## Key Components
 
-### SessionHandler
+### SSE Utilities
 
-Manages session lifecycle. Does NOT define routes.
+Helpers for Server-Sent Events:
 
 ```typescript
-interface SessionHandler {
-  create(input): Promise<{ sessionId, session }>;
-  send(sessionId, input): Promise<SendResult>;
-  stream(sessionId, input): AsyncIterable<StreamEvent>;
-  getSession(sessionId): Session | undefined;
-  getState(sessionId): SessionStateInfo | undefined;
-  delete(sessionId): boolean;
-  list(): string[];
-}
+import { createSSEWriter, setSSEHeaders } from "@tentickle/server";
+
+// Set SSE headers on response
+setSSEHeaders(res);
+
+// Create SSE writer
+const writer = createSSEWriter(res);
+
+// Write events
+writer.writeEvent({ type: "content_delta", delta: "Hello" });
+writer.writeComment("keepalive");
+writer.writeError({ code: "SESSION_NOT_FOUND", message: "Not found" });
+
+// Close when done
+writer.close();
 ```
 
-### EventBridge
-
-Routes events between transport connections and sessions.
-
-**Two modes:**
-
-1. **Without transport adapter (HTTP/SSE):** Manages connections internally
-2. **With transport adapter (Socket.IO):** Delegates connection management to adapter
+### SSE Writer Interface
 
 ```typescript
-interface EventBridge {
-  // Accepts connectionId (string) OR connection (ServerConnection)
-  handleEvent(connectionOrId, event): Promise<void>;
-  registerConnection(connection): void;   // Only needed without adapter
-  unregisterConnection(connectionId): void; // Only needed without adapter
-  destroy(): void;
-}
-```
-
-**HTTP/SSE mode:**
-```typescript
-const bridge = createEventBridge({ sessionHandler });
-bridge.registerConnection(connection);  // You track connections
-await bridge.handleEvent(connectionId, event);  // Looks up by ID
-```
-
-**Socket.IO mode:**
-```typescript
-const bridge = createEventBridge({ sessionHandler, transport: adapter });
-// No registerConnection needed - adapter tracks via rooms
-await bridge.handleEvent(connection, event);  // Pass connection directly
-```
-
-Handles framework channels automatically:
-- `session:messages` → session.send() (starts execution + stream)
-- `session:control` → tick or abort (optional)
-- `session:tool_confirmation` → forwards to session
-
-Notes:
-- `tick` events with no queued messages and no props are ignored to prevent
-  system-only runs.
-
-### ServerConnection
-
-Your framework creates these when clients connect:
-
-```typescript
-interface ServerConnection {
-  readonly id: string;
-  readonly sessionId: string;
-  readonly userId?: string;
-  readonly metadata: Record<string, unknown>;
-  send(event): Promise<void>;
+interface SSEWriter {
+  writeEvent(event: unknown): void;
+  writeComment(comment: string): void;
+  writeError(error: { type?: string; code?: string; message: string }): void;
   close(): void;
 }
 ```
 
-### SessionStore
+### Type Re-exports
 
-Pluggable session persistence:
-
-```typescript
-interface SessionStore {
-  get(id: string): Session | undefined;
-  set(id: string, session: Session): void;
-  delete(id: string): boolean;
-  list(): string[];
-  has(id: string): boolean;
-}
-```
-
-Built-in `InMemorySessionStore` for development. Implement your own for production (Redis, PostgreSQL, etc.).
-
-### ServerTransportAdapter
-
-For WebSocket or Socket.io support:
+Re-exports from `@tentickle/shared` for convenience:
 
 ```typescript
-interface ServerTransportAdapter {
-  readonly name: string;
-  registerConnection(connection): void;
-  unregisterConnection(connectionId): void;
-  sendToConnection(connectionId, event): Promise<void>;
-  sendToSession(sessionId, event): Promise<void>;
-  getSessionConnections(sessionId): ServerConnection[];
-  destroy(): void;
-}
+export type {
+  SessionResultPayload,
+  ToolConfirmationRequest,
+  ToolConfirmationResponse,
+  SessionState,
+  CreateSessionResponse,
+} from "@tentickle/shared";
 ```
 
 ## File Structure
 
 ```
 packages/server/src/
-├── index.ts           # Public exports
-├── types.ts           # Server types (re-exports protocol from shared)
-├── session-handler.ts # Session lifecycle management
-├── session-store.ts   # In-memory store implementation
-├── event-bridge.ts    # Event routing between transport and sessions
-└── sse.ts             # SSE utilities
+├── index.ts    # Public exports
+├── types.ts    # Type re-exports from shared
+└── sse.ts      # SSE utilities
 ```
 
-## Usage (Express Example)
+## Usage
+
+### With Express
 
 ```typescript
-import express from "express";
-import {
-  createSessionHandler,
-  createEventBridge,
-  createSSEWriter,
-  setSSEHeaders,
-  InMemorySessionStore,
-} from "@tentickle/server";
+import { setSSEHeaders, createSSEWriter } from "@tentickle/server";
 
-const app = express();
-
-// Create handlers
-const sessionHandler = createSessionHandler({
-  app: myTentickleApp,
-  store: new InMemorySessionStore(),
-});
-
-const eventBridge = createEventBridge({ sessionHandler });
-
-// Define YOUR routes - the server package doesn't impose any
-app.post("/sessions", async (req, res) => {
-  const { sessionId } = await sessionHandler.create(req.body);
-  res.json({ sessionId, status: "created" });
-});
-
-app.get("/sessions/:id", async (req, res) => {
-  const state = sessionHandler.getState(req.params.id);
-  if (!state) return res.status(404).json({ error: "Not found" });
-  res.json(state);
-});
-
-// SSE endpoint for server → client events
 app.get("/events", (req, res) => {
-  const { sessionId, userId } = req.query;
-  const connectionId = crypto.randomUUID();
-
   setSSEHeaders(res);
   const writer = createSSEWriter(res);
 
-  eventBridge.registerConnection({
-    id: connectionId,
-    sessionId,
-    userId,
-    metadata: {},
-    send: async (event) => writer.writeEvent(event),
-    close: () => writer.close(),
-  });
+  // Write events
+  writer.writeEvent({ type: "connected", connectionId: "123" });
+
+  // Keepalive
+  const keepalive = setInterval(() => {
+    writer.writeComment("keepalive");
+  }, 15000);
 
   req.on("close", () => {
-    eventBridge.unregisterConnection(connectionId);
+    clearInterval(keepalive);
+    writer.close();
   });
 });
+```
 
-// POST endpoint for client → server events
-app.post("/events", async (req, res) => {
-  const { connectionId, ...event } = req.body;
-  await eventBridge.handleEvent(connectionId, event);
-  res.json({ success: true });
+### Streaming Events
+
+```typescript
+import { setSSEHeaders, createSSEWriter } from "@tentickle/server";
+
+app.post("/send", async (req, res) => {
+  setSSEHeaders(res);
+  const writer = createSSEWriter(res);
+
+  const session = app.getOrCreateSession(req.body.sessionId);
+  const handle = session.send(req.body);
+
+  for await (const event of handle) {
+    writer.writeEvent({ ...event, sessionId: req.body.sessionId });
+  }
+
+  const result = await handle;
+  writer.writeEvent({ type: "result", result });
+  writer.close();
 });
 ```
 
-## Error Handling
+## Why This Package Exists
 
-```typescript
-import { SessionNotFoundError, SessionClosedError } from "@tentickle/server";
+Framework adapters (`@tentickle/express`, `@tentickle/nestjs`, etc.) need shared utilities:
 
-try {
-  await sessionHandler.send(sessionId, input);
-} catch (error) {
-  if (error instanceof SessionNotFoundError) {
-    res.status(404).json({ error: "Session not found" });
-  } else if (error instanceof SessionClosedError) {
-    res.status(410).json({ error: "Session closed" });
-  } else {
-    res.status(500).json({ error: "Internal error" });
-  }
-}
-```
+1. **SSE helpers** - Consistent SSE formatting across adapters
+2. **Type re-exports** - Convenient imports for adapter authors
+3. **Error codes** - Standardized error responses
 
-### Structured Error Codes
+This package keeps the shared utilities in one place without duplicating code.
 
-The EventBridge sends structured errors with protocol error codes when streaming fails:
+## What This Package Doesn't Do
 
-```typescript
-// Error event sent to client
-{
-  channel: "session:events",
-  type: "error",
-  payload: {
-    code: "SESSION_NOT_FOUND",  // or EXECUTION_ERROR, TIMEOUT, etc.
-    message: "Session not found: xyz",
-    details?: { cause: "..." }   // Optional additional context
-  }
-}
-```
-
-Available error codes (from `@tentickle/shared`):
-
-| Code | Description |
-|------|-------------|
-| `SESSION_NOT_FOUND` | Session does not exist |
-| `SESSION_CLOSED` | Session has been closed |
-| `TIMEOUT` | Operation timed out |
-| `INVALID_MESSAGE` | Invalid or malformed message |
-| `EXECUTION_ERROR` | General execution error |
-| `SERIALIZATION_ERROR` | Failed to serialize event payload |
-
-### SSE Serialization Safety
-
-The SSE writer handles JSON serialization errors gracefully. If `JSON.stringify()` fails (e.g., circular references, BigInt values), the writer:
-
-1. Logs the error to console
-2. Sends a fallback error event with `SERIALIZATION_ERROR` code
-3. Continues streaming (doesn't close the connection)
-
-```typescript
-// If original event can't be serialized, client receives:
-{
-  channel: "original-channel",
-  type: "error",
-  payload: {
-    code: "SERIALIZATION_ERROR",
-    message: "Failed to serialize event: ..."
-  }
-}
-```
+- **Session management** - Use `@tentickle/core` (`App`, `Session`)
+- **Routing** - Use framework adapters (`@tentickle/express`, etc.)
+- **Authentication** - Handle in your framework middleware
+- **Connection tracking** - Handled by framework adapters

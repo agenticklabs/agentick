@@ -13,7 +13,7 @@ import {
   type MiddlewarePipeline,
   type Procedure,
   type ProcedureOptions,
-} from "../core/index.js";
+} from "../core/index";
 import { createEngineProcedure } from "../procedure";
 import type {
   ModelInput as BaseModelInput,

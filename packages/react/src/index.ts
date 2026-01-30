@@ -17,7 +17,7 @@
  * }
  *
  * function Chat() {
- *   const { isConnected, send } = useSession();
+ *   const { send } = useSession({ sessionId: 'my-session' });
  *   const { text, isStreaming } = useStreamingText();
  *   const [input, setInput] = useState('');
  *
@@ -25,8 +25,6 @@
  *     await send(input);
  *     setInput('');
  *   };
- *
- *   if (!isConnected) return <div>Connecting...</div>;
  *
  *   return (
  *     <div>
@@ -59,51 +57,32 @@
  * }
  * ```
  *
- * @example Manual connection control
- * ```tsx
- * function Chat() {
- *   const { connect, disconnect, isConnected } = useSession({ autoConnect: false });
- *
- *   if (!isConnected) {
- *     return <button onClick={() => connect()}>Start Chat</button>;
- *   }
- *
- *   return (
- *     <div>
- *       <ChatInterface />
- *       <button onClick={disconnect}>End Chat</button>
- *     </div>
- *   );
- * }
- * ```
- *
  * ## Hooks
  *
  * | Hook | Purpose |
  * |------|---------|
  * | `useClient()` | Direct client access |
- * | `useSession(opts?)` | Session lifecycle (connect, send, tick) |
+ * | `useConnection()` | SSE connection state |
+ * | `useSession(opts?)` | Session accessor (send, abort, close) |
  * | `useConnectionState()` | Connection state subscription |
  * | `useEvents(opts?)` | Stream event subscription |
  * | `useStreamingText(opts?)` | Accumulated text from deltas |
- * | `useResult()` | Execution result subscription |
- * | `useChannel(name)` | Custom channel access |
+ * | `useEvents(opts?)` | Stream event subscription |
  *
  * @module @tentickle/react
  */
 
 // Provider and context
-export { TentickleProvider, useClient } from "./context.js";
+export { TentickleProvider, useClient } from "./context";
 
 // Hooks
 export {
+  useConnection,
   useSession,
   useConnectionState,
   useEvents,
   useStreamingText,
-  useResult,
-  useChannel,
-} from "./hooks.js";
+} from "./hooks";
 
 // Types
 export type {
@@ -112,15 +91,23 @@ export type {
   TentickleContextValue,
 
   // Hook types
+  UseConnectionOptions,
+  UseConnectionResult,
   UseSessionOptions,
   UseSessionResult,
   UseEventsOptions,
   UseEventsResult,
   UseStreamingTextOptions,
   UseStreamingTextResult,
+} from "./types.js";
 
-  // Re-exports from client
+// Re-export client types for convenience
+export type {
   TentickleClient,
   ConnectionState,
   StreamEvent,
-} from "./types.js";
+  SessionAccessor,
+  SendInput,
+  ClientExecutionHandle,
+  SessionStreamEvent,
+} from "@tentickle/client";

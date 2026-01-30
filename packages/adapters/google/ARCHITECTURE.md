@@ -189,13 +189,13 @@ Google's API uses a different structure than Tentickle's unified format:
 
 Tentickle content blocks map to Google parts:
 
-| Tentickle Block Type  | Google Part Type       | Notes                         |
-| ---------------- | ---------------------- | ----------------------------- |
-| `text`           | `{ text }`             | Direct mapping                |
-| `image` (URL)    | `{ fileData }`         | Uses `fileUri` and `mimeType` |
-| `image` (base64) | `{ inlineData }`       | Uses `data` and `mimeType`    |
-| `tool_use`       | `{ functionCall }`     | Maps `name` and `args`        |
-| `tool_result`    | `{ functionResponse }` | Wraps content in `response`   |
+| Tentickle Block Type | Google Part Type       | Notes                         |
+| -------------------- | ---------------------- | ----------------------------- |
+| `text`               | `{ text }`             | Direct mapping                |
+| `image` (URL)        | `{ fileData }`         | Uses `fileUri` and `mimeType` |
+| `image` (base64)     | `{ inlineData }`       | Uses `data` and `mimeType`    |
+| `tool_use`           | `{ functionCall }`     | Maps `name` and `args`        |
+| `tool_result`        | `{ functionResponse }` | Wraps content in `response`   |
 
 ### 5. Tool Declaration Format
 
@@ -270,18 +270,18 @@ const google: (config?: GoogleAdapterConfig) => GoogleAdapter;
 
 #### Internal Functions
 
-| Function                     | Purpose                                          |
-| ---------------------------- | ------------------------------------------------ |
-| `buildClientOptions`         | Build GoogleGenAI constructor options            |
-| `prepareInput`               | Convert ModelInput to GenerateContentParameters  |
-| `processOutput`              | Convert GenerateContentResponse to ModelOutput   |
-| `processChunk`               | Convert streaming chunk to StreamEvent           |
-| `processStreamChunks`        | Aggregate chunks into final ModelOutput          |
-| `convertBlocksToGoogleParts` | Convert ContentBlocks to Google parts            |
+| Function                     | Purpose                                               |
+| ---------------------------- | ----------------------------------------------------- |
+| `buildClientOptions`         | Build GoogleGenAI constructor options                 |
+| `prepareInput`               | Convert ModelInput to GenerateContentParameters       |
+| `processOutput`              | Convert GenerateContentResponse to ModelOutput        |
+| `processChunk`               | Convert streaming chunk to StreamEvent                |
+| `processStreamChunks`        | Aggregate chunks into final ModelOutput               |
+| `convertBlocksToGoogleParts` | Convert ContentBlocks to Google parts                 |
 | `mapToolDefinition`          | Convert Tentickle tool to Google function declaration |
-| `mapGoogleFinishReason`      | Normalize finish reason to StopReason            |
-| `execute`                    | Call non-streaming API                           |
-| `executeStream`              | Call streaming API (async generator)             |
+| `mapGoogleFinishReason`      | Normalize finish reason to StopReason                 |
+| `execute`                    | Call non-streaming API                                |
+| `executeStream`              | Call streaming API (async generator)                  |
 
 ### types.ts
 
@@ -594,7 +594,7 @@ const model = google({
 
 | Package         | Type          | Purpose                         |
 | --------------- | ------------- | ------------------------------- |
-| `tentickle`          | dependency    | Core types, createLanguageModel |
+| `tentickle`     | dependency    | Core types, createLanguageModel |
 | `@google/genai` | peer (>=1.31) | Google AI SDK                   |
 
 ### Extension Points

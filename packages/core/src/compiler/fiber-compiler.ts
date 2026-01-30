@@ -9,7 +9,7 @@
  */
 
 import { AsyncLocalStorage } from "node:async_hooks";
-import { Logger } from "../core/index.js";
+import { Channel, Logger } from "../core/index";
 import { isContentBlock, isHostPrimitive as isHostPrimitiveSymbol } from "@tentickle/shared";
 import type { COM } from "../com/object-model";
 import type {
@@ -21,7 +21,12 @@ import type {
 import type { ExecutionMessage } from "../engine/execution-types";
 import type { JSX } from "../jsx/jsx-runtime";
 import { isElement, Fragment } from "../jsx/jsx-runtime";
-import type { CompiledStructure, CompiledSection, CompiledTimelineEntry } from "./types";
+import type {
+  CompiledStructure,
+  CompiledSection,
+  CompiledTimelineEntry,
+  TickControl,
+} from "./types";
 import type { ContentRenderer, SemanticContentBlock } from "../renderers";
 import { MarkdownRenderer } from "../renderers";
 import { Section, Tool, Entry, Ephemeral } from "../jsx/components/primitives";
@@ -35,7 +40,7 @@ import {
   isSignal,
   isComputed,
 } from "../state";
-import type { Signal, ComputedSignal } from "../state/signal";
+import type { Signal } from "../state/signal";
 import { initializeContentBlockMappers, type ContentBlockMapper } from "./content-block-registry";
 import { extractSemanticNodeFromElement } from "./extractors";
 import {
@@ -67,11 +72,7 @@ import { setRenderContext } from "../state/hooks";
 import { isContextProvider, getProviderContext } from "../state/context";
 import { isBoundaryProvider, getBoundaryData } from "../state/boundary";
 import type { Formatter } from "../renderers/base";
-import type {
-  SerializedFiberNode,
-  SerializedHookState,
-  HookType,
-} from "../app/types";
+import type { SerializedFiberNode, SerializedHookState, HookType } from "../app/types";
 
 const log = Logger.for("FiberCompiler");
 
@@ -145,8 +146,8 @@ export class FiberCompiler {
   // Context
   private com: COM;
   private tickState: TickState | null = null;
-  private tickControl: import("./types").TickControl | undefined = undefined;
-  private getChannel: ((name: string) => import("../core/channel").Channel) | undefined = undefined;
+  private tickControl: TickControl | undefined = undefined;
+  private getChannel: ((name: string) => Channel) | undefined = undefined;
 
   // Rendering
   private defaultRenderer: ContentRenderer = new MarkdownRenderer();
@@ -281,7 +282,7 @@ export class FiberCompiler {
     for (let i = 0; i < node.children.length; i++) {
       const child = node.children[i];
       // Use index as implicit key if no explicit key
-      const childPath = child.key ? path : `${path}/${i}`;
+      const _childPath = child.key ? path : `${path}/${i}`;
       this.buildHydrationMap(child, path);
     }
   }
@@ -439,10 +440,7 @@ export class FiberCompiler {
    * @param element - Optional element to reconcile. Uses rootElement if not provided.
    * @param options - Reconciliation options
    */
-  async reconcile(
-    element?: JSX.Element,
-    options: ReconcileOptions = {},
-  ): Promise<void> {
+  async reconcile(element?: JSX.Element, options: ReconcileOptions = {}): Promise<void> {
     const el = element ?? this.rootElement;
     if (!el) {
       throw new Error("No element to reconcile. Call setRoot() or pass an element.");
@@ -577,8 +575,8 @@ export class FiberCompiler {
     state: TickState,
     options: {
       maxIterations?: number;
-      tickControl?: import("./types").TickControl;
-      getChannel?: (name: string) => import("../core/channel").Channel;
+      tickControl?: TickControl;
+      getChannel?: (name: string) => Channel;
     } = {},
   ): Promise<CompileResult> {
     const { maxIterations: maxIter, tickControl, getChannel } = options;
@@ -2466,10 +2464,7 @@ export class FiberCompiler {
 
     // Model component - show model ID
     if (type === "Model" || type === "ModelComponent") {
-      const model = props.model as
-        | string
-        | { metadata?: { id?: string } }
-        | undefined;
+      const model = props.model as string | { metadata?: { id?: string } } | undefined;
       if (typeof model === "string") {
         return `model: ${model}`;
       }
@@ -2687,22 +2682,14 @@ export class FiberCompiler {
 
   private serializeHookValue(hook: HookState, hookType: HookType): unknown {
     // For effects, we don't serialize the callback
-    if (
-      hookType === "useEffect" ||
-      hookType === "useOnMessage" ||
-      hookType === "useCallback"
-    ) {
-      return hook.effect
-        ? { phase: hook.effect.phase, pending: hook.effect.pending }
-        : null;
+    if (hookType === "useEffect" || hookType === "useOnMessage" || hookType === "useCallback") {
+      return hook.effect ? { phase: hook.effect.phase, pending: hook.effect.pending } : null;
     }
 
     // For refs, get .current
     if (hookType === "useRef") {
       const refValue = hook.memoizedState as { current?: unknown } | undefined;
-      return refValue?.current !== undefined
-        ? this.serializeValue(refValue.current)
-        : null;
+      return refValue?.current !== undefined ? this.serializeValue(refValue.current) : null;
     }
 
     // For useSignal, the memoizedState IS the signal - call it to get value

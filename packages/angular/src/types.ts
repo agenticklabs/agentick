@@ -37,7 +37,12 @@ export interface TentickleConfig {
    */
   paths?: {
     events?: string;
-    sessions?: string;
+    send?: string;
+    subscribe?: string;
+    abort?: string;
+    close?: string;
+    toolResponse?: string;
+    channel?: string;
   };
 
   /**
@@ -55,5 +60,7 @@ export type {
   TentickleClient,
   ConnectionState,
   StreamEvent,
+  SessionStreamEvent,
+  ClientExecutionHandle,
   StreamingTextState,
 } from "@tentickle/client";

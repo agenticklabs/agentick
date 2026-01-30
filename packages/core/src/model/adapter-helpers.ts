@@ -316,7 +316,10 @@ export function toJsonSchema(schema: unknown): unknown {
  * Convert tool result content to simple text/json format.
  * Useful for providers that expect simple tool outputs.
  */
-export function toolResultToSimple(content: ContentBlock[], isError?: boolean): {
+export function toolResultToSimple(
+  content: ContentBlock[],
+  isError?: boolean,
+): {
   type: "text" | "json" | "error";
   value: unknown;
 } {

@@ -73,7 +73,7 @@ class TodoListServiceImpl {
   update(
     sessionId: string,
     id: number,
-    updates: { title?: string; completed?: boolean }
+    updates: { title?: string; completed?: boolean },
   ): TodoItem | undefined {
     const store = this.getStore(sessionId);
     const item = store.get(id);

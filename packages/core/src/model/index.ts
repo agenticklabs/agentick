@@ -44,6 +44,6 @@ export * from "./model-hooks";
 export * from "./utils";
 
 // Simplified adapter pattern
-export * from "./stream-accumulator";  // AdapterDelta, StreamAccumulator
-export * from "./simple-adapter";       // createSimpleAdapter factory
-export * from "./adapter-helpers";      // Composable helpers for adapters
+export * from "./stream-accumulator"; // AdapterDelta, StreamAccumulator
+export * from "./simple-adapter"; // createSimpleAdapter factory
+export * from "./adapter-helpers"; // Composable helpers for adapters

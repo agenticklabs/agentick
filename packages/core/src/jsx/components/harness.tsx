@@ -204,8 +204,9 @@ export class HarnessComponent<P = Record<string, unknown>> extends Component<Har
 
     // Execute child session using tick (starts fresh execution)
     // Use .result to get the SendResult from the SessionExecutionHandle
-    this.executionPromise = this.session.tick(props).result
-      .then((result) => {
+    this.executionPromise = this.session
+      .tick(props)
+      .result.then((result) => {
         this.result = result;
         if (onResult) {
           return Promise.resolve(onResult(result)).then(() => result);

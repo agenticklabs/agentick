@@ -4,7 +4,7 @@
 
 This compiler is designed for **AI agent execution**, not UI rendering. This changes everything:
 
-| Concern            | React (UI)                  | Tentickle (Agent)                        |
+| Concern            | React (UI)                  | Tentickle (Agent)                   |
 | ------------------ | --------------------------- | ----------------------------------- |
 | **Timing**         | 60fps, can't block          | Tick-based, waiting is fine         |
 | **Output**         | DOM mutations               | Data structures (CompiledStructure) |

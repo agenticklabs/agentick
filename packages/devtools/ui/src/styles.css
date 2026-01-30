@@ -19,7 +19,7 @@
   --accent-purple: #a371f7;
   --accent-pink: #db61a2;
   --accent-cyan: #39c5cf;
-  --shadow-md: 0 3px 6px rgba(0,0,0,0.3);
+  --shadow-md: 0 3px 6px rgba(0, 0, 0, 0.3);
   --radius-sm: 4px;
   --radius-md: 6px;
   --radius-lg: 8px;
@@ -31,7 +31,7 @@
 
 body {
   margin: 0;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, sans-serif;
   background: var(--bg-primary);
   color: var(--text-primary);
   font-size: 13px;
@@ -137,8 +137,13 @@ body {
 }
 
 @keyframes pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.5; }
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
 }
 
 /* Main Layout */
@@ -178,7 +183,9 @@ body {
   font-size: 12px;
   font-weight: 500;
   cursor: pointer;
-  transition: color 0.15s, border-color 0.15s;
+  transition:
+    color 0.15s,
+    border-color 0.15s;
   margin-bottom: -1px;
 }
 
@@ -420,7 +427,9 @@ body {
   font-size: 13px;
   font-weight: 500;
   cursor: pointer;
-  transition: color 0.15s, border-color 0.15s;
+  transition:
+    color 0.15s,
+    border-color 0.15s;
   position: relative;
   margin-bottom: -1px;
 }
@@ -513,10 +522,18 @@ body {
   color: var(--text-primary);
 }
 
-.overview-card-value.green { color: var(--accent-green); }
-.overview-card-value.blue { color: var(--accent-blue); }
-.overview-card-value.yellow { color: var(--accent-yellow); }
-.overview-card-value.purple { color: var(--accent-purple); }
+.overview-card-value.green {
+  color: var(--accent-green);
+}
+.overview-card-value.blue {
+  color: var(--accent-blue);
+}
+.overview-card-value.yellow {
+  color: var(--accent-yellow);
+}
+.overview-card-value.purple {
+  color: var(--accent-purple);
+}
 
 .overview-card-detail {
   font-size: 11px;
@@ -646,7 +663,7 @@ body {
   background: var(--bg-tertiary);
   border-radius: var(--radius-md);
   padding: 12px 16px;
-  font-family: 'SF Mono', Monaco, 'Fira Code', monospace;
+  font-family: "SF Mono", Monaco, "Fira Code", monospace;
   font-size: 12px;
   white-space: pre-wrap;
   word-break: break-word;
@@ -688,9 +705,18 @@ body {
   text-align: center;
 }
 
-.tick-event-type.content_delta { background: rgba(88, 166, 255, 0.15); color: var(--accent-blue); }
-.tick-event-type.tool_call { background: rgba(163, 113, 247, 0.15); color: var(--accent-purple); }
-.tick-event-type.tool_result { background: rgba(63, 185, 80, 0.15); color: var(--accent-green); }
+.tick-event-type.content_delta {
+  background: rgba(88, 166, 255, 0.15);
+  color: var(--accent-blue);
+}
+.tick-event-type.tool_call {
+  background: rgba(163, 113, 247, 0.15);
+  color: var(--accent-purple);
+}
+.tick-event-type.tool_result {
+  background: rgba(63, 185, 80, 0.15);
+  color: var(--accent-green);
+}
 
 .tick-event-content {
   flex: 1;
@@ -790,7 +816,7 @@ body {
 }
 
 .fiber-tree {
-  font-family: 'SF Mono', Monaco, monospace;
+  font-family: "SF Mono", Monaco, monospace;
   font-size: 12px;
   background: var(--bg-secondary);
   border: 1px solid var(--border-color);
@@ -1077,7 +1103,7 @@ body {
 
 /* Tick Fiber Tree (in tick details) */
 .tick-fiber-tree {
-  font-family: 'SF Mono', Monaco, monospace;
+  font-family: "SF Mono", Monaco, monospace;
   font-size: 12px;
 }
 
@@ -1201,7 +1227,7 @@ body {
   border: 1px solid var(--border-color);
   border-radius: var(--radius-md);
   padding: 12px 16px;
-  font-family: 'SF Mono', Monaco, monospace;
+  font-family: "SF Mono", Monaco, monospace;
   font-size: 12px;
   overflow-x: auto;
   white-space: pre-wrap;
@@ -1211,11 +1237,21 @@ body {
   overflow-y: auto;
 }
 
-.json-key { color: var(--accent-cyan); }
-.json-string { color: var(--accent-green); }
-.json-number { color: var(--accent-yellow); }
-.json-boolean { color: var(--accent-orange); }
-.json-null { color: var(--text-muted); }
+.json-key {
+  color: var(--accent-cyan);
+}
+.json-string {
+  color: var(--accent-green);
+}
+.json-number {
+  color: var(--accent-yellow);
+}
+.json-boolean {
+  color: var(--accent-orange);
+}
+.json-null {
+  color: var(--text-muted);
+}
 
 /* Model I/O View */
 .message-list {
@@ -1368,7 +1404,7 @@ body {
 
 /* Utility */
 .mono {
-  font-family: 'SF Mono', Monaco, monospace;
+  font-family: "SF Mono", Monaco, monospace;
 }
 
 .truncate {
@@ -1381,8 +1417,16 @@ body {
   flex: 1;
 }
 
-.gap-2 { gap: 8px; }
-.gap-4 { gap: 16px; }
+.gap-2 {
+  gap: 8px;
+}
+.gap-4 {
+  gap: 16px;
+}
 
-.text-muted { color: var(--text-muted); }
-.text-secondary { color: var(--text-secondary); }
+.text-muted {
+  color: var(--text-muted);
+}
+.text-secondary {
+  color: var(--text-secondary);
+}

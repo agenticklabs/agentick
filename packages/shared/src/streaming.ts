@@ -96,6 +96,10 @@ export interface StreamEventBase {
 
   /** Original provider event/chunk for pass-through (debugging, provider-specific features) */
   raw?: unknown;
+
+  /** Session ID (if available) */
+  /** Available on all events emitted from within a session */
+  sessionId?: string;
 }
 
 // ============================================================================
@@ -588,9 +592,7 @@ export function isModelStreamEvent(event: StreamEvent): event is ModelStreamEven
 /**
  * Check if event is an OrchestrationStreamEvent (orchestration)
  */
-export function isOrchestrationStreamEvent(
-  event: StreamEvent,
-): event is OrchestrationStreamEvent {
+export function isOrchestrationStreamEvent(event: StreamEvent): event is OrchestrationStreamEvent {
   return [
     "execution_start",
     "execution_end",
@@ -648,15 +650,9 @@ export function isFinalEvent(
   | TickEvent
   | ExecutionEvent
   | ResultStreamEvent {
-  return [
-    "content",
-    "reasoning",
-    "message",
-    "tool_call",
-    "tick",
-    "execution",
-    "result",
-  ].includes(event.type);
+  return ["content", "reasoning", "message", "tool_call", "tick", "execution", "result"].includes(
+    event.type,
+  );
 }
 
 // ============================================================================

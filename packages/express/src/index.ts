@@ -1,90 +1,74 @@
 /**
  * @tentickle/express - Express integration for Tentickle
  *
- * Provides a pre-configured Express router for Tentickle applications
- * with session management, SSE streaming, and event handling.
+ * Provides an Express handler for Tentickle applications
+ * with multiplexed SSE streaming and session control.
  *
  * @example Quick start
  * ```typescript
  * import express from "express";
- * import { createTentickleRouter } from "@tentickle/express";
+ * import { createTentickleHandler } from "@tentickle/express";
  * import { createApp } from "@tentickle/core";
  *
  * const app = express();
  * app.use(express.json());
  *
  * const tentickleApp = createApp(<MyAgent />);
- * const { router, destroy } = createTentickleRouter({ app: tentickleApp });
- *
- * app.use("/api", router);
+ * app.use("/api/agent", createTentickleHandler(tentickleApp));
  *
  * const server = app.listen(3000);
  *
  * // Cleanup on shutdown
- * process.on("SIGTERM", () => {
- *   destroy();
- *   server.close();
- * });
+ * process.on("SIGTERM", () => server.close());
  * ```
  *
  * @example With authentication
  * ```typescript
- * import { createTentickleRouter } from "@tentickle/express";
+ * import { createTentickleHandler } from "@tentickle/express";
  * import { verifyToken } from "./auth";
  *
- * const { router } = createTentickleRouter({
- *   app: tentickleApp,
+ * app.use("/api/agent", createTentickleHandler(tentickleApp, {
  *   authenticate: async (req) => {
  *     const token = req.headers.authorization?.replace("Bearer ", "");
- *     if (token) {
- *       const user = await verifyToken(token);
- *       (req as any).user = user;
- *       return token;
- *     }
+ *     return token ? verifyToken(token) : undefined;
  *   },
- *   getUserId: (req) => (req as any).user?.id,
- * });
+ *   authorize: (user, sessionId) => {
+ *     return !!user && sessionId.startsWith(`user-${user.id}-`);
+ *   },
+ *   getUserId: (req, user) => user?.id,
+ * }));
  * ```
  *
  * @example Custom paths
  * ```typescript
- * const { router } = createTentickleRouter({
- *   app: tentickleApp,
+ * app.use("/chat", createTentickleHandler(tentickleApp, {
  *   paths: {
- *     sessions: "/chat/sessions",
- *     session: "/chat/sessions/:sessionId",
- *     events: "/chat/stream",
+ *     events: "/stream",
+ *     send: "/send",
+ *     subscribe: "/subscribe",
+ *     abort: "/abort",
+ *     close: "/close",
+ *     toolResponse: "/tool-response",
  *   },
- * });
+ * }));
  * ```
  *
  * ## Routes
  *
- * The router provides the following endpoints:
+ * The handler provides the following endpoints:
  *
  * | Method | Path | Description |
  * |--------|------|-------------|
- * | POST | /sessions | Create a new session |
- * | GET | /sessions/:sessionId | Get session state |
- * | DELETE | /sessions/:sessionId | Delete a session |
- * | GET | /events?sessionId=... | SSE stream for events |
- * | POST | /events | Send event to session |
+ * | GET | /events?subscribe=... | SSE stream for events |
+ * | POST | /send | Send to a session or ephemeral execution |
+ * | POST | /subscribe | Add/remove subscriptions |
+ * | POST | /abort | Abort execution |
+ * | POST | /close | Close session |
+ * | POST | /tool-response | Submit tool confirmation |
  *
  * @module @tentickle/express
  */
 
-export { createTentickleRouter } from "./router.js";
+export { createTentickleHandler } from "./router";
 
-export type {
-  TentickleRouterConfig,
-  TentickleRouterResult,
-  TentickleRequest,
-  TentickleHandler,
-} from "./types.js";
-
-// Re-export commonly used types from server
-export type {
-  SessionHandler,
-  EventBridge,
-  SessionStateInfo,
-} from "@tentickle/server";
+export type { TentickleHandlerOptions, TentickleRequest } from "./types";

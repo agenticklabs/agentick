@@ -2,10 +2,11 @@ import type { EphemeralPosition, COMTimelineEntry } from "../com/types";
 import type { ExecutableTool } from "../tool/tool";
 import type { SemanticContentBlock, Formatter, ContentRenderer } from "../renderers";
 import type { ContentBlock, MessageRoles } from "@tentickle/shared";
-import { Fragment, type JSX } from "../jsx/jsx-runtime.js";
+import { Fragment, type JSX } from "../jsx/jsx-runtime";
 import type { COM } from "../com/object-model";
 import type { TickState } from "../component/component";
 import type { ExecutionMessage } from "../engine/execution-types";
+import type { Channel } from "../channels";
 
 /**
  * Policy boundary captured during compilation.
@@ -263,7 +264,7 @@ export interface Effect {
 }
 
 export type EffectCallback = () => void | EffectCleanup | Promise<void | EffectCleanup>;
-export type EffectCleanup = () => void | Promise<void>;
+export type EffectCleanup = () => void | Promise<void | any> | any;
 
 // ============================================================================
 // Update Queue (for batched state updates)
@@ -503,7 +504,7 @@ export interface RenderContext {
    * Channel accessor for useChannel() hook.
    * Provided by Session to give components access to named channels.
    */
-  getChannel?: (name: string) => import("../core/channel").Channel;
+  getChannel?: (name: string) => Channel;
 
   /**
    * Current hook index during mounting.
@@ -599,7 +600,7 @@ export interface ReconcileOptions {
    * Channel accessor for useChannel() hook.
    * Allows components to access named channels for pub/sub communication.
    */
-  getChannel?: (name: string) => import("../core/channel").Channel;
+  getChannel?: (name: string) => Channel;
 }
 
 // ============================================================================

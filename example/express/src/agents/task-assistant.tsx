@@ -9,10 +9,10 @@
  * - Timeline rendering
  */
 
-import { Model, Section, Timeline, Message } from "@tentickle/core/jsx";
-import { useComputed, useComState } from "@tentickle/core/hooks";
-import { createOpenAIModel } from "@tentickle/openai";
-import { createGoogleModel } from "@tentickle/google";
+import { Model, Section, Timeline, Message } from "@tentickle/core";
+import { useComputed, useComState } from "@tentickle/core";
+import { openai } from "@tentickle/openai";
+import { google } from "@tentickle/google";
 import { TodoListTool } from "../tools/todo-list.tool.js";
 import { CalculatorTool } from "../tools/calculator.tool.js";
 
@@ -26,12 +26,18 @@ const GOOGLE_CREDENTIALS = process.env["GCP_CREDENTIALS"]
  */
 function DynamicModel() {
   const useGoogle = useComState<boolean>("useGoogle", process.env["USE_GOOGLE_MODEL"] === "true");
-  const openaiModelName = useComState<string>("openaiModel", process.env["OPENAI_MODEL"] || "gpt-4o-mini");
-  const googleModelName = useComState<string>("googleModel", process.env["GOOGLE_MODEL"] || "gemini-2.0-flash");
+  const openaiModelName = useComState<string>(
+    "openaiModel",
+    process.env["OPENAI_MODEL"] || "gpt-4o-mini",
+  );
+  const googleModelName = useComState<string>(
+    "googleModel",
+    process.env["GOOGLE_MODEL"] || "gemini-2.0-flash",
+  );
 
   const model = useComputed(() => {
     if (useGoogle()) {
-      return createGoogleModel({
+      return google({
         model: googleModelName(),
         apiKey: process.env["GOOGLE_API_KEY"],
         vertexai: !!process.env["GCP_PROJECT_ID"],
@@ -40,7 +46,7 @@ function DynamicModel() {
         googleAuthOptions: GOOGLE_CREDENTIALS ? { credentials: GOOGLE_CREDENTIALS } : undefined,
       });
     } else {
-      return createOpenAIModel({
+      return openai({
         model: openaiModelName(),
         apiKey: process.env["OPENAI_API_KEY"],
         baseURL: process.env["OPENAI_BASE_URL"],
@@ -62,21 +68,13 @@ export function TaskAssistantAgent() {
 
       {/* System instructions */}
       <Section id="instructions" audience="model">
-        You are a helpful task management assistant. You have access to:
-
-        1. **Todo List Tool** - Create, update, complete, and delete tasks
-        2. **Calculator Tool** - Perform mathematical calculations
-
-        IMPORTANT RULES:
-        - When asked to manage tasks, ALWAYS use the todo_list tool
-        - When asked to calculate, ALWAYS use the calculator tool
-        - Be concise and helpful in your responses
-        - After using a tool, briefly confirm what you did
-
-        Examples:
-        - "Add a task to buy groceries" → Use todo_list with action: create
-        - "Mark task 1 as done" → Use todo_list with action: complete
-        - "What is 42 * 17?" → Use calculator with expression: "42 * 17"
+        You are a helpful task management assistant. You have access to: 1. **Todo List Tool** -
+        Create, update, complete, and delete tasks 2. **Calculator Tool** - Perform mathematical
+        calculations IMPORTANT RULES: - When asked to manage tasks, ALWAYS use the todo_list tool -
+        When asked to calculate, ALWAYS use the calculator tool - Be concise and helpful in your
+        responses - After using a tool, briefly confirm what you did Examples: - "Add a task to buy
+        groceries" → Use todo_list with action: create - "Mark task 1 as done" → Use todo_list with
+        action: complete - "What is 42 * 17?" → Use calculator with expression: "42 * 17"
       </Section>
 
       {/* Tools */}
@@ -88,7 +86,7 @@ export function TaskAssistantAgent() {
         {(history) => (
           <>
             {history.map((entry, i) =>
-              entry.message ? <Message key={i} {...entry.message} /> : null
+              entry.message ? <Message key={i} {...entry.message} /> : null,
             )}
           </>
         )}

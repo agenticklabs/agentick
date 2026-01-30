@@ -7,7 +7,7 @@ import {
 } from "../tool/tool";
 import { COM } from "../com/object-model";
 import { type ContentBlock } from "@tentickle/shared";
-import { type Middleware, type MiddlewarePipeline } from "../core/index.js";
+import { type Middleware, type MiddlewarePipeline } from "../core/index";
 import { type ToolHookMiddleware, type ToolHookName, ToolHookRegistry } from "../tool/tool-hooks";
 import { applyRegistryMiddleware } from "../procedure";
 import { ClientToolCoordinator } from "./client-tool-coordinator";

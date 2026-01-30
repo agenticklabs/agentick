@@ -1,72 +1,54 @@
 /**
  * TentickleController - Default NestJS controller for Tentickle endpoints.
  *
- * This controller uses TentickleService internally. Users who want custom
- * routes should inject TentickleService into their own controllers and
- * set `registerController: false` in the module options.
+ * Provides multiplexed SSE endpoints matching Express adapter API.
  *
  * @module @tentickle/nestjs/controller
  */
 
-import {
-  Controller,
-  Post,
-  Get,
-  Param,
-  Body,
-  Res,
-  Query,
-  HttpException,
-  HttpStatus,
-  UseFilters,
-} from "@nestjs/common";
+import { Controller, Post, Get, Body, Res, HttpException, HttpStatus } from "@nestjs/common";
 import type { Response } from "express";
-import { TentickleService } from "./tentickle.service.js";
-import { TentickleExceptionFilter } from "./tentickle.filter.js";
+import type { Message, ToolConfirmationResponse } from "@tentickle/shared";
+import { TentickleService } from "./tentickle.service";
 
 // ============================================================================
 // DTOs
 // ============================================================================
 
-/**
- * Input for creating a session.
- */
-interface CreateSessionDto {
+interface SubscribeDto {
+  connectionId: string;
+  add?: string[];
+  remove?: string[];
+}
+
+interface SendDto {
   sessionId?: string;
+  message?: Message;
+  messages?: Message[];
   props?: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
 }
 
-/**
- * Input for sending a message.
- */
-interface SendMessageDto {
-  content: string;
-  role?: "user" | "assistant";
-}
-
-/**
- * Input for triggering a tick.
- */
-interface TickDto {
-  props?: Record<string, unknown>;
-}
-
-/**
- * Input for aborting execution.
- */
 interface AbortDto {
+  sessionId: string;
   reason?: string;
 }
 
-/**
- * Input for publishing an event.
- */
-interface PublishEventDto {
-  connectionId: string;
+interface CloseDto {
+  sessionId: string;
+}
+
+interface ToolResponseDto {
+  sessionId: string;
+  toolUseId: string;
+  response: ToolConfirmationResponse;
+}
+
+interface ChannelPublishDto {
+  sessionId: string;
   channel: string;
   type: string;
   payload: unknown;
-  id?: string;
 }
 
 // ============================================================================
@@ -76,132 +58,148 @@ interface PublishEventDto {
 /**
  * Default controller for Tentickle endpoints.
  *
- * Provides REST endpoints for session management and SSE for events.
- * Uses TentickleExceptionFilter to convert SessionNotFoundError to 404.
+ * Provides multiplexed SSE with per-session subscriptions.
  *
  * @example Using the default controller
  * ```typescript
  * @Module({
- *   imports: [TentickleModule.forRoot({ sessionHandler: { app } })],
+ *   imports: [TentickleModule.forRoot({ app })],
  * })
  * export class AppModule {}
- * // Endpoints available at /sessions, /events, etc.
  * ```
  *
- * @example Custom controller with TentickleService
+ * @example Custom controller
  * ```typescript
  * @Module({
- *   imports: [TentickleModule.forRoot({
- *     sessionHandler: { app },
- *     registerController: false,
- *   })],
- *   controllers: [MyCustomController],
+ *   imports: [TentickleModule.forRoot({ app, registerController: false })],
+ *   controllers: [MyController],
  * })
  * export class AppModule {}
- *
- * @Controller('chat')
- * export class MyCustomController {
- *   constructor(private tentickle: TentickleService) {}
- *
- *   @Post('start')
- *   async start() {
- *     return this.tentickle.createSession();
- *   }
- * }
  * ```
  */
 @Controller()
-@UseFilters(TentickleExceptionFilter)
 export class TentickleController {
   constructor(private readonly tentickle: TentickleService) {}
 
-  // ══════════════════════════════════════════════════════════════════════════
-  // Session Endpoints
-  // ══════════════════════════════════════════════════════════════════════════
-
   /**
-   * Create a new session.
+   * SSE endpoint for multiplexed events.
    *
-   * POST /sessions
+   * GET /events
    */
-  @Post("sessions")
-  async createSession(@Body() body: CreateSessionDto) {
-    return this.tentickle.createSession(body);
+  @Get("events")
+  events(@Res() res: Response) {
+    this.tentickle.createConnection(res);
   }
 
   /**
-   * Get session state.
+   * Subscribe to sessions.
    *
-   * GET /sessions/:id
+   * POST /subscribe
    */
-  @Get("sessions/:id")
-  async getSession(@Param("id") id: string) {
-    return this.tentickle.getSession(id);
+  @Post("subscribe")
+  async subscribe(@Body() body: SubscribeDto) {
+    if (!body.connectionId) {
+      throw new HttpException("connectionId is required", HttpStatus.BAD_REQUEST);
+    }
+
+    const { connectionId, add = [], remove = [] } = body;
+
+    if (add.length > 0) {
+      await this.tentickle.subscribe(connectionId, add);
+    }
+    if (remove.length > 0) {
+      await this.tentickle.unsubscribe(connectionId, remove);
+    }
+
+    return { success: true };
   }
 
   /**
-   * Send message to session.
+   * Send message and stream events.
    *
-   * POST /sessions/:id/messages
+   * POST /send
    */
-  @Post("sessions/:id/messages")
-  async sendMessage(@Param("id") id: string, @Body() body: SendMessageDto) {
-    return this.tentickle.sendMessage(id, body.content, body.role);
-  }
+  @Post("send")
+  async send(@Body() body: SendDto, @Res() res: Response) {
+    const { sessionId, message, messages, props, metadata } = body;
 
-  /**
-   * Trigger tick.
-   *
-   * POST /sessions/:id/tick
-   */
-  @Post("sessions/:id/tick")
-  async tick(@Param("id") id: string, @Body() body: TickDto) {
-    return this.tentickle.tick(id, body.props);
+    // Build valid SendInput - must have message OR messages (not neither)
+    let input: { message: Message } | { messages: Message[] };
+    if (message) {
+      input = { message };
+    } else if (messages && messages.length > 0) {
+      input = { messages };
+    } else {
+      throw new HttpException("Either message or messages is required", HttpStatus.BAD_REQUEST);
+    }
+
+    // Add optional fields
+    const sendInput = {
+      ...input,
+      ...(props && { props }),
+      ...(metadata && { metadata }),
+    };
+
+    await this.tentickle.sendAndStream(sessionId, sendInput, res);
   }
 
   /**
    * Abort execution.
    *
-   * POST /sessions/:id/abort
+   * POST /abort
    */
-  @Post("sessions/:id/abort")
-  async abort(@Param("id") id: string, @Body() body: AbortDto) {
-    this.tentickle.abort(id, body.reason);
-    return { success: true };
-  }
-
-  // ══════════════════════════════════════════════════════════════════════════
-  // Event Endpoints
-  // ══════════════════════════════════════════════════════════════════════════
-
-  /**
-   * SSE endpoint for events.
-   *
-   * GET /events?sessionId=xxx&userId=xxx
-   */
-  @Get("events")
-  async events(
-    @Query("sessionId") sessionId: string,
-    @Query("userId") userId: string | undefined,
-    @Res() res: Response,
-  ) {
-    if (!sessionId) {
+  @Post("abort")
+  async abort(@Body() body: AbortDto) {
+    if (!body.sessionId) {
       throw new HttpException("sessionId is required", HttpStatus.BAD_REQUEST);
     }
 
-    // createConnection handles the SSE setup and connection registration
-    this.tentickle.createConnection(sessionId, res, userId);
+    await this.tentickle.abort(body.sessionId, body.reason);
+    return { success: true };
   }
 
   /**
-   * Post event to session.
+   * Close session.
    *
-   * POST /events
+   * POST /close
    */
-  @Post("events")
-  async postEvent(@Body() body: PublishEventDto) {
-    if (!body.connectionId) {
-      throw new HttpException("connectionId is required", HttpStatus.BAD_REQUEST);
+  @Post("close")
+  async close(@Body() body: CloseDto) {
+    if (!body.sessionId) {
+      throw new HttpException("sessionId is required", HttpStatus.BAD_REQUEST);
+    }
+
+    await this.tentickle.close(body.sessionId);
+    return { success: true };
+  }
+
+  /**
+   * Submit tool confirmation response.
+   *
+   * POST /tool-response
+   */
+  @Post("tool-response")
+  async toolResponse(@Body() body: ToolResponseDto) {
+    if (!body.sessionId) {
+      throw new HttpException("sessionId is required", HttpStatus.BAD_REQUEST);
+    }
+    if (!body.toolUseId) {
+      throw new HttpException("toolUseId is required", HttpStatus.BAD_REQUEST);
+    }
+
+    await this.tentickle.submitToolResult(body.sessionId, body.toolUseId, body.response);
+    return { success: true };
+  }
+
+  /**
+   * Publish to session channel.
+   *
+   * POST /channel
+   */
+  @Post("channel")
+  async channel(@Body() body: ChannelPublishDto) {
+    if (!body.sessionId) {
+      throw new HttpException("sessionId is required", HttpStatus.BAD_REQUEST);
     }
     if (!body.channel) {
       throw new HttpException("channel is required", HttpStatus.BAD_REQUEST);
@@ -210,13 +208,7 @@ export class TentickleController {
       throw new HttpException("type is required", HttpStatus.BAD_REQUEST);
     }
 
-    await this.tentickle.publishEvent(body.connectionId, {
-      channel: body.channel,
-      type: body.type,
-      payload: body.payload,
-      id: body.id,
-    });
-
+    await this.tentickle.publishToChannel(body.sessionId, body.channel, body.type, body.payload);
     return { success: true };
   }
 }

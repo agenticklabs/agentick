@@ -8,10 +8,12 @@ import type {
   TentickleClient,
   ConnectionState,
   StreamEvent,
-  ContentBlock,
-  Message,
-  SessionMessagePayload,
+  SendInput,
+  SessionAccessor,
+  ClientExecutionHandle,
+  SessionStreamEvent,
 } from "@tentickle/client";
+import type { ContentBlock, Message } from "@tentickle/shared";
 import type { ReactNode } from "react";
 
 // ============================================================================
@@ -34,32 +36,30 @@ export interface TentickleProviderProps {
   clientConfig?: {
     baseUrl: string;
     token?: string;
-    userId?: string;
-    headers?: Record<string, string>;
+    withCredentials?: boolean;
+    timeout?: number;
     paths?: {
       events?: string;
-      sessions?: string;
+      send?: string;
+      subscribe?: string;
+      abort?: string;
+      close?: string;
+      channel?: string;
     };
   };
 
-  /**
-   * Children to render.
-   */
-  children: ReactNode;
+  children?: ReactNode;
 }
 
 /**
- * Context value for TentickleProvider.
+ * Context value provided by TentickleProvider.
  */
 export interface TentickleContextValue {
-  /**
-   * The Tentickle client instance.
-   */
   client: TentickleClient;
 }
 
 // ============================================================================
-// Hook Types
+// Session Hooks
 // ============================================================================
 
 /**
@@ -67,21 +67,17 @@ export interface TentickleContextValue {
  */
 export interface UseSessionOptions {
   /**
-   * Session ID to connect to.
-   * If not provided, a new session will be created.
+   * Session ID to work with.
+   * If not provided, send() will use ephemeral sessions.
    */
   sessionId?: string;
 
   /**
-   * Whether to auto-connect on mount.
-   * @default true
+   * Automatically subscribe to the session on mount.
+   * Requires sessionId to be provided.
+   * @default false
    */
-  autoConnect?: boolean;
-
-  /**
-   * Initial props for new sessions.
-   */
-  initialProps?: Record<string, unknown>;
+  autoSubscribe?: boolean;
 }
 
 /**
@@ -89,14 +85,69 @@ export interface UseSessionOptions {
  */
 export interface UseSessionResult {
   /**
-   * Current session ID (undefined until connected).
+   * Session ID (if provided in options).
    */
-  sessionId: string | undefined;
+  sessionId?: string;
 
+  /**
+   * Whether this session is subscribed.
+   */
+  isSubscribed: boolean;
+
+  /**
+   * Subscribe to this session (only if sessionId provided).
+   */
+  subscribe: () => void;
+
+  /**
+   * Unsubscribe from this session.
+   */
+  unsubscribe: () => void;
+
+  /**
+   * Send a message.
+   *
+   * If sessionId was provided, sends to that session.
+   * Otherwise, creates an ephemeral session.
+   */
+  send: (
+    input: string | ContentBlock | ContentBlock[] | Message | Message[] | SendInput,
+  ) => ClientExecutionHandle;
+
+  /**
+   * Abort the session's current execution.
+   */
+  abort: (reason?: string) => Promise<void>;
+
+  /**
+   * Close this session.
+   */
+  close: () => Promise<void>;
+
+  /**
+   * Session accessor for advanced operations (channels, tool confirmations).
+   * Only available if sessionId was provided.
+   */
+  accessor?: SessionAccessor;
+}
+
+// ============================================================================
+// Connection Hooks
+// ============================================================================
+
+/**
+ * Options for useConnection hook.
+ */
+export interface UseConnectionOptions {}
+
+/**
+ * Return value from useConnection hook.
+ */
+export interface UseConnectionResult {
   /**
    * Current connection state.
    */
-  connectionState: ConnectionState;
+  state: ConnectionState;
 
   /**
    * Whether currently connected.
@@ -107,59 +158,31 @@ export interface UseSessionResult {
    * Whether currently connecting.
    */
   isConnecting: boolean;
-
-  /**
-   * Error if connection failed.
-   */
-  error: Error | undefined;
-
-  /**
-   * Connect to session (called automatically if autoConnect is true).
-   */
-  connect: (sessionId?: string) => Promise<void>;
-
-  /**
-   * Disconnect from session.
-   */
-  disconnect: () => Promise<void>;
-
-  /**
-   * Send a message to the session.
-   */
-  send: (
-    input:
-      | string
-      | string[]
-      | ContentBlock
-      | ContentBlock[]
-      | Message
-      | Message[]
-      | SessionMessagePayload,
-  ) => Promise<void>;
-
-  /**
-   * Trigger a tick with optional props.
-   */
-  tick: (props?: Record<string, unknown>) => Promise<void>;
-
-  /**
-   * Abort the current execution.
-   */
-  abort: (reason?: string) => Promise<void>;
 }
+
+// ============================================================================
+// Event Hooks
+// ============================================================================
 
 /**
  * Options for useEvents hook.
  */
 export interface UseEventsOptions {
   /**
-   * Filter events by type.
+   * Optional session ID to filter events for.
+   * If not provided, receives all events from all sessions.
+   */
+  sessionId?: string;
+
+  /**
+   * Optional event type filter.
    * If provided, only events of these types are returned.
    */
-  filter?: StreamEvent["type"][];
+  filter?: Array<StreamEvent["type"] | SessionStreamEvent["type"]>;
 
   /**
    * Whether the hook is enabled.
+   * If false, no event subscription is created.
    * @default true
    */
   enabled?: boolean;
@@ -170,10 +193,9 @@ export interface UseEventsOptions {
  */
 export interface UseEventsResult {
   /**
-   * Latest event received (not accumulated).
-   * Use useStreamingText for accumulated text.
+   * Latest event received.
    */
-  event: StreamEvent | undefined;
+  event: StreamEvent | SessionStreamEvent | undefined;
 
   /**
    * Clear the current event.
@@ -181,12 +203,23 @@ export interface UseEventsResult {
   clear: () => void;
 }
 
+// ============================================================================
+// Streaming Text Hooks
+// ============================================================================
+
 /**
  * Options for useStreamingText hook.
  */
 export interface UseStreamingTextOptions {
   /**
+   * Optional session ID to filter events for.
+   * If not provided, receives text from all sessions.
+   */
+  sessionId?: string;
+
+  /**
    * Whether the hook is enabled.
+   * If false, no text accumulation occurs.
    * @default true
    */
   enabled?: boolean;
@@ -202,7 +235,7 @@ export interface UseStreamingTextResult {
   text: string;
 
   /**
-   * Whether streaming is currently active.
+   * Whether currently streaming (between tick_start and execution_end).
    */
   isStreaming: boolean;
 
@@ -211,14 +244,3 @@ export interface UseStreamingTextResult {
    */
   clear: () => void;
 }
-
-// ============================================================================
-// Re-exports
-// ============================================================================
-
-export type {
-  TentickleClient,
-  ConnectionState,
-  StreamEvent,
-  StreamingTextState,
-} from "@tentickle/client";

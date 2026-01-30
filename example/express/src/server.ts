@@ -12,7 +12,7 @@ loadEnv();
 
 import express from "express";
 import cors from "cors";
-import { createTentickleRouter } from "@tentickle/express";
+import { createTentickleHandler } from "@tentickle/express";
 import { DevToolsServer } from "@tentickle/devtools";
 import { createTentickleApp } from "./setup.js";
 import { todoRoutes } from "./routes/todos.js";
@@ -39,17 +39,38 @@ async function main() {
   // Create Tentickle app
   const tentickleApp = createTentickleApp();
 
-  // Create Tentickle router (provides /sessions and /events routes)
-  const { router, sessionHandler, eventBridge, destroy } = createTentickleRouter({
-    app: tentickleApp,
-    defaultSessionOptions: { devTools: true },
-  });
+  // Create Tentickle handler (provides /events, /send, /subscribe, etc.)
+  const tentickleHandler = createTentickleHandler(tentickleApp);
 
   // Mount Tentickle routes at /api
-  expressApp.use("/api", router);
+  expressApp.use("/api", tentickleHandler as any); // Router type is compatible but TS is strict
 
   // Custom REST routes for direct todo manipulation
-  expressApp.use("/api/tasks", todoRoutes(sessionHandler, eventBridge));
+  expressApp.use("/api/tasks", todoRoutes(tentickleApp));
+
+  // Session management helpers for the example UI
+  expressApp.post("/api/sessions", (req, res) => {
+    const requestedId = typeof req.body?.sessionId === "string" ? req.body.sessionId : undefined;
+    const session = requestedId ? tentickleApp.session(requestedId) : tentickleApp.session();
+    res.json({ sessionId: session.id });
+  });
+
+  expressApp.get("/api/sessions/:id", (req, res) => {
+    const sessionId = String(req.params.id);
+    if (!tentickleApp.has(sessionId)) {
+      res.status(404).json({ error: "SESSION_NOT_FOUND", message: "Session not found" });
+      return;
+    }
+    const session = tentickleApp.session(sessionId);
+    const snapshot = session.snapshot();
+    res.json({
+      sessionId,
+      timeline: snapshot.timeline,
+      tick: snapshot.tick,
+      usage: snapshot.usage,
+      timestamp: snapshot.timestamp,
+    });
+  });
 
   // Start server
   const server = expressApp.listen(PORT, () => {
@@ -76,7 +97,6 @@ async function main() {
   // Graceful shutdown
   const shutdown = async (signal: string) => {
     console.log(`\n${signal} received, shutting down...`);
-    destroy();
     devtools.stop();
     server.close(() => {
       console.log("Server closed");

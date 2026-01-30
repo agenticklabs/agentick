@@ -1375,14 +1375,14 @@ try {
 
 ### How Other Modules Use Engine
 
-| Module         | Uses                        | For                          |
-| -------------- | --------------------------- | ---------------------------- |
-| `@tentickle/server`  | `Engine`, `ExecutionHandle` | HTTP request handling        |
-| `@tentickle/client`  | `StreamEvent` types         | Client-side event processing |
-| `Runtime`      | `Engine` config             | Session creation             |
-| Components     | `com.process`               | Fork/spawn operations        |
-| Model Adapters | `EngineResponse`            | Response formatting          |
-| Tool Module    | `ToolExecutor`              | Tool execution               |
+| Module              | Uses                        | For                          |
+| ------------------- | --------------------------- | ---------------------------- |
+| `@tentickle/server` | `Engine`, `ExecutionHandle` | HTTP request handling        |
+| `@tentickle/client` | `StreamEvent` types         | Client-side event processing |
+| `Runtime`           | `Engine` config             | Session creation             |
+| Components          | `com.process`               | Fork/spawn operations        |
+| Model Adapters      | `EngineResponse`            | Response formatting          |
+| Tool Module         | `ToolExecutor`              | Tool execution               |
 
 ### Context Flow
 

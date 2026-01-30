@@ -10,7 +10,7 @@ import { TodoListUI } from "./components/TodoListUI";
 
 export function App() {
   return (
-    <TentickleProvider clientConfig={{ baseUrl: "http://localhost:5173/api" }}>
+    <TentickleProvider clientConfig={{ baseUrl: "/api" }}>
       <div className="app">
         <header className="app-header">
           <h1>Task Assistant</h1>

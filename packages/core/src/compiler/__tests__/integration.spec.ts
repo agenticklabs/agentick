@@ -10,7 +10,6 @@ import type { TickState } from "../../component/component";
 import { Component } from "../../component/component";
 import { Section, Message, Timeline, ModelOptions } from "../../jsx/components/primitives";
 import { StructureRenderer } from "../structure-renderer";
-import { MarkdownRenderer } from "../../renderers";
 import { Text } from "../../jsx/components/content";
 import { createElement } from "../../jsx/jsx-runtime";
 import {
@@ -362,7 +361,7 @@ describe("Compiler Integration", () => {
 
   describe("StructureRenderer modelOptions", () => {
     it("should pass through modelOptions in formatInput", async () => {
-      const structureRenderer = new StructureRenderer(com, new MarkdownRenderer());
+      const structureRenderer = new StructureRenderer(com);
 
       // Set up modelOptions via ModelOptions component
       const element = createElement(ModelOptions, { temperature: 0.7, maxTokens: 100 });
@@ -382,7 +381,7 @@ describe("Compiler Integration", () => {
     });
 
     it("should preserve modelOptions with timeline content", async () => {
-      const structureRenderer = new StructureRenderer(com, new MarkdownRenderer());
+      const structureRenderer = new StructureRenderer(com);
 
       // Compile component that sets modelOptions and adds a message
       const element = createElement(

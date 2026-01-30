@@ -11,7 +11,7 @@
  */
 
 import { createEngineProcedure, isProcedure } from "../procedure";
-import type { ExtractArgs, Middleware, Procedure } from "../core/index.js";
+import type { ExtractArgs, Middleware, Procedure } from "../core/index";
 import type { ProviderToolOptions, LibraryToolOptions } from "../types";
 import {
   ToolExecutionType,

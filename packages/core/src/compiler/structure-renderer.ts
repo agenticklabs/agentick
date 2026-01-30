@@ -7,6 +7,7 @@ import {
   MarkdownRenderer,
   type Formatter,
 } from "../renderers";
+import { Logger } from "../core/logger";
 import type {
   CompiledStructure,
   CompiledSection,
@@ -14,6 +15,8 @@ import type {
   CompiledEphemeral,
   CompiledPolicyBoundary,
 } from "../compiler/types";
+
+const log = Logger.for("StructureRenderer");
 
 /**
  * Consolidate contiguous text blocks into single text blocks.
@@ -61,6 +64,7 @@ function consolidateTextBlocks(blocks: ContentBlock[]): ContentBlock[] {
 export class StructureRenderer {
   private defaultRenderer: ContentRenderer;
   private policyBoundaries: CompiledPolicyBoundary[] = [];
+  private _lastCompiled: CompiledStructure | null = null;
 
   constructor(private com: COM) {
     this.defaultRenderer = new MarkdownRenderer();
@@ -72,17 +76,22 @@ export class StructureRenderer {
 
   /**
    * Applies compiled structure to COM and formats content.
+   *
+   * NOTE: Timeline entries are NOT added to COM here. They are passed
+   * directly to formatInput along with previousTimeline. This keeps
+   * the architecture declarative - no imperative accumulation.
    */
   apply(compiled: CompiledStructure): void {
+    // Store compiled structure for formatInput to use
+    this._lastCompiled = compiled;
+
     // 1. Apply sections (format and cache)
     for (const section of compiled.sections.values()) {
       this.applySection(section);
     }
 
-    // 2. Apply timeline entries (preserve ContentBlocks unless explicitly formatted)
-    for (const entry of compiled.timelineEntries) {
-      this.applyTimelineEntry(entry);
-    }
+    // 2. Timeline entries are NOT applied here - they go directly to formatInput
+    // This prevents duplication from re-rendering historical messages
 
     // 3. Consolidate system message
     this.consolidateSystemMessage(compiled.systemMessageItems);
@@ -305,60 +314,74 @@ export class StructureRenderer {
   /**
    * Formats COMInput for model input.
    *
+   * The compiled structure IS the complete projection of what the model sees.
+   * Components render history via `<Message>`, which becomes compiled.timelineEntries.
+   * No separate history merge - JSX is the single source of truth.
+   *
    * Rules:
    * - Sections: Use cached formattedContent
-   * - Timeline entries:
-   *   - If renderer explicitly set → format using that renderer
-   *   - If blocks have semanticNode → format using default renderer (MarkdownRenderer)
-   *   - If blocks are event blocks → format using default renderer (event blocks need text conversion)
-   *   - Otherwise → preserve ContentBlocks as-is (already formatted from model)
-   * - Policy boundaries: Applied to timeline after formatting
+   * - Timeline entries (from compiled structure):
+   *   - Format if renderer set, semantic blocks, or event blocks
+   *   - Otherwise → preserve ContentBlocks as-is
+   * - Policy boundaries: Applied after formatting
    */
   async formatInput(comInput: COMInput): Promise<COMInput> {
-    let formattedTimeline: COMTimelineEntry[] = [];
-    const formattedSections: Record<string, COMSection> = {};
+    // Get timeline entries from compiled structure
+    // This is the COMPLETE timeline - components render history as <Message>
+    const compiledEntries = this._lastCompiled?.timelineEntries ?? [];
 
-    // Format timeline entries
-    for (const entry of comInput.timeline) {
-      // Check metadata for formatter reference (stored during applyTimelineEntry)
-      const explicitFormatter = entry.metadata?.["formatter"] as Formatter | undefined;
-      const content = entry.message.content as SemanticContentBlock[];
+    // Format compiled entries
+    const formattedTimeline: COMTimelineEntry[] = [];
 
-      // Format if formatter explicitly set OR blocks have semanticNode OR blocks are event blocks
-      // Code/json blocks are passed through as-is (they'll be formatted to markdown later in fromEngineState/adapter)
-      // Native ContentBlocks (like image/audio/video/code/json) should pass through unchanged
-      const hasSemanticNodes = content.some((block) => block.semanticNode || block.semantic);
-      const hasEventBlocks = content.some(
-        (block) =>
-          block.type === "user_action" ||
-          block.type === "system_event" ||
-          block.type === "state_change",
-      );
+    for (const compiled of compiledEntries) {
+      if (compiled.kind === "message" && compiled.message) {
+        const content = compiled.message.content as SemanticContentBlock[];
+        const explicitFormatter = compiled.formatter;
 
-      let formattedContent: ContentBlock[];
-      if (explicitFormatter || hasSemanticNodes || hasEventBlocks) {
-        const formatter =
-          explicitFormatter ||
-          ((blocks: SemanticContentBlock[]) => this.defaultRenderer.format(blocks));
-        formattedContent = formatter(content);
-      } else {
-        // Pass through native ContentBlocks as-is (code, json, image, audio, video, etc.)
-        formattedContent = content;
+        // Format if formatter explicitly set OR blocks have semanticNode OR blocks are event blocks
+        const hasSemanticNodes = content.some((block) => block.semanticNode || block.semantic);
+        const hasEventBlocks = content.some(
+          (block) =>
+            block.type === "user_action" ||
+            block.type === "system_event" ||
+            block.type === "state_change",
+        );
+
+        let formattedContent: ContentBlock[];
+        if (explicitFormatter || hasSemanticNodes || hasEventBlocks) {
+          const formatter =
+            explicitFormatter ||
+            ((blocks: SemanticContentBlock[]) => this.defaultRenderer.format(blocks));
+          formattedContent = formatter(content);
+        } else {
+          formattedContent = content;
+        }
+
+        formattedTimeline.push({
+          kind: "message",
+          message: {
+            ...compiled.message,
+            content: formattedContent,
+          },
+          tags: compiled.tags,
+          visibility: compiled.visibility,
+          metadata: compiled.metadata,
+        });
       }
-
-      formattedTimeline.push({
-        ...entry,
-        message: {
-          ...entry.message,
-          content: formattedContent,
-        },
-      });
     }
+
+    log.debug(
+      { compiledCount: compiledEntries.length },
+      "formatInput: processed compiled timeline entries",
+    );
+
+    let resultTimeline = formattedTimeline;
+    const formattedSections: Record<string, COMSection> = {};
 
     // Apply policy boundaries (e.g., TokenBudget)
     // Policies are applied in order (outer to inner as they appear in tree)
     for (const policy of this.policyBoundaries) {
-      formattedTimeline = await policy.process(formattedTimeline, policy.value);
+      resultTimeline = await policy.process(resultTimeline, policy.value);
     }
 
     // Format sections (use cached formattedContent)
@@ -388,7 +411,7 @@ export class StructureRenderer {
     }
 
     return {
-      timeline: formattedTimeline,
+      timeline: resultTimeline,
       sections: formattedSections,
       tools: comInput.tools,
       ephemeral: comInput.ephemeral, // Pass through ephemeral (already formatted)

@@ -144,10 +144,7 @@ export class EventBuffer<T extends TypedEvent> {
    * Emit an event (two-param form: type + event without type property).
    * @returns true if there were listeners
    */
-  emit<K extends T["type"]>(
-    eventType: K,
-    event: Omit<EventMap<T>[K], "type">
-  ): boolean;
+  emit<K extends T["type"]>(eventType: K, event: Omit<EventMap<T>[K], "type">): boolean;
   /**
    * Emit an event with wildcard (backwards compat with EventEmitter).
    * The event must be a full event object with type property.
@@ -161,7 +158,7 @@ export class EventBuffer<T extends TypedEvent> {
   emit(event: T): boolean;
   emit<K extends T["type"]>(
     eventTypeOrEvent: K | "*" | T,
-    maybeEvent?: Omit<EventMap<T>[K], "type"> | T
+    maybeEvent?: Omit<EventMap<T>[K], "type"> | T,
   ): boolean {
     let event: T;
     if (maybeEvent !== undefined) {
@@ -189,10 +186,7 @@ export class EventBuffer<T extends TypedEvent> {
    * Handler receives the narrowed type for that event.
    * @returns Unsubscribe function
    */
-  on<K extends T["type"]>(
-    eventType: K,
-    handler: EventHandler<EventMap<T>[K]>
-  ): Unsubscribe;
+  on<K extends T["type"]>(eventType: K, handler: EventHandler<EventMap<T>[K]>): Unsubscribe;
   /**
    * Subscribe to all events (wildcard).
    * Pass "*" or no event type for wildcard subscription.
@@ -202,7 +196,7 @@ export class EventBuffer<T extends TypedEvent> {
   on(handler: EventHandler<T>): Unsubscribe;
   on<K extends T["type"]>(
     eventTypeOrHandler: K | "*" | EventHandler<T>,
-    handler?: EventHandler<EventMap<T>[K]> | EventHandler<T>
+    handler?: EventHandler<EventMap<T>[K]> | EventHandler<T>,
   ): Unsubscribe {
     if (typeof eventTypeOrHandler === "function") {
       return this.addSubscriber(WILDCARD, eventTypeOrHandler);
@@ -218,10 +212,7 @@ export class EventBuffer<T extends TypedEvent> {
    * Subscribe for a single event of a specific type.
    * @returns Unsubscribe function
    */
-  once<K extends T["type"]>(
-    eventType: K,
-    handler: EventHandler<EventMap<T>[K]>
-  ): Unsubscribe;
+  once<K extends T["type"]>(eventType: K, handler: EventHandler<EventMap<T>[K]>): Unsubscribe;
   /**
    * Subscribe for a single event (any type).
    * Pass "*" or no event type for wildcard subscription.
@@ -231,7 +222,7 @@ export class EventBuffer<T extends TypedEvent> {
   once(handler: EventHandler<T>): Unsubscribe;
   once<K extends T["type"]>(
     eventTypeOrHandler: K | "*" | EventHandler<T>,
-    handler?: EventHandler<EventMap<T>[K]> | EventHandler<T>
+    handler?: EventHandler<EventMap<T>[K]> | EventHandler<T>,
   ): Unsubscribe {
     if (typeof eventTypeOrHandler === "function") {
       const wrapper: EventHandler<T> = (event) => {
@@ -258,10 +249,7 @@ export class EventBuffer<T extends TypedEvent> {
    * Unsubscribe a handler from a specific event type.
    * @returns true if handler was found and removed
    */
-  off<K extends T["type"]>(
-    eventType: K,
-    handler: EventHandler<EventMap<T>[K]>
-  ): boolean;
+  off<K extends T["type"]>(eventType: K, handler: EventHandler<EventMap<T>[K]>): boolean;
   /**
    * Unsubscribe a wildcard handler.
    * Pass "*" or no event type for wildcard.
@@ -271,7 +259,7 @@ export class EventBuffer<T extends TypedEvent> {
   off(handler: EventHandler<T>): boolean;
   off<K extends T["type"]>(
     eventTypeOrHandler: K | "*" | EventHandler<T>,
-    handler?: EventHandler<EventMap<T>[K]> | EventHandler<T>
+    handler?: EventHandler<EventMap<T>[K]> | EventHandler<T>,
   ): boolean {
     if (typeof eventTypeOrHandler === "function") {
       return this.removeSubscriber(WILDCARD, eventTypeOrHandler);
@@ -286,10 +274,7 @@ export class EventBuffer<T extends TypedEvent> {
    * Subscribe to a specific event type and replay all buffered events of that type.
    * @returns Unsubscribe function
    */
-  onReplay<K extends T["type"]>(
-    eventType: K,
-    handler: EventHandler<EventMap<T>[K]>
-  ): Unsubscribe;
+  onReplay<K extends T["type"]>(eventType: K, handler: EventHandler<EventMap<T>[K]>): Unsubscribe;
   /**
    * Subscribe to all events and replay entire buffer.
    * @returns Unsubscribe function
@@ -297,7 +282,7 @@ export class EventBuffer<T extends TypedEvent> {
   onReplay(handler: EventHandler<T>): Unsubscribe;
   onReplay<K extends T["type"]>(
     eventTypeOrHandler: K | EventHandler<T>,
-    handler?: EventHandler<EventMap<T>[K]>
+    handler?: EventHandler<EventMap<T>[K]>,
   ): Unsubscribe {
     if (typeof eventTypeOrHandler === "function") {
       // Replay all buffered events
@@ -471,9 +456,7 @@ export class EventBuffer<T extends TypedEvent> {
   /**
    * Create a filtered async iterator for a specific event type.
    */
-  async *filter<K extends T["type"]>(
-    eventType: K
-  ): AsyncGenerator<EventMap<T>[K], void, unknown> {
+  async *filter<K extends T["type"]>(eventType: K): AsyncGenerator<EventMap<T>[K], void, unknown> {
     for await (const event of this) {
       if (event.type === eventType) {
         yield event as EventMap<T>[K];
@@ -488,25 +471,22 @@ export class EventBuffer<T extends TypedEvent> {
   /** Alias for on() (EventEmitter compatibility) */
   addListener<K extends T["type"]>(
     eventType: K,
-    handler: EventHandler<EventMap<T>[K]>
+    handler: EventHandler<EventMap<T>[K]>,
   ): Unsubscribe;
   addListener(handler: EventHandler<T>): Unsubscribe;
   addListener<K extends T["type"]>(
     eventTypeOrHandler: K | EventHandler<T>,
-    handler?: EventHandler<EventMap<T>[K]>
+    handler?: EventHandler<EventMap<T>[K]>,
   ): Unsubscribe {
     return (this.on as any)(eventTypeOrHandler, handler);
   }
 
   /** Alias for off() (EventEmitter compatibility) */
-  removeListener<K extends T["type"]>(
-    eventType: K,
-    handler: EventHandler<EventMap<T>[K]>
-  ): boolean;
+  removeListener<K extends T["type"]>(eventType: K, handler: EventHandler<EventMap<T>[K]>): boolean;
   removeListener(handler: EventHandler<T>): boolean;
   removeListener<K extends T["type"]>(
     eventTypeOrHandler: K | EventHandler<T>,
-    handler?: EventHandler<EventMap<T>[K]>
+    handler?: EventHandler<EventMap<T>[K]>,
   ): boolean {
     return (this.off as any)(eventTypeOrHandler, handler);
   }

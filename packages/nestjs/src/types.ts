@@ -5,12 +5,7 @@
  */
 
 import type { ModuleMetadata, Type, InjectionToken } from "@nestjs/common";
-import type {
-  SessionHandler,
-  EventBridge,
-  SessionHandlerConfig,
-  EventBridgeConfig,
-} from "@tentickle/server";
+import type { App } from "@tentickle/core";
 
 // ============================================================================
 // Module Configuration
@@ -21,21 +16,28 @@ import type {
  */
 export interface TentickleModuleOptions {
   /**
-   * Session handler configuration.
+   * The Tentickle App instance.
    */
-  sessionHandler: SessionHandlerConfig;
+  app: App;
 
   /**
-   * Event bridge configuration (optional).
-   * If not provided, uses sessionHandler from above.
+   * Endpoint path overrides.
    */
-  eventBridge?: Omit<EventBridgeConfig, "sessionHandler">;
+  paths?: {
+    events?: string;
+    send?: string;
+    subscribe?: string;
+    abort?: string;
+    close?: string;
+    toolResponse?: string;
+    channel?: string;
+  };
 
   /**
-   * Controller path prefix.
-   * @default "tentickle"
+   * SSE keepalive interval in ms.
+   * @default 15000
    */
-  path?: string;
+  sseKeepaliveInterval?: number;
 
   /**
    * Whether to register the default controller.
@@ -49,22 +51,17 @@ export interface TentickleModuleOptions {
  * Async configuration factory.
  */
 export interface TentickleModuleOptionsFactory {
-  createTentickleOptions():
-    | Promise<TentickleModuleOptions>
-    | TentickleModuleOptions;
+  createTentickleOptions(): Promise<TentickleModuleOptions> | TentickleModuleOptions;
 }
 
 /**
  * Async module configuration.
  */
-export interface TentickleModuleAsyncOptions
-  extends Pick<ModuleMetadata, "imports"> {
+export interface TentickleModuleAsyncOptions extends Pick<ModuleMetadata, "imports"> {
   /**
    * Factory function for options.
    */
-  useFactory?: (
-    ...args: unknown[]
-  ) => Promise<TentickleModuleOptions> | TentickleModuleOptions;
+  useFactory?: (...args: unknown[]) => Promise<TentickleModuleOptions> | TentickleModuleOptions;
 
   /**
    * Dependencies to inject into factory.
@@ -99,26 +96,12 @@ export interface TentickleModuleAsyncOptions
 export const TENTICKLE_OPTIONS = "TENTICKLE_OPTIONS";
 
 /**
- * Injection token for SessionHandler.
+ * Injection token for App.
  */
-export const TENTICKLE_SESSION_HANDLER = "TENTICKLE_SESSION_HANDLER";
-
-/**
- * Injection token for EventBridge.
- */
-export const TENTICKLE_EVENT_BRIDGE = "TENTICKLE_EVENT_BRIDGE";
+export const TENTICKLE_APP = "TENTICKLE_APP";
 
 // ============================================================================
 // Re-exports
 // ============================================================================
 
-export type {
-  SessionHandler,
-  EventBridge,
-  SessionHandlerConfig,
-  EventBridgeConfig,
-  CreateSessionInput,
-  SendInput,
-  ServerConnection,
-  SessionStateInfo,
-} from "@tentickle/server";
+export type { SendInput } from "@tentickle/shared";

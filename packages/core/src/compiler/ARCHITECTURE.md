@@ -1150,17 +1150,17 @@ class DynamicAgent extends Component {
 ### Similarities
 
 | Feature                     | React | Tentickle Compiler |
-| --------------------------- | ----- | ------------- |
-| Fiber nodes                 | Yes   | Yes           |
-| Double buffering            | Yes   | Yes           |
-| Hooks (useState, useEffect) | Yes   | Yes           |
-| Reconciliation by key       | Yes   | Yes           |
-| Component lifecycle         | Yes   | Yes           |
-| Fragment support            | Yes   | Yes           |
+| --------------------------- | ----- | ------------------ |
+| Fiber nodes                 | Yes   | Yes                |
+| Double buffering            | Yes   | Yes                |
+| Hooks (useState, useEffect) | Yes   | Yes                |
+| Reconciliation by key       | Yes   | Yes                |
+| Component lifecycle         | Yes   | Yes                |
+| Fragment support            | Yes   | Yes                |
 
 ### Key Differences
 
-| Aspect              | React                     | Tentickle Compiler                    |
+| Aspect              | React                     | Tentickle Compiler               |
 | ------------------- | ------------------------- | -------------------------------- |
 | **Async**           | Effects after paint       | All phases can be async          |
 | **Suspense**        | Throw promise pattern     | Not needed - we can wait         |

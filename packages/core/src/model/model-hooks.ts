@@ -1,4 +1,4 @@
-import type { Middleware } from "../core/index.js";
+import type { Middleware } from "../core/index";
 import type { COMInput } from "../com/types";
 import type { EngineResponse } from "../engine/engine-response";
 import { BaseHookRegistry } from "../hooks/base-hook-registry";

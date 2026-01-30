@@ -257,7 +257,7 @@ Hooks are retrieved in specificity order:
 
 ### Comparison with React
 
-| Aspect        | React Hooks              | Tentickle Hooks                     |
+| Aspect        | React Hooks              | Tentickle Hooks                |
 | ------------- | ------------------------ | ------------------------------ |
 | Async support | No (needs Suspense)      | Yes (async-first)              |
 | State storage | Fiber memoizedState      | Fiber memoizedState (same)     |

@@ -5,7 +5,7 @@
  * Demonstrates basic tool creation with Zod schema validation.
  */
 
-import { createTool } from "@tentickle/core/tool";
+import { createTool } from "@tentickle/core";
 import { z } from "zod";
 
 /**

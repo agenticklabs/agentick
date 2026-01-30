@@ -1,14 +1,14 @@
 {
   "name": "@tentickle/client",
   "version": "0.0.1",
-  "description": "Client SDK for Tentickle - channel connection, framework sugar, transport implementations",
+  "description": "Client SDK for Tentickle - multiplexed sessions over SSE",
   "keywords": [
     "agent",
     "ai",
-    "client",
     "channels",
+    "client",
     "sse",
-    "websocket"
+    "streaming"
   ],
   "license": "ISC",
   "author": "Ryan Lindgren",
@@ -18,8 +18,7 @@
   "type": "module",
   "main": "src/index.ts",
   "exports": {
-    ".": "./src/index.ts",
-    "./transports": "./src/transports/index.ts"
+    ".": "./src/index.ts"
   },
   "publishConfig": {
     "access": "public",
@@ -27,10 +26,6 @@
       ".": {
         "types": "./dist/index.d.ts",
         "import": "./dist/index.js"
-      },
-      "./transports": {
-        "types": "./dist/transports/index.d.ts",
-        "import": "./dist/transports/index.js"
       }
     },
     "main": "./dist/index.js",

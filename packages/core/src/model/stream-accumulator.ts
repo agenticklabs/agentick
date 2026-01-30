@@ -559,9 +559,15 @@ export interface ChunkMapping<TChunk> {
   toolCallStart?: { type: string; extract: (chunk: TChunk) => { id: string; name: string } };
   toolCallDelta?: { type: string; extract: (chunk: TChunk) => { id: string; delta: string } };
   toolCallEnd?: { type: string; extract: (chunk: TChunk) => { id: string; input?: unknown } };
-  toolCall?: { type: string; extract: (chunk: TChunk) => { id: string; name: string; input: unknown } };
+  toolCall?: {
+    type: string;
+    extract: (chunk: TChunk) => { id: string; name: string; input: unknown };
+  };
   messageStart?: { type: string; extract: (chunk: TChunk) => { model?: string } };
-  messageEnd?: { type: string; extract: (chunk: TChunk) => { stopReason: StopReason; usage?: UsageStats } };
+  messageEnd?: {
+    type: string;
+    extract: (chunk: TChunk) => { stopReason: StopReason; usage?: UsageStats };
+  };
   usage?: { type: string; extract: (chunk: TChunk) => Partial<UsageStats> };
   error?: { type: string; extract: (chunk: TChunk) => { error: Error | string; code?: string } };
 }

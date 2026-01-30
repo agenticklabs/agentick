@@ -4,9 +4,15 @@
  * @module @tentickle/react/hooks
  */
 
-import { useState, useEffect, useCallback, useRef, useSyncExternalStore } from "react";
-import type { ConnectionState, StreamEvent, StreamingTextState } from "@tentickle/client";
-import { useClient } from "./context.js";
+import { useState, useEffect, useCallback, useRef, useSyncExternalStore, useMemo } from "react";
+import type {
+  ConnectionState,
+  StreamEvent,
+  SessionStreamEvent,
+  StreamingTextState,
+  SessionAccessor,
+} from "@tentickle/client";
+import { useClient } from "./context";
 import type {
   UseSessionOptions,
   UseSessionResult,
@@ -14,10 +20,12 @@ import type {
   UseEventsResult,
   UseStreamingTextOptions,
   UseStreamingTextResult,
-} from "./types.js";
+  UseConnectionOptions,
+  UseConnectionResult,
+} from "./types";
 
 // ============================================================================
-// useConnectionState
+// useConnectionState (alias for useConnection)
 // ============================================================================
 
 /**
@@ -55,28 +63,52 @@ export function useConnectionState(): ConnectionState {
 }
 
 // ============================================================================
+// useConnection
+// ============================================================================
+
+/**
+ * Read the SSE connection state.
+ */
+export function useConnection(_options: UseConnectionOptions = {}): UseConnectionResult {
+  const client = useClient();
+  const [state, setState] = useState<ConnectionState>(client.state);
+
+  useEffect(() => {
+    setState(client.state);
+    return client.onConnectionChange(setState);
+  }, [client]);
+
+  return {
+    state,
+    isConnected: state === "connected",
+    isConnecting: state === "connecting",
+  };
+}
+
+// ============================================================================
 // useSession
 // ============================================================================
 
 /**
- * Manage session lifecycle.
+ * Work with a specific session.
  *
- * Creates or connects to a session, provides connection state and methods.
- *
- * @example Basic usage
+ * @example Basic usage with session ID
  * ```tsx
  * import { useSession } from '@tentickle/react';
  *
- * function Chat() {
- *   const { isConnected, send } = useSession();
+ * function Chat({ sessionId }: { sessionId: string }) {
+ *   const { send, isSubscribed, subscribe } = useSession({ sessionId });
  *   const [input, setInput] = useState('');
+ *
+ *   // Subscribe on mount
+ *   useEffect(() => {
+ *     subscribe();
+ *   }, [subscribe]);
  *
  *   const handleSend = async () => {
  *     await send(input);
  *     setInput('');
  *   };
- *
- *   if (!isConnected) return <div>Connecting...</div>;
  *
  *   return (
  *     <div>
@@ -87,49 +119,45 @@ export function useConnectionState(): ConnectionState {
  * }
  * ```
  *
- * @example With existing session
+ * @example Ephemeral session (no sessionId)
  * ```tsx
- * function Chat({ sessionId }: { sessionId: string }) {
- *   const { isConnected, send } = useSession({ sessionId });
- *   // ...
+ * function QuickChat() {
+ *   const { send } = useSession();
+ *
+ *   // Each send creates/uses an ephemeral session
+ *   const handleSend = () => send('Hello!');
+ *
+ *   return <button onClick={handleSend}>Ask</button>;
  * }
  * ```
  *
- * @example Manual connect
+ * @example Auto-subscribe
  * ```tsx
- * function Chat() {
- *   const { connect, isConnected } = useSession({ autoConnect: false });
+ * function Chat({ sessionId }: { sessionId: string }) {
+ *   const { send, isSubscribed } = useSession({
+ *     sessionId,
+ *     autoSubscribe: true,
+ *   });
  *
- *   return isConnected ? (
- *     <ChatInterface />
- *   ) : (
- *     <button onClick={() => connect()}>Start Chat</button>
- *   );
+ *   if (!isSubscribed) return <div>Subscribing...</div>;
+ *
+ *   return <ChatInterface />;
  * }
  * ```
  */
 export function useSession(options: UseSessionOptions = {}): UseSessionResult {
-  const { sessionId: initialSessionId, autoConnect = true, initialProps } = options;
+  const { sessionId, autoSubscribe = false } = options;
 
   const client = useClient();
-  const [sessionId, setSessionId] = useState<string | undefined>(initialSessionId);
-  const [connectionState, setConnectionState] = useState<ConnectionState>(client.state);
-  const [error, setError] = useState<Error | undefined>();
-
-  // Track if we've initiated connection
-  const connectingRef = useRef(false);
   const mountedRef = useRef(true);
 
-  // Subscribe to connection state
-  useEffect(() => {
-    setConnectionState(client.state);
-    const unsubscribe = client.onConnectionChange((state) => {
-      if (mountedRef.current) {
-        setConnectionState(state);
-      }
-    });
-    return unsubscribe;
-  }, [client]);
+  // Get or create session accessor
+  const accessor = useMemo<SessionAccessor | undefined>(() => {
+    if (!sessionId) return undefined;
+    return client.session(sessionId);
+  }, [client, sessionId]);
+
+  const [isSubscribed, setIsSubscribed] = useState(false);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -139,92 +167,81 @@ export function useSession(options: UseSessionOptions = {}): UseSessionResult {
     };
   }, []);
 
-  // Connect function
-  const connect = useCallback(
-    async (explicitSessionId?: string) => {
-      if (connectingRef.current || connectionState === "connected") {
-        return;
-      }
-
-      connectingRef.current = true;
-      setError(undefined);
-
-      try {
-        let targetSessionId = explicitSessionId ?? sessionId;
-
-        // Create session if needed
-        if (!targetSessionId) {
-          const result = await client.createSession({ props: initialProps });
-          targetSessionId = result.sessionId;
-          if (mountedRef.current) {
-            setSessionId(targetSessionId);
-          }
-        }
-
-        // Connect to session
-        await client.connect(targetSessionId);
-      } catch (err) {
-        if (mountedRef.current) {
-          setError(err instanceof Error ? err : new Error(String(err)));
-        }
-      } finally {
-        connectingRef.current = false;
-      }
-    },
-    [client, sessionId, connectionState, initialProps],
-  );
-
-  // Disconnect function
-  const disconnect = useCallback(async () => {
-    try {
-      await client.disconnect();
-    } catch (err) {
-      if (mountedRef.current) {
-        setError(err instanceof Error ? err : new Error(String(err)));
-      }
+  // Subscribe function
+  const subscribe = useCallback(() => {
+    if (!accessor) return;
+    accessor.subscribe();
+    if (mountedRef.current) {
+      setIsSubscribed(true);
     }
-  }, [client]);
+  }, [accessor]);
 
-  // Auto-connect on mount
+  // Unsubscribe function
+  const unsubscribe = useCallback(() => {
+    if (!accessor) return;
+    accessor.unsubscribe();
+    if (mountedRef.current) {
+      setIsSubscribed(false);
+    }
+  }, [accessor]);
+
+  // Auto-subscribe
   useEffect(() => {
-    if (autoConnect && connectionState === "disconnected" && !connectingRef.current) {
-      connect();
+    if (autoSubscribe && accessor && !isSubscribed) {
+      subscribe();
     }
-  }, [autoConnect, connectionState, connect]);
+  }, [autoSubscribe, accessor, isSubscribed, subscribe]);
 
-  // Framework methods
+  // Send function
   const send = useCallback(
-    async (content: string) => {
-      await client.send(content);
+    (input: Parameters<UseSessionResult["send"]>[0]) => {
+      if (accessor) {
+        const normalizedInput =
+          typeof input === "string"
+            ? {
+                message: {
+                  role: "user" as const,
+                  content: [{ type: "text" as const, text: input }],
+                },
+              }
+            : input;
+        return accessor.send(normalizedInput as any);
+      }
+      return client.send(input as any);
     },
-    [client],
+    [client, accessor],
   );
 
-  const tick = useCallback(
-    async (props?: Record<string, unknown>) => {
-      await client.tick(props);
-    },
-    [client],
-  );
-
+  // Abort function
   const abort = useCallback(
     async (reason?: string) => {
-      await client.abort(reason);
+      if (accessor) {
+        await accessor.abort(reason);
+      } else if (sessionId) {
+        await client.abort(sessionId, reason);
+      }
     },
-    [client],
+    [client, accessor, sessionId],
   );
+
+  // Close function
+  const close = useCallback(async () => {
+    if (accessor) {
+      await accessor.close();
+    } else if (sessionId) {
+      await client.closeSession(sessionId);
+    }
+  }, [client, accessor, sessionId]);
 
   return {
     sessionId,
-    connectionState,
-    isConnected: connectionState === "connected",
-    isConnecting: connectionState === "connecting",
-    error,
-    connect,
-    disconnect,
+    isSubscribed,
+    subscribe,
+    unsubscribe,
     send,
-    tick,
     abort,
+    close,
+    accessor,
   };
 }
 
@@ -265,18 +282,39 @@ export function useSession(options: UseSessionOptions = {}): UseSessionResult {
  *   return <div>Tool: {event.type === 'tool_call' ? event.name : 'result'}</div>;
  * }
  * ```
+ *
+ * @example Session-specific events
+ * ```tsx
+ * function SessionEvents({ sessionId }: { sessionId: string }) {
+ *   const { event } = useEvents({ sessionId });
+ *   // Only receives events for this session
+ *   return <div>{event?.type}</div>;
+ * }
+ * ```
  */
 export function useEvents(options: UseEventsOptions = {}): UseEventsResult {
-  const { filter, enabled = true } = options;
+  const { filter, sessionId, enabled = true } = options;
 
   const client = useClient();
-  const [event, setEvent] = useState<StreamEvent | undefined>();
+  const [event, setEvent] = useState<StreamEvent | SessionStreamEvent | undefined>();
 
   useEffect(() => {
     if (!enabled) return;
 
+    // Use session-specific subscription if sessionId provided
+    if (sessionId) {
+      const accessor = client.session(sessionId);
+      const unsubscribe = accessor.onEvent((incoming) => {
+        if (filter && !filter.includes(incoming.type)) {
+          return;
+        }
+        setEvent(incoming);
+      });
+      return unsubscribe;
+    }
+
+    // Global subscription
     const unsubscribe = client.onEvent((incoming) => {
-      // Apply filter if provided
       if (filter && !filter.includes(incoming.type)) {
         return;
       }
@@ -284,7 +322,7 @@ export function useEvents(options: UseEventsOptions = {}): UseEventsResult {
     });
 
     return unsubscribe;
-  }, [client, enabled, filter]);
+  }, [client, sessionId, enabled, filter]);
 
   const clear = useCallback(() => {
     setEvent(undefined);
@@ -319,9 +357,7 @@ export function useEvents(options: UseEventsOptions = {}): UseEventsResult {
  * }
  * ```
  */
-export function useStreamingText(
-  options: UseStreamingTextOptions = {},
-): UseStreamingTextResult {
+export function useStreamingText(options: UseStreamingTextOptions = {}): UseStreamingTextResult {
   const { enabled = true } = options;
   const client = useClient();
 
@@ -343,90 +379,4 @@ export function useStreamingText(
   }, [client]);
 
   return { text: state.text, isStreaming: state.isStreaming, clear };
-}
-
-// ============================================================================
-// useResult
-// ============================================================================
-
-/**
- * Subscribe to execution results.
- *
- * @example
- * ```tsx
- * import { useResult } from '@tentickle/react';
- *
- * function ResultDisplay() {
- *   const result = useResult();
- *
- *   if (!result) return null;
- *
- *   return (
- *     <div>
- *       <p>{result.response}</p>
- *       <small>Tokens: {result.usage.totalTokens}</small>
- *     </div>
- *   );
- * }
- * ```
- */
-export function useResult() {
-  const client = useClient();
-  const [result, setResult] = useState<{
-    response: string;
-    outputs: Record<string, unknown>;
-    usage: { inputTokens: number; outputTokens: number; totalTokens: number };
-    stopReason?: string;
-  } | undefined>();
-
-  useEffect(() => {
-    const unsubscribe = client.onResult((incoming) => {
-      setResult(incoming);
-    });
-
-    return unsubscribe;
-  }, [client]);
-
-  return result;
-}
-
-// ============================================================================
-// useChannel
-// ============================================================================
-
-/**
- * Access a named channel for custom pub/sub.
- *
- * @example
- * ```tsx
- * import { useChannel } from '@tentickle/react';
- *
- * function TodoList() {
- *   const [todos, setTodos] = useState([]);
- *   const channel = useChannel('todos');
- *
- *   useEffect(() => {
- *     return channel.subscribe((payload, event) => {
- *       if (event.type === 'updated') {
- *         setTodos(payload.items);
- *       }
- *     });
- *   }, [channel]);
- *
- *   const addTodo = async (title: string) => {
- *     await channel.publish('add', { title });
- *   };
- *
- *   return (
- *     <ul>
- *       {todos.map((t) => <li key={t.id}>{t.title}</li>)}
- *     </ul>
- *   );
- * }
- * ```
- */
-export function useChannel(name: string) {
-  const client = useClient();
-  // Channel accessor is memoized in the client
-  return client.channel(name);
 }

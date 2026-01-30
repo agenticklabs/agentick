@@ -72,20 +72,19 @@ export type FrameworkChannel = (typeof FrameworkChannels)[keyof typeof Framework
 import type { Message } from "./messages";
 
 /**
+ * Discriminated input for sending to a session.
+ * Requires either `message` or `messages` (but not both).
+ */
+export type SendInput<P = Record<string, unknown>> =
+  | { message: Message; messages?: never; props?: P; metadata?: Record<string, unknown> }
+  | { messages: Message[]; message?: never; props?: P; metadata?: Record<string, unknown> };
+
+/**
  * Payload for session:messages channel.
  *
  * Mirrors Session.send() input for thin channel semantics.
  */
-export interface SessionMessagePayload {
-  /** Single message to send */
-  message?: Message;
-  /** Batch of messages to send */
-  messages?: Message[];
-  /** Optional props for the execution */
-  props?: Record<string, unknown>;
-  /** Optional metadata applied to messages */
-  metadata?: Record<string, unknown>;
-}
+export type SessionMessagePayload = SendInput;
 
 /**
  * Payload for session:control channel - tick command.
@@ -136,6 +135,44 @@ export interface ToolConfirmationResponse {
   approved: boolean;
   reason?: string;
   modifiedArguments?: Record<string, unknown>;
+}
+
+// ============================================================================
+// Channel Communication Types
+// ============================================================================
+
+/**
+ * Request payload for publishing to a channel.
+ * Sent via POST /channel endpoint.
+ */
+export interface ChannelPublishRequest {
+  /** Target session ID */
+  sessionId: string;
+  /** Channel name */
+  channel: string;
+  /** Event type within the channel */
+  type: string;
+  /** Event payload */
+  payload?: unknown;
+  /** Request/response correlation ID */
+  id?: string;
+  /** Additional metadata */
+  metadata?: Record<string, unknown>;
+}
+
+/**
+ * Channel event wrapper for SSE transmission.
+ * Sent from server to client when a channel event occurs.
+ */
+export interface ChannelSSEEvent {
+  /** Discriminator for SSE event routing */
+  type: "channel";
+  /** Session ID this event belongs to */
+  sessionId: string;
+  /** Channel name */
+  channel: string;
+  /** The actual channel event */
+  event: ChannelEvent;
 }
 
 // ============================================================================

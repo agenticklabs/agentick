@@ -3,6 +3,7 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
   esbuild: {
     jsx: "automatic",
+    // Note: v2 tests use @jsxImportSource react pragma to override
     jsxImportSource: "tentickle",
   },
   test: {
@@ -10,10 +11,17 @@ export default defineConfig({
     environment: "node",
     include: [
       "packages/*/src/**/*.spec.{ts,tsx}",
+      "packages/core/v2/src/**/*.spec.{ts,tsx}",
       "packages/adapters/*/src/**/*.spec.{ts,tsx}",
       "example/*/src/**/*.spec.{ts,tsx}",
     ],
-    exclude: ["**/node_modules/**", "**/dist/**", "packages/react/**", "packages/angular/**", "packages/nestjs/**"],
+    exclude: [
+      "**/node_modules/**",
+      "**/dist/**",
+      "packages/react/**",
+      "packages/angular/**",
+      "packages/nestjs/**",
+    ],
     testTimeout: 30000,
     clearMocks: true,
     restoreMocks: true,

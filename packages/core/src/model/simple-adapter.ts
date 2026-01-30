@@ -12,18 +12,18 @@
  * @module tentickle/model/simple-adapter
  */
 
-import type { COMInput } from "../com/types.js";
-import type { EngineResponse } from "../engine/engine-response.js";
-import type { EngineModel, ModelInput, ModelOutput, ModelMetadata } from "./model.js";
-import { createLanguageModel } from "./model.js";
+import type { COMInput } from "../com/types";
+import type { EngineResponse } from "../engine/engine-response";
+import type { EngineModel, ModelInput, ModelOutput, ModelMetadata } from "./model";
+import { createLanguageModel } from "./model";
 import {
   StreamAccumulator,
   type AdapterDelta,
   type ChunkMapping,
   createChunkMapper,
-} from "./stream-accumulator.js";
+} from "./stream-accumulator";
 import type { StreamEvent } from "@tentickle/shared/streaming";
-import { fromEngineState, toEngineState } from "./utils/language-model.js";
+import { fromEngineState, toEngineState } from "./utils/language-model";
 
 // ============================================================================
 // Simple Adapter Options
@@ -122,8 +122,10 @@ export interface SimpleAdapterOptions<TProviderInput, TProviderOutput, TChunk> {
 /**
  * Declarative options using ChunkMapping instead of mapChunk function.
  */
-export interface DeclarativeAdapterOptions<TProviderInput, TProviderOutput, TChunk>
-  extends Omit<SimpleAdapterOptions<TProviderInput, TProviderOutput, TChunk>, "mapChunk"> {
+export interface DeclarativeAdapterOptions<TProviderInput, TProviderOutput, TChunk> extends Omit<
+  SimpleAdapterOptions<TProviderInput, TProviderOutput, TChunk>,
+  "mapChunk"
+> {
   /**
    * Declarative chunk mapping.
    * Alternative to mapChunk for simple cases.
@@ -264,9 +266,9 @@ export function createSimpleAdapter<TProviderInput, TProviderOutput, TChunk>(
 
       // executeStream wraps provider stream with StreamAccumulator
       executeStream: executeStream
-        ? ((input: TProviderInput) => {
+        ? (((input: TProviderInput) => {
             return createAccumulatedStream(executeStream(input), mapChunk, metadata.id);
-          }) as any // Cast needed: we return StreamEvent, not TChunk
+          }) as any) // Cast needed: we return StreamEvent, not TChunk
         : undefined,
     },
 
@@ -338,7 +340,13 @@ function createBasicEvent(delta: AdapterDelta): StreamEvent {
 
   switch (delta.type) {
     case "text":
-      return { type: "content_delta", ...base, blockType: "text", blockIndex: 0, delta: delta.delta } as StreamEvent;
+      return {
+        type: "content_delta",
+        ...base,
+        blockType: "text",
+        blockIndex: 0,
+        delta: delta.delta,
+      } as StreamEvent;
     case "reasoning":
       return { type: "reasoning_delta", ...base, blockIndex: 0, delta: delta.delta } as StreamEvent;
     case "tool_call":
@@ -355,15 +363,29 @@ function createBasicEvent(delta: AdapterDelta): StreamEvent {
     case "message_start":
       return { type: "message_start", ...base, role: "assistant" } as StreamEvent;
     case "message_end":
-      return { type: "message_end", ...base, stopReason: delta.stopReason, usage: delta.usage } as StreamEvent;
+      return {
+        type: "message_end",
+        ...base,
+        stopReason: delta.stopReason,
+        usage: delta.usage,
+      } as StreamEvent;
     case "error":
       return {
         type: "error",
         ...base,
-        error: { message: typeof delta.error === "string" ? delta.error : delta.error.message, code: delta.code },
+        error: {
+          message: typeof delta.error === "string" ? delta.error : delta.error.message,
+          code: delta.code,
+        },
       } as StreamEvent;
     default:
-      return { type: "content_delta", ...base, blockType: "text", blockIndex: 0, delta: "" } as StreamEvent;
+      return {
+        type: "content_delta",
+        ...base,
+        blockType: "text",
+        blockIndex: 0,
+        delta: "",
+      } as StreamEvent;
   }
 }
 

@@ -36,11 +36,15 @@ import {
   isComputed,
 } from "./signal";
 import { shouldSkipRecompile } from "../compiler/fiber-compiler";
+import { Logger } from "../core/logger";
 import type { COM } from "../com/object-model";
 import type { COMTimelineEntry, COMInput } from "../com/types";
 import type { TickState } from "../component/component";
 import type { CompiledStructure } from "../compiler/types";
 import type { ExecutionMessage } from "../engine/execution-types";
+import type { Message } from "@tentickle/shared";
+
+const log = Logger.for("hooks");
 
 // ============================================================================
 // Render Context (Global During Render)
@@ -190,16 +194,16 @@ function mountWorkInProgressHook(): HookState {
  * Check if a hook should skip initialization because it's being hydrated.
  * Returns the hydrated value if available.
  */
-function getHydratedValue<T>(hookIndex: number): T | undefined {
-  const ctx = getCurrentContext();
-  if (ctx.isHydrating && ctx.hydrationData?.hooks) {
-    const hydrationHook = ctx.hydrationData.hooks[hookIndex];
-    if (hydrationHook) {
-      return hydrationHook.value as T;
-    }
-  }
-  return undefined;
-}
+// function getHydratedValue<T>(hookIndex: number): T | undefined {
+//   const ctx = getCurrentContext();
+//   if (ctx.isHydrating && ctx.hydrationData?.hooks) {
+//     const hydrationHook = ctx.hydrationData.hooks[hookIndex];
+//     if (hydrationHook) {
+//       return hydrationHook.value as T;
+//     }
+//   }
+//   return undefined;
+// }
 
 function updateWorkInProgressHook(): HookState {
   const ctx = getCurrentContext();
@@ -262,8 +266,6 @@ function unwrapDeps(deps: unknown[] | undefined | null): unknown[] | undefined |
 
 /**
  * useState - Local component state.
- *
- * @deprecated Use `useSignal` instead for better composability and consistency.
  *
  * State persists across renders via fiber storage.
  *
@@ -797,7 +799,9 @@ export function useOnMessage(
  * }
  * ```
  */
-export function useOnTickStart(callback: (com: COM, state: TickState) => void | Promise<void>): void {
+export function useOnTickStart(
+  callback: (com: COM, state: TickState) => void | Promise<void>,
+): void {
   useTickStart(callback);
 }
 
@@ -817,7 +821,9 @@ export function useOnTickStart(callback: (com: COM, state: TickState) => void | 
  * }
  * ```
  */
-export function useOnAfterRender(callback: (com: COM, state: TickState) => void | Promise<void>): void {
+export function useOnAfterRender(
+  callback: (com: COM, state: TickState) => void | Promise<void>,
+): void {
   const hook = mountOrUpdateHook(HookTag.AfterRender);
   const ctx = getCurrentContext();
 
@@ -906,7 +912,9 @@ export function useOnTickEnd(callback: (com: COM, state: TickState) => void | Pr
  * }
  * ```
  */
-export function useOnComplete(callback: (com: COM, state: TickState) => void | Promise<void>): void {
+export function useOnComplete(
+  callback: (com: COM, state: TickState) => void | Promise<void>,
+): void {
   const hook = mountOrUpdateHook(HookTag.Complete);
   const ctx = getCurrentContext();
 
@@ -1529,15 +1537,62 @@ export function useConversationHistory(options?: ConversationHistoryOptions): CO
   const state = useTickState();
   const com = useCom();
 
-  // Combine previous, current, and injected timelines
-  // - previous: History from previous ticks (including hydrated initial timeline)
-  // - current: Model output from last tick (may be empty on tick 1)
+  // This hook returns PURE DATA for components to render.
+  // Components render this data as <Message> projections.
+  // The compiled output IS what the model sees - JSX is the single source of truth.
+  //
+  // Sources:
+  // - previous: History from previous ticks (the main conversation history)
+  // - current: Model output from last tick (may overlap with previous)
   // - injected: Entries added via com.injectHistory() during this tick
-  let entries: COMTimelineEntry[] = [
-    ...((state.previous as COMInput | undefined)?.timeline || []),
-    ...(state.current?.timeline || []),
-    ...com.getInjectedHistory(),
-  ];
+  // - pending: Queued messages for THIS tick (new user input)
+  //
+  // Deduplication by message reference prevents double-counting.
+  const seen = new Set<Message>();
+  let entries: COMTimelineEntry[] = [];
+
+  const addEntries = (source: COMTimelineEntry[] | undefined, sourceName: string) => {
+    const count = source?.length ?? 0;
+    log.debug({ source: sourceName, count }, "useConversationHistory adding entries from source");
+    if (!source) return;
+    for (const entry of source) {
+      // Dedupe by message reference for entries with messages
+      if (entry.message) {
+        if (seen.has(entry.message)) continue;
+        seen.add(entry.message);
+      }
+      entries.push(entry);
+    }
+  };
+
+  // Add all sources - this is DATA for components to render
+  addEntries((state.previous as COMInput | undefined)?.timeline, "state.previous.timeline");
+  addEntries(state.current?.timeline, "state.current.timeline");
+  addEntries(com.getInjectedHistory(), "com.getInjectedHistory()");
+
+  // Include pending messages (queued for this tick)
+  const pending = state.queuedMessages || [];
+  for (const msg of pending) {
+    if (
+      msg.type === "user" &&
+      msg.content &&
+      typeof msg.content === "object" &&
+      "role" in msg.content
+    ) {
+      const message = msg.content as Message;
+      if (message && !seen.has(message)) {
+        seen.add(message);
+        entries.push({
+          kind: "message",
+          message,
+          tags: ["pending", "user_input"],
+        });
+        log.debug({ role: message.role }, "useConversationHistory added pending message");
+      }
+    }
+  }
+
+  log.debug({ totalEntries: entries.length }, "useConversationHistory total entries");
 
   // Apply role filter if specified
   if (options?.roles) {
@@ -1587,7 +1642,7 @@ export function useMessageCount(): number {
  * Get messages queued for the next tick.
  *
  * Messages can be queued via:
- * - `session.queueMessage(msg)` - Queue a message for later processing
+ * - `session.queue.exec(msg)` - Queue a message for later processing
  * - `session.interrupt(msg)` - Interrupt and queue a message
  * - `RuntimeSession.sendMessage(msg)` - Direct programmatic injection
  *

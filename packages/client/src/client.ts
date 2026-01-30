@@ -1,55 +1,153 @@
 /**
- * TentickleClient - Main client for connecting to Tentickle servers.
+ * TentickleClient - Multiplexed session client
  *
- * Provides:
- * - Pluggable transport (HTTP/SSE default, WebSocket optional)
- * - Framework channel methods (send, tick, abort, onEvent)
- * - Generic channel access (subscribe, publish, request)
- * - Session lifecycle management
+ * Connects to a Tentickle server with a single SSE connection
+ * that multiplexes events for multiple sessions.
  *
  * @module @tentickle/client
  */
 
 import type {
   ConnectionState,
-  Transport,
   ChannelAccessor,
-  EventHandler,
-  ResultHandler,
-  ToolConfirmationHandler,
+  GlobalEventHandler,
+  SessionEventHandler,
+  SessionResultHandler,
+  SessionToolConfirmationHandler,
   ClientEventName,
   ClientEventHandlerMap,
   StreamEventType,
-  StreamEventHandler,
+  GlobalStreamEventHandler,
   StreamingTextState,
   StreamingTextHandler,
   ChannelEvent,
-  ConnectionMetadata,
   SessionResultPayload,
   ToolConfirmationRequest,
   ToolConfirmationResponse,
-  CreateSessionResponse,
-  SessionState,
   StreamEvent,
-} from "./types.js";
-import { FrameworkChannels } from "@tentickle/shared";
-import type { ContentBlock, Message, SessionMessagePayload, TextBlock } from "@tentickle/shared";
-import { HTTPTransport, type HTTPTransportConfig } from "./transports/http.js";
+  SessionStreamEvent,
+  SendInput,
+  ClientExecutionHandle,
+} from "./types";
+import type { ContentBlock, Message } from "@tentickle/shared";
 
 // ============================================================================
-// Utilities
+// Client Configuration
 // ============================================================================
 
-/** Browser-compatible UUID generation */
-function generateId(): string {
-  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
-    return crypto.randomUUID();
-  }
-  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
-    const r = (Math.random() * 16) | 0;
-    const v = c === "x" ? r : (r & 0x3) | 0x8;
-    return v.toString(16);
-  });
+/**
+ * Configuration for TentickleClient.
+ */
+export interface TentickleClientConfig {
+  /** Base URL for the server (e.g., https://api.example.com) */
+  baseUrl: string;
+
+  /** Override default endpoint paths */
+  paths?: {
+    /** SSE stream endpoint (default: /events) */
+    events?: string;
+    /** Send endpoint (default: /send) */
+    send?: string;
+    /** Subscribe endpoint (default: /subscribe) */
+    subscribe?: string;
+    /** Abort endpoint (default: /abort) */
+    abort?: string;
+    /** Close endpoint (default: /close) */
+    close?: string;
+    /** Tool response endpoint (default: /tool-response) */
+    toolResponse?: string;
+    /** Channel endpoint (default: /channel) */
+    channel?: string;
+  };
+
+  /** Authentication token (adds Authorization: Bearer header) */
+  token?: string;
+
+  /** Custom headers for all requests */
+  headers?: Record<string, string>;
+
+  /** Request timeout in ms (default: 30000) */
+  timeout?: number;
+
+  /** Custom fetch implementation */
+  fetch?: typeof fetch;
+
+  /** Custom EventSource constructor (for Node.js polyfills) */
+  EventSource?: typeof EventSource;
+
+  /** Send cookies with requests and SSE */
+  withCredentials?: boolean;
+}
+
+// ============================================================================
+// Session Accessor
+// ============================================================================
+
+/**
+ * Session accessor for interacting with a specific session.
+ *
+ * Cold accessor (from `client.session(id)`) - no server subscription
+ * Hot accessor (from `client.subscribe(id)`) - actively receiving events
+ */
+export interface SessionAccessor {
+  /** Session ID */
+  readonly sessionId: string;
+
+  /** Whether this accessor is subscribed (hot) */
+  readonly isSubscribed: boolean;
+
+  /**
+   * Subscribe to session events.
+   * Makes this a "hot" accessor.
+   */
+  subscribe(): void;
+
+  /**
+   * Unsubscribe from session events.
+   * Makes this a "cold" accessor.
+   */
+  unsubscribe(): void;
+
+  /**
+   * Send a message to this session.
+   */
+  send(input: SendInput): ClientExecutionHandle;
+
+  /**
+   * Abort the current execution.
+   */
+  abort(reason?: string): Promise<void>;
+
+  /**
+   * Close the session.
+   */
+  close(): Promise<void>;
+
+  /**
+   * Submit a tool confirmation response.
+   */
+  submitToolResult(toolUseId: string, result: ToolConfirmationResponse): void;
+
+  /**
+   * Subscribe to events for this session only.
+   */
+  onEvent(handler: SessionEventHandler): () => void;
+
+  /**
+   * Subscribe to results for this session only.
+   */
+  onResult(handler: SessionResultHandler): () => void;
+
+  /**
+   * Subscribe to tool confirmation requests for this session.
+   */
+  onToolConfirmation(handler: SessionToolConfirmationHandler): () => void;
+
+  /**
+   * Get a channel accessor scoped to this session.
+   * Allows pub/sub communication with the server for this session.
+   */
+  channel(name: string): ChannelAccessor;
 }
 
 // ============================================================================
@@ -124,7 +222,7 @@ class ChannelAccessorImpl implements ChannelAccessor {
     });
   }
 
-  /** @internal - Called when event is received on this channel */
+  /** @internal */
   _handleEvent(event: ChannelEvent): void {
     // Check for response to pending request
     if (event.type === "response" && event.id) {
@@ -143,7 +241,9 @@ class ChannelAccessorImpl implements ChannelAccessor {
       if (pending) {
         clearTimeout(pending.timeout);
         this.pendingRequests.delete(event.id);
-        pending.reject(new Error((event.payload as { message?: string })?.message ?? "Request failed"));
+        pending.reject(
+          new Error((event.payload as { message?: string })?.message ?? "Request failed"),
+        );
         return;
       }
     }
@@ -158,7 +258,7 @@ class ChannelAccessorImpl implements ChannelAccessor {
     }
   }
 
-  /** @internal - Cleanup */
+  /** @internal */
   _destroy(): void {
     for (const [, pending] of this.pendingRequests) {
       clearTimeout(pending.timeout);
@@ -170,181 +270,428 @@ class ChannelAccessorImpl implements ChannelAccessor {
 }
 
 // ============================================================================
+// Async Event Queue (single-consumer)
+// ============================================================================
+
+class AsyncEventQueue<T> implements AsyncIterable<T> {
+  private buffer: T[] = [];
+  private resolvers: Array<(value: IteratorResult<T>) => void> = [];
+  private closed = false;
+
+  push(value: T): void {
+    if (this.closed) return;
+    const resolver = this.resolvers.shift();
+    if (resolver) {
+      resolver({ value, done: false });
+      return;
+    }
+    this.buffer.push(value);
+  }
+
+  close(): void {
+    if (this.closed) return;
+    this.closed = true;
+    while (this.resolvers.length > 0) {
+      const resolver = this.resolvers.shift();
+      if (resolver) {
+        resolver({ value: undefined as unknown as T, done: true });
+      }
+    }
+  }
+
+  [Symbol.asyncIterator](): AsyncIterator<T> {
+    return {
+      next: () => {
+        if (this.buffer.length > 0) {
+          const value = this.buffer.shift() as T;
+          return Promise.resolve({ value, done: false });
+        }
+        if (this.closed) {
+          return Promise.resolve({ value: undefined as unknown as T, done: true });
+        }
+        return new Promise<IteratorResult<T>>((resolve) => {
+          this.resolvers.push(resolve);
+        });
+      },
+    };
+  }
+}
+
+// ============================================================================
+// Client Execution Handle
+// ============================================================================
+
+class ClientExecutionHandleImpl implements ClientExecutionHandle {
+  private readonly queue = new AsyncEventQueue<StreamEvent>();
+  private readonly resultPromise: Promise<SessionResultPayload>;
+  private resolveResult!: (result: SessionResultPayload) => void;
+  private rejectResult!: (error: Error) => void;
+  private _status: "running" | "completed" | "aborted" | "error" = "running";
+  private _sessionId: string;
+  private _executionId: string = "pending";
+  private hasResult = false;
+
+  constructor(
+    private readonly client: TentickleClient,
+    private readonly abortController: AbortController,
+    sessionId?: string,
+  ) {
+    this._sessionId = sessionId ?? "pending";
+    this.resultPromise = new Promise<SessionResultPayload>((resolve, reject) => {
+      this.resolveResult = resolve;
+      this.rejectResult = reject;
+    });
+  }
+
+  get sessionId(): string {
+    return this._sessionId;
+  }
+
+  get executionId(): string {
+    return this._executionId;
+  }
+
+  get status(): "running" | "completed" | "aborted" | "error" {
+    return this._status;
+  }
+
+  get result(): Promise<SessionResultPayload> {
+    return this.resultPromise;
+  }
+
+  [Symbol.asyncIterator](): AsyncIterator<StreamEvent> {
+    return this.queue[Symbol.asyncIterator]();
+  }
+
+  abort(reason?: string): void {
+    if (this._status !== "running") return;
+    this._status = "aborted";
+    this.abortController.abort(reason ?? "Client aborted execution");
+    if (this._sessionId !== "pending") {
+      void this.client.abort(this._sessionId, reason).catch(() => {});
+    }
+    this.queue.close();
+    this.rejectResult(new Error(reason ?? "Execution aborted"));
+  }
+
+  queueMessage(message: Message): void {
+    if (this._sessionId === "pending") {
+      throw new Error("Cannot queue message before sessionId is known");
+    }
+    const handle = this.client.send({ message }, { sessionId: this._sessionId });
+    void handle.result.catch(() => {});
+  }
+
+  submitToolResult(toolUseId: string, result: ToolConfirmationResponse): void {
+    if (this._sessionId === "pending") {
+      throw new Error("Cannot submit tool result before sessionId is known");
+    }
+    void this.client.submitToolResult(this._sessionId, toolUseId, result).catch(() => {});
+  }
+
+  /** @internal */
+  _handleEvent(event: SessionStreamEvent): void {
+    if (event.sessionId) {
+      this._sessionId = event.sessionId;
+    }
+    if ("executionId" in event && event.executionId) {
+      this._executionId = event.executionId;
+    }
+
+    const streamEvent = event as unknown as StreamEvent;
+    this.queue.push(streamEvent);
+
+    if (event.type === "result") {
+      this.hasResult = true;
+      this._status = "completed";
+      this.resolveResult(event.result);
+    }
+
+    if (event.type === "execution_end") {
+      if (this._status === "running") {
+        this._status = "completed";
+      }
+      this.queue.close();
+    }
+  }
+
+  /** @internal */
+  _fail(error: Error): void {
+    if (this._status === "running") {
+      this._status = "error";
+    }
+    this.queue.close();
+    if (!this.hasResult) {
+      this.rejectResult(error);
+    }
+  }
+
+  /** @internal */
+  _complete(): void {
+    if (this._status === "running") {
+      this._status = "completed";
+    }
+    this.queue.close();
+    if (!this.hasResult) {
+      this.rejectResult(new Error("Execution completed without result"));
+    }
+  }
+}
+
+// ============================================================================
+// Session Accessor Implementation
+// ============================================================================
+
+class SessionAccessorImpl implements SessionAccessor {
+  readonly sessionId: string;
+  private _isSubscribed = false;
+  private eventHandlers = new Set<SessionEventHandler>();
+  private resultHandlers = new Set<SessionResultHandler>();
+  private toolConfirmationHandlers = new Set<SessionToolConfirmationHandler>();
+  private channels = new Map<string, ChannelAccessorImpl>();
+
+  constructor(
+    sessionId: string,
+    private readonly client: TentickleClient,
+  ) {
+    this.sessionId = sessionId;
+  }
+
+  get isSubscribed(): boolean {
+    return this._isSubscribed;
+  }
+
+  subscribe(): void {
+    if (this._isSubscribed) return;
+    this._isSubscribed = true;
+    this.client._subscribeToSession(this.sessionId).catch((error) => {
+      this._isSubscribed = false;
+      console.error(`Failed to subscribe to session ${this.sessionId}:`, error);
+    });
+  }
+
+  unsubscribe(): void {
+    if (!this._isSubscribed) return;
+    this._isSubscribed = false;
+    this.client._unsubscribeFromSession(this.sessionId).catch((error) => {
+      console.error(`Failed to unsubscribe from session ${this.sessionId}:`, error);
+    });
+  }
+
+  send(input: SendInput): ClientExecutionHandle {
+    return this.client.send(input, { sessionId: this.sessionId });
+  }
+
+  async abort(reason?: string): Promise<void> {
+    await this.client.abort(this.sessionId, reason);
+  }
+
+  async close(): Promise<void> {
+    await this.client.closeSession(this.sessionId);
+  }
+
+  submitToolResult(toolUseId: string, result: ToolConfirmationResponse): void {
+    void this.client.submitToolResult(this.sessionId, toolUseId, result).catch(() => {});
+  }
+
+  onEvent(handler: SessionEventHandler): () => void {
+    this.eventHandlers.add(handler);
+    return () => {
+      this.eventHandlers.delete(handler);
+    };
+  }
+
+  onResult(handler: SessionResultHandler): () => void {
+    this.resultHandlers.add(handler);
+    return () => {
+      this.resultHandlers.delete(handler);
+    };
+  }
+
+  onToolConfirmation(handler: SessionToolConfirmationHandler): () => void {
+    this.toolConfirmationHandlers.add(handler);
+    return () => {
+      this.toolConfirmationHandlers.delete(handler);
+    };
+  }
+
+  /** @internal - Called by client when event is received for this session */
+  _handleEvent(event: StreamEvent): void {
+    for (const handler of this.eventHandlers) {
+      try {
+        handler(event);
+      } catch (error) {
+        console.error("Error in session event handler:", error);
+      }
+    }
+  }
+
+  /** @internal - Called by client when result is received for this session */
+  _handleResult(result: SessionResultPayload): void {
+    for (const handler of this.resultHandlers) {
+      try {
+        handler(result);
+      } catch (error) {
+        console.error("Error in session result handler:", error);
+      }
+    }
+  }
+
+  /** @internal - Called by client when channel event is received for this session */
+  _handleChannelEvent(channelName: string, event: ChannelEvent): void {
+    const channelAccessor = this.channels.get(channelName);
+    if (channelAccessor) {
+      channelAccessor._handleEvent(event);
+    }
+  }
+
+  /** @internal - Called by client when tool confirmation is requested */
+  _handleToolConfirmation(request: ToolConfirmationRequest): void {
+    const respond = (response: ToolConfirmationResponse) => {
+      this.submitToolResult(request.toolUseId, response);
+    };
+    for (const handler of this.toolConfirmationHandlers) {
+      try {
+        handler(request, respond);
+      } catch (error) {
+        console.error("Error in tool confirmation handler:", error);
+      }
+    }
+  }
+
+  channel(name: string): ChannelAccessor {
+    let channelAccessor = this.channels.get(name);
+    if (!channelAccessor) {
+      channelAccessor = new ChannelAccessorImpl(name, async (event) => {
+        await this.client._publishToChannel(this.sessionId, name, event);
+      });
+      this.channels.set(name, channelAccessor);
+      // Subscribe to this channel on the server
+      this.client._subscribeToChannel(this.sessionId, name).catch((err) => {
+        console.error(`Failed to subscribe to channel ${name}:`, err);
+      });
+    }
+    return channelAccessor;
+  }
+
+  /** @internal */
+  _destroy(): void {
+    this.eventHandlers.clear();
+    this.resultHandlers.clear();
+    this.toolConfirmationHandlers.clear();
+    for (const channel of this.channels.values()) {
+      channel._destroy();
+    }
+    this.channels.clear();
+  }
+}
+
+// ============================================================================
+// Utilities
+// ============================================================================
+
+function generateId(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === "x" ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+}
+
+// ============================================================================
 // TentickleClient
 // ============================================================================
 
 /**
- * Options for creating a session.
- */
-export interface CreateSessionOptions {
-  /** Optional session ID (generated if not provided) */
-  sessionId?: string;
-  /** Initial props for the session */
-  props?: Record<string, unknown>;
-}
-
-/**
- * TentickleClient - Connect to Tentickle servers.
+ * TentickleClient - Multiplexed session client.
+ *
+ * Connects to a Tentickle server with a single SSE connection that
+ * can manage multiple session subscriptions.
  *
  * @example
  * ```typescript
  * const client = createClient({
  *   baseUrl: 'https://api.example.com',
- *   userId: 'user_123',
  * });
  *
- * // Create or get session
- * const { sessionId } = await client.createSession();
+ * // Get session accessor (cold - no subscription)
+ * const session = client.session('conv-123');
  *
- * // Connect to the session
- * await client.connect(sessionId);
- *
- * // Send messages
- * client.send('Hello!');
+ * // Subscribe to receive events (hot)
+ * session.subscribe();
  *
  * // Listen for events
- * client.onEvent((event) => {
- *   if (event.type === 'content_delta') {
- *     console.log(event.delta);
- *   }
+ * session.onEvent((event) => {
+ *   console.log(event);
  * });
  *
- * // Trigger execution
- * client.tick();
+ * // Send a message
+ * const handle = session.send({ message: { role: 'user', content: [...] } });
+ * await handle.result;
+ *
+ * // Or use ephemeral send (creates session, executes, closes)
+ * const ephemeral = client.send({ message: {...} });
+ * await ephemeral.result;
  * ```
  */
 export class TentickleClient {
-  private readonly config: HTTPTransportConfig;
-  private readonly transport: Transport;
-  private readonly requestHeaders: Record<string, string>;
+  private readonly config: TentickleClientConfig;
   private readonly fetchFn: typeof fetch;
-  private _sessionId?: string;
-  private channels = new Map<string, ChannelAccessorImpl>();
+  private readonly EventSourceCtor: typeof EventSource;
+  private readonly requestHeaders: Record<string, string>;
+
+  private _state: ConnectionState = "disconnected";
+  private _connectionId?: string;
+  private eventSource?: EventSource;
+  private connectionPromise?: Promise<void>;
+
   private stateHandlers = new Set<(state: ConnectionState) => void>();
-  private eventHandlers = new Set<EventHandler>();
-  private resultHandlers = new Set<ResultHandler>();
-  private toolConfirmationHandler?: ToolConfirmationHandler;
+  private eventHandlers = new Set<GlobalEventHandler>();
   private streamingTextHandlers = new Set<StreamingTextHandler>();
   private _streamingText: StreamingTextState = { text: "", isStreaming: false };
-  private unsubscribeTransport?: () => void;
-  private unsubscribeState?: () => void;
 
-  constructor(config: HTTPTransportConfig, transport?: Transport) {
+  private sessions = new Map<string, SessionAccessorImpl>();
+  private subscriptions = new Set<string>();
+  private seenEventIds = new Set<string>();
+  private seenEventIdsOrder: string[] = [];
+  private readonly maxSeenEventIds = 5000;
+
+  constructor(config: TentickleClientConfig) {
     this.config = config;
 
-    // Build request headers - custom headers take precedence, token is convenience for Bearer
-    this.requestHeaders = { ...config.headers };
+    // Build request headers
+    this.requestHeaders = { "Content-Type": "application/json", ...config.headers };
     if (config.token && !this.requestHeaders["Authorization"]) {
       this.requestHeaders["Authorization"] = `Bearer ${config.token}`;
     }
 
-    // Use custom fetch or fall back to global
+    // Use custom implementations or fall back to globals
     this.fetchFn = config.fetch ?? globalThis.fetch.bind(globalThis);
-
-    // Use provided transport or create default HTTP transport
-    // HTTPTransport accepts custom fetch/EventSource/headers via config
-    this.transport = transport ?? new HTTPTransport(config);
-
-    // Setup receive handler
-    this.unsubscribeTransport = this.transport.onReceive((event) => {
-      this.handleIncomingEvent(event);
-    });
-
-    // Forward transport state changes
-    this.unsubscribeState = this.transport.onStateChange((state) => {
-      this.notifyStateChange(state);
-    });
+    this.EventSourceCtor = config.EventSource ?? globalThis.EventSource;
   }
 
   // ══════════════════════════════════════════════════════════════════════════
-  // Connection Lifecycle
+  // Connection State
   // ══════════════════════════════════════════════════════════════════════════
 
   /** Current connection state */
   get state(): ConnectionState {
-    return this.transport.state;
+    return this._state;
   }
 
-  /** Current session ID */
-  get sessionId(): string | undefined {
-    return this._sessionId;
-  }
-
-  /**
-   * Create a new session on the server.
-   */
-  async createSession(options?: CreateSessionOptions): Promise<CreateSessionResponse> {
-    const headers: Record<string, string> = {
-      "Content-Type": "application/json",
-      ...this.requestHeaders,
-    };
-
-    const sessionsPath = this.config.paths?.sessions ?? "/sessions";
-    const response = await this.fetchFn(`${this.config.baseUrl}${sessionsPath}`, {
-      method: "POST",
-      headers,
-      body: JSON.stringify({
-        sessionId: options?.sessionId,
-        props: options?.props,
-      }),
-      signal: AbortSignal.timeout(this.config.timeout ?? 30000),
-    });
-
-    if (!response.ok) {
-      const text = await response.text();
-      throw new Error(`Failed to create session: ${response.status} ${text}`);
+  private setState(state: ConnectionState): void {
+    if (this._state === state) return;
+    this._state = state;
+    for (const handler of this.stateHandlers) {
+      try {
+        handler(state);
+      } catch (error) {
+        console.error("Error in state handler:", error);
+      }
     }
-
-    return response.json() as Promise<CreateSessionResponse>;
-  }
-
-  /**
-   * Get session state from the server.
-   */
-  async getSessionState(sessionId: string): Promise<SessionState> {
-    const headers: Record<string, string> = {
-      ...this.requestHeaders,
-    };
-
-    const sessionsPath = this.config.paths?.sessions ?? "/sessions";
-    const response = await this.fetchFn(`${this.config.baseUrl}${sessionsPath}/${sessionId}`, {
-      method: "GET",
-      headers,
-      signal: AbortSignal.timeout(this.config.timeout ?? 30000),
-    });
-
-    if (!response.ok) {
-      const text = await response.text();
-      throw new Error(`Failed to get session state: ${response.status} ${text}`);
-    }
-
-    return response.json() as Promise<SessionState>;
-  }
-
-  /**
-   * Connect to a session.
-   */
-  async connect(sessionId: string): Promise<void> {
-    if (this.transport.state === "connected") {
-      throw new Error("Already connected");
-    }
-
-    this._sessionId = sessionId;
-
-    const metadata: ConnectionMetadata = {
-      sessionId,
-      userId: this.config.userId,
-    };
-
-    await this.transport.connect(sessionId, metadata);
-  }
-
-  /**
-   * Disconnect from the server.
-   */
-  async disconnect(): Promise<void> {
-    await this.transport.disconnect();
-    this._sessionId = undefined;
   }
 
   /**
@@ -357,62 +704,331 @@ export class TentickleClient {
     };
   }
 
-  private notifyStateChange(state: ConnectionState): void {
-    for (const handler of this.stateHandlers) {
+  // ══════════════════════════════════════════════════════════════════════════
+  // Connection Lifecycle
+  // ══════════════════════════════════════════════════════════════════════════
+
+  /**
+   * Ensure the SSE connection is established.
+   * This is called lazily when subscribing to sessions.
+   */
+  private async ensureConnection(): Promise<void> {
+    if (this._state === "connected") {
+      return;
+    }
+    if (this.connectionPromise) {
+      await this.connectionPromise;
+      return;
+    }
+
+    this.setState("connecting");
+    this.connectionPromise = this.openEventSource();
+
+    try {
+      await this.connectionPromise;
+      this.setState("connected");
+    } catch (error) {
+      this.setState("error");
+      throw error;
+    } finally {
+      this.connectionPromise = undefined;
+    }
+  }
+
+  private async openEventSource(): Promise<void> {
+    this.closeEventSource();
+
+    const baseUrl = this.config.baseUrl.replace(/\/$/, "");
+    const eventsPath = this.config.paths?.events ?? "/events";
+    const url = `${baseUrl}${eventsPath}`;
+
+    return new Promise((resolve, reject) => {
       try {
-        handler(state);
+        this.eventSource = new this.EventSourceCtor(url, {
+          withCredentials: this.config.withCredentials,
+        });
+
+        const onMessage = (event: MessageEvent) => {
+          try {
+            const data = JSON.parse(event.data);
+            this.handleIncomingEvent(data);
+
+            if (data.type === "connection" && data.connectionId) {
+              this._connectionId = data.connectionId;
+              if (data.subscriptions) {
+                for (const sessionId of data.subscriptions) {
+                  this.subscriptions.add(sessionId);
+                }
+              }
+              resolve();
+            }
+          } catch (error) {
+            console.error("Failed to parse SSE event:", error);
+          }
+        };
+
+        const onError = () => {
+          if (this._state === "connecting") {
+            this.closeEventSource();
+            reject(new Error("SSE connection failed"));
+          } else {
+            this.setState("error");
+          }
+        };
+
+        this.eventSource.addEventListener("message", onMessage);
+        this.eventSource.addEventListener("error", onError);
       } catch (error) {
-        console.error("Error in connection state handler:", error);
+        reject(error);
       }
+    });
+  }
+
+  private closeEventSource(): void {
+    if (!this.eventSource) return;
+    this.eventSource.close();
+    this.eventSource = undefined;
+    this._connectionId = undefined;
+    this.subscriptions.clear();
+    this.setState("disconnected");
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // Session Management
+  // ══════════════════════════════════════════════════════════════════════════
+
+  /**
+   * Get a session accessor (cold - no subscription).
+   *
+   * Call `accessor.subscribe()` to receive events.
+   */
+  session(sessionId: string): SessionAccessor {
+    let accessor = this.sessions.get(sessionId);
+    if (!accessor) {
+      accessor = new SessionAccessorImpl(sessionId, this);
+      this.sessions.set(sessionId, accessor);
+    }
+    return accessor;
+  }
+
+  /**
+   * Subscribe to a session and get accessor (hot).
+   */
+  subscribe(sessionId: string): SessionAccessor {
+    const accessor = this.session(sessionId);
+    accessor.subscribe();
+    return accessor;
+  }
+
+  /** @internal - Called by SessionAccessor */
+  async _subscribeToSession(sessionId: string): Promise<void> {
+    await this.ensureConnection();
+    if (this.subscriptions.has(sessionId)) {
+      return;
+    }
+
+    if (!this._connectionId) {
+      throw new Error("Connection not established");
+    }
+
+    const baseUrl = this.config.baseUrl.replace(/\/$/, "");
+    const subscribePath = this.config.paths?.subscribe ?? "/subscribe";
+
+    const response = await this.fetchFn(`${baseUrl}${subscribePath}`, {
+      method: "POST",
+      headers: this.requestHeaders,
+      credentials: this.config.withCredentials ? "include" : "same-origin",
+      body: JSON.stringify({
+        connectionId: this._connectionId,
+        add: [sessionId],
+      }),
+      signal: AbortSignal.timeout(this.config.timeout ?? 30000),
+    });
+
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(`Failed to subscribe: ${response.status} ${text}`);
+    }
+
+    this.subscriptions.add(sessionId);
+  }
+
+  /** @internal - Called by SessionAccessor */
+  async _unsubscribeFromSession(sessionId: string): Promise<void> {
+    if (!this._connectionId) {
+      return;
+    }
+    if (!this.subscriptions.has(sessionId)) {
+      return;
+    }
+
+    const baseUrl = this.config.baseUrl.replace(/\/$/, "");
+    const subscribePath = this.config.paths?.subscribe ?? "/subscribe";
+
+    await this.fetchFn(`${baseUrl}${subscribePath}`, {
+      method: "POST",
+      headers: this.requestHeaders,
+      credentials: this.config.withCredentials ? "include" : "same-origin",
+      body: JSON.stringify({
+        connectionId: this._connectionId,
+        remove: [sessionId],
+      }),
+      signal: AbortSignal.timeout(this.config.timeout ?? 30000),
+    });
+
+    this.subscriptions.delete(sessionId);
+  }
+
+  /** @internal - Called by SessionAccessor to publish to a channel */
+  async _publishToChannel(
+    sessionId: string,
+    channelName: string,
+    event: ChannelEvent,
+  ): Promise<void> {
+    const baseUrl = this.config.baseUrl.replace(/\/$/, "");
+    const channelPath = this.config.paths?.channel ?? "/channel";
+
+    const response = await this.fetchFn(`${baseUrl}${channelPath}`, {
+      method: "POST",
+      headers: this.requestHeaders,
+      credentials: this.config.withCredentials ? "include" : "same-origin",
+      body: JSON.stringify({
+        sessionId,
+        channel: channelName,
+        type: event.type,
+        payload: event.payload,
+        id: event.id,
+        metadata: event.metadata,
+      }),
+      signal: AbortSignal.timeout(this.config.timeout ?? 30000),
+    });
+
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(`Failed to publish to channel: ${response.status} ${text}`);
+    }
+  }
+
+  /** @internal - Called by SessionAccessor to subscribe to a channel */
+  async _subscribeToChannel(sessionId: string, channelName: string): Promise<void> {
+    const baseUrl = this.config.baseUrl.replace(/\/$/, "");
+    const channelPath = this.config.paths?.channel ?? "/channel";
+
+    const response = await this.fetchFn(`${baseUrl}${channelPath}/subscribe`, {
+      method: "POST",
+      headers: this.requestHeaders,
+      credentials: this.config.withCredentials ? "include" : "same-origin",
+      body: JSON.stringify({
+        sessionId,
+        channel: channelName,
+      }),
+      signal: AbortSignal.timeout(this.config.timeout ?? 30000),
+    });
+
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(`Failed to subscribe to channel: ${response.status} ${text}`);
     }
   }
 
   // ══════════════════════════════════════════════════════════════════════════
-  // Framework Channels
+  // Message Operations
   // ══════════════════════════════════════════════════════════════════════════
 
   /**
-   * Send a message to the session.
+   * Send a message.
+   *
+   * @param input - Message input (message or messages)
+   * @param options - Options including optional sessionId
    */
-  async send(
-    input:
-      | string
-      | string[]
-      | ContentBlock
-      | ContentBlock[]
-      | Message
-      | Message[]
-      | SessionMessagePayload,
-  ): Promise<void> {
+  send(
+    input: string | ContentBlock | ContentBlock[] | Message | Message[] | SendInput,
+    options?: { sessionId?: string },
+  ): ClientExecutionHandle {
     const payload = this.normalizeSendInput(input);
+    const abortController = new AbortController();
+    const handle = new ClientExecutionHandleImpl(this, abortController, options?.sessionId);
 
-    await this.transport.send({
-      channel: FrameworkChannels.MESSAGES,
-      type: "message",
-      payload,
-    });
+    void this.performSend(payload, options, handle, abortController);
+
+    return handle;
+  }
+
+  private async performSend(
+    payload: SendInput,
+    options: { sessionId?: string } | undefined,
+    handle: ClientExecutionHandleImpl,
+    abortController: AbortController,
+  ): Promise<void> {
+    try {
+      const baseUrl = this.config.baseUrl.replace(/\/$/, "");
+      const sendPath = this.config.paths?.send ?? "/send";
+
+      const body: Record<string, unknown> = { ...payload };
+      if (options?.sessionId) {
+        body.sessionId = options.sessionId;
+      }
+
+      const response = await this.fetchFn(`${baseUrl}${sendPath}`, {
+        method: "POST",
+        headers: this.requestHeaders,
+        credentials: this.config.withCredentials ? "include" : "same-origin",
+        body: JSON.stringify(body),
+        signal: abortController.signal,
+      });
+
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(`Failed to send: ${response.status} ${text}`);
+      }
+
+      if (!response.body) {
+        throw new Error("No response body for send");
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";
+
+        for (const line of lines) {
+          if (!line.startsWith("data: ")) continue;
+          try {
+            const data = JSON.parse(line.slice(6)) as Record<string, unknown>;
+            if (data.type === "channel" || data.type === "connection") {
+              continue;
+            }
+            const event = data as unknown as SessionStreamEvent;
+            handle._handleEvent(event);
+            this.handleIncomingEvent(data);
+          } catch (error) {
+            console.error("Failed to parse send event:", error);
+          }
+        }
+      }
+
+      handle._complete();
+    } catch (error) {
+      handle._fail(error instanceof Error ? error : new Error(String(error)));
+    }
   }
 
   private normalizeSendInput(
-    input:
-      | string
-      | string[]
-      | ContentBlock
-      | ContentBlock[]
-      | Message
-      | Message[]
-      | SessionMessagePayload,
-  ): SessionMessagePayload {
+    input: string | ContentBlock | ContentBlock[] | Message | Message[] | SendInput,
+  ): SendInput {
     if (typeof input === "string") {
       return { message: { role: "user", content: [{ type: "text", text: input }] } };
     }
     if (Array.isArray(input)) {
       if (input.length === 0) {
         return { messages: [] };
-      }
-      if (typeof input[0] === "string") {
-        const blocks = (input as string[]).map((text) => ({ type: "text", text } as TextBlock));
-        return { message: { role: "user", content: blocks } };
       }
       if (typeof (input[0] as Message).role === "string") {
         return { messages: input as Message[] };
@@ -422,35 +1038,92 @@ export class TentickleClient {
     if (typeof input === "object" && input && "role" in input && "content" in input) {
       return { message: input as Message };
     }
-    return input as SessionMessagePayload;
+    return input as SendInput;
   }
 
   /**
-   * Trigger a tick with optional props.
+   * Abort a session's current execution.
    */
-  async tick(props?: Record<string, unknown>): Promise<void> {
-    await this.transport.send({
-      channel: FrameworkChannels.CONTROL,
-      type: "tick",
-      payload: { props },
+  async abort(sessionId: string, reason?: string): Promise<void> {
+    const baseUrl = this.config.baseUrl.replace(/\/$/, "");
+    const abortPath = this.config.paths?.abort ?? "/abort";
+
+    const response = await this.fetchFn(`${baseUrl}${abortPath}`, {
+      method: "POST",
+      headers: this.requestHeaders,
+      credentials: this.config.withCredentials ? "include" : "same-origin",
+      body: JSON.stringify({ sessionId, reason }),
+      signal: AbortSignal.timeout(this.config.timeout ?? 30000),
     });
+
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(`Failed to abort: ${response.status} ${text}`);
+    }
   }
 
   /**
-   * Abort the current execution.
+   * Close a session.
    */
-  async abort(reason?: string): Promise<void> {
-    await this.transport.send({
-      channel: FrameworkChannels.CONTROL,
-      type: "abort",
-      payload: { reason },
+  async closeSession(sessionId: string): Promise<void> {
+    const baseUrl = this.config.baseUrl.replace(/\/$/, "");
+    const closePath = this.config.paths?.close ?? "/close";
+
+    const response = await this.fetchFn(`${baseUrl}${closePath}`, {
+      method: "POST",
+      headers: this.requestHeaders,
+      credentials: this.config.withCredentials ? "include" : "same-origin",
+      body: JSON.stringify({ sessionId }),
+      signal: AbortSignal.timeout(this.config.timeout ?? 30000),
     });
+
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(`Failed to close: ${response.status} ${text}`);
+    }
+
+    // Clean up accessor
+    const accessor = this.sessions.get(sessionId);
+    if (accessor) {
+      accessor._destroy();
+      this.sessions.delete(sessionId);
+    }
+    this.subscriptions.delete(sessionId);
   }
 
   /**
-   * Subscribe to stream events from the session.
+   * Submit a tool confirmation response.
    */
-  onEvent(handler: EventHandler): () => void {
+  async submitToolResult(
+    sessionId: string,
+    toolUseId: string,
+    result: ToolConfirmationResponse,
+  ): Promise<void> {
+    const baseUrl = this.config.baseUrl.replace(/\/$/, "");
+    const toolResponsePath = this.config.paths?.toolResponse ?? "/tool-response";
+
+    const response = await this.fetchFn(`${baseUrl}${toolResponsePath}`, {
+      method: "POST",
+      headers: this.requestHeaders,
+      credentials: this.config.withCredentials ? "include" : "same-origin",
+      body: JSON.stringify({ sessionId, toolUseId, result }),
+      signal: AbortSignal.timeout(this.config.timeout ?? 30000),
+    });
+
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(`Failed to submit tool result: ${response.status} ${text}`);
+    }
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // Event Handling
+  // ══════════════════════════════════════════════════════════════════════════
+
+  /**
+   * Subscribe to all stream events (from all sessions).
+   */
+  onEvent(handler: GlobalEventHandler): () => void {
     this.eventHandlers.add(handler);
     return () => {
       this.eventHandlers.delete(handler);
@@ -459,31 +1132,17 @@ export class TentickleClient {
 
   /**
    * Ergonomic event subscription.
-   *
-   * @example
-   * ```typescript
-   * client.on("result", (result) => {
-   *   console.log(result.response);
-   * });
-   * ```
    */
-  on<T extends ClientEventName>(
-    eventName: T,
-    handler: ClientEventHandlerMap[T],
-  ): () => void {
+  on<T extends ClientEventName>(eventName: T, handler: ClientEventHandlerMap[T]): () => void {
     switch (eventName) {
       case "event":
-        return this.onEvent(handler as EventHandler);
-      case "result":
-        return this.onResult(handler as ResultHandler);
-      case "tool_confirmation":
-        return this.onToolConfirmation(handler as ToolConfirmationHandler);
+        return this.onEvent(handler as GlobalEventHandler);
       case "state":
         return this.onConnectionChange(handler as (state: ConnectionState) => void);
       default: {
         const streamType = eventName as StreamEventType;
-        const streamHandler = handler as StreamEventHandler<typeof streamType>;
-        return this.onEvent((event) => {
+        const streamHandler = handler as GlobalStreamEventHandler<typeof streamType>;
+        return this.onEvent((event: SessionStreamEvent) => {
           if (event.type === streamType) {
             streamHandler(event as any);
           }
@@ -492,97 +1151,120 @@ export class TentickleClient {
     }
   }
 
-  /**
-   * Subscribe to execution results.
-   */
-  onResult(handler: ResultHandler): () => void {
-    this.resultHandlers.add(handler);
-    return () => {
-      this.resultHandlers.delete(handler);
-    };
-  }
+  private handleIncomingEvent(data: Record<string, unknown>): void {
+    const sessionId = data.sessionId as string | undefined;
+    const type = data.type as string;
 
-  /**
-   * Register handler for tool confirmations.
-   */
-  onToolConfirmation(handler: ToolConfirmationHandler): () => void {
-    this.toolConfirmationHandler = handler;
-    return () => {
-      this.toolConfirmationHandler = undefined;
-    };
-  }
-
-  // ══════════════════════════════════════════════════════════════════════════
-  // Application Channels
-  // ══════════════════════════════════════════════════════════════════════════
-
-  /**
-   * Get a channel accessor for generic pub/sub.
-   *
-   * @example
-   * ```typescript
-   * const todoChannel = client.channel('todo_list');
-   *
-   * // Subscribe to events
-   * todoChannel.subscribe((payload, event) => {
-   *   if (event.type === 'tasks_updated') {
-   *     updateUI(payload.tasks);
-   *   }
-   * });
-   *
-   * // Publish events
-   * await todoChannel.publish('create_task', { title: 'Buy milk' });
-   *
-   * // Request/response
-   * const tasks = await todoChannel.request('get_tasks', {});
-   * ```
-   */
-  channel(name: string): ChannelAccessor {
-    let channel = this.channels.get(name);
-    if (!channel) {
-      channel = new ChannelAccessorImpl(name, (event) => this.transport.send(event));
-      this.channels.set(name, channel);
+    // Handle connection event
+    if (type === "connection") {
+      return;
     }
-    return channel;
+
+    // Handle channel events (from server → client)
+    if (type === "channel" && sessionId) {
+      const channelName = data.channel as string;
+      const channelEvent = data.event as ChannelEvent;
+      if (channelName && channelEvent) {
+        const accessor = this.sessions.get(sessionId);
+        if (accessor) {
+          accessor._handleChannelEvent(channelName, channelEvent);
+        }
+      }
+      return;
+    }
+
+    // Route stream events
+    const streamEvent = data as unknown as StreamEvent;
+    const eventId = (streamEvent as { id?: string }).id;
+    if (eventId) {
+      if (this.seenEventIds.has(eventId)) {
+        return;
+      }
+      this.seenEventIds.add(eventId);
+      this.seenEventIdsOrder.push(eventId);
+      if (this.seenEventIdsOrder.length > this.maxSeenEventIds) {
+        const oldest = this.seenEventIdsOrder.shift();
+        if (oldest) {
+          this.seenEventIds.delete(oldest);
+        }
+      }
+    }
+
+    // Update streaming text state
+    this.updateStreamingText(streamEvent);
+
+    // Notify global handlers
+    if (sessionId) {
+      const sessionEvent = streamEvent as SessionStreamEvent;
+      for (const handler of this.eventHandlers) {
+        try {
+          handler(sessionEvent);
+        } catch (error) {
+          console.error("Error in event handler:", error);
+        }
+      }
+    }
+
+    // Notify session-specific handlers
+    if (sessionId) {
+      const accessor = this.sessions.get(sessionId);
+      if (accessor) {
+        accessor._handleEvent(streamEvent);
+      }
+    }
+
+    // Handle result events
+    if (type === "result" && "result" in data) {
+      if (sessionId) {
+        const accessor = this.sessions.get(sessionId);
+        if (accessor) {
+          accessor._handleResult(data.result as SessionResultPayload);
+        }
+      }
+    }
+
+    // Handle tool confirmation requests
+    if (type === "tool_confirmation_required" && sessionId) {
+      const required = data as unknown as {
+        callId: string;
+        name: string;
+        input: Record<string, unknown>;
+        message?: string;
+      };
+      const request: ToolConfirmationRequest = {
+        toolUseId: required.callId,
+        name: required.name,
+        arguments: required.input,
+        message: required.message,
+      };
+      const accessor = this.sessions.get(sessionId);
+      if (accessor) {
+        accessor._handleToolConfirmation(request);
+      }
+    }
   }
 
   // ══════════════════════════════════════════════════════════════════════════
   // Streaming Text
   // ══════════════════════════════════════════════════════════════════════════
 
-  /**
-   * Current streaming text state.
-   *
-   * Automatically updated from tick_start, content_delta, tick_end, and
-   * execution_end events.
-   */
+  /** Current streaming text state */
   get streamingText(): StreamingTextState {
     return this._streamingText;
   }
 
   /**
    * Subscribe to streaming text state changes.
-   *
-   * @example
-   * ```typescript
-   * client.onStreamingText(({ text, isStreaming }) => {
-   *   element.textContent = text;
-   *   cursor.style.display = isStreaming ? 'inline' : 'none';
-   * });
-   * ```
    */
   onStreamingText(handler: StreamingTextHandler): () => void {
     this.streamingTextHandlers.add(handler);
-    // Immediately notify with current state
     handler(this._streamingText);
     return () => {
       this.streamingTextHandlers.delete(handler);
     };
   }
 
-  /**
-   * Clear the accumulated streaming text.
-   */
+  /** Clear the accumulated streaming text */
   clearStreamingText(): void {
     this.setStreamingText({ text: "", isStreaming: false });
   }
@@ -622,92 +1304,32 @@ export class TentickleClient {
   }
 
   // ══════════════════════════════════════════════════════════════════════════
-  // Internal Methods
+  // Cleanup
   // ══════════════════════════════════════════════════════════════════════════
-
-  private handleIncomingEvent(event: ChannelEvent): void {
-    const channelName = event.channel;
-
-    // Route to framework handlers
-    if (channelName === FrameworkChannels.EVENTS) {
-      const streamEvent = event.payload as StreamEvent;
-
-      // Update streaming text state
-      this.updateStreamingText(streamEvent);
-
-      for (const handler of this.eventHandlers) {
-        try {
-          handler(streamEvent);
-        } catch (error) {
-          console.error("Error in event handler:", error);
-        }
-      }
-      return;
-    }
-
-    if (channelName === FrameworkChannels.RESULT) {
-      const result = event.payload as SessionResultPayload;
-      for (const handler of this.resultHandlers) {
-        try {
-          handler(result);
-        } catch (error) {
-          console.error("Error in result handler:", error);
-        }
-      }
-      return;
-    }
-
-    if (channelName === FrameworkChannels.TOOL_CONFIRMATION && event.type === "request") {
-      if (this.toolConfirmationHandler) {
-        const request = event.payload as ToolConfirmationRequest;
-        this.toolConfirmationHandler(request, async (response: ToolConfirmationResponse) => {
-          await this.transport.send({
-            channel: FrameworkChannels.TOOL_CONFIRMATION,
-            type: "response",
-            id: event.id,
-            payload: response,
-          });
-        });
-      }
-      return;
-    }
-
-    // Route to application channel handlers
-    const channel = this.channels.get(channelName);
-    if (channel) {
-      channel._handleEvent(event);
-    }
-  }
 
   /**
    * Cleanup and close the client.
    */
   destroy(): void {
-    // Unsubscribe from transport
-    this.unsubscribeTransport?.();
-    this.unsubscribeState?.();
+    this.closeEventSource();
 
-    // Disconnect transport
-    this.transport.disconnect();
-
-    // Cleanup channels
-    for (const channel of this.channels.values()) {
-      channel._destroy();
+    for (const accessor of this.sessions.values()) {
+      accessor._destroy();
     }
-    this.channels.clear();
+    this.sessions.clear();
 
-    // Clear handlers
     this.stateHandlers.clear();
     this.eventHandlers.clear();
-    this.resultHandlers.clear();
     this.streamingTextHandlers.clear();
-    this.toolConfirmationHandler = undefined;
     this._streamingText = { text: "", isStreaming: false };
+    this.seenEventIds.clear();
+    this.seenEventIdsOrder = [];
+    this.subscriptions.clear();
   }
 }
 
 // ============================================================================
-// Factory Functions
+// Factory Function
 // ============================================================================
 
 /**
@@ -715,52 +1337,18 @@ export class TentickleClient {
  *
  * @example
  * ```typescript
- * // Default HTTP/SSE transport
  * const client = createClient({
  *   baseUrl: 'https://api.example.com',
- *   userId: 'user_123',
  * });
  *
- * // With custom headers (any auth scheme, API keys, etc.)
- * const clientWithApiKey = createClient({
- *   baseUrl: 'https://api.example.com',
- *   headers: { 'X-API-Key': 'my-api-key' },
- * });
+ * // Subscribe to a session
+ * const session = client.subscribe('conv-123');
  *
- * const clientWithBasicAuth = createClient({
- *   baseUrl: 'https://api.example.com',
- *   headers: { Authorization: 'Basic ' + btoa('user:pass') },
- * });
- *
- * // With Bearer token (convenience shorthand)
- * const clientWithToken = createClient({
- *   baseUrl: 'https://api.example.com',
- *   token: 'my-jwt-token', // Adds Authorization: Bearer my-jwt-token
- * });
- *
- * // With custom fetch (e.g., for credentials)
- * const clientWithCredentials = createClient({
- *   baseUrl: 'https://api.example.com',
- *   fetch: (url, init) => fetch(url, { ...init, credentials: 'include' }),
- * });
- *
- * // Node.js with polyfills
- * import EventSource from 'eventsource';
- *
- * const nodeClient = createClient({
- *   baseUrl: 'https://api.example.com',
- *   EventSource,
- * });
- *
- * // Fully custom transport
- * import { createWebSocketTransport } from '@tentickle/client';
- *
- * const wsClient = createClient(
- *   { baseUrl: 'wss://api.example.com' },
- *   createWebSocketTransport({ baseUrl: 'wss://api.example.com' }),
- * );
+ * // Send a message
+ * const handle = session.send({ message: { role: 'user', content: [...] } });
+ * await handle.result;
  * ```
  */
-export function createClient(config: HTTPTransportConfig, transport?: Transport): TentickleClient {
-  return new TentickleClient(config, transport);
+export function createClient(config: TentickleClientConfig): TentickleClient {
+  return new TentickleClient(config);
 }

@@ -77,6 +77,15 @@ export class DevToolsServer {
     });
 
     this.server = createServer((req, res) => this.handleRequest(req, res));
+    this.server.on("error", (error) => {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code === "EADDRINUSE") {
+        console.warn(`[DevTools] Port ${this.config.port} is already in use; DevTools disabled.`);
+      } else {
+        console.error("[DevTools] Server error:", error);
+      }
+      this.stop();
+    });
 
     this.server.listen(this.config.port, this.config.host, () => {
       console.log(`[DevTools] Server listening on http://${this.config.host}:${this.config.port}`);
@@ -101,8 +110,18 @@ export class DevToolsServer {
     this.clients.clear();
 
     // Close server
-    this.server?.close();
-    this.server = null;
+    if (this.server) {
+      const server = this.server;
+      this.server = null;
+      try {
+        server.close();
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code;
+        if (code !== "ERR_SERVER_NOT_RUNNING") {
+          this.log("Failed to close server", error);
+        }
+      }
+    }
     this.log("Server stopped");
   }
 

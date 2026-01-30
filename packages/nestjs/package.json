@@ -2,6 +2,18 @@
   "name": "@tentickle/nestjs",
   "version": "0.0.1",
   "description": "NestJS module for Tentickle servers",
+  "keywords": [
+    "agent",
+    "ai",
+    "llm",
+    "nestjs",
+    "tentickle"
+  ],
+  "license": "MIT",
+  "files": [
+    "dist",
+    "README.md"
+  ],
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -17,17 +29,12 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@nestjs/common": "^10.4.15",
+    "@tentickle/core": "workspace:*",
     "@tentickle/server": "workspace:*",
     "@tentickle/shared": "workspace:*"
   },
-  "peerDependencies": {
-    "@nestjs/common": ">=9.0.0",
-    "@nestjs/core": ">=9.0.0",
-    "reflect-metadata": ">=0.1.0",
-    "rxjs": ">=7.0.0"
-  },
   "devDependencies": {
-    "@nestjs/common": "^10.4.15",
     "@nestjs/core": "^10.4.15",
     "@nestjs/platform-express": "^10.4.15",
     "@nestjs/testing": "^10.4.15",
@@ -37,16 +44,10 @@
     "typescript": "^5.8.3",
     "vitest": "^3.2.4"
   },
-  "files": [
-    "dist",
-    "README.md"
-  ],
-  "keywords": [
-    "tentickle",
-    "nestjs",
-    "ai",
-    "llm",
-    "agent"
-  ],
-  "license": "MIT"
+  "peerDependencies": {
+    "@nestjs/common": ">=9.0.0",
+    "@nestjs/core": ">=9.0.0",
+    "reflect-metadata": ">=0.1.0",
+    "rxjs": ">=7.0.0"
+  }
 }

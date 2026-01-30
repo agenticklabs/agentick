@@ -1,0 +1,317 @@
+/**
+ * Model Input Flow Tests
+ *
+ * These tests verify that messages flow correctly from the COM
+ * through formatInput and fromEngineState to the model adapter.
+ */
+
+import { describe, it, expect } from "vitest";
+import { fromEngineState, toEngineState } from "../utils/language-model";
+import type { COMInput, COMTimelineEntry } from "../../com/types";
+import type { Message } from "@tentickle/shared";
+
+// Helper to create a COMTimelineEntry
+function createTimelineEntry(message: Message, kind: string = "message"): COMTimelineEntry {
+  return {
+    kind: kind as any,
+    message,
+    tags: [],
+  };
+}
+
+// Helper to create a basic COMInput
+function createCOMInput(
+  timelineEntries: COMTimelineEntry[],
+  systemEntries: COMTimelineEntry[] = [],
+): COMInput {
+  return {
+    timeline: timelineEntries,
+    sections: {},
+    ephemeral: [],
+    system: systemEntries,
+    tools: [],
+    metadata: {},
+  };
+}
+
+describe("fromEngineState", () => {
+  describe("timeline message extraction", () => {
+    it("should extract user messages from timeline", async () => {
+      const input = createCOMInput([
+        createTimelineEntry({
+          role: "user",
+          content: [{ type: "text", text: "Hello" }],
+        }),
+      ]);
+
+      const modelInput = await fromEngineState(input);
+
+      expect(modelInput.messages).toBeDefined();
+      expect(modelInput.messages.length).toBeGreaterThanOrEqual(1);
+
+      const userMessage = modelInput.messages.find((m: any) => m.role === "user");
+      expect(userMessage).toBeDefined();
+      expect(userMessage.content[0].text).toBe("Hello");
+    });
+
+    it("should extract assistant messages from timeline", async () => {
+      const input = createCOMInput([
+        createTimelineEntry({
+          role: "assistant",
+          content: [{ type: "text", text: "Response" }],
+        }),
+      ]);
+
+      const modelInput = await fromEngineState(input);
+
+      const assistantMessage = modelInput.messages.find((m: any) => m.role === "assistant");
+      expect(assistantMessage).toBeDefined();
+      expect(assistantMessage.content[0].text).toBe("Response");
+    });
+
+    it("should preserve message order", async () => {
+      const input = createCOMInput([
+        createTimelineEntry({
+          role: "user",
+          content: [{ type: "text", text: "First" }],
+        }),
+        createTimelineEntry({
+          role: "assistant",
+          content: [{ type: "text", text: "Second" }],
+        }),
+        createTimelineEntry({
+          role: "user",
+          content: [{ type: "text", text: "Third" }],
+        }),
+      ]);
+
+      const modelInput = await fromEngineState(input);
+
+      // Messages should be in order (system first, then timeline)
+      const conversationMessages = modelInput.messages.filter((m: any) => m.role !== "system");
+
+      expect(conversationMessages.length).toBe(3);
+      expect(conversationMessages[0].content[0].text).toBe("First");
+      expect(conversationMessages[1].content[0].text).toBe("Second");
+      expect(conversationMessages[2].content[0].text).toBe("Third");
+    });
+
+    it("should filter out non-message entries", async () => {
+      const input = createCOMInput([
+        createTimelineEntry(
+          { role: "user", content: [{ type: "text", text: "Keep this" }] },
+          "message",
+        ),
+        // Entry with different kind should be filtered
+        {
+          kind: "other" as any,
+          message: { role: "user", content: [{ type: "text", text: "Filter this" }] },
+          tags: [],
+        },
+      ]);
+
+      const modelInput = await fromEngineState(input);
+
+      const messages = modelInput.messages.filter((m: any) => m.role === "user");
+      expect(messages.length).toBe(1);
+      expect(messages[0].content[0].text).toBe("Keep this");
+    });
+  });
+
+  describe("system message handling", () => {
+    it("should include system messages from input.system", async () => {
+      const input = createCOMInput(
+        [],
+        [
+          createTimelineEntry({
+            role: "system",
+            content: [{ type: "text", text: "System prompt" }],
+          }),
+        ],
+      );
+
+      const modelInput = await fromEngineState(input);
+
+      const systemMessage = modelInput.messages.find((m: any) => m.role === "system");
+      expect(systemMessage).toBeDefined();
+      expect(systemMessage.content[0].text).toBe("System prompt");
+    });
+
+    it("should place system messages before conversation messages", async () => {
+      const input = createCOMInput(
+        [
+          createTimelineEntry({
+            role: "user",
+            content: [{ type: "text", text: "User message" }],
+          }),
+        ],
+        [
+          createTimelineEntry({
+            role: "system",
+            content: [{ type: "text", text: "System prompt" }],
+          }),
+        ],
+      );
+
+      const modelInput = await fromEngineState(input);
+
+      // System should come first
+      expect(modelInput.messages[0].role).toBe("system");
+      expect(modelInput.messages[1].role).toBe("user");
+    });
+  });
+
+  describe("content block handling", () => {
+    it("should handle text blocks", async () => {
+      const input = createCOMInput([
+        createTimelineEntry({
+          role: "user",
+          content: [
+            { type: "text", text: "Line 1" },
+            { type: "text", text: "Line 2" },
+          ],
+        }),
+      ]);
+
+      const modelInput = await fromEngineState(input);
+      const userMessage = modelInput.messages.find((m: any) => m.role === "user");
+
+      expect(userMessage.content.length).toBe(2);
+    });
+
+    it("should handle image blocks", async () => {
+      const input = createCOMInput([
+        createTimelineEntry({
+          role: "user",
+          content: [
+            { type: "text", text: "Look at this:" },
+            {
+              type: "image",
+              source: {
+                type: "base64",
+                mediaType: "image/png",
+                data: "base64data",
+              },
+            },
+          ],
+        }),
+      ]);
+
+      const modelInput = await fromEngineState(input);
+      const userMessage = modelInput.messages.find((m: any) => m.role === "user");
+
+      expect(userMessage.content.some((c: any) => c.type === "image")).toBe(true);
+    });
+
+    it("should handle tool_use blocks", async () => {
+      const input = createCOMInput([
+        createTimelineEntry({
+          role: "assistant",
+          content: [
+            {
+              type: "tool_use",
+              id: "tool-1",
+              name: "calculator",
+              input: { expression: "2+2" },
+            },
+          ],
+        }),
+      ]);
+
+      const modelInput = await fromEngineState(input);
+      const assistantMessage = modelInput.messages.find((m: any) => m.role === "assistant");
+
+      expect(assistantMessage.content[0].type).toBe("tool_use");
+    });
+
+    it("should handle tool_result blocks", async () => {
+      const input = createCOMInput([
+        createTimelineEntry({
+          role: "user",
+          content: [
+            {
+              type: "tool_result",
+              toolUseId: "tool-1",
+              content: [{ type: "text", text: "4" }],
+            },
+          ],
+        }),
+      ]);
+
+      const modelInput = await fromEngineState(input);
+      const userMessage = modelInput.messages.find((m: any) => m.role === "user");
+
+      expect(userMessage.content[0].type).toBe("tool_result");
+    });
+  });
+
+  describe("empty input handling", () => {
+    it("should handle empty timeline", async () => {
+      const input = createCOMInput([]);
+
+      const modelInput = await fromEngineState(input);
+
+      expect(modelInput.messages).toBeDefined();
+      expect(Array.isArray(modelInput.messages)).toBe(true);
+    });
+
+    it("should handle no system messages", async () => {
+      const input = createCOMInput([
+        createTimelineEntry({
+          role: "user",
+          content: [{ type: "text", text: "No system" }],
+        }),
+      ]);
+
+      const modelInput = await fromEngineState(input);
+
+      const systemMessages = modelInput.messages.filter((m: any) => m.role === "system");
+      expect(systemMessages.length).toBe(0);
+    });
+  });
+});
+
+describe("toEngineState", () => {
+  it("should convert model output to engine response", async () => {
+    const modelOutput = {
+      message: {
+        role: "assistant" as const,
+        content: [{ type: "text" as const, text: "Response" }],
+      },
+      usage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 },
+      stopReason: "stop",
+    };
+
+    const engineResponse = await toEngineState(modelOutput);
+
+    // toEngineState returns newTimelineEntries, not message directly
+    expect(engineResponse.newTimelineEntries).toBeDefined();
+    expect(engineResponse.newTimelineEntries?.length).toBeGreaterThanOrEqual(1);
+    expect(engineResponse.newTimelineEntries?.[0].message?.role).toBe("assistant");
+    expect(engineResponse.stopReason).toBeDefined();
+  });
+
+  it("should extract tool calls from message", async () => {
+    const modelOutput = {
+      message: {
+        role: "assistant" as const,
+        content: [
+          {
+            type: "tool_use" as const,
+            id: "tool-1",
+            name: "calculator",
+            input: { expression: "2+2" },
+          },
+        ],
+      },
+      usage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 },
+      stopReason: "tool_use",
+    };
+
+    const engineResponse = await toEngineState(modelOutput);
+
+    expect(engineResponse.toolCalls).toBeDefined();
+    expect(engineResponse.toolCalls?.length).toBe(1);
+    expect(engineResponse.toolCalls?.[0].name).toBe("calculator");
+  });
+});

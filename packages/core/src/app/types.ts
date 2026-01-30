@@ -17,16 +17,16 @@ import type {
   Message,
   StreamEvent as SharedStreamEvent,
   ToolCall,
-  ToolResult,
   UsageStats,
-  ContentBlock,
   TimelineEntry,
+  SendInput as SharedSendInput,
+  ContentBlock,
 } from "@tentickle/shared";
 import type { COMInput } from "../com/types";
 import type { ExecutableTool } from "../tool/tool";
 import type { MCPConfig } from "../mcp";
 import type { ModelInstance } from "../model/model";
-import type { ExecutionHandle, Channel, Procedure } from "../core/index.js";
+import type { ExecutionHandle, Channel, Procedure } from "../core/index";
 import type { JSX } from "../jsx/jsx-runtime";
 import type { Signal } from "../state/signal";
 import type { SchedulerState } from "../compiler/scheduler";
@@ -51,7 +51,7 @@ import type { SchedulerState } from "../compiler/scheduler";
  * });
  *
  * // Session can add its own callbacks
- * const session = app.createSession({
+ * const session = app.session({
  *   onEvent: (event) => { ... }, // Receives all events
  * });
  * ```
@@ -125,10 +125,56 @@ export interface AppOptions extends LifecycleCallbacks {
   maxTicks?: number;
 
   /**
+   * Enable DevTools event emission for all sessions created by this app.
+   *
+   * When true, lifecycle events (execution_start, tick_start, tick_end,
+   * execution_end, fiber_snapshot) are emitted to the DevTools emitter.
+   *
+   * @default false
+   */
+  devTools?: boolean;
+
+  /**
    * App-level abort signal.
    * All sessions will respect this signal.
    */
   signal?: AbortSignal;
+
+  /**
+   * Idle timeout before cleaning up a session (ms).
+   * When exceeded, the session is closed and removed from the registry.
+   */
+  sessionTTL?: number;
+
+  /**
+   * Maximum number of active sessions before eviction.
+   * When exceeded, the least-recently used session is closed.
+   */
+  maxSessions?: number;
+
+  /**
+   * Called when a session is created.
+   */
+  onSessionCreate?: (session: Session) => void;
+
+  /**
+   * Called when a session is closed and removed from the registry.
+   */
+  onSessionClose?: (sessionId: string) => void;
+
+  /**
+   * Called before send is executed.
+   * Return a modified input to override what is sent.
+   */
+  onBeforeSend?: <P extends Record<string, unknown>>(
+    session: Session<P>,
+    input: SendInput<P>,
+  ) => void | SendInput<P>;
+
+  /**
+   * Called after send completes successfully.
+   */
+  onAfterSend?: (session: Session, result: SendResult) => void;
 
   /**
    * Callback for tool confirmation.
@@ -188,6 +234,10 @@ export type RecordingMode = "full" | "lightweight" | "none";
  */
 export interface SessionOptions extends LifecycleCallbacks {
   /**
+   * Explicit session ID (used by App-managed sessions).
+   */
+  sessionId?: string;
+  /**
    * Maximum number of ticks for this session.
    * Overrides AppOptions.maxTicks.
    */
@@ -207,7 +257,7 @@ export interface SessionOptions extends LifecycleCallbacks {
    *
    * @example
    * ```typescript
-   * const session = app.createSession({
+   * const session = app.session({
    *   initialTimeline: loadedConversation.entries,
    * });
    * ```
@@ -230,7 +280,7 @@ export interface SessionOptions extends LifecycleCallbacks {
    * @example
    * ```typescript
    * // Enable full recording for debugging
-   * const session = app.createSession({ recording: 'full' });
+   * const session = app.session({ recording: 'full' });
    *
    * // After execution, get the recording
    * const recording = session.getRecording();
@@ -249,7 +299,7 @@ export interface SessionOptions extends LifecycleCallbacks {
    * @example
    * ```typescript
    * // Enable DevTools for debugging
-   * const session = app.createSession({ devTools: true });
+   * const session = app.session({ devTools: true });
    * ```
    */
   devTools?: boolean;
@@ -284,29 +334,14 @@ export interface SessionSnapshot {
 }
 
 // ============================================================================
-// Run Options - Per-execution overrides
+// Send Input
 // ============================================================================
 
 /**
- * Options for a single run/stream execution.
- *
- * @deprecated Use SessionOptions instead. RunOptions exists for
- * backward compatibility with the legacy run()/stream() API.
+ * Discriminated input for sending to a session.
+ * Requires either `message` or `messages` (but not both).
  */
-export interface RunOptions {
-  /** Override maxTicks for this execution */
-  maxTicks?: number;
-
-  /** Per-execution abort signal */
-  signal?: AbortSignal;
-}
-
-/**
- * User input for legacy run/stream API.
- *
- * @deprecated The props-based send() API is preferred.
- */
-export type UserInput = Message | ContentBlock[] | string;
+export type SendInput<P = Record<string, unknown>> = SharedSendInput<P>;
 
 // ============================================================================
 // App Input - Structured input for app.run() and app.stream()
@@ -377,7 +412,7 @@ export interface AppInput<P = Record<string, unknown>> {
  *
  * @example
  * ```typescript
- * const session = app.createSession();
+ * const session = app.session();
  * const result = await session.tick({ messages: [...], context: 'Be concise' });
  *
  * console.log(result.response);        // Model's text response
@@ -413,28 +448,6 @@ export interface SendResult {
   raw: COMInput;
 }
 
-/**
- * Result of a legacy run() execution.
- *
- * @deprecated Use SendResult from session.tick() instead.
- */
-export interface RunResult {
-  /**
-   * Final compiled output.
-   */
-  output: COMInput;
-
-  /**
-   * Token usage and execution statistics.
-   */
-  usage: UsageStats;
-
-  /**
-   * Reason execution stopped.
-   */
-  stopReason?: string;
-}
-
 // ============================================================================
 // Stream Events
 // ============================================================================
@@ -443,7 +456,6 @@ export interface RunResult {
  * Events emitted during streaming execution.
  */
 export type StreamEvent = SharedStreamEvent;
-
 
 // ============================================================================
 // Session Execution Handle - For mid-execution interaction
@@ -498,18 +510,11 @@ export interface SessionExecutionHandle extends ExecutionHandle<SendResult, Stre
    * Submit a tool confirmation result.
    * Used when a tool requires user confirmation.
    */
-  submitToolResult(toolUseId: string, result: ToolResult): void;
+  submitToolResult(
+    toolUseId: string,
+    response: { approved: boolean; reason?: string; modifiedArguments?: Record<string, unknown> },
+  ): void;
 }
-
-/**
- * @deprecated Use SessionExecutionHandle instead.
- */
-export type SessionHandle = SessionExecutionHandle;
-
-/**
- * @deprecated Use SessionExecutionHandle instead.
- */
-export type AppExecutionHandle = SessionExecutionHandle;
 
 // ============================================================================
 // Session - Persistent execution context
@@ -550,7 +555,7 @@ export type HookType =
  *
  * @example
  * ```typescript
- * const session = app.createSession();
+ * const session = app.session();
  * await session.tick({ query: "Hello!" });
  *
  * const info = session.inspect();
@@ -714,7 +719,7 @@ export interface SnapshotToolDefinition {
  * @example
  * ```typescript
  * // Enable recording when creating session
- * const session = app.createSession({ recording: 'full' });
+ * const session = app.session({ recording: 'full' });
  *
  * // After some ticks...
  * const recording = session.getRecording();
@@ -857,7 +862,7 @@ export interface RecordedInput {
  *
  * @example
  * ```typescript
- * const session = app.createSession({ recording: 'full' });
+ * const session = app.session({ recording: 'full' });
  * await session.tick({ query: "Hello!" });
  * await session.tick({ query: "Tell me more" });
  *
@@ -931,7 +936,7 @@ export interface SessionRecording {
  *
  * @example
  * ```typescript
- * const session = app.createSession();
+ * const session = app.session();
  *
  * // Listen to events via EventEmitter
  * session.on('event', (event) => console.log(event));
@@ -949,7 +954,7 @@ export interface SessionRecording {
  * const result2 = await session.tick({ query: "Follow up" });
  *
  * // Queue messages for next tick
- * session.queueMessage({ role: "user", content: [...] });
+ * await session.queue.exec({ role: "user", content: [...] });
  *
  * // Interrupt running execution
  * session.interrupt({ role: "user", content: [...] }, "user_interrupt");
@@ -1018,14 +1023,7 @@ export interface Session<P = Record<string, unknown>> extends EventEmitter {
    * const result = await session.send({ messages: [...] });
    * ```
    */
-  send(input: {
-    messages?: Message[];
-    message?: Message;
-    props?: P;
-    metadata?: Record<string, unknown>;
-    /** Per-execution abort signal for this send/tick */
-    signal?: AbortSignal;
-  }): SessionExecutionHandle;
+  send(input: SendInput<P>, options?: ExecutionOptions): SessionExecutionHandle;
 
   /**
    * Run the component with props, execute tick loop.
@@ -1044,20 +1042,6 @@ export interface Session<P = Record<string, unknown>> extends EventEmitter {
    * ```
    */
   tick(props: P, options?: ExecutionOptions): SessionExecutionHandle;
-
-  /**
-   * Queue a message to be included in the next tick.
-   *
-   * @deprecated Use queue instead
-   */
-  queueMessage(message: Message): Promise<void>;
-
-  /**
-   * Send a message to the session.
-   *
-   * @deprecated Use send instead
-   */
-  sendMessage(message: Message | Message[], props?: P): Promise<void>;
 
   /**
    * Interrupt the current execution, optionally with a message.
@@ -1102,7 +1086,7 @@ export interface Session<P = Record<string, unknown>> extends EventEmitter {
    *
    * @example
    * ```typescript
-   * const session = app.createSession();
+   * const session = app.session();
    * await session.tick({ query: "Hello!" });
    *
    * const info = session.inspect();
@@ -1126,7 +1110,7 @@ export interface Session<P = Record<string, unknown>> extends EventEmitter {
    *
    * @example
    * ```typescript
-   * const session = app.createSession();
+   * const session = app.session();
    * session.startRecording('full');
    * await session.tick({ query: "Hello!" });
    * const recording = session.getRecording();
@@ -1148,7 +1132,7 @@ export interface Session<P = Record<string, unknown>> extends EventEmitter {
    *
    * @example
    * ```typescript
-   * const session = app.createSession({ recording: 'full' });
+   * const session = app.session({ recording: 'full' });
    * await session.tick({ query: "Hello!" });
    *
    * const recording = session.getRecording();
@@ -1205,6 +1189,15 @@ export interface Session<P = Record<string, unknown>> extends EventEmitter {
   channel(name: string): Channel;
 
   /**
+   * Submit tool confirmation result out-of-band.
+   * Used when client sends tool confirmation outside of execution handle.
+   */
+  submitToolResult(
+    toolUseId: string,
+    response: { approved: boolean; reason?: string; modifiedArguments?: Record<string, unknown> },
+  ): void;
+
+  /**
    * Close the session and release resources.
    */
   close(): void;
@@ -1245,11 +1238,18 @@ export type ComponentFunction<P = Record<string, unknown>> = (props: P) => JSX.E
  *   console.log(event);
  * }
  *
- * // Persistent session
- * const session = app.createSession();
+ * // Persistent session (new with generated ID)
+ * const session = app.session();
  * await session.tick({ query: "Hello!" });
  * await session.tick({ query: "Follow up" });
  * session.close();
+ *
+ * // Named session (get-or-create by ID)
+ * const conv = app.session('conv-123');
+ * await conv.tick({ query: "Hello!" });
+ *
+ * // Session with options
+ * const withOpts = app.session({ sessionId: 'conv-456', maxTicks: 5 });
  * ```
  */
 export interface App<P = Record<string, unknown>> {
@@ -1293,15 +1293,64 @@ export interface App<P = Record<string, unknown>> {
   run: Procedure<(input: AppInput<P>) => SessionExecutionHandle, true>;
 
   /**
-   * Create a persistent session for multi-turn conversations.
+   * Send to a session.
+   *
+   * Without sessionId: creates ephemeral session, executes, destroys.
+   * With sessionId: creates or reuses managed session.
+   */
+  send(
+    input: SendInput<P>,
+    options?: { sessionId?: string } & ExecutionOptions,
+  ): SessionExecutionHandle;
+
+  /**
+   * Get or create a session.
+   *
+   * This is the primary way to access sessions:
+   * - `session()` - Creates new session with generated ID
+   * - `session('id')` - Gets existing or creates new session with that ID
+   * - `session({ sessionId, ...opts })` - Gets or creates with options
+   *
+   * Use `app.has(id)` to check if a session exists without creating it.
    *
    * @example
    * ```typescript
-   * const session = app.createSession();
-   * await session.tick({ query: "Hello!" });
-   * await session.tick({ query: "Follow up" });
-   * session.close();
+   * // New session with generated ID
+   * const session = app.session();
+   *
+   * // Get or create by ID
+   * const conv = app.session('conv-123');
+   *
+   * // With options
+   * const withOpts = app.session({ sessionId: 'conv-456', maxTicks: 5 });
+   * const newWithOpts = app.session({ maxTicks: 5 }); // Generated ID
    * ```
    */
-  createSession(options?: SessionOptions): Session<P>;
+  session(id?: string): Session<P>;
+  session(options: SessionOptions): Session<P>;
+
+  /**
+   * Close and cleanup a session.
+   */
+  close(sessionId: string): Promise<void>;
+
+  /**
+   * List active session IDs.
+   */
+  readonly sessions: readonly string[];
+
+  /**
+   * Check if a session exists.
+   */
+  has(sessionId: string): boolean;
+
+  /**
+   * Register onSessionCreate handler.
+   */
+  onSessionCreate(handler: (session: Session<P>) => void): () => void;
+
+  /**
+   * Register onSessionClose handler.
+   */
+  onSessionClose(handler: (sessionId: string) => void): () => void;
 }

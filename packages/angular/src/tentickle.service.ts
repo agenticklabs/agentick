@@ -22,15 +22,16 @@ import {
   type ConnectionState,
   type StreamEvent,
   type StreamingTextState,
+  type SessionStreamEvent,
+  type SessionAccessor,
+  type ClientExecutionHandle,
 } from "@tentickle/client";
-import type { TentickleConfig } from "./types.js";
+import type { TentickleConfig } from "./types";
 
 /**
  * Injection token for Tentickle configuration.
  */
-export const TENTICKLE_CONFIG = new InjectionToken<TentickleConfig>(
-  "TENTICKLE_CONFIG",
-);
+export const TENTICKLE_CONFIG = new InjectionToken<TentickleConfig>("TENTICKLE_CONFIG");
 
 /**
  * Provides TentickleService with configuration at component level.
@@ -65,10 +66,7 @@ export const TENTICKLE_CONFIG = new InjectionToken<TentickleConfig>(
  * @returns Provider array to spread into component's providers
  */
 export function provideTentickle(config: TentickleConfig) {
-  return [
-    { provide: TENTICKLE_CONFIG, useValue: config },
-    TentickleService,
-  ];
+  return [{ provide: TENTICKLE_CONFIG, useValue: config }, TentickleService];
 }
 
 /**
@@ -109,12 +107,12 @@ export function provideTentickle(config: TentickleConfig) {
  *   tentickle = inject(TentickleService);
  *
  *   constructor() {
- *     this.tentickle.connect();
+ *     this.tentickle.subscribe("conv-123");
  *   }
  *
  *   async send(message: string) {
- *     await this.tentickle.send(message);
- *     await this.tentickle.tick();
+ *     const handle = this.tentickle.send(message);
+ *     await handle.result;
  *   }
  * }
  * ```
@@ -134,6 +132,7 @@ export function provideTentickle(config: TentickleConfig) {
 export class TentickleService implements OnDestroy {
   private readonly client: TentickleClient;
   private readonly destroy$ = new Subject<void>();
+  private currentSession?: SessionAccessor;
 
   // ══════════════════════════════════════════════════════════════════════════
   // Signals - Primary State
@@ -187,7 +186,7 @@ export class TentickleService implements OnDestroy {
   readonly isStreaming$: Observable<boolean>;
 
   /** Subject for raw stream events */
-  private readonly eventsSubject = new Subject<StreamEvent>();
+  private readonly eventsSubject = new Subject<StreamEvent | SessionStreamEvent>();
 
   /** Observable of all stream events */
   readonly events$ = this.eventsSubject.asObservable();
@@ -224,9 +223,7 @@ export class TentickleService implements OnDestroy {
     }
 
     if (!config) {
-      throw new Error(
-        "TentickleService requires TENTICKLE_CONFIG to be provided",
-      );
+      throw new Error("TentickleService requires TENTICKLE_CONFIG to be provided");
     }
 
     this.client = createClient(config);
@@ -298,57 +295,41 @@ export class TentickleService implements OnDestroy {
     });
 
     // Results → subject
-    this.client.onResult((result) => {
-      this.resultSubject.next(result);
+    this.client.onEvent((event) => {
+      if (event.type === "result") {
+        this.resultSubject.next(event.result);
+      }
     });
   }
 
   // ══════════════════════════════════════════════════════════════════════════
-  // Connection Lifecycle
+  // Session Access
   // ══════════════════════════════════════════════════════════════════════════
 
   /**
-   * Connect to a session.
-   *
-   * Creates a new session if no sessionId provided.
+   * Get a cold session accessor.
    */
-  async connect(sessionId?: string, props?: Record<string, unknown>): Promise<void> {
-    if (this.isConnected() || this.isConnecting()) {
-      return;
-    }
-
-    this.connectionState.set("connecting");
-    this.error.set(undefined);
-
-    try {
-      let targetSessionId = sessionId;
-
-      if (!targetSessionId) {
-        const result = await this.client.createSession({ props });
-        targetSessionId = result.sessionId;
-      }
-
-      this.sessionId.set(targetSessionId);
-      await this.client.connect(targetSessionId);
-    } catch (e) {
-      this.connectionState.set("error");
-      this.error.set(e instanceof Error ? e : new Error(String(e)));
-      throw e;
-    }
+  session(sessionId: string): SessionAccessor {
+    return this.client.session(sessionId);
   }
 
   /**
-   * Disconnect from the current session.
+   * Subscribe to a session and make it the active session.
    */
-  async disconnect(): Promise<void> {
-    try {
-      await this.client.disconnect();
-      this.connectionState.set("disconnected");
-      this.sessionId.set(undefined);
-    } catch (e) {
-      this.error.set(e instanceof Error ? e : new Error(String(e)));
-      throw e;
-    }
+  subscribe(sessionId: string): SessionAccessor {
+    const accessor = this.client.subscribe(sessionId);
+    this.currentSession = accessor;
+    this.sessionId.set(sessionId);
+    return accessor;
+  }
+
+  /**
+   * Unsubscribe from the active session.
+   */
+  unsubscribe(): void {
+    this.currentSession?.unsubscribe();
+    this.currentSession = undefined;
+    this.sessionId.set(undefined);
   }
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -358,22 +339,36 @@ export class TentickleService implements OnDestroy {
   /**
    * Send a message to the session.
    */
-  async send(content: string): Promise<void> {
-    await this.client.send(content);
-  }
-
-  /**
-   * Trigger a tick with optional props.
-   */
-  async tick(props?: Record<string, unknown>): Promise<void> {
-    await this.client.tick(props);
+  send(input: Parameters<TentickleClient["send"]>[0]): ClientExecutionHandle {
+    if (this.currentSession) {
+      return this.currentSession.send(input as any);
+    }
+    return this.client.send(input as any);
   }
 
   /**
    * Abort the current execution.
    */
   async abort(reason?: string): Promise<void> {
-    await this.client.abort(reason);
+    if (this.currentSession) {
+      await this.currentSession.abort(reason);
+      return;
+    }
+    const id = this.sessionId();
+    if (id) {
+      await this.client.abort(id, reason);
+    }
+  }
+
+  /**
+   * Close the active session on the server.
+   */
+  async close(): Promise<void> {
+    if (this.currentSession) {
+      await this.currentSession.close();
+      this.currentSession = undefined;
+      this.sessionId.set(undefined);
+    }
   }
 
   /**
@@ -391,7 +386,10 @@ export class TentickleService implements OnDestroy {
    * Get a channel accessor for custom pub/sub.
    */
   channel(name: string) {
-    return this.client.channel(name);
+    if (!this.currentSession) {
+      throw new Error("No active session. Call subscribe(sessionId) first.");
+    }
+    return this.currentSession.channel(name);
   }
 
   /**
@@ -399,7 +397,7 @@ export class TentickleService implements OnDestroy {
    */
   channel$(name: string): Observable<{ type: string; payload: unknown }> {
     return new Observable<{ type: string; payload: unknown }>((subscriber) => {
-      const channel = this.client.channel(name);
+      const channel = this.channel(name);
       const unsubscribe = channel.subscribe((payload, event) => {
         subscriber.next({ type: event.type, payload });
       });

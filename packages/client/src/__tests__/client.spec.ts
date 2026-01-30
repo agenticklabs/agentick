@@ -1,472 +1,255 @@
 /**
- * TentickleClient Tests
+ * TentickleClient Tests (unified session architecture)
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { TentickleClient, createClient } from "../client.js";
-import type { Transport, ConnectionState, ChannelEvent } from "../types.js";
-import { FrameworkChannels } from "@tentickle/shared";
-import type { StreamEvent } from "@tentickle/shared";
+import { TentickleClient } from "../client";
 
-// Mock transport
-function createMockTransport(): Transport & {
-  _state: ConnectionState;
-  _setState: (state: ConnectionState) => void;
-  _receiveEvent: (event: ChannelEvent) => void;
-} {
-  let state: ConnectionState = "disconnected";
-  const receiveHandlers = new Set<(event: ChannelEvent) => void>();
-  const stateHandlers = new Set<(state: ConnectionState) => void>();
+function createMockEventSourceClass() {
+  let instance: MockEventSourceInstance | null = null;
+
+  interface MockEventSourceInstance {
+    close: ReturnType<typeof vi.fn>;
+    addEventListener: (type: string, listener: EventListener) => void;
+    removeEventListener: (type: string, listener: EventListener) => void;
+    _triggerMessage: (data: unknown) => void;
+    _triggerError: () => void;
+  }
+
+  class MockEventSource {
+    private onmessage: ((event: MessageEvent) => void) | null = null;
+    private onerror: (() => void) | null = null;
+
+    close = vi.fn();
+
+    constructor(_url: string, _init?: { withCredentials?: boolean }) {
+      instance = this as unknown as MockEventSourceInstance;
+    }
+
+    addEventListener(type: string, listener: EventListener) {
+      if (type === "message") this.onmessage = listener as (e: MessageEvent) => void;
+      if (type === "error") this.onerror = listener as () => void;
+    }
+
+    removeEventListener(_type: string, _listener: EventListener) {}
+
+    _triggerMessage(data: unknown) {
+      this.onmessage?.(new MessageEvent("message", { data: JSON.stringify(data) }));
+    }
+
+    _triggerError() {
+      this.onerror?.();
+    }
+  }
 
   return {
-    name: "mock",
-
-    get state() {
-      return state;
-    },
-
-    _state: state,
-    _setState(newState: ConnectionState) {
-      state = newState;
-      stateHandlers.forEach((h) => h(newState));
-    },
-
-    _receiveEvent(event: ChannelEvent) {
-      receiveHandlers.forEach((h) => h(event));
-    },
-
-    connect: vi.fn(async () => {
-      state = "connected";
-      stateHandlers.forEach((h) => h("connected"));
-    }),
-
-    disconnect: vi.fn(async () => {
-      state = "disconnected";
-      stateHandlers.forEach((h) => h("disconnected"));
-    }),
-
-    send: vi.fn(async () => {}),
-
-    onReceive(handler) {
-      receiveHandlers.add(handler);
-      return () => receiveHandlers.delete(handler);
-    },
-
-    onStateChange(handler) {
-      stateHandlers.add(handler);
-      return () => stateHandlers.delete(handler);
-    },
+    MockEventSource,
+    getInstance: () => instance!,
   };
 }
 
-// Mock fetch
-function createMockFetch(responses: Map<string, Response | (() => Response)>) {
-  return vi.fn(async (url: string, init?: RequestInit) => {
-    const urlPath = new URL(url).pathname;
-    const response = responses.get(urlPath);
-    if (!response) {
-      throw new Error(`No mock response for ${urlPath}`);
-    }
-    return typeof response === "function" ? response() : response;
+type FetchMock = ReturnType<typeof vi.fn> &
+  ((input: string | URL | Request, init?: RequestInit) => Promise<Response>);
+
+function createMockFetch() {
+  return vi.fn() as FetchMock;
+}
+
+function createSuccessResponse(data: unknown): Response {
+  return new Response(JSON.stringify(data), {
+    status: 200,
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
+function createSSEResponse(events: unknown[]): Response {
+  const stream = new ReadableStream({
+    start(controller) {
+      for (const event of events) {
+        controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify(event)}\n\n`));
+      }
+      controller.close();
+    },
+  });
+
+  return new Response(stream, {
+    status: 200,
+    headers: { "Content-Type": "text/event-stream" },
   });
 }
 
 describe("TentickleClient", () => {
-  let transport: ReturnType<typeof createMockTransport>;
-  let client: TentickleClient;
+  let mockESClass: ReturnType<typeof createMockEventSourceClass>;
   let mockFetch: ReturnType<typeof createMockFetch>;
+  let client: TentickleClient;
 
   beforeEach(() => {
-    transport = createMockTransport();
-    mockFetch = createMockFetch(
-      new Map([
-        [
-          "/sessions",
-          () =>
-            new Response(JSON.stringify({ sessionId: "test-123", status: "created" }), {
-              status: 200,
-              headers: { "Content-Type": "application/json" },
-            }),
-        ],
-        [
-          "/sessions/test-123",
-          () =>
-            new Response(
-              JSON.stringify({ sessionId: "test-123", status: "idle", tick: 0, queuedMessages: 0 }),
-              {
-                status: 200,
-                headers: { "Content-Type": "application/json" },
-              },
-            ),
-        ],
-      ]),
-    );
+    mockESClass = createMockEventSourceClass();
+    mockFetch = createMockFetch();
 
-    client = new TentickleClient(
-      {
-        baseUrl: "https://api.example.com",
-        fetch: mockFetch as any,
-      },
-      transport,
-    );
+    client = new TentickleClient({
+      baseUrl: "https://api.example.com",
+      fetch: mockFetch as any,
+      EventSource: mockESClass.MockEventSource as any,
+    });
   });
 
   afterEach(() => {
     client.destroy();
   });
 
-  describe("createSession", () => {
-    it("creates a session via POST", async () => {
-      const result = await client.createSession();
+  const getMockES = () => mockESClass.getInstance();
 
-      expect(result.sessionId).toBe("test-123");
-      expect(result.status).toBe("created");
-      expect(mockFetch).toHaveBeenCalledWith(
-        "https://api.example.com/sessions",
-        expect.objectContaining({
-          method: "POST",
-          headers: expect.objectContaining({
-            "Content-Type": "application/json",
-          }),
+  it("subscribes and opens SSE connection", async () => {
+    mockFetch.mockResolvedValueOnce(createSuccessResponse({ success: true }));
+
+    const session = client.subscribe("conv-123");
+    expect(session.isSubscribed).toBe(true);
+
+    getMockES()._triggerMessage({
+      type: "connection",
+      connectionId: "conn-123",
+      subscriptions: [],
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(client.state).toBe("connected");
+    expect(mockFetch).toHaveBeenCalledWith(
+      "https://api.example.com/subscribe",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          connectionId: "conn-123",
+          add: ["conv-123"],
         }),
-      );
-    });
-
-    it("passes sessionId and props", async () => {
-      await client.createSession({ sessionId: "custom-id", props: { theme: "dark" } });
-
-      const call = mockFetch.mock.calls[0];
-      const body = JSON.parse(call[1]?.body as string);
-      expect(body.sessionId).toBe("custom-id");
-      expect(body.props).toEqual({ theme: "dark" });
-    });
-
-    it("includes authorization header when token provided", async () => {
-      const clientWithToken = new TentickleClient(
-        {
-          baseUrl: "https://api.example.com",
-          token: "my-jwt",
-          fetch: mockFetch as any,
-        },
-        transport,
-      );
-
-      await clientWithToken.createSession();
-
-      const call = mockFetch.mock.calls[0];
-      expect(call[1]?.headers).toHaveProperty("Authorization", "Bearer my-jwt");
-
-      clientWithToken.destroy();
-    });
+      }),
+    );
   });
 
-  describe("getSessionState", () => {
-    it("fetches session state", async () => {
-      const state = await client.getSessionState("test-123");
-
-      expect(state.sessionId).toBe("test-123");
-      expect(state.status).toBe("idle");
-    });
-  });
-
-  describe("connect", () => {
-    it("connects transport to session", async () => {
-      await client.connect("session-1");
-
-      expect(transport.connect).toHaveBeenCalledWith("session-1", {
-        sessionId: "session-1",
-        userId: undefined,
-      });
-      expect(client.sessionId).toBe("session-1");
-    });
-
-    it("throws if already connected", async () => {
-      await client.connect("session-1");
-
-      await expect(client.connect("session-2")).rejects.toThrow("Already connected");
-    });
-  });
-
-  describe("disconnect", () => {
-    it("disconnects transport", async () => {
-      await client.connect("session-1");
-      await client.disconnect();
-
-      expect(transport.disconnect).toHaveBeenCalled();
-      expect(client.sessionId).toBeUndefined();
-    });
-  });
-
-  describe("send", () => {
-    it("sends message via transport", async () => {
-      await client.connect("session-1");
-      await client.send("Hello!");
-
-      expect(transport.send).toHaveBeenCalledWith({
-        channel: FrameworkChannels.MESSAGES,
-        type: "message",
-        payload: {
-          role: "user",
-          content: [{ type: "text", text: "Hello!" }],
-        },
-      });
-    });
-
-    it("accepts ContentBlock array", async () => {
-      await client.connect("session-1");
-      await client.send([{ type: "text", text: "Hello!" }]);
-
-      expect(transport.send).toHaveBeenCalledWith(
-        expect.objectContaining({
-          payload: {
-            role: "user",
-            content: [{ type: "text", text: "Hello!" }],
-          },
-        }),
-      );
-    });
-  });
-
-  describe("tick", () => {
-    it("sends tick control event", async () => {
-      await client.connect("session-1");
-      await client.tick({ mode: "fast" });
-
-      expect(transport.send).toHaveBeenCalledWith({
-        channel: FrameworkChannels.CONTROL,
-        type: "tick",
-        payload: { props: { mode: "fast" } },
-      });
-    });
-  });
-
-  describe("abort", () => {
-    it("sends abort control event", async () => {
-      await client.connect("session-1");
-      await client.abort("User cancelled");
-
-      expect(transport.send).toHaveBeenCalledWith({
-        channel: FrameworkChannels.CONTROL,
-        type: "abort",
-        payload: { reason: "User cancelled" },
-      });
-    });
-  });
-
-  describe("event handlers", () => {
-    it("routes stream events to onEvent handlers", async () => {
-      const events: StreamEvent[] = [];
-      client.onEvent((event) => events.push(event));
-
-      await client.connect("session-1");
-
-      transport._receiveEvent({
-        channel: FrameworkChannels.EVENTS,
+  it("send returns handle and resolves result", async () => {
+    const events = [
+      {
+        type: "execution_start",
+        executionId: "exec-1",
+        sessionId: "conv-1",
+      },
+      {
         type: "content_delta",
-        payload: { type: "content_delta", delta: "Hello" },
-      });
-
-      expect(events).toHaveLength(1);
-      expect(events[0]).toEqual({ type: "content_delta", delta: "Hello" });
-    });
-
-    it("routes results to onResult handlers", async () => {
-      const results: any[] = [];
-      client.onResult((result) => results.push(result));
-
-      await client.connect("session-1");
-
-      transport._receiveEvent({
-        channel: FrameworkChannels.RESULT,
+        delta: "Hello",
+        sessionId: "conv-1",
+      },
+      {
         type: "result",
-        payload: {
-          response: "Done",
+        sessionId: "conv-1",
+        result: {
+          response: "Hello",
           outputs: {},
           usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
         },
-      });
+      },
+      {
+        type: "execution_end",
+        executionId: "exec-1",
+        sessionId: "conv-1",
+      },
+    ];
 
-      expect(results).toHaveLength(1);
-      expect(results[0].response).toBe("Done");
-    });
+    mockFetch.mockResolvedValueOnce(createSSEResponse(events));
 
-    it("handles tool confirmation requests", async () => {
-      const confirmationHandler = vi.fn((request, respond) => {
-        respond({ approved: true });
-      });
-      client.onToolConfirmation(confirmationHandler);
+    const handle = client.send("Hello!");
+    const result = await handle.result;
 
-      await client.connect("session-1");
+    expect(result.response).toBe("Hello");
+  });
 
-      transport._receiveEvent({
-        channel: FrameworkChannels.TOOL_CONFIRMATION,
-        type: "request",
-        id: "req-1",
-        payload: {
-          toolUseId: "tool-1",
-          name: "delete_file",
-          arguments: { path: "/tmp/test.txt" },
+  it("session accessor sends with sessionId", async () => {
+    const events = [
+      { type: "execution_start", executionId: "exec-2", sessionId: "conv-2" },
+      { type: "content_delta", delta: "Hi!", sessionId: "conv-2" },
+      {
+        type: "result",
+        sessionId: "conv-2",
+        result: {
+          response: "Hi!",
+          outputs: {},
+          usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
         },
-      });
+      },
+      { type: "execution_end", executionId: "exec-2", sessionId: "conv-2" },
+    ];
 
-      expect(confirmationHandler).toHaveBeenCalled();
-      expect(transport.send).toHaveBeenCalledWith({
-        channel: FrameworkChannels.TOOL_CONFIRMATION,
-        type: "response",
-        id: "req-1",
-        payload: { approved: true },
-      });
+    mockFetch.mockResolvedValueOnce(createSSEResponse(events));
+
+    const session = client.session("conv-2");
+    const handle = session.send({
+      message: { role: "user", content: [{ type: "text", text: "Hi" }] },
     });
 
-    it("supports typed event subscriptions via on()", async () => {
-      const deltas: string[] = [];
-      client.on("content_delta", (event) => {
-        deltas.push(event.delta);
-      });
+    expect(mockFetch).toHaveBeenCalledWith(
+      "https://api.example.com/send",
+      expect.objectContaining({
+        method: "POST",
+      }),
+    );
 
-      await client.connect("session-1");
+    const callArgs = mockFetch.mock.calls[0];
+    const bodyJSON = JSON.parse(callArgs[1].body as string);
+    expect(bodyJSON.sessionId).toBe("conv-2");
+    expect(bodyJSON.message.role).toBe("user");
 
-      transport._receiveEvent({
-        channel: FrameworkChannels.EVENTS,
-        type: "content_delta",
-        payload: { type: "content_delta", delta: "Hello" },
-      });
-
-      expect(deltas).toEqual(["Hello"]);
-    });
+    // Ensure execution completes properly
+    await handle.result;
   });
 
-  describe("application channels", () => {
-    it("creates channel accessors", () => {
-      const channel = client.channel("my-channel");
+  it("onEvent receives multiplexed events", async () => {
+    const events: unknown[] = [];
+    client.onEvent((event) => events.push(event));
 
-      expect(channel.name).toBe("my-channel");
+    client.subscribe("conv-1");
+    getMockES()._triggerMessage({
+      type: "connection",
+      connectionId: "conn-123",
+      subscriptions: [],
     });
 
-    it("subscribes to channel events", async () => {
-      const channel = client.channel("my-channel");
-      const events: unknown[] = [];
+    getMockES()._triggerMessage({ type: "tick_start", tick: 1, sessionId: "conv-1" });
 
-      channel.subscribe((payload) => events.push(payload));
+    await new Promise((resolve) => setTimeout(resolve, 0));
 
-      await client.connect("session-1");
-
-      transport._receiveEvent({
-        channel: "my-channel",
-        type: "update",
-        payload: { data: "test" },
-      });
-
-      expect(events).toEqual([{ data: "test" }]);
-    });
-
-    it("publishes to channel", async () => {
-      const channel = client.channel("my-channel");
-
-      await client.connect("session-1");
-      await channel.publish("create", { item: "test" });
-
-      expect(transport.send).toHaveBeenCalledWith({
-        channel: "my-channel",
-        type: "create",
-        payload: { item: "test" },
-        metadata: expect.objectContaining({ timestamp: expect.any(Number) }),
-      });
-    });
-
-    it("supports request/response pattern", async () => {
-      const channel = client.channel("my-channel");
-
-      await client.connect("session-1");
-
-      // Start request
-      const requestPromise = channel.request("get_items", {});
-
-      // Wait a tick for the send to be called
-      await new Promise((r) => setTimeout(r, 0));
-
-      // Get the request ID from the send call
-      const sendCall = transport.send.mock.calls[0][0] as ChannelEvent;
-      const requestId = sendCall.id;
-
-      // Simulate response
-      transport._receiveEvent({
-        channel: "my-channel",
-        type: "response",
-        id: requestId,
-        payload: { items: ["a", "b", "c"] },
-      });
-
-      const result = await requestPromise;
-      expect(result).toEqual({ items: ["a", "b", "c"] });
-    });
-
-    it("times out request/response", async () => {
-      const channel = client.channel("my-channel");
-      await client.connect("session-1");
-
-      // Use a short timeout with real timers
-      const requestPromise = channel.request("get_items", {}, 50);
-
-      // Wait for timeout
-      await expect(requestPromise).rejects.toThrow("Request timed out");
-    });
+    expect(events).toHaveLength(1);
+    expect((events[0] as any).sessionId).toBe("conv-1");
   });
 
-  describe("connection state", () => {
-    it("exposes current state", async () => {
-      expect(client.state).toBe("disconnected");
+  it("dedupes duplicate stream events by id", async () => {
+    mockFetch.mockResolvedValueOnce(createSuccessResponse({ success: true }));
 
-      await client.connect("session-1");
-      expect(client.state).toBe("connected");
-
-      await client.disconnect();
-      expect(client.state).toBe("disconnected");
+    client.subscribe("conv-1");
+    getMockES()._triggerMessage({
+      type: "connection",
+      connectionId: "conn-123",
+      subscriptions: [],
     });
 
-    it("notifies on state changes", async () => {
-      const states: ConnectionState[] = [];
-      client.onConnectionChange((state) => states.push(state));
+    await new Promise((resolve) => setTimeout(resolve, 0));
 
-      await client.connect("session-1");
-      await client.disconnect();
+    const event = {
+      type: "content_delta",
+      id: "evt-1",
+      sequence: 1,
+      tick: 1,
+      timestamp: new Date().toISOString(),
+      sessionId: "conv-1",
+      blockType: "text",
+      blockIndex: 0,
+      delta: "Hi",
+    };
 
-      expect(states).toEqual(["connected", "disconnected"]);
-    });
-  });
+    getMockES()._triggerMessage(event);
+    getMockES()._triggerMessage(event);
 
-  describe("destroy", () => {
-    it("cleans up all resources", async () => {
-      const channel = client.channel("my-channel");
-      const events: unknown[] = [];
-      channel.subscribe((payload) => events.push(payload));
+    await new Promise((resolve) => setTimeout(resolve, 0));
 
-      await client.connect("session-1");
-
-      client.destroy();
-
-      // Should not receive events after destroy
-      transport._receiveEvent({
-        channel: "my-channel",
-        type: "update",
-        payload: { data: "test" },
-      });
-
-      expect(events).toHaveLength(0);
-    });
-  });
-});
-
-describe("createClient", () => {
-  it("creates client with default transport", () => {
-    // This would normally use HTTPTransport, but we're just testing the factory
-    const mockFetch = vi.fn();
-    const client = createClient({
-      baseUrl: "https://api.example.com",
-      fetch: mockFetch as any,
-    });
-
-    expect(client).toBeInstanceOf(TentickleClient);
-    client.destroy();
+    expect(client.streamingText.text).toBe("Hi");
   });
 });

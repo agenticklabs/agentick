@@ -8,11 +8,10 @@
  * - JSX render function for showing current state to model
  */
 
-import { createTool } from "@tentickle/core/tool";
-import { useChannel, useOnMount, useTickStart } from "@tentickle/core/hooks";
-import { Section } from "@tentickle/core/jsx";
+import { createTool, Context } from "@tentickle/core";
+import { Section } from "@tentickle/core";
 import { z } from "zod";
-import { TodoListService, type TodoItem } from "../services/todo-list.service.js";
+import { TodoListService, type TodoItem } from "../services/todo-list.service";
 
 /**
  * Channel name for todo list state synchronization.
@@ -28,9 +27,7 @@ const todoActionSchema = z.discriminatedUnion("action", [
   }),
   z.object({
     action: z.literal("create"),
-    title: z.string().optional().describe("The title of the new todo item"),
-    task: z.string().optional().describe("Alias for title"),
-    task_name: z.string().optional().describe("Alias for title"),
+    title: z.string().describe("The title of the new todo item"),
   }),
   z.object({
     action: z.literal("complete"),
@@ -78,6 +75,24 @@ function getSessionId(): string {
 }
 
 /**
+ * Broadcast todo state change to connected clients via channels.
+ * This enables real-time updates when the model modifies todos.
+ */
+function broadcastTodoState(sessionId: string): void {
+  const ctx = Context.tryGet();
+  if (!ctx?.channels) {
+    // No channel service available (e.g., running outside of session context)
+    return;
+  }
+
+  const todos = TodoListService.list(sessionId);
+  ctx.channels.publish(ctx, TODO_CHANNEL, {
+    type: "state_changed",
+    payload: { todos },
+  });
+}
+
+/**
  * TodoList Tool for managing tasks.
  *
  * @example
@@ -114,8 +129,7 @@ export const TodoListTool = createTool({
       }
 
       case "create": {
-        const title = input.title ?? input.task ?? input.task_name;
-        if (!title) {
+        if (!input.title) {
           return [
             {
               type: "text" as const,
@@ -124,8 +138,12 @@ export const TodoListTool = createTool({
           ];
         }
 
-        const todo = TodoListService.create(sessionId, title);
+        const todo = TodoListService.create(sessionId, input.title);
         const todos = TodoListService.list(sessionId);
+
+        // Broadcast state change to connected clients
+        broadcastTodoState(sessionId);
+
         return [
           {
             type: "text" as const,
@@ -145,6 +163,10 @@ export const TodoListTool = createTool({
           ];
         }
         const todos = TodoListService.list(sessionId);
+
+        // Broadcast state change to connected clients
+        broadcastTodoState(sessionId);
+
         return [
           {
             type: "text" as const,
@@ -167,6 +189,10 @@ export const TodoListTool = createTool({
           ];
         }
         const todos = TodoListService.list(sessionId);
+
+        // Broadcast state change to connected clients
+        broadcastTodoState(sessionId);
+
         return [
           {
             type: "text" as const,
@@ -186,6 +212,10 @@ export const TodoListTool = createTool({
           ];
         }
         const todos = TodoListService.list(sessionId);
+
+        // Broadcast state change to connected clients
+        broadcastTodoState(sessionId);
+
         return [
           {
             type: "text" as const,

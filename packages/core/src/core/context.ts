@@ -4,6 +4,7 @@ import { type ChannelServiceInterface } from "./channel";
 import { ProcedureGraph } from "./procedure-graph";
 import type { ProcedureNode } from "./procedure-graph";
 import { ContextError } from "@tentickle/shared";
+import type { Middleware } from "./procedure";
 
 /**
  * User information associated with the current execution context.
@@ -244,7 +245,7 @@ export interface KernelContext {
    * Typically set by createApp() from the Tentickle instance.
    */
   middleware?: {
-    getMiddlewareFor(procedureName: string): import("./procedure").Middleware[];
+    getMiddlewareFor(procedureName: string): Middleware[];
   };
 
   /**
@@ -348,7 +349,7 @@ export class Context {
    * @returns The result of the function
    */
   static run<T>(ctx: Partial<KernelContext>, fn: () => Promise<T>): Promise<T> {
-    return storage.run(((isKernelContext(ctx) ? ctx : Context.create(ctx)) as KernelContext), fn);
+    return storage.run((isKernelContext(ctx) ? ctx : Context.create(ctx)) as KernelContext, fn);
   }
 
   /**

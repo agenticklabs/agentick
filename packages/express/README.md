@@ -53,15 +53,15 @@ const router = createRouter({
 
 ### Endpoints
 
-| Method | Path | Description |
-|--------|------|-------------|
-| POST | `/sessions` | Create new session |
-| GET | `/sessions/:id` | Get session by ID |
-| POST | `/sessions/:id/messages` | Send message to session |
-| POST | `/sessions/:id/tick` | Trigger tick |
-| POST | `/sessions/:id/abort` | Abort execution |
-| GET | `/events` | SSE stream for events |
-| POST | `/events` | Publish event to session |
+| Method | Path                     | Description              |
+| ------ | ------------------------ | ------------------------ |
+| POST   | `/sessions`              | Create new session       |
+| GET    | `/sessions/:id`          | Get session by ID        |
+| POST   | `/sessions/:id/messages` | Send message to session  |
+| POST   | `/sessions/:id/tick`     | Trigger tick             |
+| POST   | `/sessions/:id/abort`    | Abort execution          |
+| GET    | `/events`                | SSE stream for events    |
+| POST   | `/events`                | Publish event to session |
 
 ## Usage
 

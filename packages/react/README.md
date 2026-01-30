@@ -1,158 +1,67 @@
 # @tentickle/react
 
-React hooks for Tentickle clients.
+React bindings for Tentickle. Provides hooks around `@tentickle/client`.
 
 ## Installation
 
 ```bash
-npm install @tentickle/react @tentickle/client
-# or
-pnpm add @tentickle/react @tentickle/client
+pnpm add @tentickle/react
 ```
 
 ## Quick Start
 
 ```tsx
-import { TentickleProvider, useSession, useStreamingText } from "@tentickle/react";
+import { TentickleProvider, useSession, useEvents } from "@tentickle/react";
 
-function App() {
+function Chat() {
+  const session = useSession("conv-123", { autoSubscribe: true });
+  useEvents((event) => {
+    if (event.type === "content_delta") {
+      console.log(event.delta);
+    }
+  }, [session.sessionId]);
+
+  const send = async (text: string) => {
+    const handle = session.send(text);
+    await handle.result;
+  };
+
+  return <button onClick={() => send("Hello")}>Send</button>;
+}
+
+export function App() {
   return (
-    <TentickleProvider config={{ baseUrl: "https://api.example.com" }}>
+    <TentickleProvider config={{ baseUrl: "/api/agent" }}>
       <Chat />
     </TentickleProvider>
   );
 }
-
-function Chat() {
-  const { connect, send, isConnected } = useSession();
-  const { text, isStreaming } = useStreamingText();
-
-  useEffect(() => {
-    connect();
-  }, []);
-
-  const handleSend = async (message: string) => {
-    await send(message);
-  };
-
-  return (
-    <div>
-      <div>{text}{isStreaming && <span className="cursor">|</span>}</div>
-      <input onKeyDown={(e) => e.key === "Enter" && handleSend(e.target.value)} />
-    </div>
-  );
-}
 ```
 
-## API
+## Hooks
 
-### TentickleProvider
+### `useSession(sessionId, options?)`
 
-Provides Tentickle client context to child components.
+Returns a session accessor with `send`, `subscribe`, `unsubscribe`, `onEvent`, and `channel`.
 
-```tsx
-<TentickleProvider config={{ baseUrl: "https://api.example.com", token: "..." }}>
-  {children}
-</TentickleProvider>
-```
+### `useEvents(handler, deps?)`
 
-### useSession()
+Global event stream handler. Events include `sessionId`.
 
-Access session state and methods.
+### `useConnection()`
 
-```typescript
-const {
-  // State
-  sessionId,
-  connectionState,
-  isConnected,
-  isConnecting,
-  error,
-
-  // Methods
-  connect,
-  disconnect,
-  send,
-  tick,
-  abort,
-} = useSession();
-```
-
-### useConnectionState()
-
-Subscribe to connection state only.
-
-```typescript
-const connectionState = useConnectionState();
-// "disconnected" | "connecting" | "connected" | "error"
-```
-
-### useStreamingText()
-
-Subscribe to streaming text accumulation.
-
-```typescript
-const { text, isStreaming } = useStreamingText();
-```
-
-### useEvents(handler, deps?)
-
-Subscribe to all stream events.
-
-```typescript
-useEvents((event) => {
-  if (event.type === "tool_call") {
-    console.log("Tool called:", event.name);
-  }
-});
-```
-
-### useResult(handler, deps?)
-
-Subscribe to execution results.
-
-```typescript
-useResult((result) => {
-  console.log("Response:", result.response);
-  console.log("Usage:", result.usage);
-});
-```
-
-### useChannel(name)
-
-Access a named channel for pub/sub.
-
-```typescript
-const { subscribe, publish, request } = useChannel("todos");
-
-useEffect(() => {
-  return subscribe((payload, event) => {
-    console.log("Channel event:", event.type, payload);
-  });
-}, []);
-
-const addTodo = () => publish("add", { title: "New task" });
-```
-
-### useTentickle()
-
-Access the underlying TentickleClient directly.
-
-```typescript
-const client = useTentickle();
-```
-
-## TypeScript
+Read-only connection state.
 
 All hooks are fully typed. Import types from the package:
 
 ```typescript
 import type {
   TentickleConfig,
-  SessionState,
   StreamingTextState,
   ConnectionState,
   StreamEvent,
+  SessionStreamEvent,
+  ClientExecutionHandle,
 } from "@tentickle/react";
 ```
 

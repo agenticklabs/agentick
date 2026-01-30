@@ -1,0 +1,338 @@
+/**
+ * Duplicate Message Prevention Tests
+ *
+ * These tests verify that messages sent via session.send() are NOT
+ * duplicated in the model's input. This was a bug where:
+ * 1. compileTick added queued messages to COM timeline
+ * 2. <Timeline> rendered those messages as <User> components
+ * 3. The structure renderer added them AGAIN
+ *
+ * The fix ensures messages only get added once via the JSX rendering path.
+ */
+
+import { describe, it, expect, vi } from "vitest";
+import { createApp, Model, System, Timeline } from "../../index";
+
+// Helper to create a mock model that captures input
+function createMockModel() {
+  const capturedInputs: any[] = [];
+
+  return {
+    model: {
+      metadata: {
+        id: "test-model",
+        provider: "test",
+        model: "test",
+        capabilities: ["streaming", "tools"] as const,
+      },
+      generate: vi.fn().mockResolvedValue({
+        message: { role: "assistant", content: [{ type: "text", text: "Response" }] },
+        usage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 },
+        stopReason: "stop",
+      }),
+      stream: vi.fn().mockImplementation(async function* () {
+        yield { type: "content_delta", delta: "Response", role: "assistant" };
+        yield {
+          type: "result",
+          message: { role: "assistant", content: [{ type: "text", text: "Response" }] },
+          usage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 },
+          stopReason: "stop",
+        };
+      }),
+      fromEngineState: vi.fn().mockImplementation(async (input) => {
+        capturedInputs.push(JSON.parse(JSON.stringify(input))); // Deep clone
+        return {
+          messages: [
+            ...(input.system || []).map((e: any) => e.message),
+            ...input.timeline.filter((e: any) => e.kind === "message").map((e: any) => e.message),
+          ],
+          tools: input.tools || [],
+        };
+      }),
+      toEngineState: vi.fn().mockImplementation(async (output) => ({
+        newTimelineEntries: output.message
+          ? [{ kind: "message", message: output.message, tags: ["model_output"] }]
+          : [],
+        toolCalls: [],
+        stopReason: { reason: "stop", description: "Completed", recoverable: false },
+        usage: output.usage,
+      })),
+    },
+    getCapturedInputs: () => capturedInputs,
+    clearCapturedInputs: () => {
+      capturedInputs.length = 0;
+    },
+  };
+}
+
+describe("Duplicate Message Prevention", () => {
+  describe("First tick - single user message", () => {
+    it("should NOT duplicate user message on first tick", async () => {
+      const mockModel = createMockModel();
+
+      const Agent = () => {
+        return (
+          <>
+            <Model model={mockModel.model} />
+            <System>Test</System>
+            <Timeline />
+          </>
+        );
+      };
+
+      const app = createApp(Agent, { maxTicks: 1 });
+      const session = app.session();
+
+      await session.send({
+        message: {
+          role: "user",
+          content: [{ type: "text", text: "Hello world" }],
+        },
+      }).result;
+
+      // Check the input sent to the model
+      const inputs = mockModel.getCapturedInputs();
+      expect(inputs.length).toBeGreaterThanOrEqual(1);
+
+      const lastInput = inputs[inputs.length - 1];
+      const userMessages = lastInput.timeline.filter((e: any) => e.message?.role === "user");
+
+      // Should have exactly ONE user message, not duplicated
+      expect(userMessages.length).toBe(1);
+      expect(userMessages[0].message.content[0].text).toBe("Hello world");
+
+      session.close();
+    });
+  });
+
+  describe("Subsequent ticks - conversation flow", () => {
+    it("should NOT duplicate messages across multiple exchanges", async () => {
+      const mockModel = createMockModel();
+
+      const Agent = () => {
+        return (
+          <>
+            <Model model={mockModel.model} />
+            <System>Test</System>
+            <Timeline />
+          </>
+        );
+      };
+
+      const app = createApp(Agent, { maxTicks: 1 });
+      const session = app.session();
+
+      // First message
+      await session.send({
+        message: {
+          role: "user",
+          content: [{ type: "text", text: "First message" }],
+        },
+      }).result;
+
+      mockModel.clearCapturedInputs();
+
+      // Second message
+      await session.send({
+        message: {
+          role: "user",
+          content: [{ type: "text", text: "Second message" }],
+        },
+      }).result;
+
+      // Check the input for the second execution
+      const inputs = mockModel.getCapturedInputs();
+      expect(inputs.length).toBeGreaterThanOrEqual(1);
+
+      const lastInput = inputs[inputs.length - 1];
+
+      // Count user messages - should have 2 (first + second), each appearing once
+      const userMessages = lastInput.timeline.filter((e: any) => e.message?.role === "user");
+
+      // Count messages by content
+      const firstCount = userMessages.filter(
+        (e: any) => e.message.content[0].text === "First message",
+      ).length;
+      const secondCount = userMessages.filter(
+        (e: any) => e.message.content[0].text === "Second message",
+      ).length;
+
+      expect(firstCount).toBe(1); // First message appears once
+      expect(secondCount).toBe(1); // Second message appears once
+
+      session.close();
+    });
+
+    it("should NOT duplicate assistant messages", async () => {
+      const mockModel = createMockModel();
+
+      const Agent = () => {
+        return (
+          <>
+            <Model model={mockModel.model} />
+            <System>Test</System>
+            <Timeline />
+          </>
+        );
+      };
+
+      const app = createApp(Agent, { maxTicks: 1 });
+      const session = app.session();
+
+      // First exchange
+      await session.send({
+        message: {
+          role: "user",
+          content: [{ type: "text", text: "Hello" }],
+        },
+      }).result;
+
+      mockModel.clearCapturedInputs();
+
+      // Second message - should see previous assistant response exactly once
+      await session.send({
+        message: {
+          role: "user",
+          content: [{ type: "text", text: "Followup" }],
+        },
+      }).result;
+
+      const inputs = mockModel.getCapturedInputs();
+      expect(inputs.length).toBeGreaterThanOrEqual(1);
+
+      const lastInput = inputs[inputs.length - 1];
+      const assistantMessages = lastInput.timeline.filter(
+        (e: any) => e.message?.role === "assistant",
+      );
+
+      // Each assistant response should appear exactly once
+      // Note: There may be 2 distinct assistant messages if tool loops happened
+      // But same message content should NOT be duplicated
+      const responseTexts = assistantMessages.map((e: any) =>
+        e.message.content
+          .filter((b: any) => b.type === "text")
+          .map((b: any) => b.text)
+          .join(""),
+      );
+
+      // Count occurrences of each text
+      const textCounts = new Map<string, number>();
+      for (const text of responseTexts) {
+        textCounts.set(text, (textCounts.get(text) || 0) + 1);
+      }
+
+      // Each unique text should appear exactly once
+      for (const [_text, count] of textCounts) {
+        expect(count).toBe(1);
+      }
+
+      session.close();
+    });
+  });
+
+  describe("Multiple exchanges - history preservation", () => {
+    it("should handle 5 consecutive exchanges without duplication", async () => {
+      const mockModel = createMockModel();
+
+      const Agent = () => {
+        return (
+          <>
+            <Model model={mockModel.model} />
+            <System>Test</System>
+            <Timeline />
+          </>
+        );
+      };
+
+      const app = createApp(Agent, { maxTicks: 1 });
+      const session = app.session();
+
+      // Send 5 messages
+      for (let i = 1; i <= 5; i++) {
+        await session.send({
+          message: {
+            role: "user",
+            content: [{ type: "text", text: `Message ${i}` }],
+          },
+        }).result;
+      }
+
+      // Get the last captured input
+      const inputs = mockModel.getCapturedInputs();
+      const lastInput = inputs[inputs.length - 1];
+
+      const userMsgs = lastInput.timeline.filter((e: any) => e.message?.role === "user");
+      const assistantMsgs = lastInput.timeline.filter((e: any) => e.message?.role === "assistant");
+
+      // Should have exactly 5 user messages
+      expect(userMsgs.length).toBe(5);
+
+      // Should have 4 assistant responses (from messages 1-4)
+      // Note: Mock returns same "Response" text each time, but they're distinct messages
+      expect(assistantMsgs.length).toBe(4);
+
+      // Verify each user message appears exactly once
+      for (let i = 1; i <= 5; i++) {
+        const count = userMsgs.filter(
+          (e: any) => e.message.content[0].text === `Message ${i}`,
+        ).length;
+        expect(count).toBe(1);
+      }
+
+      session.close();
+    });
+
+    it("should preserve all messages across 3 exchanges", async () => {
+      const mockModel = createMockModel();
+
+      const Agent = () => {
+        return (
+          <>
+            <Model model={mockModel.model} />
+            <System>Test</System>
+            <Timeline />
+          </>
+        );
+      };
+
+      const app = createApp(Agent, { maxTicks: 1 });
+      const session = app.session();
+
+      // Exchange 1
+      await session.send({
+        message: { role: "user", content: [{ type: "text", text: "Hello" }] },
+      }).result;
+
+      // Exchange 2
+      await session.send({
+        message: { role: "user", content: [{ type: "text", text: "How are you?" }] },
+      }).result;
+
+      // Exchange 3
+      await session.send({
+        message: { role: "user", content: [{ type: "text", text: "Goodbye" }] },
+      }).result;
+
+      const inputs = mockModel.getCapturedInputs();
+      const lastInput = inputs[inputs.length - 1];
+
+      // Verify complete history
+      const userMsgs = lastInput.timeline.filter((e: any) => e.message?.role === "user");
+      const assistantMsgs = lastInput.timeline.filter((e: any) => e.message?.role === "assistant");
+
+      expect(userMsgs.length).toBe(3); // 3 user messages
+      expect(assistantMsgs.length).toBe(2); // 2 assistant responses (from exchanges 1 and 2)
+
+      // Verify no duplicates - each user message appears exactly once
+      const userTexts = userMsgs.map((e: any) => e.message.content[0].text);
+      expect(userTexts).toContain("Hello");
+      expect(userTexts).toContain("How are you?");
+      expect(userTexts).toContain("Goodbye");
+      expect(userTexts.filter((t: string) => t === "Hello").length).toBe(1);
+      expect(userTexts.filter((t: string) => t === "How are you?").length).toBe(1);
+      expect(userTexts.filter((t: string) => t === "Goodbye").length).toBe(1);
+
+      session.close();
+    });
+  });
+});

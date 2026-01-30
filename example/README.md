@@ -57,12 +57,14 @@ This example showcases:
 ### Setup
 
 1. **Install dependencies**
+
    ```bash
    cd example
    pnpm install
    ```
 
 2. **Configure environment**
+
    ```bash
    cd express
    cp .env.example .env
@@ -70,11 +72,13 @@ This example showcases:
    ```
 
 3. **Start the backend**
+
    ```bash
    pnpm dev:express
    ```
 
 4. **In another terminal, start the frontend**
+
    ```bash
    pnpm dev:react
    ```
@@ -91,12 +95,13 @@ The assistant can manage your todo list and perform calculations:
 
 - "Add a task to buy groceries"
 - "Mark task 1 as done"
-- "What is 42 * 17?"
+- "What is 42 \* 17?"
 - "Delete all completed tasks"
 
 ### Direct Todo Manipulation
 
 The todo panel on the right allows direct task management:
+
 - Click the checkbox to toggle completion
 - Click × to delete
 - Use the form to add tasks
@@ -219,36 +224,36 @@ function TodoPanel() {
 
 ## Environment Variables
 
-| Variable | Description | Required |
-|----------|-------------|----------|
-| `OPENAI_API_KEY` | OpenAI API key | Yes (if using OpenAI) |
-| `OPENAI_MODEL` | OpenAI model name | No (default: gpt-4o-mini) |
-| `USE_GOOGLE_MODEL` | Set to "true" to use Google | No |
-| `GOOGLE_API_KEY` | Google AI API key | Yes (if using Google) |
-| `GOOGLE_MODEL` | Google model name | No (default: gemini-2.0-flash) |
-| `PORT` | Server port | No (default: 3000) |
+| Variable           | Description                 | Required                       |
+| ------------------ | --------------------------- | ------------------------------ |
+| `OPENAI_API_KEY`   | OpenAI API key              | Yes (if using OpenAI)          |
+| `OPENAI_MODEL`     | OpenAI model name           | No (default: gpt-4o-mini)      |
+| `USE_GOOGLE_MODEL` | Set to "true" to use Google | No                             |
+| `GOOGLE_API_KEY`   | Google AI API key           | Yes (if using Google)          |
+| `GOOGLE_MODEL`     | Google model name           | No (default: gemini-2.0-flash) |
+| `PORT`             | Server port                 | No (default: 3000)             |
 
 ## API Endpoints
 
 ### Tentickle Routes (via `createTentickleRouter`)
 
-| Method | Path | Description |
-|--------|------|-------------|
-| POST | `/api/sessions` | Create new session |
-| GET | `/api/sessions/:id` | Get session state |
-| DELETE | `/api/sessions/:id` | Delete session |
-| GET | `/api/events` | SSE event stream |
-| POST | `/api/events` | Send client event |
+| Method | Path                | Description        |
+| ------ | ------------------- | ------------------ |
+| POST   | `/api/sessions`     | Create new session |
+| GET    | `/api/sessions/:id` | Get session state  |
+| DELETE | `/api/sessions/:id` | Delete session     |
+| GET    | `/api/events`       | SSE event stream   |
+| POST   | `/api/events`       | Send client event  |
 
 ### Custom REST Routes
 
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/api/tasks` | List all todos |
-| POST | `/api/tasks` | Create todo |
-| PATCH | `/api/tasks/:id` | Update todo |
-| POST | `/api/tasks/:id/complete` | Mark complete |
-| DELETE | `/api/tasks/:id` | Delete todo |
+| Method | Path                      | Description    |
+| ------ | ------------------------- | -------------- |
+| GET    | `/api/tasks`              | List all todos |
+| POST   | `/api/tasks`              | Create todo    |
+| PATCH  | `/api/tasks/:id`          | Update todo    |
+| POST   | `/api/tasks/:id/complete` | Mark complete  |
+| DELETE | `/api/tasks/:id`          | Delete todo    |
 
 ## License
 

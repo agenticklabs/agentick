@@ -6,20 +6,17 @@
  */
 
 import { Router, type Request, type Response, type NextFunction } from "express";
-import type { SessionHandler, EventBridge } from "@tentickle/server";
+import type { App } from "@tentickle/core";
 import { TodoListService, type TodoItem } from "../services/todo-list.service.js";
 import { TODO_CHANNEL } from "../tools/index.js";
 
 /**
  * Broadcast todo state to all clients connected to a session.
  */
-function broadcastTodoState(
-  sessionHandler: SessionHandler,
-  sessionId: string,
-  todos: TodoItem[]
-): void {
-  const session = sessionHandler.getSession(sessionId);
-  if (!session) return;
+function broadcastTodoState(app: App, sessionId: string, todos: TodoItem[]): void {
+  if (!app.has(sessionId)) return;
+
+  const session = app.session(sessionId);
 
   // Publish state change to the todo channel
   session.channel(TODO_CHANNEL).publish({
@@ -32,13 +29,9 @@ function broadcastTodoState(
 /**
  * Create todo routes.
  *
- * @param sessionHandler - Session handler for accessing sessions
- * @param eventBridge - Event bridge (not used directly, but available for custom events)
+ * @param app - Tentickle app for accessing sessions
  */
-export function todoRoutes(
-  sessionHandler: SessionHandler,
-  eventBridge: EventBridge
-): Router {
+export function todoRoutes(app: App): Router {
   const router = Router();
 
   /**
@@ -48,7 +41,7 @@ export function todoRoutes(
    */
   router.get("/", (req: Request, res: Response, next: NextFunction) => {
     try {
-      const sessionId = (req.query.sessionId as string) || "default";
+      const sessionId = String(req.query.sessionId || "default");
       const todos = TodoListService.list(sessionId);
       res.json({ todos });
     } catch (err) {
@@ -74,7 +67,7 @@ export function todoRoutes(
       const todos = TodoListService.list(sessionId);
 
       // Broadcast state change
-      broadcastTodoState(sessionHandler, sessionId, todos);
+      broadcastTodoState(app, sessionId, todos);
 
       res.status(201).json({ todo, todos });
     } catch (err) {
@@ -89,7 +82,7 @@ export function todoRoutes(
    */
   router.patch("/:id", (req: Request, res: Response, next: NextFunction) => {
     try {
-      const id = parseInt(req.params.id, 10);
+      const id = parseInt(String(req.params.id), 10);
       const { title, completed, sessionId = "default" } = req.body;
 
       if (isNaN(id)) {
@@ -107,7 +100,7 @@ export function todoRoutes(
       const todos = TodoListService.list(sessionId);
 
       // Broadcast state change
-      broadcastTodoState(sessionHandler, sessionId, todos);
+      broadcastTodoState(app, sessionId, todos);
 
       res.json({ todo, todos });
     } catch (err) {
@@ -122,7 +115,7 @@ export function todoRoutes(
    */
   router.post("/:id/complete", (req: Request, res: Response, next: NextFunction) => {
     try {
-      const id = parseInt(req.params.id, 10);
+      const id = parseInt(String(req.params.id), 10);
       const { sessionId = "default" } = req.body;
 
       if (isNaN(id)) {
@@ -140,7 +133,7 @@ export function todoRoutes(
       const todos = TodoListService.list(sessionId);
 
       // Broadcast state change
-      broadcastTodoState(sessionHandler, sessionId, todos);
+      broadcastTodoState(app, sessionId, todos);
 
       res.json({ todo, todos });
     } catch (err) {
@@ -155,8 +148,8 @@ export function todoRoutes(
    */
   router.delete("/:id", (req: Request, res: Response, next: NextFunction) => {
     try {
-      const id = parseInt(req.params.id, 10);
-      const sessionId = (req.query.sessionId as string) || "default";
+      const id = parseInt(String(req.params.id), 10);
+      const sessionId = String(req.query.sessionId || "default");
 
       if (isNaN(id)) {
         res.status(400).json({ error: "Invalid task ID" });
@@ -173,7 +166,7 @@ export function todoRoutes(
       const todos = TodoListService.list(sessionId);
 
       // Broadcast state change
-      broadcastTodoState(sessionHandler, sessionId, todos);
+      broadcastTodoState(app, sessionId, todos);
 
       res.json({ deleted: true, todos });
     } catch (err) {

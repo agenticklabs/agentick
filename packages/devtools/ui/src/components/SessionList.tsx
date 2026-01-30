@@ -112,7 +112,8 @@ interface SessionExecutionItemProps {
 }
 
 function SessionExecutionItem({ execution, isSelected, onSelect }: SessionExecutionItemProps) {
-  const statusIcon = execution.status === "running" ? "🟢" : execution.status === "error" ? "❌" : "✓";
+  const statusIcon =
+    execution.status === "running" ? "🟢" : execution.status === "error" ? "❌" : "✓";
 
   return (
     <div

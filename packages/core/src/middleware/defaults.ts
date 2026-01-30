@@ -1,4 +1,4 @@
-import { type Middleware, Context, Telemetry } from "../core/index.js";
+import { type Middleware, Context, Telemetry } from "../core/index";
 import { type EngineError } from "../component/component";
 
 /**

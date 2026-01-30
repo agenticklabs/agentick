@@ -1,4 +1,4 @@
-import type { Middleware } from "../core/index.js";
+import type { Middleware } from "../core/index";
 import type { ContentBlock } from "@tentickle/shared";
 import { BaseHookRegistry } from "../hooks/base-hook-registry";
 import type {

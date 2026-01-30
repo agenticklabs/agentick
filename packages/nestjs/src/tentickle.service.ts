@@ -1,335 +1,297 @@
 /**
  * TentickleService - High-level service for Tentickle operations.
  *
- * Provides a clean, NestJS-idiomatic API for session and event management.
- * Users can inject this service into their own controllers for custom routing.
+ * Wraps App with NestJS-friendly patterns for multiplexed SSE sessions.
  *
  * @module @tentickle/nestjs/service
  */
 
 import { Injectable, Inject } from "@nestjs/common";
 import type { Response } from "express";
-import {
-  setSSEHeaders,
-  createSSEWriter,
-  SessionNotFoundError,
-  type SessionHandler,
-  type EventBridge,
-  type ServerConnection,
-  type SSEWriter,
-} from "@tentickle/server";
-import type { TextBlock, Message } from "@tentickle/shared";
-import {
-  TENTICKLE_SESSION_HANDLER,
-  TENTICKLE_EVENT_BRIDGE,
-} from "./types.js";
+import type { App } from "@tentickle/core";
+import type { StreamEvent, SendInput, ChannelEvent } from "@tentickle/shared";
+import { createSSEWriter, setSSEHeaders } from "@tentickle/server";
+import { TENTICKLE_APP, TENTICKLE_OPTIONS, type TentickleModuleOptions } from "./types";
 
-// ============================================================================
-// Types
-// ============================================================================
-
-/**
- * Result of creating a session.
- */
-export interface CreateSessionResult {
-  sessionId: string;
-  status: "created";
-}
-
-/**
- * Result of sending a message or triggering a tick.
- */
-export interface SendResult {
-  success: true;
-  response: string;
-  usage: {
-    inputTokens: number;
-    outputTokens: number;
-    totalTokens: number;
-  };
-  stopReason?: string;
-}
-
-/**
- * State information for a session.
- */
-export interface SessionState {
-  sessionId: string;
-  status: string;
-  tick: number;
-  queuedMessages: number;
-}
-
-/**
- * Result of establishing an SSE connection.
- */
-export interface ConnectionResult {
-  connectionId: string;
-  writer: SSEWriter;
-  cleanup: () => void;
-}
-
-/**
- * Event to publish to a session.
- */
-export interface PublishEventInput {
-  channel: string;
-  type: string;
-  payload: unknown;
-  id?: string;
-}
-
-// ============================================================================
-// Service
-// ============================================================================
+type Connection = {
+  id: string;
+  writer: ReturnType<typeof createSSEWriter>;
+  subscriptions: Set<string>;
+  closed: boolean;
+};
 
 /**
  * High-level service for Tentickle operations.
  *
- * @example Injecting into your own controller
+ * @example Injecting into your controller
  * ```typescript
- * import { Controller, Post, Body } from '@nestjs/common';
- * import { TentickleService } from '@tentickle/nestjs';
- *
  * @Controller('chat')
  * export class ChatController {
  *   constructor(private readonly tentickle: TentickleService) {}
  *
- *   @Post()
- *   async sendMessage(@Body() body: { message: string }) {
- *     const { sessionId } = await this.tentickle.createSession();
- *     const result = await this.tentickle.sendMessage(sessionId, body.message);
- *     return result;
+ *   @Post('send')
+ *   async send(@Body() body: { message: string }, @Res() res: Response) {
+ *     const { sessionId } = body;
+ *     return this.tentickle.sendAndStream(sessionId, { message: body.message }, res);
  *   }
- * }
- * ```
- *
- * @example Custom SSE endpoint
- * ```typescript
- * @Get('stream/:sessionId')
- * async stream(
- *   @Param('sessionId') sessionId: string,
- *   @Res() res: Response
- * ) {
- *   const conn = await this.tentickle.createConnection(sessionId, res);
- *   // Connection is now established and streaming
  * }
  * ```
  */
 @Injectable()
 export class TentickleService {
+  private readonly connections = new Map<string, Connection>();
+  private readonly sessionSubscribers = new Map<string, Set<string>>();
+  private readonly sessionListeners = new Map<string, (event: StreamEvent) => void>();
+  private readonly sessionChannelListeners = new Map<string, Map<string, () => void>>();
+
   constructor(
-    @Inject(TENTICKLE_SESSION_HANDLER)
-    private readonly sessionHandler: SessionHandler,
-    @Inject(TENTICKLE_EVENT_BRIDGE)
-    private readonly eventBridge: EventBridge,
+    @Inject(TENTICKLE_APP) private readonly app: App,
+    @Inject(TENTICKLE_OPTIONS) private readonly options: TentickleModuleOptions,
   ) {}
 
   // ══════════════════════════════════════════════════════════════════════════
-  // Session Management
+  // SSE Connection Management
   // ══════════════════════════════════════════════════════════════════════════
 
   /**
-   * Create a new session.
-   *
-   * @param options.sessionId - Optional custom session ID
-   * @param options.props - Session properties for the agent
+   * Create an SSE connection.
+   * Returns a connection ID that the client will use for subscriptions.
    */
-  async createSession(options?: {
-    sessionId?: string;
-    props?: Record<string, unknown>;
-  }): Promise<CreateSessionResult> {
-    const { sessionId } = await this.sessionHandler.create({
-      sessionId: options?.sessionId,
-      props: options?.props,
+  createConnection(res: Response): string {
+    setSSEHeaders(res);
+    const writer = createSSEWriter(res, {
+      keepaliveInterval: this.options.sseKeepaliveInterval ?? 15000,
     });
 
-    return { sessionId, status: "created" };
+    const connectionId = `conn-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+    const connection: Connection = {
+      id: connectionId,
+      writer,
+      subscriptions: new Set<string>(),
+      closed: false,
+    };
+
+    this.connections.set(connectionId, connection);
+
+    writer.writeEvent({
+      type: "connection",
+      connectionId,
+      subscriptions: [],
+    });
+
+    res.on("close", () => {
+      connection.closed = true;
+      for (const sessionId of connection.subscriptions) {
+        this.unsubscribeConnection(connectionId, sessionId);
+      }
+      this.connections.delete(connectionId);
+    });
+
+    return connectionId;
   }
 
   /**
-   * Get session state.
-   *
-   * @throws SessionNotFoundError if session doesn't exist
+   * Subscribe a connection to one or more sessions.
    */
-  getSession(sessionId: string): SessionState {
-    const state = this.sessionHandler.getState(sessionId);
-
-    if (!state) {
-      throw new SessionNotFoundError(sessionId);
+  async subscribe(connectionId: string, sessionIds: string[]): Promise<void> {
+    const connection = this.connections.get(connectionId);
+    if (!connection || connection.closed) {
+      throw new Error("Connection not found or closed");
     }
 
-    return state;
+    for (const sessionId of sessionIds) {
+      this.ensureSessionListener(sessionId);
+      connection.subscriptions.add(sessionId);
+
+      const subscribers = this.sessionSubscribers.get(sessionId) ?? new Set<string>();
+      subscribers.add(connectionId);
+      this.sessionSubscribers.set(sessionId, subscribers);
+    }
   }
 
   /**
-   * Check if a session exists.
+   * Unsubscribe a connection from one or more sessions.
    */
-  hasSession(sessionId: string): boolean {
-    return this.sessionHandler.getState(sessionId) !== undefined;
+  async unsubscribe(connectionId: string, sessionIds: string[]): Promise<void> {
+    for (const sessionId of sessionIds) {
+      this.unsubscribeConnection(connectionId, sessionId);
+    }
   }
 
-  // ══════════════════════════════════════════════════════════════════════════
-  // Messaging
-  // ══════════════════════════════════════════════════════════════════════════
+  private ensureSessionListener(sessionId: string): void {
+    if (this.sessionListeners.has(sessionId)) return;
 
-  /**
-   * Send a message to a session.
-   *
-   * @throws SessionNotFoundError if session doesn't exist
-   */
-  async sendMessage(
-    sessionId: string,
-    content: string,
-    role: "user" | "assistant" = "user",
-  ): Promise<SendResult> {
-    const textBlock: TextBlock = { type: "text", text: content };
-    const result = await this.sessionHandler.send(sessionId, {
-      messages: [{ role, content: [textBlock] }],
+    const session = this.app.session(sessionId);
+    const listener = (event: StreamEvent) => {
+      const subscribers = this.sessionSubscribers.get(sessionId);
+      if (!subscribers) return;
+
+      for (const connectionId of subscribers) {
+        const connection = this.connections.get(connectionId);
+        if (!connection || connection.closed) continue;
+        connection.writer.writeEvent({ ...event, sessionId });
+      }
+    };
+
+    session.on("event", listener);
+    session.once("close", () => {
+      this.sessionListeners.delete(sessionId);
+      this.sessionSubscribers.delete(sessionId);
+
+      const channelListeners = this.sessionChannelListeners.get(sessionId);
+      if (channelListeners) {
+        for (const unsubscribe of channelListeners.values()) {
+          unsubscribe();
+        }
+        this.sessionChannelListeners.delete(sessionId);
+      }
     });
 
-    return {
-      success: true,
-      response: result.response,
-      usage: result.usage,
-      stopReason: result.stopReason,
-    };
+    this.sessionListeners.set(sessionId, listener);
   }
 
-  /**
-   * Send raw messages to a session.
-   *
-   * @throws SessionNotFoundError if session doesn't exist
-   */
-  async sendMessages(
-    sessionId: string,
-    messages: Message[],
-    props?: Record<string, unknown>,
-  ): Promise<SendResult> {
-    const result = await this.sessionHandler.send(sessionId, {
-      messages,
-      props,
-    });
-
-    return {
-      success: true,
-      response: result.response,
-      usage: result.usage,
-      stopReason: result.stopReason,
-    };
-  }
-
-  /**
-   * Trigger a tick without sending a message.
-   *
-   * @throws SessionNotFoundError if session doesn't exist
-   */
-  async tick(
-    sessionId: string,
-    props?: Record<string, unknown>,
-  ): Promise<SendResult> {
-    const result = await this.sessionHandler.send(sessionId, { props });
-
-    return {
-      success: true,
-      response: result.response,
-      usage: result.usage,
-      stopReason: result.stopReason,
-    };
-  }
-
-  /**
-   * Abort the current execution.
-   *
-   * @throws SessionNotFoundError if session doesn't exist
-   */
-  abort(sessionId: string, reason?: string): void {
-    const session = this.sessionHandler.getSession(sessionId);
-
-    if (!session) {
-      throw new SessionNotFoundError(sessionId);
+  private unsubscribeConnection(connectionId: string, sessionId: string): void {
+    const connection = this.connections.get(connectionId);
+    if (connection) {
+      connection.subscriptions.delete(sessionId);
     }
 
-    session.interrupt(undefined, reason);
+    const subscribers = this.sessionSubscribers.get(sessionId);
+    if (!subscribers) return;
+
+    subscribers.delete(connectionId);
+    if (subscribers.size === 0) {
+      this.sessionSubscribers.delete(sessionId);
+      const listener = this.sessionListeners.get(sessionId);
+      if (listener && this.app.has(sessionId)) {
+        const session = this.app.session(sessionId);
+        session.off("event", listener);
+      }
+      this.sessionListeners.delete(sessionId);
+    }
   }
 
   // ══════════════════════════════════════════════════════════════════════════
-  // Event Streaming
+  // Session Operations
   // ══════════════════════════════════════════════════════════════════════════
 
   /**
-   * Create an SSE connection for a session.
-   *
-   * Sets up headers, registers the connection, and returns a writer
-   * for sending events. The connection is automatically cleaned up
-   * when the client disconnects.
-   *
-   * @param sessionId - Session to connect to
-   * @param res - Express response object
-   * @param userId - Optional user ID for the connection
-   * @returns Connection info with writer and cleanup function
-   * @throws SessionNotFoundError if session doesn't exist
+   * Send a message and stream events via SSE.
+   * Mirrors Express POST /send endpoint.
    */
-  createConnection(
-    sessionId: string,
+  async sendAndStream(
+    sessionId: string | undefined,
+    input: SendInput,
     res: Response,
-    userId?: string,
-  ): ConnectionResult {
-    // Verify session exists
-    const session = this.sessionHandler.getSession(sessionId);
-    if (!session) {
-      throw new SessionNotFoundError(sessionId);
-    }
-
-    // Set up SSE
+  ): Promise<void> {
     setSSEHeaders(res);
     const writer = createSSEWriter(res);
 
-    // Generate connection ID
-    const connectionId = `conn-${Date.now()}${Math.random().toString(36).slice(2, 8)}`;
+    try {
+      const handle = await this.app.send(input, { sessionId });
 
-    // Register connection
-    const connection: ServerConnection = {
-      id: connectionId,
-      sessionId,
-      userId,
-      metadata: {},
-      send: async (event) => writer.writeEvent(event),
-      close: () => writer.close(),
-    };
+      for await (const event of handle) {
+        writer.writeEvent({ ...event, sessionId: handle.sessionId });
+      }
 
-    this.eventBridge.registerConnection(connection);
-
-    // Send initial connection event
-    writer.writeEvent({
-      channel: "system",
-      type: "connected",
-      payload: { connectionId, sessionId },
-    });
-
-    // Set up cleanup
-    const cleanup = () => {
-      this.eventBridge.unregisterConnection(connectionId);
-    };
-
-    res.on("close", cleanup);
-
-    return { connectionId, writer, cleanup };
+      const result = await handle.result;
+      writer.writeEvent({ type: "result", sessionId: handle.sessionId, result });
+    } catch (error) {
+      writer.writeEvent({
+        type: "error",
+        sessionId: sessionId ?? "unknown",
+        error: { message: error instanceof Error ? error.message : String(error) },
+      });
+    } finally {
+      writer.close();
+    }
   }
 
   /**
-   * Publish an event to a connection.
+   * Abort a session's current execution.
    */
-  async publishEvent(
-    connectionId: string,
-    event: PublishEventInput,
+  async abort(sessionId: string, reason?: string): Promise<void> {
+    if (!this.app.has(sessionId)) {
+      throw new Error(`Session ${sessionId} not found`);
+    }
+    const session = this.app.session(sessionId);
+    session.interrupt(undefined, reason);
+  }
+
+  /**
+   * Close a session server-side.
+   */
+  async close(sessionId: string): Promise<void> {
+    if (!this.app.has(sessionId)) {
+      throw new Error(`Session ${sessionId} not found`);
+    }
+    await this.app.close(sessionId);
+  }
+
+  /**
+   * Submit tool confirmation result.
+   */
+  async submitToolResult(
+    sessionId: string,
+    toolUseId: string,
+    result: { approved: boolean; reason?: string; modifiedArguments?: Record<string, unknown> },
   ): Promise<void> {
-    await this.eventBridge.handleEvent(connectionId, {
-      channel: event.channel,
-      type: event.type,
-      payload: event.payload,
-      id: event.id,
+    if (!this.app.has(sessionId)) {
+      throw new Error(`Session ${sessionId} not found`);
+    }
+    const session = this.app.session(sessionId);
+    session.submitToolResult(toolUseId, result);
+  }
+
+  /**
+   * Publish to a session-scoped channel.
+   */
+  async publishToChannel(
+    sessionId: string,
+    channelName: string,
+    eventType: string,
+    payload: unknown,
+  ): Promise<void> {
+    if (!this.app.has(sessionId)) {
+      throw new Error(`Session ${sessionId} not found`);
+    }
+
+    this.ensureChannelListener(sessionId, channelName);
+
+    const session = this.app.session(sessionId);
+    const channel = session.channel(channelName);
+    channel.publish({ type: eventType, channel: channelName, payload });
+  }
+
+  private ensureChannelListener(sessionId: string, channelName: string): void {
+    let channelListeners = this.sessionChannelListeners.get(sessionId);
+    if (!channelListeners) {
+      channelListeners = new Map();
+      this.sessionChannelListeners.set(sessionId, channelListeners);
+    }
+    if (channelListeners.has(channelName)) return;
+
+    const session = this.app.session(sessionId);
+    const channel = session.channel(channelName);
+    const unsubscribe = channel.subscribe((event: ChannelEvent) => {
+      const subscribers = this.sessionSubscribers.get(sessionId);
+      if (!subscribers) return;
+
+      const sseEvent = {
+        type: "channel" as const,
+        sessionId,
+        channel: channelName,
+        event,
+      };
+
+      for (const connectionId of subscribers) {
+        const connection = this.connections.get(connectionId);
+        if (!connection || connection.closed) continue;
+        connection.writer.writeEvent(sseEvent);
+      }
     });
+
+    channelListeners.set(channelName, unsubscribe);
   }
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -337,16 +299,9 @@ export class TentickleService {
   // ══════════════════════════════════════════════════════════════════════════
 
   /**
-   * Get the underlying session handler for advanced operations.
+   * Get the underlying App for direct access.
    */
-  get handler(): SessionHandler {
-    return this.sessionHandler;
-  }
-
-  /**
-   * Get the underlying event bridge for advanced operations.
-   */
-  get bridge(): EventBridge {
-    return this.eventBridge;
+  getApp(): App {
+    return this.app;
   }
 }

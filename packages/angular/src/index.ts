@@ -23,30 +23,26 @@
  *   selector: 'app-chat',
  *   standalone: true,
  *   template: `
- *     @if (tentickle.isConnected()) {
- *       <div class="response">
- *         {{ tentickle.text() }}
- *         @if (tentickle.isStreaming()) {
- *           <span class="cursor">|</span>
- *         }
- *       </div>
- *       <input #input />
- *       <button (click)="send(input.value); input.value = ''">Send</button>
- *     } @else if (tentickle.isConnecting()) {
- *       <p>Connecting...</p>
- *     }
+ *     <div class="response">
+ *       {{ tentickle.text() }}
+ *       @if (tentickle.isStreaming()) {
+ *         <span class="cursor">|</span>
+ *       }
+ *     </div>
+ *     <input #input />
+ *     <button (click)="send(input.value); input.value = ''">Send</button>
  *   `,
  * })
  * export class ChatComponent {
  *   tentickle = inject(TentickleService);
  *
  *   constructor() {
- *     this.tentickle.connect();
+ *     this.tentickle.subscribe("conv-123");
  *   }
  *
  *   async send(message: string) {
- *     await this.tentickle.send(message);
- *     await this.tentickle.tick();
+ *     const handle = this.tentickle.send(message);
+ *     await handle.result;
  *   }
  * }
  * ```
@@ -94,11 +90,8 @@
  *
  * | Signal | Type | Description |
  * |--------|------|-------------|
- * | `connectionState()` | `ConnectionState` | Current connection state |
- * | `sessionId()` | `string \| undefined` | Current session ID |
- * | `isConnected()` | `boolean` | Whether connected (computed) |
- * | `isConnecting()` | `boolean` | Whether connecting (computed) |
- * | `error()` | `Error \| undefined` | Connection error |
+ * | `connectionState()` | `ConnectionState` | Connection state |
+ * | `sessionId()` | `string \| undefined` | Active session ID |
  * | `streamingText()` | `StreamingTextState` | Text + isStreaming |
  * | `text()` | `string` | Just the text (computed) |
  * | `isStreaming()` | `boolean` | Whether streaming (computed) |
@@ -112,18 +105,19 @@
  * | `streamingText$` | `StreamingTextState` | Text + isStreaming |
  * | `text$` | `string` | Just the text |
  * | `isStreaming$` | `boolean` | Whether streaming |
- * | `events$` | `StreamEvent` | All stream events |
+ * | `events$` | `StreamEvent | SessionStreamEvent` | All stream events |
  * | `result$` | `Result` | Execution results |
  *
  * ## Methods
  *
  * | Method | Description |
  * |--------|-------------|
- * | `connect(sessionId?, props?)` | Connect to session |
- * | `disconnect()` | Disconnect |
- * | `send(content)` | Send message |
- * | `tick(props?)` | Trigger tick |
+ * | `session(sessionId)` | Get cold accessor |
+ * | `subscribe(sessionId)` | Subscribe (hot) |
+ * | `unsubscribe()` | Unsubscribe active session |
+ * | `send(input)` | Send message |
  * | `abort(reason?)` | Abort execution |
+ * | `close()` | Close active session |
  * | `channel(name)` | Get channel accessor |
  * | `channel$(name)` | Get channel as Observable |
  * | `eventsOfType(...types)` | Filter events by type |
@@ -133,11 +127,7 @@
  */
 
 // Service, token, and provider factory
-export {
-  TentickleService,
-  TENTICKLE_CONFIG,
-  provideTentickle,
-} from "./tentickle.service.js";
+export { TentickleService, TENTICKLE_CONFIG, provideTentickle } from "./tentickle.service";
 
 // Types
 export type {
@@ -145,5 +135,7 @@ export type {
   TentickleClient,
   ConnectionState,
   StreamEvent,
+  SessionStreamEvent,
+  ClientExecutionHandle,
   StreamingTextState,
-} from "./types.js";
+} from "./types";

@@ -20,18 +20,27 @@ import {
   createProcedure,
   Channel,
   EventBuffer,
+  Logger,
   type KernelContext,
   type Procedure,
-} from "../core/index.js";
-import { FiberCompiler, StructureRenderer, ReconciliationScheduler, type SchedulerState } from "../compiler/index.js";
-import { COM } from "../com/object-model.js";
-import { MarkdownRenderer } from "../renderers/index.js";
-import { ToolExecutor } from "../engine/tool-executor.js";
-import { AbortError } from "../utils/abort-utils.js";
-import { jsx } from "../jsx/jsx-runtime.js";
-import type { JSX } from "../jsx/jsx-runtime.js";
-import type { COMInput, COMOutput, COMTimelineEntry, TimelineTag } from "../com/types.js";
-import type { ModelInstance } from "../model/model.js";
+  type ChannelServiceInterface,
+  type ChannelEvent,
+} from "../core/index";
+import {
+  FiberCompiler,
+  StructureRenderer,
+  ReconciliationScheduler,
+  type SerializedFiberNode,
+  type FiberSummary,
+} from "../compiler";
+import { COM } from "../com/object-model";
+import { MarkdownRenderer } from "../renderers/index";
+import { ToolExecutor } from "../engine/tool-executor";
+import { AbortError } from "../utils/abort-utils";
+import { jsx } from "../jsx/jsx-runtime";
+import type { JSX } from "../jsx/jsx-runtime";
+import type { COMInput, COMOutput, COMTimelineEntry, TimelineTag } from "../com/types";
+import type { ModelInstance } from "../model/model";
 import type { ToolResult, ToolCall, Message, UsageStats, ContentBlock } from "@tentickle/shared";
 import {
   devToolsEmitter,
@@ -39,9 +48,9 @@ import {
   type DTFiberSnapshotEvent,
   type DTFiberSummary,
 } from "@tentickle/shared";
-import type { ExecutableTool, ToolClass } from "../tool/tool.js";
-import type { TickState } from "../component/component.js";
-import type { ExecutionMessage } from "../engine/execution-types.js";
+import type { ExecutableTool, ToolClass } from "../tool/tool";
+import type { TickState } from "../component/component";
+import type { ExecutionMessage } from "../engine/execution-types";
 import type {
   Session,
   SessionStatus,
@@ -57,7 +66,8 @@ import type {
   TickSnapshot,
   SessionRecording,
   SessionExecutionHandle,
-} from "./types.js";
+  SendInput,
+} from "./types";
 
 // ════════════════════════════════════════════════════════════════════════════
 // Session Context Extension
@@ -91,7 +101,6 @@ function getSessionContext(): SessionContext {
   };
 }
 
-
 /**
  * Session implementation.
  *
@@ -100,6 +109,7 @@ function getSessionContext(): SessionContext {
  */
 export class SessionImpl<P = Record<string, unknown>> extends EventEmitter implements Session<P> {
   readonly id: string;
+  private readonly log = Logger.for("SessionImpl");
 
   // Core execution state
   private _status: SessionStatus = "idle";
@@ -108,7 +118,7 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
   private _currentExecutionId: string | null = null;
 
   // Hydration state (pending fiber tree data to restore)
-  private _pendingHydrationData: import("../compiler/index.js").SerializedFiberNode | null = null;
+  private _pendingHydrationData: SerializedFiberNode | null = null;
 
   // Compilation infrastructure (no intermediate layer)
   private compiler: FiberCompiler | null = null;
@@ -119,6 +129,12 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
   // State that persists across ticks
   private _previousOutput: COMInput | null = null;
   private _currentOutput: COMOutput | null = null;
+
+  // Track timeline sent to model (for combining with response in complete())
+  private _lastSentTimeline: COMTimelineEntry[] = [];
+
+  // Track last published timeline length for delta publishing
+  private _lastPublishedTimelineLength = 0;
 
   // Message queue
   private _queuedMessages: Message[] = [];
@@ -176,7 +192,7 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
     sessionOptions: SessionOptions = {},
   ) {
     super();
-    this.id = randomUUID();
+    this.id = sessionOptions.sessionId ?? randomUUID();
     this.Component = Component;
     this.appOptions = appOptions;
     this.sessionOptions = sessionOptions;
@@ -184,7 +200,8 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
     // Capture ALS context at session creation time
     // Include Tentickle middleware registry if available (for procedure middleware support)
     const currentContext = Context.tryGet();
-    const tentickleInstance = (appOptions as { _tentickleInstance?: KernelContext["middleware"] })._tentickleInstance;
+    const tentickleInstance = (appOptions as { _tentickleInstance?: KernelContext["middleware"] })
+      ._tentickleInstance;
     if (tentickleInstance && currentContext) {
       this._capturedContext = { ...currentContext, middleware: tentickleInstance };
     } else if (tentickleInstance && !currentContext) {
@@ -327,18 +344,12 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
   // Concurrent calls return THE SAME handle
   // ════════════════════════════════════════════════════════════════════════
 
-  send(input: {
-    messages?: Message[];
-    message?: Message;
-    props?: P;
-    metadata?: Record<string, unknown>;
-    signal?: AbortSignal;
-  }): SessionExecutionHandle {
+  send(input: SendInput<P>, options?: ExecutionOptions): SessionExecutionHandle {
     if (this._status === "closed") {
       throw new Error("Session is closed");
     }
 
-    const { messages, message, props, metadata, signal } = input;
+    const { messages, message, props, metadata } = input;
 
     // Normalize messages
     const allMessages = ([] as Message[])
@@ -380,16 +391,15 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
 
     // If already running, return the existing handle (concurrent send idempotency)
     if (this._status === "running" && this._currentHandle) {
-      this.addExecutionSignal(signal);
+      this.addExecutionSignal(options?.signal);
       return this._currentHandle;
     }
 
     // If idle and we have something to do, start tick
     if ((allMessages.length > 0 || props) && this._status === "idle") {
-      const tickProps = this._lastProps;
-      if (tickProps !== null) {
-        return this.tick(tickProps, { signal });
-      }
+      // Use last known props if available, otherwise default to empty props.
+      const tickProps = (this._lastProps ?? ({} as P)) as P;
+      return this.tick(tickProps, options);
     }
 
     // Nothing to do - create a handle that resolves immediately with empty result
@@ -406,10 +416,10 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
       throw new Error("Session is closed");
     }
 
-    const hasProps =
-      props != null &&
-      (typeof props !== "object" || Object.keys(props as Record<string, unknown>).length > 0);
-    if (!hasProps && this._queuedMessages.length === 0) {
+    // Props is explicitly provided (even if empty object) - always run tick
+    // Only skip if props is undefined/null AND no queued messages
+    const propsProvided = props !== undefined && props !== null;
+    if (!propsProvided && this._queuedMessages.length === 0) {
       return this.createEmptyHandle();
     }
 
@@ -460,7 +470,7 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
     // Event queue for async iteration
     const eventQueue: StreamEvent[] = [];
     const eventResolvers: ((value: IteratorResult<StreamEvent>) => void)[] = [];
-    let iterationComplete = false;
+    let _iterationComplete = false;
 
     this.startExecutionAbort(options?.signal);
 
@@ -483,7 +493,7 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
     };
 
     const completeIteration = () => {
-      iterationComplete = true;
+      _iterationComplete = true;
       eventBuffer.close();
       for (const resolver of eventResolvers) {
         resolver({ value: undefined as any, done: true });
@@ -574,12 +584,19 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
           payload: message,
         });
       },
-      submitToolResult(toolUseId: string, result: ToolResult) {
+      submitToolResult(
+        toolUseId: string,
+        response: {
+          approved: boolean;
+          reason?: string;
+          modifiedArguments?: Record<string, unknown>;
+        },
+      ) {
         session.channel("tool_confirmation").publish({
           type: "response",
           channel: "tool_confirmation",
           id: toolUseId,
-          payload: result,
+          payload: response,
         });
       },
     };
@@ -642,7 +659,14 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
       queueMessage(message: Message) {
         session._queuedMessages.push(message);
       },
-      submitToolResult(_toolUseId: string, _result: ToolResult) {},
+      submitToolResult(
+        _toolUseId: string,
+        _response: {
+          approved: boolean;
+          reason?: string;
+          modifiedArguments?: Record<string, unknown>;
+        },
+      ) {},
     };
 
     return handle;
@@ -661,19 +685,16 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
     return channel;
   }
 
-  // ════════════════════════════════════════════════════════════════════════
-  // Deprecated Methods (for backward compatibility)
-  // ════════════════════════════════════════════════════════════════════════
-
-  async queueMessage(message: Message): Promise<void> {
-    // queue is a pass-through procedure, returns void directly
-    await this.queue.exec(message);
-  }
-
-  async sendMessage(message: Message | Message[], props?: P): Promise<void> {
-    const messages = Array.isArray(message) ? message : [message];
-    const handle = this.send({ messages, props });
-    await handle.result;
+  submitToolResult(
+    toolUseId: string,
+    response: { approved: boolean; reason?: string; modifiedArguments?: Record<string, unknown> },
+  ): void {
+    this.channel("tool_confirmation").publish({
+      type: "response",
+      channel: "tool_confirmation",
+      id: toolUseId,
+      payload: response,
+    });
   }
 
   // ════════════════════════════════════════════════════════════════════════
@@ -773,7 +794,8 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
 
     // Enrich event with executionId and tick if missing
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    let enrichedEvent: any = executionId && !("executionId" in event) ? { ...event, executionId } : event;
+    let enrichedEvent: any =
+      executionId && !("executionId" in event) ? { ...event, executionId } : event;
 
     if (!("id" in event)) {
       enrichedEvent = { ...enrichedEvent, id: randomUUID() };
@@ -851,9 +873,8 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
     const componentNames = this.collectComponentNames();
 
     // Get last tick's tool data from snapshots if available
-    const lastSnapshot = this._snapshots.length > 0
-      ? this._snapshots[this._snapshots.length - 1]
-      : null;
+    const lastSnapshot =
+      this._snapshots.length > 0 ? this._snapshots[this._snapshots.length - 1] : null;
 
     return {
       id: this.id,
@@ -865,11 +886,12 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
       lastOutput: this._previousOutput,
       lastModelOutput: this._lastModelOutput,
       lastToolCalls: lastSnapshot?.tools.calls ?? [],
-      lastToolResults: lastSnapshot?.tools.results.map((r) => ({
-        toolUseId: r.toolUseId,
-        name: r.name,
-        success: r.success,
-      })) ?? [],
+      lastToolResults:
+        lastSnapshot?.tools.results.map((r) => ({
+          toolUseId: r.toolUseId,
+          name: r.name,
+          success: r.success,
+        })) ?? [],
       totalUsage: { ...this._totalUsage },
       tickCount: this._totalUsage.ticks ?? 0,
       components: {
@@ -893,7 +915,7 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
     if (!tree) return [];
 
     const names = new Set<string>();
-    const collectNames = (node: import("../compiler/index.js").SerializedFiberNode) => {
+    const collectNames = (node: SerializedFiberNode) => {
       // Skip host primitives (Section, Message, etc.) and fragments
       if (!node.type.startsWith("tentickle.") && node.type !== "Fragment") {
         names.add(node.type);
@@ -939,7 +961,8 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
       this._recording.endedAt = new Date().toISOString();
       this._recording.summary.tickCount = this._snapshots.length;
       this._recording.summary.totalUsage = { ...this._totalUsage };
-      this._recording.summary.finalStatus = this._status === "idle" ? "completed" : this._status as any;
+      this._recording.summary.finalStatus =
+        this._status === "idle" ? "completed" : (this._status as any);
     }
     this._recordingMode = null;
   }
@@ -999,9 +1022,8 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
     if (formatted?.sections) {
       for (const [id, section] of Object.entries(formatted.sections)) {
         comSections[id] = {
-          content: typeof section.content === "string"
-            ? section.content
-            : JSON.stringify(section.content),
+          content:
+            typeof section.content === "string" ? section.content : JSON.stringify(section.content),
           priority: (section as any).priority,
         };
       }
@@ -1064,12 +1086,12 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
     this._snapshots.push(snapshot);
   }
 
-  private serializeFiberTree(): import("../compiler/index.js").SerializedFiberNode | null {
+  private serializeFiberTree(): SerializedFiberNode | null {
     if (!this.compiler) return null;
     return this.compiler.serializeFiberTree();
   }
 
-  private getFiberSummary(): import("../compiler/index.js").FiberSummary {
+  private getFiberSummary(): FiberSummary {
     if (!this.compiler) {
       return { componentCount: 0, hookCount: 0, hooksByType: {} };
     }
@@ -1137,6 +1159,8 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
 
     this.com = null;
     this.structureRenderer = null;
+
+    this.emit("close", this.id);
   }
 
   // ════════════════════════════════════════════════════════════════════════
@@ -1147,11 +1171,36 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
     const current = Context.tryGet();
     const baseContext = this._capturedContext || current;
 
+    // Create a channel service that wraps session channels
+    // This allows tools to publish events via Context.get().channels
+    const channelService: ChannelServiceInterface = {
+      getChannel: (_ctx: KernelContext, channelName: string) => this.channel(channelName),
+      publish: (_ctx: KernelContext, channelName: string, event: Omit<ChannelEvent, "channel">) => {
+        this.channel(channelName).publish({ ...event, channel: channelName } as ChannelEvent);
+      },
+      subscribe: (
+        _ctx: KernelContext,
+        channelName: string,
+        handler: (event: ChannelEvent) => void,
+      ) => {
+        return this.channel(channelName).subscribe(handler);
+      },
+      waitForResponse: (
+        _ctx: KernelContext,
+        channelName: string,
+        requestId: string,
+        timeoutMs?: number,
+      ) => {
+        return this.channel(channelName).waitForResponse(requestId, timeoutMs);
+      },
+    };
+
     // Session-specific context fields for DevTools enrichment
     const sessionContext = {
       sessionId: this.id,
       rootComponent: this.Component.name || "Agent",
       devToolsEnabled: this.sessionOptions.devTools ?? false,
+      channels: channelService,
     };
 
     if (!baseContext) {
@@ -1187,7 +1236,7 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
     // Hydrate fiber tree (component state)
     // This will be applied when the compiler is first created
     if (snapshot.componentState) {
-      this._pendingHydrationData = snapshot.componentState as import("../compiler/index.js").SerializedFiberNode;
+      this._pendingHydrationData = snapshot.componentState as SerializedFiberNode;
     }
   }
 
@@ -1213,6 +1262,10 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
     this._executionComplete = false;
     this._lastProps = props;
 
+    // Clear _currentOutput from previous execution to prevent stale data
+    // from being included in useConversationHistory() via state.current
+    this._currentOutput = null;
+
     const executionId = Context.tryGet()?.executionId || randomUUID();
     this._currentExecutionId = executionId;
     const maxTicks =
@@ -1227,7 +1280,9 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
 
     // Transfer queued messages to COM
     if (this._queuedMessages.length > 0 && this.com) {
+      this.log.debug({ count: this._queuedMessages.length }, "Transferring queued messages to COM");
       for (const msg of this._queuedMessages) {
+        this.log.debug({ role: msg.role }, "Queuing message to COM");
         this.com.queueMessage({
           id: randomUUID(),
           type: "user",
@@ -1235,6 +1290,10 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
         } as any);
       }
       this._queuedMessages = [];
+      this.log.debug(
+        { comQueuedCount: this.com.getQueuedMessages().length },
+        "COM queued messages after transfer",
+      );
     }
 
     // Track state for this execution
@@ -1524,6 +1583,30 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
         timestamp: timestamp(),
       });
 
+      // Publish timeline delta to channel for real-time sync across clients
+      // Only send NEW messages since last publish - O(delta) not O(n)
+      if (output?.timeline) {
+        const allMessages = output.timeline
+          .filter((entry: COMTimelineEntry) => entry.message)
+          .map((entry: COMTimelineEntry) => entry.message);
+
+        // Only publish if there are new messages
+        if (allMessages.length > this._lastPublishedTimelineLength) {
+          const newMessages = allMessages.slice(this._lastPublishedTimelineLength);
+          this._lastPublishedTimelineLength = allMessages.length;
+
+          this.channel("timeline").publish({
+            type: "timeline_delta",
+            channel: "timeline",
+            payload: {
+              messages: newMessages, // Only new messages
+              totalCount: allMessages.length, // For sync verification
+              tick: this._tick,
+            },
+          });
+        }
+      }
+
       // Clear execution ID after emitting execution_end
       this._currentExecutionId = null;
 
@@ -1621,6 +1704,12 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
     // Clear COM for this tick
     this.com.clear();
 
+    // NOTE: Previous timeline entries are NOT injected into COM here.
+    // They are merged in at formatInput time. This keeps the architecture declarative:
+    // - JSX compilation produces CompiledStructure with NEW entries
+    // - formatInput merges previousTimeline + new entries
+    // - No imperative accumulation during render
+
     // Re-register tools
     if (this.appOptions.tools) {
       for (const tool of this.appOptions.tools) {
@@ -1628,12 +1717,19 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
       }
     }
 
+    // Get queued messages for TickState - these are NEW messages for this tick
+    const queuedMessages = this.com.getQueuedMessages();
+    this.log.debug(
+      { queuedCount: queuedMessages.length },
+      "Queued messages available for TickState",
+    );
+
     // Prepare tick state
     const tickState: TickState = {
       tick: this._tick,
       previous: this._previousOutput ?? undefined,
       current: this._currentOutput as any,
-      queuedMessages: this.com.getQueuedMessages(),
+      queuedMessages: queuedMessages,
       stop: (reason: string) => {
         (tickState as any).stopReason = reason;
       },
@@ -1682,11 +1778,15 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
       this.scheduler?.exitTick();
     }
 
-    // Apply compiled structure
+    // Apply compiled structure (sections, tools, metadata - but NOT timeline entries)
     this.structureRenderer.apply(compiled);
 
-    // Format input
+    // Format input - compiled structure IS the complete projection
+    // JSX components render history as <Message>, so compiled.timelineEntries is complete
     const formatted = await this.structureRenderer.formatInput(this.com.toInput());
+
+    // Track what we're sending to the model (for combining with response in complete())
+    this._lastSentTimeline = formatted.timeline ?? [];
 
     // Get model from COM if not in options
     const model = this.com.getModel?.() as ModelInstance | undefined;
@@ -1749,11 +1849,7 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
 
       // Execute tool
       try {
-        const result = await executor.processToolWithConfirmation(
-          call,
-          this.com!,
-          executableTools,
-        );
+        const result = await executor.processToolWithConfirmation(call, this.com!, executableTools);
         results.push(result.result);
         const completedAt = timestamp();
         this.emitEvent({
@@ -1811,13 +1907,33 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
     // Convert queued user messages to timeline entries BEFORE clearing
     // This preserves the user message in the conversation history
     const queuedMessages = this.com.getQueuedMessages();
-    const userEntries: COMTimelineEntry[] = queuedMessages
-      .filter((m) => m.type === "user" && m.content)
-      .map((m) => ({
-        kind: "message" as const,
-        message: m.content as Message,
+    const existingTimeline = this.com.getTimeline();
+    const existingByMessage = new Map<Message, COMTimelineEntry>();
+    for (const entry of existingTimeline) {
+      if (entry.message) {
+        existingByMessage.set(entry.message, entry);
+      }
+    }
+
+    const userEntries: COMTimelineEntry[] = [];
+    const newUserEntries: COMTimelineEntry[] = [];
+
+    for (const queued of queuedMessages) {
+      if (queued.type !== "user" || !queued.content) continue;
+      const message = queued.content as Message;
+      const existing = existingByMessage.get(message);
+      if (existing) {
+        userEntries.push(existing);
+        continue;
+      }
+      const entry: COMTimelineEntry = {
+        kind: "message",
+        message,
         tags: ["user_input"] as TimelineTag[],
-      }));
+      };
+      userEntries.push(entry);
+      newUserEntries.push(entry);
+    }
 
     // Build tool result entries
     const toolResultEntries: COMTimelineEntry[] =
@@ -1849,7 +1965,7 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
     };
 
     // Add entries to COM - user entries first, then assistant response
-    for (const entry of userEntries) {
+    for (const entry of newUserEntries) {
       this.com.addTimelineEntry(entry);
     }
 
@@ -1890,14 +2006,63 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
 
   /**
    * Complete execution and return final state.
+   *
+   * Returns the complete timeline for this execution:
+   * - What was sent to the model (from compiled JSX via _lastSentTimeline)
+   * - What the model responded (from _currentOutput.timeline - only NEW entries)
+   *
+   * This ensures the full conversation history is preserved across executions.
    */
   private async complete(): Promise<COMInput> {
     if (!this.com || !this.structureRenderer || !this.compiler) {
       throw new Error("Compilation infrastructure not initialized");
     }
 
+    // Build complete timeline:
+    // 1. _lastSentTimeline = what was sent to model (includes history rendered by JSX)
+    // 2. _currentOutput.timeline = new entries from this tick (user input + model response + tool results)
+    //
+    // Only USER messages might overlap (rendered via JSX AND in queuedMessages).
+    // Model responses (assistant/tool) are ALWAYS new and should NEVER be deduplicated.
+    //
+    // NOTE: We use content-based comparison for user messages because <Message {...entry.message}>
+    // creates NEW message objects when rendering history, so reference equality fails.
+    const sentTimeline = this._lastSentTimeline ?? [];
+    const currentTimeline = this._currentOutput?.timeline ?? [];
+
+    // Create a signature for user messages only
+    const userMessageSignature = (entry: COMTimelineEntry): string | null => {
+      if (!entry.message || entry.message.role !== "user") return null;
+      const m = entry.message;
+      if (m.id) return `id:${m.id}`;
+      const contentStr = JSON.stringify(m.content);
+      return `user:${contentStr}`;
+    };
+
+    // Only track signatures of USER messages that were sent
+    const sentUserSignatures = new Set(
+      sentTimeline.map(userMessageSignature).filter((s): s is string => s !== null),
+    );
+
+    // Filter currentTimeline:
+    // - USER messages: dedupe against sentTimeline (might be rendered via JSX)
+    // - Other roles (assistant, tool): always include (they're new from this tick)
+    const newEntries = currentTimeline.filter((entry) => {
+      if (!entry.message) return true; // Non-message entries always included
+      if (entry.message.role !== "user") return true; // Assistant/tool always included
+
+      // User message: check for duplicates
+      const sig = userMessageSignature(entry);
+      return sig === null || !sentUserSignatures.has(sig);
+    });
+
+    const timeline = [...sentTimeline, ...newEntries];
+
     const comOutput = this.com.toInput();
-    const finalOutput = await this.structureRenderer.formatInput(comOutput);
+    const finalOutput: COMInput = {
+      ...comOutput,
+      timeline,
+    };
 
     // Notify compiler of completion
     try {

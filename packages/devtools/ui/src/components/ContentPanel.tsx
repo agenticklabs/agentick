@@ -41,14 +41,28 @@ export function ContentPanel({ tab, execution, session, allExecutions }: Content
 // Overview View
 // ============================================================================
 
-function OverviewView({ execution, session, allExecutions }: { execution?: Execution; session?: Session; allExecutions: Execution[] }) {
+function OverviewView({
+  execution,
+  session,
+  allExecutions,
+}: {
+  execution?: Execution;
+  session?: Session;
+  allExecutions: Execution[];
+}) {
   // Selected execution stats
-  const execTokens = execution?.totalUsage?.totalTokens ??
-    execution?.ticks.reduce((sum, t) => sum + (t.usage?.totalTokens ?? 0), 0) ?? 0;
-  const execInputTokens = execution?.totalUsage?.inputTokens ??
-    execution?.ticks.reduce((sum, t) => sum + (t.usage?.inputTokens ?? 0), 0) ?? 0;
-  const execOutputTokens = execution?.totalUsage?.outputTokens ??
-    execution?.ticks.reduce((sum, t) => sum + (t.usage?.outputTokens ?? 0), 0) ?? 0;
+  const execTokens =
+    execution?.totalUsage?.totalTokens ??
+    execution?.ticks.reduce((sum, t) => sum + (t.usage?.totalTokens ?? 0), 0) ??
+    0;
+  const execInputTokens =
+    execution?.totalUsage?.inputTokens ??
+    execution?.ticks.reduce((sum, t) => sum + (t.usage?.inputTokens ?? 0), 0) ??
+    0;
+  const execOutputTokens =
+    execution?.totalUsage?.outputTokens ??
+    execution?.ticks.reduce((sum, t) => sum + (t.usage?.outputTokens ?? 0), 0) ??
+    0;
 
   // Get duration
   const duration = execution?.endTime
@@ -73,7 +87,9 @@ function OverviewView({ execution, session, allExecutions }: { execution?: Execu
       <div className="overview-grid">
         <div className="overview-card">
           <div className="overview-card-label">Status</div>
-          <div className={`overview-card-value ${execution.status === 'completed' ? 'green' : execution.status === 'error' ? 'red' : 'yellow'}`}>
+          <div
+            className={`overview-card-value ${execution.status === "completed" ? "green" : execution.status === "error" ? "red" : "yellow"}`}
+          >
             {execution.status}
           </div>
           <div className="overview-card-detail">
@@ -104,13 +120,22 @@ function OverviewView({ execution, session, allExecutions }: { execution?: Execu
       {/* Fiber Summary */}
       {execution.fiberSummary && (
         <>
-          <h3 style={{ fontSize: 14, marginTop: 24, marginBottom: 12, color: 'var(--text-secondary)' }}>
+          <h3
+            style={{
+              fontSize: 14,
+              marginTop: 24,
+              marginBottom: 12,
+              color: "var(--text-secondary)",
+            }}
+          >
             Component Tree
           </h3>
           <div className="overview-grid">
             <div className="overview-card">
               <div className="overview-card-label">Components</div>
-              <div className="overview-card-value purple">{execution.fiberSummary.componentCount}</div>
+              <div className="overview-card-value purple">
+                {execution.fiberSummary.componentCount}
+              </div>
             </div>
             <div className="overview-card">
               <div className="overview-card-label">Hooks</div>
@@ -126,7 +151,7 @@ function OverviewView({ execution, session, allExecutions }: { execution?: Execu
       )}
 
       {/* Execution ID */}
-      <div style={{ marginTop: 24, fontSize: 11, color: 'var(--text-muted)' }}>
+      <div style={{ marginTop: 24, fontSize: 11, color: "var(--text-muted)" }}>
         <strong>Execution ID:</strong> {execution.id}
         {execution.sessionId && (
           <span style={{ marginLeft: 16 }}>
@@ -160,7 +185,7 @@ function TicksView({ execution }: { execution?: Execution }) {
   }
 
   const toggleTick = (tickNum: number) => {
-    setExpandedTicks(prev => {
+    setExpandedTicks((prev) => {
       const next = new Set(prev);
       if (next.has(tickNum)) {
         next.delete(tickNum);
@@ -172,7 +197,7 @@ function TicksView({ execution }: { execution?: Execution }) {
   };
 
   const expandAll = () => {
-    setExpandedTicks(new Set(execution.ticks.map(t => t.number)));
+    setExpandedTicks(new Set(execution.ticks.map((t) => t.number)));
   };
 
   const collapseAll = () => {
@@ -181,9 +206,13 @@ function TicksView({ execution }: { execution?: Execution }) {
 
   return (
     <div>
-      <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
-        <button className="btn btn-sm" onClick={expandAll}>Expand All</button>
-        <button className="btn btn-sm" onClick={collapseAll}>Collapse All</button>
+      <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+        <button className="btn btn-sm" onClick={expandAll}>
+          Expand All
+        </button>
+        <button className="btn btn-sm" onClick={collapseAll}>
+          Collapse All
+        </button>
       </div>
       {execution.ticks.map((tick) => (
         <TickCard
@@ -197,7 +226,15 @@ function TicksView({ execution }: { execution?: Execution }) {
   );
 }
 
-function TickCard({ tick, expanded, onToggle }: { tick: Tick; expanded: boolean; onToggle: () => void }) {
+function TickCard({
+  tick,
+  expanded,
+  onToggle,
+}: {
+  tick: Tick;
+  expanded: boolean;
+  onToggle: () => void;
+}) {
   const [eventsExpanded, setEventsExpanded] = useState(false);
   const [contextExpanded, setContextExpanded] = useState(false);
   const [modelIOExpanded, setModelIOExpanded] = useState(false);
@@ -210,9 +247,9 @@ function TickCard({ tick, expanded, onToggle }: { tick: Tick; expanded: boolean;
   const duration = tick.endTime ? tick.endTime - tick.startTime : 0;
   const isRunning = !tick.endTime;
 
-  const toolCalls = tick.events.filter(e => e.type === "tool_call");
-  const toolResults = tick.events.filter(e => e.type === "tool_result");
-  const nonDeltaEvents = tick.events.filter(e => e.type !== "content_delta");
+  const toolCalls = tick.events.filter((e) => e.type === "tool_call");
+  const toolResults = tick.events.filter((e) => e.type === "tool_result");
+  const nonDeltaEvents = tick.events.filter((e) => e.type !== "content_delta");
 
   return (
     <div className={`tick-card ${expanded ? "expanded" : ""}`}>
@@ -267,8 +304,8 @@ function TickCard({ tick, expanded, onToggle }: { tick: Tick; expanded: boolean;
               <div className="tick-timeline">
                 {toolCalls.map((event, i) => {
                   const data = event.data as any;
-                  const result = toolResults.find((r: any) =>
-                    (r.data as any)?.toolUseId === data?.toolUseId
+                  const result = toolResults.find(
+                    (r: any) => (r.data as any)?.toolUseId === data?.toolUseId,
                   );
                   return (
                     <div key={i} className="tick-event">
@@ -281,9 +318,20 @@ function TickCard({ tick, expanded, onToggle }: { tick: Tick; expanded: boolean;
                         </pre>
                         {result && (
                           <div style={{ marginTop: 8 }}>
-                            <span style={{ color: 'var(--accent-green)', fontSize: 11 }}>Result:</span>
-                            <pre className="json-view" style={{ margin: '4px 0 0 0', maxHeight: 150 }}>
-                              {JSON.stringify((result.data as any)?.result || (result.data as any)?.content || result.data, null, 2)}
+                            <span style={{ color: "var(--accent-green)", fontSize: 11 }}>
+                              Result:
+                            </span>
+                            <pre
+                              className="json-view"
+                              style={{ margin: "4px 0 0 0", maxHeight: 150 }}
+                            >
+                              {JSON.stringify(
+                                (result.data as any)?.result ||
+                                  (result.data as any)?.content ||
+                                  result.data,
+                                null,
+                                2,
+                              )}
                             </pre>
                           </div>
                         )}
@@ -302,11 +350,14 @@ function TickCard({ tick, expanded, onToggle }: { tick: Tick; expanded: boolean;
                 className="tick-section-header clickable"
                 onClick={() => setContextExpanded(!contextExpanded)}
               >
-                <span className={`tick-section-expand ${contextExpanded ? "expanded" : ""}`}>▶</span>
+                <span className={`tick-section-expand ${contextExpanded ? "expanded" : ""}`}>
+                  ▶
+                </span>
                 <span className="tick-section-header-icon">📝</span>
                 Context
                 <span className="tick-section-count">
-                  {tick.compiled.messages?.length ?? 0} messages, {tick.compiled.tools?.length ?? 0} tools
+                  {tick.compiled.messages?.length ?? 0} messages, {tick.compiled.tools?.length ?? 0}{" "}
+                  tools
                 </span>
               </div>
               {contextExpanded && (
@@ -323,7 +374,9 @@ function TickCard({ tick, expanded, onToggle }: { tick: Tick; expanded: boolean;
                   {/* Messages */}
                   {tick.compiled.messages && tick.compiled.messages.length > 0 && (
                     <div className="context-subsection">
-                      <div className="context-subsection-label">Messages ({tick.compiled.messages.length})</div>
+                      <div className="context-subsection-label">
+                        Messages ({tick.compiled.messages.length})
+                      </div>
                       <pre className="json-view" style={{ maxHeight: 300 }}>
                         {JSON.stringify(tick.compiled.messages, null, 2)}
                       </pre>
@@ -332,7 +385,9 @@ function TickCard({ tick, expanded, onToggle }: { tick: Tick; expanded: boolean;
                   {/* Tools */}
                   {tick.compiled.tools && tick.compiled.tools.length > 0 && (
                     <div className="context-subsection">
-                      <div className="context-subsection-label">Tools ({tick.compiled.tools.length})</div>
+                      <div className="context-subsection-label">
+                        Tools ({tick.compiled.tools.length})
+                      </div>
                       <pre className="json-view" style={{ maxHeight: 200 }}>
                         {JSON.stringify(tick.compiled.tools, null, 2)}
                       </pre>
@@ -350,7 +405,9 @@ function TickCard({ tick, expanded, onToggle }: { tick: Tick; expanded: boolean;
                 className="tick-section-header clickable"
                 onClick={() => setModelIOExpanded(!modelIOExpanded)}
               >
-                <span className={`tick-section-expand ${modelIOExpanded ? "expanded" : ""}`}>▶</span>
+                <span className={`tick-section-expand ${modelIOExpanded ? "expanded" : ""}`}>
+                  ▶
+                </span>
                 <span className="tick-section-header-icon">🔄</span>
                 Model I/O
                 <span className="tick-section-count">{tick.model || "model"}</span>
@@ -405,12 +462,8 @@ function TickCard({ tick, expanded, onToggle }: { tick: Tick; expanded: boolean;
                 <div className="tick-timeline">
                   {nonDeltaEvents.slice(0, 50).map((event, i) => (
                     <div key={i} className="tick-event">
-                      <span className="tick-event-time">
-                        +{event.timestamp - tick.startTime}ms
-                      </span>
-                      <span className={`tick-event-type ${event.type}`}>
-                        {event.type}
-                      </span>
+                      <span className="tick-event-time">+{event.timestamp - tick.startTime}ms</span>
+                      <span className={`tick-event-type ${event.type}`}>{event.type}</span>
                       <span className="tick-event-content">
                         {typeof event.data === "object"
                           ? JSON.stringify(event.data).slice(0, 100)
@@ -419,7 +472,7 @@ function TickCard({ tick, expanded, onToggle }: { tick: Tick; expanded: boolean;
                     </div>
                   ))}
                   {nonDeltaEvents.length > 50 && (
-                    <div style={{ padding: 8, color: 'var(--text-muted)', fontSize: 11 }}>
+                    <div style={{ padding: 8, color: "var(--text-muted)", fontSize: 11 }}>
                       ... and {nonDeltaEvents.length - 50} more events
                     </div>
                   )}
@@ -440,7 +493,8 @@ function TickCard({ tick, expanded, onToggle }: { tick: Tick; expanded: boolean;
                 Fiber Tree
                 {tick.fiberSummary && (
                   <span className="tick-section-count">
-                    {tick.fiberSummary.componentCount} components, {tick.fiberSummary.hookCount} hooks
+                    {tick.fiberSummary.componentCount} components, {tick.fiberSummary.hookCount}{" "}
+                    hooks
                   </span>
                 )}
               </div>
@@ -472,7 +526,7 @@ function TickFiberTree({
   setExpandedNodes: React.Dispatch<React.SetStateAction<Set<string>>>;
 }) {
   const toggleNode = (id: string) => {
-    setExpandedNodes(prev => {
+    setExpandedNodes((prev) => {
       const next = new Set(prev);
       if (next.has(id)) {
         next.delete(id);
@@ -485,11 +539,7 @@ function TickFiberTree({
 
   return (
     <div className="tick-fiber-tree">
-      <TickFiberNode
-        node={fiberTree}
-        expandedNodes={expandedNodes}
-        onToggle={toggleNode}
-      />
+      <TickFiberNode node={fiberTree} expandedNodes={expandedNodes} onToggle={toggleNode} />
     </div>
   );
 }
@@ -533,12 +583,12 @@ function TickFiberNode({
         >
           ▶
         </span>
-        <span className={`fiber-type ${isHostElement ? "host" : ""}`}>
-          &lt;{node.type}&gt;
-        </span>
+        <span className={`fiber-type ${isHostElement ? "host" : ""}`}>&lt;{node.type}&gt;</span>
         {node.key && <span className="fiber-key">key="{node.key}"</span>}
         {hasHooks && (
-          <span className="fiber-hooks-badge">{node.hooks.length} hook{node.hooks.length !== 1 ? "s" : ""}</span>
+          <span className="fiber-hooks-badge">
+            {node.hooks.length} hook{node.hooks.length !== 1 ? "s" : ""}
+          </span>
         )}
       </div>
       {hasChildren && isExpanded && (
@@ -569,7 +619,7 @@ function FiberView({ execution, session }: { execution?: Execution; session?: Se
   const [selectedTick, setSelectedTick] = useState<number | "latest">("latest");
 
   // Get ticks with fiber trees
-  const ticksWithFiber = execution?.ticks.filter(t => t.fiberTree) ?? [];
+  const ticksWithFiber = execution?.ticks.filter((t) => t.fiberTree) ?? [];
 
   // Determine which fiber tree to show
   const getSelectedFiberData = () => {
@@ -579,7 +629,7 @@ function FiberView({ execution, session }: { execution?: Execution; session?: Se
         summary: session?.latestFiberSummary ?? execution?.fiberSummary,
       };
     }
-    const tick = execution?.ticks.find(t => t.number === selectedTick);
+    const tick = execution?.ticks.find((t) => t.number === selectedTick);
     return {
       fiberTree: tick?.fiberTree,
       summary: tick?.fiberSummary,
@@ -601,7 +651,7 @@ function FiberView({ execution, session }: { execution?: Execution; session?: Se
   }
 
   const toggleNode = (id: string) => {
-    setExpandedNodes(prev => {
+    setExpandedNodes((prev) => {
       const next = new Set(prev);
       if (next.has(id)) {
         next.delete(id);
@@ -666,10 +716,10 @@ function FiberView({ execution, session }: { execution?: Execution; session?: Se
               style={{
                 width: (() => {
                   if (selectedTick === "latest") return "100%";
-                  const idx = ticksWithFiber.findIndex(t => t.number === selectedTick);
+                  const idx = ticksWithFiber.findIndex((t) => t.number === selectedTick);
                   if (idx === -1 || ticksWithFiber.length <= 1) return "0%";
                   return `${(idx / (ticksWithFiber.length - 1)) * 100}%`;
-                })()
+                })(),
               }}
             />
             <div className="fiber-timeline-ticks">
@@ -680,7 +730,11 @@ function FiberView({ execution, session }: { execution?: Execution; session?: Se
                   onClick={() => setSelectedTick(t.number)}
                   title={`Tick ${t.number}${t.fiberSummary ? ` - ${t.fiberSummary.componentCount} components` : ""}`}
                   style={{
-                    opacity: selectedTick === "latest" || (typeof selectedTick === "number" && t.number <= selectedTick) ? 1 : 0.5
+                    opacity:
+                      selectedTick === "latest" ||
+                      (typeof selectedTick === "number" && t.number <= selectedTick)
+                        ? 1
+                        : 0.5,
                   }}
                 >
                   <span className="fiber-timeline-tick-label">Tick {t.number}</span>
@@ -689,11 +743,7 @@ function FiberView({ execution, session }: { execution?: Execution; session?: Se
             </div>
           </div>
           <div className="fiber-timeline-info">
-            {selectedTick === "latest" ? (
-              <span>Latest</span>
-            ) : (
-              <span>Tick {selectedTick}</span>
-            )}
+            {selectedTick === "latest" ? <span>Latest</span> : <span>Tick {selectedTick}</span>}
           </div>
         </div>
       )}
@@ -701,9 +751,21 @@ function FiberView({ execution, session }: { execution?: Execution; session?: Se
       {/* Tree */}
       <div className="fiber-tree">
         <div className="fiber-toolbar">
-          <button className="btn btn-sm" onClick={expandAll}>Expand All</button>
-          <button className="btn btn-sm" onClick={collapseAll}>Collapse All</button>
-          <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, marginLeft: 'auto' }}>
+          <button className="btn btn-sm" onClick={expandAll}>
+            Expand All
+          </button>
+          <button className="btn btn-sm" onClick={collapseAll}>
+            Collapse All
+          </button>
+          <label
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 4,
+              fontSize: 12,
+              marginLeft: "auto",
+            }}
+          >
             <input
               type="checkbox"
               checked={showHooks}
@@ -711,7 +773,7 @@ function FiberView({ execution, session }: { execution?: Execution; session?: Se
             />
             Show Hooks
           </label>
-          <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12 }}>
+          <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12 }}>
             <input
               type="checkbox"
               checked={showProps}
@@ -816,20 +878,18 @@ function FiberNodeView({
         >
           ▶
         </span>
-        <span className={`fiber-type ${isHostElement ? "host" : ""}`}>
-          &lt;{node.type}&gt;
-        </span>
+        <span className={`fiber-type ${isHostElement ? "host" : ""}`}>&lt;{node.type}&gt;</span>
         {node.key && <span className="fiber-key">key="{node.key}"</span>}
         {/* Show component summary if available (e.g., message role, tool name) */}
-        {node._summary && (
-          <span className="fiber-summary">{node._summary}</span>
-        )}
+        {node._summary && <span className="fiber-summary">{node._summary}</span>}
         {/* Fallback to text preview if no summary */}
         {!node._summary && textPreview && (
           <span className="fiber-text-preview">"{textPreview}"</span>
         )}
         {hasHooks && (
-          <span className="fiber-hooks-badge">{node.hooks.length} hook{node.hooks.length !== 1 ? "s" : ""}</span>
+          <span className="fiber-hooks-badge">
+            {node.hooks.length} hook{node.hooks.length !== 1 ? "s" : ""}
+          </span>
         )}
       </div>
 
@@ -845,14 +905,16 @@ function FiberNodeView({
       {/* Props Panel */}
       {showProps && hasProps && isExpanded && (
         <div className="props-panel">
-          {Object.entries(node.props).slice(0, 10).map(([key, value]) => (
-            <div key={key} className="prop-item">
-              <span className="prop-key">{key}:</span>
-              <span className="prop-value">{formatValue(value)}</span>
-            </div>
-          ))}
+          {Object.entries(node.props)
+            .slice(0, 10)
+            .map(([key, value]) => (
+              <div key={key} className="prop-item">
+                <span className="prop-key">{key}:</span>
+                <span className="prop-value">{formatValue(value)}</span>
+              </div>
+            ))}
           {Object.keys(node.props).length > 10 && (
-            <div style={{ color: 'var(--text-muted)', fontSize: 10 }}>
+            <div style={{ color: "var(--text-muted)", fontSize: 10 }}>
               ... and {Object.keys(node.props).length - 10} more props
             </div>
           )}
@@ -883,13 +945,13 @@ function FiberNodeView({
 function HookView({ hook }: { hook: HookState }) {
   return (
     <div className="fiber-hook">
-      <span className="fiber-hook-type">{hook.type}[{hook.index}]</span>
+      <span className="fiber-hook-type">
+        {hook.type}[{hook.index}]
+      </span>
       <span className="fiber-hook-value">{formatValue(hook.value)}</span>
-      {hook.deps && (
-        <span className="fiber-hook-deps">deps: [{hook.deps.length}]</span>
-      )}
+      {hook.deps && <span className="fiber-hook-deps">deps: [{hook.deps.length}]</span>}
       {hook.status && (
-        <span style={{ color: 'var(--accent-green)', fontSize: 10 }}>{hook.status}</span>
+        <span style={{ color: "var(--accent-green)", fontSize: 10 }}>{hook.status}</span>
       )}
     </div>
   );
@@ -924,7 +986,7 @@ function formatValue(value: unknown): string {
       return `Error: ${obj.message}`;
     }
 
-    const keys = Object.keys(obj).filter(k => !k.startsWith("_"));
+    const keys = Object.keys(obj).filter((k) => !k.startsWith("_"));
     if (keys.length === 0) return "{}";
     if (keys.length <= 3) return `{${keys.join(", ")}}`;
     return `{${keys.slice(0, 3).join(", ")}, ...}`;
@@ -980,11 +1042,15 @@ function ToolsView({ execution }: { execution?: Execution }) {
       {toolEvents.map((event, i) => (
         <div key={i} className="tool-call-card">
           <div className="tool-call-header">
-            <div className={`tool-call-icon ${event.result ? (event.result.isError ? "error" : "success") : "call"}`}>
+            <div
+              className={`tool-call-icon ${event.result ? (event.result.isError ? "error" : "success") : "call"}`}
+            >
               {event.result ? (event.result.isError ? "❌" : "✓") : "🔧"}
             </div>
             <div className="tool-call-info">
-              <div className="tool-call-name">{event.call?.toolName || event.call?.name || "Unknown Tool"}</div>
+              <div className="tool-call-name">
+                {event.call?.toolName || event.call?.name || "Unknown Tool"}
+              </div>
               <div className="tool-call-id">{event.call?.toolUseId?.slice(0, 16)}...</div>
             </div>
             <div className="tool-call-meta">
@@ -994,9 +1060,7 @@ function ToolsView({ execution }: { execution?: Execution }) {
           <div className="tool-call-body">
             <div className="tool-call-section">
               <div className="tool-call-section-label">Input</div>
-              <pre className="json-view">
-                {JSON.stringify(event.call?.input || {}, null, 2)}
-              </pre>
+              <pre className="json-view">{JSON.stringify(event.call?.input || {}, null, 2)}</pre>
             </div>
             {event.result && (
               <div className="tool-call-section">
@@ -1004,7 +1068,11 @@ function ToolsView({ execution }: { execution?: Execution }) {
                   {event.result.isError ? "Error" : "Result"}
                 </div>
                 <pre className="json-view">
-                  {JSON.stringify(event.result.result || event.result.content || event.result, null, 2)}
+                  {JSON.stringify(
+                    event.result.result || event.result.content || event.result,
+                    null,
+                    2,
+                  )}
                 </pre>
               </div>
             )}
@@ -1014,4 +1082,3 @@ function ToolsView({ execution }: { execution?: Execution }) {
     </div>
   );
 }
-

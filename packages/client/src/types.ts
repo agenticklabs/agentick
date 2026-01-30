@@ -6,13 +6,10 @@
 
 import type {
   ChannelEvent,
-  ConnectionMetadata,
   SessionResultPayload,
   ToolConfirmationRequest,
   ToolConfirmationResponse,
-  CreateSessionResponse,
-  SessionState,
-  SessionMessagePayload,
+  SendInput,
   Message,
   ContentBlock,
 } from "@tentickle/shared";
@@ -21,13 +18,10 @@ import type { StreamEvent } from "@tentickle/shared";
 // Re-export protocol types
 export type {
   ChannelEvent,
-  ConnectionMetadata,
   SessionResultPayload,
   ToolConfirmationRequest,
   ToolConfirmationResponse,
-  CreateSessionResponse,
-  SessionState,
-  SessionMessagePayload,
+  SendInput,
   Message,
   ContentBlock,
   StreamEvent,
@@ -49,8 +43,18 @@ export type ConnectionState = "disconnected" | "connecting" | "connected" | "err
 export const DEFAULT_PATHS = {
   /** SSE stream endpoint */
   events: "/events",
-  /** Session management endpoint */
-  sessions: "/sessions",
+  /** Send endpoint */
+  send: "/send",
+  /** Subscribe endpoint */
+  subscribe: "/subscribe",
+  /** Abort endpoint */
+  abort: "/abort",
+  /** Close endpoint */
+  close: "/close",
+  /** Tool response endpoint */
+  toolResponse: "/tool-response",
+  /** Channel endpoint */
+  channel: "/channel",
 } as const;
 
 /**
@@ -59,8 +63,18 @@ export const DEFAULT_PATHS = {
 export interface PathConfig {
   /** SSE stream endpoint (default: /events) */
   events?: string;
-  /** Session management endpoint (default: /sessions) */
-  sessions?: string;
+  /** Send endpoint (default: /send) */
+  send?: string;
+  /** Subscribe endpoint (default: /subscribe) */
+  subscribe?: string;
+  /** Abort endpoint (default: /abort) */
+  abort?: string;
+  /** Close endpoint (default: /close) */
+  close?: string;
+  /** Tool response endpoint (default: /tool-response) */
+  toolResponse?: string;
+  /** Channel endpoint (default: /channel) */
+  channel?: string;
 }
 
 /**
@@ -73,68 +87,9 @@ export interface ClientConfig {
   paths?: PathConfig;
   /** Authentication token */
   token?: string;
-  /** User ID for user-scoped routing */
-  userId?: string;
   /** Request timeout in ms (default: 30000) */
   timeout?: number;
-  /** Reconnection delay in ms (default: 1000) */
-  reconnectDelay?: number;
-  /** Max reconnection attempts (default: 10) */
-  maxReconnectAttempts?: number;
 }
-
-// ============================================================================
-// Transport Interface
-// ============================================================================
-
-/**
- * Transport interface for client-server communication.
- *
- * Default implementation uses HTTP/SSE.
- * WebSocket implementation available as alternative.
- */
-export interface Transport {
-  /** Transport name for debugging */
-  readonly name: string;
-  /** Current connection state */
-  readonly state: ConnectionState;
-
-  /**
-   * Connect to the server.
-   * For SSE: Opens EventSource connection.
-   * For WebSocket: Opens WebSocket connection.
-   */
-  connect(sessionId: string, metadata?: ConnectionMetadata): Promise<void>;
-
-  /**
-   * Disconnect from the server.
-   */
-  disconnect(): Promise<void>;
-
-  /**
-   * Send a channel event to the server.
-   * For SSE: HTTP POST request.
-   * For WebSocket: WebSocket message.
-   */
-  send(event: ChannelEvent): Promise<void>;
-
-  /**
-   * Register handler for incoming events.
-   * Returns unsubscribe function.
-   */
-  onReceive(handler: (event: ChannelEvent) => void): () => void;
-
-  /**
-   * Register handler for connection state changes.
-   * Returns unsubscribe function.
-   */
-  onStateChange(handler: (state: ConnectionState) => void): () => void;
-}
-
-/**
- * Transport factory function.
- */
-export type TransportFactory = (config: ClientConfig) => Transport;
 
 // ============================================================================
 // Channel Accessor
@@ -176,17 +131,31 @@ export interface ChannelAccessor {
 /**
  * Handler for stream events.
  */
-export type EventHandler = (event: StreamEvent) => void;
+/**
+ * Stream event emitted from multiplexed sessions.
+ * Always includes the sessionId for routing.
+ */
+export type SessionStreamEvent = StreamEvent & { sessionId: string };
+
+/**
+ * Handler for multiplexed stream events (includes sessionId).
+ */
+export type GlobalEventHandler = (event: SessionStreamEvent) => void;
+
+/**
+ * Handler for session-scoped stream events (no sessionId required).
+ */
+export type SessionEventHandler = (event: StreamEvent) => void;
 
 /**
  * Handler for execution results.
  */
-export type ResultHandler = (result: SessionResultPayload) => void;
+export type SessionResultHandler = (result: SessionResultPayload) => void;
 
 /**
  * Handler for tool confirmations.
  */
-export type ToolConfirmationHandler = (
+export type SessionToolConfirmationHandler = (
   request: ToolConfirmationRequest,
   respond: (response: ToolConfirmationResponse) => void,
 ) => void;
@@ -206,21 +175,59 @@ export type StreamEventHandler<T extends StreamEventType> = (
   event: Extract<StreamEvent, { type: T }>,
 ) => void;
 
-export type ClientEventName =
-  | "event"
-  | "result"
-  | "tool_confirmation"
-  | "state"
-  | StreamEventType;
+export type GlobalStreamEventHandler<T extends StreamEventType> = (
+  event: Extract<SessionStreamEvent, { type: T }>,
+) => void;
+
+export type ClientEventName = "event" | "state" | StreamEventType;
 
 export type ClientEventHandlerMap = {
-  event: EventHandler;
-  result: ResultHandler;
-  tool_confirmation: ToolConfirmationHandler;
+  event: GlobalEventHandler;
   state: ConnectionHandler;
 } & {
-  [K in StreamEventType]: StreamEventHandler<K>;
+  [K in StreamEventType]: GlobalStreamEventHandler<K>;
 };
+
+// ============================================================================
+// Client Execution Handle
+// ============================================================================
+
+/**
+ * Handle for streaming a single execution from the client.
+ */
+export interface ClientExecutionHandle {
+  /** Session ID this execution belongs to */
+  readonly sessionId: string;
+  /** Execution ID (assigned by server) */
+  readonly executionId: string;
+  /** Current status */
+  readonly status: "running" | "completed" | "aborted" | "error";
+
+  /**
+   * Async iterator for events from this execution only.
+   */
+  [Symbol.asyncIterator](): AsyncIterator<StreamEvent>;
+
+  /**
+   * Final result for this execution.
+   */
+  readonly result: Promise<SessionResultPayload>;
+
+  /**
+   * Abort this execution.
+   */
+  abort(reason?: string): void;
+
+  /**
+   * Queue a message during execution.
+   */
+  queueMessage(message: Message): void;
+
+  /**
+   * Submit tool confirmation result.
+   */
+  submitToolResult(toolUseId: string, result: ToolConfirmationResponse): void;
+}
 
 // ============================================================================
 // Streaming Text State

@@ -13,5 +13,6 @@ import { TaskAssistantAgent } from "./agents/index.js";
 export function createTentickleApp() {
   return createApp(TaskAssistantAgent, {
     maxTicks: 10,
+    devTools: true,
   });
 }

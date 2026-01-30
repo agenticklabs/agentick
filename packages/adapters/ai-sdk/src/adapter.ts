@@ -49,10 +49,7 @@ import {
   createLanguageModel,
 } from "@tentickle/core/model";
 
-import {
-  type LibraryGenerationOptions,
-  type ProviderToolOptions,
-} from "@tentickle/core";
+import { type LibraryGenerationOptions, type ProviderToolOptions } from "@tentickle/core";
 
 import type { COMInput, COMTimelineEntry, EngineInput } from "@tentickle/core/com";
 

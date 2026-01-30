@@ -250,7 +250,10 @@ export interface ProcedureEnvelope<TArgs extends any[]> {
  * @see {@link ExecutionHandleImpl} - Default implementation
  * @see {@link HandleFactory} - Custom handle factory function type
  */
-export interface ExecutionHandle<TResult, TEvent extends TypedEvent = any> extends AsyncIterable<TEvent> {
+export interface ExecutionHandle<
+  TResult,
+  TEvent extends TypedEvent = any,
+> extends AsyncIterable<TEvent> {
   /** Current execution status */
   readonly status: "running" | "completed" | "error" | "aborted" | ExecutionStatus;
 
@@ -296,7 +299,10 @@ export interface ExecutionHandle<TResult, TEvent extends TypedEvent = any> exten
  * @typeParam TResult - The return type of the procedure
  * @typeParam TEvent - The event type for streaming
  */
-export class ExecutionHandleImpl<TResult, TEvent extends TypedEvent = any> implements ExecutionHandle<TResult, TEvent> {
+export class ExecutionHandleImpl<
+  TResult,
+  TEvent extends TypedEvent = any,
+> implements ExecutionHandle<TResult, TEvent> {
   private _status: "running" | "completed" | "error" | "aborted" = "running";
   private _abortController: AbortController;
   public readonly events: EventBuffer<TEvent>;
@@ -530,7 +536,10 @@ export interface ProcedureOptions {
  * @see {@link Middleware} - Middleware function type
  * @see {@link ExecutionHandle} - Handle for execution control
  */
-export interface Procedure<THandler extends (...args: any[]) => any, TPassThrough extends boolean = false> {
+export interface Procedure<
+  THandler extends (...args: any[]) => any,
+  TPassThrough extends boolean = false,
+> {
   /**
    * Call the procedure directly.
    * Returns ProcedurePromise<ExecutionHandle<T>>.
@@ -539,13 +548,21 @@ export interface Procedure<THandler extends (...args: any[]) => any, TPassThroug
    * - `await proc()` → ExecutionHandle (with status, streaming, abort)
    * - `await proc().result` → T (the final value)
    */
-  (...args: ExtractArgs<THandler>): TPassThrough extends true ? Promise<ExtractReturn<THandler>> : ProcedurePromise<ExecutionHandle<ExtractReturn<THandler>>>;
+  (
+    ...args: ExtractArgs<THandler>
+  ): TPassThrough extends true
+    ? Promise<ExtractReturn<THandler>>
+    : ProcedurePromise<ExecutionHandle<ExtractReturn<THandler>>>;
 
   /**
    * Execute the procedure with explicit arguments.
    * Equivalent to direct call.
    */
-  exec(...args: ExtractArgs<THandler>): TPassThrough extends true ? Promise<ExtractReturn<THandler>> : ProcedurePromise<ExecutionHandle<ExtractReturn<THandler>>>;
+  exec(
+    ...args: ExtractArgs<THandler>
+  ): TPassThrough extends true
+    ? Promise<ExtractReturn<THandler>>
+    : ProcedurePromise<ExecutionHandle<ExtractReturn<THandler>>>;
 
   /**
    * Add middleware to the procedure. Returns a new Procedure (immutable).
@@ -565,7 +582,9 @@ export interface Procedure<THandler extends (...args: any[]) => any, TPassThroug
    * Add a single middleware. Returns a new Procedure.
    * Convenience method equivalent to `.use(mw)`.
    */
-  withMiddleware(mw: Middleware<ExtractArgs<THandler>> | MiddlewarePipeline): Procedure<THandler, TPassThrough>;
+  withMiddleware(
+    mw: Middleware<ExtractArgs<THandler>> | MiddlewarePipeline,
+  ): Procedure<THandler, TPassThrough>;
 
   /**
    * Create a procedure variant with a timeout. Returns a new Procedure.
@@ -1184,7 +1203,9 @@ class ProcedureImpl<
    * - T is ExecutionHandle<HandlerReturn>
    * - handle.result is the handler's return value
    */
-  exec(...args: TArgs): ProcedurePromise<
+  exec(
+    ...args: TArgs
+  ): ProcedurePromise<
     typeof this.handleFactory extends HandleFactory
       ? ExecutionHandle<ExtractReturn<THandler>>
       : ExtractReturn<THandler>
@@ -1234,7 +1255,9 @@ class ProcedureImpl<
    * Execute with handle wrapping - returns ProcedurePromise<ExecutionHandle<T>>.
    * Used when handleFactory is provided (not false).
    */
-  private executeWithHandle(args: TArgs): ProcedurePromise<ExecutionHandle<ExtractReturn<THandler>>> {
+  private executeWithHandle(
+    args: TArgs,
+  ): ProcedurePromise<ExecutionHandle<ExtractReturn<THandler>>> {
     const handle = this.createHandle(args);
     // Wrap the synchronously-created handle in a ProcedurePromise
     return createProcedurePromise(Promise.resolve(handle));
@@ -1453,7 +1476,7 @@ function createProcedureFromImpl<TArgs extends any[], THandler extends (...args:
   const impl = new ProcedureImpl<TArgs, THandler>(options, handler);
 
   // Create a callable function
-  const proc = ((...args: any[]) => {
+  const proc = (...args: any[]) => {
     // Support context as last arg (backward compat)
     let actualArgs: TArgs;
 
@@ -1471,7 +1494,7 @@ function createProcedureFromImpl<TArgs extends any[], THandler extends (...args:
 
     // Return result directly (pass-through) or ExecutionHandle
     return impl.exec(...actualArgs);
-  });
+  };
 
   // Attach methods - same for both Procedure with handle return and Pass-through return Procedure
   (proc as any).use = impl.use.bind(impl);
@@ -1780,7 +1803,6 @@ export function createHook<THandler extends (...args: any[]) => any>(
   return createProcedure(options, handler);
 }
 
-
 // ============================================================================
 // ProcedureBase - Base class for auto-wrapping methods as Procedures
 // ============================================================================
@@ -1936,4 +1958,3 @@ export function wrapHook(middleware: Middleware<any[]>[]) {
 
   return wrapHookImpl;
 }
-

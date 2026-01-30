@@ -4,35 +4,23 @@
  * @module @tentickle/nestjs/module
  */
 
-import {
-  Module,
-  type DynamicModule,
-  type Provider,
-  type Type,
-} from "@nestjs/common";
-import { createSessionHandler, createEventBridge } from "@tentickle/server";
-import { TentickleController } from "./tentickle.controller.js";
-import { TentickleService } from "./tentickle.service.js";
+import { Module, type DynamicModule, type Provider, type Type } from "@nestjs/common";
+import { TentickleController } from "./tentickle.controller";
+import { TentickleService } from "./tentickle.service";
 import {
   TENTICKLE_OPTIONS,
-  TENTICKLE_SESSION_HANDLER,
-  TENTICKLE_EVENT_BRIDGE,
+  TENTICKLE_APP,
   type TentickleModuleOptions,
   type TentickleModuleAsyncOptions,
   type TentickleModuleOptionsFactory,
-} from "./types.js";
+} from "./types";
 
 /**
  * NestJS module for Tentickle.
  *
- * Provides session handling and event routing for Tentickle applications.
- * The module offers three levels of progressive disclosure:
+ * Provides multiplexed SSE session access with App injection.
  *
- * 1. **Default controller** - Use `forRoot()` and get working endpoints immediately
- * 2. **TentickleService** - Inject the service into your own controllers
- * 3. **Raw handlers** - Inject SessionHandler/EventBridge directly for full control
- *
- * @example Level 1: Default controller (simplest)
+ * @example Default controller (simplest)
  * ```typescript
  * import { TentickleModule } from '@tentickle/nestjs';
  * import { createApp } from '@tentickle/core';
@@ -40,23 +28,23 @@ import {
  * @Module({
  *   imports: [
  *     TentickleModule.forRoot({
- *       sessionHandler: { app: createApp(<MyAgent />) },
+ *       app: createApp(<MyAgent />),
  *     }),
  *   ],
  * })
  * export class AppModule {}
- * // Endpoints: POST /sessions, GET /sessions/:id, POST /sessions/:id/messages, etc.
+ * // Endpoints: GET /events, POST /send, POST /subscribe, etc.
  * ```
  *
- * @example Level 2: Custom controller with TentickleService
+ * @example Custom controller with TentickleService
  * ```typescript
  * import { TentickleModule, TentickleService } from '@tentickle/nestjs';
  *
  * @Module({
  *   imports: [
  *     TentickleModule.forRoot({
- *       sessionHandler: { app },
- *       registerController: false, // Disable default routes
+ *       app,
+ *       registerController: false,
  *     }),
  *   ],
  *   controllers: [ChatController],
@@ -69,26 +57,11 @@ import {
  *
  *   @Post()
  *   async chat(@Body() body: { message: string }) {
- *     const { sessionId } = await this.tentickle.createSession();
- *     return this.tentickle.sendMessage(sessionId, body.message);
+ *     const handle = await this.tentickle.send({
+ *       message: { role: 'user', content: [{ type: 'text', text: body.message }] },
+ *     });
+ *     return handle.result;
  *   }
- * }
- * ```
- *
- * @example Level 3: Raw handlers for full control
- * ```typescript
- * import {
- *   TentickleModule,
- *   TENTICKLE_SESSION_HANDLER,
- *   TENTICKLE_EVENT_BRIDGE,
- * } from '@tentickle/nestjs';
- *
- * @Injectable()
- * export class AdvancedService {
- *   constructor(
- *     @Inject(TENTICKLE_SESSION_HANDLER) private handler: SessionHandler,
- *     @Inject(TENTICKLE_EVENT_BRIDGE) private bridge: EventBridge,
- *   ) {}
  * }
  * ```
  */
@@ -99,18 +72,13 @@ export class TentickleModule {
    */
   static forRoot(options: TentickleModuleOptions): DynamicModule {
     const providers = this.createProviders(options);
-    const controllers =
-      options.registerController !== false ? [TentickleController] : [];
+    const controllers = options.registerController !== false ? [TentickleController] : [];
 
     return {
       module: TentickleModule,
       controllers,
       providers,
-      exports: [
-        TentickleService,
-        TENTICKLE_SESSION_HANDLER,
-        TENTICKLE_EVENT_BRIDGE,
-      ],
+      exports: [TentickleService, TENTICKLE_APP],
     };
   }
 
@@ -119,19 +87,14 @@ export class TentickleModule {
    */
   static forRootAsync(options: TentickleModuleAsyncOptions): DynamicModule {
     const providers = this.createAsyncProviders(options);
-    const controllers =
-      options.registerController !== false ? [TentickleController] : [];
+    const controllers = options.registerController !== false ? [TentickleController] : [];
 
     return {
       module: TentickleModule,
       imports: options.imports || [],
       controllers,
       providers,
-      exports: [
-        TentickleService,
-        TENTICKLE_SESSION_HANDLER,
-        TENTICKLE_EVENT_BRIDGE,
-      ],
+      exports: [TentickleService, TENTICKLE_APP],
     };
   }
 
@@ -142,40 +105,19 @@ export class TentickleModule {
         useValue: options,
       },
       {
-        provide: TENTICKLE_SESSION_HANDLER,
-        useFactory: () => createSessionHandler(options.sessionHandler),
-      },
-      {
-        provide: TENTICKLE_EVENT_BRIDGE,
-        useFactory: (sessionHandler) =>
-          createEventBridge({
-            sessionHandler,
-            ...options.eventBridge,
-          }),
-        inject: [TENTICKLE_SESSION_HANDLER],
+        provide: TENTICKLE_APP,
+        useValue: options.app,
       },
       TentickleService,
     ];
   }
 
-  private static createAsyncProviders(
-    options: TentickleModuleAsyncOptions,
-  ): Provider[] {
+  private static createAsyncProviders(options: TentickleModuleAsyncOptions): Provider[] {
     const providers: Provider[] = [
       {
-        provide: TENTICKLE_SESSION_HANDLER,
-        useFactory: (opts: TentickleModuleOptions) =>
-          createSessionHandler(opts.sessionHandler),
+        provide: TENTICKLE_APP,
+        useFactory: (opts: TentickleModuleOptions) => opts.app,
         inject: [TENTICKLE_OPTIONS],
-      },
-      {
-        provide: TENTICKLE_EVENT_BRIDGE,
-        useFactory: (opts: TentickleModuleOptions, sessionHandler) =>
-          createEventBridge({
-            sessionHandler,
-            ...opts.eventBridge,
-          }),
-        inject: [TENTICKLE_OPTIONS, TENTICKLE_SESSION_HANDLER],
       },
       TentickleService,
     ];

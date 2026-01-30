@@ -308,15 +308,15 @@ Tools are converted from Tentickle format to AI SDK's ToolSet:
 
 AI SDK finish reasons map to Tentickle's StopReason enum:
 
-| AI SDK FinishReason | Tentickle StopReason  |
-| ------------------- | ---------------- |
-| `stop`              | `STOP`           |
-| `length`            | `MAX_TOKENS`     |
-| `tool-calls`        | `TOOL_USE`       |
-| `content-filter`    | `CONTENT_FILTER` |
-| `error`             | `ERROR`          |
-| `other`             | `OTHER`          |
-| (unknown)           | `UNSPECIFIED`    |
+| AI SDK FinishReason | Tentickle StopReason |
+| ------------------- | -------------------- |
+| `stop`              | `STOP`               |
+| `length`            | `MAX_TOKENS`         |
+| `tool-calls`        | `TOOL_USE`           |
+| `content-filter`    | `CONTENT_FILTER`     |
+| `error`             | `ERROR`              |
+| `other`             | `OTHER`              |
+| (unknown)           | `UNSPECIFIED`        |
 
 ---
 

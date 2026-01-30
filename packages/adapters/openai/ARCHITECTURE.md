@@ -163,13 +163,13 @@ Messages flow through a transformation pipeline that handles Tentickle's rich co
 
 **Key transformations:**
 
-| Tentickle Block Type  | OpenAI Format                                           |
-| ---------------- | ------------------------------------------------------- |
-| `text`           | `{ type: 'text', text: '...' }`                         |
-| `image` (URL)    | `{ type: 'image_url', image_url: { url } }`             |
-| `image` (base64) | `{ type: 'image_url', image_url: { url: 'data:...' } }` |
-| `tool_use`       | `tool_calls[]` on assistant message                     |
-| `tool_result`    | Separate `role: 'tool'` message per result              |
+| Tentickle Block Type | OpenAI Format                                           |
+| -------------------- | ------------------------------------------------------- |
+| `text`               | `{ type: 'text', text: '...' }`                         |
+| `image` (URL)        | `{ type: 'image_url', image_url: { url } }`             |
+| `image` (base64)     | `{ type: 'image_url', image_url: { url: 'data:...' } }` |
+| `tool_use`           | `tool_calls[]` on assistant message                     |
+| `tool_result`        | Separate `role: 'tool'` message per result              |
 
 ### 3. Tool Definition Mapping
 
@@ -347,7 +347,7 @@ interface OpenAIToolOptions {
 
 Maps OpenAI finish reasons to Tentickle's `StopReason`:
 
-| OpenAI Reason      | Tentickle StopReason             |
+| OpenAI Reason      | Tentickle StopReason        |
 | ------------------ | --------------------------- |
 | `'stop'`           | `StopReason.STOP`           |
 | `'length'`         | `StopReason.MAX_TOKENS`     |

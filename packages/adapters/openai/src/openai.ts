@@ -6,7 +6,12 @@ import type {
   ChatCompletionFunctionTool,
 } from "openai/resources/chat/completions";
 
-import { createLanguageModel, type EngineModel, type ModelInput, type ModelOutput } from "@tentickle/core/model";
+import {
+  createLanguageModel,
+  type EngineModel,
+  type ModelInput,
+  type ModelOutput,
+} from "@tentickle/core/model";
 import { Logger } from "@tentickle/core/core";
 import { normalizeModelInput } from "@tentickle/core/utils";
 import type { ToolDefinition } from "@tentickle/core/tool";
@@ -297,7 +302,10 @@ async function prepareInput(
   config: OpenAIAdapterConfig,
 ): Promise<OpenAI.Chat.Completions.ChatCompletionCreateParams> {
   // DEBUG: Log raw input from engine
-  console.log("\n🔍 [OpenAI] prepareInput - raw messages:", JSON.stringify(input.messages, null, 2));
+  console.log(
+    "\n🔍 [OpenAI] prepareInput - raw messages:",
+    JSON.stringify(input.messages, null, 2),
+  );
 
   // Normalize input (handles message normalization, tool resolution, config merging)
   const normalizedInput = normalizeModelInput(input, config);
@@ -665,7 +673,10 @@ async function* executeStream(
     input.tools?.map((t: any) => t.function.name),
   );
   console.log("🔧 [OpenAI] executeStream - message count:", input.messages.length);
-  console.log("🔧 [OpenAI] executeStream - messages roles:", input.messages.map(m => m.role));
+  console.log(
+    "🔧 [OpenAI] executeStream - messages roles:",
+    input.messages.map((m) => m.role),
+  );
   console.log("🔧 [OpenAI] executeStream - full request:", JSON.stringify(input, null, 2));
 
   const stream = await client.chat.completions.create({

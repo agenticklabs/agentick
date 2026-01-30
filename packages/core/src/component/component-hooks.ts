@@ -1,4 +1,4 @@
-import type { Middleware } from "../core/index.js";
+import type { Middleware } from "../core/index";
 import type { EngineComponent, TickState, RecoveryAction, AfterCompileContext } from "./component";
 import { COM } from "../com/object-model";
 import type { COMInput } from "../com/types";

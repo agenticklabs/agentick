@@ -16,8 +16,8 @@ import {
   ProcedureNode,
   EventBuffer,
   type ExecutionHandle as KernelExecutionHandle,
-} from "../core/index.js";
-import { Context } from "../core/index.js";
+} from "../core/index";
+import { Context } from "../core/index";
 import { AbortError, StateError } from "@tentickle/shared";
 import { COM } from "../com/object-model";
 
@@ -58,7 +58,9 @@ export class ExecutionHandleImpl
   private streamIterator?: AsyncIterable<StreamEvent>;
   private tickCount: number = 0;
   private session?: {
-    sendMessage: (message: Omit<ExecutionMessage, "id" | "timestamp">) => Promise<void>;
+    queue: {
+      exec: (message: Omit<ExecutionMessage, "id" | "timestamp">) => Promise<void>;
+    };
   };
   private shutdownHooks: Array<() => Promise<void> | void> = [];
   private parentHandle?: ExecutionHandle;
@@ -692,7 +694,9 @@ export class ExecutionHandleImpl
    * Called by Engine when execution starts.
    */
   setSession(session: {
-    sendMessage: (message: Omit<ExecutionMessage, "id" | "timestamp">) => Promise<void>;
+    queue: {
+      exec: (message: Omit<ExecutionMessage, "id" | "timestamp">) => Promise<void>;
+    };
   }): void {
     this.session = session;
   }
@@ -723,7 +727,7 @@ export class ExecutionHandleImpl
       );
     }
 
-    await this.session.sendMessage(message);
+    await this.session.queue.exec(message);
   }
 
   getComInstance(): COM | undefined {

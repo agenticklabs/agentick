@@ -621,7 +621,7 @@ describe("ExecutionHandle - PromiseLike interface", () => {
     const proc = createProcedure({ name: "test" }, async (x: number) => x + 1);
     const handle = proc(5);
 
-    const result = await handle.then((r) => r * 2);
+    const result = await handle.result.then((r) => r * 2);
     expect(result).toBe(12); // (5 + 1) * 2
   });
 
@@ -817,10 +817,10 @@ describe("DirectProcedure - handleFactory: false (pass-through)", () => {
     // the async middleware chain will await it, giving the resolved value
 
     // For non-PromiseLike returns, the value passes through as-is
-    const proc = createProcedure(
-      { name: "pass-through", handleFactory: false },
-      async () => ({ type: "custom", value: 42 }),
-    );
+    const proc = createProcedure({ name: "pass-through", handleFactory: false }, async () => ({
+      type: "custom",
+      value: 42,
+    }));
 
     const result = await proc();
     expect(result).toEqual({ type: "custom", value: 42 });
@@ -861,13 +861,10 @@ describe("DirectProcedure - handleFactory: false (pass-through)", () => {
   });
 
   it("should support withContext in pass-through mode", async () => {
-    const proc = createProcedure(
-      { name: "pass-through", handleFactory: false },
-      async () => {
-        const ctx = Context.tryGet();
-        return ctx?.metadata?.custom;
-      },
-    );
+    const proc = createProcedure({ name: "pass-through", handleFactory: false }, async () => {
+      const ctx = Context.tryGet();
+      return ctx?.metadata?.custom;
+    });
 
     const procWithCtx = proc.withContext({ metadata: { custom: "value" } });
     const result = await procWithCtx();
@@ -891,17 +888,14 @@ describe("DirectProcedure - handleFactory: false (pass-through)", () => {
   });
 
   it("should support withTimeout in pass-through mode", async () => {
-    const proc = createProcedure(
-      { name: "pass-through", handleFactory: false },
-      async () => {
-        await new Promise((r) => setTimeout(r, 100));
-        return "done";
-      },
-    );
+    const proc = createProcedure({ name: "pass-through", handleFactory: false }, async () => {
+      await new Promise((r) => setTimeout(r, 100));
+      return "done";
+    });
 
     const procWithTimeout = proc.withTimeout(10);
 
-    await expect(procWithTimeout()).rejects.toThrow();
+    await expect(procWithTimeout()).rejects.toThrow("Operation timed out after 10ms");
   });
 
   it("should work with use() chaining", async () => {

@@ -1,167 +1,61 @@
 # @tentickle/angular
 
-Angular service for Tentickle clients.
+Angular integration for Tentickle. Provides a signal-first service wrapper around `@tentickle/client`.
 
 ## Installation
 
 ```bash
-npm install @tentickle/angular @tentickle/client
-# or
-pnpm add @tentickle/angular @tentickle/client
+pnpm add @tentickle/angular
 ```
 
 ## Quick Start
 
-### Standalone Setup
-
-```typescript
-import { bootstrapApplication } from "@angular/platform-browser";
-import { TentickleService, TENTICKLE_CONFIG } from "@tentickle/angular";
-
-bootstrapApplication(AppComponent, {
-  providers: [
-    TentickleService,
-    { provide: TENTICKLE_CONFIG, useValue: { baseUrl: "https://api.example.com" } },
-  ],
-});
-```
-
-### NgModule Setup
-
-```typescript
-import { TentickleService, TENTICKLE_CONFIG } from "@tentickle/angular";
-
-@NgModule({
-  providers: [
-    TentickleService,
-    { provide: TENTICKLE_CONFIG, useValue: { baseUrl: "https://api.example.com" } },
-  ],
-})
-export class AppModule {}
-```
-
-### Component Usage
-
-```typescript
+```ts
 import { Component, inject } from "@angular/core";
-import { AsyncPipe } from "@angular/common";
-import { TentickleService } from "@tentickle/angular";
+import { TentickleService, provideTentickle } from "@tentickle/angular";
 
 @Component({
   selector: "app-chat",
-  standalone: true,
-  imports: [AsyncPipe],
+  providers: [provideTentickle({ baseUrl: "/api/agent" })],
   template: `
-    @if (session$ | async; as session) {
-      @if (session.isConnecting) {
-        <p>Connecting...</p>
-      }
-      @if (session.isConnected) {
-        <div class="response">
-          {{ text$ | async }}
-          @if (isStreaming$ | async) {
-            <span class="cursor">|</span>
-          }
-        </div>
-        <input #input />
-        <button (click)="send(input.value); input.value = ''">Send</button>
-      }
-    }
+    <div>{{ tentickle.text() }}</div>
+    <button (click)="send('Hello')">Send</button>
   `,
 })
 export class ChatComponent {
-  private tentickle = inject(TentickleService);
-
-  session$ = this.tentickle.session$;
-  text$ = this.tentickle.text$;
-  isStreaming$ = this.tentickle.isStreaming$;
+  tentickle = inject(TentickleService);
 
   constructor() {
-    this.tentickle.connect();
+    this.tentickle.subscribe("conv-123");
   }
 
   async send(message: string) {
-    await this.tentickle.send(message);
-    await this.tentickle.tick();
+    const handle = this.tentickle.send(message);
+    await handle.result;
   }
 }
 ```
 
-## API
+## Service API
 
-### Observables
+```ts
+service.session(sessionId)      // cold accessor
+service.subscribe(sessionId)    // hot accessor
+service.unsubscribe()           // drop current subscription
 
-| Observable | Type | Description |
-|------------|------|-------------|
-| `session$` | `SessionState` | Full session state |
-| `connectionState$` | `ConnectionState` | Connection state only |
-| `isConnected$` | `boolean` | Whether connected |
-| `events$` | `StreamEvent` | All stream events |
-| `streamingText$` | `StreamingTextState` | Text + isStreaming |
-| `text$` | `string` | Accumulated text |
-| `isStreaming$` | `boolean` | Whether streaming |
-| `result$` | `Result` | Execution results |
+service.send(input)             // returns ClientExecutionHandle
+service.abort(reason?)
+service.close()
 
-### Methods
-
-| Method | Description |
-|--------|-------------|
-| `connect(sessionId?, props?)` | Connect to session |
-| `disconnect()` | Disconnect |
-| `send(content)` | Send message |
-| `tick(props?)` | Trigger tick |
-| `abort(reason?)` | Abort execution |
-| `channel(name)` | Get channel accessor |
-| `channel$(name)` | Get channel as Observable |
-| `eventsOfType(...types)` | Filter events by type |
-| `clearStreamingText()` | Clear accumulated text |
-
-### Synchronous Getters
-
-```typescript
-service.isConnected   // boolean
-service.sessionId     // string | undefined
-service.session       // SessionState
+service.channel(name)           // session-scoped channel
 ```
 
-## Configuration
+Signals:
 
-```typescript
-interface TentickleConfig {
-  baseUrl: string;
-  token?: string;
-  userId?: string;
-  headers?: Record<string, string>;
-  paths?: { events?: string; sessions?: string };
-  timeout?: number;
-}
+```ts
+service.connectionState()
+service.sessionId()
+service.streamingText()
+service.text()
+service.isStreaming()
 ```
-
-### Factory Provider
-
-```typescript
-{
-  provide: TENTICKLE_CONFIG,
-  useFactory: (auth: AuthService) => ({
-    baseUrl: environment.apiUrl,
-    token: auth.getToken(),
-  }),
-  deps: [AuthService],
-}
-```
-
-## TypeScript
-
-```typescript
-import type {
-  TentickleConfig,
-  SessionState,
-  StreamingTextState,
-  ConnectionState,
-  StreamEvent,
-} from "@tentickle/angular";
-```
-
-## License
-
-MIT

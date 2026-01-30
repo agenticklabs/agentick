@@ -18,8 +18,6 @@ import {
   // Helpers - import what you need
   extractSystemPrompt,
   extractText,
-  getTextBlocks,
-  getToolUseBlocks,
   getToolResultBlocks,
   imageToBase64,
   imageToUrl,
@@ -30,11 +28,9 @@ import {
   toolResultToSimple,
   normalizeUsage,
   mapStopReason,
-  getField,
 } from "@tentickle/core/model";
 
 import type { ContentBlock, Message } from "@tentickle/shared";
-import { StopReason } from "@tentickle/shared";
 
 import {
   generateText,
@@ -196,8 +192,11 @@ export function createAiSdkAdapterV2(config: AiSdkAdapterV2Config) {
     // =========================================================================
     prepareInput: (input: ModelInput) => {
       // Normalize messages
-      const messages = (Array.isArray(input.messages) ? input.messages : [input.messages]).map((m) =>
-        typeof m === "string" ? { role: "user" as const, content: [{ type: "text" as const, text: m }] } : m,
+      const messages = (Array.isArray(input.messages) ? input.messages : [input.messages]).map(
+        (m) =>
+          typeof m === "string"
+            ? { role: "user" as const, content: [{ type: "text" as const, text: m }] }
+            : m,
       );
 
       // Extract system prompt
@@ -295,7 +294,10 @@ export function createAiSdkAdapterV2(config: AiSdkAdapterV2Config) {
       createdAt: output.response?.timestamp?.toISOString() || new Date().toISOString(),
       message: output.response?.messages?.[0]
         ? { role: "assistant" as const, content: output.response.messages[0].content }
-        : { role: "assistant" as const, content: [{ type: "text" as const, text: output.text || "" }] },
+        : {
+            role: "assistant" as const,
+            content: [{ type: "text" as const, text: output.text || "" }],
+          },
       messages: output.response?.messages || [],
       usage: normalizeUsage(output.usage),
       toolCalls: output.toolCalls?.map((tc: any) => ({

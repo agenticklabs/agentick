@@ -240,9 +240,7 @@ export function useDevToolsEvents() {
               fiberSummary: summary,
               // Also store on the specific tick
               ticks: exec.ticks.map((t) =>
-                t.number === tickNum
-                  ? { ...t, fiberTree: tree, fiberSummary: summary }
-                  : t,
+                t.number === tickNum ? { ...t, fiberTree: tree, fiberSummary: summary } : t,
               ),
             });
           }
@@ -404,7 +402,10 @@ export function useDevToolsEvents() {
                 t.number === tickNum
                   ? {
                       ...t,
-                      events: [...t.events, { type: event.type, timestamp: event.timestamp, data: event }],
+                      events: [
+                        ...t.events,
+                        { type: event.type, timestamp: event.timestamp, data: event },
+                      ],
                     }
                   : t,
               ),
@@ -455,9 +456,7 @@ export function useDevToolsEvents() {
   }, []);
 
   // Convert maps to sorted arrays
-  const executionList = Array.from(executions.values()).sort(
-    (a, b) => b.startTime - a.startTime,
-  );
+  const executionList = Array.from(executions.values()).sort((a, b) => b.startTime - a.startTime);
 
   const sessionList = Array.from(sessions.values()).sort((a, b) => {
     // Sort by most recent execution

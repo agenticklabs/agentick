@@ -11,11 +11,7 @@
  * @module @tentickle/ai-sdk/adapter-simplified-example
  */
 
-import {
-  createSimpleAdapter,
-  type AdapterDelta,
-  type ModelInput,
-} from "@tentickle/core/model";
+import { createSimpleAdapter, type AdapterDelta, type ModelInput } from "@tentickle/core/model";
 
 import { StopReason } from "@tentickle/shared";
 
@@ -46,12 +42,18 @@ export interface SimplifiedAiSdkAdapterConfig {
 
 function mapStopReason(reason: string): StopReason {
   switch (reason) {
-    case "length": return StopReason.MAX_TOKENS;
-    case "stop": return StopReason.STOP;
-    case "content-filter": return StopReason.CONTENT_FILTER;
-    case "tool-calls": return StopReason.TOOL_USE;
-    case "error": return StopReason.ERROR;
-    default: return StopReason.UNSPECIFIED;
+    case "length":
+      return StopReason.MAX_TOKENS;
+    case "stop":
+      return StopReason.STOP;
+    case "content-filter":
+      return StopReason.CONTENT_FILTER;
+    case "tool-calls":
+      return StopReason.TOOL_USE;
+    case "error":
+      return StopReason.ERROR;
+    default:
+      return StopReason.UNSPECIFIED;
   }
 }
 
@@ -175,7 +177,12 @@ export function createSimplifiedAiSdkAdapter(config: SimplifiedAiSdkAdapterConfi
         case "tool-input-end":
           return { type: "tool_call_end", id: chunk.id, input: undefined }; // Accumulator parses JSON
         case "tool-call":
-          return { type: "tool_call", id: chunk.toolCallId, name: chunk.toolName, input: chunk.args };
+          return {
+            type: "tool_call",
+            id: chunk.toolCallId,
+            name: chunk.toolName,
+            input: chunk.args,
+          };
 
         // Message lifecycle
         case "start":
@@ -184,11 +191,14 @@ export function createSimplifiedAiSdkAdapter(config: SimplifiedAiSdkAdapterConfi
           return {
             type: "message_end",
             stopReason: mapStopReason(chunk.finishReason),
-            usage: chunk.totalUsage ? {
-              inputTokens: chunk.totalUsage.promptTokens || chunk.totalUsage.inputTokens || 0,
-              outputTokens: chunk.totalUsage.completionTokens || chunk.totalUsage.outputTokens || 0,
-              totalTokens: chunk.totalUsage.totalTokens || 0,
-            } : undefined,
+            usage: chunk.totalUsage
+              ? {
+                  inputTokens: chunk.totalUsage.promptTokens || chunk.totalUsage.inputTokens || 0,
+                  outputTokens:
+                    chunk.totalUsage.completionTokens || chunk.totalUsage.outputTokens || 0,
+                  totalTokens: chunk.totalUsage.totalTokens || 0,
+                }
+              : undefined,
           };
 
         // Errors

@@ -990,7 +990,7 @@ class ResilientAgent extends Component {
 
 ### Similarities
 
-| Feature             | React                | Tentickle Components          |
+| Feature             | React                | Tentickle Components     |
 | ------------------- | -------------------- | ------------------------ |
 | Function components | Yes                  | Yes                      |
 | Class components    | Yes                  | Yes (`Component<P,S>`)   |
@@ -999,13 +999,13 @@ class ResilientAgent extends Component {
 | Effects             | `useEffect`          | `useEffect`, lifecycle   |
 | Refs                | `useRef`             | `useRef`, `useCOMRef`    |
 | Context             | `useContext`         | COM state, `useComState` |
-| JSX                 | React JSX            | Tentickle JSX                 |
+| JSX                 | React JSX            | Tentickle JSX            |
 | Keys                | `key` prop           | `key` prop               |
 | Fragments           | `<Fragment>` or `<>` | Same                     |
 
 ### Key Differences
 
-| Aspect                | React                    | Tentickle Components               |
+| Aspect                | React                    | Tentickle Components          |
 | --------------------- | ------------------------ | ----------------------------- |
 | **Async support**     | Requires Suspense        | Native async components/hooks |
 | **Render target**     | DOM                      | Context Object Model (COM)    |

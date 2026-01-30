@@ -6,7 +6,7 @@
 
 import { createContext, useContext, useMemo, useEffect } from "react";
 import { createClient, type TentickleClient } from "@tentickle/client";
-import type { TentickleProviderProps, TentickleContextValue } from "./types.js";
+import type { TentickleProviderProps, TentickleContextValue } from "./types";
 
 // ============================================================================
 // Context
@@ -111,9 +111,7 @@ export function TentickleProvider({
     }
 
     if (!clientConfig) {
-      throw new Error(
-        "TentickleProvider requires either a client or clientConfig prop",
-      );
+      throw new Error("TentickleProvider requires either a client or clientConfig prop");
     }
 
     return createClient(clientConfig);
@@ -131,11 +129,7 @@ export function TentickleProvider({
 
   const value = useMemo<TentickleContextValue>(() => ({ client }), [client]);
 
-  return (
-    <TentickleContext.Provider value={value}>
-      {children}
-    </TentickleContext.Provider>
-  );
+  return <TentickleContext.Provider value={value}>{children}</TentickleContext.Provider>;
 }
 
 // ============================================================================
@@ -156,7 +150,8 @@ export function TentickleProvider({
  *
  *   // Direct client access for advanced use cases
  *   const handleCustomChannel = () => {
- *     const channel = client.channel('custom');
+ *     const session = client.session('conv-123');
+ *     const channel = session.channel('custom');
  *     channel.publish('event', { data: 'value' });
  *   };
  *

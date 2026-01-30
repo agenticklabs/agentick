@@ -14,16 +14,9 @@ import { FiberCompiler } from "../fiber-compiler";
 import { ReconciliationScheduler } from "../scheduler";
 import { COM } from "../../com/object-model";
 import { Channel } from "../../core/channel";
-import { jsx, Fragment } from "../../jsx/jsx-runtime";
+import { jsx } from "../../jsx/jsx-runtime";
 import { Section } from "../../jsx/components/primitives";
-import {
-  useState,
-  useEffect,
-  useSignal,
-  useTick,
-  useChannel,
-  useChannelSubscription,
-} from "../../state/hooks";
+import { useState, useEffect, useSignal, useTick, useChannel } from "../../state/hooks";
 import type { TickState } from "../../component/component";
 
 describe("Reactive Model Integration", () => {
@@ -354,7 +347,9 @@ describe("Reactive Model Integration", () => {
       const IdentityComponent = () => {
         useEffect(() => {
           mountLog.push("mounted");
-          return () => mountLog.push("unmounted");
+          return () => {
+            mountLog.push("unmounted");
+          };
         }, []);
         return jsx(Section, { id: "identity", children: "Hello" });
       };

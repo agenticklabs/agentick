@@ -29,10 +29,13 @@
  * }
  *
  * // Persistent session
- * const session = app.createSession();
+ * const session = app.session();
  * await session.tick({ query: "Hello!" });
  * await session.tick({ query: "Follow up" });
  * session.close();
+ *
+ * // Named session (get-or-create by ID)
+ * const conv = app.session('conv-123');
  * ```
  *
  * @module tentickle/app
@@ -43,7 +46,12 @@
 // ============================================================================
 
 export { createApp, Tentickle, TentickleInstance, run } from "./tentickle-instance";
-export type { MiddlewareKey, TentickleInstanceCreateOptions, MiddlewareRegistry, RunInput } from "./tentickle-instance";
+export type {
+  MiddlewareKey,
+  TentickleInstanceCreateOptions,
+  MiddlewareRegistry,
+  RunInput,
+} from "./tentickle-instance";
 
 // ============================================================================
 // Convenience Functions
@@ -83,7 +91,9 @@ export async function runComponent<P extends Record<string, unknown>>(
 ): Promise<SessionExecutionHandle> {
   // Import synchronously since we're not doing dynamic import
   // eslint-disable-next-line @typescript-eslint/no-var-requires
-  const { createApp: createAppFn } = require("./tentickle-instance") as { createApp: typeof import("./tentickle-instance").createApp };
+  const { createApp: createAppFn } = require("./tentickle-instance") as {
+    createApp: typeof import("./tentickle-instance").createApp;
+  };
   return await createAppFn(Component, options).run(input);
 }
 
@@ -96,7 +106,6 @@ export type {
   AppInput,
   AppOptions,
   StreamEvent,
-  AppExecutionHandle,
   SessionOptions,
   Session,
   SessionSnapshot,
@@ -105,6 +114,7 @@ export type {
   ExecutionPhase,
   HookType,
   SendResult,
+  SendInput,
   ComponentFunction,
   // Tick snapshots (time-travel debugging)
   RecordingMode,

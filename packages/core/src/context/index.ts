@@ -7,7 +7,7 @@
  * @module tentickle/context
  */
 
-import { Context as KernelContext, type KernelContext as KernelContextType } from "../core/index.js";
+import { Context as KernelContext, type KernelContext as KernelContextType } from "../core/index";
 import type { EngineContext } from "../types";
 
 /**

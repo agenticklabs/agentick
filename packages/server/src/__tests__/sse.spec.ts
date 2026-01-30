@@ -3,20 +3,22 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { createSSEWriter, streamToSSE, setSSEHeaders } from "../sse.js";
+import { createSSEWriter, streamToSSE, setSSEHeaders } from "../sse";
 
 // Mock writable stream
 function createMockStream(): {
-  write: ReturnType<typeof vi.fn>;
-  end: ReturnType<typeof vi.fn>;
+  write: (data: string) => void;
+  end: () => void;
   _output: string;
 } {
   let output = "";
+  const writeFn = vi.fn((data: string) => {
+    output += data;
+  });
+  const endFn = vi.fn();
   return {
-    write: vi.fn((data: string) => {
-      output += data;
-    }),
-    end: vi.fn(),
+    write: writeFn,
+    end: endFn,
     get _output() {
       return output;
     },
@@ -26,13 +28,15 @@ function createMockStream(): {
 // Mock response with setHeader
 function createMockResponse(): {
   setHeader: ReturnType<typeof vi.fn>;
-  write: ReturnType<typeof vi.fn>;
-  end: ReturnType<typeof vi.fn>;
+  write: (data: string) => void;
+  end: () => void;
 } {
+  const writeFn = vi.fn<[string], void>();
+  const endFn = vi.fn<[], void>();
   return {
     setHeader: vi.fn(),
-    write: vi.fn(),
-    end: vi.fn(),
+    write: writeFn,
+    end: endFn,
   };
 }
 
@@ -270,9 +274,7 @@ describe("streamToSSE", () => {
       throw new Error("Stream error");
     }
 
-    await expect(streamToSSE(stream, generate(), "session:events")).rejects.toThrow(
-      "Stream error",
-    );
+    await expect(streamToSSE(stream, generate(), "session:events")).rejects.toThrow("Stream error");
 
     expect(stream.end).toHaveBeenCalled();
   });
@@ -304,7 +306,7 @@ describe("setSSEHeaders", () => {
   it("sets required SSE headers", () => {
     const res = createMockResponse();
 
-    setSSEHeaders(res);
+    setSSEHeaders(res as any);
 
     expect(res.setHeader).toHaveBeenCalledWith("Content-Type", "text/event-stream");
     expect(res.setHeader).toHaveBeenCalledWith("Cache-Control", "no-cache");

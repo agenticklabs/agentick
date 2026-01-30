@@ -10,7 +10,7 @@ import { COM } from "../../com/object-model";
 import { jsx } from "../../jsx/jsx-runtime";
 import { Section } from "../../jsx/components/primitives";
 import { Channel } from "../../core/channel";
-import { useChannel, useChannelSubscription, useEffect, type UseChannelResult } from "../hooks";
+import { useChannel, useChannelSubscription, type UseChannelResult } from "../hooks";
 import type { TickState } from "../../component/component";
 
 describe("useChannel", () => {

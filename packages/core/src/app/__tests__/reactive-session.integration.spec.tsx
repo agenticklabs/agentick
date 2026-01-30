@@ -130,7 +130,7 @@ describe("Reactive Session Integration", () => {
       };
 
       const app = createApp(Agent, { maxTicks: 1 });
-      const session = app.createSession();
+      const session = app.session();
 
       // Listen for reconcile events
       session.on("reconcile", (event) => {
@@ -175,7 +175,7 @@ describe("Reactive Session Integration", () => {
       };
 
       const app = createApp(Agent, { maxTicks: 1 });
-      const session = app.createSession();
+      const session = app.session();
 
       session.on("reconcile", (event) => {
         reconcileEvents.push(event);
@@ -223,7 +223,7 @@ describe("Reactive Session Integration", () => {
       };
 
       const app = createApp(Agent, { maxTicks: 1 });
-      const session = app.createSession();
+      const session = app.session();
 
       session.on("reconcile", (event) => {
         reconcileEvents.push(event);
@@ -255,8 +255,7 @@ describe("Reactive Session Integration", () => {
       let effectRan = false;
 
       const Agent = () => {
-        const count = useSignal(0);
-        signalRef = count;
+        signalRef = useSignal(0);
 
         // This effect runs after mount, during tick
         useEffect(() => {
@@ -268,13 +267,13 @@ describe("Reactive Session Integration", () => {
             <Model model={model} />
             <System>Test</System>
             <Timeline />
-            <Section id="count">Count: {count()}</Section>
+            <Section id="count">Count: {signalRef()}</Section>
           </>
         );
       };
 
       const app = createApp(Agent, { maxTicks: 1 });
-      const session = app.createSession();
+      const session = app.session();
 
       session.on("reconcile", (event) => {
         reconcileEvents.push(event);
@@ -320,7 +319,7 @@ describe("Reactive Session Integration", () => {
       };
 
       const app = createApp(Agent, { maxTicks: 1 });
-      const session = app.createSession();
+      const session = app.session();
 
       // First tick
       await session.tick({}).result;
@@ -369,7 +368,7 @@ describe("Reactive Session Integration", () => {
       };
 
       const app = createApp(Agent, { maxTicks: 1 });
-      const session = app.createSession();
+      const session = app.session();
 
       // First tick
       await session.tick({}).result;
@@ -417,7 +416,7 @@ describe("Reactive Session Integration", () => {
       };
 
       const app = createApp(Agent, { maxTicks: 1 });
-      const session = app.createSession();
+      const session = app.session();
 
       // First tick
       await session.tick({}).result;
@@ -460,7 +459,7 @@ describe("Reactive Session Integration", () => {
       };
 
       const app = createApp(Agent, { maxTicks: 1 });
-      const session = app.createSession();
+      const session = app.session();
 
       // First tick - model sees "initial"
       await session.tick({}).result;
@@ -510,7 +509,7 @@ describe("Reactive Session Integration", () => {
       };
 
       const app = createApp(Agent, { maxTicks: 1 });
-      const session = app.createSession();
+      const session = app.session();
 
       // First tick
       await session.tick({}).result;
@@ -548,7 +547,7 @@ describe("Reactive Session Integration", () => {
       };
 
       const app = createApp(Agent, { maxTicks: 1 });
-      const session = app.createSession();
+      const session = app.session();
 
       // First tick
       await session.tick({}).result;
@@ -589,7 +588,7 @@ describe("Reactive Session Integration", () => {
       };
 
       const app = createApp(Agent, { maxTicks: 1 });
-      const session = app.createSession();
+      const session = app.session();
 
       session.on("reconcile", (event) => {
         reconcileEvents.push(event);
@@ -639,7 +638,7 @@ describe("Reactive Session Integration", () => {
       };
 
       const app = createApp(Agent, { maxTicks: 1 });
-      const session = app.createSession();
+      const session = app.session();
 
       // Send a message with props - should start a tick
       const handle = session.send({
@@ -677,7 +676,7 @@ describe("Reactive Session Integration", () => {
       };
 
       const app = createApp(Agent, { maxTicks: 1 });
-      const session = app.createSession();
+      const session = app.session();
 
       // First establish props via tick
       await session.tick({} as any).result;
@@ -713,7 +712,7 @@ describe("Reactive Session Integration", () => {
       };
 
       const app = createApp(Agent, { maxTicks: 1 });
-      const session = app.createSession();
+      const session = app.session();
 
       // Start first tick via tick() to set props
       const handle1 = session.tick({} as any);
@@ -758,7 +757,7 @@ describe("Reactive Session Integration", () => {
       };
 
       const app = createApp(Agent, { maxTicks: 1 });
-      const session = app.createSession();
+      const session = app.session();
 
       // First tick to initialize component and capture signal ref
       await session.tick({} as any).result;

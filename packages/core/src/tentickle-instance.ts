@@ -34,6 +34,8 @@ import type {
   Session,
   SessionExecutionHandle,
   ComponentFunction,
+  ExecutionOptions,
+  SendInput,
 } from "./app/types";
 import { SessionImpl } from "./app/session";
 
@@ -69,6 +71,283 @@ export interface MiddlewareRegistry {
    * Matches in order: '*', category wildcard ('tool:*'), exact name
    */
   getMiddlewareFor(procedureName: string): Middleware[];
+}
+
+// ============================================================================
+// Session Registry (App-managed sessions)
+// ============================================================================
+
+class SessionRegistry<P> {
+  private sessions = new Map<string, SessionImpl<P>>();
+  private lastActivity = new Map<string, number>();
+  private sweepTimer?: ReturnType<typeof setInterval>;
+
+  constructor(
+    private readonly options: {
+      sessionTTL?: number;
+      maxSessions?: number;
+      onSessionClose?: (sessionId: string) => void;
+    },
+  ) {
+    if (options.sessionTTL && options.sessionTTL > 0) {
+      const interval = Math.max(1000, Math.min(options.sessionTTL, 30000));
+      this.sweepTimer = setInterval(() => this.sweep(), interval);
+    }
+  }
+
+  get(sessionId: string): SessionImpl<P> | undefined {
+    const session = this.sessions.get(sessionId);
+    if (session) {
+      this.touch(sessionId);
+    }
+    return session;
+  }
+
+  register(sessionId: string, session: SessionImpl<P>): void {
+    this.sessions.set(sessionId, session);
+    this.touch(sessionId);
+    this.enforceMaxSessions();
+  }
+
+  has(sessionId: string): boolean {
+    return this.sessions.has(sessionId);
+  }
+
+  list(): string[] {
+    return Array.from(this.sessions.keys());
+  }
+
+  remove(sessionId: string, closeSession = true): void {
+    const session = this.sessions.get(sessionId);
+    if (!session) return;
+
+    this.sessions.delete(sessionId);
+    this.lastActivity.delete(sessionId);
+
+    if (closeSession) {
+      session.close();
+    }
+
+    this.options.onSessionClose?.(sessionId);
+  }
+
+  destroy(): void {
+    if (this.sweepTimer) {
+      clearInterval(this.sweepTimer);
+      this.sweepTimer = undefined;
+    }
+    for (const sessionId of this.sessions.keys()) {
+      this.remove(sessionId, true);
+    }
+  }
+
+  private touch(sessionId: string): void {
+    const session = this.sessions.get(sessionId);
+    if (!session) return;
+    this.lastActivity.set(sessionId, Date.now());
+    // Maintain LRU order by re-inserting
+    this.sessions.delete(sessionId);
+    this.sessions.set(sessionId, session);
+  }
+
+  markActive(sessionId: string): void {
+    this.touch(sessionId);
+  }
+
+  private sweep(): void {
+    const ttl = this.options.sessionTTL;
+    if (!ttl || ttl <= 0) return;
+    const now = Date.now();
+    for (const [sessionId, last] of this.lastActivity.entries()) {
+      if (now - last >= ttl) {
+        this.remove(sessionId, true);
+      }
+    }
+  }
+
+  private enforceMaxSessions(): void {
+    const max = this.options.maxSessions;
+    if (!max || max <= 0) return;
+
+    while (this.sessions.size > max) {
+      const oldestId = this.sessions.keys().next().value as string | undefined;
+      if (!oldestId) break;
+      this.remove(oldestId, true);
+    }
+  }
+}
+
+// ============================================================================
+// App Implementation
+// ============================================================================
+
+class AppImpl<P extends Record<string, unknown>> implements App<P> {
+  readonly run: Procedure<(input: AppInput<P>) => SessionExecutionHandle, true>;
+
+  private readonly registry: SessionRegistry<P>;
+  private readonly sessionCreateHandlers = new Set<(session: Session<P>) => void>();
+  private readonly sessionCloseHandlers = new Set<(sessionId: string) => void>();
+
+  constructor(
+    private readonly Component: ComponentFunction<P>,
+    private readonly options: AppOptions,
+  ) {
+    this.registry = new SessionRegistry<P>({
+      sessionTTL: options.sessionTTL,
+      maxSessions: options.maxSessions,
+      onSessionClose: (sessionId) => {
+        this.options.onSessionClose?.(sessionId);
+        for (const handler of this.sessionCloseHandlers) {
+          handler(sessionId);
+        }
+      },
+    });
+
+    this.run = createProcedure(
+      {
+        name: "app:run",
+        handleFactory: false,
+      },
+      (input: AppInput<P>): SessionExecutionHandle => {
+        const { props = {} as P, messages = [], history = [], options: runOpts = {} } = input;
+
+        const sessionOptions: SessionOptions = {
+          ...runOpts,
+          initialTimeline: history.length > 0 ? history : undefined,
+          devTools: runOpts.devTools ?? this.options.devTools,
+        };
+
+        const executionOptions: ExecutionOptions = {
+          maxTicks: runOpts.maxTicks,
+          signal: runOpts.signal,
+        };
+
+        const session = this.createSession(undefined, sessionOptions);
+
+        for (const message of messages) {
+          session.queue.exec(message);
+        }
+
+        const handle = session.tick(props, executionOptions);
+
+        handle.result
+          .finally(() => session.close())
+          .catch(() => {
+            // Prevent unhandled rejection - errors are captured in handle
+          });
+
+        return handle;
+      },
+    );
+  }
+
+  send(
+    input: SendInput<P>,
+    options?: { sessionId?: string } & ExecutionOptions,
+  ): SessionExecutionHandle {
+    const sessionId = options?.sessionId;
+    const executionOptions: ExecutionOptions = {
+      maxTicks: options?.maxTicks,
+      signal: options?.signal,
+    };
+
+    if (!sessionId) {
+      const session = this.createSession(undefined, {});
+      const handle = session.send(input, executionOptions);
+      handle.result
+        .finally(() => session.close())
+        .catch(() => {
+          // Prevent unhandled rejection - errors are captured in handle
+        });
+      return handle;
+    }
+
+    const session = this.session(sessionId);
+    const maybeModified = this.options.onBeforeSend?.(session, input) ?? input;
+    const handle = session.send(maybeModified, executionOptions);
+    handle.result
+      .then((result) => {
+        this.options.onAfterSend?.(session, result);
+      })
+      .catch(() => {
+        // Errors are already surfaced via lifecycle callbacks
+      });
+    return handle;
+  }
+
+  session(idOrOptions?: string | SessionOptions): Session<P> {
+    // Parse arguments: string is ID, object is options
+    let sessionId: string | undefined;
+    let options: SessionOptions = {};
+
+    if (typeof idOrOptions === "string") {
+      sessionId = idOrOptions;
+    } else if (idOrOptions !== undefined) {
+      options = idOrOptions;
+      sessionId = options.sessionId;
+    }
+
+    // If we have an ID, try to get existing session first
+    if (sessionId) {
+      const existing = this.registry.get(sessionId);
+      if (existing) return existing;
+    }
+
+    // Create new session (ID will be generated if undefined)
+    return this.createSession(sessionId, options);
+  }
+
+  async close(sessionId: string): Promise<void> {
+    this.registry.remove(sessionId, true);
+  }
+
+  get sessions(): readonly string[] {
+    return this.registry.list();
+  }
+
+  has(sessionId: string): boolean {
+    return this.registry.has(sessionId);
+  }
+
+  onSessionCreate(handler: (session: Session<P>) => void): () => void {
+    this.sessionCreateHandlers.add(handler);
+    return () => {
+      this.sessionCreateHandlers.delete(handler);
+    };
+  }
+
+  onSessionClose(handler: (sessionId: string) => void): () => void {
+    this.sessionCloseHandlers.add(handler);
+    return () => {
+      this.sessionCloseHandlers.delete(handler);
+    };
+  }
+
+  private createSession(sessionId: string | undefined, options: SessionOptions): SessionImpl<P> {
+    const sessionOptions: SessionOptions = {
+      ...options,
+      sessionId,
+      devTools: options.devTools ?? this.options.devTools,
+    };
+    const session = new SessionImpl(this.Component, this.options, sessionOptions);
+
+    this.registry.register(session.id, session);
+
+    session.on("event", () => {
+      this.registry.markActive(session.id);
+    });
+
+    session.once("close", () => {
+      this.registry.remove(session.id, false);
+    });
+
+    this.options.onSessionCreate?.(session);
+    for (const handler of this.sessionCreateHandlers) {
+      handler(session);
+    }
+
+    return session;
+  }
 }
 
 /**
@@ -291,7 +570,7 @@ export class TentickleInstance implements MiddlewareRegistry {
    *
    * @param Component - The component function that defines the Model Interface
    * @param options - App configuration options
-   * @returns An App instance with run and createSession methods
+   * @returns An App instance with run, send, and session methods
    *
    * @example
    * ```typescript
@@ -318,59 +597,8 @@ export class TentickleInstance implements MiddlewareRegistry {
   ): App<P> {
     const optionsWithInstance = { ...options, _tentickleInstance: this };
 
-    return {
-      /**
-       * Run the app with input.
-       *
-       * Returns SessionExecutionHandle which is both PromiseLike and AsyncIterable:
-       * - `await app.run(input)` → SendResult
-       * - `for await (const event of app.run(input))` → StreamEvent
-       */
-      run: createProcedure({
-        name: "app:run",
-        handleFactory: false,
-      }, (input: AppInput<P>): SessionExecutionHandle => {
-        const { props = {} as P, messages = [], history = [], options: runOpts = {} } = input;
-
-        const sessionOptions: SessionOptions = {
-          ...runOpts,
-          initialTimeline: history.length > 0 ? history : undefined,
-        };
-
-        const executionOptions = {
-          maxTicks: runOpts.maxTicks,
-          signal: runOpts.signal,
-        };
-
-        // Create session - it captures middleware from optionsWithInstance._tentickleInstance
-        const session = new SessionImpl(Component, optionsWithInstance, sessionOptions);
-
-        // Queue messages before tick
-        for (const message of messages) {
-          session.queueMessage(message);
-        }
-
-        // session.tick() returns SessionExecutionHandle (PromiseLike + AsyncIterable)
-        const handle = session.tick(props, executionOptions);
-
-        // Cleanup on completion (success or error)
-        handle.result.finally(() => session.close()).catch(() => {
-          // Prevent unhandled rejection - errors are captured in handle
-        });
-
-        return handle;
-      }),
-
-      /**
-       * Create a persistent session for multi-turn conversations.
-       */
-      createSession(sessionOptions?: SessionOptions): Session<P> {
-        // Session captures middleware from optionsWithInstance._tentickleInstance
-        return new SessionImpl(Component, optionsWithInstance, sessionOptions ?? {});
-      },
-    };
+    return new AppImpl(Component, optionsWithInstance);
   }
-
 }
 
 /**

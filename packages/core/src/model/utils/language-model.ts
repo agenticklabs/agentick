@@ -11,6 +11,9 @@ import { isEventBlock, StopReason } from "@tentickle/shared";
 import type { EngineResponse } from "../../engine/engine-response";
 import type { DelimiterConfig, EventBlockDelimiters } from "../../types";
 import type { ModelConfig, ModelInput, ModelOutput, MessageTransformationConfig } from "../model";
+import { Logger } from "../../core/logger";
+
+const log = Logger.for("language-model");
 
 function deriveStopReason(output: ModelOutput) {
   if (!output.stopReason) {
@@ -584,9 +587,20 @@ export async function fromEngineState(
   );
 
   // Extract conversation messages from timeline (excludes system - those are in input.system)
+  log.debug({ timelineCount: input.timeline.length }, "fromEngineState processing timeline");
+  input.timeline.forEach((entry, i) => {
+    log.debug(
+      { index: i, kind: entry.kind, role: entry.message?.role },
+      "fromEngineState timeline entry",
+    );
+  });
   const timelineMessages: Message[] = input.timeline
     .filter((entry) => entry.kind === "message")
     .map((entry) => entry.message);
+  log.debug(
+    { timelineMessagesCount: timelineMessages.length },
+    "fromEngineState extracted timeline messages",
+  );
 
   // Transform event messages (models don't understand 'event' role)
   // Also convert code/json blocks to markdown text (models don't support code blocks natively)

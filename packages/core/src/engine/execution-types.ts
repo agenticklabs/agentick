@@ -2,6 +2,7 @@ import { randomUUID } from "crypto";
 import { EventEmitter } from "node:events";
 import type { EngineInput, COMInput } from "../com/types";
 import type { ComponentDefinition } from "../component/component";
+import type { ProcedureGraph } from "../core/procedure-graph";
 
 /**
  * Signal types for execution and engine signals
@@ -185,7 +186,7 @@ export interface ExecutionHandle extends EventEmitter {
    * Get procedure graph for this execution (if procedures were executed)
    * Returns undefined if no procedures were executed in this execution's context
    */
-  getProcedureGraph(): import("../core/index.js").ProcedureGraph | undefined;
+  getProcedureGraph(): ProcedureGraph | undefined;
 
   /**
    * Get aggregated metrics from all procedures in this execution

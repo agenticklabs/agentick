@@ -17,8 +17,7 @@
     "isolatedModules": true,
     "verbatimModuleSyntax": true,
     "resolveJsonModule": true,
-    "jsx": "react-jsx",
-    "jsxImportSource": "@tentickle/core"
+    "jsx": "preserve"
   },
   "exclude": ["node_modules", "dist"]
 }

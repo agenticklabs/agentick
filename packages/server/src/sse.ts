@@ -7,7 +7,7 @@
  * @module @tentickle/server/sse
  */
 
-import type { SSEWriter, SSEWriterOptions } from "./types.js";
+import type { SSEWriter, SSEWriterOptions } from "./types";
 
 /**
  * Create an SSE writer for a response stream.
@@ -54,7 +54,7 @@ export function createSSEWriter(
   }
 
   return {
-    writeEvent(event: { channel: string; type: string; payload: unknown; id?: string }): void {
+    writeEvent(event: unknown): void {
       if (closed) return;
 
       let data: string;
@@ -65,12 +65,9 @@ export function createSSEWriter(
         // Fall back to a serializable error event
         console.error("SSE: Failed to serialize event", err, event);
         data = JSON.stringify({
-          channel: event.channel,
           type: "error",
-          payload: {
-            code: "SERIALIZATION_ERROR",
-            message: `Failed to serialize event: ${(err as Error).message}`,
-          },
+          code: "SERIALIZATION_ERROR",
+          message: `Failed to serialize event: ${(err as Error).message}`,
         });
       }
       stream.write(`event: ${eventName}\n`);
@@ -144,12 +141,10 @@ export async function streamToSSE<T>(
  * });
  * ```
  */
-export function setSSEHeaders(
-  res: {
-    setHeader: (name: string, value: string) => void;
-    flushHeaders?: () => void;
-  },
-): void {
+export function setSSEHeaders(res: {
+  setHeader: (name: string, value: string) => void;
+  flushHeaders?: () => void;
+}): void {
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache");
   res.setHeader("Connection", "keep-alive");
