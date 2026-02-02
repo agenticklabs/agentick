@@ -15,7 +15,7 @@ import type {
 } from "./types";
 import { createEmptyCompiledStructure } from "./types";
 import type { SemanticContentBlock, Renderer } from "../renderers/types";
-import { Logger } from "../core/logger";
+import { Logger } from "@tentickle/kernel";
 
 const log = Logger.for("Collector");
 

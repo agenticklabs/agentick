@@ -254,7 +254,14 @@ export interface ExecutionHandle<
   TEvent extends TypedEvent = any,
 > extends AsyncIterable<TEvent> {
   /** Current execution status */
-  readonly status: "running" | "completed" | "error" | "aborted";
+  readonly status:
+    | "running"
+    | "completed"
+    | "error"
+    | "aborted"
+    | "cancelled"
+    | "pending"
+    | "failed";
 
   /** Trace ID for distributed tracing correlation */
   readonly traceId: string;

@@ -25,7 +25,12 @@
  * @module tentickle/@tentickle/instance
  */
 
-import { type Middleware, type TelemetryProvider, createProcedure, type Procedure } from "./core";
+import {
+  type Middleware,
+  type TelemetryProvider,
+  createProcedure,
+  type Procedure,
+} from "@tentickle/kernel";
 import type {
   App,
   AppInput,

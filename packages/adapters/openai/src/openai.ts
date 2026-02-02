@@ -12,7 +12,7 @@ import {
   type ModelInput,
   type ModelOutput,
 } from "@tentickle/core/model";
-import { Logger } from "@tentickle/core/core";
+import { Logger } from "@tentickle/core";
 import { normalizeModelInput } from "@tentickle/core/utils";
 import type { ToolDefinition } from "@tentickle/core/tool";
 import {

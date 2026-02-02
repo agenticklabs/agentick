@@ -42,8 +42,8 @@
  */
 
 import { type Message, type ContentBlock, type GeneratedImageBlock } from "@tentickle/shared";
-import type { Procedure, UserContext } from "./core";
-import { ProcedureGraph, ProcedureNode } from "./core";
+import type { Procedure, UserContext } from "@tentickle/kernel";
+import { ProcedureGraph, ProcedureNode } from "@tentickle/kernel";
 import type { ChannelService } from "./channels/service";
 import { ExecutionHandleImpl } from "./engine/execution-handle";
 import type {
@@ -51,7 +51,7 @@ import type {
   ExecutionHandle as EngineExecutionHandle,
 } from "./engine/execution-types";
 import { EventEmitter } from "node:events";
-import type { ContextMetadata, ContextMetrics } from "./core";
+import type { ContextMetadata, ContextMetrics } from "@tentickle/kernel";
 
 export interface EngineContextMetadata extends ContextMetadata {}
 

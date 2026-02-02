@@ -5,6 +5,7 @@ import {
   type ChannelServiceInterface,
   type ChannelTarget,
   Context,
+  type KernelContext,
 } from "@tentickle/kernel";
 import type { EngineContext } from "../types";
 import { NotFoundError, ValidationError } from "@tentickle/shared";
@@ -1381,7 +1382,7 @@ export class ChannelRouter<TSubscribeContext = unknown> {
 
     const sourceConnectionId =
       options?.sourceConnectionId ??
-      ((Context.tryGet() as EngineContext | undefined)?.metadata?.["sessionId"] as
+      ((Context.tryGet() as unknown as KernelContext | undefined)?.metadata?.["sessionId"] as
         | string
         | undefined);
 

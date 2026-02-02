@@ -53,7 +53,7 @@ import { type LibraryGenerationOptions, type ProviderToolOptions } from "@tentic
 
 import type { COMInput, COMTimelineEntry, EngineInput } from "@tentickle/core/com";
 
-import { Logger } from "@tentickle/core/core";
+import { Logger } from "@tentickle/core";
 
 import type { ToolDefinition, ExecutableTool, ToolClass } from "@tentickle/core/tool";
 
