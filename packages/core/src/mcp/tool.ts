@@ -15,7 +15,7 @@ import type { ContentBlock } from "@tentickle/shared";
 import { MCPClient } from "./client";
 import type { MCPToolDefinition } from "./types";
 import { z } from "zod";
-import type { Procedure } from "../core/index";
+import type { Procedure } from "@tentickle/kernel";
 import { createEngineProcedure } from "../procedure";
 
 // ============================================================================

@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "concurrently -n express,react -c blue,green \"pnpm --filter example-express dev\" \"pnpm --filter example-react dev\"",
     "dev:express": "pnpm --filter example-express dev",
+    "dev:gateway": "pnpm --filter example-express gateway",
     "dev:react": "pnpm --filter example-react dev",
     "dev:angular": "pnpm --filter example-angular dev",
     "build": "turbo run build",

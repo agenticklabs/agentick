@@ -25,7 +25,7 @@ import {
   type Procedure,
   type ChannelServiceInterface,
   type ChannelEvent,
-} from "../core/index";
+} from "@tentickle/kernel";
 import {
   FiberCompiler,
   StructureRenderer,

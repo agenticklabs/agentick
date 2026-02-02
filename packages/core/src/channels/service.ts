@@ -5,7 +5,7 @@ import {
   type ChannelServiceInterface,
   type ChannelTarget,
   Context,
-} from "../core/index";
+} from "@tentickle/kernel";
 import type { EngineContext } from "../types";
 import { NotFoundError, ValidationError } from "@tentickle/shared";
 
@@ -16,7 +16,7 @@ export {
   type ChannelEvent,
   type ChannelServiceInterface,
   type ChannelTarget,
-} from "../core/index";
+} from "@tentickle/kernel";
 
 /**
  * Connection metadata for routing decisions.

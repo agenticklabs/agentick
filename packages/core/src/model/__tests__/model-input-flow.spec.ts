@@ -8,7 +8,8 @@
 import { describe, it, expect } from "vitest";
 import { fromEngineState, toEngineState } from "../utils/language-model";
 import type { COMInput, COMTimelineEntry } from "../../com/types";
-import type { Message } from "@tentickle/shared";
+import type { Message, TextBlock, ToolResultBlock, ToolUseBlock } from "@tentickle/shared";
+import type { ModelOutput } from "../model";
 
 // Helper to create a COMTimelineEntry
 function createTimelineEntry(message: Message, kind: string = "message"): COMTimelineEntry {
@@ -49,9 +50,9 @@ describe("fromEngineState", () => {
       expect(modelInput.messages).toBeDefined();
       expect(modelInput.messages.length).toBeGreaterThanOrEqual(1);
 
-      const userMessage = modelInput.messages.find((m: any) => m.role === "user");
+      const userMessage = (modelInput.messages as Message[]).find((m: any) => m.role === "user");
       expect(userMessage).toBeDefined();
-      expect(userMessage.content[0].text).toBe("Hello");
+      expect((userMessage!.content[0] as TextBlock).text).toBe("Hello");
     });
 
     it("should extract assistant messages from timeline", async () => {
@@ -64,9 +65,11 @@ describe("fromEngineState", () => {
 
       const modelInput = await fromEngineState(input);
 
-      const assistantMessage = modelInput.messages.find((m: any) => m.role === "assistant");
+      const assistantMessage = (modelInput.messages as Message[]).find(
+        (m: any) => m.role === "assistant",
+      );
       expect(assistantMessage).toBeDefined();
-      expect(assistantMessage.content[0].text).toBe("Response");
+      expect((assistantMessage!.content[0] as TextBlock).text).toBe("Response");
     });
 
     it("should preserve message order", async () => {
@@ -88,12 +91,14 @@ describe("fromEngineState", () => {
       const modelInput = await fromEngineState(input);
 
       // Messages should be in order (system first, then timeline)
-      const conversationMessages = modelInput.messages.filter((m: any) => m.role !== "system");
+      const conversationMessages = (modelInput.messages as Message[]).filter(
+        (m: any) => m.role !== "system",
+      );
 
       expect(conversationMessages.length).toBe(3);
-      expect(conversationMessages[0].content[0].text).toBe("First");
-      expect(conversationMessages[1].content[0].text).toBe("Second");
-      expect(conversationMessages[2].content[0].text).toBe("Third");
+      expect((conversationMessages[0]!.content[0] as TextBlock).text).toBe("First");
+      expect((conversationMessages[1]!.content[0] as TextBlock).text).toBe("Second");
+      expect((conversationMessages[2]!.content[0] as TextBlock).text).toBe("Third");
     });
 
     it("should filter out non-message entries", async () => {
@@ -112,9 +117,9 @@ describe("fromEngineState", () => {
 
       const modelInput = await fromEngineState(input);
 
-      const messages = modelInput.messages.filter((m: any) => m.role === "user");
+      const messages = (modelInput.messages as Message[]).filter((m: any) => m.role === "user");
       expect(messages.length).toBe(1);
-      expect(messages[0].content[0].text).toBe("Keep this");
+      expect((messages[0]!.content[0] as TextBlock).text).toBe("Keep this");
     });
   });
 
@@ -132,9 +137,11 @@ describe("fromEngineState", () => {
 
       const modelInput = await fromEngineState(input);
 
-      const systemMessage = modelInput.messages.find((m: any) => m.role === "system");
+      const systemMessage = (modelInput.messages as Message[]).find(
+        (m: any) => m.role === "system",
+      );
       expect(systemMessage).toBeDefined();
-      expect(systemMessage.content[0].text).toBe("System prompt");
+      expect((systemMessage!.content[0] as TextBlock).text).toBe("System prompt");
     });
 
     it("should place system messages before conversation messages", async () => {
@@ -156,8 +163,8 @@ describe("fromEngineState", () => {
       const modelInput = await fromEngineState(input);
 
       // System should come first
-      expect(modelInput.messages[0].role).toBe("system");
-      expect(modelInput.messages[1].role).toBe("user");
+      expect((modelInput.messages[0] as Message).role).toBe("system");
+      expect((modelInput.messages[1] as Message).role).toBe("user");
     });
   });
 
@@ -174,9 +181,9 @@ describe("fromEngineState", () => {
       ]);
 
       const modelInput = await fromEngineState(input);
-      const userMessage = modelInput.messages.find((m: any) => m.role === "user");
+      const userMessage = (modelInput.messages as Message[]).find((m: any) => m.role === "user");
 
-      expect(userMessage.content.length).toBe(2);
+      expect(userMessage!.content.length).toBe(2);
     });
 
     it("should handle image blocks", async () => {
@@ -189,7 +196,7 @@ describe("fromEngineState", () => {
               type: "image",
               source: {
                 type: "base64",
-                mediaType: "image/png",
+                mimeType: "image/png",
                 data: "base64data",
               },
             },
@@ -198,9 +205,9 @@ describe("fromEngineState", () => {
       ]);
 
       const modelInput = await fromEngineState(input);
-      const userMessage = modelInput.messages.find((m: any) => m.role === "user");
+      const userMessage = (modelInput.messages as Message[]).find((m: any) => m.role === "user");
 
-      expect(userMessage.content.some((c: any) => c.type === "image")).toBe(true);
+      expect(userMessage!.content.some((c: any) => c.type === "image")).toBe(true);
     });
 
     it("should handle tool_use blocks", async () => {
@@ -211,6 +218,7 @@ describe("fromEngineState", () => {
             {
               type: "tool_use",
               id: "tool-1",
+              toolUseId: "tool-1",
               name: "calculator",
               input: { expression: "2+2" },
             },
@@ -219,9 +227,11 @@ describe("fromEngineState", () => {
       ]);
 
       const modelInput = await fromEngineState(input);
-      const assistantMessage = modelInput.messages.find((m: any) => m.role === "assistant");
+      const assistantMessage = (modelInput.messages as Message[]).find(
+        (m: any) => m.role === "assistant",
+      );
 
-      expect(assistantMessage.content[0].type).toBe("tool_use");
+      expect((assistantMessage!.content[0] as ToolUseBlock).type).toBe("tool_use");
     });
 
     it("should handle tool_result blocks", async () => {
@@ -232,6 +242,7 @@ describe("fromEngineState", () => {
             {
               type: "tool_result",
               toolUseId: "tool-1",
+              name: "calculator",
               content: [{ type: "text", text: "4" }],
             },
           ],
@@ -239,9 +250,9 @@ describe("fromEngineState", () => {
       ]);
 
       const modelInput = await fromEngineState(input);
-      const userMessage = modelInput.messages.find((m: any) => m.role === "user");
+      const userMessage = (modelInput.messages as Message[]).find((m: any) => m.role === "user");
 
-      expect(userMessage.content[0].type).toBe("tool_result");
+      expect((userMessage!.content[0] as ToolResultBlock).type).toBe("tool_result");
     });
   });
 
@@ -265,7 +276,9 @@ describe("fromEngineState", () => {
 
       const modelInput = await fromEngineState(input);
 
-      const systemMessages = modelInput.messages.filter((m: any) => m.role === "system");
+      const systemMessages = (modelInput.messages as Message[]).filter(
+        (m: any) => m.role === "system",
+      );
       expect(systemMessages.length).toBe(0);
     });
   });
@@ -282,7 +295,7 @@ describe("toEngineState", () => {
       stopReason: "stop",
     };
 
-    const engineResponse = await toEngineState(modelOutput);
+    const engineResponse = await toEngineState(modelOutput as unknown as ModelOutput);
 
     // toEngineState returns newTimelineEntries, not message directly
     expect(engineResponse.newTimelineEntries).toBeDefined();
@@ -308,7 +321,7 @@ describe("toEngineState", () => {
       stopReason: "tool_use",
     };
 
-    const engineResponse = await toEngineState(modelOutput);
+    const engineResponse = await toEngineState(modelOutput as unknown as ModelOutput);
 
     expect(engineResponse.toolCalls).toBeDefined();
     expect(engineResponse.toolCalls?.length).toBe(1);

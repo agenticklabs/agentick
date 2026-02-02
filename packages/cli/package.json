@@ -1,0 +1,47 @@
+{
+  "name": "@tentickle/cli",
+  "version": "0.0.1",
+  "description": "Terminal client for Tentickle agents",
+  "bin": {
+    "tentickle": "./dist/bin.js"
+  },
+  "files": [
+    "dist",
+    "src"
+  ],
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "dev": "tsc --watch",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "start": "tsx src/bin.ts",
+    "cli": "tsx src/bin.ts"
+  },
+  "dependencies": {
+    "@tentickle/client": "workspace:*",
+    "@tentickle/shared": "workspace:*",
+    "chalk": "^5.3.0",
+    "commander": "^12.1.0",
+    "eventsource": "^2.0.2",
+    "marked": "^15.0.4",
+    "marked-terminal": "^7.2.1"
+  },
+  "devDependencies": {
+    "@types/eventsource": "^1.1.15",
+    "@types/node": "^22.10.5",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3",
+    "vitest": "^3.0.0"
+  }
+}

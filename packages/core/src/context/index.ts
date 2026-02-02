@@ -7,7 +7,10 @@
  * @module tentickle/context
  */
 
-import { Context as KernelContext, type KernelContext as KernelContextType } from "../core/index";
+import {
+  Context as KernelContext,
+  type KernelContext as KernelContextType,
+} from "@tentickle/kernel";
 import type { EngineContext } from "../types";
 
 /**

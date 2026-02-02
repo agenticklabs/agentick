@@ -2,7 +2,7 @@ import { randomUUID } from "crypto";
 import { EventEmitter } from "node:events";
 import type { EngineInput, COMInput } from "../com/types";
 import type { ComponentDefinition } from "../component/component";
-import type { ProcedureGraph } from "../core/procedure-graph";
+import type { ProcedureGraph } from "@tentickle/kernel";
 
 /**
  * Signal types for execution and engine signals

@@ -16,8 +16,8 @@ import {
   ProcedureNode,
   EventBuffer,
   type ExecutionHandle as KernelExecutionHandle,
-} from "../core/index";
-import { Context } from "../core/index";
+} from "@tentickle/kernel";
+import { Context } from "@tentickle/kernel";
 import { AbortError, StateError } from "@tentickle/shared";
 import { COM } from "../com/object-model";
 

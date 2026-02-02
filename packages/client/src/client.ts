@@ -39,10 +39,19 @@ import type { ContentBlock, Message } from "@tentickle/shared";
  * Configuration for TentickleClient.
  */
 export interface TentickleClientConfig {
-  /** Base URL for the server (e.g., https://api.example.com) */
+  /** Base URL for the server (e.g., https://api.example.com or ws://localhost:18789) */
   baseUrl: string;
 
-  /** Override default endpoint paths */
+  /**
+   * Transport to use for communication.
+   * - "sse": HTTP/SSE transport (default for http:// and https:// URLs)
+   * - "websocket": WebSocket transport (default for ws:// and wss:// URLs)
+   * - "auto": Auto-detect based on URL scheme (default)
+   * @default "auto"
+   */
+  transport?: "sse" | "websocket" | "auto";
+
+  /** Override default endpoint paths (SSE transport only) */
   paths?: {
     /** SSE stream endpoint (default: /events) */
     events?: string;
@@ -69,14 +78,20 @@ export interface TentickleClientConfig {
   /** Request timeout in ms (default: 30000) */
   timeout?: number;
 
-  /** Custom fetch implementation */
+  /** Custom fetch implementation (SSE transport only) */
   fetch?: typeof fetch;
 
-  /** Custom EventSource constructor (for Node.js polyfills) */
+  /** Custom EventSource constructor (SSE transport only, for Node.js polyfills) */
   EventSource?: typeof EventSource;
+
+  /** Custom WebSocket constructor (WebSocket transport only, for Node.js) */
+  WebSocket?: typeof WebSocket;
 
   /** Send cookies with requests and SSE */
   withCredentials?: boolean;
+
+  /** Client ID for WebSocket connections */
+  clientId?: string;
 }
 
 // ============================================================================
@@ -1329,16 +1344,49 @@ export class TentickleClient {
 }
 
 // ============================================================================
+// Transport Detection
+// ============================================================================
+
+/**
+ * Detect the appropriate transport based on URL scheme.
+ */
+function detectTransport(baseUrl: string): "sse" | "websocket" {
+  const url = baseUrl.toLowerCase();
+  if (url.startsWith("ws://") || url.startsWith("wss://")) {
+    return "websocket";
+  }
+  return "sse";
+}
+
+// ============================================================================
 // Factory Function
 // ============================================================================
 
 /**
  * Create a new TentickleClient.
  *
+ * Transport is auto-detected from the URL scheme:
+ * - http:// or https:// -> SSE transport
+ * - ws:// or wss:// -> WebSocket transport
+ *
+ * You can also explicitly set the transport in the config.
+ *
  * @example
  * ```typescript
+ * // Auto-detect transport (SSE for http://)
  * const client = createClient({
  *   baseUrl: 'https://api.example.com',
+ * });
+ *
+ * // Auto-detect transport (WebSocket for ws://)
+ * const wsClient = createClient({
+ *   baseUrl: 'ws://localhost:18789',
+ * });
+ *
+ * // Force WebSocket transport
+ * const wsClient2 = createClient({
+ *   baseUrl: 'http://localhost:3000',
+ *   transport: 'websocket',
  * });
  *
  * // Subscribe to a session
@@ -1350,5 +1398,30 @@ export class TentickleClient {
  * ```
  */
 export function createClient(config: TentickleClientConfig): TentickleClient {
+  const transport =
+    config.transport === "auto" || !config.transport
+      ? detectTransport(config.baseUrl)
+      : config.transport;
+
+  if (transport === "websocket") {
+    // Log warning - WebSocket transport requires using the WSTransport directly
+    // or the gateway client for full functionality
+    console.warn(
+      "[TentickleClient] WebSocket URL detected. For full WebSocket support, " +
+        "use createWSTransport() directly or connect to a Gateway. " +
+        "Falling back to SSE transport with URL conversion.",
+    );
+
+    // Convert ws:// to http:// for SSE fallback
+    let baseUrl = config.baseUrl;
+    if (baseUrl.startsWith("ws://")) {
+      baseUrl = baseUrl.replace("ws://", "http://");
+    } else if (baseUrl.startsWith("wss://")) {
+      baseUrl = baseUrl.replace("wss://", "https://");
+    }
+
+    return new TentickleClient({ ...config, baseUrl });
+  }
+
   return new TentickleClient(config);
 }

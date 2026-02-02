@@ -9,7 +9,7 @@ import express, { type Express } from "express";
 import http from "http";
 import { createTentickleHandler } from "../router";
 import type { App, Session } from "@tentickle/core/app";
-import { Channel } from "@tentickle/core/core";
+import { Channel } from "@tentickle/core";
 
 // ============================================================================
 // Mock Helpers
@@ -185,7 +185,7 @@ describe("Channel Integration", () => {
 
       expect(response.ok).toBe(true);
       const body = await response.json();
-      expect(body.success).toBe(true);
+      expect((body as { success: boolean }).success).toBe(true);
 
       // Verify channel received the event
       expect(receivedEvents).toHaveLength(1);

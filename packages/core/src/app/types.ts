@@ -26,7 +26,7 @@ import type { COMInput } from "../com/types";
 import type { ExecutableTool } from "../tool/tool";
 import type { MCPConfig } from "../mcp";
 import type { ModelInstance } from "../model/model";
-import type { ExecutionHandle, Channel, Procedure } from "../core/index";
+import type { ExecutionHandle, Channel, Procedure } from "@tentickle/kernel";
 import type { JSX } from "../jsx/jsx-runtime";
 // Signal type removed - schedulerState now returns SchedulerState directly
 import type { SchedulerState } from "../compiler/scheduler";

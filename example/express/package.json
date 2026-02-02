@@ -6,12 +6,16 @@
   "scripts": {
     "dev": "tsx watch src/server.ts",
     "start": "tsx src/server.ts",
+    "gateway": "tsx src/gateway.ts",
+    "gateway:dev": "tsx watch src/gateway.ts",
+    "both": "concurrently \"pnpm dev\" \"pnpm gateway\"",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@tentickle/core": "link:../../packages/core",
     "@tentickle/devtools": "link:../../packages/devtools",
     "@tentickle/express": "link:../../packages/express",
+    "@tentickle/gateway": "link:../../packages/gateway",
     "@tentickle/google": "link:../../packages/adapters/google",
     "@tentickle/openai": "link:../../packages/adapters/openai",
     "@tentickle/server": "link:../../packages/server",
@@ -19,13 +23,13 @@
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
     "express": "^5.0.1",
-    "react": "^19.2.4",
+    "react": "^18.3.1",
     "zod": "^3.24.0"
   },
   "devDependencies": {
     "@types/cors": "^2.8.17",
     "@types/express": "^5.0.0",
-    "@types/react": "^19.2.7",
+    "@types/react": "^18.3.0",
     "tsx": "^4.19.2",
     "typescript": "^5.7.3"
   }

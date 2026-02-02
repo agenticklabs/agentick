@@ -1,4 +1,4 @@
-import { type Middleware, Context, Telemetry } from "../core/index";
+import { type Middleware, Context, Telemetry } from "@tentickle/kernel";
 import { type EngineError } from "../component/component";
 
 /**

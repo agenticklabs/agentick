@@ -65,6 +65,8 @@ export interface Message {
   readonly updatedAt?: string | Date;
 }
 
+export interface ModelMessage extends Message {}
+
 /** Message from a user/human */
 export interface UserMessage extends Message {
   readonly role: "user";

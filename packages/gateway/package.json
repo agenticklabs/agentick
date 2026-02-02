@@ -1,0 +1,49 @@
+{
+  "name": "@tentickle/gateway",
+  "version": "0.0.1",
+  "description": "Standalone daemon for multi-client, multi-agent access",
+  "bin": {
+    "tentickle-gateway": "./dist/bin.js"
+  },
+  "files": [
+    "dist",
+    "src"
+  ],
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./testing": {
+      "types": "./dist/testing.d.ts",
+      "import": "./dist/testing.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "dev": "tsc --watch",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "start": "tsx src/bin.ts"
+  },
+  "dependencies": {
+    "@tentickle/core": "workspace:*",
+    "@tentickle/shared": "workspace:*",
+    "ws": "^8.16.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.5",
+    "@types/ws": "^8.5.10",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3",
+    "vitest": "^3.0.0"
+  },
+  "peerDependencies": {
+    "@tentickle/core": "workspace:*"
+  }
+}

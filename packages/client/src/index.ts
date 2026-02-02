@@ -2,7 +2,8 @@
  * @tentickle/client - Client SDK for Tentickle
  *
  * Provides a multiplexed client for connecting to Tentickle servers with:
- * - Single SSE connection for multiple sessions
+ * - Transport auto-detection (HTTP/SSE for http://, WebSocket for ws://)
+ * - Single connection for multiple sessions
  * - Session accessors (cold/hot semantics)
  * - Events tagged with sessionId
  * - Streaming text accumulation
@@ -11,8 +12,20 @@
  * ```typescript
  * import { createClient } from '@tentickle/client';
  *
- * const client = createClient({
+ * // HTTP/SSE transport (default for http:// URLs)
+ * const httpClient = createClient({
  *   baseUrl: 'https://api.example.com',
+ * });
+ *
+ * // WebSocket transport (for ws:// URLs or gateway)
+ * const wsClient = createClient({
+ *   baseUrl: 'ws://localhost:18789',
+ * });
+ *
+ * // Explicit transport selection
+ * const client = createClient({
+ *   baseUrl: 'http://localhost:3000',
+ *   transport: 'websocket', // Force WebSocket
  * });
  *
  * // Subscribe to a session (hot)
@@ -39,7 +52,19 @@ export {
   createClient,
   type TentickleClientConfig,
   type SessionAccessor,
-} from "./client";
+} from "./client.js";
+
+// Transport layer
+export {
+  type ClientTransport,
+  type TransportConfig,
+  type TransportState,
+  type TransportEventData,
+  type TransportEventHandler,
+} from "./transport.js";
+
+export { SSETransport, createSSETransport, type SSETransportConfig } from "./sse-transport.js";
+export { WSTransport, createWSTransport, type WSTransportConfig } from "./ws-transport.js";
 
 // Types - re-exported from types.ts which re-exports from shared
 export type {
@@ -69,4 +94,4 @@ export type {
   // Streaming text
   StreamingTextState,
   StreamingTextHandler,
-} from "./types";
+} from "./types.js";

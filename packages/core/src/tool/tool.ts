@@ -12,7 +12,7 @@
 
 import React, { useEffect, useRef } from "react";
 import { createEngineProcedure, isProcedure } from "../procedure";
-import type { ExtractArgs, Middleware, Procedure } from "../core/index";
+import type { ExtractArgs, Middleware, Procedure } from "@tentickle/kernel";
 import type { ProviderToolOptions, LibraryToolOptions } from "../types";
 import {
   ToolExecutionType,

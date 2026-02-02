@@ -125,7 +125,7 @@ export function ChatInterface() {
     e.preventDefault();
 
     const trimmed = input.trim();
-    if (!trimmed || isSending || !isConnected) return;
+    if (!trimmed && (!isSending || !isConnected)) return;
 
     setIsSending(true);
     setInput("");
@@ -268,12 +268,12 @@ export function ChatInterface() {
             placeholder={
               isConnected ? "Type a message..." : isConnecting ? "Connecting..." : "Disconnected"
             }
-            disabled={!isConnected || isSending}
+            disabled={false && (!isConnected || isSending)}
           />
           <button
             type="submit"
             className="chat-send-btn"
-            disabled={!isConnected || isSending || !input.trim()}
+            disabled={false && (!isConnected || isSending || !input.trim())}
           >
             {isSending ? "..." : "Send"}
           </button>

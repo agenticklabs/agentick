@@ -10,70 +10,23 @@
  * The fix ensures messages only get added once via the JSX rendering path.
  */
 
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect } from "vitest";
 import { createApp, Model, System, Timeline } from "../../index";
-
-// Helper to create a mock model that captures input
-function createMockModel() {
-  const capturedInputs: any[] = [];
-
-  return {
-    model: {
-      metadata: {
-        id: "test-model",
-        provider: "test",
-        model: "test",
-        capabilities: ["streaming", "tools"] as const,
-      },
-      generate: vi.fn().mockResolvedValue({
-        message: { role: "assistant", content: [{ type: "text", text: "Response" }] },
-        usage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 },
-        stopReason: "stop",
-      }),
-      stream: vi.fn().mockImplementation(async function* () {
-        yield { type: "content_delta", delta: "Response", role: "assistant" };
-        yield {
-          type: "result",
-          message: { role: "assistant", content: [{ type: "text", text: "Response" }] },
-          usage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 },
-          stopReason: "stop",
-        };
-      }),
-      fromEngineState: vi.fn().mockImplementation(async (input) => {
-        capturedInputs.push(JSON.parse(JSON.stringify(input))); // Deep clone
-        return {
-          messages: [
-            ...(input.system || []).map((e: any) => e.message),
-            ...input.timeline.filter((e: any) => e.kind === "message").map((e: any) => e.message),
-          ],
-          tools: input.tools || [],
-        };
-      }),
-      toEngineState: vi.fn().mockImplementation(async (output) => ({
-        newTimelineEntries: output.message
-          ? [{ kind: "message", message: output.message, tags: ["model_output"] }]
-          : [],
-        toolCalls: [],
-        stopReason: { reason: "stop", description: "Completed", recoverable: false },
-        usage: output.usage,
-      })),
-    },
-    getCapturedInputs: () => capturedInputs,
-    clearCapturedInputs: () => {
-      capturedInputs.length = 0;
-    },
-  };
-}
+import { createTestModel } from "../../testing/test-model";
+import type { Message, TextBlock } from "@tentickle/shared";
+import { isTextBlock } from "@tentickle/shared/blocks";
 
 describe("Duplicate Message Prevention", () => {
   describe("First tick - single user message", () => {
     it("should NOT duplicate user message on first tick", async () => {
-      const mockModel = createMockModel();
+      const mockModel = createTestModel({
+        defaultResponse: "Test response",
+      });
 
       const Agent = () => {
         return (
           <>
-            <Model model={mockModel.model} />
+            <Model model={mockModel} />
             <System>Test</System>
             <Timeline />
           </>
@@ -95,11 +48,14 @@ describe("Duplicate Message Prevention", () => {
       expect(inputs.length).toBeGreaterThanOrEqual(1);
 
       const lastInput = inputs[inputs.length - 1];
-      const userMessages = lastInput.timeline.filter((e: any) => e.message?.role === "user");
+      const userMessages = (lastInput.messages as Message[]).filter(
+        (e: Message) => e?.role === "user",
+      );
 
       // Should have exactly ONE user message, not duplicated
       expect(userMessages.length).toBe(1);
-      expect(userMessages[0].message.content[0].text).toBe("Hello world");
+      expect(isTextBlock(userMessages[0].content[0])).toBe(true);
+      expect((userMessages[0].content[0] as TextBlock).text).toBe("Hello world");
 
       session.close();
     });
@@ -107,12 +63,12 @@ describe("Duplicate Message Prevention", () => {
 
   describe("Subsequent ticks - conversation flow", () => {
     it("should NOT duplicate messages across multiple exchanges", async () => {
-      const mockModel = createMockModel();
+      const mockModel = createTestModel();
 
       const Agent = () => {
         return (
           <>
-            <Model model={mockModel.model} />
+            <Model model={mockModel} />
             <System>Test</System>
             <Timeline />
           </>
@@ -147,14 +103,16 @@ describe("Duplicate Message Prevention", () => {
       const lastInput = inputs[inputs.length - 1];
 
       // Count user messages - should have 2 (first + second), each appearing once
-      const userMessages = lastInput.timeline.filter((e: any) => e.message?.role === "user");
+      const userMessages = (lastInput.messages as Message[]).filter(
+        (e: Message) => e?.role === "user",
+      );
 
       // Count messages by content
       const firstCount = userMessages.filter(
-        (e: any) => e.message.content[0].text === "First message",
+        ({ content }) => isTextBlock(content[0]) && content[0].text === "First message",
       ).length;
       const secondCount = userMessages.filter(
-        (e: any) => e.message.content[0].text === "Second message",
+        ({ content }) => isTextBlock(content[0]) && content[0].text === "Second message",
       ).length;
 
       expect(firstCount).toBe(1); // First message appears once
@@ -164,12 +122,12 @@ describe("Duplicate Message Prevention", () => {
     });
 
     it("should NOT duplicate assistant messages", async () => {
-      const mockModel = createMockModel();
+      const mockModel = createTestModel();
 
       const Agent = () => {
         return (
           <>
-            <Model model={mockModel.model} />
+            <Model model={mockModel} />
             <System>Test</System>
             <Timeline />
           </>
@@ -201,15 +159,15 @@ describe("Duplicate Message Prevention", () => {
       expect(inputs.length).toBeGreaterThanOrEqual(1);
 
       const lastInput = inputs[inputs.length - 1];
-      const assistantMessages = lastInput.timeline.filter(
-        (e: any) => e.message?.role === "assistant",
+      const assistantMessages = (lastInput.messages as Message[]).filter(
+        (e: Message) => e?.role === "assistant",
       );
 
       // Each assistant response should appear exactly once
       // Note: There may be 2 distinct assistant messages if tool loops happened
       // But same message content should NOT be duplicated
-      const responseTexts = assistantMessages.map((e: any) =>
-        e.message.content
+      const responseTexts = assistantMessages.map((e: Message) =>
+        e.content
           .filter((b: any) => b.type === "text")
           .map((b: any) => b.text)
           .join(""),
@@ -232,12 +190,12 @@ describe("Duplicate Message Prevention", () => {
 
   describe("Multiple exchanges - history preservation", () => {
     it("should handle 5 consecutive exchanges without duplication", async () => {
-      const mockModel = createMockModel();
+      const mockModel = createTestModel();
 
       const Agent = () => {
         return (
           <>
-            <Model model={mockModel.model} />
+            <Model model={mockModel} />
             <System>Test</System>
             <Timeline />
           </>
@@ -261,8 +219,10 @@ describe("Duplicate Message Prevention", () => {
       const inputs = mockModel.getCapturedInputs();
       const lastInput = inputs[inputs.length - 1];
 
-      const userMsgs = lastInput.timeline.filter((e: any) => e.message?.role === "user");
-      const assistantMsgs = lastInput.timeline.filter((e: any) => e.message?.role === "assistant");
+      const userMsgs = (lastInput.messages as Message[]).filter((e: Message) => e?.role === "user");
+      const assistantMsgs = (lastInput.messages as Message[]).filter(
+        (e: Message) => e?.role === "assistant",
+      );
 
       // Should have exactly 5 user messages
       expect(userMsgs.length).toBe(5);
@@ -274,7 +234,8 @@ describe("Duplicate Message Prevention", () => {
       // Verify each user message appears exactly once
       for (let i = 1; i <= 5; i++) {
         const count = userMsgs.filter(
-          (e: any) => e.message.content[0].text === `Message ${i}`,
+          (e: Message) =>
+            isTextBlock(e.content[0]) && (e.content[0] as TextBlock).text === `Message ${i}`,
         ).length;
         expect(count).toBe(1);
       }
@@ -283,12 +244,12 @@ describe("Duplicate Message Prevention", () => {
     });
 
     it("should preserve all messages across 3 exchanges", async () => {
-      const mockModel = createMockModel();
+      const mockModel = createTestModel();
 
       const Agent = () => {
         return (
           <>
-            <Model model={mockModel.model} />
+            <Model model={mockModel} />
             <System>Test</System>
             <Timeline />
           </>
@@ -317,14 +278,18 @@ describe("Duplicate Message Prevention", () => {
       const lastInput = inputs[inputs.length - 1];
 
       // Verify complete history
-      const userMsgs = lastInput.timeline.filter((e: any) => e.message?.role === "user");
-      const assistantMsgs = lastInput.timeline.filter((e: any) => e.message?.role === "assistant");
+      const userMsgs = (lastInput.messages as Message[]).filter((e: Message) => e?.role === "user");
+      const assistantMsgs = (lastInput.messages as Message[]).filter(
+        (e: Message) => e?.role === "assistant",
+      );
 
       expect(userMsgs.length).toBe(3); // 3 user messages
       expect(assistantMsgs.length).toBe(2); // 2 assistant responses (from exchanges 1 and 2)
 
       // Verify no duplicates - each user message appears exactly once
-      const userTexts = userMsgs.map((e: any) => e.message.content[0].text);
+      const userTexts = userMsgs.map((e: Message) =>
+        isTextBlock(e.content[0]) ? (e.content[0] as TextBlock).text : "",
+      );
       expect(userTexts).toContain("Hello");
       expect(userTexts).toContain("How are you?");
       expect(userTexts).toContain("Goodbye");

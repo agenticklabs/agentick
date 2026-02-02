@@ -11,7 +11,7 @@ import { isEventBlock, StopReason } from "@tentickle/shared";
 import type { EngineResponse } from "../../engine/engine-response";
 import type { DelimiterConfig, EventBlockDelimiters } from "../../types";
 import type { ModelConfig, ModelInput, ModelOutput, MessageTransformationConfig } from "../model";
-import { Logger } from "../../core/logger";
+import { Logger } from "@tentickle/kernel";
 
 const log = Logger.for("language-model");
 

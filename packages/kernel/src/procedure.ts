@@ -18,7 +18,6 @@ import { ExecutionTracker, type ExecutionBoundaryConfig } from "./execution-trac
 import { randomUUID } from "node:crypto";
 import { ProcedureNode } from "./procedure-graph";
 import { AbortError, ValidationError } from "@tentickle/shared";
-import type { ExecutionStatus } from "../engine/execution-types";
 import { EventBuffer, type TypedEvent } from "./event-buffer";
 
 // ============================================================================
@@ -255,7 +254,7 @@ export interface ExecutionHandle<
   TEvent extends TypedEvent = any,
 > extends AsyncIterable<TEvent> {
   /** Current execution status */
-  readonly status: "running" | "completed" | "error" | "aborted" | ExecutionStatus;
+  readonly status: "running" | "completed" | "error" | "aborted";
 
   /** Trace ID for distributed tracing correlation */
   readonly traceId: string;

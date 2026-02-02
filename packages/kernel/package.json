@@ -1,0 +1,47 @@
+{
+  "name": "@tentickle/kernel",
+  "version": "0.0.1",
+  "description": "Kernel for Tentickle",
+  "keywords": [
+    "agent",
+    "ai"
+  ],
+  "license": "ISC",
+  "author": "Ryan Lindgren",
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "main": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "publishConfig": {
+    "access": "public",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "import": "./dist/index.js"
+      }
+    },
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "test": "echo \"Tests run from workspace root\"",
+    "typecheck": "tsc -p tsconfig.build.json --noEmit",
+    "lint": "oxlint src/",
+    "format:check": "oxfmt --check src/",
+    "clean": "rm -rf dist",
+    "prepublishOnly": "pnpm build",
+    "dev": "tsc --watch"
+  },
+  "dependencies": {
+    "@tentickle/shared": "workspace:*",
+    "pino": "^9.6.0"
+  },
+  "devDependencies": {
+    "pino-pretty": "^13.0.0"
+  }
+}

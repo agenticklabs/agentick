@@ -12,7 +12,7 @@ import type { JSX } from "react";
 import type { COMTimelineEntry } from "../../com/types";
 import type { ExecutionMessage } from "../../engine/execution-types";
 import { useTickState } from "../../hooks/context";
-import { Logger } from "../../core/logger";
+import { Logger } from "@tentickle/kernel";
 
 const log = Logger.for("Timeline");
 
@@ -118,6 +118,8 @@ function DefaultMessage({
       message: {
         role,
         content: [{ type: "text", text: textContent }],
+        // Preserve message ID for deduplication in complete()
+        id: entry.message.id,
       },
     });
   }
@@ -156,11 +158,14 @@ function DefaultPendingMessage({
   if (!textContent) return h(React.Fragment, null);
 
   // Render the "entry" intrinsic element
+  // Preserve message ID for deduplication in complete()
+  const msgWithId = msg as { role: string; content: unknown[]; id?: string };
   return h("entry", {
     kind: "message",
     message: {
       role,
       content: [{ type: "text", text: textContent }],
+      id: msgWithId.id,
     },
   });
 }

@@ -14,7 +14,7 @@ import { createModel, type ModelInput, type ModelOutput } from "../../model/mode
 import { fromEngineState, toEngineState } from "../../model/utils/language-model";
 import { System, User } from "../../jsx/components/messages";
 import { Model } from "../../jsx/components/primitives";
-import { Context } from "../../core/index";
+import { Context } from "@tentickle/kernel";
 import type { StopReason, StreamEvent } from "@tentickle/shared";
 import { AbortError, BlockType } from "@tentickle/shared";
 import { useState, useRef, useOnMessage, useQueuedMessages } from "../../hooks";
