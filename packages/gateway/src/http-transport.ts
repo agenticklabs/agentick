@@ -6,6 +6,7 @@
  */
 
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from "http";
+import { extractToken, validateAuth, setSSEHeaders, type AuthResult } from "@tentickle/server";
 import type { GatewayMessage, RequestMessage } from "./protocol.js";
 import type { ClientState } from "./types.js";
 import { BaseTransport, type TransportClient, type TransportConfig } from "./transport.js";
@@ -133,7 +134,7 @@ export class HTTPTransport extends BaseTransport {
     // Set CORS headers
     const origin = this.httpConfig.corsOrigin ?? "*";
     res.setHeader("Access-Control-Allow-Origin", origin);
-    res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+    res.setHeader("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS");
     res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
     res.setHeader("Access-Control-Allow-Credentials", "true");
 
@@ -148,12 +149,14 @@ export class HTTPTransport extends BaseTransport {
     const url = new URL(req.url ?? "/", `http://${req.headers.host}`);
     const path = url.pathname.replace(prefix, "");
 
-    // Route requests
+    // Route requests - exact matches first
     switch (path) {
       case "/events":
         return this.handleSSE(req, res);
       case "/send":
         return this.handleSend(req, res);
+      case "/invoke":
+        return this.handleInvoke(req, res);
       case "/subscribe":
         return this.handleSubscribe(req, res);
       case "/abort":
@@ -162,10 +165,10 @@ export class HTTPTransport extends BaseTransport {
         return this.handleClose(req, res);
       case "/channel":
         return this.handleChannel(req, res);
-      default:
-        res.writeHead(404, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ error: "Not found" }));
     }
+
+    res.writeHead(404, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "Not found" }));
   }
 
   /**
@@ -174,10 +177,10 @@ export class HTTPTransport extends BaseTransport {
   private async handleSSE(req: IncomingMessage, res: ServerResponse): Promise<void> {
     // Get auth token from header or query
     const url = new URL(req.url ?? "/", `http://${req.headers.host}`);
-    const token = this.extractToken(req) ?? url.searchParams.get("token") ?? undefined;
+    const token = extractToken(req) ?? url.searchParams.get("token") ?? undefined;
 
     // Validate auth
-    const authResult = await this.validateAuth(token);
+    const authResult = await validateAuth(token, this.config.auth);
     if (!authResult.valid) {
       res.writeHead(401, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: "Authentication failed" }));
@@ -191,7 +194,7 @@ export class HTTPTransport extends BaseTransport {
     if (!client) {
       client = new HTTPClientImpl(clientId);
       client.state.authenticated = true;
-      client.state.userId = authResult.userId;
+      client.state.user = authResult.user;
       client.state.metadata = authResult.metadata;
       this.clients.set(clientId, client);
 
@@ -200,17 +203,14 @@ export class HTTPTransport extends BaseTransport {
     }
 
     // Setup SSE response
-    res.writeHead(200, {
-      "Content-Type": "text/event-stream",
-      "Cache-Control": "no-cache",
-      Connection: "keep-alive",
-    });
+    setSSEHeaders(res);
 
     client.setResponse(res);
 
     // Send connection confirmation
+    // Client expects type: "connection" to resolve the connection promise
     client.send({
-      type: "connected" as any,
+      type: "connection" as any,
       connectionId: clientId,
       subscriptions: Array.from(client.state.subscriptions),
     } as any);
@@ -244,8 +244,8 @@ export class HTTPTransport extends BaseTransport {
     }
 
     // Get auth token
-    const token = this.extractToken(req);
-    const authResult = await this.validateAuth(token);
+    const token = extractToken(req);
+    const authResult = await validateAuth(token, this.config.auth);
     if (!authResult.valid) {
       res.writeHead(401, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: "Authentication failed" }));
@@ -296,11 +296,7 @@ export class HTTPTransport extends BaseTransport {
     }
 
     // Setup streaming response
-    res.writeHead(200, {
-      "Content-Type": "text/event-stream",
-      "Cache-Control": "no-cache",
-      Connection: "keep-alive",
-    });
+    setSSEHeaders(res);
 
     try {
       // Use the direct send handler to stream events
@@ -326,6 +322,65 @@ export class HTTPTransport extends BaseTransport {
   }
 
   /**
+   * Invoke endpoint - execute custom gateway methods
+   * Returns JSON (not streaming) for simpler client handling
+   */
+  private async handleInvoke(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    if (req.method !== "POST") {
+      res.writeHead(405, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Method not allowed" }));
+      return;
+    }
+
+    // Get auth token
+    const token = extractToken(req);
+    const authResult = await validateAuth(token, this.config.auth);
+    if (!authResult.valid) {
+      res.writeHead(401, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Authentication failed" }));
+      return;
+    }
+
+    // Parse body
+    const body = await this.parseBody(req);
+    if (!body) {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Invalid request body" }));
+      return;
+    }
+
+    const method = (body as { method?: string }).method;
+    const params = ((body as { params?: Record<string, unknown> }).params ?? {}) as Record<
+      string,
+      unknown
+    >;
+
+    if (!method || typeof method !== "string") {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "method is required" }));
+      return;
+    }
+
+    // Check if we have an invoke handler
+    if (!this.config.onInvoke) {
+      res.writeHead(501, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Method invocation not supported" }));
+      return;
+    }
+
+    try {
+      const result = await this.config.onInvoke(method, params, authResult.user);
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(result));
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      const statusCode = errorMessage.includes("Forbidden") ? 403 : 400;
+      res.writeHead(statusCode, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: errorMessage }));
+    }
+  }
+
+  /**
    * Subscribe endpoint - manage session subscriptions
    */
   private async handleSubscribe(req: IncomingMessage, res: ServerResponse): Promise<void> {
@@ -335,8 +390,8 @@ export class HTTPTransport extends BaseTransport {
       return;
     }
 
-    const token = this.extractToken(req);
-    const authResult = await this.validateAuth(token);
+    const token = extractToken(req);
+    const authResult = await validateAuth(token, this.config.auth);
     if (!authResult.valid) {
       res.writeHead(401, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: "Authentication failed" }));
@@ -393,8 +448,8 @@ export class HTTPTransport extends BaseTransport {
       return;
     }
 
-    const token = this.extractToken(req);
-    const authResult = await this.validateAuth(token);
+    const token = extractToken(req);
+    const authResult = await validateAuth(token, this.config.auth);
     if (!authResult.valid) {
       res.writeHead(401, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: "Authentication failed" }));
@@ -437,8 +492,8 @@ export class HTTPTransport extends BaseTransport {
       return;
     }
 
-    const token = this.extractToken(req);
-    const authResult = await this.validateAuth(token);
+    const token = extractToken(req);
+    const authResult = await validateAuth(token, this.config.auth);
     if (!authResult.valid) {
       res.writeHead(401, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: "Authentication failed" }));
@@ -480,8 +535,8 @@ export class HTTPTransport extends BaseTransport {
       return;
     }
 
-    const token = this.extractToken(req);
-    const authResult = await this.validateAuth(token);
+    const token = extractToken(req);
+    const authResult = await validateAuth(token, this.config.auth);
     if (!authResult.valid) {
       res.writeHead(401, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: "Authentication failed" }));
@@ -501,18 +556,44 @@ export class HTTPTransport extends BaseTransport {
   }
 
   // ══════════════════════════════════════════════════════════════════════════
+  // Express Integration
+  // ══════════════════════════════════════════════════════════════════════════
+
+  /**
+   * Handle a request from Express middleware.
+   * This allows the gateway to be mounted in an existing Express app.
+   */
+  handleExpressRequest(
+    req: IncomingMessage & { path?: string },
+    res: ServerResponse & { status?: (code: number) => any; json?: (body: unknown) => void },
+    next: (err?: unknown) => void,
+  ): void {
+    this.handleRequest(req, res).catch((error) => {
+      console.error("Request error:", error);
+      if (!res.headersSent) {
+        if (res.status && res.json) {
+          res.status(500).json({ error: "Internal server error" });
+        } else {
+          res.writeHead(500, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "Internal server error" }));
+        }
+      }
+    });
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
   // Utilities
   // ══════════════════════════════════════════════════════════════════════════
 
-  private extractToken(req: IncomingMessage): string | undefined {
-    const auth = req.headers.authorization;
-    if (auth?.startsWith("Bearer ")) {
-      return auth.slice(7);
+  private parseBody(
+    req: IncomingMessage & { body?: unknown },
+  ): Promise<Record<string, unknown> | null> {
+    // If body already parsed by Express middleware, use it
+    if (req.body && typeof req.body === "object") {
+      return Promise.resolve(req.body as Record<string, unknown>);
     }
-    return undefined;
-  }
 
-  private parseBody(req: IncomingMessage): Promise<Record<string, unknown> | null> {
+    // Otherwise, read from stream
     return new Promise((resolve) => {
       let body = "";
       req.on("data", (chunk) => {

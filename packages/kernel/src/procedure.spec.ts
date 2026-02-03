@@ -5,7 +5,7 @@ import { Context } from "./context";
 describe("Kernel Procedure", () => {
   it("should execute a simple handler", async () => {
     const proc = createProcedure({ name: "test" }, async (input: number) => input * 2);
-    const result = await proc(5);
+    const result = await proc(5).result;
     expect(result).toBe(10);
   });
 
@@ -17,7 +17,7 @@ describe("Kernel Procedure", () => {
       },
     );
 
-    const result = await proc(1);
+    const result = await proc(1).result;
     expect(result).toBe(2);
   });
 
@@ -50,7 +50,7 @@ describe("Kernel Procedure", () => {
       return res + 10;
     });
 
-    const result = await extendedProc();
+    const result = await extendedProc().result;
     expect(result).toBe(11);
   });
 
@@ -73,7 +73,7 @@ describe("Kernel Procedure", () => {
 
     // Execution order: mw1 -> mw2 -> mw3 -> handler
     // Return order: handler([]) -> mw3(['mw3']) -> mw2(['mw3', 'mw2']) -> mw1(['mw3', 'mw2', 'mw1'])
-    const result = await chainedProc();
+    const result = await chainedProc().result;
     expect(result).toEqual(["mw3", "mw2", "mw1"]);
   });
 
@@ -88,7 +88,7 @@ describe("Kernel Procedure", () => {
         return next([3]); // Pass transformed input
       });
 
-    const result = await proc(1);
+    const result = await proc(1).result;
     // Input flow: 1 -> (mw1 transforms to 2) -> (mw2 transforms to 3) -> handler(3 * 10 = 30)
     expect(result).toBe(30);
   });
@@ -101,7 +101,7 @@ describe("Kernel Procedure", () => {
       },
     );
 
-    const result = await proc(5);
+    const result = await proc(5).result;
     // Input flow: 5 -> (mw1 doesn't transform) -> handler(5 * 2 = 10)
     expect(result).toBe(10);
   });
@@ -121,7 +121,7 @@ describe("Kernel Procedure", () => {
         return next([15]);
       });
 
-    const result = await proc(5);
+    const result = await proc(5).result;
     // Input flow: 5 -> (mw1: 10) -> (mw2: 10) -> (mw3: 15) -> handler(15 * 2 = 30)
     expect(result).toBe(30);
   });
@@ -149,7 +149,7 @@ describe("Procedure v2 - Variable Arity", () => {
       return "result";
     });
 
-    const result = await proc();
+    const result = await proc().result;
     expect(result).toBe("result");
   });
 
@@ -158,7 +158,7 @@ describe("Procedure v2 - Variable Arity", () => {
       return input.toUpperCase();
     });
 
-    const result = await proc("test");
+    const result = await proc("test").result;
     expect(result).toBe("TEST");
   });
 
@@ -167,7 +167,7 @@ describe("Procedure v2 - Variable Arity", () => {
       return `${a}-${b}-${c}`;
     });
 
-    const result = await proc(1, "test", true);
+    const result = await proc(1, "test", true).result;
     expect(result).toBe("1-test-true");
   });
 });
@@ -213,7 +213,7 @@ describe("Procedure v2 - Pipelines", () => {
       return input;
     }).use(pipeline as any);
 
-    const result = await proc("test");
+    const result = await proc("test").result;
     expect(result).toBe("test");
   });
 });
@@ -224,8 +224,8 @@ describe("Procedure v2 - Fluent API", () => {
       return input.toUpperCase();
     });
 
-    const result1 = await proc("test");
-    const result2 = await proc.exec("test");
+    const result1 = await proc("test").result;
+    const result2 = await proc.exec("test").result;
 
     expect(result1).toBe("TEST");
     expect(result2).toBe("TEST");
@@ -237,7 +237,7 @@ describe("Procedure v2 - Fluent API", () => {
       return ctx.traceId || input;
     });
 
-    const result = await proc.withContext({ traceId: "123" }).exec("test");
+    const result = await proc.withContext({ traceId: "123" }).exec("test").result;
     expect(result).toBe("123");
   });
 
@@ -257,7 +257,7 @@ describe("Procedure v2 - Fluent API", () => {
     });
 
     try {
-      const result = await proc.withContext({ traceId: "test-trace" }).exec("hello");
+      const result = await proc.withContext({ traceId: "test-trace" }).exec("hello").result;
       expect(result).toBe("HELLO");
 
       // Check that only ONE procedure:start was emitted (not two)
@@ -277,7 +277,7 @@ describe("Procedure v2 - Fluent API", () => {
       return input;
     }).use(mw as any);
 
-    const result = await proc("test");
+    const result = await proc("test").result;
     expect(result).toBe("test");
   });
 });
@@ -288,7 +288,7 @@ describe("Procedure v2 - Hooks as Procedures", () => {
       return chunk.toUpperCase();
     });
 
-    const result = await processChunk("test");
+    const result = await processChunk("test").result;
     expect(result).toBe("TEST");
   });
 
@@ -297,15 +297,22 @@ describe("Procedure v2 - Hooks as Procedures", () => {
     // (pass-through without middleware skips tracking for performance)
     const noopMiddleware: Middleware<[string]> = async (_args, _envelope, next) => next();
 
-    const stream = createProcedure({ name: "stream" }, async function* (_input: string) {
-      const processChunk = createHook({ name: "stream:chunk" }, async (chunk: string) => {
-        return chunk;
-      });
+    // Use handleFactory: false for async generator pass-through
+    const stream = createProcedure(
+      { name: "stream", handleFactory: false },
+      async function* (_input: string) {
+        const processChunk = createHook(
+          { name: "stream:chunk", handleFactory: false },
+          async (chunk: string) => {
+            return chunk;
+          },
+        );
 
-      for (const chunk of ["a", "b", "c"]) {
-        yield await processChunk(chunk);
-      }
-    }).use(noopMiddleware);
+        for (const chunk of ["a", "b", "c"]) {
+          yield await processChunk(chunk);
+        }
+      },
+    ).use(noopMiddleware);
 
     const ctx = Context.create();
     const results: string[] = [];
@@ -336,7 +343,7 @@ describe("Procedure Timeout", () => {
       return "done";
     });
 
-    const result = await proc();
+    const result = await proc().result;
     expect(result).toBe("done");
   });
 
@@ -346,7 +353,7 @@ describe("Procedure Timeout", () => {
       return "should not get here";
     });
 
-    await expect(proc()).rejects.toThrow("timed out");
+    await expect(proc().result).rejects.toThrow("timed out");
   });
 
   it("should support withTimeout() for ad-hoc timeout", async () => {
@@ -357,7 +364,7 @@ describe("Procedure Timeout", () => {
 
     const timedProc = proc.withTimeout(50);
 
-    await expect(timedProc()).rejects.toThrow("timed out");
+    await expect(timedProc().result).rejects.toThrow("timed out");
   });
 
   it("should not apply timeout when set to 0", async () => {
@@ -366,7 +373,7 @@ describe("Procedure Timeout", () => {
       return "done";
     });
 
-    const result = await proc();
+    const result = await proc().result;
     expect(result).toBe("done");
   });
 
@@ -374,7 +381,7 @@ describe("Procedure Timeout", () => {
     // This test ensures we don't have timer leaks
     const proc = createProcedure({ name: "fast", timeout: 5000 }, async () => "done");
 
-    const result = await proc();
+    const result = await proc().result;
     expect(result).toBe("done");
     // If timeout wasn't cleared, Jest would complain about open handles
   });
@@ -385,9 +392,8 @@ describe("Procedure Timeout", () => {
       return "should not get here";
     });
 
-    const handle = proc();
-
-    await expect(handle).rejects.toThrow("timed out");
+    // Timeout rejection happens in .result
+    await expect(proc().result).rejects.toThrow("timed out");
   });
 });
 
@@ -397,7 +403,7 @@ describe("Procedure Pipe", () => {
     const addTen = createProcedure({ name: "addTen" }, async (n: number) => n + 10);
 
     const pipeline = double.pipe(addTen);
-    const result = await pipeline(5);
+    const result = await pipeline(5).result;
 
     // 5 * 2 = 10, 10 + 10 = 20
     expect(result).toBe(20);
@@ -409,7 +415,7 @@ describe("Procedure Pipe", () => {
     const toUpper = createProcedure({ name: "toUpper" }, async (s: string) => s.toUpperCase());
 
     const pipeline = parse.pipe(getName).pipe(toUpper);
-    const result = await pipeline('{"name": "hello"}');
+    const result = await pipeline('{"name": "hello"}').result;
 
     expect(result).toBe("HELLO");
   });
@@ -422,7 +428,7 @@ describe("Procedure Pipe", () => {
 
     const pipeline = willFail.pipe(shouldNotRun);
 
-    await expect(pipeline()).rejects.toThrow("oops");
+    await expect(pipeline().result).rejects.toThrow("oops");
   });
 
   it("should work with the static pipe function", async () => {
@@ -433,7 +439,7 @@ describe("Procedure Pipe", () => {
     const c = createProcedure({ name: "c" }, async (n: number) => n - 3);
 
     const pipeline = pipe(a, b, c);
-    const result = await pipeline(5);
+    const result = await pipeline(5).result;
 
     // (5 + 1) * 2 - 3 = 9
     expect(result).toBe(9);
@@ -466,7 +472,7 @@ describe("Procedure Pipe", () => {
     const pipeline = captureTrace.pipe(addOne);
 
     await Context.run(Context.create({ traceId: "test-trace" }), async () => {
-      await pipeline(1);
+      await pipeline(1).result;
     });
 
     // Both procedures should see the same trace ID
@@ -485,7 +491,7 @@ describe("Procedure Compose", () => {
 
     // compose(double, addTen)(5) = double(addTen(5)) = double(15) = 30
     const composed = compose(double, addTen);
-    const result = await composed(5);
+    const result = await composed(5).result;
 
     expect(result).toBe(30);
   });
@@ -499,11 +505,11 @@ describe("Procedure Compose", () => {
 
     // pipe(a, b, c)(5) = c(b(a(5))) = c(b(6)) = c(12) = 9
     const piped = pipe(a, b, c);
-    const pipedResult = await piped(5);
+    const pipedResult = await piped(5).result;
 
     // compose(c, b, a)(5) = c(b(a(5))) = same as pipe(a, b, c)
     const composed = compose(c, b, a);
-    const composedResult = await composed(5);
+    const composedResult = await composed(5).result;
 
     expect(pipedResult).toBe(composedResult);
     expect(pipedResult).toBe(9);
@@ -527,7 +533,7 @@ describe("Procedure Compose", () => {
 
     // compose(format, trim, parse)(x) = format(trim(parse(x)))
     const composed = compose(format, trim, parse);
-    const result = await composed("  hello  ");
+    const result = await composed("  hello  ").result;
 
     expect(result).toBe("HELLO");
   });
@@ -607,21 +613,21 @@ describe("Procedure Symbol Branding", () => {
 describe("ExecutionHandle - PromiseLike interface", () => {
   it("should resolve to result when awaited", async () => {
     const proc = createProcedure({ name: "test" }, async (x: number) => x * 2);
-    const handle = proc(5);
+    const promise = proc(5);
 
-    // Handle should have then method (PromiseLike)
-    expect(typeof handle.then).toBe("function");
+    // ProcedurePromise should have then method (PromiseLike)
+    expect(typeof promise.then).toBe("function");
 
-    // Awaiting should give the result
-    const result = await handle;
+    // Awaiting gives the ExecutionHandle, .result gives the value
+    const result = await promise.result;
     expect(result).toBe(10);
   });
 
   it("should support .then() chaining", async () => {
     const proc = createProcedure({ name: "test" }, async (x: number) => x + 1);
-    const handle = proc(5);
+    const promise = proc(5);
 
-    const result = await handle.result.then((r) => r * 2);
+    const result = await promise.result.then((r) => r * 2);
     expect(result).toBe(12); // (5 + 1) * 2
   });
 
@@ -630,8 +636,8 @@ describe("ExecutionHandle - PromiseLike interface", () => {
       throw new Error("test error");
     });
 
-    const handle = proc();
-    const result = await handle.then(
+    const promise = proc();
+    const result = await promise.result.then(
       () => "success",
       (err) => `caught: ${err.message}`,
     );
@@ -700,26 +706,26 @@ describe("ExecutionHandle - PromiseLike interface", () => {
     expect(handle.status).toBe("aborted");
   });
 
-  it("should have deprecated result property that resolves to same value", async () => {
+  it("should have result property that resolves to handler value", async () => {
     const proc = createProcedure({ name: "test" }, async () => 42);
-    const handle = proc();
+    const promise = proc();
 
-    // Both should give same result
-    const [awaitResult, resultProp] = await Promise.all([handle, handle.result]);
+    // promise.result chains through to handle.result
+    const resultProp = await promise.result;
 
-    expect(awaitResult).toBe(42);
     expect(resultProp).toBe(42);
   });
 
-  it("handle should work with Promise.all", async () => {
+  it("handle.result should work with Promise.all", async () => {
     const proc = createProcedure({ name: "test" }, async (x: number) => x * 2);
 
-    const results = await Promise.all([proc(1), proc(2), proc(3)]);
+    // Use .result to get the handler's return values
+    const results = await Promise.all([proc(1).result, proc(2).result, proc(3).result]);
 
     expect(results).toEqual([2, 4, 6]);
   });
 
-  it("handle should work with Promise.race", async () => {
+  it("handle.result should work with Promise.race", async () => {
     const fast = createProcedure({ name: "fast" }, async () => {
       await new Promise((r) => setTimeout(r, 5));
       return "fast";
@@ -730,7 +736,8 @@ describe("ExecutionHandle - PromiseLike interface", () => {
       return "slow";
     });
 
-    const result = await Promise.race([fast(), slow()]);
+    // Use .result to race on the handler's return values
+    const result = await Promise.race([fast().result, slow().result]);
     expect(result).toBe("fast");
   });
 
@@ -739,9 +746,8 @@ describe("ExecutionHandle - PromiseLike interface", () => {
       throw new Error("expected error");
     });
 
-    const handle = proc();
-
-    await expect(handle).rejects.toThrow("expected error");
+    // The rejection is in .result, not in getting the handle
+    await expect(proc().result).rejects.toThrow("expected error");
   });
 });
 
@@ -807,7 +813,7 @@ describe("DirectProcedure - handleFactory: false (pass-through)", () => {
       async (x: number) => x * 2,
     );
 
-    const result = await proc(5);
+    const result = await proc(5).result;
     expect(result).toBe(10);
   });
 
@@ -822,7 +828,7 @@ describe("DirectProcedure - handleFactory: false (pass-through)", () => {
       value: 42,
     }));
 
-    const result = await proc();
+    const result = await proc().result;
     expect(result).toEqual({ type: "custom", value: 42 });
   });
 
@@ -837,7 +843,7 @@ describe("DirectProcedure - handleFactory: false (pass-through)", () => {
     );
 
     // The result is the inner procedure's resolved value
-    const result = await outerProc();
+    const result = await outerProc().result;
     expect(result).toBe("inner-result");
   });
 
@@ -854,7 +860,7 @@ describe("DirectProcedure - handleFactory: false (pass-through)", () => {
       return result + 1;
     });
 
-    const result = await proc(5);
+    const result = await proc(5).result;
 
     expect(log).toEqual(["before", "after"]);
     expect(result).toBe(11); // (5 * 2) + 1
@@ -867,7 +873,7 @@ describe("DirectProcedure - handleFactory: false (pass-through)", () => {
     });
 
     const procWithCtx = proc.withContext({ metadata: { custom: "value" } });
-    const result = await procWithCtx();
+    const result = await procWithCtx().result;
 
     expect(result).toBe("value");
   });
@@ -883,7 +889,7 @@ describe("DirectProcedure - handleFactory: false (pass-through)", () => {
       return result * 10;
     });
 
-    const result = await procWithMw(5);
+    const result = await procWithMw(5).result;
     expect(result).toBe(50);
   });
 
@@ -906,7 +912,7 @@ describe("DirectProcedure - handleFactory: false (pass-through)", () => {
     // Middleware runs in registration order:
     // +1 middleware calls next -> *2 middleware calls next -> handler returns 1
     // *2 returns 1 * 2 = 2, +1 returns 2 + 1 = 3
-    const result = await proc();
+    const result = await proc().result;
     expect(result).toBe(3);
   });
 });

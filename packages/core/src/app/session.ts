@@ -338,7 +338,7 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
         if (this.compiler) {
           const executionMessage: ExecutionMessage = {
             id: randomUUID(),
-            type: "user",
+            type: "message",
             content: message,
             timestamp: Date.now(),
           };
@@ -390,7 +390,7 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
       if (this.compiler) {
         const executionMessage: ExecutionMessage = {
           id: randomUUID(),
-          type: "user",
+          type: "message",
           content: msgWithId,
           timestamp: Date.now(),
         };
@@ -1336,7 +1336,7 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
         this.log.debug({ role: msg.role }, "Queuing message to COM");
         this.com.queueMessage({
           id: randomUUID(),
-          type: "user",
+          type: "message",
           content: msg,
         } as any);
       }
@@ -1455,11 +1455,13 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
         // Stream model output if supported
         let modelOutput: any;
         if (model.stream) {
+          const streamEvents: StreamEvent[] = [];
           const streamIterable = await model.stream(modelInput);
           for await (const event of streamIterable) {
             if (signal.aborted) {
               throw new AbortError("Execution aborted", signal.reason);
             }
+            streamEvents.push(event as StreamEvent);
             this.emitEvent(event as StreamEvent);
 
             if (event.type === "content_delta" && "delta" in event) {
@@ -1478,11 +1480,34 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
             }
           }
 
+          // Aggregate stream events into final output
           if (!modelOutput) {
-            modelOutput = await model.generate(modelInput);
+            if (model.processStream) {
+              // Use model's processStream if available
+              modelOutput = await model.processStream(streamEvents);
+            } else if (responseChunks.length > 0) {
+              // Construct from collected chunks
+              const text = responseChunks.join("");
+              modelOutput = {
+                message: {
+                  role: "assistant",
+                  content: [{ type: "text", text }],
+                },
+                stopReason: "stop" as const,
+                raw: { streamed: true },
+              };
+            } else {
+              throw new Error("Streaming completed but no response was received");
+            }
           }
         } else {
-          modelOutput = await model.generate(modelInput);
+          // Procedure returns ExecutionHandle by default - access .result for actual return value
+          // Handle both real procedures (with .result) and mock functions (direct value)
+          const generateResult = model.generate(modelInput);
+          modelOutput =
+            generateResult && "result" in generateResult
+              ? await generateResult.result
+              : await generateResult;
         }
 
         // Extract text from model output

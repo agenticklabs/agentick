@@ -3,6 +3,21 @@
  */
 
 import type { App } from "@tentickle/core";
+import type { KernelContext, UserContext } from "@tentickle/kernel";
+
+// Re-export auth types from server
+export type { AuthConfig, AuthResult } from "@tentickle/server";
+
+/**
+ * Schema type that works with both Zod 3 and Zod 4.
+ * We only need parse() and type inference (_output).
+ */
+export interface ZodLikeSchema<T = unknown> {
+  parse(data: unknown): T;
+  _output: T;
+}
+
+export type { UserContext } from "@tentickle/kernel";
 
 // ============================================================================
 // Gateway Configuration
@@ -10,13 +25,13 @@ import type { App } from "@tentickle/core";
 
 export interface GatewayConfig {
   /**
-   * Port to listen on
+   * Port to listen on (ignored in embedded mode)
    * @default 18789
    */
   port?: number;
 
   /**
-   * Host to bind to
+   * Host to bind to (ignored in embedded mode)
    * @default "127.0.0.1"
    */
   host?: string;
@@ -27,19 +42,26 @@ export interface GatewayConfig {
   id?: string;
 
   /**
-   * Agent definitions
+   * App definitions
    */
-  agents: Record<string, App>;
+  apps: Record<string, App>;
 
   /**
-   * Default agent to use when session key doesn't specify one
+   * Default app to use when session key doesn't specify one
    */
-  defaultAgent: string;
+  defaultApp: string;
 
   /**
    * Authentication configuration
    */
-  auth?: AuthConfig;
+  auth?: import("@tentickle/server").AuthConfig;
+
+  /**
+   * Run in embedded mode (no standalone server).
+   * Use handleRequest() to process requests from your framework.
+   * @default false
+   */
+  embedded?: boolean;
 
   /**
    * Persistence configuration
@@ -57,7 +79,7 @@ export interface GatewayConfig {
   routing?: RoutingConfig;
 
   /**
-   * Transport mode
+   * Transport mode (ignored in embedded mode)
    * - "websocket": WebSocket only (default, good for CLI/native clients)
    * - "http": HTTP/SSE only (good for web browsers)
    * - "both": Both transports on different ports
@@ -82,22 +104,20 @@ export interface GatewayConfig {
    * @default port + 1
    */
   httpPort?: number;
-}
 
-// ============================================================================
-// Authentication
-// ============================================================================
-
-export type AuthConfig =
-  | { type: "none" }
-  | { type: "token"; token: string }
-  | { type: "jwt"; secret: string; issuer?: string }
-  | { type: "custom"; validate: (token: string) => Promise<AuthResult> };
-
-export interface AuthResult {
-  valid: boolean;
-  userId?: string;
-  metadata?: Record<string, unknown>;
+  /**
+   * Custom methods - runs within Tentickle ALS context.
+   *
+   * Supports:
+   * - Simple handlers: `async (params) => result`
+   * - Streaming: `async function* (params) { yield value }`
+   * - With config: `method({ schema, handler, roles, guard })`
+   * - Namespaces: `{ tasks: { list, create, admin: { ... } } }` (recursive)
+   *
+   * Use method() wrapper for schema validation, roles, guards, etc.
+   * ctx param is optional - use Context.get() for idiomatic access.
+   */
+  methods?: MethodsConfig;
 }
 
 // ============================================================================
@@ -157,9 +177,9 @@ export interface GatewayContext {
   sendToSession(sessionId: string, message: string): Promise<void>;
 
   /**
-   * Get available agents
+   * Get available apps
    */
-  getAgents(): string[];
+  getApps(): string[];
 
   /**
    * Get or create a session
@@ -169,7 +189,7 @@ export interface GatewayContext {
 
 export interface SessionContext {
   id: string;
-  agentId: string;
+  appId: string;
   send(message: string): AsyncGenerator<SessionEvent>;
 }
 
@@ -202,8 +222,8 @@ export interface IncomingMessage {
 }
 
 export interface RoutingContext {
-  availableAgents: string[];
-  defaultAgent: string;
+  availableApps: string[];
+  defaultApp: string;
   sessionHistory?: Array<{ role: string; content: string }>;
 }
 
@@ -215,7 +235,8 @@ export interface ClientState {
   id: string;
   connectedAt: Date;
   authenticated: boolean;
-  userId?: string;
+  /** Full user context from auth */
+  user?: UserContext;
   subscriptions: Set<string>;
   metadata?: Record<string, unknown>;
 }
@@ -226,7 +247,7 @@ export interface ClientState {
 
 export interface SessionState {
   id: string;
-  agentId: string;
+  appId: string;
   createdAt: Date;
   lastActivityAt: Date;
   messageCount: number;
@@ -243,16 +264,16 @@ export interface GatewayEvents {
   stopped: Record<string, never>;
   "client:connected": { clientId: string; ip?: string };
   "client:disconnected": { clientId: string; reason?: string };
-  "client:authenticated": { clientId: string; userId?: string };
-  "session:created": { sessionId: string; agentId: string };
+  "client:authenticated": { clientId: string; user?: UserContext };
+  "session:created": { sessionId: string; appId: string };
   "session:closed": { sessionId: string };
   "session:message": {
     sessionId: string;
     role: "user" | "assistant";
     content: string;
   };
-  "agent:message": {
-    agentId: string;
+  "app:message": {
+    appId: string;
     sessionId: string;
     message: string;
   };
@@ -267,3 +288,104 @@ export interface GatewayEvents {
   };
   error: Error;
 }
+
+// ============================================================================
+// Custom Methods
+// ============================================================================
+
+/** Symbol for detecting method definitions vs namespaces */
+export const METHOD_DEFINITION = Symbol.for("tentickle:method-definition");
+
+/**
+ * Simple method handler - ctx param is optional since Context.get() works
+ */
+export type SimpleMethodHandler<TParams = Record<string, unknown>, TResult = unknown> = (
+  params: TParams,
+  ctx?: KernelContext,
+) => Promise<TResult> | TResult;
+
+/**
+ * Streaming method handler - yields values to client
+ */
+export type StreamingMethodHandler<TParams = Record<string, unknown>, TYield = unknown> = (
+  params: TParams,
+  ctx?: KernelContext,
+) => AsyncGenerator<TYield>;
+
+/**
+ * Method definition input (what you pass to method())
+ */
+export interface MethodDefinitionInput<TSchema extends ZodLikeSchema = ZodLikeSchema> {
+  /** Zod schema for params validation + TypeScript inference */
+  schema?: TSchema;
+  /** Handler function - receives validated & typed params */
+  handler: SimpleMethodHandler<TSchema["_output"]> | StreamingMethodHandler<TSchema["_output"]>;
+  /** Required roles - checked before handler */
+  roles?: string[];
+  /** Custom guard function */
+  guard?: (ctx: KernelContext) => boolean | Promise<boolean>;
+  /** Method description for discovery */
+  description?: string;
+}
+
+/**
+ * Method definition with symbol marker (returned by method())
+ */
+export interface MethodDefinition<
+  TSchema extends ZodLikeSchema = ZodLikeSchema,
+> extends MethodDefinitionInput<TSchema> {
+  [METHOD_DEFINITION]: true;
+}
+
+/**
+ * Factory function to create a method definition.
+ * Stores config (schema, roles, guards) - the gateway creates the
+ * actual procedure during initialization with the full inferred path name.
+ *
+ * @example
+ * methods: {
+ *   tasks: {
+ *     list: async (params) => { ... },  // Simple - auto-wrapped
+ *     create: method({                   // With config
+ *       schema: z.object({ title: z.string() }),
+ *       handler: async (params) => { ... }
+ *     }),
+ *   }
+ * }
+ */
+export function method<TSchema extends ZodLikeSchema>(
+  definition: MethodDefinitionInput<TSchema>,
+): MethodDefinition<TSchema> {
+  return {
+    [METHOD_DEFINITION]: true,
+    ...definition,
+  };
+}
+
+/**
+ * Check if a value is a method definition (vs a namespace)
+ */
+export function isMethodDefinition(value: unknown): value is MethodDefinition {
+  return typeof value === "object" && value !== null && METHOD_DEFINITION in value;
+}
+
+/**
+ * Method can be:
+ * - Simple function: async (params) => result
+ * - Streaming function: async function* (params) { yield }
+ * - Method definition: method({ schema, handler, roles, ... })
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export type Method = SimpleMethodHandler | StreamingMethodHandler | MethodDefinition<any>;
+
+/**
+ * Method namespace - recursively nested, arbitrary depth
+ */
+export type MethodNamespace = {
+  [key: string]: Method | MethodNamespace;
+};
+
+/**
+ * Methods config - supports flat or nested namespaces
+ */
+export type MethodsConfig = MethodNamespace;

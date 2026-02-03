@@ -178,7 +178,7 @@ export class WSTransport extends BaseTransport {
 
     // Update client state
     client.state.authenticated = true;
-    client.state.userId = authResult.userId;
+    client.state.user = authResult.user;
     client.state.metadata = {
       ...client.state.metadata,
       ...authResult.metadata,

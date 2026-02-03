@@ -335,7 +335,8 @@ export class ToolExecutor {
         toolName: call.name,
         toolId: call.id,
       });
-      const result = await toolProcedure(call.input);
+      // Procedure returns ExecutionHandle by default - access .result for actual return value
+      const result = await toolProcedure(call.input).result;
 
       // Handle async iterable result (shouldn't happen for tools, but be safe)
       let content: ContentBlock[];

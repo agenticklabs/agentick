@@ -4,7 +4,7 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { SessionManager } from "../session-manager.js";
-import { AgentRegistry } from "../agent-registry.js";
+import { AppRegistry } from "../app-registry.js";
 import type { App } from "@tentickle/core";
 
 // Mock App for testing
@@ -28,7 +28,7 @@ function createMockApp(name: string): App {
 }
 
 describe("SessionManager", () => {
-  let registry: AgentRegistry;
+  let registry: AppRegistry;
   let manager: SessionManager;
   let chatApp: App;
   let researchApp: App;
@@ -36,26 +36,26 @@ describe("SessionManager", () => {
   beforeEach(() => {
     chatApp = createMockApp("chat");
     researchApp = createMockApp("research");
-    registry = new AgentRegistry({ chat: chatApp, research: researchApp }, "chat");
+    registry = new AppRegistry({ chat: chatApp, research: researchApp }, "chat");
     manager = new SessionManager(registry);
   });
 
   describe("getOrCreate", () => {
-    it("creates new session with default agent", async () => {
+    it("creates new session with default app", async () => {
       const session = await manager.getOrCreate("main");
 
       expect(session.state.id).toBe("chat:main");
-      expect(session.state.agentId).toBe("chat");
-      expect(session.agent.id).toBe("chat");
+      expect(session.state.appId).toBe("chat");
+      expect(session.appInfo.id).toBe("chat");
       expect(session.coreSession).toBeNull();
     });
 
-    it("creates new session with specified agent", async () => {
+    it("creates new session with specified app", async () => {
       const session = await manager.getOrCreate("research:task-1");
 
       expect(session.state.id).toBe("research:task-1");
-      expect(session.state.agentId).toBe("research");
-      expect(session.agent.id).toBe("research");
+      expect(session.state.appId).toBe("research");
+      expect(session.appInfo.id).toBe("research");
     });
 
     it("returns existing session", async () => {
@@ -205,15 +205,15 @@ describe("SessionManager", () => {
       expect(ids).toContain("research:task-1");
     });
 
-    it("returns sessions for specific agent", async () => {
+    it("returns sessions for specific app", async () => {
       await manager.getOrCreate("main");
       await manager.getOrCreate("chat:other");
       await manager.getOrCreate("research:task-1");
 
-      const chatSessions = manager.forAgent("chat");
+      const chatSessions = manager.forApp("chat");
       expect(chatSessions).toHaveLength(2);
 
-      const researchSessions = manager.forAgent("research");
+      const researchSessions = manager.forApp("research");
       expect(researchSessions).toHaveLength(1);
     });
   });

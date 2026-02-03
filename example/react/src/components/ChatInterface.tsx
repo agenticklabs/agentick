@@ -2,7 +2,7 @@
  * Chat Interface Component
  *
  * Architecture:
- * - Timeline channel is the source of truth for messages
+ * - execution_end events are the source of truth for messages (contains full timeline)
  * - No local message state - we render what the server sends
  * - Streaming text shows real-time model output
  * - Pending message shows optimistic user input until confirmed
@@ -41,6 +41,20 @@ export function ChatInterface() {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [serverMessages, streamingText, isStreaming, pendingMessage]);
 
+  // Helper to invoke gateway methods
+  const invoke = async (method: string, params: Record<string, unknown>) => {
+    const res = await fetch("/api/invoke", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ method, params }),
+    });
+    if (!res.ok) {
+      const error = await res.json().catch(() => ({ error: "Request failed" }));
+      throw new Error(error.error || "Request failed");
+    }
+    return res.json();
+  };
+
   // Load initial history from server
   useEffect(() => {
     let isMounted = true;
@@ -48,22 +62,17 @@ export function ChatInterface() {
     const loadHistory = async () => {
       try {
         // Ensure session exists
-        await fetch("/api/sessions", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ sessionId: SESSION_ID }),
-        });
+        await invoke("sessions:create", { sessionId: SESSION_ID });
 
         // Load timeline
-        const response = await fetch(`/api/sessions/${SESSION_ID}`);
-        if (!response.ok) return;
-
-        const data = (await response.json()) as { timeline?: unknown[] };
+        const data = (await invoke("sessions:get", { sessionId: SESSION_ID })) as {
+          timeline?: unknown[];
+        };
         const timeline = Array.isArray(data.timeline) ? data.timeline : [];
 
         const messages = timeline
-          .map((entry) => (entry as { message?: Message }).message)
-          .filter((msg): msg is Message => !!msg);
+          .map((entry: unknown) => (entry as { message?: Message }).message)
+          .filter((msg: Message | undefined): msg is Message => !!msg);
 
         if (isMounted) {
           setServerMessages(messages);
@@ -79,28 +88,26 @@ export function ChatInterface() {
     };
   }, []);
 
-  // Subscribe to timeline channel for deltas
-  // Server sends only NEW messages since last publish - we append them
+  // Subscribe to execution_end events to get timeline updates
+  // execution_end contains output.timeline with all messages
   useEffect(() => {
     if (!accessor) return;
 
-    const channel = accessor.channel("timeline");
-    const unsubscribe = channel.subscribe((payload: unknown, event: { type: string }) => {
-      if (event.type === "timeline_delta" && payload && typeof payload === "object") {
-        const data = payload as { messages?: Message[]; totalCount?: number };
-        if (data.messages && data.messages.length > 0) {
-          setServerMessages((prev) => {
-            const updated = [...prev, ...data.messages!];
-            // Verify sync - if counts don't match, we may need to refetch
-            if (data.totalCount !== undefined && updated.length !== data.totalCount) {
-              console.warn(
-                `Timeline sync mismatch: local=${updated.length}, server=${data.totalCount}`,
-              );
-            }
-            return updated;
-          });
-          // Clear pending message since server has confirmed it
-          setPendingMessage(null);
+    const unsubscribe = accessor.onEvent((event) => {
+      if (event.type === "execution_end") {
+        const execEnd = event as {
+          type: "execution_end";
+          output?: { timeline?: Array<{ kind: string; message?: Message }> };
+        };
+        if (execEnd.output?.timeline) {
+          const messages = execEnd.output.timeline
+            .filter((entry) => entry.kind === "message" && entry.message)
+            .map((entry) => entry.message!);
+          if (messages.length > 0) {
+            setServerMessages(messages);
+            // Clear pending message since server has confirmed it
+            setPendingMessage(null);
+          }
         }
       }
     });
@@ -108,9 +115,8 @@ export function ChatInterface() {
     return unsubscribe;
   }, [accessor]);
 
-  // Note: We intentionally do NOT subscribe to the "messages" channel for message_queued events.
-  // The timeline_delta channel is our single source of truth. Using both would cause duplicates.
-  // The pendingMessage state provides optimistic UX for the current user's messages.
+  // Note: The pendingMessage state provides optimistic UX for the current user's messages
+  // while waiting for the server to confirm via execution_end event.
 
   // Convert server messages to display format
   const displayMessages = useMemo((): ChatMessage[] => {

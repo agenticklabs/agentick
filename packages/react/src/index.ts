@@ -72,11 +72,12 @@
  * @module @tentickle/react
  */
 
-// Provider and context
-export { TentickleProvider, useClient } from "./context";
+// Provider
+export { TentickleProvider } from "./context";
 
 // Hooks
 export {
+  useClient,
   useConnection,
   useSession,
   useConnectionState,

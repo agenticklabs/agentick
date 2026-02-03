@@ -4,15 +4,15 @@
  * @module @tentickle/react/context
  */
 
-import { createContext, useContext, useMemo, useEffect } from "react";
-import { createClient, type TentickleClient } from "@tentickle/client";
+import { createContext, useMemo, useEffect } from "react";
+import { createClient } from "@tentickle/client";
 import type { TentickleProviderProps, TentickleContextValue } from "./types";
 
 // ============================================================================
 // Context
 // ============================================================================
 
-const TentickleContext = createContext<TentickleContextValue | null>(null);
+export const TentickleContext = createContext<TentickleContextValue | null>(null);
 
 // ============================================================================
 // Provider
@@ -130,41 +130,4 @@ export function TentickleProvider({
   const value = useMemo<TentickleContextValue>(() => ({ client }), [client]);
 
   return <TentickleContext.Provider value={value}>{children}</TentickleContext.Provider>;
-}
-
-// ============================================================================
-// Hook
-// ============================================================================
-
-/**
- * Access the Tentickle client from context.
- *
- * @throws If used outside of TentickleProvider
- *
- * @example
- * ```tsx
- * import { useClient } from '@tentickle/react';
- *
- * function MyComponent() {
- *   const client = useClient();
- *
- *   // Direct client access for advanced use cases
- *   const handleCustomChannel = () => {
- *     const session = client.session('conv-123');
- *     const channel = session.channel('custom');
- *     channel.publish('event', { data: 'value' });
- *   };
- *
- *   return <button onClick={handleCustomChannel}>Send</button>;
- * }
- * ```
- */
-export function useClient(): TentickleClient {
-  const context = useContext(TentickleContext);
-
-  if (!context) {
-    throw new Error("useClient must be used within a TentickleProvider");
-  }
-
-  return context.client;
 }

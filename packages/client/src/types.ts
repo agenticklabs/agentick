@@ -247,3 +247,17 @@ export interface StreamingTextState {
  * Handler for streaming text state changes.
  */
 export type StreamingTextHandler = (state: StreamingTextState) => void;
+
+// ============================================================================
+// Custom Method Invocation
+// ============================================================================
+
+/**
+ * Result from a streaming method invocation.
+ */
+export interface StreamingMethodResult<T = unknown> {
+  /** Whether the result was streamed */
+  streaming: true;
+  /** Collected chunks from the stream */
+  chunks: T[];
+}

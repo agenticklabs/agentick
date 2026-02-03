@@ -5,14 +5,14 @@ describe("Kernel Hook", () => {
   it("should execute a simple handler", async () => {
     const hook = createHook({ name: "test" }, async (input) => input * 2);
 
-    const result = await hook(5);
+    const result = await hook(5).result;
     expect(result).toBe(10);
   });
 
   it("should support multiple arguments", async () => {
     const hook = createHook({ name: "test" }, async (name, count) => `${name}: ${count}`);
 
-    const result = await hook("test", 5);
+    const result = await hook("test", 5).result;
     expect(result).toBe("test: 5");
   });
 
@@ -27,7 +27,7 @@ describe("Kernel Hook", () => {
       },
     );
 
-    const result = await hook(1);
+    const result = await hook(1).result;
     // Flow: 1 -> handler(1) = 2 -> 2 + 1 = 3
     expect(result).toBe(3);
   });
@@ -43,7 +43,7 @@ describe("Kernel Hook", () => {
         return next([value + 1]);
       });
 
-    const result = await hook(5);
+    const result = await hook(5).result;
     // Input flow: [5] -> (mw1: [10]) -> (mw2: [11]) -> handler(11 * 10 = 110)
     expect(result).toBe(110);
   });
@@ -56,7 +56,7 @@ describe("Kernel Hook", () => {
       },
     );
 
-    const result = await hook(5);
+    const result = await hook(5).result;
     // Input flow: [5] -> (mw1 doesn't transform) -> handler(5 * 2 = 10)
     expect(result).toBe(10);
   });
@@ -76,7 +76,7 @@ describe("Kernel Hook", () => {
         return next([value + 5]);
       });
 
-    const result = await hook(5);
+    const result = await hook(5).result;
     // Input flow: [5] -> (mw1: [10]) -> (mw2: [10]) -> (mw3: [15]) -> handler(15 * 2 = 30)
     expect(result).toBe(30);
   });
@@ -89,7 +89,7 @@ describe("Kernel Hook", () => {
       },
     );
 
-    const result = await hook("test", 5);
+    const result = await hook("test", 5).result;
     // Input flow: ['test', 5] -> (mw1: ['TEST', 10]) -> handler('TEST: 10')
     expect(result).toBe("TEST: 10");
   });
@@ -102,7 +102,7 @@ describe("Kernel Hook", () => {
       return res + 10;
     });
 
-    const result = await extendedHook(1);
+    const result = await extendedHook(1).result;
     expect(result).toBe(11);
   });
 
@@ -123,7 +123,7 @@ describe("Kernel Hook", () => {
         return [...res, 3];
       });
 
-    const result = await chainedHook();
+    const result = await chainedHook().result;
     // Execution order: mw1 -> mw2 -> mw3 -> handler
     // Return order: handler([]) -> mw3([3]) -> mw2([3,2]) -> mw1([3,2,1])
     expect(result).toEqual([3, 2, 1]);
@@ -139,7 +139,7 @@ describe("Kernel Hook", () => {
       },
     );
 
-    const result = await hook(5);
+    const result = await hook(5).result;
     expect(result).toBe("Result: 5");
   });
 
@@ -156,7 +156,7 @@ describe("Kernel Hook", () => {
   it("should support no arguments", async () => {
     const hook = createHook(async () => 42);
 
-    const result = await hook();
+    const result = await hook().result;
     expect(result).toBe(42);
   });
 
@@ -172,14 +172,14 @@ describe("Kernel Hook", () => {
           },
         );
 
-        const nestedResult = await nestedHook(value + 1);
+        const nestedResult = await nestedHook(value + 1).result;
         // Nested hook: (value + 1) * 3
         // Parent hook: value * 2
         return next([value * 2 + nestedResult]);
       },
     );
 
-    const result = await parentHook(5);
+    const result = await parentHook(5).result;
     // Parent: 5 -> nestedHook(6) -> nested: 6 * 3 = 18 -> parent: 5 * 2 + 18 = 28
     expect(result).toBe(28);
   });
@@ -198,7 +198,7 @@ describe("Kernel Hook", () => {
     );
 
     // Run concurrently
-    const [result1, result2] = await Promise.all([hook1(5), hook2(7)]);
+    const [result1, result2] = await Promise.all([hook1(5).result, hook2(7).result]);
 
     expect(result1).toBe(10); // 5 * 2
     expect(result2).toBe(21); // 7 * 3
@@ -219,12 +219,12 @@ describe("Kernel Hook", () => {
           },
         );
 
-        const innerResult = await innerHook(value);
+        const innerResult = await innerHook(value).result;
         // Continue outer chain with inner result
         return next([innerResult]);
       });
 
-    const result = await outerHook(5);
+    const result = await outerHook(5).result;
     // Flow: 5 -> (outer mw1: 15) -> innerHook(15) -> (inner mw1: 30) -> inner handler: 30
     // -> (outer mw2: 30) -> outer handler: 30 * 5 = 150
     expect(result).toBe(150);
@@ -235,7 +235,7 @@ describe("Kernel Hook", () => {
       throw new Error("Middleware error");
     });
 
-    await expect(hook(5)).rejects.toThrow("Middleware error");
+    await expect(hook(5).result).rejects.toThrow("Middleware error");
   });
 
   it("should handle errors in handler correctly", async () => {
@@ -243,7 +243,7 @@ describe("Kernel Hook", () => {
       throw new Error("Handler error");
     });
 
-    await expect(hook(5)).rejects.toThrow("Handler error");
+    await expect(hook(5).result).rejects.toThrow("Handler error");
   });
 
   it("should support complex argument types", async () => {
@@ -259,7 +259,7 @@ describe("Kernel Hook", () => {
       return next([{ name: obj.name.toUpperCase(), count: obj.count * 2 }, suffix.toUpperCase()]);
     });
 
-    const result = await hook({ name: "test", count: 5 }, "end");
+    const result = await hook({ name: "test", count: 5 }, "end").result;
     expect(result).toBe("TEST-10-END");
   });
 
@@ -273,8 +273,8 @@ describe("Kernel Hook", () => {
     const ctx = Context.create({ signal: controller.signal });
 
     await Context.run(ctx, async () => {
-      await expect(hook()).rejects.toThrow("Operation aborted");
-      const error = await hook().catch((e) => e);
+      await expect(hook().result).rejects.toThrow("Operation aborted");
+      const error = await hook().result.catch((e) => e);
       expect(error.name).toBe("AbortError");
     });
   });
@@ -290,7 +290,7 @@ describe("Kernel Hook", () => {
     const ctx = Context.create({ signal: controller.signal });
 
     await Context.run(ctx, async () => {
-      await expect(hook(5)).rejects.toThrow("Operation aborted");
+      await expect(hook(5).result).rejects.toThrow("Operation aborted");
     });
   });
 
@@ -309,8 +309,8 @@ describe("Kernel Hook", () => {
 
     await Context.run(ctx, async () => {
       // Abort check happens before handler execution
-      await expect(hook(5)).rejects.toThrow("Operation aborted");
-      const error = await hook(5).catch((e) => e);
+      await expect(hook(5).result).rejects.toThrow("Operation aborted");
+      const error = await hook(5).result.catch((e) => e);
       expect(error.name).toBe("AbortError");
     });
   });

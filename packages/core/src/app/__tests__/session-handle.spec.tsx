@@ -56,11 +56,12 @@ function createMockModel(options?: { delay?: number; response?: Partial<ModelOut
         if (delay > 0) {
           await new Promise((resolve) => setTimeout(resolve, delay));
         }
+        // Yield consistent response for both streaming and non-streaming paths
         yield {
           type: "content_delta",
           blockType: BlockType.TEXT,
           blockIndex: 0,
-          delta: "Mock",
+          delta: "Mock response",
         } as StreamEvent;
       },
     },
@@ -930,7 +931,7 @@ describe("useOnMessage integration", () => {
     expect(historyDuringRender.length).toBeGreaterThanOrEqual(1);
     const userMessage = historyDuringRender.find((m) => m.type === "user");
     expect(userMessage).toBeDefined();
-    expect(userMessage.content).toEqual({
+    expect(userMessage.content).toMatchObject({
       role: "user",
       content: [{ type: "text", text: "Hello from send" }],
     });

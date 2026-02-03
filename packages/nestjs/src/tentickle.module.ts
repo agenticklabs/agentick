@@ -1,24 +1,87 @@
 /**
- * TentickleModule - NestJS module for Tentickle.
+ * TentickleModule - NestJS module for Tentickle Gateway.
+ *
+ * This is a thin adapter - all business logic lives in @tentickle/gateway.
  *
  * @module @tentickle/nestjs/module
  */
 
-import { Module, type DynamicModule, type Provider, type Type } from "@nestjs/common";
-import { TentickleController } from "./tentickle.controller";
-import { TentickleService } from "./tentickle.service";
 import {
-  TENTICKLE_OPTIONS,
-  TENTICKLE_APP,
-  type TentickleModuleOptions,
-  type TentickleModuleAsyncOptions,
-  type TentickleModuleOptionsFactory,
-} from "./types";
+  Module,
+  type DynamicModule,
+  type Provider,
+  Inject,
+  Injectable,
+  Controller,
+  All,
+  Req,
+  Res,
+} from "@nestjs/common";
+import type { Request, Response } from "express";
+import { Gateway, type GatewayConfig } from "@tentickle/gateway";
+
+// ============================================================================
+// Injection Tokens
+// ============================================================================
+
+export const TENTICKLE_GATEWAY = "TENTICKLE_GATEWAY";
+
+// ============================================================================
+// Types
+// ============================================================================
+
+/**
+ * Gateway config type for NestJS module.
+ * Excludes standalone-mode-only options.
+ */
+export type TentickleModuleOptions = Omit<
+  GatewayConfig,
+  "port" | "host" | "transport" | "httpPort"
+> & {
+  /**
+   * Whether to register the default controller.
+   * Set to false if you want to define your own routes.
+   * @default true
+   */
+  registerController?: boolean;
+};
+
+// ============================================================================
+// Service (thin wrapper around Gateway)
+// ============================================================================
+
+@Injectable()
+export class TentickleService {
+  constructor(@Inject(TENTICKLE_GATEWAY) public readonly gateway: Gateway) {}
+
+  /**
+   * Handle an HTTP request by delegating to Gateway.
+   */
+  async handleRequest(req: Request, res: Response): Promise<void> {
+    return this.gateway.handleRequest(req, res);
+  }
+}
+
+// ============================================================================
+// Controller (delegates everything to Gateway)
+// ============================================================================
+
+@Controller()
+export class TentickleController {
+  constructor(private readonly tentickle: TentickleService) {}
+
+  @All("*")
+  async handleAll(@Req() req: Request, @Res() res: Response): Promise<void> {
+    await this.tentickle.handleRequest(req, res);
+  }
+}
+
+// ============================================================================
+// Module
+// ============================================================================
 
 /**
  * NestJS module for Tentickle.
- *
- * Provides multiplexed SSE session access with App injection.
  *
  * @example Default controller (simplest)
  * ```typescript
@@ -28,22 +91,46 @@ import {
  * @Module({
  *   imports: [
  *     TentickleModule.forRoot({
- *       app: createApp(<MyAgent />),
+ *       apps: { assistant: createApp(<MyAgent />) },
+ *       defaultApp: "assistant",
  *     }),
  *   ],
  * })
  * export class AppModule {}
- * // Endpoints: GET /events, POST /send, POST /subscribe, etc.
+ * // Endpoints: GET /events, POST /send, POST /invoke, etc.
  * ```
  *
- * @example Custom controller with TentickleService
+ * @example With custom methods
  * ```typescript
- * import { TentickleModule, TentickleService } from '@tentickle/nestjs';
+ * import { TentickleModule, method } from '@tentickle/nestjs';
+ * import { z } from "zod";
  *
  * @Module({
  *   imports: [
  *     TentickleModule.forRoot({
- *       app,
+ *       apps: { assistant: myApp },
+ *       defaultApp: "assistant",
+ *       methods: {
+ *         tasks: {
+ *           list: method({
+ *             schema: z.object({ sessionId: z.string() }),
+ *             handler: async (params) => todoService.list(params.sessionId),
+ *           }),
+ *         },
+ *       },
+ *     }),
+ *   ],
+ * })
+ * export class AppModule {}
+ * ```
+ *
+ * @example Custom controller with TentickleService
+ * ```typescript
+ * @Module({
+ *   imports: [
+ *     TentickleModule.forRoot({
+ *       apps: { assistant: myApp },
+ *       defaultApp: "assistant",
  *       registerController: false,
  *     }),
  *   ],
@@ -55,12 +142,9 @@ import {
  * export class ChatController {
  *   constructor(private tentickle: TentickleService) {}
  *
- *   @Post()
- *   async chat(@Body() body: { message: string }) {
- *     const handle = await this.tentickle.send({
- *       message: { role: 'user', content: [{ type: 'text', text: body.message }] },
- *     });
- *     return handle.result;
+ *   @All('*')
+ *   async handleAll(@Req() req: Request, @Res() res: Response) {
+ *     await this.tentickle.handleRequest(req, res);
  *   }
  * }
  * ```
@@ -71,85 +155,27 @@ export class TentickleModule {
    * Register module with static configuration.
    */
   static forRoot(options: TentickleModuleOptions): DynamicModule {
-    const providers = this.createProviders(options);
-    const controllers = options.registerController !== false ? [TentickleController] : [];
+    // Create gateway in embedded mode
+    const gateway = new Gateway({
+      ...options,
+      embedded: true,
+    });
 
-    return {
-      module: TentickleModule,
-      controllers,
-      providers,
-      exports: [TentickleService, TENTICKLE_APP],
-    };
-  }
-
-  /**
-   * Register module with async configuration.
-   */
-  static forRootAsync(options: TentickleModuleAsyncOptions): DynamicModule {
-    const providers = this.createAsyncProviders(options);
-    const controllers = options.registerController !== false ? [TentickleController] : [];
-
-    return {
-      module: TentickleModule,
-      imports: options.imports || [],
-      controllers,
-      providers,
-      exports: [TentickleService, TENTICKLE_APP],
-    };
-  }
-
-  private static createProviders(options: TentickleModuleOptions): Provider[] {
-    return [
-      {
-        provide: TENTICKLE_OPTIONS,
-        useValue: options,
-      },
-      {
-        provide: TENTICKLE_APP,
-        useValue: options.app,
-      },
-      TentickleService,
-    ];
-  }
-
-  private static createAsyncProviders(options: TentickleModuleAsyncOptions): Provider[] {
     const providers: Provider[] = [
       {
-        provide: TENTICKLE_APP,
-        useFactory: (opts: TentickleModuleOptions) => opts.app,
-        inject: [TENTICKLE_OPTIONS],
+        provide: TENTICKLE_GATEWAY,
+        useValue: gateway,
       },
       TentickleService,
     ];
 
-    if (options.useFactory) {
-      providers.push({
-        provide: TENTICKLE_OPTIONS,
-        useFactory: options.useFactory,
-        inject: options.inject || [],
-      });
-    } else if (options.useClass) {
-      providers.push(
-        {
-          provide: options.useClass,
-          useClass: options.useClass,
-        },
-        {
-          provide: TENTICKLE_OPTIONS,
-          useFactory: async (factory: TentickleModuleOptionsFactory) =>
-            factory.createTentickleOptions(),
-          inject: [options.useClass],
-        },
-      );
-    } else if (options.useExisting) {
-      providers.push({
-        provide: TENTICKLE_OPTIONS,
-        useFactory: async (factory: TentickleModuleOptionsFactory) =>
-          factory.createTentickleOptions(),
-        inject: [options.useExisting],
-      });
-    }
+    const controllers = options.registerController !== false ? [TentickleController] : [];
 
-    return providers;
+    return {
+      module: TentickleModule,
+      providers,
+      controllers,
+      exports: [TentickleService, TENTICKLE_GATEWAY],
+    };
   }
 }

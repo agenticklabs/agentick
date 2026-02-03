@@ -81,30 +81,30 @@ describe("Gateway", () => {
       gateway = createGateway({
         port: TEST_PORT,
         host: TEST_HOST,
-        agents: { chat: chatApp },
-        defaultAgent: "chat",
+        apps: { chat: chatApp },
+        defaultApp: "chat",
       });
 
       expect(gateway).toBeInstanceOf(Gateway);
       expect(gateway.id).toBeDefined();
     });
 
-    it("throws if no agents provided", () => {
+    it("throws if no apps provided", () => {
       expect(() =>
         createGateway({
-          agents: {},
-          defaultAgent: "chat",
+          apps: {},
+          defaultApp: "chat",
         }),
-      ).toThrow("At least one agent is required");
+      ).toThrow("At least one app is required");
     });
 
-    it("throws if default agent not found", () => {
+    it("throws if default app not found", () => {
       expect(() =>
         createGateway({
-          agents: { chat: chatApp },
-          defaultAgent: "research",
+          apps: { chat: chatApp },
+          defaultApp: "research",
         }),
-      ).toThrow('Default agent "research" not found');
+      ).toThrow('Default app "research" not found');
     });
   });
 
@@ -113,8 +113,8 @@ describe("Gateway", () => {
       gateway = createGateway({
         port: TEST_PORT,
         host: TEST_HOST,
-        agents: { chat: chatApp },
-        defaultAgent: "chat",
+        apps: { chat: chatApp },
+        defaultApp: "chat",
       });
 
       await gateway.start();
@@ -128,8 +128,8 @@ describe("Gateway", () => {
       gateway = createGateway({
         port: TEST_PORT,
         host: TEST_HOST,
-        agents: { chat: chatApp },
-        defaultAgent: "chat",
+        apps: { chat: chatApp },
+        defaultApp: "chat",
       });
 
       const startedPromise = new Promise<{ port: number; host: string }>((resolve) => {
@@ -147,8 +147,8 @@ describe("Gateway", () => {
       gateway = createGateway({
         port: TEST_PORT,
         host: TEST_HOST,
-        agents: { chat: chatApp },
-        defaultAgent: "chat",
+        apps: { chat: chatApp },
+        defaultApp: "chat",
       });
 
       await gateway.start();
@@ -161,8 +161,8 @@ describe("Gateway", () => {
       gateway = createGateway({
         port: TEST_PORT,
         host: TEST_HOST,
-        agents: { chat: chatApp, research: researchApp },
-        defaultAgent: "chat",
+        apps: { chat: chatApp, research: researchApp },
+        defaultApp: "chat",
       });
 
       await gateway.start();
@@ -172,7 +172,7 @@ describe("Gateway", () => {
       expect(status.uptime).toBeGreaterThanOrEqual(0);
       expect(status.clients).toBe(0);
       expect(status.sessions).toBe(0);
-      expect(status.agents).toEqual(["chat", "research"]);
+      expect(status.apps).toEqual(["chat", "research"]);
     });
   });
 
@@ -181,8 +181,8 @@ describe("Gateway", () => {
       gateway = createGateway({
         port: TEST_PORT,
         host: TEST_HOST,
-        agents: { chat: chatApp },
-        defaultAgent: "chat",
+        apps: { chat: chatApp },
+        defaultApp: "chat",
       });
 
       await gateway.start();
@@ -204,8 +204,8 @@ describe("Gateway", () => {
       gateway = createGateway({
         port: TEST_PORT,
         host: TEST_HOST,
-        agents: { chat: chatApp },
-        defaultAgent: "chat",
+        apps: { chat: chatApp },
+        defaultApp: "chat",
       });
 
       await gateway.start();
@@ -235,8 +235,8 @@ describe("Gateway", () => {
       gateway = createGateway({
         port: TEST_PORT,
         host: TEST_HOST,
-        agents: { chat: chatApp, research: researchApp },
-        defaultAgent: "chat",
+        apps: { chat: chatApp, research: researchApp },
+        defaultApp: "chat",
       });
 
       await gateway.start();
@@ -253,7 +253,7 @@ describe("Gateway", () => {
       client?.close();
     });
 
-    it("lists agents", async () => {
+    it("lists apps", async () => {
       const responsePromise = new Promise<any>((resolve) => {
         client.on("message", (data) => {
           const msg = JSON.parse(data.toString());
@@ -265,15 +265,15 @@ describe("Gateway", () => {
         JSON.stringify({
           type: "req",
           id: "req-1",
-          method: "agents",
+          method: "apps",
           params: {},
         }),
       );
 
       const response = await responsePromise;
       expect(response.ok).toBe(true);
-      expect(response.payload.agents).toHaveLength(2);
-      expect(response.payload.agents[0].id).toBeDefined();
+      expect(response.payload.apps).toHaveLength(2);
+      expect(response.payload.apps[0].id).toBeDefined();
     });
 
     it("lists sessions", async () => {
@@ -318,7 +318,7 @@ describe("Gateway", () => {
       const response = await responsePromise;
       expect(response.ok).toBe(true);
       expect(response.payload.gateway).toBeDefined();
-      expect(response.payload.gateway.agents).toContain("chat");
+      expect(response.payload.gateway.apps).toContain("chat");
     });
 
     it("sends message to session", async () => {
@@ -378,8 +378,8 @@ describe("Gateway", () => {
       gateway = createGateway({
         port: TEST_PORT,
         host: TEST_HOST,
-        agents: { chat: chatApp },
-        defaultAgent: "chat",
+        apps: { chat: chatApp },
+        defaultApp: "chat",
         auth: { type: "token", token: "secret123" },
       });
 
@@ -408,8 +408,8 @@ describe("Gateway", () => {
       gateway = createGateway({
         port: TEST_PORT,
         host: TEST_HOST,
-        agents: { chat: chatApp },
-        defaultAgent: "chat",
+        apps: { chat: chatApp },
+        defaultApp: "chat",
         auth: { type: "token", token: "secret123" },
       });
 
@@ -441,7 +441,7 @@ describe("Gateway", () => {
         JSON.stringify({
           type: "req",
           id: "req-1",
-          method: "agents",
+          method: "apps",
           params: {},
         }),
       );

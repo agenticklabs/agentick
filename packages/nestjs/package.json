@@ -30,9 +30,7 @@
   },
   "dependencies": {
     "@nestjs/common": "^10.4.15",
-    "@tentickle/core": "workspace:*",
-    "@tentickle/server": "workspace:*",
-    "@tentickle/shared": "workspace:*"
+    "@tentickle/gateway": "workspace:*"
   },
   "devDependencies": {
     "@nestjs/core": "^10.4.15",

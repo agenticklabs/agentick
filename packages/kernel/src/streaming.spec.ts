@@ -2,8 +2,9 @@ import { createProcedure } from "./procedure";
 import { Context } from "./context";
 
 describe("Kernel Streaming", () => {
-  it("should stream data via AsyncGenerator", async () => {
-    const proc = createProcedure({ name: "test" }, async function* () {
+  it("should stream data via AsyncGenerator (pass-through mode)", async () => {
+    // Use handleFactory: false for pass-through mode where the generator is returned directly
+    const proc = createProcedure({ name: "test", handleFactory: false }, async function* () {
       yield 1;
       yield 2;
     });
@@ -16,11 +17,12 @@ describe("Kernel Streaming", () => {
     expect(chunks).toEqual([1, 2]);
   });
 
-  it("should preserve context across yields when run within Context.run", async () => {
+  it("should preserve context across yields when run within Context.run (pass-through mode)", async () => {
+    // Use handleFactory: false for pass-through mode
     // Context preservation during generator iteration requires the iteration
     // to happen within a context. ExecutionTracker.track() wraps async iterables
     // to maintain context, but we need to iterate within that wrapped context.
-    const proc = createProcedure({ name: "test" }, async function* () {
+    const proc = createProcedure({ name: "test", handleFactory: false }, async function* () {
       const ctx = Context.tryGet();
       yield ctx?.traceId ?? "no-context";
       yield ctx?.traceId ?? "no-context";

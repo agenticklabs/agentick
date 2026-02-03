@@ -33,6 +33,8 @@
   },
   "dependencies": {
     "@tentickle/core": "workspace:*",
+    "@tentickle/kernel": "workspace:*",
+    "@tentickle/server": "workspace:*",
     "@tentickle/shared": "workspace:*",
     "ws": "^8.16.0"
   },

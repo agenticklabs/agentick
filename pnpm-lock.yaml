@@ -75,6 +75,9 @@ importers:
       '@tentickle/google':
         specifier: link:../../packages/adapters/google
         version: link:../../packages/adapters/google
+      '@tentickle/kernel':
+        specifier: link:../../packages/kernel
+        version: link:../../packages/kernel
       '@tentickle/openai':
         specifier: link:../../packages/adapters/openai
         version: link:../../packages/adapters/openai
@@ -328,15 +331,9 @@ importers:
 
   packages/express:
     dependencies:
-      '@tentickle/core':
+      '@tentickle/gateway':
         specifier: workspace:*
-        version: link:../core
-      '@tentickle/server':
-        specifier: workspace:*
-        version: link:../server
-      '@tentickle/shared':
-        specifier: workspace:*
-        version: link:../shared
+        version: link:../gateway
     devDependencies:
       '@types/express':
         specifier: ^4.17.21
@@ -365,6 +362,12 @@ importers:
       '@tentickle/core':
         specifier: workspace:*
         version: link:../core
+      '@tentickle/kernel':
+        specifier: workspace:*
+        version: link:../kernel
+      '@tentickle/server':
+        specifier: workspace:*
+        version: link:../server
       '@tentickle/shared':
         specifier: workspace:*
         version: link:../shared
@@ -396,6 +399,12 @@ importers:
       pino:
         specifier: ^9.6.0
         version: 9.14.0
+      zod:
+        specifier: ^4.2.1
+        version: 4.3.5
+      zod-to-json-schema:
+        specifier: ^3.25.1
+        version: 3.25.1(zod@4.3.5)
     devDependencies:
       pino-pretty:
         specifier: ^13.0.0
@@ -406,15 +415,9 @@ importers:
       '@nestjs/common':
         specifier: ^10.4.15
         version: 10.4.22(reflect-metadata@0.2.2)(rxjs@7.8.2)
-      '@tentickle/core':
+      '@tentickle/gateway':
         specifier: workspace:*
-        version: link:../core
-      '@tentickle/server':
-        specifier: workspace:*
-        version: link:../server
-      '@tentickle/shared':
-        specifier: workspace:*
-        version: link:../shared
+        version: link:../gateway
     devDependencies:
       '@nestjs/core':
         specifier: ^10.4.15
@@ -477,9 +480,9 @@ importers:
 
   packages/server:
     dependencies:
-      '@tentickle/core':
+      '@tentickle/kernel':
         specifier: workspace:*
-        version: link:../core
+        version: link:../kernel
       '@tentickle/shared':
         specifier: workspace:*
         version: link:../shared

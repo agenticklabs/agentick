@@ -7,7 +7,7 @@
 
 // Main exports
 export { Gateway, createGateway } from "./gateway.js";
-export { AgentRegistry } from "./agent-registry.js";
+export { AppRegistry } from "./app-registry.js";
 export { SessionManager } from "./session-manager.js";
 
 // Transport layer
@@ -20,10 +20,6 @@ export {
 } from "./transport.js";
 export { WSTransport, createWSTransport } from "./ws-transport.js";
 export { HTTPTransport, createHTTPTransport, type HTTPTransportConfig } from "./http-transport.js";
-
-// Legacy export for backward compatibility
-export { WSTransport as WSServer } from "./ws-transport.js";
-export type { TransportClient as WSClient } from "./transport.js";
 
 // Testing utilities
 export {
@@ -53,7 +49,7 @@ export {
   type StatusParams,
   type HistoryParams,
   type StatusPayload,
-  type AgentsPayload,
+  type AppsPayload,
   type SessionsPayload,
 } from "./protocol.js";
 
@@ -73,4 +69,19 @@ export {
   type ClientState,
   type SessionState,
   type GatewayEvents,
+  type UserContext,
+  // Method types
+  type MethodDefinition,
+  type MethodDefinitionInput,
+  type MethodNamespace,
+  type MethodsConfig,
+  type Method,
+  type SimpleMethodHandler,
+  type StreamingMethodHandler,
+  // Method factory
+  method,
+  isMethodDefinition,
+  METHOD_DEFINITION,
+  // Schema type for Zod 3/4 compatibility
+  type ZodLikeSchema,
 } from "./types.js";

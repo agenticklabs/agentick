@@ -10,33 +10,33 @@ import { parseSessionKey, formatSessionKey, type SessionKey } from "../protocol.
 describe("parseSessionKey", () => {
   it("parses simple session name with default agent", () => {
     const result = parseSessionKey("main", "chat");
-    expect(result).toEqual({ agentId: "chat", sessionName: "main" });
+    expect(result).toEqual({ appId: "chat", sessionName: "main" });
   });
 
   it("parses agent-prefixed session key", () => {
     const result = parseSessionKey("research:task-123", "chat");
-    expect(result).toEqual({ agentId: "research", sessionName: "task-123" });
+    expect(result).toEqual({ appId: "research", sessionName: "task-123" });
   });
 
   it("preserves colons in session name after first", () => {
     const result = parseSessionKey("slack:C012345:thread-xyz", "chat");
-    expect(result).toEqual({ agentId: "slack", sessionName: "C012345:thread-xyz" });
+    expect(result).toEqual({ appId: "slack", sessionName: "C012345:thread-xyz" });
   });
 
   it("handles phone numbers in session name", () => {
     const result = parseSessionKey("whatsapp:+1234567890", "chat");
-    expect(result).toEqual({ agentId: "whatsapp", sessionName: "+1234567890" });
+    expect(result).toEqual({ appId: "whatsapp", sessionName: "+1234567890" });
   });
 });
 
 describe("formatSessionKey", () => {
   it("formats session key with agent prefix", () => {
-    const key: SessionKey = { agentId: "chat", sessionName: "main" };
+    const key: SessionKey = { appId: "chat", sessionName: "main" };
     expect(formatSessionKey(key)).toBe("chat:main");
   });
 
   it("formats session key with complex session name", () => {
-    const key: SessionKey = { agentId: "slack", sessionName: "C012345:thread-xyz" };
+    const key: SessionKey = { appId: "slack", sessionName: "C012345:thread-xyz" };
     expect(formatSessionKey(key)).toBe("slack:C012345:thread-xyz");
   });
 });

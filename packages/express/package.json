@@ -24,9 +24,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@tentickle/core": "workspace:*",
-    "@tentickle/server": "workspace:*",
-    "@tentickle/shared": "workspace:*"
+    "@tentickle/gateway": "workspace:*"
   },
   "devDependencies": {
     "@types/express": "^4.17.21",

@@ -1,32 +1,8 @@
 # @tentickle/gateway
 
-Standalone daemon for multi-client, multi-agent access.
+Unified gateway for multi-client, multi-app Tentickle access.
 
-## The Problem
-
-The embedded server approach (`@tentickle/express`) works for:
-
-- Web apps with their own backend
-- Single-user applications
-- Request-response patterns
-
-But it doesn't work for:
-
-- CLI connecting to a running agent
-- Multiple clients (phone, laptop, web) to the same agent
-- Always-on agents with persistent state
-- Multi-agent coordination
-- External messaging channels (WhatsApp, Slack)
-
-## The Solution
-
-**Gateway** is a standalone daemon that:
-
-1. Hosts multiple agents
-2. Manages persistent sessions
-3. Exposes a WebSocket API for clients
-4. Routes messages to the right agent/session
-5. Connects to external channels
+Gateway can run as a **standalone daemon** or be **embedded** into existing web frameworks like Express or NestJS.
 
 ## Installation
 
@@ -38,12 +14,15 @@ pnpm add @tentickle/gateway
 
 ## Quick Start
 
-```typescript
-import { createGateway } from '@tentickle/gateway';
-import { createApp, Model, System, Timeline } from '@tentickle/core';
+### Standalone Mode
 
-// Define agents
-const ChatAgent = () => (
+Run Gateway as its own process with built-in HTTP/SSE transport:
+
+```typescript
+import { createGateway } from "@tentickle/gateway";
+import { createApp, Model, System, Timeline } from "@tentickle/core";
+
+const ChatApp = () => (
   <>
     <Model model={gpt4} />
     <System>You are a helpful assistant.</System>
@@ -51,281 +30,433 @@ const ChatAgent = () => (
   </>
 );
 
-const ResearchAgent = () => (
-  <>
-    <Model model={claude} />
-    <System>You are a research specialist.</System>
-    <Tool name="web_search" />
-    <Timeline />
-  </>
-);
-
-// Create gateway
 const gateway = createGateway({
-  port: 18789,
-  host: '127.0.0.1',
-
-  agents: {
-    chat: createApp(ChatAgent),
-    research: createApp(ResearchAgent),
+  port: 3000,
+  host: "127.0.0.1",
+  apps: {
+    chat: createApp(<ChatApp />),
   },
-  defaultAgent: 'chat',
-
+  defaultApp: "chat",
   auth: {
-    type: 'token',
+    type: "token",
     token: process.env.GATEWAY_TOKEN,
   },
 });
 
 await gateway.start();
-console.log('Gateway running on ws://127.0.0.1:18789');
+console.log("Gateway running on http://127.0.0.1:3000");
+```
+
+### Embedded Mode
+
+Embed Gateway into an existing Express app (or other framework):
+
+```typescript
+import express from "express";
+import { Gateway } from "@tentickle/gateway";
+
+const app = express();
+app.use(express.json());
+
+const gateway = new Gateway({
+  embedded: true, // Skip starting internal HTTP server
+  apps: { assistant: tentickleApp },
+  defaultApp: "assistant",
+});
+
+// Handle requests yourself
+app.use("/api", (req, res) => {
+  gateway.handleRequest(req, res);
+});
+
+app.listen(3000);
+```
+
+For Express, use `@tentickle/express` which wraps this pattern:
+
+```typescript
+import { createTentickleMiddleware } from "@tentickle/express";
+
+const middleware = createTentickleMiddleware({
+  apps: { assistant: tentickleApp },
+  defaultApp: "assistant",
+});
+
+app.use("/api", middleware);
+
+// Access gateway for lifecycle management
+await middleware.gateway.close();
+```
+
+## Configuration
+
+```typescript
+interface GatewayConfig {
+  // Server (standalone mode only)
+  port?: number;              // Default: 3000
+  host?: string;              // Default: "127.0.0.1"
+  id?: string;                // Auto-generated if not provided
+
+  // Apps
+  apps: Record<string, TentickleApp>;
+  defaultApp: string;
+
+  // Mode
+  embedded?: boolean;         // Skip transport init, use handleRequest()
+
+  // Authentication
+  auth?: AuthConfig;
+
+  // Custom methods
+  methods?: MethodsConfig;
+}
+```
+
+### Authentication
+
+```typescript
+// No auth (development)
+auth: { type: "none" }
+
+// Static token
+auth: {
+  type: "token",
+  token: process.env.API_TOKEN,
+}
+
+// JWT
+auth: {
+  type: "jwt",
+  secret: process.env.JWT_SECRET,
+  issuer: "my-app",  // Optional
+}
+
+// Custom validation
+auth: {
+  type: "custom",
+  validate: async (token) => {
+    const decoded = await verifyToken(token);
+    return decoded
+      ? { valid: true, user: { id: decoded.sub } }
+      : { valid: false };
+  },
+}
+
+// With user hydration (works with any auth type)
+auth: {
+  type: "custom",
+  validate: async (token) => {
+    const decoded = await verifyJWT(token);
+    return { valid: true, user: { id: decoded.sub } };
+  },
+  hydrateUser: async (authResult) => {
+    // Enrich with database data
+    const dbUser = await db.users.findById(authResult.user.id);
+    return {
+      id: dbUser.id,
+      tenantId: dbUser.tenantId,
+      roles: dbUser.roles,
+      email: dbUser.email,
+    };
+  },
+}
+```
+
+## Custom Methods
+
+Define RPC-style methods that clients can invoke. Methods run within Tentickle's context system with full access to user info, channels, and tracing.
+
+```typescript
+import { createGateway, method } from "@tentickle/gateway";
+import { Context } from "@tentickle/kernel";
+import { z } from "zod";
+
+const gateway = createGateway({
+  apps: { assistant: tentickleApp },
+  defaultApp: "assistant",
+
+  methods: {
+    // Simple method - no schema needed
+    ping: async () => ({ pong: true, timestamp: Date.now() }),
+
+    // Namespaced methods
+    tasks: {
+      // With Zod schema - params are typed!
+      list: method({
+        schema: z.object({
+          sessionId: z.string(),
+          completed: z.boolean().optional(),
+        }),
+        handler: async (params) => {
+          const ctx = Context.get();
+          return todoService.list(params.sessionId, {
+            userId: ctx.user?.id,
+            completed: params.completed,
+          });
+        },
+      }),
+
+      create: method({
+        schema: z.object({
+          sessionId: z.string(),
+          title: z.string().min(1),
+          priority: z.enum(["low", "medium", "high"]).optional(),
+        }),
+        handler: async (params) => {
+          const ctx = Context.get();
+          const task = await todoService.create({
+            title: params.title,
+            priority: params.priority,
+            userId: ctx.user?.id,
+          });
+          // Emit event for devtools/subscribers
+          Context.emit("task:created", { taskId: task.id });
+          return task;
+        },
+      }),
+
+      // Deeply nested namespaces
+      admin: {
+        archive: method({
+          roles: ["admin"], // Checked before handler
+          handler: async () => todoService.archiveAll(),
+        }),
+      },
+    },
+
+    // Role-protected methods
+    admin: {
+      stats: method({
+        roles: ["admin"],
+        handler: async () => {
+          const ctx = Context.get();
+          return adminService.getStats(ctx.user?.tenantId);
+        },
+      }),
+
+      // Custom guard function
+      dangerousAction: method({
+        guard: async () => {
+          const ctx = Context.get();
+          return ctx.user?.roles?.includes("superadmin") ?? false;
+        },
+        handler: async (params) => {
+          // Only superadmins reach here
+        },
+      }),
+    },
+  },
+});
+```
+
+### Method Definition Styles
+
+| Style           | Example                                        | Wrapper? |
+| --------------- | ---------------------------------------------- | -------- |
+| Simple function | `async (params) => result`                     | No       |
+| With schema     | `method({ schema: z.object({...}), handler })` | Yes      |
+| With guards     | `method({ roles: ["admin"], handler })`        | Yes      |
+| Namespace       | `{ tasks: { list, create } }`                  | No       |
+| Deep namespace  | `{ tasks: { admin: { archive } } }`            | No       |
+
+Methods are invoked using colon-separated paths: `tasks:list`, `tasks:admin:archive`, `admin:stats`.
+
+## HTTP Endpoints
+
+Gateway exposes these HTTP endpoints:
+
+| Method | Path      | Description                   |
+| ------ | --------- | ----------------------------- |
+| GET    | `/events` | SSE stream for session events |
+| POST   | `/send`   | Send message to session       |
+| POST   | `/invoke` | Invoke custom method          |
+
+### SSE Events Stream
+
+```typescript
+// Connect to events stream
+const events = new EventSource("/events?sessionId=main&token=xxx");
+
+// Execution events
+events.addEventListener("content_delta", (e) => {
+  console.log("Content:", JSON.parse(e.data).delta);
+});
+
+events.addEventListener("tool_use", (e) => {
+  console.log("Tool:", JSON.parse(e.data).name);
+});
+
+events.addEventListener("message_end", () => {
+  console.log("Response complete");
+});
+
+// Connection events
+events.addEventListener("connected", (e) => {
+  console.log("Connected:", JSON.parse(e.data));
+});
+```
+
+### Send Message
+
+```bash
+curl -X POST http://localhost:3000/send \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $TOKEN" \
+  -d '{"sessionId": "main", "message": "Hello!"}'
+```
+
+### Invoke Method
+
+```bash
+curl -X POST http://localhost:3000/invoke \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $TOKEN" \
+  -d '{"method": "tasks:list", "params": {"sessionId": "main"}}'
+```
+
+## Lifecycle
+
+```typescript
+const gateway = createGateway({ ... });
+
+// Start (standalone mode)
+await gateway.start();
+
+// Events
+gateway.on("session:created", ({ sessionId }) => { ... });
+gateway.on("session:closed", ({ sessionId }) => { ... });
+gateway.on("client:connected", ({ clientId }) => { ... });
+gateway.on("client:disconnected", ({ clientId }) => { ... });
+
+// Graceful shutdown
+await gateway.close();
+```
+
+## Client SDK
+
+Use `@tentickle/client` to connect to Gateway:
+
+```typescript
+import { createClient } from "@tentickle/client";
+
+const client = createClient({
+  baseUrl: "http://localhost:3000",
+  token: process.env.GATEWAY_TOKEN,
+});
+
+// Get session
+const session = client.session("main");
+
+// Send message and stream response
+const handle = session.send("Hello!");
+for await (const event of handle) {
+  if (event.type === "content_delta") {
+    process.stdout.write(event.delta);
+  }
+}
+
+// Invoke custom method
+const tasks = await session.invoke("tasks:list");
+const newTask = await session.invoke("tasks:create", {
+  title: "Buy groceries",
+  priority: "high",
+});
 ```
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────┐
-│                  GATEWAY                     │
-│            (daemon process)                  │
-│                                              │
-│  ┌─────────────────────────────────────────┐ │
-│  │           WebSocket Server               │ │
-│  │         (ws://127.0.0.1:18789)          │ │
-│  └───────────────────┬─────────────────────┘ │
-│                      │                       │
-│         ┌────────────┼────────────┐         │
-│         │            │            │         │
-│         ▼            ▼            ▼         │
-│  ┌──────────┐ ┌──────────┐ ┌──────────┐    │
-│  │  CLI     │ │  Web UI  │ │  Mobile  │    │
-│  │  Client  │ │  Client  │ │  Client  │    │
-│  └──────────┘ └──────────┘ └──────────┘    │
-│                                              │
-├──────────────────────────────────────────────┤
-│                                              │
-│   ┌─────────────────────────────────────┐   │
-│   │           Agent Registry             │   │
-│   ├──────────┬──────────┬───────────────┤   │
-│   │  Agent1  │  Agent2  │    Agent3     │   │
-│   │  (chat)  │(research)│    (coder)    │   │
-│   └────┬─────┴────┬─────┴───────┬───────┘   │
-│        │          │             │           │
-│   ┌────┴──────────┴─────────────┴────┐      │
-│   │         Session Manager          │      │
-│   │   ┌─────┐ ┌─────┐ ┌─────┐       │      │
-│   │   │sess1│ │sess2│ │sess3│  ...  │      │
-│   │   └─────┘ └─────┘ └─────┘       │      │
-│   └──────────────────────────────────┘      │
-│                                              │
-└─────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────┐
+│                        GATEWAY                              │
+│                                                             │
+│  ┌───────────────────────────────────────────────────────┐ │
+│  │                   HTTP Transport                       │ │
+│  │              (SSE events + REST endpoints)             │ │
+│  └───────────────────────┬───────────────────────────────┘ │
+│                          │                                  │
+│          ┌───────────────┼───────────────┐                 │
+│          │               │               │                 │
+│          ▼               ▼               ▼                 │
+│    ┌──────────┐   ┌──────────┐   ┌──────────┐             │
+│    │  Web UI  │   │   CLI    │   │  Mobile  │             │
+│    │  Client  │   │  Client  │   │  Client  │             │
+│    └──────────┘   └──────────┘   └──────────┘             │
+│                                                             │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│   ┌─────────────────────────────────────────────────────┐  │
+│   │                    App Registry                      │  │
+│   ├─────────────┬─────────────┬─────────────────────────┤  │
+│   │   chat      │  research   │       coder             │  │
+│   │   (app)     │   (app)     │       (app)             │  │
+│   └──────┬──────┴──────┬──────┴───────────┬─────────────┘  │
+│          │             │                  │                 │
+│   ┌──────┴─────────────┴──────────────────┴──────┐         │
+│   │              Session Manager                  │         │
+│   │   ┌─────┐ ┌─────┐ ┌─────┐                    │         │
+│   │   │sess1│ │sess2│ │sess3│  ...               │         │
+│   │   └─────┘ └─────┘ └─────┘                    │         │
+│   └──────────────────────────────────────────────┘         │
+│                                                             │
+│   ┌─────────────────────────────────────────────────────┐  │
+│   │              Custom Methods                          │  │
+│   │   tasks:list, tasks:create, admin:stats, ...        │  │
+│   └─────────────────────────────────────────────────────┘  │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
 ```
 
-## Connecting Clients
+## Standalone vs Embedded
 
-### Using @tentickle/cli
+| Feature            | Standalone                | Embedded                                  |
+| ------------------ | ------------------------- | ----------------------------------------- |
+| Config             | `port`, `host`            | `embedded: true`                          |
+| Start              | `gateway.start()`         | N/A                                       |
+| Request handling   | Built-in HTTP server      | `gateway.handleRequest(req, res)`         |
+| Use case           | Dedicated gateway process | Integrate with Express/NestJS             |
+| Framework packages | Not needed                | `@tentickle/express`, `@tentickle/nestjs` |
 
-```bash
-tentickle chat --url ws://127.0.0.1:18789 --token $TOKEN
-```
+## Context Access
 
-### Using @tentickle/client
+Custom methods run within Tentickle's ALS (Async Local Storage) context:
 
 ```typescript
-import { createClient } from '@tentickle/client';
+import { Context } from "@tentickle/kernel";
 
-// Client auto-detects WebSocket for ws:// URLs
-const client = createClient({
-  baseUrl: 'ws://127.0.0.1:18789',
-  token: process.env.GATEWAY_TOKEN,
-});
+methods: {
+  "tasks:create": async (params) => {
+    const ctx = Context.get();
 
-// Get session (routes to default agent)
-const session = client.session('main');
+    // User info (from auth)
+    console.log(ctx.user?.id);
+    console.log(ctx.user?.roles);
+    console.log(ctx.user?.tenantId);
 
-// Send message
-const handle = session.send('Hello!');
-for await (const event of handle) {
-  console.log(event);
+    // Request metadata
+    console.log(ctx.metadata?.sessionId);
+    console.log(ctx.metadata?.clientId);
+
+    // Distributed tracing
+    console.log(ctx.traceId);
+
+    // Channel access (if session has channels)
+    ctx.channels?.publish("notifications", { type: "task_created" });
+
+    // Emit events (for devtools/subscribers)
+    Context.emit("custom:task:created", { title: params.title });
+
+    return todoService.create(params);
+  },
 }
-
-// Or specify agent
-const researchSession = client.session('research:task-1');
-await researchSession.send('Research competitors');
 ```
-
-## Configuration
-
-### Full Options
-
-```typescript
-createGateway({
-  // Server
-  port: 18789,              // Default: 18789
-  host: '127.0.0.1',        // Default: 127.0.0.1
-  id: 'my-gateway',         // Auto-generated if not provided
-
-  // Agents
-  agents: {
-    chat: createApp(ChatAgent),
-    research: createApp(ResearchAgent),
-  },
-  defaultAgent: 'chat',
-
-  // Authentication
-  auth: {
-    type: 'token',
-    token: 'secret',
-  },
-  // Or: { type: 'none' }
-  // Or: { type: 'jwt', secret: 'xxx' }
-  // Or: { type: 'custom', validate: async (token) => ({ valid: true }) }
-
-  // Persistence (coming soon)
-  storage: {
-    directory: '~/.tentickle',
-    sessions: true,
-    memory: true,
-  },
-
-  // Channels (coming soon)
-  channels: [
-    whatsapp({ ... }),
-    slack({ ... }),
-  ],
-
-  // Routing
-  routing: {
-    channels: {
-      whatsapp: 'chat',
-      slack: 'coder',
-    },
-    custom: (message, context) => {
-      if (message.text.includes('research')) return 'research';
-      return null; // Use default
-    },
-  },
-});
-```
-
-## Protocol
-
-### Connection
-
-```typescript
-// Client → Gateway
-{ type: 'connect', clientId: 'cli-abc123', token: 'xxx' }
-
-// Gateway → Client
-{ type: 'connected', gatewayId: 'gw-xyz', agents: ['chat', 'research'], sessions: [] }
-```
-
-### Request/Response
-
-```typescript
-// Client → Gateway
-{ type: 'req', id: 'req-001', method: 'send', params: { sessionId: 'main', message: 'Hello!' } }
-
-// Gateway → Client
-{ type: 'res', id: 'req-001', ok: true, payload: { messageId: 'msg-123' } }
-```
-
-### Streaming Events
-
-```typescript
-// Gateway → Client (subscribed sessions)
-{ type: 'event', event: 'content_delta', sessionId: 'main', data: { delta: 'Hello' } }
-{ type: 'event', event: 'tool_call_start', sessionId: 'main', data: { name: 'search' } }
-{ type: 'event', event: 'message_end', sessionId: 'main', data: {} }
-```
-
-## RPC Methods
-
-| Method        | Description                 |
-| ------------- | --------------------------- |
-| `send`        | Send message to session     |
-| `abort`       | Abort current execution     |
-| `status`      | Get gateway/session status  |
-| `history`     | Get conversation history    |
-| `reset`       | Reset a session             |
-| `close`       | Close a session             |
-| `agents`      | List available agents       |
-| `sessions`    | List sessions               |
-| `subscribe`   | Subscribe to session events |
-| `unsubscribe` | Unsubscribe from events     |
-
-## Session Keys
-
-Session keys follow the format `[agent:]name`:
-
-```
-main                  # Default agent, "main" session
-chat:main             # "chat" agent, "main" session
-research:task-123     # "research" agent, "task-123" session
-whatsapp:+1234567890  # Channel session
-```
-
-## Events
-
-```typescript
-gateway.on('started', ({ port, host }) => {});
-gateway.on('stopped', () => {});
-gateway.on('client:connected', ({ clientId }) => {});
-gateway.on('client:disconnected', ({ clientId, reason }) => {});
-gateway.on('session:created', ({ sessionId, agentId }) => {});
-gateway.on('session:closed', ({ sessionId }) => {});
-gateway.on('session:message', ({ sessionId, role, content }) => {});
-gateway.on('error', (error) => {});
-```
-
-## Comparison: Server vs Gateway
-
-| Feature    | `@tentickle/server`  | `@tentickle/gateway`  |
-| ---------- | -------------------- | --------------------- |
-| Deployment | Embedded in your app | Standalone daemon     |
-| Transport  | SSE                  | WebSocket             |
-| Agents     | Single               | Multiple              |
-| Sessions   | Ephemeral            | Persistent            |
-| Clients    | Web browsers         | CLI, mobile, web      |
-| Channels   | None                 | WhatsApp, Slack, etc. |
-| State      | In-memory            | File-based            |
-| Use case   | Web apps             | Personal assistants   |
-
-## Development
-
-```bash
-# Clone the repo
-git clone https://github.com/your-org/tentickle.git
-cd tentickle
-
-# Install dependencies
-pnpm install
-
-# Build
-cd packages/gateway
-pnpm build
-
-# Run tests
-pnpm test
-```
-
-## Roadmap
-
-- [x] Core gateway with WebSocket
-- [x] Agent registry
-- [x] Session manager
-- [ ] File-based persistence
-- [ ] Channel adapters (WhatsApp, Slack)
-- [ ] Multi-agent communication
-- [ ] Tailscale integration
-- [ ] Health checks and metrics
 
 ## Related Packages
 
-- [`@tentickle/core`](../core) - JSX runtime for agents
+- [`@tentickle/express`](../express) - Express middleware (thin adapter)
+- [`@tentickle/nestjs`](../nestjs) - NestJS module (thin adapter)
+- [`@tentickle/core`](../core) - JSX runtime for apps
 - [`@tentickle/client`](../client) - Client SDK
-- [`@tentickle/cli`](../cli) - Terminal client
-- [`@tentickle/server`](../server) - Embeddable SSE server
-- [`@tentickle/express`](../express) - Express middleware
+- [`@tentickle/server`](../server) - SSE utilities
 
 ## License
 

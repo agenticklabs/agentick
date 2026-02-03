@@ -11,7 +11,6 @@
  * - Automatic tracking (execution graph, telemetry)
  */
 
-import { z } from "zod";
 import { EventEmitter } from "node:events";
 import { Context, type KernelContext, isKernelContext } from "./context";
 import { ExecutionTracker, type ExecutionBoundaryConfig } from "./execution-tracker";
@@ -19,6 +18,7 @@ import { randomUUID } from "node:crypto";
 import { ProcedureNode } from "./procedure-graph";
 import { AbortError, ValidationError } from "@tentickle/shared";
 import { EventBuffer, type TypedEvent } from "./event-buffer";
+import { parseSchema } from "./schema";
 
 // ============================================================================
 // ProcedurePromise - Enhanced Promise with .result chaining
@@ -450,8 +450,11 @@ export interface ProcedureOptions {
    * ```
    */
   handleFactory?: HandleFactory | true | false;
-  /** Zod schema for input validation */
-  schema?: z.ZodType<any>;
+  /**
+   * Schema for input validation.
+   * Supports Zod 3, Zod 4, Standard Schema, or any schema with parse/validate method.
+   */
+  schema?: unknown;
   /** Parent procedure name (for hooks) */
   parentProcedure?: string;
   /** @internal Whether this is a procedure or hook */
@@ -879,7 +882,7 @@ class ProcedureImpl<
 > {
   private internalMiddlewares: InternalMiddleware<TArgs, ExtractReturn<THandler>>[] = [];
   private middlewares: Middleware<TArgs>[] = [];
-  private schema?: z.ZodType<any>;
+  private schema?: unknown;
   private procedureName?: string;
   private sourceType: "procedure" | "hook" = "procedure";
   private sourceId?: string;
@@ -1096,7 +1099,7 @@ class ProcedureImpl<
     // Validate input if schema provided
     let validatedArgs = args;
     if (this.schema && args.length > 0) {
-      const validated = await this.schema.parseAsync(args[0]);
+      const validated = await parseSchema(this.schema, args[0]);
       validatedArgs = [validated, ...args.slice(1)] as TArgs;
     }
 
@@ -1216,12 +1219,12 @@ class ProcedureImpl<
       ? ExecutionHandle<ExtractReturn<THandler>>
       : ExtractReturn<THandler>
   > {
-    // If handleFactory is a function or true, use handle wrapping
-    if (typeof this.handleFactory === "function" || this.handleFactory === true) {
-      return this.executeWithHandle(args) as any;
+    // Pass-through mode ONLY when handleFactory === false explicitly
+    if (this.handleFactory === false) {
+      return this.executePassThrough(args) as any;
     }
-    // Default: pass-through mode (handleFactory: false or undefined)
-    return this.executePassThrough(args) as any;
+    // Default: handle wrapping (handleFactory: undefined, true, or function)
+    return this.executeWithHandle(args) as any;
   }
 
   /**
@@ -1236,7 +1239,7 @@ class ProcedureImpl<
       // Validate if schema provided
       let validatedArgs = args;
       if (this.schema && args.length > 0) {
-        const validated = await this.schema.parseAsync(args[0]);
+        const validated = await parseSchema(this.schema, args[0]);
         validatedArgs = [validated, ...args.slice(1)] as TArgs;
       }
 
@@ -1283,7 +1286,7 @@ class ProcedureImpl<
       // Validate input if schema provided
       let validatedArgs = args;
       if (this.schema && args.length > 0) {
-        const validated = await this.schema.parseAsync(args[0]);
+        const validated = await parseSchema(this.schema, args[0]);
         validatedArgs = [validated, ...args.slice(1)] as TArgs;
       }
 
@@ -1446,7 +1449,8 @@ class ProcedureImpl<
     const self = this;
     const pipedHandler = async (...args: TArgs): Promise<ExtractReturn<TNext>> => {
       const firstResult = await self.execute(args);
-      const secondResult = await (next as any)(firstResult);
+      // Access .result on the next procedure's return value since procedures return ExecutionHandle by default
+      const secondResult = await (next as any)(firstResult).result;
       return secondResult;
     };
 

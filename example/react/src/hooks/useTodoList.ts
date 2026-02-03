@@ -52,13 +52,25 @@ export function useTodoList() {
     return unsubscribe;
   }, [accessor]);
 
+  // Helper to invoke gateway methods
+  const invoke = async (method: string, params: Record<string, unknown>) => {
+    const res = await fetch("/api/invoke", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ method, params }),
+    });
+    if (!res.ok) {
+      const error = await res.json().catch(() => ({ error: "Request failed" }));
+      throw new Error(error.error || "Request failed");
+    }
+    return res.json();
+  };
+
   const fetchTodos = async () => {
     try {
       setLoading(true);
       setError(null);
-      const res = await fetch(`/api/tasks?sessionId=${SESSION_ID}`);
-      if (!res.ok) throw new Error("Failed to fetch tasks");
-      const data = await res.json();
+      const data = await invoke("tasks:list", { sessionId: SESSION_ID });
       setTodos(data.todos || []);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error");
@@ -70,13 +82,7 @@ export function useTodoList() {
   const createTodo = useCallback(async (title: string) => {
     try {
       setError(null);
-      const res = await fetch("/api/tasks", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title, sessionId: SESSION_ID }),
-      });
-      if (!res.ok) throw new Error("Failed to create task");
-      const data = await res.json();
+      const data = await invoke("tasks:create", { title, sessionId: SESSION_ID });
       setTodos(data.todos || []);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error");
@@ -89,13 +95,7 @@ export function useTodoList() {
 
     try {
       setError(null);
-      const res = await fetch(`/api/tasks/${id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ completed, sessionId: SESSION_ID }),
-      });
-      if (!res.ok) throw new Error("Failed to update task");
-      const data = await res.json();
+      const data = await invoke("tasks:update", { id, completed, sessionId: SESSION_ID });
       setTodos(data.todos || []);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error");
@@ -112,11 +112,7 @@ export function useTodoList() {
 
       try {
         setError(null);
-        const res = await fetch(`/api/tasks/${id}?sessionId=${SESSION_ID}`, {
-          method: "DELETE",
-        });
-        if (!res.ok) throw new Error("Failed to delete task");
-        const data = await res.json();
+        const data = await invoke("tasks:delete", { id, sessionId: SESSION_ID });
         setTodos(data.todos || []);
       } catch (err) {
         setError(err instanceof Error ? err.message : "Unknown error");

@@ -1,25 +1,25 @@
 /**
  * Session Manager
  *
- * Manages persistent sessions across agents.
+ * Manages persistent sessions across apps.
  */
 
 import type { Session } from "@tentickle/core";
-import type { AgentRegistry, AgentInfo } from "./agent-registry.js";
+import type { AppRegistry, AppInfo } from "./app-registry.js";
 import type { SessionState } from "./types.js";
 import { parseSessionKey, formatSessionKey } from "./protocol.js";
 
 interface ManagedSession {
   state: SessionState;
   coreSession: Session | null;
-  agent: AgentInfo;
+  appInfo: AppInfo;
 }
 
 export class SessionManager {
   private sessions = new Map<string, ManagedSession>();
-  private registry: AgentRegistry;
+  private registry: AppRegistry;
 
-  constructor(registry: AgentRegistry) {
+  constructor(registry: AppRegistry) {
     this.registry = registry;
   }
 
@@ -34,16 +34,16 @@ export class SessionManager {
       return session;
     }
 
-    // Parse session key to get agent and name
-    const { agentId, sessionName } = parseSessionKey(sessionKey, this.registry.defaultId);
+    // Parse session key to get app and name
+    const { appId, sessionName } = parseSessionKey(sessionKey, this.registry.defaultId);
 
-    // Get the agent
-    const agent = this.registry.resolve(agentId);
+    // Get the app
+    const appInfo = this.registry.resolve(appId);
 
     // Create session state
     const state: SessionState = {
-      id: formatSessionKey({ agentId, sessionName }),
-      agentId,
+      id: formatSessionKey({ appId, sessionName }),
+      appId,
       createdAt: new Date(),
       lastActivityAt: new Date(),
       messageCount: 0,
@@ -55,7 +55,7 @@ export class SessionManager {
     session = {
       state,
       coreSession: null,
-      agent,
+      appInfo,
     };
 
     this.sessions.set(state.id, session);
@@ -125,10 +125,10 @@ export class SessionManager {
   }
 
   /**
-   * Get sessions for a specific agent
+   * Get sessions for a specific app
    */
-  forAgent(agentId: string): ManagedSession[] {
-    return this.all().filter((s) => s.state.agentId === agentId);
+  forApp(appId: string): ManagedSession[] {
+    return this.all().filter((s) => s.state.appId === appId);
   }
 
   /**

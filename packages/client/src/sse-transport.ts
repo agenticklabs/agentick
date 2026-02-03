@@ -412,6 +412,7 @@ export class SSETransport implements ClientTransport {
       body: JSON.stringify({
         sessionId,
         channel,
+        clientId: this._connectionId, // Required for event forwarding to SSE
       }),
       signal: AbortSignal.timeout(this.config.timeout ?? 30000),
     });

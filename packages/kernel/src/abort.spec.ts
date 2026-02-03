@@ -9,7 +9,8 @@ describe("Kernel Abort Handling", () => {
       signal: controller.signal,
     });
 
-    await expect(proc()).rejects.toThrow("Operation aborted");
+    // The rejection happens in .result, not in getting the handle
+    await expect(proc().result).rejects.toThrow("Operation aborted");
   });
 
   it("should throw AbortError during middleware execution if aborted", async () => {
@@ -22,13 +23,15 @@ describe("Kernel Abort Handling", () => {
         return next(args);
       });
 
-    await expect(proc()).rejects.toThrow("Operation aborted");
+    // The rejection happens in .result, not in getting the handle
+    await expect(proc().result).rejects.toThrow("Operation aborted");
   });
 
   it("should throw AbortError during stream iteration if aborted", async () => {
     const controller = new AbortController();
 
-    const proc = createProcedure({ name: "test" }, async function* () {
+    // Use handleFactory: false for pass-through mode since we're testing async generator iteration
+    const proc = createProcedure({ name: "test", handleFactory: false }, async function* () {
       yield 1;
       controller.abort(); // Abort after first chunk
       yield 2;

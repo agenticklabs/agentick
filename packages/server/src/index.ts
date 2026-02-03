@@ -26,6 +26,9 @@
 // SSE utilities
 export { createSSEWriter, streamToSSE, setSSEHeaders } from "./sse";
 
+// Auth utilities
+export { extractToken, validateAuth, type AuthConfig, type AuthResult } from "./auth";
+
 // Types - re-exported from types.ts
 export type {
   // Protocol types (from shared)

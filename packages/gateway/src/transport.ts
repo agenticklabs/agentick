@@ -6,8 +6,9 @@
  */
 
 import type { Message } from "@tentickle/shared";
+import { validateAuth, type AuthResult } from "@tentickle/server";
 import type { GatewayMessage, ClientMessage } from "./protocol.js";
-import type { AuthConfig, AuthResult, ClientState } from "./types.js";
+import type { AuthConfig, ClientState } from "./types.js";
 
 // ============================================================================
 // Transport Interface
@@ -72,6 +73,17 @@ export interface TransportConfig {
     sessionId: string,
     message: Message,
   ) => AsyncIterable<{ type: string; data?: unknown }>;
+
+  /**
+   * Method invocation handler for HTTP transport.
+   * Called to execute custom gateway methods.
+   * Returns the method result directly (no streaming).
+   */
+  onInvoke?: (
+    method: string,
+    params: Record<string, unknown>,
+    user?: import("@tentickle/kernel").UserContext,
+  ) => Promise<unknown>;
 }
 
 /**
@@ -164,30 +176,7 @@ export abstract class BaseTransport implements Transport {
     return `client-${++this.clientIdCounter}`;
   }
 
-  protected async validateAuth(token?: string): Promise<AuthResult> {
-    const auth = this.config.auth;
-
-    // No auth configured
-    if (!auth || auth.type === "none") {
-      return { valid: true };
-    }
-
-    // Token auth
-    if (auth.type === "token") {
-      return { valid: token === auth.token };
-    }
-
-    // JWT auth
-    if (auth.type === "jwt") {
-      // TODO: Implement JWT validation
-      return { valid: false };
-    }
-
-    // Custom auth
-    if (auth.type === "custom") {
-      return await auth.validate(token ?? "");
-    }
-
-    return { valid: false };
+  protected validateAuth(token?: string): Promise<AuthResult> {
+    return validateAuth(token, this.config.auth);
   }
 }

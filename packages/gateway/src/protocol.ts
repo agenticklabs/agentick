@@ -36,7 +36,7 @@ export type ClientMessage = ConnectMessage | RequestMessage | PingMessage;
 export interface ConnectedMessage {
   type: "connected";
   gatewayId: string;
-  agents: string[];
+  apps: string[];
   sessions: string[];
 }
 
@@ -81,17 +81,26 @@ export type GatewayMessage =
 // RPC Methods
 // ============================================================================
 
-export type GatewayMethod =
+/**
+ * Built-in gateway methods with autocomplete support.
+ */
+export type BuiltInMethod =
   | "send" // Send message to session
   | "abort" // Abort current execution
   | "status" // Get gateway/session status
   | "history" // Get conversation history
   | "reset" // Reset a session
   | "close" // Close a session
-  | "agents" // List available agents
+  | "apps" // List available apps
   | "sessions" // List sessions
   | "subscribe" // Subscribe to session events
   | "unsubscribe"; // Unsubscribe from events
+
+/**
+ * Gateway method - built-in methods or custom method strings.
+ * The (string & {}) allows any string while preserving autocomplete for built-in methods.
+ */
+export type GatewayMethod = BuiltInMethod | (string & {});
 
 // ============================================================================
 // Event Types
@@ -163,11 +172,11 @@ export interface StatusPayload {
     uptime: number;
     clients: number;
     sessions: number;
-    agents: string[];
+    apps: string[];
   };
   session?: {
     id: string;
-    agentId: string;
+    appId: string;
     messageCount: number;
     createdAt: string;
     lastActivityAt: string;
@@ -190,8 +199,8 @@ export interface HistoryPayload {
   hasMore: boolean;
 }
 
-export interface AgentsPayload {
-  agents: Array<{
+export interface AppsPayload {
+  apps: Array<{
     id: string;
     name: string;
     description?: string;
@@ -202,7 +211,7 @@ export interface AgentsPayload {
 export interface SessionsPayload {
   sessions: Array<{
     id: string;
-    agentId: string;
+    appId: string;
     createdAt: string;
     lastActivityAt: string;
     messageCount: number;
@@ -214,27 +223,27 @@ export interface SessionsPayload {
 // ============================================================================
 
 /**
- * Session keys follow the format: [agent:]name
+ * Session keys follow the format: [app:]name
  *
  * Examples:
- * - "main" → default agent, "main" session
- * - "chat:main" → "chat" agent, "main" session
- * - "research:task-123" → "research" agent, "task-123" session
+ * - "main" → default app, "main" session
+ * - "chat:main" → "chat" app, "main" session
+ * - "research:task-123" → "research" app, "task-123" session
  * - "whatsapp:+1234567890" → WhatsApp channel session
  */
 export interface SessionKey {
-  agentId: string;
+  appId: string;
   sessionName: string;
 }
 
-export function parseSessionKey(key: string, defaultAgent: string): SessionKey {
+export function parseSessionKey(key: string, defaultApp: string): SessionKey {
   const parts = key.split(":");
   if (parts.length === 1) {
-    return { agentId: defaultAgent, sessionName: parts[0] };
+    return { appId: defaultApp, sessionName: parts[0] };
   }
-  return { agentId: parts[0], sessionName: parts.slice(1).join(":") };
+  return { appId: parts[0], sessionName: parts.slice(1).join(":") };
 }
 
 export function formatSessionKey(key: SessionKey): string {
-  return `${key.agentId}:${key.sessionName}`;
+  return `${key.appId}:${key.sessionName}`;
 }

@@ -56,3 +56,4 @@ export * from "./channel-helpers";
 export * from "./procedure";
 export * from "./logger";
 export * from "./event-buffer";
+export * from "./schema";

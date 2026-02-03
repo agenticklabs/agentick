@@ -289,25 +289,8 @@ describe("Tool Component", () => {
               raw: {},
             } as ModelOutput;
           },
-          executeStream: async function* () {
-            yield {
-              type: "content_delta",
-              blockType: BlockType.TEXT,
-              blockIndex: 0,
-              delta: "Done",
-            } as StreamEvent;
-          },
-        },
-        transformers: {
-          processStream: async () =>
-            ({
-              model: "mock-model",
-              createdAt: new Date().toISOString(),
-              message: { role: "assistant", content: [{ type: "text", text: "Done" }] },
-              usage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 },
-              stopReason: "stop" as StopReason,
-              raw: {},
-            }) as ModelOutput,
+          // Note: No executeStream - this test specifically tests tool execution
+          // via the non-streaming (execute) path which returns toolCalls
         },
         fromEngineState,
         toEngineState,
@@ -461,8 +444,8 @@ describe("Tool Component", () => {
       // Run should be accessible as static property
       expect(TestTool.run).toBeDefined();
 
-      // Execute the tool directly
-      const result = await TestTool.run!({ value: "test input" });
+      // Execute the tool directly - procedures return ExecutionHandle, use .result
+      const result = await TestTool.run!({ value: "test input" }).result;
 
       expect(handler).toHaveBeenCalledWith({ value: "test input" });
       expect(result).toEqual([{ type: "text", text: "executed!" }]);

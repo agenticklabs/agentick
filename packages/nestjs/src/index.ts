@@ -1,7 +1,8 @@
 /**
- * @tentickle/nestjs - NestJS module for Tentickle
+ * @tentickle/nestjs - NestJS adapter for Tentickle Gateway
  *
- * Provides NestJS integration with multiplexed SSE sessions.
+ * Provides NestJS integration that delegates to Gateway.
+ * This is a thin adapter - all business logic lives in @tentickle/gateway.
  *
  * @example Default controller
  * ```typescript
@@ -12,34 +13,35 @@
  * @Module({
  *   imports: [
  *     TentickleModule.forRoot({
- *       app: createApp(<MyAgent />),
+ *       apps: { assistant: createApp(<MyAgent />) },
+ *       defaultApp: "assistant",
  *     }),
  *   ],
  * })
  * export class AppModule {}
- * // Endpoints: GET /events, POST /send, POST /subscribe, etc.
+ * // Endpoints: GET /events, POST /send, POST /invoke, etc.
  * ```
  *
- * @example Custom controller
+ * @example With custom methods
  * ```typescript
- * @Controller('chat')
- * export class ChatController {
- *   constructor(private tentickle: TentickleService) {}
- *
- *   @Post('send')
- *   async send(@Body() body: SendDto, @Res() res: Response) {
- *     await this.tentickle.sendAndStream(body.sessionId, body, res);
- *   }
- * }
+ * import { TentickleModule, method } from '@tentickle/nestjs';
+ * import { z } from "zod";
  *
  * @Module({
  *   imports: [
  *     TentickleModule.forRoot({
- *       app,
- *       registerController: false,
+ *       apps: { assistant: myApp },
+ *       defaultApp: "assistant",
+ *       methods: {
+ *         tasks: {
+ *           list: method({
+ *             schema: z.object({ sessionId: z.string() }),
+ *             handler: async (params) => todoService.list(params.sessionId),
+ *           }),
+ *         },
+ *       },
  *     }),
  *   ],
- *   controllers: [ChatController],
  * })
  * export class AppModule {}
  * ```
@@ -50,30 +52,27 @@
  * |--------|------|-------------|
  * | GET | `/events` | SSE stream |
  * | POST | `/send` | Send and stream |
+ * | POST | `/invoke` | Invoke custom method |
  * | POST | `/subscribe` | Subscribe to sessions |
  * | POST | `/abort` | Abort execution |
  * | POST | `/close` | Close session |
- * | POST | `/tool-response` | Submit tool confirmation |
- * | POST | `/channel` | Publish to channel |
  *
  * @module @tentickle/nestjs
  */
 
-// Module
-export { TentickleModule } from "./tentickle.module";
-
-// Service
-export { TentickleService } from "./tentickle.service";
-
-// Controller
-export { TentickleController } from "./tentickle.controller";
-
-// Types and tokens
+// Module, Service, Controller
 export {
-  TENTICKLE_OPTIONS,
-  TENTICKLE_APP,
+  TentickleModule,
+  TentickleService,
+  TentickleController,
+  TENTICKLE_GATEWAY,
   type TentickleModuleOptions,
-  type TentickleModuleAsyncOptions,
-  type TentickleModuleOptionsFactory,
-  type SendInput,
-} from "./types";
+} from "./tentickle.module";
+
+// Re-export gateway types for convenience
+export {
+  method,
+  type GatewayConfig,
+  type MethodDefinition,
+  type AuthConfig,
+} from "@tentickle/gateway";

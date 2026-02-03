@@ -42,7 +42,7 @@
     "dev": "tsc --watch"
   },
   "dependencies": {
-    "@tentickle/core": "workspace:*",
+    "@tentickle/kernel": "workspace:*",
     "@tentickle/shared": "workspace:*"
   },
   "devDependencies": {

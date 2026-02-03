@@ -260,7 +260,8 @@ export function createModel<
           id: metadata.id,
           operation: "stream",
         },
-        handleFactory: procedures.stream?.handleFactory,
+        // Stream procedures return async generators - must use pass-through mode
+        handleFactory: procedures.stream?.handleFactory ?? false,
         middleware: normalizeMiddleware(procedures.stream?.middleware),
         // Model calls are child executions within the parent engine execution
         executionBoundary: "child",
@@ -586,6 +587,8 @@ export abstract class ModelAdapter<
           // Model calls are child executions within the parent engine execution
           executionBoundary: "child",
           executionType: "model",
+          // Stream procedures return async generators - must use pass-through mode
+          handleFactory: false,
         },
         async function* (input: TModelInput): AsyncIterable<StreamEvent> {
           if (!self.executeStream) {

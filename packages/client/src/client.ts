@@ -57,6 +57,8 @@ export interface TentickleClientConfig {
     events?: string;
     /** Send endpoint (default: /send) */
     send?: string;
+    /** Invoke endpoint for custom methods (default: /invoke) */
+    invoke?: string;
     /** Subscribe endpoint (default: /subscribe) */
     subscribe?: string;
     /** Abort endpoint (default: /abort) */
@@ -163,6 +165,16 @@ export interface SessionAccessor {
    * Allows pub/sub communication with the server for this session.
    */
   channel(name: string): ChannelAccessor;
+
+  /**
+   * Invoke a custom method with auto-injected sessionId.
+   */
+  invoke<T = unknown>(method: string, params?: Record<string, unknown>): Promise<T>;
+
+  /**
+   * Invoke a streaming method with auto-injected sessionId.
+   */
+  stream<T = unknown>(method: string, params?: Record<string, unknown>): AsyncGenerator<T>;
 }
 
 // ============================================================================
@@ -589,6 +601,44 @@ class SessionAccessorImpl implements SessionAccessor {
     return channelAccessor;
   }
 
+  /**
+   * Invoke a custom method with auto-injected sessionId.
+   *
+   * @example
+   * ```typescript
+   * const session = client.session("main");
+   * const tasks = await session.invoke("tasks:list");
+   * const newTask = await session.invoke("tasks:create", { title: "Buy groceries" });
+   * ```
+   */
+  async invoke<T = unknown>(method: string, params: Record<string, unknown> = {}): Promise<T> {
+    return this.client.invoke<T>(method, {
+      ...params,
+      sessionId: this.sessionId,
+    });
+  }
+
+  /**
+   * Invoke a streaming method with auto-injected sessionId.
+   *
+   * @example
+   * ```typescript
+   * const session = client.session("main");
+   * for await (const change of session.stream("tasks:watch")) {
+   *   console.log("Task changed:", change);
+   * }
+   * ```
+   */
+  async *stream<T = unknown>(
+    method: string,
+    params: Record<string, unknown> = {},
+  ): AsyncGenerator<T> {
+    yield* this.client.stream<T>(method, {
+      ...params,
+      sessionId: this.sessionId,
+    });
+  }
+
   /** @internal */
   _destroy(): void {
     this.eventHandlers.clear();
@@ -926,6 +976,9 @@ export class TentickleClient {
 
   /** @internal - Called by SessionAccessor to subscribe to a channel */
   async _subscribeToChannel(sessionId: string, channelName: string): Promise<void> {
+    // Ensure we have a connection before subscribing
+    await this.ensureConnection();
+
     const baseUrl = this.config.baseUrl.replace(/\/$/, "");
     const channelPath = this.config.paths?.channel ?? "/channel";
 
@@ -936,6 +989,7 @@ export class TentickleClient {
       body: JSON.stringify({
         sessionId,
         channel: channelName,
+        clientId: this._connectionId,
       }),
       signal: AbortSignal.timeout(this.config.timeout ?? 30000),
     });
@@ -1316,6 +1370,133 @@ export class TentickleClient {
         });
         break;
     }
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // Custom Method Invocation
+  // ══════════════════════════════════════════════════════════════════════════
+
+  /**
+   * Invoke a custom Gateway method.
+   * For session-scoped methods, use session.invoke() instead.
+   *
+   * @example
+   * ```typescript
+   * // Invoke a custom method
+   * const result = await client.invoke("tasks:list", { status: "active" });
+   *
+   * // Invoke with admin method
+   * const stats = await client.invoke("admin:stats");
+   * ```
+   */
+  async invoke<T = unknown>(method: string, params: Record<string, unknown> = {}): Promise<T> {
+    const baseUrl = this.config.baseUrl.replace(/\/$/, "");
+    const invokePath = this.config.paths?.invoke ?? "/invoke";
+
+    const response = await this.fetchFn(`${baseUrl}${invokePath}`, {
+      method: "POST",
+      headers: this.requestHeaders,
+      credentials: this.config.withCredentials ? "include" : "same-origin",
+      body: JSON.stringify({
+        method,
+        params,
+      }),
+      signal: AbortSignal.timeout(this.config.timeout ?? 30000),
+    });
+
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(`Failed to invoke method: ${response.status} ${text}`);
+    }
+
+    const result = await response.json();
+    return result as T;
+  }
+
+  /**
+   * Invoke a streaming method, returns async iterator.
+   * Yields values as they arrive from the server.
+   *
+   * @example
+   * ```typescript
+   * // Stream task updates
+   * for await (const change of client.stream("tasks:watch")) {
+   *   console.log("Task changed:", change);
+   * }
+   * ```
+   */
+  async *stream<T = unknown>(
+    method: string,
+    params: Record<string, unknown> = {},
+  ): AsyncGenerator<T> {
+    const baseUrl = this.config.baseUrl.replace(/\/$/, "");
+    const invokePath = this.config.paths?.invoke ?? "/invoke";
+
+    const response = await this.fetchFn(`${baseUrl}${invokePath}`, {
+      method: "POST",
+      headers: this.requestHeaders,
+      credentials: this.config.withCredentials ? "include" : "same-origin",
+      body: JSON.stringify({
+        method,
+        params,
+      }),
+    });
+
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(`Failed to invoke streaming method: ${response.status} ${text}`);
+    }
+
+    if (!response.body) {
+      throw new Error("No response body for streaming method");
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() ?? "";
+
+      for (const line of lines) {
+        if (!line.startsWith("data: ")) continue;
+        try {
+          const data = JSON.parse(line.slice(6)) as Record<string, unknown>;
+          if (data.type === "method:chunk") {
+            yield data.chunk as T;
+          } else if (data.type === "method:end") {
+            return;
+          }
+        } catch (error) {
+          console.error("Failed to parse stream event:", error);
+        }
+      }
+    }
+  }
+
+  /**
+   * Get authorization headers for use with fetch.
+   * Useful for making authenticated requests to custom routes.
+   *
+   * @example
+   * ```typescript
+   * // Make authenticated request to custom API
+   * const response = await fetch("/api/custom", {
+   *   headers: client.getAuthHeaders(),
+   * });
+   * ```
+   */
+  getAuthHeaders(): Record<string, string> {
+    const headers: Record<string, string> = {};
+    if (this.config.token) {
+      headers["Authorization"] = `Bearer ${this.config.token}`;
+    }
+    return headers;
   }
 
   // ══════════════════════════════════════════════════════════════════════════

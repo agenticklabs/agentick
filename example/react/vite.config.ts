@@ -2,7 +2,7 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
 // Use Gateway HTTP port (18790) by default, or override via environment variable
-const API_TARGET = process.env.VITE_API_TARGET || "http://localhost:18790";
+const API_TARGET = process.env.VITE_API_TARGET || "http://localhost:3000";
 
 export default defineConfig({
   plugins: [react()],

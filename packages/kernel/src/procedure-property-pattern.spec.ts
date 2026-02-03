@@ -25,8 +25,8 @@ describe("Procedure v2 - Property Initializer Pattern", () => {
     expect("use" in model.execute).toBe(true);
     expect("withContext" in model.execute).toBe(true);
 
-    // ✅ Can call directly
-    const result = await model.execute("test");
+    // ✅ Can call directly - use .result to get the handler's return value
+    const result = await model.execute("test").result;
     expect(result).toBe("test");
 
     // ✅ Can chain middleware
@@ -75,7 +75,7 @@ describe("Procedure v2 - Property Initializer Pattern", () => {
     }
 
     const model = new Model();
-    const result = await model.execute("input");
+    const result = await model.execute("input").result;
     expect(result).toBe("test:input");
   });
 
@@ -90,7 +90,7 @@ describe("Procedure v2 - Property Initializer Pattern", () => {
     }
 
     const model = new Model();
-    const result = await model.processChunk("test");
+    const result = await model.processChunk("test").result;
     expect(result).toBe("TEST");
   });
 });
