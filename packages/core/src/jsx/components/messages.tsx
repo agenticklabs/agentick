@@ -13,7 +13,7 @@
  *   <ToolResult toolCallId="..." name="weather">Sunny, 72°F</ToolResult>
  */
 
-import React from "react";
+import React, { useDebugValue } from "react";
 import type { JSX } from "react";
 import type { ContentBlock, EventAllowedBlock } from "@tentickle/shared";
 import { Message as MessagePrimitive, type MessageProps } from "./primitives";
@@ -59,6 +59,7 @@ export interface UserProps extends RoleMessageBaseProps {}
  */
 export function User(props: UserProps) {
   const { content, children, ...rest } = props;
+  useDebugValue("User message");
   return h(MessagePrimitive, {
     role: "user",
     content,
@@ -82,6 +83,7 @@ export interface AssistantProps extends RoleMessageBaseProps {}
  */
 export function Assistant(props: AssistantProps) {
   const { content, children, ...rest } = props;
+  useDebugValue("Assistant message");
   return h(MessagePrimitive, {
     role: "assistant",
     content,
@@ -107,6 +109,7 @@ export interface SystemProps extends RoleMessageBaseProps {}
  */
 export function System(props: SystemProps) {
   const { content, children, ...rest } = props;
+  useDebugValue("System prompt");
   return h(MessagePrimitive, {
     role: "system",
     content,
@@ -138,6 +141,7 @@ export interface ToolResultProps extends RoleMessageBaseProps {
  */
 export function ToolResult(props: ToolResultProps) {
   const { content, children, toolCallId, name, isError, ...rest } = props;
+  useDebugValue(`ToolResult: ${name ?? toolCallId}`);
   return h(MessagePrimitive, {
     role: "tool",
     content,
@@ -188,6 +192,7 @@ export interface EventProps extends RoleMessageBaseProps {
  */
 export function Event(props: EventProps) {
   const { content, children, eventType, ...rest } = props;
+  useDebugValue(`Event: ${eventType ?? "generic"}`);
   return h(MessagePrimitive, {
     role: "event",
     content,
@@ -361,6 +366,7 @@ export interface EphemeralProps {
  * </Ephemeral>
  */
 export function Ephemeral(props: EphemeralProps): JSX.Element {
+  useDebugValue(`Ephemeral: ${props.type ?? "content"} @ ${props.position ?? "end"}`);
   // Self-reference so compiler can recognize this component type
   return h(Ephemeral, props);
 }
@@ -420,6 +426,8 @@ export function Grounding(props: GroundingProps): JSX.Element {
     tags,
     metadata,
   } = props;
+
+  useDebugValue(`Grounding: ${title ?? type ?? "context"}`);
 
   return h(Ephemeral, {
     type,

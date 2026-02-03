@@ -68,3 +68,12 @@ export type { TentickleComponentProps } from "./component/tentickle-component";
 // Model types
 // ============================================================================
 export * from "./types";
+
+// ============================================================================
+// DevTools
+// ============================================================================
+export {
+  enableReactDevTools,
+  isReactDevToolsConnected,
+  disconnectReactDevTools,
+} from "./reconciler/reconciler";

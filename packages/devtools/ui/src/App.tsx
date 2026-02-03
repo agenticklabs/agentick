@@ -1,19 +1,27 @@
-import { useState, useMemo } from "react";
-import { useDevToolsEvents, type Execution, type Session } from "./hooks/useDevToolsEvents";
+import { useState, useMemo, useEffect } from "react";
+import { useDevToolsEvents, type FiberNode, type TokenSummary } from "./hooks/useDevToolsEvents";
 import { ExecutionList } from "./components/ExecutionList";
 import { SessionList } from "./components/SessionList";
 import { ContentPanel } from "./components/ContentPanel";
+import { Inspector } from "./components/Inspector";
+import { TickNavigator } from "./components/TickNavigator";
+import { NetworkPanel } from "./components/NetworkPanel";
 
 type SidebarTab = "executions" | "sessions";
-type ContentTab = "overview" | "ticks" | "fiber" | "tools";
+type ContentTab = "execution" | "context" | "fiber" | "tools";
+type GlobalTab = "network";
 
 export function App() {
-  const { executions, sessions, isConnected, clearAll } = useDevToolsEvents();
+  const { executions, sessions, isConnected, clearAll, clients, gatewaySessions, requests } =
+    useDevToolsEvents();
   const [sidebarTab, setSidebarTab] = useState<SidebarTab>("executions");
-  const [contentTab, setContentTab] = useState<ContentTab>("overview");
+  const [contentTab, setContentTab] = useState<ContentTab>("execution");
+  const [globalTab, setGlobalTab] = useState<GlobalTab | null>(null);
   const [selectedExecutionId, setSelectedExecutionId] = useState<string | null>(null);
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const [selectedTick, setSelectedTick] = useState<number | "latest">("latest");
 
   const selectedExecution = executions.find((e) => e.id === selectedExecutionId);
   const selectedSession = sessions.find((s) => s.id === selectedSessionId);
@@ -60,6 +68,53 @@ export function App() {
       );
     return sum + usage.totalTokens;
   }, 0);
+
+  // Get fiber data for the selected tick (for Inspector panel)
+  const getFiberData = (): {
+    fiberTree: FiberNode | null;
+    tokenSummary: TokenSummary | undefined;
+  } => {
+    if (!selectedExecution) {
+      return { fiberTree: null, tokenSummary: undefined };
+    }
+    if (selectedTick === "latest") {
+      const latestTick = selectedExecution.ticks[selectedExecution.ticks.length - 1];
+      return {
+        fiberTree: selectedSession?.latestFiberTree ?? selectedExecution.fiberTree ?? null,
+        tokenSummary: latestTick?.tokenSummary,
+      };
+    }
+    const tick = selectedExecution.ticks.find((t) => t.number === selectedTick);
+    return {
+      fiberTree: tick?.fiberTree ?? null,
+      tokenSummary: tick?.tokenSummary,
+    };
+  };
+
+  const { fiberTree, tokenSummary } = getFiberData();
+
+  // Find selected node in tree
+  const findNode = (tree: FiberNode | null, id: string): FiberNode | null => {
+    if (!tree) return null;
+    if (tree.id === id) return tree;
+    for (const child of tree.children) {
+      const found = findNode(child, id);
+      if (found) return found;
+    }
+    return null;
+  };
+
+  const selectedNode = selectedNodeId ? findNode(fiberTree, selectedNodeId) : null;
+
+  // Show inspector only when on fiber tab with an execution selected (and no global tab)
+  const showInspector = selectedExecution && contentTab === "fiber" && !globalTab;
+
+  // Clear node selection when switching away from fiber tab
+  useEffect(() => {
+    if (contentTab !== "fiber" || globalTab) {
+      setSelectedNodeId(null);
+    }
+  }, [contentTab, globalTab]);
 
   return (
     <div className="app">
@@ -157,48 +212,102 @@ export function App() {
 
         {/* Content */}
         <section className="content">
-          {/* Content Tabs */}
+          {/* Tick Navigator - Always visible when execution is selected */}
+          {selectedExecution && selectedExecution.ticks.some((t) => t.fiberTree) && (
+            <div className="content-tick-navigator">
+              <TickNavigator
+                ticks={selectedExecution.ticks}
+                selectedTick={selectedTick}
+                onSelectTick={setSelectedTick}
+              />
+            </div>
+          )}
+
+          {/* Content Tabs - Two groups: Execution-scoped and Global */}
           <div className="content-tabs">
-            <button
-              className={`content-tab ${contentTab === "overview" ? "active" : ""}`}
-              onClick={() => setContentTab("overview")}
-            >
-              Overview
-            </button>
-            <button
-              className={`content-tab ${contentTab === "ticks" ? "active" : ""}`}
-              onClick={() => setContentTab("ticks")}
-            >
-              Ticks
-              {selectedExecution && (
-                <span className="content-tab-badge">{selectedExecution.ticks.length}</span>
-              )}
-            </button>
-            <button
-              className={`content-tab ${contentTab === "fiber" ? "active" : ""}`}
-              onClick={() => setContentTab("fiber")}
-            >
-              Fiber Tree
-            </button>
-            <button
-              className={`content-tab ${contentTab === "tools" ? "active" : ""}`}
-              onClick={() => setContentTab("tools")}
-            >
-              Tools
-              {toolCount > 0 && <span className="content-tab-badge">{toolCount}</span>}
-            </button>
+            {/* Execution-scoped tabs */}
+            <div className="content-tabs-group">
+              <button
+                className={`content-tab ${contentTab === "execution" && !globalTab ? "active" : ""}`}
+                onClick={() => {
+                  setContentTab("execution");
+                  setGlobalTab(null);
+                }}
+              >
+                Execution
+              </button>
+              <button
+                className={`content-tab ${contentTab === "context" && !globalTab ? "active" : ""}`}
+                onClick={() => {
+                  setContentTab("context");
+                  setGlobalTab(null);
+                }}
+              >
+                Context
+              </button>
+              <button
+                className={`content-tab ${contentTab === "fiber" && !globalTab ? "active" : ""}`}
+                onClick={() => {
+                  setContentTab("fiber");
+                  setGlobalTab(null);
+                }}
+              >
+                Fiber Tree
+              </button>
+              <button
+                className={`content-tab ${contentTab === "tools" && !globalTab ? "active" : ""}`}
+                onClick={() => {
+                  setContentTab("tools");
+                  setGlobalTab(null);
+                }}
+              >
+                Tools
+                {toolCount > 0 && <span className="content-tab-badge">{toolCount}</span>}
+              </button>
+            </div>
+            {/* Separator */}
+            <div className="content-tabs-separator" />
+            {/* Global tabs */}
+            <div className="content-tabs-group">
+              <button
+                className={`content-tab ${globalTab === "network" ? "active" : ""}`}
+                onClick={() => setGlobalTab("network")}
+              >
+                Network
+                {clients.length > 0 && <span className="content-tab-badge">{clients.length}</span>}
+              </button>
+            </div>
           </div>
 
           {/* Content Body */}
           <div className="content-body">
-            <ContentPanel
-              tab={contentTab}
-              execution={selectedExecution}
-              session={selectedSession}
-              allExecutions={executions}
-            />
+            {globalTab === "network" ? (
+              <NetworkPanel
+                clients={clients}
+                gatewaySessions={gatewaySessions}
+                requests={requests}
+              />
+            ) : (
+              <ContentPanel
+                tab={contentTab}
+                execution={selectedExecution}
+                session={selectedSession}
+                allExecutions={executions}
+                selectedTick={selectedTick}
+                onSelectTick={setSelectedTick}
+                selectedNodeId={selectedNodeId}
+                onNodeSelect={setSelectedNodeId}
+              />
+            )}
           </div>
         </section>
+
+        {/* Inspector Panel - Right side */}
+        {showInspector && (
+          <aside className="inspector-panel">
+            <Inspector node={selectedNode} tokenSummary={tokenSummary} />
+          </aside>
+        )}
       </main>
     </div>
   );

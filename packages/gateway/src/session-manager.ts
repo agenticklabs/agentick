@@ -5,6 +5,7 @@
  */
 
 import type { Session } from "@tentickle/core";
+import { devToolsEmitter, type DTGatewaySessionEvent } from "@tentickle/shared";
 import type { AppRegistry, AppInfo } from "./app-registry.js";
 import type { SessionState } from "./types.js";
 import { parseSessionKey, formatSessionKey } from "./protocol.js";
@@ -15,18 +16,54 @@ interface ManagedSession {
   appInfo: AppInfo;
 }
 
+/**
+ * SessionManager configuration
+ */
+export interface SessionManagerConfig {
+  /** Gateway ID for DevTools events */
+  gatewayId: string;
+}
+
 export class SessionManager {
   private sessions = new Map<string, ManagedSession>();
   private registry: AppRegistry;
+  private gatewayId: string;
+  private devToolsSequence = 0;
 
-  constructor(registry: AppRegistry) {
+  constructor(registry: AppRegistry, config?: SessionManagerConfig) {
     this.registry = registry;
+    this.gatewayId = config?.gatewayId ?? "gateway";
+  }
+
+  /**
+   * Emit a DevTools session event
+   */
+  private emitDevToolsEvent(
+    action: DTGatewaySessionEvent["action"],
+    sessionId: string,
+    appId: string,
+    messageCount?: number,
+    clientId?: string,
+  ): void {
+    if (!devToolsEmitter.hasSubscribers()) return;
+
+    devToolsEmitter.emitEvent({
+      type: "gateway_session",
+      executionId: this.gatewayId,
+      action,
+      sessionId,
+      appId,
+      messageCount,
+      clientId,
+      sequence: this.devToolsSequence++,
+      timestamp: Date.now(),
+    } as DTGatewaySessionEvent);
   }
 
   /**
    * Get or create a session
    */
-  async getOrCreate(sessionKey: string): Promise<ManagedSession> {
+  async getOrCreate(sessionKey: string, clientId?: string): Promise<ManagedSession> {
     // Check if session exists
     let session = this.sessions.get(sessionKey);
     if (session) {
@@ -59,6 +96,10 @@ export class SessionManager {
     };
 
     this.sessions.set(state.id, session);
+
+    // Emit DevTools event for session creation
+    this.emitDevToolsEvent("created", state.id, appId, 0, clientId);
+
     return session;
   }
 
@@ -83,6 +124,8 @@ export class SessionManager {
     const session = this.sessions.get(sessionKey);
     if (!session) return;
 
+    const { id, appId, messageCount } = session.state;
+
     // Clean up session if active
     if (session.coreSession) {
       session.coreSession.close();
@@ -90,6 +133,9 @@ export class SessionManager {
     }
 
     this.sessions.delete(sessionKey);
+
+    // Emit DevTools event for session closure
+    this.emitDevToolsEvent("closed", id, appId, messageCount);
   }
 
   /**
@@ -99,6 +145,8 @@ export class SessionManager {
     const session = this.sessions.get(sessionKey);
     if (!session) return;
 
+    const { id, appId, messageCount } = session.state;
+
     // Reset session state
     session.state.messageCount = 0;
     session.state.lastActivityAt = new Date();
@@ -106,6 +154,9 @@ export class SessionManager {
       session.coreSession.close();
       session.coreSession = null;
     }
+
+    // Emit DevTools event for session reset (treated as closed + recreated)
+    this.emitDevToolsEvent("closed", id, appId, messageCount);
 
     // TODO: Clear persisted history
   }
@@ -178,11 +229,20 @@ export class SessionManager {
   /**
    * Update message count for a session
    */
-  incrementMessageCount(sessionKey: string): void {
+  incrementMessageCount(sessionKey: string, clientId?: string): void {
     const session = this.sessions.get(sessionKey);
     if (session) {
       session.state.messageCount++;
       session.state.lastActivityAt = new Date();
+
+      // Emit DevTools event for session message
+      this.emitDevToolsEvent(
+        "message",
+        session.state.id,
+        session.state.appId,
+        session.state.messageCount,
+        clientId,
+      );
     }
   }
 

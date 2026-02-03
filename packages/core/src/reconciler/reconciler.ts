@@ -98,3 +98,21 @@ export function getContainerChildren(container: TentickleContainer): TentickleNo
 // Re-export
 export { registerRendererComponent };
 export type { TentickleNode, TentickleContainer };
+
+// Re-export devtools bridge
+export {
+  enableReactDevTools,
+  isReactDevToolsConnected,
+  disconnectReactDevTools,
+} from "./devtools-bridge";
+
+/**
+ * Inject renderer info into React DevTools.
+ * This allows React DevTools to recognize Tentickle as a custom renderer.
+ */
+reconciler.injectIntoDevTools({
+  bundleType: process.env.NODE_ENV === "development" ? 1 : 0,
+  version: "1.0.0",
+  rendererPackageName: "@tentickle/core",
+  findFiberByHostInstance: () => null,
+});

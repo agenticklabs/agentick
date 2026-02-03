@@ -560,10 +560,12 @@ export class FiberCompiler {
         typeof node.type === "string"
           ? node.type
           : typeof node.type === "function"
-            ? node.type.name || "Anonymous"
+            ? (node.type as any).displayName || node.type.name || "Anonymous"
             : typeof node.type === "symbol"
               ? node.type.description || "Symbol"
-              : "Unknown";
+              : node.type === null || node.type === undefined
+                ? "text"
+                : "Unknown";
 
       // Generate a human-readable summary for the node
       const summary =

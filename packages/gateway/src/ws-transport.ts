@@ -58,6 +58,7 @@ class WSClientImpl implements TransportClient {
 // ============================================================================
 
 export class WSTransport extends BaseTransport {
+  readonly type = "websocket" as const;
   private wss: WebSocketServer | null = null;
 
   override start(): Promise<void> {

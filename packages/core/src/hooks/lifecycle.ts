@@ -5,7 +5,7 @@
  * These integrate with the engine's tick orchestration.
  */
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useDebugValue } from "react";
 import { useRuntimeStore } from "./runtime-context";
 import type { TickStartCallback, TickEndCallback, AfterCompileCallback } from "./types";
 
@@ -28,6 +28,8 @@ export function useTickStart(callback: TickStartCallback): void {
 
   // Update ref on each render so callback has fresh closure
   savedCallback.current = callback;
+
+  useDebugValue("onTickStart registered");
 
   useEffect(() => {
     const cb: TickStartCallback = () => savedCallback.current();
@@ -55,6 +57,8 @@ export function useTickEnd(callback: TickEndCallback): void {
   const store = useRuntimeStore();
   const savedCallback = useRef(callback);
   savedCallback.current = callback;
+
+  useDebugValue("onTickEnd registered");
 
   useEffect(() => {
     const cb: TickEndCallback = () => savedCallback.current();
@@ -90,6 +94,8 @@ export function useAfterCompile(callback: AfterCompileCallback): void {
   const store = useRuntimeStore();
   const savedCallback = useRef(callback);
   savedCallback.current = callback;
+
+  useDebugValue("onAfterCompile registered");
 
   useEffect(() => {
     const cb: AfterCompileCallback = (compiled) => savedCallback.current(compiled);

@@ -39,7 +39,7 @@
  */
 
 import { AsyncLocalStorage } from "node:async_hooks";
-import { useRef, useState, useEffect, useContext } from "react";
+import { useRef, useState, useEffect, useContext, useDebugValue } from "react";
 import { COMContext } from "./context";
 
 // Import for render phase detection
@@ -738,6 +738,11 @@ export function useSignal<T>(initialValue: T): Signal<T> {
   // Force unused variable to avoid lint warning
   void version;
 
+  // Debug value for React DevTools
+  useDebugValue(signalRef.current.value, (v) =>
+    typeof v === "object" ? `Object(${Object.keys(v as object).length} keys)` : String(v),
+  );
+
   return signalRef.current;
 }
 
@@ -784,6 +789,13 @@ export function useComputed<T>(compute: () => T, deps: readonly Signal<any>[]): 
       unsubscribes.forEach((unsub) => unsub());
     };
   }, deps);
+
+  // Debug value for React DevTools
+  useDebugValue(computedRef.current.value, (v) =>
+    typeof v === "object"
+      ? `Computed(${Object.keys(v as object).length} keys)`
+      : `Computed(${String(v)})`,
+  );
 
   return computedRef.current;
 }

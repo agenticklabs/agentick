@@ -333,6 +333,38 @@ export interface DTFiberSummary {
 }
 
 /**
+ * Token summary for DevTools visualization.
+ */
+export interface DTTokenSummary {
+  /** Tokens in system prompt(s) */
+  system: number;
+  /** Tokens in timeline messages */
+  messages: number;
+  /** Tokens in tool definitions */
+  tools: number;
+  /** Tokens in ephemeral content */
+  ephemeral: number;
+  /** Total tokens */
+  total: number;
+  /** Token count by component (keyed by component identifier) */
+  byComponent?: Record<string, number>;
+}
+
+/**
+ * Compiled preview for DevTools visualization.
+ */
+export interface DTCompiledPreview {
+  /** First 200 chars of system prompt */
+  systemPrompt?: string;
+  /** Number of messages in timeline */
+  messageCount: number;
+  /** Number of tools available */
+  toolCount: number;
+  /** Number of ephemeral entries */
+  ephemeralCount: number;
+}
+
+/**
  * Emitted after each tick with the current fiber tree state.
  * Enables DevTools to show component hierarchy and hook values.
  */
@@ -346,6 +378,10 @@ export interface DTFiberSnapshotEvent extends DevToolsEventBase {
   tree: DTSerializedFiberNode | null;
   /** Summary statistics (always present) */
   summary: DTFiberSummary;
+  /** Token estimate summary (optional - only if compiled structure available) */
+  tokenSummary?: DTTokenSummary;
+  /** Preview of compiled structure (optional) */
+  compiledPreview?: DTCompiledPreview;
 }
 
 // ============================================================================
@@ -408,6 +444,89 @@ export interface DTProcedureErrorEvent extends DevToolsEventBase {
 }
 
 // ============================================================================
+// Network Events (Gateway/Client observability)
+// ============================================================================
+
+/**
+ * Emitted when a client connects to the gateway.
+ */
+export interface DTClientConnectedEvent extends DevToolsEventBase {
+  type: "client_connected";
+  /** Unique client identifier */
+  clientId: string;
+  /** Transport type */
+  transport: "websocket" | "sse" | "http";
+  /** Client IP address (if available) */
+  ip?: string;
+  /** User agent string (if available) */
+  userAgent?: string;
+}
+
+/**
+ * Emitted when a client disconnects from the gateway.
+ */
+export interface DTClientDisconnectedEvent extends DevToolsEventBase {
+  type: "client_disconnected";
+  clientId: string;
+  /** Disconnect reason */
+  reason?: string;
+  /** Connection duration in milliseconds */
+  durationMs: number;
+}
+
+/**
+ * Emitted for gateway session lifecycle events.
+ */
+export interface DTGatewaySessionEvent extends DevToolsEventBase {
+  type: "gateway_session";
+  /** Session lifecycle action */
+  action: "created" | "closed" | "message" | "resumed";
+  /** Session ID */
+  sessionId: string;
+  /** App/agent ID */
+  appId: string;
+  /** Number of messages in session (for stats) */
+  messageCount?: number;
+  /** Client ID that owns this session */
+  clientId?: string;
+}
+
+/**
+ * Emitted when a gateway request is received.
+ */
+export interface DTGatewayRequestEvent extends DevToolsEventBase {
+  type: "gateway_request";
+  /** Unique request identifier */
+  requestId: string;
+  /** Method name (e.g., "chat:send", "tasks:list") */
+  method: string;
+  /** Session key if session-scoped */
+  sessionKey?: string;
+  /** Request parameters (sanitized) */
+  params?: Record<string, unknown>;
+  /** Client ID that made the request */
+  clientId?: string;
+}
+
+/**
+ * Emitted when a gateway request completes.
+ */
+export interface DTGatewayResponseEvent extends DevToolsEventBase {
+  type: "gateway_response";
+  /** Matches the request */
+  requestId: string;
+  /** Whether the request succeeded */
+  ok: boolean;
+  /** Response latency in milliseconds */
+  latencyMs: number;
+  /** Error details if ok is false */
+  error?: {
+    code: string;
+    message: string;
+  };
+}
+
+// ============================================================================
 // Union Type
 // ============================================================================
 
@@ -434,7 +553,12 @@ export type DevToolsEvent =
   | DTFiberSnapshotEvent
   | DTProcedureStartEvent
   | DTProcedureEndEvent
-  | DTProcedureErrorEvent;
+  | DTProcedureErrorEvent
+  | DTClientConnectedEvent
+  | DTClientDisconnectedEvent
+  | DTGatewaySessionEvent
+  | DTGatewayRequestEvent
+  | DTGatewayResponseEvent;
 
 // ============================================================================
 // DevTools Configuration

@@ -11,6 +11,13 @@ import { EventEmitter } from "events";
 import type { IncomingMessage as NodeRequest, ServerResponse as NodeResponse } from "http";
 import type { Message } from "@tentickle/shared";
 import {
+  devToolsEmitter,
+  type DTClientConnectedEvent,
+  type DTClientDisconnectedEvent,
+  type DTGatewayRequestEvent,
+  type DTGatewayResponseEvent,
+} from "@tentickle/shared";
+import {
   Context,
   createProcedure,
   Logger,
@@ -127,6 +134,12 @@ export class Gateway extends EventEmitter {
   /** Track unsubscribe functions for core session channels */
   private coreChannelUnsubscribes = new Map<string, () => void>();
 
+  /** Track client connection times for duration calculation */
+  private clientConnectedAt = new Map<string, number>();
+
+  /** Sequence counter for DevTools events */
+  private devToolsSequence = 0;
+
   constructor(config: GatewayConfig) {
     super();
 
@@ -151,7 +164,7 @@ export class Gateway extends EventEmitter {
 
     // Initialize components
     this.registry = new AppRegistry(config.apps, config.defaultApp);
-    this.sessions = new SessionManager(this.registry);
+    this.sessions = new SessionManager(this.registry, { gatewayId: this.config.id });
 
     // Initialize all methods as procedures
     if (config.methods) {
@@ -259,12 +272,33 @@ export class Gateway extends EventEmitter {
 
   private setupTransportHandlers(transport: Transport): void {
     transport.on("connection", (client) => {
+      // Track connection time for duration calculation
+      const connectTime = Date.now();
+      this.clientConnectedAt.set(client.id, connectTime);
+
       this.emit("client:connected", {
         clientId: client.id,
       });
+
+      // Emit DevTools event
+      if (devToolsEmitter.hasSubscribers()) {
+        devToolsEmitter.emitEvent({
+          type: "client_connected",
+          executionId: this.config.id,
+          clientId: client.id,
+          transport: transport.type as "websocket" | "sse" | "http",
+          sequence: this.devToolsSequence++,
+          timestamp: connectTime,
+        } as DTClientConnectedEvent);
+      }
     });
 
     transport.on("disconnect", (clientId, reason) => {
+      // Calculate connection duration
+      const connectedAt = this.clientConnectedAt.get(clientId);
+      const durationMs = connectedAt ? Date.now() - connectedAt : 0;
+      this.clientConnectedAt.delete(clientId);
+
       // Clean up subscriptions
       this.sessions.unsubscribeAll(clientId);
 
@@ -272,6 +306,19 @@ export class Gateway extends EventEmitter {
         clientId,
         reason,
       });
+
+      // Emit DevTools event
+      if (devToolsEmitter.hasSubscribers()) {
+        devToolsEmitter.emitEvent({
+          type: "client_disconnected",
+          executionId: this.config.id,
+          clientId,
+          reason,
+          durationMs,
+          sequence: this.devToolsSequence++,
+          timestamp: Date.now(),
+        } as DTClientDisconnectedEvent);
+      }
     });
 
     transport.on("message", async (clientId, message) => {
@@ -895,6 +942,25 @@ export class Gateway extends EventEmitter {
     const client = transport.getClient(clientId);
     if (!client) return;
 
+    const startTime = Date.now();
+    const requestId = request.id;
+    const sessionKey = (request.params as Record<string, unknown>)?.sessionId as string | undefined;
+
+    // Emit DevTools request event
+    if (devToolsEmitter.hasSubscribers()) {
+      devToolsEmitter.emitEvent({
+        type: "gateway_request",
+        executionId: this.config.id,
+        requestId,
+        method: request.method,
+        sessionKey,
+        params: request.params as Record<string, unknown>,
+        clientId,
+        sequence: this.devToolsSequence++,
+        timestamp: startTime,
+      } as DTGatewayRequestEvent);
+    }
+
     try {
       const result = await this.executeMethod(transport, clientId, request.method, request.params);
 
@@ -904,16 +970,49 @@ export class Gateway extends EventEmitter {
         ok: true,
         payload: result,
       });
+
+      // Emit DevTools response event
+      if (devToolsEmitter.hasSubscribers()) {
+        devToolsEmitter.emitEvent({
+          type: "gateway_response",
+          executionId: this.config.id,
+          requestId,
+          ok: true,
+          latencyMs: Date.now() - startTime,
+          sequence: this.devToolsSequence++,
+          timestamp: Date.now(),
+        } as DTGatewayResponseEvent);
+      }
     } catch (error) {
+      const errorCode = "METHOD_ERROR";
+      const errorMessage = error instanceof Error ? error.message : String(error);
+
       client.send({
         type: "res",
         id: request.id,
         ok: false,
         error: {
-          code: "METHOD_ERROR",
-          message: error instanceof Error ? error.message : String(error),
+          code: errorCode,
+          message: errorMessage,
         },
       });
+
+      // Emit DevTools response event with error
+      if (devToolsEmitter.hasSubscribers()) {
+        devToolsEmitter.emitEvent({
+          type: "gateway_response",
+          executionId: this.config.id,
+          requestId,
+          ok: false,
+          latencyMs: Date.now() - startTime,
+          error: {
+            code: errorCode,
+            message: errorMessage,
+          },
+          sequence: this.devToolsSequence++,
+          timestamp: Date.now(),
+        } as DTGatewayResponseEvent);
+      }
     }
   }
 
@@ -1048,8 +1147,8 @@ export class Gateway extends EventEmitter {
   ): Promise<{ messageId: string }> {
     const { sessionId, message } = params;
 
-    // Get or create managed session
-    const managedSession = await this.sessions.getOrCreate(sessionId);
+    // Get or create managed session (SessionManager emits DevTools event if new)
+    const managedSession = await this.sessions.getOrCreate(sessionId, clientId);
 
     // Auto-subscribe sender to session events
     const client = transport.getClient(clientId);
@@ -1080,8 +1179,8 @@ export class Gateway extends EventEmitter {
       },
     );
 
-    // Increment message count
-    this.sessions.incrementMessageCount(managedSession.state.id);
+    // Increment message count (SessionManager emits DevTools event)
+    this.sessions.incrementMessageCount(managedSession.state.id, clientId);
 
     this.emit("session:message", {
       sessionId: managedSession.state.id,
@@ -1280,14 +1379,14 @@ export class Gateway extends EventEmitter {
   }
 
   private async handleResetMethod(params: { sessionId: string }): Promise<void> {
+    // SessionManager.reset() emits DevTools event
     await this.sessions.reset(params.sessionId);
-
     this.emit("session:closed", { sessionId: params.sessionId });
   }
 
   private async handleCloseMethod(params: { sessionId: string }): Promise<void> {
+    // SessionManager.close() emits DevTools event
     await this.sessions.close(params.sessionId);
-
     this.emit("session:closed", { sessionId: params.sessionId });
   }
 

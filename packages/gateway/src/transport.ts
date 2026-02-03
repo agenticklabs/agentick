@@ -86,10 +86,16 @@ export interface TransportConfig {
   ) => Promise<unknown>;
 }
 
+/** Transport type identifier */
+export type TransportType = "websocket" | "http" | "sse";
+
 /**
  * Transport interface - abstracts WebSocket vs HTTP/SSE.
  */
 export interface Transport {
+  /** Transport type identifier */
+  readonly type: TransportType;
+
   /** Start the transport server */
   start(): Promise<void>;
 
@@ -126,6 +132,9 @@ export interface Transport {
  * Base class with shared transport functionality.
  */
 export abstract class BaseTransport implements Transport {
+  /** Transport type - must be set by subclass */
+  abstract readonly type: TransportType;
+
   protected clients = new Map<string, TransportClient>();
   protected handlers: Partial<TransportEvents> = {};
   protected config: TransportConfig;

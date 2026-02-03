@@ -4,7 +4,7 @@
  * React contexts for COM, TickState, and other engine-provided values.
  */
 
-import React, { useContext, type ReactNode } from "react";
+import React, { useContext, useDebugValue, type ReactNode } from "react";
 import type { TickState } from "./types";
 import type { COM } from "../com/object-model";
 import { RuntimeProvider, type RuntimeStore } from "./runtime-context";
@@ -33,6 +33,7 @@ export function useCom(): COM {
   if (!com) {
     throw new Error("useCom must be used within a TentickleProvider");
   }
+  useDebugValue(com ? "COM" : "No COM");
   return com;
 }
 
@@ -70,6 +71,7 @@ export function useTickState(): TickState {
   if (!state) {
     throw new Error("useTickState must be used within a TentickleProvider");
   }
+  useDebugValue(state ? `Tick ${state.tick}` : "No TickState");
   return state;
 }
 

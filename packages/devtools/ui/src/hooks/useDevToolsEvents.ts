@@ -37,10 +37,16 @@ export interface Tick {
   providerResponse?: unknown;
   /** Transformed model output (engine format) */
   modelOutput?: unknown;
+  /** COM layer output (final combined output) */
+  comOutput?: unknown;
   /** Fiber tree snapshot at this tick */
   fiberTree?: FiberNode | null;
   /** Fiber summary at this tick */
   fiberSummary?: FiberSummary;
+  /** Token estimates at this tick */
+  tokenSummary?: TokenSummary;
+  /** Compiled structure preview at this tick */
+  compiledPreview?: CompiledPreview;
 }
 
 export interface TickEvent {
@@ -61,6 +67,10 @@ export interface Execution {
   model?: string;
   fiberTree?: FiberNode | null;
   fiberSummary?: FiberSummary;
+  /** Latest token estimates */
+  tokenSummary?: TokenSummary;
+  /** Latest compiled preview */
+  compiledPreview?: CompiledPreview;
 }
 
 export interface FiberNode {
@@ -88,6 +98,22 @@ export interface FiberSummary {
   hooksByType: Record<string, number>;
 }
 
+export interface TokenSummary {
+  system: number;
+  messages: number;
+  tools: number;
+  ephemeral: number;
+  total: number;
+  byComponent?: Record<string, number>;
+}
+
+export interface CompiledPreview {
+  systemPrompt?: string;
+  messageCount: number;
+  toolCount: number;
+  ephemeralCount: number;
+}
+
 export interface Session {
   id: string;
   rootComponent: string;
@@ -97,11 +123,47 @@ export interface Session {
   latestFiberSummary?: FiberSummary;
 }
 
+// Network monitoring types
+export interface ClientInfo {
+  id: string;
+  transport: "websocket" | "sse" | "http";
+  connectedAt: number;
+  ip?: string;
+  userAgent?: string;
+}
+
+export interface GatewaySessionInfo {
+  id: string;
+  appId: string;
+  messageCount: number;
+  createdAt: number;
+  clientId?: string;
+}
+
+export interface RequestInfo {
+  id: string;
+  method: string;
+  params?: Record<string, unknown>;
+  timestamp: number;
+  latencyMs?: number;
+  ok?: boolean;
+  error?: string;
+  sessionKey?: string;
+  clientId?: string;
+}
+
 export function useDevToolsEvents() {
   const [executions, setExecutions] = useState<Map<string, Execution>>(new Map());
   const [sessions, setSessions] = useState<Map<string, Session>>(new Map());
   const [isConnected, setIsConnected] = useState(false);
   const seenEvents = useRef<Set<string>>(new Set());
+
+  // Network state
+  const [clients, setClients] = useState<Map<string, ClientInfo>>(new Map());
+  const [gatewaySessions, setGatewaySessions] = useState<Map<string, GatewaySessionInfo>>(
+    new Map(),
+  );
+  const [requests, setRequests] = useState<RequestInfo[]>([]);
 
   const getEventKey = (event: DevToolsEvent): string => {
     // Use sequence number for deduplication - monotonically increasing per session,
@@ -228,6 +290,8 @@ export function useDevToolsEvents() {
         const tickNum = event.tick as number;
         const tree = event.tree as FiberNode | null;
         const summary = event.summary as FiberSummary;
+        const tokenSummary = event.tokenSummary as TokenSummary | undefined;
+        const compiledPreview = event.compiledPreview as CompiledPreview | undefined;
 
         // Update execution (both the latest and per-tick)
         setExecutions((prev) => {
@@ -238,9 +302,13 @@ export function useDevToolsEvents() {
               ...exec,
               fiberTree: tree,
               fiberSummary: summary,
+              tokenSummary,
+              compiledPreview,
               // Also store on the specific tick
               ticks: exec.ticks.map((t) =>
-                t.number === tickNum ? { ...t, fiberTree: tree, fiberSummary: summary } : t,
+                t.number === tickNum
+                  ? { ...t, fiberTree: tree, fiberSummary: summary, tokenSummary, compiledPreview }
+                  : t,
               ),
             });
           }
@@ -415,6 +483,95 @@ export function useDevToolsEvents() {
         });
         break;
       }
+
+      // Network events
+      case "client_connected": {
+        const clientInfo: ClientInfo = {
+          id: event.clientId as string,
+          transport: event.transport as "websocket" | "sse" | "http",
+          connectedAt: event.timestamp,
+          ip: event.ip as string | undefined,
+          userAgent: event.userAgent as string | undefined,
+        };
+        setClients((prev) => {
+          const next = new Map(prev);
+          next.set(clientInfo.id, clientInfo);
+          return next;
+        });
+        break;
+      }
+
+      case "client_disconnected": {
+        const clientId = event.clientId as string;
+        setClients((prev) => {
+          const next = new Map(prev);
+          next.delete(clientId);
+          return next;
+        });
+        break;
+      }
+
+      case "gateway_session": {
+        const action = event.action as string;
+        const sessionId = event.sessionId as string;
+        if (action === "created" || action === "message" || action === "resumed") {
+          const sessionInfo: GatewaySessionInfo = {
+            id: sessionId,
+            appId: event.appId as string,
+            messageCount: (event.messageCount as number) ?? 0,
+            createdAt: event.timestamp,
+            clientId: event.clientId as string | undefined,
+          };
+          setGatewaySessions((prev) => {
+            const next = new Map(prev);
+            const existing = next.get(sessionId);
+            if (existing && action === "message") {
+              // Update message count
+              next.set(sessionId, { ...existing, messageCount: sessionInfo.messageCount });
+            } else {
+              next.set(sessionId, sessionInfo);
+            }
+            return next;
+          });
+        } else if (action === "closed") {
+          setGatewaySessions((prev) => {
+            const next = new Map(prev);
+            next.delete(sessionId);
+            return next;
+          });
+        }
+        break;
+      }
+
+      case "gateway_request": {
+        const requestInfo: RequestInfo = {
+          id: event.requestId as string,
+          method: event.method as string,
+          params: event.params as Record<string, unknown> | undefined,
+          timestamp: event.timestamp,
+          sessionKey: event.sessionKey as string | undefined,
+          clientId: event.clientId as string | undefined,
+        };
+        setRequests((prev) => [...prev.slice(-99), requestInfo]); // Keep last 100 requests
+        break;
+      }
+
+      case "gateway_response": {
+        const requestId = event.requestId as string;
+        setRequests((prev) =>
+          prev.map((req) =>
+            req.id === requestId
+              ? {
+                  ...req,
+                  latencyMs: event.latencyMs as number,
+                  ok: event.ok as boolean,
+                  error: event.error ? (event.error as { message: string }).message : undefined,
+                }
+              : req,
+          ),
+        );
+        break;
+      }
     }
   }, []);
 
@@ -451,6 +608,9 @@ export function useDevToolsEvents() {
   const clearAll = useCallback(() => {
     setExecutions(new Map());
     setSessions(new Map());
+    setClients(new Map());
+    setGatewaySessions(new Map());
+    setRequests([]);
     seenEvents.current.clear();
     fetch("/api/clear").catch(() => {});
   }, []);
@@ -465,10 +625,20 @@ export function useDevToolsEvents() {
     return bLatest - aLatest;
   });
 
+  // Convert network maps to arrays
+  const clientList = Array.from(clients.values()).sort((a, b) => b.connectedAt - a.connectedAt);
+  const gatewaySessionList = Array.from(gatewaySessions.values()).sort(
+    (a, b) => b.createdAt - a.createdAt,
+  );
+
   return {
     executions: executionList,
     sessions: sessionList,
     isConnected,
     clearAll,
+    // Network state
+    clients: clientList,
+    gatewaySessions: gatewaySessionList,
+    requests,
   };
 }

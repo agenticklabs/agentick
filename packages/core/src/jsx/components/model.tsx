@@ -4,7 +4,7 @@
  * Uses React hooks (useEffect) for lifecycle instead of Tentickle Component class.
  */
 
-import React, { useEffect } from "react";
+import React, { useEffect, useDebugValue } from "react";
 import { useCom } from "../../hooks/context";
 import type { ModelConfig, ModelInstance } from "../../model/model";
 import type { ComponentBaseProps } from "../jsx-types";
@@ -63,6 +63,13 @@ export interface ModelComponentProps extends ComponentBaseProps, Omit<ModelConfi
 export function Model(props: ModelComponentProps): React.ReactElement {
   const { model, onMount, onUnmount, ...options } = props;
   const com = useCom();
+
+  // Debug value shows model identifier for React DevTools
+  useDebugValue(
+    typeof model === "string"
+      ? `Model: ${model}`
+      : `Model: ${(model as any).metadata?.id ?? "custom"}`,
+  );
 
   // Set model on mount, clear on unmount
   useEffect(() => {

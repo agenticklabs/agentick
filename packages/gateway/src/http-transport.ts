@@ -75,6 +75,7 @@ export interface HTTPTransportConfig extends TransportConfig {
 }
 
 export class HTTPTransport extends BaseTransport {
+  readonly type = "http" as const;
   private server: Server | null = null;
   private httpConfig: HTTPTransportConfig;
 

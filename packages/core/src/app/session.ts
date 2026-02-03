@@ -47,7 +47,11 @@ import {
   forwardToDevTools,
   type DTFiberSnapshotEvent,
   type DTFiberSummary,
+  type DTTokenSummary,
+  type DTCompiledPreview,
 } from "@tentickle/shared";
+import { computeTokenSummary } from "../utils/token-estimate";
+import type { CompiledStructure } from "../compiler/types";
 import type { ExecutableTool, ToolClass } from "../tool/tool";
 import type { TickState } from "../component/component";
 import type { ExecutionMessage } from "../engine/execution-types";
@@ -1152,14 +1156,57 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
   /**
    * Emit a fiber_snapshot event to DevTools after each tick.
    * This enables the Fiber Tree panel in DevTools to show component hierarchy and hook values.
+   *
+   * @param tick - The tick number
+   * @param executionId - The execution ID
+   * @param compiled - Optional compiled structure for token estimation
    */
-  private emitFiberSnapshot(tick: number, executionId: string): void {
+  private emitFiberSnapshot(tick: number, executionId: string, compiled?: CompiledStructure): void {
     // Only emit if DevTools has subscribers (avoid serialization overhead)
     if (!devToolsEmitter.hasSubscribers()) return;
 
     try {
       const tree = this.serializeFiberTree();
       const summary = this.getFiberSummary();
+
+      // Compute token summary if compiled structure is available
+      let tokenSummary: DTTokenSummary | undefined;
+      let compiledPreview: DTCompiledPreview | undefined;
+
+      if (compiled) {
+        try {
+          const tokens = computeTokenSummary(compiled);
+          tokenSummary = {
+            system: tokens.system,
+            messages: tokens.messages,
+            tools: tokens.tools,
+            ephemeral: tokens.ephemeral,
+            total: tokens.total,
+            byComponent: Object.fromEntries(tokens.byComponent),
+          };
+
+          // Get system prompt preview (first 200 chars)
+          let systemPrompt: string | undefined;
+          if (compiled.system.length > 0) {
+            const firstSystem = compiled.system[0];
+            if (firstSystem.content.length > 0) {
+              const firstBlock = firstSystem.content[0];
+              if ("text" in firstBlock && typeof firstBlock.text === "string") {
+                systemPrompt = firstBlock.text.slice(0, 200);
+              }
+            }
+          }
+
+          compiledPreview = {
+            systemPrompt,
+            messageCount: compiled.timelineEntries.length,
+            toolCount: compiled.tools.length,
+            ephemeralCount: compiled.ephemeral.length,
+          };
+        } catch {
+          // Ignore token estimation errors
+        }
+      }
 
       const event: DTFiberSnapshotEvent = {
         type: "fiber_snapshot",
@@ -1170,6 +1217,8 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
         timestamp: Date.now(),
         tree: tree as DTFiberSnapshotEvent["tree"],
         summary: summary as DTFiberSummary,
+        tokenSummary,
+        compiledPreview,
       };
 
       devToolsEmitter.emitEvent(event);
@@ -1424,7 +1473,7 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
           });
 
           // Emit fiber snapshot to DevTools
-          this.emitFiberSnapshot(currentTick, executionId);
+          this.emitFiberSnapshot(currentTick, executionId, compiled.rawCompiled);
           // Clear queued messages - they were made available during compilation
           this.com?.clearQueuedMessages();
           break;
@@ -1597,7 +1646,7 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
         });
 
         // Emit fiber snapshot to DevTools
-        this.emitFiberSnapshot(currentTick, executionId);
+        this.emitFiberSnapshot(currentTick, executionId, compiled.rawCompiled);
 
         // Clear queued messages after tick completes - they've been processed
         this.com?.clearQueuedMessages();
@@ -1779,6 +1828,8 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
     tools: (ToolClass | ExecutableTool)[];
     shouldStop: boolean;
     stopReason?: string;
+    /** Raw compiled structure for DevTools token estimation */
+    rawCompiled?: CompiledStructure;
   }> {
     if (!this.com || !this.compiler || !this.structureRenderer) {
       throw new Error("Compilation infrastructure not initialized");
@@ -1897,6 +1948,7 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
       tools: tools as (ToolClass | ExecutableTool)[],
       shouldStop: !!stopReason,
       stopReason,
+      rawCompiled: compiled,
     };
   }
 

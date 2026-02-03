@@ -1,5 +1,5 @@
 import type { ContentBlock, Message, MessageRoles } from "@tentickle/shared";
-import React from "react";
+import React, { useDebugValue } from "react";
 import type { JSX } from "react";
 import type { JSX as TentickleJSX } from "../jsx-runtime";
 import type { StreamEvent } from "../../engine/engine-events";
@@ -102,6 +102,8 @@ export function Entry(props: EntryProps): JSX.Element {
  * Returns an intrinsic "section" element for react-reconciler compatibility.
  */
 export function Section(props: TentickleJSX.IntrinsicElements["section"]): JSX.Element {
+  // Debug value shows section title for React DevTools
+  useDebugValue(`Section: ${props.title ?? props.id ?? "untitled"}`);
   // Use intrinsic "section" element for react-reconciler compatibility
   return h("section", props);
 }
@@ -139,6 +141,15 @@ export function Message(props: MessageProps): JSX.Element {
   const { role, content, children, id, metadata, tags, visibility, createdAt, updatedAt, ...rest } =
     props;
 
+  // Debug value shows role and content preview for React DevTools
+  const preview =
+    typeof content === "string"
+      ? content.slice(0, 30) + (content.length > 30 ? "..." : "")
+      : children
+        ? "[children]"
+        : "[empty]";
+  useDebugValue(`${role}: ${preview}`);
+
   // Convert MessageProps to Message structure for EntryKindMap
   // If content is already ContentBlock[], use it; otherwise renderer will convert children
   const message: Message = {
@@ -165,6 +176,8 @@ export function Message(props: MessageProps): JSX.Element {
  * When used in JSX: <Tool definition={myTool} />
  */
 export function Tool(props: TentickleJSX.IntrinsicElements["tool"]): JSX.Element {
+  // Debug value shows tool name for React DevTools
+  useDebugValue(`Tool: ${props.name ?? "unnamed"}`);
   // Use intrinsic "tool" element for react-reconciler compatibility
   return h("tool", props);
 }

@@ -330,3 +330,287 @@ Context.emit("custom:event", { data: "value" });
 | Client implementation  | `packages/client/src/client.ts`   |
 | Express example        | `example/express/src/`            |
 | Test files             | `packages/*/src/**/*.spec.ts`     |
+
+## Core Package Architecture
+
+### React-like Reconciler
+
+Tentickle uses a React-inspired reconciler for composing LLM prompts. The core abstracts are:
+
+- **Fiber Tree**: Virtual DOM-like structure representing the component hierarchy
+- **Reconciler**: Manages component lifecycle, diffs changes, schedules updates
+- **Compiler**: Transforms the fiber tree into model-ready format (messages, tools, system prompt)
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                      User JSX Components                         │
+│   <App> → <System> → <Message> → <Tool> → primitives            │
+└───────────────────────────┬─────────────────────────────────────┘
+                            │ render
+┌───────────────────────────▼─────────────────────────────────────┐
+│                        Fiber Tree                                │
+│   Root fiber → child fibers → hooks state → props               │
+└───────────────────────────┬─────────────────────────────────────┘
+                            │ compile
+┌───────────────────────────▼─────────────────────────────────────┐
+│                    CompiledStructure                             │
+│   { system, timelineEntries, tools, ephemeral, sections }       │
+└───────────────────────────┬─────────────────────────────────────┘
+                            │ transform
+┌───────────────────────────▼─────────────────────────────────────┐
+│                      Provider Input                              │
+│   Provider-specific format (Anthropic, OpenAI, etc.)            │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Key Files in @tentickle/core
+
+| File                         | Purpose                                                  |
+| ---------------------------- | -------------------------------------------------------- |
+| `reconciler/reconciler.ts`   | Fiber reconciliation, component lifecycle                |
+| `reconciler/fiber.ts`        | Fiber node types and creation                            |
+| `compiler/fiber-compiler.ts` | Transforms fiber tree to CompiledStructure               |
+| `compiler/collector.ts`      | Collects content from fiber tree                         |
+| `app/session.ts`             | Session management, tick execution, DevTools integration |
+| `hooks/*.ts`                 | React-like hooks (useState, useEffect, useSignal, etc.)  |
+| `jsx/components/*.tsx`       | Built-in JSX components                                  |
+
+### JSX Components
+
+Built-in components for prompt composition:
+
+```typescript
+// System prompt
+<System>You are a helpful assistant.</System>
+
+// Messages
+<Message role="user">Hello!</Message>
+<Message role="assistant">Hi there!</Message>
+
+// Tools
+<Tool
+  name="calculator"
+  description="Performs math"
+  schema={z.object({ expression: z.string() })}
+  handler={async ({ expression }) => eval(expression)}
+/>
+
+// Primitives
+<text>Raw text content</text>
+<section id="context">Grouped content</section>
+```
+
+### Hook System
+
+React-like hooks for state and effects:
+
+```typescript
+// State
+const [count, setCount] = useState(0);
+const [state, dispatch] = useReducer(reducer, initialState);
+
+// Signals (reactive state)
+const signal = useSignal(initialValue);
+const computed = useComputed(() => signal.value * 2);
+
+// Effects
+useEffect(() => {
+  // Side effect on mount/update
+  return () => { /* cleanup */ };
+}, [deps]);
+
+// Message handling
+const messages = useQueuedMessages();
+useOnMessage((msg) => { /* handle */ });
+
+// Context
+const value = useContext(MyContext);
+```
+
+### Session & Execution Model
+
+**Session**: Long-lived conversation context with state persistence.
+
+**Execution**: Single run of the component tree (one user message → model response cycle).
+
+**Tick**: One model API call within an execution. Multi-tick executions happen with tool use.
+
+```
+Session
+├── Execution 1 (user: "Hello")
+│   └── Tick 1 → model response
+├── Execution 2 (user: "Use calculator")
+│   ├── Tick 1 → tool_use (calculator)
+│   └── Tick 2 → final response
+└── Execution 3 ...
+```
+
+### CompiledStructure
+
+The intermediate representation after compiling the fiber tree:
+
+```typescript
+interface CompiledStructure {
+  system: CompiledTimelineEntry[];      // System-level entries
+  timelineEntries: CompiledTimelineEntry[]; // Message history
+  tools: CompiledTool[];                // Available tools
+  ephemeral: CompiledEphemeral[];       // Temporary content
+  sections: Map<string, CompiledSection>; // Named sections
+}
+```
+
+## DevTools Architecture
+
+### Enabling DevTools
+
+```typescript
+import { createSession } from "@tentickle/core";
+
+const session = createSession(MyApp, {
+  devTools: true,  // Enable DevTools
+  // or with config:
+  devTools: {
+    enabled: true,
+    remote: true,
+    remoteUrl: "http://localhost:3001/api/devtools",
+  },
+});
+```
+
+### DevTools Event Flow
+
+```
+┌─────────────┐    emit     ┌──────────────────┐    SSE     ┌─────────────┐
+│   Session   │ ─────────▶  │ devToolsEmitter  │ ─────────▶ │ DevTools UI │
+│   (core)    │             │    (shared)      │            │  (browser)  │
+└─────────────┘             └──────────────────┘            └─────────────┘
+```
+
+### Key Event Types
+
+| Event                       | Purpose                        |
+| --------------------------- | ------------------------------ |
+| `execution_start`           | New execution began            |
+| `execution_end`             | Execution completed            |
+| `tick_start` / `tick_end`   | Model API call lifecycle       |
+| `compiled`                  | JSX compiled to messages/tools |
+| `model_request`             | Request sent to provider       |
+| `provider_response`         | Raw provider response          |
+| `model_response`            | Transformed response           |
+| `tool_call` / `tool_result` | Tool execution                 |
+| `fiber_snapshot`            | Fiber tree state at tick end   |
+| `content_delta`             | Streaming text chunk           |
+
+### DevTools UI Structure
+
+The DevTools UI (`packages/devtools/ui/`) has:
+
+**Sidebar** (left):
+
+- Executions list
+- Sessions list (grouped executions)
+
+**Content Tabs** (center):
+
+- **Execution**: Overview stats (status, tokens, duration, model)
+- **Context**: Per-tick context view controlled by tick scrubber
+  - Compiled context (system, messages, tools)
+  - Provider input (what model sees)
+  - Provider response (raw)
+  - Model output (transformed)
+  - Tool calls
+- **Fiber Tree**: Component hierarchy with hooks inspection
+- **Tools**: All tool calls across ticks
+
+**Global Tabs** (separated):
+
+- **Network**: Gateway connections, sessions, requests
+
+**Inspector** (right, fiber tab only):
+
+- Selected node props
+- Hook states
+- Token estimates
+
+**Tick Navigator** (top):
+
+- Scrubber to select which tick's data to view
+
+### DevTools Files
+
+| File                                                   | Purpose                            |
+| ------------------------------------------------------ | ---------------------------------- |
+| `packages/shared/src/devtools.ts`                      | Event types, emitter singleton     |
+| `packages/devtools/ui/src/App.tsx`                     | Main UI layout and state           |
+| `packages/devtools/ui/src/hooks/useDevToolsEvents.ts`  | Event processing, state management |
+| `packages/devtools/ui/src/components/ContentPanel.tsx` | Tab content views                  |
+| `packages/devtools/ui/src/components/Tree/`            | Fiber tree visualization           |
+| `packages/devtools/ui/src/components/Inspector/`       | Node inspection panel              |
+| `packages/devtools/ui/src/components/NetworkPanel.tsx` | Network monitoring                 |
+
+### Token Estimation
+
+DevTools shows approximate token counts using `packages/core/src/utils/token-estimate.ts`:
+
+```typescript
+import { computeTokenSummary, formatTokenCount } from "@tentickle/core";
+
+const summary = computeTokenSummary(compiled);
+// { system: 150, messages: 500, tools: 200, ephemeral: 0, total: 850, byComponent: Map }
+
+formatTokenCount(1500); // "1.5k"
+```
+
+### React DevTools Integration
+
+For debugging the reconciler itself, connect to standalone React DevTools:
+
+```typescript
+import { enableReactDevTools } from "@tentickle/core";
+
+// Before creating sessions
+enableReactDevTools(); // Connects to npx react-devtools on port 8097
+```
+
+## Provider Adapters
+
+Adapters transform between Tentickle's format and provider-specific APIs:
+
+```typescript
+import { createAnthropicAdapter } from "@tentickle/openai"; // or @tentickle/google
+
+const adapter = createAnthropicAdapter({
+  apiKey: process.env.ANTHROPIC_API_KEY,
+});
+
+// Used internally by session
+const session = createSession(MyApp, {
+  adapter,
+  model: "claude-3-5-sonnet-20241022",
+});
+```
+
+## Common Debugging
+
+### Component shows as `<Unknown>` in DevTools
+
+Add `displayName` to function components:
+
+```typescript
+function MyComponent() { ... }
+MyComponent.displayName = "MyComponent";
+```
+
+### System tokens showing as 0
+
+Ensure sections are being compiled. Check that `<System>` or `<section>` components are in the tree.
+
+### Fiber tree not updating
+
+The fiber tree snapshots are taken at tick end. Check `tick_end` events are being emitted.
+
+### DevTools not receiving events
+
+1. Verify `devTools: true` in session config
+2. Check SSE connection in Network tab
+3. Look for `[DevTools]` log messages in console
