@@ -11,6 +11,126 @@ We maintain a clean, single code path for all functionality. When refactoring:
 - Don't keep unused exports "for backwards compat"
 - One way to do things, done well
 
+### Primitives vs Patterns
+
+The framework provides **building blocks**, not opinions. Users compose these into application-specific patterns.
+
+**Core primitives (what framework provides):**
+
+| Primitive     | Purpose                                                               |
+| ------------- | --------------------------------------------------------------------- |
+| `<Timeline>`  | Renders conversation history. Special because it IS the conversation. |
+| `<Tool>`      | Defines a function the model can call                                 |
+| `<Section>`   | Renders content to model context                                      |
+| `<Message>`   | Adds a message to the timeline                                        |
+| Signals/hooks | Reactive state management                                             |
+| Channels      | Real-time sync between session and UI                                 |
+
+**Patterns (what users build from primitives):**
+
+Todo lists, artifacts, memory systems, etc. are NOT framework primitives. They are **state that exists parallel to the timeline**. The timeline contains _actions_ (tool calls) that manipulate this state, but the state itself lives outside the conversation history.
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                        Session                               │
+│                                                             │
+│   Timeline (IS the conversation)    Parallel State          │
+│   ┌─────────────────────────┐      ┌───────────────────┐   │
+│   │ user: "Add a task"      │      │ todos: [...]      │   │
+│   │ tool_use: todo_list     │ ───▶ │ artifacts: [...]  │   │
+│   │ tool_result: "Created"  │      │ memory: [...]     │   │
+│   │ assistant: "Done!"      │      │ (user-defined)    │   │
+│   └─────────────────────────┘      └───────────────────┘   │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Stateful Tool Pattern
+
+The recommended way to build managed collections (todos, artifacts, etc.) is the **stateful tool pattern**. See `example/express/src/tools/todo-list.tool.tsx` for a complete example.
+
+A stateful tool combines:
+
+```typescript
+export const MyStatefulTool = createTool({
+  name: "my_tool",
+  description: "...",
+  input: schema,
+
+  // 1. Handler: Mutates state, broadcasts changes
+  handler: async (input) => {
+    const result = MyService.doAction(input);
+
+    // Broadcast to UI via channel
+    const ctx = Context.tryGet();
+    ctx?.channels?.publish(ctx, "my-channel", {
+      type: "state_changed",
+      payload: result
+    });
+
+    return [{ type: "text", text: "Done" }];
+  },
+
+  // 2. Render: Shows current state to model each tick
+  render: () => {
+    const state = MyService.getState();
+    return (
+      <Section id="my-state" audience="model">
+        Current state: {JSON.stringify(state)}
+      </Section>
+    );
+  },
+});
+```
+
+This pattern gives you:
+
+- **Model sees state** via `render()` on each tick
+- **Model can act** via `handler()` tool calls
+- **UI stays in sync** via channel broadcasts
+- **Actions in timeline** but state lives separately
+
+### Provider Pattern (for composability)
+
+For more complex patterns, use the Provider pattern (see `<Timeline.Provider>`):
+
+```tsx
+// Provider manages state + context
+<MyThing.Provider service={myService}>
+  {/* Customizable rendering */}
+  <MyThing.List>
+    {(items) => items.map(item => <CustomItem {...item} />)}
+  </MyThing.List>
+
+  {/* Tools can be bundled or custom */}
+  <MyThing.Tools />
+</MyThing.Provider>
+```
+
+This allows:
+
+- Default rendering with customization via render props
+- Separation of state management from presentation
+- Service injection for persistence
+
+### Plugins
+
+Common patterns can be packaged as plugins (separate packages, not in core):
+
+```typescript
+import { Artifacts } from "@tentickle/plugin-artifacts";
+
+<Artifacts.Provider service={myArtifactService}>
+  <Artifacts.List />
+  <Artifacts.Tools />
+</Artifacts.Provider>
+```
+
+Plugins compose framework primitives into reusable patterns. They should:
+
+- Accept service/persistence configuration
+- Follow the Provider pattern for composability
+- Have sensible defaults but allow customization
+
 ## Package Architecture
 
 ```

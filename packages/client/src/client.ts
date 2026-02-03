@@ -434,6 +434,14 @@ class ClientExecutionHandleImpl implements ClientExecutionHandle {
       this.resolveResult(event.result);
     }
 
+    // Handle server-side errors
+    if (event.type === "error") {
+      this.hasResult = true; // Prevent "completed without result" error
+      this._status = "error";
+      const errorMessage = (event as unknown as { error?: string }).error ?? "Server error";
+      this.rejectResult(new Error(errorMessage));
+    }
+
     if (event.type === "execution_end") {
       if (this._status === "running") {
         this._status = "completed";

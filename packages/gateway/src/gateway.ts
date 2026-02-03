@@ -25,7 +25,10 @@ import {
   type Procedure,
   type Middleware,
   type UserContext,
+  type ChannelServiceInterface,
+  type ChannelEvent,
 } from "@tentickle/kernel";
+import type { Session } from "@tentickle/core";
 
 const log = Logger.for("Gateway");
 import { extractToken, validateAuth, setSSEHeaders, type AuthResult } from "@tentickle/server";
@@ -89,6 +92,41 @@ function createCustomGuardMiddleware(
     }
 
     return next();
+  };
+}
+
+// ============================================================================
+// Channel Service Helpers
+// ============================================================================
+
+/**
+ * Create a ChannelServiceInterface that wraps a Session's channel() method.
+ * This allows gateway methods to access session channels via Context.
+ */
+function createChannelServiceFromSession(
+  session: Session,
+  _gatewayId: string,
+): ChannelServiceInterface {
+  return {
+    getChannel: (_ctx: KernelContext, channelName: string) => session.channel(channelName),
+    publish: (_ctx: KernelContext, channelName: string, event: Omit<ChannelEvent, "channel">) => {
+      session.channel(channelName).publish({ ...event, channel: channelName } as ChannelEvent);
+    },
+    subscribe: (
+      _ctx: KernelContext,
+      channelName: string,
+      handler: (event: ChannelEvent) => void,
+    ) => {
+      return session.channel(channelName).subscribe(handler);
+    },
+    waitForResponse: (
+      _ctx: KernelContext,
+      channelName: string,
+      requestId: string,
+      timeoutMs?: number,
+    ) => {
+      return session.channel(channelName).waitForResponse(requestId, timeoutMs);
+    },
   };
 }
 
@@ -689,7 +727,46 @@ export class Gateway extends EventEmitter {
       return;
     }
 
-    // For now just acknowledge - subscriptions are managed per-connection
+    // Support both formats:
+    // - { sessionId, clientId } - simple format
+    // - { connectionId, add: [...], remove: [...] } - client format
+    const clientId = (body.clientId ?? body.connectionId) as string | undefined;
+
+    if (!clientId) {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "clientId or connectionId is required" }));
+      return;
+    }
+
+    // Handle additions
+    const addSessionIds: string[] = [];
+    if (body.sessionId) {
+      addSessionIds.push(body.sessionId as string);
+    }
+    if (Array.isArray(body.add)) {
+      addSessionIds.push(...(body.add as string[]));
+    }
+
+    // Handle removals
+    const removeSessionIds: string[] = [];
+    if (Array.isArray(body.remove)) {
+      removeSessionIds.push(...(body.remove as string[]));
+    }
+
+    if (addSessionIds.length === 0 && removeSessionIds.length === 0) {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "sessionId, add[], or remove[] is required" }));
+      return;
+    }
+
+    // Process subscriptions
+    for (const sessionId of addSessionIds) {
+      await this.sessions.subscribe(sessionId, clientId);
+    }
+    for (const sessionId of removeSessionIds) {
+      this.sessions.unsubscribe(sessionId, clientId);
+    }
+
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ ok: true }));
   }
@@ -837,15 +914,14 @@ export class Gateway extends EventEmitter {
       });
     }
 
-    // Subscribe to the core session's channel
+    // Subscribe to the core session's channel and forward events to SSE clients
     const coreChannel = managedSession.coreSession.channel(channelName);
     const unsubscribe = coreChannel.subscribe((event) => {
-      // Forward channel event to all subscribed SSE clients
       this.forwardChannelEvent(subscriptionKey, event);
     });
 
     this.coreChannelUnsubscribes.set(subscriptionKey, unsubscribe);
-    log.debug({ sessionId, channelName }, "Subscribed to core session channel");
+    log.debug({ sessionId, channelName }, "Channel forwarding established");
   }
 
   /**
@@ -860,7 +936,12 @@ export class Gateway extends EventEmitter {
       return;
     }
 
-    const [sessionId] = subscriptionKey.split(":");
+    // subscriptionKey format is "sessionId:channelName" where sessionId can contain ":"
+    // e.g., "assistant:default:todo-list" → sessionId="assistant:default", channel="todo-list"
+    // Extract sessionId by removing the last segment (channelName)
+    const lastColonIndex = subscriptionKey.lastIndexOf(":");
+    const sessionId = subscriptionKey.substring(0, lastColonIndex);
+
     const sseData = JSON.stringify({
       type: "channel",
       sessionId,
@@ -1151,13 +1232,14 @@ export class Gateway extends EventEmitter {
     const managedSession = await this.sessions.getOrCreate(sessionId, clientId);
 
     // Auto-subscribe sender to session events
+    // Subscribe with the ORIGINAL sessionId so events can be matched by clients
     const client = transport.getClient(clientId);
     if (client) {
-      client.state.subscriptions.add(managedSession.state.id);
-      this.sessions.subscribe(managedSession.state.id, clientId);
+      client.state.subscriptions.add(sessionId);
+      await this.sessions.subscribe(sessionId, clientId);
     }
 
-    // Mark session as active
+    // Mark session as active (internal, uses normalized ID)
     this.sessions.setActive(managedSession.state.id, true);
 
     // Get or create core session from app
@@ -1171,13 +1253,12 @@ export class Gateway extends EventEmitter {
     const messageId = `msg-${Date.now().toString(36)}`;
 
     // Execute in background and stream events
-    this.executeAndStream(managedSession.state.id, managedSession.coreSession, message).catch(
-      (error) => {
-        this.sendEventToSubscribers(managedSession.state.id, "error", {
-          message: error instanceof Error ? error.message : String(error),
-        });
-      },
-    );
+    // Use ORIGINAL sessionId for events so clients can match them
+    this.executeAndStream(sessionId, managedSession.coreSession, message).catch((error) => {
+      this.sendEventToSubscribers(sessionId, "error", {
+        message: error instanceof Error ? error.message : String(error),
+      });
+    });
 
     // Increment message count (SessionManager emits DevTools event)
     this.sessions.incrementMessageCount(managedSession.state.id, clientId);
@@ -1191,6 +1272,15 @@ export class Gateway extends EventEmitter {
     return { messageId };
   }
 
+  /**
+   * Execute a message and stream events to subscribers.
+   *
+   * @param sessionId - The session key as provided by client (may be unnormalized)
+   * @param coreSession - The core session instance
+   * @param messageText - The message text to send
+   *
+   * IMPORTANT: Uses the original sessionId for events to ensure client matching.
+   */
   private async executeAndStream(
     sessionId: string,
     coreSession: import("@tentickle/core").Session,
@@ -1206,7 +1296,7 @@ export class Gateway extends EventEmitter {
       const execution = coreSession.send({ message });
 
       for await (const event of execution) {
-        // Map core events to gateway events
+        // Use the original sessionId for events (ensures client matching)
         this.sendEventToSubscribers(sessionId, event.type, event);
       }
 
@@ -1220,7 +1310,7 @@ export class Gateway extends EventEmitter {
   private sendEventToSubscribers(sessionId: string, eventType: string, data: unknown): void {
     const subscribers = this.sessions.getSubscribers(sessionId);
 
-    // Send to all clients across all transports
+    // Send to all clients across all transports (standalone mode)
     for (const transport of this.transports) {
       for (const clientId of subscribers) {
         const client = transport.getClient(clientId);
@@ -1234,12 +1324,28 @@ export class Gateway extends EventEmitter {
         }
       }
     }
+
+    // Also send to SSE clients (embedded mode)
+    for (const clientId of subscribers) {
+      const res = this.sseClients.get(clientId);
+      if (res && !res.writableEnded) {
+        const sseData = JSON.stringify({
+          type: eventType,
+          sessionId,
+          ...(data && typeof data === "object" ? data : {}),
+        });
+        res.write(`data: ${sseData}\n\n`);
+      }
+    }
   }
 
   /**
    * Direct send handler for HTTP transport.
    * Returns an async generator that yields events for streaming.
    * Accepts full Message object to support multimodal content (images, audio, video, docs).
+   *
+   * IMPORTANT: Uses the original sessionId (as provided by client) for events,
+   * not the normalized internal ID. This ensures clients can match events to their sessions.
    */
   private async *directSend(
     sessionId: string,
@@ -1277,8 +1383,9 @@ export class Gateway extends EventEmitter {
       });
 
       for await (const event of execution) {
-        // Also send to WebSocket subscribers
-        this.sendEventToSubscribers(managedSession.state.id, event.type, event);
+        // Use the ORIGINAL sessionId for events (not normalized managedSession.state.id)
+        // This ensures clients can match events to sessions by the key they used
+        this.sendEventToSubscribers(sessionId, event.type, event);
 
         // Yield event for HTTP streaming
         yield { type: event.type, data: event };
@@ -1304,6 +1411,18 @@ export class Gateway extends EventEmitter {
 
     const sessionId = params.sessionId as string | undefined;
 
+    // Get or create session to access channels (if sessionId provided)
+    let channels: ChannelServiceInterface | undefined = undefined;
+    if (sessionId) {
+      const managedSession = await this.sessions.getOrCreate(sessionId);
+      if (!managedSession.coreSession) {
+        managedSession.coreSession = managedSession.appInfo.app.session({
+          sessionId: managedSession.state.id,
+        });
+      }
+      channels = createChannelServiceFromSession(managedSession.coreSession, this.config.id);
+    }
+
     // Build metadata
     const metadata = {
       sessionId,
@@ -1312,10 +1431,11 @@ export class Gateway extends EventEmitter {
       ...(params.metadata as Record<string, unknown> | undefined),
     };
 
-    // Create kernel context
+    // Create kernel context with channels for pub/sub
     const ctx = Context.create({
       user,
       metadata,
+      channels,
     });
 
     // Execute within context
@@ -1413,15 +1533,15 @@ export class Gateway extends EventEmitter {
     };
   }
 
-  private handleSubscribeMethod(
+  private async handleSubscribeMethod(
     transport: Transport,
     clientId: string,
     params: SubscribeParams,
-  ): void {
+  ): Promise<void> {
     const client = transport.getClient(clientId);
     if (client) {
       client.state.subscriptions.add(params.sessionId);
-      this.sessions.subscribe(params.sessionId, clientId);
+      await this.sessions.subscribe(params.sessionId, clientId);
     }
   }
 

@@ -13,6 +13,7 @@ import { StopReason, BlockType } from "@tentickle/shared";
 import type {
   StreamEvent,
   StreamEventBase,
+  ContentMetadata,
   MessageStartEvent,
   MessageEndEvent,
   ContentStartEvent,
@@ -62,11 +63,26 @@ import type { ModelOutput } from "./model";
  * }
  * ```
  */
+/**
+ * AdapterDelta is a simplified interface for adapter authors.
+ *
+ * Adapters map provider chunks to these simple delta types.
+ * The StreamAccumulator handles converting them into the full
+ * StreamEvent lifecycle (start/delta/end/complete patterns).
+ *
+ * For example, when an adapter emits { type: "text", delta: "Hello" },
+ * the accumulator automatically:
+ * - Emits content_start on first text
+ * - Emits content_delta for each text
+ * - Emits content_end when the block ends
+ *
+ * This keeps adapter code simple - no lifecycle tracking needed.
+ */
 export type AdapterDelta =
-  // Text content
-  | { type: "text"; delta: string }
-  // Reasoning/thinking content (Claude, o1)
-  | { type: "reasoning"; delta: string }
+  // Text content (with optional metadata for citations, annotations, etc.)
+  | { type: "text"; delta: string; metadata?: ContentMetadata }
+  // Reasoning/thinking content (Claude, o1) - can also have citations
+  | { type: "reasoning"; delta: string; metadata?: ContentMetadata }
   // Tool calls (streamed in parts)
   | { type: "tool_call_start"; id: string; name: string }
   | { type: "tool_call_delta"; id: string; delta: string }
@@ -81,7 +97,11 @@ export type AdapterDelta =
   // Error
   | { type: "error"; error: Error | string; code?: string }
   // Raw pass-through (for provider-specific data)
-  | { type: "raw"; data: unknown };
+  | { type: "raw"; data: unknown }
+  // Content metadata update (add metadata to current content block without text)
+  | { type: "content_metadata"; metadata: ContentMetadata }
+  // Reasoning metadata update (add metadata to current reasoning block without text)
+  | { type: "reasoning_metadata"; metadata: ContentMetadata };
 
 // ============================================================================
 // StreamAccumulator - Framework-provided accumulation
@@ -160,6 +180,10 @@ export class StreamAccumulator {
   private stopReason: StopReason = StopReason.UNSPECIFIED;
   private modelId?: string;
 
+  // Metadata tracking (accumulated across deltas, emitted on end events)
+  private contentMetadata?: ContentMetadata;
+  private reasoningMetadata?: ContentMetadata;
+
   // Lifecycle tracking
   private messageStarted = false;
   private messageStartedAt?: string;
@@ -212,7 +236,13 @@ export class StreamAccumulator {
             ...createEventBase(tick),
             blockType: BlockType.TEXT,
             blockIndex: this.blockIndex,
+            metadata: delta.metadata,
           } as ContentStartEvent);
+        }
+
+        // Accumulate metadata from deltas (merge citations/annotations)
+        if (delta.metadata) {
+          this.contentMetadata = this.mergeMetadata(this.contentMetadata, delta.metadata);
         }
 
         this.text += delta.delta;
@@ -239,7 +269,13 @@ export class StreamAccumulator {
             type: "reasoning_start",
             ...createEventBase(tick),
             blockIndex: this.blockIndex,
+            metadata: delta.metadata,
           } as ReasoningStartEvent);
+        }
+
+        // Accumulate metadata from deltas (merge citations/annotations)
+        if (delta.metadata) {
+          this.reasoningMetadata = this.mergeMetadata(this.reasoningMetadata, delta.metadata);
         }
 
         this.reasoning += delta.delta;
@@ -249,6 +285,18 @@ export class StreamAccumulator {
           blockIndex: this.blockIndex,
           delta: delta.delta,
         } as ReasoningDeltaEvent);
+        break;
+      }
+
+      case "content_metadata": {
+        // Add metadata to current content block without emitting text
+        this.contentMetadata = this.mergeMetadata(this.contentMetadata, delta.metadata);
+        break;
+      }
+
+      case "reasoning_metadata": {
+        // Add metadata to current reasoning block without emitting text
+        this.reasoningMetadata = this.mergeMetadata(this.reasoningMetadata, delta.metadata);
         break;
       }
 
@@ -265,8 +313,10 @@ export class StreamAccumulator {
             ...createEventBase(tick),
             blockType: BlockType.TEXT,
             blockIndex: this.blockIndex,
+            metadata: this.contentMetadata,
           } as ContentEndEvent);
           this.textStarted = false;
+          this.contentMetadata = undefined; // Reset for next block
           this.blockIndex++;
         }
 
@@ -276,8 +326,10 @@ export class StreamAccumulator {
             type: "reasoning_end",
             ...createEventBase(tick),
             blockIndex: this.blockIndex,
+            metadata: this.reasoningMetadata,
           } as ReasoningEndEvent);
           this.reasoningStarted = false;
+          this.reasoningMetadata = undefined; // Reset for next block
           this.blockIndex++;
         }
 
@@ -393,6 +445,7 @@ export class StreamAccumulator {
             ...createEventBase(tick),
             blockType: BlockType.TEXT,
             blockIndex: this.blockIndex,
+            metadata: this.contentMetadata,
           } as ContentEndEvent);
           this.textStarted = false;
         }
@@ -401,6 +454,7 @@ export class StreamAccumulator {
             type: "reasoning_end",
             ...createEventBase(tick),
             blockIndex: this.blockIndex,
+            metadata: this.reasoningMetadata,
           } as ReasoningEndEvent);
           this.reasoningStarted = false;
         }
@@ -529,6 +583,40 @@ export class StreamAccumulator {
       // Return raw string if not valid JSON
       return { raw: json };
     }
+  }
+
+  /**
+   * Merge metadata objects, concatenating arrays and merging objects.
+   */
+  private mergeMetadata(
+    existing: ContentMetadata | undefined,
+    incoming: ContentMetadata,
+  ): ContentMetadata {
+    if (!existing) {
+      return { ...incoming };
+    }
+
+    return {
+      // Concatenate citations
+      citations:
+        existing.citations || incoming.citations
+          ? [...(existing.citations || []), ...(incoming.citations || [])]
+          : undefined,
+      // Concatenate annotations
+      annotations:
+        existing.annotations || incoming.annotations
+          ? [...(existing.annotations || []), ...(incoming.annotations || [])]
+          : undefined,
+      // Take latest language (incoming wins)
+      language: incoming.language ?? existing.language,
+      // Take latest mimeType (incoming wins)
+      mimeType: incoming.mimeType ?? existing.mimeType,
+      // Merge extensions
+      extensions:
+        existing.extensions || incoming.extensions
+          ? { ...existing.extensions, ...incoming.extensions }
+          : undefined,
+    };
   }
 }
 

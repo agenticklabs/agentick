@@ -13,10 +13,31 @@ loadEnv();
 import express from "express";
 import cors from "cors";
 import { z } from "zod";
+import { Context, Logger } from "@tentickle/kernel";
 import { createTentickleMiddleware, method } from "@tentickle/express";
 import { DevToolsServer } from "@tentickle/devtools";
 import { createTentickleApp } from "./setup.js";
 import { TodoListService } from "./services/todo-list.service.js";
+
+// Configure logging at debug level
+Logger.configure({ level: "debug" });
+
+const TODO_CHANNEL = "todo-list";
+
+/**
+ * Broadcast todo state change to connected clients via channels.
+ * This enables real-time sync across multiple browser tabs.
+ */
+function broadcastTodoState(sessionId: string): void {
+  const ctx = Context.tryGet();
+  if (!ctx?.channels) return;
+
+  const todos = TodoListService.list(sessionId);
+  ctx.channels.publish(ctx, TODO_CHANNEL, {
+    type: "state_changed",
+    payload: { todos },
+  });
+}
 
 const PORT = Number(process.env["PORT"]) || 3000;
 const DEVTOOLS_PORT = Number(process.env["DEVTOOLS_PORT"]) || 3002;
@@ -70,6 +91,7 @@ async function main() {
           handler: async (params) => {
             const todo = TodoListService.create(params.sessionId, params.title);
             const todos = TodoListService.list(params.sessionId);
+            broadcastTodoState(params.sessionId);
             return { todo, todos };
           },
         }),
@@ -92,6 +114,7 @@ async function main() {
             }
 
             const todos = TodoListService.list(params.sessionId);
+            broadcastTodoState(params.sessionId);
             return { todo, todos };
           },
         }),
@@ -109,6 +132,7 @@ async function main() {
             }
 
             const todos = TodoListService.list(params.sessionId);
+            broadcastTodoState(params.sessionId);
             return { todo, todos };
           },
         }),
@@ -126,6 +150,7 @@ async function main() {
             }
 
             const todos = TodoListService.list(params.sessionId);
+            broadcastTodoState(params.sessionId);
             return { deleted: true, todos };
           },
         }),

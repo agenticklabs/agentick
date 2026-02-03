@@ -36,6 +36,15 @@ export class SessionManager {
   }
 
   /**
+   * Normalize a session key to the canonical format (appId:sessionName).
+   * This ensures consistent lookups regardless of input format.
+   */
+  private normalizeKey(sessionKey: string): string {
+    const { appId, sessionName } = parseSessionKey(sessionKey, this.registry.defaultId);
+    return formatSessionKey({ appId, sessionName });
+  }
+
+  /**
    * Emit a DevTools session event
    */
   private emitDevToolsEvent(
@@ -64,8 +73,10 @@ export class SessionManager {
    * Get or create a session
    */
   async getOrCreate(sessionKey: string, clientId?: string): Promise<ManagedSession> {
+    const normalizedKey = this.normalizeKey(sessionKey);
+
     // Check if session exists
-    let session = this.sessions.get(sessionKey);
+    let session = this.sessions.get(normalizedKey);
     if (session) {
       session.state.lastActivityAt = new Date();
       return session;
@@ -107,21 +118,22 @@ export class SessionManager {
    * Get an existing session
    */
   get(sessionKey: string): ManagedSession | undefined {
-    return this.sessions.get(sessionKey);
+    return this.sessions.get(this.normalizeKey(sessionKey));
   }
 
   /**
    * Check if a session exists
    */
   has(sessionKey: string): boolean {
-    return this.sessions.has(sessionKey);
+    return this.sessions.has(this.normalizeKey(sessionKey));
   }
 
   /**
    * Close a session
    */
   async close(sessionKey: string): Promise<void> {
-    const session = this.sessions.get(sessionKey);
+    const normalizedKey = this.normalizeKey(sessionKey);
+    const session = this.sessions.get(normalizedKey);
     if (!session) return;
 
     const { id, appId, messageCount } = session.state;
@@ -132,7 +144,7 @@ export class SessionManager {
       session.coreSession = null;
     }
 
-    this.sessions.delete(sessionKey);
+    this.sessions.delete(normalizedKey);
 
     // Emit DevTools event for session closure
     this.emitDevToolsEvent("closed", id, appId, messageCount);
@@ -142,7 +154,8 @@ export class SessionManager {
    * Reset a session (clear history but keep session)
    */
   async reset(sessionKey: string): Promise<void> {
-    const session = this.sessions.get(sessionKey);
+    const normalizedKey = this.normalizeKey(sessionKey);
+    const session = this.sessions.get(normalizedKey);
     if (!session) return;
 
     const { id, appId, messageCount } = session.state;
@@ -190,20 +203,19 @@ export class SessionManager {
   }
 
   /**
-   * Add a subscriber to a session
+   * Add a subscriber to a session.
+   * Creates the session if it doesn't exist (ensures subscription is never lost).
    */
-  subscribe(sessionKey: string, clientId: string): void {
-    const session = this.sessions.get(sessionKey);
-    if (session) {
-      session.state.subscribers.add(clientId);
-    }
+  async subscribe(sessionKey: string, clientId: string): Promise<void> {
+    const session = await this.getOrCreate(sessionKey, clientId);
+    session.state.subscribers.add(clientId);
   }
 
   /**
    * Remove a subscriber from a session
    */
   unsubscribe(sessionKey: string, clientId: string): void {
-    const session = this.sessions.get(sessionKey);
+    const session = this.sessions.get(this.normalizeKey(sessionKey));
     if (session) {
       session.state.subscribers.delete(clientId);
     }
@@ -222,7 +234,7 @@ export class SessionManager {
    * Get subscribers for a session
    */
   getSubscribers(sessionKey: string): Set<string> {
-    const session = this.sessions.get(sessionKey);
+    const session = this.sessions.get(this.normalizeKey(sessionKey));
     return session?.state.subscribers ?? new Set();
   }
 
@@ -230,7 +242,7 @@ export class SessionManager {
    * Update message count for a session
    */
   incrementMessageCount(sessionKey: string, clientId?: string): void {
-    const session = this.sessions.get(sessionKey);
+    const session = this.sessions.get(this.normalizeKey(sessionKey));
     if (session) {
       session.state.messageCount++;
       session.state.lastActivityAt = new Date();
@@ -250,7 +262,7 @@ export class SessionManager {
    * Set session active state
    */
   setActive(sessionKey: string, isActive: boolean): void {
-    const session = this.sessions.get(sessionKey);
+    const session = this.sessions.get(this.normalizeKey(sessionKey));
     if (session) {
       session.state.isActive = isActive;
     }

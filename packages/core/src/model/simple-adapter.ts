@@ -330,11 +330,15 @@ export function createDeclarativeAdapter<
 /**
  * Create a basic StreamEvent from an AdapterDelta.
  * Used for backward compatibility with createLanguageModel.
+ *
+ * Note: This is only used when NOT using StreamAccumulator.
+ * Most adapters use createAccumulatedStream which handles lifecycle properly.
  */
 function createBasicEvent(delta: AdapterDelta): StreamEvent {
   const base = {
     id: `evt_${Date.now()}`,
     tick: 1,
+    sequence: 0,
     timestamp: new Date().toISOString(),
   };
 
@@ -346,9 +350,15 @@ function createBasicEvent(delta: AdapterDelta): StreamEvent {
         blockType: "text",
         blockIndex: 0,
         delta: delta.delta,
+        // Note: metadata is tracked by StreamAccumulator, not emitted on deltas
       } as StreamEvent;
     case "reasoning":
-      return { type: "reasoning_delta", ...base, blockIndex: 0, delta: delta.delta } as StreamEvent;
+      return {
+        type: "reasoning_delta",
+        ...base,
+        blockIndex: 0,
+        delta: delta.delta,
+      } as StreamEvent;
     case "tool_call":
       return {
         type: "tool_call",
@@ -377,6 +387,16 @@ function createBasicEvent(delta: AdapterDelta): StreamEvent {
           message: typeof delta.error === "string" ? delta.error : delta.error.message,
           code: delta.code,
         },
+      } as StreamEvent;
+    case "content_metadata":
+    case "reasoning_metadata":
+      // Metadata deltas don't emit events directly - handled by accumulator
+      return {
+        type: "content_delta",
+        ...base,
+        blockType: "text",
+        blockIndex: 0,
+        delta: "",
       } as StreamEvent;
     default:
       return {

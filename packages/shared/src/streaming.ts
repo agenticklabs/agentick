@@ -31,6 +31,76 @@ import type { ToolExecutor } from "./tools";
 import type { SessionResultPayload } from "./protocol";
 
 // ============================================================================
+// Content Metadata Types
+// ============================================================================
+
+/**
+ * Citation - normalized reference to source material.
+ *
+ * Adapters map provider-specific citation formats to this normalized structure.
+ * - Anthropic: citations with source info
+ * - Google: grounding sources/chunks
+ * - OpenAI: annotations with file citations
+ */
+export interface ContentCitation {
+  /** Citation text shown in the response */
+  text: string;
+  /** Source URL if available */
+  url?: string;
+  /** Source title/name */
+  title?: string;
+  /** Start index in the content this citation applies to */
+  startIndex?: number;
+  /** End index in the content this citation applies to */
+  endIndex?: number;
+}
+
+/**
+ * Annotation - model-provided note about the content.
+ *
+ * Adapters map provider-specific annotation formats to this normalized structure.
+ */
+export interface ContentAnnotation {
+  /** Annotation type (e.g., "file_citation", "note", "highlight") */
+  type: string;
+  /** Annotation content/text */
+  text: string;
+  /** Start index in the content */
+  startIndex?: number;
+  /** End index in the content */
+  endIndex?: number;
+  /** Additional annotation-specific data */
+  data?: Record<string, unknown>;
+}
+
+/**
+ * Normalized content metadata.
+ *
+ * Adapters populate these fields when provider data maps to them.
+ * Provider-specific data that doesn't fit these fields goes in `extensions`.
+ *
+ * Note: Artifacts are NOT part of content metadata. Artifacts are created
+ * via tool calls and managed as session state parallel to the timeline.
+ * See plans/agentic/artifacts.md for the artifact pattern.
+ */
+export interface ContentMetadata {
+  /** Citations/sources referenced by the model */
+  citations?: ContentCitation[];
+
+  /** Model-provided annotations on the content */
+  annotations?: ContentAnnotation[];
+
+  /** Programming language (for code blocks) */
+  language?: string;
+
+  /** MIME type hint */
+  mimeType?: string;
+
+  /** Provider-specific extensions (not normalized) */
+  extensions?: Record<string, unknown>;
+}
+
+// ============================================================================
 // Stop Reason
 // ============================================================================
 
@@ -108,11 +178,16 @@ export interface StreamEventBase {
 
 /**
  * Content block events (text, images, etc.)
+ *
+ * Metadata is available on content_start, content_end, and content events.
+ * It is NOT included on content_delta events to avoid noise during streaming.
  */
 export type ContentStartEvent = {
   type: "content_start";
   blockType: BlockType;
   blockIndex: number;
+  /** Content metadata (citations, annotations, language hints) */
+  metadata?: ContentMetadata;
 } & StreamEventBase;
 
 export type ContentDeltaEvent = {
@@ -120,45 +195,60 @@ export type ContentDeltaEvent = {
   blockType: BlockType;
   blockIndex: number;
   delta: string;
+  // Note: No metadata on deltas - too noisy. Captured in start/end events.
 } & StreamEventBase;
 
 export type ContentEndEvent = {
   type: "content_end";
   blockType: BlockType;
   blockIndex: number;
+  /** Content metadata (citations, annotations, language hints) */
+  metadata?: ContentMetadata;
 } & StreamEventBase;
 
 export type ContentEvent = {
   type: "content";
   blockIndex: number;
   content: ContentBlock;
+  /** Content metadata (citations, annotations, language hints) */
+  metadata?: ContentMetadata;
   startedAt: string;
   completedAt: string;
 } & StreamEventBase;
 
 /**
  * Reasoning/thinking events (separate for easy filtering)
+ *
+ * Metadata is available on reasoning_start, reasoning_end, and reasoning events.
+ * Reasoning can have citations when the model references sources during thinking.
  */
 export type ReasoningStartEvent = {
   type: "reasoning_start";
   blockIndex: number;
+  /** Reasoning metadata (citations, annotations) */
+  metadata?: ContentMetadata;
 } & StreamEventBase;
 
 export type ReasoningDeltaEvent = {
   type: "reasoning_delta";
   blockIndex: number;
   delta: string;
+  // Note: No metadata on deltas - too noisy. Captured in start/end events.
 } & StreamEventBase;
 
 export type ReasoningEndEvent = {
   type: "reasoning_end";
   blockIndex: number;
+  /** Reasoning metadata (citations, annotations) */
+  metadata?: ContentMetadata;
 } & StreamEventBase;
 
 export type ReasoningEvent = {
   type: "reasoning";
   blockIndex: number;
   reasoning: string;
+  /** Reasoning metadata (citations, annotations) */
+  metadata?: ContentMetadata;
   startedAt: string;
   completedAt: string;
 } & StreamEventBase;

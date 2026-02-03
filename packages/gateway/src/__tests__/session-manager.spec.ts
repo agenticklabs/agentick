@@ -134,7 +134,7 @@ describe("SessionManager", () => {
   describe("subscription management", () => {
     it("adds subscriber to session", async () => {
       await manager.getOrCreate("main");
-      manager.subscribe("chat:main", "client-1");
+      await manager.subscribe("chat:main", "client-1");
 
       const subscribers = manager.getSubscribers("chat:main");
       expect(subscribers.has("client-1")).toBe(true);
@@ -142,7 +142,7 @@ describe("SessionManager", () => {
 
     it("removes subscriber from session", async () => {
       await manager.getOrCreate("main");
-      manager.subscribe("chat:main", "client-1");
+      await manager.subscribe("chat:main", "client-1");
       manager.unsubscribe("chat:main", "client-1");
 
       const subscribers = manager.getSubscribers("chat:main");
@@ -153,8 +153,8 @@ describe("SessionManager", () => {
       await manager.getOrCreate("main");
       await manager.getOrCreate("research:task-1");
 
-      manager.subscribe("chat:main", "client-1");
-      manager.subscribe("research:task-1", "client-1");
+      await manager.subscribe("chat:main", "client-1");
+      await manager.subscribe("research:task-1", "client-1");
 
       manager.unsubscribeAll("client-1");
 
