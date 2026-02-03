@@ -42,4 +42,4 @@ coverage/
 # Example app data
 example/express/data/
 
-.tsbuildinfo.build
+*.tsbuildinfo
