@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useCallback } from "react";
 import { useDevToolsEvents, type FiberNode, type TokenSummary } from "./hooks/useDevToolsEvents";
 import { ExecutionList } from "./components/ExecutionList";
 import { SessionList } from "./components/SessionList";
@@ -6,10 +6,17 @@ import { ContentPanel } from "./components/ContentPanel";
 import { Inspector } from "./components/Inspector";
 import { TickNavigator } from "./components/TickNavigator";
 import { NetworkPanel } from "./components/NetworkPanel";
+import { Splitter } from "./components/Splitter";
 
 type SidebarTab = "executions" | "sessions";
 type ContentTab = "execution" | "context" | "fiber" | "tools";
 type GlobalTab = "network";
+
+// Min/max widths for panels
+const SIDEBAR_MIN = 180;
+const SIDEBAR_MAX = 500;
+const INSPECTOR_MIN = 200;
+const INSPECTOR_MAX = 600;
 
 export function App() {
   const { executions, sessions, isConnected, clearAll, clients, gatewaySessions, requests } =
@@ -22,6 +29,19 @@ export function App() {
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [selectedTick, setSelectedTick] = useState<number | "latest">("latest");
+
+  // Panel sizing
+  const [sidebarWidth, setSidebarWidth] = useState(280);
+  const [inspectorWidth, setInspectorWidth] = useState(320);
+
+  const handleSidebarResize = useCallback((delta: number) => {
+    setSidebarWidth((w) => Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, w + delta)));
+  }, []);
+
+  const handleInspectorResize = useCallback((delta: number) => {
+    // Note: delta is negative when dragging left (making inspector wider)
+    setInspectorWidth((w) => Math.min(INSPECTOR_MAX, Math.max(INSPECTOR_MIN, w - delta)));
+  }, []);
 
   const selectedExecution = executions.find((e) => e.id === selectedExecutionId);
   const selectedSession = sessions.find((s) => s.id === selectedSessionId);
@@ -158,7 +178,7 @@ export function App() {
       {/* Main Layout */}
       <main className="main">
         {/* Sidebar */}
-        <aside className="sidebar">
+        <aside className="sidebar" style={{ width: sidebarWidth, minWidth: sidebarWidth }}>
           {/* Sidebar Tabs */}
           <div className="sidebar-tabs">
             <button
@@ -209,6 +229,9 @@ export function App() {
             )}
           </div>
         </aside>
+
+        {/* Sidebar Splitter */}
+        <Splitter direction="horizontal" onResize={handleSidebarResize} />
 
         {/* Content */}
         <section className="content">
@@ -304,9 +327,15 @@ export function App() {
 
         {/* Inspector Panel - Right side */}
         {showInspector && (
-          <aside className="inspector-panel">
-            <Inspector node={selectedNode} tokenSummary={tokenSummary} />
-          </aside>
+          <>
+            <Splitter direction="horizontal" onResize={handleInspectorResize} />
+            <aside
+              className="inspector-panel"
+              style={{ width: inspectorWidth, minWidth: inspectorWidth }}
+            >
+              <Inspector node={selectedNode} tokenSummary={tokenSummary} />
+            </aside>
+          </>
         )}
       </main>
     </div>

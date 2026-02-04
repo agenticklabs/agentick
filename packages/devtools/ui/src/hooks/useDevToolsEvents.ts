@@ -76,6 +76,40 @@ export interface Tick {
   tokenSummary?: TokenSummary;
   /** Compiled structure preview at this tick */
   compiledPreview?: CompiledPreview;
+  /** Context utilization info from session:context channel */
+  contextInfo?: ContextInfo;
+}
+
+export interface ContextInfo {
+  /** Model ID (e.g., "gpt-4o") */
+  modelId: string;
+  /** Human-readable model name */
+  modelName?: string;
+  /** Provider name */
+  provider?: string;
+  /** Context window size in tokens */
+  contextWindow?: number;
+  /** Input tokens used this tick */
+  inputTokens: number;
+  /** Output tokens generated this tick */
+  outputTokens: number;
+  /** Total tokens this tick */
+  totalTokens: number;
+  /** Context utilization percentage (0-100) */
+  utilization?: number;
+  /** Max output tokens */
+  maxOutputTokens?: number;
+  /** Model capabilities */
+  supportsVision?: boolean;
+  supportsToolUse?: boolean;
+  isReasoningModel?: boolean;
+  /** Cumulative usage across all ticks */
+  cumulativeUsage?: {
+    inputTokens: number;
+    outputTokens: number;
+    totalTokens: number;
+    ticks: number;
+  };
 }
 
 export interface TickEvent {
@@ -482,6 +516,48 @@ export function useDevToolsEvents() {
                       ...t,
                       // Pipeline visibility: Provider input (stage 4)
                       providerInput: event.providerInput,
+                    }
+                  : t,
+              ),
+            });
+          }
+          return next;
+        });
+        break;
+      }
+
+      case "context_update": {
+        const tickNum = event.tick as number;
+        const contextInfo: ContextInfo = {
+          modelId: event.modelId as string,
+          modelName: event.modelName as string | undefined,
+          provider: event.provider as string | undefined,
+          contextWindow: event.contextWindow as number | undefined,
+          inputTokens: event.inputTokens as number,
+          outputTokens: event.outputTokens as number,
+          totalTokens: event.totalTokens as number,
+          utilization: event.utilization as number | undefined,
+          maxOutputTokens: event.maxOutputTokens as number | undefined,
+          supportsVision: event.supportsVision as boolean | undefined,
+          supportsToolUse: event.supportsToolUse as boolean | undefined,
+          isReasoningModel: event.isReasoningModel as boolean | undefined,
+          cumulativeUsage: event.cumulativeUsage as ContextInfo["cumulativeUsage"],
+        };
+        setExecutions((prev) => {
+          const next = new Map(prev);
+          const exec = next.get(event.executionId);
+          if (exec) {
+            next.set(event.executionId, {
+              ...exec,
+              // Update model on execution from context info
+              model: contextInfo.modelId || exec.model,
+              ticks: exec.ticks.map((t) =>
+                t.number === tickNum
+                  ? {
+                      ...t,
+                      contextInfo,
+                      // Also update tick's model from context info
+                      model: contextInfo.modelId || t.model,
                     }
                   : t,
               ),

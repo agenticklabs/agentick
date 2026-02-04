@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { Execution, Session, FiberNode, TokenSummary } from "../hooks/useDevToolsEvents";
 import { Tree } from "./Tree";
+import { getModelInfo, getContextUtilization, formatContextWindow } from "@tentickle/shared";
 
 type ContentTab = "execution" | "context" | "fiber" | "tools";
 
@@ -142,6 +143,19 @@ function ExecutionView({
         </div>
       </div>
 
+      {/* Context Utilization - prefer real-time contextInfo over catalog lookup */}
+      {(execution.ticks[execution.ticks.length - 1]?.contextInfo || execution.ticks[0]?.model) && (
+        <ContextUtilizationCard
+          modelId={
+            execution.ticks[execution.ticks.length - 1]?.contextInfo?.modelId ||
+            execution.ticks[0]?.model ||
+            ""
+          }
+          usedTokens={execInputTokens}
+          contextInfo={execution.ticks[execution.ticks.length - 1]?.contextInfo}
+        />
+      )}
+
       {/* Fiber Summary */}
       {execution.fiberSummary && (
         <>
@@ -184,6 +198,93 @@ function ExecutionView({
           </span>
         )}
       </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// Context Utilization Card - Shows how much of the model's context is used
+// ============================================================================
+
+function ContextUtilizationCard({
+  modelId,
+  usedTokens,
+  contextInfo,
+}: {
+  modelId: string;
+  usedTokens: number;
+  contextInfo?: {
+    modelId: string;
+    contextWindow?: number;
+    utilization?: number;
+    provider?: string;
+    supportsVision?: boolean;
+    supportsToolUse?: boolean;
+    isReasoningModel?: boolean;
+    maxOutputTokens?: number;
+  };
+}) {
+  // Prefer contextInfo from real-time events over catalog lookup
+  const effectiveModelId = contextInfo?.modelId || modelId;
+  const modelInfo = contextInfo?.contextWindow
+    ? { contextWindow: contextInfo.contextWindow, maxOutputTokens: contextInfo.maxOutputTokens }
+    : getModelInfo(effectiveModelId);
+  const utilization =
+    contextInfo?.utilization ?? getContextUtilization(effectiveModelId, usedTokens);
+
+  if (!modelInfo || utilization === undefined) {
+    return null;
+  }
+
+  const contextWindow = modelInfo.contextWindow;
+  const formattedWindow = formatContextWindow(contextWindow);
+  const utilizationPercent = utilization.toFixed(1);
+
+  // Color based on utilization level
+  const getUtilizationColor = (pct: number) => {
+    if (pct >= 90) return "var(--accent-red)";
+    if (pct >= 75) return "var(--accent-orange)";
+    if (pct >= 50) return "var(--accent-yellow)";
+    return "var(--accent-green)";
+  };
+
+  const barColor = getUtilizationColor(utilization);
+
+  return (
+    <div className="context-utilization-card">
+      <div className="context-utilization-header">
+        <span className="context-utilization-label">Context Utilization</span>
+        <span className="context-utilization-value">
+          {usedTokens.toLocaleString()} / {formattedWindow} tokens ({utilizationPercent}%)
+        </span>
+      </div>
+      <div className="context-utilization-bar-container">
+        <div
+          className="context-utilization-bar"
+          style={{
+            width: `${Math.min(100, utilization)}%`,
+            backgroundColor: barColor,
+          }}
+        />
+      </div>
+      {modelInfo.maxOutputTokens && (
+        <div className="context-utilization-detail">
+          Max output: {formatContextWindow(modelInfo.maxOutputTokens)} tokens
+        </div>
+      )}
+      {/* Model Capabilities */}
+      {contextInfo && (
+        <div className="context-header-details" style={{ marginTop: 8 }}>
+          {contextInfo.provider && (
+            <span className="context-badge provider">{contextInfo.provider}</span>
+          )}
+          {contextInfo.supportsVision && <span className="context-badge capability">Vision</span>}
+          {contextInfo.supportsToolUse && <span className="context-badge capability">Tools</span>}
+          {contextInfo.isReasoningModel && (
+            <span className="context-badge capability">Reasoning</span>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -1036,6 +1137,15 @@ function ContextView({
   const duration = tick.endTime ? tick.endTime - tick.startTime : 0;
   const isRunning = !tick.endTime;
 
+  // Context utilization - prefer real-time data from contextInfo over catalog lookup
+  const contextInfo = tick.contextInfo;
+  const modelId = contextInfo?.modelId || tick.model;
+  const contextWindow = contextInfo?.contextWindow;
+  const contextUtilization =
+    contextInfo?.utilization ?? (modelId ? getContextUtilization(modelId, inputTokens) : undefined);
+  // Fall back to catalog lookup if contextInfo doesn't have context window
+  const modelInfo = contextWindow ? { contextWindow } : modelId ? getModelInfo(modelId) : undefined;
+
   // Get tool calls for this tick
   const toolCalls = tick.events.filter((e) => e.type === "tool_call");
   const toolResults = tick.events.filter((e) => e.type === "tool_result");
@@ -1053,7 +1163,7 @@ function ContextView({
         <div className="context-header-stats">
           <span className="context-stat">
             <span className="context-stat-icon">🤖</span>
-            {tick.model || "—"}
+            {modelId || "—"}
           </span>
           <span className="context-stat">
             <span className="context-stat-icon">📊</span>
@@ -1065,6 +1175,52 @@ function ContextView({
             {duration}ms
           </span>
         </div>
+        {/* Context Utilization Bar */}
+        {modelInfo && contextUtilization !== undefined && (
+          <div className="context-header-utilization">
+            <div className="context-header-utilization-info">
+              <span className="context-header-utilization-label">Context</span>
+              <span className="context-header-utilization-value">
+                {contextUtilization.toFixed(1)}% of {formatContextWindow(modelInfo.contextWindow)}
+              </span>
+            </div>
+            <div className="context-utilization-bar-container">
+              <div
+                className="context-utilization-bar"
+                style={{
+                  width: `${Math.min(100, contextUtilization)}%`,
+                  backgroundColor:
+                    contextUtilization >= 90
+                      ? "var(--accent-red)"
+                      : contextUtilization >= 75
+                        ? "var(--accent-orange)"
+                        : contextUtilization >= 50
+                          ? "var(--accent-yellow)"
+                          : "var(--accent-green)",
+                }}
+              />
+            </div>
+          </div>
+        )}
+        {/* Model Capabilities and Cumulative Usage */}
+        {contextInfo && (
+          <div className="context-header-details">
+            {contextInfo.provider && (
+              <span className="context-badge provider">{contextInfo.provider}</span>
+            )}
+            {contextInfo.supportsVision && <span className="context-badge capability">Vision</span>}
+            {contextInfo.supportsToolUse && <span className="context-badge capability">Tools</span>}
+            {contextInfo.isReasoningModel && (
+              <span className="context-badge capability">Reasoning</span>
+            )}
+            {contextInfo.cumulativeUsage && tick.number > 1 && (
+              <span className="context-badge cumulative">
+                Cumulative: {contextInfo.cumulativeUsage.totalTokens.toLocaleString()} tokens (
+                {contextInfo.cumulativeUsage.ticks} ticks)
+              </span>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Response Content (if any) */}

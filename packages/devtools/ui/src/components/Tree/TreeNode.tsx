@@ -35,6 +35,12 @@ export function TreeNode({ node, depth = 0, tokenSummary }: TreeNodeProps) {
   // Get text preview for display
   const getPreview = (): string | null => {
     if (node._summary) return node._summary;
+
+    // Tool components: show the tool name
+    if (node.type === "tool" && node.props.name) {
+      return String(node.props.name);
+    }
+
     if (node.type === "text" && node.props.value) {
       const text = String(node.props.value);
       return text.length > 40 ? `"${text.slice(0, 40)}..."` : `"${text}"`;
@@ -42,6 +48,65 @@ export function TreeNode({ node, depth = 0, tokenSummary }: TreeNodeProps) {
     if (node.props.text) {
       const text = String(node.props.text);
       return text.length > 40 ? `"${text.slice(0, 40)}..."` : `"${text}"`;
+    }
+    // Entry nodes: show role and content preview from message.content
+    if (node.type === "entry" && node.props.message) {
+      const msg = node.props.message as { role?: string; content?: unknown[] };
+      const role = msg.role ?? "?";
+      const content = msg.content ?? [];
+
+      // Collect different block types
+      const textBlocks: string[] = [];
+      const toolUseBlocks: string[] = [];
+      const toolResultBlocks: string[] = [];
+
+      for (const block of content) {
+        if (typeof block !== "object" || block === null) continue;
+        const b = block as Record<string, unknown>;
+
+        if (b.type === "text" && typeof b.text === "string") {
+          textBlocks.push(b.text);
+        } else if (b.type === "tool_use" && typeof b.name === "string") {
+          toolUseBlocks.push(b.name);
+        } else if (b.type === "tool_result") {
+          // Tool result has nested content
+          const resultContent = b.content as unknown[] | undefined;
+          if (Array.isArray(resultContent)) {
+            for (const rc of resultContent) {
+              if (
+                typeof rc === "object" &&
+                rc !== null &&
+                (rc as Record<string, unknown>).type === "text"
+              ) {
+                const text = (rc as Record<string, unknown>).text as string;
+                toolResultBlocks.push(text);
+              }
+            }
+          }
+        }
+      }
+
+      // Build preview based on content types
+      const parts: string[] = [];
+
+      if (textBlocks.length > 0) {
+        const text = textBlocks.join(" ");
+        const preview = text.length > 25 ? text.slice(0, 25) + "..." : text;
+        parts.push(`"${preview}"`);
+      }
+
+      if (toolUseBlocks.length > 0) {
+        parts.push(`→ ${toolUseBlocks.join(", ")}`);
+      }
+
+      if (toolResultBlocks.length > 0) {
+        const text = toolResultBlocks.join(" ");
+        const preview = text.length > 25 ? text.slice(0, 25) + "..." : text;
+        parts.push(`"${preview}"`);
+      }
+
+      const preview = parts.length > 0 ? parts.join(" ") : "(empty)";
+      return `[${role}] ${preview}`;
     }
     return null;
   };
