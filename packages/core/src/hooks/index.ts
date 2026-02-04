@@ -34,7 +34,7 @@ export {
 } from "./runtime-context";
 
 // Lifecycle hooks
-export { useTickStart, useTickEnd, useAfterCompile } from "./lifecycle";
+export { useTickStart, useTickEnd, useAfterCompile, useContinuation } from "./lifecycle";
 
 // Data hook
 export { useData, useInvalidateData } from "./data";

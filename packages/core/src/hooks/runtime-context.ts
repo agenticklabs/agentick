@@ -7,7 +7,7 @@
 
 import React, { createContext, useContext, type ReactNode } from "react";
 import type { CompiledStructure } from "../compiler/types";
-import type { TickStartCallback, TickEndCallback, AfterCompileCallback } from "./types";
+import type { TickStartCallback, TickEndCallback, AfterCompileCallback, TickResult } from "./types";
 
 // Helper for createElement
 const h = React.createElement;
@@ -121,11 +121,29 @@ export async function storeRunTickStartCallbacks(store: RuntimeStore): Promise<v
 }
 
 /**
- * Run tick end callbacks.
+ * Run tick end callbacks with the tick result.
+ *
+ * Callbacks receive the TickResult which contains both data about the completed tick
+ * and control methods (stop/continue) to influence whether execution continues.
+ *
+ * If a callback returns a boolean, it's automatically converted to a continue/stop call:
+ * - true = result.continue()
+ * - false = result.stop()
+ * - void/undefined = no automatic action (callback may have called methods directly)
  */
-export async function storeRunTickEndCallbacks(store: RuntimeStore): Promise<void> {
+export async function storeRunTickEndCallbacks(
+  store: RuntimeStore,
+  result: TickResult,
+): Promise<void> {
   for (const callback of store.tickEndCallbacks) {
-    await callback();
+    const decision = await callback(result);
+    // If callback returns boolean, auto-convert to continue/stop
+    if (decision === true) {
+      result.continue();
+    } else if (decision === false) {
+      result.stop();
+    }
+    // void/undefined = callback handled it or wants default behavior
   }
 }
 

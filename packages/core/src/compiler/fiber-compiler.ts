@@ -50,6 +50,7 @@ import type { Renderer } from "../renderers/types";
 import { markdownRenderer } from "../renderers";
 import type { COM } from "../com/object-model";
 import type { TickState } from "../component/component";
+import type { TickResult } from "../hooks/types";
 
 export interface FiberCompilerConfig {
   dev?: boolean;
@@ -402,11 +403,11 @@ export class FiberCompiler {
     }
   }
 
-  async notifyTickEnd(state: TickState): Promise<void> {
+  async notifyTickEnd(state: TickState, result: TickResult): Promise<void> {
     this.tickState = state;
     this.currentPhase = "tickEnd";
     try {
-      await storeRunTickEndCallbacks(this.runtimeStore);
+      await storeRunTickEndCallbacks(this.runtimeStore, result);
     } finally {
       this.currentPhase = "idle";
     }

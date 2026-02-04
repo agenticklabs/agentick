@@ -120,6 +120,7 @@ export namespace JSX {
       description?: string;
       input?: z.ZodSchema;
       executionType?: ToolExecutionType;
+      handler?: (input: any) => Promise<ContentBlock[]>;
     };
     // Content block primitives
     text: {

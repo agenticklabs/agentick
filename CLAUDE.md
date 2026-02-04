@@ -11,6 +11,27 @@ We maintain a clean, single code path for all functionality. When refactoring:
 - Don't keep unused exports "for backwards compat"
 - One way to do things, done well
 
+### Documentation with READMEs
+
+**Document features with README files at all levels of the codebase.**
+
+READMEs are our primary documentation mechanism. Place them liberally throughout the codebase:
+
+- `packages/core/README.md` - Package overview and getting started
+- `packages/core/src/hooks/README.md` - Hook API documentation
+- `packages/core/src/reconciler/README.md` - Reconciler internals
+- `packages/core/src/compiler/README.md` - Compiler architecture
+- Any directory with non-obvious patterns or APIs
+
+README content should include:
+
+- **Purpose**: What problem does this code solve?
+- **Usage**: Code examples showing common patterns
+- **API Reference**: Key exports and their signatures
+- **Patterns**: Recommended ways to use the APIs together
+
+When adding new features or patterns, create or update the relevant README. Documentation lives with the code it describes.
+
 ### Primitives vs Patterns
 
 The framework provides **building blocks**, not opinions. Users compose these into application-specific patterns.
@@ -580,9 +601,9 @@ registerModel("myorg/custom-model-v1", {
 
 Two `useContextInfo` hooks exist for different contexts:
 
-| Package | Use Case |
-|---------|----------|
-| `@tentickle/core` | Server-side JSX apps (via `ContextInfoProvider`) |
+| Package            | Use Case                                                              |
+| ------------------ | --------------------------------------------------------------------- |
+| `@tentickle/core`  | Server-side JSX apps (via `ContextInfoProvider`)                      |
 | `@tentickle/react` | Client-side React apps (subscribes to `context_update` stream events) |
 
 ```typescript

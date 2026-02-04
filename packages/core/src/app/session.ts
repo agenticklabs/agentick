@@ -33,7 +33,7 @@ import {
   type SerializedFiberNode,
   type FiberSummary,
 } from "../compiler";
-import { COM } from "../com/object-model";
+import { COM, type COMStopRequest, type COMContinueRequest } from "../com/object-model";
 import { MarkdownRenderer } from "../renderers/index";
 import { ToolExecutor } from "../engine/tool-executor";
 import { AbortError } from "../utils/abort-utils";
@@ -58,6 +58,7 @@ import { computeTokenSummary } from "../utils/token-estimate";
 import type { CompiledStructure } from "../compiler/types";
 import type { ExecutableTool, ToolClass } from "../tool/tool";
 import type { TickState } from "../component/component";
+import type { TickResult } from "../hooks/types";
 import type { ExecutionMessage } from "../engine/execution-types";
 import type {
   Session,
@@ -1822,9 +1823,66 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
           );
         }
 
-        // Phase 4: Ingest
+        // Phase 4: Ingest & Tick End Callbacks
         const ingestResult = await this.ingestTickResult(response, toolResults);
-        shouldContinue = ingestResult.shouldContinue;
+
+        // Build TickResult for useTickEnd/useContinuation callbacks
+        // Extract text from model response
+        let tickText: string | undefined;
+        if (modelOutput?.message?.content) {
+          const textContent = modelOutput.message.content.find(
+            (b: ContentBlock) => b.type === "text",
+          );
+          if (textContent && "text" in textContent) {
+            tickText = textContent.text;
+          }
+        }
+
+        // Build TickResult with data and control methods
+        const tickResult: TickResult = {
+          tick: currentTick,
+          text: tickText,
+          content: modelOutput?.message?.content ?? [],
+          toolCalls: response.toolCalls ?? [],
+          toolResults,
+          stopReason: modelOutput?.stopReason,
+          usage: modelOutput?.usage,
+          timeline: ingestResult.timeline,
+          stop: (reasonOrOptions?: string | COMStopRequest) => {
+            if (typeof reasonOrOptions === "string") {
+              this.com?.requestStop({ reason: reasonOrOptions });
+            } else {
+              this.com?.requestStop(reasonOrOptions ?? {});
+            }
+          },
+          continue: (reasonOrOptions?: string | COMContinueRequest) => {
+            if (typeof reasonOrOptions === "string") {
+              this.com?.requestContinue({ reason: reasonOrOptions });
+            } else {
+              this.com?.requestContinue(reasonOrOptions ?? {});
+            }
+          },
+        };
+
+        // Run useTickEnd/useContinuation callbacks
+        // These can call tickResult.stop() or tickResult.continue() to influence continuation
+        const tickEndState: TickState = {
+          tick: currentTick,
+          previous: this._previousOutput ?? undefined,
+          current: this._currentOutput as any,
+          queuedMessages: [],
+          stop: () => {}, // No-op at tick end - use tickResult.stop() instead
+        };
+        await this.compiler?.notifyTickEnd(tickEndState, tickResult);
+
+        // Resolve final tick control using COM's priority-based system
+        // This considers: explicit stop/continue requests from callbacks > default behavior
+        const defaultStatus = ingestResult.shouldContinue ? "continue" : "completed";
+        const tickDecision = this.com?._resolveTickControl(
+          defaultStatus,
+          ingestResult.stopReason,
+        ) ?? { status: defaultStatus };
+        shouldContinue = tickDecision.status === "continue";
 
         // Get actual model ID: prefer response model, then metadata.model, then metadata.id
         const actualModelId =
@@ -2246,7 +2304,7 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
   private async ingestTickResult(
     response: any,
     toolResults: ToolResult[],
-  ): Promise<{ shouldContinue: boolean; stopReason?: string }> {
+  ): Promise<{ shouldContinue: boolean; stopReason?: string; timeline: COMTimelineEntry[] }> {
     if (!this.com || !this.compiler) {
       throw new Error("Compilation infrastructure not initialized");
     }
@@ -2348,6 +2406,7 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
     return {
       shouldContinue: !shouldStop && (response.toolCalls?.length > 0 || false),
       stopReason,
+      timeline: current.timeline,
     };
   }
 
