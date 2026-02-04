@@ -422,6 +422,47 @@ export interface DTFiberSnapshotEvent extends DevToolsEventBase {
   compiledPreview?: DTCompiledPreview;
 }
 
+/**
+ * Emitted after each tick with context utilization info.
+ * Enables DevTools and React UI to show real-time context tracking.
+ */
+export interface DTContextUpdateEvent extends DevToolsEventBase {
+  type: "context_update";
+  /** Session ID */
+  sessionId: string;
+  /** Model ID (e.g., "gpt-4o", "claude-3-5-sonnet-20241022") */
+  modelId: string;
+  /** Human-readable model name */
+  modelName?: string;
+  /** Provider name */
+  provider?: string;
+  /** Context window size in tokens */
+  contextWindow?: number;
+  /** Input tokens used this tick */
+  inputTokens: number;
+  /** Output tokens generated this tick */
+  outputTokens: number;
+  /** Total tokens this tick */
+  totalTokens: number;
+  /** Context utilization percentage (0-100) */
+  utilization?: number;
+  /** Max output tokens */
+  maxOutputTokens?: number;
+  /** Model capabilities */
+  supportsVision?: boolean;
+  supportsToolUse?: boolean;
+  isReasoningModel?: boolean;
+  /** Current tick number */
+  tick: number;
+  /** Cumulative usage across all ticks */
+  cumulativeUsage?: {
+    inputTokens: number;
+    outputTokens: number;
+    totalTokens: number;
+    ticks: number;
+  };
+}
+
 // ============================================================================
 // Procedure Events (from kernel-level observability)
 // ============================================================================
@@ -589,6 +630,7 @@ export type DevToolsEvent =
   | DTToolConfirmationEvent
   | DTStateChangeEvent
   | DTFiberSnapshotEvent
+  | DTContextUpdateEvent
   | DTProcedureStartEvent
   | DTProcedureEndEvent
   | DTProcedureErrorEvent

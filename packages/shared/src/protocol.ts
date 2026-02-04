@@ -61,6 +61,8 @@ export const FrameworkChannels = {
   RESULT: "session:result",
   /** Bidirectional tool confirmation flow */
   TOOL_CONFIRMATION: "session:tool_confirmation",
+  /** Server broadcasts context utilization updates */
+  CONTEXT: "session:context",
 } as const;
 
 export type FrameworkChannel = (typeof FrameworkChannels)[keyof typeof FrameworkChannels];
@@ -135,6 +137,50 @@ export interface ToolConfirmationResponse {
   approved: boolean;
   reason?: string;
   modifiedArguments?: Record<string, unknown>;
+}
+
+/**
+ * Payload for session:context channel.
+ *
+ * Broadcast after each tick with context utilization info.
+ * Enables real-time context tracking in UI.
+ */
+export interface SessionContextPayload {
+  /** Model ID (e.g., "gpt-4o", "claude-3-5-sonnet-20241022") */
+  modelId: string;
+  /** Human-readable model name */
+  modelName?: string;
+  /** Provider name (e.g., "openai", "anthropic") */
+  provider?: string;
+  /** Context window size in tokens */
+  contextWindow?: number;
+  /** Input tokens used (what was sent to model) */
+  inputTokens: number;
+  /** Output tokens generated */
+  outputTokens: number;
+  /** Total tokens (input + output) */
+  totalTokens: number;
+  /** Context utilization as percentage (0-100) */
+  utilization?: number;
+  /** Max output tokens the model supports */
+  maxOutputTokens?: number;
+  /** Whether the model supports vision */
+  supportsVision?: boolean;
+  /** Whether the model supports tool use */
+  supportsToolUse?: boolean;
+  /** Whether this is a reasoning model */
+  isReasoningModel?: boolean;
+  /** Current tick number */
+  tick: number;
+  /** Cumulative usage across all ticks in this execution */
+  cumulativeUsage?: {
+    inputTokens: number;
+    outputTokens: number;
+    totalTokens: number;
+    ticks: number;
+  };
+  /** ISO timestamp */
+  timestamp: string;
 }
 
 // ============================================================================

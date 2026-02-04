@@ -848,6 +848,17 @@ export interface ModelMetadata {
   provider?: string;
   type?: "language" | "image" | "embedding" | "vision";
   capabilities: ModelCapabilities[];
+
+  /** Context window size in tokens (adapter-provided takes precedence over catalog) */
+  contextWindow?: number;
+  /** Maximum output tokens per response */
+  maxOutputTokens?: number;
+  /** Whether the model supports vision/image input */
+  supportsVision?: boolean;
+  /** Whether the model supports tool/function calling */
+  supportsToolUse?: boolean;
+  /** Whether this is a reasoning model (extended thinking) */
+  isReasoningModel?: boolean;
 }
 
 /**

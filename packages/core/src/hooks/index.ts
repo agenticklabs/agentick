@@ -104,5 +104,15 @@ export {
   useConversationHistory,
 } from "../jsx/components/timeline";
 
+// Context info hook (real-time context utilization)
+export {
+  useContextInfo,
+  useContextInfoStore,
+  createContextInfoStore,
+  ContextInfoProvider,
+  type ContextInfo,
+  type ContextInfoStore,
+} from "./context-info";
+
 // Types
 export * from "./types";

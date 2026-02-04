@@ -30,7 +30,8 @@ body {
 .app {
   display: flex;
   flex-direction: column;
-  min-height: 100vh;
+  height: 100vh;
+  overflow: hidden;
 }
 
 .app-header {
@@ -92,6 +93,8 @@ body {
   grid-template-columns: 1fr 360px;
   gap: 1px;
   background: var(--border);
+  min-height: 0; /* Allow flex child to shrink */
+  overflow: hidden;
 }
 
 .app-footer {
@@ -117,7 +120,9 @@ body {
   display: flex;
   flex-direction: column;
   background: var(--bg);
-  height: calc(100vh - 140px);
+  height: 100%;
+  min-height: 0; /* Allow flex child to shrink */
+  overflow: hidden;
 }
 
 .chat-messages {
@@ -345,12 +350,89 @@ body {
   background: var(--success);
 }
 
+/* Context info */
+.context-info {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-left: auto;
+  padding: 0.25rem 0.5rem;
+  background: var(--bg-tertiary);
+  border-radius: 0.25rem;
+}
+
+.context-model {
+  font-weight: 500;
+  color: var(--text);
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.context-utilization {
+  color: var(--text-muted);
+}
+
+.context-progress {
+  width: 60px;
+  height: 6px;
+  border-radius: 3px;
+  overflow: hidden;
+  background: var(--bg);
+  border: none;
+  appearance: none;
+}
+
+.context-progress::-webkit-progress-bar {
+  background: var(--bg);
+  border-radius: 3px;
+}
+
+.context-progress::-webkit-progress-value {
+  background: var(--primary);
+  border-radius: 3px;
+  transition: width 0.3s ease;
+}
+
+.context-progress::-moz-progress-bar {
+  background: var(--primary);
+  border-radius: 3px;
+}
+
+/* Color coding for utilization levels */
+.context-progress.low::-webkit-progress-value {
+  background: var(--success);
+}
+
+.context-progress.low::-moz-progress-bar {
+  background: var(--success);
+}
+
+.context-progress.medium::-webkit-progress-value {
+  background: #f59e0b;
+}
+
+.context-progress.medium::-moz-progress-bar {
+  background: #f59e0b;
+}
+
+.context-progress.high::-webkit-progress-value {
+  background: var(--danger);
+}
+
+.context-progress.high::-moz-progress-bar {
+  background: var(--danger);
+}
+
 /* Todo panel */
 .todo-panel {
   display: flex;
   flex-direction: column;
   background: var(--bg-secondary);
-  height: calc(100vh - 140px);
+  height: 100%;
+  min-height: 0; /* Allow flex child to shrink */
+  overflow: hidden;
 }
 
 .todo-header {

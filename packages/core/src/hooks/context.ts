@@ -8,6 +8,7 @@ import React, { useContext, useDebugValue, type ReactNode } from "react";
 import type { TickState } from "./types";
 import type { COM } from "../com/object-model";
 import { RuntimeProvider, type RuntimeStore } from "./runtime-context";
+import { ContextInfoProvider, type ContextInfoStore } from "./context-info";
 import { COMContext, TickStateContext } from "./context-internal";
 
 // Helper for createElement
@@ -96,6 +97,7 @@ export interface TentickleProviderProps {
   com: COM;
   tickState: TickState;
   runtimeStore: RuntimeStore;
+  contextInfoStore?: ContextInfoStore;
   children?: ReactNode; // Optional since React.createElement can pass it as third arg
 }
 
@@ -106,15 +108,18 @@ export function TentickleProvider({
   com,
   tickState,
   runtimeStore,
+  contextInfoStore,
   children,
 }: TentickleProviderProps): React.ReactElement {
-  return h(
-    RuntimeProvider,
-    { store: runtimeStore },
-    h(
-      COMContext.Provider,
-      { value: com },
-      h(TickStateContext.Provider, { value: tickState }, children),
-    ),
-  );
+  // Build provider chain: Runtime -> ContextInfo -> COM -> TickState
+  // Using explicit ReactNode typing to avoid type inference issues
+  let content: ReactNode = h(TickStateContext.Provider, { value: tickState }, children);
+  content = h(COMContext.Provider, { value: com }, content);
+
+  // Only add ContextInfoProvider if store is provided
+  if (contextInfoStore) {
+    content = h(ContextInfoProvider, { store: contextInfoStore }, content);
+  }
+
+  return h(RuntimeProvider, { store: runtimeStore }, content) as React.ReactElement;
 }

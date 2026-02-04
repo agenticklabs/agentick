@@ -545,7 +545,21 @@ export class Gateway extends EventEmitter {
     const clientId = url.searchParams.get("clientId") ?? `client-${Date.now().toString(36)}`;
 
     // Register SSE client for channel forwarding
+    const connectTime = Date.now();
     this.sseClients.set(clientId, res);
+    this.clientConnectedAt.set(clientId, connectTime);
+
+    // Emit DevTools event for connection tracking
+    if (devToolsEmitter.hasSubscribers()) {
+      devToolsEmitter.emitEvent({
+        type: "client_connected",
+        executionId: this.config.id,
+        clientId,
+        transport: "sse",
+        sequence: this.devToolsSequence++,
+        timestamp: connectTime,
+      } as DTClientConnectedEvent);
+    }
 
     // Send connection confirmation
     // Client expects type: "connection" to resolve the connection promise
@@ -566,6 +580,23 @@ export class Gateway extends EventEmitter {
       this.sessions.unsubscribeAll(clientId);
       this.sseClients.delete(clientId);
       this.cleanupClientChannelSubscriptions(clientId);
+
+      // Emit DevTools event for disconnection tracking
+      const connectedAt = this.clientConnectedAt.get(clientId);
+      const durationMs = connectedAt ? Date.now() - connectedAt : 0;
+      this.clientConnectedAt.delete(clientId);
+
+      if (devToolsEmitter.hasSubscribers()) {
+        devToolsEmitter.emitEvent({
+          type: "client_disconnected",
+          executionId: this.config.id,
+          clientId,
+          reason: "Connection closed",
+          durationMs,
+          sequence: this.devToolsSequence++,
+          timestamp: Date.now(),
+        } as DTClientDisconnectedEvent);
+      }
     });
   }
 
@@ -701,14 +732,63 @@ export class Gateway extends EventEmitter {
 
     log.debug({ method, params }, "handleInvoke");
 
+    const requestId = `req-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+    const startTime = Date.now();
+    const sessionKey = params.sessionId as string | undefined;
+
+    // Emit DevTools request event
+    if (devToolsEmitter.hasSubscribers()) {
+      devToolsEmitter.emitEvent({
+        type: "gateway_request",
+        executionId: this.config.id,
+        requestId,
+        method,
+        sessionKey,
+        params,
+        sequence: this.devToolsSequence++,
+        timestamp: startTime,
+      } as DTGatewayRequestEvent);
+    }
+
     try {
       const result = await this.invokeMethod(method, params, authResult.user);
       log.debug({ method, result }, "handleInvoke: completed");
+
+      // Emit DevTools response event
+      if (devToolsEmitter.hasSubscribers()) {
+        devToolsEmitter.emitEvent({
+          type: "gateway_response",
+          executionId: this.config.id,
+          requestId,
+          method,
+          ok: true,
+          latencyMs: Date.now() - startTime,
+          sequence: this.devToolsSequence++,
+          timestamp: Date.now(),
+        } as DTGatewayResponseEvent);
+      }
+
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify(result));
     } catch (error) {
       log.error({ method, error }, "handleInvoke: failed");
       const errorMessage = error instanceof Error ? error.message : String(error);
+
+      // Emit DevTools response event for error
+      if (devToolsEmitter.hasSubscribers()) {
+        devToolsEmitter.emitEvent({
+          type: "gateway_response",
+          executionId: this.config.id,
+          requestId,
+          method,
+          ok: false,
+          error: { code: "INVOKE_ERROR", message: errorMessage },
+          latencyMs: Date.now() - startTime,
+          sequence: this.devToolsSequence++,
+          timestamp: Date.now(),
+        } as DTGatewayResponseEvent);
+      }
+
       const statusCode = errorMessage.includes("Forbidden") ? 403 : 400;
       res.writeHead(statusCode, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: errorMessage }));

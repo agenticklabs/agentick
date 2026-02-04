@@ -49,6 +49,10 @@ import {
   type DTFiberSummary,
   type DTTokenSummary,
   type DTCompiledPreview,
+  FrameworkChannels,
+  type SessionContextPayload,
+  getEffectiveModelInfo,
+  getContextUtilization,
 } from "@tentickle/shared";
 import { computeTokenSummary } from "../utils/token-estimate";
 import type { CompiledStructure } from "../compiler/types";
@@ -1155,6 +1159,148 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
   }
 
   /**
+   * Broadcast context utilization info via the session:context channel.
+   * Enables real-time context tracking in UI via useContextInfo() hook.
+   */
+  private broadcastContextInfo(
+    executionId: string,
+    modelId: string,
+    modelMetadata:
+      | { contextWindow?: number; maxOutputTokens?: number; provider?: string }
+      | undefined,
+    tickUsage: UsageStats | undefined,
+    tick: number,
+    cumulativeUsage: {
+      inputTokens: number;
+      outputTokens: number;
+      totalTokens: number;
+      ticks?: number;
+    },
+    timestampStr: string,
+  ): void {
+    // Get context info (effective = adapter metadata merged with catalog)
+    const modelInfo = getEffectiveModelInfo(
+      {
+        model: modelId,
+        provider: modelMetadata?.provider,
+        contextWindow: modelMetadata?.contextWindow,
+        maxOutputTokens: modelMetadata?.maxOutputTokens,
+      },
+      modelId,
+    );
+
+    const inputTokens = tickUsage?.inputTokens ?? 0;
+    const outputTokens = tickUsage?.outputTokens ?? 0;
+    const totalTokens = tickUsage?.totalTokens ?? inputTokens + outputTokens;
+
+    // Calculate utilization if we have context window info
+    const utilization = modelInfo?.contextWindow
+      ? (getContextUtilization(modelId, inputTokens) ?? undefined)
+      : undefined;
+
+    const payload: SessionContextPayload = {
+      modelId,
+      modelName: modelInfo?.name,
+      provider: modelInfo?.provider || modelMetadata?.provider,
+      contextWindow: modelInfo?.contextWindow,
+      inputTokens,
+      outputTokens,
+      totalTokens,
+      utilization,
+      maxOutputTokens: modelInfo?.maxOutputTokens,
+      supportsVision: modelInfo?.supportsVision,
+      supportsToolUse: modelInfo?.supportsToolUse,
+      isReasoningModel: modelInfo?.isReasoningModel,
+      tick,
+      cumulativeUsage: {
+        inputTokens: cumulativeUsage.inputTokens,
+        outputTokens: cumulativeUsage.outputTokens,
+        totalTokens: cumulativeUsage.totalTokens,
+        ticks: cumulativeUsage.ticks ?? tick,
+      },
+      timestamp: timestampStr,
+    };
+
+    // Publish to channel (if channel service is available)
+    const ctx = Context.tryGet();
+    if (ctx?.channels) {
+      try {
+        ctx.channels.publish(ctx, FrameworkChannels.CONTEXT, {
+          type: "context_update",
+          payload,
+        });
+      } catch {
+        // Silently ignore if channel publish fails
+      }
+    }
+
+    // Also emit as DevTools event for DevTools UI
+    if (devToolsEmitter.hasSubscribers()) {
+      devToolsEmitter.emitEvent({
+        type: "context_update",
+        executionId,
+        sessionId: this.id,
+        sequence: ++this._sequence,
+        timestamp: Date.now(),
+        modelId: payload.modelId,
+        modelName: payload.modelName,
+        provider: payload.provider,
+        contextWindow: payload.contextWindow,
+        inputTokens: payload.inputTokens,
+        outputTokens: payload.outputTokens,
+        totalTokens: payload.totalTokens,
+        utilization: payload.utilization,
+        maxOutputTokens: payload.maxOutputTokens,
+        supportsVision: payload.supportsVision,
+        supportsToolUse: payload.supportsToolUse,
+        isReasoningModel: payload.isReasoningModel,
+        tick: payload.tick,
+        cumulativeUsage: payload.cumulativeUsage,
+      });
+    }
+
+    // Update compiler's contextInfoStore so JSX components can access via useContextInfo
+    if (this.compiler) {
+      this.compiler.contextInfoStore.update({
+        modelId: payload.modelId,
+        modelName: payload.modelName,
+        provider: payload.provider,
+        contextWindow: payload.contextWindow,
+        inputTokens: payload.inputTokens,
+        outputTokens: payload.outputTokens,
+        totalTokens: payload.totalTokens,
+        utilization: payload.utilization,
+        maxOutputTokens: payload.maxOutputTokens,
+        supportsVision: payload.supportsVision,
+        supportsToolUse: payload.supportsToolUse,
+        isReasoningModel: payload.isReasoningModel,
+        tick: payload.tick,
+        cumulativeUsage: payload.cumulativeUsage,
+      });
+    }
+
+    // Emit as stream event for client-side React consumption
+    this.emitEvent({
+      type: "context_update",
+      modelId: payload.modelId,
+      modelName: payload.modelName,
+      provider: payload.provider,
+      contextWindow: payload.contextWindow,
+      inputTokens: payload.inputTokens,
+      outputTokens: payload.outputTokens,
+      totalTokens: payload.totalTokens,
+      utilization: payload.utilization,
+      maxOutputTokens: payload.maxOutputTokens,
+      supportsVision: payload.supportsVision,
+      supportsToolUse: payload.supportsToolUse,
+      isReasoningModel: payload.isReasoningModel,
+      cumulativeUsage: payload.cumulativeUsage,
+      tick,
+      timestamp: timestampStr,
+    });
+  }
+
+  /**
    * Emit a fiber_snapshot event to DevTools after each tick.
    * This enables the Fiber Tree panel in DevTools to show component hierarchy and hook values.
    *
@@ -1680,15 +1826,30 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
         const ingestResult = await this.ingestTickResult(response, toolResults);
         shouldContinue = ingestResult.shouldContinue;
 
+        // Get actual model ID: prefer response model, then metadata.model, then metadata.id
+        const actualModelId =
+          modelOutput?.model || model?.metadata?.model || model?.metadata?.id || "unknown";
+
         this.emitEvent({
           type: "tick_end",
           tick: currentTick,
           shouldContinue,
           usage: modelOutput?.usage,
           stopReason: modelOutput?.stopReason,
-          model: model?.metadata?.id || model?.metadata?.model,
+          model: actualModelId,
           timestamp: timestamp(),
         });
+
+        // Broadcast context utilization via channel
+        this.broadcastContextInfo(
+          executionId,
+          actualModelId,
+          model?.metadata,
+          modelOutput?.usage,
+          currentTick,
+          usage,
+          timestamp(),
+        );
 
         // Emit fiber snapshot to DevTools
         this.emitFiberSnapshot(currentTick, executionId, compiled.rawCompiled);

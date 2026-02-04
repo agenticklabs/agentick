@@ -41,6 +41,9 @@ import {
   createMessageStore,
   MessageProvider,
   type MessageStore,
+  // Context info
+  createContextInfoStore,
+  type ContextInfoStore,
 } from "../hooks";
 import type { ExecutionMessage } from "../engine/execution-types";
 import type { Renderer } from "../renderers/types";
@@ -135,6 +138,9 @@ export class FiberCompiler {
   // Message store for useOnMessage/useQueuedMessages
   private messageStore: MessageStore;
 
+  // Context info store for useContextInfo
+  private _contextInfoStore: ContextInfoStore;
+
   // Context
   private com: COM;
   private tickState: TickState | null = null;
@@ -171,6 +177,9 @@ export class FiberCompiler {
     // Create message store for useOnMessage/useQueuedMessages
     this.messageStore = createMessageStore();
 
+    // Create context info store for useContextInfo
+    this._contextInfoStore = createContextInfoStore();
+
     // Create the render container and root
     this.container = createContainer(markdownRenderer);
     this.root = createRoot(this.container);
@@ -184,6 +193,18 @@ export class FiberCompiler {
       }
       originalRequestRecompile(reason);
     };
+  }
+
+  // ============================================================
+  // Public API - Stores
+  // ============================================================
+
+  /**
+   * Get the context info store for this compiler.
+   * Used by session to update context utilization info after each tick.
+   */
+  get contextInfoStore(): ContextInfoStore {
+    return this._contextInfoStore;
   }
 
   // ============================================================
@@ -247,6 +268,7 @@ export class FiberCompiler {
                       com: this.com as any,
                       tickState: this.tickState as any, // Different TickState types are compatible
                       runtimeStore: this.runtimeStore,
+                      contextInfoStore: this._contextInfoStore,
                     },
                     reactElement,
                   ),

@@ -50,6 +50,13 @@ export {
   useData,
   useInvalidateData,
   useComState,
+  // Context utilization
+  useContextInfo,
+  useContextInfoStore,
+  createContextInfoStore,
+  ContextInfoProvider,
+  type ContextInfo,
+  type ContextInfoStore,
 } from "./hooks";
 
 // ============================================================================

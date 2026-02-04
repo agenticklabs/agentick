@@ -545,6 +545,64 @@ useOnMessage((msg) => { /* handle */ });
 
 // Context
 const value = useContext(MyContext);
+
+// Context utilization (updated after each tick)
+const contextInfo = useContextInfo();
+if (contextInfo) {
+  console.log(contextInfo.modelId);      // Model ID
+  console.log(contextInfo.utilization);  // % of context used
+  console.log(contextInfo.inputTokens);  // Tokens this tick
+}
+```
+
+### Model Catalog & Context Utilization
+
+The `@tentickle/shared` package includes a model catalog for tracking context windows and capabilities.
+
+**Registering Custom Models:**
+
+For custom/fine-tuned models not in the built-in catalog, use `registerModel()`:
+
+```typescript
+import { registerModel } from "@tentickle/shared";
+
+registerModel("myorg/custom-model-v1", {
+  name: "My Custom Model",
+  provider: "myorg",
+  contextWindow: 32768,
+  maxOutputTokens: 8192,
+  supportsToolUse: true,
+  supportsVision: false,
+});
+```
+
+**Context Info Hooks:**
+
+Two `useContextInfo` hooks exist for different contexts:
+
+| Package | Use Case |
+|---------|----------|
+| `@tentickle/core` | Server-side JSX apps (via `ContextInfoProvider`) |
+| `@tentickle/react` | Client-side React apps (subscribes to `context_update` stream events) |
+
+```typescript
+// Server-side (in JSX app components)
+import { useContextInfo } from "@tentickle/core";
+
+function MyComponent() {
+  const contextInfo = useContextInfo();
+  if (contextInfo?.utilization > 80) {
+    return <System>Be concise - context is limited.</System>;
+  }
+}
+
+// Client-side (in React UI)
+import { useContextInfo } from "@tentickle/react";
+
+function ContextBar() {
+  const { contextInfo } = useContextInfo({ sessionId: "my-session" });
+  return <div>{contextInfo?.utilization?.toFixed(1)}% used</div>;
+}
 ```
 
 ### Session & Execution Model
@@ -967,3 +1025,38 @@ The fiber tree snapshots are taken at tick end. Check `tick_end` events are bein
 1. Verify `devTools: true` in session config
 2. Check SSE connection in Network tab
 3. Look for `[DevTools]` log messages in console
+
+### CSS: Flex/Grid children overflowing viewport
+
+When using flexbox or grid layouts that should fit within the viewport, children may overflow if `min-height` isn't handled correctly:
+
+```css
+/* Problem: min-height: 100vh allows growth beyond viewport */
+.app {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh; /* ❌ Allows overflow */
+}
+
+/* Solution: Constrain height and allow children to shrink */
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;      /* ✅ Fixed height */
+  overflow: hidden;
+}
+
+.app-main {
+  flex: 1;
+  min-height: 0;      /* ✅ Critical! Allows flex child to shrink */
+  overflow: hidden;
+}
+
+.panel {
+  height: 100%;       /* ✅ Fill parent instead of calc() */
+  min-height: 0;      /* ✅ Allow shrinking */
+  overflow: auto;     /* ✅ Scroll content if needed */
+}
+```
+
+The `min-height: 0` is essential because flexbox/grid children default to `min-height: auto`, which prevents them from shrinking below their content size.

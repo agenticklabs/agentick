@@ -9,7 +9,7 @@
  */
 
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
-import { useSession, useConnection, useStreamingText } from "@tentickle/react";
+import { useSession, useConnection, useStreamingText, useContextInfo } from "@tentickle/react";
 import type { ContentBlock, MediaSource, Message, ToolResultBlock } from "@tentickle/shared";
 
 interface ChatMessage {
@@ -23,6 +23,7 @@ export function ChatInterface() {
   const { send, accessor } = useSession({ sessionId: SESSION_ID, autoSubscribe: true });
   const { isConnected, isConnecting } = useConnection();
   const { text: streamingText, isStreaming, clear: clearStreamingText } = useStreamingText();
+  const { contextInfo } = useContextInfo({ sessionId: SESSION_ID });
 
   // Input state
   const [input, setInput] = useState("");
@@ -293,6 +294,31 @@ export function ChatInterface() {
 
           {isSending && <span>Sending...</span>}
           {isStreaming && <span>Streaming...</span>}
+
+          {contextInfo && (
+            <span className="context-info">
+              <span className="context-model">{contextInfo.modelName || contextInfo.modelId}</span>
+              {contextInfo.utilization !== undefined && (
+                <>
+                  <span className="context-utilization">
+                    {contextInfo.utilization.toFixed(1)}% context
+                  </span>
+                  <progress
+                    className={`context-progress ${
+                      contextInfo.utilization >= 80
+                        ? "high"
+                        : contextInfo.utilization >= 50
+                          ? "medium"
+                          : "low"
+                    }`}
+                    value={contextInfo.utilization}
+                    max={100}
+                    title={`${contextInfo.inputTokens.toLocaleString()} / ${contextInfo.contextWindow?.toLocaleString() ?? "?"} tokens`}
+                  />
+                </>
+              )}
+            </span>
+          )}
         </div>
       </div>
     </>

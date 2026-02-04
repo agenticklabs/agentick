@@ -16,8 +16,25 @@ import { z } from "zod";
 import { Context, Logger } from "@tentickle/kernel";
 import { createTentickleMiddleware, method } from "@tentickle/express";
 import { DevToolsServer } from "@tentickle/devtools";
+import { registerModel } from "@tentickle/shared";
 import { createTentickleApp } from "./setup.js";
 import { TodoListService } from "./services/todo-list.service.js";
+
+// ============================================================================
+// Register Custom Models
+// ============================================================================
+
+// Register custom/fine-tuned models that aren't in the default catalog.
+// This enables context utilization tracking and model info in DevTools.
+registerModel("knowify/qwen2.5-14b-platform-v1", {
+  name: "Qwen 2.5 14B Platform v1",
+  provider: "knowify",
+  contextWindow: 32768, // 32k context
+  maxOutputTokens: 8192,
+  supportsToolUse: true,
+  supportsVision: false,
+  isReasoningModel: false,
+});
 
 // Configure logging at debug level
 Logger.configure({ level: "debug" });

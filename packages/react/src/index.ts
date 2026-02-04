@@ -83,6 +83,10 @@ export {
   useConnectionState,
   useEvents,
   useStreamingText,
+  useContextInfo,
+  type ContextInfo,
+  type UseContextInfoOptions,
+  type UseContextInfoResult,
 } from "./hooks";
 
 // Types
