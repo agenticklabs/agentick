@@ -190,8 +190,8 @@ async function main() {
           }),
           handler: async (params) => {
             const session = params.sessionId
-              ? tentickleApp.session(params.sessionId)
-              : tentickleApp.session();
+              ? await tentickleApp.session(params.sessionId)
+              : await tentickleApp.session();
             return { sessionId: session.id };
           },
         }),
@@ -205,10 +205,13 @@ async function main() {
             sessionId: z.string(),
           }),
           handler: async (params) => {
-            if (!tentickleApp.has(params.sessionId)) {
+            // Check both in-memory and hibernated sessions
+            const inMemory = tentickleApp.has(params.sessionId);
+            const hibernated = await tentickleApp.isHibernated(params.sessionId);
+            if (!inMemory && !hibernated) {
               throw new Error("Session not found");
             }
-            const session = tentickleApp.session(params.sessionId);
+            const session = await tentickleApp.session(params.sessionId);
             const snapshot = session.snapshot();
             return {
               sessionId: params.sessionId,

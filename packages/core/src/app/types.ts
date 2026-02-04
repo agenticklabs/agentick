@@ -602,6 +602,8 @@ export interface ExecutionOptions {
 export interface SessionSnapshot {
   /** Session version for compatibility */
   version: string;
+  /** Session ID */
+  sessionId: string;
   /** Tick number at snapshot time */
   tick: number;
   /** Serialized conversation/timeline */
@@ -1611,12 +1613,12 @@ export interface App<P = Record<string, unknown>> {
    * Send to a session.
    *
    * Without sessionId: creates ephemeral session, executes, destroys.
-   * With sessionId: creates or reuses managed session.
+   * With sessionId: creates or reuses managed session (may hydrate from store).
    */
   send(
     input: SendInput<P>,
     options?: { sessionId?: string } & ExecutionOptions,
-  ): SessionExecutionHandle;
+  ): Promise<SessionExecutionHandle>;
 
   /**
    * Get or create a session.
@@ -1637,12 +1639,12 @@ export interface App<P = Record<string, unknown>> {
    * const conv = app.session('conv-123');
    *
    * // With options
-   * const withOpts = app.session({ sessionId: 'conv-456', maxTicks: 5 });
-   * const newWithOpts = app.session({ maxTicks: 5 }); // Generated ID
+   * const withOpts = await app.session({ sessionId: 'conv-456', maxTicks: 5 });
+   * const newWithOpts = await app.session({ maxTicks: 5 }); // Generated ID
    * ```
    */
-  session(id?: string): Session<P>;
-  session(options: SessionOptions): Session<P>;
+  session(id?: string): Promise<Session<P>>;
+  session(options: SessionOptions): Promise<Session<P>>;
 
   /**
    * Close and cleanup a session.

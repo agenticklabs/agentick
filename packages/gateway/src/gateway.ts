@@ -920,7 +920,9 @@ export class Gateway extends EventEmitter {
     const managedSession = await this.sessions.getOrCreate(sessionId);
     if (!managedSession.coreSession) {
       // Use sessionName (without app prefix) for App - Gateway handles routing
-      managedSession.coreSession = managedSession.appInfo.app.session(managedSession.sessionName);
+      managedSession.coreSession = await managedSession.appInfo.app.session(
+        managedSession.sessionName,
+      );
     }
 
     // Subscribe to the core session's channel and forward events to SSE clients
@@ -981,7 +983,9 @@ export class Gateway extends EventEmitter {
     const managedSession = await this.sessions.getOrCreate(sessionId);
     if (!managedSession.coreSession) {
       // Use sessionName (without app prefix) for App - Gateway handles routing
-      managedSession.coreSession = managedSession.appInfo.app.session(managedSession.sessionName);
+      managedSession.coreSession = await managedSession.appInfo.app.session(
+        managedSession.sessionName,
+      );
     }
 
     const coreChannel = managedSession.coreSession.channel(channelName);
@@ -1253,7 +1257,9 @@ export class Gateway extends EventEmitter {
     // Get or create core session from app
     if (!managedSession.coreSession) {
       // Use sessionName (without app prefix) for App - Gateway handles routing
-      managedSession.coreSession = managedSession.appInfo.app.session(managedSession.sessionName);
+      managedSession.coreSession = await managedSession.appInfo.app.session(
+        managedSession.sessionName,
+      );
     }
 
     // Stream execution to subscribers
@@ -1378,7 +1384,9 @@ export class Gateway extends EventEmitter {
     if (!managedSession.coreSession) {
       // Use sessionName (without app prefix) for App - Gateway handles routing
       log.debug({ sessionName: managedSession.sessionName }, "directSend: creating core session");
-      managedSession.coreSession = managedSession.appInfo.app.session(managedSession.sessionName);
+      managedSession.coreSession = await managedSession.appInfo.app.session(
+        managedSession.sessionName,
+      );
       log.debug(
         { coreSessionId: managedSession.coreSession.id },
         "directSend: created core session",
@@ -1448,7 +1456,9 @@ export class Gateway extends EventEmitter {
       const managedSession = await this.sessions.getOrCreate(sessionId);
       if (!managedSession.coreSession) {
         // Use sessionName (without app prefix) for App - Gateway handles routing
-        managedSession.coreSession = managedSession.appInfo.app.session(managedSession.sessionName);
+        managedSession.coreSession = await managedSession.appInfo.app.session(
+          managedSession.sessionName,
+        );
       }
       channels = createChannelServiceFromSession(managedSession.coreSession, this.config.id);
     }
@@ -1595,7 +1605,7 @@ export class Gateway extends EventEmitter {
 
         if (!managedSession.coreSession) {
           // Use sessionName (without app prefix) for App - Gateway handles routing
-          managedSession.coreSession = managedSession.appInfo.app.session(
+          managedSession.coreSession = await managedSession.appInfo.app.session(
             managedSession.sessionName,
           );
         }

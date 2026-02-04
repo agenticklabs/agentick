@@ -34,7 +34,7 @@ describe("Duplicate Message Prevention", () => {
       };
 
       const app = createApp(Agent, { maxTicks: 1 });
-      const session = app.session();
+      const session = await app.session();
 
       await session.send({
         message: {
@@ -76,7 +76,7 @@ describe("Duplicate Message Prevention", () => {
       };
 
       const app = createApp(Agent, { maxTicks: 1 });
-      const session = app.session();
+      const session = await app.session();
 
       // First message
       await session.send({
@@ -135,7 +135,7 @@ describe("Duplicate Message Prevention", () => {
       };
 
       const app = createApp(Agent, { maxTicks: 1 });
-      const session = app.session();
+      const session = await app.session();
 
       // First exchange
       await session.send({
@@ -203,7 +203,7 @@ describe("Duplicate Message Prevention", () => {
       };
 
       const app = createApp(Agent, { maxTicks: 1 });
-      const session = app.session();
+      const session = await app.session();
 
       // Send 5 messages
       for (let i = 1; i <= 5; i++) {
@@ -257,7 +257,7 @@ describe("Duplicate Message Prevention", () => {
       };
 
       const app = createApp(Agent, { maxTicks: 1 });
-      const session = app.session();
+      const session = await app.session();
 
       // Exchange 1
       await session.send({

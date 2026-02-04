@@ -436,10 +436,10 @@ class AppImpl<P extends Record<string, unknown>> implements App<P> {
     );
   }
 
-  send(
+  async send(
     input: SendInput<P>,
     options?: { sessionId?: string } & ExecutionOptions,
-  ): SessionExecutionHandle {
+  ): Promise<SessionExecutionHandle> {
     const sessionId = options?.sessionId;
     const executionOptions: ExecutionOptions = {
       maxTicks: options?.maxTicks,
@@ -457,7 +457,7 @@ class AppImpl<P extends Record<string, unknown>> implements App<P> {
       return handle;
     }
 
-    const session = this.session(sessionId);
+    const session = await this.session(sessionId);
     const maybeModified = this.options.onBeforeSend?.(session, input) ?? input;
     const handle = session.send(maybeModified, executionOptions);
     handle.result
@@ -470,7 +470,7 @@ class AppImpl<P extends Record<string, unknown>> implements App<P> {
     return handle;
   }
 
-  session(idOrOptions?: string | SessionOptions): Session<P> {
+  async session(idOrOptions?: string | SessionOptions): Promise<Session<P>> {
     // Parse arguments: string is ID, object is options
     let sessionId: string | undefined;
     let options: SessionOptions = {};
@@ -482,9 +482,11 @@ class AppImpl<P extends Record<string, unknown>> implements App<P> {
       sessionId = options.sessionId;
     }
 
-    // If we have an ID, try to get existing session first
+    // If we have an ID, try to get existing or hydrate from store
     if (sessionId) {
-      const existing = this.registry.get(sessionId);
+      const existing = await this.registry.getOrHydrate(sessionId, (snapshot) =>
+        this.createSessionFromSnapshot(snapshot, options),
+      );
       if (existing) return existing;
     }
 
@@ -538,10 +540,40 @@ class AppImpl<P extends Record<string, unknown>> implements App<P> {
     };
     const session = new SessionImpl(this.Component, this.options, sessionOptions);
 
+    this.initializeSession(session);
+    this.registry.register(session.id, session);
+
+    return session;
+  }
+
+  /**
+   * Create a session from a hibernation snapshot.
+   * Used by registry.getOrHydrate() - does NOT register (getOrHydrate handles that).
+   */
+  private createSessionFromSnapshot(
+    snapshot: SessionSnapshot,
+    options: SessionOptions,
+  ): SessionImpl<P> {
+    const sessionOptions: SessionOptions = {
+      ...options,
+      sessionId: snapshot.sessionId,
+      snapshot,
+      devTools: options.devTools ?? this.options.devTools,
+    };
+    const session = new SessionImpl(this.Component, this.options, sessionOptions);
+
+    this.initializeSession(session);
+
+    return session;
+  }
+
+  /**
+   * Initialize session with callbacks and listeners.
+   * Shared by createSession and createSessionFromSnapshot.
+   */
+  private initializeSession(session: SessionImpl<P>): void {
     // Set hibernate callback so session.hibernate() delegates to the registry
     session.setHibernateCallback(() => this.registry.hibernate(session.id));
-
-    this.registry.register(session.id, session);
 
     session.on("event", () => {
       this.registry.markActive(session.id);
@@ -555,8 +587,6 @@ class AppImpl<P extends Record<string, unknown>> implements App<P> {
     for (const handler of this.sessionCreateHandlers) {
       handler(session);
     }
-
-    return session;
   }
 }
 

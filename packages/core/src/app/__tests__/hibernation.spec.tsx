@@ -100,6 +100,7 @@ describe("MemorySessionStore", () => {
   it("should save and load a snapshot", async () => {
     const snapshot: SessionSnapshot = {
       version: "1.0",
+      sessionId: "session-1",
       tick: 3,
       timeline: [{ kind: "message", message: { role: "user", content: [] } }],
       componentState: null,
@@ -121,6 +122,7 @@ describe("MemorySessionStore", () => {
   it("should delete a snapshot", async () => {
     const snapshot: SessionSnapshot = {
       version: "1.0",
+      sessionId: "session-1",
       tick: 1,
       timeline: null,
       componentState: null,
@@ -138,15 +140,16 @@ describe("MemorySessionStore", () => {
   it("should list all session IDs", async () => {
     const snapshot: SessionSnapshot = {
       version: "1.0",
+      sessionId: "session-1",
       tick: 1,
       timeline: null,
       componentState: null,
       timestamp: Date.now(),
     };
 
-    await store.save("session-1", snapshot);
-    await store.save("session-2", snapshot);
-    await store.save("session-3", snapshot);
+    await store.save("session-1", { ...snapshot, sessionId: "session-1" });
+    await store.save("session-2", { ...snapshot, sessionId: "session-2" });
+    await store.save("session-3", { ...snapshot, sessionId: "session-3" });
 
     const ids = await store.list();
     expect(ids).toHaveLength(3);
@@ -159,15 +162,16 @@ describe("MemorySessionStore", () => {
     const store = new MemorySessionStore({ maxSize: 2 });
     const snapshot: SessionSnapshot = {
       version: "1.0",
+      sessionId: "session-1",
       tick: 1,
       timeline: null,
       componentState: null,
       timestamp: Date.now(),
     };
 
-    await store.save("session-1", snapshot);
-    await store.save("session-2", snapshot);
-    await store.save("session-3", snapshot); // Should evict session-1
+    await store.save("session-1", { ...snapshot, sessionId: "session-1" });
+    await store.save("session-2", { ...snapshot, sessionId: "session-2" });
+    await store.save("session-3", { ...snapshot, sessionId: "session-3" }); // Should evict session-1
 
     expect(await store.has("session-1")).toBe(false);
     expect(await store.has("session-2")).toBe(true);
@@ -179,20 +183,21 @@ describe("MemorySessionStore", () => {
     const store = new MemorySessionStore({ maxSize: 2 });
     const snapshot: SessionSnapshot = {
       version: "1.0",
+      sessionId: "session-1",
       tick: 1,
       timeline: null,
       componentState: null,
       timestamp: Date.now(),
     };
 
-    await store.save("session-1", snapshot);
-    await store.save("session-2", snapshot);
+    await store.save("session-1", { ...snapshot, sessionId: "session-1" });
+    await store.save("session-2", { ...snapshot, sessionId: "session-2" });
 
     // Access session-1 to move it to end of LRU
     await store.load("session-1");
 
     // Add session-3 - should evict session-2 (now oldest)
-    await store.save("session-3", snapshot);
+    await store.save("session-3", { ...snapshot, sessionId: "session-3" });
 
     expect(await store.has("session-1")).toBe(true);
     expect(await store.has("session-2")).toBe(false);
@@ -202,14 +207,15 @@ describe("MemorySessionStore", () => {
   it("should clear all sessions", async () => {
     const snapshot: SessionSnapshot = {
       version: "1.0",
+      sessionId: "session-1",
       tick: 1,
       timeline: null,
       componentState: null,
       timestamp: Date.now(),
     };
 
-    await store.save("session-1", snapshot);
-    await store.save("session-2", snapshot);
+    await store.save("session-1", { ...snapshot, sessionId: "session-1" });
+    await store.save("session-2", { ...snapshot, sessionId: "session-2" });
     expect(store.size).toBe(2);
 
     store.clear();
@@ -267,7 +273,7 @@ describe("App hibernation", () => {
     });
 
     // Create and use a session
-    const session = app.session("test-session");
+    const session = await app.session("test-session");
     await session.tick({
       messages: [{ role: "user", content: [{ type: "text", text: "Hello" }] }],
     } as any);
@@ -301,7 +307,7 @@ describe("App hibernation", () => {
       sessions: { store },
     });
 
-    const session = app.session("test-session");
+    const session = await app.session("test-session");
     await session.tick({
       messages: [{ role: "user", content: [{ type: "text", text: "Hello" }] }],
     } as any);
@@ -331,8 +337,8 @@ describe("App hibernation", () => {
     });
 
     // Create and hibernate multiple sessions
-    const session1 = app.session("session-1");
-    const session2 = app.session("session-2");
+    const session1 = await app.session("session-1");
+    const session2 = await app.session("session-2");
     await session1.tick({
       messages: [{ role: "user", content: [{ type: "text", text: "Hello" }] }],
     } as any);
@@ -391,7 +397,7 @@ describe("Hibernation lifecycle hooks", () => {
       onBeforeHibernate,
     });
 
-    const session = app.session("test-session");
+    const session = await app.session("test-session");
     await session.tick({
       messages: [{ role: "user", content: [{ type: "text", text: "Hello" }] }],
     } as any);
@@ -421,7 +427,7 @@ describe("Hibernation lifecycle hooks", () => {
       onBeforeHibernate: () => false,
     });
 
-    const session = app.session("test-session");
+    const session = await app.session("test-session");
     await session.tick({
       messages: [{ role: "user", content: [{ type: "text", text: "Hello" }] }],
     } as any);
@@ -453,7 +459,7 @@ describe("Hibernation lifecycle hooks", () => {
       }),
     });
 
-    const session = app.session("test-session");
+    const session = await app.session("test-session");
     await session.tick({
       messages: [{ role: "user", content: [{ type: "text", text: "Hello" }] }],
     } as any);
@@ -482,7 +488,7 @@ describe("Hibernation lifecycle hooks", () => {
       onAfterHibernate,
     });
 
-    const session = app.session("test-session");
+    const session = await app.session("test-session");
     await session.tick({
       messages: [{ role: "user", content: [{ type: "text", text: "Hello" }] }],
     } as any);
@@ -513,7 +519,7 @@ describe("Session snapshot", () => {
     );
 
     const app = createApp(Agent, {});
-    const session = app.session("test-session");
+    const session = await app.session("test-session");
 
     const snapshot = session.snapshot();
 
@@ -535,7 +541,7 @@ describe("Session snapshot", () => {
     );
 
     const app = createApp(Agent, {});
-    const session = app.session("test-session");
+    const session = await app.session("test-session");
     await session.tick({} as any);
 
     const snapshot = session.snapshot();
@@ -560,7 +566,7 @@ describe("Session snapshot", () => {
     );
 
     const app = createApp(Agent, {});
-    const session = app.session("test-session");
+    const session = await app.session("test-session");
     await session.tick({} as any);
 
     const snapshot = session.snapshot();
@@ -588,6 +594,7 @@ describe("SqliteSessionStore", () => {
     const store = new SqliteSessionStore(); // In-memory by default
     const snapshot: SessionSnapshot = {
       version: "1.0",
+      sessionId: "session-1",
       tick: 3,
       timeline: [{ kind: "message", message: { role: "user", content: [] } }],
       componentState: null,
@@ -616,6 +623,7 @@ describe("SqliteSessionStore", () => {
     const store = new SqliteSessionStore();
     const snapshot: SessionSnapshot = {
       version: "1.0",
+      sessionId: "session-1",
       tick: 1,
       timeline: null,
       componentState: null,
@@ -635,14 +643,15 @@ describe("SqliteSessionStore", () => {
     const store = new SqliteSessionStore();
     const snapshot: SessionSnapshot = {
       version: "1.0",
+      sessionId: "session-1",
       tick: 1,
       timeline: null,
       componentState: null,
       timestamp: Date.now(),
     };
 
-    await store.save("session-1", snapshot);
-    await store.save("session-2", snapshot);
+    await store.save("session-1", { ...snapshot, sessionId: "session-1" });
+    await store.save("session-2", { ...snapshot, sessionId: "session-2" });
 
     const ids = await store.list();
     expect(ids).toHaveLength(2);
@@ -656,6 +665,7 @@ describe("SqliteSessionStore", () => {
     const store = new SqliteSessionStore();
     const snapshot: SessionSnapshot = {
       version: "1.0",
+      sessionId: "session-1",
       tick: 1,
       timeline: null,
       componentState: null,
@@ -664,10 +674,10 @@ describe("SqliteSessionStore", () => {
 
     expect(await store.count()).toBe(0);
 
-    await store.save("session-1", snapshot);
+    await store.save("session-1", { ...snapshot, sessionId: "session-1" });
     expect(await store.count()).toBe(1);
 
-    await store.save("session-2", snapshot);
+    await store.save("session-2", { ...snapshot, sessionId: "session-2" });
     expect(await store.count()).toBe(2);
 
     await store.close();
@@ -678,15 +688,16 @@ describe("SqliteSessionStore", () => {
     const store = new SqliteSessionStore();
     const snapshot: SessionSnapshot = {
       version: "1.0",
+      sessionId: "session-1",
       tick: 1,
       timeline: null,
       componentState: null,
       timestamp: Date.now(),
     };
 
-    await store.save("session-1", snapshot);
-    await store.save("session-2", snapshot);
-    await store.save("session-3", snapshot);
+    await store.save("session-1", { ...snapshot, sessionId: "session-1" });
+    await store.save("session-2", { ...snapshot, sessionId: "session-2" });
+    await store.save("session-3", { ...snapshot, sessionId: "session-3" });
 
     const deleted = await store.enforceMaxCount(2);
     expect(deleted).toBe(1);
@@ -760,7 +771,7 @@ describe("App with SQLite store", () => {
       sessions: { store: ":memory:" },
     });
 
-    const session = app.session("test-session");
+    const session = await app.session("test-session");
     await session.tick({
       messages: [{ role: "user", content: [{ type: "text", text: "Hello" }] }],
     } as any);
@@ -789,7 +800,7 @@ describe("App with SQLite store", () => {
       },
     });
 
-    const session = app.session("test-session");
+    const session = await app.session("test-session");
     await session.tick({
       messages: [{ role: "user", content: [{ type: "text", text: "Hello" }] }],
     } as any);

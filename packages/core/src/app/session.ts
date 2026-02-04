@@ -876,6 +876,7 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
   snapshot(): SessionSnapshot {
     return {
       version: "1.0",
+      sessionId: this.id,
       tick: this._tick,
       timeline: this._previousOutput?.timeline ?? null,
       componentState: this.serializeFiberTree(), // Serialized fiber tree with hook states

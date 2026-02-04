@@ -69,7 +69,7 @@ describe("Tool Component", () => {
       }
 
       const app = createApp(Agent, { maxTicks: 1 });
-      const session = app.session();
+      const session = await app.session();
 
       // Run a tick to trigger tool registration
       await session.tick({}).result;
@@ -104,7 +104,7 @@ describe("Tool Component", () => {
       }
 
       const app = createApp(Agent, { maxTicks: 1 });
-      const session = app.session();
+      const session = await app.session();
 
       await session.tick({}).result;
 
@@ -204,7 +204,7 @@ describe("Tool Component", () => {
       }
 
       const app = createApp(Agent, { maxTicks: 3 });
-      const session = app.session();
+      const session = await app.session();
 
       await session.tick({}).result;
 
@@ -249,7 +249,7 @@ describe("Tool Component", () => {
       }
 
       const app = createApp(Agent, { maxTicks: 1 });
-      const session = app.session();
+      const session = await app.session();
 
       await session.tick({}).result;
 

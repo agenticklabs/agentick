@@ -52,7 +52,7 @@ describe("Message Flow Integration", () => {
       };
 
       const app = createApp(Agent, { maxTicks: 1 });
-      const session = app.session();
+      const session = await app.session();
 
       const handle = session.send({
         message: {
@@ -104,7 +104,7 @@ describe("Message Flow Integration", () => {
       };
 
       const app = createApp(Agent, { maxTicks: 1 });
-      const session = app.session();
+      const session = await app.session();
 
       const handle = session.send({
         message: {
@@ -146,7 +146,7 @@ describe("Message Flow Integration", () => {
       };
 
       const app = createApp(Agent, { maxTicks: 1 });
-      const session = app.session();
+      const session = await app.session();
 
       // First tick
       await session.send({
@@ -185,7 +185,7 @@ describe("Message Flow Integration", () => {
       };
 
       const app = createApp(Agent, { maxTicks: 1 });
-      const session = app.session();
+      const session = await app.session();
 
       const handle = session.send({
         message: {
@@ -232,7 +232,7 @@ describe("Message Flow Integration", () => {
       };
 
       const app = createApp(Agent, { maxTicks: 1 });
-      const session = app.session();
+      const session = await app.session();
 
       // First message
       await session.send({
@@ -287,7 +287,7 @@ describe("Message Flow Integration", () => {
       };
 
       const app = createApp(Agent, { maxTicks: 1 });
-      const session = app.session();
+      const session = await app.session();
 
       // First tick - send a message
       await session.send({
@@ -343,7 +343,7 @@ describe("Message Flow Integration", () => {
       };
 
       const app = createApp(Agent, { maxTicks: 1 });
-      const session = app.session();
+      const session = await app.session();
 
       await session.send({
         message: {
@@ -393,7 +393,7 @@ describe("Message Flow Integration", () => {
       };
 
       const app = createApp(Agent, { maxTicks: 1 });
-      const session = app.session();
+      const session = await app.session();
 
       await session.send({
         message: {
@@ -438,7 +438,7 @@ describe("Session Lifecycle", () => {
       };
 
       const app = createApp(Agent, { maxTicks: 1 });
-      const session = app.session();
+      const session = await app.session();
 
       // No props have been set yet
       const handle = session.send({
@@ -475,7 +475,7 @@ describe("Session Lifecycle", () => {
       };
 
       const app = createApp(Agent, { maxTicks: 1 });
-      const session = app.session();
+      const session = await app.session();
 
       await session.send({
         message: { role: "user", content: [{ type: "text", text: "One" }] },

@@ -189,10 +189,10 @@ export function cleanup(): void {
  * });
  * ```
  */
-export function renderAgent<P extends Record<string, unknown> = Record<string, unknown>>(
+export async function renderAgent<P extends Record<string, unknown> = Record<string, unknown>>(
   Agent: ComponentFunction<P>,
   options: RenderAgentOptions<P> = {},
-): RenderAgentResult<P> {
+): Promise<RenderAgentResult<P>> {
   const {
     props = {} as P,
     model = createTestModel(),
@@ -208,7 +208,7 @@ export function renderAgent<P extends Record<string, unknown> = Record<string, u
     maxTicks: appOptions.maxTicks ?? 1,
   });
 
-  const session = sessionOptions ? app.session(sessionOptions) : app.session();
+  const session = sessionOptions ? await app.session(sessionOptions) : await app.session();
 
   // Register for cleanup
   sessionsToCleanup.add(session);

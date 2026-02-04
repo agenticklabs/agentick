@@ -25,7 +25,7 @@ describe("createTestModel", () => {
 
   it("should capture inputs when model is called", async () => {
     const model = createTestModel({ defaultResponse: "Hello!" });
-    const { send } = renderAgent(
+    const { send } = await renderAgent(
       () => (
         <>
           <Model model={model} />
@@ -69,7 +69,7 @@ describe("createTestModel", () => {
     const model = createTestModel({ delay: 10 });
     const start = Date.now();
 
-    const { send } = renderAgent(
+    const { send } = await renderAgent(
       () => (
         <>
           <Model model={model} />
@@ -119,7 +119,7 @@ describe("createTestModel", () => {
       streaming: { enabled: true, chunkSize: 3, chunkDelay: 0 },
     });
 
-    const { send, result } = renderAgent(
+    const { send, result } = await renderAgent(
       () => (
         <>
           <Model model={model} />
@@ -150,7 +150,7 @@ describe("renderAgent", () => {
       </>
     );
 
-    const { send, result } = renderAgent(Agent);
+    const { send, result } = await renderAgent(Agent);
 
     await act(async () => {
       await send("Hello");
@@ -169,7 +169,7 @@ describe("renderAgent", () => {
       </>
     );
 
-    const { tick, result } = renderAgent(Agent);
+    const { tick, result } = await renderAgent(Agent);
 
     await act(async () => {
       await tick();
@@ -187,7 +187,7 @@ describe("renderAgent", () => {
       </>
     );
 
-    const { send, result } = renderAgent(Agent);
+    const { send, result } = await renderAgent(Agent);
 
     await act(async () => {
       await send("Hello");
@@ -207,7 +207,7 @@ describe("renderAgent", () => {
       </>
     );
 
-    const { send, model } = renderAgent(Agent, { model: customModel });
+    const { send, model } = await renderAgent(Agent, { model: customModel });
 
     await act(async () => {
       await send("Test");
@@ -216,7 +216,7 @@ describe("renderAgent", () => {
     expect(model.getCapturedInputs().length).toBeGreaterThan(0);
   });
 
-  it("should cleanup session on unmount", () => {
+  it("should cleanup session on unmount", async () => {
     const Agent = () => (
       <>
         <Model model={createTestModel()} />
@@ -225,7 +225,7 @@ describe("renderAgent", () => {
       </>
     );
 
-    const { session, unmount } = renderAgent(Agent);
+    const { session, unmount } = await renderAgent(Agent);
     expect(session.status).toBe("idle");
 
     unmount();
@@ -319,7 +319,7 @@ describe("act", () => {
       );
     };
 
-    const { tick } = renderAgent(Agent);
+    const { tick } = await renderAgent(Agent);
 
     await act(async () => {
       await tick();
@@ -345,7 +345,7 @@ describe("act", () => {
 });
 
 describe("cleanup", () => {
-  it("should close all sessions", () => {
+  it("should close all sessions", async () => {
     const Agent = () => (
       <>
         <Model model={createTestModel()} />
@@ -354,8 +354,8 @@ describe("cleanup", () => {
       </>
     );
 
-    const { session: session1 } = renderAgent(Agent);
-    const { session: session2 } = renderAgent(Agent);
+    const { session: session1 } = await renderAgent(Agent);
+    const { session: session2 } = await renderAgent(Agent);
 
     expect(session1.status).toBe("idle");
     expect(session2.status).toBe("idle");

@@ -91,7 +91,7 @@ describe("TentickleComponent", () => {
       }
 
       const app = createApp(Agent, { maxTicks: 1 });
-      const session = app.session();
+      const session = await app.session();
 
       await session.tick({}).result;
       session.close();
@@ -128,7 +128,7 @@ describe("TentickleComponent", () => {
       }
 
       const app = createApp(Agent, { maxTicks: 1 });
-      const session = app.session();
+      const session = await app.session();
 
       await session.tick({}).result;
       session.close();
@@ -163,7 +163,7 @@ describe("TentickleComponent", () => {
       }
 
       const app = createApp(Agent, { maxTicks: 1 });
-      const session = app.session();
+      const session = await app.session();
 
       await session.tick({}).result;
       session.close();
@@ -203,7 +203,7 @@ describe("TentickleComponent", () => {
       }
 
       const app = createApp(Agent, { maxTicks: 1 });
-      const session = app.session();
+      const session = await app.session();
 
       await session.tick({}).result;
       session.close();
@@ -241,7 +241,7 @@ describe("TentickleComponent", () => {
       }
 
       const app = createApp(Agent, { maxTicks: 1 });
-      const session = app.session();
+      const session = await app.session();
 
       await session.tick({}).result;
       session.close();
@@ -282,7 +282,7 @@ describe("TentickleComponent", () => {
       }
 
       const app = createApp(Agent, { maxTicks: 1 });
-      const session = app.session();
+      const session = await app.session();
 
       await session.tick({}).result;
       session.close();

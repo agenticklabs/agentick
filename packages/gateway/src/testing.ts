@@ -149,6 +149,7 @@ export function createMockApp(options: MockAppOptions = {}): App {
     events: async function* () {},
     snapshot: () => ({
       version: "1.0",
+      sessionId: "mock-session",
       tick: 0,
       timeline: [],
       componentState: {},

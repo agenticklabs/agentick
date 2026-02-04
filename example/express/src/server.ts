@@ -168,8 +168,8 @@ async function main() {
           handler: async (params) => {
             console.log(`[sessions:create] params.sessionId=${params.sessionId}`);
             const session = params.sessionId
-              ? tentickleApp.session(params.sessionId)
-              : tentickleApp.session();
+              ? await tentickleApp.session(params.sessionId)
+              : await tentickleApp.session();
             console.log(
               `[sessions:create] created/got session.id=${session.id}, status=${(session as any)._status}`,
             );
@@ -186,10 +186,13 @@ async function main() {
             console.log(`[sessions:get] params.sessionId=${params.sessionId}`);
             console.log(`[sessions:get] app.has=${tentickleApp.has(params.sessionId)}`);
             console.log(`[sessions:get] app.sessions=${tentickleApp.sessions}`);
-            if (!tentickleApp.has(params.sessionId)) {
+            // Check both in-memory and hibernated sessions
+            const inMemory = tentickleApp.has(params.sessionId);
+            const hibernated = await tentickleApp.isHibernated(params.sessionId);
+            if (!inMemory && !hibernated) {
               throw new Error("Session not found");
             }
-            const session = tentickleApp.session(params.sessionId);
+            const session = await tentickleApp.session(params.sessionId);
             console.log(
               `[sessions:get] session.id=${session.id}, status=${(session as any)._status}`,
             );
