@@ -90,6 +90,7 @@ export type {
   // Provider types
   TentickleProviderProps,
   TentickleContextValue,
+  TransportConfig,
 
   // Hook types
   UseConnectionOptions,
@@ -102,7 +103,7 @@ export type {
   UseStreamingTextResult,
 } from "./types.js";
 
-// Re-export client types for convenience
+// Re-export client types and factory for convenience
 export type {
   TentickleClient,
   ConnectionState,
@@ -111,4 +112,8 @@ export type {
   SendInput,
   ClientExecutionHandle,
   SessionStreamEvent,
+  ClientTransport,
 } from "@tentickle/client";
+
+// Re-export createClient for users who want to create a client manually
+export { createClient } from "@tentickle/client";

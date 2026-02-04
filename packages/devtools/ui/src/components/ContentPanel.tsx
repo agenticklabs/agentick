@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { Execution, Session, Tick, FiberNode, TokenSummary } from "../hooks/useDevToolsEvents";
+import type { Execution, Session, FiberNode, TokenSummary } from "../hooks/useDevToolsEvents";
 import { Tree } from "./Tree";
 
 type ContentTab = "execution" | "context" | "fiber" | "tools";
@@ -189,7 +189,800 @@ function ExecutionView({
 }
 
 // ============================================================================
-// Context View - Shows per-tick context based on selected tick
+// Pipeline Stage Component - Collapsible section for a transformation stage
+// ============================================================================
+
+type ViewMode = "pretty" | "json";
+type PipelineDataType =
+  | "compiled"
+  | "rendered"
+  | "modelInput"
+  | "providerInput"
+  | "providerOutput"
+  | "modelOutput"
+  | "engineState";
+
+interface PipelineStageProps {
+  number: number;
+  title: string;
+  subtitle: string;
+  data: unknown;
+  dataType?: PipelineDataType;
+  defaultExpanded?: boolean;
+}
+
+function PipelineStage({
+  number,
+  title,
+  subtitle,
+  data,
+  dataType,
+  defaultExpanded = false,
+}: PipelineStageProps) {
+  const [expanded, setExpanded] = useState(defaultExpanded);
+  const [viewMode, setViewMode] = useState<ViewMode>("pretty");
+
+  const hasData = data !== undefined && data !== null;
+
+  const toggleViewMode = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setViewMode((m) => (m === "pretty" ? "json" : "pretty"));
+  };
+
+  return (
+    <div className={`pipeline-stage ${hasData ? "" : "no-data"}`}>
+      <div className="pipeline-stage-header" onClick={() => hasData && setExpanded(!expanded)}>
+        <div className={`pipeline-stage-number ${hasData ? "" : "dim"}`}>{number}</div>
+        <div className="pipeline-stage-info">
+          <div className={`pipeline-stage-title ${hasData ? "" : "dim"}`}>{title}</div>
+          <div className="pipeline-stage-subtitle">{subtitle}</div>
+        </div>
+        {hasData && expanded && (
+          <button
+            className={`pipeline-view-toggle ${viewMode === "json" ? "active" : ""}`}
+            onClick={toggleViewMode}
+            title={viewMode === "pretty" ? "Show JSON" : "Show Pretty"}
+          >
+            {"{ }"}
+          </button>
+        )}
+        {hasData && (
+          <span className={`pipeline-stage-expand ${expanded ? "expanded" : ""}`}>▶</span>
+        )}
+        {!hasData && <span className="pipeline-stage-empty-badge">No data</span>}
+      </div>
+      {hasData && expanded && (
+        <div className="pipeline-stage-body">
+          {viewMode === "json" ? (
+            <pre className="json-view">{JSON.stringify(data, null, 2)}</pre>
+          ) : (
+            <PrettyView data={data} dataType={dataType} />
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ============================================================================
+// Pretty View Renderers - User-friendly representations of pipeline data
+// ============================================================================
+
+function PrettyView({ data, dataType }: { data: unknown; dataType?: PipelineDataType }) {
+  if (!data) return null;
+
+  switch (dataType) {
+    case "compiled":
+      return <CompiledStructureView data={data} />;
+    case "rendered":
+      return <RenderedInputView data={data} />;
+    case "modelInput":
+      return <ModelInputView data={data} />;
+    case "providerInput":
+      return <ProviderInputView data={data} />;
+    case "providerOutput":
+      return <ProviderOutputView data={data} />;
+    case "modelOutput":
+      return <ModelOutputView data={data} />;
+    case "engineState":
+      return <EngineStateView data={data} />;
+    default:
+      // Fallback to JSON for unknown types
+      return <pre className="json-view">{JSON.stringify(data, null, 2)}</pre>;
+  }
+}
+
+// ---- Compiled Structure View ----
+function CompiledStructureView({ data }: { data: unknown }) {
+  const compiled = data as {
+    sections?: Record<string, { id: string; content: unknown[]; audience?: string }>;
+    timelineEntries?: unknown[];
+    system?: unknown[];
+    tools?: unknown[];
+    ephemeral?: unknown[];
+  };
+
+  return (
+    <div className="pretty-view">
+      {/* Sections */}
+      {compiled.sections && Object.keys(compiled.sections).length > 0 && (
+        <div className="pretty-section">
+          <div className="pretty-section-header">
+            <span className="pretty-section-icon">📑</span>
+            Sections ({Object.keys(compiled.sections).length})
+          </div>
+          <div className="pretty-section-content">
+            {Object.entries(compiled.sections).map(([key, section]) => (
+              <div key={key} className="pretty-card">
+                <div className="pretty-card-header">
+                  <span className="pretty-card-title">{section.id || key}</span>
+                  {section.audience && <span className="pretty-badge">{section.audience}</span>}
+                </div>
+                <div className="pretty-card-content">{renderContentBlocks(section.content)}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Timeline Entries */}
+      {compiled.timelineEntries && compiled.timelineEntries.length > 0 && (
+        <div className="pretty-section">
+          <div className="pretty-section-header">
+            <span className="pretty-section-icon">💬</span>
+            Timeline ({compiled.timelineEntries.length} entries)
+          </div>
+          <div className="pretty-section-content">
+            <MessageList messages={compiled.timelineEntries as any[]} />
+          </div>
+        </div>
+      )}
+
+      {/* Tools */}
+      {compiled.tools && compiled.tools.length > 0 && (
+        <div className="pretty-section">
+          <div className="pretty-section-header">
+            <span className="pretty-section-icon">🔧</span>
+            Tools ({compiled.tools.length})
+          </div>
+          <div className="pretty-section-content">
+            <ToolsList tools={compiled.tools as any[]} />
+          </div>
+        </div>
+      )}
+
+      {/* System */}
+      {compiled.system && (compiled.system as any[]).length > 0 && (
+        <div className="pretty-section">
+          <div className="pretty-section-header">
+            <span className="pretty-section-icon">⚙️</span>
+            System
+          </div>
+          <div className="pretty-section-content">{renderContentBlocks(compiled.system)}</div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---- Rendered Input View ----
+function RenderedInputView({ data }: { data: unknown }) {
+  const rendered = data as {
+    timeline?: unknown[];
+    system?: unknown[];
+    sections?: Record<string, unknown>;
+    tools?: unknown[];
+    ephemeral?: unknown[];
+  };
+
+  return (
+    <div className="pretty-view">
+      {/* System */}
+      {rendered.system && (rendered.system as any[]).length > 0 && (
+        <div className="pretty-section">
+          <div className="pretty-section-header">
+            <span className="pretty-section-icon">⚙️</span>
+            System Prompt
+          </div>
+          <div className="pretty-section-content">{renderContentBlocks(rendered.system)}</div>
+        </div>
+      )}
+
+      {/* Timeline */}
+      {rendered.timeline && (rendered.timeline as any[]).length > 0 && (
+        <div className="pretty-section">
+          <div className="pretty-section-header">
+            <span className="pretty-section-icon">💬</span>
+            Messages ({(rendered.timeline as any[]).length})
+          </div>
+          <div className="pretty-section-content">
+            <MessageList messages={rendered.timeline as any[]} />
+          </div>
+        </div>
+      )}
+
+      {/* Tools */}
+      {rendered.tools && (rendered.tools as any[]).length > 0 && (
+        <div className="pretty-section">
+          <div className="pretty-section-header">
+            <span className="pretty-section-icon">🔧</span>
+            Tools ({(rendered.tools as any[]).length})
+          </div>
+          <div className="pretty-section-content">
+            <ToolsList tools={rendered.tools as any[]} />
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---- Model Input View ----
+function ModelInputView({ data }: { data: unknown }) {
+  const input = data as {
+    messages?: unknown[];
+    tools?: unknown[];
+    system?: string;
+    model?: string;
+    temperature?: number;
+    maxTokens?: number;
+  };
+
+  return (
+    <div className="pretty-view">
+      {/* Model Config */}
+      {(input.model || input.temperature !== undefined || input.maxTokens !== undefined) && (
+        <div className="pretty-config">
+          {input.model && (
+            <span className="pretty-config-item">
+              <span className="pretty-config-label">Model:</span> {input.model}
+            </span>
+          )}
+          {input.temperature !== undefined && (
+            <span className="pretty-config-item">
+              <span className="pretty-config-label">Temp:</span> {input.temperature}
+            </span>
+          )}
+          {input.maxTokens !== undefined && (
+            <span className="pretty-config-item">
+              <span className="pretty-config-label">Max:</span> {input.maxTokens}
+            </span>
+          )}
+        </div>
+      )}
+
+      {/* System */}
+      {input.system && (
+        <div className="pretty-section">
+          <div className="pretty-section-header">
+            <span className="pretty-section-icon">⚙️</span>
+            System Prompt
+          </div>
+          <div className="pretty-section-content">
+            <div className="pretty-system-prompt">{input.system}</div>
+          </div>
+        </div>
+      )}
+
+      {/* Messages */}
+      {input.messages && input.messages.length > 0 && (
+        <div className="pretty-section">
+          <div className="pretty-section-header">
+            <span className="pretty-section-icon">💬</span>
+            Messages ({input.messages.length})
+          </div>
+          <div className="pretty-section-content">
+            <MessageList messages={input.messages as any[]} />
+          </div>
+        </div>
+      )}
+
+      {/* Tools */}
+      {input.tools && input.tools.length > 0 && (
+        <div className="pretty-section">
+          <div className="pretty-section-header">
+            <span className="pretty-section-icon">🔧</span>
+            Tools ({input.tools.length})
+          </div>
+          <div className="pretty-section-content">
+            <ToolsList tools={input.tools as any[]} />
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---- Provider Input View ----
+function ProviderInputView({ data }: { data: unknown }) {
+  const input = data as Record<string, unknown>;
+
+  // Extract common fields
+  const model = input.model as string | undefined;
+  const messages = input.messages as unknown[] | undefined;
+  const tools = input.tools as unknown[] | undefined;
+
+  return (
+    <div className="pretty-view">
+      {/* Provider-specific config summary */}
+      <div className="pretty-config">
+        {model && (
+          <span className="pretty-config-item">
+            <span className="pretty-config-label">Model:</span> {model}
+          </span>
+        )}
+        {messages && (
+          <span className="pretty-config-item">
+            <span className="pretty-config-label">Messages:</span> {messages.length}
+          </span>
+        )}
+        {tools && (
+          <span className="pretty-config-item">
+            <span className="pretty-config-label">Tools:</span> {tools.length}
+          </span>
+        )}
+      </div>
+
+      {/* Messages (provider format) */}
+      {messages && messages.length > 0 && (
+        <div className="pretty-section">
+          <div className="pretty-section-header">
+            <span className="pretty-section-icon">💬</span>
+            Messages (Provider Format)
+          </div>
+          <div className="pretty-section-content">
+            <MessageList messages={messages as any[]} isProviderFormat />
+          </div>
+        </div>
+      )}
+
+      {/* Tools (provider format) - show as JSON since format varies */}
+      {tools && tools.length > 0 && (
+        <div className="pretty-section">
+          <div className="pretty-section-header">
+            <span className="pretty-section-icon">🔧</span>
+            Tools (Provider Format)
+          </div>
+          <div className="pretty-section-content">
+            <ToolsList tools={tools as any[]} isProviderFormat />
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---- Provider Output View ----
+function ProviderOutputView({ data }: { data: unknown }) {
+  const output = data as Record<string, unknown>;
+
+  // Try to extract common fields from different provider formats
+  const choices = output.choices as any[] | undefined;
+  const candidates = output.candidates as any[] | undefined;
+  const usage = output.usage as Record<string, number> | undefined;
+  const usageMetadata = output.usageMetadata as Record<string, number> | undefined;
+  const model = output.model as string | undefined;
+
+  const message = choices?.[0]?.message || candidates?.[0]?.content;
+  const finishReason = choices?.[0]?.finish_reason || candidates?.[0]?.finishReason;
+
+  return (
+    <div className="pretty-view">
+      {/* Summary */}
+      <div className="pretty-config">
+        {model && (
+          <span className="pretty-config-item">
+            <span className="pretty-config-label">Model:</span> {model}
+          </span>
+        )}
+        {finishReason && (
+          <span className="pretty-config-item">
+            <span className="pretty-config-label">Finish:</span> {finishReason}
+          </span>
+        )}
+        {(usage || usageMetadata) && (
+          <span className="pretty-config-item">
+            <span className="pretty-config-label">Tokens:</span>{" "}
+            {usage?.total_tokens ||
+              usageMetadata?.totalTokenCount ||
+              (usage?.prompt_tokens ?? 0) + (usage?.completion_tokens ?? 0)}
+          </span>
+        )}
+      </div>
+
+      {/* Message Content */}
+      {message && (
+        <div className="pretty-section">
+          <div className="pretty-section-header">
+            <span className="pretty-section-icon">🤖</span>
+            Response
+          </div>
+          <div className="pretty-section-content">
+            {typeof message === "string" ? (
+              <div className="pretty-message assistant">{message}</div>
+            ) : message.content ? (
+              <div className="pretty-message assistant">
+                {typeof message.content === "string"
+                  ? message.content
+                  : renderContentBlocks(
+                      Array.isArray(message.content) ? message.content : [message.content],
+                    )}
+              </div>
+            ) : (
+              <pre className="json-view">{JSON.stringify(message, null, 2)}</pre>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Tool Calls */}
+      {message?.tool_calls && message.tool_calls.length > 0 && (
+        <div className="pretty-section">
+          <div className="pretty-section-header">
+            <span className="pretty-section-icon">🔧</span>
+            Tool Calls ({message.tool_calls.length})
+          </div>
+          <div className="pretty-section-content">
+            {message.tool_calls.map((tc: any, i: number) => (
+              <div key={i} className="pretty-tool-call">
+                <div className="pretty-tool-call-header">
+                  <span className="pretty-tool-call-name">
+                    {tc.function?.name || tc.name || "tool"}
+                  </span>
+                  <span className="pretty-tool-call-id">{tc.id?.slice(0, 12)}...</span>
+                </div>
+                <pre className="json-view" style={{ margin: 0 }}>
+                  {tc.function?.arguments || JSON.stringify(tc.input || tc.args || {}, null, 2)}
+                </pre>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Usage */}
+      {(usage || usageMetadata) && (
+        <div className="pretty-section">
+          <div className="pretty-section-header">
+            <span className="pretty-section-icon">📊</span>
+            Usage
+          </div>
+          <div className="pretty-section-content">
+            <div className="pretty-usage">
+              <div className="pretty-usage-item">
+                <span className="pretty-usage-value">
+                  {usage?.prompt_tokens ?? usageMetadata?.promptTokenCount ?? 0}
+                </span>
+                <span className="pretty-usage-label">Input</span>
+              </div>
+              <div className="pretty-usage-item">
+                <span className="pretty-usage-value">
+                  {usage?.completion_tokens ?? usageMetadata?.candidatesTokenCount ?? 0}
+                </span>
+                <span className="pretty-usage-label">Output</span>
+              </div>
+              <div className="pretty-usage-item">
+                <span className="pretty-usage-value">
+                  {usage?.total_tokens ?? usageMetadata?.totalTokenCount ?? 0}
+                </span>
+                <span className="pretty-usage-label">Total</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---- Model Output View ----
+function ModelOutputView({ data }: { data: unknown }) {
+  const output = data as {
+    message?: { role: string; content: unknown[] };
+    messages?: { role: string; content: unknown[] }[];
+    usage?: { inputTokens: number; outputTokens: number; totalTokens: number };
+    stopReason?: string;
+    toolCalls?: { id: string; name: string; input: unknown }[];
+    model?: string;
+  };
+
+  const message = output.message || output.messages?.[0];
+
+  return (
+    <div className="pretty-view">
+      {/* Summary */}
+      <div className="pretty-config">
+        {output.model && (
+          <span className="pretty-config-item">
+            <span className="pretty-config-label">Model:</span> {output.model}
+          </span>
+        )}
+        {output.stopReason && (
+          <span className="pretty-config-item">
+            <span className="pretty-config-label">Stop:</span> {output.stopReason}
+          </span>
+        )}
+      </div>
+
+      {/* Message */}
+      {message && (
+        <div className="pretty-section">
+          <div className="pretty-section-header">
+            <span className="pretty-section-icon">🤖</span>
+            Response
+          </div>
+          <div className="pretty-section-content">
+            <div className="pretty-message assistant">
+              {renderContentBlocks(message.content as any[])}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Tool Calls */}
+      {output.toolCalls && output.toolCalls.length > 0 && (
+        <div className="pretty-section">
+          <div className="pretty-section-header">
+            <span className="pretty-section-icon">🔧</span>
+            Tool Calls ({output.toolCalls.length})
+          </div>
+          <div className="pretty-section-content">
+            {output.toolCalls.map((tc, i) => (
+              <div key={i} className="pretty-tool-call">
+                <div className="pretty-tool-call-header">
+                  <span className="pretty-tool-call-name">{tc.name}</span>
+                  <span className="pretty-tool-call-id">{tc.id?.slice(0, 12)}...</span>
+                </div>
+                <pre className="json-view" style={{ margin: 0 }}>
+                  {JSON.stringify(tc.input, null, 2)}
+                </pre>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Usage */}
+      {output.usage && (
+        <div className="pretty-section">
+          <div className="pretty-section-header">
+            <span className="pretty-section-icon">📊</span>
+            Usage
+          </div>
+          <div className="pretty-section-content">
+            <div className="pretty-usage">
+              <div className="pretty-usage-item">
+                <span className="pretty-usage-value">{output.usage.inputTokens}</span>
+                <span className="pretty-usage-label">Input</span>
+              </div>
+              <div className="pretty-usage-item">
+                <span className="pretty-usage-value">{output.usage.outputTokens}</span>
+                <span className="pretty-usage-label">Output</span>
+              </div>
+              <div className="pretty-usage-item">
+                <span className="pretty-usage-value">{output.usage.totalTokens}</span>
+                <span className="pretty-usage-label">Total</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---- Engine State View ----
+function EngineStateView({ data }: { data: unknown }) {
+  const state = data as {
+    newTimelineEntries?: unknown[];
+    toolCalls?: unknown[];
+    shouldStop?: boolean;
+    stopReason?: unknown;
+  };
+
+  return (
+    <div className="pretty-view">
+      {/* Summary */}
+      <div className="pretty-config">
+        <span className="pretty-config-item">
+          <span className="pretty-config-label">Stop:</span> {state.shouldStop ? "Yes" : "No"}
+        </span>
+        {state.stopReason && (
+          <span className="pretty-config-item">
+            <span className="pretty-config-label">Reason:</span> {String(state.stopReason)}
+          </span>
+        )}
+        {state.newTimelineEntries && (
+          <span className="pretty-config-item">
+            <span className="pretty-config-label">New Entries:</span>{" "}
+            {state.newTimelineEntries.length}
+          </span>
+        )}
+        {state.toolCalls && (
+          <span className="pretty-config-item">
+            <span className="pretty-config-label">Tool Calls:</span> {state.toolCalls.length}
+          </span>
+        )}
+      </div>
+
+      {/* Timeline Entries */}
+      {state.newTimelineEntries && state.newTimelineEntries.length > 0 && (
+        <div className="pretty-section">
+          <div className="pretty-section-header">
+            <span className="pretty-section-icon">📝</span>
+            New Timeline Entries
+          </div>
+          <div className="pretty-section-content">
+            <MessageList messages={state.newTimelineEntries as any[]} />
+          </div>
+        </div>
+      )}
+
+      {/* Tool Calls */}
+      {state.toolCalls && state.toolCalls.length > 0 && (
+        <div className="pretty-section">
+          <div className="pretty-section-header">
+            <span className="pretty-section-icon">🔧</span>
+            Tool Calls to Execute
+          </div>
+          <div className="pretty-section-content">
+            {(state.toolCalls as any[]).map((tc, i) => (
+              <div key={i} className="pretty-tool-call">
+                <div className="pretty-tool-call-header">
+                  <span className="pretty-tool-call-name">{tc.name}</span>
+                  <span className="pretty-tool-call-id">{tc.id?.slice(0, 12)}...</span>
+                </div>
+                <pre className="json-view" style={{ margin: 0 }}>
+                  {JSON.stringify(tc.input, null, 2)}
+                </pre>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ============================================================================
+// Shared Components for Pretty Views
+// ============================================================================
+
+function MessageList({
+  messages,
+  isProviderFormat,
+}: {
+  messages: any[];
+  isProviderFormat?: boolean;
+}) {
+  return (
+    <div className="pretty-messages">
+      {messages.map((msg, i) => {
+        const role = msg.role || msg.kind || "unknown";
+        const content = msg.content || msg.message?.content || msg.parts || [];
+
+        return (
+          <div key={i} className={`pretty-message ${role}`}>
+            <div className="pretty-message-role">{role}</div>
+            <div className="pretty-message-content">
+              {typeof content === "string" ? (
+                content
+              ) : Array.isArray(content) ? (
+                renderContentBlocks(content)
+              ) : (
+                <pre className="json-view" style={{ margin: 0 }}>
+                  {JSON.stringify(content, null, 2)}
+                </pre>
+              )}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function ToolsList({ tools, isProviderFormat }: { tools: any[]; isProviderFormat?: boolean }) {
+  return (
+    <div className="pretty-tools">
+      {tools.map((tool, i) => {
+        // Handle different tool formats
+        const name =
+          tool.name ||
+          tool.function?.name ||
+          tool.metadata?.name ||
+          tool.functionDeclarations?.[0]?.name ||
+          `Tool ${i + 1}`;
+        const description =
+          tool.description ||
+          tool.function?.description ||
+          tool.metadata?.description ||
+          tool.functionDeclarations?.[0]?.description ||
+          "";
+
+        return (
+          <div key={i} className="pretty-tool">
+            <span className="pretty-tool-name">{name}</span>
+            {description && <span className="pretty-tool-desc">{description}</span>}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function renderContentBlocks(blocks: unknown[]): React.ReactNode {
+  if (!blocks || !Array.isArray(blocks)) return null;
+
+  return blocks.map((block: any, i) => {
+    if (!block) return null;
+
+    // Text block
+    if (block.type === "text" || typeof block === "string") {
+      const text = typeof block === "string" ? block : block.text;
+      return (
+        <div key={i} className="pretty-content-text">
+          {text}
+        </div>
+      );
+    }
+
+    // Tool use block
+    if (block.type === "tool_use") {
+      return (
+        <div key={i} className="pretty-tool-call inline">
+          <span className="pretty-tool-call-name">{block.name}</span>
+          <pre className="json-view" style={{ margin: 0 }}>
+            {JSON.stringify(block.input, null, 2)}
+          </pre>
+        </div>
+      );
+    }
+
+    // Tool result block
+    if (block.type === "tool_result") {
+      return (
+        <div key={i} className="pretty-tool-result">
+          <span className="pretty-tool-result-label">
+            {block.isError ? "❌ Error" : "✓ Result"}
+          </span>
+          <pre className="json-view" style={{ margin: 0 }}>
+            {JSON.stringify(block.content || block.result, null, 2)}
+          </pre>
+        </div>
+      );
+    }
+
+    // Image block
+    if (block.type === "image") {
+      return (
+        <div key={i} className="pretty-content-image">
+          📷 Image
+        </div>
+      );
+    }
+
+    // Reasoning block
+    if (block.type === "reasoning") {
+      return (
+        <div key={i} className="pretty-content-reasoning">
+          <span className="pretty-reasoning-label">💭 Thinking</span>
+          <div className="pretty-reasoning-text">{block.text}</div>
+        </div>
+      );
+    }
+
+    // Unknown - render as JSON
+    return (
+      <pre key={i} className="json-view" style={{ margin: 0 }}>
+        {JSON.stringify(block, null, 2)}
+      </pre>
+    );
+  });
+}
+
+// ============================================================================
+// Context View - Shows per-tick context with pipeline visualization
 // ============================================================================
 
 function ContextView({
@@ -199,12 +992,6 @@ function ContextView({
   execution?: Execution;
   selectedTick?: number | "latest";
 }) {
-  const [compiledExpanded, setCompiledExpanded] = useState(true);
-  const [providerInputExpanded, setProviderInputExpanded] = useState(true);
-  const [providerResponseExpanded, setProviderResponseExpanded] = useState(true);
-  const [modelOutputExpanded, setModelOutputExpanded] = useState(true);
-  const [comOutputExpanded, setComOutputExpanded] = useState(true);
-
   if (!execution) {
     return (
       <div className="empty-state">
@@ -249,6 +1036,10 @@ function ContextView({
   const duration = tick.endTime ? tick.endTime - tick.startTime : 0;
   const isRunning = !tick.endTime;
 
+  // Get tool calls for this tick
+  const toolCalls = tick.events.filter((e) => e.type === "tool_call");
+  const toolResults = tick.events.filter((e) => e.type === "tool_result");
+
   return (
     <div className="context-view">
       {/* Tick Summary Header */}
@@ -289,167 +1080,84 @@ function ContextView({
         </div>
       )}
 
-      {/* 1. Compiled Context - What we rendered */}
-      {tick.compiled && (
-        <div className="context-section collapsible">
-          <div
-            className="context-section-header clickable"
-            onClick={() => setCompiledExpanded(!compiledExpanded)}
-          >
-            <span className={`context-section-expand ${compiledExpanded ? "expanded" : ""}`}>
-              ▶
-            </span>
-            <span className="context-section-icon">📝</span>
-            Compiled Context
-            <span className="context-section-count">
-              {tick.compiled.messages?.length ?? 0} messages, {tick.compiled.tools?.length ?? 0}{" "}
-              tools
-            </span>
-          </div>
-          {compiledExpanded && (
-            <div className="context-section-body">
-              {/* System Prompt */}
-              {tick.compiled.system && (
-                <div className="context-subsection">
-                  <div className="context-subsection-label">System Prompt</div>
-                  <pre className="json-view" style={{ maxHeight: 200 }}>
-                    {tick.compiled.system}
-                  </pre>
-                </div>
-              )}
-              {/* Messages */}
-              {tick.compiled.messages && tick.compiled.messages.length > 0 && (
-                <div className="context-subsection">
-                  <div className="context-subsection-label">
-                    Messages ({tick.compiled.messages.length})
-                  </div>
-                  <pre className="json-view" style={{ maxHeight: 300 }}>
-                    {JSON.stringify(tick.compiled.messages, null, 2)}
-                  </pre>
-                </div>
-              )}
-              {/* Tools */}
-              {tick.compiled.tools && tick.compiled.tools.length > 0 && (
-                <div className="context-subsection">
-                  <div className="context-subsection-label">
-                    Tools ({tick.compiled.tools.length})
-                  </div>
-                  <pre className="json-view" style={{ maxHeight: 200 }}>
-                    {JSON.stringify(tick.compiled.tools, null, 2)}
-                  </pre>
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-      )}
+      {/* Request Pipeline */}
+      <div className="pipeline-section">
+        <h3 className="pipeline-title">Request Pipeline</h3>
 
-      {/* 2. Provider Input - What the provider model actually sees */}
-      {tick.modelRequest && (
-        <div className="context-section collapsible">
-          <div
-            className="context-section-header clickable"
-            onClick={() => setProviderInputExpanded(!providerInputExpanded)}
-          >
-            <span className={`context-section-expand ${providerInputExpanded ? "expanded" : ""}`}>
-              ▶
-            </span>
-            <span className="context-section-icon">📤</span>
-            Provider Input
-            <span className="context-section-count">{tick.model || "model"}</span>
-          </div>
-          {providerInputExpanded && (
-            <div className="context-section-body">
-              <pre className="json-view" style={{ maxHeight: 400 }}>
-                {JSON.stringify(tick.modelRequest, null, 2)}
-              </pre>
-            </div>
-          )}
-        </div>
-      )}
+        <PipelineStage
+          number={1}
+          title="Compiled Structure"
+          subtitle="JSX → Semantic Blocks"
+          data={tick.rawCompiled}
+          dataType="compiled"
+          defaultExpanded={false}
+        />
 
-      {/* 3. Provider Response - Raw response from provider */}
-      {tick.providerResponse && (
-        <div className="context-section collapsible">
-          <div
-            className="context-section-header clickable"
-            onClick={() => setProviderResponseExpanded(!providerResponseExpanded)}
-          >
-            <span
-              className={`context-section-expand ${providerResponseExpanded ? "expanded" : ""}`}
-            >
-              ▶
-            </span>
-            <span className="context-section-icon">📥</span>
-            Provider Response (Raw)
-          </div>
-          {providerResponseExpanded && (
-            <div className="context-section-body">
-              <pre className="json-view" style={{ maxHeight: 400 }}>
-                {JSON.stringify(tick.providerResponse, null, 2)}
-              </pre>
-            </div>
-          )}
-        </div>
-      )}
+        <PipelineStage
+          number={2}
+          title="Rendered Input"
+          subtitle="After Markdown/XML"
+          data={tick.formattedInput}
+          dataType="rendered"
+          defaultExpanded={false}
+        />
 
-      {/* 4. Model Output - Transformed to ModelOutput */}
-      {tick.modelOutput && (
-        <div className="context-section collapsible">
-          <div
-            className="context-section-header clickable"
-            onClick={() => setModelOutputExpanded(!modelOutputExpanded)}
-          >
-            <span className={`context-section-expand ${modelOutputExpanded ? "expanded" : ""}`}>
-              ▶
-            </span>
-            <span className="context-section-icon">🔄</span>
-            Model Output (Transformed)
-          </div>
-          {modelOutputExpanded && (
-            <div className="context-section-body">
-              <pre className="json-view" style={{ maxHeight: 400 }}>
-                {JSON.stringify(tick.modelOutput, null, 2)}
-              </pre>
-            </div>
-          )}
-        </div>
-      )}
+        <PipelineStage
+          number={3}
+          title="Model Input"
+          subtitle="Tentickle Format"
+          data={tick.modelInput}
+          dataType="modelInput"
+          defaultExpanded={true}
+        />
 
-      {/* 5. COM Output - Final output from COM layer */}
-      {tick.comOutput && (
-        <div className="context-section collapsible">
-          <div
-            className="context-section-header clickable"
-            onClick={() => setComOutputExpanded(!comOutputExpanded)}
-          >
-            <span className={`context-section-expand ${comOutputExpanded ? "expanded" : ""}`}>
-              ▶
-            </span>
-            <span className="context-section-icon">✨</span>
-            COM Output
-          </div>
-          {comOutputExpanded && (
-            <div className="context-section-body">
-              <pre className="json-view" style={{ maxHeight: 400 }}>
-                {JSON.stringify(tick.comOutput, null, 2)}
-              </pre>
-            </div>
-          )}
-        </div>
-      )}
+        <PipelineStage
+          number={4}
+          title="Provider Input"
+          subtitle="SDK Format"
+          data={tick.providerInput}
+          dataType="providerInput"
+          defaultExpanded={false}
+        />
+      </div>
 
-      {/* Tool Calls for this tick */}
-      {(() => {
-        const toolCalls = tick.events.filter((e) => e.type === "tool_call");
-        const toolResults = tick.events.filter((e) => e.type === "tool_result");
-        if (toolCalls.length === 0) return null;
-        return (
+      {/* Response Pipeline */}
+      <div className="pipeline-section">
+        <h3 className="pipeline-title">Response Pipeline</h3>
+
+        <PipelineStage
+          number={1}
+          title="Provider Output"
+          subtitle="Raw SDK Response"
+          data={tick.providerOutput}
+          dataType="providerOutput"
+          defaultExpanded={false}
+        />
+
+        <PipelineStage
+          number={2}
+          title="Model Output"
+          subtitle="Normalized"
+          data={tick.modelOutput}
+          dataType="modelOutput"
+          defaultExpanded={true}
+        />
+
+        <PipelineStage
+          number={3}
+          title="Engine State"
+          subtitle="Timeline Integration"
+          data={tick.engineState}
+          dataType="engineState"
+          defaultExpanded={false}
+        />
+      </div>
+
+      {/* Tool Calls (if any) */}
+      {toolCalls.length > 0 && (
+        <div className="pipeline-section">
+          <h3 className="pipeline-title">Tool Calls ({toolCalls.length})</h3>
           <div className="context-section">
-            <div className="context-section-header">
-              <span className="context-section-icon">🔧</span>
-              Tool Calls ({toolCalls.length})
-            </div>
             <div className="context-section-body">
               <div className="tick-timeline">
                 {toolCalls.map((event, i) => {
@@ -492,8 +1200,8 @@ function ContextView({
               </div>
             </div>
           </div>
-        );
-      })()}
+        </div>
+      )}
     </div>
   );
 }

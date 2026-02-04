@@ -132,10 +132,15 @@ export { TentickleService, TENTICKLE_CONFIG, provideTentickle } from "./tentickl
 // Types
 export type {
   TentickleConfig,
+  TransportConfig,
   TentickleClient,
   ConnectionState,
   StreamEvent,
   SessionStreamEvent,
   ClientExecutionHandle,
   StreamingTextState,
+  ClientTransport,
 } from "./types";
+
+// Re-export createClient for advanced usage
+export { createClient } from "@tentickle/client";

@@ -5,11 +5,17 @@
  */
 
 import { TentickleProvider } from "@tentickle/react";
+// import { createSharedTransport } from "@tentickle/client-multiplexer";
 import { ChatInterface } from "./components/ChatInterface";
 import { TodoListUI } from "./components/TodoListUI";
 
+// Create shared transport for multi-tab multiplexing
+// Only one tab holds the SSE connection, others communicate via BroadcastChannel
+// const sharedTransport = createSharedTransport({ baseUrl: "/api" });
+
 export function App() {
   return (
+    // <TentickleProvider clientConfig={{ baseUrl: "/api", transport: sharedTransport }}>
     <TentickleProvider clientConfig={{ baseUrl: "/api" }}>
       <div className="app">
         <header className="app-header">

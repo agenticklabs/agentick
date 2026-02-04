@@ -10,79 +10,26 @@
 
 import { describe, it, expect } from "vitest";
 import { createApp } from "../../app";
-import { createModel, type ModelInput, type ModelOutput } from "../../model/model";
-import { fromEngineState, toEngineState } from "../../model/utils/language-model";
+import type { ModelOutput } from "../../model/model";
 import { System, User } from "../../jsx/components/messages";
 import { Model } from "../../jsx/components/primitives";
 import { Context } from "@tentickle/kernel";
-import type { StopReason, StreamEvent } from "@tentickle/shared";
-import { AbortError, BlockType } from "@tentickle/shared";
+import { AbortError } from "@tentickle/shared";
 import { useState, useRef, useOnMessage, useQueuedMessages } from "../../hooks";
 import { Timeline } from "../../jsx/components/timeline";
+import { createTestModel } from "../../testing";
 
 // ============================================================================
 // Test Utilities
 // ============================================================================
 
 function createMockModel(options?: { delay?: number; response?: Partial<ModelOutput> }) {
-  const delay = options?.delay ?? 0;
-  const responseOverrides = options?.response ?? {};
-
-  return createModel<ModelInput, ModelOutput, ModelInput, ModelOutput, StreamEvent>({
-    metadata: {
-      id: "mock-model",
-      provider: "mock",
-      capabilities: [],
-    },
-    executors: {
-      execute: async (_input: ModelInput) => {
-        if (delay > 0) {
-          await new Promise((resolve) => setTimeout(resolve, delay));
-        }
-        return {
-          model: "mock-model",
-          createdAt: new Date().toISOString(),
-          message: {
-            role: "assistant",
-            content: [{ type: "text", text: "Mock response" }],
-          },
-          usage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 },
-          stopReason: "stop" as StopReason,
-          raw: {},
-          ...responseOverrides,
-        } as ModelOutput;
-      },
-      executeStream: async function* (_input: ModelInput) {
-        if (delay > 0) {
-          await new Promise((resolve) => setTimeout(resolve, delay));
-        }
-        // Yield consistent response for both streaming and non-streaming paths
-        yield {
-          type: "content_delta",
-          blockType: BlockType.TEXT,
-          blockIndex: 0,
-          delta: "Mock response",
-        } as StreamEvent;
-      },
-    },
-    transformers: {
-      processStream: async (chunks: StreamEvent[]) => {
-        let text = "";
-        for (const chunk of chunks) {
-          if (chunk.type === "content_delta") text += chunk.delta;
-        }
-        return {
-          model: "mock-model",
-          createdAt: new Date().toISOString(),
-          message: { role: "assistant", content: [{ type: "text", text }] },
-          usage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 },
-          stopReason: "stop" as StopReason,
-          raw: {},
-        } as ModelOutput;
-      },
-    },
-    fromEngineState,
-    toEngineState,
+  return createTestModel({
+    delay: options?.delay ?? 0,
+    defaultResponse: options?.response?.message
+      ? ((options.response.message as any).content?.[0]?.text ?? "Mock response")
+      : "Mock response",
+    stopReason: options?.response?.stopReason,
   });
 }
 
@@ -790,7 +737,7 @@ describe("useOnMessage integration", () => {
     // Verify the callback was called
     expect(messagesReceived.length).toBe(1);
     expect(messagesReceived[0]).toMatchObject({
-      type: "user",
+      type: "message",
       content: {
         role: "user",
         content: [{ type: "text", text: "Injected message" }],
@@ -853,7 +800,7 @@ describe("useOnMessage integration", () => {
     // Verify the callback was called
     expect(messagesReceived.length).toBeGreaterThanOrEqual(1);
     expect(messagesReceived[0]).toMatchObject({
-      type: "user",
+      type: "message",
       content: {
         role: "user",
         content: [{ type: "text", text: "Follow up" }],
@@ -929,7 +876,7 @@ describe("useOnMessage integration", () => {
 
     // The queued messages should have been available during render
     expect(historyDuringRender.length).toBeGreaterThanOrEqual(1);
-    const userMessage = historyDuringRender.find((m) => m.type === "user");
+    const userMessage = historyDuringRender.find((m) => m.type === "message");
     expect(userMessage).toBeDefined();
     expect(userMessage.content).toMatchObject({
       role: "user",
@@ -1078,7 +1025,7 @@ describe("useQueuedMessages integration", () => {
     expect(queuedMessagesPerTick.some((arr) => arr.length > 0)).toBe(true);
     const messagesInTick2 = queuedMessagesPerTick.find((arr) => arr.length > 0);
     expect(messagesInTick2?.[0]).toMatchObject({
-      type: "user",
+      type: "message",
       content: {
         role: "user",
         content: [{ type: "text", text: "Queued between ticks" }],
@@ -1230,7 +1177,7 @@ describe("useQueuedMessages integration", () => {
     expect(onMessageCalls[0]).toMatchObject({
       tick: 1,
       message: {
-        type: "user",
+        type: "message",
         content: {
           role: "user",
           content: [{ type: "text", text: "Interrupt!" }],
@@ -1245,7 +1192,7 @@ describe("useQueuedMessages integration", () => {
     // Verify useQueuedMessages had the message in tick 2
     expect(queuedInTick2.length).toBe(1);
     expect(queuedInTick2[0]).toMatchObject({
-      type: "user",
+      type: "message",
       content: {
         role: "user",
         content: [{ type: "text", text: "Interrupt!" }],

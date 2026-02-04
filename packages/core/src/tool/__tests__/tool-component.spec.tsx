@@ -12,10 +12,11 @@ import { describe, it, expect, vi } from "vitest";
 import { createApp } from "../../app";
 import { createTool } from "../../tool/tool";
 import { Model, Section } from "../../jsx/components/primitives";
+import { createTestModel, type TestModelInstance } from "../../testing";
 import { createModel, type ModelInput, type ModelOutput } from "../../model/model";
 import { fromEngineState, toEngineState } from "../../model/utils/language-model";
-import type { StopReason, StreamEvent, ToolCall } from "@tentickle/shared";
-import { BlockType } from "@tentickle/shared";
+import type { ToolCall, StreamEvent } from "@tentickle/shared";
+import { StopReason } from "@tentickle/shared";
 import { z } from "zod";
 
 // ============================================================================
@@ -23,80 +24,18 @@ import { z } from "zod";
 // ============================================================================
 
 /**
- * Create a mock model that can optionally call tools.
+ * Create a mock model using createTestModel.
  */
-function createMockModel(options?: { toolCalls?: ToolCall[]; response?: string }) {
-  const toolCalls = options?.toolCalls ?? [];
-  const response = options?.response ?? "Mock response";
-
-  return createModel<ModelInput, ModelOutput, ModelInput, ModelOutput, StreamEvent>({
-    metadata: {
-      id: "mock-model",
-      provider: "mock",
-      capabilities: [],
-    },
-    executors: {
-      execute: async (_input: ModelInput) => {
-        // If tool calls are provided, return them
-        if (toolCalls.length > 0) {
-          return {
-            model: "mock-model",
-            createdAt: new Date().toISOString(),
-            message: {
-              role: "assistant",
-              content: toolCalls.map((tc) => ({
-                type: "tool_use",
-                id: tc.id,
-                name: tc.name,
-                input: tc.input,
-              })),
-            },
-            usage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 },
-            stopReason: "tool_use" as StopReason,
-            raw: {},
-          } as ModelOutput;
-        }
-
-        return {
-          model: "mock-model",
-          createdAt: new Date().toISOString(),
-          message: {
-            role: "assistant",
-            content: [{ type: "text", text: response }],
-          },
-          usage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 },
-          stopReason: "stop" as StopReason,
-          raw: {},
-        } as ModelOutput;
-      },
-      executeStream: async function* (_input: ModelInput) {
-        yield {
-          type: "content_delta",
-          blockType: BlockType.TEXT,
-          blockIndex: 0,
-          delta: response,
-        } as StreamEvent;
-      },
-    },
-    transformers: {
-      processStream: async (chunks: StreamEvent[]) => {
-        let text = "";
-        for (const chunk of chunks) {
-          if (chunk.type === "content_delta") text += chunk.delta;
-        }
-        return {
-          model: "mock-model",
-          createdAt: new Date().toISOString(),
-          message: { role: "assistant", content: [{ type: "text", text }] },
-          usage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 },
-          stopReason: "stop" as StopReason,
-          raw: {},
-        } as ModelOutput;
-      },
-    },
-    fromEngineState,
-    toEngineState,
+function createMockModel(options?: {
+  toolCalls?: ToolCall[];
+  response?: string;
+}): TestModelInstance {
+  const model = createTestModel({
+    defaultResponse: options?.response ?? "Mock response",
+    toolCalls: options?.toolCalls,
+    stopReason: options?.toolCalls?.length ? StopReason.TOOL_USE : StopReason.STOP,
   });
+  return model;
 }
 
 // ============================================================================
@@ -140,8 +79,6 @@ describe("Tool Component", () => {
     });
 
     it("should make tool available to model during execution", async () => {
-      let receivedTools: any[] = [];
-
       const TestTool = createTool({
         name: "test_tool",
         description: "A test tool",
@@ -149,57 +86,9 @@ describe("Tool Component", () => {
         handler: () => [{ type: "text" as const, text: "tool result" }],
       });
 
-      // Create a model that captures the tools passed to it
-      const capturingModel = createModel<
-        ModelInput,
-        ModelOutput,
-        ModelInput,
-        ModelOutput,
-        StreamEvent
-      >({
-        metadata: {
-          id: "capturing-model",
-          provider: "mock",
-          capabilities: [],
-        },
-        executors: {
-          execute: async (input: ModelInput) => {
-            // Capture tools from input
-            receivedTools = input.tools ?? [];
-            return {
-              model: "mock-model",
-              createdAt: new Date().toISOString(),
-              message: {
-                role: "assistant",
-                content: [{ type: "text", text: "Response" }],
-              },
-              usage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 },
-              stopReason: "stop" as StopReason,
-              raw: {},
-            } as ModelOutput;
-          },
-          executeStream: async function* () {
-            yield {
-              type: "content_delta",
-              blockType: BlockType.TEXT,
-              blockIndex: 0,
-              delta: "Response",
-            } as StreamEvent;
-          },
-        },
-        transformers: {
-          processStream: async () =>
-            ({
-              model: "mock-model",
-              createdAt: new Date().toISOString(),
-              message: { role: "assistant", content: [{ type: "text", text: "Response" }] },
-              usage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 },
-              stopReason: "stop" as StopReason,
-              raw: {},
-            }) as ModelOutput,
-        },
-        fromEngineState,
-        toEngineState,
+      // Create a model that captures inputs (including tools)
+      const capturingModel = createTestModel({
+        defaultResponse: "Response",
       });
 
       function Agent() {
@@ -220,6 +109,12 @@ describe("Tool Component", () => {
       await session.tick({}).result;
 
       // Tools should have been passed to the model
+      const capturedInputs = capturingModel.getCapturedInputs();
+      expect(capturedInputs.length).toBeGreaterThan(0);
+
+      const lastInput = capturedInputs[capturedInputs.length - 1];
+      const receivedTools = lastInput.tools ?? [];
+
       expect(receivedTools.length).toBeGreaterThan(0);
       expect(receivedTools.some((t: any) => t.name === "test_tool")).toBe(true);
 
@@ -324,8 +219,6 @@ describe("Tool Component", () => {
     it("should include tool in model input when tool has render function", async () => {
       // Simpler test: verify that a tool with a render function is still registered
       // and available to the model (the render output goes to sections)
-      let receivedTools: any[] = [];
-
       const RenderingTool = createTool({
         name: "rendering_tool",
         description: "A tool that renders content",
@@ -338,56 +231,9 @@ describe("Tool Component", () => {
         ),
       });
 
-      // Model that captures the tools
-      const capturingModel = createModel<
-        ModelInput,
-        ModelOutput,
-        ModelInput,
-        ModelOutput,
-        StreamEvent
-      >({
-        metadata: {
-          id: "capturing-model",
-          provider: "mock",
-          capabilities: [],
-        },
-        executors: {
-          execute: async (input: ModelInput) => {
-            receivedTools = input.tools ?? [];
-            return {
-              model: "mock-model",
-              createdAt: new Date().toISOString(),
-              message: {
-                role: "assistant",
-                content: [{ type: "text", text: "Response" }],
-              },
-              usage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 },
-              stopReason: "stop" as StopReason,
-              raw: {},
-            } as ModelOutput;
-          },
-          executeStream: async function* () {
-            yield {
-              type: "content_delta",
-              blockType: BlockType.TEXT,
-              blockIndex: 0,
-              delta: "Response",
-            } as StreamEvent;
-          },
-        },
-        transformers: {
-          processStream: async () =>
-            ({
-              model: "mock-model",
-              createdAt: new Date().toISOString(),
-              message: { role: "assistant", content: [{ type: "text", text: "Response" }] },
-              usage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 },
-              stopReason: "stop" as StopReason,
-              raw: {},
-            }) as ModelOutput,
-        },
-        fromEngineState,
-        toEngineState,
+      // Model that captures inputs (including tools)
+      const capturingModel = createTestModel({
+        defaultResponse: "Response",
       });
 
       function Agent() {
@@ -408,6 +254,12 @@ describe("Tool Component", () => {
       await session.tick({}).result;
 
       // Tool should be registered even when it has a render function
+      const capturedInputs = capturingModel.getCapturedInputs();
+      expect(capturedInputs.length).toBeGreaterThan(0);
+
+      const lastInput = capturedInputs[capturedInputs.length - 1];
+      const receivedTools = lastInput.tools ?? [];
+
       expect(receivedTools.length).toBeGreaterThan(0);
       expect(receivedTools.some((t: any) => t.name === "rendering_tool")).toBe(true);
 

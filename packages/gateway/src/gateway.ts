@@ -588,6 +588,8 @@ export class Gateway extends EventEmitter {
   }
 
   private async handleSend(req: NodeRequest, res: NodeResponse): Promise<void> {
+    log.debug({ method: req.method, url: req.url }, "handleSend: START");
+
     if (req.method !== "POST") {
       res.writeHead(405, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: "Method not allowed" }));
@@ -603,6 +605,7 @@ export class Gateway extends EventEmitter {
     }
 
     const body = await this.parseBody(req);
+    log.debug({ body }, "handleSend: parsed body");
     if (!body) {
       res.writeHead(400, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: "Invalid request body" }));
@@ -611,6 +614,7 @@ export class Gateway extends EventEmitter {
 
     const sessionId = (body.sessionId as string) ?? "main";
     const rawMessage = body.message;
+    log.debug({ sessionId, hasMessage: !!rawMessage }, "handleSend: extracted params");
 
     if (
       !rawMessage ||
@@ -638,9 +642,11 @@ export class Gateway extends EventEmitter {
     setSSEHeaders(res);
 
     try {
+      log.debug({ sessionId }, "handleSend: calling directSend");
       const events = this.directSend(sessionId, message as Message);
 
       for await (const event of events) {
+        log.debug({ eventType: event.type }, "handleSend: got event from directSend");
         const sseData = {
           type: event.type,
           sessionId,
@@ -649,9 +655,13 @@ export class Gateway extends EventEmitter {
         res.write(`data: ${JSON.stringify(sseData)}\n\n`);
       }
 
+      log.debug({ sessionId }, "handleSend: directSend complete, sending execution_end");
       res.write(`data: ${JSON.stringify({ type: "execution_end", sessionId })}\n\n`);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorStack = error instanceof Error ? error.stack : undefined;
+      console.error("[Gateway handleSend ERROR]", errorMessage, "\n", errorStack);
+      log.error({ errorMessage, errorStack, sessionId }, "handleSend: ERROR in directSend");
       res.write(`data: ${JSON.stringify({ type: "error", error: errorMessage, sessionId })}\n\n`);
     } finally {
       res.end();
@@ -909,9 +919,8 @@ export class Gateway extends EventEmitter {
     // Get or create the managed session and core session
     const managedSession = await this.sessions.getOrCreate(sessionId);
     if (!managedSession.coreSession) {
-      managedSession.coreSession = managedSession.appInfo.app.session({
-        sessionId: managedSession.state.id,
-      });
+      // Use sessionName (without app prefix) for App - Gateway handles routing
+      managedSession.coreSession = managedSession.appInfo.app.session(managedSession.sessionName);
     }
 
     // Subscribe to the core session's channel and forward events to SSE clients
@@ -971,9 +980,8 @@ export class Gateway extends EventEmitter {
   ): Promise<void> {
     const managedSession = await this.sessions.getOrCreate(sessionId);
     if (!managedSession.coreSession) {
-      managedSession.coreSession = managedSession.appInfo.app.session({
-        sessionId: managedSession.state.id,
-      });
+      // Use sessionName (without app prefix) for App - Gateway handles routing
+      managedSession.coreSession = managedSession.appInfo.app.session(managedSession.sessionName);
     }
 
     const coreChannel = managedSession.coreSession.channel(channelName);
@@ -1244,9 +1252,8 @@ export class Gateway extends EventEmitter {
 
     // Get or create core session from app
     if (!managedSession.coreSession) {
-      managedSession.coreSession = managedSession.appInfo.app.session({
-        sessionId: managedSession.state.id,
-      });
+      // Use sessionName (without app prefix) for App - Gateway handles routing
+      managedSession.coreSession = managedSession.appInfo.app.session(managedSession.sessionName);
     }
 
     // Stream execution to subscribers
@@ -1354,15 +1361,39 @@ export class Gateway extends EventEmitter {
     // Get or create managed session
     const managedSession = await this.sessions.getOrCreate(sessionId);
 
+    log.debug(
+      {
+        sessionId,
+        sessionName: managedSession.sessionName,
+        stateId: managedSession.state.id,
+        hasCoreSession: !!managedSession.coreSession,
+      },
+      "directSend: got managed session",
+    );
+
     // Mark session as active
     this.sessions.setActive(managedSession.state.id, true);
 
     // Get or create core session from app
     if (!managedSession.coreSession) {
-      managedSession.coreSession = managedSession.appInfo.app.session({
-        sessionId: managedSession.state.id,
-      });
+      // Use sessionName (without app prefix) for App - Gateway handles routing
+      log.debug({ sessionName: managedSession.sessionName }, "directSend: creating core session");
+      managedSession.coreSession = managedSession.appInfo.app.session(managedSession.sessionName);
+      log.debug(
+        { coreSessionId: managedSession.coreSession.id },
+        "directSend: created core session",
+      );
     }
+
+    // Check session status before sending
+    const coreSession = managedSession.coreSession as any;
+    log.debug(
+      {
+        coreSessionId: coreSession.id,
+        status: coreSession._status,
+      },
+      "directSend: core session status before send",
+    );
 
     try {
       const execution = managedSession.coreSession.send({ message });
@@ -1416,9 +1447,8 @@ export class Gateway extends EventEmitter {
     if (sessionId) {
       const managedSession = await this.sessions.getOrCreate(sessionId);
       if (!managedSession.coreSession) {
-        managedSession.coreSession = managedSession.appInfo.app.session({
-          sessionId: managedSession.state.id,
-        });
+        // Use sessionName (without app prefix) for App - Gateway handles routing
+        managedSession.coreSession = managedSession.appInfo.app.session(managedSession.sessionName);
       }
       channels = createChannelServiceFromSession(managedSession.coreSession, this.config.id);
     }
@@ -1564,9 +1594,10 @@ export class Gateway extends EventEmitter {
         const managedSession = await this.sessions.getOrCreate(sessionId);
 
         if (!managedSession.coreSession) {
-          managedSession.coreSession = managedSession.appInfo.app.session({
-            sessionId: managedSession.state.id,
-          });
+          // Use sessionName (without app prefix) for App - Gateway handles routing
+          managedSession.coreSession = managedSession.appInfo.app.session(
+            managedSession.sessionName,
+          );
         }
 
         await this.executeAndStream(managedSession.state.id, managedSession.coreSession, message);

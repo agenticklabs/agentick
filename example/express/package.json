@@ -4,19 +4,22 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "tsx watch src/server.ts",
+    "dev": "nodemon --exec tsx src/server.ts",
     "start": "tsx src/server.ts",
     "gateway": "tsx src/gateway.ts",
-    "gateway:dev": "tsx watch src/gateway.ts",
+    "gateway:dev": "nodemon --exec tsx src/gateway.ts",
     "both": "concurrently \"pnpm dev\" \"pnpm gateway\"",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@tentickle/client": "link:../../packages/client",
+    "@tentickle/client-multiplexer": "link:../../packages/client-multiplexer",
     "@tentickle/core": "link:../../packages/core",
     "@tentickle/devtools": "link:../../packages/devtools",
     "@tentickle/express": "link:../../packages/express",
     "@tentickle/gateway": "link:../../packages/gateway",
     "@tentickle/google": "link:../../packages/adapters/google",
+    "@tentickle/kernel": "link:../../packages/kernel",
     "@tentickle/openai": "link:../../packages/adapters/openai",
     "@tentickle/server": "link:../../packages/server",
     "@tentickle/shared": "link:../../packages/shared",
@@ -30,6 +33,8 @@
     "@types/cors": "^2.8.17",
     "@types/express": "^5.0.0",
     "@types/react": "^18.3.0",
+    "esbuild": "^0.24.0",
+    "nodemon": "^3.1.0",
     "tsx": "^4.19.2",
     "typescript": "^5.7.3"
   }

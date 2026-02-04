@@ -3,42 +3,27 @@
  *
  * Wraps Vercel AI SDK models for use with the engine.
  * Supports any LanguageModel from AI SDK providers (OpenAI, Anthropic, Google, etc.)
+ *
+ * Uses createAdapter for minimal boilerplate - the framework handles:
+ * - Stream lifecycle (message_start, content_start/delta/end, message_end)
+ * - Content accumulation and ModelOutput construction
+ * - Event generation with proper timing and IDs
  */
 
 import {
-  type AudioBlock,
   type ContentBlock,
   type DocumentBlock,
   type ImageBlock,
   type ReasoningBlock,
   type TextBlock,
   type ToolResultBlock,
-  type VideoBlock,
   type ToolUseBlock,
   type JsonBlock,
   type MediaBlock,
   type Message,
-  type StreamEvent,
-  type ModelStreamEvent,
-  type StreamEventBase,
-  isModelStreamEvent,
-  type ContentStartEvent,
-  type ContentDeltaEvent,
-  type ContentEndEvent,
-  type ReasoningStartEvent,
-  type ReasoningDeltaEvent,
-  type ReasoningEndEvent,
-  type ToolCallStartEvent,
-  type ToolCallDeltaEvent,
-  type ToolCallEndEvent,
-  type ToolCallEvent,
-  type MessageStartEvent,
-  type MessageEndEvent,
-  type StreamErrorEvent,
   StopReason,
-  BlockType,
-  bufferToBase64Source,
-  isUrlString,
+  // bufferToBase64Source,
+  // isUrlString,
 } from "@tentickle/shared";
 
 import {
@@ -46,16 +31,15 @@ import {
   type ModelOutput,
   type ModelToolReference,
   type EngineModel,
-  createLanguageModel,
+  createAdapter,
+  type AdapterDelta,
 } from "@tentickle/core/model";
 
 import { type LibraryGenerationOptions, type ProviderToolOptions } from "@tentickle/core";
 
-import type { COMInput, COMTimelineEntry, EngineInput } from "@tentickle/core/com";
-
 import { Logger } from "@tentickle/core";
 
-import type { ToolDefinition, ExecutableTool, ToolClass } from "@tentickle/core/tool";
+import type { ToolDefinition, ExecutableTool } from "@tentickle/core/tool";
 
 import { mergeDeep } from "@tentickle/shared/utils";
 
@@ -98,33 +82,6 @@ export type ToolResultOutput =
         { type: "text"; text: string } | { type: "media"; data: string; mediaType: string }
       >;
     };
-
-// ============================================================================
-// Event Helpers
-// ============================================================================
-
-let adapterEventIdCounter = 0;
-let adapterSequenceCounter = 0;
-
-/**
- * Generate a unique event ID for adapter stream events
- */
-function generateAdapterEventId(): string {
-  return `aievt_${Date.now()}_${++adapterEventIdCounter}`;
-}
-
-/**
- * Create base event fields for ModelStreamEvent
- * Adapter layer always uses tick=1 since it doesn't have engine context
- */
-function createAdapterEventBase(): StreamEventBase {
-  return {
-    id: generateAdapterEventId(),
-    tick: 1,
-    sequence: ++adapterSequenceCounter,
-    timestamp: new Date().toISOString(),
-  };
-}
 
 /**
  * Configuration options for the AI SDK adapter
@@ -187,6 +144,10 @@ export function toStopReason(reason: FinishReason): StopReason {
       return StopReason.UNSPECIFIED;
   }
 }
+
+// ============================================================================
+// Tool Conversion
+// ============================================================================
 
 /**
  * Convert ModelToolReference[] to AI SDK ToolSet format.
@@ -267,9 +228,7 @@ export function convertToolsToToolSet(tools?: ModelToolReference[]): ToolSet {
 export function createAiSdkModel(config: AiSdkAdapterConfig): AiSdkAdapter {
   const { model, system: defaultSystem, tools: defaultTools, ...defaultParams } = config;
 
-  return createLanguageModel<
-    ModelInput,
-    ModelOutput,
+  return createAdapter<
     Parameters<typeof generateText>[0],
     Awaited<ReturnType<typeof generateText>>,
     any
@@ -315,398 +274,253 @@ export function createAiSdkModel(config: AiSdkAdapterConfig): AiSdkAdapter {
       ],
     },
 
-    transformers: {
-      prepareInput: (input): Parameters<typeof generateText>[0] => {
-        const { libraryOptions = {}, providerOptions = {}, ...params } = input;
-        const sdkOptions = (libraryOptions as LibraryGenerationOptions["ai-sdk"]) || {};
-        const { tools: adapterTools, system: adapterSystem, ...restOfLibraryOptions } = sdkOptions;
+    // =========================================================================
+    // prepareInput: ModelInput → AI SDK format
+    // =========================================================================
+    prepareInput: (input: ModelInput): Parameters<typeof generateText>[0] => {
+      const { libraryOptions = {}, providerOptions = {}, ...params } = input;
+      const sdkOptions = (libraryOptions as LibraryGenerationOptions["ai-sdk"]) || {};
+      const { tools: adapterTools, system: adapterSystem, ...restOfLibraryOptions } = sdkOptions;
 
-        // Ensure messages is Message[]
-        const messages = Array.isArray(params.messages)
-          ? params.messages.filter((m): m is Message => typeof m !== "string")
-          : [];
+      // Ensure messages is Message[]
+      const messages = Array.isArray(params.messages)
+        ? params.messages.filter((m: Message | string): m is Message => typeof m !== "string")
+        : [];
 
-        const aiSdkMessages = toAiSdkMessages(messages, adapterSystem, defaultSystem);
+      const aiSdkMessages = toAiSdkMessages(messages, adapterSystem, defaultSystem);
 
-        // Merge tools: default -> adapter -> input
-        const inputToolSet = convertToolsToToolSet(params.tools);
-        const mergedTools: ToolSet = {
-          ...defaultTools,
-          ...(adapterTools || {}),
-          ...inputToolSet,
-        } as ToolSet;
+      // Merge tools: default -> adapter -> input
+      const inputToolSet = convertToolsToToolSet(params.tools);
+      const mergedTools: ToolSet = {
+        ...defaultTools,
+        ...(adapterTools || {}),
+        ...inputToolSet,
+      } as ToolSet;
 
-        return {
-          model,
-          tools: Object.keys(mergedTools).length > 0 ? mergedTools : undefined,
-          messages: aiSdkMessages,
-          temperature: params.temperature ?? defaultParams.temperature,
-          maxOutputTokens: params.maxTokens ?? defaultParams.maxTokens,
-          topP: params.topP ?? defaultParams.topP,
-          frequencyPenalty: params.frequencyPenalty ?? defaultParams.frequencyPenalty,
-          presencePenalty: params.presencePenalty ?? defaultParams.presencePenalty,
-          ...(restOfLibraryOptions as Omit<Parameters<typeof generateText>[0], "model" | "prompt">),
-          providerOptions: {
-            ...defaultParams.providerOptions,
-            ...providerOptions,
-            ...(sdkOptions.providerOptions || {}),
-          },
-        };
-      },
-
-      processOutput: (output) => {
-        const messages = fromAiSdkMessages(output.response.messages) ?? [];
-        const result = {
-          messages,
-          get message() {
-            return messages.filter((msg) => msg.role === "assistant").at(-1);
-          },
-          usage: {
-            inputTokens: output.usage?.inputTokens ?? 0,
-            outputTokens: output.usage?.outputTokens ?? 0,
-            totalTokens: output.usage?.totalTokens ?? 0,
-            reasoningTokens: (output.usage as any)?.reasoningTokens ?? 0,
-            cachedInputTokens: (output.usage as any)?.cachedInputTokens ?? 0,
-          },
-          toolCalls:
-            output.toolCalls?.map((toolCall) => {
-              return {
-                id: toolCall.toolCallId,
-                name: toolCall.toolName,
-                input: (toolCall as any).args || (toolCall as any).input || {},
-                metadata: (toolCall as any).providerMetadata,
-                executedBy: (toolCall as any).providerExecuted ? "provider" : undefined,
-              };
-            }) || [],
-          stopReason: toStopReason(output.finishReason),
-          model: output.response.modelId,
-          createdAt: output.response.timestamp.toISOString(),
-          raw: output,
-        };
-
-        return result;
-      },
-
-      processChunk: (chunk: any): ModelStreamEvent => {
-        const base = createAdapterEventBase();
-
-        // AI SDK TextStreamPart types - see ai/dist/index.d.ts
-        switch (chunk.type) {
-          // Text content
-          case "text-start":
-            return {
-              type: "content_start",
-              ...base,
-              blockType: BlockType.TEXT,
-              blockIndex: 0,
-            } as ContentStartEvent;
-          case "text-delta":
-            return {
-              type: "content_delta",
-              ...base,
-              blockType: BlockType.TEXT,
-              blockIndex: 0,
-              delta: chunk.text || "",
-            } as ContentDeltaEvent;
-          case "text-end":
-            return {
-              type: "content_end",
-              ...base,
-              blockType: BlockType.TEXT,
-              blockIndex: 0,
-            } as ContentEndEvent;
-
-          // Reasoning/thinking
-          case "reasoning-start":
-            return {
-              type: "reasoning_start",
-              ...base,
-              blockIndex: 0,
-            } as ReasoningStartEvent;
-          case "reasoning-delta":
-            return {
-              type: "reasoning_delta",
-              ...base,
-              blockIndex: 0,
-              delta: chunk.text || "",
-            } as ReasoningDeltaEvent;
-          case "reasoning-end":
-            return {
-              type: "reasoning_end",
-              ...base,
-              blockIndex: 0,
-            } as ReasoningEndEvent;
-
-          // Tool calls
-          case "tool-input-start":
-            return {
-              type: "tool_call_start",
-              ...base,
-              callId: chunk.id || generateAdapterEventId(),
-              name: chunk.toolName || "",
-              blockIndex: 0,
-            } as ToolCallStartEvent;
-          case "tool-input-delta":
-            return {
-              type: "tool_call_delta",
-              ...base,
-              callId: chunk.id || "",
-              blockIndex: 0,
-              delta: chunk.delta || "",
-            } as ToolCallDeltaEvent;
-          case "tool-input-end":
-            return {
-              type: "tool_call_end",
-              ...base,
-              callId: chunk.id || "",
-              blockIndex: 0,
-            } as ToolCallEndEvent;
-          case "tool-call":
-            return {
-              type: "tool_call",
-              ...base,
-              callId: chunk.toolCallId,
-              name: chunk.toolName,
-              input: (chunk as any).args || (chunk as any).input || {},
-              blockIndex: 0,
-              startedAt: base.timestamp,
-              completedAt: base.timestamp,
-            } as ToolCallEvent;
-          case "tool-result":
-            // Provider-executed tool result - emit as content_delta with raw data
-            // (tool_result is an OrchestrationStreamEvent, not ModelStreamEvent)
-            return {
-              type: "content_delta",
-              ...base,
-              blockType: BlockType.TEXT,
-              blockIndex: 0,
-              delta: "",
-              raw: {
-                type: "tool_result",
-                toolCallId: chunk.toolCallId,
-                toolName: chunk.toolName,
-                result: chunk.result,
-                providerExecuted: true,
-              },
-            } as ContentDeltaEvent;
-          case "tool-error":
-            return {
-              type: "error",
-              ...base,
-              error: {
-                message: chunk.error?.message || "Tool error",
-                code: "tool_error",
-              },
-            } as StreamErrorEvent;
-
-          // Sources and files - pass through as content_delta with raw
-          case "source":
-            return {
-              type: "content_delta",
-              ...base,
-              blockType: BlockType.TEXT,
-              blockIndex: 0,
-              delta: "",
-              raw: { type: "source", ...chunk },
-            } as ContentDeltaEvent;
-          case "file":
-            return {
-              type: "content_delta",
-              ...base,
-              blockType: BlockType.TEXT,
-              blockIndex: 0,
-              delta: "",
-              raw: { type: "file", file: chunk.file },
-            } as ContentDeltaEvent;
-
-          // Step lifecycle - pass through as content_delta with raw
-          case "start-step":
-            return {
-              type: "content_delta",
-              ...base,
-              blockType: BlockType.TEXT,
-              blockIndex: 0,
-              delta: "",
-              raw: {
-                type: "step_start",
-                stepRequest: chunk.request,
-                stepWarnings: chunk.warnings || [],
-              },
-            } as ContentDeltaEvent;
-          case "finish-step": {
-            // AI SDK provides inputTokens/outputTokens OR promptTokens/completionTokens
-            const su = chunk.usage as Record<string, number> | undefined;
-            const stepInTokens = su?.inputTokens ?? su?.promptTokens ?? 0;
-            const stepOutTokens = su?.outputTokens ?? su?.completionTokens ?? 0;
-            return {
-              type: "content_delta",
-              ...base,
-              blockType: BlockType.TEXT,
-              blockIndex: 0,
-              delta: "",
-              raw: {
-                type: "step_end",
-                stepResponse: chunk.response,
-                usage: su
-                  ? {
-                      inputTokens: stepInTokens,
-                      outputTokens: stepOutTokens,
-                      totalTokens: su?.totalTokens ?? stepInTokens + stepOutTokens,
-                    }
-                  : undefined,
-                stopReason: toStopReason(chunk.finishReason),
-              },
-            } as ContentDeltaEvent;
-          }
-
-          // Stream lifecycle
-          case "start":
-            return {
-              type: "message_start",
-              ...base,
-              role: "assistant",
-            } as MessageStartEvent;
-          case "finish": {
-            // AI SDK provides inputTokens/outputTokens OR promptTokens/completionTokens
-            // depending on the provider. Handle both cases.
-            const tu = chunk.totalUsage as Record<string, number> | undefined;
-            const inTokens = tu?.inputTokens ?? tu?.promptTokens ?? 0;
-            const outTokens = tu?.outputTokens ?? tu?.completionTokens ?? 0;
-            const totalTokens = tu?.totalTokens ?? inTokens + outTokens;
-            const reasoningTokens = tu?.reasoningTokens;
-            const cachedInputTokens = tu?.cachedInputTokens;
-
-            return {
-              type: "message_end",
-              ...base,
-              stopReason: toStopReason(chunk.finishReason),
-              usage: tu
-                ? {
-                    inputTokens: inTokens,
-                    outputTokens: outTokens,
-                    totalTokens,
-                    ...(reasoningTokens !== undefined && { reasoningTokens }),
-                    ...(cachedInputTokens !== undefined && { cachedInputTokens }),
-                  }
-                : undefined,
-            } as MessageEndEvent;
-          }
-          case "abort":
-            return {
-              type: "error",
-              ...base,
-              error: { message: "Stream aborted", code: "abort" },
-            } as StreamErrorEvent;
-          case "error":
-            return {
-              type: "error",
-              ...base,
-              error: {
-                message: chunk.error?.message || "Stream error",
-                code: "stream_error",
-              },
-            } as StreamErrorEvent;
-          case "raw":
-            return {
-              type: "content_delta",
-              ...base,
-              blockType: BlockType.TEXT,
-              blockIndex: 0,
-              delta: "",
-              raw: chunk.rawValue,
-            } as ContentDeltaEvent;
-
-          default:
-            // Unknown chunk type - pass through as content_delta
-            return {
-              type: "content_delta",
-              ...base,
-              blockType: BlockType.TEXT,
-              blockIndex: 0,
-              delta: "",
-              raw: chunk,
-            } as ContentDeltaEvent;
-        }
-      },
-
-      processStream: async (events: StreamEvent[]) => {
-        // Aggregate stream events into ModelOutput
-        let text = "";
-        let reasoning = "";
-        const toolCalls: any[] = [];
-        let stopReason: StopReason = StopReason.UNSPECIFIED;
-        let usage = { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
-
-        const modelEvents = events.filter(isModelStreamEvent);
-
-        for (const event of modelEvents) {
-          if (event.type === "content_delta") {
-            text += (event as ContentDeltaEvent).delta;
-          }
-          if (event.type === "reasoning_delta") {
-            reasoning += (event as ReasoningDeltaEvent).delta;
-          }
-          if (event.type === "tool_call") {
-            const tc = event as ToolCallEvent;
-            toolCalls.push({ id: tc.callId, name: tc.name, input: tc.input });
-          }
-          if (event.type === "message_end") {
-            const endEvent = event as MessageEndEvent;
-            stopReason = endEvent.stopReason;
-            if (endEvent.usage) {
-              usage = endEvent.usage;
-            }
-          }
-        }
-
-        const content: ContentBlock[] = [];
-        // Add reasoning block first if present
-        if (reasoning) {
-          content.push({ type: "reasoning", text: reasoning } as ContentBlock);
-        }
-        if (text) {
-          content.push({ type: "text", text });
-        }
-        for (const tc of toolCalls) {
-          content.push({
-            type: "tool_use",
-            toolUseId: tc.id,
-            name: tc.name,
-            input: tc.input,
-          });
-        }
-
-        const messages: Message[] = [
-          {
-            role: "assistant",
-            content,
-          },
-        ];
-
-        return {
-          messages,
-          get message() {
-            return messages[0];
-          },
-          usage,
-          toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
-          stopReason,
-          model: (model as any).modelId || "unknown",
-          createdAt: new Date().toISOString(),
-          raw: events,
-        };
-      },
+      return {
+        model,
+        tools: Object.keys(mergedTools).length > 0 ? mergedTools : undefined,
+        messages: aiSdkMessages,
+        temperature: params.temperature ?? defaultParams.temperature,
+        maxOutputTokens: params.maxTokens ?? defaultParams.maxTokens,
+        topP: params.topP ?? defaultParams.topP,
+        frequencyPenalty: params.frequencyPenalty ?? defaultParams.frequencyPenalty,
+        presencePenalty: params.presencePenalty ?? defaultParams.presencePenalty,
+        ...(restOfLibraryOptions as Omit<Parameters<typeof generateText>[0], "model" | "prompt">),
+        providerOptions: {
+          ...defaultParams.providerOptions,
+          ...providerOptions,
+          ...(sdkOptions.providerOptions || {}),
+        },
+      };
     },
 
-    executors: {
-      execute: (params) => {
-        logger.info({ params }, "execute");
-        return generateText(params);
-      },
-      executeStream: (params) => {
-        logger.info({ params }, "executeStream");
-        return streamText(params).fullStream;
-      },
+    // =========================================================================
+    // mapChunk: AI SDK chunk → AdapterDelta (~50 lines vs 240 lines)
+    // The framework handles lifecycle (content_start/end) automatically
+    // =========================================================================
+    mapChunk: (chunk: any): AdapterDelta | null => {
+      switch (chunk.type) {
+        // Text content
+        case "text-delta":
+          return { type: "text", delta: chunk.text || "" };
+
+        // Reasoning/thinking
+        case "reasoning-delta":
+          return { type: "reasoning", delta: chunk.text || "" };
+
+        // Tool calls (streamed)
+        case "tool-input-start":
+          return { type: "tool_call_start", id: chunk.id || "", name: chunk.toolName || "" };
+        case "tool-input-delta":
+          return { type: "tool_call_delta", id: chunk.id || "", delta: chunk.delta || "" };
+        case "tool-input-end":
+          return { type: "tool_call_end", id: chunk.id || "", input: undefined };
+
+        // Tool call (complete)
+        case "tool-call":
+          return {
+            type: "tool_call",
+            id: chunk.toolCallId,
+            name: chunk.toolName,
+            input: (chunk as any).args || (chunk as any).input || {},
+          };
+
+        // Message lifecycle
+        case "start":
+          return { type: "message_start" };
+        case "finish": {
+          const tu = chunk.totalUsage as Record<string, number> | undefined;
+          const inTokens = tu?.inputTokens ?? tu?.promptTokens ?? 0;
+          const outTokens = tu?.outputTokens ?? tu?.completionTokens ?? 0;
+          const totalTokens = tu?.totalTokens ?? inTokens + outTokens;
+          return {
+            type: "message_end",
+            stopReason: toStopReason(chunk.finishReason),
+            usage: tu
+              ? {
+                  inputTokens: inTokens,
+                  outputTokens: outTokens,
+                  totalTokens,
+                  ...(tu.reasoningTokens !== undefined && { reasoningTokens: tu.reasoningTokens }),
+                  ...(tu.cachedInputTokens !== undefined && {
+                    cachedInputTokens: tu.cachedInputTokens,
+                  }),
+                }
+              : undefined,
+          };
+        }
+
+        // Errors
+        case "abort":
+          return { type: "error", error: "Stream aborted", code: "abort" };
+        case "error":
+          return {
+            type: "error",
+            error: chunk.error?.message || "Stream error",
+            code: "stream_error",
+          };
+
+        // Pass through as raw - sources, files, steps
+        case "source":
+        case "file":
+        case "start-step":
+        case "finish-step":
+        case "tool-result":
+        case "tool-error":
+        case "raw":
+          return { type: "raw", data: chunk };
+
+        // Lifecycle events we don't need (handled by framework)
+        case "text-start":
+        case "text-end":
+        case "reasoning-start":
+        case "reasoning-end":
+          return null;
+
+        default:
+          // Unknown chunk type - pass through as raw
+          return { type: "raw", data: chunk };
+      }
+    },
+
+    // =========================================================================
+    // processOutput: Non-streaming result → ModelOutput
+    // =========================================================================
+    processOutput: (output: Awaited<ReturnType<typeof generateText>>) => {
+      const messages = fromAiSdkMessages(output.response.messages) ?? [];
+      return {
+        messages,
+        get message() {
+          return messages.filter((msg) => msg.role === "assistant").at(-1);
+        },
+        usage: {
+          inputTokens: output.usage?.inputTokens ?? 0,
+          outputTokens: output.usage?.outputTokens ?? 0,
+          totalTokens: output.usage?.totalTokens ?? 0,
+          reasoningTokens: (output.usage as any)?.reasoningTokens ?? 0,
+          cachedInputTokens: (output.usage as any)?.cachedInputTokens ?? 0,
+        },
+        toolCalls:
+          output.toolCalls?.map((toolCall) => {
+            return {
+              id: toolCall.toolCallId,
+              name: toolCall.toolName,
+              input: (toolCall as any).args || (toolCall as any).input || {},
+              metadata: (toolCall as any).providerMetadata,
+              executedBy: (toolCall as any).providerExecuted ? "provider" : undefined,
+            };
+          }) || [],
+        stopReason: toStopReason(output.finishReason),
+        model: output.response.modelId,
+        createdAt: output.response.timestamp.toISOString(),
+        raw: output,
+      };
+    },
+
+    // =========================================================================
+    // Executors
+    // =========================================================================
+    execute: (params: Parameters<typeof generateText>[0]) => {
+      logger.info({ params }, "execute");
+      return generateText(params);
+    },
+    executeStream: (params: Parameters<typeof streamText>[0]) => {
+      logger.info({ params }, "executeStream");
+      return streamText(params).fullStream;
+    },
+
+    reconstructRaw: (accumulated) => {
+      // Reconstruct a GenerateTextResult-like object from streaming data
+      // This provides a consistent format regardless of streaming vs non-streaming
+
+      // Build tool calls in AI SDK format (with proper type field and input instead of args)
+      const toolCalls = accumulated.toolCalls.map((tc) => ({
+        type: "tool-call" as const,
+        toolCallId: tc.id,
+        toolName: tc.name,
+        input: tc.input,
+      }));
+
+      // Build response messages
+      const content: AssistantContent = [];
+      if (accumulated.text) {
+        content.push({ type: "text" as const, text: accumulated.text });
+      }
+      if (accumulated.reasoning) {
+        content.push({ type: "reasoning" as const, text: accumulated.reasoning } as any);
+      }
+      for (const tc of toolCalls) {
+        content.push({
+          type: "tool-call" as const,
+          toolCallId: tc.toolCallId,
+          toolName: tc.toolName,
+          input: tc.input,
+        } as any);
+      }
+
+      // Map internal stop reason to AI SDK FinishReason
+      const finishReason = ((): FinishReason => {
+        switch (accumulated.stopReason) {
+          case StopReason.STOP:
+            return "stop";
+          case StopReason.MAX_TOKENS:
+            return "length";
+          case StopReason.TOOL_USE:
+            return "tool-calls";
+          case StopReason.CONTENT_FILTER:
+            return "content-filter";
+          case StopReason.ERROR:
+            return "error";
+          default:
+            return "stop";
+        }
+      })();
+
+      // Reconstruct the GenerateTextResult format
+      const reconstructed: Partial<GenerateTextResult<ToolSet, unknown>> = {
+        text: accumulated.text || "",
+        toolCalls: toolCalls.length > 0 ? (toolCalls as any) : [],
+        finishReason,
+        usage: {
+          inputTokens: accumulated.usage.inputTokens,
+          outputTokens: accumulated.usage.outputTokens,
+          totalTokens: accumulated.usage.totalTokens,
+        },
+        response: {
+          id: `gen-${Date.now()}`,
+          modelId: accumulated.model,
+          timestamp: new Date(),
+          messages: [
+            {
+              role: "assistant" as const,
+              content,
+            },
+          ],
+        } as any,
+      };
+
+      return reconstructed;
     },
   });
 }
@@ -954,7 +768,7 @@ export function mapContentBlockToAiSdkPart(
     }
 
     case "audio": {
-      const audioBlock = block as AudioBlock;
+      const audioBlock = block as MediaBlock;
       const source = audioBlock.source;
       if (source.type === "url") {
         return {
@@ -973,7 +787,7 @@ export function mapContentBlockToAiSdkPart(
     }
 
     case "video": {
-      const videoBlock = block as VideoBlock;
+      const videoBlock = block as MediaBlock;
       const source = videoBlock.source;
       if (source.type === "url") {
         return {
@@ -1006,107 +820,15 @@ export function mapContentBlockToAiSdkPart(
       return {
         type: "tool-result",
         toolCallId: toolResultBlock.toolUseId,
-        toolName: toolResultBlock.name,
-        output: mapContentBlocksToToolResultOutput(
-          toolResultBlock.content,
-          toolResultBlock.isError,
-        ),
-      } as unknown as ToolResultPart;
+        toolName: toolResultBlock.name || "unknown",
+        output: mapToolResultContent(toolResultBlock.content, toolResultBlock.isError),
+      } as ToolResultPart;
     }
 
     default:
-      // Unexpected block type - convert to text as fallback
-      // This should rarely happen if fromEngineState is working correctly,
-      // but provides graceful degradation for unexpected types
-      const blockType = (block as any).type || "unknown";
-      const blockText = (block as any).text || JSON.stringify(block, null, 2);
-      logger.warn(
-        `[AI SDK Adapter] Unexpected block type "${blockType}" - converting to text. This should have been converted by fromEngineState.`,
-      );
-      return { type: "text", text: blockText };
+      // Fallback: serialize as text
+      return { type: "text", text: JSON.stringify(block) };
   }
-}
-
-/**
- * Convert ContentBlock[] to LanguageModelV2ToolResultOutput format.
- * Used in mapContentBlockToAiSdkPart for tool_result blocks.
- */
-export function mapContentBlocksToToolResultOutput(
-  content: ContentBlock[],
-  isError?: boolean,
-): ToolResultPart["output"] {
-  // Empty content
-  if (!content || content.length === 0) {
-    return isError
-      ? { type: "error-text" as const, value: "Tool execution failed" }
-      : { type: "text" as const, value: "Tool execution succeeded" };
-  }
-
-  // Single text block
-  if (content.length === 1 && content[0].type === "text") {
-    const text = content[0].text;
-    return isError
-      ? { type: "error-text" as const, value: text }
-      : { type: "text" as const, value: text };
-  }
-
-  // Single JSON block
-  if (content.length === 1 && content[0].type === "json") {
-    const jsonBlock = content[0] as JsonBlock;
-    const data = jsonBlock.data || JSON.parse(jsonBlock.text);
-    return isError
-      ? { type: "error-json" as const, value: data }
-      : { type: "json" as const, value: data };
-  }
-
-  // Multiple blocks → use 'content' type
-  return {
-    type: "content" as const,
-    value: content
-      .map((block) => {
-        if (block.type === "text") {
-          // Skip empty text blocks to avoid AI SDK validation errors
-          if (!block.text) return null;
-          return { type: "text" as const, text: block.text };
-        } else if (block.type === "json") {
-          const jsonBlock = block as JsonBlock;
-          // JSON blocks can have either data (object) or text (string)
-          const jsonText = jsonBlock.text || JSON.stringify(jsonBlock.data, null, 2);
-          // Skip if both are empty/undefined
-          if (!jsonText) return null;
-          return { type: "text" as const, text: jsonText };
-        } else if (block.type === "image") {
-          const mediaBlock = block as MediaBlock;
-          if (mediaBlock.source.type === "base64") {
-            return {
-              type: "media" as const,
-              data: mediaBlock.source.data,
-              mediaType: mediaBlock.mimeType || "image/png",
-            };
-          } else if (mediaBlock.source.type === "url") {
-            return { type: "text" as const, text: mediaBlock.source.url };
-          } else if (mediaBlock.source.type === "s3") {
-            return {
-              type: "text" as const,
-              text: `s3://${mediaBlock.source.bucket}/${mediaBlock.source.key}`,
-            };
-          } else if (mediaBlock.source.type === "gcs") {
-            return {
-              type: "text" as const,
-              text: `gs://${mediaBlock.source.bucket}/${mediaBlock.source.object}`,
-            };
-          }
-          // URL images fallback to text
-          return {
-            type: "text" as const,
-            text: `file_id:${mediaBlock.source.fileId}`,
-          };
-        }
-        // Fallback: serialize as text
-        return { type: "text" as const, text: JSON.stringify(block) };
-      })
-      .filter((item): item is NonNullable<typeof item> => item !== null),
-  };
 }
 
 // ============================================================================
@@ -1120,78 +842,52 @@ export function mapAiSdkContentToContentBlocks(
     return [{ type: "text", text: content }];
   }
 
+  if (!Array.isArray(content)) {
+    return [];
+  }
+
   return content
-    .map(mapAiSdkPartToContentBlock)
+    .map((part) => mapAiSdkPartToContentBlock(part))
     .filter((block): block is ContentBlock => block !== undefined);
 }
 
 export function mapAiSdkPartToContentBlock(
-  part: TextPart | ImagePart | FilePart | ReasoningUIPart | ToolCallPart | ToolResultPart,
+  part: AssistantContent[number] | ToolContent[number],
 ): ContentBlock | undefined {
+  if (typeof part === "string") {
+    return { type: "text", text: part };
+  }
+  if (!("type" in part)) {
+    return undefined;
+  }
+
   switch (part.type) {
     case "text":
-      return { type: "text", text: part.text } as TextBlock;
+      return { type: "text", text: part.text };
 
     case "reasoning":
-      return { type: "reasoning", text: part.text } as ReasoningBlock;
-
-    case "image": {
-      const imageData = part.image;
-
-      if (typeof imageData === "string") {
-        return {
-          type: "image",
-          source: isUrlString(imageData)
-            ? { type: "url", url: imageData }
-            : { type: "base64", data: imageData },
-          mimeType: part.mediaType,
-        } as ImageBlock;
-      } else if (imageData instanceof Uint8Array || Buffer.isBuffer(imageData)) {
-        return {
-          type: "image",
-          source: bufferToBase64Source(imageData, part.mediaType),
-        } as ImageBlock;
-      }
-      return undefined;
-    }
-
-    case "file": {
-      const fileData = part.data;
-
-      if (typeof fileData === "string") {
-        return {
-          type: "document",
-          source: isUrlString(fileData)
-            ? { type: "url", url: fileData }
-            : { type: "base64", data: fileData },
-          mimeType: part.mediaType,
-        } as DocumentBlock;
-      } else if (fileData instanceof Uint8Array || Buffer.isBuffer(fileData)) {
-        return {
-          type: "document",
-          source: bufferToBase64Source(fileData, part.mediaType),
-        } as DocumentBlock;
-      }
-      return undefined;
-    }
+      return { type: "reasoning", text: (part as any).text } as ReasoningBlock;
 
     case "tool-call":
       return {
         type: "tool_use",
-        toolUseId: part.toolCallId,
-        name: part.toolName,
-        input: (part as any).args || (part as any).input || {},
+        toolUseId: (part as any).toolCallId,
+        name: (part as any).toolName,
+        input: ((part as any).args || (part as any).input) as Record<string, unknown>,
       } as ToolUseBlock;
 
     case "tool-result": {
-      const output = (part as any).output || (part as any).result;
+      const toolResultPart = part as any;
       return {
         type: "tool_result",
-        toolUseId: part.toolCallId,
-        name: part.toolName,
-        content: mapToolResultToContentBlocks(output),
-        isError: typeof output === "object" && output !== null && "error" in output,
-      } as ToolResultBlock;
+        toolUseId: toolResultPart.toolCallId,
+        name: toolResultPart.toolName || "unknown",
+        content: mapToolResultOutputToContentBlocks(toolResultPart.output as ToolResultOutput),
+        isError:
+          toolResultPart.output &&
+          "type" in toolResultPart.output &&
+          toolResultPart.output.type.startsWith("error"),
+      } as unknown as ContentBlock;
     }
 
     default:
@@ -1199,202 +895,36 @@ export function mapAiSdkPartToContentBlock(
   }
 }
 
-export function mapToolResultToContentBlocks(result: any): ContentBlock[] {
-  if (result === undefined || result === null) {
-    return [{ type: "text", text: "[No result]" }];
+function mapToolResultOutputToContentBlocks(output: ToolResultOutput | unknown): ContentBlock[] {
+  if (!output || typeof output !== "object") {
+    return [{ type: "text", text: String(output) }];
   }
 
-  if (typeof result === "string") {
-    return [{ type: "text", text: result }];
-  }
+  const typedOutput = output as ToolResultOutput;
 
-  if (Array.isArray(result)) {
-    const blocks: ContentBlock[] = [];
-    for (const item of result) {
-      if (typeof item === "string") {
-        blocks.push({ type: "text", text: item } as TextBlock);
-      } else if (item && typeof item === "object" && "type" in item) {
-        if (item.type === "text" && "text" in item) {
-          blocks.push({ type: "text", text: item.text } as TextBlock);
-        } else if (item.type === "image" && "data" in item) {
-          blocks.push({
-            type: "image",
-            source: { type: "base64", data: item.data },
-            mimeType: (item as any).mediaType || "image/png",
-          } as ImageBlock);
-        } else {
-          // Unknown type, serialize as JSON
-          blocks.push({
-            type: "json",
-            text: JSON.stringify(item),
-            data: item,
-          } as JsonBlock);
+  switch (typedOutput.type) {
+    case "text":
+    case "error-text":
+      return [{ type: "text", text: typedOutput.value }];
+
+    case "json":
+    case "error-json":
+      return [{ type: "json", data: typedOutput.value, text: "" } as JsonBlock];
+
+    case "content":
+      return typedOutput.value.map((item) => {
+        if (item.type === "text") {
+          return { type: "text", text: item.text } as TextBlock;
         }
-      } else {
-        // Fallback: serialize as JSON
-        blocks.push({
-          type: "json",
-          text: JSON.stringify(item),
-          data: item,
-        } as JsonBlock);
-      }
-    }
-    return blocks;
-  }
-
-  // Object result → JSON block
-  return [{ type: "json", text: JSON.stringify(result), data: result } as JsonBlock];
-}
-
-// ============================================================================
-// Compiler Integration Helpers
-// ============================================================================
-
-/**
- * Convert AI SDK input messages to our Message[] format.
- * This is the inverse of toAiSdkMessages.
- *
- * Use this when receiving messages in AI SDK format and need to process
- * them with our internal systems.
- */
-export function fromAiSdkInputMessages(messages: ModelMessage[]): Message[] {
-  const result: Message[] = [];
-
-  for (const msg of messages) {
-    if (msg.role === "system") {
-      const text = typeof msg.content === "string" ? msg.content : "";
-      result.push({
-        role: "system",
-        content: [{ type: "text", text }],
+        // media type
+        return {
+          type: "image",
+          mimeType: item.mediaType,
+          source: { type: "base64", data: item.data, mimeType: item.mediaType },
+        } as ImageBlock;
       });
-    } else if (msg.role === "user" || msg.role === "assistant") {
-      const content =
-        typeof msg.content === "string"
-          ? [{ type: "text" as const, text: msg.content }]
-          : Array.isArray(msg.content)
-            ? mapAiSdkContentToContentBlocks(msg.content as any)
-            : [];
 
-      if (content.length > 0) {
-        result.push({ role: msg.role, content });
-      }
-    } else if (msg.role === "tool") {
-      const content = Array.isArray(msg.content)
-        ? (msg.content as any[]).map((part: any) => ({
-            type: "tool_result" as const,
-            toolUseId: part.toolCallId,
-            name: part.toolName || "unknown",
-            content: mapToolResultToContentBlocks(part.result ?? part.output),
-            isError: part.isError,
-          }))
-        : [];
-
-      if (content.length > 0) {
-        result.push({ role: "tool", content });
-      }
-    }
+    default:
+      return [{ type: "text", text: JSON.stringify(output) }];
   }
-
-  return result;
-}
-
-/**
- * Convert our Message[] to EngineInput format.
- * Wraps messages in COMTimelineEntry structures.
- */
-export function messagesToEngineInput(messages: Message[]): EngineInput {
-  const timeline: COMTimelineEntry[] = messages.map((msg) => ({
-    kind: "message" as const,
-    message: msg,
-  })) as COMTimelineEntry[];
-
-  return { timeline, sections: {} };
-}
-
-/**
- * Convert AI SDK messages directly to EngineInput.
- * Convenience function that chains fromAiSdkInputMessages → messagesToEngineInput.
- */
-export function aiSdkMessagesToEngineInput(messages?: ModelMessage[]): EngineInput {
-  if (!messages || messages.length === 0) {
-    return { timeline: [], sections: {} };
-  }
-
-  return messagesToEngineInput(fromAiSdkInputMessages(messages));
-}
-
-/**
- * Convert compiled output (COMInput) to AI SDK CompiledInput format.
- * Used by the compiler adapter to produce library-native output.
- */
-export function toAiSdkCompiledInput(
-  formatted: COMInput,
-  tools: (ToolClass | ExecutableTool)[],
-  tick: number,
-  extractedModel?: LanguageModel,
-): {
-  messages: ModelMessage[];
-  tools?: ToolSet;
-  system?: string;
-  model?: LanguageModel;
-  tick: number;
-} {
-  // Extract messages and system from timeline
-  const messages: ModelMessage[] = [];
-  let system: string | undefined;
-
-  for (const entry of formatted.timeline || []) {
-    if (entry.kind === "message") {
-      const msg = entry.message as Message;
-
-      if (msg.role === "system") {
-        // Accumulate system messages
-        const text = msg.content
-          .filter((c: any) => c.type === "text")
-          .map((c: any) => c.text)
-          .join("\n");
-        system = system ? `${system}\n\n${text}` : text;
-      } else if (msg.role === "user" || msg.role === "assistant") {
-        const content = mapContentBlocksToAiSdkContent(msg.content);
-        if (content.length > 0) {
-          messages.push({ role: msg.role, content } as any);
-        }
-      } else if (msg.role === "tool") {
-        const toolResults = msg.content
-          .filter((block: any): block is ToolResultBlock => block.type === "tool_result")
-          .map((block) => ({
-            type: "tool-result" as const,
-            toolCallId: block.toolUseId,
-            toolName: block.name || "unknown",
-            output: mapToolResultContent(block.content, block.isError),
-          }));
-
-        if (toolResults.length > 0) {
-          messages.push({ role: "tool", content: toolResults } as any);
-        }
-      }
-    }
-  }
-
-  // Convert tools to ToolSet (definitions only, no execute)
-  const toolSet: ToolSet | undefined =
-    tools && tools.length > 0
-      ? tools.reduce((acc, tool) => {
-          if ("metadata" in tool) {
-            acc[tool.metadata.name] = {
-              description: tool.metadata.description,
-              parameters: tool.metadata.input, // AI SDK expects 'parameters'
-            } as any;
-          }
-          return acc;
-        }, {} as ToolSet)
-      : undefined;
-
-  return {
-    messages,
-    tools: toolSet,
-    system,
-    model: extractedModel,
-    tick,
-  };
 }

@@ -12,6 +12,7 @@ import type {
   SessionAccessor,
   ClientExecutionHandle,
   SessionStreamEvent,
+  ClientTransport,
 } from "@tentickle/client";
 import type { ContentBlock, Message } from "@tentickle/shared";
 import type { ReactNode } from "react";
@@ -19,6 +20,12 @@ import type { ReactNode } from "react";
 // ============================================================================
 // Provider Types
 // ============================================================================
+
+/**
+ * Transport configuration for TentickleProvider.
+ * Can be a built-in transport type or a custom ClientTransport instance.
+ */
+export type TransportConfig = "sse" | "websocket" | "auto" | ClientTransport;
 
 /**
  * Configuration for TentickleProvider.
@@ -35,6 +42,24 @@ export interface TentickleProviderProps {
    */
   clientConfig?: {
     baseUrl: string;
+    /**
+     * Transport to use for communication.
+     * - "sse": HTTP/SSE transport (default for http:// and https:// URLs)
+     * - "websocket": WebSocket transport (default for ws:// and wss:// URLs)
+     * - "auto": Auto-detect based on URL scheme (default)
+     * - ClientTransport instance: Use a custom transport (e.g., SharedTransport for multi-tab)
+     *
+     * @example
+     * ```tsx
+     * import { createSharedTransport } from '@tentickle/client-multiplexer';
+     *
+     * <TentickleProvider clientConfig={{
+     *   baseUrl: 'https://api.example.com',
+     *   transport: createSharedTransport({ baseUrl: 'https://api.example.com' }),
+     * }}>
+     * ```
+     */
+    transport?: TransportConfig;
     token?: string;
     withCredentials?: boolean;
     timeout?: number;

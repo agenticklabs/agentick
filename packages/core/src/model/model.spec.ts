@@ -1,7 +1,10 @@
 /**
  * Model Tests
  *
- * Tests for createModel and streaming event emission.
+ * Tests for createModel - the low-level model API.
+ *
+ * Note: createModel is a pass-through layer that doesn't accumulate or synthesize
+ * the final `message` event. For that behavior, use createAdapter (tested in adapter.spec.ts).
  */
 
 import { describe, it, expect, vi } from "vitest";
@@ -9,7 +12,6 @@ import { createModel, type ModelInput, type ModelOutput } from "./model";
 import { fromEngineState, toEngineState } from "./utils/language-model";
 import type {
   StreamEvent,
-  MessageEvent,
   ContentStartEvent,
   ContentEndEvent,
   MessageStartEvent,
@@ -19,7 +21,7 @@ import { BlockType, StopReason } from "@tentickle/shared";
 
 describe("createModel", () => {
   describe("streaming", () => {
-    it("should emit message event after message_end", async () => {
+    it("should pass through all events from executor", async () => {
       const events: StreamEvent[] = [];
 
       // Create a model that emits proper StreamEvent sequence
@@ -32,7 +34,6 @@ describe("createModel", () => {
         executors: {
           execute: vi.fn(),
           executeStream: async function* () {
-            // Emit the standard streaming sequence
             yield {
               type: "message_start",
               messageId: "msg-1",
@@ -76,32 +77,27 @@ describe("createModel", () => {
         messages: [{ role: "user", content: [{ type: "text", text: "Hi" }] }],
       };
 
-      // model.stream returns a Procedure that yields AsyncIterable
-      // Invoke the procedure (returns Promise<AsyncIterable>) and iterate over the result
       expect(model.stream).toBeDefined();
       const streamIterable = await model.stream!(mockInput);
       for await (const event of streamIterable) {
         events.push(event);
       }
 
-      // Verify message event is emitted after message_end
-      const messageEvent = events.find((e) => e.type === "message") as MessageEvent;
-      expect(messageEvent).toBeDefined();
-      expect(messageEvent.type).toBe("message");
-      expect(messageEvent.message.role).toBe("assistant");
-      expect(messageEvent.message.content).toHaveLength(1);
-      expect(messageEvent.message.content[0].type).toBe("text");
-      expect((messageEvent.message.content[0] as any).text).toBe("Hello, world!");
-      expect(messageEvent.stopReason).toBe(StopReason.STOP);
-      expect(messageEvent.usage).toEqual({ inputTokens: 10, outputTokens: 5, totalTokens: 15 });
+      // Verify all events are passed through
+      expect(events).toHaveLength(5);
+      expect(events[0].type).toBe("message_start");
+      expect(events[1].type).toBe("content_start");
+      expect(events[2].type).toBe("content_delta");
+      expect(events[3].type).toBe("content_end");
+      expect(events[4].type).toBe("message_end");
 
-      // Verify event order: message_end comes before message
-      const messageEndIndex = events.findIndex((e) => e.type === "message_end");
-      const messageIndex = events.findIndex((e) => e.type === "message");
-      expect(messageEndIndex).toBeLessThan(messageIndex);
+      // Verify message_end has correct data
+      const messageEnd = events[4] as MessageEndEvent;
+      expect(messageEnd.stopReason).toBe(StopReason.STOP);
+      expect(messageEnd.usage).toEqual({ inputTokens: 10, outputTokens: 5, totalTokens: 15 });
     });
 
-    it("should accumulate text from multiple content_delta events", async () => {
+    it("should pass through multiple content_delta events", async () => {
       const events: StreamEvent[] = [];
 
       const model = createModel<ModelInput, ModelOutput, ModelInput, ModelOutput, StreamEvent>({
@@ -162,12 +158,15 @@ describe("createModel", () => {
         events.push(event);
       }
 
-      const messageEvent = events.find((e) => e.type === "message") as MessageEvent;
-      expect(messageEvent).toBeDefined();
-      expect((messageEvent.message.content[0] as any).text).toBe("Hello, world!");
+      // All deltas should be passed through
+      const deltas = events.filter((e) => e.type === "content_delta");
+      expect(deltas).toHaveLength(3);
+      expect((deltas[0] as any).delta).toBe("Hello");
+      expect((deltas[1] as any).delta).toBe(", ");
+      expect((deltas[2] as any).delta).toBe("world!");
     });
 
-    it("should emit message event with tool_use content", async () => {
+    it("should pass through tool_call events", async () => {
       const events: StreamEvent[] = [];
       const now = new Date().toISOString();
 
@@ -183,7 +182,6 @@ describe("createModel", () => {
               model: "test-model",
               startedAt: now,
             } as MessageStartEvent;
-            // Emit complete tool_call event (this is what adapters emit for complete tool calls)
             yield {
               type: "tool_call",
               callId: "call-1",
@@ -211,16 +209,18 @@ describe("createModel", () => {
         events.push(event);
       }
 
-      const messageEvent = events.find((e) => e.type === "message") as MessageEvent;
-      expect(messageEvent).toBeDefined();
-      expect(messageEvent.stopReason).toBe(StopReason.TOOL_USE);
-      expect(messageEvent.message.content).toHaveLength(1);
-      expect(messageEvent.message.content[0].type).toBe("tool_use");
-      expect((messageEvent.message.content[0] as any).name).toBe("search");
-      expect((messageEvent.message.content[0] as any).input).toEqual({ query: "test" });
+      // Tool call event should be passed through
+      const toolCall = events.find((e) => e.type === "tool_call") as any;
+      expect(toolCall).toBeDefined();
+      expect(toolCall.name).toBe("search");
+      expect(toolCall.input).toEqual({ query: "test" });
+
+      // Message end should have TOOL_USE stop reason
+      const messageEnd = events.find((e) => e.type === "message_end") as MessageEndEvent;
+      expect(messageEnd.stopReason).toBe(StopReason.TOOL_USE);
     });
 
-    it("should emit message event with reasoning content", async () => {
+    it("should pass through reasoning events", async () => {
       const events: StreamEvent[] = [];
 
       const model = createModel<ModelInput, ModelOutput, ModelInput, ModelOutput, StreamEvent>({
@@ -278,16 +278,16 @@ describe("createModel", () => {
         events.push(event);
       }
 
-      const messageEvent = events.find((e) => e.type === "message") as MessageEvent;
-      expect(messageEvent).toBeDefined();
-      expect(messageEvent.message.content).toHaveLength(2);
-      expect(messageEvent.message.content[0].type).toBe("reasoning");
-      expect((messageEvent.message.content[0] as any).text).toBe("Let me think...");
-      expect(messageEvent.message.content[1].type).toBe("text");
-      expect((messageEvent.message.content[1] as any).text).toBe("The answer is 42.");
+      // Reasoning events should be passed through
+      expect(events.some((e) => e.type === "reasoning_start")).toBe(true);
+      expect(events.some((e) => e.type === "reasoning_delta")).toBe(true);
+      expect(events.some((e) => e.type === "reasoning_end")).toBe(true);
+
+      const reasoningDelta = events.find((e) => e.type === "reasoning_delta") as any;
+      expect(reasoningDelta.delta).toBe("Let me think...");
     });
 
-    it("should pass through events from adapter", async () => {
+    it("should preserve event order from executor", async () => {
       const events: StreamEvent[] = [];
 
       const model = createModel<ModelInput, ModelOutput, ModelInput, ModelOutput, StreamEvent>({
@@ -334,14 +334,15 @@ describe("createModel", () => {
         events.push(event);
       }
 
-      // All adapter events should be present
-      expect(events.some((e) => e.type === "message_start")).toBe(true);
-      expect(events.some((e) => e.type === "content_start")).toBe(true);
-      expect(events.some((e) => e.type === "content_delta")).toBe(true);
-      expect(events.some((e) => e.type === "content_end")).toBe(true);
-      expect(events.some((e) => e.type === "message_end")).toBe(true);
-      // Plus the synthesized message event
-      expect(events.some((e) => e.type === "message")).toBe(true);
+      // All events should be present in order
+      const types = events.map((e) => e.type);
+      expect(types).toEqual([
+        "message_start",
+        "content_start",
+        "content_delta",
+        "content_end",
+        "message_end",
+      ]);
     });
   });
 });

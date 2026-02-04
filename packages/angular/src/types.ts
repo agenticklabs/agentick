@@ -4,9 +4,17 @@
  * @module @tentickle/angular/types
  */
 
+import type { ClientTransport } from "@tentickle/client";
+
 // ============================================================================
 // Configuration Types
 // ============================================================================
+
+/**
+ * Transport configuration for TentickleService.
+ * Can be a built-in transport type or a custom ClientTransport instance.
+ */
+export type TransportConfig = "sse" | "websocket" | "auto" | ClientTransport;
 
 /**
  * Configuration for TentickleService.
@@ -16,6 +24,30 @@ export interface TentickleConfig {
    * Base URL of the Tentickle server.
    */
   baseUrl: string;
+
+  /**
+   * Transport to use for communication.
+   * - "sse": HTTP/SSE transport (default for http:// and https:// URLs)
+   * - "websocket": WebSocket transport (default for ws:// and wss:// URLs)
+   * - "auto": Auto-detect based on URL scheme (default)
+   * - ClientTransport instance: Use a custom transport (e.g., SharedTransport for multi-tab)
+   *
+   * @example
+   * ```typescript
+   * import { createSharedTransport } from '@tentickle/client-multiplexer';
+   *
+   * providers: [
+   *   {
+   *     provide: TENTICKLE_CONFIG,
+   *     useValue: {
+   *       baseUrl: 'https://api.example.com',
+   *       transport: createSharedTransport({ baseUrl: 'https://api.example.com' }),
+   *     },
+   *   },
+   * ]
+   * ```
+   */
+  transport?: TransportConfig;
 
   /**
    * Authentication token (adds Authorization: Bearer header).
@@ -63,4 +95,5 @@ export type {
   SessionStreamEvent,
   ClientExecutionHandle,
   StreamingTextState,
+  ClientTransport,
 } from "@tentickle/client";

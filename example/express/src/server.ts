@@ -166,9 +166,14 @@ async function main() {
             sessionId: z.string().optional(),
           }),
           handler: async (params) => {
+            console.log(`[sessions:create] params.sessionId=${params.sessionId}`);
             const session = params.sessionId
               ? tentickleApp.session(params.sessionId)
               : tentickleApp.session();
+            console.log(
+              `[sessions:create] created/got session.id=${session.id}, status=${(session as any)._status}`,
+            );
+            console.log(`[sessions:create] app.sessions=${tentickleApp.sessions}`);
             return { sessionId: session.id };
           },
         }),
@@ -178,10 +183,16 @@ async function main() {
             sessionId: z.string(),
           }),
           handler: async (params) => {
+            console.log(`[sessions:get] params.sessionId=${params.sessionId}`);
+            console.log(`[sessions:get] app.has=${tentickleApp.has(params.sessionId)}`);
+            console.log(`[sessions:get] app.sessions=${tentickleApp.sessions}`);
             if (!tentickleApp.has(params.sessionId)) {
               throw new Error("Session not found");
             }
             const session = tentickleApp.session(params.sessionId);
+            console.log(
+              `[sessions:get] session.id=${session.id}, status=${(session as any)._status}`,
+            );
             const snapshot = session.snapshot();
             return {
               sessionId: params.sessionId,
@@ -241,16 +252,11 @@ async function main() {
   // Graceful shutdown
   const shutdown = async (signal: string) => {
     console.log(`\n${signal} received, shutting down...`);
+    server.close();
     devtools.stop();
     await tentickleMiddleware.gateway.close();
-    server.close(() => {
-      console.log("Server closed");
-      process.exit(0);
-    });
-    setTimeout(() => {
-      console.error("Forced shutdown");
-      process.exit(1);
-    }, 5000);
+    console.log("Server closed");
+    process.exit(0);
   };
 
   process.once("SIGTERM", () => shutdown("SIGTERM"));

@@ -1455,12 +1455,25 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
           type: "compiled",
           tick: currentTick,
           timestamp: timestamp(),
+          // Rendered output (existing)
           system: systemText || undefined,
           messages: compiled.formatted?.timeline,
           tools: compiled.tools?.map((t: any) => ({
             name: t.metadata?.name ?? t.name,
             description: t.metadata?.description ?? t.description,
           })),
+          // Raw compiled structure (before rendering)
+          rawCompiled: compiled.rawCompiled
+            ? {
+                sections: Object.fromEntries(compiled.rawCompiled.sections ?? new Map()),
+                timelineEntries: compiled.rawCompiled.timelineEntries,
+                system: compiled.rawCompiled.system,
+                tools: compiled.rawCompiled.tools,
+                ephemeral: compiled.rawCompiled.ephemeral,
+              }
+            : undefined,
+          // Formatted COMInput (after rendering)
+          formattedInput: compiled.formatted,
         });
 
         if (compiled.shouldStop) {
@@ -1492,14 +1505,31 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
         const modelInput = compiled.modelInput ?? compiled.formatted;
         const modelStartTime = Date.now();
 
-        // Emit model request to DevTools (provider-formatted input)
+        // Emit model request to DevTools
+        // modelInput is the Tentickle ModelInput format (after fromEngineState transformation)
         this.emitEvent({
           type: "model_request",
           tick: currentTick,
           timestamp: timestamp(),
           modelId: model?.metadata?.id ?? model?.metadata?.model,
+          // ModelInput: Tentickle's model input format
           input: modelInput,
+          // Stage marker for pipeline visualization
+          stage: "model_input",
         });
+
+        // Emit provider request to DevTools (Stage 4: what the SDK actually receives)
+        if (model.getProviderInput) {
+          const providerInput = await model.getProviderInput(modelInput);
+          this.emitEvent({
+            type: "provider_request",
+            tick: currentTick,
+            timestamp: timestamp(),
+            modelId: model?.metadata?.id ?? model?.metadata?.model,
+            provider: model?.metadata?.provider,
+            providerInput,
+          });
+        }
 
         // Stream model output if supported
         let modelOutput: any;
@@ -1524,7 +1554,7 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
                 message: messageEvent.message,
                 stopReason: messageEvent.stopReason,
                 usage: messageEvent.usage,
-                raw: messageEvent,
+                raw: messageEvent.raw, // Reconstructed provider response from adapter
               };
             }
           }
@@ -1585,14 +1615,28 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
         }
         const response = await model.toEngineState(modelOutput);
 
-        // Emit model response to DevTools (raw provider output + transformed)
+        // Emit model response to DevTools with full pipeline visibility
         this.emitEvent({
           type: "model_response",
           tick: currentTick,
           timestamp: timestamp(),
-          rawOutput: modelOutput,
-          transformedResponse: response,
-          usage: modelOutput?.usage,
+          // Provider output (raw from SDK - may be reconstructed for streaming)
+          providerOutput: modelOutput?.raw,
+          // ModelOutput (normalized Tentickle format)
+          modelOutput: {
+            model: modelOutput?.model,
+            message: modelOutput?.message,
+            usage: modelOutput?.usage,
+            stopReason: modelOutput?.stopReason,
+            toolCalls: modelOutput?.toolCalls,
+          },
+          // Engine state (how it's ingested into timeline)
+          engineState: {
+            newTimelineEntries: response.newTimelineEntries,
+            toolCalls: response.toolCalls,
+            shouldStop: response.shouldStop,
+            stopReason: response.stopReason,
+          },
         });
 
         // Track last model output for inspection

@@ -43,7 +43,7 @@ export * from "./model";
 export * from "./model-hooks";
 export * from "./utils";
 
-// Simplified adapter pattern
+// Adapter creation
 export * from "./stream-accumulator"; // AdapterDelta, StreamAccumulator
-export * from "./simple-adapter"; // createSimpleAdapter factory
+export * from "./adapter"; // createAdapter factory
 export * from "./adapter-helpers"; // Composable helpers for adapters

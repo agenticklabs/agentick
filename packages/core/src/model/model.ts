@@ -23,13 +23,10 @@ import type {
 } from "@tentickle/shared/models";
 import type {
   StreamEvent,
-  MessageStartEvent,
   MessageEndEvent,
   MessageEvent,
   ContentDeltaEvent,
-  ReasoningDeltaEvent,
   ToolCallEvent,
-  StreamEventBase,
 } from "@tentickle/shared/streaming";
 import type { Message } from "@tentickle/shared/messages";
 import { StopReason } from "@tentickle/shared";
@@ -41,32 +38,6 @@ import { ToolHookRegistry } from "../tool/tool-hooks";
 import type { EventBlock, TextBlock, ContentBlock } from "@tentickle/shared";
 
 export type { BaseModelToolReference, BaseModelConfig, BaseModelInput, BaseModelOutput };
-
-// ============================================================================
-// Event Helpers
-// ============================================================================
-
-let modelEventIdCounter = 0;
-
-/**
- * Generate a unique event ID for model stream events
- */
-function generateModelEventId(): string {
-  return `mevt_${Date.now()}_${++modelEventIdCounter}`;
-}
-
-/**
- * Create base event fields for StreamEvent
- * Model layer always uses tick=1 since it doesn't have engine context
- */
-function createModelEventBase(): StreamEventBase {
-  return {
-    id: generateModelEventId(),
-    sequence: 0, // Placeholder - session.emitEvent assigns actual sequence
-    tick: 1,
-    timestamp: new Date().toISOString(),
-  };
-}
 
 // ============================================================================
 // Core Interface
@@ -94,6 +65,9 @@ export interface EngineModel<TModelInput = ModelInput, TModelOutput = ModelOutpu
 
   /** Aggregate stream events into final output */
   processStream?: (events: StreamEvent[]) => Promise<TModelOutput>;
+
+  /** Transform model input to provider-specific format (for DevTools visibility) */
+  getProviderInput?: (input: TModelInput) => Promise<unknown>;
 }
 
 // ============================================================================
@@ -120,6 +94,16 @@ export interface ModelTransformers<
   processChunk?: (chunk: TChunk) => StreamEvent;
   /** Aggregate events into final output */
   processStream?: (events: TChunk[] | StreamEvent[]) => MaybePromise<TModelOutput>;
+  /** Reconstruct raw provider response from accumulated streaming data */
+  reconstructRaw?: (accumulated: {
+    text: string;
+    reasoning: string;
+    toolCalls: Array<{ id: string; name: string; input: Record<string, unknown> }>;
+    usage: { inputTokens: number; outputTokens: number; totalTokens: number };
+    stopReason: string;
+    model: string;
+    chunks: TChunk[];
+  }) => unknown;
 }
 
 /**
@@ -279,97 +263,12 @@ export function createModel<
 
         const iterator = executors.executeStream!(providerInput);
 
-        // Accumulate content for final message event
-        let messageStartedAt: string | undefined;
-        let accumulatedText = "";
-        let accumulatedReasoning = "";
-        const accumulatedToolCalls: Array<{
-          id: string;
-          name: string;
-          input: Record<string, unknown>;
-        }> = [];
-        let lastUsage:
-          | { inputTokens: number; outputTokens: number; totalTokens: number }
-          | undefined;
-        let lastStopReason: StopReason = StopReason.UNSPECIFIED;
-        let modelId: string | undefined;
-
+        // Simple pass-through: yield events from processChunk
+        // Accumulation is handled by the adapter (via StreamAccumulator in createAdapter)
+        // or by the caller if using createModel directly
         for await (const chunk of iterator) {
           const processed = processChunk(chunk);
-
-          // Track message lifecycle
-          if (processed.type === "message_start") {
-            messageStartedAt = new Date().toISOString();
-            modelId = (processed as MessageStartEvent).model || metadata.id;
-          }
-
-          // Accumulate content
-          if (processed.type === "content_delta") {
-            accumulatedText += (processed as ContentDeltaEvent).delta;
-          }
-          if (processed.type === "reasoning_delta") {
-            accumulatedReasoning += (processed as ReasoningDeltaEvent).delta;
-          }
-          if (processed.type === "tool_call") {
-            const tc = processed as ToolCallEvent;
-            accumulatedToolCalls.push({
-              id: tc.callId,
-              name: tc.name,
-              input: tc.input,
-            });
-          }
-          if (processed.type === "message_end") {
-            const endEvent = processed as MessageEndEvent;
-            if (endEvent.usage) lastUsage = endEvent.usage;
-            lastStopReason = endEvent.stopReason;
-          }
-
           yield processed;
-
-          // After message_end, emit a complete message event
-          if (processed.type === "message_end") {
-            const content: ContentBlock[] = [];
-
-            // Add reasoning block first if present
-            if (accumulatedReasoning) {
-              content.push({ type: "reasoning", text: accumulatedReasoning } as ContentBlock);
-            }
-            // Add text content
-            if (accumulatedText) {
-              content.push({ type: "text", text: accumulatedText });
-            }
-            // Add tool use blocks
-            for (const tc of accumulatedToolCalls) {
-              content.push({
-                type: "tool_use",
-                toolUseId: tc.id,
-                name: tc.name,
-                input: tc.input,
-              } as ContentBlock);
-            }
-
-            const messageEvent: MessageEvent = {
-              type: "message",
-              ...createModelEventBase(),
-              message: {
-                role: "assistant" as const,
-                content,
-              },
-              stopReason: lastStopReason,
-              usage: lastUsage,
-              model: modelId || metadata.id,
-              startedAt: messageStartedAt || new Date().toISOString(),
-              completedAt: new Date().toISOString(),
-            };
-
-            yield messageEvent;
-
-            // Reset accumulators for potential multi-message streams
-            messageStartedAt = undefined;
-            accumulatedText = "";
-            accumulatedReasoning = "";
-            accumulatedToolCalls.length = 0;
-          }
         }
       },
     );
@@ -392,6 +291,7 @@ export function createModel<
     processStream: processStream
       ? async (events: StreamEvent[]) => processStream(events)
       : undefined,
+    getProviderInput: async (input: TModelInput) => prepareInput(input),
   };
 }
 
@@ -603,99 +503,14 @@ export abstract class ModelAdapter<
             providerInput,
           });
 
-          // Accumulate content for final message event
-          let messageStartedAt: string | undefined;
-          let accumulatedText = "";
-          let accumulatedReasoning = "";
-          const accumulatedToolCalls: Array<{
-            id: string;
-            name: string;
-            input: Record<string, unknown>;
-          }> = [];
-          let lastUsage:
-            | { inputTokens: number; outputTokens: number; totalTokens: number }
-            | undefined;
-          let lastStopReason: StopReason = StopReason.UNSPECIFIED;
-          let modelId: string | undefined;
-
+          // Simple pass-through: yield events from processChunk
+          // Accumulation is handled by the adapter (via StreamAccumulator in createAdapter)
+          // or by the caller if using ModelAdapter directly
           for await (const chunk of self.executeStream(providerInput)) {
             const processed = self.processChunk
               ? self.processChunk(chunk)
               : (chunk as unknown as StreamEvent);
-
-            // Track message lifecycle
-            if (processed.type === "message_start") {
-              messageStartedAt = new Date().toISOString();
-              modelId = (processed as MessageStartEvent).model || self.metadata.id;
-            }
-
-            // Accumulate content
-            if (processed.type === "content_delta") {
-              accumulatedText += (processed as ContentDeltaEvent).delta;
-            }
-            if (processed.type === "reasoning_delta") {
-              accumulatedReasoning += (processed as ReasoningDeltaEvent).delta;
-            }
-            if (processed.type === "tool_call") {
-              const tc = processed as ToolCallEvent;
-              accumulatedToolCalls.push({
-                id: tc.callId,
-                name: tc.name,
-                input: tc.input,
-              });
-            }
-            if (processed.type === "message_end") {
-              const endEvent = processed as MessageEndEvent;
-              if (endEvent.usage) lastUsage = endEvent.usage;
-              lastStopReason = endEvent.stopReason;
-            }
-
             yield processed;
-
-            // After message_end, emit a complete message event
-            if (processed.type === "message_end") {
-              const content: ContentBlock[] = [];
-
-              // Add reasoning block first if present
-              if (accumulatedReasoning) {
-                content.push({ type: "reasoning", text: accumulatedReasoning } as ContentBlock);
-              }
-              // Add text content
-              if (accumulatedText) {
-                content.push({ type: "text", text: accumulatedText });
-              }
-              // Add tool use blocks
-              for (const tc of accumulatedToolCalls) {
-                content.push({
-                  type: "tool_use",
-                  toolUseId: tc.id,
-                  name: tc.name,
-                  input: tc.input,
-                } as ContentBlock);
-              }
-
-              const messageEvent: MessageEvent = {
-                type: "message",
-                ...createModelEventBase(),
-                message: {
-                  role: "assistant" as const,
-                  content,
-                },
-                stopReason: lastStopReason,
-                usage: lastUsage,
-                model: modelId || self.metadata.id,
-                startedAt: messageStartedAt || new Date().toISOString(),
-                completedAt: new Date().toISOString(),
-              };
-
-              yield messageEvent;
-
-              // Reset accumulators for potential multi-message streams
-              messageStartedAt = undefined;
-              accumulatedText = "";
-              accumulatedReasoning = "";
-              accumulatedToolCalls.length = 0;
-            }
           }
         },
       );
@@ -756,6 +571,11 @@ export abstract class ModelAdapter<
   public async fromEngineState(input: COMInput): Promise<TModelInput> {
     // Use default implementation with this model instance for transformation config
     return defaultFromEngineState(input, undefined, this as any) as Promise<TModelInput>;
+  }
+
+  /** Transform model input to provider-specific format (for DevTools visibility) */
+  public async getProviderInput(input: TModelInput): Promise<unknown> {
+    return this.prepareInput(input);
   }
 
   /** Convert model output to engine response */

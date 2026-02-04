@@ -25,20 +25,49 @@ export interface Tick {
   model?: string;
   startTime: number;
   endTime?: number;
-  /** Compiled context (after JSX compilation) */
-  compiled?: {
-    messages: unknown[];
+
+  // === REQUEST PIPELINE ===
+  /** 1. Raw compiled structure (before rendering) - JSX to semantic blocks */
+  rawCompiled?: {
+    sections: Record<string, unknown>;
+    timelineEntries: unknown[];
+    system: unknown[];
     tools: unknown[];
-    system?: string;
+    ephemeral: unknown[];
   };
-  /** Provider-formatted model request */
-  modelRequest?: unknown;
-  /** Raw provider response */
-  providerResponse?: unknown;
-  /** Transformed model output (engine format) */
-  modelOutput?: unknown;
-  /** COM layer output (final combined output) */
-  comOutput?: unknown;
+  /** 2. Formatted COMInput (after rendering) - Markdown/XML applied */
+  formattedInput?: {
+    timeline: unknown[];
+    system: unknown[];
+    sections: Record<string, unknown>;
+    tools: unknown[];
+    ephemeral: unknown[];
+    metadata?: Record<string, unknown>;
+  };
+  /** 3. ModelInput (what we pass to model layer) - Tentickle format */
+  modelInput?: unknown;
+  /** 4. Provider input (what SDK receives) - OpenAI/Anthropic/Google format */
+  providerInput?: unknown;
+
+  // === RESPONSE PIPELINE ===
+  /** 1. Provider output (raw SDK response) */
+  providerOutput?: unknown;
+  /** 2. ModelOutput (normalized Tentickle format) */
+  modelOutput?: {
+    model?: string;
+    message?: unknown;
+    usage?: unknown;
+    stopReason?: string;
+    toolCalls?: unknown[];
+  };
+  /** 3. Engine state (ingested into timeline) */
+  engineState?: {
+    newTimelineEntries?: unknown[];
+    toolCalls?: unknown[];
+    shouldStop?: boolean;
+    stopReason?: unknown;
+  };
+
   /** Fiber tree snapshot at this tick */
   fiberTree?: FiberNode | null;
   /** Fiber summary at this tick */
@@ -373,11 +402,10 @@ export function useDevToolsEvents() {
                 t.number === tickNum
                   ? {
                       ...t,
-                      compiled: {
-                        messages: event.messages as unknown[],
-                        tools: event.tools as unknown[],
-                        system: event.system as string | undefined,
-                      },
+                      // Pipeline visibility: raw compiled (stage 1)
+                      rawCompiled: event.rawCompiled as Tick["rawCompiled"],
+                      // Pipeline visibility: formatted input (stage 2)
+                      formattedInput: event.formattedInput as Tick["formattedInput"],
                     }
                   : t,
               ),
@@ -400,7 +428,8 @@ export function useDevToolsEvents() {
                 t.number === tickNum
                   ? {
                       ...t,
-                      modelRequest: event.input,
+                      // Pipeline visibility: ModelInput (stage 3)
+                      modelInput: event.input,
                     }
                   : t,
               ),
@@ -423,7 +452,12 @@ export function useDevToolsEvents() {
                 t.number === tickNum
                   ? {
                       ...t,
-                      modelOutput: event.message,
+                      // Pipeline visibility: Provider output (response stage 1)
+                      providerOutput: event.providerOutput,
+                      // Pipeline visibility: ModelOutput (response stage 2)
+                      modelOutput: event.modelOutput as Tick["modelOutput"],
+                      // Pipeline visibility: Engine state (response stage 3)
+                      engineState: event.engineState as Tick["engineState"],
                     }
                   : t,
               ),
@@ -434,7 +468,7 @@ export function useDevToolsEvents() {
         break;
       }
 
-      case "provider_response": {
+      case "provider_request": {
         const tickNum = event.tick as number;
         setExecutions((prev) => {
           const next = new Map(prev);
@@ -446,7 +480,8 @@ export function useDevToolsEvents() {
                 t.number === tickNum
                   ? {
                       ...t,
-                      providerResponse: event.providerOutput,
+                      // Pipeline visibility: Provider input (stage 4)
+                      providerInput: event.providerInput,
                     }
                   : t,
               ),

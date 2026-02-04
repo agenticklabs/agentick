@@ -14,6 +14,8 @@ interface ManagedSession {
   state: SessionState;
   coreSession: Session | null;
   appInfo: AppInfo;
+  /** The session name without app prefix - used when creating App sessions */
+  sessionName: string;
 }
 
 /**
@@ -100,10 +102,12 @@ export class SessionManager {
     };
 
     // Create the managed session
+    // Note: sessionName is the name WITHOUT app prefix - used when creating App sessions
     session = {
       state,
       coreSession: null,
       appInfo,
+      sessionName,
     };
 
     this.sessions.set(state.id, session);

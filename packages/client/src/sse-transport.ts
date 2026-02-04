@@ -35,6 +35,16 @@ export interface SSETransportConfig extends TransportConfig {
 
   /** Custom EventSource constructor */
   EventSource?: typeof EventSource;
+
+  /** Reconnection settings */
+  reconnect?: {
+    /** Enable auto-reconnection (default: true) */
+    enabled?: boolean;
+    /** Max reconnection attempts (default: 5) */
+    maxAttempts?: number;
+    /** Base delay between attempts in ms (default: 1000) */
+    delay?: number;
+  };
 }
 
 // ============================================================================
@@ -55,6 +65,8 @@ export class SSETransport implements ClientTransport {
   private eventHandlers = new Set<TransportEventHandler>();
   private stateHandlers = new Set<(state: TransportState) => void>();
   private subscriptions = new Set<string>();
+  private reconnectAttempts = 0;
+  private reconnectTimer?: ReturnType<typeof setTimeout>;
 
   constructor(config: SSETransportConfig) {
     this.config = config;
@@ -105,6 +117,7 @@ export class SSETransport implements ClientTransport {
     try {
       await this.connectionPromise;
       this.setState("connected");
+      this.reconnectAttempts = 0; // Reset on successful connection
     } catch (error) {
       this.setState("error");
       throw error;
@@ -114,7 +127,64 @@ export class SSETransport implements ClientTransport {
   }
 
   disconnect(): void {
+    // Cancel any pending reconnect
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = undefined;
+    }
+    this.reconnectAttempts = 0;
     this.closeEventSource();
+  }
+
+  private attemptReconnect(): void {
+    const reconnect = this.config.reconnect;
+    if (reconnect?.enabled === false) {
+      return;
+    }
+
+    const maxAttempts = reconnect?.maxAttempts ?? 5;
+    const baseDelay = reconnect?.delay ?? 1000;
+
+    if (this.reconnectAttempts >= maxAttempts) {
+      console.error(`SSE reconnection failed after ${maxAttempts} attempts`);
+      this.setState("error");
+      return;
+    }
+
+    this.reconnectAttempts++;
+    const delay = baseDelay * this.reconnectAttempts; // Exponential backoff
+
+    console.log(
+      `SSE reconnecting in ${delay}ms (attempt ${this.reconnectAttempts}/${maxAttempts})`,
+    );
+
+    this.reconnectTimer = setTimeout(async () => {
+      this.reconnectTimer = undefined;
+      try {
+        await this.connect();
+        // Re-subscribe to all sessions after reconnect
+        await this.resubscribeAll();
+      } catch (error) {
+        console.error("SSE reconnection failed:", error);
+        // attemptReconnect will be called again by onError if appropriate
+      }
+    }, delay);
+  }
+
+  private async resubscribeAll(): Promise<void> {
+    // Re-register subscriptions with the new connection
+    const sessionsToResubscribe = [...this.subscriptions];
+
+    // Clear local tracking - subscribeToSession will re-add them
+    this.subscriptions.clear();
+
+    for (const sessionId of sessionsToResubscribe) {
+      try {
+        await this.subscribeToSession(sessionId);
+      } catch (error) {
+        console.error(`Failed to resubscribe to session ${sessionId}:`, error);
+      }
+    }
   }
 
   private async openEventSource(): Promise<void> {
@@ -154,7 +224,13 @@ export class SSETransport implements ClientTransport {
             this.closeEventSource();
             reject(new Error("SSE connection failed"));
           } else {
-            this.setState("error");
+            // Connection was established but then failed - attempt reconnect
+            const wasConnected = this._state === "connected";
+            this.closeEventSource(false); // Preserve subscriptions for reconnect
+
+            if (wasConnected) {
+              this.attemptReconnect();
+            }
           }
         };
 
@@ -166,12 +242,14 @@ export class SSETransport implements ClientTransport {
     });
   }
 
-  private closeEventSource(): void {
+  private closeEventSource(clearSubscriptions = true): void {
     if (!this.eventSource) return;
     this.eventSource.close();
     this.eventSource = undefined;
     this._connectionId = undefined;
-    this.subscriptions.clear();
+    if (clearSubscriptions) {
+      this.subscriptions.clear();
+    }
     this.setState("disconnected");
   }
 

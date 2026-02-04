@@ -121,12 +121,29 @@ export interface DTTickEndEvent extends DevToolsEventBase {
 export interface DTCompiledEvent extends DevToolsEventBase {
   type: "compiled";
   tick: number;
-  /** Full conversation history */
+  /** Full conversation history (rendered timeline) */
   messages: Message[];
   /** Available tools */
   tools: ToolDefinition[];
   /** System prompt */
   system?: string;
+  /** Raw compiled structure (before rendering) - JSX to semantic blocks */
+  rawCompiled?: {
+    sections: Record<string, unknown>;
+    timelineEntries: unknown[];
+    system: unknown[];
+    tools: unknown[];
+    ephemeral: unknown[];
+  };
+  /** Formatted COMInput (after rendering) - Markdown/XML applied */
+  formattedInput?: {
+    timeline: unknown[];
+    system: unknown[];
+    sections: Record<string, unknown>;
+    tools: unknown[];
+    ephemeral: unknown[];
+    metadata?: Record<string, unknown>;
+  };
 }
 
 // ============================================================================
@@ -145,6 +162,8 @@ export interface DTModelStartEvent extends DevToolsEventBase {
 export interface DTModelRequestEvent extends DevToolsEventBase {
   type: "model_request";
   tick: number;
+  /** Model ID */
+  modelId?: string;
   /** The formatted input in Tentickle format (before provider transformation) */
   input?: {
     /** Messages array in Tentickle format */
@@ -156,10 +175,14 @@ export interface DTModelRequestEvent extends DevToolsEventBase {
     /** Other model parameters */
     [key: string]: unknown;
   };
+  /** Pipeline stage identifier */
+  stage?: "model_input";
 }
 
 export interface DTProviderRequestEvent extends DevToolsEventBase {
   type: "provider_request";
+  /** Tick number */
+  tick: number;
   /** Model ID */
   modelId?: string;
   /** Provider name (e.g., "openai", "anthropic", "google") */
@@ -184,8 +207,23 @@ export interface DTProviderResponseEvent extends DevToolsEventBase {
 export interface DTModelResponseEvent extends DevToolsEventBase {
   type: "model_response";
   tick: number;
-  /** Complete assistant message in Tentickle format */
-  message: Message;
+  /** Provider output (raw SDK response, may be reconstructed for streaming) */
+  providerOutput?: unknown;
+  /** ModelOutput (normalized Tentickle format) */
+  modelOutput?: {
+    model?: string;
+    message?: Message;
+    usage?: UsageStats;
+    stopReason?: string;
+    toolCalls?: Array<{ id: string; name: string; input: unknown }>;
+  };
+  /** Engine state (how response is ingested into timeline) */
+  engineState?: {
+    newTimelineEntries?: unknown[];
+    toolCalls?: unknown[];
+    shouldStop?: boolean;
+    stopReason?: unknown;
+  };
 }
 
 // ============================================================================
@@ -986,6 +1024,10 @@ const devToolsForwarders: Record<string, Forwarder> = {
       system: e.system as string | undefined,
       messages: (e.messages ?? []) as Message[],
       tools: (e.tools ?? []) as ToolDefinition[],
+      // Pipeline visibility: raw compiled structure (before rendering)
+      rawCompiled: e.rawCompiled as DTCompiledEvent["rawCompiled"],
+      // Pipeline visibility: formatted COMInput (after rendering)
+      formattedInput: e.formattedInput as DTCompiledEvent["formattedInput"],
       timestamp: ctx.timestamp,
     } as DTCompiledEvent);
   },
@@ -997,30 +1039,50 @@ const devToolsForwarders: Record<string, Forwarder> = {
       executionId: e.executionId as string,
       sequence: (e.sequence as number) ?? 0,
       tick: e.tick as number,
+      modelId: e.modelId as string | undefined,
       input: e.input as DTModelRequestEvent["input"],
+      stage: e.stage as DTModelRequestEvent["stage"],
       timestamp: ctx.timestamp,
     } as DTModelRequestEvent);
   },
 
+  provider_request: (e, ctx) => {
+    if (!e.executionId) return;
+    devToolsEmitter.emitEvent({
+      type: "provider_request",
+      executionId: e.executionId as string,
+      sequence: (e.sequence as number) ?? 0,
+      tick: e.tick as number,
+      modelId: e.modelId as string | undefined,
+      provider: e.provider as string | undefined,
+      providerInput: e.providerInput,
+      timestamp: ctx.timestamp,
+    } as DTProviderRequestEvent);
+  },
+
   model_response: (e, ctx) => {
     if (!e.executionId) return;
-    const rawOutput = e.rawOutput as { message?: Message } | undefined;
-    // Emit model_response with transformed message
+    // Emit model_response with full pipeline visibility
     devToolsEmitter.emitEvent({
       type: "model_response",
       executionId: e.executionId as string,
       sequence: (e.sequence as number) ?? 0,
       tick: e.tick as number,
-      message: rawOutput?.message ?? { role: "assistant", content: [] },
+      // Pipeline visibility: provider output (raw SDK response)
+      providerOutput: e.providerOutput,
+      // Pipeline visibility: ModelOutput (normalized Tentickle format)
+      modelOutput: e.modelOutput as DTModelResponseEvent["modelOutput"],
+      // Pipeline visibility: Engine state (timeline integration)
+      engineState: e.engineState as DTModelResponseEvent["engineState"],
       timestamp: ctx.timestamp,
     } as DTModelResponseEvent);
-    // Also emit provider_response with raw details (same sequence, different type)
+    // Also emit provider_response with raw details
     devToolsEmitter.emitEvent({
       type: "provider_response",
       executionId: e.executionId as string,
       sequence: (e.sequence as number) ?? 0,
       tick: e.tick as number,
-      providerOutput: e.rawOutput,
+      providerOutput: e.providerOutput,
       timestamp: ctx.timestamp,
     } as DTProviderResponseEvent);
   },

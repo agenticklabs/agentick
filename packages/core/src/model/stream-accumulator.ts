@@ -459,6 +459,33 @@ export class StreamAccumulator {
           this.reasoningStarted = false;
         }
 
+        // Finalize any in-progress tool calls
+        // Some providers (like OpenAI) don't send explicit tool_call_end events,
+        // they just send message_end with finish_reason: "tool_calls"
+        for (const [, tc] of this.toolCalls) {
+          const input = this.parseToolInput(tc.inputJson);
+          this.completedToolCalls.push({ id: tc.id, name: tc.name, input });
+
+          events.push({
+            type: "tool_call_end",
+            ...createEventBase(tick),
+            callId: tc.id,
+            blockIndex: tc.blockIndex,
+          } as ToolCallEndEvent);
+
+          events.push({
+            type: "tool_call",
+            ...createEventBase(tick),
+            callId: tc.id,
+            name: tc.name,
+            input,
+            blockIndex: tc.blockIndex,
+            startedAt: this.messageStartedAt || new Date().toISOString(),
+            completedAt: new Date().toISOString(),
+          } as ToolCallEvent);
+        }
+        this.toolCalls.clear();
+
         this.stopReason = delta.stopReason;
         if (delta.usage) {
           this.push({ type: "usage", usage: delta.usage });

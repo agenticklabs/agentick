@@ -46,15 +46,18 @@ export { createAiSdkModel, aiSdk, type AiSdkAdapter, type AiSdkAdapterConfig } f
 // Conversion utilities (for advanced use cases)
 export {
   // AI SDK → Engine conversions
-  aiSdkMessagesToEngineInput,
-  fromAiSdkInputMessages,
   fromAiSdkMessages,
   mapAiSdkContentToContentBlocks,
   mapAiSdkPartToContentBlock,
-  mapToolResultToContentBlocks,
   // Engine → AI SDK conversions
   toAiSdkMessages,
-  toAiSdkCompiledInput,
   mapContentBlocksToAiSdkContent,
   mapContentBlockToAiSdkPart,
+  mapToolResultContent,
+  // Tool conversion
+  convertToolsToToolSet,
+  // Stop reason mapping
+  toStopReason,
+  // Types
+  type ToolResultOutput,
 } from "./adapter";

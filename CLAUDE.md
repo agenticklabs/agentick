@@ -692,23 +692,256 @@ import { enableReactDevTools } from "@tentickle/core";
 enableReactDevTools(); // Connects to npx react-devtools on port 8097
 ```
 
-## Provider Adapters
+## Model Adapters
 
-Adapters transform between Tentickle's format and provider-specific APIs:
+Adapters transform between Tentickle's format and provider-specific APIs. Understanding the streaming architecture is critical for writing correct adapters.
+
+### Streaming Architecture
+
+```
+┌─────────────────┐    executeStream    ┌─────────────────┐
+│  Provider SDK   │ ──────────────────▶ │  Raw Chunks     │
+│  (OpenAI, etc)  │                     │  (provider fmt) │
+└─────────────────┘                     └────────┬────────┘
+                                                 │
+                                        mapChunk │ (adapter)
+                                                 ▼
+                                        ┌─────────────────┐
+                                        │  AdapterDelta   │
+                                        │  (normalized)   │
+                                        └────────┬────────┘
+                                                 │
+                                     processChunk│ (model.ts)
+                                                 ▼
+                                        ┌─────────────────┐
+                                        │  StreamEvent    │
+                                        │  (framework)    │
+                                        └────────┬────────┘
+                                                 │
+                                          yield  │ (to session)
+                                                 ▼
+                                        ┌─────────────────┐
+                                        │  Session/UI     │
+                                        └─────────────────┘
+```
+
+### Key Types
+
+**AdapterDelta** - What adapters emit (simplified):
 
 ```typescript
-import { createAnthropicAdapter } from "@tentickle/openai"; // or @tentickle/google
+type AdapterDelta =
+  | { type: "text"; delta: string }
+  | { type: "reasoning"; delta: string }
+  | { type: "tool_call"; id: string; name: string; input: unknown }
+  | { type: "message_start"; model?: string }
+  | { type: "message_end"; stopReason: StopReason; usage?: UsageStats }
+  | { type: "usage"; usage: Partial<UsageStats> }  // Standalone usage update
+  | { type: "error"; error: Error | string }
+```
 
-const adapter = createAnthropicAdapter({
-  apiKey: process.env.ANTHROPIC_API_KEY,
-});
+**StreamEvent** - What consumers receive (richer):
 
-// Used internally by session
-const session = createSession(MyApp, {
-  adapter,
-  model: "claude-3-5-sonnet-20241022",
+```typescript
+type StreamEvent =
+  | ContentDeltaEvent    // { type: "content_delta", delta: string, ... }
+  | MessageEndEvent      // { type: "message_end", stopReason, usage, ... }
+  | UsageEvent           // { type: "usage", usage: { inputTokens, ... } }
+  | MessageEvent         // { type: "message", message: Message, raw, ... }
+  // ... and more
+```
+
+### Creating an Adapter with `createAdapter`
+
+```typescript
+import { createAdapter, StopReason } from "@tentickle/core/model";
+
+const model = createAdapter<ProviderInput, ProviderOutput, ProviderChunk>({
+  metadata: {
+    id: "my-provider",
+    provider: "my-provider",
+    capabilities: [{ stream: true, toolCalls: true }],
+  },
+
+  prepareInput: (input: ModelInput) => {
+    // Transform Tentickle format → provider format
+    return { model: "...", messages: [...], tools: [...] };
+  },
+
+  mapChunk: (chunk: ProviderChunk): AdapterDelta | null => {
+    // Transform provider chunk → AdapterDelta
+    // Return null to ignore chunks
+  },
+
+  execute: async (input) => provider.generate(input),
+  executeStream: async function* (input) { yield* provider.stream(input) },
+
+  // Optional: Reconstruct full response from streaming chunks
+  reconstructRaw: (accumulated) => ({
+    id: "...",
+    choices: [{ message: { content: accumulated.text }, ... }],
+    usage: accumulated.usage,
+  }),
 });
 ```
+
+### Critical: Provider-Specific Streaming Quirks
+
+Different providers send data differently. **Always check provider behavior!**
+
+**OpenAI** sends streaming data in this order:
+
+1. Text delta chunks with `choices[0].delta.content`
+2. A chunk with `finish_reason: "stop"` (NO usage yet)
+3. A SEPARATE final chunk with just `usage` data (no choices)
+
+**Correct handling:**
+
+```typescript
+mapChunk: (chunk: ChatCompletionChunk): AdapterDelta | null => {
+  // Usage-only chunks (no choices) - emit "usage" NOT "message_end"
+  if (!chunk.choices || chunk.choices.length === 0) {
+    if (chunk.usage) {
+      return { type: "usage", usage: { ... } };  // ✅ Correct
+      // NOT: return { type: "message_end", ... }; // ❌ Wrong - causes duplicate
+    }
+    return null;
+  }
+
+  // finish_reason chunk → message_end (without usage)
+  if (choice.finish_reason) {
+    return { type: "message_end", stopReason: ..., usage: undefined };
+  }
+
+  // Content chunks
+  if (delta.content) {
+    return { type: "text", delta: delta.content };
+  }
+}
+```
+
+**Why this matters:**
+
+- `message_end` triggers accumulator reset in model.ts
+- Two `message_end` events = second one has empty content
+- `usage` event updates usage without resetting accumulators
+
+### Tool Call Streaming Patterns
+
+Providers handle tool calls differently. The StreamAccumulator supports both patterns:
+
+**Pattern 1: Complete Tool Calls** (Google, some providers)
+
+```typescript
+// Provider sends complete tool call in one chunk
+mapChunk: (chunk) => {
+  if (chunk.functionCall) {
+    return {
+      type: "tool_call",  // Complete in one event
+      id: chunk.functionCall.id || chunk.functionCall.name,
+      name: chunk.functionCall.name,
+      input: chunk.functionCall.args,
+    };
+  }
+}
+```
+
+**Pattern 2: Streamed Tool Calls** (OpenAI, AI SDK)
+
+```typescript
+// Provider streams tool calls in parts
+mapChunk: (chunk) => {
+  if (chunk.toolCallStart) {
+    return { type: "tool_call_start", id: chunk.id, name: chunk.name };
+  }
+  if (chunk.toolCallDelta) {
+    return { type: "tool_call_delta", id: chunk.id, delta: chunk.jsonChunk };
+  }
+  if (chunk.toolCallEnd) {
+    return { type: "tool_call_end", id: chunk.id, input: undefined }; // Accumulator parses JSON
+  }
+}
+```
+
+**Critical: OpenAI ID-by-Index Tracking**
+
+OpenAI only sends tool call `id` on the first chunk. Subsequent chunks only have `index`:
+
+```typescript
+// OpenAI adapter needs stateful tracking
+let toolCallIdByIndex = new Map<number, string>();
+
+mapChunk: (chunk) => {
+  if (chunk.tool_calls) {
+    for (const tc of chunk.tool_calls) {
+      // Track ID by index (only sent on first chunk)
+      if (tc.id) toolCallIdByIndex.set(tc.index, tc.id);
+      const id = toolCallIdByIndex.get(tc.index) || "";
+
+      if (tc.function?.name) {
+        return { type: "tool_call_start", id, name: tc.function.name };
+      }
+      if (tc.function?.arguments) {
+        return { type: "tool_call_delta", id, delta: tc.function.arguments };
+      }
+    }
+  }
+},
+
+executeStream: async function* (params) {
+  toolCallIdByIndex = new Map(); // Reset per stream!
+  // ...
+}
+```
+
+**No Explicit `tool_call_end`?**
+
+Some providers (native OpenAI) don't send explicit end events for tool calls - they just send `message_end` with `finish_reason: "tool_calls"`. The StreamAccumulator handles this automatically by finalizing any in-progress tool calls when `message_end` is received.
+
+### The `reconstructRaw` Option
+
+For streaming responses, `ModelOutput.raw` should contain a fully-formed provider response (as if non-streaming). Implement `reconstructRaw`:
+
+```typescript
+reconstructRaw: (accumulated) => {
+  // Build what a non-streaming response would look like
+  return {
+    id: accumulated.chunks[0]?.id ?? `chatcmpl-${Date.now()}`,
+    object: "chat.completion",
+    model: accumulated.model,
+    choices: [{
+      index: 0,
+      message: {
+        role: "assistant",
+        content: accumulated.text || null,
+        tool_calls: accumulated.toolCalls.length > 0 ? [...] : undefined,
+      },
+      finish_reason: mapStopReason(accumulated.stopReason),
+    }],
+    usage: {
+      prompt_tokens: accumulated.usage.inputTokens,
+      completion_tokens: accumulated.usage.outputTokens,
+      total_tokens: accumulated.usage.totalTokens,
+    },
+  };
+}
+```
+
+### Message Event Timing
+
+The final `message` event (containing the complete response) is yielded at **stream end**, not immediately after `message_end`. This ensures:
+
+- All content is accumulated (text, tools, reasoning)
+- All usage data is captured (may arrive in separate chunks)
+- `reconstructRaw` has all chunks available
+
+### Adapter Files
+
+| Adapter | Location                                  | Notes                          |
+| ------- | ----------------------------------------- | ------------------------------ |
+| OpenAI  | `packages/adapters/openai/src/openai.ts`  | Native OpenAI SDK              |
+| Google  | `packages/adapters/google/src/google.ts`  | Google Generative AI           |
+| AI SDK  | `packages/adapters/ai-sdk/src/adapter.ts` | Vercel AI SDK (multi-provider) |
 
 ## Common Debugging
 

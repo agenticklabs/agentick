@@ -325,6 +325,22 @@ export type StreamErrorEvent = {
 } & StreamEventBase;
 
 /**
+ * Usage event - standalone usage update.
+ *
+ * Some providers (e.g., OpenAI with stream_options.include_usage) send usage
+ * data in a separate chunk after the finish_reason chunk. This event captures
+ * that usage without triggering another message_end.
+ */
+export type UsageEvent = {
+  type: "usage";
+  usage: {
+    inputTokens: number;
+    outputTokens: number;
+    totalTokens: number;
+  };
+} & StreamEventBase;
+
+/**
  * ModelStreamEvent - All model output events.
  *
  * Discriminated union of all events that come from model streaming.
@@ -349,6 +365,8 @@ export type ModelStreamEvent =
   | ToolCallDeltaEvent
   | ToolCallEndEvent
   | ToolCallEvent
+  // Usage (standalone, for providers that send it separately)
+  | UsageEvent
   // Errors
   | StreamErrorEvent;
 
@@ -486,29 +504,54 @@ export type CompiledEvent = {
 } & StreamEventBase;
 
 /**
- * DevTools event: Model request (provider-formatted input)
+ * DevTools event: Model request (Tentickle format input)
  */
 export type ModelRequestEvent = {
   type: "model_request";
   executionId?: string;
   /** Model identifier */
   modelId?: string;
-  /** The input sent to the model (provider-specific format) */
+  /** The input sent to the model (Tentickle format) */
   input: unknown;
 } & StreamEventBase;
 
 /**
- * DevTools event: Model response (raw output + transformed)
+ * DevTools event: Provider request (SDK-specific format)
+ */
+export type ProviderRequestEvent = {
+  type: "provider_request";
+  executionId?: string;
+  /** Model identifier */
+  modelId?: string;
+  /** Provider name (e.g., "openai", "anthropic", "google") */
+  provider?: string;
+  /** The input sent to the provider SDK (provider-specific format) */
+  providerInput: unknown;
+} & StreamEventBase;
+
+/**
+ * DevTools event: Model response (pipeline visibility)
  */
 export type ModelResponseEvent = {
   type: "model_response";
   executionId?: string;
-  /** Raw output from the provider */
-  rawOutput: unknown;
-  /** Transformed response (engine format) */
-  transformedResponse: unknown;
-  /** Token usage */
-  usage?: UsageStats;
+  /** Provider output (raw SDK response, may be reconstructed for streaming) */
+  providerOutput?: unknown;
+  /** ModelOutput (normalized Tentickle format) */
+  modelOutput?: {
+    model?: string;
+    message?: unknown;
+    usage?: UsageStats;
+    stopReason?: string;
+    toolCalls?: Array<{ id: string; name: string; input: unknown }>;
+  };
+  /** Engine state (how response is ingested into timeline) */
+  engineState?: {
+    newTimelineEntries?: unknown[];
+    toolCalls?: unknown[];
+    shouldStop?: boolean;
+    stopReason?: unknown;
+  };
 } & StreamEventBase;
 
 /**
@@ -618,6 +661,7 @@ export type OrchestrationStreamEvent =
   // DevTools events
   | CompiledEvent
   | ModelRequestEvent
+  | ProviderRequestEvent
   | ModelResponseEvent
   // Fork/Spawn orchestration
   | ForkStartEvent
@@ -675,6 +719,7 @@ export function isModelStreamEvent(event: StreamEvent): event is ModelStreamEven
     "tool_call_delta",
     "tool_call_end",
     "tool_call",
+    "usage",
     "error",
   ].includes(event.type);
 }

@@ -35,6 +35,8 @@ import type { ContentBlock, Message } from "@tentickle/shared";
 // Client Configuration
 // ============================================================================
 
+import type { ClientTransport } from "./transport.js";
+
 /**
  * Configuration for TentickleClient.
  */
@@ -47,9 +49,10 @@ export interface TentickleClientConfig {
    * - "sse": HTTP/SSE transport (default for http:// and https:// URLs)
    * - "websocket": WebSocket transport (default for ws:// and wss:// URLs)
    * - "auto": Auto-detect based on URL scheme (default)
+   * - ClientTransport instance: Use a custom transport (e.g., SharedTransport for multi-tab)
    * @default "auto"
    */
-  transport?: "sse" | "websocket" | "auto";
+  transport?: "sse" | "websocket" | "auto" | ClientTransport;
 
   /** Override default endpoint paths (SSE transport only) */
   paths?: {
@@ -716,6 +719,10 @@ export class TentickleClient {
   private readonly EventSourceCtor: typeof EventSource;
   private readonly requestHeaders: Record<string, string>;
 
+  // Custom transport (when provided)
+  private readonly customTransport: ClientTransport | null = null;
+  private transportCleanup: (() => void) | null = null;
+
   private _state: ConnectionState = "disconnected";
   private _connectionId?: string;
   private eventSource?: EventSource;
@@ -744,6 +751,42 @@ export class TentickleClient {
     // Use custom implementations or fall back to globals
     this.fetchFn = config.fetch ?? globalThis.fetch.bind(globalThis);
     this.EventSourceCtor = config.EventSource ?? globalThis.EventSource;
+
+    // Check if a custom transport was provided
+    if (config.transport && typeof config.transport === "object") {
+      this.customTransport = config.transport;
+      this.setupTransportHandlers();
+    }
+  }
+
+  /**
+   * Setup handlers for custom transport events.
+   */
+  private setupTransportHandlers(): void {
+    if (!this.customTransport) return;
+
+    // Forward transport events to our handlers
+    const cleanupEvent = this.customTransport.onEvent((event) => {
+      this.handleIncomingEvent(event as Record<string, unknown>);
+    });
+
+    // Map transport state to connection state
+    const cleanupState = this.customTransport.onStateChange((state) => {
+      const connectionState: ConnectionState =
+        state === "disconnected"
+          ? "disconnected"
+          : state === "connecting"
+            ? "connecting"
+            : state === "connected"
+              ? "connected"
+              : "error";
+      this.setState(connectionState);
+    });
+
+    this.transportCleanup = () => {
+      cleanupEvent();
+      cleanupState();
+    };
   }
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -782,10 +825,22 @@ export class TentickleClient {
   // ══════════════════════════════════════════════════════════════════════════
 
   /**
-   * Ensure the SSE connection is established.
+   * Ensure the connection is established.
    * This is called lazily when subscribing to sessions.
    */
   private async ensureConnection(): Promise<void> {
+    // Use custom transport if provided
+    if (this.customTransport) {
+      if (this.customTransport.state === "connected") {
+        this._connectionId = this.customTransport.connectionId;
+        return;
+      }
+      await this.customTransport.connect();
+      this._connectionId = this.customTransport.connectionId;
+      return;
+    }
+
+    // Default SSE connection logic
     if (this._state === "connected") {
       return;
     }
@@ -900,6 +955,13 @@ export class TentickleClient {
       return;
     }
 
+    // Use custom transport if provided
+    if (this.customTransport) {
+      await this.customTransport.subscribeToSession(sessionId);
+      this.subscriptions.add(sessionId);
+      return;
+    }
+
     if (!this._connectionId) {
       throw new Error("Connection not established");
     }
@@ -928,10 +990,18 @@ export class TentickleClient {
 
   /** @internal - Called by SessionAccessor */
   async _unsubscribeFromSession(sessionId: string): Promise<void> {
-    if (!this._connectionId) {
+    if (!this.subscriptions.has(sessionId)) {
       return;
     }
-    if (!this.subscriptions.has(sessionId)) {
+
+    // Use custom transport if provided
+    if (this.customTransport) {
+      await this.customTransport.unsubscribeFromSession(sessionId);
+      this.subscriptions.delete(sessionId);
+      return;
+    }
+
+    if (!this._connectionId) {
       return;
     }
 
@@ -958,6 +1028,12 @@ export class TentickleClient {
     channelName: string,
     event: ChannelEvent,
   ): Promise<void> {
+    // Use custom transport if provided
+    if (this.customTransport) {
+      await this.customTransport.publishToChannel(sessionId, channelName, event);
+      return;
+    }
+
     const baseUrl = this.config.baseUrl.replace(/\/$/, "");
     const channelPath = this.config.paths?.channel ?? "/channel";
 
@@ -986,6 +1062,12 @@ export class TentickleClient {
   async _subscribeToChannel(sessionId: string, channelName: string): Promise<void> {
     // Ensure we have a connection before subscribing
     await this.ensureConnection();
+
+    // Use custom transport if provided
+    if (this.customTransport) {
+      await this.customTransport.subscribeToChannel(sessionId, channelName);
+      return;
+    }
 
     const baseUrl = this.config.baseUrl.replace(/\/$/, "");
     const channelPath = this.config.paths?.channel ?? "/channel";
@@ -1038,6 +1120,28 @@ export class TentickleClient {
     abortController: AbortController,
   ): Promise<void> {
     try {
+      // Use custom transport if provided
+      if (this.customTransport) {
+        const stream = this.customTransport.send(payload, options?.sessionId);
+
+        // Wire up abort
+        abortController.signal.addEventListener("abort", () => {
+          stream.abort(abortController.signal.reason ?? "Aborted");
+        });
+
+        for await (const event of stream) {
+          if (event.type === "channel" || event.type === "connection") {
+            continue;
+          }
+          handle._handleEvent(event as unknown as SessionStreamEvent);
+          this.handleIncomingEvent(event as Record<string, unknown>);
+        }
+
+        handle._complete();
+        return;
+      }
+
+      // Default HTTP fetch logic
       const baseUrl = this.config.baseUrl.replace(/\/$/, "");
       const sendPath = this.config.paths?.send ?? "/send";
 
@@ -1122,6 +1226,12 @@ export class TentickleClient {
    * Abort a session's current execution.
    */
   async abort(sessionId: string, reason?: string): Promise<void> {
+    // Use custom transport if provided
+    if (this.customTransport) {
+      await this.customTransport.abortSession(sessionId, reason);
+      return;
+    }
+
     const baseUrl = this.config.baseUrl.replace(/\/$/, "");
     const abortPath = this.config.paths?.abort ?? "/abort";
 
@@ -1143,20 +1253,25 @@ export class TentickleClient {
    * Close a session.
    */
   async closeSession(sessionId: string): Promise<void> {
-    const baseUrl = this.config.baseUrl.replace(/\/$/, "");
-    const closePath = this.config.paths?.close ?? "/close";
+    // Use custom transport if provided
+    if (this.customTransport) {
+      await this.customTransport.closeSession(sessionId);
+    } else {
+      const baseUrl = this.config.baseUrl.replace(/\/$/, "");
+      const closePath = this.config.paths?.close ?? "/close";
 
-    const response = await this.fetchFn(`${baseUrl}${closePath}`, {
-      method: "POST",
-      headers: this.requestHeaders,
-      credentials: this.config.withCredentials ? "include" : "same-origin",
-      body: JSON.stringify({ sessionId }),
-      signal: AbortSignal.timeout(this.config.timeout ?? 30000),
-    });
+      const response = await this.fetchFn(`${baseUrl}${closePath}`, {
+        method: "POST",
+        headers: this.requestHeaders,
+        credentials: this.config.withCredentials ? "include" : "same-origin",
+        body: JSON.stringify({ sessionId }),
+        signal: AbortSignal.timeout(this.config.timeout ?? 30000),
+      });
 
-    if (!response.ok) {
-      const text = await response.text();
-      throw new Error(`Failed to close: ${response.status} ${text}`);
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(`Failed to close: ${response.status} ${text}`);
+      }
     }
 
     // Clean up accessor
@@ -1176,6 +1291,12 @@ export class TentickleClient {
     toolUseId: string,
     result: ToolConfirmationResponse,
   ): Promise<void> {
+    // Use custom transport if provided
+    if (this.customTransport) {
+      await this.customTransport.submitToolResult(sessionId, toolUseId, result);
+      return;
+    }
+
     const baseUrl = this.config.baseUrl.replace(/\/$/, "");
     const toolResponsePath = this.config.paths?.toolResponse ?? "/tool-response";
 
@@ -1515,7 +1636,13 @@ export class TentickleClient {
    * Cleanup and close the client.
    */
   destroy(): void {
-    this.closeEventSource();
+    // Clean up custom transport
+    if (this.customTransport) {
+      this.transportCleanup?.();
+      this.customTransport.disconnect();
+    } else {
+      this.closeEventSource();
+    }
 
     for (const accessor of this.sessions.values()) {
       accessor._destroy();
@@ -1529,6 +1656,14 @@ export class TentickleClient {
     this.seenEventIds.clear();
     this.seenEventIdsOrder = [];
     this.subscriptions.clear();
+  }
+
+  /**
+   * Get the underlying transport (if using custom transport).
+   * Useful for accessing transport-specific features like leadership status.
+   */
+  getTransport(): ClientTransport | undefined {
+    return this.customTransport ?? undefined;
   }
 }
 
@@ -1558,7 +1693,8 @@ function detectTransport(baseUrl: string): "sse" | "websocket" {
  * - http:// or https:// -> SSE transport
  * - ws:// or wss:// -> WebSocket transport
  *
- * You can also explicitly set the transport in the config.
+ * You can also explicitly set the transport in the config, or provide
+ * a custom ClientTransport instance (e.g., SharedTransport for multi-tab).
  *
  * @example
  * ```typescript
@@ -1578,6 +1714,13 @@ function detectTransport(baseUrl: string): "sse" | "websocket" {
  *   transport: 'websocket',
  * });
  *
+ * // Custom transport (e.g., SharedTransport for multi-tab)
+ * import { createSharedTransport } from '@tentickle/client-multiplexer';
+ * const sharedClient = createClient({
+ *   baseUrl: 'https://api.example.com',
+ *   transport: createSharedTransport({ baseUrl: 'https://api.example.com' }),
+ * });
+ *
  * // Subscribe to a session
  * const session = client.subscribe('conv-123');
  *
@@ -1587,6 +1730,11 @@ function detectTransport(baseUrl: string): "sse" | "websocket" {
  * ```
  */
 export function createClient(config: TentickleClientConfig): TentickleClient {
+  // If a custom transport object is provided, use it directly
+  if (config.transport && typeof config.transport === "object") {
+    return new TentickleClient(config);
+  }
+
   const transport =
     config.transport === "auto" || !config.transport
       ? detectTransport(config.baseUrl)

@@ -9,6 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@tentickle/client-multiplexer": "link:../../packages/client-multiplexer",
     "@tentickle/react": "link:../../packages/react",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"

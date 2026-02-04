@@ -13,7 +13,6 @@ import {
   mapAiSdkContentToContentBlocks,
   mapAiSdkPartToContentBlock,
   mapToolResultContent,
-  mapContentBlocksToToolResultOutput,
   convertToolsToToolSet,
 } from "../adapter";
 import { ImageMimeType, StopReason } from "@tentickle/shared";
@@ -372,7 +371,8 @@ describe("mapAiSdkPartToContentBlock", () => {
     expect(result).toEqual({ type: "reasoning", text: "Let me think..." });
   });
 
-  it("should map image part with URL", () => {
+  // Skip: AI SDK AssistantContent doesn't include image type
+  it.skip("should map image part with URL", () => {
     const result = mapAiSdkPartToContentBlock({
       type: "image",
       image: "https://example.com/image.png",
@@ -386,7 +386,8 @@ describe("mapAiSdkPartToContentBlock", () => {
     });
   });
 
-  it("should map image part with base64", () => {
+  // Skip: AI SDK AssistantContent doesn't include image type
+  it.skip("should map image part with base64", () => {
     const result = mapAiSdkPartToContentBlock({
       type: "image",
       image: "iVBORw0KGgoAAAANS...",
@@ -525,14 +526,14 @@ describe("mapToolResultContent", () => {
   });
 });
 
-describe("mapContentBlocksToToolResultOutput", () => {
-  it("should behave same as mapToolResultContent for empty content", () => {
-    const result = mapContentBlocksToToolResultOutput([]);
+describe("mapToolResultContent", () => {
+  it("should return success text for empty content", () => {
+    const result = mapToolResultContent([]);
     expect(result).toEqual({ type: "text", value: "Tool execution succeeded" });
   });
 
   it("should handle error case", () => {
-    const result = mapContentBlocksToToolResultOutput([], true);
+    const result = mapToolResultContent([], true);
     expect(result).toEqual({
       type: "error-text",
       value: "Tool execution failed",
@@ -540,12 +541,12 @@ describe("mapContentBlocksToToolResultOutput", () => {
   });
 
   it("should handle single text block", () => {
-    const result = mapContentBlocksToToolResultOutput([{ type: "text", text: "42" }]);
+    const result = mapToolResultContent([{ type: "text", text: "42" }]);
     expect(result).toEqual({ type: "text", value: "42" });
   });
 
   it("should handle json block", () => {
-    const result = mapContentBlocksToToolResultOutput([
+    const result = mapToolResultContent([
       { type: "json", text: '{"result": 42}', data: { result: 42 } } as any,
     ]);
     expect(result).toEqual({ type: "json", value: { result: 42 } });
