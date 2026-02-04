@@ -38,7 +38,7 @@ export function enableReactDevTools(options?: { host?: string; port?: number }):
   // Dynamically import react-devtools-core to avoid issues if not installed
   try {
     // Try to require react-devtools-core
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
+
     const devToolsCore = require("react-devtools-core");
     connectToDevTools = devToolsCore.connectToDevTools;
   } catch {

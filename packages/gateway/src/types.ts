@@ -4,6 +4,7 @@
 
 import type { App } from "@tentickle/core";
 import type { KernelContext, UserContext } from "@tentickle/kernel";
+import type { AuthConfig } from "@tentickle/server";
 
 // Re-export auth types from server
 export type { AuthConfig, AuthResult } from "@tentickle/server";
@@ -54,7 +55,7 @@ export interface GatewayConfig {
   /**
    * Authentication configuration
    */
-  auth?: import("@tentickle/server").AuthConfig;
+  auth?: AuthConfig;
 
   /**
    * Run in embedded mode (no standalone server).
@@ -375,7 +376,7 @@ export function isMethodDefinition(value: unknown): value is MethodDefinition {
  * - Streaming function: async function* (params) { yield }
  * - Method definition: method({ schema, handler, roles, ... })
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+
 export type Method = SimpleMethodHandler | StreamingMethodHandler | MethodDefinition<any>;
 
 /**

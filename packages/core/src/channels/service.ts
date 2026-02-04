@@ -1,5 +1,5 @@
+import type { Channel } from "@tentickle/kernel";
 import {
-  Channel,
   ChannelSession,
   type ChannelEvent,
   type ChannelServiceInterface,

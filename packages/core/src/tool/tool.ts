@@ -22,7 +22,7 @@ import {
 } from "@tentickle/shared/tools";
 import type { ContentBlock } from "@tentickle/shared/blocks";
 import { type RecoveryAction, type TickState } from "../component/component";
-import { COM } from "../com/object-model";
+import type { COM } from "../com/object-model";
 import type { COMInput } from "../com/types";
 import type { JSX } from "../jsx/jsx-runtime";
 import type { ComponentBaseProps } from "../jsx/jsx-types";

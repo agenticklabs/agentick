@@ -1,4 +1,5 @@
-import { Context, KernelContext } from "./context";
+import type { KernelContext } from "./context";
+import { Context } from "./context";
 import {
   addMetric,
   setMetric,

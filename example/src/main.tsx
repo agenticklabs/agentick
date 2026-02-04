@@ -16,7 +16,8 @@ import { createApp } from "@tentickle/core/app";
 import { createModel, type ModelInput, type ModelOutput } from "@tentickle/core/model";
 import { fromEngineState, toEngineState } from "@tentickle/core/model/utils/language-model";
 import { useState, useEffect } from "@tentickle/core/hooks";
-import { Timeline, Model, Section, Message, MessageProps } from "@tentickle/core/jsx";
+import type { MessageProps } from "@tentickle/core/jsx";
+import { Timeline, Model, Section, Message } from "@tentickle/core/jsx";
 import { startDevToolsServer } from "@tentickle/devtools";
 import type {
   StreamEvent,

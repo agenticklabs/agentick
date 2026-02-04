@@ -1,7 +1,7 @@
 import React from "react";
 import type { JSX } from "react";
 import type { ContentBlock as ContentBlockType, MediaSource } from "@tentickle/shared";
-import { CodeLanguage } from "@tentickle/shared";
+import type { CodeLanguage } from "@tentickle/shared";
 import type { ComponentBaseProps } from "../jsx-types";
 
 // Helper for createElement

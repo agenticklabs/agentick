@@ -30,7 +30,8 @@
  */
 
 import WebSocket from "ws";
-import { Gateway, createGateway } from "./gateway.js";
+import type { Gateway } from "./gateway.js";
+import { createGateway } from "./gateway.js";
 import type { GatewayConfig, GatewayEvents } from "./types.js";
 import type { App, Session, SessionExecutionHandle, SendResult } from "@tentickle/core";
 

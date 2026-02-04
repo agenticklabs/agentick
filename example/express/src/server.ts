@@ -237,7 +237,7 @@ async function main() {
   });
 
   // Mount Tentickle middleware at /api
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+
   expressApp.use("/api", tentickleMiddleware as any);
 
   // Start server

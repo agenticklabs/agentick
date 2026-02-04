@@ -1,4 +1,5 @@
-import { Channel, type ChannelEvent } from "./channel";
+import type { Channel } from "./channel";
+import { type ChannelEvent } from "./channel";
 import { Context } from "./context";
 
 /**

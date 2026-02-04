@@ -1376,7 +1376,7 @@ export class Gateway extends EventEmitter {
    */
   private async executeAndStream(
     sessionId: string,
-    coreSession: import("@tentickle/core").Session,
+    coreSession: Session,
     messageText: string,
   ): Promise<void> {
     try {

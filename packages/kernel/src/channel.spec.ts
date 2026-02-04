@@ -1,5 +1,6 @@
-import { Channel, ChannelSession, ChannelEvent } from "./channel";
-import { KernelContext } from "./context";
+import type { ChannelEvent } from "./channel";
+import { Channel, ChannelSession } from "./channel";
+import type { KernelContext } from "./context";
 
 describe("Channel", () => {
   let channel: Channel;

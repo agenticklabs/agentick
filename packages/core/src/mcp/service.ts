@@ -5,11 +5,11 @@
  * Uses the official @modelcontextprotocol/sdk Client.
  */
 
-import { Client } from "@modelcontextprotocol/sdk/client";
-import { MCPClient } from "./client";
+import type { Client } from "@modelcontextprotocol/sdk/client";
+import type { MCPClient } from "./client";
 import { MCPTool } from "./tool";
 import type { MCPConfig, MCPToolDefinition } from "./types";
-import { COM } from "../com/object-model";
+import type { COM } from "../com/object-model";
 
 /**
  * MCP Service handles discovery and registration of MCP tools

@@ -1,4 +1,5 @@
-import { type GenerateContentParameters, GoogleGenAI } from "@google/genai";
+import type { GoogleGenAI } from "@google/genai";
+import { type GenerateContentParameters } from "@google/genai";
 import { type ProviderClientOptions } from "@tentickle/core";
 import { StopReason } from "@tentickle/shared";
 

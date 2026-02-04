@@ -1,5 +1,5 @@
 import { randomUUID } from "crypto";
-import { EventEmitter } from "node:events";
+import type { EventEmitter } from "node:events";
 import type { EngineInput, COMInput } from "../com/types";
 import type { ComponentDefinition } from "../component/component";
 import type { ProcedureGraph } from "@tentickle/kernel";

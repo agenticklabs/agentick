@@ -1,5 +1,5 @@
 import type { COMInput, COMOutput } from "../com/types";
-import { COM } from "../com/object-model";
+import type { COM } from "../com/object-model";
 import type { JSX } from "../jsx/jsx-runtime";
 import type { StopReason, UsageStats } from "@tentickle/shared";
 import type { ExecutableTool } from "../tool/tool";
@@ -8,7 +8,7 @@ import {
   type ComponentHookName,
   ComponentHookRegistry,
 } from "./component-hooks";
-import { ChannelService } from "../channels";
+import type { ChannelService } from "../channels";
 import { type CompiledStructure } from "../compiler/types";
 import type { ExecutionMessage } from "../engine/execution-types";
 

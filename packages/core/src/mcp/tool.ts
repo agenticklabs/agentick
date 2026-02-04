@@ -12,7 +12,7 @@ import {
   ToolExecutionType,
 } from "../tool/tool";
 import type { ContentBlock } from "@tentickle/shared";
-import { MCPClient } from "./client";
+import type { MCPClient } from "./client";
 import type { MCPToolDefinition } from "./types";
 import { z } from "zod";
 import type { Procedure } from "@tentickle/kernel";

@@ -1,5 +1,6 @@
 import { Context, type KernelContext } from "./context";
-import { ProcedureGraph, ProcedureNode, type ProcedureStatus } from "./procedure-graph";
+import type { ProcedureNode } from "./procedure-graph";
+import { ProcedureGraph, type ProcedureStatus } from "./procedure-graph";
 import { Telemetry } from "./telemetry";
 import { AbortError } from "@tentickle/shared";
 import { isAsyncIterable } from "./stream";

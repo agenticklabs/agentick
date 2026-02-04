@@ -1,4 +1,5 @@
-import { OpenAI, type ClientOptions } from "openai";
+import type { OpenAI } from "openai";
+import { type ClientOptions } from "openai";
 import { type ProviderClientOptions } from "@tentickle/core";
 import { StopReason } from "@tentickle/shared";
 

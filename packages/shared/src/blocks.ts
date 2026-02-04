@@ -33,7 +33,7 @@
  * @module
  */
 
-import {
+import type {
   BlockType,
   MediaSourceType,
   ImageMimeType,

@@ -1,7 +1,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { EventEmitter } from "node:events";
 import { type ChannelServiceInterface } from "./channel";
-import { ProcedureGraph } from "./procedure-graph";
+import type { ProcedureGraph } from "./procedure-graph";
 import type { ProcedureNode } from "./procedure-graph";
 import { ContextError } from "@tentickle/shared";
 import type { Middleware } from "./procedure";

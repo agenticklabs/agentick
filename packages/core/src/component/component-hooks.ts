@@ -1,6 +1,6 @@
 import type { Middleware } from "@tentickle/kernel";
 import type { EngineComponent, TickState, RecoveryAction, AfterCompileContext } from "./component";
-import { COM } from "../com/object-model";
+import type { COM } from "../com/object-model";
 import type { COMInput } from "../com/types";
 import type { JSX } from "../jsx/jsx-runtime";
 import { BaseHookRegistry } from "../hooks/base-hook-registry";

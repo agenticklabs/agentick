@@ -4,7 +4,7 @@
  * Utility functions for async testing, event handling, and stream processing.
  */
 
-import { EventEmitter } from "events";
+import type { EventEmitter } from "events";
 
 // =============================================================================
 // Async Utilities

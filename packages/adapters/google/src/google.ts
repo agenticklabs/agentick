@@ -5,12 +5,8 @@
  * Uses createAdapter for minimal boilerplate.
  */
 
-import {
-  GoogleGenAI,
-  GenerateContentResponse,
-  type GenerateContentParameters,
-  FinishReason,
-} from "@google/genai";
+import type { GenerateContentResponse } from "@google/genai";
+import { GoogleGenAI, type GenerateContentParameters, FinishReason } from "@google/genai";
 
 import {
   createAdapter,

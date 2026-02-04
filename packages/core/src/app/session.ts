@@ -817,7 +817,7 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
     const executionId = this._currentExecutionId ?? Context.tryGet()?.executionId;
 
     // Enrich event with executionId and tick if missing
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+
     let enrichedEvent: any =
       executionId && !("executionId" in event) ? { ...event, executionId } : event;
 

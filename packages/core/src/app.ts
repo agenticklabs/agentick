@@ -44,8 +44,8 @@
 // ============================================================================
 // Re-export createApp and run from @tentickle/instance
 // ============================================================================
-
-export { createApp, Tentickle, TentickleInstance, run } from "./tentickle-instance";
+import { createApp, Tentickle, TentickleInstance, run } from "./tentickle-instance";
+export { createApp, Tentickle, TentickleInstance, run };
 export type {
   MiddlewareKey,
   TentickleInstanceCreateOptions,
@@ -90,9 +90,9 @@ export async function runComponent<P extends Record<string, unknown>>(
   options: AppOptions = {},
 ): Promise<SessionExecutionHandle> {
   // Import synchronously since we're not doing dynamic import
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
+
   const { createApp: createAppFn } = require("./tentickle-instance") as {
-    createApp: typeof import("./tentickle-instance").createApp;
+    createApp: typeof createApp;
   };
   return await createAppFn(Component, options).run(input);
 }

@@ -8,7 +8,7 @@
 import type { Message } from "@tentickle/shared";
 import { validateAuth, type AuthResult } from "@tentickle/server";
 import type { GatewayMessage, ClientMessage } from "./protocol.js";
-import type { AuthConfig, ClientState } from "./types.js";
+import type { AuthConfig, ClientState, UserContext } from "./types.js";
 
 // ============================================================================
 // Transport Interface
@@ -82,7 +82,7 @@ export interface TransportConfig {
   onInvoke?: (
     method: string,
     params: Record<string, unknown>,
-    user?: import("@tentickle/kernel").UserContext,
+    user?: UserContext,
   ) => Promise<unknown>;
 }
 

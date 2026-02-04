@@ -11,7 +11,7 @@ import type {
 import type { ToolDefinition, ExecutableTool } from "../tool/tool";
 import type { Message, ContentBlock } from "@tentickle/shared";
 import type { ModelConfig, ModelInstance } from "../model/model";
-import { ChannelService } from "../channels";
+import type { ChannelService } from "../channels";
 import { EventEmitter } from "node:events";
 import { toJSONSchema } from "../utils/schema";
 import type { ExecutionMessage } from "../engine/execution-types";

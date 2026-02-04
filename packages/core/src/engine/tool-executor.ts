@@ -5,10 +5,11 @@ import {
   type ToolConfirmationResult,
   ToolExecutionType,
 } from "../tool/tool";
-import { COM } from "../com/object-model";
+import type { COM } from "../com/object-model";
 import { type ContentBlock } from "@tentickle/shared";
 import { type Middleware, type MiddlewarePipeline } from "@tentickle/kernel";
-import { type ToolHookMiddleware, type ToolHookName, ToolHookRegistry } from "../tool/tool-hooks";
+import type { ToolHookRegistry } from "../tool/tool-hooks";
+import { type ToolHookMiddleware, type ToolHookName } from "../tool/tool-hooks";
 import { applyRegistryMiddleware } from "../procedure";
 import { ClientToolCoordinator } from "./client-tool-coordinator";
 import { ToolConfirmationCoordinator } from "./tool-confirmation-coordinator";

@@ -20,6 +20,7 @@
     "type": "git",
     "url": "git+https://github.com/rlindgren/tentickle.git"
   },
+  "type": "module",
   "scripts": {
     "prepare": "simple-git-hooks",
     "build": "turbo build",
@@ -31,6 +32,7 @@
     "dev": "turbo dev",
     "lint": "turbo lint",
     "lint:all": "turbo lint && eslint .",
+    "lint:fix": "eslint . --fix",
     "format": "oxfmt --write .",
     "format:check": "turbo format:check",
     "changeset": "changeset",
@@ -59,7 +61,7 @@
   },
   "simple-git-hooks": {
     "pre-commit": "pnpm run format:check && pnpm run lint:all",
-    "commit-msg": "npx --no -- commitlint --edit ${1}"
+    "commit-msg": "npx --no -- commitlint --config commitlint.config.cjs --edit ${1}"
   },
   "packageManager": "pnpm@10.25.0"
 }

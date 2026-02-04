@@ -11,11 +11,11 @@
  * - Automatic tracking (execution graph, telemetry)
  */
 
-import { EventEmitter } from "node:events";
+import type { EventEmitter } from "node:events";
 import { Context, type KernelContext, isKernelContext } from "./context";
 import { ExecutionTracker, type ExecutionBoundaryConfig } from "./execution-tracker";
 import { randomUUID } from "node:crypto";
-import { ProcedureNode } from "./procedure-graph";
+import type { ProcedureNode } from "./procedure-graph";
 import { AbortError, ValidationError } from "@tentickle/shared";
 import { EventBuffer, type TypedEvent } from "./event-buffer";
 import { parseSchema } from "./schema";

@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-namespace */
 import React from "react";
 import type z from "zod";
 import type { ComponentClass, ComponentFactory } from "../component/component";

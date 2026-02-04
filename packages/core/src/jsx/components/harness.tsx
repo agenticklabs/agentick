@@ -35,7 +35,7 @@
 
 import React, { useEffect, useRef } from "react";
 import type { JSX } from "react";
-import { COM } from "../../com/object-model";
+import type { COM } from "../../com/object-model";
 import { type ComponentBaseProps } from "../jsx-types";
 import { SessionImpl } from "../../app/session";
 import type { ComponentFunction, SendResult, AppOptions, SessionOptions } from "../../app/types";
