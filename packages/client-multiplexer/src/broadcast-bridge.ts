@@ -14,9 +14,10 @@ import type { SendInput, ChannelEvent, ToolConfirmationResponse } from "@tentick
 
 export type BridgeMessage =
   // Leadership coordination
-  | { type: "leader:ready"; tabId: string }
-  | { type: "ping:leader"; tabId: string }
-  | { type: "pong:leader"; tabId: string }
+  | { type: "leader:collecting_subscriptions"; tabId: string } // Leader asking for subscriptions (not ready yet)
+  | { type: "leader:transport_ready"; tabId: string } // Leader's transport is connected and ready
+  | { type: "ping:leader"; tabId: string } // Follower asking if there's a ready leader
+  | { type: "pong:leader"; tabId: string } // Leader responding (only sent if transport ready)
   | { type: "subscriptions:announce"; tabId: string; sessions: string[]; channels: string[] }
 
   // Request forwarding (follower → leader)

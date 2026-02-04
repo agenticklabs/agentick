@@ -158,11 +158,12 @@ export class SharedTransport implements ClientTransport {
   }
 
   /**
-   * Wait until a leader is available (for followers).
+   * Wait until a leader is available AND ready to handle requests (for followers).
+   * The key distinction is waiting for "leader:transport_ready" not just "leader:ready".
    */
   private waitForLeader(): Promise<void> {
     return new Promise((resolve) => {
-      // Ask if there's a leader
+      // Ask if there's a leader ready to handle requests
       this.bridge.broadcast({ type: "ping:leader", tabId: this.elector.tabId });
 
       const timeout = setTimeout(() => {
@@ -171,14 +172,23 @@ export class SharedTransport implements ClientTransport {
         // Trigger re-election
         this.elector.awaitLeadership().catch(() => {});
         resolve();
-      }, 1000);
+      }, 2000); // Increased timeout to allow leader more time to connect
 
       const cleanup = this.bridge.onMessage((msg) => {
-        if (msg.type === "pong:leader" || msg.type === "leader:ready" || msg.type === "event") {
+        // Only resolve when leader's TRANSPORT is ready, not just when leader exists
+        // "pong:leader" is sent by leader with ready transport
+        // "leader:transport_ready" is broadcast when leader finishes connecting
+        // "event" means leader is actively sending events (definitely ready)
+        if (
+          msg.type === "pong:leader" ||
+          msg.type === "leader:transport_ready" ||
+          msg.type === "event"
+        ) {
           clearTimeout(timeout);
           cleanup();
           resolve();
         }
+        // Note: "leader:ready" is just the start of leader setup, not safe to use yet
       });
     });
   }
@@ -442,8 +452,14 @@ export class SharedTransport implements ClientTransport {
       this.readyResolve = resolve;
     });
 
-    // Announce we're the new leader and request subscription info
-    this.bridge.broadcast({ type: "leader:ready", tabId: this.elector.tabId });
+    // IMPORTANT: The order here is critical to avoid race conditions:
+    // 1. First, collect subscriptions from other tabs (they need to know we're becoming leader)
+    // 2. Then, connect our transport
+    // 3. Then, re-subscribe on the new transport
+    // 4. ONLY THEN announce we're ready to handle requests
+
+    // Step 1: Request subscription info from other tabs (but DON'T signal readiness yet)
+    this.bridge.broadcast({ type: "leader:collecting_subscriptions", tabId: this.elector.tabId });
 
     // Collect subscription announcements from other tabs
     const announcements = await this.bridge.collectResponses<{
@@ -462,10 +478,17 @@ export class SharedTransport implements ClientTransport {
       for (const c of ann.channels) allChannels.add(c);
     }
 
-    // Connect real transport
-    await this.connectAsLeader();
+    // Step 2: Connect real transport
+    try {
+      await this.connectAsLeader();
+    } catch (error) {
+      console.error("Leader failed to connect transport:", error);
+      // Resign leadership so another tab can try
+      this.elector.resign();
+      return;
+    }
 
-    // Subscribe to aggregated sessions/channels
+    // Step 3: Subscribe to aggregated sessions/channels
     if (this.realTransport) {
       for (const sessionId of allSessions) {
         await this.realTransport.subscribeToSession(sessionId).catch(() => {});
@@ -478,7 +501,10 @@ export class SharedTransport implements ClientTransport {
       }
     }
 
-    // Now we're fully ready as leader
+    // Step 4: NOW we're fully ready - announce it so followers can proceed
+    this.bridge.broadcast({ type: "leader:transport_ready", tabId: this.elector.tabId });
+
+    // Mark ourselves as ready
     this.readyResolve?.();
   }
 
@@ -573,8 +599,8 @@ export class SharedTransport implements ClientTransport {
   private handleBridgeMessage(msg: BridgeMessage): void {
     switch (msg.type) {
       // Leadership coordination
-      case "leader:ready":
-        // New leader is asking for subscriptions
+      case "leader:collecting_subscriptions":
+        // New leader is asking for subscriptions (but not ready yet)
         if (msg.tabId !== this.elector.tabId) {
           this.bridge.broadcast({
             type: "subscriptions:announce",
@@ -585,9 +611,14 @@ export class SharedTransport implements ClientTransport {
         }
         break;
 
+      case "leader:transport_ready":
+        // Leader is now ready to handle requests - handled by waitForLeader promise
+        break;
+
       case "ping:leader":
-        // Follower asking if there's a leader
-        if (this.elector.isLeader && msg.tabId !== this.elector.tabId) {
+        // Follower asking if there's a leader ready to handle requests
+        // IMPORTANT: Only respond if we have a ready transport, not just if we're the leader
+        if (this.elector.isLeader && this.realTransport && msg.tabId !== this.elector.tabId) {
           this.bridge.broadcast({ type: "pong:leader", tabId: this.elector.tabId });
         }
         break;
