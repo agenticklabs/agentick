@@ -56,7 +56,13 @@ export {
 
 // Test model factory
 export { createTestModel } from "./test-model";
-export type { TestModelOptions, TestModelInstance, StreamingOptions } from "./test-model";
+export type {
+  TestModelOptions,
+  TestModelInstance,
+  StreamingOptions,
+  ResponseItem,
+  ToolCallInput,
+} from "./test-model";
 
 // Agent rendering
 export { renderAgent, cleanup } from "./render-agent";

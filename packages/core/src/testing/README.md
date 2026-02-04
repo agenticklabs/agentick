@@ -1,0 +1,290 @@
+# Tentickle Testing Utilities
+
+Test your agents without making real API calls.
+
+## Quick Start
+
+```tsx
+import {
+  renderAgent,
+  createTestModel,
+  act,
+  cleanup,
+} from "@tentickle/core/testing";
+
+afterEach(() => cleanup());
+
+test("agent responds to user", async () => {
+  const { send, result, model } = renderAgent(MyAgent);
+
+  await act(async () => {
+    await send("Hello!");
+  });
+
+  expect(result.current.lastAssistantMessage).toBe("Test response");
+  expect(model.getCapturedInputs()).toHaveLength(1);
+});
+```
+
+## Test Model
+
+`createTestModel()` creates a mock model for testing.
+
+### Basic Usage
+
+```typescript
+// Simple text response
+const model = createTestModel({
+  defaultResponse: "Hello from test!",
+});
+
+// With tool calls
+const model = createTestModel({
+  defaultResponse: "I'll search for that",
+  toolCalls: [{ name: "search", input: { query: "test" } }],
+});
+
+// Dynamic responses
+const model = createTestModel({
+  responseGenerator: (input) => {
+    const lastMessage = input.messages.at(-1);
+    if (lastMessage?.content.includes("weather")) {
+      return "It's sunny!";
+    }
+    return "I don't understand.";
+  },
+});
+```
+
+### respondWith API
+
+Set the exact response for the next model call with automatic content detection:
+
+```typescript
+const model = createTestModel();
+
+// Simple text
+model.respondWith(["Hello world"]);
+
+// Text + tool call
+model.respondWith([
+  "Let me search for that",
+  { tool: { name: "search", input: { query: "test" } } },
+]);
+
+// Parallel tool calls
+model.respondWith([
+  {
+    tool: [
+      { name: "search", input: { query: "a" } },
+      { name: "search", input: { query: "b" } },
+    ],
+  },
+]);
+
+// With image
+model.respondWith([
+  "Here's the image:",
+  { image: { url: "https://example.com/image.png" } },
+]);
+
+// With reasoning
+model.respondWith([
+  { reasoning: "Let me think about this..." },
+  "The answer is 42",
+]);
+```
+
+`respondWith` is consumed on the next call - subsequent calls fall back to `defaultResponse`.
+
+### Content Types
+
+| Input                             | Detected As              |
+| --------------------------------- | ------------------------ |
+| `"text"`                          | Text block               |
+| `{ text: "..." }`                 | Explicit text block      |
+| `{ tool: { name, input } }`       | Single tool call         |
+| `{ tool: [...] }`                 | Parallel tool calls      |
+| `{ image: { url } }`              | Image from URL           |
+| `{ image: { data, mediaType? } }` | Base64 image             |
+| `{ reasoning: "..." }`            | Reasoning/thinking block |
+
+### Automatic Behavior
+
+- **Tool call IDs**: Auto-generated if not provided
+- **Stop reason**: Inferred from content (`tool_use` if tools present, `stop` otherwise)
+- **Streaming**: `respondWith` works with both `generate()` and `stream()`
+
+### Imperative Methods
+
+```typescript
+model.setResponse("New default response");
+model.setToolCalls([{ name: "foo", input: {} }]);
+model.setError(new Error("Simulated failure"));
+model.setStreaming({ enabled: true, chunkSize: 5, chunkDelay: 10 });
+```
+
+### Assertions
+
+```typescript
+// Check what the model received
+const inputs = model.getCapturedInputs();
+expect(inputs).toHaveLength(2);
+expect(inputs[0].messages).toContainEqual(
+  expect.objectContaining({ role: "user" })
+);
+
+// Use vitest mocks
+expect(model.mocks.execute).toHaveBeenCalledTimes(1);
+```
+
+## renderAgent
+
+Full agent lifecycle testing:
+
+```typescript
+const { send, result, model, session, rerender } = renderAgent(MyAgent, {
+  props: { mode: "helpful" },
+  model: createTestModel({ defaultResponse: "Hi!" }),
+});
+
+// Send messages
+await act(() => send("Hello"));
+
+// Check results
+expect(result.current.lastAssistantMessage).toBe("Hi!");
+expect(result.current.timeline).toHaveLength(2);
+
+// Rerender with new props
+await act(() => rerender({ mode: "concise" }));
+```
+
+### Options
+
+| Option     | Description                                      |
+| ---------- | ------------------------------------------------ |
+| `props`    | Props to pass to the agent component             |
+| `model`    | Custom test model (default: `createTestModel()`) |
+| `maxTicks` | Max ticks per execution (default: 10)            |
+
+## compileAgent
+
+Test the compiled structure without execution:
+
+```typescript
+const { sections, tools, messages, ephemeral } = await compileAgent(MyAgent, {
+  props: { mode: "helpful" },
+  messages: [{ role: "user", content: "Hello" }],
+});
+
+// Check system prompt
+expect(sections.get("instructions")).toContain("helpful");
+
+// Check available tools
+expect(tools.map((t) => t.name)).toContain("search");
+
+// Check message rendering
+expect(messages).toHaveLength(1);
+```
+
+## Async Helpers
+
+```typescript
+import {
+  sleep,
+  waitFor,
+  createDeferred,
+  captureAsyncGenerator,
+} from "@tentickle/core/testing";
+
+// Wait for condition
+await waitFor(() => expect(result.current.done).toBe(true));
+
+// Capture generator output
+const events = await captureAsyncGenerator(model.stream(input));
+
+// Control async flow
+const deferred = createDeferred<string>();
+// ... later
+deferred.resolve("done");
+```
+
+## act
+
+Wrap state updates like React Testing Library:
+
+```typescript
+await act(async () => {
+  await send("Hello");
+  // All state updates batched
+});
+
+// Sync version
+actSync(() => {
+  model.setResponse("New response");
+});
+```
+
+## cleanup
+
+Call after each test to reset state:
+
+```typescript
+afterEach(() => cleanup());
+```
+
+## Testing Patterns
+
+### Testing Tool Execution
+
+```typescript
+test("agent uses search tool", async () => {
+  const model = createTestModel();
+  const { send, result } = renderAgent(SearchAgent, { model });
+
+  // First tick: model calls tool
+  model.respondWith([
+    "Let me search",
+    { tool: { name: "search", input: { q: "weather" } } },
+  ]);
+
+  // Second tick: model responds with result
+  model.respondWith(["The weather is sunny!"]);
+
+  await act(() => send("What's the weather?"));
+
+  expect(result.current.lastAssistantMessage).toContain("sunny");
+});
+```
+
+### Testing Multi-Turn Conversations
+
+```typescript
+test("agent remembers context", async () => {
+  const model = createTestModel();
+  const { send, result } = renderAgent(ChatAgent, { model });
+
+  model.respondWith(["I'm Claude, nice to meet you!"]);
+  await act(() => send("Hi, I'm Alice"));
+
+  model.respondWith(["Of course, Alice!"]);
+  await act(() => send("Remember my name?"));
+
+  expect(result.current.lastAssistantMessage).toContain("Alice");
+});
+```
+
+### Testing Error Handling
+
+```typescript
+test("agent handles model errors", async () => {
+  const model = createTestModel();
+  const { send, result } = renderAgent(ResilientAgent, { model });
+
+  model.setError(new Error("API rate limited"));
+
+  await act(() => send("Hello"));
+
+  expect(result.current.error).toBeDefined();
+});
+```
