@@ -226,7 +226,6 @@ import {
   TentickleError,
   ValidationError,
   AbortError,
-  TimeoutError,
   isAbortError,
   isTentickleError,
 } from "@tentickle/shared";
@@ -243,9 +242,9 @@ try {
 }
 
 // Throw typed errors
-throw new ValidationError("email", "string", "Invalid email format");
+throw new ValidationError("email", "Invalid email format");
 throw new AbortError("User cancelled");
-throw new TimeoutError("Operation timed out", 30000);
+throw AbortError.timeout(30000);  // Timeout via AbortError factory
 ```
 
 ## Input Normalization

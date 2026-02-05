@@ -44,9 +44,14 @@ export {
   useComputed,
   useCom,
   useTickState,
-  useTickStart,
-  useTickEnd,
+  // Lifecycle hooks
+  useOnMount,
+  useOnUnmount,
+  useOnTickStart,
+  useOnTickEnd,
   useAfterCompile,
+  useContinuation,
+  // Data hooks
   useData,
   useInvalidateData,
   useComState,

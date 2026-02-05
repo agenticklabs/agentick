@@ -107,5 +107,5 @@ Any provider supported by the [Vercel AI SDK](https://sdk.vercel.ai/providers):
 
 ## Exports
 
-- `createAiSdkModel(config)` - Factory function returning `ModelClass`
-- `AiSdkModel` - JSX component for declarative usage
+- `aiSdk(config)` - Convenience factory (recommended)
+- `createAiSdkModel(config)` - Full factory function returning `ModelClass`

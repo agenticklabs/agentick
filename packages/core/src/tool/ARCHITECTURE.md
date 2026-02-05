@@ -714,10 +714,9 @@ const WeatherTool = createTool({
     // Cleanup resources
   },
 
-  onTickEnd: async (com, state) => {
+  onTickEnd: async (result, com) => {
     // Called after each model response
-    const lastMessage = state.messages[state.messages.length - 1];
-    console.log("Last response:", lastMessage);
+    console.log(`Tick ${result.tick} complete`);
   },
 });
 ```

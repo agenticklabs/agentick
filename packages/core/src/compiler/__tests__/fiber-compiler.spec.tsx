@@ -9,8 +9,8 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import React from "react";
 import {
   FiberCompiler,
-  useTickStart,
-  useTickEnd,
+  useOnTickStart,
+  useOnTickEnd,
   useAfterCompile,
   useData,
   useInvalidateData,
@@ -154,7 +154,7 @@ describe("FiberCompiler", () => {
       const tickEndCallback = vi.fn();
 
       const LifecycleComponent = () => {
-        useTickEnd(tickEndCallback);
+        useOnTickEnd(tickEndCallback);
         return React.createElement("Section", { id: "lifecycle" });
       };
 
@@ -192,14 +192,14 @@ describe("FiberCompiler", () => {
       await compiler.notifyAfterCompile(compiled, tickState, {});
 
       expect(afterCompileCallback).toHaveBeenCalledTimes(1);
-      expect(afterCompileCallback).toHaveBeenCalledWith(compiled);
+      expect(afterCompileCallback).toHaveBeenCalledWith(compiled, expect.anything());
     });
 
     it("useTickStart callback should run on next tick", async () => {
       const tickStartCallback = vi.fn();
 
       const TickStartComponent = () => {
-        useTickStart(tickStartCallback);
+        useOnTickStart(tickStartCallback);
         return React.createElement("Section", { id: "tickstart" });
       };
 
@@ -223,7 +223,7 @@ describe("FiberCompiler", () => {
       let showComponent = true;
 
       const ConditionalComponent = () => {
-        useTickEnd(tickEndCallback);
+        useOnTickEnd(tickEndCallback);
         return React.createElement("Section", { id: "conditional" });
       };
 
@@ -254,8 +254,8 @@ describe("FiberCompiler", () => {
       const callback2 = vi.fn();
 
       const MultiCallbackComponent = () => {
-        useTickEnd(callback1);
-        useTickEnd(callback2);
+        useOnTickEnd(callback1);
+        useOnTickEnd(callback2);
         return React.createElement("Section", { id: "multi" });
       };
 
@@ -271,11 +271,11 @@ describe("FiberCompiler", () => {
       const order: string[] = [];
 
       const AsyncCallbackComponent = () => {
-        useTickEnd(async () => {
+        useOnTickEnd(async () => {
           await new Promise((r) => setTimeout(r, 10));
           order.push("async1");
         });
-        useTickEnd(async () => {
+        useOnTickEnd(async () => {
           await new Promise((r) => setTimeout(r, 5));
           order.push("async2");
         });
@@ -299,7 +299,7 @@ describe("FiberCompiler", () => {
         renderCount++;
         const value = renderCount;
 
-        useTickEnd(() => {
+        useOnTickEnd(() => {
           capturedValue = value;
         });
 
@@ -693,12 +693,12 @@ describe("FiberCompiler", () => {
       const callback2 = vi.fn();
 
       const Component1 = () => {
-        useTickEnd(callback1);
+        useOnTickEnd(callback1);
         return React.createElement("Section", { id: "1" });
       };
 
       const Component2 = () => {
-        useTickEnd(callback2);
+        useOnTickEnd(callback2);
         return React.createElement("Section", { id: "2" });
       };
 
@@ -838,14 +838,14 @@ describe("FiberCompiler", () => {
       const order: string[] = [];
 
       const Child = () => {
-        useTickEnd(() => {
+        useOnTickEnd(() => {
           order.push("child");
         });
         return React.createElement("Section", { id: "child" });
       };
 
       const Parent = () => {
-        useTickEnd(() => {
+        useOnTickEnd(() => {
           order.push("parent");
         });
         return React.createElement(Child);
@@ -866,12 +866,12 @@ describe("FiberCompiler", () => {
       let showChild = true;
 
       const Child = () => {
-        useTickEnd(childCallback);
+        useOnTickEnd(childCallback);
         return React.createElement("Section", { id: "child" });
       };
 
       const Parent = () => {
-        useTickEnd(parentCallback);
+        useOnTickEnd(parentCallback);
         if (showChild) {
           return React.createElement(Child);
         }
@@ -949,7 +949,7 @@ describe("FiberCompiler", () => {
       const callback = vi.fn();
 
       const LifecycleComponent = () => {
-        useTickEnd(callback);
+        useOnTickEnd(callback);
         return React.createElement("Section", { id: "cleanup-test" });
       };
 

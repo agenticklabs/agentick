@@ -45,23 +45,23 @@ The compiler is used internally by the session. Direct usage:
 ```typescript
 import { createFiberCompiler } from '@tentickle/core/compiler';
 
-const compiler = createFiberCompiler({
-  com,
-  providers,
-  onRecompileRequest: () => { /* handle */ },
-});
+const compiler = createFiberCompiler(com);
 
-// Compile JSX to structure
-const { compiled } = await compiler.reconcile(<MyApp />, tickState);
+// Single-pass compile: reconcile + collect
+const compiled = await compiler.compile(<MyApp />, tickState);
+
+// Or separate steps for reactive updates:
+await compiler.reconcile(<MyApp />, { tickState });
+const compiled = compiler.collect();
 ```
 
 ## Architecture
 
-See [ARCHITECTURE.md](./ARCHITECTURE.md) for detailed documentation on:
+The compiler uses `react-reconciler` directly to build and manage a fiber tree from JSX:
 
-- Fiber architecture and reconciliation
-- Component lifecycle integration
-- Hooks system
-- Content block registry
+- **Fiber tree**: Built by react-reconciler, represents component hierarchy with hooks state
+- **Reconciliation**: React's diffing algorithm schedules updates
+- **Collection**: Traverses the reconciled TentickleNode tree to extract content blocks
+- **Lifecycle integration**: Notifies components of tick start/end events
 
-See [DESIGN.md](./DESIGN.md) for design philosophy and decisions.
+See the [reconciler README](../reconciler/README.md) for details on the react-reconciler integration.

@@ -398,7 +398,7 @@ export class FiberCompiler {
     this.currentPhase = "tickStart";
     try {
       if (this.com) {
-        await storeRunTickStartCallbacks(this.runtimeStore, this.com, state);
+        await storeRunTickStartCallbacks(this.runtimeStore, state, this.com);
       }
     } finally {
       this.currentPhase = "idle";
@@ -410,7 +410,7 @@ export class FiberCompiler {
     this.currentPhase = "tickEnd";
     try {
       if (this.com) {
-        await storeRunTickEndCallbacks(this.runtimeStore, this.com, result);
+        await storeRunTickEndCallbacks(this.runtimeStore, result, this.com);
       }
     } finally {
       this.currentPhase = "idle";
@@ -422,7 +422,7 @@ export class FiberCompiler {
     _state: TickState,
     _ctx: unknown,
   ): Promise<void> {
-    await storeRunAfterCompileCallbacks(this.runtimeStore, compiled);
+    await storeRunAfterCompileCallbacks(this.runtimeStore, compiled, this.com);
   }
 
   async notifyComplete(_finalState: unknown): Promise<void> {

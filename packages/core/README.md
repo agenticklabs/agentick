@@ -99,7 +99,7 @@ Group content with semantic meaning:
 Override the model for a subtree:
 
 ```tsx
-<Model id="gpt-4o-mini">
+<Model model={gpt4oMini}>
   {/* Children use gpt-4o-mini */}
 </Model>
 ```
@@ -145,17 +145,29 @@ function MyComponent() {
 
 ### Lifecycle Hooks
 
+All lifecycle hooks follow the pattern: data first, COM (context) last.
+
 ```tsx
-import { useTickStart, useTickEnd, useAfterCompile, useContinuation } from "@tentickle/core";
+import { useOnMount, useOnUnmount, useOnTickStart, useOnTickEnd, useAfterCompile, useContinuation } from "@tentickle/core";
 
 function MyComponent() {
+  // Called when component mounts
+  useOnMount((com) => {
+    console.log("Component mounted");
+  });
+
+  // Called when component unmounts
+  useOnUnmount((com) => {
+    console.log("Component unmounting");
+  });
+
   // Called at the start of each tick (before model call)
-  useTickStart(() => {
-    console.log("Tick starting...");
+  useOnTickStart((tickState) => {
+    console.log(`Tick ${tickState.tick} starting...`);
   });
 
   // Called at the end of each tick (after model response)
-  useTickEnd((result) => {
+  useOnTickEnd((result) => {
     console.log(`Tick ${result.tick} complete, tokens: ${result.usage?.totalTokens}`);
   });
 
@@ -170,6 +182,12 @@ function MyComponent() {
     if (result.text?.includes("<DONE>")) return false;
     if (result.tick >= 10) return false;  // Safety limit
     return true;
+  });
+
+  // Access COM when needed (always the last parameter)
+  useContinuation((result, com) => {
+    com.setState("lastTick", result.tick);
+    return !result.text?.includes("<DONE>");
   });
 }
 ```

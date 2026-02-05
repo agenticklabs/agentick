@@ -72,7 +72,14 @@ export { createEmptyCompiledStructure } from "./types";
 export { useCom, useTickState, TentickleProvider } from "../hooks";
 
 // Lifecycle hooks
-export { useTickStart, useTickEnd, useAfterCompile } from "../hooks";
+export {
+  useOnMount,
+  useOnUnmount,
+  useOnTickStart,
+  useOnTickEnd,
+  useAfterCompile,
+  useContinuation,
+} from "../hooks";
 
 // Data hook
 export { useData, useInvalidateData } from "../hooks";

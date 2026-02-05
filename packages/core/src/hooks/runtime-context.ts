@@ -119,23 +119,24 @@ export async function storeResolvePendingData(store: RuntimeStore): Promise<void
 }
 
 /**
- * Run tick start callbacks with COM and TickState.
+ * Run tick start callbacks with TickState and COM.
  */
 export async function storeRunTickStartCallbacks(
   store: RuntimeStore,
-  com: COM,
   tickState: TickState,
+  com: COM,
 ): Promise<void> {
   for (const callback of store.tickStartCallbacks) {
-    await callback(com, tickState);
+    await callback(tickState, com);
   }
 }
 
 /**
- * Run tick end callbacks with COM and TickResult.
+ * Run tick end callbacks with TickResult and COM.
  *
- * Callbacks receive COM and TickResult which contains both data about the completed tick
- * and control methods (stop/continue) to influence whether execution continues.
+ * Callbacks receive TickResult (data) and COM (context).
+ * TickResult contains both data about the completed tick and control methods
+ * (stop/continue) to influence whether execution continues.
  *
  * If a callback returns a boolean, it's automatically converted to a continue/stop call:
  * - true = result.continue()
@@ -144,11 +145,11 @@ export async function storeRunTickStartCallbacks(
  */
 export async function storeRunTickEndCallbacks(
   store: RuntimeStore,
-  com: COM,
   result: TickResult,
+  com: COM,
 ): Promise<void> {
   for (const callback of store.tickEndCallbacks) {
-    const decision = await callback(com, result);
+    const decision = await callback(result, com);
     // If callback returns boolean, auto-convert to continue/stop
     if (decision === true) {
       result.continue();
@@ -165,9 +166,10 @@ export async function storeRunTickEndCallbacks(
 export async function storeRunAfterCompileCallbacks(
   store: RuntimeStore,
   compiled: CompiledStructure,
+  com: COM,
 ): Promise<void> {
   for (const callback of store.afterCompileCallbacks) {
-    await callback(compiled);
+    await callback(compiled, com);
   }
 }
 

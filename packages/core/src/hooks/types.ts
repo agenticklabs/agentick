@@ -57,14 +57,14 @@ export interface UsageStats {
 }
 
 /**
- * TickResult - the result of a completed tick, passed to useTickEnd callbacks.
+ * TickResult - the result of a completed tick, passed to useOnTickEnd callbacks.
  *
  * Contains both data about the tick and control methods to influence continuation.
  * This enables agent loops with custom termination conditions.
  *
  * @example
  * ```tsx
- * useTickEnd((result) => {
+ * useOnTickEnd((result) => {
  *   // Check if task is complete
  *   if (result.text?.includes("<DONE>")) {
  *     result.stop("task-complete");
@@ -133,24 +133,29 @@ export interface TickResult {
 }
 
 /**
- * Callback for useTickStart hook.
+ * Callback for useOnTickStart hook.
  *
- * Receives COM and TickState for consistency with other lifecycle hooks.
+ * Receives TickState first (primary data), COM second (context).
  *
  * @example
  * ```tsx
- * useTickStart((com, tickState) => {
+ * useOnTickStart((tickState) => {
  *   console.log(`Tick ${tickState.tick} starting`);
+ * });
+ *
+ * useOnTickStart((tickState, com) => {
+ *   com.setState("lastTick", tickState.tick);
  * });
  * ```
  */
-export type TickStartCallback = (com: COMImpl, tickState: TickState) => void | Promise<void>;
+export type TickStartCallback = (tickState: TickState, com: COMImpl) => void | Promise<void>;
 
 /**
- * Callback for useTickEnd hook.
+ * Callback for useOnTickEnd hook.
  *
- * Receives COM and TickResult which contains both data about the completed tick
- * and control methods (stop/continue) to influence whether execution continues.
+ * Receives TickResult first (primary data), COM second (context).
+ * TickResult contains both data about the completed tick and control methods
+ * (stop/continue) to influence whether execution continues.
  *
  * Can return a boolean for simple cases (true = continue, false = stop),
  * or call result.stop()/result.continue() for control with reasons.
@@ -158,20 +163,51 @@ export type TickStartCallback = (com: COMImpl, tickState: TickState) => void | P
  * @example
  * ```tsx
  * // Simple boolean return
- * useTickEnd((com, result) => !result.text?.includes("<DONE>"));
+ * useOnTickEnd((result) => !result.text?.includes("<DONE>"));
  *
  * // With reasons via methods
- * useTickEnd((com, result) => {
+ * useOnTickEnd((result, com) => {
  *   if (result.text?.includes("<DONE>")) result.stop("complete");
  *   else result.continue("working");
  * });
  * ```
  */
 export type TickEndCallback = (
-  com: COMImpl,
   result: TickResult,
+  com: COMImpl,
 ) => void | boolean | Promise<void | boolean>;
 
-export type AfterCompileCallback = (compiled: CompiledStructure) => void | Promise<void>;
+/**
+ * Callback for useOnMount hook.
+ *
+ * Called when the component mounts.
+ *
+ * @example
+ * ```tsx
+ * useOnMount((com) => {
+ *   console.log("Component mounted");
+ * });
+ * ```
+ */
+export type MountCallback = (com: COMImpl) => void | Promise<void>;
+
+/**
+ * Callback for useOnUnmount hook.
+ *
+ * Called when the component unmounts.
+ *
+ * @example
+ * ```tsx
+ * useOnUnmount((com) => {
+ *   console.log("Component unmounting");
+ * });
+ * ```
+ */
+export type UnmountCallback = (com: COMImpl) => void | Promise<void>;
+
+export type AfterCompileCallback = (
+  compiled: CompiledStructure,
+  com: COMImpl,
+) => void | Promise<void>;
 
 // Signal type is exported from ./signal.ts

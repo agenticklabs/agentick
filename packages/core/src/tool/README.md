@@ -83,7 +83,7 @@ const TodoTool = createTool({
   handler: async ({ action }) => { /* ... */ },
 
   // Render current state to model context each tick
-  render: (com, state) => (
+  render: (tickState, com) => (
     <Section id="todos">
       Current todos: {JSON.stringify(todoService.list())}
     </Section>
@@ -108,7 +108,7 @@ const DeleteTool = createTool({
 
 ## Lifecycle Hooks
 
-Tools support lifecycle hooks for JSX usage:
+Tools support lifecycle hooks for JSX usage. All hooks follow the "data first, COM last" pattern:
 
 ```typescript
 const MyTool = createTool({
@@ -116,8 +116,8 @@ const MyTool = createTool({
   // ...
   onMount: (com) => console.log('Tool mounted'),
   onUnmount: (com) => console.log('Tool unmounted'),
-  onTickStart: (com, state) => { /* before each tick */ },
-  onTickEnd: (com, state) => { /* after each tick */ },
+  onTickStart: (tickState, com) => { /* before each tick */ },
+  onTickEnd: (result, com) => { /* after each tick */ },
 });
 ```
 

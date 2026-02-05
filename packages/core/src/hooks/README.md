@@ -10,6 +10,8 @@ The most important hooks for agent development are the lifecycle hooks that cont
 
 The primary hook for implementing agent loops with custom termination conditions.
 
+All callbacks receive data first, COM (context) last. Most callbacks only need the data parameter.
+
 ```tsx
 import { useContinuation } from "@tentickle/core";
 
@@ -28,11 +30,11 @@ function MyAgent() {
     }
   });
 
-  // Multiple conditions
-  useContinuation((result) =>
-    result.toolCalls.length > 0 ||           // pending tools
-    (result.tick < 10 && !result.text?.includes("DONE"))
-  );
+  // Access COM when needed (second parameter)
+  useContinuation((result, com) => {
+    com.setState("lastTick", result.tick);
+    return !result.text?.includes("<DONE>");
+  });
 
   return <Timeline />;
 }
@@ -191,37 +193,73 @@ function AgentWithLimits() {
 }
 ```
 
-## Other Lifecycle Hooks
+## Lifecycle Hooks
 
-### useTickStart
+All lifecycle hooks follow the pattern: data first, COM (context) last.
 
-Run code at the start of each tick (before compilation):
+### useOnMount
+
+Run code when the component mounts:
 
 ```tsx
 function AgentWithSetup() {
-  useTickStart(() => {
-    console.log("Tick starting!");
-    // Refresh external state, update context, etc.
+  useOnMount((com) => {
+    console.log("Component mounted");
+    com.setState("initialized", true);
   });
 
   return <Timeline />;
 }
 ```
 
-> **Note:** `useTickStart` uses `useEffect` internally, so the callback is registered _after_ the component's first render. This means:
+### useOnUnmount
+
+Run code when the component unmounts:
+
+```tsx
+function AgentWithCleanup() {
+  useOnUnmount((com) => {
+    console.log("Component unmounting");
+    // Cleanup resources
+  });
+
+  return <Timeline />;
+}
+```
+
+### useOnTickStart
+
+Run code at the start of each tick (before compilation):
+
+```tsx
+function AgentWithSetup() {
+  useOnTickStart((tickState) => {
+    console.log(`Tick ${tickState.tick} starting!`);
+  });
+
+  // With COM access
+  useOnTickStart((tickState, com) => {
+    com.setState("lastTickStart", tickState.tick);
+  });
+
+  return <Timeline />;
+}
+```
+
+> **Note:** `useOnTickStart` uses `useEffect` internally, so the callback is registered _after_ the component's first render. This means:
 >
 > - **Tick 1**: Component mounts, effect queues callback registration
 > - **Tick 2+**: Callback fires at tick start
 >
-> If you need code to run on the very first tick, use component initialization or `useMemo` instead.
+> If you need code to run on the very first tick, use `useOnMount` or `useMemo` instead.
 
-### useTickEnd
+### useOnTickEnd
 
 Lower-level hook for post-tick processing (useContinuation is built on this):
 
 ```tsx
 function AgentWithTelemetry() {
-  useTickEnd((result) => {
+  useOnTickEnd((result) => {
     // Log tick metrics
     analytics.track("tick_complete", {
       tick: result.tick,
@@ -238,13 +276,11 @@ function AgentWithTelemetry() {
 
 ### useAfterCompile
 
-Inspect or modify compiled context before sending to model:
+Inspect compiled context before sending to model, optionally request recompilation:
 
 ```tsx
 function AgentWithContextManagement() {
-  const com = useCom();
-
-  useAfterCompile((compiled) => {
+  useAfterCompile((compiled, com) => {
     // Estimate tokens
     const tokens = estimateTokens(compiled);
 

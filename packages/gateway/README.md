@@ -93,7 +93,7 @@ await middleware.gateway.close();
 ```typescript
 interface GatewayConfig {
   // Server (standalone mode only)
-  port?: number;              // Default: 3000
+  port?: number;              // Default: 18789
   host?: string;              // Default: "127.0.0.1"
   id?: string;                // Auto-generated if not provided
 

@@ -856,7 +856,7 @@ class GreetingAgent extends Component<GreetingProps, GreetingState> {
 ### Function Component with Hooks
 
 ```tsx
-import { useSignal, useInit, useOnMount, useTickEnd } from "tentickle";
+import { useSignal, useInit, useOnMount, useOnTickEnd } from "tentickle";
 
 function CounterAgent(props: { initialCount: number }) {
   const count = useSignal(props.initialCount);
@@ -870,7 +870,7 @@ function CounterAgent(props: { initialCount: number }) {
     console.log("CounterAgent mounted");
   });
 
-  useTickEnd((com, state) => {
+  useOnTickEnd((result) => {
     saveCount(count());
   });
 

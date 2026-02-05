@@ -28,7 +28,7 @@ import type { COMInput } from "../com/types";
 import type { JSX } from "../jsx/jsx-runtime";
 import type { ComponentBaseProps } from "../jsx/jsx-types";
 import type { CompiledStructure } from "../compiler/types";
-import { useCom, useTickState, useTickStart, useTickEnd, useAfterCompile } from "../hooks";
+import { useCom, useTickState, useOnTickStart, useOnTickEnd, useAfterCompile } from "../hooks";
 
 // Re-export for convenience
 export {
@@ -201,19 +201,20 @@ export interface CreateToolOptions<TInput = any, TOutput extends ContentBlock[] 
   middleware?: Middleware[];
 
   // === Component Lifecycle Hooks (for JSX usage) ===
+  // All callbacks receive data first, com (context) last.
 
   onMount?: (com: COM) => void | Promise<void>;
   onUnmount?: (com: COM) => void | Promise<void>;
   onStart?: (com: COM) => void | Promise<void>;
-  onTickStart?: (com: COM, tickState: TickState) => void | Promise<void>;
-  onTickEnd?: (com: COM, result: TickResult) => void | Promise<void>;
-  onComplete?: (com: COM, finalState: COMInput) => void | Promise<void>;
-  onError?: (com: COM, state: TickState) => RecoveryAction | void;
-  render?: (com: COM, state: TickState) => JSX.Element | null;
+  onTickStart?: (tickState: TickState, com: COM) => void | Promise<void>;
+  onTickEnd?: (result: TickResult, com: COM) => void | Promise<void>;
+  onComplete?: (finalState: COMInput, com: COM) => void | Promise<void>;
+  onError?: (tickState: TickState, com: COM) => RecoveryAction | void;
+  render?: (tickState: TickState, com: COM) => JSX.Element | null;
   onAfterCompile?: (
-    com: COM,
     compiled: CompiledStructure,
-    state: TickState,
+    tickState: TickState,
+    com: COM,
     ctx: any,
   ) => void | Promise<void>;
 }
@@ -392,19 +393,19 @@ export function createTool<TInput = any, TOutput extends ContentBlock[] = Conten
       };
     }, [com]);
 
-    // Tick lifecycle hooks - use the com/tickState/result from hook params for consistency
+    // Tick lifecycle hooks - data first, com last
     if (options.onTickStart) {
-      useTickStart((hookCom, hookTickState) => {
+      useOnTickStart((hookTickState, hookCom) => {
         if (options.onTickStart) {
-          Promise.resolve(options.onTickStart(hookCom, hookTickState)).catch(console.error);
+          Promise.resolve(options.onTickStart(hookTickState, hookCom)).catch(console.error);
         }
       });
     }
 
     if (options.onTickEnd) {
-      useTickEnd((hookCom, result) => {
+      useOnTickEnd((result, hookCom) => {
         if (options.onTickEnd) {
-          Promise.resolve(options.onTickEnd(hookCom, result)).catch(console.error);
+          Promise.resolve(options.onTickEnd(result, hookCom)).catch(console.error);
         }
       });
     }
@@ -412,7 +413,7 @@ export function createTool<TInput = any, TOutput extends ContentBlock[] = Conten
     if (options.onAfterCompile) {
       useAfterCompile((compiled) => {
         if (options.onAfterCompile) {
-          Promise.resolve(options.onAfterCompile(com, compiled, tickState, {})).catch(
+          Promise.resolve(options.onAfterCompile(compiled, tickState, com, {})).catch(
             console.error,
           );
         }
@@ -432,7 +433,7 @@ export function createTool<TInput = any, TOutput extends ContentBlock[] = Conten
 
     // If custom render provided, wrap both tool element and render output
     if (options.render) {
-      const renderOutput = options.render(com, tickState);
+      const renderOutput = options.render(tickState, com);
       return React.createElement(React.Fragment, null, toolElement, renderOutput);
     }
 
