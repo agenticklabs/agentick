@@ -12,14 +12,14 @@
 
 import { describe, it, expect } from "vitest";
 import { createApp, Model, System, Timeline } from "../../index";
-import { createTestModel } from "../../testing/test-model";
+import { createTestAdapter } from "../../testing/test-adapter";
 import type { Message, TextBlock } from "@tentickle/shared";
 import { isTextBlock } from "@tentickle/shared/blocks";
 
 describe("Duplicate Message Prevention", () => {
   describe("First tick - single user message", () => {
     it("should NOT duplicate user message on first tick", async () => {
-      const mockModel = createTestModel({
+      const mockModel = createTestAdapter({
         defaultResponse: "Test response",
       });
 
@@ -63,7 +63,7 @@ describe("Duplicate Message Prevention", () => {
 
   describe("Subsequent ticks - conversation flow", () => {
     it("should NOT duplicate messages across multiple exchanges", async () => {
-      const mockModel = createTestModel();
+      const mockModel = createTestAdapter();
 
       const Agent = () => {
         return (
@@ -122,7 +122,7 @@ describe("Duplicate Message Prevention", () => {
     });
 
     it("should NOT duplicate assistant messages", async () => {
-      const mockModel = createTestModel();
+      const mockModel = createTestAdapter();
 
       const Agent = () => {
         return (
@@ -190,7 +190,7 @@ describe("Duplicate Message Prevention", () => {
 
   describe("Multiple exchanges - history preservation", () => {
     it("should handle 5 consecutive exchanges without duplication", async () => {
-      const mockModel = createTestModel();
+      const mockModel = createTestAdapter();
 
       const Agent = () => {
         return (
@@ -244,7 +244,7 @@ describe("Duplicate Message Prevention", () => {
     });
 
     it("should preserve all messages across 3 exchanges", async () => {
-      const mockModel = createTestModel();
+      const mockModel = createTestAdapter();
 
       const Agent = () => {
         return (

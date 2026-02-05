@@ -146,7 +146,7 @@ function MyComponent() {
 ### Lifecycle Hooks
 
 ```tsx
-import { useTickStart, useTickEnd, useAfterCompile } from "@tentickle/core";
+import { useTickStart, useTickEnd, useAfterCompile, useContinuation } from "@tentickle/core";
 
 function MyComponent() {
   // Called at the start of each tick (before model call)
@@ -155,33 +155,38 @@ function MyComponent() {
   });
 
   // Called at the end of each tick (after model response)
-  useTickEnd(() => {
-    console.log("Tick complete!");
+  useTickEnd((result) => {
+    console.log(`Tick ${result.tick} complete, tokens: ${result.usage?.totalTokens}`);
   });
 
   // Called after JSX compiles but before model call
-  useAfterCompile(() => {
-    console.log("Compilation done");
+  useAfterCompile((compiled) => {
+    console.log(`Compiled ${compiled.tools.length} tools`);
+  });
+
+  // Control agent loop continuation (primary hook for agent behavior)
+  useContinuation((result) => {
+    // Return true to continue, false to stop
+    if (result.text?.includes("<DONE>")) return false;
+    if (result.tick >= 10) return false;  // Safety limit
+    return true;
   });
 }
 ```
 
-### Data Hooks
+### Message Hooks
 
 ```tsx
-import { useData, useInvalidateData } from "@tentickle/core";
+import { useQueuedMessages, useOnMessage } from "@tentickle/core";
 
 function MyComponent() {
-  // Fetch data with caching
-  const { data, loading, error } = useData(
-    "user-profile",
-    async () => fetchUserProfile(),
-    { ttl: 60000 }  // Cache for 1 minute
-  );
+  // Access messages queued for this tick
+  const queuedMessages = useQueuedMessages();
 
-  // Invalidate cached data
-  const invalidate = useInvalidateData();
-  const refresh = () => invalidate("user-profile");
+  // React to incoming messages
+  useOnMessage((message, com, state) => {
+    console.log("Received:", message);
+  });
 }
 ```
 
@@ -366,6 +371,46 @@ const app = createApp(MyApp, {
 });
 ```
 
+### Basic Options
+
+```typescript
+const app = createApp(MyApp, {
+  model: createOpenAIModel(),  // Override model (optional if <Model> in JSX)
+  maxTicks: 10,                // Max model calls per execution (default: 10)
+  devTools: true,              // Enable DevTools emission
+  tools: [ExternalTool],       // Additional tools (merged with JSX <Tool>s)
+  mcpServers: { ... },         // MCP server configs
+});
+```
+
+### Lifecycle Callbacks
+
+Callbacks provide a cleaner alternative to event listeners:
+
+```typescript
+const app = createApp(MyApp, {
+  model,
+
+  // Execution lifecycle
+  onTickStart: (tick, executionId) => console.log(`Tick ${tick}`),
+  onTickEnd: (tick, usage) => console.log(`Used ${usage?.totalTokens} tokens`),
+  onComplete: (result) => console.log(`Done: ${result.response}`),
+  onError: (error) => console.error(error),
+
+  // All events (fine-grained)
+  onEvent: (event) => { /* handle any stream event */ },
+
+  // Send lifecycle
+  onBeforeSend: (session, input) => { /* modify input */ },
+  onAfterSend: (session, result) => { /* post-processing */ },
+
+  // Tool confirmation
+  onToolConfirmation: async (call, message) => {
+    return await askUser(`Allow ${call.name}?`);
+  },
+});
+```
+
 ### Session Management
 
 ```tsx
@@ -384,6 +429,58 @@ const result = await session.run({
 const snapshot = session.snapshot();
 console.log(snapshot.timeline);
 console.log(snapshot.usage);
+```
+
+### Session Persistence & Hibernation
+
+Control hibernation, limits, and auto-cleanup:
+
+```typescript
+const app = createApp(MyApp, {
+  model,
+  sessions: {
+    store: new RedisSessionStore(redis),  // Or ":memory:" for SQLite
+    maxActive: 100,                        // Max concurrent sessions
+    idleTimeout: 5 * 60 * 1000,           // Hibernate after 5 min idle
+    autoHibernate: true,                  // Auto-hibernate on idle
+  },
+
+  // Session lifecycle hooks
+  onSessionCreate: (session) => { /* ... */ },
+  onSessionClose: (sessionId) => { /* ... */ },
+
+  // Hibernation hooks
+  onBeforeHibernate: (session, snapshot) => {
+    // Return false to cancel, modified snapshot, or void
+    if (session.inspect().lastToolCalls.length > 0) return false;
+  },
+  onAfterHibernate: (sessionId, snapshot) => { /* ... */ },
+  onBeforeHydrate: (sessionId, snapshot) => {
+    // Migrate old formats, validate, etc.
+  },
+  onAfterHydrate: (session, snapshot) => { /* ... */ },
+});
+```
+
+### Middleware Inheritance
+
+Apps inherit from the global `Tentickle` instance by default:
+
+```typescript
+import { Tentickle, createApp } from "@tentickle/core";
+
+// Register global middleware
+Tentickle.use('*', loggingMiddleware);
+Tentickle.use('tool:*', authMiddleware);
+
+// App inherits global middleware (default)
+const app = createApp(MyApp, { model });
+
+// Isolated app (for testing)
+const testApp = createApp(TestApp, {
+  model,
+  inheritDefaults: false
+});
 ```
 
 ### Standalone Run

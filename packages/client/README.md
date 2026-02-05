@@ -120,6 +120,37 @@ Receives tool confirmation requests for this session.
 
 Abort the current execution or close the session server-side.
 
+### `accessor.invoke(method, params?)`
+
+Invoke a custom gateway method with auto-injected sessionId.
+
+```typescript
+const session = client.subscribe("conv-123");
+
+// Invoke custom methods defined in gateway
+const tasks = await session.invoke("tasks:list");
+const newTask = await session.invoke("tasks:create", {
+  title: "Buy groceries",
+  priority: "high"
+});
+
+// Nested namespaces
+await session.invoke("tasks:admin:archive");
+```
+
+### `accessor.stream(method, params?)`
+
+Invoke a streaming method with auto-injected sessionId. Returns an async generator.
+
+```typescript
+const session = client.subscribe("conv-123");
+
+// Stream updates from a custom method
+for await (const change of session.stream("tasks:watch")) {
+  console.log("Task changed:", change);
+}
+```
+
 ### `accessor.channel(name)`
 
 Session-scoped channel for app-defined pub/sub.

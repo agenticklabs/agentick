@@ -22,6 +22,7 @@ import {
 } from "@tentickle/shared/tools";
 import type { ContentBlock } from "@tentickle/shared/blocks";
 import { type RecoveryAction, type TickState } from "../component/component";
+import type { TickResult } from "../hooks/types";
 import type { COM } from "../com/object-model";
 import type { COMInput } from "../com/types";
 import type { JSX } from "../jsx/jsx-runtime";
@@ -204,8 +205,8 @@ export interface CreateToolOptions<TInput = any, TOutput extends ContentBlock[] 
   onMount?: (com: COM) => void | Promise<void>;
   onUnmount?: (com: COM) => void | Promise<void>;
   onStart?: (com: COM) => void | Promise<void>;
-  onTickStart?: (com: COM, state: TickState) => void | Promise<void>;
-  onTickEnd?: (com: COM, state: TickState) => void | Promise<void>;
+  onTickStart?: (com: COM, tickState: TickState) => void | Promise<void>;
+  onTickEnd?: (com: COM, result: TickResult) => void | Promise<void>;
   onComplete?: (com: COM, finalState: COMInput) => void | Promise<void>;
   onError?: (com: COM, state: TickState) => RecoveryAction | void;
   render?: (com: COM, state: TickState) => JSX.Element | null;
@@ -391,19 +392,19 @@ export function createTool<TInput = any, TOutput extends ContentBlock[] = Conten
       };
     }, [com]);
 
-    // Tick lifecycle hooks
+    // Tick lifecycle hooks - use the com/tickState/result from hook params for consistency
     if (options.onTickStart) {
-      useTickStart(() => {
+      useTickStart((hookCom, hookTickState) => {
         if (options.onTickStart) {
-          Promise.resolve(options.onTickStart(com, tickState)).catch(console.error);
+          Promise.resolve(options.onTickStart(hookCom, hookTickState)).catch(console.error);
         }
       });
     }
 
     if (options.onTickEnd) {
-      useTickEnd(() => {
+      useTickEnd((hookCom, result) => {
         if (options.onTickEnd) {
-          Promise.resolve(options.onTickEnd(com, tickState)).catch(console.error);
+          Promise.resolve(options.onTickEnd(hookCom, result)).catch(console.error);
         }
       });
     }

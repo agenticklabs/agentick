@@ -397,7 +397,9 @@ export class FiberCompiler {
     this.tickState = state;
     this.currentPhase = "tickStart";
     try {
-      await storeRunTickStartCallbacks(this.runtimeStore);
+      if (this.com) {
+        await storeRunTickStartCallbacks(this.runtimeStore, this.com, state);
+      }
     } finally {
       this.currentPhase = "idle";
     }
@@ -407,7 +409,9 @@ export class FiberCompiler {
     this.tickState = state;
     this.currentPhase = "tickEnd";
     try {
-      await storeRunTickEndCallbacks(this.runtimeStore, result);
+      if (this.com) {
+        await storeRunTickEndCallbacks(this.runtimeStore, this.com, result);
+      }
     } finally {
       this.currentPhase = "idle";
     }
@@ -441,7 +445,7 @@ export class FiberCompiler {
     // Dispatch message to all handlers registered via useOnMessage
     const com = this.com;
     for (const handler of this.messageStore.handlers) {
-      await handler(com as any, message, state);
+      await handler(message, com as any, state);
     }
   }
 

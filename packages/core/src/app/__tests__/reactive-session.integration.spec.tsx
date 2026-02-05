@@ -12,14 +12,12 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createApp } from "../../app";
-import { createModel, type ModelInput, type ModelOutput } from "../../model/model";
-import { fromEngineState, toEngineState } from "../../model/utils/language-model";
+import { createTestAdapter, type TestAdapterInstance } from "../../testing/test-adapter";
+import type { ModelInput } from "../../model/model";
 import { System, User } from "../../jsx/components/messages";
 import { Model, Section } from "../../jsx/components/primitives";
 import { Timeline } from "../../jsx/components/timeline";
 import { useState, useEffect, useSignal, useComState } from "../../hooks";
-import type { StopReason, StreamEvent } from "@tentickle/shared";
-import { BlockType } from "@tentickle/shared";
 
 // ============================================================================
 // Test Utilities
@@ -29,66 +27,11 @@ function createMockModel(options?: {
   delay?: number;
   response?: string;
   onExecute?: (input: ModelInput) => void;
-}) {
-  const delay = options?.delay ?? 0;
-  const response = options?.response ?? "Mock response";
-  const onExecute = options?.onExecute;
-
-  return createModel<ModelInput, ModelOutput, ModelInput, ModelOutput, StreamEvent>({
-    metadata: {
-      id: "mock-model",
-      provider: "mock",
-      capabilities: [],
-    },
-    executors: {
-      execute: async (input: ModelInput) => {
-        onExecute?.(input);
-        if (delay > 0) {
-          await new Promise((resolve) => setTimeout(resolve, delay));
-        }
-        return {
-          model: "mock-model",
-          createdAt: new Date().toISOString(),
-          message: {
-            role: "assistant",
-            content: [{ type: "text", text: response }],
-          },
-          usage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 },
-          stopReason: "stop" as StopReason,
-          raw: {},
-        } as ModelOutput;
-      },
-      executeStream: async function* (input: ModelInput) {
-        onExecute?.(input);
-        if (delay > 0) {
-          await new Promise((resolve) => setTimeout(resolve, delay));
-        }
-        yield {
-          type: "content_delta",
-          blockType: BlockType.TEXT,
-          blockIndex: 0,
-          delta: response,
-        } as StreamEvent;
-      },
-    },
-    transformers: {
-      processStream: async (chunks: StreamEvent[]) => {
-        let text = "";
-        for (const chunk of chunks) {
-          if (chunk.type === "content_delta") text += chunk.delta;
-        }
-        return {
-          model: "mock-model",
-          createdAt: new Date().toISOString(),
-          message: { role: "assistant", content: [{ type: "text", text }] },
-          usage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 },
-          stopReason: "stop" as StopReason,
-          raw: {},
-        } as ModelOutput;
-      },
-    },
-    fromEngineState,
-    toEngineState,
+}): TestAdapterInstance {
+  return createTestAdapter({
+    defaultResponse: options?.response ?? "Mock response",
+    delay: options?.delay,
+    onExecute: options?.onExecute,
   });
 }
 

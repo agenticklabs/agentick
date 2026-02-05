@@ -10,38 +10,10 @@ import React from "react";
 import { FiberCompiler } from "../fiber-compiler";
 import { markdownRenderer } from "../../renderers";
 import type { CompiledStructure, CompiledSection } from "../types";
+import { createMockCom, createMockTickState } from "../../testing";
 
 // Use React.createElement to avoid JSX pragma issues
 const h = React.createElement;
-
-// Mock COM
-function createMockCom() {
-  const state = new Map<string, unknown>();
-  return {
-    id: "test-session",
-    timeline: [],
-    state,
-    get<T>(key: string): T | undefined {
-      return state.get(key) as T | undefined;
-    },
-    set<T>(key: string, value: T): void {
-      state.set(key, value);
-    },
-    requestRecompile: vi.fn(),
-  };
-}
-
-// Mock TickState
-function createMockTickState(tick = 1): any {
-  return {
-    tick,
-    previous: null,
-    current: null,
-    stop: vi.fn(),
-    stopped: false,
-    stopReason: undefined,
-  };
-}
 
 // Helper to get section by id
 function getSection(compiled: CompiledStructure, id: string): CompiledSection | undefined {

@@ -6,7 +6,6 @@
 
 import { useTickState } from "./context";
 import { useRuntimeStore } from "./runtime-context";
-import type { UseDataOptions } from "./types";
 
 /**
  * Fetch and cache async data.
@@ -19,21 +18,18 @@ import type { UseDataOptions } from "./types";
  * @example
  * ```tsx
  * const MyComponent = ({ userId }) => {
- *   // Cached across ticks (same key = same data)
- *   const user = useData(`user-${userId}`, () => fetchUser(userId));
+ *   // Cached across ticks, refetch when userId changes
+ *   const user = useData('user', () => fetchUser(userId), [userId]);
  *
- *   // Refetch every tick
- *   const status = useData('status', fetchStatus, { refetchEveryTick: true });
+ *   // Refetch every tick by including tick in deps
+ *   const { tick } = useTickState();
+ *   const status = useData('status', fetchStatus, [tick]);
  *
  *   return <Section>{user.name}: {status}</Section>;
  * };
  * ```
  */
-export function useData<T>(
-  key: string,
-  fetcher: () => Promise<T>,
-  options: UseDataOptions = {},
-): T {
+export function useData<T>(key: string, fetcher: () => Promise<T>, deps?: unknown[]): T {
   const store = useRuntimeStore();
   const tickState = useTickState();
   const tick = tickState.tick;
@@ -43,31 +39,20 @@ export function useData<T>(
 
   if (cached) {
     // Check if deps changed by comparing against cached deps
-    // We can't use useRef here because the throw-promise pattern
-    // doesn't preserve ref values (component doesn't commit during throw)
-    const depsChanged = options.deps
-      ? !cached.deps || !shallowEqual(cached.deps, options.deps)
-      : false;
+    const depsChanged = deps ? !cached.deps || !shallowEqual(cached.deps, deps) : false;
 
-    // Check if stale
-    // refetchEveryTick means refetch when tick changes, not every render
-    const isStale =
-      (options.refetchEveryTick && tick !== cached.tick) ||
-      depsChanged ||
-      (options.staleAfterTicks !== undefined && tick - cached.tick > options.staleAfterTicks);
-
-    if (!isStale) {
+    if (!depsChanged) {
       return cached.value as T;
     }
 
-    // Stale - need to refetch
+    // Deps changed - need to refetch
     store.dataCache.delete(key);
   }
 
   // Check if fetch already pending
   if (!store.pendingFetches.has(key)) {
     const promise = fetcher().then((value) => {
-      store.dataCache.set(key, { value, tick, deps: options.deps });
+      store.dataCache.set(key, { value, tick, deps });
       store.pendingFetches.delete(key);
       return value;
     });

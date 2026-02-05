@@ -1,6 +1,6 @@
 # @tentickle/openai
 
-Direct OpenAI adapter for Tentickle.
+Native OpenAI adapter for Tentickle.
 
 ## Installation
 
@@ -10,34 +10,77 @@ pnpm add @tentickle/openai
 
 ## Usage
 
+### Factory Pattern (Recommended)
+
+```tsx
+import { openai } from '@tentickle/openai';
+import { createApp } from '@tentickle/core';
+
+const model = openai({ model: 'gpt-4o' });
+
+// Use with createApp
+const app = createApp(MyAgent, { model });
+const session = await app.session();
+await session.run({ message: 'Hello!' });
+
+// Or use as JSX component
+function MyAgent() {
+  return (
+    <model temperature={0.9}>
+      <System>You are helpful.</System>
+      <Timeline />
+    </model>
+  );
+}
+
+// Or call directly
+const result = await model.generate({
+  messages: [{ role: 'user', content: 'Hello!' }],
+});
+```
+
+### JSX Component Pattern
+
 ```tsx
 import { OpenAIModel } from '@tentickle/openai';
 
-<OpenAIModel
-  apiKey={process.env.OPENAI_API_KEY}
-  model="gpt-5.2"
-  temperature={0.7}
-  maxTokens={4096}
-/>
+function MyAgent() {
+  return (
+    <OpenAIModel
+      model="gpt-4o"
+      temperature={0.7}
+      maxTokens={4096}
+    >
+      <System>You are helpful.</System>
+      <Timeline />
+    </OpenAIModel>
+  );
+}
+```
 
-// With custom base URL (Azure, etc.)
-<OpenAIModel
-  apiKey={process.env.AZURE_OPENAI_KEY}
-  baseURL="https://your-resource.openai.azure.com"
-  model="gpt-5.2"
-/>
+### Azure OpenAI
+
+```tsx
+const model = openai({
+  apiKey: process.env.AZURE_OPENAI_KEY,
+  baseURL: 'https://your-resource.openai.azure.com',
+  model: 'gpt-4o',
+});
 ```
 
 ## Configuration
 
-| Prop          | Type      | Description                  |
-| ------------- | --------- | ---------------------------- |
-| `apiKey`      | `string`  | OpenAI API key               |
-| `model`       | `string`  | Model name (e.g., `gpt-5.2`) |
-| `baseURL`     | `string?` | Custom API endpoint          |
-| `temperature` | `number?` | Sampling temperature         |
-| `maxTokens`   | `number?` | Maximum tokens               |
+| Option         | Type      | Description                          |
+| -------------- | --------- | ------------------------------------ |
+| `model`        | `string`  | Model name (e.g., `gpt-4o`)          |
+| `apiKey`       | `string?` | OpenAI API key (env: OPENAI_API_KEY) |
+| `baseURL`      | `string?` | Custom API endpoint                  |
+| `organization` | `string?` | OpenAI organization ID               |
+| `temperature`  | `number?` | Sampling temperature (0-2)           |
+| `maxTokens`    | `number?` | Maximum tokens to generate           |
 
-## Documentation
+## Exports
 
-See the [full documentation](https://rlindgren.github.io/tentickle).
+- `openai(config)` - Factory function returning `ModelClass`
+- `createOpenAIModel(config)` - Same as `openai()`
+- `OpenAIModel` - JSX component for declarative usage

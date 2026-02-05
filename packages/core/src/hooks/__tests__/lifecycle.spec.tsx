@@ -9,7 +9,7 @@ import { createApp } from "../../app";
 import { System, User } from "../../jsx/components/messages";
 import { Model, Tool } from "../../jsx/components/primitives";
 import { Timeline } from "../../jsx/components/timeline";
-import { createTestModel } from "../../testing";
+import { createTestAdapter } from "../../testing";
 import { useContinuation, useTickEnd, useTickStart } from "../../hooks";
 import type { TickResult } from "../types";
 import { type ToolCall, StopReason } from "@tentickle/shared";
@@ -20,14 +20,14 @@ import { z } from "zod";
 // ============================================================================
 
 function createMockModel(options?: { response?: string; stopReason?: StopReason }) {
-  return createTestModel({
+  return createTestAdapter({
     defaultResponse: options?.response ?? "Mock response",
     stopReason: options?.stopReason,
   });
 }
 
 function createToolCallingModel(toolName: string, toolInput: Record<string, unknown>) {
-  return createTestModel({
+  return createTestAdapter({
     defaultResponse: "",
     toolCalls: [{ id: "1", name: toolName, input: toolInput }],
   });
@@ -43,7 +43,7 @@ describe("useContinuation", () => {
     const receivedResults: TickResult[] = [];
 
     const Agent = () => {
-      useContinuation((result) => {
+      useContinuation((_com, result) => {
         receivedResults.push({ ...result });
         return false; // Stop after first tick
       });
@@ -84,7 +84,7 @@ describe("useContinuation", () => {
     let receivedToolCalls: ToolCall[] = [];
 
     const Agent = () => {
-      useContinuation((result) => {
+      useContinuation((_com, result) => {
         receivedToolCalls = [...result.toolCalls];
         return false; // Stop after first tick
       });
@@ -120,7 +120,7 @@ describe("useContinuation", () => {
     let tickCount = 0;
 
     const Agent = () => {
-      useContinuation((_result) => {
+      useContinuation((_com, _result) => {
         tickCount++;
         return false; // Always stop
       });
@@ -155,7 +155,7 @@ describe("useContinuation", () => {
     let tickCount = 0;
 
     const Agent = () => {
-      useContinuation((_result) => {
+      useContinuation((_com, _result) => {
         tickCount++;
         // Continue for first 2 ticks, then stop
         return tickCount < 2;
@@ -185,7 +185,7 @@ describe("useContinuation", () => {
     let tickCount = 0;
 
     const Agent = () => {
-      useContinuation((result) => {
+      useContinuation((_com, result) => {
         tickCount++;
         result.stop("custom-stop-reason");
         // Note: we don't return anything - the method call handles it
@@ -221,7 +221,7 @@ describe("useContinuation", () => {
     let tickCount = 0;
 
     const Agent = () => {
-      useContinuation((result) => {
+      useContinuation((_com, result) => {
         tickCount++;
         if (tickCount < 3) {
           result.continue("keep-going");
@@ -255,7 +255,7 @@ describe("useContinuation", () => {
     let asyncCompleted = false;
 
     const Agent = () => {
-      useContinuation(async (_result) => {
+      useContinuation(async (_com, _result) => {
         tickCount++;
         // Simulate async verification
         await new Promise((resolve) => setTimeout(resolve, 10));
@@ -284,7 +284,7 @@ describe("useContinuation", () => {
 
   it("should detect done marker in response text", async () => {
     let callCount = 0;
-    const model = createTestModel({
+    const model = createTestAdapter({
       responseGenerator: () => {
         callCount++;
         return callCount === 1 ? "Still working..." : "Task complete <DONE>";
@@ -293,7 +293,7 @@ describe("useContinuation", () => {
     let tickCount = 0;
 
     const Agent = () => {
-      useContinuation((result) => {
+      useContinuation((_com, result) => {
         tickCount++;
         // Continue until we see the done marker
         return !result.text?.includes("<DONE>");
@@ -329,7 +329,7 @@ describe("useTickEnd", () => {
     const tickEndCalls: number[] = [];
 
     const Agent = () => {
-      useTickEnd((result) => {
+      useTickEnd((_com, result) => {
         tickEndCalls.push(result.tick);
         return false; // Stop after first tick
       });
@@ -357,7 +357,7 @@ describe("useTickEnd", () => {
     let receivedContent: any[] = [];
 
     const Agent = () => {
-      useTickEnd((result) => {
+      useTickEnd((_com, result) => {
         // Capture content from the result
         receivedContent = [...result.content];
         return false; // Stop after capturing
@@ -396,12 +396,12 @@ describe("useTickStart", () => {
     const Agent = () => {
       // useTickStart uses useEffect, which runs after first render
       // On subsequent ticks (tick 2+), the callback should be registered
-      useTickStart(() => {
+      useTickStart((_com, _tickState) => {
         tickStartCallCount++;
       });
 
       // Continue for 2 ticks to ensure callback gets registered and called
-      useContinuation((result) => result.tick < 2);
+      useContinuation((_com, result) => result.tick < 2);
 
       return (
         <>
@@ -435,13 +435,13 @@ describe("multiple continuation callbacks", () => {
 
     const Agent = () => {
       // First callback says continue
-      useContinuation((result) => {
+      useContinuation((_com, result) => {
         callback1Called = true;
         result.continue("want-to-continue");
       });
 
       // Second callback says stop - should win
-      useContinuation((result) => {
+      useContinuation((_com, result) => {
         callback2Called = true;
         result.stop("must-stop");
       });

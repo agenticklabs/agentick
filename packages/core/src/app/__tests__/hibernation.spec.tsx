@@ -10,79 +10,22 @@
 
 import { describe, it, expect, vi, beforeEach, beforeAll } from "vitest";
 import { createApp } from "../../app";
-import { createModel, type ModelInput, type ModelOutput } from "../../model/model";
-import { fromEngineState, toEngineState } from "../../model/utils/language-model";
+import { createTestAdapter } from "../../testing/test-adapter";
 import { System, User } from "../../jsx/components/messages";
 import { Model } from "../../jsx/components/primitives";
 import { MemorySessionStore } from "../session-store";
 import { SqliteSessionStore, isSqliteAvailable, createSessionStore } from "../sqlite-session-store";
 import type { SessionSnapshot } from "../types";
-import type { StopReason, StreamEvent } from "@tentickle/shared";
-import { BlockType } from "@tentickle/shared";
 import { Timeline } from "../../jsx/components/timeline";
 
 // ============================================================================
 // Test Utilities
 // ============================================================================
 
-function createMockModel(options?: { delay?: number; response?: Partial<ModelOutput> }) {
-  const delay = options?.delay ?? 0;
-  const responseOverrides = options?.response ?? {};
-
-  return createModel<ModelInput, ModelOutput, ModelInput, ModelOutput, StreamEvent>({
-    metadata: {
-      id: "mock-model",
-      provider: "mock",
-      capabilities: [],
-    },
-    executors: {
-      execute: async (_input: ModelInput) => {
-        if (delay > 0) {
-          await new Promise((resolve) => setTimeout(resolve, delay));
-        }
-        return {
-          model: "mock-model",
-          createdAt: new Date().toISOString(),
-          message: {
-            role: "assistant",
-            content: [{ type: "text", text: "Mock response" }],
-          },
-          usage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 },
-          stopReason: "stop" as StopReason,
-          raw: {},
-          ...responseOverrides,
-        } as ModelOutput;
-      },
-      executeStream: async function* (_input: ModelInput) {
-        if (delay > 0) {
-          await new Promise((resolve) => setTimeout(resolve, delay));
-        }
-        yield {
-          type: "content_delta",
-          blockType: BlockType.TEXT,
-          blockIndex: 0,
-          delta: "Mock",
-        } as StreamEvent;
-      },
-    },
-    transformers: {
-      processStream: async (chunks: StreamEvent[]) => {
-        let text = "";
-        for (const chunk of chunks) {
-          if (chunk.type === "content_delta") text += chunk.delta;
-        }
-        return {
-          model: "mock-model",
-          createdAt: new Date().toISOString(),
-          message: { role: "assistant", content: [{ type: "text", text }] },
-          usage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 },
-          stopReason: "stop" as StopReason,
-          raw: {},
-        } as ModelOutput;
-      },
-    },
-    fromEngineState,
-    toEngineState,
+function createMockModel(options?: { delay?: number; response?: Record<string, unknown> }) {
+  return createTestAdapter({
+    defaultResponse: "Mock response",
+    delay: options?.delay,
   });
 }
 

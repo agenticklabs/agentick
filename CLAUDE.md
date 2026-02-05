@@ -4,11 +4,14 @@
 
 **No backwards compatibility, no deprecations, no legacy code paths.**
 
+We are in a special window of opportunity to get the API right before users depend on it. Take advantage of this by making breaking changes freely when they improve the design.
+
 We maintain a clean, single code path for all functionality. When refactoring:
 
 - Remove old code entirely rather than deprecating
 - Don't add compatibility shims or migration helpers
 - Don't keep unused exports "for backwards compat"
+- Don't use `@deprecated` JSDoc tags - just remove the old API
 - One way to do things, done well
 
 ### Documentation with READMEs
@@ -409,6 +412,53 @@ pnpm --filter example-express typecheck  # Check example
 - **Explicit over implicit**: Name things clearly
 - **No dead code**: Remove unused exports, functions, types
 - **Errors over nulls**: Throw typed errors, don't return null for failures
+- **Single source of truth for types**: Never define the same interface in multiple files. If two modules need the same type, one must import from the other or both import from a shared location.
+
+## Development Workflow
+
+### Before Making Type/Signature Changes
+
+1. **Run `pnpm build` or `pnpm typecheck` first**, not just tests. Tests may pass while types are broken.
+2. **Search for duplicate type definitions** before modifying a type:
+   ```bash
+   grep -r "export.*interface MyType" packages/
+   ```
+3. **Understand the type landscape** - trace imports to find the canonical definition.
+
+### Avoiding Type Duplication
+
+**Never create a second definition of an existing type.** This causes:
+
+- Type incompatibility errors even when structures match
+- Confusion about which is the "real" type
+- Maintenance burden keeping them in sync
+- Need for `as any` casts to work around TypeScript
+
+**If you find duplicate types:**
+
+1. Choose one as the canonical source (usually the more public/general location)
+2. Have all other files import and re-export from that source
+3. Remove the duplicate definitions entirely
+
+**Example - Bad:**
+
+```typescript
+// hooks/types.ts
+export interface TickState { tick: number; ... }
+
+// component/component.ts
+export interface TickState { tick: number; ... }  // ❌ Duplicate!
+```
+
+**Example - Good:**
+
+```typescript
+// hooks/types.ts (canonical source)
+export interface TickState { tick: number; ... }
+
+// component/component.ts
+export { TickState } from "../hooks/types";  // ✅ Re-export
+```
 
 ## Common Patterns
 
@@ -663,17 +713,13 @@ interface CompiledStructure {
 ### Enabling DevTools
 
 ```typescript
-import { createSession } from "@tentickle/core";
+import { createApp } from "@tentickle/core";
 
-const session = createSession(MyApp, {
+const app = createApp(MyApp, {
   devTools: true,  // Enable DevTools
-  // or with config:
-  devTools: {
-    enabled: true,
-    remote: true,
-    remoteUrl: "http://localhost:3001/api/devtools",
-  },
 });
+
+const session = await app.session("my-session");
 ```
 
 ### DevTools Event Flow
@@ -769,6 +815,99 @@ import { enableReactDevTools } from "@tentickle/core";
 
 // Before creating sessions
 enableReactDevTools(); // Connects to npx react-devtools on port 8097
+```
+
+## App Configuration
+
+`createApp` accepts options that configure behavior for all sessions.
+
+### Basic Options
+
+```typescript
+const app = createApp(MyApp, {
+  model: createOpenAIModel(),  // Override model (optional if <Model> in JSX)
+  maxTicks: 10,                // Max model calls per execution (default: 10)
+  devTools: true,              // Enable DevTools emission
+  tools: [ExternalTool],       // Additional tools (merged with JSX <Tool>s)
+  mcpServers: { ... },         // MCP server configs
+});
+```
+
+### Lifecycle Callbacks
+
+Callbacks provide a cleaner alternative to event listeners:
+
+```typescript
+const app = createApp(MyApp, {
+  // Execution lifecycle
+  onTickStart: (tick, executionId) => console.log(`Tick ${tick}`),
+  onTickEnd: (tick, usage) => console.log(`Used ${usage?.totalTokens} tokens`),
+  onComplete: (result) => console.log(`Done: ${result.response}`),
+  onError: (error) => console.error(error),
+
+  // All events (fine-grained)
+  onEvent: (event) => { /* handle any stream event */ },
+
+  // Send lifecycle
+  onBeforeSend: (session, input) => { /* modify input */ },
+  onAfterSend: (session, result) => { /* post-processing */ },
+
+  // Tool confirmation
+  onToolConfirmation: async (call, message) => {
+    return await askUser(`Allow ${call.name}?`);
+  },
+});
+```
+
+### Session Management
+
+Control hibernation, limits, and auto-cleanup:
+
+```typescript
+const app = createApp(MyApp, {
+  sessions: {
+    store: new RedisSessionStore(redis),  // Or ":memory:" for SQLite
+    maxActive: 100,                        // Max concurrent sessions
+    idleTimeout: 5 * 60 * 1000,           // Hibernate after 5 min idle
+    autoHibernate: true,                  // Auto-hibernate on idle
+  },
+
+  // Session lifecycle hooks
+  onSessionCreate: (session) => { /* ... */ },
+  onSessionClose: (sessionId) => { /* ... */ },
+
+  // Hibernation hooks
+  onBeforeHibernate: (session, snapshot) => {
+    // Return false to cancel, modified snapshot, or void
+    if (session.inspect().lastToolCalls.length > 0) return false;
+  },
+  onAfterHibernate: (sessionId, snapshot) => { /* ... */ },
+  onBeforeHydrate: (sessionId, snapshot) => {
+    // Migrate old formats, validate, etc.
+  },
+  onAfterHydrate: (session, snapshot) => { /* ... */ },
+});
+```
+
+### Middleware Inheritance
+
+Apps inherit from the global `Tentickle` instance by default:
+
+```typescript
+import { Tentickle, createApp } from "@tentickle/core";
+
+// Register global middleware
+Tentickle.use('*', loggingMiddleware);
+Tentickle.use('tool:*', authMiddleware);
+
+// App inherits global middleware (default)
+const app = createApp(MyApp, { model });
+
+// Isolated app (for testing)
+const testApp = createApp(TestApp, {
+  model,
+  inheritDefaults: false
+});
 ```
 
 ## Model Adapters

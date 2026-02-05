@@ -284,6 +284,80 @@ describe("fromEngineState", () => {
   });
 });
 
+describe("model options merging", () => {
+  it("should merge modelOptions into ModelInput", async () => {
+    const input = createCOMInput([
+      createTimelineEntry({
+        role: "user",
+        content: [{ type: "text", text: "Hello" }],
+      }),
+    ]);
+
+    // Add modelOptions to the input
+    input.modelOptions = {
+      temperature: 0.9,
+      maxTokens: 2000,
+      topP: 0.95,
+    };
+
+    const modelInput = await fromEngineState(input);
+
+    expect(modelInput.temperature).toBe(0.9);
+    expect(modelInput.maxTokens).toBe(2000);
+    expect(modelInput.topP).toBe(0.95);
+  });
+
+  it("should merge all supported generation parameters", async () => {
+    const input = createCOMInput([]);
+    input.modelOptions = {
+      model: "gpt-4",
+      temperature: 0.5,
+      maxTokens: 1000,
+      topP: 0.8,
+      frequencyPenalty: 0.2,
+      presencePenalty: 0.1,
+      stop: ["END"],
+    };
+
+    const modelInput = await fromEngineState(input);
+
+    expect(modelInput.model).toBe("gpt-4");
+    expect(modelInput.temperature).toBe(0.5);
+    expect(modelInput.maxTokens).toBe(1000);
+    expect(modelInput.topP).toBe(0.8);
+    expect(modelInput.frequencyPenalty).toBe(0.2);
+    expect(modelInput.presencePenalty).toBe(0.1);
+    expect(modelInput.stop).toEqual(["END"]);
+  });
+
+  it("should merge providerOptions", async () => {
+    const input = createCOMInput([]);
+    input.modelOptions = {
+      providerOptions: {
+        openai: { logprobs: true },
+      },
+    };
+
+    const modelInput = await fromEngineState(input);
+
+    expect(modelInput.providerOptions).toEqual({
+      openai: { logprobs: true },
+    });
+  });
+
+  it("should not set undefined options", async () => {
+    const input = createCOMInput([]);
+    // Empty modelOptions
+    input.modelOptions = {};
+
+    const modelInput = await fromEngineState(input);
+
+    // These should remain undefined, not be set to undefined
+    expect("temperature" in modelInput && modelInput.temperature !== undefined).toBe(false);
+    expect("maxTokens" in modelInput && modelInput.maxTokens !== undefined).toBe(false);
+  });
+});
+
 describe("toEngineState", () => {
   it("should convert model output to engine response", async () => {
     const modelOutput = {

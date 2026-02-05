@@ -327,7 +327,7 @@ console.log(state.previous?.timeline); // Previous tick's output
 React to incoming messages (for interactive agents):
 
 ```tsx
-useOnMessage((com, message, state) => {
+useOnMessage((message, com, state) => {
   if (message.type === "user") {
     console.log("User said:", message.content);
   }
@@ -349,14 +349,18 @@ for (const msg of messages) {
 
 ### useData
 
-Fetch and cache data with automatic refresh:
+Fetch and cache data with dependency-based refresh:
 
 ```tsx
-const weather = useData(
-  "weather",
-  async () => fetchWeather(location),
-  { staleAfterTicks: 5 }
-);
+// Refetch when location changes
+const weather = useData("weather", () => fetchWeather(location), [location]);
+
+// Refetch every tick by including tick in deps
+const { tick } = useTickState();
+const status = useData("status", fetchStatus, [tick]);
+
+// Cache forever (no deps)
+const config = useData("config", fetchConfig);
 ```
 
 ## Priority System

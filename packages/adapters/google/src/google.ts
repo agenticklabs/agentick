@@ -11,7 +11,7 @@ import { GoogleGenAI, type GenerateContentParameters, FinishReason } from "@goog
 import {
   createAdapter,
   type AdapterDelta,
-  type EngineModel,
+  type ModelClass,
   type ModelInput,
   type ModelOutput,
 } from "@tentickle/core/model";
@@ -28,7 +28,7 @@ import {
 } from "@tentickle/shared";
 import { type GoogleAdapterConfig, STOP_REASON_MAP } from "./types";
 
-export type GoogleAdapter = EngineModel<ModelInput, ModelOutput>;
+export type GoogleAdapter = ModelClass;
 
 // const logger = Logger.for("GoogleAdapter");
 
@@ -37,9 +37,11 @@ export type GoogleAdapter = EngineModel<ModelInput, ModelOutput>;
 // ============================================================================
 
 /**
- * Factory function for creating Google model adapter
+ * Factory function for creating Google model adapter.
+ *
+ * Returns a ModelClass that can be used both programmatically and as JSX.
  */
-export function createGoogleModel(config: GoogleAdapterConfig = {}): GoogleAdapter {
+export function createGoogleModel(config: GoogleAdapterConfig = {}): ModelClass {
   const client = config.client ?? new GoogleGenAI(buildClientOptions(config));
 
   return createAdapter<GenerateContentParameters, GenerateContentResponse, GenerateContentResponse>(
@@ -314,9 +316,25 @@ export function createGoogleModel(config: GoogleAdapterConfig = {}): GoogleAdapt
 }
 
 /**
- * Factory function for creating Google adapter (alias)
+ * Convenience factory for creating Google model.
+ *
+ * Returns a ModelClass that can be used as:
+ * - JSX component: `<model><Agent /></model>`
+ * - App config: `createApp(Agent, { model })`
+ * - Direct calls: `await model.generate(input)`
+ *
+ * @example
+ * ```typescript
+ * const model = google({ model: 'gemini-2.0-flash' });
+ *
+ * // As JSX
+ * <model><MyAgent /></model>
+ *
+ * // With createApp
+ * const app = createApp(MyAgent, { model });
+ * ```
  */
-export function google(config?: GoogleAdapterConfig): GoogleAdapter {
+export function google(config?: GoogleAdapterConfig): ModelClass {
   return createGoogleModel(config);
 }
 

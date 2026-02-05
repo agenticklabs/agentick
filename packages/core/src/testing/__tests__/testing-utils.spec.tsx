@@ -6,7 +6,7 @@
 
 import { describe, it, expect, afterEach, vi } from "vitest";
 import React from "react";
-import { renderAgent, compileAgent, createTestModel, act, cleanup } from "../index";
+import { renderAgent, compileAgent, createTestAdapter, act, cleanup } from "../index";
 import { System, Timeline, Section, Model } from "../../jsx/components";
 import { useSignal, useEffect } from "../../index";
 import type { Message } from "@tentickle/shared";
@@ -16,15 +16,15 @@ afterEach(() => {
   cleanup();
 });
 
-describe("createTestModel", () => {
+describe("createTestAdapter", () => {
   it("should create a model with default response", () => {
-    const model = createTestModel();
+    const model = createTestAdapter();
     expect(model).toBeDefined();
     expect(model.getCapturedInputs()).toEqual([]);
   });
 
   it("should capture inputs when model is called", async () => {
-    const model = createTestModel({ defaultResponse: "Hello!" });
+    const model = createTestAdapter({ defaultResponse: "Hello!" });
     const { send } = await renderAgent(
       () => (
         <>
@@ -44,14 +44,14 @@ describe("createTestModel", () => {
   });
 
   it("should allow changing response dynamically", () => {
-    const model = createTestModel({ defaultResponse: "Initial" });
+    const model = createTestAdapter({ defaultResponse: "Initial" });
     model.setResponse("Updated");
     // The response is used when the model is called
     expect(model).toBeDefined();
   });
 
   it("should support response generator", async () => {
-    const model = createTestModel({
+    const model = createTestAdapter({
       responseGenerator: (input) => {
         const messages = (input.messages as Message[]) ?? [];
         const lastMessage = messages[messages.length - 1];
@@ -66,7 +66,7 @@ describe("createTestModel", () => {
   });
 
   it("should support delay option", async () => {
-    const model = createTestModel({ delay: 10 });
+    const model = createTestAdapter({ delay: 10 });
     const start = Date.now();
 
     const { send } = await renderAgent(
@@ -89,7 +89,7 @@ describe("createTestModel", () => {
   });
 
   it("should simulate streaming with chunks", async () => {
-    const model = createTestModel({
+    const model = createTestAdapter({
       defaultResponse: "Hello world from streaming!",
       streaming: {
         enabled: true,
@@ -104,7 +104,7 @@ describe("createTestModel", () => {
   });
 
   it("should allow dynamic streaming configuration", () => {
-    const model = createTestModel({ defaultResponse: "Test" });
+    const model = createTestAdapter({ defaultResponse: "Test" });
 
     // Enable streaming dynamically
     model.setStreaming({ enabled: true, chunkSize: 3, chunkDelay: 2 });
@@ -114,7 +114,7 @@ describe("createTestModel", () => {
   });
 
   it("should stream with proper event structure in full agent flow", async () => {
-    const model = createTestModel({
+    const model = createTestAdapter({
       defaultResponse: "Hello!",
       streaming: { enabled: true, chunkSize: 3, chunkDelay: 0 },
     });
@@ -144,7 +144,7 @@ describe("renderAgent", () => {
   it("should render an agent and provide send function", async () => {
     const Agent = () => (
       <>
-        <Model model={createTestModel()} />
+        <Model model={createTestAdapter()} />
         <System>You are helpful</System>
         <Timeline />
       </>
@@ -163,7 +163,7 @@ describe("renderAgent", () => {
   it("should provide tick function for running without message", async () => {
     const Agent = () => (
       <>
-        <Model model={createTestModel()} />
+        <Model model={createTestAdapter()} />
         <System>Test</System>
         <Timeline />
       </>
@@ -181,7 +181,7 @@ describe("renderAgent", () => {
   it("should track timeline messages", async () => {
     const Agent = () => (
       <>
-        <Model model={createTestModel({ defaultResponse: "Test response" })} />
+        <Model model={createTestAdapter({ defaultResponse: "Test response" })} />
         <System>Test</System>
         <Timeline />
       </>
@@ -197,7 +197,7 @@ describe("renderAgent", () => {
   });
 
   it("should allow custom model", async () => {
-    const customModel = createTestModel({ defaultResponse: "Custom response" });
+    const customModel = createTestAdapter({ defaultResponse: "Custom response" });
 
     const Agent = () => (
       <>
@@ -219,7 +219,7 @@ describe("renderAgent", () => {
   it("should cleanup session on unmount", async () => {
     const Agent = () => (
       <>
-        <Model model={createTestModel()} />
+        <Model model={createTestAdapter()} />
         <System>Test</System>
         <Timeline />
       </>
@@ -312,7 +312,7 @@ describe("act", () => {
 
       return (
         <>
-          <Model model={createTestModel()} />
+          <Model model={createTestAdapter()} />
           <System>Count: {count()}</System>
           <Timeline />
         </>
@@ -348,7 +348,7 @@ describe("cleanup", () => {
   it("should close all sessions", async () => {
     const Agent = () => (
       <>
-        <Model model={createTestModel()} />
+        <Model model={createTestAdapter()} />
         <System>Test</System>
         <Timeline />
       </>

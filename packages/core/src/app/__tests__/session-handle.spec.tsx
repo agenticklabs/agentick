@@ -17,14 +17,14 @@ import { Context } from "@tentickle/kernel";
 import { AbortError } from "@tentickle/shared";
 import { useState, useRef, useOnMessage, useQueuedMessages } from "../../hooks";
 import { Timeline } from "../../jsx/components/timeline";
-import { createTestModel } from "../../testing";
+import { createTestAdapter } from "../../testing";
 
 // ============================================================================
 // Test Utilities
 // ============================================================================
 
 function createMockModel(options?: { delay?: number; response?: Partial<ModelOutput> }) {
-  return createTestModel({
+  return createTestAdapter({
     delay: options?.delay ?? 0,
     defaultResponse: options?.response?.message
       ? ((options.response.message as any).content?.[0]?.text ?? "Mock response")
@@ -703,7 +703,7 @@ describe("useOnMessage integration", () => {
     const messagesReceived: unknown[] = [];
 
     const Agent = ({ query }: { query: string }) => {
-      useOnMessage((_com, message, _state) => {
+      useOnMessage((message, _com, _state) => {
         messagesReceived.push(message);
       });
 
@@ -753,7 +753,7 @@ describe("useOnMessage integration", () => {
     let tickCompleted = false;
 
     const Agent = ({ query }: { query: string }) => {
-      useOnMessage((_com, message, _state) => {
+      useOnMessage((message, _com, _state) => {
         messagesReceived.push(message);
       });
 
@@ -891,7 +891,7 @@ describe("useOnMessage integration", () => {
     let receivedMessage: any = null;
 
     const Agent = ({ query }: { query: string }) => {
-      useOnMessage((_com, message, _state) => {
+      useOnMessage((message, _com, _state) => {
         receivedMessage = message;
       });
 
@@ -937,7 +937,7 @@ describe("useOnMessage integration", () => {
     const messagesReceived: unknown[] = [];
 
     const Agent = ({ query }: { query: string }) => {
-      useOnMessage((_com, message, _state) => {
+      useOnMessage((message, _com, _state) => {
         messagesReceived.push(message);
       });
 
@@ -1137,7 +1137,7 @@ describe("useQueuedMessages integration", () => {
     let currentTick = 0;
 
     const Agent = ({ query }: { query: string }) => {
-      useOnMessage((_com, message, _state) => {
+      useOnMessage((message, _com, _state) => {
         onMessageCalls.push({ tick: currentTick, message });
       });
 

@@ -6,35 +6,42 @@
  *
  * ## Features
  *
- * - **ModelAdapter** - Base class for model adapters
- * - **createModel** - Factory for creating model instances
- * - **Model Hooks** - Before/after hooks for model calls
- * - **Streaming** - Built-in streaming support
+ * - **createAdapter** - Factory for creating model adapters (recommended)
+ * - **ModelClass** - Unified type for JSX + programmatic use
+ * - **EngineModel** - Core interface for all models
+ * - **StreamAccumulator** - Built-in streaming support
  *
  * ## Quick Start
  *
  * ```typescript
- * import { createModel } from 'tentickle/model';
+ * import { createAdapter, StopReason } from '@tentickle/core/model';
  *
- * // Create a model using an adapter
- * const model = createModel({
- *   adapter: openaiAdapter,
- *   model: 'gpt-4o',
+ * const model = createAdapter({
+ *   metadata: { id: 'my-model', provider: 'my-provider', capabilities: [] },
+ *   prepareInput: (input) => ({ model: 'gpt-4', messages: input.messages }),
+ *   mapChunk: (chunk) => ({ type: 'text', delta: chunk.text }),
+ *   execute: (input) => provider.generate(input),
+ *   executeStream: (input) => provider.stream(input),
  * });
  *
- * // Use in an engine
- * const engine = new Engine({ model });
+ * // Use as JSX component
+ * <model temperature={0.9}><MyAgent /></model>
+ *
+ * // Use with createApp
+ * const app = createApp(Agent, { model });
+ *
+ * // Direct execution
+ * const output = await model.generate(input);
  * ```
  *
- * ## Adapters
+ * ## Pre-built Adapters
  *
- * Use pre-built adapters from:
- * - `@tentickle/ai-sdk` - Vercel AI SDK
+ * - `@tentickle/ai-sdk` - Vercel AI SDK (multi-provider)
  * - `@tentickle/openai` - OpenAI native
  * - `@tentickle/google` - Google AI native
  *
- * @see {@link ModelAdapter} - Base adapter class
- * @see {@link createModel} - Model factory
+ * @see {@link createAdapter} - Main adapter factory
+ * @see {@link ModelClass} - Unified model type
  *
  * @module tentickle/model
  */

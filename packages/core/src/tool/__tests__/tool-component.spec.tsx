@@ -12,10 +12,8 @@ import { describe, it, expect, vi } from "vitest";
 import { createApp } from "../../app";
 import { createTool } from "../../tool/tool";
 import { Model, Section } from "../../jsx/components/primitives";
-import { createTestModel, type TestModelInstance } from "../../testing";
-import { createModel, type ModelInput, type ModelOutput } from "../../model/model";
-import { fromEngineState, toEngineState } from "../../model/utils/language-model";
-import type { ToolCall, StreamEvent } from "@tentickle/shared";
+import { createTestAdapter, type TestAdapterInstance } from "../../testing";
+import type { ToolCall } from "@tentickle/shared";
 import { StopReason } from "@tentickle/shared";
 import { z } from "zod";
 
@@ -24,13 +22,13 @@ import { z } from "zod";
 // ============================================================================
 
 /**
- * Create a mock model using createTestModel.
+ * Create a mock model using createTestAdapter.
  */
 function createMockModel(options?: {
   toolCalls?: ToolCall[];
   response?: string;
-}): TestModelInstance {
-  const model = createTestModel({
+}): TestAdapterInstance {
+  const model = createTestAdapter({
     defaultResponse: options?.response ?? "Mock response",
     toolCalls: options?.toolCalls,
     stopReason: options?.toolCalls?.length ? StopReason.TOOL_USE : StopReason.STOP,
@@ -87,7 +85,7 @@ describe("Tool Component", () => {
       });
 
       // Create a model that captures inputs (including tools)
-      const capturingModel = createTestModel({
+      const capturingModel = createTestAdapter({
         defaultResponse: "Response",
       });
 
@@ -131,65 +129,13 @@ describe("Tool Component", () => {
         handler,
       });
 
-      // Model that calls the tool, then stops
-      let callCount = 0;
-      const toolCallingModel = createModel<
-        ModelInput,
-        ModelOutput,
-        ModelInput,
-        ModelOutput,
-        StreamEvent
-      >({
-        metadata: {
-          id: "tool-calling-model",
-          provider: "mock",
-          capabilities: [],
-        },
-        executors: {
-          execute: async () => {
-            callCount++;
-            if (callCount === 1) {
-              // First call: request tool execution
-              return {
-                model: "mock-model",
-                createdAt: new Date().toISOString(),
-                message: {
-                  role: "assistant",
-                  content: [
-                    {
-                      type: "tool_use",
-                      toolUseId: "call-1",
-                      id: "call-1",
-                      name: "execute_test",
-                      input: { value: "test" },
-                    },
-                  ],
-                },
-                toolCalls: [{ id: "call-1", name: "execute_test", input: { value: "test" } }],
-                usage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 },
-                stopReason: "tool_use" as StopReason,
-                raw: {},
-              } as ModelOutput;
-            }
-            // Second call: stop
-            return {
-              model: "mock-model",
-              createdAt: new Date().toISOString(),
-              message: {
-                role: "assistant",
-                content: [{ type: "text", text: "Done" }],
-              },
-              usage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 },
-              stopReason: "stop" as StopReason,
-              raw: {},
-            } as ModelOutput;
-          },
-          // Note: No executeStream - this test specifically tests tool execution
-          // via the non-streaming (execute) path which returns toolCalls
-        },
-        fromEngineState,
-        toEngineState,
+      // Model that calls the tool on first call, then returns text
+      const toolCallingModel = createTestAdapter({
+        defaultResponse: "Done",
       });
+
+      // Queue the tool call for the first response
+      toolCallingModel.respondWith([{ tool: { name: "execute_test", input: { value: "test" } } }]);
 
       function Agent() {
         return (
@@ -232,7 +178,7 @@ describe("Tool Component", () => {
       });
 
       // Model that captures inputs (including tools)
-      const capturingModel = createTestModel({
+      const capturingModel = createTestAdapter({
         defaultResponse: "Response",
       });
 

@@ -28,9 +28,8 @@ import {
 
 import {
   type ModelInput,
-  type ModelOutput,
   type ModelToolReference,
-  type EngineModel,
+  type ModelClass,
   createAdapter,
   type AdapterDelta,
 } from "@tentickle/core/model";
@@ -118,7 +117,7 @@ declare module "@tentickle/core" {
   }
 }
 
-export type AiSdkAdapter = EngineModel<ModelInput, ModelOutput>;
+export type AiSdkAdapter = ModelClass;
 
 const logger = Logger.for("AiSdkAdapter");
 
@@ -223,9 +222,15 @@ export function convertToolsToToolSet(tools?: ModelToolReference[]): ToolSet {
  *   model: openai('gpt-4o'),
  *   temperature: 0.7,
  * });
+ *
+ * // As JSX
+ * <model><MyAgent /></model>
+ *
+ * // With createApp
+ * const app = createApp(MyAgent, { model });
  * ```
  */
-export function createAiSdkModel(config: AiSdkAdapterConfig): AiSdkAdapter {
+export function createAiSdkModel(config: AiSdkAdapterConfig): ModelClass {
   const { model, system: defaultSystem, tools: defaultTools, ...defaultParams } = config;
 
   return createAdapter<

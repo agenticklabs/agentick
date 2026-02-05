@@ -32,14 +32,14 @@ const h = React.createElement;
 // ============================================================
 
 /**
- * Message handler signature - matches v1 API.
- * @param com - The Context Object Model
+ * Message handler signature.
  * @param message - The message that was received
+ * @param com - The Context Object Model
  * @param state - The current tick state
  */
 export type MessageHandler = (
-  com: COM,
   message: ExecutionMessage,
+  com: COM,
   state: TickState,
 ) => void | Promise<void>;
 
@@ -174,12 +174,10 @@ export function useMessageContext(): MessageContextValue {
 /**
  * Register a handler for incoming messages.
  *
- * The handler receives (com, message, state) matching the v1 API.
- *
  * @example
  * ```tsx
  * function MyComponent() {
- *   useOnMessage((com, message, state) => {
+ *   useOnMessage((message, com, state) => {
  *     console.log('Received:', message);
  *   });
  *   return <System>I respond to messages</System>;
@@ -195,8 +193,8 @@ export function useOnMessage(handler: MessageHandler): void {
     if (!ctx) return;
 
     // Create a stable wrapper that always calls the latest handler
-    const wrappedHandler: MessageHandler = (com, message, state) => {
-      return handlerRef.current(com, message, state);
+    const wrappedHandler: MessageHandler = (message, com, state) => {
+      return handlerRef.current(message, com, state);
     };
 
     const cleanup = ctx.addMessageHandler(wrappedHandler);

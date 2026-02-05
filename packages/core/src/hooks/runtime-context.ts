@@ -7,7 +7,14 @@
 
 import React, { createContext, useContext, type ReactNode } from "react";
 import type { CompiledStructure } from "../compiler/types";
-import type { TickStartCallback, TickEndCallback, AfterCompileCallback, TickResult } from "./types";
+import type {
+  TickStartCallback,
+  TickEndCallback,
+  AfterCompileCallback,
+  TickResult,
+  TickState,
+} from "./types";
+import type { COM } from "../com/object-model";
 
 // Helper for createElement
 const h = React.createElement;
@@ -112,18 +119,22 @@ export async function storeResolvePendingData(store: RuntimeStore): Promise<void
 }
 
 /**
- * Run tick start callbacks.
+ * Run tick start callbacks with COM and TickState.
  */
-export async function storeRunTickStartCallbacks(store: RuntimeStore): Promise<void> {
+export async function storeRunTickStartCallbacks(
+  store: RuntimeStore,
+  com: COM,
+  tickState: TickState,
+): Promise<void> {
   for (const callback of store.tickStartCallbacks) {
-    await callback();
+    await callback(com, tickState);
   }
 }
 
 /**
- * Run tick end callbacks with the tick result.
+ * Run tick end callbacks with COM and TickResult.
  *
- * Callbacks receive the TickResult which contains both data about the completed tick
+ * Callbacks receive COM and TickResult which contains both data about the completed tick
  * and control methods (stop/continue) to influence whether execution continues.
  *
  * If a callback returns a boolean, it's automatically converted to a continue/stop call:
@@ -133,10 +144,11 @@ export async function storeRunTickStartCallbacks(store: RuntimeStore): Promise<v
  */
 export async function storeRunTickEndCallbacks(
   store: RuntimeStore,
+  com: COM,
   result: TickResult,
 ): Promise<void> {
   for (const callback of store.tickEndCallbacks) {
-    const decision = await callback(result);
+    const decision = await callback(com, result);
     // If callback returns boolean, auto-convert to continue/stop
     if (decision === true) {
       result.continue();

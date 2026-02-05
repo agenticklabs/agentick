@@ -7,7 +7,7 @@
 
 import { useEffect, useRef, useDebugValue } from "react";
 import { useRuntimeStore } from "./runtime-context";
-import type { TickStartCallback, TickEndCallback, AfterCompileCallback, TickResult } from "./types";
+import type { TickStartCallback, TickEndCallback, AfterCompileCallback } from "./types";
 
 /**
  * Register a callback to run at the start of each tick.
@@ -15,8 +15,8 @@ import type { TickStartCallback, TickEndCallback, AfterCompileCallback, TickResu
  * @example
  * ```tsx
  * const MyComponent = () => {
- *   useTickStart(() => {
- *     console.log('Tick starting!');
+ *   useTickStart((com, tickState) => {
+ *     console.log(`Tick ${tickState.tick} starting!`);
  *   });
  *   return <Section>...</Section>;
  * };
@@ -32,7 +32,7 @@ export function useTickStart(callback: TickStartCallback): void {
   useDebugValue("onTickStart registered");
 
   useEffect(() => {
-    const cb: TickStartCallback = () => savedCallback.current();
+    const cb: TickStartCallback = (com, tickState) => savedCallback.current(com, tickState);
     store.tickStartCallbacks.add(cb);
     return () => {
       store.tickStartCallbacks.delete(cb);
@@ -43,21 +43,21 @@ export function useTickStart(callback: TickStartCallback): void {
 /**
  * Register a callback to run at the end of each tick.
  *
- * The callback receives a TickResult containing data about the completed tick
+ * The callback receives COM and TickResult containing data about the completed tick
  * and control methods to influence whether execution continues.
  *
  * @example
  * ```tsx
  * // Simple: inspect results
- * useTickEnd((result) => {
+ * useTickEnd((com, result) => {
  *   console.log(`Tick ${result.tick} complete, tokens: ${result.usage?.totalTokens}`);
  * });
  *
  * // Control continuation with boolean return
- * useTickEnd((result) => !result.text?.includes("<DONE>"));
+ * useTickEnd((com, result) => !result.text?.includes("<DONE>"));
  *
  * // Control continuation with methods (includes reasons)
- * useTickEnd((result) => {
+ * useTickEnd((com, result) => {
  *   if (result.text?.includes("<DONE>")) {
  *     result.stop("task-complete");
  *   } else {
@@ -66,7 +66,7 @@ export function useTickStart(callback: TickStartCallback): void {
  * });
  *
  * // Async verification
- * useTickEnd(async (result) => {
+ * useTickEnd(async (com, result) => {
  *   const verified = await checkWithModel(result.text);
  *   return !verified; // continue if not verified
  * });
@@ -80,7 +80,7 @@ export function useTickEnd(callback: TickEndCallback): void {
   useDebugValue("onTickEnd registered");
 
   useEffect(() => {
-    const cb: TickEndCallback = (result) => savedCallback.current(result);
+    const cb: TickEndCallback = (com, result) => savedCallback.current(com, result);
     store.tickEndCallbacks.add(cb);
     return () => {
       store.tickEndCallbacks.delete(cb);
@@ -129,7 +129,7 @@ export function useAfterCompile(callback: AfterCompileCallback): void {
  * Control whether execution continues after each tick.
  *
  * This is the primary hook for implementing agent loops with custom termination conditions.
- * The callback receives the TickResult and should return whether to continue or stop.
+ * The callback receives COM and TickResult and should return whether to continue or stop.
  *
  * The callback can:
  * 1. Return a boolean (true = continue, false = stop)
@@ -141,10 +141,10 @@ export function useAfterCompile(callback: AfterCompileCallback): void {
  * @example
  * ```tsx
  * // Simple: continue until done token
- * useContinuation((r) => !r.text?.includes("<DONE>"));
+ * useContinuation((com, r) => !r.text?.includes("<DONE>"));
  *
  * // With reasons
- * useContinuation((r) => {
+ * useContinuation((com, r) => {
  *   if (r.text?.includes("<DONE>")) {
  *     r.stop("task-complete");
  *   } else if (r.tick >= 10) {
@@ -155,20 +155,18 @@ export function useAfterCompile(callback: AfterCompileCallback): void {
  * });
  *
  * // Async verification
- * useContinuation(async (r) => {
+ * useContinuation(async (com, r) => {
  *   const verified = await verifyWithModel(r.text);
  *   return verified ? false : true; // stop if verified
  * });
  *
  * // Multiple conditions
- * useContinuation((r) =>
+ * useContinuation((com, r) =>
  *   r.toolCalls.length > 0 ||           // pending tools
  *   (r.tick < 10 && !r.text?.includes("DONE"))
  * );
  * ```
  */
-export function useContinuation(
-  shouldContinue: (result: TickResult) => void | boolean | Promise<void | boolean>,
-): void {
+export function useContinuation(shouldContinue: TickEndCallback): void {
   useTickEnd(shouldContinue);
 }

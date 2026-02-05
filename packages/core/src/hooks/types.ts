@@ -4,8 +4,13 @@
 
 import type { CompiledStructure } from "../compiler/types";
 import type { ContentBlock, ToolCall, ToolResult } from "@tentickle/shared";
-import type { COMStopRequest, COMContinueRequest } from "../com/object-model";
+import type { COMStopRequest, COMContinueRequest, COM as COMImpl } from "../com/object-model";
 import type { COMTimelineEntry } from "../com/types";
+
+// TickState - canonical definition in component/component.ts
+// Import for use in this file and re-export for consumers
+import type { TickState } from "../component/component";
+export type { TickState };
 
 /**
  * COM - Context Object Model
@@ -128,14 +133,23 @@ export interface TickResult {
 }
 
 /**
- * Callback types for lifecycle hooks.
+ * Callback for useTickStart hook.
+ *
+ * Receives COM and TickState for consistency with other lifecycle hooks.
+ *
+ * @example
+ * ```tsx
+ * useTickStart((com, tickState) => {
+ *   console.log(`Tick ${tickState.tick} starting`);
+ * });
+ * ```
  */
-export type TickStartCallback = () => void | Promise<void>;
+export type TickStartCallback = (com: COMImpl, tickState: TickState) => void | Promise<void>;
 
 /**
  * Callback for useTickEnd hook.
  *
- * Receives the TickResult which contains both data about the completed tick
+ * Receives COM and TickResult which contains both data about the completed tick
  * and control methods (stop/continue) to influence whether execution continues.
  *
  * Can return a boolean for simple cases (true = continue, false = stop),
@@ -144,64 +158,20 @@ export type TickStartCallback = () => void | Promise<void>;
  * @example
  * ```tsx
  * // Simple boolean return
- * useTickEnd((result) => !result.text?.includes("<DONE>"));
+ * useTickEnd((com, result) => !result.text?.includes("<DONE>"));
  *
  * // With reasons via methods
- * useTickEnd((result) => {
+ * useTickEnd((com, result) => {
  *   if (result.text?.includes("<DONE>")) result.stop("complete");
  *   else result.continue("working");
  * });
  * ```
  */
-export type TickEndCallback = (result: TickResult) => void | boolean | Promise<void | boolean>;
+export type TickEndCallback = (
+  com: COMImpl,
+  result: TickResult,
+) => void | boolean | Promise<void | boolean>;
 
 export type AfterCompileCallback = (compiled: CompiledStructure) => void | Promise<void>;
 
-/**
- * Data fetch options.
- */
-export interface UseDataOptions {
-  /** Refetch every tick */
-  refetchEveryTick?: boolean;
-
-  /** Refetch after N ticks */
-  staleAfterTicks?: number;
-
-  /** Dependencies that trigger refetch when changed */
-  deps?: unknown[];
-}
-
 // Signal type is exported from ./signal.ts
-
-/**
- * TickState - state for a single tick of execution.
- */
-export interface TickState {
-  /** Current tick number */
-  tick: number;
-
-  /** Previous tick's output (COMInput with timeline, system, etc.) */
-  previous:
-    | {
-        timeline?: unknown[];
-        system?: unknown[];
-        ephemeral?: unknown[];
-        [key: string]: unknown;
-      }
-    | undefined;
-
-  /** Current tick's in-progress state */
-  current: unknown;
-
-  /** Messages queued for this tick (user input) */
-  queuedMessages: unknown[];
-
-  /** Stop execution */
-  stop(reason?: string): void;
-
-  /** Whether execution has been stopped */
-  stopped?: boolean;
-
-  /** Why execution was stopped */
-  stopReason?: string;
-}

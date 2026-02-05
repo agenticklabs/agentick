@@ -48,6 +48,7 @@
  * @module tentickle/model/adapter
  */
 
+import React from "react";
 import { Context } from "@tentickle/kernel";
 import type { COMInput } from "../com/types";
 import type { EngineResponse } from "../engine/engine-response";
@@ -68,6 +69,7 @@ import type {
 import type { ContentBlock } from "@tentickle/shared";
 import { fromEngineState, toEngineState } from "./utils/language-model";
 import type { LibraryGenerationOptions, ProviderGenerationOptions } from "../types";
+import { Model } from "../jsx/components/model";
 
 // ============================================================================
 // Re-exports for adapter convenience
@@ -76,6 +78,57 @@ import type { LibraryGenerationOptions, ProviderGenerationOptions } from "../typ
 export { StopReason } from "@tentickle/shared";
 export type { AdapterDelta, ChunkMapping } from "./stream-accumulator";
 export { createChunkMapper } from "./stream-accumulator";
+
+// ============================================================================
+// ModelClass - Unified model type (component + adapter)
+// ============================================================================
+
+import type { COM } from "../com/object-model";
+import type { ModelConfig as SharedModelConfig } from "@tentickle/shared/models";
+
+/**
+ * Props for ModelClass when used as a JSX component.
+ * Extends SharedModelConfig with component-specific props.
+ */
+export interface ModelClassProps extends Partial<SharedModelConfig> {
+  /** Child components */
+  children?: React.ReactNode;
+  /** Provider-specific options */
+  providerOptions?: ProviderGenerationOptions;
+  /** Callback when mounted */
+  onMount?: (com: COM) => void | Promise<void>;
+  /** Callback when unmounted */
+  onUnmount?: (com: COM) => void | Promise<void>;
+}
+
+/**
+ * ModelClass - A model adapter that can be used both programmatically and as JSX.
+ *
+ * This is the return type of createAdapter. It behaves like:
+ * - An EngineModel for programmatic use (createApp, direct generate/stream calls)
+ * - A JSX component for declarative use in agent trees
+ *
+ * @example
+ * ```typescript
+ * const model = createAdapter({ ... });
+ *
+ * // Use as JSX component
+ * <model temperature={0.9}>
+ *   <MyAgent />
+ * </model>
+ *
+ * // Use with createApp
+ * const app = createApp(Agent, { model });
+ *
+ * // Direct execution
+ * const output = await model.generate(input);
+ * for await (const event of model.stream(input)) { ... }
+ * ```
+ */
+export interface ModelClass extends EngineModel<ModelInput, ModelOutput> {
+  /** Use as JSX component */
+  (props: ModelClassProps): React.ReactElement;
+}
 
 // ============================================================================
 // Options Merging Utilities
@@ -435,6 +488,20 @@ export interface AdapterOptions<TProviderInput, TProviderOutput, TChunk> {
    * Most adapters don't need this - the default handles standard transformations.
    */
   toEngineState?: (output: ModelOutput) => EngineResponse | Promise<EngineResponse>;
+
+  // === Component Lifecycle Hooks (for JSX usage) ===
+
+  /**
+   * Called when the model component is mounted.
+   * Use for initialization when used as JSX.
+   */
+  onMount?: (com: COM) => void | Promise<void>;
+
+  /**
+   * Called when the model component is unmounted.
+   * Use for cleanup when used as JSX.
+   */
+  onUnmount?: (com: COM) => void | Promise<void>;
 }
 
 /**
@@ -539,10 +606,15 @@ function createAdapterEventBase(): StreamEventBase {
  * This is the recommended way to create model adapters. StreamAccumulator
  * handles all the complexity of converting AdapterDeltas to StreamEvents
  * with proper lifecycle management.
+ *
+ * Returns a ModelClass that can be used:
+ * - As a JSX component: `<model temperature={0.9}><MyAgent /></model>`
+ * - With createApp: `createApp(Agent, { model })`
+ * - For direct calls: `await model.generate(input)`
  */
 export function createAdapter<TProviderInput, TProviderOutput, TChunk>(
   options: AdapterOptions<TProviderInput, TProviderOutput, TChunk>,
-): EngineModel<ModelInput, ModelOutput> {
+): ModelClass {
   const {
     metadata,
     prepareInput,
@@ -552,6 +624,8 @@ export function createAdapter<TProviderInput, TProviderOutput, TChunk>(
     processOutput,
     extractMetadata,
     reconstructRaw,
+    onMount: adapterOnMount,
+    onUnmount: adapterOnUnmount,
   } = options;
 
   // Create generate procedure
@@ -727,7 +801,8 @@ export function createAdapter<TProviderInput, TProviderOutput, TChunk>(
     return fromEngineState(input, undefined, modelInstance) as Promise<ModelInput>;
   };
 
-  return {
+  // Build the EngineModel properties
+  const engineModel: EngineModel<ModelInput, ModelOutput> = {
     metadata,
     generate,
     stream,
@@ -739,6 +814,39 @@ export function createAdapter<TProviderInput, TProviderOutput, TChunk>(
       : (output: ModelOutput) => toEngineState(output),
     getProviderInput: async (input: ModelInput) => prepareInput(input),
   };
+
+  // Create functional component that wraps <Model>
+  const ModelComponent = function ModelComponent(props: ModelClassProps): React.ReactElement {
+    const { children, onMount: propsOnMount, onUnmount: propsOnUnmount, ...modelOptions } = props;
+
+    // Merge lifecycle hooks: props override adapter defaults
+    const onMount = propsOnMount ?? adapterOnMount;
+    const onUnmount = propsOnUnmount ?? adapterOnUnmount;
+
+    return React.createElement(
+      Model,
+      {
+        model: engineModel,
+        onMount,
+        onUnmount,
+        ...modelOptions,
+      },
+      children,
+    );
+  };
+
+  // Set display name for React DevTools
+  ModelComponent.displayName = `Model(${metadata.id})`;
+
+  // Attach EngineModel properties to make it a valid ModelClass
+  (ModelComponent as any).metadata = metadata;
+  (ModelComponent as any).generate = generate;
+  (ModelComponent as any).stream = stream;
+  (ModelComponent as any).fromEngineState = engineModel.fromEngineState;
+  (ModelComponent as any).toEngineState = engineModel.toEngineState;
+  (ModelComponent as any).getProviderInput = engineModel.getProviderInput;
+
+  return ModelComponent as unknown as ModelClass;
 }
 
 /**
@@ -766,9 +874,7 @@ export function createDeclarativeAdapter<
   TProviderInput,
   TProviderOutput,
   TChunk extends { type: string },
->(
-  options: DeclarativeOptions<TProviderInput, TProviderOutput, TChunk>,
-): EngineModel<ModelInput, ModelOutput> {
+>(options: DeclarativeOptions<TProviderInput, TProviderOutput, TChunk>): ModelClass {
   const { chunkMapping, ...rest } = options;
   const mapChunk = createChunkMapper(chunkMapping);
 

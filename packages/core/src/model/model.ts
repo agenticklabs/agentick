@@ -2,40 +2,28 @@
  * Model System
  *
  * EngineModel is the primary interface for models in the engine.
- * Use createModel() to create models from options.
- *
- * ModelAdapter is available for class-based implementations (e.g., provider adapters).
+ * Use createAdapter() from ./adapter.ts to create model adapters.
  */
 
-import {
-  Context,
-  type Middleware,
-  type MiddlewarePipeline,
-  type Procedure,
-  type ProcedureOptions,
-} from "@tentickle/kernel";
-import { createEngineProcedure } from "../procedure";
+import type { Procedure } from "@tentickle/kernel";
 import type {
   ModelInput as BaseModelInput,
   ModelOutput as BaseModelOutput,
   ModelConfig as BaseModelConfig,
   ModelToolReference as BaseModelToolReference,
 } from "@tentickle/shared/models";
-import type {
-  StreamEvent,
-  MessageEndEvent,
-  MessageEvent,
-  ContentDeltaEvent,
-  ToolCallEvent,
-} from "@tentickle/shared/streaming";
+import type { StreamEvent } from "@tentickle/shared/streaming";
 import type { Message } from "@tentickle/shared/messages";
-import { StopReason } from "@tentickle/shared";
 import type { COMInput } from "../com/types";
 import type { EngineResponse } from "../engine/engine-response";
-import type { StopReasonInfo } from "../component/component";
-import { type ModelHookMiddleware, type ModelHookName, ModelHookRegistry } from "./model-hooks";
-import { ToolHookRegistry } from "../tool/tool-hooks";
 import type { EventBlock, TextBlock, ContentBlock } from "@tentickle/shared";
+import type {
+  LibraryGenerationOptions,
+  ProviderGenerationOptions,
+  DelimiterConfig,
+  EventBlockDelimiters,
+} from "../types";
+import type { ExecutableTool, ToolDefinition, ToolMetadata } from "../tool/tool";
 
 export type { BaseModelToolReference, BaseModelConfig, BaseModelInput, BaseModelOutput };
 
@@ -45,7 +33,20 @@ export type { BaseModelToolReference, BaseModelConfig, BaseModelInput, BaseModel
 
 /**
  * EngineModel is the primary interface for models.
- * All models (created via createModel or ModelAdapter) conform to this.
+ * All models (created via createAdapter) conform to this interface.
+ *
+ * @example
+ * ```typescript
+ * import { createAdapter } from '@tentickle/core/model';
+ *
+ * const model = createAdapter({
+ *   metadata: { id: 'my-model', provider: 'my-provider', capabilities: [] },
+ *   prepareInput: (input) => ({ ... }),
+ *   mapChunk: (chunk) => ({ type: 'text', delta: chunk.text }),
+ *   execute: (input) => provider.generate(input),
+ *   executeStream: (input) => provider.stream(input),
+ * });
+ * ```
  */
 export interface EngineModel<TModelInput = ModelInput, TModelOutput = ModelOutput> {
   /** Model metadata (id, description, capabilities, etc.) */
@@ -71,607 +72,6 @@ export interface EngineModel<TModelInput = ModelInput, TModelOutput = ModelOutpu
 }
 
 // ============================================================================
-// createModel - Functional Model Creation
-// ============================================================================
-
-type MaybePromise<T> = T | Promise<T>;
-
-/**
- * Transformers for converting between model and provider formats.
- */
-export interface ModelTransformers<
-  TModelInput,
-  TModelOutput,
-  TProviderInput,
-  TProviderOutput,
-  TChunk,
-> {
-  /** Convert model input to provider-specific format */
-  prepareInput?: (input: TModelInput) => MaybePromise<TProviderInput>;
-  /** Convert provider output to model output */
-  processOutput?: (output: TProviderOutput) => MaybePromise<TModelOutput>;
-  /** Convert provider chunk to StreamEvent */
-  processChunk?: (chunk: TChunk) => StreamEvent;
-  /** Aggregate events into final output */
-  processStream?: (events: TChunk[] | StreamEvent[]) => MaybePromise<TModelOutput>;
-  /** Reconstruct raw provider response from accumulated streaming data */
-  reconstructRaw?: (accumulated: {
-    text: string;
-    reasoning: string;
-    toolCalls: Array<{ id: string; name: string; input: Record<string, unknown> }>;
-    usage: { inputTokens: number; outputTokens: number; totalTokens: number };
-    stopReason: string;
-    model: string;
-    chunks: TChunk[];
-  }) => unknown;
-}
-
-/**
- * Provider execution methods.
- */
-export interface ModelExecutors<TProviderInput, TProviderOutput, TChunk> {
-  /** Execute non-streaming generation */
-  execute: (input: TProviderInput) => Promise<TProviderOutput>;
-  /** Execute streaming generation */
-  executeStream?: (input: TProviderInput) => AsyncIterable<TChunk>;
-}
-
-/**
- * Options for model procedures (middleware, etc.)
- */
-export interface ModelProcedureOptions {
-  middleware?: Middleware<any[]>[];
-  handleFactory?: ProcedureOptions["handleFactory"];
-}
-
-/**
- * Options for createModel().
- */
-export interface CreateModelOptions<
-  TModelInput extends ModelInput = ModelInput,
-  TModelOutput extends ModelOutput = ModelOutput,
-  TProviderInput = any,
-  TProviderOutput = any,
-  TChunk = any,
-> {
-  /** Model metadata */
-  metadata: ModelMetadata;
-  /** Input/output transformers */
-  transformers?: ModelTransformers<
-    TModelInput,
-    TModelOutput,
-    TProviderInput,
-    TProviderOutput,
-    TChunk
-  >;
-  /** Provider execution methods */
-  executors: ModelExecutors<TProviderInput, TProviderOutput, TChunk>;
-  /** Procedure options for generate/stream */
-  procedures?: {
-    generate?: ModelProcedureOptions;
-    stream?: ModelProcedureOptions;
-  };
-  /** Convert engine state to model input */
-  fromEngineState?: (input: COMInput) => MaybePromise<TModelInput>;
-  /** Convert model output to engine response */
-  toEngineState?: (output: TModelOutput) => MaybePromise<EngineResponse>;
-}
-
-/**
- * Creates an EngineModel from options.
- *
- * @example
- * ```typescript
- * const myModel = createModel({
- *   metadata: { id: 'my-model', description: 'Custom model' },
- *   executors: {
- *     execute: async (input) => provider.generate(input),
- *     executeStream: async function* (input) { yield* provider.stream(input) },
- *   },
- *   transformers: {
- *     prepareInput: (input) => convertToProviderFormat(input),
- *     processOutput: (output) => convertFromProviderFormat(output),
- *   },
- * });
- * ```
- */
-export function createModel<
-  TModelInput extends ModelInput = ModelInput,
-  TModelOutput extends ModelOutput = ModelOutput,
-  TProviderInput = any,
-  TProviderOutput = any,
-  TChunk = any,
->(
-  options: CreateModelOptions<TModelInput, TModelOutput, TProviderInput, TProviderOutput, TChunk>,
-): EngineModel<TModelInput, TModelOutput> {
-  const { metadata, transformers = {}, executors, procedures = {} } = options;
-
-  // Default transformers (pass-through)
-  const prepareInput =
-    transformers.prepareInput ?? ((input: TModelInput) => input as unknown as TProviderInput);
-  const processOutput =
-    transformers.processOutput ?? ((output: TProviderOutput) => output as unknown as TModelOutput);
-  const processChunk =
-    transformers.processChunk ?? ((chunk: TChunk) => chunk as unknown as StreamEvent);
-  const processStream = transformers.processStream;
-
-  // Create generate procedure with low-cardinality telemetry
-  const generate = createEngineProcedure<(input: TModelInput) => Promise<TModelOutput>>(
-    {
-      name: "model:generate",
-      metadata: {
-        type: "model",
-        id: metadata.id,
-        operation: "generate",
-      },
-      handleFactory: procedures.generate?.handleFactory,
-      middleware: normalizeMiddleware(procedures.generate?.middleware),
-      // Model calls are child executions within the parent engine execution
-      executionBoundary: "child",
-      executionType: "model",
-    },
-    async (input: TModelInput) => {
-      const providerInput = await prepareInput(input);
-
-      // Emit event with the provider-formatted input (for DevTools debugging)
-      Context.emit("model:provider_request", {
-        modelId: metadata.id,
-        provider: metadata.provider,
-        providerInput,
-      });
-
-      const providerOutput = await executors.execute(providerInput);
-
-      // Emit event with the raw provider response (for DevTools debugging)
-      Context.emit("model:provider_response", {
-        modelId: metadata.id,
-        provider: metadata.provider,
-        providerOutput,
-      });
-
-      return processOutput(providerOutput);
-    },
-  );
-
-  // Create stream procedure if streaming is supported
-  let stream: Procedure<(input: TModelInput) => AsyncIterable<StreamEvent>> | undefined;
-  if (executors.executeStream) {
-    stream = createEngineProcedure<(input: TModelInput) => AsyncIterable<StreamEvent>>(
-      {
-        name: "model:stream",
-        metadata: {
-          type: "model",
-          id: metadata.id,
-          operation: "stream",
-        },
-        // Stream procedures return async generators - must use pass-through mode
-        handleFactory: procedures.stream?.handleFactory ?? false,
-        middleware: normalizeMiddleware(procedures.stream?.middleware),
-        // Model calls are child executions within the parent engine execution
-        executionBoundary: "child",
-        executionType: "model",
-      },
-      async function* (input: TModelInput) {
-        const providerInput = await prepareInput(input);
-
-        // Emit event with the provider-formatted input (for DevTools debugging)
-        Context.emit("model:provider_request", {
-          modelId: metadata.id,
-          provider: metadata.provider,
-          providerInput,
-        });
-
-        const iterator = executors.executeStream!(providerInput);
-
-        // Simple pass-through: yield events from processChunk
-        // Accumulation is handled by the adapter (via StreamAccumulator in createAdapter)
-        // or by the caller if using createModel directly
-        for await (const chunk of iterator) {
-          const processed = processChunk(chunk);
-          yield processed;
-        }
-      },
-    );
-  }
-
-  return {
-    metadata,
-    generate,
-    stream,
-    fromEngineState: options.fromEngineState
-      ? async (input: COMInput) => options.fromEngineState!(input)
-      : async (input: COMInput) => {
-          // Use default with model instance
-          const modelInstance = { metadata } as any;
-          return defaultFromEngineState(input, undefined, modelInstance) as Promise<TModelInput>;
-        },
-    toEngineState: options.toEngineState
-      ? async (output: TModelOutput) => options.toEngineState!(output)
-      : undefined,
-    processStream: processStream
-      ? async (events: StreamEvent[]) => processStream(events)
-      : undefined,
-    getProviderInput: async (input: TModelInput) => prepareInput(input),
-  };
-}
-
-function normalizeMiddleware(
-  middleware?: Middleware<any[]>[],
-): (Middleware<any[]> | MiddlewarePipeline)[] | undefined {
-  return middleware as (Middleware<any[]> | MiddlewarePipeline)[] | undefined;
-}
-
-// Import and re-export language model utilities
-import {
-  fromEngineState as defaultFromEngineState,
-  toEngineState as defaultToEngineState,
-} from "./utils/language-model";
-import type {
-  LibraryGenerationOptions,
-  ProviderGenerationOptions,
-  DelimiterConfig,
-  EventBlockDelimiters,
-} from "../types";
-import type { ExecutableTool, ToolDefinition, ToolMetadata } from "../tool/tool";
-
-/**
- * Creates a language model with standard fromEngineState/toEngineState transformers.
- * Convenience wrapper around createModel() for language models.
- */
-export function createLanguageModel<
-  TModelInput extends ModelInput = ModelInput,
-  TModelOutput extends ModelOutput = ModelOutput,
-  TProviderInput = any,
-  TProviderOutput = any,
-  TChunk = any,
->(
-  options: CreateModelOptions<TModelInput, TModelOutput, TProviderInput, TProviderOutput, TChunk>,
-): EngineModel<TModelInput, TModelOutput> {
-  return createModel<TModelInput, TModelOutput, TProviderInput, TProviderOutput, TChunk>({
-    metadata: {
-      ...options.metadata,
-      type: "language" as const,
-    },
-    transformers: options.transformers,
-    executors: options.executors,
-    procedures: options.procedures,
-    fromEngineState: async (input: COMInput) => {
-      if (options.fromEngineState) {
-        return options.fromEngineState(input) as Promise<TModelInput>;
-      }
-      // Use default with model instance (created model has access to metadata)
-      const modelInstance = { metadata: options.metadata } as any;
-      return defaultFromEngineState(input, undefined, modelInstance) as Promise<TModelInput>;
-    },
-    toEngineState: (output: TModelOutput) =>
-      (options.toEngineState || defaultToEngineState)(output),
-  });
-}
-
-// ============================================================================
-// ModelAdapter - Class-based Implementation
-// ============================================================================
-
-/**
- * Abstract class for provider-specific model adapters.
- *
- * Use this when you need class-based organization (e.g., OpenAI, Anthropic adapters).
- * For simpler cases, use createModel().
- *
- * Generic parameters:
- * - TModelInput: Standard input format (default: ModelInput)
- * - TModelOutput: Standard output format (default: ModelOutput)
- * - TProviderInput: Provider-specific input format
- * - TProviderOutput: Provider-specific output format
- * - TChunk: Provider-specific stream chunk format
- */
-export abstract class ModelAdapter<
-  TModelInput = ModelInput,
-  TModelOutput = ModelOutput,
-  TProviderInput = any,
-  TProviderOutput = any,
-  TChunk = StreamEvent,
-> implements EngineModel<TModelInput, TModelOutput> {
-  abstract metadata: ModelMetadata;
-
-  static hooks: Record<string, ModelHookMiddleware<any>[]> = {};
-  static tags: string[] = [];
-
-  private hooksRegistry: ModelHookRegistry;
-  private toolHooksRegistry: ToolHookRegistry;
-
-  get hooks(): ModelHookRegistry {
-    return Object.assign(this.hooksRegistry, { tools: this.toolHooksRegistry });
-  }
-
-  get toolHooks(): ToolHookRegistry {
-    return this.toolHooksRegistry;
-  }
-
-  constructor() {
-    this.hooksRegistry = new ModelHookRegistry();
-    this.toolHooksRegistry = new ToolHookRegistry();
-    this.registerStaticHooks();
-  }
-
-  private registerStaticHooks(): void {
-    const modelClass = this.constructor as typeof ModelAdapter;
-    const staticHooks = modelClass.hooks;
-    if (!staticHooks) return;
-
-    for (const [hookName, middleware] of Object.entries(staticHooks)) {
-      if (middleware && Array.isArray(middleware)) {
-        for (const mw of middleware) {
-          this.hooksRegistry.register(hookName as ModelHookName, mw);
-        }
-      }
-    }
-  }
-
-  // === Abstract methods for subclasses ===
-
-  /** Convert model input to provider format */
-  protected abstract prepareInput(input: TModelInput): TProviderInput | Promise<TProviderInput>;
-
-  /** Convert provider output to model output */
-  protected abstract processOutput(output: TProviderOutput): TModelOutput | Promise<TModelOutput>;
-
-  /** Convert provider chunk to StreamEvent */
-  protected abstract processChunk?(chunk: TChunk): StreamEvent;
-
-  /** Execute generation (provider-specific) */
-  protected abstract execute(input: TProviderInput): Promise<TProviderOutput>;
-
-  /** Execute streaming (provider-specific) */
-  protected abstract executeStream?(input: TProviderInput): AsyncIterable<TChunk>;
-
-  // === EngineModel interface implementation ===
-
-  /** Generate procedure - initialized lazily to access metadata */
-  private _generate?: Procedure<(input: TModelInput) => Promise<TModelOutput>>;
-
-  public get generate(): Procedure<(input: TModelInput) => Promise<TModelOutput>> {
-    if (!this._generate) {
-      this._generate = createEngineProcedure(
-        {
-          name: "model:generate",
-          metadata: {
-            type: "model",
-            id: this.metadata.id,
-            operation: "generate",
-          },
-          // Model calls are child executions within the parent engine execution
-          executionBoundary: "child",
-          executionType: "model",
-        },
-        async (input: TModelInput) => {
-          const providerInput = await this.prepareInput(input);
-
-          // Emit event with the provider-formatted input (for DevTools debugging)
-          Context.emit("model:provider_request", {
-            modelId: this.metadata.id,
-            provider: this.metadata.provider,
-            providerInput,
-          });
-
-          const providerOutput = await this.execute(providerInput);
-
-          // Emit event with the raw provider response (for DevTools debugging)
-          Context.emit("model:provider_response", {
-            modelId: this.metadata.id,
-            provider: this.metadata.provider,
-            providerOutput,
-          });
-
-          return this.processOutput(providerOutput);
-        },
-      );
-    }
-    return this._generate;
-  }
-
-  /** Stream procedure - initialized lazily to access metadata */
-  private _stream?: Procedure<(input: TModelInput) => AsyncIterable<StreamEvent>>;
-
-  public get stream(): Procedure<(input: TModelInput) => AsyncIterable<StreamEvent>> {
-    if (!this._stream) {
-      const self = this;
-      this._stream = createEngineProcedure(
-        {
-          name: "model:stream",
-          metadata: {
-            type: "model",
-            id: this.metadata.id,
-            operation: "stream",
-          },
-          // Model calls are child executions within the parent engine execution
-          executionBoundary: "child",
-          executionType: "model",
-          // Stream procedures return async generators - must use pass-through mode
-          handleFactory: false,
-        },
-        async function* (input: TModelInput): AsyncIterable<StreamEvent> {
-          if (!self.executeStream) {
-            throw new Error(`Model ${self.metadata.id} does not support streaming.`);
-          }
-          const providerInput = await self.prepareInput(input);
-
-          // Emit event with the provider-formatted input (for DevTools debugging)
-          Context.emit("model:provider_request", {
-            modelId: self.metadata.id,
-            provider: self.metadata.provider,
-            providerInput,
-          });
-
-          // Simple pass-through: yield events from processChunk
-          // Accumulation is handled by the adapter (via StreamAccumulator in createAdapter)
-          // or by the caller if using ModelAdapter directly
-          for await (const chunk of self.executeStream(providerInput)) {
-            const processed = self.processChunk
-              ? self.processChunk(chunk)
-              : (chunk as unknown as StreamEvent);
-            yield processed;
-          }
-        },
-      );
-    }
-    return this._stream;
-  }
-
-  /** Aggregate stream events into final output */
-  public async processStream(events: TChunk[] | StreamEvent[]): Promise<TModelOutput> {
-    const streamEvents = events as StreamEvent[];
-    let text = "";
-    const toolCalls: any[] = [];
-    const usage = { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
-    let stopReason: any = "unspecified";
-    let model = this.metadata.id;
-
-    for (const event of streamEvents) {
-      if (event.type === "content_delta") {
-        text += (event as ContentDeltaEvent).delta;
-      }
-      if (event.type === "tool_call") {
-        const tc = event as ToolCallEvent;
-        toolCalls.push({ id: tc.callId, name: tc.name, input: tc.input });
-      }
-      if (event.type === "message_end") {
-        const endEvent = event as MessageEndEvent;
-        if (endEvent.usage) {
-          usage.inputTokens = Math.max(usage.inputTokens, endEvent.usage.inputTokens || 0);
-          usage.outputTokens = Math.max(usage.outputTokens, endEvent.usage.outputTokens || 0);
-          usage.totalTokens = Math.max(usage.totalTokens, endEvent.usage.totalTokens || 0);
-        }
-        stopReason = endEvent.stopReason;
-      }
-      if (event.type === "message") {
-        const msgEvent = event as MessageEvent;
-        if (msgEvent.model) model = msgEvent.model;
-        if (msgEvent.usage) {
-          usage.inputTokens = Math.max(usage.inputTokens, msgEvent.usage.inputTokens || 0);
-          usage.outputTokens = Math.max(usage.outputTokens, msgEvent.usage.outputTokens || 0);
-          usage.totalTokens = Math.max(usage.totalTokens, msgEvent.usage.totalTokens || 0);
-        }
-        stopReason = msgEvent.stopReason;
-      }
-    }
-
-    return {
-      model,
-      createdAt: new Date().toISOString(),
-      message: { role: "assistant", content: [{ type: "text", text }] },
-      usage,
-      toolCalls: toolCalls.length ? toolCalls : undefined,
-      stopReason,
-      raw: {},
-    } as unknown as TModelOutput;
-  }
-
-  /** Convert engine state to model input */
-  public async fromEngineState(input: COMInput): Promise<TModelInput> {
-    // Use default implementation with this model instance for transformation config
-    return defaultFromEngineState(input, undefined, this as any) as Promise<TModelInput>;
-  }
-
-  /** Transform model input to provider-specific format (for DevTools visibility) */
-  public async getProviderInput(input: TModelInput): Promise<unknown> {
-    return this.prepareInput(input);
-  }
-
-  /** Convert model output to engine response */
-  public async toEngineState(output: TModelOutput): Promise<EngineResponse> {
-    const modelOutput = output as unknown as ModelOutput;
-    const stopReasonInfo = this.deriveStopReason(output);
-
-    // Determine if we should stop:
-    // 1. No tool calls AND terminal stop reason, OR
-    // 2. No tool calls AND empty/no content (model has nothing to say)
-    const hasToolCalls = modelOutput.toolCalls && modelOutput.toolCalls.length > 0;
-    const hasContent =
-      modelOutput.message?.content &&
-      Array.isArray(modelOutput.message.content) &&
-      modelOutput.message.content.length > 0;
-    const isTerminal = stopReasonInfo ? this.isTerminalStopReason(stopReasonInfo.reason) : false;
-
-    // Stop if: no tool calls AND (terminal stop reason OR empty response)
-    // This prevents infinite loops when model returns empty content with UNSPECIFIED stop reason
-    const shouldStop = !hasToolCalls && (isTerminal || !hasContent);
-
-    return {
-      newTimelineEntries: modelOutput.message
-        ? [
-            {
-              kind: "message",
-              message: modelOutput.message,
-              tags: ["model_output"],
-            },
-          ]
-        : [],
-      toolCalls: modelOutput.toolCalls?.map((tc) => ({
-        id: tc.id,
-        name: tc.name,
-        input: tc.input,
-      })),
-      usage: modelOutput.usage,
-      shouldStop,
-      stopReason: stopReasonInfo,
-    };
-  }
-
-  // === Stop reason helpers ===
-
-  protected deriveStopReason(output: TModelOutput): StopReasonInfo | undefined {
-    const modelOutput = output as unknown as ModelOutput;
-    if (!modelOutput.stopReason) return undefined;
-
-    const stopReason = modelOutput.stopReason as string | StopReason;
-    return {
-      reason: stopReason,
-      description: this.getStopReasonDescription(stopReason),
-      recoverable: this.isRecoverableStopReason(stopReason),
-      metadata: { usage: modelOutput.usage, model: modelOutput.model },
-    };
-  }
-
-  protected getStopReasonDescription(reason: string | StopReason): string {
-    const descriptions: Record<string, string> = {
-      [StopReason.MAX_TOKENS]: "Maximum token limit reached",
-      [StopReason.CONTENT_FILTER]: "Content was filtered by safety filters",
-      [StopReason.TOOL_USE]: "Model requested tool execution",
-      [StopReason.STOP]: "Model completed naturally",
-      [StopReason.PAUSED]: "Generation was paused",
-      [StopReason.FORMAT_ERROR]: "Response format error occurred",
-      [StopReason.EMPTY_RESPONSE]: "Model returned empty response",
-      [StopReason.NO_CONTENT]: "No content was generated",
-    };
-    return descriptions[reason] || `Stopped: ${reason}`;
-  }
-
-  protected isRecoverableStopReason(reason: string | StopReason): boolean {
-    const recoverable = [StopReason.PAUSED, StopReason.FORMAT_ERROR];
-    const terminal = [
-      StopReason.STOP,
-      StopReason.EXPLICIT_COMPLETION,
-      StopReason.NATURAL_COMPLETION,
-    ];
-    if (recoverable.includes(reason as StopReason)) return true;
-    if (terminal.includes(reason as StopReason)) return false;
-    return false;
-  }
-
-  protected isTerminalStopReason(reason: string | StopReason): boolean {
-    const terminal = [
-      StopReason.STOP,
-      StopReason.EXPLICIT_COMPLETION,
-      StopReason.NATURAL_COMPLETION,
-      StopReason.MAX_TOKENS,
-      StopReason.CONTENT_FILTER,
-    ];
-    return terminal.includes(reason as StopReason);
-  }
-}
-
-// ============================================================================
 // Utilities
 // ============================================================================
 
@@ -689,10 +89,14 @@ export function isEngineModel(value: any): value is EngineModel {
 }
 
 /**
- * ModelInstance type - use EngineModel as the standard.
- * ModelAdapter implements EngineModel, so both work.
+ * ModelInstance type - alias for EngineModel.
+ * Used by session code for type consistency.
  */
 export type ModelInstance = EngineModel;
+
+// ============================================================================
+// Configuration Types
+// ============================================================================
 
 /**
  * Unified message transformation configuration.
@@ -940,14 +344,12 @@ export type ModelToolReference =
   | BaseModelToolReference
   | ToolDefinition
   | ToolMetadata
-  | ExecutableTool; // Changed from Tool class to ExecutableTool interface
+  | ExecutableTool;
 
 export interface NormalizedModelTool {
   id: string;
   metadata: ToolMetadata;
 }
-
-// ToolCall is now exported from '@tentickle/shared'
 
 /**
  * Normalized model input (after message normalization)

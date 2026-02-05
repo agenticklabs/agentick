@@ -92,36 +92,8 @@ export interface CompileAgentResult {
   hasTool: (name: string) => boolean;
 }
 
-// ============================================================================
-// Mock COM for compilation
-// ============================================================================
-
-function createMockCom() {
-  const state = new Map<string, unknown>();
-  return {
-    id: "test-session",
-    timeline: [],
-    state,
-    get<T>(key: string): T | undefined {
-      return state.get(key) as T | undefined;
-    },
-    set<T>(key: string, value: T): void {
-      state.set(key, value);
-    },
-    requestRecompile: () => {},
-  };
-}
-
-function createMockTickState(tick: number) {
-  return {
-    tick,
-    previous: null,
-    current: null,
-    stop: () => {},
-    stopped: false,
-    stopReason: undefined,
-  };
-}
+// Use shared mocks
+import { createMockCom, createMockTickState } from "./mocks";
 
 // ============================================================================
 // Main API

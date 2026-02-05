@@ -20,35 +20,7 @@ import {
   useComputed,
   createSignal,
 } from "../index";
-
-// Mock COM
-function createMockCom() {
-  const state = new Map<string, unknown>();
-  return {
-    id: "test-session",
-    timeline: [],
-    state,
-    get<T>(key: string): T | undefined {
-      return state.get(key) as T | undefined;
-    },
-    set<T>(key: string, value: T): void {
-      state.set(key, value);
-    },
-    requestRecompile: vi.fn(),
-  };
-}
-
-// Mock TickState
-function createMockTickState(tick = 1): any {
-  return {
-    tick,
-    previous: null,
-    current: null,
-    stop: vi.fn(),
-    stopped: false,
-    stopReason: undefined,
-  };
-}
+import { createMockCom, createMockTickState, createMockTickResult } from "../../testing/mocks";
 
 describe("FiberCompiler", () => {
   let com: ReturnType<typeof createMockCom>;
@@ -56,7 +28,7 @@ describe("FiberCompiler", () => {
 
   beforeEach(() => {
     com = createMockCom();
-    compiler = new FiberCompiler(com);
+    compiler = new FiberCompiler(com as any);
   });
 
   // ============================================================
@@ -195,7 +167,7 @@ describe("FiberCompiler", () => {
       expect(tickEndCallback).not.toHaveBeenCalled();
 
       // Run tick end
-      await compiler.notifyTickEnd(tickState);
+      await compiler.notifyTickEnd(tickState, createMockTickResult(tickState.tick));
 
       expect(tickEndCallback).toHaveBeenCalledTimes(1);
     });
@@ -272,7 +244,7 @@ describe("FiberCompiler", () => {
       await compiler.compile(React.createElement(ParentComponent), tickState);
 
       // Tick end - callback should NOT run (component unmounted)
-      await compiler.notifyTickEnd(tickState);
+      await compiler.notifyTickEnd(tickState, createMockTickResult(tickState.tick));
 
       expect(tickEndCallback).not.toHaveBeenCalled();
     });
@@ -289,7 +261,7 @@ describe("FiberCompiler", () => {
 
       const tickState = createMockTickState();
       await compiler.compile(React.createElement(MultiCallbackComponent), tickState);
-      await compiler.notifyTickEnd(tickState);
+      await compiler.notifyTickEnd(tickState, createMockTickResult(tickState.tick));
 
       expect(callback1).toHaveBeenCalledTimes(1);
       expect(callback2).toHaveBeenCalledTimes(1);
@@ -312,7 +284,7 @@ describe("FiberCompiler", () => {
 
       const tickState = createMockTickState();
       await compiler.compile(React.createElement(AsyncCallbackComponent), tickState);
-      await compiler.notifyTickEnd(tickState);
+      await compiler.notifyTickEnd(tickState, createMockTickResult(tickState.tick));
 
       // Both should have run (order depends on implementation)
       expect(order).toContain("async1");
@@ -341,7 +313,7 @@ describe("FiberCompiler", () => {
       // Second compile (re-render)
       await compiler.compile(React.createElement(ClosureComponent), tickState);
 
-      await compiler.notifyTickEnd(tickState);
+      await compiler.notifyTickEnd(tickState, createMockTickResult(tickState.tick));
 
       // Should capture the value from the most recent render
       expect(capturedValue).toBe(2);
@@ -358,7 +330,7 @@ describe("FiberCompiler", () => {
       let capturedData: any = null;
 
       const DataComponent = () => {
-        const data = useData("user-1", fetchFn);
+        const data = useData<{ name: string }>("user-1", fetchFn);
         capturedData = data;
         return React.createElement("Section", { id: "data", "data-name": data.name });
       };
@@ -375,11 +347,12 @@ describe("FiberCompiler", () => {
       expect(fetchFn).toHaveBeenCalledTimes(1); // Still 1, not 2
     });
 
-    it("should refetch when refetchEveryTick is true", async () => {
+    it("should refetch when tick changes", async () => {
       const fetchFn = vi.fn().mockResolvedValue({ status: "ok" });
 
       const RefetchComponent = () => {
-        const data = useData("status", fetchFn, { refetchEveryTick: true });
+        const tick = useTickState();
+        const data = useData<{ status: string }>("status", fetchFn, [tick.tick]);
         return React.createElement("Section", { id: "status", "data-status": data.status });
       };
 
@@ -398,7 +371,7 @@ describe("FiberCompiler", () => {
       let userId = "user-1";
 
       const DepsComponent = () => {
-        const data = useData("user-data", fetchFn, { deps: [userId] });
+        const data = useData<{ data: string }>("user-data", fetchFn, [userId]);
         return React.createElement("Section", { id: "deps", "data-result": data.data });
       };
 
@@ -415,35 +388,6 @@ describe("FiberCompiler", () => {
       // Change deps - should refetch
       userId = "user-2";
       await compiler.compile(React.createElement(DepsComponent), tickState);
-      expect(fetchFn).toHaveBeenCalledTimes(2);
-    });
-
-    it("should refetch after staleAfterTicks", async () => {
-      const fetchFn = vi.fn().mockResolvedValue({ fresh: true });
-
-      const StaleComponent = () => {
-        const data = useData("stale-test", fetchFn, { staleAfterTicks: 2 });
-        return React.createElement("Section", { id: "stale", "data-fresh": String(data.fresh) });
-      };
-
-      // Tick 1
-      const tickState1 = createMockTickState(1);
-      await compiler.compile(React.createElement(StaleComponent), tickState1);
-      expect(fetchFn).toHaveBeenCalledTimes(1);
-
-      // Tick 2 - within stale threshold
-      const tickState2 = createMockTickState(2);
-      await compiler.compile(React.createElement(StaleComponent), tickState2);
-      expect(fetchFn).toHaveBeenCalledTimes(1);
-
-      // Tick 3 - still within threshold (2 ticks since fetch)
-      const tickState3 = createMockTickState(3);
-      await compiler.compile(React.createElement(StaleComponent), tickState3);
-      expect(fetchFn).toHaveBeenCalledTimes(1);
-
-      // Tick 4 - exceeds staleAfterTicks (3 ticks since fetch)
-      const tickState4 = createMockTickState(4);
-      await compiler.compile(React.createElement(StaleComponent), tickState4);
       expect(fetchFn).toHaveBeenCalledTimes(2);
     });
 
@@ -468,8 +412,8 @@ describe("FiberCompiler", () => {
       const fetchPosts = vi.fn().mockResolvedValue([{ id: 1 }]);
 
       const MultiDataComponent = () => {
-        const user = useData("user", fetchUser);
-        const posts = useData("posts", fetchPosts);
+        const user = useData<{ name: string }>("user", fetchUser);
+        const posts = useData<{ id: number }[]>("posts", fetchPosts);
         return React.createElement("Section", {
           id: "multi-data",
           "data-user": user.name,
@@ -489,7 +433,7 @@ describe("FiberCompiler", () => {
       let shouldInvalidate = false;
 
       const InvalidateComponent = () => {
-        const data = useData("invalidate-test", fetchFn);
+        const data = useData<{ value: number }>("invalidate-test", fetchFn);
         const invalidate = useInvalidateData();
 
         useAfterCompile(() => {
@@ -564,8 +508,8 @@ describe("FiberCompiler", () => {
 
       const StateComponent = () => {
         const com = useCom();
-        com.set("test-key", "test-value");
-        readValue = com.get("test-key");
+        com.setState("test-key", "test-value");
+        readValue = com.getState("test-key");
         return React.createElement("Section", { id: "state-test" });
       };
 
@@ -604,7 +548,7 @@ describe("FiberCompiler", () => {
       // Call stop
       tickState.stop("test reason");
 
-      expect(mockTickState.stop).toHaveBeenCalledWith("test reason");
+      expect(mockTickState._stopCalls).toContain("test reason");
     });
   });
 
@@ -630,11 +574,11 @@ describe("FiberCompiler", () => {
       const signal = createSignal("initial");
       const subscriber = vi.fn();
 
-      signal.subscribe(subscriber);
+      signal.subscribe?.(subscriber);
       signal.set("updated");
 
       // Wait for microtask to flush (signals use microtask scheduling)
-      await new Promise((resolve) => queueMicrotask(resolve));
+      await new Promise<void>((resolve) => queueMicrotask(resolve));
 
       expect(subscriber).toHaveBeenCalledWith("updated");
     });
@@ -643,7 +587,7 @@ describe("FiberCompiler", () => {
       const signal = createSignal(10);
       const subscriber = vi.fn();
 
-      signal.subscribe(subscriber);
+      signal.subscribe?.(subscriber);
       signal.set(10); // Same value
 
       expect(subscriber).not.toHaveBeenCalled();
@@ -660,15 +604,15 @@ describe("FiberCompiler", () => {
       const signal = createSignal(0);
       const subscriber = vi.fn();
 
-      const unsubscribe = signal.subscribe(subscriber);
+      const unsubscribe = signal.subscribe?.(subscriber);
       signal.set(1);
       // Wait for microtask to flush (signals use microtask scheduling)
-      await new Promise((resolve) => queueMicrotask(resolve));
+      await new Promise<void>((resolve) => queueMicrotask(resolve));
       expect(subscriber).toHaveBeenCalledTimes(1);
 
-      unsubscribe();
+      unsubscribe?.();
       signal.set(2);
-      await new Promise((resolve) => queueMicrotask(resolve));
+      await new Promise<void>((resolve) => queueMicrotask(resolve));
       expect(subscriber).toHaveBeenCalledTimes(1); // No new call
     });
 
@@ -712,8 +656,8 @@ describe("FiberCompiler", () => {
     it("should isolate data cache between compiler instances", async () => {
       const com1 = createMockCom();
       const com2 = createMockCom();
-      const compiler1 = new FiberCompiler(com1);
-      const compiler2 = new FiberCompiler(com2);
+      const compiler1 = new FiberCompiler(com1 as any);
+      const compiler2 = new FiberCompiler(com2 as any);
 
       const fetchFn1 = vi.fn().mockResolvedValue({ id: 1 });
       const fetchFn2 = vi.fn().mockResolvedValue({ id: 2 });
@@ -742,8 +686,8 @@ describe("FiberCompiler", () => {
     it("should isolate lifecycle callbacks between compiler instances", async () => {
       const com1 = createMockCom();
       const com2 = createMockCom();
-      const compiler1 = new FiberCompiler(com1);
-      const compiler2 = new FiberCompiler(com2);
+      const compiler1 = new FiberCompiler(com1 as any);
+      const compiler2 = new FiberCompiler(com2 as any);
 
       const callback1 = vi.fn();
       const callback2 = vi.fn();
@@ -764,13 +708,13 @@ describe("FiberCompiler", () => {
       await compiler2.compile(React.createElement(Component2), tickState);
 
       // Only notify tick end on compiler1
-      await compiler1.notifyTickEnd(tickState);
+      await compiler1.notifyTickEnd(tickState, createMockTickResult(tickState.tick));
 
       expect(callback1).toHaveBeenCalledTimes(1);
       expect(callback2).not.toHaveBeenCalled(); // Isolated!
 
       // Now notify on compiler2
-      await compiler2.notifyTickEnd(tickState);
+      await compiler2.notifyTickEnd(tickState, createMockTickResult(tickState.tick));
 
       expect(callback2).toHaveBeenCalledTimes(1);
     });
@@ -778,22 +722,22 @@ describe("FiberCompiler", () => {
     it("should isolate COM state between sessions", async () => {
       const com1 = createMockCom();
       const com2 = createMockCom();
-      const compiler1 = new FiberCompiler(com1);
-      const compiler2 = new FiberCompiler(com2);
+      const compiler1 = new FiberCompiler(com1 as any);
+      const compiler2 = new FiberCompiler(com2 as any);
 
       let value1: any = null;
       let value2: any = null;
 
       const Component1 = () => {
         const com = useCom();
-        com.set("shared-key", "value-from-session-1");
-        value1 = com.get("shared-key");
+        com.setState("shared-key", "value-from-session-1");
+        value1 = com.getState("shared-key");
         return React.createElement("Section", { id: "1" });
       };
 
       const Component2 = () => {
         const com = useCom();
-        value2 = com.get("shared-key"); // Should be undefined
+        value2 = com.getState("shared-key"); // Should be undefined
         return React.createElement("Section", { id: "2" });
       };
 
@@ -835,7 +779,7 @@ describe("FiberCompiler", () => {
 
       // Create new compiler and restore cache
       const newCom = createMockCom();
-      const newCompiler = new FiberCompiler(newCom);
+      const newCompiler = new FiberCompiler(newCom as any);
       newCompiler.setDataCache(serialized);
 
       // Compile with restored cache - should NOT fetch again
@@ -873,7 +817,7 @@ describe("FiberCompiler", () => {
       const fetchFn = vi.fn().mockResolvedValue({ data: "test" });
 
       const DepsTickComponent = () => {
-        const _data = useData("deps-cache", fetchFn, { deps: ["a", "b"] });
+        const _data = useData<{ data: string }>("deps-cache", fetchFn, ["a", "b"]);
         return React.createElement("Section", { id: "deps-cache" });
       };
 
@@ -909,7 +853,7 @@ describe("FiberCompiler", () => {
 
       const tickState = createMockTickState();
       await compiler.compile(React.createElement(Parent), tickState);
-      await compiler.notifyTickEnd(tickState);
+      await compiler.notifyTickEnd(tickState, createMockTickResult(tickState.tick));
 
       // React's useEffect runs bottom-up: children before parents
       expect(order[0]).toBe("child");
@@ -944,7 +888,7 @@ describe("FiberCompiler", () => {
       await compiler.compile(React.createElement(Parent), tickState);
 
       // Tick end
-      await compiler.notifyTickEnd(tickState);
+      await compiler.notifyTickEnd(tickState, createMockTickResult(tickState.tick));
 
       expect(parentCallback).toHaveBeenCalledTimes(1);
       expect(childCallback).not.toHaveBeenCalled(); // Unmounted
@@ -1015,7 +959,7 @@ describe("FiberCompiler", () => {
       await compiler.unmount();
 
       // Tick end after unmount should not call the callback
-      await compiler.notifyTickEnd(tickState);
+      await compiler.notifyTickEnd(tickState, createMockTickResult(tickState.tick));
       expect(callback).not.toHaveBeenCalled();
     });
 

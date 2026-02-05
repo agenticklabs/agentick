@@ -7,7 +7,7 @@ Test your agents without making real API calls.
 ```tsx
 import {
   renderAgent,
-  createTestModel,
+  createTestAdapter,
   act,
   cleanup,
 } from "@tentickle/core/testing";
@@ -26,26 +26,26 @@ test("agent responds to user", async () => {
 });
 ```
 
-## Test Model
+## Test Adapter
 
-`createTestModel()` creates a mock model for testing.
+`createTestAdapter()` creates a mock model for testing.
 
 ### Basic Usage
 
 ```typescript
 // Simple text response
-const model = createTestModel({
+const model = createTestAdapter({
   defaultResponse: "Hello from test!",
 });
 
 // With tool calls
-const model = createTestModel({
+const model = createTestAdapter({
   defaultResponse: "I'll search for that",
   toolCalls: [{ name: "search", input: { query: "test" } }],
 });
 
 // Dynamic responses
-const model = createTestModel({
+const model = createTestAdapter({
   responseGenerator: (input) => {
     const lastMessage = input.messages.at(-1);
     if (lastMessage?.content.includes("weather")) {
@@ -61,7 +61,7 @@ const model = createTestModel({
 Set the exact response for the next model call with automatic content detection:
 
 ```typescript
-const model = createTestModel();
+const model = createTestAdapter();
 
 // Simple text
 model.respondWith(["Hello world"]);
@@ -145,7 +145,7 @@ Full agent lifecycle testing:
 ```typescript
 const { send, result, model, session, rerender } = renderAgent(MyAgent, {
   props: { mode: "helpful" },
-  model: createTestModel({ defaultResponse: "Hi!" }),
+  model: createTestAdapter({ defaultResponse: "Hi!" }),
 });
 
 // Send messages
@@ -161,11 +161,11 @@ await act(() => rerender({ mode: "concise" }));
 
 ### Options
 
-| Option     | Description                                      |
-| ---------- | ------------------------------------------------ |
-| `props`    | Props to pass to the agent component             |
-| `model`    | Custom test model (default: `createTestModel()`) |
-| `maxTicks` | Max ticks per execution (default: 10)            |
+| Option     | Description                                        |
+| ---------- | -------------------------------------------------- |
+| `props`    | Props to pass to the agent component               |
+| `model`    | Custom test model (default: `createTestAdapter()`) |
+| `maxTicks` | Max ticks per execution (default: 10)              |
 
 ## compileAgent
 
@@ -239,7 +239,7 @@ afterEach(() => cleanup());
 
 ```typescript
 test("agent uses search tool", async () => {
-  const model = createTestModel();
+  const model = createTestAdapter();
   const { send, result } = renderAgent(SearchAgent, { model });
 
   // First tick: model calls tool
@@ -261,7 +261,7 @@ test("agent uses search tool", async () => {
 
 ```typescript
 test("agent remembers context", async () => {
-  const model = createTestModel();
+  const model = createTestAdapter();
   const { send, result } = renderAgent(ChatAgent, { model });
 
   model.respondWith(["I'm Claude, nice to meet you!"]);
@@ -278,7 +278,7 @@ test("agent remembers context", async () => {
 
 ```typescript
 test("agent handles model errors", async () => {
-  const model = createTestModel();
+  const model = createTestAdapter();
   const { send, result } = renderAgent(ResilientAgent, { model });
 
   model.setError(new Error("API rate limited"));

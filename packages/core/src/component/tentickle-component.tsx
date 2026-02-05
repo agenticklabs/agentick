@@ -30,7 +30,7 @@
 
 import React, { type ReactNode } from "react";
 import type { COM } from "../com/object-model";
-import type { TickState } from "../hooks/types";
+import type { TickState, TickResult } from "../hooks/types";
 import type { COMInput } from "../com/types";
 import type { CompiledStructure } from "../compiler/types";
 import type { ExecutionMessage } from "../engine/execution-types";
@@ -184,6 +184,9 @@ export abstract class TentickleComponent<P extends object = {}, S = {}> extends 
 
   /**
    * Internal: Render with lifecycle management.
+   *
+   * Note: onTickEnd is not called from class components directly.
+   * Use useTickEnd hook or createTool for tick end callbacks.
    */
   _renderWithLifecycle(): React.ReactElement | null {
     // Handle mount
@@ -196,7 +199,9 @@ export abstract class TentickleComponent<P extends object = {}, S = {}> extends 
     const currentTick = this._tickState?.tick ?? 0;
     if (currentTick !== this._lastTick) {
       this._lastTick = currentTick;
-      this.onTickStart?.();
+      if (this.onTickStart && this._com && this._tickState) {
+        this.onTickStart(this._com, this._tickState);
+      }
     }
 
     // Call render
@@ -223,14 +228,16 @@ export abstract class TentickleComponent<P extends object = {}, S = {}> extends 
   /**
    * Called at the start of each tick.
    * Use for per-tick initialization or state updates.
+   * Receives COM and TickState for consistency with hooks API.
    */
-  onTickStart?(): void | Promise<void>;
+  onTickStart?(com: COM, tickState: TickState): void | Promise<void>;
 
   /**
    * Called at the end of each tick.
-   * Use for per-tick cleanup or side effects.
+   * Use for per-tick cleanup, side effects, or continuation control.
+   * Receives COM and TickResult with response data and control methods.
    */
-  onTickEnd?(): void | Promise<void>;
+  onTickEnd?(com: COM, result: TickResult): void | Promise<void>;
 
   /**
    * Called after compilation, before model execution.

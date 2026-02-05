@@ -8,57 +8,15 @@ import { describe, it, expect, vi } from "vitest";
 import React from "react";
 import { TentickleComponent, createClassComponent } from "../tentickle-component";
 import { createApp } from "../../app";
-import { createModel, type ModelInput, type ModelOutput } from "../../model/model";
-import { fromEngineState, toEngineState } from "../../model/utils/language-model";
+import { createTestAdapter } from "../../testing/test-adapter";
 import { Section, Model } from "../../jsx/components/primitives";
-import type { StopReason, StreamEvent } from "@tentickle/shared";
-import { BlockType } from "@tentickle/shared";
 
 // ============================================================================
 // Test Utilities
 // ============================================================================
 
 function createMockModel(response = "Mock response") {
-  return createModel<ModelInput, ModelOutput, ModelInput, ModelOutput, StreamEvent>({
-    metadata: {
-      id: "mock-model",
-      provider: "mock",
-      capabilities: [],
-    },
-    executors: {
-      execute: async () => ({
-        model: "mock-model",
-        createdAt: new Date().toISOString(),
-        message: {
-          role: "assistant",
-          content: [{ type: "text", text: response }],
-        },
-        usage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 },
-        stopReason: "stop" as StopReason,
-        raw: {},
-      }),
-      executeStream: async function* () {
-        yield {
-          type: "content_delta",
-          blockType: BlockType.TEXT,
-          blockIndex: 0,
-          delta: response,
-        } as StreamEvent;
-      },
-    },
-    transformers: {
-      processStream: async () => ({
-        model: "mock-model",
-        createdAt: new Date().toISOString(),
-        message: { role: "assistant", content: [{ type: "text", text: response }] },
-        usage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 },
-        stopReason: "stop" as StopReason,
-        raw: {},
-      }),
-    },
-    fromEngineState,
-    toEngineState,
-  });
+  return createTestAdapter({ defaultResponse: response });
 }
 
 // ============================================================================

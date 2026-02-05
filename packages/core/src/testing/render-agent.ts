@@ -8,8 +8,8 @@ import { createApp } from "../app";
 import type { AppOptions, SessionOptions, SendResult, ComponentFunction } from "../app/types";
 import type { Session } from "../app/types";
 import type { Message, ContentBlock } from "@tentickle/shared";
-import type { TestModelInstance } from "./test-model";
-import { createTestModel } from "./test-model";
+import type { TestAdapterInstance } from "./test-adapter";
+import { createTestAdapter } from "./test-adapter";
 import { flushMicrotasks } from "./act";
 
 // ============================================================================
@@ -23,9 +23,9 @@ export interface RenderAgentOptions<P extends Record<string, unknown> = Record<s
   props?: P;
 
   /**
-   * Model to use. If not provided, creates a default test model.
+   * Model to use. If not provided, creates a default test adapter.
    */
-  model?: TestModelInstance | ReturnType<typeof createTestModel>;
+  model?: TestAdapterInstance | ReturnType<typeof createTestAdapter>;
 
   /**
    * App options (maxTicks, etc.)
@@ -51,9 +51,9 @@ export interface RenderAgentResult<P extends Record<string, unknown> = Record<st
   session: Session<P>;
 
   /**
-   * The test model (for assertions).
+   * The test adapter (for assertions).
    */
-  model: TestModelInstance;
+  model: TestAdapterInstance;
 
   /**
    * Send a user message and wait for completion.
@@ -182,7 +182,7 @@ export function cleanup(): void {
  * @example With custom model
  * ```tsx
  * const { send, result } = renderAgent(MyAgent, {
- *   model: createTestModel({
+ *   model: createTestAdapter({
  *     defaultResponse: "Custom response",
  *     delay: 10,
  *   }),
@@ -195,7 +195,7 @@ export async function renderAgent<P extends Record<string, unknown> = Record<str
 ): Promise<RenderAgentResult<P>> {
   const {
     props = {} as P,
-    model = createTestModel(),
+    model = createTestAdapter(),
     appOptions = {},
     sessionOptions,
     autoTick = false,
@@ -321,7 +321,7 @@ export async function renderAgent<P extends Record<string, unknown> = Record<str
 
   return {
     session,
-    model: model as TestModelInstance,
+    model: model as TestAdapterInstance,
     send,
     tick,
     result,

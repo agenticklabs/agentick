@@ -17,11 +17,11 @@ import { createApp, Model, System, Timeline, Message } from "../../index";
 import { useConversationHistory, useQueuedMessages, useTickState } from "../../hooks";
 import type { COMTimelineEntry } from "../../com/types";
 import type { MessageRoles } from "@tentickle/shared";
-import { createTestModel } from "../../testing";
+import { createTestAdapter } from "../../testing";
 
 // Helper to create a mock model that captures input using the shared test utility
 function createMockModel() {
-  const model = createTestModel({
+  const model = createTestAdapter({
     defaultResponse: "Response",
   });
 
@@ -197,7 +197,7 @@ describe("Message Flow Integration", () => {
       await handle.result;
 
       // Check that fromEngineState was called with the user message
-      // createTestModel captures ModelInput (after fromEngineState transforms COMInput)
+      // createTestAdapter captures ModelInput (after fromEngineState transforms COMInput)
       const capturedInputs = mockModel.getCapturedInputs();
       expect(capturedInputs.length).toBeGreaterThanOrEqual(1);
 
@@ -451,7 +451,7 @@ describe("Session Lifecycle", () => {
       await handle.result;
 
       expect(tickCount).toBeGreaterThanOrEqual(1);
-      // createTestModel exposes mocks via .mocks property
+      // createTestAdapter exposes mocks via .mocks property
       expect(mockModel.model.mocks.executeStream).toHaveBeenCalled();
 
       session.close();

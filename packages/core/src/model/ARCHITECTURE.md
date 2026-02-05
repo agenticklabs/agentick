@@ -45,7 +45,7 @@ Tentickle needs to work with multiple AI providers (OpenAI, Anthropic, Google, e
 - **Provider agnostic** - Core engine code never depends on specific providers
 - **Procedure-based execution** - All model operations are wrapped in kernel procedures for tracking
 - **Transformation pipeline** - Clear separation between engine format and provider format
-- **Progressive adoption** - Use `createModel()` for simple cases, `ModelAdapter` for complex adapters
+- **Single API** - Use `createAdapter()` for all model creation (simple to complex)
 
 ---
 
@@ -53,7 +53,8 @@ Tentickle needs to work with multiple AI providers (OpenAI, Anthropic, Google, e
 
 ```
 model/
-├── model.ts              # Core interfaces, createModel(), ModelAdapter
+├── model.ts              # Core interfaces (EngineModel, ModelInput, ModelOutput)
+├── adapter.ts            # createAdapter() factory
 ├── model-hooks.ts        # Hook registry for model operations
 ├── index.ts              # Public exports
 └── utils/
@@ -65,8 +66,7 @@ model/
 graph TB
     subgraph "Model Module"
         EM[EngineModel Interface]
-        CM[createModel / createLanguageModel]
-        MA[ModelAdapter Class]
+        CA[createAdapter]
         MH[ModelHookRegistry]
     end
 
@@ -82,16 +82,15 @@ graph TB
         GOOGLE[google adapter]
     end
 
-    CM --> EM
-    MA --> EM
+    CA --> EM
 
     EM --> FES
     EM --> TES
     FES --> MT
 
-    AISDK --> CM
-    OPENAI --> CM
-    GOOGLE --> CM
+    AISDK --> CA
+    OPENAI --> CA
+    GOOGLE --> CA
 
     MH --> EM
 ```
@@ -136,66 +135,43 @@ interface EngineModel<TModelInput = ModelInput, TModelOutput = ModelOutput> {
 
 **Key insight**: Both `generate` and `stream` are kernel Procedures, providing automatic tracking, middleware support, and telemetry.
 
-### 2. Model Creation Patterns
+### 2. Model Creation with `createAdapter()`
 
-Tentickle provides two patterns for creating models:
-
-#### Functional Pattern: `createModel()`
-
-Best for simple adapters and one-off integrations:
+All models in Tentickle are created using `createAdapter()`:
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                    createModel(options)                         │
+│                    createAdapter(options)                        │
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                 │
-│  CreateModelOptions:                                            │
+│  AdapterOptions<TProviderInput, TProviderOutput, TProviderChunk>│
 │  ┌─────────────────────────────────────────────────────────┐    │
 │  │ metadata:     ModelMetadata                              │    │
-│  │ transformers: {                                          │    │
-│  │   prepareInput:  ModelInput → ProviderInput              │    │
-│  │   processOutput: ProviderOutput → ModelOutput            │    │
-│  │   processChunk:  ProviderChunk → StreamEvent             │    │
-│  │   processStream: StreamEvent[] → ModelOutput             │    │
-│  │ }                                                        │    │
-│  │ executors: {                                             │    │
-│  │   execute:       ProviderInput → ProviderOutput          │    │
-│  │   executeStream: ProviderInput → AsyncIterable<Chunk>    │    │
-│  │ }                                                        │    │
+│  │                                                         │    │
+│  │ prepareInput:   ModelInput → ProviderInput               │    │
+│  │ mapChunk:       ProviderChunk → AdapterDelta | null      │    │
+│  │ execute:        ProviderInput → ProviderOutput           │    │
+│  │ executeStream:  ProviderInput → AsyncIterable<Chunk>     │    │
+│  │                                                         │    │
+│  │ // Optional:                                            │    │
+│  │ processOutput:  ProviderOutput → ModelOutput             │    │
+│  │ reconstructRaw: StreamAccumulator → raw                  │    │
+│  │ fromEngineState: COMInput → ModelInput                   │    │
+│  │ toEngineState:   ModelOutput → EngineResponse            │    │
 │  └─────────────────────────────────────────────────────────┘    │
 │                           │                                     │
 │                           ▼                                     │
-│                    EngineModel                                  │
+│               ModelClass (EngineModel + JSX Component)          │
 │                                                                 │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-#### Class Pattern: `ModelAdapter`
+**Key features:**
 
-Best for complex adapters with shared behavior:
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                    ModelAdapter (abstract)                       │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                 │
-│  Abstract methods (must implement):                             │
-│  ├── prepareInput(input): ProviderInput                         │
-│  ├── processOutput(output): ModelOutput                         │
-│  ├── processChunk(chunk): StreamEvent                           │
-│  ├── execute(input): ProviderOutput                             │
-│  └── executeStream(input): AsyncIterable<Chunk>                 │
-│                                                                 │
-│  Provided implementations:                                      │
-│  ├── generate: Procedure (lazy-initialized)                     │
-│  ├── stream: Procedure (lazy-initialized)                       │
-│  ├── fromEngineState(input): ModelInput                         │
-│  ├── toEngineState(output): EngineResponse                      │
-│  ├── processStream(chunks): ModelOutput                         │
-│  └── Hook registration (static hooks, instance hooks)           │
-│                                                                 │
-└─────────────────────────────────────────────────────────────────┘
-```
+- Returns a `ModelClass` that works both as an `EngineModel` and a JSX component
+- Wraps `generate()` and `stream()` as kernel Procedures (automatic tracking, telemetry)
+- Built-in stream accumulation for tool calls, reasoning, and usage stats
+- Returns `ExecutionHandle` from generate/stream for consistent async patterns
 
 ### 3. Message Transformation
 
@@ -323,60 +299,65 @@ interface ModelOutput {
 
 ## API Reference
 
+### adapter.ts
+
+#### `createAdapter<TProviderInput, TProviderOutput, TProviderChunk>(options)`
+
+Factory function for creating model adapters:
+
+```typescript
+import { createAdapter } from '@tentickle/core/model';
+
+const model = createAdapter({
+  metadata: {
+    id: 'my-model',
+    provider: 'my-provider',
+    capabilities: [{ stream: true, toolCalls: true }]
+  },
+
+  prepareInput: (input: ModelInput) => ({
+    // Transform to provider format
+    model: input.model,
+    messages: input.messages.map(m => ({ ... })),
+  }),
+
+  mapChunk: (chunk: ProviderChunk): AdapterDelta | null => {
+    // Transform provider chunk to normalized delta
+    if (chunk.text) return { type: 'text', delta: chunk.text };
+    if (chunk.toolCall) return { type: 'tool_call', ... };
+    return null; // Ignore unknown chunks
+  },
+
+  execute: async (input) => provider.generate(input),
+  executeStream: async function*(input) { yield* provider.stream(input) },
+
+  // Optional: custom output processing
+  processOutput: (output) => ({ ... }),
+
+  // Optional: reconstruct raw for streaming (builds ModelOutput.raw)
+  reconstructRaw: (accumulated) => ({ ... }),
+
+  fromEngineState, // Usually import from utils/language-model
+  toEngineState,   // Usually import from utils/language-model
+});
+```
+
+**Returns:** `ModelClass` - An `EngineModel` that also works as a JSX component.
+
+**AdapterDelta types:**
+
+- `{ type: 'text', delta: string }` - Text content
+- `{ type: 'reasoning', delta: string }` - Reasoning/thinking content
+- `{ type: 'tool_call', id, name, input }` - Complete tool call
+- `{ type: 'tool_call_start', id, name }` - Start of streamed tool call
+- `{ type: 'tool_call_delta', id, delta }` - Tool call argument chunk
+- `{ type: 'tool_call_end', id, input? }` - End of streamed tool call
+- `{ type: 'message_start' }` - Message started
+- `{ type: 'message_end', stopReason, usage }` - Message completed
+- `{ type: 'usage', usage }` - Standalone usage update
+- `{ type: 'error', error }` - Error occurred
+
 ### model.ts
-
-#### `createModel<...>(options)`
-
-Factory function for creating models:
-
-```typescript
-const model = createModel({
-  metadata: { id: 'my-model', type: 'language', capabilities: [...] },
-  transformers: {
-    prepareInput: (input) => providerFormat(input),
-    processOutput: (output) => normalizedFormat(output),
-    processChunk: (chunk) => streamChunk(chunk),
-  },
-  executors: {
-    execute: (input) => provider.generate(input),
-    executeStream: (input) => provider.stream(input),
-  },
-  fromEngineState: (comInput) => modelInput,
-  toEngineState: (modelOutput) => engineResponse,
-});
-```
-
-#### `createLanguageModel<...>(options)`
-
-Convenience wrapper for language models with default fromEngineState/toEngineState:
-
-```typescript
-const model = createLanguageModel({
-  metadata: { id: 'my-llm', capabilities: [...] },
-  transformers: { ... },
-  executors: { ... },
-});
-// fromEngineState and toEngineState provided automatically
-```
-
-#### `ModelAdapter` (abstract class)
-
-Base class for provider adapters:
-
-| Property/Method     | Description                                 |
-| ------------------- | ------------------------------------------- |
-| `metadata`          | Abstract - must define model metadata       |
-| `generate`          | Procedure for non-streaming (lazy)          |
-| `stream`            | Procedure for streaming (lazy)              |
-| `hooks`             | ModelHookRegistry for this instance         |
-| `prepareInput()`    | Abstract - convert ModelInput to provider   |
-| `processOutput()`   | Abstract - convert provider output to Model |
-| `processChunk()`    | Abstract - convert chunk to StreamEvent     |
-| `execute()`         | Abstract - call provider generation         |
-| `executeStream()`   | Abstract - call provider streaming          |
-| `fromEngineState()` | Convert COMInput to ModelInput              |
-| `toEngineState()`   | Convert ModelOutput to EngineResponse       |
-| `processStream()`   | Aggregate chunks into ModelOutput           |
 
 #### `isEngineModel(value)`
 
@@ -548,113 +529,77 @@ graph LR
 
 ## Usage Examples
 
-### Creating a Simple Model
+### Creating a Simple Adapter
 
 ```typescript
-import { createModel } from "tentickle";
+import { createAdapter } from "@tentickle/core/model";
+import { fromEngineState, toEngineState } from "@tentickle/core/model/utils";
 import { MyProviderSDK } from "my-provider";
 
-const model = createModel({
+const model = createAdapter({
   metadata: {
     id: "my-provider:gpt-4",
     provider: "my-provider",
-    type: "language",
     capabilities: [{ stream: true, toolCalls: true }],
   },
 
-  transformers: {
-    prepareInput: (input) => ({
-      model: input.model || "gpt-5.2",
-      messages: input.messages.map((m) => ({
-        role: m.role,
-        content: m.content
-          .map((b) => (b.type === "text" ? b.text : ""))
-          .join(""),
-      })),
-      temperature: input.temperature,
-    }),
+  prepareInput: (input) => ({
+    model: input.model || "gpt-5.2",
+    messages: input.messages.map((m) => ({
+      role: m.role,
+      content: m.content.map((b) => (b.type === "text" ? b.text : "")).join(""),
+    })),
+    temperature: input.temperature,
+  }),
 
-    processOutput: (output) => ({
-      message: {
-        role: "assistant",
-        content: [{ type: "text", text: output.text }],
-      },
-      usage: output.usage,
-      stopReason: output.stop_reason,
-      model: output.model,
-      createdAt: new Date().toISOString(),
-      raw: output,
-    }),
+  mapChunk: (chunk) => {
+    if (chunk.text) return { type: "text", delta: chunk.text };
+    if (chunk.finish_reason) {
+      return { type: "message_end", stopReason: chunk.finish_reason, usage: chunk.usage };
+    }
+    return null;
   },
 
-  executors: {
-    execute: (input) => MyProviderSDK.generate(input),
-    executeStream: (input) => MyProviderSDK.stream(input),
-  },
+  execute: (input) => MyProviderSDK.generate(input),
+  executeStream: (input) => MyProviderSDK.stream(input),
+
+  fromEngineState,
+  toEngineState,
 });
 ```
 
 ### Using AI SDK Adapter
 
 ```typescript
-import { createAiSdkModel } from "tentickle/adapters/ai-sdk";
+import { aiSdk } from "@tentickle/ai-sdk";
 import { openai } from "@ai-sdk/openai";
 
-const model = createAiSdkModel({
+const model = aiSdk({
   model: openai("gpt-5.2"),
   temperature: 0.7,
   maxTokens: 4096,
 });
 
-// Use with engine
-const engine = createEngine({ model });
+// Use with app
+const app = createApp(MyAgent, { model });
 ```
 
-### Custom ModelAdapter Class
+### Using OpenAI Adapter
 
 ```typescript
-import { ModelAdapter, ModelInput, ModelOutput } from 'tentickle';
+import { openai } from "@tentickle/openai";
 
-class MyCustomAdapter extends ModelAdapter<ModelInput, ModelOutput, ProviderInput, ProviderOutput, ProviderChunk> {
-  metadata = {
-    id: 'custom:model',
-    provider: 'custom',
-    type: 'language' as const,
-    capabilities: [{ stream: true }],
-  };
+const model = openai({ model: "gpt-4o" });
 
-  protected prepareInput(input: ModelInput): ProviderInput {
-    // Transform to provider format
-    return { ... };
-  }
-
-  protected processOutput(output: ProviderOutput): ModelOutput {
-    // Transform from provider format
-    return { ... };
-  }
-
-  protected processChunk(chunk: ProviderChunk): StreamEvent {
-    // Transform streaming chunk to typed StreamEvent
-    return {
-      type: 'content_delta',
-      blockType: 'text',
-      blockIndex: 0,
-      delta: chunk.text,
-      id: generateEventId(),
-      tick: 1,
-      timestamp: new Date().toISOString(),
-    };
-  }
-
-  protected async execute(input: ProviderInput): Promise<ProviderOutput> {
-    return await this.client.generate(input);
-  }
-
-  protected async *executeStream(input: ProviderInput): AsyncIterable<ProviderChunk> {
-    for await (const chunk of this.client.stream(input)) {
-      yield chunk;
-    }
-  }
+// Use in JSX
+function Agent() {
+  return (
+    <>
+      <model />
+      <System>You are helpful.</System>
+      <Timeline />
+    </>
+  );
 }
 ```
 
@@ -696,9 +641,10 @@ class MyAdapter extends ModelAdapter {
 ### Custom Message Transformation
 
 ```typescript
-const model = createLanguageModel({
+const model = createAdapter({
   metadata: {
     id: "my-model",
+    provider: "my-provider",
     capabilities: [
       {
         messageTransformation: (modelId, provider) => ({
@@ -760,11 +706,11 @@ Each adapter must handle:
 
 ### Creating New Adapters
 
-1. **Use `createLanguageModel()`** for most cases - gets default transformers
-2. **Extend `ModelAdapter`** when you need class-based organization
+1. **Use `createAdapter()`** for all model creation
+2. **Implement `mapChunk()`** to normalize provider streaming chunks to `AdapterDelta`
 3. **Define messageTransformation** in capabilities for proper event/ephemeral handling
 4. **Map all stop reasons** to StopReason enum values
-5. **Handle streaming properly** - ensure chunks have correct types
+5. **Handle streaming properly** - emit correct delta types for text, tools, and usage
 
 ---
 
@@ -773,10 +719,10 @@ Each adapter must handle:
 The model module provides:
 
 - **`EngineModel`** - Unified interface for all AI models
-- **`createModel()` / `createLanguageModel()`** - Factory functions for model creation
-- **`ModelAdapter`** - Base class for complex provider adapters
+- **`createAdapter()`** - Factory function for creating model adapters (returns `ModelClass`)
 - **`fromEngineState()` / `toEngineState()`** - Engine state transformation
 - **`ModelHookRegistry`** - Middleware for model operations
 - **Message transformation** - Handle events, ephemeral, and special content types
+- **Stream accumulation** - Built-in handling of tool calls, reasoning, and usage stats
 
 This abstraction layer enables Tentickle to work with any AI provider while maintaining a consistent internal representation and providing automatic tracking, middleware support, and observability.

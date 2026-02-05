@@ -8,7 +8,7 @@
  * import {
  *   renderAgent,
  *   compileAgent,
- *   createTestModel,
+ *   createTestAdapter,
  *   act,
  *   cleanup,
  * } from '@tentickle/core/testing';
@@ -54,15 +54,15 @@ export {
   createControllableGenerator,
 } from "./async-helpers";
 
-// Test model factory
-export { createTestModel } from "./test-model";
+// Test adapter factory (uses createAdapter internally)
+export { createTestAdapter } from "./test-adapter";
 export type {
-  TestModelOptions,
-  TestModelInstance,
+  TestAdapterOptions,
+  TestAdapterInstance,
   StreamingOptions,
   ResponseItem,
   ToolCallInput,
-} from "./test-model";
+} from "./test-adapter";
 
 // Agent rendering
 export { renderAgent, cleanup } from "./render-agent";
@@ -71,3 +71,14 @@ export type { RenderAgentOptions, RenderAgentResult, AgentTestResult } from "./r
 // Compilation testing
 export { compileAgent } from "./compile-agent";
 export type { CompileAgentOptions, CompileAgentResult } from "./compile-agent";
+
+// Test mocks
+export { createMockCom, createMockTickState, createMockTickResult } from "./mocks";
+export type {
+  MockComOptions,
+  MockCom,
+  MockTickStateOptions,
+  MockTickState,
+  MockTickResultOptions,
+  MockTickResult,
+} from "./mocks";

@@ -16,7 +16,7 @@ import type {
 import {
   createAdapter,
   type AdapterDelta,
-  type EngineModel,
+  type ModelClass,
   type ModelInput,
   type ModelOutput,
 } from "@tentickle/core/model";
@@ -32,7 +32,7 @@ import {
 } from "@tentickle/shared";
 import { type OpenAIAdapterConfig, STOP_REASON_MAP } from "./types";
 
-export type OpenAIAdapter = EngineModel<ModelInput, ModelOutput>;
+export type OpenAIAdapter = ModelClass;
 
 // const logger = Logger.for("OpenAIAdapter");
 
@@ -41,9 +41,11 @@ export type OpenAIAdapter = EngineModel<ModelInput, ModelOutput>;
 // ============================================================================
 
 /**
- * Factory function for creating OpenAI model adapter
+ * Factory function for creating OpenAI model adapter.
+ *
+ * Returns a ModelClass that can be used both programmatically and as JSX.
  */
-export function createOpenAIModel(config: OpenAIAdapterConfig = {}): OpenAIAdapter {
+export function createOpenAIModel(config: OpenAIAdapterConfig = {}): ModelClass {
   const client = config.client ?? new OpenAI(buildClientOptions(config));
 
   // Stateful tracking of tool call IDs by index (reset per stream)
@@ -362,9 +364,25 @@ export function createOpenAIModel(config: OpenAIAdapterConfig = {}): OpenAIAdapt
 }
 
 /**
- * Factory function for creating OpenAI adapter (alias)
+ * Convenience factory for creating OpenAI model.
+ *
+ * Returns a ModelClass that can be used as:
+ * - JSX component: `<model temperature={0.9}><Agent /></model>`
+ * - App config: `createApp(Agent, { model })`
+ * - Direct calls: `await model.generate(input)`
+ *
+ * @example
+ * ```typescript
+ * const model = openai({ model: 'gpt-4o' });
+ *
+ * // As JSX
+ * <model><MyAgent /></model>
+ *
+ * // With createApp
+ * const app = createApp(MyAgent, { model });
+ * ```
  */
-export function openai(config?: OpenAIAdapterConfig): OpenAIAdapter {
+export function openai(config?: OpenAIAdapterConfig): ModelClass {
   return createOpenAIModel(config);
 }
 

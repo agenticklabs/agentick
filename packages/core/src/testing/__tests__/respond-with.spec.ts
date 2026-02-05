@@ -1,15 +1,15 @@
 /**
- * Tests for the respondWith API on test models.
+ * Tests for the respondWith API on test adapters.
  */
 
 import { describe, it, expect } from "vitest";
-import { createTestModel } from "../test-model";
+import { createTestAdapter } from "../test-adapter";
 import { toEngineState } from "../../model/utils/language-model";
 
 describe("respondWith", () => {
   describe("content detection", () => {
     it("should handle simple text string", async () => {
-      const model = createTestModel();
+      const model = createTestAdapter();
       model.respondWith(["Hello world"]);
 
       const result = model.generate({ messages: [], tools: [] });
@@ -21,7 +21,7 @@ describe("respondWith", () => {
     });
 
     it("should handle explicit text object", async () => {
-      const model = createTestModel();
+      const model = createTestAdapter();
       model.respondWith([{ text: "Explicit text" }]);
 
       const result = model.generate({ messages: [], tools: [] });
@@ -31,7 +31,7 @@ describe("respondWith", () => {
     });
 
     it("should handle single tool call", async () => {
-      const model = createTestModel();
+      const model = createTestAdapter();
       model.respondWith([{ tool: { name: "search", input: { query: "test" } } }]);
 
       const result = model.generate({ messages: [], tools: [] });
@@ -46,7 +46,7 @@ describe("respondWith", () => {
     });
 
     it("should handle parallel tool calls", async () => {
-      const model = createTestModel();
+      const model = createTestAdapter();
       model.respondWith([
         {
           tool: [
@@ -66,7 +66,7 @@ describe("respondWith", () => {
     });
 
     it("should handle text + tool call", async () => {
-      const model = createTestModel();
+      const model = createTestAdapter();
       model.respondWith([
         "Let me search for that",
         { tool: { name: "search", input: { query: "test" } } },
@@ -82,7 +82,7 @@ describe("respondWith", () => {
     });
 
     it("should handle image with URL", async () => {
-      const model = createTestModel();
+      const model = createTestAdapter();
       model.respondWith(["Here's an image:", { image: { url: "https://example.com/image.png" } }]);
 
       const result = model.generate({ messages: [], tools: [] });
@@ -97,7 +97,7 @@ describe("respondWith", () => {
     });
 
     it("should handle image with base64 data", async () => {
-      const model = createTestModel();
+      const model = createTestAdapter();
       model.respondWith([{ image: { data: "base64data", mediaType: "image/jpeg" } }]);
 
       const result = model.generate({ messages: [], tools: [] });
@@ -112,7 +112,7 @@ describe("respondWith", () => {
     });
 
     it("should handle reasoning content", async () => {
-      const model = createTestModel();
+      const model = createTestAdapter();
       model.respondWith([{ reasoning: "Let me think about this..." }, "The answer is 42"]);
 
       const result = model.generate({ messages: [], tools: [] });
@@ -129,7 +129,7 @@ describe("respondWith", () => {
 
   describe("ID generation", () => {
     it("should auto-generate tool call IDs", async () => {
-      const model = createTestModel();
+      const model = createTestAdapter();
       model.respondWith([{ tool: { name: "test", input: {} } }]);
 
       const result = model.generate({ messages: [], tools: [] });
@@ -139,7 +139,7 @@ describe("respondWith", () => {
     });
 
     it("should preserve provided tool call IDs", async () => {
-      const model = createTestModel();
+      const model = createTestAdapter();
       model.respondWith([{ tool: { id: "custom-id", name: "test", input: {} } }]);
 
       const result = model.generate({ messages: [], tools: [] });
@@ -151,7 +151,7 @@ describe("respondWith", () => {
 
   describe("consumption behavior", () => {
     it("should consume respondWith on next call", async () => {
-      const model = createTestModel({ defaultResponse: "Default" });
+      const model = createTestAdapter({ defaultResponse: "Default" });
       model.respondWith(["Override"]);
 
       // First call uses respondWith
@@ -168,7 +168,7 @@ describe("respondWith", () => {
 
   describe("streaming support", () => {
     it("should stream respondWith content correctly", async () => {
-      const model = createTestModel();
+      const model = createTestAdapter();
       model.respondWith(["Hello", { tool: { name: "greet", input: { name: "World" } } }]);
 
       // Collect stream events
@@ -190,7 +190,7 @@ describe("respondWith", () => {
 
   describe("integration with toEngineState", () => {
     it("should produce valid EngineResponse with tool calls", async () => {
-      const model = createTestModel();
+      const model = createTestAdapter();
       model.respondWith(["Using tool", { tool: { name: "search", input: { q: "test" } } }]);
 
       const result = model.generate({ messages: [], tools: [] });
