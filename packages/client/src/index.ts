@@ -39,7 +39,7 @@
  * });
  *
  * // Send a message
- * const handle = session.send({ message: { role: 'user', content: [...] } });
+ * const handle = session.send({ messages: [{ role: 'user', content: [...] }] });
  * await handle.result;
  * ```
  *

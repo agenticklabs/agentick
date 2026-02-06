@@ -5,12 +5,12 @@
 export interface ComponentBaseProps {
   /**
    * Reference name for accessing this component instance.
-   * Use com.getRef<ComponentType>('myRef') to access the instance.
+   * Use ctx.getRef<ComponentType>('myRef') to access the instance.
    *
    * @example
    * ```tsx
    * <Harness ref="myHarness" component={MyAgent} props={input} />
-   * const harness = com.getRef<HarnessComponent>('myHarness');
+   * const harness = ctx.getRef<HarnessComponent>('myHarness');
    * ```
    */
   ref?: string;

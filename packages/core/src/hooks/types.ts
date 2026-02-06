@@ -143,12 +143,12 @@ export interface TickResult {
  *   console.log(`Tick ${tickState.tick} starting`);
  * });
  *
- * useOnTickStart((tickState, com) => {
- *   com.setState("lastTick", tickState.tick);
+ * useOnTickStart((tickState, ctx) => {
+ *   ctx.setState("lastTick", tickState.tick);
  * });
  * ```
  */
-export type TickStartCallback = (tickState: TickState, com: COMImpl) => void | Promise<void>;
+export type TickStartCallback = (tickState: TickState, ctx: COMImpl) => void | Promise<void>;
 
 /**
  * Callback for useOnTickEnd hook.
@@ -166,7 +166,7 @@ export type TickStartCallback = (tickState: TickState, com: COMImpl) => void | P
  * useOnTickEnd((result) => !result.text?.includes("<DONE>"));
  *
  * // With reasons via methods
- * useOnTickEnd((result, com) => {
+ * useOnTickEnd((result, ctx) => {
  *   if (result.text?.includes("<DONE>")) result.stop("complete");
  *   else result.continue("working");
  * });
@@ -174,7 +174,7 @@ export type TickStartCallback = (tickState: TickState, com: COMImpl) => void | P
  */
 export type TickEndCallback = (
   result: TickResult,
-  com: COMImpl,
+  ctx: COMImpl,
 ) => void | boolean | Promise<void | boolean>;
 
 /**
@@ -184,12 +184,12 @@ export type TickEndCallback = (
  *
  * @example
  * ```tsx
- * useOnMount((com) => {
+ * useOnMount((ctx) => {
  *   console.log("Component mounted");
  * });
  * ```
  */
-export type MountCallback = (com: COMImpl) => void | Promise<void>;
+export type MountCallback = (ctx: COMImpl) => void | Promise<void>;
 
 /**
  * Callback for useOnUnmount hook.
@@ -198,16 +198,16 @@ export type MountCallback = (com: COMImpl) => void | Promise<void>;
  *
  * @example
  * ```tsx
- * useOnUnmount((com) => {
+ * useOnUnmount((ctx) => {
  *   console.log("Component unmounting");
  * });
  * ```
  */
-export type UnmountCallback = (com: COMImpl) => void | Promise<void>;
+export type UnmountCallback = (ctx: COMImpl) => void | Promise<void>;
 
 export type AfterCompileCallback = (
   compiled: CompiledStructure,
-  com: COMImpl,
+  ctx: COMImpl,
 ) => void | Promise<void>;
 
 // Signal type is exported from ./signal.ts

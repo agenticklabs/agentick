@@ -354,7 +354,7 @@ export interface EphemeralProps {
  * fresh each tick.
  *
  * The compiler recognizes this component and adds its content to
- * `com.ephemeral` rather than the timeline.
+ * `ctx.ephemeral` rather than the timeline.
  *
  * @example
  * <Ephemeral type="account_balance" position="before-user">

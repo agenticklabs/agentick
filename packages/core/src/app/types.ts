@@ -25,7 +25,7 @@ import type {
 import type { COMInput } from "../com/types";
 import type { ExecutableTool } from "../tool/tool";
 import type { MCPConfig } from "../mcp";
-import type { ModelInstance } from "../model/model";
+import type { EngineModel } from "../model/model";
 import type { ExecutionHandle, Channel, Procedure } from "@tentickle/kernel";
 import type { JSX } from "../jsx/jsx-runtime";
 // Signal type removed - schedulerState now returns SchedulerState directly
@@ -262,7 +262,7 @@ export interface SessionManagementOptions {
 
   /**
    * Milliseconds of inactivity before auto-hibernating a session.
-   * Activity is tracked via send(), tick(), queue(), and channel publish.
+   * Activity is tracked via send(), render(), queue(), and channel publish.
    * Set to 0 or undefined to disable auto-hibernation.
    */
   idleTimeout?: number;
@@ -289,7 +289,7 @@ export interface AppOptions extends LifecycleCallbacks {
    * Override model from JSX (for testing/mocking).
    * If not provided, uses the model from <Model> component in JSX tree.
    */
-  model?: ModelInstance;
+  model?: EngineModel;
 
   /**
    * Additional tools to make available.
@@ -341,18 +341,6 @@ export interface AppOptions extends LifecycleCallbacks {
    * ```
    */
   sessions?: SessionManagementOptions;
-
-  /**
-   * @deprecated Use `sessions.idleTimeout` instead.
-   * Idle timeout before cleaning up a session (ms).
-   */
-  sessionTTL?: number;
-
-  /**
-   * @deprecated Use `sessions.maxActive` instead.
-   * Maximum number of active sessions before eviction.
-   */
-  maxSessions?: number;
 
   /**
    * Called when a session is created.
@@ -621,54 +609,60 @@ export interface SessionSnapshot {
 // ============================================================================
 
 /**
- * Discriminated input for sending to a session.
- * Requires either `message` or `messages` (but not both).
- */
-export type SendInput<P = Record<string, unknown>> = SharedSendInput<P>;
-
-// ============================================================================
-// App Input - Structured input for app.run() and app.stream()
-// ============================================================================
-
-/**
- * Input for app.run() and app.stream().
+ * Input for sending messages to a session.
  *
- * Separates concerns cleanly:
- * - `props`: Component props (passed to the component function)
- * - `messages`: Current turn messages (queued before first tick)
- * - `history`: Previous conversation history (hydrates timeline)
- * - `options`: Session options (maxTicks, signal, etc.)
+ * Extends the wire-safe SharedSendInput with local execution fields.
+ * Always uses `messages` array (no singular `message` form).
  *
  * @example
  * ```typescript
- * // Simple case
- * const result = await app.run({
- *   props: { system: "You are helpful" },
+ * session.send({
  *   messages: [{ role: "user", content: [{ type: "text", text: "Hello!" }] }],
- * });
- *
- * // With history and options
- * const result = await app.run({
- *   props: { system: "You are helpful" },
- *   messages: [{ role: "user", content: [{ type: "text", text: "Follow up" }] }],
- *   history: previousConversation.entries,
- *   options: { maxTicks: 5 },
+ *   maxTicks: 5,
  * });
  * ```
  */
-export interface AppInput<P = Record<string, unknown>> {
-  /**
-   * Props passed to the component function.
-   */
-  props?: P;
+export interface SendInput<P = Record<string, unknown>> extends SharedSendInput<P> {
+  /** Override maxTicks for this execution */
+  maxTicks?: number;
+  /** Per-execution abort signal (not serializable — local only) */
+  signal?: AbortSignal;
+}
 
-  /**
-   * Messages to include in the first tick.
-   *
-   * These are queued before the first compile, making them available
-   * via `useQueuedMessages()` and automatically added to the timeline.
-   */
-  messages?: Message[];
+// ============================================================================
+// Run Input - Full configuration for one-shot execution
+// ============================================================================
+
+/**
+ * Input for run() and app.run().
+ *
+ * Extends SendInput with configuration for the implicit layers
+ * (app creation, session creation) that run() and app.run() handle.
+ *
+ * Progressive disclosure: run() needs model, app.run() doesn't (already configured).
+ *
+ * @example run() — needs everything
+ * ```typescript
+ * const result = await run(<MyAgent />, {
+ *   model,
+ *   messages: [{ role: "user", content: [{ type: "text", text: "Hello!" }] }],
+ *   history: previousConversation.entries,
+ *   maxTicks: 5,
+ * });
+ * ```
+ *
+ * @example app.run() — model already configured
+ * ```typescript
+ * const result = await app.run({
+ *   props: { system: "You are helpful" },
+ *   messages: [{ role: "user", content: [{ type: "text", text: "Hello!" }] }],
+ *   history: previousConversation.entries,
+ * });
+ * ```
+ */
+export interface RunInput<P = Record<string, unknown>> extends SendInput<P> {
+  /** Model instance (required for run(), optional for app.run()) */
+  model?: EngineModel;
 
   /**
    * Previous conversation history to hydrate.
@@ -678,25 +672,26 @@ export interface AppInput<P = Record<string, unknown>> {
    */
   history?: TimelineEntry[];
 
-  /**
-   * Session options (maxTicks, signal, etc.)
-   */
-  options?: Omit<SessionOptions, "initialTimeline">;
+  /** Enable DevTools event emission */
+  devTools?: boolean;
+
+  /** Recording mode for time-travel debugging */
+  recording?: RecordingMode;
 }
 
 // ============================================================================
-// Send Result - Output from session.tick()
+// Send Result - Output from session.render()
 // ============================================================================
 
 /**
- * Result from session.tick() with structured outputs.
+ * Result from session.render() with structured outputs.
  *
  * This is the primary output interface. Props go in, SendResult comes out.
  *
  * @example
  * ```typescript
  * const session = app.session();
- * const result = await session.tick({ messages: [...], context: 'Be concise' });
+ * const result = await session.render({ messages: [...], context: 'Be concise' });
  *
  * console.log(result.response);        // Model's text response
  * console.log(result.outputs.decide);  // Structured data from OUTPUT tool
@@ -749,7 +744,7 @@ export type StreamEvent = SharedStreamEvent;
  *
  * SessionExecutionHandle wraps the kernel's ExecutionHandle with session-specific
  * methods using explicit delegation. This is the return type of session.send()
- * and session.tick().
+ * and session.render().
  *
  * The handle is both PromiseLike and AsyncIterable:
  * - `await handle` → resolves to SendResult
@@ -839,7 +834,7 @@ export type HookType =
  * @example
  * ```typescript
  * const session = app.session();
- * await session.tick({ query: "Hello!" });
+ * await session.render({ query: "Hello!" });
  *
  * const info = session.inspect();
  * console.log('Status:', info.status);
@@ -1151,8 +1146,8 @@ export interface RecordedInput {
  * @example
  * ```typescript
  * const session = app.session({ recording: 'full' });
- * await session.tick({ query: "Hello!" });
- * await session.tick({ query: "Tell me more" });
+ * await session.render({ query: "Hello!" });
+ * await session.render({ query: "Tell me more" });
  *
  * const recording = session.getRecording();
  * console.log(recording.summary.tickCount);        // 2
@@ -1235,11 +1230,11 @@ export interface SessionRecording {
  * }
  *
  * // Run with props, get result
- * const result = await session.tick({ query: "Hello!" });
+ * const result = await session.render({ query: "Hello!" });
  * console.log(result.response);
  *
- * // Session maintains state between ticks
- * const result2 = await session.tick({ query: "Follow up" });
+ * // Session maintains state between renders
+ * const result2 = await session.render({ query: "Follow up" });
  *
  * // Queue messages for next tick
  * await session.queue.exec({ role: "user", content: [...] });
@@ -1281,7 +1276,7 @@ export interface Session<P = Record<string, unknown>> extends EventEmitter {
    * Queue a message to be included in the next tick.
    *
    * Queues the message and notifies onMessage hooks if components are mounted.
-   * Does NOT trigger execution - use send() if you want to trigger tick().
+   * Does NOT trigger execution - use send() if you want to trigger render().
    *
    * This is a procedure (without execution boundary) so you can use:
    * - `session.queue.withContext({ userId }).exec(message)`
@@ -1311,7 +1306,7 @@ export interface Session<P = Record<string, unknown>> extends EventEmitter {
    * const result = await session.send({ messages: [...] });
    * ```
    */
-  send(input: SendInput<P>, options?: ExecutionOptions): SessionExecutionHandle;
+  send(input: SendInput<P>): SessionExecutionHandle;
 
   /**
    * Run the component with props, execute tick loop.
@@ -1324,12 +1319,12 @@ export interface Session<P = Record<string, unknown>> extends EventEmitter {
    *
    * @example
    * ```typescript
-   * const handle = session.tick(props);
+   * const handle = session.render(props);
    * handle.queueMessage({ role: "user", content: [...] });
    * const result = await handle;
    * ```
    */
-  tick(props: P, options?: ExecutionOptions): SessionExecutionHandle;
+  render(props: P, options?: ExecutionOptions): SessionExecutionHandle;
 
   /**
    * Interrupt the current execution, optionally with a message.
@@ -1383,7 +1378,7 @@ export interface Session<P = Record<string, unknown>> extends EventEmitter {
    * @example
    * ```typescript
    * const session = app.session('conv-123');
-   * await session.tick({ query: "Hello!" });
+   * await session.render({ query: "Hello!" });
    *
    * // Manually hibernate
    * const snapshot = await session.hibernate();
@@ -1404,7 +1399,7 @@ export interface Session<P = Record<string, unknown>> extends EventEmitter {
    * @example
    * ```typescript
    * const session = app.session();
-   * await session.tick({ query: "Hello!" });
+   * await session.render({ query: "Hello!" });
    *
    * const info = session.inspect();
    * console.log('Tick:', info.currentTick);
@@ -1429,7 +1424,7 @@ export interface Session<P = Record<string, unknown>> extends EventEmitter {
    * ```typescript
    * const session = app.session();
    * session.startRecording('full');
-   * await session.tick({ query: "Hello!" });
+   * await session.render({ query: "Hello!" });
    * const recording = session.getRecording();
    * ```
    */
@@ -1450,7 +1445,7 @@ export interface Session<P = Record<string, unknown>> extends EventEmitter {
    * @example
    * ```typescript
    * const session = app.session({ recording: 'full' });
-   * await session.tick({ query: "Hello!" });
+   * await session.render({ query: "Hello!" });
    *
    * const recording = session.getRecording();
    * console.log(recording?.snapshots.length); // 1
@@ -1557,13 +1552,13 @@ export type ComponentFunction<P = Record<string, unknown>> = (props: P) => JSX.E
  *
  * // Persistent session (new with generated ID)
  * const session = app.session();
- * await session.tick({ query: "Hello!" });
- * await session.tick({ query: "Follow up" });
+ * await session.render({ query: "Hello!" });
+ * await session.render({ query: "Follow up" });
  * session.close();
  *
  * // Named session (get-or-create by ID)
  * const conv = app.session('conv-123');
- * await conv.tick({ query: "Hello!" });
+ * await conv.render({ query: "Hello!" });
  *
  * // Session with options
  * const withOpts = app.session({ sessionId: 'conv-456', maxTicks: 5 });
@@ -1588,16 +1583,15 @@ export interface App<P = Record<string, unknown>> {
    * console.log(result.response);
    * ```
    *
-   * @example Stream events
+   * @example With history and session config
    * ```typescript
-   * for await (const event of app.run({
+   * const result = await app.run({
    *   props: { system: "You are helpful" },
-   *   messages: [{ role: "user", content: [{ type: "text", text: "Hello!" }] }],
-   * })) {
-   *   if (event.type === 'content_delta') {
-   *     process.stdout.write(event.delta);
-   *   }
-   * }
+   *   messages: [{ role: "user", content: [{ type: "text", text: "Follow up" }] }],
+   *   history: previousConversation.entries,
+   *   maxTicks: 5,
+   *   devTools: true,
+   * });
    * ```
    *
    * @example Use handle for control
@@ -1607,7 +1601,7 @@ export interface App<P = Record<string, unknown>> {
    * const result = await handle;
    * ```
    */
-  run: Procedure<(input: AppInput<P>) => SessionExecutionHandle, true>;
+  run: Procedure<(input: RunInput<P>) => SessionExecutionHandle, true>;
 
   /**
    * Send to a session.
@@ -1615,10 +1609,7 @@ export interface App<P = Record<string, unknown>> {
    * Without sessionId: creates ephemeral session, executes, destroys.
    * With sessionId: creates or reuses managed session (may hydrate from store).
    */
-  send(
-    input: SendInput<P>,
-    options?: { sessionId?: string } & ExecutionOptions,
-  ): Promise<SessionExecutionHandle>;
+  send(input: SendInput<P>, options?: { sessionId?: string }): Promise<SessionExecutionHandle>;
 
   /**
    * Get or create a session.

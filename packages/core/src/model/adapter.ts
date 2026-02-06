@@ -96,9 +96,9 @@ export interface ModelClassProps extends Partial<SharedModelConfig> {
   /** Provider-specific options */
   providerOptions?: ProviderGenerationOptions;
   /** Callback when mounted */
-  onMount?: (com: COM) => void | Promise<void>;
+  onMount?: (ctx: COM) => void | Promise<void>;
   /** Callback when unmounted */
-  onUnmount?: (com: COM) => void | Promise<void>;
+  onUnmount?: (ctx: COM) => void | Promise<void>;
 }
 
 /**
@@ -495,13 +495,13 @@ export interface AdapterOptions<TProviderInput, TProviderOutput, TChunk> {
    * Called when the model component is mounted.
    * Use for initialization when used as JSX.
    */
-  onMount?: (com: COM) => void | Promise<void>;
+  onMount?: (ctx: COM) => void | Promise<void>;
 
   /**
    * Called when the model component is unmounted.
    * Use for cleanup when used as JSX.
    */
-  onUnmount?: (com: COM) => void | Promise<void>;
+  onUnmount?: (ctx: COM) => void | Promise<void>;
 }
 
 /**

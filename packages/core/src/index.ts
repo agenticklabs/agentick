@@ -71,14 +71,10 @@ export { createTool } from "./tool/index";
 export type { ToolDefinition, ToolMetadata } from "./tool/index";
 
 // ============================================================================
-// Class Components
+// Model
 // ============================================================================
-export { TentickleComponent, createClassComponent } from "./component/tentickle-component";
-export type { TentickleComponentProps } from "./component/tentickle-component";
-
-// ============================================================================
-// Model types
-// ============================================================================
+export { createAdapter } from "./model/adapter";
+export type { ModelClass } from "./model/adapter";
 export * from "./types";
 
 // ============================================================================

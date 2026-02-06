@@ -13,11 +13,6 @@
 export {
   FiberCompiler,
   createFiberCompiler,
-  // Compiler bridge for signals
-  getActiveCompiler,
-  isCompilerRendering,
-  shouldSkipRecompile,
-  setActiveCompiler,
   type FiberCompilerConfig,
   type ReconcileOptions,
   type SerializedFiberNode,

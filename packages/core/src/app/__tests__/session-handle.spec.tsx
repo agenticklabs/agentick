@@ -2,7 +2,7 @@
  * SessionHandle Tests
  *
  * Tests for the SessionHandle functionality including:
- * - session.tick() returning a SessionExecutionHandle
+ * - session.render() returning a SessionExecutionHandle
  * - app.run() returning an ExecutionHandle
  * - handle.sendMessage() behavior (running vs idle)
  * - ALS context capture in session constructor
@@ -15,7 +15,7 @@ import { System, User } from "../../jsx/components/messages";
 import { Model } from "../../jsx/components/primitives";
 import { Context } from "@tentickle/kernel";
 import { AbortError } from "@tentickle/shared";
-import { useState, useRef, useOnMessage, useQueuedMessages } from "../../hooks";
+import { useState, useRef, useOnMessage, useQueuedMessages, useContinuation } from "../../hooks";
 import { Timeline } from "../../jsx/components/timeline";
 import { createTestAdapter } from "../../testing";
 
@@ -34,10 +34,10 @@ function createMockModel(options?: { delay?: number; response?: Partial<ModelOut
 }
 
 // ============================================================================
-// session.tick() handle Tests
+// session.render() handle Tests
 // ============================================================================
 
-describe("session.tick() handle", () => {
+describe("session.render() handle", () => {
   it("should return empty result when no props and no queued messages", async () => {
     const Agent = () => (
       <>
@@ -49,7 +49,7 @@ describe("session.tick() handle", () => {
     const app = createApp(Agent, { maxTicks: 1 });
     const session = await app.session();
 
-    const handle = session.tick(undefined as never);
+    const handle = session.render(undefined as never);
     const result = await handle.result;
 
     expect(handle.status).toBe("completed");
@@ -73,7 +73,7 @@ describe("session.tick() handle", () => {
     const session = await app.session();
 
     // Empty props {} is still an explicit request to run
-    const handle = session.tick({} as never);
+    const handle = session.render({} as never);
     const result = await handle.result;
 
     expect(handle.status).toBe("completed");
@@ -96,7 +96,7 @@ describe("session.tick() handle", () => {
     const app = createApp(Agent, { maxTicks: 1 });
     const session = await app.session();
 
-    const handle = session.tick({ query: "Hello!" });
+    const handle = session.render({ query: "Hello!" });
 
     // Handle should be running initially
     expect(handle.status).toBe("running");
@@ -127,7 +127,7 @@ describe("session.tick() handle", () => {
     const app = createApp(Agent, { maxTicks: 1 });
     const session = await app.session();
 
-    const handle = session.tick({ query: "test" });
+    const handle = session.render({ query: "test" });
 
     expect(handle.sessionId).toBe(session.id);
 
@@ -150,7 +150,7 @@ describe("session.tick() handle", () => {
     const app = createApp(Agent, { maxTicks: 1 });
     const session = await app.session();
 
-    const handle = session.tick({ query: "test" });
+    const handle = session.render({ query: "test" });
 
     // Tick starts at 1
     expect(handle.currentTick).toBeGreaterThanOrEqual(1);
@@ -307,7 +307,7 @@ describe("handle.abort()", () => {
     const app = createApp(Agent, { maxTicks: 1 });
     const session = await app.session();
 
-    const handle = session.tick({ query: "test" });
+    const handle = session.render({ query: "test" });
 
     // Abort immediately
     handle.abort("User cancelled");
@@ -340,11 +340,11 @@ describe("handle.abort()", () => {
     const app = createApp(Agent, { maxTicks: 1 });
     const session = await app.session();
 
-    const handle = session.tick({ query: "first" });
+    const handle = session.render({ query: "first" });
     handle.abort("User cancelled");
     await expect(handle.result).rejects.toBeInstanceOf(AbortError);
 
-    const nextHandle = session.tick({ query: "second" });
+    const nextHandle = session.render({ query: "second" });
     const result = await nextHandle.result;
 
     expect(result.response).toContain("Mock");
@@ -376,17 +376,114 @@ describe("execution abort signals", () => {
     const signalA = new AbortController();
     const signalB = new AbortController();
 
-    const handle = session.tick({ query: "first" }, { signal: signalA.signal });
-    const sameHandle = session.send(
-      { message: { role: "user", content: [{ type: "text", text: "interrupt" }] } },
-      { signal: signalB.signal },
-    );
+    const handle = session.render({ query: "first" }, { signal: signalA.signal });
+    const sameHandle = session.send({
+      messages: [{ role: "user", content: [{ type: "text", text: "interrupt" }] }],
+      signal: signalB.signal,
+    });
 
     expect(sameHandle).toBe(handle);
 
     signalB.abort("Second signal abort");
 
     await expect(handle.result).rejects.toBeDefined();
+
+    session.close();
+  });
+});
+
+// ============================================================================
+// SendInput flat fields
+// ============================================================================
+
+describe("SendInput flat fields", () => {
+  it("should respect maxTicks passed inside send()", async () => {
+    const model = createMockModel();
+    let tickCount = 0;
+
+    const Agent = () => {
+      useContinuation(() => {
+        tickCount++;
+        return true; // Always continue — maxTicks should stop us
+      });
+
+      return (
+        <>
+          <Model model={model} />
+          <System>Test</System>
+          <Timeline />
+        </>
+      );
+    };
+
+    // App allows up to 10 ticks
+    const app = createApp(Agent, { maxTicks: 10 });
+    const session = await app.session();
+
+    // But send() limits to 2
+    await session.send({
+      messages: [{ role: "user", content: [{ type: "text", text: "Hello" }] }],
+      maxTicks: 2,
+    }).result;
+
+    // Should have been capped at 2, not 10
+    expect(tickCount).toBeLessThanOrEqual(2);
+
+    session.close();
+  });
+
+  it("should abort via signal passed inside send()", async () => {
+    const model = createMockModel({ delay: 100 });
+
+    const Agent = () => (
+      <>
+        <Model model={model} />
+        <System>Test</System>
+        <Timeline />
+      </>
+    );
+
+    const app = createApp(Agent, { maxTicks: 1 });
+    const session = await app.session();
+
+    const controller = new AbortController();
+
+    const handle = session.send({
+      messages: [{ role: "user", content: [{ type: "text", text: "Hello" }] }],
+      signal: controller.signal,
+    });
+
+    // Abort immediately
+    controller.abort("test abort");
+
+    await expect(handle.result).rejects.toBeDefined();
+
+    session.close();
+  });
+
+  it("should send with no messages (props-only)", async () => {
+    const model = createMockModel();
+    let capturedQuery: string | undefined;
+
+    const Agent = ({ query }: { query: string }) => {
+      capturedQuery = query;
+      return (
+        <>
+          <Model model={model} />
+          <System>Test</System>
+          <Timeline />
+          <User>{query}</User>
+        </>
+      );
+    };
+
+    const app = createApp(Agent, { maxTicks: 1 });
+    const session = await app.session();
+
+    // send() with only props, no messages
+    await session.send({ props: { query: "from send" } }).result;
+
+    expect(capturedQuery).toBe("from send");
 
     session.close();
   });
@@ -424,7 +521,7 @@ describe("ALS Context Capture", () => {
 
     await Context.run({ traceId: "test-trace-123", events }, async () => {
       const session = await app.session();
-      await session.tick({ query: "test" }).result;
+      await session.render({ query: "test" }).result;
       session.close();
     });
 
@@ -462,7 +559,7 @@ describe("ALS Context Capture", () => {
 
     // Send with a different context (but same events bus)
     await Context.run({ traceId: "send-trace", events }, async () => {
-      await session.tick({ query: "test" }).result;
+      await session.render({ query: "test" }).result;
     });
 
     // Current (send-time) context should win
@@ -510,13 +607,13 @@ describe("State Persistence Across Sends", () => {
     const session = await app.session();
 
     // First send - should start at 0, increment to 1
-    await session.tick({ query: "First message" }).result;
+    await session.render({ query: "First message" }).result;
 
     // Second send - should start at 1 (persisted), increment to 2
-    await session.tick({ query: "Second message" }).result;
+    await session.render({ query: "Second message" }).result;
 
     // Third send - should start at 2 (persisted), increment to 3
-    await session.tick({ query: "Third message" }).result;
+    await session.render({ query: "Third message" }).result;
 
     session.close();
 
@@ -556,13 +653,13 @@ describe("State Persistence Across Sends", () => {
     const session = await app.session();
 
     // First send
-    await session.tick({ query: "First message" }).result;
+    await session.render({ query: "First message" }).result;
 
     // Second send - ref should persist
-    await session.tick({ query: "Second message" }).result;
+    await session.render({ query: "Second message" }).result;
 
     // Third send - ref should still persist
-    await session.tick({ query: "Third message" }).result;
+    await session.render({ query: "Third message" }).result;
 
     session.close();
 
@@ -599,13 +696,13 @@ describe("State Persistence Across Sends", () => {
     const session = await app.session();
 
     // First send - should mount
-    await session.tick({ query: "First" }).result;
+    await session.render({ query: "First" }).result;
 
     // Second send - should NOT remount (fiber tree preserved)
-    await session.tick({ query: "Second" }).result;
+    await session.render({ query: "Second" }).result;
 
     // Third send - should NOT remount
-    await session.tick({ query: "Third" }).result;
+    await session.render({ query: "Third" }).result;
 
     session.close();
 
@@ -618,9 +715,9 @@ describe("State Persistence Across Sends", () => {
 // Hot Update Props Tests
 // ============================================================================
 
-describe("tick() hot update when running", () => {
-  it("should update props when tick() called while running", async () => {
-    // Use a model with delay to give us time to call tick() while running
+describe("render() hot update when running", () => {
+  it("should update props when render() called while running", async () => {
+    // Use a model with delay to give us time to call render() while running
     const model = createMockModel({ delay: 100 });
     const propsReceived: string[] = [];
 
@@ -642,12 +739,12 @@ describe("tick() hot update when running", () => {
     const session = await app.session();
 
     // Start first tick
-    const firstTickPromise = session.tick({ query: "First" });
+    const firstTickPromise = session.render({ query: "First" });
 
-    // While running, call tick() with new props (hot update)
+    // While running, call render() with new props (hot update)
     // Wait a tiny bit for the first tick to start
     await new Promise((r) => setTimeout(r, 10));
-    const secondTickPromise = session.tick({ query: "Updated" });
+    const secondTickPromise = session.render({ query: "Updated" });
 
     // Both should return the same promise (the first one's result)
     const [result1, result2] = await Promise.all([firstTickPromise, secondTickPromise]);
@@ -664,7 +761,7 @@ describe("tick() hot update when running", () => {
     session.close();
   });
 
-  it("should not throw when tick() called while running", async () => {
+  it("should not throw when render() called while running", async () => {
     const model = createMockModel({ delay: 100 });
 
     const Agent = ({ query }: { query: string }) => (
@@ -680,11 +777,11 @@ describe("tick() hot update when running", () => {
     const session = await app.session();
 
     // Start first tick
-    const firstHandle = session.tick({ query: "First" });
+    const firstHandle = session.render({ query: "First" });
 
-    // Wait a bit then call tick() again - should NOT throw
+    // Wait a bit then call render() again - should NOT throw
     await new Promise((r) => setTimeout(r, 10));
-    const secondHandle = session.tick({ query: "Second" });
+    const secondHandle = session.render({ query: "Second" });
     expect(secondHandle).toBeDefined();
     await secondHandle.result;
 
@@ -721,7 +818,7 @@ describe("useOnMessage integration", () => {
     const session = await app.session();
 
     // Start execution
-    const tickPromise = session.tick({ query: "Hello" });
+    const tickPromise = session.render({ query: "Hello" });
 
     // Wait for components to mount
     await new Promise((r) => setTimeout(r, 20));
@@ -778,7 +875,7 @@ describe("useOnMessage integration", () => {
     });
 
     // Run first tick to mount components and set _lastProps
-    await session.tick({ query: "Initial" }).result;
+    await session.render({ query: "Initial" }).result;
 
     // Clear received messages from first tick
     messagesReceived.length = 0;
@@ -786,10 +883,12 @@ describe("useOnMessage integration", () => {
 
     // Now send while IDLE - this should queue, notify, and trigger tick
     await session.send({
-      message: {
-        role: "user",
-        content: [{ type: "text", text: "Follow up" }],
-      },
+      messages: [
+        {
+          role: "user",
+          content: [{ type: "text", text: "Follow up" }],
+        },
+      ],
     }).result;
 
     // Wait for the triggered tick to complete
@@ -825,10 +924,12 @@ describe("useOnMessage integration", () => {
     const session = await app.session();
 
     const handle = session.send({
-      message: {
-        role: "user",
-        content: [{ type: "text", text: "Hello from send" }],
-      },
+      messages: [
+        {
+          role: "user",
+          content: [{ type: "text", text: "Hello from send" }],
+        },
+      ],
     });
 
     const events: StreamEvent[] = [];
@@ -866,10 +967,12 @@ describe("useOnMessage integration", () => {
     const session = await app.session();
 
     const handle = session.send({
-      message: {
-        role: "user",
-        content: [{ type: "text", text: "Hello from send" }],
-      },
+      messages: [
+        {
+          role: "user",
+          content: [{ type: "text", text: "Hello from send" }],
+        },
+      ],
     });
 
     await handle.result;
@@ -909,7 +1012,7 @@ describe("useOnMessage integration", () => {
     const session = await app.session();
 
     // Start execution
-    const tickPromise = session.tick({ query: "Hello" });
+    const tickPromise = session.render({ query: "Hello" });
 
     // Wait for components to mount
     await new Promise((r) => setTimeout(r, 20));
@@ -964,7 +1067,7 @@ describe("useOnMessage integration", () => {
     expect(messagesReceived.length).toBe(0);
 
     // Now run a tick
-    await session.tick({ query: "Hello" }).result;
+    await session.render({ query: "Hello" }).result;
 
     // The message was queued but since components weren't mounted,
     // onMessage wasn't called during queueMessage
@@ -1003,7 +1106,7 @@ describe("useQueuedMessages integration", () => {
     const session = await app.session();
 
     // Tick 1: No queued messages yet
-    await session.tick({ query: "First" }).result;
+    await session.render({ query: "First" }).result;
 
     // Queue a message while IDLE (between ticks)
     await session.queue.exec({
@@ -1016,7 +1119,7 @@ describe("useQueuedMessages integration", () => {
     queuedMessagesPerTick.length = 0;
 
     // Tick 2: Should have the queued message available
-    await session.tick({ query: "Second" }).result;
+    await session.render({ query: "Second" }).result;
 
     // Tick 1 should have had no queued messages
     expect(tick1Captures.some((arr) => arr.length > 0)).toBe(false);
@@ -1059,7 +1162,7 @@ describe("useQueuedMessages integration", () => {
 
     // Tick 1
     currentTickNumber = 1;
-    await session.tick({ query: "First" }).result;
+    await session.render({ query: "First" }).result;
 
     // Queue a message
     await session.queue.exec({
@@ -1069,11 +1172,11 @@ describe("useQueuedMessages integration", () => {
 
     // Tick 2: Should have 1 message
     currentTickNumber = 2;
-    await session.tick({ query: "Second" }).result;
+    await session.render({ query: "Second" }).result;
 
     // Tick 3: Should have 0 messages (cleared after tick 2 consumed them)
     currentTickNumber = 3;
-    await session.tick({ query: "Third" }).result;
+    await session.render({ query: "Third" }).result;
 
     // Verify tick 2 had a message, tick 3 did not
     const tick2Results = queuedMessagesPerTick.filter((r) => r.tick === 2);
@@ -1109,7 +1212,7 @@ describe("useQueuedMessages integration", () => {
 
     // Tick 1: Start and queue message during execution
     currentTickNumber = 1;
-    const tick1Handle = session.tick({ query: "First" });
+    const tick1Handle = session.render({ query: "First" });
 
     // Wait for tick to start, then queue
     await new Promise((r) => setTimeout(r, 10));
@@ -1122,7 +1225,7 @@ describe("useQueuedMessages integration", () => {
 
     // Tick 2: Should have the message from tick 1
     currentTickNumber = 2;
-    await session.tick({ query: "Second" }).result;
+    await session.render({ query: "Second" }).result;
 
     const tick2Results = queuedMessagesPerTick.filter((r) => r.tick === 2);
     expect(tick2Results.some((r) => r.messages.length > 0)).toBe(true);
@@ -1161,7 +1264,7 @@ describe("useQueuedMessages integration", () => {
 
     // Tick 1
     currentTick = 1;
-    const tick1Handle = session.tick({ query: "Hello" });
+    const tick1Handle = session.render({ query: "Hello" });
 
     // Queue during tick 1
     await new Promise((r) => setTimeout(r, 10));
@@ -1187,7 +1290,7 @@ describe("useQueuedMessages integration", () => {
 
     // Tick 2
     currentTick = 2;
-    await session.tick({ query: "Continue" }).result;
+    await session.render({ query: "Continue" }).result;
 
     // Verify useQueuedMessages had the message in tick 2
     expect(queuedInTick2.length).toBe(1);
@@ -1253,7 +1356,7 @@ describe("session.inspect()", () => {
     const app = createApp(Agent, { maxTicks: 1 });
     const session = await app.session();
 
-    await session.tick({ query: "Hello!" }).result;
+    await session.render({ query: "Hello!" }).result;
 
     const info = session.inspect();
 
@@ -1310,7 +1413,7 @@ describe("session.inspect()", () => {
     const app = createApp(Agent, { maxTicks: 1 });
     const session = await app.session();
 
-    await session.tick({ query: "Hello!" }).result;
+    await session.render({ query: "Hello!" }).result;
 
     const info = session.inspect();
 
@@ -1346,7 +1449,7 @@ describe("tick snapshots", () => {
     const app = createApp(Agent, { maxTicks: 1 });
     const session = await app.session(); // Default: no recording
 
-    await session.tick({ query: "Hello!" }).result;
+    await session.render({ query: "Hello!" }).result;
 
     const recording = session.getRecording();
     expect(recording).toBeNull();
@@ -1368,7 +1471,7 @@ describe("tick snapshots", () => {
     const app = createApp(Agent, { maxTicks: 1 });
     const session = await app.session({ recording: "full" });
 
-    await session.tick({ query: "Hello!" }).result;
+    await session.render({ query: "Hello!" }).result;
 
     const recording = session.getRecording();
     expect(recording).not.toBeNull();
@@ -1394,8 +1497,8 @@ describe("tick snapshots", () => {
 
     session.startRecording("full");
 
-    await session.tick({ query: "Hello!" }).result;
-    await session.tick({ query: "Follow up" }).result;
+    await session.render({ query: "Hello!" }).result;
+    await session.render({ query: "Follow up" }).result;
 
     const recording = session.getRecording();
     expect(recording).not.toBeNull();
@@ -1418,7 +1521,7 @@ describe("tick snapshots", () => {
     const app = createApp(Agent, { maxTicks: 1 });
     const session = await app.session({ recording: "full" });
 
-    await session.tick({ query: "Hello!" }).result;
+    await session.render({ query: "Hello!" }).result;
 
     const snapshot = session.getSnapshotAt(1);
     expect(snapshot).not.toBeNull();
@@ -1450,7 +1553,7 @@ describe("tick snapshots", () => {
     const app = createApp(Agent, { maxTicks: 1 });
     const session = await app.session({ recording: "full" });
 
-    await session.tick({ query: "Hello!" }).result;
+    await session.render({ query: "Hello!" }).result;
 
     const snapshot = session.getSnapshotAt(1);
     expect(snapshot).not.toBeNull();
@@ -1479,7 +1582,7 @@ describe("tick snapshots", () => {
     const app = createApp(Agent, { maxTicks: 1 });
     const session = await app.session({ recording: "full" });
 
-    await session.tick({ query: "Hello!" }).result;
+    await session.render({ query: "Hello!" }).result;
 
     const snapshot = session.getSnapshotAt(1);
     expect(snapshot).not.toBeNull();
@@ -1512,7 +1615,7 @@ describe("tick snapshots", () => {
     const app = createApp(Agent, { maxTicks: 1 });
     const session = await app.session({ recording: "lightweight" });
 
-    await session.tick({ query: "Hello!" }).result;
+    await session.render({ query: "Hello!" }).result;
 
     const snapshot = session.getSnapshotAt(1);
     expect(snapshot).not.toBeNull();
@@ -1541,11 +1644,11 @@ describe("tick snapshots", () => {
     const app = createApp(Agent, { maxTicks: 1 });
     const session = await app.session({ recording: "full" });
 
-    await session.tick({ query: "First" }).result;
+    await session.render({ query: "First" }).result;
 
     session.stopRecording();
 
-    await session.tick({ query: "Second" }).result;
+    await session.render({ query: "Second" }).result;
 
     const recording = session.getRecording();
     expect(recording).not.toBeNull();
@@ -1570,8 +1673,8 @@ describe("tick snapshots", () => {
     const app = createApp(Agent, { maxTicks: 1 });
     const session = await app.session({ recording: "full" });
 
-    await session.tick({ query: "First" }).result;
-    await session.tick({ query: "Second" }).result;
+    await session.render({ query: "First" }).result;
+    await session.render({ query: "Second" }).result;
 
     const recording = session.getRecording();
     expect(recording).not.toBeNull();

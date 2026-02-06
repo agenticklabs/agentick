@@ -217,7 +217,7 @@ describe("App hibernation", () => {
 
     // Create and use a session
     const session = await app.session("test-session");
-    await session.tick({
+    await session.render({
       messages: [{ role: "user", content: [{ type: "text", text: "Hello" }] }],
     } as any);
 
@@ -251,7 +251,7 @@ describe("App hibernation", () => {
     });
 
     const session = await app.session("test-session");
-    await session.tick({
+    await session.render({
       messages: [{ role: "user", content: [{ type: "text", text: "Hello" }] }],
     } as any);
 
@@ -282,10 +282,10 @@ describe("App hibernation", () => {
     // Create and hibernate multiple sessions
     const session1 = await app.session("session-1");
     const session2 = await app.session("session-2");
-    await session1.tick({
+    await session1.render({
       messages: [{ role: "user", content: [{ type: "text", text: "Hello" }] }],
     } as any);
-    await session2.tick({
+    await session2.render({
       messages: [{ role: "user", content: [{ type: "text", text: "Hello" }] }],
     } as any);
 
@@ -341,7 +341,7 @@ describe("Hibernation lifecycle hooks", () => {
     });
 
     const session = await app.session("test-session");
-    await session.tick({
+    await session.render({
       messages: [{ role: "user", content: [{ type: "text", text: "Hello" }] }],
     } as any);
 
@@ -371,7 +371,7 @@ describe("Hibernation lifecycle hooks", () => {
     });
 
     const session = await app.session("test-session");
-    await session.tick({
+    await session.render({
       messages: [{ role: "user", content: [{ type: "text", text: "Hello" }] }],
     } as any);
 
@@ -403,7 +403,7 @@ describe("Hibernation lifecycle hooks", () => {
     });
 
     const session = await app.session("test-session");
-    await session.tick({
+    await session.render({
       messages: [{ role: "user", content: [{ type: "text", text: "Hello" }] }],
     } as any);
 
@@ -432,7 +432,7 @@ describe("Hibernation lifecycle hooks", () => {
     });
 
     const session = await app.session("test-session");
-    await session.tick({
+    await session.render({
       messages: [{ role: "user", content: [{ type: "text", text: "Hello" }] }],
     } as any);
 
@@ -485,7 +485,7 @@ describe("Session snapshot", () => {
 
     const app = createApp(Agent, {});
     const session = await app.session("test-session");
-    await session.tick({} as any);
+    await session.render({} as any);
 
     const snapshot = session.snapshot();
 
@@ -510,7 +510,7 @@ describe("Session snapshot", () => {
 
     const app = createApp(Agent, {});
     const session = await app.session("test-session");
-    await session.tick({} as any);
+    await session.render({} as any);
 
     const snapshot = session.snapshot();
 
@@ -715,7 +715,7 @@ describe("App with SQLite store", () => {
     });
 
     const session = await app.session("test-session");
-    await session.tick({
+    await session.render({
       messages: [{ role: "user", content: [{ type: "text", text: "Hello" }] }],
     } as any);
 
@@ -744,7 +744,7 @@ describe("App with SQLite store", () => {
     });
 
     const session = await app.session("test-session");
-    await session.tick({
+    await session.render({
       messages: [{ role: "user", content: [{ type: "text", text: "Hello" }] }],
     } as any);
 

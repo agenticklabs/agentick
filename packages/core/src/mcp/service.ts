@@ -41,7 +41,7 @@ export class MCPService {
   /**
    * Discover tools from an MCP server and register them with the COM
    */
-  async discoverAndRegister(config: MCPConfig, com: COM): Promise<void> {
+  async discoverAndRegister(config: MCPConfig, ctx: COM): Promise<void> {
     const tools = await this.connectAndDiscover(config);
 
     for (const mcpToolDef of tools) {
@@ -51,7 +51,7 @@ export class MCPService {
         transport: config.transport,
       });
 
-      await com.addTool(tool);
+      await ctx.addTool(tool);
     }
   }
 
@@ -62,30 +62,30 @@ export class MCPService {
   /**
    * Register a single MCP tool (useful for manual registration)
    */
-  async registerMCPTool(config: MCPConfig, mcpToolDef: MCPToolDefinition, com: COM): Promise<void> {
+  async registerMCPTool(config: MCPConfig, mcpToolDef: MCPToolDefinition, ctx: COM): Promise<void> {
     const tool = new MCPTool(this.mcpClient, config.serverName, mcpToolDef, {
       serverUrl: config.connection.url,
       serverName: config.serverName,
       transport: config.transport,
     });
 
-    await com.addTool(tool);
+    await ctx.addTool(tool);
   }
 
   /**
    * Disconnect from an MCP server and remove its tools.
    * Finds tools belonging to this server by checking metadata.mcpConfig.serverName.
    */
-  async disconnectAndUnregister(serverName: string, com: COM): Promise<void> {
+  async disconnectAndUnregister(serverName: string, ctx: COM): Promise<void> {
     // Find all tools that belong to this MCP server
-    const allTools = com.getTools();
+    const allTools = ctx.getTools();
     const toolsToRemove = allTools
       .filter((tool) => tool.metadata.mcpConfig?.serverName === serverName)
       .map((tool) => tool.metadata.name);
 
     // Remove each tool from the COM
     for (const toolName of toolsToRemove) {
-      com.removeTool(toolName);
+      ctx.removeTool(toolName);
     }
 
     await this.disconnect(serverName);

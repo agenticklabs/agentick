@@ -6,45 +6,45 @@ import { createTool } from "../tool/tool";
 import { z } from "zod";
 
 describe("COM EventEmitter", () => {
-  let com: COM;
+  let ctx: COM;
 
   beforeEach(() => {
-    com = new COM();
+    ctx = new COM();
   });
 
   describe("EventEmitter inheritance", () => {
     it("should extend EventEmitter", () => {
-      expect(com).toBeInstanceOf(require("node:events").EventEmitter);
+      expect(ctx).toBeInstanceOf(require("node:events").EventEmitter);
     });
 
     it("should have type-safe on method", () => {
       const handler = vi.fn();
-      com.on("message:added", handler);
-      expect(typeof com.on).toBe("function");
+      ctx.on("message:added", handler);
+      expect(typeof ctx.on).toBe("function");
     });
 
     it("should have type-safe once method", () => {
       const handler = vi.fn();
-      com.once("message:added", handler);
-      expect(typeof com.once).toBe("function");
+      ctx.once("message:added", handler);
+      expect(typeof ctx.once).toBe("function");
     });
 
     it("should have type-safe emit method", () => {
-      expect(typeof com.emit).toBe("function");
+      expect(typeof ctx.emit).toBe("function");
     });
   });
 
   describe("message:added event", () => {
     it("should emit message:added when addMessage is called", () => {
       const handler = vi.fn();
-      com.on("message:added", handler);
+      ctx.on("message:added", handler);
 
       const message: Message = {
         role: "user",
         content: [{ type: "text", text: "Hello" }],
       };
 
-      com.addMessage(message);
+      ctx.addMessage(message);
 
       expect(handler).toHaveBeenCalledTimes(1);
       expect(handler).toHaveBeenCalledWith(message, {});
@@ -52,7 +52,7 @@ describe("COM EventEmitter", () => {
 
     it("should emit message:added with options", () => {
       const handler = vi.fn();
-      com.on("message:added", handler);
+      ctx.on("message:added", handler);
 
       const message: Message = {
         role: "assistant",
@@ -64,14 +64,14 @@ describe("COM EventEmitter", () => {
         metadata: { source: "test" },
       };
 
-      com.addMessage(message, options);
+      ctx.addMessage(message, options);
 
       expect(handler).toHaveBeenCalledWith(message, options);
     });
 
     it("should emit message:added for system message consolidation", () => {
       const handler = vi.fn();
-      com.on("message:added", handler);
+      ctx.on("message:added", handler);
 
       const message1: Message = {
         role: "system",
@@ -82,8 +82,8 @@ describe("COM EventEmitter", () => {
         content: [{ type: "text", text: "Second" }],
       };
 
-      com.addMessage(message1);
-      com.addMessage(message2);
+      ctx.addMessage(message1);
+      ctx.addMessage(message2);
 
       // Should emit twice: once for first, once for merged
       expect(handler).toHaveBeenCalledTimes(2);
@@ -93,7 +93,7 @@ describe("COM EventEmitter", () => {
   describe("timeline:modified event", () => {
     it("should emit timeline:modified when addTimelineEntry is called", () => {
       const handler = vi.fn();
-      com.on("timeline:modified", handler);
+      ctx.on("timeline:modified", handler);
 
       const entry: COMTimelineEntry = {
         kind: "message",
@@ -103,7 +103,7 @@ describe("COM EventEmitter", () => {
         },
       };
 
-      com.addTimelineEntry(entry);
+      ctx.addTimelineEntry(entry);
 
       expect(handler).toHaveBeenCalledTimes(1);
       expect(handler).toHaveBeenCalledWith(entry, "add");
@@ -111,14 +111,14 @@ describe("COM EventEmitter", () => {
 
     it("should emit timeline:modified when addMessage calls addTimelineEntry", () => {
       const handler = vi.fn();
-      com.on("timeline:modified", handler);
+      ctx.on("timeline:modified", handler);
 
       const message: Message = {
         role: "user",
         content: [{ type: "text", text: "Hello" }],
       };
 
-      com.addMessage(message);
+      ctx.addMessage(message);
 
       // addMessage calls addTimelineEntry, so timeline:modified should fire
       expect(handler).toHaveBeenCalled();
@@ -128,7 +128,7 @@ describe("COM EventEmitter", () => {
   describe("tool:registered event", () => {
     it("should emit tool:registered when addTool is called", async () => {
       const handler = vi.fn();
-      com.on("tool:registered", handler);
+      ctx.on("tool:registered", handler);
 
       const mockTool = createTool({
         name: "test-tool",
@@ -137,7 +137,7 @@ describe("COM EventEmitter", () => {
         handler: async (_input: { value?: string }) => [],
       });
 
-      await com.addTool(mockTool);
+      await ctx.addTool(mockTool);
 
       expect(handler).toHaveBeenCalledTimes(1);
       expect(handler).toHaveBeenCalledWith(mockTool);
@@ -145,7 +145,7 @@ describe("COM EventEmitter", () => {
 
     it("should not emit tool:registered if tool has no name", async () => {
       const handler = vi.fn();
-      com.on("tool:registered", handler);
+      ctx.on("tool:registered", handler);
 
       // Create a tool with empty name by directly manipulating metadata
       const mockTool = createTool({
@@ -158,7 +158,7 @@ describe("COM EventEmitter", () => {
       // Override name to empty string (this shouldn't happen in practice)
       (mockTool.metadata as any).name = "";
 
-      await com.addTool(mockTool);
+      await ctx.addTool(mockTool);
 
       expect(handler).not.toHaveBeenCalled();
     });
@@ -167,7 +167,7 @@ describe("COM EventEmitter", () => {
   describe("tool:removed event", () => {
     it("should emit tool:removed when removeTool is called", async () => {
       const handler = vi.fn();
-      com.on("tool:removed", handler);
+      ctx.on("tool:removed", handler);
 
       const mockTool = createTool({
         name: "test-tool",
@@ -176,8 +176,8 @@ describe("COM EventEmitter", () => {
         handler: async (_input: { value?: string }) => [],
       });
 
-      await com.addTool(mockTool);
-      com.removeTool("test-tool");
+      await ctx.addTool(mockTool);
+      ctx.removeTool("test-tool");
 
       expect(handler).toHaveBeenCalledTimes(1);
       expect(handler).toHaveBeenCalledWith("test-tool");
@@ -185,9 +185,9 @@ describe("COM EventEmitter", () => {
 
     it("should not emit tool:removed if tool does not exist", () => {
       const handler = vi.fn();
-      com.on("tool:removed", handler);
+      ctx.on("tool:removed", handler);
 
-      com.removeTool("non-existent-tool");
+      ctx.removeTool("non-existent-tool");
 
       expect(handler).not.toHaveBeenCalled();
     });
@@ -196,9 +196,9 @@ describe("COM EventEmitter", () => {
   describe("state:changed event", () => {
     it("should emit state:changed when setState is called", () => {
       const handler = vi.fn();
-      com.on("state:changed", handler);
+      ctx.on("state:changed", handler);
 
-      com.setState("testKey", "testValue");
+      ctx.setState("testKey", "testValue");
 
       expect(handler).toHaveBeenCalledTimes(1);
       expect(handler).toHaveBeenCalledWith("testKey", "testValue", undefined);
@@ -206,10 +206,10 @@ describe("COM EventEmitter", () => {
 
     it("should emit state:changed with previous value", () => {
       const handler = vi.fn();
-      com.on("state:changed", handler);
+      ctx.on("state:changed", handler);
 
-      com.setState("testKey", "firstValue");
-      com.setState("testKey", "secondValue");
+      ctx.setState("testKey", "firstValue");
+      ctx.setState("testKey", "secondValue");
 
       expect(handler).toHaveBeenCalledTimes(2);
       expect(handler).toHaveBeenNthCalledWith(1, "testKey", "firstValue", undefined);
@@ -218,9 +218,9 @@ describe("COM EventEmitter", () => {
 
     it("should emit state:changed for each key in setStatePartial", () => {
       const handler = vi.fn();
-      com.on("state:changed", handler);
+      ctx.on("state:changed", handler);
 
-      com.setStatePartial({
+      ctx.setStatePartial({
         key1: "value1",
         key2: "value2",
         key3: "value3",
@@ -236,9 +236,9 @@ describe("COM EventEmitter", () => {
   describe("state:cleared event", () => {
     it("should emit state:cleared when clear is called", () => {
       const handler = vi.fn();
-      com.on("state:cleared", handler);
+      ctx.on("state:cleared", handler);
 
-      com.clear();
+      ctx.clear();
 
       expect(handler).toHaveBeenCalledTimes(1);
       expect(handler).toHaveBeenCalledWith();
@@ -246,10 +246,10 @@ describe("COM EventEmitter", () => {
 
     it("should not remove event listeners when clear is called", () => {
       const handler = vi.fn();
-      com.on("state:cleared", handler);
+      ctx.on("state:cleared", handler);
 
-      com.clear();
-      com.clear();
+      ctx.clear();
+      ctx.clear();
 
       // Handler should still be registered and called again
       expect(handler).toHaveBeenCalledTimes(2);
@@ -259,10 +259,10 @@ describe("COM EventEmitter", () => {
   describe("model:changed event", () => {
     it("should emit model:changed when setModel is called", () => {
       const handler = vi.fn();
-      com.on("model:changed", handler);
+      ctx.on("model:changed", handler);
 
       const mockModel = { id: "test-model" } as any;
-      com.setModel(mockModel);
+      ctx.setModel(mockModel);
 
       expect(handler).toHaveBeenCalledTimes(1);
       expect(handler).toHaveBeenCalledWith(mockModel);
@@ -270,10 +270,10 @@ describe("COM EventEmitter", () => {
 
     it("should emit model:changed with undefined when clearing model", () => {
       const handler = vi.fn();
-      com.on("model:changed", handler);
+      ctx.on("model:changed", handler);
 
-      com.setModel("test-model");
-      com.setModel(undefined);
+      ctx.setModel("test-model");
+      ctx.setModel(undefined);
 
       expect(handler).toHaveBeenCalledTimes(2);
       expect(handler).toHaveBeenNthCalledWith(2, undefined);
@@ -283,9 +283,9 @@ describe("COM EventEmitter", () => {
   describe("model:unset event", () => {
     it("should emit model:unset when unsetModel is called", () => {
       const handler = vi.fn();
-      com.on("model:unset", handler);
+      ctx.on("model:unset", handler);
 
-      com.unsetModel();
+      ctx.unsetModel();
 
       expect(handler).toHaveBeenCalledTimes(1);
       expect(handler).toHaveBeenCalledWith();
@@ -295,14 +295,14 @@ describe("COM EventEmitter", () => {
   describe("section:updated event", () => {
     it('should emit section:updated with action "add" when new section is added', () => {
       const handler = vi.fn();
-      com.on("section:updated", handler);
+      ctx.on("section:updated", handler);
 
       const section: COMSection = {
         id: "test-section",
         content: "Test content",
       };
 
-      com.addSection(section);
+      ctx.addSection(section);
 
       expect(handler).toHaveBeenCalledTimes(1);
       expect(handler).toHaveBeenCalledWith(section, "add");
@@ -310,7 +310,7 @@ describe("COM EventEmitter", () => {
 
     it('should emit section:updated with action "update" when existing section is updated', () => {
       const handler = vi.fn();
-      com.on("section:updated", handler);
+      ctx.on("section:updated", handler);
 
       const section1: COMSection = {
         id: "test-section",
@@ -321,8 +321,8 @@ describe("COM EventEmitter", () => {
         content: "Second content",
       };
 
-      com.addSection(section1);
-      com.addSection(section2);
+      ctx.addSection(section1);
+      ctx.addSection(section2);
 
       expect(handler).toHaveBeenCalledTimes(2);
       expect(handler).toHaveBeenNthCalledWith(1, section1, "add");
@@ -337,9 +337,9 @@ describe("COM EventEmitter", () => {
   describe("metadata:changed event", () => {
     it("should emit metadata:changed when addMetadata is called", () => {
       const handler = vi.fn();
-      com.on("metadata:changed", handler);
+      ctx.on("metadata:changed", handler);
 
-      com.addMetadata("testKey", "testValue");
+      ctx.addMetadata("testKey", "testValue");
 
       expect(handler).toHaveBeenCalledTimes(1);
       expect(handler).toHaveBeenCalledWith("testKey", "testValue", undefined);
@@ -347,10 +347,10 @@ describe("COM EventEmitter", () => {
 
     it("should emit metadata:changed with previous value", () => {
       const handler = vi.fn();
-      com.on("metadata:changed", handler);
+      ctx.on("metadata:changed", handler);
 
-      com.addMetadata("testKey", "firstValue");
-      com.addMetadata("testKey", "secondValue");
+      ctx.addMetadata("testKey", "firstValue");
+      ctx.addMetadata("testKey", "secondValue");
 
       expect(handler).toHaveBeenCalledTimes(2);
       expect(handler).toHaveBeenNthCalledWith(1, "testKey", "firstValue", undefined);
@@ -362,11 +362,11 @@ describe("COM EventEmitter", () => {
     it("should emit events synchronously", () => {
       const callOrder: string[] = [];
 
-      com.on("state:changed", () => {
+      ctx.on("state:changed", () => {
         callOrder.push("event-handler");
       });
 
-      com.setState("test", "value");
+      ctx.setState("test", "value");
       callOrder.push("after-setState");
 
       expect(callOrder).toEqual(["event-handler", "after-setState"]);
@@ -376,23 +376,23 @@ describe("COM EventEmitter", () => {
   describe("Event listener cleanup", () => {
     it("should allow removing listeners", () => {
       const handler = vi.fn();
-      com.on("state:changed", handler);
+      ctx.on("state:changed", handler);
 
-      com.setState("test", "value");
+      ctx.setState("test", "value");
       expect(handler).toHaveBeenCalledTimes(1);
 
-      com.removeListener("state:changed", handler);
-      com.setState("test", "value2");
+      ctx.removeListener("state:changed", handler);
+      ctx.setState("test", "value2");
 
       expect(handler).toHaveBeenCalledTimes(1); // Should not be called again
     });
 
     it("should allow using once for one-time listeners", () => {
       const handler = vi.fn();
-      com.once("state:changed", handler);
+      ctx.once("state:changed", handler);
 
-      com.setState("test", "value1");
-      com.setState("test", "value2");
+      ctx.setState("test", "value1");
+      ctx.setState("test", "value2");
 
       expect(handler).toHaveBeenCalledTimes(1); // Should only be called once
     });
@@ -405,15 +405,15 @@ describe("COM EventEmitter", () => {
       const stateHandler = vi.fn();
 
       // Simulate component onMount
-      com.on("message:added", messageHandler);
-      cleanup.push(() => com.removeListener("message:added", messageHandler));
+      ctx.on("message:added", messageHandler);
+      cleanup.push(() => ctx.removeListener("message:added", messageHandler));
 
-      com.on("state:changed", stateHandler);
-      cleanup.push(() => com.removeListener("state:changed", stateHandler));
+      ctx.on("state:changed", stateHandler);
+      cleanup.push(() => ctx.removeListener("state:changed", stateHandler));
 
       // Trigger events
-      com.addMessage({ role: "user", content: [{ type: "text", text: "Hello" }] });
-      com.setState("test", "value");
+      ctx.addMessage({ role: "user", content: [{ type: "text", text: "Hello" }] });
+      ctx.setState("test", "value");
 
       expect(messageHandler).toHaveBeenCalledTimes(1);
       expect(stateHandler).toHaveBeenCalledTimes(1);
@@ -422,8 +422,8 @@ describe("COM EventEmitter", () => {
       cleanup.forEach((fn) => fn());
 
       // Trigger events again - handlers should not be called
-      com.addMessage({ role: "user", content: [{ type: "text", text: "Hello again" }] });
-      com.setState("test", "value2");
+      ctx.addMessage({ role: "user", content: [{ type: "text", text: "Hello again" }] });
+      ctx.setState("test", "value2");
 
       expect(messageHandler).toHaveBeenCalledTimes(1); // Still 1
       expect(stateHandler).toHaveBeenCalledTimes(1); // Still 1
@@ -436,19 +436,19 @@ describe("COM EventEmitter", () => {
       // If types are wrong, TypeScript will error at compile time
 
       // Correct usage - should compile
-      com.on("message:added", (message: Message, _options: any) => {
+      ctx.on("message:added", (message: Message, _options: any) => {
         expect(message.role).toBeDefined();
       });
 
-      com.on("state:changed", (key: string, _value: unknown, _previousValue: unknown) => {
+      ctx.on("state:changed", (key: string, _value: unknown, _previousValue: unknown) => {
         expect(typeof key).toBe("string");
       });
 
-      com.on("tool:registered", (tool: ExecutableTool) => {
+      ctx.on("tool:registered", (tool: ExecutableTool) => {
         expect(tool.metadata).toBeDefined();
       });
 
-      com.on("state:cleared", () => {
+      ctx.on("state:cleared", () => {
         // No arguments
       });
 
@@ -463,11 +463,11 @@ describe("COM EventEmitter", () => {
       const handler2 = vi.fn();
       const handler3 = vi.fn();
 
-      com.on("state:changed", handler1);
-      com.on("state:changed", handler2);
-      com.on("state:changed", handler3);
+      ctx.on("state:changed", handler1);
+      ctx.on("state:changed", handler2);
+      ctx.on("state:changed", handler3);
 
-      com.setState("test", "value");
+      ctx.setState("test", "value");
 
       expect(handler1).toHaveBeenCalledTimes(1);
       expect(handler2).toHaveBeenCalledTimes(1);

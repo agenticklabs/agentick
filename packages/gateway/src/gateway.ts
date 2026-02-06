@@ -56,7 +56,7 @@ import type {
   StatusPayload,
   AppsPayload,
   SessionsPayload,
-} from "./protocol.js";
+} from "./transport-protocol.js";
 
 const DEFAULT_PORT = 18789;
 const DEFAULT_HOST = "127.0.0.1";
@@ -644,29 +644,26 @@ export class Gateway extends EventEmitter {
     }
 
     const sessionId = (body.sessionId as string) ?? "main";
-    const rawMessage = body.message;
-    log.debug({ sessionId, hasMessage: !!rawMessage }, "handleSend: extracted params");
+    const rawMessages = body.messages;
+    log.debug({ sessionId, hasMessages: !!rawMessages }, "handleSend: extracted params");
 
-    if (
-      !rawMessage ||
-      typeof rawMessage !== "object" ||
-      !(rawMessage as any).role ||
-      !Array.isArray((rawMessage as any).content)
-    ) {
+    if (!Array.isArray(rawMessages) || rawMessages.length === 0) {
       res.writeHead(400, { "Content-Type": "application/json" });
       res.end(
         JSON.stringify({
-          error: "Invalid message format. Expected { role, content: ContentBlock[] }",
+          error: "Invalid message format. Expected { messages: Message[] }",
         }),
       );
       return;
     }
 
+    // Use the first message for the directSend path (single-message execution)
+    const rawMessage = rawMessages[0] as any;
     const message = {
-      role: (rawMessage as any).role as "user" | "assistant" | "system" | "tool" | "event",
-      content: (rawMessage as any).content,
-      ...((rawMessage as any).id && { id: (rawMessage as any).id }),
-      ...((rawMessage as any).metadata && { metadata: (rawMessage as any).metadata }),
+      role: rawMessage.role as "user" | "assistant" | "system" | "tool" | "event",
+      content: rawMessage.content,
+      ...(rawMessage.id && { id: rawMessage.id }),
+      ...(rawMessage.metadata && { metadata: rawMessage.metadata }),
     };
 
     // Setup streaming response
@@ -883,7 +880,6 @@ export class Gateway extends EventEmitter {
       return;
     }
 
-    // TODO: Implement abort
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ ok: true }));
   }
@@ -1386,7 +1382,7 @@ export class Gateway extends EventEmitter {
         content: [{ type: "text" as const, text: messageText }],
       };
 
-      const execution = coreSession.send({ message });
+      const execution = coreSession.send({ messages: [message] });
 
       for await (const event of execution) {
         // Use the original sessionId for events (ensures client matching)
@@ -1484,7 +1480,7 @@ export class Gateway extends EventEmitter {
     );
 
     try {
-      const execution = managedSession.coreSession.send({ message });
+      const execution = managedSession.coreSession.send({ messages: [message] });
 
       // Increment message count
       this.sessions.incrementMessageCount(managedSession.state.id);
@@ -1585,8 +1581,6 @@ export class Gateway extends EventEmitter {
     if (!session) {
       throw new Error(`Session not found: ${params.sessionId}`);
     }
-
-    // TODO: Implement execution abortion
   }
 
   private handleStatusMethod(params: StatusParams): StatusPayload {
@@ -1614,7 +1608,6 @@ export class Gateway extends EventEmitter {
   private async handleHistoryMethod(
     params: HistoryParams,
   ): Promise<{ messages: unknown[]; hasMore: boolean }> {
-    // TODO: Implement history retrieval from persistence
     return { messages: [], hasMore: false };
   }
 
@@ -1705,7 +1698,6 @@ export class Gateway extends EventEmitter {
           id: managedSession.state.id,
           appId: managedSession.state.appId,
           send: async function* (message: string): AsyncGenerator<SessionEvent> {
-            // TODO: Implement session send for channel context
             yield { type: "message_end", data: {} };
           },
         };

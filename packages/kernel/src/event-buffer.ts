@@ -490,18 +490,4 @@ export class EventBuffer<T extends TypedEvent> {
   ): boolean {
     return (this.off as any)(eventTypeOrHandler, handler);
   }
-
-  // ============================================================================
-  // Deprecated Aliases (for migration)
-  // ============================================================================
-
-  /** @deprecated Use `on()` instead */
-  subscribe(handler: EventHandler<T>): Unsubscribe {
-    return this.on(handler);
-  }
-
-  /** @deprecated Use `onReplay()` instead */
-  subscribeWithReplay(handler: EventHandler<T>): Unsubscribe {
-    return this.onReplay(handler);
-  }
 }

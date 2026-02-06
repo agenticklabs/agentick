@@ -5,7 +5,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { parseSessionKey, formatSessionKey, type SessionKey } from "../protocol.js";
+import { parseSessionKey, formatSessionKey, type SessionKey } from "../transport-protocol.js";
 
 describe("parseSessionKey", () => {
   it("parses simple session name with default agent", () => {

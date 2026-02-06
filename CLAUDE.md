@@ -47,10 +47,9 @@ export const MyStatefulTool = createTool({
   name: "my_tool",
   description: "...",
   input: schema,
-  handler: async (input) => {
+  handler: async (input, ctx) => {
     const result = MyService.doAction(input);
-    const ctx = Context.tryGet();
-    ctx?.channels?.publish(ctx, "my-channel", { type: "state_changed", payload: result });
+    ctx?.setState("lastResult", result);
     return [{ type: "text", text: "Done" }];
   },
   render: () => (
@@ -163,16 +162,54 @@ methods: {
 }
 ```
 
-### Creating a Procedure
+### Procedures & Middleware
+
+A **Procedure** wraps any async function with middleware, validation, execution tracking, and `ProcedurePromise` return values. Procedures are the core execution primitive — every model call, tool run, and engine operation is a Procedure.
 
 ```typescript
 import { createProcedure } from "@tentickle/kernel";
 
-export const myProcedure = createProcedure(
-  { name: "my-procedure", schema: z.object({ input: z.string() }) },
-  async (params) => ({ output: params.input.toUpperCase() })
-);
+const greet = createProcedure(async (name: string) => `Hello, ${name}!`);
 ```
+
+**Calling a Procedure** returns a `ProcedurePromise<ExecutionHandle<T>>`:
+
+```typescript
+const handle = await greet("World");     // ExecutionHandle (status, abort, streaming)
+const result = await greet("World").result; // "Hello, World!" (auto-unwraps .result)
+```
+
+The `.result` auto-unwrap is key: `await proc()` gives the handle, `await proc().result` gives the final value. This is how `await run(<Agent />, opts)` returns `SendResult` directly.
+
+**Chainable API** — all return a new Procedure (immutable):
+
+```typescript
+proc.use(middleware)           // Add middleware
+proc.withContext({ user })     // Merge ALS context
+proc.withTimeout(5000)         // Abort after 5s
+proc.withMetadata({ model })   // Add telemetry metadata
+proc.pipe(nextProc)            // Chain output → input
+```
+
+**Middleware** intercepts execution — transform args, modify results, or short-circuit:
+
+```typescript
+const timing: Middleware = async (args, envelope, next) => {
+  const start = Date.now();
+  const result = await next();
+  console.log(`${envelope.operationName}: ${Date.now() - start}ms`);
+  return result;
+};
+```
+
+**Layering** — kernel provides bare procedures, core adds engine middleware:
+
+| Factory                 | Package                      | Behavior                                                 |
+| ----------------------- | ---------------------------- | -------------------------------------------------------- |
+| `createProcedure`       | `@tentickle/kernel`          | Bare procedure, no default middleware                    |
+| `createEngineProcedure` | `@tentickle/core` (internal) | `wrapProcedure([errorMiddleware])` — adds error handling |
+
+`createEngineProcedure` is not exported from core's public API. It's used internally by adapters, tools, and MCP tools. Users register middleware via `Tentickle.use()`, which is resolved at runtime from ALS context.
 
 ### Using ALS Context
 

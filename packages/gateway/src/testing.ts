@@ -144,7 +144,7 @@ export function createMockApp(options: MockAppOptions = {}): App {
     schedulerState: null,
     queue: { exec: async () => {} } as any,
     send: () => createMockExecution(),
-    tick: () => createMockExecution(),
+    render: () => createMockExecution(),
     interrupt: () => {},
     clearAbort: () => {},
     events: async function* () {},

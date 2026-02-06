@@ -23,19 +23,19 @@ export { COMContext, TickStateContext };
  * @example
  * ```tsx
  * const MyComponent = () => {
- *   const com = useCom();
- *   const history = com.timeline;
+ *   const ctx = useCom();
+ *   const history = ctx.timeline;
  *   // ...
  * };
  * ```
  */
 export function useCom(): COM {
-  const com = useContext(COMContext);
-  if (!com) {
+  const ctx = useContext(COMContext);
+  if (!ctx) {
     throw new Error("useCom must be used within a TentickleProvider");
   }
-  useDebugValue(com ? "COM" : "No COM");
-  return com;
+  useDebugValue(ctx ? "COM" : "No COM");
+  return ctx;
 }
 
 /**
@@ -94,7 +94,7 @@ export function TickStateProvider({
 // ============================================================
 
 export interface TentickleProviderProps {
-  com: COM;
+  ctx: COM;
   tickState: TickState;
   runtimeStore: RuntimeStore;
   contextInfoStore?: ContextInfoStore;
@@ -105,7 +105,7 @@ export interface TentickleProviderProps {
  * Combined provider for all Tentickle contexts.
  */
 export function TentickleProvider({
-  com,
+  ctx,
   tickState,
   runtimeStore,
   contextInfoStore,
@@ -114,7 +114,7 @@ export function TentickleProvider({
   // Build provider chain: Runtime -> ContextInfo -> COM -> TickState
   // Using explicit ReactNode typing to avoid type inference issues
   let content: ReactNode = h(TickStateContext.Provider, { value: tickState }, children);
-  content = h(COMContext.Provider, { value: com }, content);
+  content = h(COMContext.Provider, { value: ctx }, content);
 
   // Only add ContextInfoProvider if store is provided
   if (contextInfoStore) {

@@ -175,7 +175,7 @@ export function computeTokenSummary(compiled: CompiledStructure): TokenSummary {
   const byComponent = new Map<string, number>();
 
   // System entries
-  for (const entry of compiled.system) {
+  for (const entry of compiled.systemEntries) {
     const entryTokens = estimateTimelineEntryTokens(entry);
     system += entryTokens;
     if (entry.id) {

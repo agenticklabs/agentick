@@ -55,10 +55,12 @@ describe("Message Flow Integration", () => {
       const session = await app.session();
 
       const handle = session.send({
-        message: {
-          role: "user",
-          content: [{ type: "text", text: "Hello world" }],
-        },
+        messages: [
+          {
+            role: "user",
+            content: [{ type: "text", text: "Hello world" }],
+          },
+        ],
       });
 
       await handle.result;
@@ -107,10 +109,12 @@ describe("Message Flow Integration", () => {
       const session = await app.session();
 
       const handle = session.send({
-        message: {
-          role: "user",
-          content: [{ type: "text", text: "Test message" }],
-        },
+        messages: [
+          {
+            role: "user",
+            content: [{ type: "text", text: "Test message" }],
+          },
+        ],
       });
 
       await handle.result;
@@ -150,18 +154,22 @@ describe("Message Flow Integration", () => {
 
       // First tick
       await session.send({
-        message: {
-          role: "user",
-          content: [{ type: "text", text: "First message" }],
-        },
+        messages: [
+          {
+            role: "user",
+            content: [{ type: "text", text: "First message" }],
+          },
+        ],
       }).result;
 
       // Second tick - should now see first message in history
       await session.send({
-        message: {
-          role: "user",
-          content: [{ type: "text", text: "Second message" }],
-        },
+        messages: [
+          {
+            role: "user",
+            content: [{ type: "text", text: "Second message" }],
+          },
+        ],
       }).result;
 
       // History during second tick should include messages from first tick
@@ -188,10 +196,12 @@ describe("Message Flow Integration", () => {
       const session = await app.session();
 
       const handle = session.send({
-        message: {
-          role: "user",
-          content: [{ type: "text", text: "Model should see this" }],
-        },
+        messages: [
+          {
+            role: "user",
+            content: [{ type: "text", text: "Model should see this" }],
+          },
+        ],
       });
 
       await handle.result;
@@ -236,18 +246,22 @@ describe("Message Flow Integration", () => {
 
       // First message
       await session.send({
-        message: {
-          role: "user",
-          content: [{ type: "text", text: "First message" }],
-        },
+        messages: [
+          {
+            role: "user",
+            content: [{ type: "text", text: "First message" }],
+          },
+        ],
       }).result;
 
       // Second message - should see history from first tick
       await session.send({
-        message: {
-          role: "user",
-          content: [{ type: "text", text: "Second message" }],
-        },
+        messages: [
+          {
+            role: "user",
+            content: [{ type: "text", text: "Second message" }],
+          },
+        ],
       }).result;
 
       // The last capture should have accumulated history
@@ -291,18 +305,22 @@ describe("Message Flow Integration", () => {
 
       // First tick - send a message
       await session.send({
-        message: {
-          role: "user",
-          content: [{ type: "text", text: "Unique message" }],
-        },
+        messages: [
+          {
+            role: "user",
+            content: [{ type: "text", text: "Unique message" }],
+          },
+        ],
       }).result;
 
       // Second tick - now the first message should be in history
       await session.send({
-        message: {
-          role: "user",
-          content: [{ type: "text", text: "Another message" }],
-        },
+        messages: [
+          {
+            role: "user",
+            content: [{ type: "text", text: "Another message" }],
+          },
+        ],
       }).result;
 
       // History on second tick should contain user messages from first tick
@@ -346,10 +364,12 @@ describe("Message Flow Integration", () => {
       const session = await app.session();
 
       await session.send({
-        message: {
-          role: "user",
-          content: [{ type: "text", text: "Test" }],
-        },
+        messages: [
+          {
+            role: "user",
+            content: [{ type: "text", text: "Test" }],
+          },
+        ],
       }).result;
 
       expect(capturedInput).not.toBeNull();
@@ -396,10 +416,12 @@ describe("Message Flow Integration", () => {
       const session = await app.session();
 
       await session.send({
-        message: {
-          role: "user",
-          content: [{ type: "text", text: "Hello" }],
-        },
+        messages: [
+          {
+            role: "user",
+            content: [{ type: "text", text: "Hello" }],
+          },
+        ],
       }).result;
 
       expect(capturedInput).not.toBeNull();
@@ -442,10 +464,12 @@ describe("Session Lifecycle", () => {
 
       // No props have been set yet
       const handle = session.send({
-        message: {
-          role: "user",
-          content: [{ type: "text", text: "First message ever" }],
-        },
+        messages: [
+          {
+            role: "user",
+            content: [{ type: "text", text: "First message ever" }],
+          },
+        ],
       });
 
       await handle.result;
@@ -478,13 +502,13 @@ describe("Session Lifecycle", () => {
       const session = await app.session();
 
       await session.send({
-        message: { role: "user", content: [{ type: "text", text: "One" }] },
+        messages: [{ role: "user", content: [{ type: "text", text: "One" }] }],
       }).result;
 
       const firstRenderCount = renderCount;
 
       await session.send({
-        message: { role: "user", content: [{ type: "text", text: "Two" }] },
+        messages: [{ role: "user", content: [{ type: "text", text: "Two" }] }],
       }).result;
 
       // Should have rendered more times for the second tick

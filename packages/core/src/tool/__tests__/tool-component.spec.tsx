@@ -70,7 +70,7 @@ describe("Tool Component", () => {
       const session = await app.session();
 
       // Run a tick to trigger tool registration
-      await session.tick({}).result;
+      await session.render({}).result;
 
       // Close session
       session.close();
@@ -104,7 +104,7 @@ describe("Tool Component", () => {
       const app = createApp(Agent, { maxTicks: 1 });
       const session = await app.session();
 
-      await session.tick({}).result;
+      await session.render({}).result;
 
       // Tools should have been passed to the model
       const capturedInputs = capturingModel.getCapturedInputs();
@@ -152,12 +152,79 @@ describe("Tool Component", () => {
       const app = createApp(Agent, { maxTicks: 3 });
       const session = await app.session();
 
-      await session.tick({}).result;
+      await session.render({}).result;
 
-      // Handler should have been called
-      expect(handler).toHaveBeenCalledWith({ value: "test" });
+      // Handler should have been called with input and com
+      expect(handler).toHaveBeenCalledWith({ value: "test" }, expect.anything());
 
       session.close();
+    });
+
+    it("should pass COM to tool handler during execution", async () => {
+      let receivedCom: any = null;
+
+      const StatefulTool = createTool({
+        name: "stateful_tool",
+        description: "A tool that uses COM",
+        input: z.object({ key: z.string(), value: z.string() }),
+        handler: (input, ctx) => {
+          receivedCom = ctx;
+          ctx?.setState(input.key, input.value);
+          return [{ type: "text" as const, text: `Set ${input.key}=${input.value}` }];
+        },
+      });
+
+      const toolCallingModel = createTestAdapter({
+        defaultResponse: "Done",
+      });
+
+      toolCallingModel.respondWith([
+        { tool: { name: "stateful_tool", input: { key: "color", value: "blue" } } },
+      ]);
+
+      function Agent() {
+        return (
+          <>
+            <StatefulTool />
+            <Section id="system" audience="model">
+              Test agent
+            </Section>
+            <Model model={toolCallingModel} />
+          </>
+        );
+      }
+
+      const app = createApp(Agent, { maxTicks: 3 });
+      const session = await app.session();
+
+      await session.render({}).result;
+
+      // COM should have been passed to the handler
+      expect(receivedCom).toBeDefined();
+      expect(receivedCom).not.toBeNull();
+      // COM should have setState method
+      expect(typeof receivedCom.setState).toBe("function");
+
+      session.close();
+    });
+
+    it("should not pass COM when running tool directly", async () => {
+      let receivedCom: any = "NOT_CALLED";
+
+      const DirectTool = createTool({
+        name: "direct_tool",
+        description: "A tool for direct execution",
+        input: z.object({ value: z.string() }),
+        handler: (input, ctx) => {
+          receivedCom = ctx;
+          return [{ type: "text" as const, text: input.value }];
+        },
+      });
+
+      // Run directly - no COM available
+      await DirectTool.run!({ value: "test" }).result;
+
+      expect(receivedCom).toBeUndefined();
     });
   });
 
@@ -197,7 +264,7 @@ describe("Tool Component", () => {
       const app = createApp(Agent, { maxTicks: 1 });
       const session = await app.session();
 
-      await session.tick({}).result;
+      await session.render({}).result;
 
       // Tool should be registered even when it has a render function
       const capturedInputs = capturingModel.getCapturedInputs();

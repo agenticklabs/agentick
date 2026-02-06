@@ -29,7 +29,7 @@
  * ```typescript
  * declare module 'tentickle' {
  *   interface ProviderClientOptions {
- *     openai?: OpenAIClientOptions;
+ *     openai?: OpenAIAdapterConfig;
  *   }
  *   interface ProviderGenerationOptions {
  *     openai?: OpenAIGenerationOptions;
@@ -352,32 +352,6 @@ export interface LibraryToolOptions {
   [library: string]: unknown;
 }
 
-/**
- * @deprecated Use LibraryGenerationOptions instead. Alias for backwards compatibility.
- */
-export type LibraryOptions = LibraryGenerationOptions;
-
-/**
- * @deprecated Use MessageTransformationConfig from 'tentickle/model' instead.
- * This interface is kept temporarily for migration purposes.
- */
-export interface EphemeralRoleConfig {
-  /**
-   * @deprecated Use MessageTransformationConfig.roleMapping.ephemeral instead
-   */
-  role?: "user" | "system";
-
-  /**
-   * @deprecated Use MessageTransformationConfig.delimiters.ephemeral instead
-   */
-  delimiter?: string | { start: string; end: string };
-
-  /**
-   * @deprecated Use MessageTransformationConfig.ephemeralPosition instead
-   */
-  position?: "flow" | "start" | "end" | "before-user" | "after-system";
-}
-
 /** Simple delimiter - string or start/end pair */
 export type DelimiterConfig = string | { start: string; end: string };
 
@@ -391,30 +365,6 @@ export interface EventBlockDelimiters {
   state_change?: DelimiterConfig;
   /** Delimiter for text blocks (or any block type not specified) */
   default?: DelimiterConfig;
-}
-
-/** Event content block types (for formatter) */
-import type { EventBlock, TextBlock } from "@tentickle/shared";
-
-/**
- * @deprecated Use MessageTransformationConfig from 'tentickle/model' instead.
- * This interface is kept temporarily for migration purposes.
- */
-export interface EventRoleConfig {
-  /**
-   * @deprecated Use MessageTransformationConfig.roleMapping.event instead
-   */
-  role?: "user" | "event";
-
-  /**
-   * @deprecated Use MessageTransformationConfig.delimiters.event instead
-   */
-  delimiter?: DelimiterConfig | EventBlockDelimiters;
-
-  /**
-   * @deprecated Use MessageTransformationConfig.formatBlock instead
-   */
-  formatBlock?: (block: EventBlock | TextBlock) => ContentBlock[];
 }
 
 // ToolExecutionType and ToolIntent are now exported from '@tentickle/shared'

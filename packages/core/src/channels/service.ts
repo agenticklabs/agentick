@@ -846,7 +846,7 @@ export type ChannelEventHandler<TContext = unknown> = (
  *
  * // 3. In components - register for auto-notification
  * const publisher = channel.registerContext(ctx, { userId }, (event, result) => {
- *   if (result?.success) com.setState('tasks', result.tasks);
+ *   if (result?.success) ctx.setState('tasks', result.tasks);
  * });
  *
  * // 4. Publish events
@@ -1109,7 +1109,7 @@ export class ChannelRouter<TSubscribeContext = unknown> {
    * ```typescript
    * // In component onMount
    * const publisher = channel.registerContext(ctx, { userId }, (event, result) => {
-   *   if (result?.success) com.setState('tasks', result.tasks);
+   *   if (result?.success) ctx.setState('tasks', result.tasks);
    * });
    * publisher.to(userId).broadcast({ type: 'state_changed', payload });
    *

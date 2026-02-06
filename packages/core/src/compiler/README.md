@@ -45,7 +45,7 @@ The compiler is used internally by the session. Direct usage:
 ```typescript
 import { createFiberCompiler } from '@tentickle/core/compiler';
 
-const compiler = createFiberCompiler(com);
+const compiler = createFiberCompiler(ctx);
 
 // Single-pass compile: reconcile + collect
 const compiled = await compiler.compile(<MyApp />, tickState);

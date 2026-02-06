@@ -10,7 +10,7 @@ import type {
 } from "./types";
 import type { ToolDefinition, ExecutableTool } from "../tool/tool";
 import type { Message, ContentBlock } from "@tentickle/shared";
-import type { ModelConfig, ModelInstance } from "../model/model";
+import type { ModelConfig, EngineModel } from "../model/model";
 import type { ChannelService } from "../channels";
 import { EventEmitter } from "node:events";
 import { toJSONSchema } from "../utils/schema";
@@ -33,7 +33,7 @@ export interface COMEventMap {
   "tool:removed": [toolName: string];
   "state:changed": [key: string, value: unknown, previousValue: unknown];
   "state:cleared": [];
-  "model:changed": [model: ModelInstance | string | undefined];
+  "model:changed": [model: EngineModel | string | undefined];
   "model:unset": [];
   "section:updated": [section: COMSection, action: "add" | "update"];
   "metadata:changed": [key: string, value: unknown, previousValue: unknown];
@@ -52,7 +52,6 @@ export interface COMStopRequest {
   ownerId?: string | object;
   priority?: number;
   reason?: string;
-  terminationReason?: string;
   status?: COMTickStatus;
   metadata?: Record<string, unknown>;
 }
@@ -75,7 +74,6 @@ interface COMControlRequest {
   ownerId?: string | object;
   priority: number;
   reason?: string;
-  terminationReason?: string;
   status?: COMTickStatus;
   metadata?: Record<string, unknown>;
 }
@@ -85,7 +83,7 @@ interface COMControlRequest {
  */
 export interface COMTickDecision {
   status: COMTickStatus;
-  terminationReason?: string;
+  reason?: string;
   decidedBy?: COMControlRequest;
 }
 
@@ -107,17 +105,17 @@ export interface COMTickDecision {
  * @example
  * ```typescript
  * // Listen for new messages
- * com.on('message:added', (message, options) => {
+ * ctx.on('message:added', (message, options) => {
  *   console.log('New message:', message);
  * });
  *
  * // Listen for tool registration
- * com.on('tool:registered', (tool) => {
+ * ctx.on('tool:registered', (tool) => {
  *   console.log('Tool registered:', tool.metadata.name);
  * });
  *
  * // Listen for state changes
- * com.on('state:changed', (key, value, previousValue) => {
+ * ctx.on('state:changed', (key, value, previousValue) => {
  *   console.log(`State changed: ${key} = ${value}`);
  * });
  * ```
@@ -169,11 +167,11 @@ export class ContextObjectModel extends EventEmitter {
    * The current model adapter for this execution.
    * Can be set dynamically via Model components.
    */
-  private model?: ModelInstance | string;
+  private model?: EngineModel | string;
 
   /**
    * The original user input for this execution (static, doesn't change).
-   * Components can access this via com.getUserInput().
+   * Components can access this via ctx.getUserInput().
    */
   private userInput?: EngineInput;
 
@@ -243,7 +241,7 @@ export class ContextObjectModel extends EventEmitter {
 
   /**
    * Convenience property accessor for channel service.
-   * Allows `com.channels` instead of `com.getChannelService()`.
+   * Allows `ctx.channels` instead of `ctx.getChannelService()`.
    */
   get channels(): ChannelService | undefined {
     return this.channelService;
@@ -254,7 +252,7 @@ export class ContextObjectModel extends EventEmitter {
    * Can be called by Model components to dynamically set the model.
    * This only updates the COM's internal model state - Engine.setModel handles the actual model switching.
    */
-  setModel(model: ModelInstance | string | undefined): void {
+  setModel(model: EngineModel | string | undefined): void {
     this.model = model;
     // Emit event synchronously
     this.emit("model:changed", model);
@@ -264,7 +262,7 @@ export class ContextObjectModel extends EventEmitter {
    * Get the current model adapter (or model identifier).
    * Returns undefined if no model is set.
    */
-  getModel(): ModelInstance | string | undefined {
+  getModel(): EngineModel | string | undefined {
     return this.model;
   }
 
@@ -324,13 +322,6 @@ export class ContextObjectModel extends EventEmitter {
     // managed by session's clearQueuedMessages() calls
     // Emit state cleared event
     this.emit("state:cleared");
-  }
-
-  /**
-   * @deprecated Use clear() instead. Timeline is now managed by components.
-   */
-  clearEphemeral() {
-    this.clear();
   }
 
   /**
@@ -429,11 +420,11 @@ export class ContextObjectModel extends EventEmitter {
    * @example
    * ```tsx
    * const ChatAgent = () => {
-   *   const com = useCom();
+   *   const ctx = useCom();
    *
    *   await useInit(async () => {
    *     const conversation = await loadConversation(id);
-   *     com.injectHistory(conversation.entries);
+   *     ctx.injectHistory(conversation.entries);
    *   });
    *
    *   return <Timeline />;  // Shows injected + new entries
@@ -664,13 +655,13 @@ export class ContextObjectModel extends EventEmitter {
    * @example
    * ```typescript
    * // Add current account balance at the start
-   * com.addEphemeral(
+   * ctx.addEphemeral(
    *   [{ type: 'text', text: `Current balance: $${balance}` }],
    *   'start'
    * );
    *
    * // Add inventory context before user message with type
-   * com.addEphemeral(
+   * ctx.addEphemeral(
    *   [{ type: 'text', text: `Available items: ${items.join(', ')}` }],
    *   'before-user',
    *   10, // order
@@ -761,7 +752,7 @@ export class ContextObjectModel extends EventEmitter {
    *
    * @example
    * ```typescript
-   * const harness = com.getRef<HarnessComponent>('myHarness');
+   * const harness = ctx.getRef<HarnessComponent>('myHarness');
    * ```
    */
   getRef<T = any>(refName: string): T | undefined {
@@ -824,10 +815,10 @@ export class ContextObjectModel extends EventEmitter {
    * @example
    * ```typescript
    * class ResponseVerifier extends Component {
-   *   render(com: ContextObjectModel, state: TickState) {
+   *   render(ctx: ContextObjectModel, state: TickState) {
    *     const response = state.current?.timeline.find(e => e.message.role === 'assistant');
    *     if (response && this.isComplete(response)) {
-   *       com.requestStop({ reason: 'response-complete', status: 'completed' });
+   *       ctx.requestStop({ reason: 'response-complete', status: 'completed' });
    *     }
    *   }
    * }
@@ -839,7 +830,6 @@ export class ContextObjectModel extends EventEmitter {
       ownerId: details.ownerId,
       priority: details.priority ?? 0,
       reason: details.reason,
-      terminationReason: details.terminationReason,
       status: details.status ?? "aborted",
       metadata: details.metadata,
     });
@@ -854,9 +844,9 @@ export class ContextObjectModel extends EventEmitter {
    * @example
    * ```typescript
    * class RetryHandler extends Component {
-   *   render(com: ContextObjectModel, state: TickState) {
+   *   render(ctx: ContextObjectModel, state: TickState) {
    *     if (state.stopReason?.reason === 'error' && this.shouldRetry(state.error)) {
-   *       com.requestContinue({ reason: 'retrying-after-error' });
+   *       ctx.requestContinue({ reason: 'retrying-after-error' });
    *     }
    *   }
    * }
@@ -906,7 +896,7 @@ export class ContextObjectModel extends EventEmitter {
     if (stopRequest) {
       return {
         status: stopRequest.status ?? "aborted",
-        terminationReason: stopRequest.reason ?? stopRequest.terminationReason ?? defaultReason,
+        reason: stopRequest.reason ?? defaultReason,
         decidedBy: stopRequest,
       };
     }
@@ -915,7 +905,7 @@ export class ContextObjectModel extends EventEmitter {
     if (defaultStatus !== "continue" && continueRequest) {
       return {
         status: "continue",
-        terminationReason: continueRequest.reason ?? defaultReason,
+        reason: continueRequest.reason ?? defaultReason,
         decidedBy: continueRequest,
       };
     }
@@ -923,7 +913,7 @@ export class ContextObjectModel extends EventEmitter {
     // Default decision
     return {
       status: defaultStatus,
-      terminationReason: defaultReason,
+      reason: defaultReason,
     };
   }
 
@@ -944,11 +934,11 @@ export class ContextObjectModel extends EventEmitter {
    * @example
    * ```typescript
    * class ContextManager extends Component {
-   *   onAfterCompile(com: ContextObjectModel, compiled: CompiledStructure, state: TickState) {
+   *   onAfterCompile(ctx: ContextObjectModel, compiled: CompiledStructure, state: TickState) {
    *     const tokens = this.estimateTokens(compiled);
    *     if (tokens > MAX_TOKENS) {
-   *       com.setTimeline(this.summarize(com.getTimeline()));
-   *       com.requestRecompile('context-too-large');
+   *       ctx.setTimeline(this.summarize(ctx.getTimeline()));
+   *       ctx.requestRecompile('context-too-large');
    *     }
    *   }
    * }
@@ -1059,9 +1049,9 @@ export class ContextObjectModel extends EventEmitter {
    * @example
    * ```typescript
    * class InteractiveAgent extends Component {
-   *   onMessage(com, message, state) {
+   *   onMessage(ctx, message, state) {
    *     if (message.type === 'stop') {
-   *       com.abort('User requested stop');
+   *       ctx.abort('User requested stop');
    *     }
    *   }
    * }

@@ -117,27 +117,27 @@ The COM is created by the Engine and passed to all components during execution:
 │     └─► new ContextObjectModel(initial, userInput, channels)    │
 │                                                                 │
 │  2. Components mount and register resources                     │
-│     └─► onMount(com) - register tools, set initial state        │
+│     └─► onMount(ctx) - register tools, set initial state        │
 │                                                                 │
 │  3. For each tick:                                              │
-│     ┌─► com.clear() - reset timeline, sections, tools           │
+│     ┌─► ctx.clear() - reset timeline, sections, tools           │
 │     │                 (state persists, refs persist)            │
 │     │                                                           │
-│     ├─► onTickStart(com, state) - components prepare state      │
+│     ├─► onTickStart(ctx, state) - components prepare state      │
 │     │                                                           │
-│     ├─► render(com, state) - components populate COM            │
+│     ├─► render(ctx, state) - components populate COM            │
 │     │   └─► addMessage(), addSection(), addTool(), etc.         │
 │     │                                                           │
-│     ├─► com.toInput() - snapshot for model                      │
+│     ├─► ctx.toInput() - snapshot for model                      │
 │     │                                                           │
 │     ├─► Model execution - send to AI, get response              │
 │     │                                                           │
-│     └─► onTickEnd(com, state) - process results                 │
+│     └─► onTickEnd(ctx, state) - process results                 │
 │                                                                 │
-│  4. onComplete(com, finalState) - execution finished            │
+│  4. onComplete(ctx, finalState) - execution finished            │
 │                                                                 │
 │  5. Components unmount                                          │
-│     └─► onUnmount(com) - cleanup resources                      │
+│     └─► onUnmount(ctx) - cleanup resources                      │
 │                                                                 │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -168,7 +168,7 @@ The COM manages two categories of data with different persistence semantics:
 │  • Tools (available tools for this tick)                        │
 │  • Metadata                                                     │
 │                                                                 │
-│  Cleared on com.clear() before each render phase.               │
+│  Cleared on ctx.clear() before each render phase.               │
 │                                                                 │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -313,7 +313,7 @@ type EphemeralPosition =
 ### Construction
 
 ```typescript
-const com = new ContextObjectModel(
+const ctx = new ContextObjectModel(
   initial?: Partial<COMInput>,      // Initial state
   userInput?: EngineInput,          // Original user input
   channelService?: ChannelService,  // For bidirectional communication
@@ -325,69 +325,69 @@ const com = new ContextObjectModel(
 
 ```typescript
 // Add a message (routes system messages to separate array)
-com.addMessage(message: Message, options?: {
+ctx.addMessage(message: Message, options?: {
   tags?: TimelineTag[];
   visibility?: TimelineVisibility;
   metadata?: Record<string, unknown>;
 }): void;
 
 // Add raw timeline entry (for events or custom entries)
-com.addTimelineEntry(entry: COMTimelineEntry): void;
+ctx.addTimelineEntry(entry: COMTimelineEntry): void;
 
 // Get timeline entries
-com.getTimeline(): COMTimelineEntry[];
+ctx.getTimeline(): COMTimelineEntry[];
 
 // System messages (separate from timeline, rebuilt each tick)
-com.addSystemMessage(message: Message): void;
-com.getSystemMessages(): COMTimelineEntry[];
+ctx.addSystemMessage(message: Message): void;
+ctx.getSystemMessages(): COMTimelineEntry[];
 ```
 
 ### Section Methods
 
 ```typescript
 // Add/merge a section (same ID = content combined)
-com.addSection(section: COMSection): void;
+ctx.addSection(section: COMSection): void;
 
 // Get section by ID
-com.getSection(id: string): COMSection | undefined;
+ctx.getSection(id: string): COMSection | undefined;
 
 // Get all sections
-com.getSections(): Record<string, COMSection>;
+ctx.getSections(): Record<string, COMSection>;
 ```
 
 ### Tool Methods
 
 ```typescript
 // Register executable tool
-com.addTool(tool: ExecutableTool): void;
+ctx.addTool(tool: ExecutableTool): void;
 
 // Add tool definition (client tools)
-com.addToolDefinition(definition: ToolDefinition): void;
+ctx.addToolDefinition(definition: ToolDefinition): void;
 
 // Remove tool
-com.removeTool(name: string): void;
+ctx.removeTool(name: string): void;
 
 // Get tools
-com.getTool(name: string): ExecutableTool | undefined;
-com.getTools(): ExecutableTool[];
-com.getToolDefinition(name: string): ToolDefinition | undefined;
+ctx.getTool(name: string): ExecutableTool | undefined;
+ctx.getTools(): ExecutableTool[];
+ctx.getToolDefinition(name: string): ToolDefinition | undefined;
 ```
 
 ### State Methods
 
 ```typescript
 // COM state (shared across components, persists across ticks)
-com.getState<T>(key: string): T | undefined;
-com.setState(key: string, value: unknown): void;
-com.setStatePartial(partial: Record<string, unknown>): void;
-com.getStateAll(): Record<string, unknown>;
+ctx.getState<T>(key: string): T | undefined;
+ctx.setState(key: string, value: unknown): void;
+ctx.setStatePartial(partial: Record<string, unknown>): void;
+ctx.getStateAll(): Record<string, unknown>;
 ```
 
 ### Ephemeral Methods
 
 ```typescript
 // Add transient context content
-com.addEphemeral(
+ctx.addEphemeral(
   content: ContentBlock[],
   position?: EphemeralPosition,
   order?: number,
@@ -398,51 +398,50 @@ com.addEphemeral(
 ): void;
 
 // Get ephemeral entries
-com.getEphemeral(): EphemeralEntry[];
+ctx.getEphemeral(): EphemeralEntry[];
 ```
 
 ### Model Methods
 
 ```typescript
 // Set/get current model
-com.setModel(model: ModelInstance | string | undefined): void;
-com.getModel(): ModelInstance | string | undefined;
-com.unsetModel(): void;
+ctx.setModel(model: ModelInstance | string | undefined): void;
+ctx.getModel(): ModelInstance | string | undefined;
+ctx.unsetModel(): void;
 
 // Model options
-com.setModelOptions(options: Partial<ModelConfig>): void;
-com.getModelOptions(): ModelConfig | undefined;
+ctx.setModelOptions(options: Partial<ModelConfig>): void;
+ctx.getModelOptions(): ModelConfig | undefined;
 ```
 
 ### Component Ref Methods
 
 ```typescript
 // Get component reference
-com.getRef<T>(refName: string): T | undefined;
+ctx.getRef<T>(refName: string): T | undefined;
 
 // Get all refs
-com.getRefs(): Record<string, any>;
+ctx.getRefs(): Record<string, any>;
 
 // Internal (called by compiler)
-com._setRef(refName: string, instance: any): void;
-com._removeRef(refName: string): void;
+ctx._setRef(refName: string, instance: any): void;
+ctx._removeRef(refName: string): void;
 ```
 
 ### Tick Control Methods
 
 ```typescript
 // Request execution stop
-com.requestStop(details?: {
+ctx.requestStop(details?: {
   ownerId?: string | object;
   priority?: number;
   reason?: string;
-  terminationReason?: string;
   status?: 'continue' | 'completed' | 'aborted';
   metadata?: Record<string, unknown>;
 }): void;
 
 // Request execution continue (overrides default stops)
-com.requestContinue(details?: {
+ctx.requestContinue(details?: {
   ownerId?: string | object;
   priority?: number;
   reason?: string;
@@ -450,7 +449,7 @@ com.requestContinue(details?: {
 }): void;
 
 // Internal: resolve tick control decision
-com._resolveTickControl(
+ctx._resolveTickControl(
   defaultStatus: COMTickStatus,
   defaultReason?: string,
   tickNumber?: number
@@ -461,59 +460,59 @@ com._resolveTickControl(
 
 ```typescript
 // Request recompilation (for onAfterCompile)
-com.requestRecompile(reason?: string): void;
+ctx.requestRecompile(reason?: string): void;
 
 // Internal
-com._wasRecompileRequested(): boolean;
-com._getRecompileReasons(): string[];
-com._resetRecompileRequest(): void;
+ctx._wasRecompileRequested(): boolean;
+ctx._getRecompileReasons(): string[];
+ctx._resetRecompileRequest(): void;
 ```
 
 ### Message Queue Methods
 
 ```typescript
 // For execution messages
-com.queueMessage(message: ExecutionMessage): void;
-com.getQueuedMessages(): ExecutionMessage[];
-com.clearQueuedMessages(): void;
+ctx.queueMessage(message: ExecutionMessage): void;
+ctx.getQueuedMessages(): ExecutionMessage[];
+ctx.clearQueuedMessages(): void;
 ```
 
 ### Abort Control
 
 ```typescript
 // Request immediate abort (from onMessage)
-com.abort(reason?: string): void;
+ctx.abort(reason?: string): void;
 
 // Check abort state
-com.shouldAbort: boolean;
-com.abortReason: string | undefined;
+ctx.shouldAbort: boolean;
+ctx.abortReason: string | undefined;
 
 // Internal
-com._resetAbortState(): void;
+ctx._resetAbortState(): void;
 ```
 
 ### Rendering
 
 ```typescript
 // Clear for new render pass
-com.clear(): void;
+ctx.clear(): void;
 
 // Snapshot for model
-com.toInput(): COMInput;
+ctx.toInput(): COMInput;
 ```
 
 ### Accessors
 
 ```typescript
 // Original user input
-com.getUserInput(): EngineInput | undefined;
+ctx.getUserInput(): EngineInput | undefined;
 
 // Channel service
-com.getChannelService(): ChannelService | undefined;
-com.channels: ChannelService | undefined;  // Shorthand
+ctx.getChannelService(): ChannelService | undefined;
+ctx.channels: ChannelService | undefined;  // Shorthand
 
 // Process operations
-com.process: COMProcess | undefined;
+ctx.process: COMProcess | undefined;
 ```
 
 ---
@@ -535,11 +534,11 @@ sequenceDiagram
     Engine->>COM: clear()
     Note over COM: Reset timeline, sections,<br/>tools, ephemeral<br/>(state persists)
 
-    Engine->>Components: onTickStart(com, state)
+    Engine->>Components: onTickStart(ctx, state)
     Components->>COM: setState(), access previous
 
-    Engine->>Compiler: compile(agent, com, tickState)
-    Compiler->>Components: render(com, state)
+    Engine->>Compiler: compile(agent, ctx, tickState)
+    Compiler->>Components: render(ctx, state)
     Components->>COM: addMessage(), addSection(), addTool()
 
     Compiler-->>Engine: CompiledStructure
@@ -556,7 +555,7 @@ sequenceDiagram
     Engine->>Engine: toEngineState(output)
     Note over Engine: Create current with<br/>new timeline entries
 
-    Engine->>Components: onTickEnd(com, state)
+    Engine->>Components: onTickEnd(ctx, state)
 
     Engine->>COM: _resolveTickControl()
     COM-->>Engine: COMTickDecision
@@ -564,7 +563,7 @@ sequenceDiagram
     alt Continue
         Note over Engine: Next tick
     else Stop
-        Engine->>Components: onComplete(com, finalState)
+        Engine->>Components: onComplete(ctx, finalState)
     end
 ```
 
@@ -608,7 +607,7 @@ class TimelineManager extends Component {
   // Declared as property - auto-bound to COM in onMount
   private timeline = comState<COMTimelineEntry[]>('timeline', []);
 
-  onTickStart(com, state) {
+  onTickStart(ctx, state) {
     // Merge new entries from model output
     if (state.current?.timeline) {
       this.timeline.update(t => [...t, ...state.current.timeline]);
@@ -659,17 +658,17 @@ class TokenCounter extends Component {
 │  1. Component declares: private data = comState('key', []);     │
 │     └─► Creates placeholder signal marked with COM_SIGNAL_SYMBOL│
 │                                                                 │
-│  2. Compiler calls: bindCOMSignals(instance, com)               │
+│  2. Compiler calls: bindCOMSignals(instance, ctx)               │
 │     └─► Scans instance properties for COM_SIGNAL_SYMBOL         │
 │                                                                 │
 │  3. For each comState signal:                                   │
-│     a. Get current COM value: com.getState('key')               │
+│     a. Get current COM value: ctx.getState('key')               │
 │     b. Replace placeholder with real COMStateSignal             │
 │     c. Subscribe to 'state:changed' events                      │
 │     d. Set up bidirectional sync                                │
 │                                                                 │
 │  4. On signal.set(value):                                       │
-│     └─► com.setState('key', value) + emit 'state:changed'       │
+│     └─► ctx.setState('key', value) + emit 'state:changed'       │
 │                                                                 │
 │  5. On 'state:changed' event (from other component):            │
 │     └─► Update signal internal value                            │
@@ -686,7 +685,7 @@ class TokenCounter extends Component {
 The `addMessage()` method routes messages based on role:
 
 ```typescript
-com.addMessage(message, options);
+ctx.addMessage(message, options);
 // If role === 'system':
 //   → addSystemMessage() → systemMessages array
 //   → NOT in timeline (rebuilt each tick)
@@ -730,7 +729,7 @@ com.addMessage(message, options);
 
 ```typescript
 class ConversationAgent extends Component {
-  render(com, state) {
+  render(ctx, state) {
     // Combine previous and current entries
     const previousEntries = state.previous?.timeline ?? [];
     const currentEntries = state.current?.timeline ?? [];
@@ -760,7 +759,7 @@ class ConversationAgent extends Component {
 class StatefulAgent extends Component {
   private timeline = comState<COMTimelineEntry[]>('timeline', []);
 
-  onTickStart(com, state) {
+  onTickStart(ctx, state) {
     // On first tick, seed from userInput
     if (state.tick === 1 && state.current?.timeline) {
       this.timeline.set(state.current.timeline);
@@ -846,7 +845,7 @@ type SemanticContentBlock =
 
 ```typescript
 class SimpleAgent extends Component {
-  render(com, state) {
+  render(ctx, state) {
     return (
       <Fragment>
         {/* System instructions (rebuilt each tick) */}
@@ -872,23 +871,23 @@ class SimpleAgent extends Component {
 
 ```typescript
 class ContextAwareAgent extends Component {
-  onTickStart(com) {
+  onTickStart(ctx) {
     // Add current state as ephemeral (not persisted)
-    com.addEphemeral(
+    ctx.addEphemeral(
       [{ type: 'text', text: `Current balance: $${this.getBalance()}` }],
       'before-user',  // Position before user's message
       10              // Order (lower = earlier)
     );
 
     // Add inventory context
-    com.addEphemeral(
+    ctx.addEphemeral(
       [{ type: 'text', text: `Available items: ${this.getItems().join(', ')}` }],
       'before-user',
       20
     );
   }
 
-  render(com, state) {
+  render(ctx, state) {
     return (
       <Fragment>
         <Section id="instructions" content="Help the user manage their account." />
@@ -903,21 +902,21 @@ class ContextAwareAgent extends Component {
 
 ```typescript
 class ToolProvider extends Component {
-  onMount(com) {
+  onMount(ctx) {
     // Register base tools
-    com.addTool(this.searchTool);
-    com.addTool(this.calculateTool);
+    ctx.addTool(this.searchTool);
+    ctx.addTool(this.calculateTool);
   }
 
-  render(com, state) {
+  render(ctx, state) {
     // Conditionally add tools based on state
     if (this.userHasAdminRole()) {
-      com.addTool(this.adminTool);
+      ctx.addTool(this.adminTool);
     }
 
     if (state.current?.toolCalls?.length > 0) {
       // Add debug tool after first tool use
-      com.addTool(this.debugTool);
+      ctx.addTool(this.debugTool);
     }
 
     return null;
@@ -929,14 +928,14 @@ class ToolProvider extends Component {
 
 ```typescript
 class ResponseVerifier extends Component {
-  render(com, state) {
+  render(ctx, state) {
     const lastResponse = state.current?.timeline?.find(
       (e) => e.message.role === "assistant",
     );
 
     if (lastResponse && this.isComplete(lastResponse)) {
       // Signal completion
-      com.requestStop({
+      ctx.requestStop({
         reason: "response-complete",
         status: "completed",
       });
@@ -944,7 +943,7 @@ class ResponseVerifier extends Component {
 
     if (this.needsAnotherRound(state)) {
       // Override default stop
-      com.requestContinue({
+      ctx.requestContinue({
         reason: "needs-more-processing",
         priority: 10,
       });
@@ -959,28 +958,28 @@ class ResponseVerifier extends Component {
 
 ```typescript
 class ToolMonitor extends Component {
-  onMount(com) {
+  onMount(ctx) {
     // Listen for tool registrations
-    com.on("tool:registered", (tool) => {
+    ctx.on("tool:registered", (tool) => {
       console.log(`Tool registered: ${tool.metadata.name}`);
     });
 
     // Listen for state changes
-    com.on("state:changed", (key, value, prev) => {
+    ctx.on("state:changed", (key, value, prev) => {
       console.log(`State changed: ${key} = ${value} (was ${prev})`);
     });
 
     // Listen for messages
-    com.on("message:added", (message, options) => {
+    ctx.on("message:added", (message, options) => {
       console.log(`Message added: ${message.role}`);
     });
   }
 
-  onUnmount(com) {
+  onUnmount(ctx) {
     // Clean up listeners
-    com.removeAllListeners("tool:registered");
-    com.removeAllListeners("state:changed");
-    com.removeAllListeners("message:added");
+    ctx.removeAllListeners("tool:registered");
+    ctx.removeAllListeners("state:changed");
+    ctx.removeAllListeners("message:added");
   }
 
   render() {
@@ -993,16 +992,16 @@ class ToolMonitor extends Component {
 
 ```typescript
 class OrchestratorAgent extends Component {
-  render(com, state) {
+  render(ctx, state) {
     // Spawn a sub-agent for a subtask
-    const handle = com.process?.spawn(
+    const handle = ctx.process?.spawn(
       { timeline: [{ message: { role: 'user', content: 'Analyze this data' } }] },
       DataAnalyzerAgent,
       { engineConfig: { maxTicks: 5 } }
     );
 
     // Fork with inherited state
-    const forkHandle = com.process?.fork(
+    const forkHandle = ctx.process?.fork(
       { timeline: state.previous?.timeline ?? [] },
       SummarizerAgent,
       { inherit: { timeline: true, state: true } }

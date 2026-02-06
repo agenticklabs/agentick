@@ -295,7 +295,7 @@ export interface DiscoverMCPToolsOptions {
  * @example Register with COM
  * ```typescript
  * const tools = await discoverMCPTools({ config });
- * tools.forEach(tool => com.addTool(tool));
+ * tools.forEach(tool => ctx.addTool(tool));
  * ```
  */
 export async function discoverMCPTools(

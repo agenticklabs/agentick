@@ -277,11 +277,6 @@ export interface ExecutionHandle<
    */
   readonly events: EventBuffer<TEvent>;
 
-  /**
-   * @deprecated Use `events` instead. This is now an alias for backwards compatibility.
-   */
-  readonly eventBuffer: EventBuffer<TEvent>;
-
   /** Abort the execution */
   abort(reason?: string): void;
 
@@ -337,13 +332,6 @@ export class ExecutionHandleImpl<
         }
       },
     );
-  }
-
-  /**
-   * @deprecated Use `events` instead. This getter exists for backwards compatibility.
-   */
-  get eventBuffer(): EventBuffer<TEvent> {
-    return this.events;
   }
 
   get status(): "running" | "completed" | "error" | "aborted" {

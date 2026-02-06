@@ -94,13 +94,13 @@ iterateTicks() called
     ↓
 COM created
     ↓
-initializeMCPServers(com) called
+initializeMCPServers(ctx) called
     ↓
 For each MCP server:
   - Connect via MCPClient
   - Discover tools via SDK client.listTools()
   - Wrap each tool as MCPTool
-  - Register via com.addTool()
+  - Register via ctx.addTool()
     ↓
 Config tools registered
     ↓
@@ -123,7 +123,7 @@ for (const [serverName, config] of Object.entries(mcpServers)) {
   // Register each tool
   for (const mcpToolDef of toolsList.tools) {
     const tool = new MCPTool(mcpClient, serverName, mcpToolDef, mcpConfig);
-    com.addTool(tool); // Registers in COM
+    ctx.addTool(tool); // Registers in COM
   }
 }
 ```
@@ -142,7 +142,7 @@ for (const [serverName, config] of Object.entries(mcpServers)) {
 2. ToolExecutor.executeSingleTool() called
     ↓
 3. Resolve tool from COM:
-   tool = com.getTool('query_database')
+   tool = ctx.getTool('query_database')
    // Returns MCPTool instance
     ↓
 4. Check execution type:
@@ -189,7 +189,7 @@ for (const [serverName, config] of Object.entries(mcpServers)) {
 
 ```typescript
 // ToolExecutor.executeSingleTool()
-const tool = com.getTool(call.name); // MCPTool instance
+const tool = ctx.getTool(call.name); // MCPTool instance
 const executionType = tool.metadata.type; // 'mcp'
 
 // Execute (same path for all execution types)
@@ -227,7 +227,7 @@ this.run = createEngineProcedure()
    const tools = await mcpService.connectAndDiscover(config);
    const filtered = tools.filter(t => t.name.startsWith('safe_'));
    for (const tool of filtered) {
-     mcpService.registerMCPTool(config, tool, com);
+     mcpService.registerMCPTool(config, tool, ctx);
    }
    ```
 
@@ -238,7 +238,7 @@ this.run = createEngineProcedure()
      ...mcpToolDef,
      name: `mcp_${mcpToolDef.name}`,
    }, mcpConfig);
-   com.addTool(tool);
+   ctx.addTool(tool);
    ```
 
 ### ❌ What You Cannot Control (Without Custom Code)
@@ -299,7 +299,7 @@ class MyAgent extends Component {
   private mcpClient?: MCPClient;
   private mcpService?: MCPService;
 
-  async onStart(com: COM) {
+  async onStart(ctx: COM) {
     // Create MCP client/service instances
     this.mcpClient = new MCPClient();
     this.mcpService = new MCPService(this.mcpClient);
@@ -315,17 +315,17 @@ class MyAgent extends Component {
     };
 
     // Discover and register tools manually
-    await this.mcpService.discoverAndRegister(postgresConfig, com);
+    await this.mcpService.discoverAndRegister(postgresConfig, ctx);
 
     // Or discover tools and filter/transform before registering
     const tools = await this.mcpService.connectAndDiscover(postgresConfig);
     const filteredTools = tools.filter(t => t.name.startsWith('safe_'));
     for (const toolDef of filteredTools) {
-      this.mcpService.registerMCPTool(postgresConfig, toolDef, com);
+      this.mcpService.registerMCPTool(postgresConfig, toolDef, ctx);
     }
   }
 
-  async onUnmount(com: COM) {
+  async onUnmount(ctx: COM) {
     // Cleanup MCP connections if needed
     if (this.mcpClient) {
       await this.mcpClient.disconnectAll();

@@ -74,12 +74,19 @@ export type FrameworkChannel = (typeof FrameworkChannels)[keyof typeof Framework
 import type { Message } from "./messages";
 
 /**
- * Discriminated input for sending to a session.
- * Requires either `message` or `messages` (but not both).
+ * Input for sending to a session.
+ *
+ * This is the wire-safe base type shared between client and server.
+ * Core extends this with local-only fields (maxTicks, signal).
  */
-export type SendInput<P = Record<string, unknown>> =
-  | { message: Message; messages?: never; props?: P; metadata?: Record<string, unknown> }
-  | { messages: Message[]; message?: never; props?: P; metadata?: Record<string, unknown> };
+export interface SendInput<P = Record<string, unknown>> {
+  /** Messages to deliver */
+  messages?: Message[];
+  /** Component props to update */
+  props?: P;
+  /** Metadata attached to messages */
+  metadata?: Record<string, unknown>;
+}
 
 /**
  * Payload for session:messages channel.
@@ -89,9 +96,9 @@ export type SendInput<P = Record<string, unknown>> =
 export type SessionMessagePayload = SendInput;
 
 /**
- * Payload for session:control channel - tick command.
+ * Payload for session:control channel - render command.
  */
-export interface SessionTickPayload {
+export interface SessionRenderPayload {
   props?: Record<string, unknown>;
 }
 

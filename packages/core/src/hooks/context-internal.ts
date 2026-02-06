@@ -1,7 +1,7 @@
 /**
  * Internal Context Exports
  *
- * Exports the raw React context objects for use by TentickleComponent.
+ * Exports the raw React context objects.
  * These are internal and should not be used directly by application code.
  *
  * Use the hooks from ./context.ts instead (useCom, useTickState).

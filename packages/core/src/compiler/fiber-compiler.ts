@@ -143,7 +143,7 @@ export class FiberCompiler {
   private _contextInfoStore: ContextInfoStore;
 
   // Context
-  private com: COM;
+  private ctx: COM;
   private tickState: TickState | null = null;
   private rootElement: React.ReactNode | null = null;
 
@@ -162,11 +162,11 @@ export class FiberCompiler {
   private onScheduleReconcile?: (reason?: string) => void;
 
   constructor(
-    com: COM,
+    ctx: COM,
     _hookRegistry?: unknown, // ComponentHookRegistry - not used in v2
     config: FiberCompilerConfig = {},
   ) {
-    this.com = com;
+    this.ctx = ctx;
     this.config = {
       dev: config.dev ?? process.env.NODE_ENV === "development",
       maxCompileIterations: config.maxCompileIterations ?? 10,
@@ -186,8 +186,8 @@ export class FiberCompiler {
     this.root = createRoot(this.container);
 
     // Wire up COM's requestRecompile to our tracking
-    const originalRequestRecompile = com.requestRecompile.bind(com);
-    com.requestRecompile = (reason?: string) => {
+    const originalRequestRecompile = ctx.requestRecompile.bind(ctx);
+    ctx.requestRecompile = (reason?: string) => {
       this.recompileRequested = true;
       if (reason) {
         this.recompileReasons.push(reason);
@@ -266,7 +266,7 @@ export class FiberCompiler {
                   h(
                     TentickleProvider,
                     {
-                      com: this.com as any,
+                      ctx: this.ctx as any,
                       tickState: this.tickState as any, // Different TickState types are compatible
                       runtimeStore: this.runtimeStore,
                       contextInfoStore: this._contextInfoStore,
@@ -397,8 +397,8 @@ export class FiberCompiler {
     this.tickState = state;
     this.currentPhase = "tickStart";
     try {
-      if (this.com) {
-        await storeRunTickStartCallbacks(this.runtimeStore, state, this.com);
+      if (this.ctx) {
+        await storeRunTickStartCallbacks(this.runtimeStore, state, this.ctx);
       }
     } finally {
       this.currentPhase = "idle";
@@ -409,8 +409,8 @@ export class FiberCompiler {
     this.tickState = state;
     this.currentPhase = "tickEnd";
     try {
-      if (this.com) {
-        await storeRunTickEndCallbacks(this.runtimeStore, result, this.com);
+      if (this.ctx) {
+        await storeRunTickEndCallbacks(this.runtimeStore, result, this.ctx);
       }
     } finally {
       this.currentPhase = "idle";
@@ -422,7 +422,7 @@ export class FiberCompiler {
     _state: TickState,
     _ctx: unknown,
   ): Promise<void> {
-    await storeRunAfterCompileCallbacks(this.runtimeStore, compiled, this.com);
+    await storeRunAfterCompileCallbacks(this.runtimeStore, compiled, this.ctx);
   }
 
   async notifyComplete(_finalState: unknown): Promise<void> {
@@ -438,14 +438,14 @@ export class FiberCompiler {
 
   async notifyOnMessage(message: ExecutionMessage, state: TickState): Promise<void> {
     // Update store with current context before dispatching
-    this.messageStore.com = this.com as any;
+    this.messageStore.ctx = this.ctx as any;
     this.messageStore.tickState = state;
     this.messageStore.lastMessage = message;
 
     // Dispatch message to all handlers registered via useOnMessage
-    const com = this.com;
+    const ctx = this.ctx;
     for (const handler of this.messageStore.handlers) {
-      await handler(message, com as any, state);
+      await handler(message, ctx as any, state);
     }
   }
 
@@ -659,11 +659,11 @@ export class FiberCompiler {
  * Create a V2 FiberCompiler.
  */
 export function createFiberCompiler(
-  com: COM,
+  ctx: COM,
   hookRegistry?: unknown,
   config?: FiberCompilerConfig,
 ): FiberCompiler {
-  return new FiberCompiler(com, hookRegistry, config);
+  return new FiberCompiler(ctx, hookRegistry, config);
 }
 
 // ============================================================

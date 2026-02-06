@@ -33,7 +33,7 @@ import {
 } from "@tentickle/kernel";
 import type {
   App,
-  AppInput,
+  RunInput,
   AppOptions,
   SessionOptions,
   Session,
@@ -86,11 +86,7 @@ import type { SessionStore, SessionSnapshot, SessionManagementOptions } from "./
 import { createSessionStore } from "./app/sqlite-session-store";
 
 interface SessionRegistryOptions<P> {
-  // Legacy options (deprecated)
-  sessionTTL?: number;
-  maxSessions?: number;
-
-  // New session management options
+  // Session management options
   sessions?: SessionManagementOptions;
 
   // Callbacks
@@ -123,8 +119,8 @@ class SessionRegistry<P> {
     const sessionsConfig = options.sessions ?? {};
     // Resolve store configuration (string path, config object, or SessionStore instance)
     this.store = createSessionStore(sessionsConfig.store);
-    this.idleTimeout = sessionsConfig.idleTimeout ?? options.sessionTTL ?? 0;
-    this.maxActive = sessionsConfig.maxActive ?? options.maxSessions ?? 0;
+    this.idleTimeout = sessionsConfig.idleTimeout ?? 0;
+    this.maxActive = sessionsConfig.maxActive ?? 0;
     this.autoHibernate = sessionsConfig.autoHibernate ?? !!this.store;
 
     // Start sweep timer if we have an idle timeout
@@ -369,7 +365,7 @@ class SessionRegistry<P> {
 // ============================================================================
 
 class AppImpl<P extends Record<string, unknown>> implements App<P> {
-  readonly run: Procedure<(input: AppInput<P>) => SessionExecutionHandle, true>;
+  readonly run: Procedure<(input: RunInput<P>) => SessionExecutionHandle, true>;
 
   private readonly registry: SessionRegistry<P>;
   private readonly sessionCreateHandlers = new Set<(session: Session<P>) => void>();
@@ -380,10 +376,6 @@ class AppImpl<P extends Record<string, unknown>> implements App<P> {
     private readonly options: AppOptions,
   ) {
     this.registry = new SessionRegistry<P>({
-      // Legacy options
-      sessionTTL: options.sessionTTL,
-      maxSessions: options.maxSessions,
-      // New session management options
       sessions: options.sessions,
       // Callbacks
       onSessionClose: (sessionId) => {
@@ -403,18 +395,26 @@ class AppImpl<P extends Record<string, unknown>> implements App<P> {
         name: "app:run",
         handleFactory: false,
       },
-      (input: AppInput<P>): SessionExecutionHandle => {
-        const { props = {} as P, messages = [], history = [], options: runOpts = {} } = input;
+      (input: RunInput<P>): SessionExecutionHandle => {
+        const {
+          props = {} as P,
+          messages = [],
+          history = [],
+          maxTicks,
+          signal,
+          devTools,
+          recording,
+        } = input;
 
         const sessionOptions: SessionOptions = {
-          ...runOpts,
           initialTimeline: history.length > 0 ? history : undefined,
-          devTools: runOpts.devTools ?? this.options.devTools,
+          devTools: devTools ?? this.options.devTools,
+          recording,
         };
 
         const executionOptions: ExecutionOptions = {
-          maxTicks: runOpts.maxTicks,
-          signal: runOpts.signal,
+          maxTicks,
+          signal,
         };
 
         const session = this.createSession(undefined, sessionOptions);
@@ -423,7 +423,7 @@ class AppImpl<P extends Record<string, unknown>> implements App<P> {
           session.queue.exec(message);
         }
 
-        const handle = session.tick(props, executionOptions);
+        const handle = session.render(props, executionOptions);
 
         handle.result
           .finally(() => session.close())
@@ -438,17 +438,13 @@ class AppImpl<P extends Record<string, unknown>> implements App<P> {
 
   async send(
     input: SendInput<P>,
-    options?: { sessionId?: string } & ExecutionOptions,
+    options?: { sessionId?: string },
   ): Promise<SessionExecutionHandle> {
     const sessionId = options?.sessionId;
-    const executionOptions: ExecutionOptions = {
-      maxTicks: options?.maxTicks,
-      signal: options?.signal,
-    };
 
     if (!sessionId) {
       const session = this.createSession(undefined, {});
-      const handle = session.send(input, executionOptions);
+      const handle = session.send(input);
       handle.result
         .finally(() => session.close())
         .catch(() => {
@@ -459,7 +455,7 @@ class AppImpl<P extends Record<string, unknown>> implements App<P> {
 
     const session = await this.session(sessionId);
     const maybeModified = this.options.onBeforeSend?.(session, input) ?? input;
-    const handle = session.send(maybeModified, executionOptions);
+    const handle = session.send(maybeModified);
     handle.result
       .then((result) => {
         this.options.onAfterSend?.(session, result);
@@ -656,27 +652,21 @@ export class TentickleInstance implements MiddlewareRegistry {
         element: { type: ComponentFunction<P>; props: P; key: string | number | null },
         input: RunInput<P> = {} as RunInput<P>,
       ): Promise<SessionExecutionHandle> => {
-        const { model, props, messages = [], history = [], maxTicks, signal } = input;
+        const { model, props, ...runInput } = input;
 
-        // Extract component and element props
+        // Extract component and element props, input props override element props
         const Component = element.type;
-        const elementProps = element.props;
-
-        // Merge element props with input props (input props take precedence)
-        const mergedProps = { ...elementProps, ...props } as P;
+        const mergedProps = { ...element.props, ...props } as P;
 
         // Create app options
         const appOptions: AppOptions = {};
         if (model) appOptions.model = model;
-        if (maxTicks !== undefined) appOptions.maxTicks = maxTicks;
-        if (signal) appOptions.signal = signal;
 
         // Create app and run using this instance
         const app = instance.createApp(Component, appOptions);
         return app.run({
+          ...runInput,
           props: mergedProps,
-          messages,
-          history,
         });
       },
     );
@@ -903,24 +893,4 @@ export const createApp = Tentickle.createApp.bind(Tentickle);
  */
 export const run = Tentickle.run.bind(Tentickle);
 
-// ============================================================================
-// Types
-// ============================================================================
-
-/**
- * Input for the run() function.
- */
-export interface RunInput<P extends Record<string, unknown> = Record<string, unknown>> {
-  /** Model instance to use for execution */
-  model?: AppOptions["model"];
-  /** Props to pass to the component */
-  props?: P;
-  /** Messages to queue before running */
-  messages?: AppInput<P>["messages"];
-  /** Conversation history to seed */
-  history?: AppInput<P>["history"];
-  /** Maximum number of ticks before stopping */
-  maxTicks?: number;
-  /** Abort signal for cancellation */
-  signal?: AbortSignal;
-}
+// RunInput is now defined in ./app/types and exported from the package index.

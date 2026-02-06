@@ -24,17 +24,17 @@ Use the `useCom` hook in components:
 import { useCom } from '@tentickle/core';
 
 function MyComponent() {
-  const com = useCom();
+  const ctx = useCom();
 
   // Read timeline
-  const messages = com.timeline;
+  const messages = ctx.timeline;
 
   // Read/write state
-  const value = com.getState('myKey');
-  com.setState('myKey', newValue);
+  const value = ctx.getState('myKey');
+  ctx.setState('myKey', newValue);
 
   // Add content
-  com.addSection({ id: 'context', content: 'Current time: ...' });
+  ctx.addSection({ id: 'context', content: 'Current time: ...' });
 
   return <Section id="info">...</Section>;
 }

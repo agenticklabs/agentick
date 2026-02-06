@@ -63,7 +63,7 @@ export function collect(container: TentickleContainer): CompiledStructure {
       sections: result.sections.size,
       timelineEntries: result.timelineEntries.length,
       tools: result.tools.length,
-      system: result.system.length,
+      systemEntries: result.systemEntries.length,
       ephemeral: result.ephemeral.length,
     },
     "Collector: Collection complete",
@@ -156,7 +156,7 @@ function collectSection(node: TentickleNode, result: CompiledStructure): void {
  * In both cases, if message.content is empty but node has children,
  * we collect content from children.
  *
- * System role entries are routed to `result.system` (rebuilt each tick),
+ * System role entries are routed to `result.systemEntries` (rebuilt each tick),
  * while all other roles go to `result.timelineEntries`.
  */
 function collectTimelineEntry(node: TentickleNode, result: CompiledStructure): void {
@@ -193,7 +193,7 @@ function collectTimelineEntry(node: TentickleNode, result: CompiledStructure): v
 
     // Route system entries separately (rebuilt each tick)
     if (role === "system") {
-      result.system.push(entry);
+      result.systemEntries.push(entry);
     } else {
       result.timelineEntries.push(entry);
     }
@@ -213,7 +213,7 @@ function collectTimelineEntry(node: TentickleNode, result: CompiledStructure): v
 
   // Route system entries separately (rebuilt each tick)
   if (role === "system") {
-    result.system.push(entry);
+    result.systemEntries.push(entry);
   } else {
     result.timelineEntries.push(entry);
   }

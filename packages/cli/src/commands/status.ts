@@ -27,8 +27,6 @@ export async function statusCommand(options: StatusOptions): Promise<void> {
   renderer.info(`Token: ${config.token ? "(set)" : "(not set)"}`);
   renderer.separator();
 
-  // TODO: Actually query the server for status
-  // This would require the server to expose a status endpoint
   renderer.info("\nNote: Server status check not yet implemented.");
   renderer.info("Use 'tentickle chat' to connect and '/status' for session info.\n");
 }

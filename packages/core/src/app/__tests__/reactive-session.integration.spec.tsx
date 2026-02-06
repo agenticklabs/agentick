@@ -81,7 +81,7 @@ describe("Reactive Session Integration", () => {
       });
 
       // First tick to initialize
-      const handle = session.tick({});
+      const handle = session.render({});
       await handle.result;
 
       // Now session is idle - change state
@@ -125,7 +125,7 @@ describe("Reactive Session Integration", () => {
       });
 
       // First tick
-      await session.tick({}).result;
+      await session.render({}).result;
 
       // Multiple state changes in quick succession
       signalRef!.set(1);
@@ -173,7 +173,7 @@ describe("Reactive Session Integration", () => {
       });
 
       // First tick
-      await session.tick({}).result;
+      await session.render({}).result;
 
       // Change COM state while idle
       comStateRef!.set("active");
@@ -223,7 +223,7 @@ describe("Reactive Session Integration", () => {
       });
 
       // Start tick
-      const handle = session.tick({});
+      const handle = session.render({});
 
       // Wait a bit but tick should still be running
       await new Promise((r) => setTimeout(r, 20));
@@ -265,7 +265,7 @@ describe("Reactive Session Integration", () => {
       const session = await app.session();
 
       // First tick
-      await session.tick({}).result;
+      await session.render({}).result;
       expect(renderHistory).toContain(0);
 
       // Change state while idle
@@ -314,7 +314,7 @@ describe("Reactive Session Integration", () => {
       const session = await app.session();
 
       // First tick
-      await session.tick({}).result;
+      await session.render({}).result;
       expect(mountLog).toEqual(["mounted"]);
 
       // Multiple state changes - should NOT remount
@@ -362,7 +362,7 @@ describe("Reactive Session Integration", () => {
       const session = await app.session();
 
       // First tick
-      await session.tick({}).result;
+      await session.render({}).result;
       await flushMicrotasks();
       expect(effectLog).toContain(0);
 
@@ -405,7 +405,7 @@ describe("Reactive Session Integration", () => {
       const session = await app.session();
 
       // First tick - model sees "initial"
-      await session.tick({}).result;
+      await session.render({}).result;
       const firstTickCalls = modelInputs.length;
       expect(firstTickCalls).toBeGreaterThanOrEqual(1);
 
@@ -419,7 +419,7 @@ describe("Reactive Session Integration", () => {
       await flushMicrotasks();
 
       // Second tick - model should see "updated"
-      await session.tick({}).result;
+      await session.render({}).result;
       expect(modelInputs.length).toBeGreaterThan(firstTickCalls);
 
       // Verify the latest input contains updated message
@@ -455,7 +455,7 @@ describe("Reactive Session Integration", () => {
       const session = await app.session();
 
       // First tick
-      await session.tick({}).result;
+      await session.render({}).result;
       expect(renderHistory).toEqual([0]);
 
       // Update state while idle
@@ -493,7 +493,7 @@ describe("Reactive Session Integration", () => {
       const session = await app.session();
 
       // First tick
-      await session.tick({}).result;
+      await session.render({}).result;
 
       // Rapid fire state changes
       for (let i = 0; i < 100; i++) {
@@ -538,7 +538,7 @@ describe("Reactive Session Integration", () => {
       });
 
       // First tick
-      await session.tick({}).result;
+      await session.render({}).result;
 
       // Close session
       session.close();
@@ -586,7 +586,7 @@ describe("Reactive Session Integration", () => {
       // Send a message with props - should start a tick
       const handle = session.send({
         props: {} as any, // Provide props to trigger tick
-        message: { role: "user", content: [{ type: "text", text: "Hello!" }] },
+        messages: [{ role: "user", content: [{ type: "text", text: "Hello!" }] }],
       });
 
       // Handle should be running (or may have completed quickly)
@@ -622,13 +622,13 @@ describe("Reactive Session Integration", () => {
       const session = await app.session();
 
       // First establish props via tick
-      await session.tick({} as any).result;
+      await session.render({} as any).result;
       expect(modelInputs.length).toBeGreaterThanOrEqual(1);
       const countAfterFirstTick = modelInputs.length;
 
       // Now send a message - should start another tick
       const handle = session.send({
-        message: { role: "user", content: [{ type: "text", text: "Test message" }] },
+        messages: [{ role: "user", content: [{ type: "text", text: "Test message" }] }],
       });
 
       await handle.result;
@@ -658,7 +658,7 @@ describe("Reactive Session Integration", () => {
       const session = await app.session();
 
       // Start first tick via tick() to set props
-      const handle1 = session.tick({} as any);
+      const handle1 = session.render({} as any);
 
       // Wait a moment to ensure it's running
       await new Promise((r) => setTimeout(r, 10));
@@ -666,7 +666,7 @@ describe("Reactive Session Integration", () => {
 
       // While running, send a message - should return same handle
       const handle2 = session.send({
-        message: { role: "user", content: [{ type: "text", text: "Second" }] },
+        messages: [{ role: "user", content: [{ type: "text", text: "Second" }] }],
       });
 
       // Should be the same handle (concurrent send idempotency)
@@ -703,7 +703,7 @@ describe("Reactive Session Integration", () => {
       const session = await app.session();
 
       // First tick to initialize component and capture signal ref
-      await session.tick({} as any).result;
+      await session.render({} as any).result;
       const firstCallCount = modelInputs.length;
       expect(signalRef).toBeDefined();
 
@@ -713,7 +713,7 @@ describe("Reactive Session Integration", () => {
 
       // Send message - should start another tick with updated state
       const handle = session.send({
-        message: { role: "user", content: [{ type: "text", text: "How are you?" }] },
+        messages: [{ role: "user", content: [{ type: "text", text: "How are you?" }] }],
       });
       await handle.result;
 

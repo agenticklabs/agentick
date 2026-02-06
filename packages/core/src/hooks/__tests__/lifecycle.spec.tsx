@@ -60,7 +60,7 @@ describe("useContinuation", () => {
 
     const app = createApp(Agent, { maxTicks: 5 });
     const session = await app.session();
-    await session.send({ message: { role: "user", content: [{ type: "text", text: "Hi" }] } })
+    await session.send({ messages: [{ role: "user", content: [{ type: "text", text: "Hi" }] }] })
       .result;
     session.close();
 
@@ -106,7 +106,7 @@ describe("useContinuation", () => {
 
     const app = createApp(Agent, { maxTicks: 5 });
     const session = await app.session();
-    await session.send({ message: { role: "user", content: [{ type: "text", text: "Greet" }] } })
+    await session.send({ messages: [{ role: "user", content: [{ type: "text", text: "Greet" }] }] })
       .result;
     session.close();
 
@@ -142,7 +142,7 @@ describe("useContinuation", () => {
 
     const app = createApp(Agent, { maxTicks: 10 });
     const session = await app.session();
-    await session.send({ message: { role: "user", content: [{ type: "text", text: "Test" }] } })
+    await session.send({ messages: [{ role: "user", content: [{ type: "text", text: "Test" }] }] })
       .result;
     session.close();
 
@@ -172,7 +172,7 @@ describe("useContinuation", () => {
 
     const app = createApp(Agent, { maxTicks: 10 });
     const session = await app.session();
-    await session.send({ message: { role: "user", content: [{ type: "text", text: "Test" }] } })
+    await session.send({ messages: [{ role: "user", content: [{ type: "text", text: "Test" }] }] })
       .result;
     session.close();
 
@@ -208,7 +208,7 @@ describe("useContinuation", () => {
 
     const app = createApp(Agent, { maxTicks: 10 });
     const session = await app.session();
-    await session.send({ message: { role: "user", content: [{ type: "text", text: "Test" }] } })
+    await session.send({ messages: [{ role: "user", content: [{ type: "text", text: "Test" }] }] })
       .result;
     session.close();
 
@@ -241,7 +241,7 @@ describe("useContinuation", () => {
 
     const app = createApp(Agent, { maxTicks: 10 });
     const session = await app.session();
-    await session.send({ message: { role: "user", content: [{ type: "text", text: "Test" }] } })
+    await session.send({ messages: [{ role: "user", content: [{ type: "text", text: "Test" }] }] })
       .result;
     session.close();
 
@@ -274,7 +274,7 @@ describe("useContinuation", () => {
 
     const app = createApp(Agent, { maxTicks: 5 });
     const session = await app.session();
-    await session.send({ message: { role: "user", content: [{ type: "text", text: "Test" }] } })
+    await session.send({ messages: [{ role: "user", content: [{ type: "text", text: "Test" }] }] })
       .result;
     session.close();
 
@@ -310,7 +310,7 @@ describe("useContinuation", () => {
 
     const app = createApp(Agent, { maxTicks: 10 });
     const session = await app.session();
-    await session.send({ message: { role: "user", content: [{ type: "text", text: "Test" }] } })
+    await session.send({ messages: [{ role: "user", content: [{ type: "text", text: "Test" }] }] })
       .result;
     session.close();
 
@@ -345,7 +345,7 @@ describe("useOnTickEnd", () => {
 
     const app = createApp(Agent, { maxTicks: 5 });
     const session = await app.session();
-    await session.send({ message: { role: "user", content: [{ type: "text", text: "Test" }] } })
+    await session.send({ messages: [{ role: "user", content: [{ type: "text", text: "Test" }] }] })
       .result;
     session.close();
 
@@ -374,7 +374,7 @@ describe("useOnTickEnd", () => {
 
     const app = createApp(Agent, { maxTicks: 5 });
     const session = await app.session();
-    await session.send({ message: { role: "user", content: [{ type: "text", text: "Test" }] } })
+    await session.send({ messages: [{ role: "user", content: [{ type: "text", text: "Test" }] }] })
       .result;
     session.close();
 
@@ -414,7 +414,7 @@ describe("useOnTickStart", () => {
 
     const app = createApp(Agent, { maxTicks: 5 });
     const session = await app.session();
-    await session.send({ message: { role: "user", content: [{ type: "text", text: "Test" }] } })
+    await session.send({ messages: [{ role: "user", content: [{ type: "text", text: "Test" }] }] })
       .result;
     session.close();
 
@@ -457,7 +457,7 @@ describe("multiple continuation callbacks", () => {
 
     const app = createApp(Agent, { maxTicks: 10 });
     const session = await app.session();
-    await session.send({ message: { role: "user", content: [{ type: "text", text: "Test" }] } })
+    await session.send({ messages: [{ role: "user", content: [{ type: "text", text: "Test" }] }] })
       .result;
     session.close();
 

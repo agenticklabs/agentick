@@ -17,11 +17,8 @@ export interface CompiledStructure {
   /** Timeline entries (messages) - excludes system role */
   timelineEntries: CompiledTimelineEntry[];
 
-  /**
-   * System entries (rebuilt fresh each tick).
-   * TODO: Rename to `systemEntries` for consistency
-   */
-  system: CompiledTimelineEntry[];
+  /** System entries (rebuilt fresh each tick). */
+  systemEntries: CompiledTimelineEntry[];
 
   /** Available tools */
   tools: CompiledTool[];
@@ -93,7 +90,7 @@ export function createEmptyCompiledStructure(): CompiledStructure {
   return {
     sections: new Map(),
     timelineEntries: [],
-    system: [],
+    systemEntries: [],
     tools: [],
     ephemeral: [],
     metadata: {},

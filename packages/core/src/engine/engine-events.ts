@@ -17,7 +17,6 @@
 export {
   // Enums
   StopReason,
-  StreamChunkType,
   // Type guards
   isModelStreamEvent,
   isOrchestrationStreamEvent,
@@ -73,8 +72,6 @@ export type {
   OrchestrationStreamEvent,
   ResultStreamEvent,
   StreamEvent,
-  // Legacy
-  StreamChunk,
 } from "@tentickle/shared";
 
 // ============================================================================

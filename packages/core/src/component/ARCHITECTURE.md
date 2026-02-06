@@ -82,40 +82,40 @@ interface EngineComponent {
   tool?: ExecutableTool;
 
   // Lifecycle
-  onMount?: (com: COM) => Promise<void> | void;
-  onUnmount?: (com: COM) => Promise<void> | void;
-  onStart?: (com: COM) => Promise<void> | void;
+  onMount?: (ctx: COM) => Promise<void> | void;
+  onUnmount?: (ctx: COM) => Promise<void> | void;
+  onStart?: (ctx: COM) => Promise<void> | void;
   onTickStart?: (
-    com: COM,
+    ctx: COM,
     state: TickState,
   ) => Promise<void> | void;
   onAfterCompile?: (
-    com: COM,
+    ctx: COM,
     compiled: CompiledStructure,
     state: TickState,
     ctx: AfterCompileContext,
   ) => Promise<void> | void;
   onTickEnd?: (
-    com: COM,
+    ctx: COM,
     state: TickState,
   ) => Promise<void> | void;
   onComplete?: (
-    com: COM,
+    ctx: COM,
     finalState: COMInput,
   ) => Promise<void> | void;
   onMessage?: (
-    com: COM,
+    ctx: COM,
     message: ExecutionMessage,
     state: TickState,
   ) => Promise<void> | void;
   onError?: (
-    com: COM,
+    ctx: COM,
     state: TickState,
   ) => Promise<RecoveryAction | void> | RecoveryAction | void;
 
   // Render
   render?: (
-    com: COM,
+    ctx: COM,
     state: TickState,
   ) => Promise<void | JSX.Element | null> | void | JSX.Element | null;
 }
@@ -156,7 +156,7 @@ type PureFunctionComponent<P = any> =
   | ((props: P) => JSX.Element | null)
   | ((
       props: P,
-      com: COM,
+      ctx: COM,
       state: TickState,
     ) => JSX.Element | null);
 
@@ -184,8 +184,8 @@ function Greeting(props: { name: string }) {
 }
 
 // Engine-style (props + COM access)
-function StatefulGreeting(props: { name: string }, com: COM) {
-  const count = com.getState<number>("visitCount") ?? 0;
+function StatefulGreeting(props: { name: string }, ctx: COM) {
+  const count = ctx.getState<number>("visitCount") ?? 0;
   return (
     <User>
       Hello, {props.name}! Visit #{count}
@@ -196,7 +196,7 @@ function StatefulGreeting(props: { name: string }, com: COM) {
 // Full access (props + COM + TickState)
 function TickAwareGreeting(
   props: { name: string },
-  com: COM,
+  ctx: COM,
   state: TickState,
 ) {
   return (
@@ -227,18 +227,18 @@ class ChatAgent extends Component<{ model: Model }, { messages: Message[] }> {
     onTickStart: [loggingMiddleware], // Static middleware
   };
 
-  async onMount(com: COM) {
+  async onMount(ctx: COM) {
     // Initialize resources
     const history = await loadChatHistory();
     this.setState({ messages: history });
   }
 
-  onTickStart(com: COM, state: TickState) {
+  onTickStart(ctx: COM, state: TickState) {
     // Called before each tick
     console.log(`Starting tick ${state.tick}`);
   }
 
-  render(com: COM, state: TickState): JSX.Element {
+  render(ctx: COM, state: TickState): JSX.Element {
     return (
       <Fragment>
         <Model model={this.props.model} />
@@ -252,7 +252,7 @@ class ChatAgent extends Component<{ model: Model }, { messages: Message[] }> {
     );
   }
 
-  onComplete(com: COM, finalState: COMInput) {
+  onComplete(ctx: COM, finalState: COMInput) {
     // Save conversation
     saveChatHistory(this.state.messages);
   }
@@ -281,15 +281,15 @@ abstract class Component<P = {}, S = {}> implements EngineComponent {
   getState<T>(key: keyof S): T;
 
   // Lifecycle (override as needed)
-  onMount(com: COM): void;
-  onUnmount(com: COM): void;
-  onStart(com: COM): void;
-  onTickStart(com: COM, state: TickState): void;
-  onAfterCompile(com, compiled, state, ctx): void;
-  onTickEnd(com: COM, state: TickState): void;
-  onComplete(com: COM, finalState: COMInput): void;
-  onError(com: COM, state: TickState): RecoveryAction | void;
-  render(com, state): JSX.Element | null;
+  onMount(ctx: COM): void;
+  onUnmount(ctx: COM): void;
+  onStart(ctx: COM): void;
+  onTickStart(ctx: COM, state: TickState): void;
+  onAfterCompile(ctx, compiled, state, afterCompileCtx): void;
+  onTickEnd(ctx: COM, state: TickState): void;
+  onComplete(ctx: COM, finalState: COMInput): void;
+  onError(ctx: COM, state: TickState): RecoveryAction | void;
+  render(ctx, state): JSX.Element | null;
 }
 ```
 
@@ -400,19 +400,19 @@ Components can handle errors and optionally recover:
 interface RecoveryAction {
   continue: boolean; // Whether to continue execution
   recoveryMessage?: string; // Message to add explaining recovery
-  modifications?: (com: COM) => void | Promise<void>;
+  modifications?: (ctx: COM) => void | Promise<void>;
 }
 
 class ResilientAgent extends Component {
-  onError(com: COM, state: TickState): RecoveryAction {
+  onError(ctx: COM, state: TickState): RecoveryAction {
     const error = state.error;
 
     if (error?.recoverable && error?.phase === "tool_execution") {
       return {
         continue: true,
         recoveryMessage: `Tool failed, continuing without result`,
-        modifications: (com) => {
-          com.setState("toolFailed", true);
+        modifications: (ctx) => {
+          ctx.setState("toolFailed", true);
         },
       };
     }
@@ -564,7 +564,7 @@ Components can render in two ways:
 ```tsx
 // JSX rendering (declarative)
 class DeclarativeAgent extends Component {
-  render(com: COM, state: TickState): JSX.Element {
+  render(ctx: COM, state: TickState): JSX.Element {
     return (
       <Fragment>
         <Model model={this.props.model} />
@@ -577,8 +577,8 @@ class DeclarativeAgent extends Component {
 
 // Direct COM modification (imperative)
 class ImperativeAgent extends Component {
-  render(com: COM, state: TickState): void {
-    com.pushToTimeline({
+  render(ctx: COM, state: TickState): void {
+    ctx.pushToTimeline({
       kind: "message",
       message: { role: "user", content: [{ type: "text", text: "Hello" }] },
     });
@@ -670,15 +670,15 @@ abstract class Component<P = {}, S = {}> implements EngineComponent {
   getState<T>(key: keyof S): T;
 
   // Lifecycle methods (all optional, override as needed)
-  onMount(com: COM): void;
-  onUnmount(com: COM): void;
-  onStart(com: COM): void;
-  onTickStart(com: COM, state: TickState): void;
-  onAfterCompile(com, compiled, state, ctx): void;
-  onTickEnd(com: COM, state: TickState): void;
-  onComplete(com: COM, finalState: COMInput): void;
-  onError(com, state): RecoveryAction | void;
-  render(com, state): JSX.Element | null;
+  onMount(ctx: COM): void;
+  onUnmount(ctx: COM): void;
+  onStart(ctx: COM): void;
+  onTickStart(ctx: COM, state: TickState): void;
+  onAfterCompile(ctx, compiled, state, afterCompileCtx): void;
+  onTickEnd(ctx: COM, state: TickState): void;
+  onComplete(ctx: COM, finalState: COMInput): void;
+  onError(ctx, state): RecoveryAction | void;
+  render(ctx, state): JSX.Element | null;
 }
 ```
 
@@ -740,7 +740,7 @@ Return from `onError` to control error handling:
 interface RecoveryAction {
   continue: boolean;
   recoveryMessage?: string;
-  modifications?: (com: COM) => void | Promise<void>;
+  modifications?: (ctx: COM) => void | Promise<void>;
 }
 ```
 
@@ -831,15 +831,15 @@ interface GreetingState {
 class GreetingAgent extends Component<GreetingProps, GreetingState> {
   static tags = ["greeting"];
 
-  onMount(com: COM) {
+  onMount(ctx: COM) {
     this.state = { greetCount: 0 };
   }
 
-  onTickStart(com: COM, state: TickState) {
+  onTickStart(ctx: COM, state: TickState) {
     this.setState({ greetCount: this.state.greetCount + 1 });
   }
 
-  render(com: COM, state: TickState): JSX.Element {
+  render(ctx: COM, state: TickState): JSX.Element {
     return (
       <Fragment>
         <Model model={myModel} />
@@ -861,12 +861,12 @@ import { useSignal, useInit, useOnMount, useOnTickEnd } from "tentickle";
 function CounterAgent(props: { initialCount: number }) {
   const count = useSignal(props.initialCount);
 
-  await useInit(async (com, state) => {
+  await useInit(async (ctx, state) => {
     const saved = await loadSavedCount();
     if (saved !== undefined) count.set(saved);
   });
 
-  useOnMount((com) => {
+  useOnMount((ctx) => {
     console.log("CounterAgent mounted");
   });
 
@@ -889,21 +889,21 @@ function CounterAgent(props: { initialCount: number }) {
 ```tsx
 class InteractiveAgent extends Component {
   onMessage(
-    com: COM,
+    ctx: COM,
     message: ExecutionMessage,
     state: TickState,
   ) {
     if (message.type === "stop") {
-      com.abort("User requested stop");
+      ctx.abort("User requested stop");
     } else if (message.type === "feedback") {
-      com.setState("userFeedback", message.content);
+      ctx.setState("userFeedback", message.content);
     } else if (message.type === "update_context") {
-      com.setState("additionalContext", message.data);
+      ctx.setState("additionalContext", message.data);
     }
   }
 
-  render(com: COM, state: TickState): JSX.Element {
-    const feedback = com.getState<string>("userFeedback");
+  render(ctx: COM, state: TickState): JSX.Element {
+    const feedback = ctx.getState<string>("userFeedback");
 
     return (
       <Fragment>
@@ -936,7 +936,7 @@ const calculatorTool = createTool({
 class CalculatorAgent extends Component {
   static tool = calculatorTool; // Auto-registered on mount
 
-  render(com: COM, state: TickState): JSX.Element {
+  render(ctx: COM, state: TickState): JSX.Element {
     return (
       <Fragment>
         <Model model={myModel} />
@@ -953,7 +953,7 @@ class CalculatorAgent extends Component {
 
 ```tsx
 class ResilientAgent extends Component {
-  onError(com: COM, state: TickState): RecoveryAction {
+  onError(ctx: COM, state: TickState): RecoveryAction {
     const error = state.error;
 
     if (!error) {
@@ -965,14 +965,14 @@ class ResilientAgent extends Component {
 
     // Retry for transient tool failures
     if (error.phase === "tool_execution" && error.recoverable) {
-      const retryCount = com.getState<number>("retryCount") ?? 0;
+      const retryCount = ctx.getState<number>("retryCount") ?? 0;
 
       if (retryCount < 3) {
         return {
           continue: true,
           recoveryMessage: `Tool failed, retrying (attempt ${retryCount + 1})`,
-          modifications: (com) => {
-            com.setState("retryCount", retryCount + 1);
+          modifications: (ctx) => {
+            ctx.setState("retryCount", retryCount + 1);
           },
         };
       }

@@ -112,7 +112,7 @@ export interface MCPToolConfig {
  * const tool = new MCPTool(mcpClient, 'server-name', toolDefinition, mcpConfig);
  *
  * // Register with COM
- * com.addTool(tool);
+ * ctx.addTool(tool);
  *
  * // Or execute directly
  * const result = await tool.run({ path: '/file.txt' });

@@ -342,22 +342,22 @@ function createTool<TInput>(
 
 #### `CreateToolOptions<TInput>`
 
-| Field                   | Type                                                          | Description                                  |
-| ----------------------- | ------------------------------------------------------------- | -------------------------------------------- |
-| `name`                  | `string`                                                      | Tool name (used by model to call)            |
-| `description`           | `string`                                                      | Description shown to the model               |
-| `parameters`            | `z.ZodSchema<TInput>`                                         | Zod schema for input validation              |
-| `handler?`              | `ToolHandler<TInput>`                                         | Handler function (optional for CLIENT tools) |
-| `type?`                 | `ToolExecutionType`                                           | Execution type (default: SERVER)             |
-| `intent?`               | `ToolIntent`                                                  | Tool intent (default: COMPUTE)               |
-| `requiresResponse?`     | `boolean`                                                     | Wait for client response (CLIENT only)       |
-| `timeout?`              | `number`                                                      | Response timeout in ms (default: 30000)      |
-| `defaultResult?`        | `ContentBlock[]`                                              | Default result for non-blocking tools        |
-| `middleware?`           | `Middleware[]`                                                | Middleware for handler execution             |
-| `providerOptions?`      | `ProviderToolOptions`                                         | Provider-specific configuration              |
-| `mcpConfig?`            | `object`                                                      | MCP server configuration                     |
-| `requiresConfirmation?` | `boolean \| ((input: TInput) => boolean \| Promise<boolean>)` | Require user confirmation before execution   |
-| `confirmationMessage?`  | `string \| ((input: TInput) => string)`                       | Custom confirmation prompt message           |
+| Field                   | Type                                                          | Description                                                                                                                  |
+| ----------------------- | ------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `name`                  | `string`                                                      | Tool name (used by model to call)                                                                                            |
+| `description`           | `string`                                                      | Description shown to the model                                                                                               |
+| `parameters`            | `z.ZodSchema<TInput>`                                         | Zod schema for input validation                                                                                              |
+| `handler?`              | `(input: TInput, ctx?: COM) => ContentBlock[]`                | Handler function (optional for CLIENT tools). `ctx` is provided during agent execution, undefined for direct `.run()` calls. |
+| `type?`                 | `ToolExecutionType`                                           | Execution type (default: SERVER)                                                                                             |
+| `intent?`               | `ToolIntent`                                                  | Tool intent (default: COMPUTE)                                                                                               |
+| `requiresResponse?`     | `boolean`                                                     | Wait for client response (CLIENT only)                                                                                       |
+| `timeout?`              | `number`                                                      | Response timeout in ms (default: 30000)                                                                                      |
+| `defaultResult?`        | `ContentBlock[]`                                              | Default result for non-blocking tools                                                                                        |
+| `middleware?`           | `Middleware[]`                                                | Middleware for handler execution                                                                                             |
+| `providerOptions?`      | `ProviderToolOptions`                                         | Provider-specific configuration                                                                                              |
+| `mcpConfig?`            | `object`                                                      | MCP server configuration                                                                                                     |
+| `requiresConfirmation?` | `boolean \| ((input: TInput) => boolean \| Promise<boolean>)` | Require user confirmation before execution                                                                                   |
+| `confirmationMessage?`  | `string \| ((input: TInput) => string)`                       | Custom confirmation prompt message                                                                                           |
 
 **Component lifecycle hooks (for JSX usage):**
 
@@ -489,7 +489,7 @@ sequenceDiagram
     alt Handler exists
         ToolExecutor->>Hooks: Get 'run' middleware
         Hooks-->>ToolExecutor: middleware[]
-        ToolExecutor->>Tool: wrappedRun(input)
+        ToolExecutor->>Tool: wrappedRun(input, ctx)
         Tool-->>ToolExecutor: ContentBlock[]
     else No handler
         ToolExecutor-->>Engine: Error: TOOL_NO_HANDLER
@@ -594,6 +594,27 @@ function MyAgent() {
     </>
   );
 }
+```
+
+### Tool with COM Access
+
+Handlers receive an optional `ctx` (Context Object Model) as a second argument during agent execution:
+
+```typescript
+const BookmarkTool = createTool({
+  name: 'bookmark',
+  description: 'Save a bookmark',
+  input: z.object({ url: z.string(), title: z.string() }),
+  handler: async ({ url, title }, ctx) => {
+    await db.saveBookmark(url, title);
+    ctx?.setState('lastBookmark', { url, title });
+    return [{ type: 'text', text: `Bookmarked: ${title}` }];
+  },
+});
+
+// During agent execution: ctx is provided
+// Via direct call: ctx is undefined
+await BookmarkTool.run({ url: 'https://example.com', title: 'Example' });
 ```
 
 ### Client Render Tool (Non-blocking)
@@ -704,17 +725,17 @@ const WeatherTool = createTool({
   },
 
   // Component lifecycle hooks
-  onMount: async (com) => {
+  onMount: async (ctx) => {
     console.log("Weather tool mounted");
     // Initialize API client, etc.
   },
 
-  onUnmount: async (com) => {
+  onUnmount: async (ctx) => {
     console.log("Weather tool unmounted");
     // Cleanup resources
   },
 
-  onTickEnd: async (result, com) => {
+  onTickEnd: async (result, ctx) => {
     // Called after each model response
     console.log(`Tick ${result.tick} complete`);
   },

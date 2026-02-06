@@ -124,10 +124,10 @@ export async function storeResolvePendingData(store: RuntimeStore): Promise<void
 export async function storeRunTickStartCallbacks(
   store: RuntimeStore,
   tickState: TickState,
-  com: COM,
+  ctx: COM,
 ): Promise<void> {
   for (const callback of store.tickStartCallbacks) {
-    await callback(tickState, com);
+    await callback(tickState, ctx);
   }
 }
 
@@ -146,10 +146,10 @@ export async function storeRunTickStartCallbacks(
 export async function storeRunTickEndCallbacks(
   store: RuntimeStore,
   result: TickResult,
-  com: COM,
+  ctx: COM,
 ): Promise<void> {
   for (const callback of store.tickEndCallbacks) {
-    const decision = await callback(result, com);
+    const decision = await callback(result, ctx);
     // If callback returns boolean, auto-convert to continue/stop
     if (decision === true) {
       result.continue();
@@ -166,10 +166,10 @@ export async function storeRunTickEndCallbacks(
 export async function storeRunAfterCompileCallbacks(
   store: RuntimeStore,
   compiled: CompiledStructure,
-  com: COM,
+  ctx: COM,
 ): Promise<void> {
   for (const callback of store.afterCompileCallbacks) {
-    await callback(compiled, com);
+    await callback(compiled, ctx);
   }
 }
 

@@ -22,11 +22,6 @@ export interface OpenAIAdapterConfig extends ClientOptions {
 }
 
 /**
- * @deprecated Use OpenAIAdapterConfig instead
- */
-export type OpenAIClientOptions = OpenAIAdapterConfig;
-
-/**
  * OpenAI-specific generation options.
  * Used for chat completion calls and other operations.
  * Extends OpenAI's ChatCompletionCreateParams to allow provider-specific overrides.

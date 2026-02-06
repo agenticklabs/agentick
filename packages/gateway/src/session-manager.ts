@@ -8,7 +8,7 @@ import type { Session } from "@tentickle/core";
 import { devToolsEmitter, type DTGatewaySessionEvent } from "@tentickle/shared";
 import type { AppRegistry, AppInfo } from "./app-registry.js";
 import type { SessionState } from "./types.js";
-import { parseSessionKey, formatSessionKey } from "./protocol.js";
+import { parseSessionKey, formatSessionKey } from "./transport-protocol.js";
 
 interface ManagedSession {
   state: SessionState;
@@ -174,8 +174,6 @@ export class SessionManager {
 
     // Emit DevTools event for session reset (treated as closed + recreated)
     this.emitDevToolsEvent("closed", id, appId, messageCount);
-
-    // TODO: Clear persisted history
   }
 
   /**

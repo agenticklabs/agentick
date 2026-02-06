@@ -19,9 +19,7 @@ import type { Message } from "../messages";
 import type { UsageStats } from "../models";
 import type { SessionResultPayload } from "../protocol";
 import {
-  StreamChunkType,
   StopReason,
-  type StreamChunk,
   type StreamEventBase,
   type ContentStartEvent,
   type ContentDeltaEvent,
@@ -346,129 +344,6 @@ export function createToolResult(
     content,
     ...overrides,
   };
-}
-
-// =============================================================================
-// Stream Event Fixtures
-// =============================================================================
-
-/**
- * Create a stream chunk
- */
-export function createStreamChunk(
-  type: StreamChunk["type"],
-  overrides: Partial<StreamChunk> = {},
-): StreamChunk {
-  return {
-    type,
-    ...overrides,
-  };
-}
-
-/**
- * Create a text delta chunk
- */
-export function createTextDeltaChunk(
-  delta: string,
-  overrides: Partial<StreamChunk> = {},
-): StreamChunk {
-  return createStreamChunk(StreamChunkType.CONTENT_DELTA, {
-    delta,
-    ...overrides,
-  });
-}
-
-/**
- * Create a message start chunk
- */
-export function createMessageStartChunk(
-  id: string = testId("msg"),
-  overrides: Partial<StreamChunk> = {},
-): StreamChunk {
-  return createStreamChunk(StreamChunkType.MESSAGE_START, { id, ...overrides });
-}
-
-/**
- * Create a message end chunk
- */
-export function createMessageEndChunk(
-  stopReason: StopReason = StopReason.STOP,
-  overrides: Partial<StreamChunk> = {},
-): StreamChunk {
-  return createStreamChunk(StreamChunkType.MESSAGE_END, {
-    stopReason,
-    ...overrides,
-  });
-}
-
-/**
- * Create a tool call chunk
- */
-export function createToolCallChunk(
-  toolName: string,
-  toolCallId: string = testId("call"),
-  overrides: Partial<StreamChunk> = {},
-): StreamChunk {
-  return createStreamChunk(StreamChunkType.TOOL_CALL, {
-    toolName,
-    toolCallId,
-    ...overrides,
-  });
-}
-
-/**
- * Create a tool result chunk
- */
-export function createToolResultChunk(
-  toolCallId: string,
-  toolResult: unknown,
-  overrides: Partial<StreamChunk> = {},
-): StreamChunk {
-  return createStreamChunk(StreamChunkType.TOOL_RESULT, {
-    toolCallId,
-    toolResult,
-    ...overrides,
-  });
-}
-
-/**
- * Create a sequence of stream chunks for a simple text response
- */
-export function createTextStreamSequence(text: string, chunkSize: number = 10): StreamChunk[] {
-  const chunks: StreamChunk[] = [createMessageStartChunk()];
-
-  // Split text into chunks
-  for (let i = 0; i < text.length; i += chunkSize) {
-    chunks.push(createTextDeltaChunk(text.slice(i, i + chunkSize)));
-  }
-
-  chunks.push(createMessageEndChunk(StopReason.STOP));
-
-  return chunks;
-}
-
-/**
- * Create a sequence of stream chunks for a tool call response
- */
-export function createToolCallStreamSequence(
-  toolName: string,
-  toolInput: Record<string, unknown>,
-  toolResult: unknown,
-): StreamChunk[] {
-  const toolCallId = testId("call");
-
-  return [
-    createMessageStartChunk(),
-    createToolCallChunk(toolName, toolCallId),
-    createStreamChunk(StreamChunkType.TOOL_INPUT_START, { toolCallId }),
-    createStreamChunk(StreamChunkType.TOOL_INPUT_DELTA, {
-      toolCallId,
-      delta: JSON.stringify(toolInput),
-    }),
-    createStreamChunk(StreamChunkType.TOOL_INPUT_END, { toolCallId }),
-    createToolResultChunk(toolCallId, toolResult),
-    createMessageEndChunk(StopReason.TOOL_USE),
-  ];
 }
 
 // =============================================================================

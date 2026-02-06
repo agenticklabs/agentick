@@ -6,7 +6,7 @@
  *
  * @example
  * ```tsx
- * render(com, state) {
+ * render(ctx, state) {
  *   if (allVotesIn && winner) {
  *     return (
  *       <Complete reason="Consensus reached">

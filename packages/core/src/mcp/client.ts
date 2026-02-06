@@ -57,7 +57,6 @@ export class MCPClient {
     };
 
     client.onerror = (error) => {
-      // TODO: inspect error and determine if we should reconnect, or disconnect completely
       this.disconnect(config.serverName);
       this.logger.error({ err: error, serverName: config.serverName }, "MCP client error");
     };

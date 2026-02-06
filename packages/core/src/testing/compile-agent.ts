@@ -135,8 +135,8 @@ export async function compileAgent<P extends Record<string, unknown> = Record<st
   const { props = {} as P, tick = 1, maxIterations = 10 } = options;
 
   // Create mock COM and compiler
-  const com = createMockCom();
-  const compiler = new FiberCompiler(com as any);
+  const ctx = createMockCom();
+  const compiler = new FiberCompiler(ctx as any);
 
   // Create tick state
   const tickState = createMockTickState(tick);
@@ -160,7 +160,7 @@ export async function compileAgent<P extends Record<string, unknown> = Record<st
   const tools: CompiledTool[] = compiled.tools ?? [];
 
   // Extract system messages
-  const systemMessages: string[] = (compiled.system ?? [])
+  const systemMessages: string[] = (compiled.systemEntries ?? [])
     .map((entry) => {
       // CompiledTimelineEntry has content: SemanticContentBlock[]
       if (entry.content) {

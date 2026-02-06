@@ -37,17 +37,17 @@ import type { Signal } from "./signal";
  * ```
  */
 export function useComState<T>(key: string, initialValue: T): Signal<T> {
-  const com = useCom();
+  const ctx = useCom();
 
   // Initialize if needed
-  if (com.getState<T>(key) === undefined) {
-    com.setState(key, initialValue);
+  if (ctx.getState<T>(key) === undefined) {
+    ctx.setState(key, initialValue);
   }
 
   // Get the current value
   const getValue = useCallback((): T => {
-    return (com.getState<T>(key) ?? initialValue) as T;
-  }, [com, key, initialValue]);
+    return (ctx.getState<T>(key) ?? initialValue) as T;
+  }, [ctx, key, initialValue]);
 
   // Set a new value
   const setValue = useCallback(
@@ -55,11 +55,11 @@ export function useComState<T>(key: string, initialValue: T): Signal<T> {
       const currentValue = getValue();
       const newValue =
         typeof value === "function" ? (value as (prev: T) => T)(currentValue) : value;
-      com.setState(key, newValue);
+      ctx.setState(key, newValue);
       // Request recompilation to reflect the change
-      com.requestRecompile(`COM state '${key}' changed`);
+      ctx.requestRecompile(`COM state '${key}' changed`);
     },
-    [com, key, getValue],
+    [ctx, key, getValue],
   );
 
   // Update with function

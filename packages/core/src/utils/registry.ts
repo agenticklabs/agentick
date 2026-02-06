@@ -1,5 +1,5 @@
 import type { ExecutableTool } from "../tool/tool";
-import type { ModelInstance } from "../model/model";
+import type { EngineModel } from "../model/model";
 
 export class Registry<T> {
   private items = new Map<string, T>();
@@ -31,4 +31,4 @@ export class Registry<T> {
 }
 
 export const toolRegistry = new Registry<ExecutableTool>("Tool");
-export const modelRegistry = new Registry<ModelInstance>("Model");
+export const modelRegistry = new Registry<EngineModel>("Model");

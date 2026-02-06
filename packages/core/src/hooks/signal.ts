@@ -43,7 +43,11 @@ import { useRef, useState, useEffect, useContext, useDebugValue } from "react";
 import { COMContext } from "./context";
 
 // Import for render phase detection
-import { isCompilerRendering, shouldSkipRecompile, getActiveCompiler } from "../compiler";
+import {
+  isCompilerRendering,
+  shouldSkipRecompile,
+  getActiveCompiler,
+} from "../compiler/fiber-compiler";
 
 // ============================================================================
 // Signal Execution Context (Concurrency Safety)
@@ -701,7 +705,7 @@ export function useSignal<T>(initialValue: T): Signal<T> {
 
   // Get COM for requestRecompile - this triggers the scheduler when idle
   // Returns null if not in Tentickle context
-  const com = useContext(COMContext);
+  const ctx = useContext(COMContext);
 
   // Store setVersion in a ref so it's always current
   // This fixes the issue where setVersion captured in the signal closure
@@ -711,8 +715,8 @@ export function useSignal<T>(initialValue: T): Signal<T> {
 
   // Create signal wrapper once - stored in ref for stability
   const signalRef = useRef<Signal<T> | null>(null);
-  const comRef = useRef(com);
-  comRef.current = com; // Update com ref on each render
+  const ctxRef = useRef(ctx);
+  ctxRef.current = ctx; // Update ctx ref on each render
 
   if (signalRef.current === null) {
     const baseSignal = createSignal(initialValue);
@@ -727,8 +731,8 @@ export function useSignal<T>(initialValue: T): Signal<T> {
       setVersionRef.current((v) => v + 1);
       // Request recompile through COM → scheduler → reconcile
       // This triggers the reactive model when session is idle
-      if (comRef.current?.requestRecompile) {
-        comRef.current.requestRecompile("useSignal state change");
+      if (ctxRef.current?.requestRecompile) {
+        ctxRef.current.requestRecompile("useSignal state change");
       }
     };
 
@@ -865,7 +869,7 @@ export const COM_SIGNAL_SYMBOL = Symbol.for("tentickle.comSignal");
  * @internal Used by comState() after COM is available
  */
 export function createCOMStateSignal<T>(
-  com: {
+  ctx: {
     getState: (key: string) => T | undefined;
     setState: (key: string, value: unknown) => void;
     on: (event: any, handler: (...args: any[]) => void) => any;
@@ -874,7 +878,7 @@ export function createCOMStateSignal<T>(
   key: string,
   initialValue?: T,
 ): Signal<T | undefined> {
-  const sig = signal<T | undefined>(com.getState(key) ?? initialValue);
+  const sig = signal<T | undefined>(ctx.getState(key) ?? initialValue);
 
   // Flag to prevent circular updates
   let isUpdatingFromCOM = false;
@@ -894,9 +898,9 @@ export function createCOMStateSignal<T>(
         if (isCompilerRendering() && !shouldSkipRecompile()) {
           const compiler = getActiveCompiler();
           if (compiler) {
-            const comObj = com as any;
-            if (comObj.requestRecompile) {
-              comObj.requestRecompile(`comState '${key}' changed during render`);
+            const ctxObj = ctx as any;
+            if (ctxObj.requestRecompile) {
+              ctxObj.requestRecompile(`comState '${key}' changed during render`);
             }
           }
         }
@@ -906,7 +910,7 @@ export function createCOMStateSignal<T>(
     }
   };
 
-  com.on("state:changed", handler);
+  ctx.on("state:changed", handler);
 
   // Override set to also update COM
   const originalSet = sig.set;
@@ -940,7 +944,7 @@ export function createCOMStateSignal<T>(
     // Update COM first (will trigger handler, but flag prevents circular)
     isUpdatingFromCOM = true;
     try {
-      com.setState(key, nextValue);
+      ctx.setState(key, nextValue);
     } finally {
       isUpdatingFromCOM = false;
     }
@@ -960,9 +964,9 @@ export function createCOMStateSignal<T>(
     // ALLOW recompile in:
     // - mount (useOnMount): Function component useOnMount runs after first render, can trigger recompile
     if (!shouldSkipRecompile()) {
-      const comObj = com as any;
-      if (comObj.requestRecompile) {
-        comObj.requestRecompile(`comState '${key}' updated`);
+      const ctxObj = ctx as any;
+      if (ctxObj.requestRecompile) {
+        ctxObj.requestRecompile(`comState '${key}' updated`);
       }
     }
   };
@@ -970,8 +974,8 @@ export function createCOMStateSignal<T>(
   // Override dispose to cleanup COM listener
   const originalDispose = sig.dispose!;
   sig.dispose = () => {
-    if (com.off) {
-      com.off("state:changed", handler);
+    if (ctx.off) {
+      ctx.off("state:changed", handler);
     }
     originalDispose.call(sig);
   };
@@ -993,7 +997,7 @@ export const REQUIRED_INPUT_SYMBOL = Symbol.for("tentickle.requiredInput");
  * @internal Used by watchComState() and watch()
  */
 export function createReadonlyCOMStateSignal<T>(
-  com: {
+  ctx: {
     getState: (key: string) => T | undefined;
     on: (event: any, handler: (...args: any[]) => void) => any;
     off?: (event: any, handler: (...args: any[]) => void) => any;
@@ -1001,7 +1005,7 @@ export function createReadonlyCOMStateSignal<T>(
   key: string,
   defaultValue?: T,
 ): ReadonlySignal<T | undefined> {
-  let value: T | undefined = com.getState(key) ?? defaultValue;
+  let value: T | undefined = ctx.getState(key) ?? defaultValue;
   let isDisposed = false;
 
   // Listen for COM state changes
@@ -1017,16 +1021,16 @@ export function createReadonlyCOMStateSignal<T>(
       if (isCompilerRendering() && !shouldSkipRecompile()) {
         const compiler = getActiveCompiler();
         if (compiler) {
-          const comObj = com as any;
-          if (comObj.requestRecompile) {
-            comObj.requestRecompile(`watched comState '${key}' changed during render`);
+          const ctxObj = ctx as any;
+          if (ctxObj.requestRecompile) {
+            ctxObj.requestRecompile(`watched comState '${key}' changed during render`);
           }
         }
       }
     }
   };
 
-  com.on("state:changed", handler);
+  ctx.on("state:changed", handler);
 
   const getter = (): T | undefined => {
     if (isDisposed) return value;
@@ -1049,8 +1053,8 @@ export function createReadonlyCOMStateSignal<T>(
   const dispose = (): void => {
     if (isDisposed) return;
     isDisposed = true;
-    if (com.off) {
-      com.off("state:changed", handler);
+    if (ctx.off) {
+      ctx.off("state:changed", handler);
     }
   };
 

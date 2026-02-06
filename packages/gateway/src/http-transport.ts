@@ -7,7 +7,7 @@
 
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from "http";
 import { extractToken, validateAuth, setSSEHeaders, type AuthResult } from "@tentickle/server";
-import type { GatewayMessage, RequestMessage } from "./protocol.js";
+import type { GatewayMessage, RequestMessage } from "./transport-protocol.js";
 import type { ClientState } from "./types.js";
 import { BaseTransport, type TransportClient, type TransportConfig } from "./transport.js";
 
@@ -551,7 +551,6 @@ export class HTTPTransport extends BaseTransport {
       return;
     }
 
-    // TODO: Implement channel handling
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ ok: true }));
   }

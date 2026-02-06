@@ -31,8 +31,8 @@ function MyAgent() {
   });
 
   // Access COM when needed (second parameter)
-  useContinuation((result, com) => {
-    com.setState("lastTick", result.tick);
+  useContinuation((result, ctx) => {
+    ctx.setState("lastTick", result.tick);
     return !result.text?.includes("<DONE>");
   });
 
@@ -203,9 +203,9 @@ Run code when the component mounts:
 
 ```tsx
 function AgentWithSetup() {
-  useOnMount((com) => {
+  useOnMount((ctx) => {
     console.log("Component mounted");
-    com.setState("initialized", true);
+    ctx.setState("initialized", true);
   });
 
   return <Timeline />;
@@ -218,7 +218,7 @@ Run code when the component unmounts:
 
 ```tsx
 function AgentWithCleanup() {
-  useOnUnmount((com) => {
+  useOnUnmount((ctx) => {
     console.log("Component unmounting");
     // Cleanup resources
   });
@@ -238,8 +238,8 @@ function AgentWithSetup() {
   });
 
   // With COM access
-  useOnTickStart((tickState, com) => {
-    com.setState("lastTickStart", tickState.tick);
+  useOnTickStart((tickState, ctx) => {
+    ctx.setState("lastTickStart", tickState.tick);
   });
 
   return <Timeline />;
@@ -280,14 +280,14 @@ Inspect compiled context before sending to model, optionally request recompilati
 
 ```tsx
 function AgentWithContextManagement() {
-  useAfterCompile((compiled, com) => {
+  useAfterCompile((compiled, ctx) => {
     // Estimate tokens
     const tokens = estimateTokens(compiled);
 
     if (tokens > MAX_CONTEXT_TOKENS) {
       // Summarize old messages
-      summarizeOldMessages(com);
-      com.requestRecompile("context-too-large");
+      summarizeOldMessages(ctx);
+      ctx.requestRecompile("context-too-large");
     }
   });
 
@@ -341,9 +341,9 @@ function ComponentB() {
 Access the Context Object Model:
 
 ```tsx
-const com = useCom();
-com.addSection({ id: "context", content: "..." });
-com.setState("key", value);
+const ctx = useCom();
+ctx.addSection({ id: "context", content: "..." });
+ctx.setState("key", value);
 ```
 
 ### useTickState
@@ -363,7 +363,7 @@ console.log(state.previous?.timeline); // Previous tick's output
 React to incoming messages (for interactive agents):
 
 ```tsx
-useOnMessage((message, com, state) => {
+useOnMessage((message, ctx, state) => {
   if (message.type === "user") {
     console.log("User said:", message.content);
   }

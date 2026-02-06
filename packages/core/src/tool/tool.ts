@@ -59,10 +59,14 @@ export interface ZodSchema<T = unknown> {
 
 /**
  * Tool handler function signature.
- * Takes typed input and returns ContentBlock[].
+ * Takes typed input and an optional COM for accessing agent state.
+ *
+ * When called during agent execution (model calls the tool), `ctx` is provided.
+ * When called directly via `MyTool.run(input)`, `ctx` is undefined.
  */
 export type ToolHandler<TInput = any, TOutput extends ContentBlock[] = ContentBlock[]> = (
   input: TInput,
+  ctx?: COM,
 ) => TOutput | Promise<TOutput>;
 
 /**
@@ -94,7 +98,22 @@ export interface CreateToolOptions<TInput = any, TOutput extends ContentBlock[] 
 
   /**
    * Handler function that executes the tool.
+   * Receives typed input and an optional COM for accessing agent state.
+   *
+   * When called during agent execution, `ctx` is provided so the handler
+   * can set state, publish to channels, read context, etc.
+   * When called directly via `MyTool.run(input)`, `ctx` is undefined.
+   *
    * Optional for CLIENT and PROVIDER tools (no server-side execution).
+   *
+   * @example
+   * ```typescript
+   * handler: async (input, ctx) => {
+   *   const result = doSomething(input);
+   *   ctx?.setState("lastResult", result);
+   *   return [{ type: "text", text: JSON.stringify(result) }];
+   * }
+   * ```
    */
   handler?: ToolHandler<TInput, TOutput>;
 
@@ -201,22 +220,17 @@ export interface CreateToolOptions<TInput = any, TOutput extends ContentBlock[] 
   middleware?: Middleware[];
 
   // === Component Lifecycle Hooks (for JSX usage) ===
-  // All callbacks receive data first, com (context) last.
+  // All callbacks receive data first, ctx (context) last.
 
-  onMount?: (com: COM) => void | Promise<void>;
-  onUnmount?: (com: COM) => void | Promise<void>;
-  onStart?: (com: COM) => void | Promise<void>;
-  onTickStart?: (tickState: TickState, com: COM) => void | Promise<void>;
-  onTickEnd?: (result: TickResult, com: COM) => void | Promise<void>;
-  onComplete?: (finalState: COMInput, com: COM) => void | Promise<void>;
-  onError?: (tickState: TickState, com: COM) => RecoveryAction | void;
-  render?: (tickState: TickState, com: COM) => JSX.Element | null;
-  onAfterCompile?: (
-    compiled: CompiledStructure,
-    tickState: TickState,
-    com: COM,
-    ctx: any,
-  ) => void | Promise<void>;
+  onMount?: (ctx: COM) => void | Promise<void>;
+  onUnmount?: (ctx: COM) => void | Promise<void>;
+  onStart?: (ctx: COM) => void | Promise<void>;
+  onTickStart?: (tickState: TickState, ctx: COM) => void | Promise<void>;
+  onTickEnd?: (result: TickResult, ctx: COM) => void | Promise<void>;
+  onComplete?: (finalState: COMInput, ctx: COM) => void | Promise<void>;
+  onError?: (tickState: TickState, ctx: COM) => RecoveryAction | void;
+  render?: (tickState: TickState, ctx: COM) => JSX.Element | null;
+  onAfterCompile?: (compiled: CompiledStructure, ctx: COM) => void | Promise<void>;
 }
 
 /**
@@ -365,7 +379,7 @@ export function createTool<TInput = any, TOutput extends ContentBlock[] = Conten
   const ToolComponent = function ToolComponent(
     _props: ComponentBaseProps,
   ): React.ReactElement | null {
-    const com = useCom();
+    const ctx = useCom();
     // Note: useTickState returns hooks/types.ts TickState, but lifecycle callbacks
     // expect component/component.ts TickState. They're compatible at runtime,
     // so we use type assertion. The hooks version is a simplified subset.
@@ -379,43 +393,41 @@ export function createTool<TInput = any, TOutput extends ContentBlock[] = Conten
       if (!hasCalledMountRef.current) {
         hasCalledMountRef.current = true;
         if (options.onMount) {
-          Promise.resolve(options.onMount(com)).catch(console.error);
+          Promise.resolve(options.onMount(ctx)).catch(console.error);
         }
         if (options.onStart) {
-          Promise.resolve(options.onStart(com)).catch(console.error);
+          Promise.resolve(options.onStart(ctx)).catch(console.error);
         }
       }
 
       return () => {
         if (options.onUnmount) {
-          Promise.resolve(options.onUnmount(com)).catch(console.error);
+          Promise.resolve(options.onUnmount(ctx)).catch(console.error);
         }
       };
-    }, [com]);
+    }, [ctx]);
 
-    // Tick lifecycle hooks - data first, com last
+    // Tick lifecycle hooks - data first, ctx last
     if (options.onTickStart) {
-      useOnTickStart((hookTickState, hookCom) => {
+      useOnTickStart((hookTickState, hookCtx) => {
         if (options.onTickStart) {
-          Promise.resolve(options.onTickStart(hookTickState, hookCom)).catch(console.error);
+          Promise.resolve(options.onTickStart(hookTickState, hookCtx)).catch(console.error);
         }
       });
     }
 
     if (options.onTickEnd) {
-      useOnTickEnd((result, hookCom) => {
+      useOnTickEnd((result, hookCtx) => {
         if (options.onTickEnd) {
-          Promise.resolve(options.onTickEnd(result, hookCom)).catch(console.error);
+          Promise.resolve(options.onTickEnd(result, hookCtx)).catch(console.error);
         }
       });
     }
 
     if (options.onAfterCompile) {
-      useAfterCompile((compiled) => {
+      useAfterCompile((compiled, hookCtx) => {
         if (options.onAfterCompile) {
-          Promise.resolve(options.onAfterCompile(compiled, tickState, com, {})).catch(
-            console.error,
-          );
+          Promise.resolve(options.onAfterCompile(compiled, hookCtx)).catch(console.error);
         }
       });
     }
@@ -433,7 +445,7 @@ export function createTool<TInput = any, TOutput extends ContentBlock[] = Conten
 
     // If custom render provided, wrap both tool element and render output
     if (options.render) {
-      const renderOutput = options.render(tickState, com);
+      const renderOutput = options.render(tickState, ctx);
       return React.createElement(React.Fragment, null, toolElement, renderOutput);
     }
 
@@ -565,8 +577,9 @@ export interface ToolMetadata<TInput = any, TOutput = any> {
 }
 
 export interface ExecutableTool<
-  THandler extends (input: any) => ContentBlock[] | Promise<ContentBlock[]> = (
+  THandler extends (input: any, ctx?: COM) => ContentBlock[] | Promise<ContentBlock[]> = (
     input: any,
+    ctx?: COM,
   ) => ContentBlock[] | Promise<ContentBlock[]>,
 > {
   metadata: ToolMetadata<ExtractArgs<THandler>[0]>;

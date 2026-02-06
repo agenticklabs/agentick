@@ -7,7 +7,7 @@
 
 import type { Message } from "@tentickle/shared";
 import { validateAuth, type AuthResult } from "@tentickle/server";
-import type { GatewayMessage, ClientMessage } from "./protocol.js";
+import type { GatewayMessage, ClientMessage } from "./transport-protocol.js";
 import type { AuthConfig, ClientState, UserContext } from "./types.js";
 
 // ============================================================================

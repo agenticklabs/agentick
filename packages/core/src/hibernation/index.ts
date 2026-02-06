@@ -78,7 +78,7 @@ export interface HibernateOptions {
  *   sessionId: session.id,
  *   tick: session.currentTick,
  *   timeline: session.timeline,
- *   comState: session.com.state,
+ *   comState: session.ctx.state,
  * });
  *
  * // Store snapshot
@@ -150,7 +150,7 @@ export interface HydrateResult {
  * const snapshot = JSON.parse(json) as SessionSnapshot;
  *
  * // Create compiler first
- * const compiler = new FiberCompiler(com);
+ * const compiler = new FiberCompiler(ctx);
  *
  * // Hydrate - restores data cache into compiler
  * const state = hydrate(compiler, snapshot);

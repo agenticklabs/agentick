@@ -6,7 +6,12 @@
 
 import { WebSocketServer, WebSocket } from "ws";
 import type { IncomingMessage } from "http";
-import type { ClientMessage, GatewayMessage, ConnectMessage, RequestMessage } from "./protocol.js";
+import type {
+  ClientMessage,
+  GatewayMessage,
+  ConnectMessage,
+  RequestMessage,
+} from "./transport-protocol.js";
 import type { ClientState, AuthConfig, AuthResult } from "./types.js";
 
 export interface WSServerConfig {
@@ -285,7 +290,6 @@ export class WSServer {
 
     // JWT auth
     if (auth.type === "jwt") {
-      // TODO: Implement JWT validation
       return { valid: false };
     }
 

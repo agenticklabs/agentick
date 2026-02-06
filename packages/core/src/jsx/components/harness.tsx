@@ -39,7 +39,7 @@ import type { COM } from "../../com/object-model";
 import { type ComponentBaseProps } from "../jsx-types";
 import { SessionImpl } from "../../app/session";
 import type { ComponentFunction, SendResult, AppOptions, SessionOptions } from "../../app/types";
-import type { ModelInstance } from "../../model/model";
+import type { EngineModel } from "../../model/model";
 
 /**
  * Context for harness topology awareness.
@@ -78,7 +78,7 @@ export interface HarnessProps<P = Record<string, unknown>> extends ComponentBase
    * Model to use for the child session.
    * If not provided, inherits from parent context.
    */
-  model?: ModelInstance;
+  model?: EngineModel;
 
   /**
    * Callback when child execution completes.
@@ -114,8 +114,8 @@ const harnessContextMap = new WeakMap<object, HarnessContext>();
  * Get the current harness context (for use in components).
  * Returns undefined if not inside a harness.
  */
-export function getHarnessContext(com: COM): HarnessContext | undefined {
-  return harnessContextMap.get(com);
+export function getHarnessContext(ctx: COM): HarnessContext | undefined {
+  return harnessContextMap.get(ctx);
 }
 
 /**
@@ -168,7 +168,7 @@ export function Harness<P = Record<string, unknown>>(props: HarnessProps<P>): JS
 
     // Execute child session
     session
-      .tick(childProps)
+      .render(childProps)
       .result.then((result) => {
         if (onResult) {
           return Promise.resolve(onResult(result)).then(() => result);

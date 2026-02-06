@@ -306,7 +306,7 @@ async function AsyncComponent(props: Props): Promise<JSX.Element> {
 
 // Class component (extends Component<P>)
 class MyAgent extends Component<AgentProps> {
-  render(com: COM): JSX.Element {
+  render(ctx: COM): JSX.Element {
     return <Fragment>...</Fragment>;
   }
 }
@@ -641,33 +641,6 @@ function CustomerServiceAgent({ user, query }: Props) {
 }
 ```
 
-### Class Components
-
-```tsx
-class StatefulAgent extends Component<{ topic: string }> {
-  private conversationCount = 0;
-
-  async onMount(com: COM) {
-    this.conversationCount = await loadConversationCount();
-  }
-
-  render(com: COM): JSX.Element {
-    return (
-      <Fragment>
-        <Model model={myModel} />
-        <Grounding>
-          Conversation #{this.conversationCount}
-          Topic: {this.props.topic}
-        </Grounding>
-        {com.timeline.map((entry) => (
-          <Entry key={entry.id} {...entry} />
-        ))}
-      </Fragment>
-    );
-  }
-}
-```
-
 ### Using Refs
 
 ```tsx
@@ -681,7 +654,7 @@ function ForkingAgent() {
         <User>Analyze this data...</User>
       </Fork>
 
-      {/* Access fork result via com.getRef() */}
+      {/* Access fork result via ctx.getRef() */}
       <User>Based on the analysis, what should we do?</User>
     </Fragment>
   );

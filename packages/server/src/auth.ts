@@ -82,7 +82,6 @@ export async function validateAuth(
   } else if (config.type === "custom") {
     result = await config.validate(token);
   } else if (config.type === "jwt") {
-    // TODO: Implement JWT validation
     result = { valid: false };
   } else {
     result = { valid: false };

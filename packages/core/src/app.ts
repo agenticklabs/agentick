@@ -30,8 +30,8 @@
  *
  * // Persistent session
  * const session = app.session();
- * await session.tick({ query: "Hello!" });
- * await session.tick({ query: "Follow up" });
+ * await session.render({ query: "Hello!" });
+ * await session.render({ query: "Follow up" });
  * session.close();
  *
  * // Named session (get-or-create by ID)
@@ -50,14 +50,13 @@ export type {
   MiddlewareKey,
   TentickleInstanceCreateOptions,
   MiddlewareRegistry,
-  RunInput,
 } from "./tentickle-instance";
 
 // ============================================================================
 // Convenience Functions
 // ============================================================================
 
-import type { AppInput, AppOptions, SessionExecutionHandle, ComponentFunction } from "./app/types";
+import type { RunInput, AppOptions, SessionExecutionHandle, ComponentFunction } from "./app/types";
 
 /**
  * Execute a component with input (ephemeral session).
@@ -86,7 +85,7 @@ import type { AppInput, AppOptions, SessionExecutionHandle, ComponentFunction } 
  */
 export async function runComponent<P extends Record<string, unknown>>(
   Component: ComponentFunction<P>,
-  input: AppInput<P>,
+  input: RunInput<P>,
   options: AppOptions = {},
 ): Promise<SessionExecutionHandle> {
   // Import synchronously since we're not doing dynamic import
@@ -103,7 +102,7 @@ export async function runComponent<P extends Record<string, unknown>>(
 
 export type {
   App,
-  AppInput,
+  RunInput,
   AppOptions,
   StreamEvent,
   SessionOptions,

@@ -2,7 +2,7 @@
  * Lifecycle Hooks
  *
  * Event-driven hooks for component and tick lifecycle phases.
- * All callbacks receive data first, com (context) last.
+ * All callbacks receive data first, ctx (context) last.
  */
 
 import { useEffect, useRef, useDebugValue } from "react";
@@ -21,22 +21,22 @@ import type {
  *
  * @example
  * ```tsx
- * useOnMount((com) => {
+ * useOnMount((ctx) => {
  *   console.log("Component mounted");
- *   com.setState("initialized", true);
+ *   ctx.setState("initialized", true);
  * });
  * ```
  */
 export function useOnMount(callback: MountCallback): void {
-  const com = useCom();
+  const ctx = useCom();
   const savedCallback = useRef(callback);
   savedCallback.current = callback;
 
   useDebugValue("onMount registered");
 
   useEffect(() => {
-    savedCallback.current(com as any);
-  }, [com]);
+    savedCallback.current(ctx as any);
+  }, [ctx]);
 }
 
 /**
@@ -44,14 +44,14 @@ export function useOnMount(callback: MountCallback): void {
  *
  * @example
  * ```tsx
- * useOnUnmount((com) => {
+ * useOnUnmount((ctx) => {
  *   console.log("Component unmounting");
- *   com.setState("initialized", false);
+ *   ctx.setState("initialized", false);
  * });
  * ```
  */
 export function useOnUnmount(callback: UnmountCallback): void {
-  const com = useCom();
+  const ctx = useCom();
   const savedCallback = useRef(callback);
   savedCallback.current = callback;
 
@@ -59,9 +59,9 @@ export function useOnUnmount(callback: UnmountCallback): void {
 
   useEffect(() => {
     return () => {
-      savedCallback.current(com as any);
+      savedCallback.current(ctx as any);
     };
-  }, [com]);
+  }, [ctx]);
 }
 
 /**
@@ -73,8 +73,8 @@ export function useOnUnmount(callback: UnmountCallback): void {
  *   console.log(`Tick ${tickState.tick} starting!`);
  * });
  *
- * useOnTickStart((tickState, com) => {
- *   com.setState("lastTickStart", tickState.tick);
+ * useOnTickStart((tickState, ctx) => {
+ *   ctx.setState("lastTickStart", tickState.tick);
  * });
  * ```
  *
@@ -97,7 +97,7 @@ export function useOnTickStart(callback: TickStartCallback): void {
   useDebugValue("onTickStart registered");
 
   useEffect(() => {
-    const cb: TickStartCallback = (tickState, com) => savedCallback.current(tickState, com);
+    const cb: TickStartCallback = (tickState, ctx) => savedCallback.current(tickState, ctx);
     store.tickStartCallbacks.add(cb);
     return () => {
       store.tickStartCallbacks.delete(cb);
@@ -123,7 +123,7 @@ export function useOnTickStart(callback: TickStartCallback): void {
  * useOnTickEnd((result) => !result.text?.includes("<DONE>"));
  *
  * // Control continuation with methods (includes reasons)
- * useOnTickEnd((result, com) => {
+ * useOnTickEnd((result, ctx) => {
  *   if (result.text?.includes("<DONE>")) {
  *     result.stop("task-complete");
  *   } else {
@@ -146,7 +146,7 @@ export function useOnTickEnd(callback: TickEndCallback): void {
   useDebugValue("onTickEnd registered");
 
   useEffect(() => {
-    const cb: TickEndCallback = (result, com) => savedCallback.current(result, com);
+    const cb: TickEndCallback = (result, ctx) => savedCallback.current(result, ctx);
     store.tickEndCallbacks.add(cb);
     return () => {
       store.tickEndCallbacks.delete(cb);
@@ -166,10 +166,10 @@ export function useOnTickEnd(callback: TickEndCallback): void {
  * });
  *
  * // Request recompilation when needed
- * useAfterCompile((compiled, com) => {
+ * useAfterCompile((compiled, ctx) => {
  *   if (compiled.tools.length === 0) {
  *     registerMoreTools();
- *     com.requestRecompile('adding tools');
+ *     ctx.requestRecompile('adding tools');
  *   }
  * });
  * ```
@@ -182,7 +182,7 @@ export function useAfterCompile(callback: AfterCompileCallback): void {
   useDebugValue("onAfterCompile registered");
 
   useEffect(() => {
-    const cb: AfterCompileCallback = (compiled, com) => savedCallback.current(compiled, com);
+    const cb: AfterCompileCallback = (compiled, ctx) => savedCallback.current(compiled, ctx);
     store.afterCompileCallbacks.add(cb);
     return () => {
       store.afterCompileCallbacks.delete(cb);

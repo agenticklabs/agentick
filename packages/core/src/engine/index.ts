@@ -2,13 +2,13 @@
  * Engine Types and Utilities
  *
  * This module exports the essential types for execution:
- * - ExecutionHandle - The handle returned by session.tick()
+ * - ExecutionHandle - The handle returned by session.render()
  * - ExecutionMessage, ExecutionHandle - Core execution types
  * - StreamEvent - Event types for streaming
  * - ToolExecutor - Tool execution utilities
  *
  * Note: The Engine class has been replaced by SessionImpl.
- * Use createApp() and session.tick() for execution.
+ * Use createApp() and session.render() for execution.
  *
  * @module tentickle/engine
  */

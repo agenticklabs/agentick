@@ -567,7 +567,7 @@ export class ExecutionHandleImpl
       error: this.error
         ? {
             message: this.error.message,
-            phase: undefined, // TODO: Track phase
+            phase: undefined,
           }
         : undefined,
     };
@@ -681,8 +681,8 @@ export class ExecutionHandleImpl
     return allNodes.find((node) => !node.parentPid);
   }
 
-  setComInstance(com: COM): void {
-    this.comInstance = com;
+  setComInstance(ctx: COM): void {
+    this.comInstance = ctx;
   }
 
   /**

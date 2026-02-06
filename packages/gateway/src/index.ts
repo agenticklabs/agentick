@@ -51,7 +51,7 @@ export {
   type StatusPayload,
   type AppsPayload,
   type SessionsPayload,
-} from "./protocol.js";
+} from "./transport-protocol.js";
 
 // Configuration types
 export {

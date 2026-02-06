@@ -74,17 +74,17 @@ export class ToolExecutor {
    * Evaluates the requiresConfirmation option (boolean or function).
    *
    * @param call - The tool call to check
-   * @param com - COM for tool resolution
+   * @param ctx - COM for tool resolution
    * @param configTools - Optional config tools for fallback
    * @returns ConfirmationCheckResult or null if tool not found
    */
   async checkConfirmationRequired(
     call: ToolCall,
-    com: COM,
+    ctx: COM,
     configTools: ExecutableTool[] = [],
   ): Promise<ConfirmationCheckResult | null> {
     // Resolve tool
-    let tool: ExecutableTool | undefined = com.getTool(call.name);
+    let tool: ExecutableTool | undefined = ctx.getTool(call.name);
     if (!tool && configTools.length > 0) {
       tool = configTools.find((t) => t.metadata.name === call.name);
     }
@@ -186,21 +186,21 @@ export class ToolExecutor {
    * Execute tool calls sequentially or in parallel.
    *
    * @param toolCalls Array of tool calls to execute
-   * @param com COM for tool resolution
+   * @param ctx COM for tool resolution
    * @param parallel Whether to execute tools in parallel (default: false)
    * @param configTools Optional array of tools from Engine config for fallback resolution
    * @returns Array of tool results
    */
   async executeToolCalls(
     toolCalls: ToolCall[],
-    com: COM,
+    ctx: COM,
     parallel: boolean = false,
     configTools: ExecutableTool[] = [],
   ): Promise<ToolResult[]> {
     if (parallel && toolCalls.length > 1) {
-      return this.executeParallel(toolCalls, com, configTools);
+      return this.executeParallel(toolCalls, ctx, configTools);
     }
-    return this.executeSequential(toolCalls, com, configTools);
+    return this.executeSequential(toolCalls, ctx, configTools);
   }
 
   /**
@@ -209,13 +209,13 @@ export class ToolExecutor {
    */
   private async executeSequential(
     toolCalls: ToolCall[],
-    com: COM,
+    ctx: COM,
     configTools: ExecutableTool[] = [],
   ): Promise<ToolResult[]> {
     const results: ToolResult[] = [];
 
     for (const call of toolCalls) {
-      const result = await this.executeSingleTool(call, com, configTools);
+      const result = await this.executeSingleTool(call, ctx, configTools);
       results.push(result);
     }
 
@@ -223,20 +223,14 @@ export class ToolExecutor {
   }
 
   /**
-   * Execute tools in parallel (future implementation).
-   * Will be enhanced with proper error handling, timeouts, etc.
+   * Execute tools in parallel.
    */
   private async executeParallel(
     toolCalls: ToolCall[],
-    com: COM,
+    ctx: COM,
     configTools: ExecutableTool[] = [],
   ): Promise<ToolResult[]> {
-    // TODO: Implement proper parallel execution with:
-    // - Timeout handling
-    // - Error isolation
-    // - Result ordering preservation
-    // - Circuit breaker patterns
-    const promises = toolCalls.map((call) => this.executeSingleTool(call, com, configTools));
+    const promises = toolCalls.map((call) => this.executeSingleTool(call, ctx, configTools));
     return Promise.all(promises);
   }
 
@@ -245,17 +239,17 @@ export class ToolExecutor {
    * This method does NOT handle confirmation - caller should check confirmation first.
    *
    * @param call - The tool call to execute
-   * @param com - COM for tool resolution
+   * @param ctx - COM for tool resolution
    * @param configTools - Optional config tools for fallback
    * @returns The tool result
    */
   async executeSingleTool(
     call: ToolCall,
-    com: COM,
+    ctx: COM,
     configTools: ExecutableTool[] = [],
   ): Promise<ToolResult> {
     // 1. Resolve tool
-    let tool: ExecutableTool | undefined = com.getTool(call.name);
+    let tool: ExecutableTool | undefined = ctx.getTool(call.name);
 
     // 2. Fallback to config tools
     if (!tool && configTools.length > 0) {
@@ -337,7 +331,8 @@ export class ToolExecutor {
         toolId: call.id,
       });
       // Procedure returns ExecutionHandle by default - access .result for actual return value
-      const result = await toolProcedure(call.input).result;
+      // Pass ctx so tool handlers can access agent state during execution
+      const result = await toolProcedure(call.input, ctx).result;
 
       // Handle async iterable result (shouldn't happen for tools, but be safe)
       let content: ContentBlock[];
@@ -482,14 +477,14 @@ export class ToolExecutor {
    * wait for confirmation while other tools are being processed.
    *
    * @param call - The tool call to process
-   * @param com - COM for tool resolution
+   * @param ctx - COM for tool resolution
    * @param configTools - Optional config tools for fallback
    * @param callbacks - Callbacks for emitting events during processing
    * @returns The tool result and metadata about the processing
    */
   async processToolWithConfirmation(
     call: ToolCall,
-    com: COM,
+    ctx: COM,
     configTools: ExecutableTool[] = [],
     callbacks: {
       onConfirmationRequired?: (call: ToolCall, message: string) => void | Promise<void>;
@@ -504,7 +499,7 @@ export class ToolExecutor {
     confirmation: ToolConfirmationResult | null;
   }> {
     // Check if confirmation is required
-    const confirmCheck = await this.checkConfirmationRequired(call, com, configTools);
+    const confirmCheck = await this.checkConfirmationRequired(call, ctx, configTools);
 
     let result: ToolResult;
     let confirmation: ToolConfirmationResult | null = null;
@@ -531,11 +526,11 @@ export class ToolExecutor {
         result = this.createDenialResult(call);
       } else {
         // User confirmed - execute the tool
-        result = await this.executeSingleTool(call, com, configTools);
+        result = await this.executeSingleTool(call, ctx, configTools);
       }
     } else {
       // No confirmation needed - execute directly
-      result = await this.executeSingleTool(call, com, configTools);
+      result = await this.executeSingleTool(call, ctx, configTools);
     }
 
     return { result, confirmCheck, confirmation };

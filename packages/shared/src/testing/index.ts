@@ -62,16 +62,7 @@ export {
   createToolDefinition,
   createToolCall,
   createToolResult,
-  // Legacy stream chunks (StreamChunk)
-  createStreamChunk,
-  createTextDeltaChunk,
-  createMessageStartChunk,
-  createMessageEndChunk,
-  createToolCallChunk,
-  createToolResultChunk,
-  createTextStreamSequence,
-  createToolCallStreamSequence,
-  // StreamEvent fixtures (new typed event system)
+  // StreamEvent fixtures
   createEventBase,
   createContentStartEvent,
   createContentDeltaEvent,

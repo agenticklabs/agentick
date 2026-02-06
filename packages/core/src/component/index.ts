@@ -6,7 +6,6 @@
  *
  * ## Features
  *
- * - **Class Components** - Stateful components with lifecycle methods
  * - **Lifecycle Hooks** - onMount, onUnmount, onTickStart, onTickEnd
  * - **Signals** - Reactive state within components
  * - **Render Method** - JSX output for each tick
@@ -23,7 +22,7 @@
  *     console.log('Agent mounted');
  *   }
  *
- *   onTickStart(com, state) {
+ *   onTickStart(ctx, state) {
  *     this.count.value++;
  *   }
  *
@@ -46,5 +45,3 @@
 
 export * from "./component";
 export * from "./component-hooks";
-export { TentickleComponent, createClassComponent } from "./tentickle-component";
-export type { TentickleComponentProps, TentickleContextValues } from "./tentickle-component";

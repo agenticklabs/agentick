@@ -63,10 +63,10 @@ const mcpClient = new MCPClient();
 const mcpService = new MCPService(mcpClient);
 
 // Discover and register tools from MCP server
-const com = new ContextObjectModel();
-await mcpService.discoverAndRegister(filesystemMCPConfig, com);
+const ctx = new ContextObjectModel();
+await mcpService.discoverAndRegister(filesystemMCPConfig, ctx);
 
-// Now com has all tools from the filesystem MCP server registered!
+// Now ctx has all tools from the filesystem MCP server registered!
 ```
 
 ### 3. Use in Engine Execution
@@ -82,9 +82,9 @@ const mcpService = new MCPService(mcpClient);
 
 // In your component's onMount or onStart:
 class MyAgent extends Component {
-  async onStart(com: COM) {
+  async onStart(ctx: COM) {
     // Discover MCP tools and register them manually
-    await mcpService.discoverAndRegister(filesystemMCPConfig, com);
+    await mcpService.discoverAndRegister(filesystemMCPConfig, ctx);
     // Now model can use these tools!
   }
 }
@@ -136,10 +136,10 @@ Model receives tools in tool calling format
 
 1. **Discovery**: `MCPService.connectAndDiscover()` calls SDK's `client.listTools()`
 2. **Wrapping**: Each tool becomes an `MCPTool` instance (extends `Tool`, implements `ExecutableTool`)
-3. **Registration**: `com.addTool(mcpTool)` stores:
-   - `ExecutableTool` in `com.tools` (for execution)
-   - `ToolDefinition` in `com.toolDefinitions` (for model)
-4. **Context Building**: `com.toInput()` returns `COMInput` with `tools: ToolDefinition[]`
+3. **Registration**: `ctx.addTool(mcpTool)` stores:
+   - `ExecutableTool` in `ctx.tools` (for execution)
+   - `ToolDefinition` in `ctx.toolDefinitions` (for model)
+4. **Context Building**: `ctx.toInput()` returns `COMInput` with `tools: ToolDefinition[]`
 5. **Model Conversion**: `model.fromEngineState(comInput)` converts `ToolDefinition[]` to provider format
 
 ## Control Over Tool Presentation
@@ -176,7 +176,7 @@ const filteredTools = allTools.filter(tool =>
 
 // Register manually
 for (const toolDef of filteredTools) {
-  mcpService.registerMCPTool(config, toolDef, com);
+  mcpService.registerMCPTool(config, toolDef, ctx);
 }
 ```
 
@@ -201,7 +201,7 @@ for (const mcpToolDef of tools) {
     mcpConfig
   );
 
-  com.addTool(transformedTool);
+  ctx.addTool(transformedTool);
 }
 ```
 
@@ -223,7 +223,7 @@ tool.metadata.providerOptions = {
   },
 };
 
-com.addTool(tool);
+ctx.addTool(tool);
 ```
 
 ### Future Enhancement: Tool Middleware/Transformers
@@ -251,7 +251,7 @@ const transformer = new PrefixToolTransformer('mcp');
 const tools = await mcpService.connectAndDiscover(config);
 const transformed = tools.map(t => transformer.transform(t)).filter(Boolean);
 for (const tool of transformed) {
-  mcpService.registerMCPTool(config, tool, com);
+  mcpService.registerMCPTool(config, tool, ctx);
 }
 ```
 

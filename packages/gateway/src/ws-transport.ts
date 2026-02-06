@@ -6,7 +6,7 @@
 
 import { WebSocketServer, WebSocket } from "ws";
 import type { IncomingMessage } from "http";
-import type { ClientMessage, GatewayMessage, ConnectMessage } from "./protocol.js";
+import type { ClientMessage, GatewayMessage, ConnectMessage } from "./transport-protocol.js";
 import type { ClientState } from "./types.js";
 import { BaseTransport, type TransportClient, type TransportConfig } from "./transport.js";
 

@@ -144,7 +144,7 @@ export interface COMInput {
  *
  * On tick 1, before model execution, this may contain userInput (timeline, sections)
  * to allow components to render purely from previous + current without
- * needing to check tick number or access com.getUserInput().
+ * needing to check tick number or access ctx.getUserInput().
  */
 export interface COMOutput {
   /**

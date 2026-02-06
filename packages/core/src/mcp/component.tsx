@@ -140,7 +140,7 @@ export interface MCPToolComponentProps extends ComponentBaseProps, Partial<Engin
  * ```
  */
 export function MCPToolComponent(props: MCPToolComponentProps): React.ReactElement | null {
-  const com = useCom();
+  const ctx = useCom();
 
   // Refs for managing state across renders
   const mcpClientRef = useRef<MCPClient | null>(null);
@@ -195,19 +195,19 @@ export function MCPToolComponent(props: MCPToolComponentProps): React.ReactEleme
             name: toolName,
           };
 
-          mcpService.registerMCPTool(effectiveConfig, toolDef, com);
+          mcpService.registerMCPTool(effectiveConfig, toolDef, ctx);
           registeredToolNamesRef.current.push(toolName);
         }
 
         // Call onMount callback if provided
         if (props.onMount) {
-          await props.onMount(com);
+          await props.onMount(ctx);
         }
       } catch (error) {
         console.error(`Failed to initialize MCP server "${props.server}":`, error);
         // Call onMount even on error (for error handling)
         if (props.onMount) {
-          await props.onMount(com);
+          await props.onMount(ctx);
         }
       }
     };
@@ -218,7 +218,7 @@ export function MCPToolComponent(props: MCPToolComponentProps): React.ReactEleme
     return () => {
       // Remove registered tools
       for (const toolName of registeredToolNamesRef.current) {
-        com.removeTool(toolName);
+        ctx.removeTool(toolName);
       }
       registeredToolNamesRef.current = [];
 
@@ -229,11 +229,11 @@ export function MCPToolComponent(props: MCPToolComponentProps): React.ReactEleme
 
       // Call onUnmount callback if provided
       if (props.onUnmount) {
-        props.onUnmount(com);
+        props.onUnmount(ctx);
       }
     };
   }, [
-    com,
+    ctx,
     props.server,
     props.config,
     props.runtimeConfig,

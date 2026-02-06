@@ -8,7 +8,7 @@
  * ```tsx
  * import { createMockCom, createMockTickState, createMockTickResult } from '@tentickle/core/testing';
  *
- * const com = createMockCom();
+ * const ctx = createMockCom();
  * const tickState = createMockTickState({ tick: 2 });
  * const result = createMockTickResult({ text: "Hello world" });
  * ```
@@ -47,9 +47,9 @@ export interface MockCom {
  *
  * @example
  * ```tsx
- * const com = createMockCom();
- * com.setState("counter", 0);
- * expect(com.getState("counter")).toBe(0);
+ * const ctx = createMockCom();
+ * ctx.setState("counter", 0);
+ * expect(ctx.getState("counter")).toBe(0);
  * ```
  */
 export function createMockCom(options: MockComOptions = {}): MockCom {

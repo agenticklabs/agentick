@@ -90,7 +90,7 @@ class SearchAgent extends Component {
   private searchQuery = comState('');
   private results = comState<any[]>([]);
 
-  render(com, state) {
+  render(ctx, state) {
     // Extract query from conversation
     const lastMessage = state.previous?.timeline?.at(-1);
     if (lastMessage?.role === 'user') {

@@ -6,7 +6,7 @@
 
 import React, { useEffect, useDebugValue } from "react";
 import { useCom } from "../../hooks/context";
-import type { ModelConfig, ModelInstance } from "../../model/model";
+import type { ModelConfig, EngineModel } from "../../model/model";
 import type { ComponentBaseProps } from "../jsx-types";
 import type { ProviderGenerationOptions } from "../../types";
 import type { MessageTransformationConfig } from "../../model/model";
@@ -23,7 +23,7 @@ export interface ModelComponentProps extends ComponentBaseProps, Omit<ModelConfi
    * The model adapter instance or identifier.
    * If a string, will be resolved from the model registry.
    */
-  model: ModelInstance | string;
+  model: EngineModel | string;
 
   /**
    * Provider-specific options.
@@ -35,12 +35,12 @@ export interface ModelComponentProps extends ComponentBaseProps, Omit<ModelConfi
   /**
    * Optional callback when model is mounted.
    */
-  onMount?: (com: COM) => Promise<void> | void;
+  onMount?: (ctx: COM) => Promise<void> | void;
 
   /**
    * Optional callback when model is unmounted.
    */
-  onUnmount?: (com: COM) => Promise<void> | void;
+  onUnmount?: (ctx: COM) => Promise<void> | void;
 }
 
 /**
@@ -62,7 +62,7 @@ export interface ModelComponentProps extends ComponentBaseProps, Omit<ModelConfi
  */
 export function Model(props: ModelComponentProps): React.ReactElement {
   const { model, onMount, onUnmount, ...options } = props;
-  const com = useCom();
+  const ctx = useCom();
 
   // Debug value shows model identifier for React DevTools
   useDebugValue(
@@ -73,34 +73,34 @@ export function Model(props: ModelComponentProps): React.ReactElement {
 
   // Set model on mount, clear on unmount
   useEffect(() => {
-    com.setModel(model);
-    com.resetModelOptions();
+    ctx.setModel(model);
+    ctx.resetModelOptions();
 
     // Call user's onMount if provided
     if (onMount) {
-      const result = onMount(com);
+      const result = onMount(ctx);
       if (result instanceof Promise) {
         result.catch(() => {}); // Fire and forget
       }
     }
 
     return () => {
-      com.unsetModel();
+      ctx.unsetModel();
 
       // Call user's onUnmount if provided
       if (onUnmount) {
-        const result = onUnmount(com);
+        const result = onUnmount(ctx);
         if (result instanceof Promise) {
           result.catch(() => {}); // Fire and forget
         }
       }
     };
-  }, [model, com, onMount, onUnmount]);
+  }, [model, ctx, onMount, onUnmount]);
 
   // Set model options during render
   useEffect(() => {
-    com.setModelOptions(options);
-  }, [com, options]);
+    ctx.setModelOptions(options);
+  }, [ctx, options]);
 
   // Model is configuration-only - doesn't render anything
   return h(React.Fragment, null);
@@ -154,12 +154,12 @@ export interface ModelOptionsProps extends ComponentBaseProps {
  * ```
  */
 export function ModelOptions(props: ModelOptionsProps): React.ReactElement {
-  const com = useCom();
+  const ctx = useCom();
 
   // Set model options during render
   useEffect(() => {
-    com.setModelOptions(props);
-  }, [com, props]);
+    ctx.setModelOptions(props);
+  }, [ctx, props]);
 
   // ModelOptions is configuration-only - doesn't render anything
   return h(React.Fragment, null);

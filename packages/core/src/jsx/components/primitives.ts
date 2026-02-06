@@ -13,19 +13,6 @@ export { Timeline, useTimelineContext } from "./timeline";
 export type { TimelineProps, TimelineRenderFn, TimelineContextValue } from "./timeline";
 
 /**
- * TimelineWrapper primitive component.
- * Wraps Message components to explicitly declare timeline entries.
- * When used in JSX: <TimelineWrapper><Message role="user" content="..." /></TimelineWrapper>
- *
- * @deprecated Use <Timeline> for rendering conversation history with render props.
- */
-export function TimelineWrapper(props: TentickleJSX.IntrinsicElements["timeline"]): JSX.Element {
-  // TimelineWrapper is just a Fragment - it doesn't render anything itself
-  // The renderer processes its Message children
-  return h(React.Fragment, props);
-}
-
-/**
  * Entry primitive component.
  * Foundational structural primitive for timeline entries only.
  * Uses discriminated union based on kind to determine data structure.

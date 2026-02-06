@@ -180,10 +180,10 @@ Add hooks for JSX usage:
 createAdapter({
   // ... other options
 
-  onMount: (com) => {
+  onMount: (ctx) => {
     console.log('Model mounted');
   },
-  onUnmount: (com) => {
+  onUnmount: (ctx) => {
     console.log('Model unmounted');
   },
 });

@@ -453,13 +453,15 @@ function CompiledStructureView({ data }: { data: unknown }) {
       )}
 
       {/* System */}
-      {compiled.system && (compiled.system as any[]).length > 0 && (
+      {compiled.systemEntries && (compiled.systemEntries as any[]).length > 0 && (
         <div className="pretty-section">
           <div className="pretty-section-header">
             <span className="pretty-section-icon">⚙️</span>
             System
           </div>
-          <div className="pretty-section-content">{renderContentBlocks(compiled.system)}</div>
+          <div className="pretty-section-content">
+            {renderContentBlocks(compiled.systemEntries)}
+          </div>
         </div>
       )}
     </div>

@@ -37,10 +37,12 @@ describe("Duplicate Message Prevention", () => {
       const session = await app.session();
 
       await session.send({
-        message: {
-          role: "user",
-          content: [{ type: "text", text: "Hello world" }],
-        },
+        messages: [
+          {
+            role: "user",
+            content: [{ type: "text", text: "Hello world" }],
+          },
+        ],
       }).result;
 
       // Check the input sent to the model
@@ -80,20 +82,24 @@ describe("Duplicate Message Prevention", () => {
 
       // First message
       await session.send({
-        message: {
-          role: "user",
-          content: [{ type: "text", text: "First message" }],
-        },
+        messages: [
+          {
+            role: "user",
+            content: [{ type: "text", text: "First message" }],
+          },
+        ],
       }).result;
 
       mockModel.clearCapturedInputs();
 
       // Second message
       await session.send({
-        message: {
-          role: "user",
-          content: [{ type: "text", text: "Second message" }],
-        },
+        messages: [
+          {
+            role: "user",
+            content: [{ type: "text", text: "Second message" }],
+          },
+        ],
       }).result;
 
       // Check the input for the second execution
@@ -139,20 +145,24 @@ describe("Duplicate Message Prevention", () => {
 
       // First exchange
       await session.send({
-        message: {
-          role: "user",
-          content: [{ type: "text", text: "Hello" }],
-        },
+        messages: [
+          {
+            role: "user",
+            content: [{ type: "text", text: "Hello" }],
+          },
+        ],
       }).result;
 
       mockModel.clearCapturedInputs();
 
       // Second message - should see previous assistant response exactly once
       await session.send({
-        message: {
-          role: "user",
-          content: [{ type: "text", text: "Followup" }],
-        },
+        messages: [
+          {
+            role: "user",
+            content: [{ type: "text", text: "Followup" }],
+          },
+        ],
       }).result;
 
       const inputs = mockModel.getCapturedInputs();
@@ -208,10 +218,12 @@ describe("Duplicate Message Prevention", () => {
       // Send 5 messages
       for (let i = 1; i <= 5; i++) {
         await session.send({
-          message: {
-            role: "user",
-            content: [{ type: "text", text: `Message ${i}` }],
-          },
+          messages: [
+            {
+              role: "user",
+              content: [{ type: "text", text: `Message ${i}` }],
+            },
+          ],
         }).result;
       }
 
@@ -261,17 +273,17 @@ describe("Duplicate Message Prevention", () => {
 
       // Exchange 1
       await session.send({
-        message: { role: "user", content: [{ type: "text", text: "Hello" }] },
+        messages: [{ role: "user", content: [{ type: "text", text: "Hello" }] }],
       }).result;
 
       // Exchange 2
       await session.send({
-        message: { role: "user", content: [{ type: "text", text: "How are you?" }] },
+        messages: [{ role: "user", content: [{ type: "text", text: "How are you?" }] }],
       }).result;
 
       // Exchange 3
       await session.send({
-        message: { role: "user", content: [{ type: "text", text: "Goodbye" }] },
+        messages: [{ role: "user", content: [{ type: "text", text: "Goodbye" }] }],
       }).result;
 
       const inputs = mockModel.getCapturedInputs();

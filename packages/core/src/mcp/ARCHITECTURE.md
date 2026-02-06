@@ -253,7 +253,7 @@ When a model calls an MCP tool:
 │    │ tool_use: { name: 'read_file', input: { path: '...' } }   │
 │    ▼                                                            │
 │  ToolExecutor                                                   │
-│    │ com.getTool('read_file') → MCPTool                        │
+│    │ ctx.getTool('read_file') → MCPTool                        │
 │    │ tool.metadata.type === 'mcp'                               │
 │    ▼                                                            │
 │  MCPTool.run(input)                                             │
@@ -318,7 +318,7 @@ MCP tools can be used in three ways:
 │  ─────────────────────────                                      │
 │  const tools = await discoverMCPTools({ config });              │
 │  engine.execute({ tools });                                     │
-│  // Or: tools.forEach(t => com.addTool(t))                      │
+│  // Or: tools.forEach(t => ctx.addTool(t))                      │
 │                                                                 │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -434,14 +434,14 @@ class MCPService {
   // Discover and register tools with COM
   async discoverAndRegister(
     config: MCPConfig,
-    com: COM,
+    ctx: COM,
   ): Promise<void>;
 
   // Register a single tool
   registerMCPTool(
     config: MCPConfig,
     def: MCPToolDefinition,
-    com: COM,
+    ctx: COM,
   ): void;
 
   // List tools from a server
@@ -540,8 +540,8 @@ interface CreateMCPToolOptions {
   toolPrefix?: string; // Name prefix
   runtimeConfig?: Partial<MCPConfig>; // Runtime overrides
   // Component lifecycle hooks...
-  onMount?: (com: COM) => Promise<void>;
-  onUnmount?: (com: COM) => Promise<void>;
+  onMount?: (ctx: COM) => Promise<void>;
+  onUnmount?: (ctx: COM) => Promise<void>;
   // etc.
 }
 ```
@@ -592,12 +592,12 @@ JSX component that connects to MCP server and registers tools:
 ```typescript
 class MCPToolComponent extends Component<MCPToolComponentProps> {
   // Lifecycle
-  async onMount(com: COM): Promise<void>;
-  async onUnmount(com: COM): Promise<void>;
+  async onMount(ctx: COM): Promise<void>;
+  async onUnmount(ctx: COM): Promise<void>;
 
   // Runtime updates
   async updateRuntimeConfig(
-    com: COM,
+    ctx: COM,
     runtimeConfig: Partial<MCPConfig>,
   ): Promise<void>;
 }
@@ -636,7 +636,7 @@ sequenceDiagram
     participant SDK as @modelcontextprotocol/sdk
     participant Server as MCP Server
 
-    App->>Svc: discoverAndRegister(config, com)
+    App->>Svc: discoverAndRegister(config, ctx)
     Svc->>Client: connect(config)
     Client->>SDK: new Client()
     Client->>Client: createTransport(config)
@@ -653,7 +653,7 @@ sequenceDiagram
 
     loop For each tool
         Svc->>Svc: new MCPTool(client, serverName, def)
-        Svc->>Svc: com.addTool(tool)
+        Svc->>Svc: ctx.addTool(tool)
     end
 
     Svc-->>App: done
@@ -672,7 +672,7 @@ sequenceDiagram
 
     Model->>Engine: tool_use block
     Engine->>TE: executeToolCalls([call])
-    TE->>TE: com.getTool(name)
+    TE->>TE: ctx.getTool(name)
     TE->>Tool: run(input)
 
     Tool->>Tool: Zod validate input
@@ -832,7 +832,7 @@ const safeTools = allTools.filter(t => !t.name.includes('delete'));
 
 // Register with COM
 for (const def of safeTools) {
-  service.registerMCPTool(config, def, com);
+  service.registerMCPTool(config, def, ctx);
 }
 ```
 

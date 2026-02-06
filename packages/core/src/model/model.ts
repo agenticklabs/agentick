@@ -88,12 +88,6 @@ export function isEngineModel(value: any): value is EngineModel {
   );
 }
 
-/**
- * ModelInstance type - alias for EngineModel.
- * Used by session code for type consistency.
- */
-export type ModelInstance = EngineModel;
-
 // ============================================================================
 // Configuration Types
 // ============================================================================

@@ -610,7 +610,7 @@ function onMount(ctx: EngineContext, com: ComponentHandle) {
     { userId },
     (event, result) => {
       if (result?.notes) {
-        com.setState("notes", result.notes);
+        ctx.setState("notes", result.notes);
       }
     },
   );

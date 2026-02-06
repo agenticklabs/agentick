@@ -23,12 +23,12 @@ import {
 import { createMockCom, createMockTickState, createMockTickResult } from "../../testing/mocks";
 
 describe("FiberCompiler", () => {
-  let com: ReturnType<typeof createMockCom>;
+  let ctx: ReturnType<typeof createMockCom>;
   let compiler: FiberCompiler;
 
   beforeEach(() => {
-    com = createMockCom();
-    compiler = new FiberCompiler(com as any);
+    ctx = createMockCom();
+    compiler = new FiberCompiler(ctx as any);
   });
 
   // ============================================================
@@ -67,12 +67,12 @@ describe("FiberCompiler", () => {
       let compileCount = 0;
 
       const RecompileComponent = () => {
-        const com = useCom();
+        const ctx = useCom();
 
         useAfterCompile(() => {
           compileCount++;
           if (compileCount < 3) {
-            com.requestRecompile("test recompile");
+            ctx.requestRecompile("test recompile");
           }
         });
 
@@ -93,12 +93,12 @@ describe("FiberCompiler", () => {
       let compileCount = 0;
 
       const InfiniteRecompileComponent = () => {
-        const com = useCom();
+        const ctx = useCom();
 
         useAfterCompile(() => {
           compileCount++;
           // Always request recompile
-          com.requestRecompile("infinite loop");
+          ctx.requestRecompile("infinite loop");
         });
 
         return React.createElement("Section", { id: "infinite" });
@@ -120,14 +120,14 @@ describe("FiberCompiler", () => {
       let compileCount = 0;
 
       const ReasonComponent = () => {
-        const com = useCom();
+        const ctx = useCom();
 
         useAfterCompile(() => {
           compileCount++;
           if (compileCount === 1) {
-            com.requestRecompile("first reason");
+            ctx.requestRecompile("first reason");
           } else if (compileCount === 2) {
-            com.requestRecompile("second reason");
+            ctx.requestRecompile("second reason");
           }
         });
 
@@ -507,9 +507,9 @@ describe("FiberCompiler", () => {
       let readValue: any = null;
 
       const StateComponent = () => {
-        const com = useCom();
-        com.setState("test-key", "test-value");
-        readValue = com.getState("test-key");
+        const ctx = useCom();
+        ctx.setState("test-key", "test-value");
+        readValue = ctx.getState("test-key");
         return React.createElement("Section", { id: "state-test" });
       };
 
@@ -654,10 +654,10 @@ describe("FiberCompiler", () => {
 
   describe("session isolation", () => {
     it("should isolate data cache between compiler instances", async () => {
-      const com1 = createMockCom();
-      const com2 = createMockCom();
-      const compiler1 = new FiberCompiler(com1 as any);
-      const compiler2 = new FiberCompiler(com2 as any);
+      const ctx1 = createMockCom();
+      const ctx2 = createMockCom();
+      const compiler1 = new FiberCompiler(ctx1 as any);
+      const compiler2 = new FiberCompiler(ctx2 as any);
 
       const fetchFn1 = vi.fn().mockResolvedValue({ id: 1 });
       const fetchFn2 = vi.fn().mockResolvedValue({ id: 2 });
@@ -684,10 +684,10 @@ describe("FiberCompiler", () => {
     });
 
     it("should isolate lifecycle callbacks between compiler instances", async () => {
-      const com1 = createMockCom();
-      const com2 = createMockCom();
-      const compiler1 = new FiberCompiler(com1 as any);
-      const compiler2 = new FiberCompiler(com2 as any);
+      const ctx1 = createMockCom();
+      const ctx2 = createMockCom();
+      const compiler1 = new FiberCompiler(ctx1 as any);
+      const compiler2 = new FiberCompiler(ctx2 as any);
 
       const callback1 = vi.fn();
       const callback2 = vi.fn();
@@ -720,24 +720,24 @@ describe("FiberCompiler", () => {
     });
 
     it("should isolate COM state between sessions", async () => {
-      const com1 = createMockCom();
-      const com2 = createMockCom();
-      const compiler1 = new FiberCompiler(com1 as any);
-      const compiler2 = new FiberCompiler(com2 as any);
+      const ctx1 = createMockCom();
+      const ctx2 = createMockCom();
+      const compiler1 = new FiberCompiler(ctx1 as any);
+      const compiler2 = new FiberCompiler(ctx2 as any);
 
       let value1: any = null;
       let value2: any = null;
 
       const Component1 = () => {
-        const com = useCom();
-        com.setState("shared-key", "value-from-session-1");
-        value1 = com.getState("shared-key");
+        const ctx = useCom();
+        ctx.setState("shared-key", "value-from-session-1");
+        value1 = ctx.getState("shared-key");
         return React.createElement("Section", { id: "1" });
       };
 
       const Component2 = () => {
-        const com = useCom();
-        value2 = com.getState("shared-key"); // Should be undefined
+        const ctx = useCom();
+        value2 = ctx.getState("shared-key"); // Should be undefined
         return React.createElement("Section", { id: "2" });
       };
 

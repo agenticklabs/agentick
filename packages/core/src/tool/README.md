@@ -24,6 +24,23 @@ const SearchTool = createTool({
 });
 ```
 
+## COM in Handlers
+
+Tool handlers receive an optional `ctx` (Context Object Model) as their second argument. During agent execution (when the model calls the tool), `ctx` is provided. When calling directly via `MyTool.run(input)`, `ctx` is undefined.
+
+```typescript
+const StatefulTool = createTool({
+  name: 'update_preferences',
+  description: 'Update user preferences',
+  input: z.object({ key: z.string(), value: z.string() }),
+  handler: async ({ key, value }, ctx) => {
+    // ctx is available during agent execution
+    ctx?.setState(key, value);
+    return [{ type: 'text', text: `Set ${key}=${value}` }];
+  },
+});
+```
+
 ## The ToolClass Pattern
 
 `createTool` returns a `ToolClass` - usable both as JSX and programmatically:
@@ -83,7 +100,7 @@ const TodoTool = createTool({
   handler: async ({ action }) => { /* ... */ },
 
   // Render current state to model context each tick
-  render: (tickState, com) => (
+  render: (tickState, ctx) => (
     <Section id="todos">
       Current todos: {JSON.stringify(todoService.list())}
     </Section>
@@ -114,10 +131,10 @@ Tools support lifecycle hooks for JSX usage. All hooks follow the "data first, C
 const MyTool = createTool({
   name: 'my_tool',
   // ...
-  onMount: (com) => console.log('Tool mounted'),
-  onUnmount: (com) => console.log('Tool unmounted'),
-  onTickStart: (tickState, com) => { /* before each tick */ },
-  onTickEnd: (result, com) => { /* after each tick */ },
+  onMount: (ctx) => console.log('Tool mounted'),
+  onUnmount: (ctx) => console.log('Tool unmounted'),
+  onTickStart: (tickState, ctx) => { /* before each tick */ },
+  onTickEnd: (result, ctx) => { /* after each tick */ },
 });
 ```
 

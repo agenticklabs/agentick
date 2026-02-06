@@ -40,7 +40,7 @@ function MyApp() {
 // Create and run
 const app = createApp(MyApp, { model: createOpenAIModel() });
 const session = await app.session();
-await session.run({ message: "What is 2 + 2?" });
+await session.run({ messages: [{ role: "user", content: [{ type: "text", text: "What is 2 + 2?" }] }] });
 ```
 
 ## JSX Components
@@ -152,12 +152,12 @@ import { useOnMount, useOnUnmount, useOnTickStart, useOnTickEnd, useAfterCompile
 
 function MyComponent() {
   // Called when component mounts
-  useOnMount((com) => {
+  useOnMount((ctx) => {
     console.log("Component mounted");
   });
 
   // Called when component unmounts
-  useOnUnmount((com) => {
+  useOnUnmount((ctx) => {
     console.log("Component unmounting");
   });
 
@@ -185,8 +185,8 @@ function MyComponent() {
   });
 
   // Access COM when needed (always the last parameter)
-  useContinuation((result, com) => {
-    com.setState("lastTick", result.tick);
+  useContinuation((result, ctx) => {
+    ctx.setState("lastTick", result.tick);
     return !result.text?.includes("<DONE>");
   });
 }
@@ -202,7 +202,7 @@ function MyComponent() {
   const queuedMessages = useQueuedMessages();
 
   // React to incoming messages
-  useOnMessage((message, com, state) => {
+  useOnMessage((message, ctx, state) => {
     console.log("Received:", message);
   });
 }
@@ -215,8 +215,8 @@ import { useCom, useTickState, useContextInfo } from "@tentickle/core";
 
 function MyComponent() {
   // Access the Context Object Model
-  const com = useCom();
-  const history = com.timeline;
+  const ctx = useCom();
+  const history = ctx.timeline;
 
   // Access current tick state
   const tickState = useTickState();
@@ -352,8 +352,9 @@ const WeatherTool = createTool({
     location: z.string().describe("City name"),
     units: z.enum(["celsius", "fahrenheit"]).optional(),
   }),
-  handler: async ({ location, units }) => {
+  handler: async ({ location, units }, ctx) => {
     const weather = await fetchWeather(location, units);
+    ctx?.setState("lastLocation", location);
     return [{ type: "text", text: JSON.stringify(weather) }];
   },
   // Optional: render state to model context
@@ -440,7 +441,7 @@ const session = await app.session("user-123");
 
 // Run with input
 const result = await session.run({
-  message: { role: "user", content: "Hello!" },
+  messages: [{ role: "user", content: [{ type: "text", text: "Hello!" }] }],
 });
 
 // Check session state
@@ -511,13 +512,13 @@ import { run, runComponent } from "@tentickle/core";
 // Run a component directly
 const result = await runComponent(
   <MyApp />,
-  { message: "Hello!" },
+  { messages: [{ role: "user", content: [{ type: "text", text: "Hello!" }] }] },
   { model: myModel }
 );
 
 // Run with app configuration
 const result = await run(MyApp, {
-  input: { message: "Hello!" },
+  messages: [{ role: "user", content: [{ type: "text", text: "Hello!" }] }],
   model: myModel,
 });
 ```

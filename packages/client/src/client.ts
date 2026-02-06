@@ -408,7 +408,7 @@ class ClientExecutionHandleImpl implements ClientExecutionHandle {
     if (this._sessionId === "pending") {
       throw new Error("Cannot queue message before sessionId is known");
     }
-    const handle = this.client.send({ message }, { sessionId: this._sessionId });
+    const handle = this.client.send({ messages: [message] }, { sessionId: this._sessionId });
     void handle.result.catch(() => {});
   }
 
@@ -705,11 +705,11 @@ function generateId(): string {
  * });
  *
  * // Send a message
- * const handle = session.send({ message: { role: 'user', content: [...] } });
+ * const handle = session.send({ messages: [{ role: 'user', content: [...] }] });
  * await handle.result;
  *
  * // Or use ephemeral send (creates session, executes, closes)
- * const ephemeral = client.send({ message: {...} });
+ * const ephemeral = client.send({ messages: [{...}] });
  * await ephemeral.result;
  * ```
  */
@@ -1205,7 +1205,7 @@ export class TentickleClient {
     input: string | ContentBlock | ContentBlock[] | Message | Message[] | SendInput,
   ): SendInput {
     if (typeof input === "string") {
-      return { message: { role: "user", content: [{ type: "text", text: input }] } };
+      return { messages: [{ role: "user", content: [{ type: "text", text: input }] }] };
     }
     if (Array.isArray(input)) {
       if (input.length === 0) {
@@ -1214,10 +1214,10 @@ export class TentickleClient {
       if (typeof (input[0] as Message).role === "string") {
         return { messages: input as Message[] };
       }
-      return { message: { role: "user", content: input as ContentBlock[] } };
+      return { messages: [{ role: "user", content: input as ContentBlock[] }] };
     }
     if (typeof input === "object" && input && "role" in input && "content" in input) {
-      return { message: input as Message };
+      return { messages: [input as Message] };
     }
     return input as SendInput;
   }
@@ -1725,7 +1725,7 @@ function detectTransport(baseUrl: string): "sse" | "websocket" {
  * const session = client.subscribe('conv-123');
  *
  * // Send a message
- * const handle = session.send({ message: { role: 'user', content: [...] } });
+ * const handle = session.send({ messages: [{ role: 'user', content: [...] }] });
  * await handle.result;
  * ```
  */

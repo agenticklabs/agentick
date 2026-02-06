@@ -47,7 +47,7 @@ export class StructureRenderer {
   private defaultRenderer: ContentRenderer;
   private _lastCompiled: CompiledStructure | null = null;
 
-  constructor(private com: COM) {
+  constructor(private ctx: COM) {
     this.defaultRenderer = new MarkdownRenderer();
   }
 
@@ -70,7 +70,7 @@ export class StructureRenderer {
     for (const tool of compiled.tools) {
       // Convert CompiledTool to ExecutableTool format
       // ExecutableTool expects { metadata: {...}, run?: Procedure }
-      await this.com.addTool({
+      await this.ctx.addTool({
         metadata: {
           name: tool.name,
           description: tool.description ?? "",
@@ -87,7 +87,7 @@ export class StructureRenderer {
 
     // 4. Apply metadata
     for (const [key, value] of Object.entries(compiled.metadata)) {
-      this.com.addMetadata(key, value);
+      this.ctx.addMetadata(key, value);
     }
   }
 
@@ -110,7 +110,7 @@ export class StructureRenderer {
       metadata: compiled.metadata,
     };
 
-    this.com.addSection(section);
+    this.ctx.addSection(section);
   }
 
   /**
@@ -120,7 +120,7 @@ export class StructureRenderer {
     const formattedContent = this.formatSemanticBlocks(compiled.content);
     const consolidatedContent = consolidateTextBlocks(formattedContent);
 
-    this.com.addEphemeral(
+    this.ctx.addEphemeral(
       consolidatedContent,
       compiled.position,
       compiled.order,
@@ -189,7 +189,7 @@ export class StructureRenderer {
     }
 
     // Format compiled system entries (rebuilt each tick)
-    const compiledSystem = this._lastCompiled?.system ?? [];
+    const compiledSystem = this._lastCompiled?.systemEntries ?? [];
     const formattedSystem: COMTimelineEntry[] = compiledSystem.map((compiled) => {
       const formattedContent = this.formatSemanticBlocks(compiled.content);
       return {

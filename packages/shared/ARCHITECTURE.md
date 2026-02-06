@@ -21,7 +21,7 @@ import {
 
   // Channel payloads
   SessionMessagePayload,
-  SessionTickPayload,
+  SessionRenderPayload,
   SessionAbortPayload,
   SessionResultPayload,
   ToolConfirmationRequest,

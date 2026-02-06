@@ -38,13 +38,13 @@ const Img = (src: string, alt?: string) => h("Image", { src, alt });
 const JsonBlock = (data: unknown) => h("Json", { data });
 
 describe("Compiled Content", () => {
-  let com: ReturnType<typeof createMockCom>;
+  let ctx: ReturnType<typeof createMockCom>;
   let compiler: FiberCompiler;
   let tickState: any;
 
   beforeEach(() => {
-    com = createMockCom();
-    compiler = new FiberCompiler(com);
+    ctx = createMockCom();
+    compiler = new FiberCompiler(ctx);
     tickState = createMockTickState();
   });
 
@@ -359,9 +359,9 @@ describe("Compiled Content", () => {
 
       const compiled = await compiler.compile(h(App), tickState);
 
-      // System entries are routed to `compiled.system` (rebuilt each tick), not timelineEntries
-      expect(compiled.system.length).toBe(1);
-      expect(compiled.system[0].role).toBe("system");
+      // System entries are routed to `compiled.systemEntries` (rebuilt each tick), not timelineEntries
+      expect(compiled.systemEntries.length).toBe(1);
+      expect(compiled.systemEntries[0].role).toBe("system");
     });
 
     it("should collect Entry with tool role", async () => {

@@ -41,25 +41,30 @@ export type ComponentHookMiddleware<T extends ComponentHookName> = Middleware<Co
  * Arguments for each component hook.
  */
 export type ComponentHookArgs<T extends ComponentHookName> = T extends "onMount"
-  ? [com: COM]
+  ? [ctx: COM]
   : T extends "onUnmount"
-    ? [com: COM]
+    ? [ctx: COM]
     : T extends "onStart"
-      ? [com: COM]
+      ? [ctx: COM]
       : T extends "onTickStart"
         ? [state: TickState]
         : T extends "render"
-          ? [com: COM, state: TickState]
+          ? [ctx: COM, state: TickState]
           : T extends "onAfterCompile"
-            ? [com: COM, compiled: CompiledStructure, state: TickState, ctx: AfterCompileContext]
+            ? [
+                ctx: COM,
+                compiled: CompiledStructure,
+                state: TickState,
+                afterCompileCtx: AfterCompileContext,
+              ]
             : T extends "onTickEnd"
-              ? [com: COM, state: TickState]
+              ? [ctx: COM, state: TickState]
               : T extends "onMessage"
-                ? [com: COM, message: ExecutionMessage, state: TickState]
+                ? [ctx: COM, message: ExecutionMessage, state: TickState]
                 : T extends "onComplete"
-                  ? [com: COM, finalState: COMInput]
+                  ? [ctx: COM, finalState: COMInput]
                   : T extends "onError"
-                    ? [com: COM, state: TickState]
+                    ? [ctx: COM, state: TickState]
                     : never;
 
 /**

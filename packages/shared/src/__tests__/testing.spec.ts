@@ -15,9 +15,7 @@ import {
   createAssistantMessage,
   createConversation,
   createToolDefinition,
-  createTextStreamSequence,
-  createToolCallStreamSequence,
-  // New StreamEvent fixtures
+  // StreamEvent fixtures
   createEventBase,
   createContentStartEvent,
   createContentDeltaEvent,
@@ -59,7 +57,6 @@ import {
   createMockSequence,
 } from "../testing";
 import {
-  StreamChunkType,
   StopReason,
   isModelStreamEvent,
   isOrchestrationStreamEvent,
@@ -174,29 +171,6 @@ describe("Fixtures", () => {
       expect(tool.name).toBe("search");
       expect(tool.description).toContain("search");
       expect(tool.input).toBeDefined();
-    });
-  });
-
-  describe("Stream Fixtures (Legacy StreamChunk)", () => {
-    it("should create text stream sequence", () => {
-      const chunks = createTextStreamSequence("Hello", 2);
-
-      expect(chunks[0].type).toBe(StreamChunkType.MESSAGE_START);
-      expect(chunks[chunks.length - 1].type).toBe(StreamChunkType.MESSAGE_END);
-      expect(chunks[chunks.length - 1].stopReason).toBe(StopReason.STOP);
-
-      // Should have content deltas in the middle
-      const deltas = chunks.filter((c) => c.type === StreamChunkType.CONTENT_DELTA);
-      expect(deltas.length).toBeGreaterThan(0);
-    });
-
-    it("should create tool call stream sequence", () => {
-      const chunks = createToolCallStreamSequence("search", { query: "test" }, { results: [] });
-
-      expect(chunks[0].type).toBe(StreamChunkType.MESSAGE_START);
-      expect(chunks.some((c) => c.type === StreamChunkType.TOOL_CALL)).toBe(true);
-      expect(chunks.some((c) => c.type === StreamChunkType.TOOL_RESULT)).toBe(true);
-      expect(chunks[chunks.length - 1].stopReason).toBe(StopReason.TOOL_USE);
     });
   });
 

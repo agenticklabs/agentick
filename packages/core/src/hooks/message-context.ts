@@ -34,12 +34,12 @@ const h = React.createElement;
 /**
  * Message handler signature.
  * @param message - The message that was received
- * @param com - The Context Object Model
+ * @param ctx - The Context Object Model
  * @param state - The current tick state
  */
 export type MessageHandler = (
   message: ExecutionMessage,
-  com: COM,
+  ctx: COM,
   state: TickState,
 ) => void | Promise<void>;
 
@@ -61,7 +61,7 @@ export interface MessageStore {
   subscribers: Set<() => void>;
 
   /** Current COM reference (set by compiler) */
-  com: COM | null;
+  ctx: COM | null;
 
   /** Current TickState reference (set by compiler) */
   tickState: TickState | null;
@@ -73,7 +73,7 @@ export function createMessageStore(): MessageStore {
     handlers: new Set(),
     lastMessage: null,
     subscribers: new Set(),
-    com: null,
+    ctx: null,
     tickState: null,
   };
 }
@@ -177,7 +177,7 @@ export function useMessageContext(): MessageContextValue {
  * @example
  * ```tsx
  * function MyComponent() {
- *   useOnMessage((message, com, state) => {
+ *   useOnMessage((message, ctx, state) => {
  *     console.log('Received:', message);
  *   });
  *   return <System>I respond to messages</System>;
@@ -193,8 +193,8 @@ export function useOnMessage(handler: MessageHandler): void {
     if (!ctx) return;
 
     // Create a stable wrapper that always calls the latest handler
-    const wrappedHandler: MessageHandler = (message, com, state) => {
-      return handlerRef.current(message, com, state);
+    const wrappedHandler: MessageHandler = (message, ctx, state) => {
+      return handlerRef.current(message, ctx, state);
     };
 
     const cleanup = ctx.addMessageHandler(wrappedHandler);

@@ -26,7 +26,7 @@ const model = createAiSdkModel({
 // Use with createApp
 const app = createApp(MyAgent, { model });
 const session = await app.session();
-await session.run({ message: 'Hello!' });
+await session.run({ messages: [{ role: 'user', content: [{ type: 'text', text: 'Hello!' }] }] });
 
 // Or use as JSX component
 function MyAgent() {
