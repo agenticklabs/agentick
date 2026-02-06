@@ -322,17 +322,19 @@ count.value++;
 
 ### useComState
 
-State stored in the COM, accessible to all components:
+State stored in the COM, accessible to all components. Returns a Signal (not a tuple).
+Automatically re-renders when state is modified externally (e.g. from a tool handler).
 
 ```tsx
 function ComponentA() {
-  const [value, setValue] = useComState("shared-key", "initial");
-  // ...
+  const value = useComState("shared-key", "initial");
+  console.log(value()); // or value.value — read current value
+  value.set("updated"); // write new value
 }
 
 function ComponentB() {
-  const [value] = useComState("shared-key"); // Same value
-  // ...
+  const value = useComState("shared-key", "initial"); // Same COM state
+  return <Section id="info">Value: {value()}</Section>;
 }
 ```
 
@@ -400,6 +402,62 @@ const status = useData("status", fetchStatus, [tick]);
 // Cache forever (no deps)
 const config = useData("config", fetchConfig);
 ```
+
+## Knobs
+
+Knobs are model-visible, model-settable reactive state. The model sees primitive values (string, number, boolean) and can change them via a `set_knob` tool. An optional resolve callback maps the primitive to a rich application value.
+
+### knob() — Config-level Descriptor
+
+Create a knob descriptor for use in config objects. Detected by `isKnob()`.
+
+```tsx
+import { knob } from "@tentickle/core";
+
+const config = {
+  mode: knob("broad", { description: "Operating mode", options: ["broad", "deep"] }),
+  model: knob("gpt-4", { description: "Model", options: ["gpt-4", "gpt-5"] }, (v) => openai(v)),
+  citations: knob(true, { description: "Whether to include citations" }),
+};
+```
+
+### useKnob() — Component-level Hook
+
+Create a live knob inside a component. Returns `[value, setter]`.
+
+```tsx
+import { useKnob, Knobs } from "@tentickle/core";
+
+function Agent() {
+  // Simple — mode is "broad" or "deep"
+  const [mode, setMode] = useKnob("mode", "broad", {
+    description: "Operating mode",
+    options: ["broad", "deep"],
+  });
+
+  // With resolver — model is openai("gpt-4"), setModel accepts primitives
+  const [model, setModel] = useKnob("model", "gpt-4", { description: "Model" }, (v) => openai(v));
+
+  // From descriptor
+  const desc = knob("broad", { description: "Mode", options: ["broad", "deep"] });
+  const [modeFromDesc] = useKnob("mode", desc);
+
+  return (
+    <>
+      <Knobs />
+      <Model model={model} />
+      <Section id="system" audience="model">
+        Mode: {mode}
+      </Section>
+      <Timeline />
+    </>
+  );
+}
+```
+
+### `<Knobs />` — Stateful Tool Component
+
+Place once in the component tree. Renders a section describing all registered knobs and the `set_knob` tool. Renders nothing if no knobs are registered. Built with `createTool` (stateful tool pattern).
 
 ## Priority System
 

@@ -55,6 +55,13 @@ export {
   useData,
   useInvalidateData,
   useComState,
+  // Knobs
+  knob,
+  isKnob,
+  useKnob,
+  Knobs,
+  type KnobDescriptor,
+  type KnobRegistration,
   // Context utilization
   useContextInfo,
   useContextInfoStore,

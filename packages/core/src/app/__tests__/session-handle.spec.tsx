@@ -14,7 +14,7 @@ import type { ModelOutput } from "../../model/model";
 import { System, User } from "../../jsx/components/messages";
 import { Model } from "../../jsx/components/primitives";
 import { Context } from "@tentickle/kernel";
-import { AbortError } from "@tentickle/shared";
+import { AbortError, type StreamEvent } from "@tentickle/shared";
 import { useState, useRef, useOnMessage, useQueuedMessages, useContinuation } from "../../hooks";
 import { Timeline } from "../../jsx/components/timeline";
 import { createTestAdapter } from "../../testing";

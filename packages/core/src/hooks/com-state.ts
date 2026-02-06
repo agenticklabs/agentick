@@ -1,16 +1,20 @@
 /**
- * V2 COM State Hook
+ * COM State Hook
  *
  * Provides state storage in the COM (Context Object Model).
- * State persists across renders and changes trigger reconciliation.
+ * State persists across renders and changes trigger re-renders.
  *
  * This is similar to useState but:
  * - State is stored in the shared COM, not component-local
  * - State persists across ticks
  * - Returns a Signal-like interface
+ *
+ * Reactivity: Subscribes to COM's "state:changed" events via a React
+ * version counter, ensuring the component re-renders when state is
+ * modified externally (e.g. from a tool handler).
  */
 
-import { useCallback, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useCom } from "./context";
 import type { Signal } from "./signal";
 
@@ -44,19 +48,36 @@ export function useComState<T>(key: string, initialValue: T): Signal<T> {
     ctx.setState(key, initialValue);
   }
 
-  // Get the current value
+  // Version counter triggers React re-render when COM state changes externally
+  const [, setVersion] = useState(0);
+  const setVersionRef = useRef(setVersion);
+  setVersionRef.current = setVersion;
+
+  // Subscribe to COM "state:changed" events for this key
+  useEffect(() => {
+    const handler = (changedKey: string) => {
+      if (changedKey === key) {
+        setVersionRef.current((v) => v + 1);
+      }
+    };
+    ctx.on("state:changed", handler);
+    return () => {
+      ctx.off("state:changed", handler);
+    };
+  }, [ctx, key]);
+
+  // Read directly from COM (always fresh — works in tool handlers, effects, etc.)
   const getValue = useCallback((): T => {
     return (ctx.getState<T>(key) ?? initialValue) as T;
   }, [ctx, key, initialValue]);
 
-  // Set a new value
+  // Set a new value — writes to COM, which emits event, which triggers re-render
   const setValue = useCallback(
     (value: T | ((prev: T) => T)) => {
       const currentValue = getValue();
       const newValue =
         typeof value === "function" ? (value as (prev: T) => T)(currentValue) : value;
       ctx.setState(key, newValue);
-      // Request recompilation to reflect the change
       ctx.requestRecompile(`COM state '${key}' changed`);
     },
     [ctx, key, getValue],
@@ -70,25 +91,17 @@ export function useComState<T>(key: string, initialValue: T): Signal<T> {
     [setValue],
   );
 
-  // Subscribe to changes (no-op for now, reconciliation handles this)
-  const subscribe = useCallback((_callback: (value: T) => void): (() => void) => {
-    // In v2, reconciliation handles reactivity
-    // This is a placeholder for future subscription support
-    return () => {};
-  }, []);
-
-  // Create the Signal-like interface
+  // Create the Signal-like interface — reads from COM directly, always fresh
   const signal = useMemo((): Signal<T> => {
     const fn = getValue as Signal<T>;
     Object.defineProperty(fn, "value", {
       get: getValue,
       enumerable: true,
     });
-    (fn as Signal<T>).set = setValue;
-    (fn as Signal<T>).update = update;
-    (fn as Signal<T>).subscribe = subscribe;
-    return fn as Signal<T>;
-  }, [getValue, setValue, update, subscribe]);
+    fn.set = setValue;
+    fn.update = update;
+    return fn;
+  }, [getValue, setValue, update]);
 
   return signal;
 }

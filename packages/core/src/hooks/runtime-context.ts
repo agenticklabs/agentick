@@ -36,6 +36,24 @@ export interface SerializableCacheEntry {
 }
 
 // ============================================================
+// Knob Registration
+// ============================================================
+
+/**
+ * Registration for a single knob in the runtime store.
+ * Stores primitive info only — the resolved value is internal to useKnob.
+ */
+export interface KnobRegistration {
+  name: string;
+  description: string;
+  getPrimitive: () => string | number | boolean;
+  setPrimitive: (value: string | number | boolean) => void;
+  defaultValue: string | number | boolean;
+  options?: (string | number | boolean)[];
+  valueType: "string" | "number" | "boolean";
+}
+
+// ============================================================
 // Runtime Store
 // ============================================================
 
@@ -54,6 +72,9 @@ export interface RuntimeStore {
   tickStartCallbacks: Set<TickStartCallback>;
   tickEndCallbacks: Set<TickEndCallback>;
   afterCompileCallbacks: Set<AfterCompileCallback>;
+
+  /** Knob registry — all active knobs registered by useKnob */
+  knobRegistry: Map<string, KnobRegistration>;
 }
 
 /**
@@ -66,6 +87,7 @@ export function createRuntimeStore(): RuntimeStore {
     tickStartCallbacks: new Set(),
     tickEndCallbacks: new Set(),
     afterCompileCallbacks: new Set(),
+    knobRegistry: new Map(),
   };
 }
 

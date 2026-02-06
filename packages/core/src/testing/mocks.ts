@@ -38,6 +38,9 @@ export interface MockCom {
   getState<T>(key: string): T | undefined;
   setState<T>(key: string, value: T): void;
   requestRecompile: () => void;
+  // EventEmitter-like methods (used by useComState subscription)
+  on(event: string, handler: (...args: any[]) => void): void;
+  off(event: string, handler: (...args: any[]) => void): void;
   // Track calls for assertions
   _recompileRequests: string[];
 }
@@ -55,6 +58,7 @@ export interface MockCom {
 export function createMockCom(options: MockComOptions = {}): MockCom {
   const state = new Map<string, unknown>(Object.entries(options.initialState ?? {}));
   const recompileRequests: string[] = [];
+  const listeners = new Map<string, Set<(...args: any[]) => void>>();
 
   return {
     id: options.id ?? "test-session",
@@ -64,10 +68,25 @@ export function createMockCom(options: MockComOptions = {}): MockCom {
       return state.get(key) as T | undefined;
     },
     setState<T>(key: string, value: T): void {
+      const previousValue = state.get(key);
       state.set(key, value);
+      // Emit state:changed like real COM
+      const handlers = listeners.get("state:changed");
+      if (handlers) {
+        for (const handler of handlers) {
+          handler(key, value, previousValue);
+        }
+      }
     },
     requestRecompile(reason?: string) {
       recompileRequests.push(reason ?? "unspecified");
+    },
+    on(event: string, handler: (...args: any[]) => void) {
+      if (!listeners.has(event)) listeners.set(event, new Set());
+      listeners.get(event)!.add(handler);
+    },
+    off(event: string, handler: (...args: any[]) => void) {
+      listeners.get(event)?.delete(handler);
     },
     _recompileRequests: recompileRequests,
   };

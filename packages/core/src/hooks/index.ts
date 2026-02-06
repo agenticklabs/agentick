@@ -31,7 +31,12 @@ export {
   type RuntimeStore,
   type CacheEntry,
   type SerializableCacheEntry,
+  type KnobRegistration,
 } from "./runtime-context";
+
+// Knobs
+export { knob, isKnob, useKnob, type KnobDescriptor } from "./knob";
+export { Knobs } from "./knobs-component";
 
 // Lifecycle hooks
 export {
