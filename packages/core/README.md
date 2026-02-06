@@ -161,7 +161,7 @@ function MyComponent() {
     console.log("Component unmounting");
   });
 
-  // Called at the start of each tick (before model call)
+  // Called at the start of each tick (tick 2+ — see useOnMount for first tick)
   useOnTickStart((tickState) => {
     console.log(`Tick ${tickState.tick} starting...`);
   });

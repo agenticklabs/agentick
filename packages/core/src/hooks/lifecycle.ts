@@ -78,14 +78,18 @@ export function useOnUnmount(callback: UnmountCallback): void {
  * });
  * ```
  *
- * > **Note:** Uses `useEffect` internally, so the callback is registered
- * > _after_ the component's first render. This means:
- * >
- * > - **Tick 1**: Component mounts, effect queues callback registration
- * > - **Tick 2+**: Callback fires at tick start
- * >
- * > If you need code to run on the very first tick, use component
- * > initialization or `useMemo` instead.
+ * **Timing:** Fires from tick 2+ (the tick after the component mounts).
+ * This follows the React lifecycle model — the component must render
+ * before its effects can register callbacks, and `notifyTickStart`
+ * fires before compilation.
+ *
+ * For first-tick setup, use `useOnMount`. For logic that must run
+ * on every tick including the first, combine both:
+ *
+ * ```tsx
+ * useOnMount((ctx) => { setupForFirstTick(ctx); });
+ * useOnTickStart((tickState, ctx) => { setupForSubsequentTicks(tickState, ctx); });
+ * ```
  */
 export function useOnTickStart(callback: TickStartCallback): void {
   const store = useRuntimeStore();

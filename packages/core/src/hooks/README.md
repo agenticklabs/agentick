@@ -246,12 +246,14 @@ function AgentWithSetup() {
 }
 ```
 
-> **Note:** `useOnTickStart` uses `useEffect` internally, so the callback is registered _after_ the component's first render. This means:
+> **Timing:** `useOnTickStart` fires from tick 2+ (the tick after the component mounts). This follows the React lifecycle model — the component must render before its effects can register callbacks, and `notifyTickStart` fires before compilation.
 >
-> - **Tick 1**: Component mounts, effect queues callback registration
-> - **Tick 2+**: Callback fires at tick start
+> For first-tick setup, use `useOnMount`. For logic on every tick including the first, combine both:
 >
-> If you need code to run on the very first tick, use `useOnMount` or `useMemo` instead.
+> ```tsx
+> useOnMount((ctx) => { /* runs on mount tick */ });
+> useOnTickStart((tickState, ctx) => { /* runs on tick 2+ */ });
+> ```
 
 ### useOnTickEnd
 
