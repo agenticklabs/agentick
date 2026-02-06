@@ -13,7 +13,11 @@
 
 import type { EventEmitter } from "node:events";
 import { Context, type KernelContext, isKernelContext } from "./context";
-import { ExecutionTracker, type ExecutionBoundaryConfig } from "./execution-tracker";
+import {
+  ExecutionTracker,
+  ExecutionHandleBrand,
+  type ExecutionBoundaryConfig,
+} from "./execution-tracker";
 import { randomUUID } from "node:crypto";
 import type { ProcedureNode } from "./procedure-graph";
 import { AbortError, ValidationError } from "@tentickle/shared";
@@ -253,6 +257,8 @@ export interface ExecutionHandle<
   TResult,
   TEvent extends TypedEvent = any,
 > extends AsyncIterable<TEvent> {
+  /** Brand identifying this as an ExecutionHandle (not a plain AsyncIterable) */
+  readonly [ExecutionHandleBrand]: true;
   /** Current execution status */
   readonly status:
     | "running"
@@ -304,6 +310,7 @@ export class ExecutionHandleImpl<
   TResult,
   TEvent extends TypedEvent = any,
 > implements ExecutionHandle<TResult, TEvent> {
+  readonly [ExecutionHandleBrand] = true as const;
   private _status: "running" | "completed" | "error" | "aborted" = "running";
   private _abortController: AbortController;
   public readonly events: EventBuffer<TEvent>;
@@ -495,21 +502,23 @@ export interface ProcedureOptions {
  * - **Automatic tracking** - Every call is tracked in the procedure graph
  * - **Composition** - Chain procedures with `.pipe()`
  *
- * Procedures return ExecutionHandle which is both PromiseLike AND AsyncIterable:
- * - `await proc(args)` → resolves to the result
- * - `for await (const event of proc(args))` → streams events
+ * Procedures return ProcedurePromise wrapping ExecutionHandle (AsyncIterable):
+ * - `await proc(args)` → ExecutionHandle (status, abort, streaming)
+ * - `await proc(args).result` → the final value
+ * - `for await (const event of await proc(args))` → streams events
  *
  * @typeParam THandler - The function type being wrapped
  *
- * @example Direct call - await for result
+ * @example Get handle, then result
  * ```typescript
  * const greet = createProcedure(async (name: string) => `Hello, ${name}!`);
- * const result = await greet('World'); // 'Hello, World!'
+ * const handle = await greet('World');
+ * const result = await handle.result; // 'Hello, World!'
  * ```
  *
  * @example Stream events
  * ```typescript
- * const handle = proc(input);
+ * const handle = await proc(input);
  * for await (const event of handle) {
  *   console.log('Event:', event);
  * }
@@ -539,16 +548,16 @@ export interface Procedure<
 > {
   /**
    * Call the procedure directly.
-   * Returns ProcedurePromise<ExecutionHandle<T>>.
+   * Returns ProcedurePromise — supports `.result` chaining in all modes.
    *
    * Usage:
-   * - `await proc()` → ExecutionHandle (with status, streaming, abort)
+   * - `await proc()` → ExecutionHandle (or T in passthrough mode)
    * - `await proc().result` → T (the final value)
    */
   (
     ...args: ExtractArgs<THandler>
   ): TPassThrough extends true
-    ? Promise<ExtractReturn<THandler>>
+    ? ProcedurePromise<ExtractReturn<THandler>>
     : ProcedurePromise<ExecutionHandle<ExtractReturn<THandler>>>;
 
   /**
@@ -558,7 +567,7 @@ export interface Procedure<
   exec(
     ...args: ExtractArgs<THandler>
   ): TPassThrough extends true
-    ? Promise<ExtractReturn<THandler>>
+    ? ProcedurePromise<ExtractReturn<THandler>>
     : ProcedurePromise<ExecutionHandle<ExtractReturn<THandler>>>;
 
   /**

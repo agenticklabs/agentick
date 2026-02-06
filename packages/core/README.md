@@ -481,6 +481,39 @@ const app = createApp(MyApp, {
 });
 ```
 
+### Procedures & Middleware
+
+Session methods `send`, `render`, and `queue` are all Procedures. This means they support middleware, context injection, and the chainable API:
+
+```typescript
+const session = await app.session();
+
+// Direct call (await unwraps to SessionExecutionHandle)
+const handle = await session.send({ messages: [...] });
+const result = await session.send({ messages: [...] }).result; // SendResult
+
+// Add middleware to a single call
+const handle = await session.render.use(async (args, envelope, next) => {
+  console.log("before render");
+  const result = await next();
+  console.log("after render");
+  return result;
+})({ query: "Hello" });
+
+// .use() returns a new Procedure (immutable — original is unchanged)
+const loggedRender = session.render.use(loggingMiddleware);
+await loggedRender({ query: "test" }).result;
+```
+
+`ProcedurePromise` supports `.result` chaining — `await proc().result` resolves to the final `SendResult` regardless of whether the procedure is passthrough or handle-wrapped.
+
+`app.run` is also a Procedure:
+
+```typescript
+const handle = await app.run({ messages: [...], props: { query: "Hello" } });
+await handle.result;
+```
+
 ### Middleware Inheritance
 
 Apps inherit from the global `Tentickle` instance by default:

@@ -7,7 +7,7 @@
  * Design principles:
  * - Single class, no intermediate layers
  * - Minimal state - just what's needed for execution
- * - render() is a Procedure returning ExecutionHandle (PromiseLike + AsyncIterable)
+ * - render() is a Procedure returning SessionExecutionHandle (AsyncIterable)
  * - Clean, elegant code over feature completeness
  *
  * @module tentickle/app/session
@@ -20,6 +20,7 @@ import {
   createProcedure,
   Channel,
   EventBuffer,
+  ExecutionHandleBrand,
   Logger,
   type KernelContext,
   type Procedure,
@@ -319,6 +320,8 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
   // ════════════════════════════════════════════════════════════════════════
 
   queue!: Procedure<(message: Message) => Promise<void>, true>;
+  send!: Procedure<(input: SendInput<P>) => SessionExecutionHandle, true>;
+  render!: Procedure<(props: P, options?: ExecutionOptions) => SessionExecutionHandle, true>;
 
   private initProcedures(): void {
     // Queue procedure - queues messages and notifies components
@@ -360,107 +363,115 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
         }
       },
     );
-  }
 
-  // ════════════════════════════════════════════════════════════════════════
-  // send() - Returns SessionExecutionHandle
-  // Concurrent calls return THE SAME handle
-  // ════════════════════════════════════════════════════════════════════════
+    // Send procedure - queues messages + delegates to render
+    this.send = createProcedure(
+      {
+        name: "session:send",
+        metadata: { operation: "send" },
+        handleFactory: false,
+        executionBoundary: false,
+      },
+      async (input: SendInput<P>): Promise<SessionExecutionHandle> => {
+        if (this._status === "closed") {
+          throw new Error("Session is closed");
+        }
 
-  send(input: SendInput<P>): SessionExecutionHandle {
-    if (this._status === "closed") {
-      throw new Error("Session is closed");
-    }
+        const { messages = [], props, metadata, maxTicks, signal } = input;
 
-    const { messages = [], props, metadata, maxTicks, signal } = input;
+        // Apply metadata to messages
+        const allMessages = messages.map((m) => (metadata ? { ...m, metadata } : m));
 
-    // Apply metadata to messages
-    const allMessages = messages.map((m) => (metadata ? { ...m, metadata } : m));
+        // Update props if provided
+        if (props) {
+          this._lastProps = props;
+        }
 
-    // Update props if provided
-    if (props) {
-      this._lastProps = props;
-    }
+        // Queue messages synchronously and notify components
+        for (const msg of allMessages) {
+          const msgWithId = ensureMessageId(msg);
+          this._queuedMessages.push(msgWithId);
+          this.channel("messages").publish({
+            type: "message_queued",
+            channel: "messages",
+            payload: msgWithId,
+          });
 
-    // Queue messages synchronously and notify components
-    for (const msg of allMessages) {
-      const msgWithId = ensureMessageId(msg);
-      this._queuedMessages.push(msgWithId);
-      this.channel("messages").publish({
-        type: "message_queued",
-        channel: "messages",
-        payload: msgWithId,
-      });
+          // Notify components via useOnMessage hooks if compiler exists
+          if (this.compiler) {
+            const executionMessage: ExecutionMessage = {
+              id: randomUUID(),
+              type: "message",
+              content: msgWithId,
+              timestamp: Date.now(),
+            };
+            const tickState: TickState = {
+              tick: this._tick,
+              stop: () => {},
+              queuedMessages: [],
+            };
+            // Fire and forget - don't await to keep send() fast
+            this.compiler.notifyOnMessage(executionMessage, tickState).catch(() => {});
+          }
+        }
 
-      // Notify components via useOnMessage hooks if compiler exists
-      if (this.compiler) {
-        const executionMessage: ExecutionMessage = {
-          id: randomUUID(),
-          type: "message",
-          content: msgWithId,
-          timestamp: Date.now(),
-        };
-        const tickState: TickState = {
-          tick: this._tick,
-          stop: () => {},
-          queuedMessages: [],
-        };
-        // Fire and forget - don't await to keep send() synchronous
-        this.compiler.notifyOnMessage(executionMessage, tickState).catch(() => {});
-      }
-    }
+        // Build execution options from input
+        const executionOptions: ExecutionOptions = {};
+        if (maxTicks !== undefined) executionOptions.maxTicks = maxTicks;
+        if (signal) executionOptions.signal = signal;
 
-    // Build execution options from input
-    const executionOptions: ExecutionOptions = {};
-    if (maxTicks !== undefined) executionOptions.maxTicks = maxTicks;
-    if (signal) executionOptions.signal = signal;
+        // If already running, return the existing handle (concurrent send idempotency)
+        if (this._status === "running" && this._currentHandle) {
+          this.addExecutionSignal(signal);
+          return this._currentHandle;
+        }
 
-    // If already running, return the existing handle (concurrent send idempotency)
-    if (this._status === "running" && this._currentHandle) {
-      this.addExecutionSignal(signal);
-      return this._currentHandle;
-    }
+        // If idle and we have something to do, start tick
+        if ((allMessages.length > 0 || props) && this._status === "idle") {
+          // Use last known props if available, otherwise default to empty props.
+          const tickProps = (this._lastProps ?? ({} as P)) as P;
+          return await this.render(tickProps, executionOptions);
+        }
 
-    // If idle and we have something to do, start tick
-    if ((allMessages.length > 0 || props) && this._status === "idle") {
-      // Use last known props if available, otherwise default to empty props.
-      const tickProps = (this._lastProps ?? ({} as P)) as P;
-      return this.render(tickProps, executionOptions);
-    }
+        // Nothing to do - create a handle that resolves immediately with empty result
+        return this.createEmptyHandle();
+      },
+    );
 
-    // Nothing to do - create a handle that resolves immediately with empty result
-    return this.createEmptyHandle();
-  }
+    // Render procedure - creates and runs a tick execution
+    this.render = createProcedure(
+      {
+        name: "session:render",
+        metadata: { operation: "render" },
+        handleFactory: false,
+        executionBoundary: false,
+      },
+      (props: P, options?: ExecutionOptions): SessionExecutionHandle => {
+        if (this._status === "closed") {
+          throw new Error("Session is closed");
+        }
 
-  // ════════════════════════════════════════════════════════════════════════
-  // render() - Returns SessionExecutionHandle
-  // If already running, returns the existing handle (hot-update)
-  // ════════════════════════════════════════════════════════════════════════
+        // Props is explicitly provided (even if empty object) - always run tick
+        // Only skip if props is undefined/null AND no queued messages
+        const propsProvided = props !== undefined && props !== null;
+        if (!propsProvided && this._queuedMessages.length === 0) {
+          return this.createEmptyHandle();
+        }
 
-  render(props: P, options?: ExecutionOptions): SessionExecutionHandle {
-    if (this._status === "closed") {
-      throw new Error("Session is closed");
-    }
+        // Hot-update: if already running, update props and return existing handle
+        if (this._status === "running" && this._currentHandle) {
+          this._lastProps = props;
+          this.addExecutionSignal(options?.signal);
+          return this._currentHandle;
+        }
 
-    // Props is explicitly provided (even if empty object) - always run tick
-    // Only skip if props is undefined/null AND no queued messages
-    const propsProvided = props !== undefined && props !== null;
-    if (!propsProvided && this._queuedMessages.length === 0) {
-      return this.createEmptyHandle();
-    }
-
-    // Hot-update: if already running, update props and return existing handle
-    if (this._status === "running" && this._currentHandle) {
-      this._lastProps = props;
-      this.addExecutionSignal(options?.signal);
-      return this._currentHandle;
-    }
-
-    // Create new execution
-    this._lastProps = props;
-    const handle = this.createSessionHandle(props, options);
-    this._currentHandle = handle;
-    return handle;
+        // Create new execution
+        this._lastProps = props;
+        const handle = this.createSessionHandle(props, options);
+        this._currentHandle = handle;
+        return handle;
+      },
+    );
   }
 
   // ════════════════════════════════════════════════════════════════════════
@@ -469,7 +480,7 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
 
   /**
    * Create a SessionExecutionHandle with explicit delegation.
-   * The handle is PromiseLike + AsyncIterable.
+   * The handle is AsyncIterable (not PromiseLike — use `.result` for the final value).
    */
   private createSessionHandle(props: P, options?: ExecutionOptions): SessionExecutionHandle {
     const session = this;
@@ -563,6 +574,8 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
 
     // Create handle - use .result for final value, not PromiseLike
     const handle: SessionExecutionHandle = {
+      [ExecutionHandleBrand]: true as const,
+
       // AsyncIterable delegation - delegates to EventBuffer for dual consumption
       [Symbol.asyncIterator](): AsyncIterator<StreamEvent> {
         return eventBuffer[Symbol.asyncIterator]();
@@ -654,6 +667,7 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
     emptyEventBuffer.close();
 
     const handle: SessionExecutionHandle = {
+      [ExecutionHandleBrand]: true as const,
       [Symbol.asyncIterator](): AsyncIterator<StreamEvent> {
         return emptyEventBuffer[Symbol.asyncIterator]();
       },

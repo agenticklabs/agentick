@@ -54,7 +54,7 @@ describe("Message Flow Integration", () => {
       const app = createApp(Agent, { maxTicks: 1 });
       const session = await app.session();
 
-      const handle = session.send({
+      const handle = await session.send({
         messages: [
           {
             role: "user",
@@ -108,7 +108,7 @@ describe("Message Flow Integration", () => {
       const app = createApp(Agent, { maxTicks: 1 });
       const session = await app.session();
 
-      const handle = session.send({
+      const handle = await session.send({
         messages: [
           {
             role: "user",
@@ -195,7 +195,7 @@ describe("Message Flow Integration", () => {
       const app = createApp(Agent, { maxTicks: 1 });
       const session = await app.session();
 
-      const handle = session.send({
+      const handle = await session.send({
         messages: [
           {
             role: "user",
@@ -463,7 +463,7 @@ describe("Session Lifecycle", () => {
       const session = await app.session();
 
       // No props have been set yet
-      const handle = session.send({
+      const handle = await session.send({
         messages: [
           {
             role: "user",

@@ -268,7 +268,7 @@ export async function renderAgent<P extends Record<string, unknown> = Record<str
           ? { role: "user", content: [{ type: "text", text: message }] }
           : message;
 
-      const handle = session.send({ messages: [messageObj] });
+      const handle = await session.send({ messages: [messageObj] });
       const sendResult = await handle.result;
       updateResult(sendResult);
       await flushMicrotasks();
@@ -286,7 +286,7 @@ export async function renderAgent<P extends Record<string, unknown> = Record<str
     resultState.error = null;
 
     try {
-      const handle = session.render(newProps ?? props);
+      const handle = await session.render(newProps ?? props);
       const sendResult = await handle.result;
       updateResult(sendResult);
       await flushMicrotasks();

@@ -12,7 +12,11 @@ import type { COMInput } from "../com/types";
 import type { StreamEvent } from "./engine-events";
 import { EventEmitter } from "node:events";
 import type { ProcedureGraph, ProcedureNode } from "@tentickle/kernel";
-import { EventBuffer, type ExecutionHandle as KernelExecutionHandle } from "@tentickle/kernel";
+import {
+  EventBuffer,
+  ExecutionHandleBrand,
+  type ExecutionHandle as KernelExecutionHandle,
+} from "@tentickle/kernel";
 import { Context } from "@tentickle/kernel";
 import { AbortError, StateError } from "@tentickle/shared";
 import type { COM } from "../com/object-model";
@@ -25,6 +29,7 @@ export class ExecutionHandleImpl
   extends EventEmitter
   implements ExecutionHandle, KernelExecutionHandle<COMInput>
 {
+  readonly [ExecutionHandleBrand] = true as const;
   public readonly pid: string;
   public readonly parentPid?: string;
   public readonly rootPid: string;

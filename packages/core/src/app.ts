@@ -61,24 +61,26 @@ import type { RunInput, AppOptions, SessionExecutionHandle, ComponentFunction } 
 /**
  * Execute a component with input (ephemeral session).
  *
- * Returns SessionExecutionHandle which is both:
- * - PromiseLike: `await runComponent(...)` → SendResult
- * - AsyncIterable: `for await (event of runComponent(...))` → StreamEvent
+ * Returns SessionExecutionHandle (AsyncIterable, not PromiseLike):
+ * - `await handle.result` → SendResult
+ * - `for await (const event of handle)` → StreamEvent
  *
- * @example Await result
+ * @example Get result
  * ```typescript
- * const result = await runComponent(MyAgent, {
+ * const handle = await runComponent(MyAgent, {
  *   props: { systemPrompt: "Be helpful" },
  *   messages: [{ role: "user", content: [{ type: "text", text: "Hello!" }] }],
  * }, { model });
+ * const result = await handle.result;
  * ```
  *
  * @example Stream events
  * ```typescript
- * for await (const event of runComponent(MyAgent, {
+ * const handle = await runComponent(MyAgent, {
  *   props: { systemPrompt: "Be helpful" },
  *   messages: [{ role: "user", content: [{ type: "text", text: "Hello!" }] }],
- * }, { model })) {
+ * }, { model });
+ * for await (const event of handle) {
  *   console.log(event);
  * }
  * ```

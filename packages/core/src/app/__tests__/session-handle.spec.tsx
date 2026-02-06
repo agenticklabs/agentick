@@ -49,7 +49,7 @@ describe("session.render() handle", () => {
     const app = createApp(Agent, { maxTicks: 1 });
     const session = await app.session();
 
-    const handle = session.render(undefined as never);
+    const handle = await session.render(undefined as never);
     const result = await handle.result;
 
     expect(handle.status).toBe("completed");
@@ -73,7 +73,7 @@ describe("session.render() handle", () => {
     const session = await app.session();
 
     // Empty props {} is still an explicit request to run
-    const handle = session.render({} as never);
+    const handle = await session.render({} as never);
     const result = await handle.result;
 
     expect(handle.status).toBe("completed");
@@ -96,7 +96,7 @@ describe("session.render() handle", () => {
     const app = createApp(Agent, { maxTicks: 1 });
     const session = await app.session();
 
-    const handle = session.render({ query: "Hello!" });
+    const handle = await session.render({ query: "Hello!" });
 
     // Handle should be running initially
     expect(handle.status).toBe("running");
@@ -127,7 +127,7 @@ describe("session.render() handle", () => {
     const app = createApp(Agent, { maxTicks: 1 });
     const session = await app.session();
 
-    const handle = session.render({ query: "test" });
+    const handle = await session.render({ query: "test" });
 
     expect(handle.sessionId).toBe(session.id);
 
@@ -150,7 +150,7 @@ describe("session.render() handle", () => {
     const app = createApp(Agent, { maxTicks: 1 });
     const session = await app.session();
 
-    const handle = session.render({ query: "test" });
+    const handle = await session.render({ query: "test" });
 
     // Tick starts at 1
     expect(handle.currentTick).toBeGreaterThanOrEqual(1);
@@ -230,7 +230,7 @@ describe("app.run() streaming", () => {
 
     const app = createApp(Agent, { maxTicks: 1 });
 
-    // app.run() returns SessionExecutionHandle which is both PromiseLike and AsyncIterable
+    // app.run() returns SessionExecutionHandle (AsyncIterable, not PromiseLike)
     const handle = await app.run({ props: { query: "Hello!" } });
 
     expect(handle.status).toBe("running");
@@ -307,7 +307,7 @@ describe("handle.abort()", () => {
     const app = createApp(Agent, { maxTicks: 1 });
     const session = await app.session();
 
-    const handle = session.render({ query: "test" });
+    const handle = await session.render({ query: "test" });
 
     // Abort immediately
     handle.abort("User cancelled");
@@ -340,11 +340,11 @@ describe("handle.abort()", () => {
     const app = createApp(Agent, { maxTicks: 1 });
     const session = await app.session();
 
-    const handle = session.render({ query: "first" });
+    const handle = await session.render({ query: "first" });
     handle.abort("User cancelled");
     await expect(handle.result).rejects.toBeInstanceOf(AbortError);
 
-    const nextHandle = session.render({ query: "second" });
+    const nextHandle = await session.render({ query: "second" });
     const result = await nextHandle.result;
 
     expect(result.response).toContain("Mock");
@@ -376,8 +376,8 @@ describe("execution abort signals", () => {
     const signalA = new AbortController();
     const signalB = new AbortController();
 
-    const handle = session.render({ query: "first" }, { signal: signalA.signal });
-    const sameHandle = session.send({
+    const handle = await session.render({ query: "first" }, { signal: signalA.signal });
+    const sameHandle = await session.send({
       messages: [{ role: "user", content: [{ type: "text", text: "interrupt" }] }],
       signal: signalB.signal,
     });
@@ -448,7 +448,7 @@ describe("SendInput flat fields", () => {
 
     const controller = new AbortController();
 
-    const handle = session.send({
+    const handle = await session.send({
       messages: [{ role: "user", content: [{ type: "text", text: "Hello" }] }],
       signal: controller.signal,
     });
@@ -739,12 +739,12 @@ describe("render() hot update when running", () => {
     const session = await app.session();
 
     // Start first tick
-    const firstTickPromise = session.render({ query: "First" });
+    const firstTickPromise = await session.render({ query: "First" });
 
     // While running, call render() with new props (hot update)
     // Wait a tiny bit for the first tick to start
     await new Promise((r) => setTimeout(r, 10));
-    const secondTickPromise = session.render({ query: "Updated" });
+    const secondTickPromise = await session.render({ query: "Updated" });
 
     // Both should return the same promise (the first one's result)
     const [result1, result2] = await Promise.all([firstTickPromise, secondTickPromise]);
@@ -777,11 +777,11 @@ describe("render() hot update when running", () => {
     const session = await app.session();
 
     // Start first tick
-    const firstHandle = session.render({ query: "First" });
+    const firstHandle = await session.render({ query: "First" });
 
     // Wait a bit then call render() again - should NOT throw
     await new Promise((r) => setTimeout(r, 10));
-    const secondHandle = session.render({ query: "Second" });
+    const secondHandle = await session.render({ query: "Second" });
     expect(secondHandle).toBeDefined();
     await secondHandle.result;
 
@@ -818,7 +818,7 @@ describe("useOnMessage integration", () => {
     const session = await app.session();
 
     // Start execution
-    const tickPromise = session.render({ query: "Hello" });
+    const tickPromise = await session.render({ query: "Hello" });
 
     // Wait for components to mount
     await new Promise((r) => setTimeout(r, 20));
@@ -923,7 +923,7 @@ describe("useOnMessage integration", () => {
     const app = createApp(Agent, { maxTicks: 1 });
     const session = await app.session();
 
-    const handle = session.send({
+    const handle = await session.send({
       messages: [
         {
           role: "user",
@@ -966,7 +966,7 @@ describe("useOnMessage integration", () => {
     const app = createApp(Agent, { maxTicks: 1 });
     const session = await app.session();
 
-    const handle = session.send({
+    const handle = await session.send({
       messages: [
         {
           role: "user",
@@ -1012,7 +1012,7 @@ describe("useOnMessage integration", () => {
     const session = await app.session();
 
     // Start execution
-    const tickPromise = session.render({ query: "Hello" });
+    const tickPromise = await session.render({ query: "Hello" });
 
     // Wait for components to mount
     await new Promise((r) => setTimeout(r, 20));
@@ -1212,7 +1212,7 @@ describe("useQueuedMessages integration", () => {
 
     // Tick 1: Start and queue message during execution
     currentTickNumber = 1;
-    const tick1Handle = session.render({ query: "First" });
+    const tick1Handle = await session.render({ query: "First" });
 
     // Wait for tick to start, then queue
     await new Promise((r) => setTimeout(r, 10));
@@ -1264,7 +1264,7 @@ describe("useQueuedMessages integration", () => {
 
     // Tick 1
     currentTick = 1;
-    const tick1Handle = session.render({ query: "Hello" });
+    const tick1Handle = await session.render({ query: "Hello" });
 
     // Queue during tick 1
     await new Promise((r) => setTimeout(r, 10));
@@ -1781,5 +1781,105 @@ describe("standalone run() function", () => {
 
     // Input props should win
     expect(capturedQuery).toBe("from input");
+  });
+});
+
+// ============================================================================
+// Procedure Middleware on send/render
+// ============================================================================
+
+describe("session.send and session.render as Procedures", () => {
+  it("should support middleware on session.render via .use()", async () => {
+    const model = createMockModel();
+    const calls: string[] = [];
+
+    const Agent = ({ query }: { query: string }) => (
+      <>
+        <Model model={model} />
+        <System>You are helpful.</System>
+        <Timeline />
+        <User>{query}</User>
+      </>
+    );
+
+    const app = createApp(Agent, { maxTicks: 1 });
+    const session = await app.session();
+
+    const handle = await session.render.use(async (args, _envelope, next) => {
+      calls.push("before");
+      const result = await next();
+      calls.push("after");
+      return result;
+    })({ query: "test" });
+
+    await handle.result;
+
+    expect(calls).toEqual(["before", "after"]);
+    expect(handle.status).toBe("completed");
+  });
+
+  it("should support middleware on session.send via .use()", async () => {
+    const model = createMockModel();
+    const calls: string[] = [];
+
+    const Agent = () => (
+      <>
+        <Model model={model} />
+        <System>You are helpful.</System>
+        <Timeline />
+      </>
+    );
+
+    const app = createApp(Agent, { maxTicks: 1 });
+    const session = await app.session();
+
+    const handle = await session.send.use(async (args, _envelope, next) => {
+      calls.push("before");
+      const result = await next();
+      calls.push("after");
+      return result;
+    })({
+      messages: [{ role: "user", content: [{ type: "text", text: "Hello" }] }],
+    });
+
+    await handle.result;
+
+    expect(calls).toEqual(["before", "after"]);
+    expect(handle.status).toBe("completed");
+  });
+
+  it(".use() should return a new Procedure without mutating the original", async () => {
+    const model = createMockModel();
+    const calls: string[] = [];
+
+    const Agent = ({ query }: { query: string }) => (
+      <>
+        <Model model={model} />
+        <System>You are helpful.</System>
+        <Timeline />
+        <User>{query}</User>
+      </>
+    );
+
+    const app = createApp(Agent, { maxTicks: 1 });
+    const session = await app.session();
+
+    // Create a middleware-wrapped variant
+    const wrappedRender = session.render.use(async (_args, _envelope, next) => {
+      calls.push("middleware");
+      return next();
+    });
+
+    // Use the original (no middleware)
+    const handle1 = await session.render({ query: "original" });
+    await handle1.result;
+
+    expect(calls).toEqual([]);
+
+    // Use the wrapped variant (middleware fires)
+    const handle2 = await wrappedRender({ query: "wrapped" });
+    await handle2.result;
+
+    expect(calls).toEqual(["middleware"]);
   });
 });

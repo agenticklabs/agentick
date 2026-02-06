@@ -6,6 +6,15 @@ import { AbortError } from "@tentickle/shared";
 import { isAsyncIterable } from "./stream";
 
 /**
+ * Brand symbol for ExecutionHandle objects.
+ *
+ * ExecutionTracker uses this to distinguish handles (which are AsyncIterable
+ * but manage their own lifecycle) from pure async generators (where iteration
+ * IS the execution). Branded objects pass through the tracker without wrapping.
+ */
+export const ExecutionHandleBrand: unique symbol = Symbol("tentickle.execution-handle");
+
+/**
  * Execution boundary behavior configuration.
  *
  * - `'always'`: Always create a new root execution (no parentExecutionId)
@@ -260,8 +269,10 @@ export class ExecutionTracker {
           // Execute function
           const result = await fn(node);
 
-          // If result is an AsyncIterable, wrap it to maintain context and defer procedure:end
-          if (isAsyncIterable(result)) {
+          // If result is a pure AsyncIterable (not a branded ExecutionHandle), wrap it
+          // to maintain context and defer procedure:end until iteration completes.
+          // ExecutionHandles manage their own lifecycle — pass them through unchanged.
+          if (isAsyncIterable(result) && !(result as any)[ExecutionHandleBrand]) {
             // Capture the forked context for use during iteration
             const forkedContext = Context.get();
 

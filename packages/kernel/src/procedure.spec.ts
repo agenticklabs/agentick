@@ -607,10 +607,10 @@ describe("Procedure Symbol Branding", () => {
 });
 
 // ============================================================================
-// ExecutionHandle Tests - PromiseLike + AsyncIterable Interface
+// ExecutionHandle Tests - ProcedurePromise + AsyncIterable Interface
 // ============================================================================
 
-describe("ExecutionHandle - PromiseLike interface", () => {
+describe("ExecutionHandle - ProcedurePromise interface", () => {
   it("should resolve to result when awaited", async () => {
     const proc = createProcedure({ name: "test" }, async (x: number) => x * 2);
     const promise = proc(5);
@@ -741,7 +741,7 @@ describe("ExecutionHandle - PromiseLike interface", () => {
     expect(result).toBe("fast");
   });
 
-  it("should maintain error handling through PromiseLike", async () => {
+  it("should maintain error handling through ProcedurePromise", async () => {
     const proc = createProcedure({ name: "test" }, async () => {
       throw new Error("expected error");
     });
@@ -819,10 +819,7 @@ describe("DirectProcedure - handleFactory: false (pass-through)", () => {
 
   it("should pass through handler result directly", async () => {
     // Pass-through mode passes the handler's return value through
-    // Note: if handler returns a PromiseLike (like ExecutionHandle),
-    // the async middleware chain will await it, giving the resolved value
-
-    // For non-PromiseLike returns, the value passes through as-is
+    // Pass-through mode passes the handler's return value through directly
     const proc = createProcedure({ name: "pass-through", handleFactory: false }, async () => ({
       type: "custom",
       value: 42,
@@ -833,13 +830,13 @@ describe("DirectProcedure - handleFactory: false (pass-through)", () => {
   });
 
   it("should work when delegating to another procedure", async () => {
-    // When delegating to another procedure, the result is the inner procedure's result
-    // (not its handle, since ExecutionHandle is PromiseLike and gets awaited)
+    // When delegating to another procedure, the result is the inner ProcedurePromise
+    // (which is PromiseLike, so async middleware chain awaits it to the resolved value)
     const innerProc = createProcedure({ name: "inner" }, async () => "inner-result");
 
     const outerProc = createProcedure(
       { name: "outer", handleFactory: false },
-      () => innerProc(), // Returns ExecutionHandle which is PromiseLike
+      () => innerProc(), // Returns ProcedurePromise (PromiseLike) — gets awaited by middleware
     );
 
     // The result is the inner procedure's resolved value

@@ -81,7 +81,7 @@ describe("Reactive Session Integration", () => {
       });
 
       // First tick to initialize
-      const handle = session.render({});
+      const handle = await session.render({});
       await handle.result;
 
       // Now session is idle - change state
@@ -223,7 +223,7 @@ describe("Reactive Session Integration", () => {
       });
 
       // Start tick
-      const handle = session.render({});
+      const handle = await session.render({});
 
       // Wait a bit but tick should still be running
       await new Promise((r) => setTimeout(r, 20));
@@ -584,7 +584,7 @@ describe("Reactive Session Integration", () => {
       const session = await app.session();
 
       // Send a message with props - should start a tick
-      const handle = session.send({
+      const handle = await session.send({
         props: {} as any, // Provide props to trigger tick
         messages: [{ role: "user", content: [{ type: "text", text: "Hello!" }] }],
       });
@@ -627,7 +627,7 @@ describe("Reactive Session Integration", () => {
       const countAfterFirstTick = modelInputs.length;
 
       // Now send a message - should start another tick
-      const handle = session.send({
+      const handle = await session.send({
         messages: [{ role: "user", content: [{ type: "text", text: "Test message" }] }],
       });
 
@@ -658,14 +658,14 @@ describe("Reactive Session Integration", () => {
       const session = await app.session();
 
       // Start first tick via tick() to set props
-      const handle1 = session.render({} as any);
+      const handle1 = await session.render({} as any);
 
       // Wait a moment to ensure it's running
       await new Promise((r) => setTimeout(r, 10));
       expect(handle1.status).toBe("running");
 
       // While running, send a message - should return same handle
-      const handle2 = session.send({
+      const handle2 = await session.send({
         messages: [{ role: "user", content: [{ type: "text", text: "Second" }] }],
       });
 
@@ -712,7 +712,7 @@ describe("Reactive Session Integration", () => {
       await flushMicrotasks();
 
       // Send message - should start another tick with updated state
-      const handle = session.send({
+      const handle = await session.send({
         messages: [{ role: "user", content: [{ type: "text", text: "How are you?" }] }],
       });
       await handle.result;

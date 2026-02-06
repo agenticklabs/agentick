@@ -211,6 +211,16 @@ const timing: Middleware = async (args, envelope, next) => {
 
 `createEngineProcedure` is not exported from core's public API. It's used internally by adapters, tools, and MCP tools. Users register middleware via `Tentickle.use()`, which is resolved at runtime from ALS context.
 
+**Session Procedures** — `session.send`, `session.render`, `session.queue`, and `app.run` are all Procedures:
+
+```typescript
+const handle = await session.send({ messages: [...] });       // ProcedurePromise → SessionExecutionHandle
+const result = await session.send({ messages: [...] }).result; // ProcedurePromise.result → SendResult
+const handle = await session.render({ query: "Hello" });       // ProcedurePromise → SessionExecutionHandle
+```
+
+All four use passthrough mode (`handleFactory: false`) — the handler's return value flows through directly. `ProcedurePromise.result` chains to `SessionExecutionHandle.result`, giving `SendResult`.
+
 ### Using ALS Context
 
 ```typescript

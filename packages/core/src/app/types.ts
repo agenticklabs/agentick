@@ -746,14 +746,14 @@ export type StreamEvent = SharedStreamEvent;
  * methods using explicit delegation. This is the return type of session.send()
  * and session.render().
  *
- * The handle is both PromiseLike and AsyncIterable:
- * - `await handle` → resolves to SendResult
+ * The handle is AsyncIterable (not PromiseLike):
+ * - `await handle.result` → resolves to SendResult
  * - `for await (const event of handle)` → streams StreamEvent
  *
  * @example
  * ```typescript
- * // Call send() - returns handle immediately
- * const handle = session.send({ messages: [...] });
+ * // send/render are Procedures — await to get the handle
+ * const handle = await session.send({ messages: [...] });
  *
  * // Stream events
  * for await (const event of handle) {
@@ -762,8 +762,8 @@ export type StreamEvent = SharedStreamEvent;
  *   }
  * }
  *
- * // Or just await for result
- * const result = await handle;
+ * // Or get result directly via ProcedurePromise chaining
+ * const result = await session.send({ messages: [...] }).result;
  * console.log(result.response);
  *
  * // Mid-execution interaction
@@ -1229,12 +1229,13 @@ export interface SessionRecording {
  *   console.log(event);
  * }
  *
- * // Run with props, get result
- * const result = await session.render({ query: "Hello!" });
+ * // Run with props, get handle
+ * const handle = await session.render({ query: "Hello!" });
+ * const result = await handle.result;
  * console.log(result.response);
  *
- * // Session maintains state between renders
- * const result2 = await session.render({ query: "Follow up" });
+ * // Or get result directly via ProcedurePromise chaining
+ * const result2 = await session.render({ query: "Follow up" }).result;
  *
  * // Queue messages for next tick
  * await session.queue.exec({ role: "user", content: [...] });
@@ -1287,8 +1288,8 @@ export interface Session<P = Record<string, unknown>> extends EventEmitter {
   /**
    * Send messages and/or update props.
    *
-   * Returns SessionExecutionHandle which is PromiseLike + AsyncIterable:
-   * - `await handle` → SendResult when execution completes
+   * Returns SessionExecutionHandle (AsyncIterable, not PromiseLike):
+   * - `await handle.result` → SendResult when execution completes
    * - `for await (const event of handle)` → stream events
    *
    * Concurrent calls return THE SAME handle - messages queue, handle resolves
@@ -1296,22 +1297,22 @@ export interface Session<P = Record<string, unknown>> extends EventEmitter {
    *
    * @example
    * ```typescript
-   * // Get handle immediately, stream events
-   * const handle = session.send({ messages: [...] });
+   * // Await Procedure to get handle, then stream events
+   * const handle = await session.send({ messages: [...] });
    * for await (const event of handle) {
    *   console.log(event);
    * }
    *
-   * // Or just await
-   * const result = await session.send({ messages: [...] });
+   * // Or get the result directly via ProcedurePromise chaining
+   * const result = await session.send({ messages: [...] }).result;
    * ```
    */
-  send(input: SendInput<P>): SessionExecutionHandle;
+  send: Procedure<(input: SendInput<P>) => SessionExecutionHandle, true>;
 
   /**
    * Run the component with props, execute tick loop.
    *
-   * Returns SessionExecutionHandle which is PromiseLike + AsyncIterable.
+   * Returns SessionExecutionHandle (AsyncIterable, not PromiseLike).
    * If already running, returns the existing handle (hot-update support).
    *
    * Note: If called with no props (or empty props) and no queued messages, returns an
@@ -1319,12 +1320,12 @@ export interface Session<P = Record<string, unknown>> extends EventEmitter {
    *
    * @example
    * ```typescript
-   * const handle = session.render(props);
+   * const handle = await session.render(props);
    * handle.queueMessage({ role: "user", content: [...] });
-   * const result = await handle;
+   * const result = await handle.result;
    * ```
    */
-  render(props: P, options?: ExecutionOptions): SessionExecutionHandle;
+  render: Procedure<(props: P, options?: ExecutionOptions) => SessionExecutionHandle, true>;
 
   /**
    * Interrupt the current execution, optionally with a message.
@@ -1568,18 +1569,18 @@ export interface App<P = Record<string, unknown>> {
   /**
    * Run the app with input.
    *
-   * Returns SessionExecutionHandle which is both:
-   * - PromiseLike: `await app.run(input)` → SendResult
-   * - AsyncIterable: `for await (const event of app.run(input))` → StreamEvent
+   * Returns SessionExecutionHandle (AsyncIterable, not PromiseLike):
+   * - `await handle.result` → SendResult
+   * - `for await (const event of handle)` → StreamEvent
    *
    * Creates an ephemeral session internally (create → run → close).
    *
-   * @example Await result
+   * @example Get result
    * ```typescript
    * const result = await app.run({
    *   props: { system: "You are helpful" },
    *   messages: [{ role: "user", content: [{ type: "text", text: "Hello!" }] }],
-   * });
+   * }).result;
    * console.log(result.response);
    * ```
    *
@@ -1591,14 +1592,14 @@ export interface App<P = Record<string, unknown>> {
    *   history: previousConversation.entries,
    *   maxTicks: 5,
    *   devTools: true,
-   * });
+   * }).result;
    * ```
    *
    * @example Use handle for control
    * ```typescript
-   * const handle = app.run({ messages });
+   * const handle = await app.run({ messages });
    * handle.queueMessage({ role: "user", content: [...] });
-   * const result = await handle;
+   * const result = await handle.result;
    * ```
    */
   run: Procedure<(input: RunInput<P>) => SessionExecutionHandle, true>;

@@ -395,7 +395,7 @@ class AppImpl<P extends Record<string, unknown>> implements App<P> {
         name: "app:run",
         handleFactory: false,
       },
-      (input: RunInput<P>): SessionExecutionHandle => {
+      async (input: RunInput<P>): Promise<SessionExecutionHandle> => {
         const {
           props = {} as P,
           messages = [],
@@ -423,7 +423,7 @@ class AppImpl<P extends Record<string, unknown>> implements App<P> {
           session.queue.exec(message);
         }
 
-        const handle = session.render(props, executionOptions);
+        const handle = await session.render(props, executionOptions);
 
         handle.result
           .finally(() => session.close())
@@ -444,7 +444,7 @@ class AppImpl<P extends Record<string, unknown>> implements App<P> {
 
     if (!sessionId) {
       const session = this.createSession(undefined, {});
-      const handle = session.send(input);
+      const handle = await session.send(input);
       handle.result
         .finally(() => session.close())
         .catch(() => {
@@ -455,7 +455,7 @@ class AppImpl<P extends Record<string, unknown>> implements App<P> {
 
     const session = await this.session(sessionId);
     const maybeModified = this.options.onBeforeSend?.(session, input) ?? input;
-    const handle = session.send(maybeModified);
+    const handle = await session.send(maybeModified);
     handle.result
       .then((result) => {
         this.options.onAfterSend?.(session, result);
@@ -615,21 +615,22 @@ export class TentickleInstance implements MiddlewareRegistry {
    * `{ ...element.props, ...input.props }` — so `<Agent query="default" />` with
    * `{ props: { query: "override" } }` uses `"override"`.
    *
-   * Returns SessionExecutionHandle which is both PromiseLike and AsyncIterable:
-   * - `await run(...)` → SendResult
-   * - `for await (const event of run(...))` → StreamEvent
+   * Returns SessionExecutionHandle (AsyncIterable, not PromiseLike):
+   * - `await run(...).result` → SendResult
+   * - `for await (const event of await run(...))` → StreamEvent
    *
-   * @example Await result
+   * @example Get result
    * ```typescript
    * const result = await Tentickle.run(
    *   <MyAgent />,
    *   { messages: [{ role: "user", content: [...] }], model }
-   * );
+   * ).result;
    * ```
    *
    * @example Stream events
    * ```typescript
-   * for await (const event of Tentickle.run(<MyAgent />, { messages, model })) {
+   * const handle = await Tentickle.run(<MyAgent />, { messages, model });
+   * for await (const event of handle) {
    *   if (event.type === 'content_delta') {
    *     process.stdout.write(event.delta);
    *   }
@@ -639,7 +640,7 @@ export class TentickleInstance implements MiddlewareRegistry {
    * @example Add middleware to run
    * ```typescript
    * const loggedRun = Tentickle.run.use(loggingMiddleware);
-   * const result = await loggedRun(<MyAgent />, { messages, model });
+   * const result = await loggedRun(<MyAgent />, { messages, model }).result;
    * ```
    */
   readonly run: Procedure<RunHandler, true>;
@@ -882,17 +883,18 @@ export const createApp = Tentickle.createApp.bind(Tentickle);
  * One-shot execution of a JSX component.
  *
  * This is `Tentickle.run` - the simplest way to run an agent.
- * Returns SessionExecutionHandle which is both PromiseLike and AsyncIterable.
+ * Returns SessionExecutionHandle (AsyncIterable, not PromiseLike).
  *
  * @example
  * ```typescript
  * import { run } from 'tentickle';
  *
- * // Await result
- * const result = await run(<MyAgent />, { messages, model });
+ * // Get result
+ * const result = await run(<MyAgent />, { messages, model }).result;
  *
  * // Stream events
- * for await (const event of run(<MyAgent />, { messages, model })) {
+ * const handle = await run(<MyAgent />, { messages, model });
+ * for await (const event of handle) {
  *   console.log(event);
  * }
  * ```
