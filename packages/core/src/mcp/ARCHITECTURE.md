@@ -731,10 +731,10 @@ sequenceDiagram
 
 ```typescript
 import { Engine } from "tentickle";
-import { OpenAIAdapter } from "@tentickle/openai";
+import { openai } from "@tentickle/openai";
 
 const engine = new Engine({
-  model: new OpenAIAdapter({ model: "gpt-5.2" }),
+  model: openai({ model: "gpt-5.2" }),
   mcpServers: {
     filesystem: {
       command: "npx",

@@ -32,8 +32,6 @@ import {
 } from "@tentickle/shared";
 import { type OpenAIAdapterConfig, STOP_REASON_MAP } from "./types";
 
-export type OpenAIAdapter = ModelClass;
-
 // const logger = Logger.for("OpenAIAdapter");
 
 // ============================================================================

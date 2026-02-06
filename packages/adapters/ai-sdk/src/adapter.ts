@@ -117,8 +117,6 @@ declare module "@tentickle/core" {
   }
 }
 
-export type AiSdkAdapter = ModelClass;
-
 const logger = Logger.for("AiSdkAdapter");
 
 // ============================================================================
@@ -540,7 +538,7 @@ export function createAiSdkModel(config: AiSdkAdapterConfig): ModelClass {
  * const model = aiSdk({ model: openai('gpt-4o') });
  * ```
  */
-export function aiSdk(config: AiSdkAdapterConfig): AiSdkAdapter {
+export function aiSdk(config: AiSdkAdapterConfig): ModelClass {
   return createAiSdkModel(config);
 }
 

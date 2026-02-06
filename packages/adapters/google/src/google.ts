@@ -28,8 +28,6 @@ import {
 } from "@tentickle/shared";
 import { type GoogleAdapterConfig, STOP_REASON_MAP } from "./types";
 
-export type GoogleAdapter = ModelClass;
-
 // const logger = Logger.for("GoogleAdapter");
 
 // ============================================================================

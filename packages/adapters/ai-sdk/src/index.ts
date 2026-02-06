@@ -41,7 +41,7 @@
 // ============================================================================
 
 // Use ai-sdk models within our Engine
-export { createAiSdkModel, aiSdk, type AiSdkAdapter, type AiSdkAdapterConfig } from "./adapter";
+export { createAiSdkModel, aiSdk, type AiSdkAdapterConfig } from "./adapter";
 
 // Conversion utilities (for advanced use cases)
 export {

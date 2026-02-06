@@ -253,11 +253,11 @@ this.run = createEngineProcedure()
 
 ```typescript
 import { Engine } from 'tentickle';
-import { OpenAIAdapter } from '@tentickle/openai';
+import { openai } from '@tentickle/openai';
 
 // Create engine with MCP servers configured
 const engine = new Engine({
-  model: new OpenAIAdapter({ model: 'gpt-5.2' }),
+  model: openai({ model: 'gpt-5.2' }),
   mcpServers: {
     postgres: {
       command: 'npx',
@@ -290,7 +290,7 @@ import { EngineComponent } from 'tentickle';
 
 // Create engine WITHOUT mcpServers config
 const engine = new Engine({
-  model: new OpenAIAdapter({ model: 'gpt-5.2' }),
+  model: openai({ model: 'gpt-5.2' }),
   // No mcpServers here!
 });
 

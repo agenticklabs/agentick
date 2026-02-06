@@ -507,21 +507,30 @@ const testApp = createApp(TestApp, {
 For one-off executions without session management:
 
 ```tsx
-import { run, runComponent } from "@tentickle/core";
+import { run } from "@tentickle/core";
 
-// Run a component directly
-const result = await runComponent(
+const result = await run(
   <MyApp />,
-  { messages: [{ role: "user", content: [{ type: "text", text: "Hello!" }] }] },
-  { model: myModel }
+  { messages: [{ role: "user", content: [{ type: "text", text: "Hello!" }] }], model: myModel }
 );
-
-// Run with app configuration
-const result = await run(MyApp, {
-  messages: [{ role: "user", content: [{ type: "text", text: "Hello!" }] }],
-  model: myModel,
-});
 ```
+
+### Choosing `run()` vs `createApp`
+
+| Use case                          | API                                                            |
+| --------------------------------- | -------------------------------------------------------------- |
+| One-shot, quick prototype         | `run(<Agent />, { model, messages })`                          |
+| Reusable app, persistent sessions | `createApp(Agent, { model })` + `app.run()` / `session.send()` |
+| Middleware, lifecycle hooks       | `createApp` (supports `app.run.use(mw)`)                       |
+
+`run()` accepts a JSX element (not a bare component function). Element props are defaults — `input.props` overrides them:
+
+```tsx
+// Element prop "query" is "default", but input.props overrides it to "override"
+await run(<Agent query="default" />, { props: { query: "override" }, model, messages });
+```
+
+`createApp` takes a component function and returns a reusable app with session management, hibernation, and middleware support.
 
 ## DevTools Integration
 

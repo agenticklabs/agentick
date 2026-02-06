@@ -608,7 +608,13 @@ export class TentickleInstance implements MiddlewareRegistry {
   /**
    * One-shot execution of a JSX component.
    *
-   * This is a procedure with handleFactory: false (pass-through).
+   * Accepts a JSX element and optional RunInput. Creates a temporary app and session,
+   * runs to completion, then cleans up.
+   *
+   * **Prop merging:** Element props are defaults, `input.props` override them.
+   * `{ ...element.props, ...input.props }` — so `<Agent query="default" />` with
+   * `{ props: { query: "override" } }` uses `"override"`.
+   *
    * Returns SessionExecutionHandle which is both PromiseLike and AsyncIterable:
    * - `await run(...)` → SendResult
    * - `for await (const event of run(...))` → StreamEvent
