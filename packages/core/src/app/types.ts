@@ -28,6 +28,7 @@ import type { MCPConfig } from "../mcp";
 import type { EngineModel } from "../model/model";
 import type { ExecutionHandle, Channel, Procedure } from "@tentickle/kernel";
 import type { JSX } from "../jsx/jsx-runtime";
+import type { AgentConfig } from "../agent";
 // Signal type removed - schedulerState now returns SchedulerState directly
 import type { SchedulerState } from "../compiler/scheduler";
 
@@ -1260,6 +1261,12 @@ export interface Session<P = Record<string, unknown>> extends EventEmitter {
   /** Whether the session has been aborted */
   readonly isAborted: boolean;
 
+  /** Parent session, or null for root sessions. */
+  readonly parent: Session | null;
+
+  /** Active child sessions (currently running spawns). */
+  readonly children: readonly Session[];
+
   /** Messages queued for the next tick (read-only view) */
   readonly queuedMessages: readonly Message[];
 
@@ -1326,6 +1333,35 @@ export interface Session<P = Record<string, unknown>> extends EventEmitter {
    * ```
    */
   render: Procedure<(props: P, options?: ExecutionOptions) => SessionExecutionHandle, true>;
+
+  /**
+   * Spawn a child session with a different agent/component.
+   *
+   * Creates an ephemeral child session, runs it to completion, and returns
+   * the same SessionExecutionHandle as session.send().
+   *
+   * The child session is NOT registered in the App's session registry.
+   * Parent abort propagates to child. Max spawn depth is 10.
+   *
+   * @param agentOrConfig - AgentConfig, ComponentFunction, or JSX element
+   * @param input - Optional SendInput for the child session
+   *
+   * @example
+   * ```typescript
+   * // From a tool handler via ctx.spawn()
+   * const handle = await ctx.spawn(ResearchAgent, {
+   *   messages: [{ role: "user", content: [{ type: "text", text: query }] }],
+   * });
+   * const result = await handle.result;
+   * ```
+   */
+  spawn: Procedure<
+    (
+      agentOrConfig: AgentConfig | ComponentFunction | JSX.Element,
+      input?: SendInput,
+    ) => SessionExecutionHandle,
+    true
+  >;
 
   /**
    * Interrupt the current execution, optionally with a message.

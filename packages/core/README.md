@@ -43,6 +43,52 @@ const session = await app.session();
 await session.send({ messages: [{ role: "user", content: [{ type: "text", text: "What is 2 + 2?" }] }] }).result;
 ```
 
+## Level 0: `createAgent` (No JSX Required)
+
+For simple agents that don't need custom rendering or hooks:
+
+```tsx
+import { createAgent, knob } from "@tentickle/core";
+import { createOpenAIModel } from "@tentickle/openai";
+
+const agent = createAgent({
+  system: "You are a helpful researcher.",
+  model: createOpenAIModel(),
+  tools: [SearchTool, Calculator],
+  knobs: {
+    mode: knob("broad", { description: "Search mode", options: ["broad", "deep"] }),
+  },
+});
+
+const handle = await agent.run({
+  messages: [{ role: "user", content: [{ type: "text", text: "Research quantum computing" }] }],
+});
+for await (const chunk of handle) {
+  console.log(chunk);
+}
+const result = await handle.result;
+
+// or create an agent session
+
+const session = await agent.session();
+await session.send({
+  messages: [{ role: "user", content: [{ type: "text", text: "Research quantum computing" }] }],
+}).result;
+```
+
+`createAgent` wraps the `<Agent>` component and `createApp` — same capabilities, no JSX. For conditional tools, custom hooks, or composition, use `<Agent>` directly (Level 1+):
+
+```tsx
+import { Agent, createApp } from "@tentickle/core";
+
+function MyAgent() {
+  const [verbose] = useKnob("verbose", false, { description: "Verbose mode" });
+  return <Agent system="You are helpful." tools={[SearchTool]} />;
+}
+
+const app = createApp(MyAgent);
+```
+
 ## JSX Components
 
 ### `<System>`
@@ -555,6 +601,65 @@ console.log(snapshot.timeline);
 console.log(snapshot.usage);
 ```
 
+### Spawning Child Sessions
+
+`session.spawn()` creates an ephemeral child session with a different agent/component. The child runs to completion and returns a `SessionExecutionHandle` — the same type as `session.send()`. This is the recursive primitive for multi-agent systems.
+
+```tsx
+// Spawn with a component function
+const handle = await session.spawn(ChildAgent, {
+  messages: [{ role: "user", content: [{ type: "text", text: "Analyze this data" }] }],
+});
+const result = await handle.result;
+
+// Spawn with an AgentConfig (Level 0)
+const handle = await session.spawn(
+  { system: "You are a summarizer.", model: summaryModel },
+  { messages: [{ role: "user", content: [{ type: "text", text: doc }] }] },
+);
+
+// Spawn with a JSX element (props from element + input.props are merged)
+const handle = await session.spawn(
+  <Researcher query="quantum computing" />,
+  { messages: [{ role: "user", content: [{ type: "text", text: "Go" }] }] },
+);
+```
+
+**Parallel spawns** work with `Promise.all`:
+
+```tsx
+const [researchResult, factCheckResult] = await Promise.all([
+  session.spawn(Researcher, { messages }).then(h => h.result),
+  session.spawn(FactChecker, { messages }).then(h => h.result),
+]);
+```
+
+**From tool handlers** via `ctx.spawn()`:
+
+```tsx
+const DelegateTool = createTool({
+  name: "delegate",
+  description: "Delegate to a specialist",
+  input: z.object({ task: z.string() }),
+  handler: async (input, ctx) => {
+    const handle = await ctx!.spawn(Specialist, {
+      messages: [{ role: "user", content: [{ type: "text", text: input.task }] }],
+    });
+    const result = await handle.result;
+    return [{ type: "text", text: result.response }];
+  },
+});
+```
+
+**Key behaviors:**
+
+- **Isolation**: Child gets a fresh COM — no parent state leaks.
+- **Lifecycle isolation**: Parent's lifecycle callbacks (onComplete, onTickStart, etc.) do NOT fire for child executions.
+- **Abort propagation**: Aborting the parent execution aborts all children.
+- **Close propagation**: Closing the parent session closes all children.
+- **Depth limit**: Maximum 10 levels of nesting (throws if exceeded).
+- **Cleanup**: Children are removed from `session.children` when they complete.
+
 ### Session Persistence & Hibernation
 
 Control hibernation, limits, and auto-cleanup:
@@ -588,7 +693,7 @@ const app = createApp(MyApp, {
 
 ### Procedures & Middleware
 
-Session methods `send`, `render`, and `queue` are all Procedures. This means they support middleware, context injection, and the chainable API:
+Session methods `send`, `render`, `queue`, and `spawn` are all Procedures. This means they support middleware, context injection, and the chainable API:
 
 ```typescript
 const session = await app.session();

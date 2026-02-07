@@ -87,15 +87,16 @@ interface EphemeralEntry {
 
 ## COM Methods
 
-| Method                     | Description                |
-| -------------------------- | -------------------------- |
-| `getState(key)`            | Get shared state value     |
-| `setState(key, value)`     | Set shared state value     |
-| `addSection(section)`      | Add a named section        |
-| `removeSection(id)`        | Remove a section           |
-| `addEphemeral(entry)`      | Add transient content      |
-| `setModel(model)`          | Set the active model       |
-| `requestRecompile(reason)` | Request tree recompilation |
+| Method                     | Description                                      |
+| -------------------------- | ------------------------------------------------ |
+| `getState(key)`            | Get shared state value                           |
+| `setState(key, value)`     | Set shared state value                           |
+| `addSection(section)`      | Add a named section                              |
+| `removeSection(id)`        | Remove a section                                 |
+| `addEphemeral(entry)`      | Add transient content                            |
+| `setModel(model)`          | Set the active model                             |
+| `requestRecompile(reason)` | Request tree recompilation                       |
+| `spawn(agent, input)`      | Spawn a child session (requires session context) |
 
 ## Architecture
 

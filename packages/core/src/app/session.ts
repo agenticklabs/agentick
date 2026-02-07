@@ -79,6 +79,9 @@ import type {
   SendInput,
   HookType,
 } from "./types";
+import React from "react";
+import { Agent } from "../jsx/components/agent";
+import type { AgentConfig } from "../agent";
 
 // ════════════════════════════════════════════════════════════════════════════
 // Session Context Extension
@@ -209,6 +212,12 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
   // Hibernate callback (set by App when registering session)
   private _hibernateCallback: (() => Promise<SessionSnapshot | null>) | null = null;
 
+  // Spawn hierarchy
+  private _parent: Session | null = null;
+  private _children: Session[] = [];
+  private _spawnDepth = 0;
+  private static readonly MAX_SPAWN_DEPTH = 10;
+
   constructor(
     Component: ComponentFunction<P>,
     appOptions: AppOptions,
@@ -288,6 +297,14 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
     return this._isAborted;
   }
 
+  get parent(): Session | null {
+    return this._parent;
+  }
+
+  get children(): readonly Session[] {
+    return this._children;
+  }
+
   get queuedMessages(): readonly Message[] {
     return this._queuedMessages;
   }
@@ -322,6 +339,13 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
   queue!: Procedure<(message: Message) => Promise<void>, true>;
   send!: Procedure<(input: SendInput<P>) => SessionExecutionHandle, true>;
   render!: Procedure<(props: P, options?: ExecutionOptions) => SessionExecutionHandle, true>;
+  spawn!: Procedure<
+    (
+      agentOrConfig: AgentConfig | ComponentFunction | JSX.Element,
+      input?: SendInput,
+    ) => SessionExecutionHandle,
+    true
+  >;
 
   private initProcedures(): void {
     // Queue procedure - queues messages and notifies components
@@ -469,6 +493,67 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
         this._lastProps = props;
         const handle = this.createSessionHandle(props, options);
         this._currentHandle = handle;
+        return handle;
+      },
+    );
+
+    // Spawn procedure - creates ephemeral child session
+    this.spawn = createProcedure(
+      {
+        name: "session:spawn",
+        metadata: { operation: "spawn" },
+        handleFactory: false,
+        executionBoundary: false,
+      },
+      async (
+        agentOrConfig: AgentConfig | ComponentFunction | JSX.Element,
+        input: SendInput = {},
+      ): Promise<SessionExecutionHandle> => {
+        if (this._status === "closed") {
+          throw new Error("Session is closed");
+        }
+        if (this._spawnDepth >= SessionImpl.MAX_SPAWN_DEPTH) {
+          throw new Error(`Maximum spawn depth (${SessionImpl.MAX_SPAWN_DEPTH}) exceeded`);
+        }
+
+        // 1. Resolve to ComponentFunction
+        const { Component, mergedProps } = this.resolveSpawnTarget(agentOrConfig, input);
+
+        // 2. Create child SessionImpl (ephemeral — NOT registered in App's registry)
+        //    Whitelist structural fields only — lifecycle callbacks, session management,
+        //    signal, and devTools are intentionally excluded. New AppOptions fields
+        //    must be explicitly added here if children should inherit them.
+        const childAppOptions: AppOptions = {
+          model: this.appOptions.model,
+          tools: this.appOptions.tools,
+          mcpServers: this.appOptions.mcpServers,
+          maxTicks: this.appOptions.maxTicks,
+          inheritDefaults: this.appOptions.inheritDefaults,
+        };
+
+        const childOptions: SessionOptions = {
+          signal: this.executionAbortController?.signal,
+          devTools: this.sessionOptions.devTools ?? this.appOptions.devTools,
+        };
+        const child = new SessionImpl(Component, childAppOptions, childOptions);
+        (child as any)._parent = this;
+        (child as any)._spawnDepth = this._spawnDepth + 1;
+        this._children.push(child as unknown as Session);
+
+        // 3. Delegate to child.send()
+        const handle = await child.send({
+          ...input,
+          props: mergedProps,
+        });
+
+        // 4. Cleanup on completion
+        handle.result
+          .finally(() => {
+            this._children = this._children.filter((c) => c !== (child as unknown as Session));
+            child.close();
+          })
+          .catch(() => {});
+
         return handle;
       },
     );
@@ -707,6 +792,49 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
   }
 
   // ════════════════════════════════════════════════════════════════════════
+  // Spawn Target Resolution
+  // ════════════════════════════════════════════════════════════════════════
+
+  /**
+   * Resolve spawn target to a ComponentFunction and merged props.
+   */
+  private resolveSpawnTarget(
+    agentOrConfig: AgentConfig | ComponentFunction | JSX.Element,
+    input: SendInput,
+  ): { Component: ComponentFunction; mergedProps: Record<string, unknown> } {
+    // JSX Element
+    if (React.isValidElement(agentOrConfig)) {
+      return {
+        Component: agentOrConfig.type as ComponentFunction,
+        mergedProps: {
+          ...(agentOrConfig.props as Record<string, unknown>),
+          ...(input.props ?? {}),
+        },
+      };
+    }
+
+    // Component function
+    if (typeof agentOrConfig === "function") {
+      return {
+        Component: agentOrConfig as ComponentFunction,
+        mergedProps: input.props ?? {},
+      };
+    }
+
+    // AgentConfig — wrap in Agent component
+    const config = agentOrConfig as AgentConfig;
+    const SpawnedAgent = () =>
+      React.createElement(Agent, {
+        system: config.system,
+        model: config.model,
+        tools: config.tools,
+        knobs: config.knobs,
+      });
+    SpawnedAgent.displayName = "SpawnedAgent";
+    return { Component: SpawnedAgent, mergedProps: input.props ?? {} };
+  }
+
+  // ════════════════════════════════════════════════════════════════════════
   // Channels
   // ════════════════════════════════════════════════════════════════════════
 
@@ -747,6 +875,11 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
     if (this._status === "running") {
       this._isAborted = true;
       this.executionAbortController?.abort(reason ?? "interrupt");
+
+      // Propagate interrupt to child sessions (spread-copy: interrupt cleanup may mutate array)
+      for (const child of [...this._children]) {
+        child.interrupt(undefined, reason ?? "Parent interrupted");
+      }
     }
   }
 
@@ -1393,6 +1526,13 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
     if (this._status === "closed") return;
 
     this._status = "closed";
+
+    // Close all child sessions
+    for (const child of [...this._children]) {
+      child.close();
+    }
+    this._children = [];
+
     this.sessionAbortController.abort("Session closed");
     this.executionAbortController?.abort("Session closed");
 
@@ -2077,6 +2217,9 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
     this.ctx.setRecompileCallback((reason) => {
       this.scheduler!.schedule(reason ?? "COM recompile request");
     });
+
+    // Wire COM spawn delegate to session's spawn Procedure
+    this.ctx.setSpawnCallback((agent: any, input: any) => this.spawn(agent, input));
 
     this.structureRenderer = new StructureRenderer(this.ctx);
     this.structureRenderer.setDefaultRenderer(new MarkdownRenderer());

@@ -21,7 +21,7 @@ describe("DevToolsServer", () => {
 
     await new Promise((resolve) => setTimeout(resolve, 20));
 
-    expect((devtools as { server: unknown }).server).toBeNull();
+    expect((devtools as unknown as { server: unknown }).server).toBeNull();
 
     await new Promise<void>((resolve) => blocker.close(() => resolve()));
   });
