@@ -40,7 +40,7 @@ function MyApp() {
 // Create and run
 const app = createApp(MyApp, { model: createOpenAIModel() });
 const session = await app.session();
-await session.run({ messages: [{ role: "user", content: [{ type: "text", text: "What is 2 + 2?" }] }] });
+await session.send({ messages: [{ role: "user", content: [{ type: "text", text: "What is 2 + 2?" }] }] }).result;
 ```
 
 ## JSX Components
@@ -134,12 +134,20 @@ function MyComponent() {
   // React-style state
   const [count, setCount] = useState(0);
 
-  // Signal-based reactive state
+  // Signal-based reactive state — Signal<T> is a callable + .set() + .value
   const counter = useSignal(0);
-  const doubled = useComputed(() => counter.value * 2);
+  const doubled = useComputed(() => counter() * 2, [counter]);
 
-  // COM state (persisted across ticks)
-  const [notes, setNotes] = useComState<string[]>("notes", []);
+  counter();              // read: 0
+  counter.set(5);         // write
+  counter.update(v => v + 1); // update with function
+  doubled();              // read: 12
+
+  // COM state (persisted across ticks, shared between components)
+  // Returns Signal<T>, NOT a tuple
+  const notes = useComState<string[]>("notes", []);
+  notes();                // read current value
+  notes.set(["a", "b"]); // write new value
 }
 ```
 
@@ -231,6 +239,103 @@ function MyComponent() {
   }
 }
 ```
+
+### Knobs
+
+Knobs are **form controls for models**. The same way HTML inputs bridge humans to application state, knobs bridge models to application state. The model sees primitive values (string, number, boolean), can change them via a `set_knob` tool, and the change takes effect on the next recompile.
+
+`useKnob()` creates reactive state + renders it to model context + registers a tool — all in one line.
+
+```tsx
+import { useKnob, Knobs } from "@tentickle/core";
+
+function Agent() {
+  // String with options → model sees [select] type
+  const [mode] = useKnob("mode", "broad", {
+    description: "Operating mode",
+    options: ["broad", "deep"],
+  });
+
+  // Number with constraints → model sees [range] type
+  const [temp] = useKnob("temp", 0.7, {
+    description: "Temperature",
+    group: "Model",
+    min: 0, max: 2, step: 0.1,
+  });
+
+  // Boolean → model sees [toggle] type
+  const [verbose] = useKnob("verbose", false, { description: "Verbose output" });
+
+  // With resolver — model sets a primitive, you get a rich value
+  const [model] = useKnob("model", "gpt-4", { description: "Model" }, (v) => openai(v));
+
+  return (
+    <>
+      <Knobs />
+      <Timeline />
+    </>
+  );
+}
+```
+
+#### `<Knobs />` — Three Rendering Modes
+
+The `set_knob` tool is always registered automatically. You control how knobs are rendered to the model's context:
+
+```tsx
+// 1. Default — renders a grouped knob section automatically
+<Knobs />
+
+// 2. Render prop — custom section formatting, receives KnobGroup[]
+<Knobs>
+  {(groups) => (
+    <Section id="my-knobs" audience="model">
+      {groups.flatMap(g => g.knobs).map(k => `${k.name}=${k.value}`).join("\n")}
+    </Section>
+  )}
+</Knobs>
+
+// 3. Provider — full custom rendering with React context
+<Knobs.Provider>
+  <Knobs.Controls />                          {/* Default section */}
+  <Knobs.Controls renderKnob={(k) => ...} />  {/* Custom per-knob */}
+  <Knobs.Controls renderGroup={(g) => ...} />  {/* Custom per-group */}
+</Knobs.Provider>
+```
+
+The provider pattern also exposes `useKnobsContext()` for fully custom rendering:
+
+```tsx
+import { useKnobsContext } from "@tentickle/core";
+
+function MyKnobUI() {
+  const { knobs, groups, get } = useKnobsContext();
+  const temp = get("temp");
+  return (
+    <Section id="knobs" audience="model">
+      Temperature is {temp?.value}. There are {knobs.length} knobs.
+    </Section>
+  );
+}
+```
+
+#### Config-level Knobs
+
+For `createAgent` / `<Agent>`, declare knobs as descriptors with `knob()`:
+
+```tsx
+import { knob, createAgent } from "@tentickle/core";
+
+const agent = createAgent({
+  system: "You are a researcher.",
+  knobs: {
+    mode: knob("broad", { description: "Operating mode", options: ["broad", "deep"] }),
+    temperature: knob(0.7, { description: "Temperature", min: 0, max: 2, step: 0.1 }),
+  },
+});
+```
+
+See `packages/core/src/hooks/README.md` for complete API reference including `KnobInfo`, `KnobGroup`, constraints, and validation.
 
 ## Context Utilization
 
@@ -357,8 +462,8 @@ const WeatherTool = createTool({
     ctx?.setState("lastLocation", location);
     return [{ type: "text", text: JSON.stringify(weather) }];
   },
-  // Optional: render state to model context
-  render: () => (
+  // Optional: render state to model context (receives tickState, ctx)
+  render: (tickState, ctx) => (
     <Section id="weather-info">
       Last checked: {lastChecked}
     </Section>
@@ -439,10 +544,10 @@ const session = await app.session();
 // Or get/create a specific session by ID
 const session = await app.session("user-123");
 
-// Run with input
-const result = await session.run({
+// Send a message
+const result = await session.send({
   messages: [{ role: "user", content: [{ type: "text", text: "Hello!" }] }],
-});
+}).result;
 
 // Check session state
 const snapshot = session.snapshot();

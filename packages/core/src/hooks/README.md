@@ -405,7 +405,9 @@ const config = useData("config", fetchConfig);
 
 ## Knobs
 
-Knobs are model-visible, model-settable reactive state. The model sees primitive values (string, number, boolean) and can change them via a `set_knob` tool. An optional resolve callback maps the primitive to a rich application value.
+Knobs are model-visible, model-settable reactive state. Think of them as **form controls for models** — the same way HTML inputs bridge humans to application state, knobs bridge models to application state.
+
+The model sees primitive values (string, number, boolean) and can change them via a `set_knob` tool. An optional resolve callback maps the primitive to a rich application value.
 
 ### knob() — Config-level Descriptor
 
@@ -435,7 +437,7 @@ function Agent() {
     options: ["broad", "deep"],
   });
 
-  // With resolver — model is openai("gpt-4"), setModel accepts primitives
+  // With resolver — model sees "gpt-4", you get openai("gpt-4")
   const [model, setModel] = useKnob("model", "gpt-4", { description: "Model" }, (v) => openai(v));
 
   // From descriptor
@@ -446,18 +448,197 @@ function Agent() {
     <>
       <Knobs />
       <Model model={model} />
-      <Section id="system" audience="model">
-        Mode: {mode}
-      </Section>
+      <Section id="system" audience="model">Mode: {mode}</Section>
       <Timeline />
     </>
   );
 }
 ```
 
-### `<Knobs />` — Stateful Tool Component
+### Type-Safe Constraints
 
-Place once in the component tree. Renders a section describing all registered knobs and the `set_knob` tool. Renders nothing if no knobs are registered. Built with `createTool` (stateful tool pattern).
+Constraints are conditional on the value type:
+
+```tsx
+// Numbers: min, max, step
+useKnob("temp", 0.7, { description: "Temperature", min: 0, max: 2, step: 0.1 });
+
+// Strings: maxLength, pattern
+useKnob("code", "abc", { description: "Code", maxLength: 10, pattern: "^[a-z]+$" });
+
+// Booleans: no constraints (just a toggle)
+useKnob("verbose", true, { description: "Verbose output" });
+
+// All types: options, group, required, validate
+useKnob("mode", "quick", {
+  description: "Research depth",
+  options: ["quick", "deep"],
+  group: "Behavior",
+  required: true,
+  validate: (v) => v !== "invalid" ? true : "Cannot use 'invalid'",
+});
+```
+
+Semantic types are inferred automatically: `[toggle]`, `[range]`, `[number]`, `[select]`, `[text]`.
+
+### `<Knobs />` — Three Rendering Modes
+
+The `<Knobs />` component always registers the `set_knob` tool. It provides three modes for rendering the knobs section:
+
+#### Mode 1: Default rendering
+
+Place `<Knobs />` in the tree. Renders a model-visible section with all knobs grouped and typed.
+
+```tsx
+function Agent() {
+  useKnob("temp", 0.7, { description: "Temperature", group: "Model", min: 0, max: 2 });
+  useKnob("mode", "quick", { description: "Depth", group: "Behavior", options: ["quick", "deep"] });
+  useKnob("verbose", true, { description: "Verbose output" });
+
+  return (
+    <>
+      <Knobs />
+      <Timeline />
+    </>
+  );
+}
+```
+
+Produces a section like:
+
+```
+verbose [toggle]: true — Verbose output
+
+### Model
+temp [range]: 0.7 — Temperature (0 - 2)
+
+### Behavior
+mode [select]: "quick" — Depth (options: "quick", "deep")
+```
+
+#### Mode 2: Render prop
+
+Pass a function as children to control section rendering. Receives `KnobGroup[]`.
+
+```tsx
+function Agent() {
+  useKnob("temp", 0.7, { description: "Temperature", group: "Model", min: 0, max: 2 });
+  useKnob("mode", "quick", { description: "Depth", options: ["quick", "deep"] });
+
+  return (
+    <>
+      <Knobs>
+        {(groups) => (
+          <Section id="my-knobs" audience="model">
+            {groups.flatMap(g => g.knobs).map(k => `${k.name}=${k.value}`).join("\n")}
+          </Section>
+        )}
+      </Knobs>
+      <Timeline />
+    </>
+  );
+}
+```
+
+The `set_knob` tool is still registered automatically. You control only the section output.
+
+#### Mode 3: Provider + Context
+
+Full custom rendering. `<Knobs.Provider>` registers the tool and exposes knob data via React context. Use `<Knobs.Controls />` or `useKnobsContext()` to consume.
+
+```tsx
+import { useKnobsContext, type KnobInfo, type KnobGroup } from "@tentickle/core";
+
+function MyKnobDisplay() {
+  const { knobs, groups, get } = useKnobsContext();
+  const temp = get("temp");
+  return (
+    <Section id="knobs" audience="model">
+      Temperature: {temp?.value} | Total knobs: {knobs.length}
+    </Section>
+  );
+}
+
+function Agent() {
+  useKnob("temp", 0.7, { description: "Temperature", min: 0, max: 2 });
+  useKnob("mode", "quick", { description: "Depth", options: ["quick", "deep"] });
+
+  return (
+    <>
+      <Knobs.Provider>
+        <MyKnobDisplay />
+      </Knobs.Provider>
+      <Timeline />
+    </>
+  );
+}
+```
+
+`<Knobs.Controls />` provides built-in rendering with optional customization:
+
+```tsx
+// Default section (same as <Knobs /> output)
+<Knobs.Provider>
+  <Knobs.Controls />
+</Knobs.Provider>
+
+// Custom per-knob rendering
+<Knobs.Provider>
+  <Knobs.Controls renderKnob={(knob) => (
+    <Section id={`knob-${knob.name}`} audience="model">
+      {knob.name}: {knob.value}
+    </Section>
+  )} />
+</Knobs.Provider>
+
+// Custom per-group rendering
+<Knobs.Provider>
+  <Knobs.Controls renderGroup={(group) => (
+    <Section id={`group-${group.name || "default"}`} audience="model">
+      {group.knobs.map(k => `${k.name}=${k.value}`).join(", ")}
+    </Section>
+  )} />
+</Knobs.Provider>
+```
+
+### KnobInfo
+
+Read-only snapshot of a knob, passed to render props and available via context:
+
+| Field                  | Type                                                    | Description                       |
+| ---------------------- | ------------------------------------------------------- | --------------------------------- |
+| `name`                 | `string`                                                | Knob name                         |
+| `description`          | `string`                                                | Human/model-readable summary      |
+| `value`                | `string \| number \| boolean`                           | Current primitive value           |
+| `defaultValue`         | `string \| number \| boolean`                           | Initial value                     |
+| `semanticType`         | `"toggle" \| "range" \| "number" \| "select" \| "text"` | Inferred from value + constraints |
+| `valueType`            | `"string" \| "number" \| "boolean"`                     | Primitive type                    |
+| `group`                | `string?`                                               | Group name                        |
+| `options`              | `(string \| number \| boolean)[]?`                      | Valid values (select/enum)        |
+| `min`, `max`, `step`   | `number?`                                               | Number constraints                |
+| `maxLength`, `pattern` | `string? / number?`                                     | String constraints                |
+| `required`             | `boolean?`                                              | Whether value is required         |
+
+### KnobsContextValue
+
+Returned by `useKnobsContext()`:
+
+| Field    | Type                                      | Description                     |
+| -------- | ----------------------------------------- | ------------------------------- |
+| `knobs`  | `KnobInfo[]`                              | All knobs (flat list)           |
+| `groups` | `KnobGroup[]`                             | Knobs grouped; `""` = ungrouped |
+| `get`    | `(name: string) => KnobInfo \| undefined` | Lookup a knob by name           |
+
+### Hooks
+
+| Hook                        | Description                                           |
+| --------------------------- | ----------------------------------------------------- |
+| `useKnobsContext()`         | Access knob context (throws outside `Knobs.Provider`) |
+| `useKnobsContextOptional()` | Access knob context (returns null outside provider)   |
+
+### When no knobs exist
+
+All three modes render nothing when no knobs are registered — no tool, no section, no context. `<Knobs.Provider>` still renders its children (just without context).
 
 ## Priority System
 

@@ -6,6 +6,9 @@ A React reconciler where the render target is a language model. No prompt templa
 
 You're not configuring a chatbot. You're building the application through which the model sees and experiences the world.
 
+[![npm version](https://img.shields.io/npm/v/pi-messenger?style=for-the-badge)](https://www.npmjs.com/package/pi-messenger)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)](LICENSE)
+
 ```tsx
 import { createApp, System, Timeline, Message, Section,
          createTool, useContinuation } from "@tentickle/core";

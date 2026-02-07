@@ -8,6 +8,9 @@
  *
  * Knobs present primitive values (string, number, boolean) to the model.
  * An optional resolve callback maps the primitive to a rich application value.
+ *
+ * Constraints are type-safe: number knobs accept min/max/step,
+ * string knobs accept maxLength/pattern. Boolean knobs have no constraints.
  */
 
 import { useEffect, useMemo } from "react";
@@ -15,13 +18,46 @@ import { useRuntimeStore } from "./runtime-context";
 import { useComState } from "./com-state";
 
 // ============================================================================
-// KnobDescriptor — config-level declaration
+// Types — Primitives, Constraints, Options
 // ============================================================================
 
 const KNOB_SYMBOL = Symbol.for("tentickle.knob");
 
-type KnobPrimitive = string | number | boolean;
+export type KnobPrimitive = string | number | boolean;
 
+/**
+ * Type-safe constraints based on value type.
+ * Numbers get min/max/step. Strings get maxLength/pattern.
+ */
+export type KnobConstraints<T extends KnobPrimitive> = T extends number
+  ? { min?: number; max?: number; step?: number }
+  : T extends string
+    ? { maxLength?: number; pattern?: string }
+    : // eslint-disable-next-line @typescript-eslint/no-empty-object-type
+      {};
+
+/**
+ * Options for knob() and useKnob(). Type-safe constraints based on value type.
+ */
+export type KnobOpts<T extends KnobPrimitive> = KnobConstraints<T> & {
+  description: string;
+  options?: T[];
+  group?: string;
+  required?: boolean;
+  validate?: (value: T) => true | string;
+};
+
+// ============================================================================
+// KnobDescriptor — config-level declaration
+// ============================================================================
+
+/**
+ * Descriptor carrying a knob's default value, constraints, and optional resolver.
+ * Created by knob(), consumed by useKnob() and <Knobs />.
+ *
+ * Stores the superset of all constraint fields (the user-facing KnobOpts<T>
+ * provides compile-time safety; the descriptor is a runtime carrier).
+ */
 export interface KnobDescriptor<T extends KnobPrimitive = KnobPrimitive, R = T> {
   [KNOB_SYMBOL]: true;
   defaultValue: T;
@@ -29,6 +65,16 @@ export interface KnobDescriptor<T extends KnobPrimitive = KnobPrimitive, R = T> 
   options?: T[];
   valueType: "string" | "number" | "boolean";
   resolve?: (value: T) => R;
+  group?: string;
+  required?: boolean;
+  validate?: (value: T) => true | string;
+  // Number constraints
+  min?: number;
+  max?: number;
+  step?: number;
+  // String constraints
+  maxLength?: number;
+  pattern?: string;
 }
 
 /**
@@ -36,7 +82,7 @@ export interface KnobDescriptor<T extends KnobPrimitive = KnobPrimitive, R = T> 
  */
 export function knob<T extends KnobPrimitive>(
   defaultValue: T,
-  opts: { description: string; options?: T[] },
+  opts: KnobOpts<T>,
 ): KnobDescriptor<T, T>;
 
 /**
@@ -44,13 +90,13 @@ export function knob<T extends KnobPrimitive>(
  */
 export function knob<T extends KnobPrimitive, R>(
   defaultValue: T,
-  opts: { description: string; options?: T[] },
+  opts: KnobOpts<T>,
   resolve: (value: T) => R,
 ): KnobDescriptor<T, R>;
 
 export function knob(
   defaultValue: KnobPrimitive,
-  opts: { description: string; options?: KnobPrimitive[] },
+  opts: KnobOpts<any>,
   resolve?: (value: any) => any,
 ): KnobDescriptor {
   return {
@@ -60,6 +106,14 @@ export function knob(
     options: opts.options,
     valueType: typeof defaultValue as "string" | "number" | "boolean",
     resolve,
+    group: opts.group,
+    required: opts.required,
+    validate: opts.validate,
+    min: (opts as any).min,
+    max: (opts as any).max,
+    step: (opts as any).step,
+    maxLength: (opts as any).maxLength,
+    pattern: (opts as any).pattern,
   };
 }
 
@@ -73,11 +127,6 @@ export function isKnob(value: unknown): value is KnobDescriptor {
 // ============================================================================
 // useKnob — hook returning [value, setter] tuple
 // ============================================================================
-
-interface KnobOpts<T extends KnobPrimitive> {
-  description: string;
-  options?: T[];
-}
 
 /**
  * Create a knob (no resolver). Returns [value, setter].
@@ -112,12 +161,20 @@ export function useKnob(
   optsOrUndefined?: KnobOpts<any>,
   maybeResolve?: (value: any) => any,
 ): [any, (value: any) => void] {
-  // Normalize arguments
+  // Normalize arguments — extract all fields from descriptor or opts
   let defaultValue: KnobPrimitive;
   let description: string;
   let options: KnobPrimitive[] | undefined;
   let valueType: "string" | "number" | "boolean";
   let resolve: ((value: any) => any) | undefined;
+  let group: string | undefined;
+  let required: boolean | undefined;
+  let validate: ((value: any) => true | string) | undefined;
+  let min: number | undefined;
+  let max: number | undefined;
+  let step: number | undefined;
+  let maxLength: number | undefined;
+  let pattern: string | undefined;
 
   if (isKnob(defaultOrDescriptor)) {
     defaultValue = defaultOrDescriptor.defaultValue;
@@ -125,6 +182,14 @@ export function useKnob(
     options = defaultOrDescriptor.options;
     valueType = defaultOrDescriptor.valueType;
     resolve = defaultOrDescriptor.resolve;
+    group = defaultOrDescriptor.group;
+    required = defaultOrDescriptor.required;
+    validate = defaultOrDescriptor.validate;
+    min = defaultOrDescriptor.min;
+    max = defaultOrDescriptor.max;
+    step = defaultOrDescriptor.step;
+    maxLength = defaultOrDescriptor.maxLength;
+    pattern = defaultOrDescriptor.pattern;
   } else {
     defaultValue = defaultOrDescriptor;
     const opts = optsOrUndefined!;
@@ -132,6 +197,14 @@ export function useKnob(
     options = opts.options;
     valueType = typeof defaultValue as "string" | "number" | "boolean";
     resolve = maybeResolve;
+    group = opts.group;
+    required = opts.required;
+    validate = opts.validate;
+    min = (opts as any).min;
+    max = (opts as any).max;
+    step = (opts as any).step;
+    maxLength = (opts as any).maxLength;
+    pattern = (opts as any).pattern;
   }
 
   const store = useRuntimeStore();
@@ -152,6 +225,14 @@ export function useKnob(
       defaultValue,
       options,
       valueType,
+      group,
+      required,
+      validate,
+      min,
+      max,
+      step,
+      maxLength,
+      pattern,
     });
   }, [name]);
 

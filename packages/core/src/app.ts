@@ -46,6 +46,8 @@
 // ============================================================================
 import { createApp, Tentickle, TentickleInstance, run } from "./tentickle-instance";
 export { createApp, Tentickle, TentickleInstance, run };
+export { createAgent } from "./agent";
+export type { AgentConfig } from "./agent";
 export type {
   MiddlewareKey,
   TentickleInstanceCreateOptions,

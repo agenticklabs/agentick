@@ -41,7 +41,7 @@ export interface SerializableCacheEntry {
 
 /**
  * Registration for a single knob in the runtime store.
- * Stores primitive info only — the resolved value is internal to useKnob.
+ * Stores primitive info + constraints — the resolved value is internal to useKnob.
  */
 export interface KnobRegistration {
   name: string;
@@ -51,6 +51,16 @@ export interface KnobRegistration {
   defaultValue: string | number | boolean;
   options?: (string | number | boolean)[];
   valueType: "string" | "number" | "boolean";
+  // Grouping
+  group?: string;
+  // Constraints
+  required?: boolean;
+  validate?: (value: any) => true | string;
+  min?: number;
+  max?: number;
+  step?: number;
+  maxLength?: number;
+  pattern?: string;
 }
 
 // ============================================================

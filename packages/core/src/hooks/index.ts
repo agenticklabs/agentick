@@ -35,8 +35,24 @@ export {
 } from "./runtime-context";
 
 // Knobs
-export { knob, isKnob, useKnob, type KnobDescriptor } from "./knob";
-export { Knobs } from "./knobs-component";
+export {
+  knob,
+  isKnob,
+  useKnob,
+  type KnobDescriptor,
+  type KnobOpts,
+  type KnobPrimitive,
+  type KnobConstraints,
+} from "./knob";
+export {
+  Knobs,
+  useKnobsContext,
+  useKnobsContextOptional,
+  type KnobsContextValue,
+  type KnobInfo,
+  type KnobGroup,
+  type KnobsRenderFn,
+} from "./knobs-component";
 
 // Lifecycle hooks
 export {

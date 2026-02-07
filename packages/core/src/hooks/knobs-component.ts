@@ -1,14 +1,15 @@
 /**
- * Knobs — a stateful tool that renders knob state + provides set_knob.
+ * Knobs — provider pattern for model-visible knob state.
  *
- * Uses the createTool stateful tool pattern:
- * - handler: validates and sets knob primitives via COM state
- * - render: shows all registered knobs as a model-visible section
+ * Three modes:
+ * 1. `<Knobs />`               — default rendering (tool + section)
+ * 2. `<Knobs>{(groups) => …}</Knobs>` — render prop for custom section
+ * 3. `<Knobs.Provider>` + `useKnobsContext()` — full custom rendering
  *
- * Place <Knobs /> in your component tree. Renders nothing if no knobs exist.
+ * The set_knob tool is always registered automatically in all three modes.
  */
 
-import React from "react";
+import React, { createContext, useContext, type ReactNode } from "react";
 import { z } from "zod";
 import { useRuntimeStore, type KnobRegistration } from "./runtime-context";
 import { useCom } from "./context";
@@ -21,29 +22,176 @@ const h = React.createElement;
 const KNOB_REGISTRY_KEY = "__knobRegistry";
 
 // ============================================================================
-// Formatting + Validation
+// Types
 // ============================================================================
 
-function formatKnobsForModel(knobs: Map<string, KnobRegistration>): string {
+/** Read-only snapshot of a knob for rendering. */
+export interface KnobInfo {
+  name: string;
+  description: string;
+  value: string | number | boolean;
+  defaultValue: string | number | boolean;
+  semanticType: "toggle" | "range" | "number" | "select" | "text";
+  valueType: "string" | "number" | "boolean";
+  group?: string;
+  options?: (string | number | boolean)[];
+  min?: number;
+  max?: number;
+  step?: number;
+  maxLength?: number;
+  pattern?: string;
+  required?: boolean;
+}
+
+export interface KnobGroup {
+  name: string; // group name, or "" for ungrouped
+  knobs: KnobInfo[];
+}
+
+export interface KnobsContextValue {
+  knobs: KnobInfo[];
+  groups: KnobGroup[];
+  get: (name: string) => KnobInfo | undefined;
+}
+
+export type KnobsRenderFn = (groups: KnobGroup[]) => React.ReactElement | null;
+
+export interface KnobsProps {
+  children?: KnobsRenderFn;
+}
+
+// ============================================================================
+// React Context
+// ============================================================================
+
+const KnobsContext = createContext<KnobsContextValue | null>(null);
+
+// ============================================================================
+// Semantic Type Inference
+// ============================================================================
+
+function inferSemanticType(knob: KnobRegistration): KnobInfo["semanticType"] {
+  if (knob.valueType === "boolean") return "toggle";
+  if (knob.valueType === "number" && (knob.min !== undefined || knob.max !== undefined))
+    return "range";
+  if (knob.valueType === "number") return "number";
+  if (knob.valueType === "string" && knob.options?.length) return "select";
+  return "text";
+}
+
+// ============================================================================
+// KnobInfo / KnobGroup Builders
+// ============================================================================
+
+function buildKnobInfo(reg: KnobRegistration): KnobInfo {
+  return {
+    name: reg.name,
+    description: reg.description,
+    value: reg.getPrimitive(),
+    defaultValue: reg.defaultValue,
+    semanticType: inferSemanticType(reg),
+    valueType: reg.valueType,
+    group: reg.group,
+    options: reg.options,
+    min: reg.min,
+    max: reg.max,
+    step: reg.step,
+    maxLength: reg.maxLength,
+    pattern: reg.pattern,
+    required: reg.required,
+  };
+}
+
+function buildGroups(knobs: Map<string, KnobRegistration>): KnobGroup[] {
+  const ungrouped: KnobInfo[] = [];
+  const grouped = new Map<string, KnobInfo[]>();
+
+  for (const [, reg] of knobs) {
+    const info = buildKnobInfo(reg);
+    if (reg.group) {
+      const list = grouped.get(reg.group) ?? [];
+      list.push(info);
+      grouped.set(reg.group, list);
+    } else {
+      ungrouped.push(info);
+    }
+  }
+
+  const result: KnobGroup[] = [];
+  if (ungrouped.length > 0) {
+    result.push({ name: "", knobs: ungrouped });
+  }
+  for (const [name, knobs] of grouped) {
+    result.push({ name, knobs });
+  }
+  return result;
+}
+
+// ============================================================================
+// Formatting
+// ============================================================================
+
+function formatValue(value: string | number | boolean): string {
+  return typeof value === "string" ? `"${value}"` : String(value);
+}
+
+function formatKnobLine(knob: KnobInfo): string {
+  const parts: string[] = [
+    `${knob.name} [${knob.semanticType}]: ${formatValue(knob.value)} — ${knob.description}`,
+  ];
+
+  const hints: string[] = [];
+  if (knob.options?.length) {
+    hints.push(`options: ${knob.options.map(formatValue).join(", ")}`);
+  }
+  if (knob.min !== undefined || knob.max !== undefined) {
+    const range = `${knob.min ?? "*"} - ${knob.max ?? "*"}`;
+    hints.push(range);
+  }
+  if (knob.step !== undefined) hints.push(`step ${knob.step}`);
+  if (knob.maxLength !== undefined) hints.push(`max ${knob.maxLength} chars`);
+  if (knob.pattern !== undefined) hints.push(`pattern: ${knob.pattern}`);
+  if (knob.required) hints.push("required");
+
+  if (hints.length > 0) {
+    parts.push(` (${hints.join(", ")})`);
+  }
+
+  return parts.join("");
+}
+
+function formatKnobsForModel(groups: KnobGroup[]): string {
   const lines: string[] = [
     "Knobs are adjustable parameters you can modify using the set_knob tool.",
     "",
   ];
 
-  for (const [, knob] of knobs) {
-    const raw = knob.getPrimitive();
-    const display = typeof raw === "string" ? `"${raw}"` : String(raw);
-    lines.push(`${knob.name}: ${display}`);
-    lines.push(`  ${knob.description}`);
-    if (knob.options?.length) {
-      lines.push(
-        `  Options: ${knob.options.map((o) => (typeof o === "string" ? `"${o}"` : String(o))).join(", ")}`,
-      );
+  let firstGroup = true;
+  for (const group of groups) {
+    if (group.name === "") {
+      // Ungrouped knobs (no header)
+      for (const knob of group.knobs) {
+        lines.push(formatKnobLine(knob));
+      }
+    } else {
+      if (!firstGroup || lines.length > 2) lines.push("");
+      lines.push(`### ${group.name}`);
+      for (const knob of group.knobs) {
+        lines.push(formatKnobLine(knob));
+      }
     }
-    lines.push("");
+    firstGroup = false;
   }
 
   return lines.join("\n").trimEnd();
+}
+
+// ============================================================================
+// Validation
+// ============================================================================
+
+function error(text: string) {
+  return [{ type: "text" as const, text }];
 }
 
 function executeSetKnob(
@@ -52,37 +200,58 @@ function executeSetKnob(
 ) {
   const knob = knobs.get(input.name);
   if (!knob) {
-    return [
-      {
-        type: "text" as const,
-        text: `Unknown knob "${input.name}". Available: ${[...knobs.keys()].join(", ")}`,
-      },
-    ];
+    return error(`Unknown knob "${input.name}". Available: ${[...knobs.keys()].join(", ")}`);
   }
 
-  if (knob.options?.length && !knob.options.some((o) => o === input.value)) {
-    const opts = knob.options.map((o) => (typeof o === "string" ? `"${o}"` : String(o))).join(", ");
-    return [
-      { type: "text" as const, text: `Invalid value for "${input.name}". Valid options: ${opts}` },
-    ];
-  }
-
+  // Type check
   if (typeof input.value !== knob.valueType) {
-    return [
-      {
-        type: "text" as const,
-        text: `Invalid type for "${input.name}". Expected ${knob.valueType}, got ${typeof input.value}.`,
-      },
-    ];
+    return error(
+      `Invalid type for "${input.name}". Expected ${knob.valueType}, got ${typeof input.value}.`,
+    );
+  }
+
+  // Options check (enum constraint)
+  if (knob.options?.length && !knob.options.some((o) => o === input.value)) {
+    const opts = knob.options.map(formatValue).join(", ");
+    return error(`Invalid value for "${input.name}". Valid options: ${opts}`);
+  }
+
+  // Number constraints
+  if (typeof input.value === "number") {
+    if (knob.min !== undefined && input.value < knob.min) {
+      return error(`Value for "${input.name}" must be >= ${knob.min}. Got ${input.value}.`);
+    }
+    if (knob.max !== undefined && input.value > knob.max) {
+      return error(`Value for "${input.name}" must be <= ${knob.max}. Got ${input.value}.`);
+    }
+  }
+
+  // String constraints
+  if (typeof input.value === "string") {
+    if (knob.maxLength !== undefined && input.value.length > knob.maxLength) {
+      return error(
+        `Value for "${input.name}" exceeds max length of ${knob.maxLength}. Got ${input.value.length} chars.`,
+      );
+    }
+    if (knob.pattern !== undefined && !new RegExp(knob.pattern).test(input.value)) {
+      return error(`Value for "${input.name}" does not match pattern: ${knob.pattern}`);
+    }
+  }
+
+  // Custom validate
+  if (knob.validate) {
+    const result = knob.validate(input.value);
+    if (result !== true) {
+      return error(`Validation failed for "${input.name}": ${result}`);
+    }
   }
 
   knob.setPrimitive(input.value);
-  const display = typeof input.value === "string" ? `"${input.value}"` : String(input.value);
-  return [{ type: "text" as const, text: `Set ${input.name} to ${display}.` }];
+  return [{ type: "text" as const, text: `Set ${input.name} to ${formatValue(input.value)}.` }];
 }
 
 // ============================================================================
-// SetKnobTool — stateful tool (handler + render)
+// SetKnobTool — tool-only, no render
 // ============================================================================
 
 const SetKnobTool = createTool({
@@ -100,23 +269,22 @@ const SetKnobTool = createTool({
     }
     return executeSetKnob(knobs, input);
   },
-
-  render: (_tickState, ctx) => {
-    const knobs = ctx?.getState<Map<string, KnobRegistration>>(KNOB_REGISTRY_KEY);
-    if (!knobs?.size) return null;
-    return h("section", { id: "knobs", audience: "model" }, formatKnobsForModel(knobs));
-  },
+  // No render — tool registration only. Section rendered by Knobs/Provider.
 });
 
 // ============================================================================
-// <Knobs /> — conditional wrapper
+// <Knobs /> — default + render prop
 // ============================================================================
 
 /**
- * Place once in your component tree. Renders the set_knob tool + knob section
- * when knobs are registered, nothing otherwise.
+ * Renders the set_knob tool + knob section when knobs are registered.
+ *
+ * Three modes:
+ * - `<Knobs />` — default section rendering
+ * - `<Knobs>{(groups) => <section>…</section>}</Knobs>` — custom section via render prop
+ * - Use `<Knobs.Provider>` + `<Knobs.Controls />` for full custom rendering
  */
-export function Knobs(): React.ReactElement | null {
+export function Knobs(props: KnobsProps): React.ReactElement | null {
   const store = useRuntimeStore();
   const ctx = useCom();
 
@@ -125,8 +293,116 @@ export function Knobs(): React.ReactElement | null {
   }
 
   // Stash registry on COM so the tool handler can access it via ctx.getState().
-  // Intentional render-time side effect — safe in Tentickle's synchronous reconciler.
   ctx.setState(KNOB_REGISTRY_KEY, store.knobRegistry);
 
-  return h(SetKnobTool);
+  const groups = buildGroups(store.knobRegistry);
+
+  if (typeof props.children === "function") {
+    // Render prop: tool + custom content
+    return h(React.Fragment, null, h(SetKnobTool), props.children(groups));
+  }
+
+  // Default: tool + default section
+  return h(
+    React.Fragment,
+    null,
+    h(SetKnobTool),
+    h("section", { id: "knobs", audience: "model" }, formatKnobsForModel(groups)),
+  );
+}
+
+// ============================================================================
+// <Knobs.Provider>
+// ============================================================================
+
+/**
+ * Provider that exposes knob context to descendants.
+ * Always registers the set_knob tool.
+ *
+ * @example
+ * ```tsx
+ * <Knobs.Provider>
+ *   <Knobs.Controls />
+ * </Knobs.Provider>
+ * ```
+ */
+Knobs.Provider = function KnobsProvider({ children }: { children: ReactNode }): React.ReactElement {
+  const store = useRuntimeStore();
+  const ctx = useCom();
+
+  if (store.knobRegistry.size === 0) {
+    return h(React.Fragment, null, children);
+  }
+
+  ctx.setState(KNOB_REGISTRY_KEY, store.knobRegistry);
+
+  const groups = buildGroups(store.knobRegistry);
+  const knobs = groups.flatMap((g) => g.knobs);
+
+  const contextValue: KnobsContextValue = {
+    knobs,
+    groups,
+    get: (name) => knobs.find((k) => k.name === name),
+  };
+
+  return h(
+    React.Fragment,
+    null,
+    h(SetKnobTool),
+    h(KnobsContext.Provider, { value: contextValue }, children),
+  );
+};
+
+// ============================================================================
+// <Knobs.Controls>
+// ============================================================================
+
+interface KnobsControlsProps {
+  renderKnob?: (knob: KnobInfo) => React.ReactElement | null;
+  renderGroup?: (group: KnobGroup) => React.ReactElement | null;
+}
+
+/**
+ * Renders knob content from Knobs.Provider context.
+ *
+ * - No props: default section rendering
+ * - `renderKnob`: custom per-knob rendering
+ * - `renderGroup`: custom per-group rendering
+ */
+Knobs.Controls = function KnobsControls(props: KnobsControlsProps): React.ReactElement {
+  const context = useContext(KnobsContext);
+  if (!context) return h(React.Fragment, null);
+
+  if (props.renderGroup) {
+    return h(React.Fragment, null, ...context.groups.map((g) => props.renderGroup!(g)));
+  }
+
+  if (props.renderKnob) {
+    return h(React.Fragment, null, ...context.knobs.map((k) => props.renderKnob!(k)));
+  }
+
+  // Default rendering from context
+  return h("section", { id: "knobs", audience: "model" }, formatKnobsForModel(context.groups));
+};
+
+// ============================================================================
+// Hooks
+// ============================================================================
+
+/**
+ * Access knob context from within Knobs.Provider. Throws if not in provider.
+ */
+export function useKnobsContext(): KnobsContextValue {
+  const context = useContext(KnobsContext);
+  if (!context) {
+    throw new Error("useKnobsContext must be used within a Knobs.Provider");
+  }
+  return context;
+}
+
+/**
+ * Access knob context, returning null if not within provider.
+ */
+export function useKnobsContextOptional(): KnobsContextValue | null {
+  return useContext(KnobsContext);
 }

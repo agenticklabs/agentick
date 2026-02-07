@@ -13,12 +13,23 @@ export * from "@tentickle/kernel";
 // App & Session
 // ============================================================================
 export * from "./app/types.js";
-export { createApp, Tentickle, TentickleInstance, run, runComponent, SessionImpl } from "./app.js";
+export {
+  createApp,
+  createAgent,
+  Tentickle,
+  TentickleInstance,
+  run,
+  runComponent,
+  SessionImpl,
+} from "./app.js";
+export type { AgentConfig } from "./agent";
 
 // ============================================================================
 // JSX Components (re-export from jsx/components)
 // ============================================================================
 export {
+  Agent,
+  type AgentProps,
   Model,
   Section,
   Timeline,
@@ -60,8 +71,17 @@ export {
   isKnob,
   useKnob,
   Knobs,
+  useKnobsContext,
+  useKnobsContextOptional,
   type KnobDescriptor,
+  type KnobOpts,
+  type KnobPrimitive,
+  type KnobConstraints,
   type KnobRegistration,
+  type KnobsContextValue,
+  type KnobInfo,
+  type KnobGroup,
+  type KnobsRenderFn,
   // Context utilization
   useContextInfo,
   useContextInfoStore,
