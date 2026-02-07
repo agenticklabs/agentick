@@ -24,7 +24,7 @@ const h = React.createElement;
  * Satisfies React's rules of hooks — can't call hooks in a loop,
  * but CAN render components in a loop (each gets its own hook state).
  */
-function KnobBinding({ name, descriptor }: { name: string; descriptor: KnobDescriptor }) {
+function KnobBinding({ name, descriptor }: { name: string; descriptor: KnobDescriptor<any, any> }) {
   useKnob(name, descriptor);
   return null;
 }
@@ -37,7 +37,7 @@ export interface AgentProps {
   /** Tools (ToolClass values). Each rendered as a JSX component. */
   tools?: ToolClass[];
   /** Declarative knobs. Each binds via useKnob(name, descriptor). */
-  knobs?: Record<string, KnobDescriptor>;
+  knobs?: Record<string, KnobDescriptor<any, any>>;
   /** Additional children (extra sections, tools, etc.). */
   children?: React.ReactNode;
 }

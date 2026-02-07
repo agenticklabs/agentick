@@ -35,7 +35,7 @@ export interface AgentConfig {
   /** Tools (ToolClass values from createTool). */
   tools?: ToolClass[];
   /** Knobs — model-visible, model-settable parameters. */
-  knobs?: Record<string, KnobDescriptor>;
+  knobs?: Record<string, KnobDescriptor<any, any>>;
 }
 
 // ============================================================================

@@ -67,23 +67,23 @@ export const MyStatefulTool = createTool({
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
-│                              Applications                                │
+│                              Applications                               │
 │        (example/express, user apps, CLI tools)                          │
 └────────────────────────────────┬────────────────────────────────────────┘
                                  │
 ┌────────────────────────────────┴────────────────────────────────────────┐
-│                          Framework Layer                                 │
+│                          Framework Layer                                │
 │   @tentickle/core     @tentickle/gateway     @tentickle/client          │
 │   @tentickle/express  @tentickle/devtools                               │
 └────────────────────────────────┬────────────────────────────────────────┘
                                  │
 ┌────────────────────────────────┴────────────────────────────────────────┐
-│                         Adapter Layer                                    │
+│                         Adapter Layer                                   │
 │   @tentickle/openai   @tentickle/google   @tentickle/ai-sdk             │
 └────────────────────────────────┬────────────────────────────────────────┘
                                  │
 ┌────────────────────────────────┴────────────────────────────────────────┐
-│                        Foundation Layer                                  │
+│                        Foundation Layer                                 │
 │              @tentickle/kernel          @tentickle/shared               │
 │              (Node.js only)             (Platform-independent)          │
 └─────────────────────────────────────────────────────────────────────────┘
