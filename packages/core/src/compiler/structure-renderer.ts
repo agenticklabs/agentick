@@ -108,6 +108,7 @@ export class StructureRenderer {
       audience: compiled.audience,
       tags: compiled.tags,
       metadata: compiled.metadata,
+      tokens: compiled.tokens,
     };
 
     this.ctx.addSection(section);
@@ -160,6 +161,7 @@ export class StructureRenderer {
           createdAt: compiled.createdAt?.toISOString(),
         },
         metadata: compiled.metadata,
+        tokens: compiled.tokens,
       });
     }
 
@@ -202,6 +204,7 @@ export class StructureRenderer {
           createdAt: compiled.createdAt?.toISOString(),
         },
         metadata: compiled.metadata,
+        tokens: compiled.tokens,
       };
     });
 
@@ -214,6 +217,7 @@ export class StructureRenderer {
       system: formattedSystem.length > 0 ? formattedSystem : comInput.system,
       metadata: comInput.metadata,
       modelOptions: comInput.modelOptions,
+      totalTokens: this._lastCompiled?.totalTokens,
     };
   }
 }

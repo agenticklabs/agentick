@@ -13,23 +13,12 @@ export * from "@tentickle/kernel";
 // App & Session
 // ============================================================================
 export * from "./app/types.js";
-export {
-  createApp,
-  createAgent,
-  Tentickle,
-  TentickleInstance,
-  run,
-  runComponent,
-  SessionImpl,
-} from "./app.js";
-export type { AgentConfig } from "./agent";
+export { createApp, Tentickle, TentickleInstance, run, runComponent, SessionImpl } from "./app.js";
 
 // ============================================================================
 // JSX Components (re-export from jsx/components)
 // ============================================================================
 export {
-  Agent,
-  type AgentProps,
   Model,
   Section,
   Timeline,
@@ -40,6 +29,19 @@ export {
   ToolResult as ToolResultComponent,
   Markdown,
   XML,
+  // Token budget (types + pure functions, used via Timeline props)
+  compactEntries,
+  type CompactionStrategy,
+  type CompactionFunction,
+  type CompactionResult,
+  type CompactOptions,
+  type CompactResult,
+  type TokenBudgetInfo,
+  // Timeline types
+  type TimelineContextValue,
+  type TimelineRenderFn,
+  type TimelineProps,
+  type TimelineBudgetOptions,
 } from "./jsx/components/index";
 
 // ============================================================================
@@ -95,14 +97,20 @@ export {
 // Tools
 // ============================================================================
 export { createTool } from "./tool/index";
-export type { ToolDefinition, ToolMetadata } from "./tool/index";
+export type { ToolClass, ToolDefinition, ToolMetadata } from "./tool/index";
 
 // ============================================================================
 // Model
 // ============================================================================
 export { createAdapter } from "./model/adapter";
 export type { ModelClass } from "./model/adapter";
+export type { EngineModel, ModelMetadata } from "./model/model";
 export * from "./types";
+
+// ============================================================================
+// COM Types
+// ============================================================================
+export type { COMTimelineEntry, COMSection, COMInput, TokenEstimator } from "./com/types";
 
 // ============================================================================
 // DevTools

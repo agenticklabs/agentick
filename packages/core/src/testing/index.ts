@@ -73,7 +73,13 @@ export { compileAgent } from "./compile-agent";
 export type { CompileAgentOptions, CompileAgentResult } from "./compile-agent";
 
 // Test mocks
-export { createMockCom, createMockTickState, createMockTickResult } from "./mocks";
+export {
+  createMockCom,
+  createMockTickState,
+  createMockTickResult,
+  makeTimelineEntry,
+  makeCOMInput,
+} from "./mocks";
 export type {
   MockComOptions,
   MockCom,

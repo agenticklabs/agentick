@@ -2,16 +2,25 @@
  * Timeline Component
  *
  * Renders conversation history with optional pending messages.
+ * Supports token budget compaction via maxTokens/strategy props.
  * Uses React context to provide timeline access to descendants.
  *
  * @module tentickle/components
  */
 
-import React, { createContext, useContext, useMemo, type ReactNode } from "react";
+import React, {
+  createContext,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  type ReactNode,
+} from "react";
 import type { JSX } from "react";
 import type { COMTimelineEntry } from "../../com/types";
 import type { ExecutionMessage } from "../../engine/execution-types";
 import { useTickState } from "../../hooks/context";
+import { compactEntries, type CompactionStrategy, type TokenBudgetInfo } from "./token-budget";
 import { Logger } from "@tentickle/kernel";
 
 const log = Logger.for("Timeline");
@@ -27,11 +36,13 @@ const h = React.createElement;
  * Render function signature for Timeline component.
  *
  * @param history - Executed timeline entries (previous + current)
- * @param pending - Messages queued for the next tick (optional)
+ * @param pending - Messages queued for the next tick
+ * @param budget - Token budget info (present when maxTokens is set)
  */
 export type TimelineRenderFn = (
   history: COMTimelineEntry[],
-  pending?: ExecutionMessage[],
+  pending: ExecutionMessage[],
+  budget: TokenBudgetInfo | null,
 ) => JSX.Element | (JSX.Element | null)[] | null;
 
 /**
@@ -49,6 +60,9 @@ export interface TimelineContextValue {
 
   /** Filter entries by role */
   byRole: (role: "user" | "assistant" | "tool" | "system") => COMTimelineEntry[];
+
+  /** Token budget info (present when maxTokens is set) */
+  budget: TokenBudgetInfo | null;
 }
 
 /**
@@ -66,9 +80,32 @@ export interface ConversationHistoryOptions {
 }
 
 /**
+ * Token budget options for Timeline.
+ */
+export interface TimelineBudgetOptions {
+  /** Maximum tokens for timeline entries. Enables compaction. */
+  maxTokens?: number;
+
+  /** Compaction strategy (default: "sliding-window") */
+  strategy?: CompactionStrategy;
+
+  /** Callback when entries are evicted */
+  onEvict?: (entries: COMTimelineEntry[]) => void;
+
+  /** Guidance string passed to custom compaction functions */
+  guidance?: string;
+
+  /** Roles that are never evicted (default: ["system"]) */
+  preserveRoles?: Array<"user" | "assistant" | "system" | "tool">;
+
+  /** Reserve tokens for safety margin (default: 0) */
+  headroom?: number;
+}
+
+/**
  * Props for the Timeline component.
  */
-export interface TimelineProps extends ConversationHistoryOptions {
+export interface TimelineProps extends ConversationHistoryOptions, TimelineBudgetOptions {
   /**
    * Render prop for custom rendering.
    * If not provided, renders default message components.
@@ -208,15 +245,23 @@ function applyFilters(
  *
  * @example Basic usage
  * ```tsx
- * <Timeline>
- *   {(entries) => entries.map(entry => <Message key={entry.id} entry={entry} />)}
- * </Timeline>
+ * <Timeline />
  * ```
  *
  * @example With filtering
  * ```tsx
- * <Timeline roles={['user', 'assistant']} limit={10}>
- *   {(entries) => entries.map(entry => ...)}
+ * <Timeline roles={['user', 'assistant']} limit={10} />
+ * ```
+ *
+ * @example With token budget
+ * ```tsx
+ * <Timeline maxTokens={4000} strategy="truncate" />
+ * ```
+ *
+ * @example With render prop
+ * ```tsx
+ * <Timeline maxTokens={8000} headroom={500}>
+ *   {(entries) => entries.map(entry => <Message key={entry.id} entry={entry} />)}
  * </Timeline>
  * ```
  */
@@ -229,8 +274,8 @@ export function Timeline(props: TimelineProps): JSX.Element {
     // Outside of TentickleProvider - return empty
   }
 
-  // Get and filter timeline entries from tickState.previous (conversation history)
-  const entries = useMemo(() => {
+  // Get raw timeline entries, apply filters
+  const filteredEntries = useMemo(() => {
     if (!tickState?.previous?.timeline) {
       log.debug(
         { tick: tickState?.tick, hasPrevious: !!tickState?.previous },
@@ -250,6 +295,47 @@ export function Timeline(props: TimelineProps): JSX.Element {
     return applyFilters(rawEntries, props);
   }, [tickState?.previous?.timeline, props.filter, props.limit, props.roles]);
 
+  // Apply token budget compaction (when maxTokens is set)
+  const { entries, evicted, budgetInfo } = useMemo(() => {
+    if (props.maxTokens == null) {
+      return { entries: filteredEntries, evicted: [] as COMTimelineEntry[], budgetInfo: null };
+    }
+
+    const result = compactEntries(filteredEntries, {
+      maxTokens: props.maxTokens,
+      strategy: props.strategy,
+      headroom: props.headroom,
+      preserveRoles: props.preserveRoles as string[] | undefined,
+      guidance: props.guidance,
+    });
+
+    const info: TokenBudgetInfo = {
+      maxTokens: props.maxTokens,
+      effectiveBudget: props.maxTokens - (props.headroom ?? 0),
+      currentTokens: result.currentTokens,
+      evictedCount: result.evicted.length,
+      isCompacted: result.evicted.length > 0,
+    };
+
+    return { entries: result.kept, evicted: result.evicted, budgetInfo: info };
+  }, [
+    filteredEntries,
+    props.maxTokens,
+    props.headroom,
+    props.strategy,
+    props.preserveRoles,
+    props.guidance,
+  ]);
+
+  // Fire onEvict callback as an effect — not a side effect in memo
+  const onEvictRef = useRef(props.onEvict);
+  onEvictRef.current = props.onEvict;
+  useEffect(() => {
+    if (evicted.length > 0 && onEvictRef.current) {
+      onEvictRef.current(evicted);
+    }
+  }, [evicted]);
+
   // Pending messages (queued for this tick)
   const pending = useMemo(() => {
     return (tickState?.queuedMessages ?? []) as ExecutionMessage[];
@@ -264,7 +350,7 @@ export function Timeline(props: TimelineProps): JSX.Element {
   if (props.children !== undefined) {
     if (typeof props.children === "function") {
       // Render prop pattern
-      const result = props.children(entries, pending);
+      const result = props.children(entries, pending, budgetInfo);
       return h(React.Fragment, null, result);
     }
     // Regular children
@@ -338,6 +424,7 @@ Timeline.Provider = function TimelineProvider(props: TimelineProviderProps): JSX
       pending,
       messageCount: entries.length,
       byRole: (role) => entries.filter((e) => e.message.role === role),
+      budget: null,
     };
   }, [entries, pending]);
 

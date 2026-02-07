@@ -111,6 +111,25 @@ export function createOpenAIModel(config: OpenAIAdapterConfig = {}): ModelClass 
         tool_choice: openAITools && openAITools.length > 0 ? "auto" : undefined,
       };
 
+      // Map responseFormat
+      if (normalizedInput.responseFormat) {
+        const rf = normalizedInput.responseFormat;
+        if (rf.type === "text") {
+          (baseParams as any).response_format = { type: "text" };
+        } else if (rf.type === "json") {
+          (baseParams as any).response_format = { type: "json_object" };
+        } else if (rf.type === "json_schema") {
+          (baseParams as any).response_format = {
+            type: "json_schema",
+            json_schema: {
+              name: rf.name ?? "response",
+              schema: rf.schema,
+              strict: true,
+            },
+          };
+        }
+      }
+
       // Clean undefined values
       Object.keys(baseParams).forEach((key) => {
         if ((baseParams as any)[key] === undefined) {
@@ -118,6 +137,7 @@ export function createOpenAIModel(config: OpenAIAdapterConfig = {}): ModelClass 
         }
       });
 
+      // providerOptions.openai spreads AFTER for user override
       if (normalizedInput.providerOptions?.openai) {
         return { ...baseParams, ...normalizedInput.providerOptions.openai };
       }

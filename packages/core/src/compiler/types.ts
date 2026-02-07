@@ -28,6 +28,9 @@ export interface CompiledStructure {
 
   /** Additional metadata */
   metadata: Record<string, unknown>;
+
+  /** Total estimated tokens across all compiled content */
+  totalTokens?: number;
 }
 
 /**
@@ -42,6 +45,8 @@ export interface CompiledSection {
   audience?: "user" | "model" | "all";
   tags?: string[];
   metadata?: Record<string, unknown>;
+  /** Estimated token count (set by collector) */
+  tokens?: number;
 }
 
 /**
@@ -54,6 +59,8 @@ export interface CompiledTimelineEntry {
   renderer: Renderer | null;
   metadata?: Record<string, unknown>;
   createdAt?: Date;
+  /** Estimated token count (set by collector) */
+  tokens?: number;
 }
 
 /**

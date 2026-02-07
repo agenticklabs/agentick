@@ -104,14 +104,59 @@ Define system instructions:
 Render conversation history. This is the core component that represents the conversation:
 
 ```tsx
+// Basic — renders all history + pending messages
 <Timeline />
 
-// With custom rendering
+// With filtering
+<Timeline roles={['user', 'assistant']} limit={10} />
+
+// With token budget compaction
+<Timeline maxTokens={4000} strategy="sliding-window" headroom={500} />
+
+// With render prop (receives history, pending, budget info)
+<Timeline maxTokens={8000}>
+  {(entries, pending, budget) => {
+    if (budget?.isCompacted) console.log(`Evicted ${budget.evictedCount} entries`);
+    return entries.map(entry => <Message key={entry.id} entry={entry} />);
+  }}
+</Timeline>
+
+// With custom rendering via Provider
 <Timeline.Provider>
-  <Timeline.Messages>
-    {(messages) => messages.map(msg => <CustomMessage {...msg} />)}
-  </Timeline.Messages>
+  <Timeline.Messages renderEntry={(entry) => <CustomMessage entry={entry} />} />
 </Timeline.Provider>
+```
+
+#### Token Budget Compaction
+
+When `maxTokens` is set, Timeline automatically compacts entries that exceed the token budget. Entries carry token estimates from the compiler's annotation pass (or fall back to a char/4 heuristic).
+
+| Prop            | Type                 | Default            | Description                                |
+| --------------- | -------------------- | ------------------ | ------------------------------------------ |
+| `maxTokens`     | `number`             | —                  | Token budget. Enables compaction when set. |
+| `strategy`      | `CompactionStrategy` | `"sliding-window"` | Compaction strategy                        |
+| `headroom`      | `number`             | `0`                | Reserve tokens for safety margin           |
+| `preserveRoles` | `string[]`           | `["system"]`       | Roles that are never evicted               |
+| `onEvict`       | `(entries) => void`  | —                  | Callback when entries are evicted          |
+| `guidance`      | `string`             | —                  | Passed to custom strategy functions        |
+
+**Built-in strategies:**
+
+- **`"sliding-window"`** (default): Preserves entries with protected roles, then fills remaining budget with newest entries. Maintains original entry order.
+- **`"truncate"`**: Keeps newest entries that fit. Simple FIFO eviction.
+- **`"none"`**: No compaction. Entries pass through unchanged.
+- **Custom function**: `(entries, budget, guidance?) => { kept, evicted }`
+
+**Budget info** is available via render prop (3rd argument) or `useTimelineContext().budget`:
+
+```typescript
+interface TokenBudgetInfo {
+  maxTokens: number;       // configured budget
+  effectiveBudget: number; // maxTokens - headroom
+  currentTokens: number;   // tokens in kept entries
+  evictedCount: number;    // entries dropped
+  isCompacted: boolean;    // whether compaction fired
+}
 ```
 
 ### `<Message>`
@@ -142,13 +187,38 @@ Group content with semantic meaning:
 
 ### `<Model>`
 
-Override the model for a subtree:
+Override the model for a subtree. Also accepts generation parameters and response format:
 
 ```tsx
 <Model model={gpt4oMini}>
   {/* Children use gpt-4o-mini */}
 </Model>
+
+// With response format (structured output)
+<Model model={gpt4o} responseFormat={{ type: "json" }} />
+
+<Model
+  model={gpt4o}
+  responseFormat={{
+    type: "json_schema",
+    schema: { type: "object", properties: { name: { type: "string" } } },
+    name: "person",
+  }}
+  temperature={0.2}
+/>
 ```
+
+#### ResponseFormat
+
+Normalized across providers. Three modes:
+
+| Type                                     | Description                      |
+| ---------------------------------------- | -------------------------------- |
+| `{ type: "text" }`                       | Free-form text (default)         |
+| `{ type: "json" }`                       | Valid JSON output                |
+| `{ type: "json_schema", schema, name? }` | JSON conforming to a JSON Schema |
+
+For Zod schemas, call `zodToJsonSchema()` yourself — Tentickle doesn't bundle Zod.
 
 ### `<Markdown>` / `<XML>`
 

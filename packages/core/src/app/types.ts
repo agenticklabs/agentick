@@ -28,7 +28,6 @@ import type { MCPConfig } from "../mcp";
 import type { EngineModel } from "../model/model";
 import type { ExecutionHandle, Channel, Procedure } from "@tentickle/kernel";
 import type { JSX } from "../jsx/jsx-runtime";
-import type { AgentConfig } from "../agent";
 // Signal type removed - schedulerState now returns SchedulerState directly
 import type { SchedulerState } from "../compiler/scheduler";
 
@@ -1343,7 +1342,7 @@ export interface Session<P = Record<string, unknown>> extends EventEmitter {
    * The child session is NOT registered in the App's session registry.
    * Parent abort propagates to child. Max spawn depth is 10.
    *
-   * @param agentOrConfig - AgentConfig, ComponentFunction, or JSX element
+   * @param component - ComponentFunction or JSX element
    * @param input - Optional SendInput for the child session
    *
    * @example
@@ -1356,10 +1355,7 @@ export interface Session<P = Record<string, unknown>> extends EventEmitter {
    * ```
    */
   spawn: Procedure<
-    (
-      agentOrConfig: AgentConfig | ComponentFunction | JSX.Element,
-      input?: SendInput,
-    ) => SessionExecutionHandle,
+    (component: ComponentFunction | JSX.Element, input?: SendInput) => SessionExecutionHandle,
     true
   >;
 

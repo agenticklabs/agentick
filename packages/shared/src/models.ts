@@ -13,6 +13,23 @@ import type { StopReason } from "./streaming";
 import type { ToolCall, ToolDefinition } from "./tools";
 
 // ============================================================================
+// Response Format
+// ============================================================================
+
+/**
+ * Normalized response format across providers.
+ *
+ * - `text`: Free-form text (default behavior, no constraint).
+ * - `json`: JSON output (provider ensures valid JSON).
+ * - `json_schema`: Structured output conforming to a JSON Schema.
+ *   Users call `zodToJsonSchema()` themselves if using Zod.
+ */
+export type ResponseFormat =
+  | { type: "text" }
+  | { type: "json" }
+  | { type: "json_schema"; schema: Record<string, unknown>; name?: string };
+
+// ============================================================================
 // Model Tool Reference
 // ============================================================================
 
@@ -62,6 +79,11 @@ export interface ModelInput {
    * Tool references
    */
   tools?: ModelToolReference[];
+
+  /**
+   * Response format constraint.
+   */
+  responseFormat?: ResponseFormat;
 
   /**
    * Whether to stream the response
@@ -190,4 +212,9 @@ export interface ModelConfig {
    * Tool references
    */
   tools?: ModelToolReference[];
+
+  /**
+   * Response format constraint.
+   */
+  responseFormat?: ResponseFormat;
 }

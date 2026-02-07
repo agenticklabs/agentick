@@ -11,7 +11,12 @@ import type { ExecutableTool, ToolDefinition } from "../tool/tool";
 import type { SemanticContentBlock, Formatter } from "../renderers";
 import type { ContentBlock } from "@tentickle/shared";
 
-// Note: ToolCall and NormalizedModelTool are unused imports - keeping for future use
+// ============================================================================
+// Token Estimation
+// ============================================================================
+
+/** Token estimation function. Takes text content, returns estimated token count. */
+export type TokenEstimator = (text: string) => number;
 
 // TimelineVisibility and TimelineTag are now exported from @tentickle/shared
 export type TimelineVisibility = "model" | "observer" | "log";
@@ -92,6 +97,8 @@ export interface COMTimelineEntry extends BaseTimelineEntry {
   };
   // Formatter reference for formatting (temporary, not persisted)
   formatter?: Formatter;
+  /** Estimated token count (set by collector/structure-renderer) */
+  tokens?: number;
 }
 
 export interface COMSection {
@@ -109,6 +116,8 @@ export interface COMSection {
   tags?: TimelineTag[];
   metadata?: Record<string, unknown>;
   formatter?: Formatter; // Formatter function
+  /** Estimated token count */
+  tokens?: number;
 }
 
 export interface COMInput {
@@ -136,6 +145,9 @@ export interface COMInput {
    * Not persisted. Interleaved into messages based on position before model call.
    */
   ephemeral: EphemeralEntry[];
+
+  /** Total estimated tokens for this input */
+  totalTokens?: number;
 }
 
 /**

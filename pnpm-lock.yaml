@@ -201,6 +201,25 @@ importers:
         specifier: ^6.0.0
         version: 6.16.0(ws@8.19.0)(zod@4.3.5)
 
+  packages/agent:
+    dependencies:
+      '@tentickle/core':
+        specifier: workspace:*
+        version: link:../core
+      '@tentickle/shared':
+        specifier: workspace:*
+        version: link:../shared
+      react:
+        specifier: ^18.2.0
+        version: 18.3.1
+    devDependencies:
+      '@types/react':
+        specifier: ^18.2.0
+        version: 18.3.27
+      zod:
+        specifier: ^4.2.1
+        version: 4.3.5
+
   packages/angular:
     dependencies:
       '@tentickle/client':

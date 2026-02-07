@@ -15,6 +15,7 @@ import type {
 } from "./types";
 import { createEmptyCompiledStructure } from "./types";
 import type { SemanticContentBlock, Renderer } from "../renderers/types";
+import type { TokenEstimator } from "../com/types";
 import { Logger } from "@tentickle/kernel";
 
 const log = Logger.for("Collector");
@@ -45,8 +46,14 @@ const JSON_LOWER = "json";
 
 /**
  * Collect compiled structure from a container.
+ *
+ * @param container - The root container to collect from
+ * @param estimator - Optional token estimator. When provided, annotates all compiled entries with token estimates.
  */
-export function collect(container: TentickleContainer): CompiledStructure {
+export function collect(
+  container: TentickleContainer,
+  estimator?: TokenEstimator,
+): CompiledStructure {
   const result = createEmptyCompiledStructure();
 
   if (!container.children) {
@@ -58,6 +65,11 @@ export function collect(container: TentickleContainer): CompiledStructure {
     collectNode(child, result);
   }
 
+  // Annotate with token estimates if estimator provided
+  if (estimator) {
+    annotateTokens(result, estimator);
+  }
+
   log.debug(
     {
       sections: result.sections.size,
@@ -65,6 +77,7 @@ export function collect(container: TentickleContainer): CompiledStructure {
       tools: result.tools.length,
       systemEntries: result.systemEntries.length,
       ephemeral: result.ephemeral.length,
+      totalTokens: result.totalTokens,
     },
     "Collector: Collection complete",
   );
@@ -365,4 +378,89 @@ function getTypeName(type: unknown): string {
   }
 
   return "Unknown";
+}
+
+// ============================================================================
+// Token Annotation
+// ============================================================================
+
+const MESSAGE_OVERHEAD = 4; // Per-message overhead tokens
+const IMAGE_OVERHEAD = 85; // Fixed token overhead for images
+
+/**
+ * Estimate tokens for an array of semantic content blocks.
+ */
+function estimateContentTokens(blocks: SemanticContentBlock[], estimator: TokenEstimator): number {
+  let total = 0;
+  for (const block of blocks) {
+    switch (block.type) {
+      case "text":
+        total += estimator((block as any).text || "");
+        break;
+      case "code":
+        total += estimator((block as any).text || (block as any).code || "");
+        break;
+      case "json":
+        total += estimator((block as any).text || JSON.stringify((block as any).data));
+        break;
+      case "tool_use":
+        total += estimator(
+          ((block as any).name || "") + JSON.stringify((block as any).input || {}),
+        );
+        break;
+      case "tool_result": {
+        const nested = (block as any).content;
+        if (Array.isArray(nested)) {
+          total += estimateContentTokens(nested, estimator);
+        } else if (typeof nested === "string") {
+          total += estimator(nested);
+        }
+        break;
+      }
+      case "image":
+        total += IMAGE_OVERHEAD;
+        break;
+      default:
+        // Unknown block type — estimate from JSON representation
+        total += estimator(JSON.stringify(block));
+        break;
+    }
+  }
+  return total;
+}
+
+/**
+ * Annotate all entries in a compiled structure with token estimates.
+ * Sets `.tokens` on each section and timeline entry, and `.totalTokens` on the structure.
+ */
+function annotateTokens(structure: CompiledStructure, estimator: TokenEstimator): void {
+  let total = 0;
+
+  // Sections
+  for (const section of structure.sections.values()) {
+    const tokens = estimateContentTokens(section.content, estimator) + MESSAGE_OVERHEAD;
+    section.tokens = tokens;
+    total += tokens;
+  }
+
+  // Timeline entries
+  for (const entry of structure.timelineEntries) {
+    const tokens = estimateContentTokens(entry.content, estimator) + MESSAGE_OVERHEAD;
+    entry.tokens = tokens;
+    total += tokens;
+  }
+
+  // System entries
+  for (const entry of structure.systemEntries) {
+    const tokens = estimateContentTokens(entry.content, estimator) + MESSAGE_OVERHEAD;
+    entry.tokens = tokens;
+    total += tokens;
+  }
+
+  // Ephemeral (count but don't stamp — no tokens field on CompiledEphemeral)
+  for (const eph of structure.ephemeral) {
+    total += estimateContentTokens(eph.content, estimator) + MESSAGE_OVERHEAD;
+  }
+
+  structure.totalTokens = total;
 }

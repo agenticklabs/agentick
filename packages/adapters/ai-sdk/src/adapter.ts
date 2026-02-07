@@ -300,7 +300,27 @@ export function createAiSdkModel(config: AiSdkAdapterConfig): ModelClass {
         ...inputToolSet,
       } as ToolSet;
 
-      return {
+      // Map responseFormat to AI SDK options
+      let outputMode: "text" | "object" | undefined;
+      let outputSchema: unknown;
+      const mergedProviderOptions = {
+        ...defaultParams.providerOptions,
+        ...providerOptions,
+        ...(sdkOptions.providerOptions || {}),
+      } as Record<string, any>;
+
+      if (params.responseFormat) {
+        const rf = params.responseFormat;
+        if (rf.type === "json") {
+          // Use providerOptions to request JSON mode
+          mergedProviderOptions.response_format = { type: "json_object" };
+        } else if (rf.type === "json_schema") {
+          outputMode = "object";
+          outputSchema = jsonSchema(rf.schema);
+        }
+      }
+
+      const result: Parameters<typeof generateText>[0] = {
         model,
         tools: Object.keys(mergedTools).length > 0 ? mergedTools : undefined,
         messages: aiSdkMessages,
@@ -310,12 +330,15 @@ export function createAiSdkModel(config: AiSdkAdapterConfig): ModelClass {
         frequencyPenalty: params.frequencyPenalty ?? defaultParams.frequencyPenalty,
         presencePenalty: params.presencePenalty ?? defaultParams.presencePenalty,
         ...(restOfLibraryOptions as Omit<Parameters<typeof generateText>[0], "model" | "prompt">),
-        providerOptions: {
-          ...defaultParams.providerOptions,
-          ...providerOptions,
-          ...(sdkOptions.providerOptions || {}),
-        },
+        providerOptions: mergedProviderOptions,
       };
+
+      if (outputMode === "object" && outputSchema) {
+        (result as any).output = "object";
+        (result as any).schema = outputSchema;
+      }
+
+      return result;
     },
 
     // =========================================================================

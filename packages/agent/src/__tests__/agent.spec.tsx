@@ -3,11 +3,9 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { Agent } from "../agent";
-import { createAgent } from "../../../agent";
-import { knob } from "../../../hooks";
-import { compileAgent, createTestAdapter } from "../../../testing";
-import { createTool } from "../../../tool/tool";
+import { Agent, createAgent } from "../index";
+import { compileAgent, createTestAdapter } from "@tentickle/core/testing";
+import { knob, createTool } from "@tentickle/core";
 import { z } from "zod";
 
 // ============================================================================
@@ -113,6 +111,34 @@ describe("<Agent> compilation", () => {
     expect(result.hasTool("greet")).toBe(true);
     expect(result.hasTool("set_knob")).toBe(true);
     expect(result.getSection("knobs")).toContain("verbose");
+  });
+
+  it("should suppress timeline when timeline={false}", async () => {
+    function MyAgent() {
+      return <Agent system="No timeline." timeline={false} />;
+    }
+
+    const result = await compileAgent(MyAgent);
+    expect(result.getSection("system")).toContain("No timeline.");
+    // No timeline entries rendered (timeline component suppressed)
+    expect(result.compiled.timelineEntries).toHaveLength(0);
+  });
+
+  it("should render declarative sections from sections prop", async () => {
+    function MyAgent() {
+      return (
+        <Agent
+          sections={[
+            { id: "context", content: "Today is Monday." },
+            { id: "rules", content: "Be concise.", audience: "model" },
+          ]}
+        />
+      );
+    }
+
+    const result = await compileAgent(MyAgent);
+    expect(result.getSection("context")).toContain("Today is Monday.");
+    expect(result.getSection("rules")).toContain("Be concise.");
   });
 });
 

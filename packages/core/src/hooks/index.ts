@@ -109,9 +109,6 @@ export {
 // Formatter context
 export { FormatterBoundary, useFormatter, type FormatterContextValue } from "./formatter-context";
 
-// Policy context
-export { createPolicy, type PolicyDefinition } from "./policy-context";
-
 // Message context
 export {
   createMessageStore,

@@ -124,6 +124,36 @@ formatContextWindow(1000000);  // "1M"
 formatContextWindow(2097152);  // "2.1M"
 ```
 
+## Response Format
+
+Normalized response format type for structured output across providers:
+
+```typescript
+import type { ResponseFormat } from "@tentickle/shared";
+
+// Free-form text (default behavior)
+const text: ResponseFormat = { type: "text" };
+
+// JSON output (provider ensures valid JSON)
+const json: ResponseFormat = { type: "json" };
+
+// Structured output conforming to a JSON Schema
+const structured: ResponseFormat = {
+  type: "json_schema",
+  schema: {
+    type: "object",
+    properties: {
+      name: { type: "string" },
+      age: { type: "number" },
+    },
+    required: ["name"],
+  },
+  name: "person",  // optional
+};
+```
+
+`ResponseFormat` is accepted on both `ModelInput` (per-call) and `ModelConfig` (adapter default). Each adapter maps it to the provider's native format.
+
 ## Content Types
 
 ### ContentBlock

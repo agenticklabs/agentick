@@ -7,6 +7,7 @@ import type {
   EngineInput,
   EphemeralEntry,
   EphemeralPosition,
+  TokenEstimator,
 } from "./types";
 import type { ToolDefinition, ExecutableTool } from "../tool/tool";
 import type { Message, ContentBlock } from "@tentickle/shared";
@@ -15,6 +16,11 @@ import type { ChannelService } from "../channels";
 import { EventEmitter } from "node:events";
 import { toJSONSchema } from "../utils/schema";
 import type { ExecutionMessage } from "../engine/execution-types";
+/** Default token estimator: ~4 chars per token + overhead */
+function defaultEstimateTokens(text: string): number {
+  return Math.ceil(text.length / 4) + 4;
+}
+
 /**
  * Event payload types for COM events
  */
@@ -165,6 +171,9 @@ export class ContextObjectModel extends EventEmitter {
   // Injected history - entries added via injectHistory() during current tick
   // Separate from timeline to avoid duplication with compiled entries
   private _injectedHistory: COMTimelineEntry[] = [];
+
+  // Token estimation
+  private _tokenEstimator: TokenEstimator = defaultEstimateTokens;
 
   /**
    * The current model adapter for this execution.
@@ -803,6 +812,34 @@ export class ContextObjectModel extends EventEmitter {
       metadata: { ...this.metadata },
       modelOptions: this.modelOptions,
     };
+  }
+
+  // ============================================================================
+  // Token Estimation API
+  // ============================================================================
+
+  /**
+   * Set the token estimator function.
+   * Called by Model component when the adapter provides a tokenEstimator.
+   */
+  setTokenEstimator(estimator: TokenEstimator): void {
+    this._tokenEstimator = estimator;
+  }
+
+  /**
+   * Estimate token count for text content.
+   * Uses the model-provided estimator or falls back to char/4 default.
+   */
+  estimateTokens(text: string): number {
+    return this._tokenEstimator(text);
+  }
+
+  /**
+   * Get the current token estimator function.
+   * Used by the collector to annotate compiled structures.
+   */
+  getTokenEstimator(): TokenEstimator {
+    return this._tokenEstimator;
   }
 
   // ============================================================================

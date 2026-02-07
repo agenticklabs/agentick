@@ -111,6 +111,17 @@ export function createGoogleModel(config: GoogleAdapterConfig = {}): ModelClass 
           generateConfig.tools = [{ functionDeclarations: allFunctionDeclarations }];
         }
 
+        // Map responseFormat
+        if (normalizedInput.responseFormat) {
+          const rf = normalizedInput.responseFormat;
+          if (rf.type === "json" || rf.type === "json_schema") {
+            generateConfig.responseMimeType = "application/json";
+          }
+          if (rf.type === "json_schema") {
+            generateConfig.responseSchema = rf.schema;
+          }
+        }
+
         Object.keys(generateConfig).forEach((key) => {
           if (generateConfig[key] === undefined) delete generateConfig[key];
         });

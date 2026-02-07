@@ -1,0 +1,41 @@
+{
+  "name": "@tentickle/agent",
+  "version": "0.0.1",
+  "description": "Opinionated agent composition for Tentickle",
+  "keywords": [
+    "agent",
+    "ai",
+    "tentickle"
+  ],
+  "license": "ISC",
+  "author": "Ryan Lindgren",
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "main": "src/index.ts",
+  "publishConfig": {
+    "access": "public",
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "test": "echo \"Tests run from workspace root\"",
+    "typecheck": "tsc -p tsconfig.build.json --noEmit",
+    "lint": "oxlint src/",
+    "format:check": "oxfmt --check src/",
+    "clean": "rm -rf dist",
+    "prepublishOnly": "pnpm build",
+    "dev": "tsc --watch"
+  },
+  "dependencies": {
+    "@tentickle/core": "workspace:*",
+    "@tentickle/shared": "workspace:*",
+    "react": "^18.2.0"
+  },
+  "devDependencies": {
+    "@types/react": "^18.2.0",
+    "zod": "^4.2.1"
+  }
+}

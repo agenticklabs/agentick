@@ -76,6 +76,12 @@ export function Model(props: ModelComponentProps): React.ReactElement {
     ctx.setModel(model);
     ctx.resetModelOptions();
 
+    // Register token estimator if adapter provides one
+    const resolvedModel = typeof model === "string" ? null : model;
+    if (resolvedModel?.metadata?.tokenEstimator) {
+      ctx.setTokenEstimator(resolvedModel.metadata.tokenEstimator);
+    }
+
     // Call user's onMount if provided
     if (onMount) {
       const result = onMount(ctx);

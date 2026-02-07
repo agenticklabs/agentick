@@ -322,10 +322,10 @@ export class FiberCompiler {
 
   /**
    * Collect the compiled structure from the current tree.
-   * Used by reactive model after reconcile().
+   * Uses COM's token estimator to annotate all entries with token estimates.
    */
   collect(): CompiledStructure {
-    return collect(this.container);
+    return collect(this.container, this.ctx.getTokenEstimator());
   }
 
   /**

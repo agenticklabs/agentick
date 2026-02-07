@@ -13,7 +13,6 @@ import { Timeline } from "../../jsx/components/timeline";
 import { createTestAdapter } from "../../testing";
 import { createTool } from "../../tool/tool";
 import { z } from "zod";
-import type { AgentConfig } from "../../agent";
 
 // ============================================================================
 // Test Utilities
@@ -62,14 +61,17 @@ describe("session.spawn()", () => {
     session.close();
   });
 
-  it("should spawn a child session with AgentConfig", async () => {
-    const childModel = createMockModel("Config child response");
+  it("should spawn a child session with an inline component", async () => {
+    const childModel = createMockModel("Inline child response");
     const parentModel = createMockModel("Parent response");
 
-    const config: AgentConfig = {
-      system: "You are a config-based agent",
-      model: childModel,
-    };
+    const InlineChild = () => (
+      <>
+        <Model model={childModel} />
+        <System>You are an inline agent</System>
+        <Timeline />
+      </>
+    );
 
     const ParentAgent = () => (
       <>
@@ -82,12 +84,12 @@ describe("session.spawn()", () => {
     const app = createApp(ParentAgent, { maxTicks: 1 });
     const session = await app.session();
 
-    const childHandle = await session.spawn(config, {
-      messages: [{ role: "user", content: [{ type: "text", text: "Hello config" }] }],
+    const childHandle = await session.spawn(InlineChild, {
+      messages: [{ role: "user", content: [{ type: "text", text: "Hello inline" }] }],
     });
 
     const childResult = await childHandle.result;
-    expect(childResult.response).toBe("Config child response");
+    expect(childResult.response).toBe("Inline child response");
 
     session.close();
   });

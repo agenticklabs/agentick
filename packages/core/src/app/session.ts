@@ -80,8 +80,6 @@ import type {
   HookType,
 } from "./types";
 import React from "react";
-import { Agent } from "../jsx/components/agent";
-import type { AgentConfig } from "../agent";
 
 // ════════════════════════════════════════════════════════════════════════════
 // Session Context Extension
@@ -155,6 +153,9 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
 
   // Track timeline sent to model (for combining with response in complete())
   private _lastSentTimeline: COMTimelineEntry[] = [];
+
+  // Estimated context tokens from last compilation (pre-model-call)
+  private _estimatedContextTokens?: number;
 
   // Track last published timeline length for delta publishing
   private _lastPublishedTimelineLength = 0;
@@ -340,10 +341,7 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
   send!: Procedure<(input: SendInput<P>) => SessionExecutionHandle, true>;
   render!: Procedure<(props: P, options?: ExecutionOptions) => SessionExecutionHandle, true>;
   spawn!: Procedure<
-    (
-      agentOrConfig: AgentConfig | ComponentFunction | JSX.Element,
-      input?: SendInput,
-    ) => SessionExecutionHandle,
+    (component: ComponentFunction | JSX.Element, input?: SendInput) => SessionExecutionHandle,
     true
   >;
 
@@ -506,7 +504,7 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
         executionBoundary: false,
       },
       async (
-        agentOrConfig: AgentConfig | ComponentFunction | JSX.Element,
+        component: ComponentFunction | JSX.Element,
         input: SendInput = {},
       ): Promise<SessionExecutionHandle> => {
         if (this._status === "closed") {
@@ -517,7 +515,7 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
         }
 
         // 1. Resolve to ComponentFunction
-        const { Component, mergedProps } = this.resolveSpawnTarget(agentOrConfig, input);
+        const { Component, mergedProps } = this.resolveSpawnTarget(component, input);
 
         // 2. Create child SessionImpl (ephemeral — NOT registered in App's registry)
         //    Whitelist structural fields only — lifecycle callbacks, session management,
@@ -799,39 +797,25 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
    * Resolve spawn target to a ComponentFunction and merged props.
    */
   private resolveSpawnTarget(
-    agentOrConfig: AgentConfig | ComponentFunction | JSX.Element,
+    component: ComponentFunction | JSX.Element,
     input: SendInput,
   ): { Component: ComponentFunction; mergedProps: Record<string, unknown> } {
     // JSX Element
-    if (React.isValidElement(agentOrConfig)) {
+    if (React.isValidElement(component)) {
       return {
-        Component: agentOrConfig.type as ComponentFunction,
+        Component: component.type as ComponentFunction,
         mergedProps: {
-          ...(agentOrConfig.props as Record<string, unknown>),
+          ...(component.props as Record<string, unknown>),
           ...(input.props ?? {}),
         },
       };
     }
 
     // Component function
-    if (typeof agentOrConfig === "function") {
-      return {
-        Component: agentOrConfig as ComponentFunction,
-        mergedProps: input.props ?? {},
-      };
-    }
-
-    // AgentConfig — wrap in Agent component
-    const config = agentOrConfig as AgentConfig;
-    const SpawnedAgent = () =>
-      React.createElement(Agent, {
-        system: config.system,
-        model: config.model,
-        tools: config.tools,
-        knobs: config.knobs,
-      });
-    SpawnedAgent.displayName = "SpawnedAgent";
-    return { Component: SpawnedAgent, mergedProps: input.props ?? {} };
+    return {
+      Component: component as ComponentFunction,
+      mergedProps: input.props ?? {},
+    };
   }
 
   // ════════════════════════════════════════════════════════════════════════
@@ -1420,6 +1404,7 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
         isReasoningModel: payload.isReasoningModel,
         tick: payload.tick,
         cumulativeUsage: payload.cumulativeUsage,
+        estimatedContextTokens: this._estimatedContextTokens,
       });
     }
 
@@ -2344,6 +2329,9 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
 
     // Track what we're sending to the model (for combining with response in complete())
     this._lastSentTimeline = formatted.timeline ?? [];
+
+    // Track estimated context tokens for contextInfo
+    this._estimatedContextTokens = formatted.totalTokens;
 
     // Get model from COM if not in options
     const model = this.ctx.getModel?.() as EngineModel | undefined;

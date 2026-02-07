@@ -18,7 +18,7 @@ import type { TickState } from "../component/component";
 import type { TickResult } from "../hooks/types";
 import type { COMStopRequest, COMContinueRequest } from "../com/object-model";
 import type { ContentBlock, ToolCall, ToolResult } from "@tentickle/shared";
-import type { COMTimelineEntry } from "../com/types";
+import type { COMTimelineEntry, COMInput, TokenEstimator } from "../com/types";
 
 // ============================================================================
 // Mock COM
@@ -38,6 +38,7 @@ export interface MockCom {
   getState<T>(key: string): T | undefined;
   setState<T>(key: string, value: T): void;
   requestRecompile: () => void;
+  getTokenEstimator(): TokenEstimator;
   // EventEmitter-like methods (used by useComState subscription)
   on(event: string, handler: (...args: any[]) => void): void;
   off(event: string, handler: (...args: any[]) => void): void;
@@ -80,6 +81,9 @@ export function createMockCom(options: MockComOptions = {}): MockCom {
     },
     requestRecompile(reason?: string) {
       recompileRequests.push(reason ?? "unspecified");
+    },
+    getTokenEstimator(): TokenEstimator {
+      return (text: string) => Math.ceil(text.length / 4) + 4;
     },
     on(event: string, handler: (...args: any[]) => void) {
       if (!listeners.has(event)) listeners.set(event, new Set());
@@ -204,5 +208,69 @@ export function createMockTickResult(options: MockTickResultOptions = {}): MockT
     },
     _stopCalls: stopCalls,
     _continueCalls: continueCalls,
+  };
+}
+
+// ============================================================================
+// Timeline Entry Helpers
+// ============================================================================
+
+/**
+ * Create a COMTimelineEntry for testing.
+ *
+ * @param role - Message role
+ * @param text - Text content
+ * @param tokens - Optional token count (for budget testing)
+ *
+ * @example
+ * ```tsx
+ * import { makeTimelineEntry } from '@tentickle/core/testing';
+ *
+ * const entry = makeTimelineEntry("user", "Hello!", 10);
+ * const entries = [
+ *   makeTimelineEntry("user", "First message", 30),
+ *   makeTimelineEntry("assistant", "Response", 50),
+ * ];
+ * ```
+ */
+export function makeTimelineEntry(
+  role: "user" | "assistant" | "tool" | "system",
+  text: string,
+  tokens?: number,
+): COMTimelineEntry {
+  return {
+    kind: "message",
+    message: {
+      role,
+      content: [{ type: "text", text }] as any,
+    },
+    tokens,
+  };
+}
+
+/**
+ * Create a minimal COMInput with timeline entries for testing.
+ *
+ * @param entries - Timeline entries (or use makeTimelineEntry to create them)
+ *
+ * @example
+ * ```tsx
+ * import { makeTimelineEntry, makeCOMInput } from '@tentickle/core/testing';
+ *
+ * const previous = makeCOMInput([
+ *   makeTimelineEntry("user", "Hello", 10),
+ *   makeTimelineEntry("assistant", "Hi there", 15),
+ * ]);
+ * const tickState = createMockTickState({ previous });
+ * ```
+ */
+export function makeCOMInput(entries: COMTimelineEntry[]): COMInput {
+  return {
+    timeline: entries,
+    system: [],
+    sections: {},
+    tools: [],
+    metadata: {},
+    ephemeral: [],
   };
 }

@@ -14,7 +14,7 @@ import type {
 } from "@tentickle/shared/models";
 import type { StreamEvent } from "@tentickle/shared/streaming";
 import type { Message } from "@tentickle/shared/messages";
-import type { COMInput } from "../com/types";
+import type { COMInput, TokenEstimator } from "../com/types";
 import type { EngineResponse } from "../engine/engine-response";
 import type { EventBlock, TextBlock, ContentBlock } from "@tentickle/shared";
 import type {
@@ -257,6 +257,9 @@ export interface ModelMetadata {
   supportsToolUse?: boolean;
   /** Whether this is a reasoning model (extended thinking) */
   isReasoningModel?: boolean;
+
+  /** Token estimator function (e.g., tiktoken). If provided, used instead of default char/4 heuristic. */
+  tokenEstimator?: TokenEstimator;
 }
 
 /**

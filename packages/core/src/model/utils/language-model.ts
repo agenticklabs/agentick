@@ -729,6 +729,9 @@ export async function fromEngineState(
     if (optionsToMerge.providerOptions !== undefined) {
       baseModelInput.providerOptions = optionsToMerge.providerOptions;
     }
+    if (optionsToMerge.responseFormat !== undefined) {
+      baseModelInput.responseFormat = optionsToMerge.responseFormat;
+    }
     // Note: tools from modelOptions are not merged - we use tools from COMInput.tools
   }
 

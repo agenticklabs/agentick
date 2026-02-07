@@ -55,6 +55,8 @@ export interface ContextInfo {
   supportsVision?: boolean;
   supportsToolUse?: boolean;
   isReasoningModel?: boolean;
+  /** Estimated total context tokens (from token estimation, pre-model-call) */
+  estimatedContextTokens?: number;
   /** Current tick number */
   tick: number;
   /** Cumulative usage across all ticks in this execution */
