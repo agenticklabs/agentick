@@ -118,28 +118,53 @@ Auto-generated API documentation for all agentick packages.
 
 Browse the sidebar to explore types, functions, and classes from each package.
 
-## Packages
+## Core
 
 | Package | Description |
 |---------|-------------|
 | [@agentick/core](./@agentick/core/) | Reconciler, hooks, JSX, compiler |
 | [@agentick/kernel](./@agentick/kernel/) | Procedures, execution, context |
 | [@agentick/shared](./@agentick/shared/) | Wire types, blocks, messages |
-| [@agentick/gateway](./@agentick/gateway/) | Multi-session management |
-| [@agentick/client](./@agentick/client/) | Browser/Node client |
-| [@agentick/server](./@agentick/server/) | Transport server |
-| [@agentick/express](./@agentick/express/) | Express.js integration |
-| [@agentick/nestjs](./@agentick/nestjs/) | NestJS module |
-| [@agentick/react](./@agentick/react/) | React hooks & components |
-| [@agentick/angular](./@agentick/angular/) | Angular services & utilities |
-| [@agentick/devtools](./@agentick/devtools/) | Inspector & debugging |
+
+## Agent
+
+| Package | Description |
+|---------|-------------|
 | [@agentick/agent](./@agentick/agent/) | High-level agent factory |
-| [@agentick/cli](./@agentick/cli/) | Terminal client |
 | [@agentick/guardrails](./@agentick/guardrails/) | Guard system |
-| [@agentick/client-multiplexer](./@agentick/client-multiplexer/) | Multi-tab multiplexer |
+
+## Adapters
+
+| Package | Description |
+|---------|-------------|
 | [@agentick/openai](./@agentick/openai/) | OpenAI adapter |
 | [@agentick/google](./@agentick/google/) | Google Gemini adapter |
 | [@agentick/ai-sdk](./@agentick/ai-sdk/) | Vercel AI SDK adapter |
+
+## Server
+
+| Package | Description |
+|---------|-------------|
+| [@agentick/gateway](./@agentick/gateway/) | Multi-session management |
+| [@agentick/server](./@agentick/server/) | Transport server |
+| [@agentick/express](./@agentick/express/) | Express.js integration |
+| [@agentick/nestjs](./@agentick/nestjs/) | NestJS module |
+
+## Client
+
+| Package | Description |
+|---------|-------------|
+| [@agentick/client](./@agentick/client/) | Browser/Node client |
+| [@agentick/react](./@agentick/react/) | React hooks & components |
+| [@agentick/angular](./@agentick/angular/) | Angular services & utilities |
+| [@agentick/cli](./@agentick/cli/) | Terminal client |
+| [@agentick/client-multiplexer](./@agentick/client-multiplexer/) | Multi-tab multiplexer |
+
+## DevTools
+
+| Package | Description |
+|---------|-------------|
+| [@agentick/devtools](./@agentick/devtools/) | Inspector & debugging |
 `,
   );
 }

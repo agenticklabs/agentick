@@ -217,26 +217,54 @@ One `useKnob` call creates reactive state, renders it to model context as a form
 
 ## Packages
 
+### Core
+
 | Package | Description |
 |---------|-------------|
 | `agentick` | Convenience re-export of @agentick/core |
 | `@agentick/core` | Reconciler, hooks, JSX, compiler, app |
 | `@agentick/kernel` | Procedures, execution tracking, context (ALS) |
 | `@agentick/shared` | Wire-safe types, blocks, messages, streaming |
-| `@agentick/gateway` | Multi-session management, methods |
-| `@agentick/client` | Browser/Node client for real-time sessions |
-| `@agentick/server` | Transport server (SSE, WebSocket) |
-| `@agentick/express` | Express.js integration |
-| `@agentick/nestjs` | NestJS module |
-| `@agentick/react` | React hooks & components for UI |
-| `@agentick/angular` | Angular services & utilities |
-| `@agentick/devtools` | Fiber inspector, timeline viewer |
+
+### Agent
+
+| Package | Description |
+|---------|-------------|
 | `@agentick/agent` | High-level createAgent factory |
-| `@agentick/cli` | Terminal client for agents |
-| `@agentick/client-multiplexer` | Multi-tab connection multiplexer |
+| `@agentick/guardrails` | Guard system |
+
+### Adapters
+
+| Package | Description |
+|---------|-------------|
 | `@agentick/openai` | OpenAI adapter |
 | `@agentick/google` | Google Gemini adapter |
 | `@agentick/ai-sdk` | Vercel AI SDK adapter |
+
+### Server
+
+| Package | Description |
+|---------|-------------|
+| `@agentick/gateway` | Multi-session management, methods |
+| `@agentick/server` | Transport server (SSE, WebSocket) |
+| `@agentick/express` | Express.js integration |
+| `@agentick/nestjs` | NestJS module |
+
+### Client
+
+| Package | Description |
+|---------|-------------|
+| `@agentick/client` | Browser/Node client for real-time sessions |
+| `@agentick/react` | React hooks & components for UI |
+| `@agentick/angular` | Angular services & utilities |
+| `@agentick/cli` | Terminal client for agents |
+| `@agentick/client-multiplexer` | Multi-tab connection multiplexer |
+
+### DevTools
+
+| Package | Description |
+|---------|-------------|
+| `@agentick/devtools` | Fiber inspector, timeline viewer |
 
 ## Install
 

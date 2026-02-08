@@ -2,6 +2,45 @@ import { defineConfig } from "vitepress";
 import { readFileSync, existsSync } from "node:fs";
 import { resolve } from "node:path";
 
+// Package grouping for API sidebar
+const PACKAGE_GROUPS: Array<{ label: string; packages: string[] }> = [
+  {
+    label: "Core",
+    packages: ["@agentick/core", "@agentick/kernel", "@agentick/shared"],
+  },
+  {
+    label: "Agent",
+    packages: ["@agentick/agent", "@agentick/guardrails"],
+  },
+  {
+    label: "Adapters",
+    packages: ["@agentick/openai", "@agentick/google", "@agentick/ai-sdk"],
+  },
+  {
+    label: "Server",
+    packages: [
+      "@agentick/gateway",
+      "@agentick/server",
+      "@agentick/express",
+      "@agentick/nestjs",
+    ],
+  },
+  {
+    label: "Client",
+    packages: [
+      "@agentick/client",
+      "@agentick/react",
+      "@agentick/angular",
+      "@agentick/cli",
+      "@agentick/client-multiplexer",
+    ],
+  },
+  {
+    label: "DevTools",
+    packages: ["@agentick/devtools"],
+  },
+];
+
 // Load TypeDoc-generated sidebar if it exists
 function loadApiSidebar() {
   const sidebarPath = resolve(__dirname, "../api/typedoc-sidebar.json");
@@ -18,7 +57,44 @@ function loadApiSidebar() {
     }));
   }
 
-  return stripMd(raw);
+  const cleaned = stripMd(raw);
+
+  // Build a map of package name → sidebar item
+  const itemMap = new Map<string, any>();
+  for (const item of cleaned) {
+    itemMap.set(item.text, item);
+  }
+
+  // Group into sections
+  const grouped: any[] = [];
+  const placed = new Set<string>();
+
+  for (const group of PACKAGE_GROUPS) {
+    const items: any[] = [];
+    for (const pkg of group.packages) {
+      const item = itemMap.get(pkg);
+      if (item) {
+        items.push(item);
+        placed.add(pkg);
+      }
+    }
+    if (items.length > 0) {
+      grouped.push({
+        text: group.label,
+        collapsed: false,
+        items,
+      });
+    }
+  }
+
+  // Catch any ungrouped packages
+  for (const item of cleaned) {
+    if (!placed.has(item.text)) {
+      grouped.push(item);
+    }
+  }
+
+  return grouped;
 }
 
 export default defineConfig({

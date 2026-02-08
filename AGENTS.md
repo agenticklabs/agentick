@@ -29,27 +29,54 @@ Adapters: @agentick/openai, google, ai-sdk
 Foundation: @agentick/kernel (Node.js), @agentick/shared (universal)
 ```
 
+**Core**
+
 | Package | Path | Purpose |
 |---------|------|---------|
+| `agentick` | `packages/agentick` | Convenience re-export of @agentick/core |
 | `@agentick/core` | `packages/core` | Reconciler, hooks, JSX, compiler, session, app |
 | `@agentick/kernel` | `packages/kernel` | Procedures, execution tracking, ALS context |
 | `@agentick/shared` | `packages/shared` | Wire-safe types, blocks, messages, streaming |
-| `@agentick/gateway` | `packages/gateway` | Multi-session management, methods |
-| `@agentick/client` | `packages/client` | Browser/Node client for real-time sessions |
-| `@agentick/server` | `packages/server` | Transport server (SSE, WebSocket) |
-| `@agentick/express` | `packages/express` | Express.js integration |
-| `@agentick/nestjs` | `packages/nestjs` | NestJS module |
-| `@agentick/react` | `packages/react` | React hooks & UI components |
-| `@agentick/angular` | `packages/angular` | Angular services & utilities |
-| `@agentick/devtools` | `packages/devtools` | Fiber inspector, timeline viewer |
+
+**Agent**
+
+| Package | Path | Purpose |
+|---------|------|---------|
 | `@agentick/agent` | `packages/agent` | High-level createAgent factory |
-| `@agentick/cli` | `packages/cli` | Terminal client for agents |
 | `@agentick/guardrails` | `packages/guardrails` | Guard system |
-| `@agentick/client-multiplexer` | `packages/client-multiplexer` | Multi-tab connection multiplexer |
+
+**Adapters**
+
+| Package | Path | Purpose |
+|---------|------|---------|
 | `@agentick/openai` | `packages/adapters/openai` | OpenAI adapter |
 | `@agentick/google` | `packages/adapters/google` | Google Gemini adapter |
 | `@agentick/ai-sdk` | `packages/adapters/ai-sdk` | Vercel AI SDK adapter |
-| `agentick` | `packages/agentick` | Convenience re-export of @agentick/core |
+
+**Server**
+
+| Package | Path | Purpose |
+|---------|------|---------|
+| `@agentick/gateway` | `packages/gateway` | Multi-session management, methods |
+| `@agentick/server` | `packages/server` | Transport server (SSE, WebSocket) |
+| `@agentick/express` | `packages/express` | Express.js integration |
+| `@agentick/nestjs` | `packages/nestjs` | NestJS module |
+
+**Client**
+
+| Package | Path | Purpose |
+|---------|------|---------|
+| `@agentick/client` | `packages/client` | Browser/Node client for real-time sessions |
+| `@agentick/react` | `packages/react` | React hooks & UI components |
+| `@agentick/angular` | `packages/angular` | Angular services & utilities |
+| `@agentick/cli` | `packages/cli` | Terminal client for agents |
+| `@agentick/client-multiplexer` | `packages/client-multiplexer` | Multi-tab connection multiplexer |
+
+**DevTools**
+
+| Package | Path | Purpose |
+|---------|------|---------|
+| `@agentick/devtools` | `packages/devtools` | Fiber inspector, timeline viewer |
 
 ## Core Concepts
 
