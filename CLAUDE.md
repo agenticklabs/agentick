@@ -1,4 +1,4 @@
-# Tentickle - Claude Code Guidelines
+# Agentick - Claude Code Guidelines
 
 ## Philosophy
 
@@ -73,18 +73,18 @@ export const MyStatefulTool = createTool({
                                  │
 ┌────────────────────────────────┴────────────────────────────────────────┐
 │                          Framework Layer                                │
-│   @tentickle/core     @tentickle/gateway     @tentickle/client          │
-│   @tentickle/express  @tentickle/devtools                               │
+│   @agentick/core     @agentick/gateway     @agentick/client          │
+│   @agentick/express  @agentick/devtools                               │
 └────────────────────────────────┬────────────────────────────────────────┘
                                  │
 ┌────────────────────────────────┴────────────────────────────────────────┐
 │                         Adapter Layer                                   │
-│   @tentickle/openai   @tentickle/google   @tentickle/ai-sdk             │
+│   @agentick/openai   @agentick/google   @agentick/ai-sdk             │
 └────────────────────────────────┬────────────────────────────────────────┘
                                  │
 ┌────────────────────────────────┴────────────────────────────────────────┐
 │                        Foundation Layer                                 │
-│              @tentickle/kernel          @tentickle/shared               │
+│              @agentick/kernel          @agentick/shared               │
 │              (Node.js only)             (Platform-independent)          │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
@@ -111,7 +111,7 @@ Session
 
 ### React-like Reconciler
 
-Tentickle uses a React-inspired reconciler:
+Agentick uses a React-inspired reconciler:
 
 - **Fiber Tree**: Virtual DOM-like component hierarchy
 - **Reconciler**: Component lifecycle, diffs, scheduling
@@ -129,7 +129,7 @@ User JSX → Fiber Tree → CompiledStructure → Provider Input
 pnpm test                                   # Run all tests
 pnpm build                                  # Build all packages
 pnpm typecheck                              # Check all types
-pnpm --filter @tentickle/core test          # Run specific package
+pnpm --filter @agentick/core test          # Run specific package
 ```
 
 ### Code Style
@@ -170,7 +170,7 @@ methods: {
 A **Procedure** wraps any async function with middleware, validation, execution tracking, and `ProcedurePromise` return values. Procedures are the core execution primitive — every model call, tool run, and engine operation is a Procedure.
 
 ```typescript
-import { createProcedure } from "@tentickle/kernel";
+import { createProcedure } from "@agentick/kernel";
 
 const greet = createProcedure(async (name: string) => `Hello, ${name}!`);
 ```
@@ -207,12 +207,12 @@ const timing: Middleware = async (args, envelope, next) => {
 
 **Layering** — kernel provides bare procedures, core adds engine middleware:
 
-| Factory                 | Package                      | Behavior                                                 |
-| ----------------------- | ---------------------------- | -------------------------------------------------------- |
-| `createProcedure`       | `@tentickle/kernel`          | Bare procedure, no default middleware                    |
-| `createEngineProcedure` | `@tentickle/core` (internal) | `wrapProcedure([errorMiddleware])` — adds error handling |
+| Factory                 | Package                     | Behavior                                                 |
+| ----------------------- | --------------------------- | -------------------------------------------------------- |
+| `createProcedure`       | `@agentick/kernel`          | Bare procedure, no default middleware                    |
+| `createEngineProcedure` | `@agentick/core` (internal) | `wrapProcedure([errorMiddleware])` — adds error handling |
 
-`createEngineProcedure` is not exported from core's public API. It's used internally by adapters, tools, and MCP tools. Users register middleware via `Tentickle.use()`, which is resolved at runtime from ALS context.
+`createEngineProcedure` is not exported from core's public API. It's used internally by adapters, tools, and MCP tools. Users register middleware via `Agentick.use()`, which is resolved at runtime from ALS context.
 
 **Session Procedures** — `session.send`, `session.render`, `session.queue`, and `app.run` are all Procedures:
 
@@ -227,7 +227,7 @@ All four use passthrough mode (`handleFactory: false`) — the handler's return 
 ### Using ALS Context
 
 ```typescript
-import { Context } from "@tentickle/kernel";
+import { Context } from "@agentick/kernel";
 
 const ctx = Context.get();
 const userId = ctx.user?.id;

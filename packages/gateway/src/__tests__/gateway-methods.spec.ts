@@ -13,8 +13,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { z } from "zod";
 import { Gateway, createGateway, type ExpressRequestHandler } from "../gateway.js";
 import { method, type AuthResult, type AuthConfig, type GatewayConfig } from "../types.js";
-import { Context, type UserContext } from "@tentickle/kernel";
-import { createMockApp } from "@tentickle/core/testing";
+import { Context, type UserContext } from "@agentick/kernel";
+import { createMockApp } from "@agentick/core/testing";
 
 // ============================================================================
 // Gateway initialization tests

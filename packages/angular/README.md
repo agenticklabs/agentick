@@ -1,36 +1,36 @@
-# @tentickle/angular
+# @agentick/angular
 
-Angular integration for Tentickle. Provides a signal-first service wrapper around `@tentickle/client`.
+Angular integration for Agentick. Provides a signal-first service wrapper around `@agentick/client`.
 
 ## Installation
 
 ```bash
-pnpm add @tentickle/angular
+pnpm add @agentick/angular
 ```
 
 ## Quick Start
 
 ```ts
 import { Component, inject } from "@angular/core";
-import { TentickleService, provideTentickle } from "@tentickle/angular";
+import { AgentickService, provideAgentick } from "@agentick/angular";
 
 @Component({
   selector: "app-chat",
-  providers: [provideTentickle({ baseUrl: "/api/agent" })],
+  providers: [provideAgentick({ baseUrl: "/api/agent" })],
   template: `
-    <div>{{ tentickle.text() }}</div>
+    <div>{{ agentick.text() }}</div>
     <button (click)="send('Hello')">Send</button>
   `,
 })
 export class ChatComponent {
-  tentickle = inject(TentickleService);
+  agentick = inject(AgentickService);
 
   constructor() {
-    this.tentickle.subscribe("conv-123");
+    this.agentick.subscribe("conv-123");
   }
 
   async send(message: string) {
-    const handle = this.tentickle.send(message);
+    const handle = this.agentick.send(message);
     await handle.result;
   }
 }

@@ -10,8 +10,8 @@
 
 import React from "react";
 import { Agent, type AgentProps } from "./agent";
-import { createApp } from "@tentickle/core";
-import type { AppOptions, App, ComponentFunction } from "@tentickle/core";
+import { createApp } from "@agentick/core";
+import type { AppOptions, App, ComponentFunction } from "@agentick/core";
 
 // ============================================================================
 // AgentConfig — config-only subset of AgentProps for Level 0

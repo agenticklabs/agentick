@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { Execution, Session, FiberNode, TokenSummary } from "../hooks/useDevToolsEvents";
 import { Tree } from "./Tree";
-import { getModelInfo, getContextUtilization, formatContextWindow } from "@tentickle/shared";
+import { getModelInfo, getContextUtilization, formatContextWindow } from "@agentick/shared";
 
 type ContentTab = "execution" | "context" | "fiber" | "tools";
 
@@ -1263,7 +1263,7 @@ function ContextView({
         <PipelineStage
           number={3}
           title="Model Input"
-          subtitle="Tentickle Format"
+          subtitle="Agentick Format"
           data={tick.modelInput}
           dataType="modelInput"
           defaultExpanded={true}
@@ -1403,7 +1403,7 @@ function TickFiberNode({
   onToggle: (id: string) => void;
 }) {
   // Skip fragment nodes
-  if (node.type === "tentickle.fragment") {
+  if (node.type === "agentick.fragment") {
     return (
       <>
         {node.children.map((child) => (
@@ -1421,7 +1421,7 @@ function TickFiberNode({
   const hasChildren = node.children.length > 0;
   const hasHooks = node.hooks.length > 0;
   const isExpanded = expandedNodes.has(node.id);
-  const isHostElement = node.type.startsWith("tentickle.") || node.type === "text";
+  const isHostElement = node.type.startsWith("agentick.") || node.type === "text";
 
   return (
     <div className="fiber-node">

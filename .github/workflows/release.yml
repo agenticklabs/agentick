@@ -62,7 +62,7 @@ jobs:
       - name: Create unified version tag
         if: steps.changesets.outputs.published == 'true'
         run: |
-          # Get version from main tentickle package
+          # Get version from main agentick package
           VERSION=$(node -p "require('./packages/core/package.json').version")
           TAG="v${VERSION}"
 

@@ -5,7 +5,7 @@
  * Supports token budget compaction via maxTokens/strategy props.
  * Uses React context to provide timeline access to descendants.
  *
- * @module tentickle/components
+ * @module agentick/components
  */
 
 import React, {
@@ -21,7 +21,7 @@ import type { COMTimelineEntry } from "../../com/types";
 import type { ExecutionMessage } from "../../engine/execution-types";
 import { useTickState } from "../../hooks/context";
 import { compactEntries, type CompactionStrategy, type TokenBudgetInfo } from "./token-budget";
-import { Logger } from "@tentickle/kernel";
+import { Logger } from "@agentick/kernel";
 
 const log = Logger.for("Timeline");
 
@@ -127,7 +127,7 @@ const TimelineContext = createContext<TimelineContextValue | null>(null);
  * Default renderer for a single timeline entry.
  *
  * Renders directly to the "entry" intrinsic element to avoid
- * React trying to render Tentickle components that return Tentickle elements.
+ * React trying to render Agentick components that return Agentick elements.
  */
 function DefaultMessage({
   entry,
@@ -148,7 +148,7 @@ function DefaultMessage({
   if (!textContent) return h(React.Fragment, null);
 
   // Render the "entry" intrinsic element directly
-  // This avoids going through User/Assistant which return Tentickle elements
+  // This avoids going through User/Assistant which return Agentick elements
   if (role === "user" || role === "assistant" || role === "tool") {
     return h("entry", {
       kind: "message",
@@ -271,7 +271,7 @@ export function Timeline(props: TimelineProps): JSX.Element {
   try {
     tickState = useTickState();
   } catch {
-    // Outside of TentickleProvider - return empty
+    // Outside of AgentickProvider - return empty
   }
 
   // Get raw timeline entries, apply filters
@@ -405,7 +405,7 @@ Timeline.Provider = function TimelineProvider(props: TimelineProviderProps): JSX
   try {
     tickState = useTickState();
   } catch {
-    // Outside of TentickleProvider
+    // Outside of AgentickProvider
   }
 
   // Use provided entries or get from tickState.previous.timeline
@@ -551,7 +551,7 @@ export function useConversationHistory(): COMTimelineEntry[] {
   try {
     tickState = useTickState();
   } catch {
-    // Outside of TentickleProvider
+    // Outside of AgentickProvider
     return [];
   }
 

@@ -21,7 +21,7 @@ import { useComState } from "./com-state";
 // Types — Primitives, Constraints, Options
 // ============================================================================
 
-const KNOB_SYMBOL = Symbol.for("tentickle.knob");
+const KNOB_SYMBOL = Symbol.for("agentick.knob");
 
 export type KnobPrimitive = string | number | boolean;
 
@@ -214,7 +214,7 @@ export function useKnob(
   const primitiveSignal = useComState<KnobPrimitive>(comKey, defaultValue);
 
   // Register in knobRegistry eagerly so <Knobs /> sees it on the same render pass.
-  // NOTE: Intentional render-time side effect — safe because Tentickle's reconciler
+  // NOTE: Intentional render-time side effect — safe because Agentick's reconciler
   // is synchronous/single-pass. Would not be safe in concurrent React.
   useMemo(() => {
     store.knobRegistry.set(name, {

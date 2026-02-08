@@ -1,7 +1,7 @@
 import type { OpenAI } from "openai";
 import { type ClientOptions } from "openai";
-import { type ProviderClientOptions } from "@tentickle/core";
-import { StopReason } from "@tentickle/shared";
+import { type ProviderClientOptions } from "@agentick/core";
+import { StopReason } from "@agentick/shared";
 
 /**
  * OpenAI adapter configuration.
@@ -49,7 +49,7 @@ export interface OpenAIToolOptions {
 /**
  * Module augmentation: Extend provider option interfaces to include OpenAI-specific options.
  */
-declare module "@tentickle/core" {
+declare module "@agentick/core" {
   interface ProviderClientOptions {
     openai?: OpenAIAdapterConfig;
   }

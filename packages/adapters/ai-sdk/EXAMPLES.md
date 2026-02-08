@@ -1,6 +1,6 @@
 # AI SDK Compiler Adapter Examples
 
-Progressive adoption: Use as little or as much of tentickle as you want.
+Progressive adoption: Use as little or as much of agentick as you want.
 
 ## Level 1: Just JSX Compilation (Minimal Change)
 
@@ -9,7 +9,7 @@ Keep your existing `generateText`/`streamText` calls. Add JSX for dynamic contex
 ```typescript
 import { openai } from '@ai-sdk/openai';
 import { generateText } from 'ai';
-import { createAiSdkCompiler } from '@tentickle/ai-sdk';
+import { createAiSdkCompiler } from '@agentick/ai-sdk';
 
 const compiler = createAiSdkCompiler();
 
@@ -83,7 +83,7 @@ for await (const event of compiler.stream(
 Add React-style state to your components.
 
 ```typescript
-import { Component, comState } from 'tentickle';
+import { Component, comState } from 'agentick';
 
 class SearchAgent extends Component {
   // State persists across ticks
@@ -131,7 +131,7 @@ const result = await compiler.run(
 Provide tools to the compilation.
 
 ```typescript
-import { defineTool } from 'tentickle';
+import { defineTool } from 'agentick';
 
 const searchTool = defineTool({
   name: 'web_search',
@@ -170,7 +170,7 @@ const result = await compiler.run(
 Run sub-agents in parallel.
 
 ```typescript
-import { Fork, Spawn } from 'tentickle';
+import { Fork, Spawn } from 'agentick';
 
 function ParallelAgent() {
   return (
@@ -220,7 +220,7 @@ const result = await compiler.run(
 
 ## Level 6: Fully Managed (Optional)
 
-Let tentickle handle model execution entirely.
+Let agentick handle model execution entirely.
 
 ```typescript
 const compiler = createAiSdkCompiler({
@@ -243,11 +243,11 @@ for await (const event of compiler.stream(<MyAgent />, initialMessages)) {
 
 ## Level 7: Adopt the Full Engine
 
-When you're ready, migrate to the full tentickle Engine for maximum power.
+When you're ready, migrate to the full agentick Engine for maximum power.
 
 ```typescript
-import { Engine } from 'tentickle';
-import { createAiSdkModel } from '@tentickle/ai-sdk';
+import { Engine } from 'agentick';
+import { createAiSdkModel } from '@agentick/ai-sdk';
 
 const engine = new Engine({
   model: createAiSdkModel({ model: openai('gpt-5.2') }),
@@ -266,7 +266,7 @@ const result = await engine.execute(<MyAgent />, initialMessages);
 Use ai-sdk message format directly in JSX.
 
 ```typescript
-import { Message, System, User, Assistant } from '@tentickle/ai-sdk';
+import { Message, System, User, Assistant } from '@agentick/ai-sdk';
 
 function ConversationAgent() {
   return (
@@ -294,7 +294,7 @@ function ConversationAgent() {
 
 1. **Progressive Adoption**: Start small, add features as needed
 2. **Minimal Changes**: Keep your existing code, add JSX on top
-3. **User Control**: You decide how much tentickle manages
+3. **User Control**: You decide how much agentick manages
 4. **Library-Native**: Accept and return ai-sdk types, not EngineInput/EngineResponse
 5. **Flexibility**: Use as much or as little as you want
 
@@ -303,7 +303,7 @@ function ConversationAgent() {
 ```
 You are here → Just JSX → Add state → Add tools → Fork/spawn → Full Engine
      ↓           ↓          ↓          ↓          ↓           ↓
-   0% tentickle    10% tentickle   30% tentickle   50% tentickle   70% tentickle   100% tentickle
+   0% agentick    10% agentick   30% agentick   50% agentick   70% agentick   100% agentick
 ```
 
 Start anywhere. Move at your own pace. Never break existing code.

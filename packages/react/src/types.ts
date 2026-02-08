@@ -1,11 +1,11 @@
 /**
- * React integration types for Tentickle.
+ * React integration types for Agentick.
  *
- * @module @tentickle/react/types
+ * @module @agentick/react/types
  */
 
 import type {
-  TentickleClient,
+  AgentickClient,
   ConnectionState,
   StreamEvent,
   SendInput,
@@ -13,8 +13,8 @@ import type {
   ClientExecutionHandle,
   SessionStreamEvent,
   ClientTransport,
-} from "@tentickle/client";
-import type { ContentBlock, Message } from "@tentickle/shared";
+} from "@agentick/client";
+import type { ContentBlock, Message } from "@agentick/shared";
 import type { ReactNode } from "react";
 
 // ============================================================================
@@ -22,20 +22,20 @@ import type { ReactNode } from "react";
 // ============================================================================
 
 /**
- * Transport configuration for TentickleProvider.
+ * Transport configuration for AgentickProvider.
  * Can be a built-in transport type or a custom ClientTransport instance.
  */
 export type TransportConfig = "sse" | "websocket" | "auto" | ClientTransport;
 
 /**
- * Configuration for TentickleProvider.
+ * Configuration for AgentickProvider.
  */
-export interface TentickleProviderProps {
+export interface AgentickProviderProps {
   /**
    * Pre-configured client instance.
    * If provided, clientConfig is ignored.
    */
-  client?: TentickleClient;
+  client?: AgentickClient;
 
   /**
    * Client configuration (used if client is not provided).
@@ -51,9 +51,9 @@ export interface TentickleProviderProps {
      *
      * @example
      * ```tsx
-     * import { createSharedTransport } from '@tentickle/client-multiplexer';
+     * import { createSharedTransport } from '@agentick/client-multiplexer';
      *
-     * <TentickleProvider clientConfig={{
+     * <AgentickProvider clientConfig={{
      *   baseUrl: 'https://api.example.com',
      *   transport: createSharedTransport({ baseUrl: 'https://api.example.com' }),
      * }}>
@@ -77,10 +77,10 @@ export interface TentickleProviderProps {
 }
 
 /**
- * Context value provided by TentickleProvider.
+ * Context value provided by AgentickProvider.
  */
-export interface TentickleContextValue {
-  client: TentickleClient;
+export interface AgentickContextValue {
+  client: AgentickClient;
 }
 
 // ============================================================================

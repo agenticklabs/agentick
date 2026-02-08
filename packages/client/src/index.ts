@@ -1,7 +1,7 @@
 /**
- * @tentickle/client - Client SDK for Tentickle
+ * @agentick/client - Client SDK for Agentick
  *
- * Provides a multiplexed client for connecting to Tentickle servers with:
+ * Provides a multiplexed client for connecting to Agentick servers with:
  * - Transport auto-detection (HTTP/SSE for http://, WebSocket for ws://)
  * - Single connection for multiple sessions
  * - Session accessors (cold/hot semantics)
@@ -10,7 +10,7 @@
  *
  * @example
  * ```typescript
- * import { createClient } from '@tentickle/client';
+ * import { createClient } from '@agentick/client';
  *
  * // HTTP/SSE transport (default for http:// URLs)
  * const httpClient = createClient({
@@ -43,14 +43,14 @@
  * await handle.result;
  * ```
  *
- * @module @tentickle/client
+ * @module @agentick/client
  */
 
 // Main client
 export {
-  TentickleClient,
+  AgentickClient,
   createClient,
-  type TentickleClientConfig,
+  type AgentickClientConfig,
   type SessionAccessor,
 } from "./client.js";
 

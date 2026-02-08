@@ -2,12 +2,12 @@
  * Gateway Types
  */
 
-import type { App } from "@tentickle/core";
-import type { KernelContext, UserContext } from "@tentickle/kernel";
-import type { AuthConfig } from "@tentickle/server";
+import type { App } from "@agentick/core";
+import type { KernelContext, UserContext } from "@agentick/kernel";
+import type { AuthConfig } from "@agentick/server";
 
 // Re-export auth types from server
-export type { AuthConfig, AuthResult } from "@tentickle/server";
+export type { AuthConfig, AuthResult } from "@agentick/server";
 
 /**
  * Schema type that works with both Zod 3 and Zod 4.
@@ -18,7 +18,7 @@ export interface ZodLikeSchema<T = unknown> {
   _output: T;
 }
 
-export type { UserContext } from "@tentickle/kernel";
+export type { UserContext } from "@agentick/kernel";
 
 // ============================================================================
 // Gateway Configuration
@@ -107,7 +107,7 @@ export interface GatewayConfig {
   httpPort?: number;
 
   /**
-   * Custom methods - runs within Tentickle ALS context.
+   * Custom methods - runs within Agentick ALS context.
    *
    * Supports:
    * - Simple handlers: `async (params) => result`
@@ -128,7 +128,7 @@ export interface GatewayConfig {
 export interface StorageConfig {
   /**
    * Base directory for storage
-   * @default "~/.tentickle"
+   * @default "~/.agentick"
    */
   directory?: string;
 
@@ -295,7 +295,7 @@ export interface GatewayEvents {
 // ============================================================================
 
 /** Symbol for detecting method definitions vs namespaces */
-export const METHOD_DEFINITION = Symbol.for("tentickle:method-definition");
+export const METHOD_DEFINITION = Symbol.for("agentick:method-definition");
 
 /**
  * Simple method handler - ctx param is optional since Context.get() works

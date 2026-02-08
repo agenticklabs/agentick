@@ -1,19 +1,19 @@
 /**
  * Engine procedure utilities for creating middleware-wrapped procedures.
  *
- * Middleware is now registered via Tentickle.use() and resolved at runtime from context.
+ * Middleware is now registered via Agentick.use() and resolved at runtime from context.
  *
- * @module tentickle/procedure
+ * @module agentick/procedure
  */
 
-import { applyRegistryMiddleware, wrapProcedure, isProcedure } from "@tentickle/kernel";
+import { applyRegistryMiddleware, wrapProcedure, isProcedure } from "@agentick/kernel";
 import { errorMiddleware } from "../middleware/defaults";
 
 /**
  * Create an engine procedure with standard middleware.
  *
  * Note: Global middleware is now resolved from context.middleware at runtime,
- * not applied statically here. Use Tentickle.use() to register middleware.
+ * not applied statically here. Use Agentick.use() to register middleware.
  */
 export const createEngineProcedure = wrapProcedure([errorMiddleware]);
 

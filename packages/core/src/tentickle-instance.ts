@@ -1,28 +1,28 @@
 /**
- * Tentickle Configuration Instance
+ * Agentick Configuration Instance
  *
- * `Tentickle` is the default global instance. Users interact with instances, never the class directly.
+ * `Agentick` is the default global instance. Users interact with instances, never the class directly.
  *
  * ```typescript
- * import { Tentickle, createApp } from 'tentickle';
+ * import { Agentick, createApp } from 'agentick';
  *
  * // Configure global instance
- * Tentickle.use('*', loggingMiddleware);
- * Tentickle.use('tool:*', authMiddleware);
+ * Agentick.use('*', loggingMiddleware);
+ * Agentick.use('tool:*', authMiddleware);
  *
- * // createApp uses Tentickle by default
+ * // createApp uses Agentick by default
  * const app = createApp(MyAgent, { model });
  *
- * // Create a scoped instance (inherits from Tentickle)
- * const scoped = Tentickle.create();
+ * // Create a scoped instance (inherits from Agentick)
+ * const scoped = Agentick.create();
  * scoped.use('model:generate', rateLimitMiddleware);
  * const scopedApp = scoped.createApp(MyAgent, { model });
  *
  * // Create isolated instance (no inheritance)
- * const isolated = Tentickle.create({ inheritDefaults: false });
+ * const isolated = Agentick.create({ inheritDefaults: false });
  * ```
  *
- * @module tentickle/@tentickle/instance
+ * @module agentick/@agentick/instance
  */
 
 import {
@@ -30,7 +30,7 @@ import {
   type TelemetryProvider,
   createProcedure,
   type Procedure,
-} from "@tentickle/kernel";
+} from "@agentick/kernel";
 import type {
   App,
   RunInput,
@@ -54,9 +54,9 @@ import { SessionImpl } from "./app/session";
 export type MiddlewareKey = string;
 
 /**
- * Options for creating an TentickleInstance.
+ * Options for creating an AgentickInstance.
  */
-export interface TentickleInstanceCreateOptions {
+export interface AgentickInstanceCreateOptions {
   /** Telemetry provider for tracing and metrics */
   telemetryProvider?: TelemetryProvider;
   /**
@@ -596,12 +596,12 @@ type RunHandler = <P extends Record<string, unknown>>(
 ) => SessionExecutionHandle;
 
 /**
- * Tentickle configuration instance.
+ * Agentick configuration instance.
  *
  * Users interact with instances, never the class directly.
- * `Tentickle` is the default global instance.
+ * `Agentick` is the default global instance.
  */
-export class TentickleInstance implements MiddlewareRegistry {
+export class AgentickInstance implements MiddlewareRegistry {
   private middlewareRegistry = new Map<MiddlewareKey, Middleware[]>();
   private _telemetryProvider?: TelemetryProvider;
 
@@ -621,7 +621,7 @@ export class TentickleInstance implements MiddlewareRegistry {
    *
    * @example Get result
    * ```typescript
-   * const result = await Tentickle.run(
+   * const result = await Agentick.run(
    *   <MyAgent />,
    *   { messages: [{ role: "user", content: [...] }], model }
    * ).result;
@@ -629,7 +629,7 @@ export class TentickleInstance implements MiddlewareRegistry {
    *
    * @example Stream events
    * ```typescript
-   * const handle = await Tentickle.run(<MyAgent />, { messages, model });
+   * const handle = await Agentick.run(<MyAgent />, { messages, model });
    * for await (const event of handle) {
    *   if (event.type === 'content_delta') {
    *     process.stdout.write(event.delta);
@@ -639,7 +639,7 @@ export class TentickleInstance implements MiddlewareRegistry {
    *
    * @example Add middleware to run
    * ```typescript
-   * const loggedRun = Tentickle.run.use(loggingMiddleware);
+   * const loggedRun = Agentick.run.use(loggingMiddleware);
    * const result = await loggedRun(<MyAgent />, { messages, model }).result;
    * ```
    */
@@ -654,7 +654,7 @@ export class TentickleInstance implements MiddlewareRegistry {
     // Create the run procedure bound to this instance
     const instance = this;
     this.run = createProcedure(
-      { name: "tentickle:run", handleFactory: false },
+      { name: "agentick:run", handleFactory: false },
       async <P extends Record<string, unknown>>(
         element: { type: ComponentFunction<P>; props: P; key: string | number | null },
         input: RunInput<P> = {} as RunInput<P>,
@@ -697,7 +697,7 @@ export class TentickleInstance implements MiddlewareRegistry {
    *
    * @example
    * ```typescript
-   * Tentickle
+   * Agentick
    *   .use('*', loggingMiddleware)
    *   .use('tool:*', authMiddleware)
    *   .use('model:generate', rateLimitMiddleware);
@@ -772,21 +772,21 @@ export class TentickleInstance implements MiddlewareRegistry {
    * Use `inheritDefaults: false` for a completely isolated instance.
    *
    * @param options - Instance options
-   * @returns A new TentickleInstance
+   * @returns A new AgentickInstance
    *
    * @example
    * ```typescript
    * // Create scoped instance that inherits global middleware
-   * const scoped = Tentickle.create();
+   * const scoped = Agentick.create();
    * scoped.use('model:generate', rateLimitMiddleware);
    * const app = scoped.createApp(MyAgent);
    *
    * // Create isolated instance (no inheritance)
-   * const isolated = Tentickle.create({ inheritDefaults: false });
+   * const isolated = Agentick.create({ inheritDefaults: false });
    * ```
    */
-  create(options: TentickleInstanceCreateOptions = {}): TentickleInstance {
-    const child = new TentickleInstance({
+  create(options: AgentickInstanceCreateOptions = {}): AgentickInstance {
+    const child = new AgentickInstance({
       telemetryProvider: options.telemetryProvider ?? this._telemetryProvider,
     });
 
@@ -803,7 +803,7 @@ export class TentickleInstance implements MiddlewareRegistry {
   /**
    * Create an app from a component function.
    *
-   * The app inherits middleware from this Tentickle instance.
+   * The app inherits middleware from this Agentick instance.
    *
    * @param Component - The component function that defines the Model Interface
    * @param options - App configuration options
@@ -819,11 +819,11 @@ export class TentickleInstance implements MiddlewareRegistry {
    *   </>
    * );
    *
-   * // Use global Tentickle
+   * // Use global Agentick
    * const app = createApp(MyAgent, { model });
    *
    * // Use scoped instance
-   * const scoped = Tentickle.create();
+   * const scoped = Agentick.create();
    * scoped.use('tool:*', authMiddleware);
    * const scopedApp = scoped.createApp(MyAgent, { model });
    * ```
@@ -832,62 +832,62 @@ export class TentickleInstance implements MiddlewareRegistry {
     Component: ComponentFunction<P>,
     options: AppOptions = {},
   ): App<P> {
-    const optionsWithInstance = { ...options, _tentickleInstance: this };
+    const optionsWithInstance = { ...options, _agentickInstance: this };
 
     return new AppImpl(Component, optionsWithInstance);
   }
 }
 
 /**
- * The default global Tentickle instance.
+ * The default global Agentick instance.
  *
  * All configuration and middleware registration starts here.
  * The exported `createApp` and `run` are bound to this instance.
  *
  * @example
  * ```typescript
- * import { Tentickle, createApp, run } from 'tentickle';
+ * import { Agentick, createApp, run } from 'agentick';
  *
  * // Configure global middleware
- * Tentickle.use('*', loggingMiddleware);
- * Tentickle.telemetryProvider = myProvider;
+ * Agentick.use('*', loggingMiddleware);
+ * Agentick.telemetryProvider = myProvider;
  *
- * // createApp and run use Tentickle
+ * // createApp and run use Agentick
  * const app = createApp(MyAgent, { model });
  * const result = await run(<MyAgent />, { messages, model });
  *
  * // Create scoped instance with its own middleware
- * const scoped = Tentickle.create();
+ * const scoped = Agentick.create();
  * scoped.use('model:generate', specialMiddleware);
  * const scopedResult = await scoped.run(<MyAgent />, { messages, model });
  * ```
  */
-export const Tentickle = new TentickleInstance();
+export const Agentick = new AgentickInstance();
 
 /**
  * Create an app from a component function.
  *
- * This is `Tentickle.createApp` - apps inherit middleware from the global Tentickle instance.
+ * This is `Agentick.createApp` - apps inherit middleware from the global Agentick instance.
  *
  * @example
  * ```typescript
- * import { createApp } from 'tentickle';
+ * import { createApp } from 'agentick';
  *
  * const app = createApp(MyAgent, { model });
  * const result = await app.run({ props: { query: "Hello!" } });
  * ```
  */
-export const createApp = Tentickle.createApp.bind(Tentickle);
+export const createApp = Agentick.createApp.bind(Agentick);
 
 /**
  * One-shot execution of a JSX component.
  *
- * This is `Tentickle.run` - the simplest way to run an agent.
+ * This is `Agentick.run` - the simplest way to run an agent.
  * Returns SessionExecutionHandle (AsyncIterable, not PromiseLike).
  *
  * @example
  * ```typescript
- * import { run } from 'tentickle';
+ * import { run } from 'agentick';
  *
  * // Get result
  * const result = await run(<MyAgent />, { messages, model }).result;
@@ -899,6 +899,6 @@ export const createApp = Tentickle.createApp.bind(Tentickle);
  * }
  * ```
  */
-export const run = Tentickle.run.bind(Tentickle);
+export const run = Agentick.run.bind(Agentick);
 
 // RunInput is now defined in ./app/types and exported from the package index.

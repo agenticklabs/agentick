@@ -1,12 +1,12 @@
-# @tentickle/shared Architecture
+# @agentick/shared Architecture
 
-Platform-independent types shared across all Tentickle packages.
+Platform-independent types shared across all Agentick packages.
 
 ## Wire Protocol (`protocol.ts`)
 
 **This is the single source of truth for client-server communication.**
 
-Both `@tentickle/client` and `@tentickle/server` MUST import protocol types from this package. Never duplicate these types.
+Both `@agentick/client` and `@agentick/server` MUST import protocol types from this package. Never duplicate these types.
 
 ### Core Types
 
@@ -38,7 +38,7 @@ import {
   // Errors
   ProtocolError,
   ErrorCodes,
-} from "@tentickle/shared";
+} from "@agentick/shared";
 ```
 
 ### Framework Channels
@@ -100,8 +100,8 @@ const ErrorCodes = {
 
 ```typescript
 // Always import protocol types from shared
-import type { ChannelEvent, SessionResultPayload } from "@tentickle/shared";
-import { FrameworkChannels } from "@tentickle/shared";
+import type { ChannelEvent, SessionResultPayload } from "@agentick/shared";
+import { FrameworkChannels } from "@agentick/shared";
 
 // Never duplicate these types in client or server packages
 ```

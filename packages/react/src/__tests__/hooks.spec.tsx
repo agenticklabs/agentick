@@ -6,7 +6,7 @@ import { describe, it, expect, vi } from "vitest";
 import { renderHook, act } from "@testing-library/react";
 import { type ReactNode } from "react";
 import {
-  TentickleProvider,
+  AgentickProvider,
   useClient,
   useSession,
   useConnectionState,
@@ -14,20 +14,20 @@ import {
   useStreamingText,
 } from "../index";
 import type {
-  TentickleClient,
+  AgentickClient,
   ConnectionState,
   StreamEvent,
   SessionStreamEvent,
-} from "@tentickle/client";
-import { createEventBase } from "@tentickle/shared/testing";
+} from "@agentick/client";
+import { createEventBase } from "@agentick/shared/testing";
 
 // ============================================================================
 // Mock Client
 // ============================================================================
 
-import type { StreamingTextState } from "@tentickle/client";
+import type { StreamingTextState } from "@agentick/client";
 
-function createMockClient(): TentickleClient & {
+function createMockClient(): AgentickClient & {
   _eventHandlers: Set<(event: SessionStreamEvent) => void>;
   _stateHandlers: Set<(state: ConnectionState) => void>;
   _streamingTextHandlers: Set<(state: StreamingTextState) => void>;
@@ -168,9 +168,9 @@ function createMockClient(): TentickleClient & {
 // Test Wrapper
 // ============================================================================
 
-function createWrapper(client: TentickleClient) {
+function createWrapper(client: AgentickClient) {
   return function Wrapper({ children }: { children: ReactNode }) {
-    return <TentickleProvider client={client}>{children}</TentickleProvider>;
+    return <AgentickProvider client={client}>{children}</AgentickProvider>;
   };
 }
 
@@ -178,7 +178,7 @@ function createWrapper(client: TentickleClient) {
 // Tests
 // ============================================================================
 
-describe("TentickleProvider", () => {
+describe("AgentickProvider", () => {
   it("provides client to children", () => {
     const mockClient = createMockClient();
     const wrapper = createWrapper(mockClient);
@@ -191,7 +191,7 @@ describe("TentickleProvider", () => {
   it("throws when used outside provider", () => {
     expect(() => {
       renderHook(() => useClient());
-    }).toThrow("useClient must be used within a TentickleProvider");
+    }).toThrow("useClient must be used within a AgentickProvider");
   });
 });
 

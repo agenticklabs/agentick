@@ -1,33 +1,33 @@
-# @tentickle/socket.io
+# @agentick/socket.io
 
-Socket.IO transport adapter for Tentickle. Thin wrappers that let Socket.IO be Socket.IO.
+Socket.IO transport adapter for Agentick. Thin wrappers that let Socket.IO be Socket.IO.
 
 ## Philosophy
 
-You configure Socket.IO however you want (auth, transports, namespaces). This package just adapts it to Tentickle's transport interfaces. No custom features, no reimplementation—just adapters.
+You configure Socket.IO however you want (auth, transports, namespaces). This package just adapts it to Agentick's transport interfaces. No custom features, no reimplementation—just adapters.
 
 ## Installation
 
 ```bash
-pnpm add @tentickle/socket.io socket.io socket.io-client
+pnpm add @agentick/socket.io socket.io socket.io-client
 ```
 
 ## Client Usage
 
 ```typescript
 import { io } from "socket.io-client";
-import { createClient } from "@tentickle/client";
-import { createSocketIOTransport } from "@tentickle/socket.io";
+import { createClient } from "@agentick/client";
+import { createSocketIOTransport } from "@agentick/socket.io";
 
 // Create your Socket.IO client (configure as needed)
 const socket = io("http://localhost:3000", {
   auth: { token: "your-auth-token" },
 });
 
-// Wrap with Tentickle transport
+// Wrap with Agentick transport
 const transport = createSocketIOTransport({ socket });
 
-// Use with Tentickle client
+// Use with Agentick client
 const client = createClient({ transport });
 const session = client.session("my-session");
 
@@ -40,8 +40,8 @@ for await (const event of session.send("Hello!")) {
 
 ```typescript
 import { Server } from "socket.io";
-import { createGateway } from "@tentickle/gateway";
-import { createSocketIOAdapter } from "@tentickle/socket.io";
+import { createGateway } from "@agentick/gateway";
+import { createSocketIOAdapter } from "@agentick/socket.io";
 
 // Create your Socket.IO server (configure as needed)
 const io = new Server(httpServer, {
@@ -59,7 +59,7 @@ io.use((socket, next) => {
   }
 });
 
-// Create Tentickle adapter
+// Create Agentick adapter
 const adapter = createSocketIOAdapter({ io });
 
 // Wire to gateway
@@ -75,7 +75,7 @@ const gateway = createGateway({
 
 #### createSocketIOTransport(config)
 
-Creates a `Transport` for use with `@tentickle/client`.
+Creates a `Transport` for use with `@agentick/client`.
 
 ```typescript
 interface SocketIOClientConfig {
@@ -116,10 +116,10 @@ interface SocketIOServerConfig {
 ## Constants
 
 ```typescript
-import { CHANNEL_EVENT, JOIN_SESSION } from "@tentickle/socket.io";
+import { CHANNEL_EVENT, JOIN_SESSION } from "@agentick/socket.io";
 
-CHANNEL_EVENT  // "tentickle:event" - bidirectional channel events
-JOIN_SESSION   // "tentickle:join" - join a session room
+CHANNEL_EVENT  // "agentick:event" - bidirectional channel events
+JOIN_SESSION   // "agentick:join" - join a session room
 ```
 
 ## Session Rooms
@@ -135,18 +135,18 @@ The adapter uses Socket.IO rooms for session multiplexing:
 Use a namespace for isolation:
 
 ```typescript
-const tentickleNamespace = io.of("/tentickle");
+const agentickNamespace = io.of("/agentick");
 
-tentickleNamespace.use(authMiddleware);
+agentickNamespace.use(authMiddleware);
 
-const adapter = createSocketIOAdapter({ io: tentickleNamespace });
+const adapter = createSocketIOAdapter({ io: agentickNamespace });
 ```
 
 ## Related Packages
 
-- `@tentickle/client` - Client library
-- `@tentickle/gateway` - Server gateway
-- `@tentickle/server` - Server utilities
+- `@agentick/client` - Client library
+- `@agentick/gateway` - Server gateway
+- `@agentick/server` - Server utilities
 
 ## License
 

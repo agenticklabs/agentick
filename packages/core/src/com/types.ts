@@ -4,12 +4,12 @@ import type {
   Message,
   TimelineEntry as BaseTimelineEntry,
   ClientToolDefinition,
-} from "@tentickle/shared";
+} from "@agentick/shared";
 import type { ToolExecutionOptions } from "../types";
 import type { ModelConfig } from "../model/model";
 import type { ExecutableTool, ToolDefinition } from "../tool/tool";
 import type { SemanticContentBlock, Formatter } from "../renderers";
-import type { ContentBlock } from "@tentickle/shared";
+import type { ContentBlock } from "@agentick/shared";
 
 // ============================================================================
 // Token Estimation
@@ -18,7 +18,7 @@ import type { ContentBlock } from "@tentickle/shared";
 /** Token estimation function. Takes text content, returns estimated token count. */
 export type TokenEstimator = (text: string) => number;
 
-// TimelineVisibility and TimelineTag are now exported from @tentickle/shared
+// TimelineVisibility and TimelineTag are now exported from @agentick/shared
 export type TimelineVisibility = "model" | "observer" | "log";
 export type TimelineTag = string;
 
@@ -86,7 +86,7 @@ export interface EphemeralEntry {
 /**
  * COM Timeline Entry - extends base TimelineEntry with backend-specific fields.
  *
- * Extends the platform-independent TimelineEntry from @tentickle/shared with:
+ * Extends the platform-independent TimelineEntry from @agentick/shared with:
  * - SemanticContentBlock[] content (format-agnostic, can be rendered)
  * - Formatter reference (for formatting)
  */

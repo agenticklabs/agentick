@@ -34,7 +34,7 @@ import type { ContentBlock, EventAllowedBlock } from "./blocks";
 /**
  * Base message interface for all message types.
  *
- * Messages are the fundamental unit of conversation in Tentickle.
+ * Messages are the fundamental unit of conversation in Agentick.
  * Each message has a role indicating its source and an array
  * of content blocks.
  *

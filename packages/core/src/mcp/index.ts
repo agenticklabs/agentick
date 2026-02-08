@@ -1,5 +1,5 @@
 /**
- * # Tentickle MCP (Model Context Protocol)
+ * # Agentick MCP (Model Context Protocol)
  *
  * Integration with MCP servers for external tool execution.
  * MCP allows agents to use tools provided by external servers.
@@ -14,7 +14,7 @@
  * ## Quick Start
  *
  * ```typescript
- * import { discoverMCPTools } from 'tentickle/mcp';
+ * import { discoverMCPTools } from 'agentick/mcp';
  *
  * // Discover tools from an MCP server
  * const tools = await discoverMCPTools({
@@ -37,7 +37,7 @@
  * @see {@link MCPService} - MCP connection manager
  * @see {@link discoverMCPTools} - Tool discovery
  *
- * @module tentickle/mcp
+ * @module agentick/mcp
  */
 
 export * from "./types";

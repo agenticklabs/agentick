@@ -1,15 +1,15 @@
-# @tentickle/gateway
+# @agentick/gateway
 
-Unified gateway for multi-client, multi-app Tentickle access.
+Unified gateway for multi-client, multi-app Agentick access.
 
 Gateway can run as a **standalone daemon** or be **embedded** into existing web frameworks like Express or NestJS.
 
 ## Installation
 
 ```bash
-npm install @tentickle/gateway
+npm install @agentick/gateway
 # or
-pnpm add @tentickle/gateway
+pnpm add @agentick/gateway
 ```
 
 ## Quick Start
@@ -19,8 +19,8 @@ pnpm add @tentickle/gateway
 Run Gateway as its own process with built-in HTTP/SSE transport:
 
 ```typescript
-import { createGateway } from "@tentickle/gateway";
-import { createApp, Model, System, Timeline } from "@tentickle/core";
+import { createGateway } from "@agentick/gateway";
+import { createApp, Model, System, Timeline } from "@agentick/core";
 
 const ChatApp = () => (
   <>
@@ -53,14 +53,14 @@ Embed Gateway into an existing Express app (or other framework):
 
 ```typescript
 import express from "express";
-import { Gateway } from "@tentickle/gateway";
+import { Gateway } from "@agentick/gateway";
 
 const app = express();
 app.use(express.json());
 
 const gateway = new Gateway({
   embedded: true, // Skip starting internal HTTP server
-  apps: { assistant: tentickleApp },
+  apps: { assistant: agentickApp },
   defaultApp: "assistant",
 });
 
@@ -72,13 +72,13 @@ app.use("/api", (req, res) => {
 app.listen(3000);
 ```
 
-For Express, use `@tentickle/express` which wraps this pattern:
+For Express, use `@agentick/express` which wraps this pattern:
 
 ```typescript
-import { createTentickleMiddleware } from "@tentickle/express";
+import { createAgentickMiddleware } from "@agentick/express";
 
-const middleware = createTentickleMiddleware({
-  apps: { assistant: tentickleApp },
+const middleware = createAgentickMiddleware({
+  apps: { assistant: agentickApp },
   defaultApp: "assistant",
 });
 
@@ -98,7 +98,7 @@ interface GatewayConfig {
   id?: string;                // Auto-generated if not provided
 
   // Apps
-  apps: Record<string, TentickleApp>;
+  apps: Record<string, AgentickApp>;
   defaultApp: string;
 
   // Mode
@@ -164,15 +164,15 @@ auth: {
 
 ## Custom Methods
 
-Define RPC-style methods that clients can invoke. Methods run within Tentickle's context system with full access to user info, channels, and tracing.
+Define RPC-style methods that clients can invoke. Methods run within Agentick's context system with full access to user info, channels, and tracing.
 
 ```typescript
-import { createGateway, method } from "@tentickle/gateway";
-import { Context } from "@tentickle/kernel";
+import { createGateway, method } from "@agentick/gateway";
+import { Context } from "@agentick/kernel";
 import { z } from "zod";
 
 const gateway = createGateway({
-  apps: { assistant: tentickleApp },
+  apps: { assistant: agentickApp },
   defaultApp: "assistant",
 
   methods: {
@@ -263,10 +263,10 @@ Methods are invoked using colon-separated paths: `tasks:list`, `tasks:admin:arch
 
 ### Guard Errors
 
-Role and custom guards throw `GuardError` (from `@tentickle/kernel`) on denial. The gateway returns HTTP 403 for guard denials:
+Role and custom guards throw `GuardError` (from `@agentick/kernel`) on denial. The gateway returns HTTP 403 for guard denials:
 
 ```typescript
-import { isGuardError } from "@tentickle/kernel";
+import { isGuardError } from "@agentick/kernel";
 
 // In your error handling
 if (isGuardError(error)) {
@@ -348,10 +348,10 @@ await gateway.close();
 
 ## Client SDK
 
-Use `@tentickle/client` to connect to Gateway:
+Use `@agentick/client` to connect to Gateway:
 
 ```typescript
-import { createClient } from "@tentickle/client";
+import { createClient } from "@agentick/client";
 
 const client = createClient({
   baseUrl: "http://localhost:3000",
@@ -422,20 +422,20 @@ const newTask = await session.invoke("tasks:create", {
 
 ## Standalone vs Embedded
 
-| Feature            | Standalone                | Embedded                                  |
-| ------------------ | ------------------------- | ----------------------------------------- |
-| Config             | `port`, `host`            | `embedded: true`                          |
-| Start              | `gateway.start()`         | N/A                                       |
-| Request handling   | Built-in HTTP server      | `gateway.handleRequest(req, res)`         |
-| Use case           | Dedicated gateway process | Integrate with Express/NestJS             |
-| Framework packages | Not needed                | `@tentickle/express`, `@tentickle/nestjs` |
+| Feature            | Standalone                | Embedded                                |
+| ------------------ | ------------------------- | --------------------------------------- |
+| Config             | `port`, `host`            | `embedded: true`                        |
+| Start              | `gateway.start()`         | N/A                                     |
+| Request handling   | Built-in HTTP server      | `gateway.handleRequest(req, res)`       |
+| Use case           | Dedicated gateway process | Integrate with Express/NestJS           |
+| Framework packages | Not needed                | `@agentick/express`, `@agentick/nestjs` |
 
 ## Context Access
 
-Custom methods run within Tentickle's ALS (Async Local Storage) context:
+Custom methods run within Agentick's ALS (Async Local Storage) context:
 
 ```typescript
-import { Context } from "@tentickle/kernel";
+import { Context } from "@agentick/kernel";
 
 methods: {
   "tasks:create": async (params) => {
@@ -466,11 +466,11 @@ methods: {
 
 ## Related Packages
 
-- [`@tentickle/express`](../express) - Express middleware (thin adapter)
-- [`@tentickle/nestjs`](../nestjs) - NestJS module (thin adapter)
-- [`@tentickle/core`](../core) - JSX runtime for apps
-- [`@tentickle/client`](../client) - Client SDK
-- [`@tentickle/server`](../server) - SSE utilities
+- [`@agentick/express`](../express) - Express middleware (thin adapter)
+- [`@agentick/nestjs`](../nestjs) - NestJS module (thin adapter)
+- [`@agentick/core`](../core) - JSX runtime for apps
+- [`@agentick/client`](../client) - Client SDK
+- [`@agentick/server`](../server) - SSE utilities
 
 ## License
 

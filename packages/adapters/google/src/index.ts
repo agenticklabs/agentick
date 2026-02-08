@@ -1,7 +1,7 @@
 /**
- * # Tentickle Google AI Adapter
+ * # Agentick Google AI Adapter
  *
- * Native Google AI (Gemini) adapter for Tentickle. Provides direct integration
+ * Native Google AI (Gemini) adapter for Agentick. Provides direct integration
  * with Google's Gemini models without requiring the Vercel AI SDK.
  *
  * ## Features
@@ -15,7 +15,7 @@
  * ## Quick Start
  *
  * ```typescript
- * import { google } from '@tentickle/google';
+ * import { google } from '@agentick/google';
  *
  * const model = google('gemini-1.5-pro');
  *
@@ -24,7 +24,7 @@
  * const result = await app.run({ messages });
  * ```
  *
- * @module @tentickle/google
+ * @module @agentick/google
  */
 export * from "./google";
 export * from "./google.model";

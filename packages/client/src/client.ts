@@ -1,10 +1,10 @@
 /**
- * TentickleClient - Multiplexed session client
+ * AgentickClient - Multiplexed session client
  *
- * Connects to a Tentickle server with a single SSE connection
+ * Connects to a Agentick server with a single SSE connection
  * that multiplexes events for multiple sessions.
  *
- * @module @tentickle/client
+ * @module @agentick/client
  */
 
 import type {
@@ -29,7 +29,7 @@ import type {
   SendInput,
   ClientExecutionHandle,
 } from "./types";
-import type { ContentBlock, Message } from "@tentickle/shared";
+import type { ContentBlock, Message } from "@agentick/shared";
 
 // ============================================================================
 // Client Configuration
@@ -38,9 +38,9 @@ import type { ContentBlock, Message } from "@tentickle/shared";
 import type { ClientTransport } from "./transport.js";
 
 /**
- * Configuration for TentickleClient.
+ * Configuration for AgentickClient.
  */
-export interface TentickleClientConfig {
+export interface AgentickClientConfig {
   /** Base URL for the server (e.g., https://api.example.com or ws://localhost:18789) */
   baseUrl: string;
 
@@ -362,7 +362,7 @@ class ClientExecutionHandleImpl implements ClientExecutionHandle {
   private hasResult = false;
 
   constructor(
-    private readonly client: TentickleClient,
+    private readonly client: AgentickClient,
     private readonly abortController: AbortController,
     sessionId?: string,
   ) {
@@ -490,7 +490,7 @@ class SessionAccessorImpl implements SessionAccessor {
 
   constructor(
     sessionId: string,
-    private readonly client: TentickleClient,
+    private readonly client: AgentickClient,
   ) {
     this.sessionId = sessionId;
   }
@@ -678,13 +678,13 @@ function generateId(): string {
 }
 
 // ============================================================================
-// TentickleClient
+// AgentickClient
 // ============================================================================
 
 /**
- * TentickleClient - Multiplexed session client.
+ * AgentickClient - Multiplexed session client.
  *
- * Connects to a Tentickle server with a single SSE connection that
+ * Connects to a Agentick server with a single SSE connection that
  * can manage multiple session subscriptions.
  *
  * @example
@@ -713,8 +713,8 @@ function generateId(): string {
  * await ephemeral.result;
  * ```
  */
-export class TentickleClient {
-  private readonly config: TentickleClientConfig;
+export class AgentickClient {
+  private readonly config: AgentickClientConfig;
   private readonly fetchFn: typeof fetch;
   private readonly EventSourceCtor: typeof EventSource;
   private readonly requestHeaders: Record<string, string>;
@@ -739,7 +739,7 @@ export class TentickleClient {
   private seenEventIdsOrder: string[] = [];
   private readonly maxSeenEventIds = 5000;
 
-  constructor(config: TentickleClientConfig) {
+  constructor(config: AgentickClientConfig) {
     this.config = config;
 
     // Build request headers
@@ -1687,7 +1687,7 @@ function detectTransport(baseUrl: string): "sse" | "websocket" {
 // ============================================================================
 
 /**
- * Create a new TentickleClient.
+ * Create a new AgentickClient.
  *
  * Transport is auto-detected from the URL scheme:
  * - http:// or https:// -> SSE transport
@@ -1715,7 +1715,7 @@ function detectTransport(baseUrl: string): "sse" | "websocket" {
  * });
  *
  * // Custom transport (e.g., SharedTransport for multi-tab)
- * import { createSharedTransport } from '@tentickle/client-multiplexer';
+ * import { createSharedTransport } from '@agentick/client-multiplexer';
  * const sharedClient = createClient({
  *   baseUrl: 'https://api.example.com',
  *   transport: createSharedTransport({ baseUrl: 'https://api.example.com' }),
@@ -1729,10 +1729,10 @@ function detectTransport(baseUrl: string): "sse" | "websocket" {
  * await handle.result;
  * ```
  */
-export function createClient(config: TentickleClientConfig): TentickleClient {
+export function createClient(config: AgentickClientConfig): AgentickClient {
   // If a custom transport object is provided, use it directly
   if (config.transport && typeof config.transport === "object") {
-    return new TentickleClient(config);
+    return new AgentickClient(config);
   }
 
   const transport =
@@ -1744,7 +1744,7 @@ export function createClient(config: TentickleClientConfig): TentickleClient {
     // Log warning - WebSocket transport requires using the WSTransport directly
     // or the gateway client for full functionality
     console.warn(
-      "[TentickleClient] WebSocket URL detected. For full WebSocket support, " +
+      "[AgentickClient] WebSocket URL detected. For full WebSocket support, " +
         "use createWSTransport() directly or connect to a Gateway. " +
         "Falling back to SSE transport with URL conversion.",
     );
@@ -1757,8 +1757,8 @@ export function createClient(config: TentickleClientConfig): TentickleClient {
       baseUrl = baseUrl.replace("wss://", "https://");
     }
 
-    return new TentickleClient({ ...config, baseUrl });
+    return new AgentickClient({ ...config, baseUrl });
   }
 
-  return new TentickleClient(config);
+  return new AgentickClient(config);
 }

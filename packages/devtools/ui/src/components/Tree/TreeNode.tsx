@@ -18,8 +18,8 @@ export function TreeNode({ node, depth = 0, tokenSummary }: TreeNodeProps) {
 
   // Determine node style based on type
   const isComponent = /^[A-Z]/.test(node.type);
-  const isIntrinsic = node.type.startsWith("tentickle.") || /^[a-z]/.test(node.type);
-  const isFragment = node.type === "Fragment" || node.type === "tentickle.fragment";
+  const isIntrinsic = node.type.startsWith("agentick.") || /^[a-z]/.test(node.type);
+  const isFragment = node.type === "Fragment" || node.type === "agentick.fragment";
 
   // Skip rendering fragment nodes, just render children
   if (isFragment) {

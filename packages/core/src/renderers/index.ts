@@ -1,5 +1,5 @@
 /**
- * # Tentickle Renderers
+ * # Agentick Renderers
  *
  * Content renderers for transforming semantic content blocks into various
  * output formats (Markdown, XML, etc.).
@@ -13,7 +13,7 @@
  * ## Quick Start
  *
  * ```typescript
- * import { MarkdownRenderer } from 'tentickle/renderers';
+ * import { MarkdownRenderer } from 'agentick/renderers';
  *
  * const renderer = new MarkdownRenderer();
  * const markdown = renderer.render(contentBlocks);
@@ -23,7 +23,7 @@
  * @see {@link MarkdownRenderer} - Markdown output
  * @see {@link XMLRenderer} - XML output
  *
- * @module tentickle/renderers
+ * @module agentick/renderers
  */
 
 export {

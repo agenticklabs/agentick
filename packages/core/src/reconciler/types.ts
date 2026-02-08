@@ -7,21 +7,21 @@
 import type { Renderer } from "../renderers/types";
 
 /**
- * A node in the Tentickle tree built by react-reconciler.
+ * A node in the Agentick tree built by react-reconciler.
  * This is the "host instance" in React terminology.
  */
-export interface TentickleNode {
+export interface AgentickNode {
   /** Component type (function, class, string for intrinsics, symbol for Fragment) */
-  type: TentickleNodeType;
+  type: AgentickNodeType;
 
   /** Props passed to the component */
   props: Record<string, unknown>;
 
   /** Child nodes */
-  children: TentickleNode[];
+  children: AgentickNode[];
 
   /** Parent node (for traversal) */
-  parent: TentickleNode | null;
+  parent: AgentickNode | null;
 
   /** Renderer context inherited from ancestors */
   renderer: Renderer | null;
@@ -36,18 +36,18 @@ export interface TentickleNode {
 /**
  * Valid node types in the tree.
  */
-export type TentickleNodeType =
+export type AgentickNodeType =
   | string // Intrinsic elements
   | ((...args: unknown[]) => unknown) // Function components
   | { new (...args: unknown[]): unknown } // Class components
   | symbol; // Fragment
 
 /**
- * The container (root) of the Tentickle tree.
+ * The container (root) of the Agentick tree.
  */
-export interface TentickleContainer {
+export interface AgentickContainer {
   /** Root children */
-  children: TentickleNode[];
+  children: AgentickNode[];
 
   /** Default renderer for the tree */
   renderer: Renderer;
@@ -75,14 +75,14 @@ export interface UpdatePayload {
 }
 
 /**
- * Create a new TentickleNode.
+ * Create a new AgentickNode.
  */
 export function createNode(
-  type: TentickleNodeType,
+  type: AgentickNodeType,
   props: Props,
   renderer: Renderer | null,
   key: string | number | null = null,
-): TentickleNode {
+): AgentickNode {
   return {
     type,
     props,
@@ -95,15 +95,15 @@ export function createNode(
 }
 
 /**
- * A text node in the Tentickle tree.
+ * A text node in the Agentick tree.
  * Represents raw text content.
  */
-export interface TentickleTextNode {
+export interface AgentickTextNode {
   /** Text content */
   text: string;
 
   /** Parent node */
-  parent: TentickleNode | null;
+  parent: AgentickNode | null;
 
   /** Index among siblings */
   index: number;
@@ -115,7 +115,7 @@ export interface TentickleTextNode {
 /**
  * Create a text node.
  */
-export function createTextNode(text: string): TentickleTextNode {
+export function createTextNode(text: string): AgentickTextNode {
   return {
     text,
     parent: null,
@@ -127,6 +127,6 @@ export function createTextNode(text: string): TentickleTextNode {
 /**
  * Check if a node is a text node.
  */
-export function isTextNode(node: TentickleNode | TentickleTextNode): node is TentickleTextNode {
+export function isTextNode(node: AgentickNode | AgentickTextNode): node is AgentickTextNode {
   return "isTextNode" in node && node.isTextNode === true;
 }

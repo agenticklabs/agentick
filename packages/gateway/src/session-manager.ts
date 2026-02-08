@@ -4,8 +4,8 @@
  * Manages persistent sessions across apps.
  */
 
-import type { Session } from "@tentickle/core";
-import { devToolsEmitter, type DTGatewaySessionEvent } from "@tentickle/shared";
+import type { Session } from "@agentick/core";
+import { devToolsEmitter, type DTGatewaySessionEvent } from "@agentick/shared";
 import type { AppRegistry, AppInfo } from "./app-registry.js";
 import type { SessionState } from "./types.js";
 import { parseSessionKey, formatSessionKey } from "./transport-protocol.js";

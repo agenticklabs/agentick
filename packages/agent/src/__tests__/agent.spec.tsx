@@ -4,8 +4,8 @@
 
 import { describe, it, expect } from "vitest";
 import { Agent, createAgent } from "../index";
-import { compileAgent, createTestAdapter } from "@tentickle/core/testing";
-import { knob, createTool } from "@tentickle/core";
+import { compileAgent, createTestAdapter } from "@agentick/core/testing";
+import { knob, createTool } from "@agentick/core";
 import { z } from "zod";
 
 // ============================================================================

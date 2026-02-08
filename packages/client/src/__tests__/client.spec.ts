@@ -1,9 +1,9 @@
 /**
- * TentickleClient Tests (unified session architecture)
+ * AgentickClient Tests (unified session architecture)
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { TentickleClient } from "../client";
+import { AgentickClient } from "../client";
 
 function createMockEventSourceClass() {
   let instance: MockEventSourceInstance | null = null;
@@ -78,16 +78,16 @@ function createSSEResponse(events: unknown[]): Response {
   });
 }
 
-describe("TentickleClient", () => {
+describe("AgentickClient", () => {
   let mockESClass: ReturnType<typeof createMockEventSourceClass>;
   let mockFetch: ReturnType<typeof createMockFetch>;
-  let client: TentickleClient;
+  let client: AgentickClient;
 
   beforeEach(() => {
     mockESClass = createMockEventSourceClass();
     mockFetch = createMockFetch();
 
-    client = new TentickleClient({
+    client = new AgentickClient({
       baseUrl: "https://api.example.com",
       fetch: mockFetch as any,
       EventSource: mockESClass.MockEventSource as any,

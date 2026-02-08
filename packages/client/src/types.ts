@@ -1,7 +1,7 @@
 /**
  * Client Types
  *
- * @module @tentickle/client/types
+ * @module @agentick/client/types
  */
 
 import type {
@@ -12,8 +12,8 @@ import type {
   SendInput,
   Message,
   ContentBlock,
-} from "@tentickle/shared";
-import type { StreamEvent } from "@tentickle/shared";
+} from "@agentick/shared";
+import type { StreamEvent } from "@agentick/shared";
 
 // Re-export protocol types
 export type {

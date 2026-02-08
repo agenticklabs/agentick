@@ -1,9 +1,9 @@
-import { isGuardError } from "@tentickle/shared";
+import { isGuardError } from "@agentick/shared";
 
 /**
  * Error categories for recovery decisions.
  *
- * Intentionally NOT `TentickleErrorCode` — categories drive recovery logic,
+ * Intentionally NOT `AgentickErrorCode` — categories drive recovery logic,
  * codes are structured error identity.
  */
 export type ErrorCategory =

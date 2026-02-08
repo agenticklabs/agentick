@@ -2,7 +2,7 @@
  * Timeline Types
  *
  * Platform-independent types for timeline entries.
- * Used by both backend (@tentickle/core) and frontend (@tentickle/client).
+ * Used by both backend (@agentick/core) and frontend (@agentick/client).
  *
  * Timeline entries represent the conversation history. Tool calls and results
  * are embedded in message content blocks (tool_use, tool_result), not as

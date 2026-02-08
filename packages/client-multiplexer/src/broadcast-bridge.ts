@@ -5,8 +5,8 @@
  * Used for forwarding requests from followers to leader and events back.
  */
 
-import type { TransportEventData } from "@tentickle/client";
-import type { SendInput, ChannelEvent, ToolConfirmationResponse } from "@tentickle/client";
+import type { TransportEventData } from "@agentick/client";
+import type { SendInput, ChannelEvent, ToolConfirmationResponse } from "@agentick/client";
 
 // ============================================================================
 // Message Types
@@ -88,7 +88,7 @@ export interface BroadcastBridge {
 }
 
 export function createBroadcastBridge(channelName: string, tabId: string): BroadcastBridge {
-  const channel = new BroadcastChannel(`tentickle:bridge:${channelName}`);
+  const channel = new BroadcastChannel(`agentick:bridge:${channelName}`);
   const handlers = new Set<MessageHandler>();
 
   channel.onmessage = (event) => {

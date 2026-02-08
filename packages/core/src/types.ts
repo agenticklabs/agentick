@@ -27,7 +27,7 @@
  *
  * Each adapter extends these interfaces using module augmentation:
  * ```typescript
- * declare module 'tentickle' {
+ * declare module 'agentick' {
  *   interface ProviderClientOptions {
  *     openai?: OpenAIAdapterConfig;
  *   }
@@ -41,9 +41,9 @@
  * ```
  */
 
-import { type Message, type ContentBlock, type GeneratedImageBlock } from "@tentickle/shared";
-import type { Procedure, UserContext } from "@tentickle/kernel";
-import type { ProcedureGraph, ProcedureNode } from "@tentickle/kernel";
+import { type Message, type ContentBlock, type GeneratedImageBlock } from "@agentick/shared";
+import type { Procedure, UserContext } from "@agentick/kernel";
+import type { ProcedureGraph, ProcedureNode } from "@agentick/kernel";
 import type { ChannelService } from "./channels/service";
 import type { ExecutionHandleImpl } from "./engine/execution-handle";
 import type {
@@ -51,7 +51,7 @@ import type {
   ExecutionHandle as EngineExecutionHandle,
 } from "./engine/execution-types";
 import type { EventEmitter } from "node:events";
-import type { ContextMetadata, ContextMetrics } from "@tentickle/kernel";
+import type { ContextMetadata, ContextMetrics } from "@agentick/kernel";
 
 export interface EngineContextMetadata extends ContextMetadata {}
 
@@ -74,7 +74,7 @@ export interface EngineContextMetrics extends ContextMetrics {
  * Note: We cannot override executionHandle (it's EventEmitter in Kernel),
  * but in Engine code we know it's always ExecutionHandleImpl and use type guards/assertions.
  */
-declare module "@tentickle/core" {
+declare module "@agentick/core" {
   interface KernelContext {
     // Note: executionType, executionId, and parentExecutionId are now first-class
     // fields in KernelContext (Phase 3). We only augment with Engine-specific fields.
@@ -221,7 +221,7 @@ export interface EngineContext {
  *
  * Example:
  * ```typescript
- * declare module 'tentickle' {
+ * declare module 'agentick' {
  *   interface ProviderClientOptions {
  *     openai?: OpenAI.ClientOptions;
  *   }
@@ -239,7 +239,7 @@ export interface ProviderClientOptions {
  *
  * Example:
  * ```typescript
- * declare module 'tentickle' {
+ * declare module 'agentick' {
  *   interface ProviderGenerationOptions {
  *     openai?: Partial<OpenAI.Chat.Completions.ChatCompletionCreateParams>;
  *   }
@@ -257,7 +257,7 @@ export interface ProviderGenerationOptions {
  *
  * Example:
  * ```typescript
- * declare module 'tentickle' {
+ * declare module 'agentick' {
  *   interface ProviderToolOptions {
  *     openai?: OpenAIToolOptions;
  *   }
@@ -292,7 +292,7 @@ export interface ProviderToolOptions {
  *
  * Example:
  * ```typescript
- * declare module 'tentickle' {
+ * declare module 'agentick' {
  *   interface LibraryClientOptions {
  *     'ai-sdk'?: {
  *       telemetry?: { isEnabled?: boolean };
@@ -313,7 +313,7 @@ export interface LibraryClientOptions {
  *
  * Example:
  * ```typescript
- * declare module 'tentickle' {
+ * declare module 'agentick' {
  *   interface LibraryGenerationOptions {
  *     'ai-sdk'?: {
  *       maxSteps?: number;
@@ -336,7 +336,7 @@ export interface LibraryGenerationOptions {
  *
  * Example:
  * ```typescript
- * declare module 'tentickle' {
+ * declare module 'agentick' {
  *   interface LibraryToolOptions {
  *     'ai-sdk'?: {
  *       maxDuration?: number;
@@ -367,7 +367,7 @@ export interface EventBlockDelimiters {
   default?: DelimiterConfig;
 }
 
-// ToolExecutionType and ToolIntent are now exported from '@tentickle/shared'
+// ToolExecutionType and ToolIntent are now exported from '@agentick/shared'
 
 /**
  * Tool execution configuration options.
@@ -403,13 +403,13 @@ export interface ToolExecutionOptions {
   continueOnError?: boolean;
 }
 
-// StopReason is now exported from '@tentickle/shared'
+// StopReason is now exported from '@agentick/shared'
 
 // ============================================================================
 // Engine Events
 // ============================================================================
 
-// ToolCall and ToolResult are now exported from '@tentickle/shared'
+// ToolCall and ToolResult are now exported from '@agentick/shared'
 // StreamEvent and related unions are exported from './engine/engine-events'
 
 // ============================================================================

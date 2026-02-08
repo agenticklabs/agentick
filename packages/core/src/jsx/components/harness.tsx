@@ -30,7 +30,7 @@
  * };
  * ```
  *
- * @module tentickle/components/harness
+ * @module agentick/components/harness
  */
 
 import React, { useEffect, useRef } from "react";

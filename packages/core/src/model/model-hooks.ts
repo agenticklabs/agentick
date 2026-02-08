@@ -1,4 +1,4 @@
-import type { Middleware } from "@tentickle/kernel";
+import type { Middleware } from "@agentick/kernel";
 import type { COMInput } from "../com/types";
 import type { EngineResponse } from "../engine/engine-response";
 import { BaseHookRegistry } from "../hooks/base-hook-registry";
@@ -51,7 +51,7 @@ export type ModelHookReturn<T extends ModelHookName> = T extends "fromEngineStat
  * Uses BaseHookRegistry to reduce code duplication.
  *
  * Note: Global hooks via configureEngine() have been deprecated.
- * Use Tentickle.use() for middleware registration instead.
+ * Use Agentick.use() for middleware registration instead.
  */
 export class ModelHookRegistry extends BaseHookRegistry<
   ModelHookName,
@@ -67,7 +67,7 @@ export class ModelHookRegistry extends BaseHookRegistry<
    * Returns instance-specific hooks only.
    *
    * Note: Global hooks via configureEngine() have been deprecated.
-   * Use Tentickle.use() for middleware registration instead.
+   * Use Agentick.use() for middleware registration instead.
    */
   getMiddleware<T extends ModelHookName>(hookName: T): ModelHookMiddleware<T>[] {
     return this.registry.getMiddleware(

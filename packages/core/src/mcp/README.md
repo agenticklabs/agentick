@@ -15,8 +15,8 @@ MCP (Model Context Protocol) tools allow the Engine to connect to external MCP s
 ### 1. Define MCP Server Configuration
 
 ```typescript
-import { MCPConfig } from 'tentickle';
-import { MCPClient, MCPService } from 'tentickle';
+import { MCPConfig } from 'agentick';
+import { MCPClient, MCPService } from 'agentick';
 
 // Example 1: Stdio transport (spawns a process)
 const filesystemMCPConfig: MCPConfig = {
@@ -54,7 +54,7 @@ const cloudMCPConfig: MCPConfig = {
 ### 2. Initialize MCP Service and Discover Tools
 
 ```typescript
-import { Engine, MCPClient, MCPService } from 'tentickle';
+import { Engine, MCPClient, MCPService } from 'agentick';
 
 // Create MCP client (manages connections)
 const mcpClient = new MCPClient();

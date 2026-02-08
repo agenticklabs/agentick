@@ -9,8 +9,8 @@
  */
 
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
-import { useSession, useConnection, useStreamingText, useContextInfo } from "@tentickle/react";
-import type { ContentBlock, MediaSource, Message, ToolResultBlock } from "@tentickle/shared";
+import { useSession, useConnection, useStreamingText, useContextInfo } from "@agentick/react";
+import type { ContentBlock, MediaSource, Message, ToolResultBlock } from "@agentick/shared";
 
 interface ChatMessage {
   id: string;

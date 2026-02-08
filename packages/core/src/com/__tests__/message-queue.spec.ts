@@ -7,7 +7,7 @@
 
 import { describe, it, expect, beforeEach } from "vitest";
 import { COM } from "../object-model";
-import type { Message } from "@tentickle/shared";
+import type { Message } from "@agentick/shared";
 
 describe("COM Message Queue", () => {
   let ctx: COM;

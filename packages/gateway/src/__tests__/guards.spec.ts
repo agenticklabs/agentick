@@ -6,8 +6,8 @@
  */
 
 import { describe, it, expect, vi } from "vitest";
-import { Context, type KernelContext, type UserContext } from "@tentickle/kernel";
-import { GuardError, isGuardError } from "@tentickle/shared";
+import { Context, type KernelContext, type UserContext } from "@agentick/kernel";
+import { GuardError, isGuardError } from "@agentick/shared";
 
 // ============================================================================
 // Role guard behavior tests

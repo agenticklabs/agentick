@@ -10,7 +10,7 @@ import type {
   TokenEstimator,
 } from "./types";
 import type { ToolDefinition, ExecutableTool } from "../tool/tool";
-import type { Message, ContentBlock } from "@tentickle/shared";
+import type { Message, ContentBlock } from "@agentick/shared";
 import type { ModelConfig, EngineModel } from "../model/model";
 import type { ChannelService } from "../channels";
 import { EventEmitter } from "node:events";

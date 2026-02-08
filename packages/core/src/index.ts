@@ -1,5 +1,5 @@
 /**
- * @tentickle/core - Core engine for Tentickle
+ * @agentick/core - Core engine for Agentick
  *
  * Main entry point with all essential exports
  */
@@ -7,13 +7,13 @@
 // ============================================================================
 // Kernel primitives
 // ============================================================================
-export * from "@tentickle/kernel";
+export * from "@agentick/kernel";
 
 // ============================================================================
 // App & Session
 // ============================================================================
 export * from "./app/types.js";
-export { createApp, Tentickle, TentickleInstance, run, runComponent, SessionImpl } from "./app.js";
+export { createApp, Agentick, AgentickInstance, run, runComponent, SessionImpl } from "./app.js";
 
 // ============================================================================
 // JSX Components (re-export from jsx/components)
@@ -50,7 +50,7 @@ export {
 export { useState, useEffect, useReducer, useMemo, useCallback, useRef } from "react";
 
 // ============================================================================
-// Tentickle Hooks
+// Agentick Hooks
 // ============================================================================
 export {
   useSignal,

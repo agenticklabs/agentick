@@ -4,7 +4,7 @@ export default defineConfig({
   esbuild: {
     jsx: "automatic",
     // Note: v2 tests use @jsxImportSource react pragma to override
-    jsxImportSource: "tentickle",
+    jsxImportSource: "agentick",
   },
   test: {
     globals: true,
@@ -34,8 +34,8 @@ export default defineConfig({
   },
   resolve: {
     alias: {
-      "tentickle/jsx-runtime": "./packages/core/src/jsx/jsx-runtime.ts",
-      "tentickle/jsx-dev-runtime": "./packages/core/src/jsx/jsx-runtime.ts",
+      "agentick/jsx-runtime": "./packages/core/src/jsx/jsx-runtime.ts",
+      "agentick/jsx-dev-runtime": "./packages/core/src/jsx/jsx-runtime.ts",
     },
   },
 });

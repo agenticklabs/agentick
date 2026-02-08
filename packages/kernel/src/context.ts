@@ -3,7 +3,7 @@ import { EventEmitter } from "node:events";
 import { type ChannelServiceInterface } from "./channel";
 import type { ProcedureGraph } from "./procedure-graph";
 import type { ProcedureNode } from "./procedure-graph";
-import { ContextError } from "@tentickle/shared";
+import { ContextError } from "@agentick/shared";
 import type { Middleware } from "./procedure";
 
 /**
@@ -242,7 +242,7 @@ export interface KernelContext {
   /**
    * Middleware registry for procedure execution.
    * Procedures read this at execution time to get instance-level middleware.
-   * Typically set by createApp() from the Tentickle instance.
+   * Typically set by createApp() from the Agentick instance.
    */
   middleware?: {
     getMiddlewareFor(procedureName: string): Middleware[];
@@ -324,7 +324,7 @@ export class Context {
       user: overrides.user,
       signal: overrides.signal,
       executionHandle: overrides.executionHandle,
-      // Tentickle middleware registry (for context-based middleware resolution)
+      // Agentick middleware registry (for context-based middleware resolution)
       middleware: overrides.middleware,
       // Execution context fields (Phase 3)
       executionId: overrides.executionId,
@@ -534,7 +534,7 @@ export class ContextProvider {
  * Symbol used to brand context objects for deterministic detection.
  * This allows procedures to distinguish context from regular arguments.
  */
-export const KERNEL_CONTEXT_SYMBOL = Symbol.for("@tentickle/kernel.context");
+export const KERNEL_CONTEXT_SYMBOL = Symbol.for("@agentick/kernel.context");
 
 /**
  * Brand a context object with a Symbol for deterministic detection.

@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { z } from "zod";
 import { createTool } from "../tool";
-import { createGuard, type ProcedureEnvelope, GuardError, isGuardError } from "@tentickle/kernel";
+import { createGuard, type ProcedureEnvelope, GuardError, isGuardError } from "@agentick/kernel";
 
 describe("createTool + guard integration", () => {
   const EchoTool = createTool({

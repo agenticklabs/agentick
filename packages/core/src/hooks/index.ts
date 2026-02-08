@@ -1,14 +1,14 @@
 /**
  * V2 Hooks
  *
- * Custom hooks for Tentickle components.
+ * Custom hooks for Agentick components.
  */
 
 // Re-export React hooks for convenience
 export { useState, useEffect, useRef, useCallback, useMemo, useContext } from "react";
 
 // Context hooks
-export { useCom, useTickState, COMProvider, TickStateProvider, TentickleProvider } from "./context";
+export { useCom, useTickState, COMProvider, TickStateProvider, AgentickProvider } from "./context";
 
 // COM state hook
 export { useComState } from "./com-state";

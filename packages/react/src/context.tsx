@@ -1,50 +1,50 @@
 /**
- * React context for Tentickle client.
+ * React context for Agentick client.
  *
- * @module @tentickle/react/context
+ * @module @agentick/react/context
  */
 
 import { createContext, useMemo, useEffect } from "react";
-import { createClient } from "@tentickle/client";
-import type { TentickleProviderProps, TentickleContextValue } from "./types";
+import { createClient } from "@agentick/client";
+import type { AgentickProviderProps, AgentickContextValue } from "./types";
 
 // ============================================================================
 // Context
 // ============================================================================
 
-export const TentickleContext = createContext<TentickleContextValue | null>(null);
+export const AgentickContext = createContext<AgentickContextValue | null>(null);
 
 // ============================================================================
 // Provider
 // ============================================================================
 
 /**
- * Provider for Tentickle client context.
+ * Provider for Agentick client context.
  *
  * Either provide a pre-configured client or clientConfig to create one.
  *
  * @example With client config
  * ```tsx
- * import { TentickleProvider } from '@tentickle/react';
+ * import { AgentickProvider } from '@agentick/react';
  *
  * function App() {
  *   return (
- *     <TentickleProvider
+ *     <AgentickProvider
  *       clientConfig={{
  *         baseUrl: 'https://api.example.com',
  *         token: 'my-token',
  *       }}
  *     >
  *       <Chat />
- *     </TentickleProvider>
+ *     </AgentickProvider>
  *   );
  * }
  * ```
  *
  * @example With pre-configured client
  * ```tsx
- * import { TentickleProvider } from '@tentickle/react';
- * import { createClient } from '@tentickle/client';
+ * import { AgentickProvider } from '@agentick/react';
+ * import { createClient } from '@agentick/client';
  *
  * const client = createClient({
  *   baseUrl: 'https://api.example.com',
@@ -53,9 +53,9 @@ export const TentickleContext = createContext<TentickleContextValue | null>(null
  *
  * function App() {
  *   return (
- *     <TentickleProvider client={client}>
+ *     <AgentickProvider client={client}>
  *       <Chat />
- *     </TentickleProvider>
+ *     </AgentickProvider>
  *   );
  * }
  * ```
@@ -66,13 +66,13 @@ export const TentickleContext = createContext<TentickleContextValue | null>(null
  * function App() {
  *   return (
  *     <div className="dashboard">
- *       <TentickleProvider clientConfig={{ baseUrl: '/api/support-agent' }}>
+ *       <AgentickProvider clientConfig={{ baseUrl: '/api/support-agent' }}>
  *         <SupportChat />
- *       </TentickleProvider>
+ *       </AgentickProvider>
  *
- *       <TentickleProvider clientConfig={{ baseUrl: '/api/sales-agent' }}>
+ *       <AgentickProvider clientConfig={{ baseUrl: '/api/sales-agent' }}>
  *         <SalesChat />
- *       </TentickleProvider>
+ *       </AgentickProvider>
  *     </div>
  *   );
  * }
@@ -86,24 +86,24 @@ export const TentickleContext = createContext<TentickleContextValue | null>(null
  * function App() {
  *   return (
  *     <>
- *       <TentickleProvider client={sharedClient}>
+ *       <AgentickProvider client={sharedClient}>
  *         <MainChat />
- *       </TentickleProvider>
+ *       </AgentickProvider>
  *
  *       {/* Both providers share the same client and connection * /}
- *       <TentickleProvider client={sharedClient}>
+ *       <AgentickProvider client={sharedClient}>
  *         <ChatSidebar />
- *       </TentickleProvider>
+ *       </AgentickProvider>
  *     </>
  *   );
  * }
  * ```
  */
-export function TentickleProvider({
+export function AgentickProvider({
   client: providedClient,
   clientConfig,
   children,
-}: TentickleProviderProps) {
+}: AgentickProviderProps) {
   // Create client from config if not provided
   const client = useMemo(() => {
     if (providedClient) {
@@ -111,7 +111,7 @@ export function TentickleProvider({
     }
 
     if (!clientConfig) {
-      throw new Error("TentickleProvider requires either a client or clientConfig prop");
+      throw new Error("AgentickProvider requires either a client or clientConfig prop");
     }
 
     return createClient(clientConfig);
@@ -127,7 +127,7 @@ export function TentickleProvider({
     }
   }, [client, providedClient]);
 
-  const value = useMemo<TentickleContextValue>(() => ({ client }), [client]);
+  const value = useMemo<AgentickContextValue>(() => ({ client }), [client]);
 
-  return <TentickleContext.Provider value={value}>{children}</TentickleContext.Provider>;
+  return <AgentickContext.Provider value={value}>{children}</AgentickContext.Provider>;
 }

@@ -38,19 +38,19 @@
  * const conv = app.session('conv-123');
  * ```
  *
- * @module tentickle/app
+ * @module agentick/app
  */
 
 // ============================================================================
-// Re-export createApp and run from @tentickle/instance
+// Re-export createApp and run from @agentick/instance
 // ============================================================================
-import { createApp, Tentickle, TentickleInstance, run } from "./tentickle-instance";
-export { createApp, Tentickle, TentickleInstance, run };
+import { createApp, Agentick, AgentickInstance, run } from "./agentick-instance";
+export { createApp, Agentick, AgentickInstance, run };
 export type {
   MiddlewareKey,
-  TentickleInstanceCreateOptions,
+  AgentickInstanceCreateOptions,
   MiddlewareRegistry,
-} from "./tentickle-instance";
+} from "./agentick-instance";
 
 // ============================================================================
 // Convenience Functions
@@ -92,7 +92,7 @@ export async function runComponent<P extends Record<string, unknown>>(
 ): Promise<SessionExecutionHandle> {
   // Import synchronously since we're not doing dynamic import
 
-  const { createApp: createAppFn } = require("./tentickle-instance") as {
+  const { createApp: createAppFn } = require("./agentick-instance") as {
     createApp: typeof createApp;
   };
   return await createAppFn(Component, options).run(input);

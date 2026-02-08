@@ -1,8 +1,8 @@
 # Channels Module Architecture
 
-> **Streaming communication infrastructure for Tentickle applications**
+> **Streaming communication infrastructure for Agentick applications**
 
-The channels module provides a layered communication system for real-time, bidirectional data streaming between Tentickle backends and clients. It builds on the kernel's `Channel` primitive to offer session management, transport abstraction, distributed scaling, and declarative event routing.
+The channels module provides a layered communication system for real-time, bidirectional data streaming between Agentick backends and clients. It builds on the kernel's `Channel` primitive to offer session management, transport abstraction, distributed scaling, and declarative event routing.
 
 ---
 
@@ -34,7 +34,7 @@ The channels module provides:
 
 ### Why It Exists
 
-Tentickle applications need real-time communication between:
+Agentick applications need real-time communication between:
 
 - Backend agents publishing streaming results
 - Frontend clients receiving updates and sending user input
@@ -49,7 +49,7 @@ The kernel provides the low-level `Channel` primitive:
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
-│  Kernel (@tentickle/kernel)                                               │
+│  Kernel (@agentick/kernel)                                               │
 │  ├── Channel - EventEmitter-based pub/sub                           │
 │  ├── ChannelSession - Collection of channels scoped to user+conv    │
 │  └── ChannelServiceInterface - Contract for channel access          │
@@ -258,13 +258,13 @@ class ChannelRouter<TSubscribeContext> {
 │                     │   Redis PubSub  │                             │
 │                     │                 │                             │
 │                     │  Channels:      │                             │
-│                     │  tentickle:rooms:*   │                             │
-│                     │  tentickle:channels:*│                             │
+│                     │  agentick:rooms:*   │                             │
+│                     │  agentick:channels:*│                             │
 │                     └─────────────────┘                             │
 │                                                                     │
 │  Flow for room-targeted message:                                    │
 │  1. Instance A publishes event with target.rooms = ['user:alice']   │
-│  2. Adapter publishes to Redis channel 'tentickle:rooms:user:alice'      │
+│  2. Adapter publishes to Redis channel 'agentick:rooms:user:alice'      │
 │  3. Instance B (subscribed to room) receives from Redis             │
 │  4. Instance B delivers to Client B (in room 'user:alice')          │
 │                                                                     │
@@ -402,15 +402,15 @@ const adapter = new RedisChannelAdapter({
   port: 6379,
   password: "secret",
   db: 0,
-  channelPrefix: "tentickle:channels:",
-  roomPrefix: "tentickle:rooms:",
+  channelPrefix: "agentick:channels:",
+  roomPrefix: "agentick:rooms:",
 });
 ```
 
 **Channel Naming:**
 
-- Default channels: `tentickle:channels:{channelName}`
-- Room channels: `tentickle:rooms:{roomName}`
+- Default channels: `agentick:channels:{channelName}`
+- Room channels: `agentick:rooms:{roomName}`
 
 **Flow:**
 

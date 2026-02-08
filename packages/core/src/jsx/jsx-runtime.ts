@@ -2,7 +2,7 @@ import React from "react";
 import type z from "zod";
 import type { ComponentClass, ComponentFactory } from "../component/component";
 import type { ToolClass, ExecutableTool } from "../tool/tool";
-import type { ContentBlock, MessageRoles, ToolExecutionType } from "@tentickle/shared";
+import type { ContentBlock, MessageRoles, ToolExecutionType } from "@agentick/shared";
 
 // Use React's createElement for all element creation
 // This ensures elements have proper $$typeof symbol
@@ -17,7 +17,7 @@ export namespace JSX {
 
   /**
    * Allow function components to return Promise<Element> for async components.
-   * This is valid in Tentickle because we don't have UI rendering constraints.
+   * This is valid in Agentick because we don't have UI rendering constraints.
    */
   export interface ElementChildrenAttribute {
     children: {};

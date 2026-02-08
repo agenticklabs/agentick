@@ -1,8 +1,8 @@
 /**
- * Tentickle Example - Express Server
+ * Agentick Example - Express Server
  *
  * Demonstrates:
- * - createTentickleMiddleware for Gateway integration
+ * - createAgentickMiddleware for Gateway integration
  * - Custom methods via Gateway methods API
  * - Channel-based state sync
  */
@@ -13,11 +13,11 @@ loadEnv();
 import express from "express";
 import cors from "cors";
 import { z } from "zod";
-import { Context, Logger } from "@tentickle/kernel";
-import { createTentickleMiddleware, method } from "@tentickle/express";
-import { DevToolsServer } from "@tentickle/devtools";
-import { registerModel } from "@tentickle/shared";
-import { createTentickleApp } from "./setup.js";
+import { Context, Logger } from "@agentick/kernel";
+import { createAgentickMiddleware, method } from "@agentick/express";
+import { DevToolsServer } from "@agentick/devtools";
+import { registerModel } from "@agentick/shared";
+import { createAgentickApp } from "./setup.js";
 import { TodoListService } from "./services/todo-list.service.js";
 
 // ============================================================================
@@ -75,12 +75,12 @@ async function main() {
     res.json({ status: "ok", timestamp: new Date().toISOString() });
   });
 
-  // Create Tentickle app
-  const tentickleApp = createTentickleApp();
+  // Create Agentick app
+  const agentickApp = createAgentickApp();
 
-  // Create Tentickle middleware with custom methods
-  const tentickleMiddleware = createTentickleMiddleware({
-    apps: { assistant: tentickleApp },
+  // Create Agentick middleware with custom methods
+  const agentickMiddleware = createAgentickMiddleware({
+    apps: { assistant: agentickApp },
     defaultApp: "assistant",
 
     // Custom methods - replaces separate REST routes
@@ -185,12 +185,12 @@ async function main() {
           handler: async (params) => {
             console.log(`[sessions:create] params.sessionId=${params.sessionId}`);
             const session = params.sessionId
-              ? await tentickleApp.session(params.sessionId)
-              : await tentickleApp.session();
+              ? await agentickApp.session(params.sessionId)
+              : await agentickApp.session();
             console.log(
               `[sessions:create] created/got session.id=${session.id}, status=${(session as any)._status}`,
             );
-            console.log(`[sessions:create] app.sessions=${tentickleApp.sessions}`);
+            console.log(`[sessions:create] app.sessions=${agentickApp.sessions}`);
             return { sessionId: session.id };
           },
         }),
@@ -201,15 +201,15 @@ async function main() {
           }),
           handler: async (params) => {
             console.log(`[sessions:get] params.sessionId=${params.sessionId}`);
-            console.log(`[sessions:get] app.has=${tentickleApp.has(params.sessionId)}`);
-            console.log(`[sessions:get] app.sessions=${tentickleApp.sessions}`);
+            console.log(`[sessions:get] app.has=${agentickApp.has(params.sessionId)}`);
+            console.log(`[sessions:get] app.sessions=${agentickApp.sessions}`);
             // Check both in-memory and hibernated sessions
-            const inMemory = tentickleApp.has(params.sessionId);
-            const hibernated = await tentickleApp.isHibernated(params.sessionId);
+            const inMemory = agentickApp.has(params.sessionId);
+            const hibernated = await agentickApp.isHibernated(params.sessionId);
             if (!inMemory && !hibernated) {
               throw new Error("Session not found");
             }
-            const session = await tentickleApp.session(params.sessionId);
+            const session = await agentickApp.session(params.sessionId);
             console.log(
               `[sessions:get] session.id=${session.id}, status=${(session as any)._status}`,
             );
@@ -236,15 +236,15 @@ async function main() {
     },
   });
 
-  // Mount Tentickle middleware at /api
+  // Mount Agentick middleware at /api
 
-  expressApp.use("/api", tentickleMiddleware as any);
+  expressApp.use("/api", agentickMiddleware as any);
 
   // Start server
   const server = expressApp.listen(PORT, () => {
     console.log(`
 ╔══════════════════════════════════════════════════════════════╗
-║           Tentickle Example Server                           ║
+║           Agentick Example Server                           ║
 ╠══════════════════════════════════════════════════════════════╣
 ║  Server:     http://localhost:${PORT}                        ║
 ║  Health:     http://localhost:${PORT}/health                 ║
@@ -274,7 +274,7 @@ async function main() {
     console.log(`\n${signal} received, shutting down...`);
     server.close();
     devtools.stop();
-    await tentickleMiddleware.gateway.close();
+    await agentickMiddleware.gateway.close();
     console.log("Server closed");
     process.exit(0);
   };

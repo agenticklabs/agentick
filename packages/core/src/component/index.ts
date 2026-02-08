@@ -1,7 +1,7 @@
 /**
- * # Tentickle Components
+ * # Agentick Components
  *
- * Base component system for Tentickle agents. Provides class-based components
+ * Base component system for Agentick agents. Provides class-based components
  * with lifecycle hooks, signals, and render methods.
  *
  * ## Features
@@ -13,7 +13,7 @@
  * ## Quick Start
  *
  * ```tsx
- * import { Component } from 'tentickle';
+ * import { Component } from 'agentick';
  *
  * class MyAgent extends Component {
  *   count = signal(0);
@@ -40,7 +40,7 @@
  * @see {@link Component} - Base component class
  * @see {@link ComponentLifecycleHooks} - Lifecycle hook interfaces
  *
- * @module tentickle/component
+ * @module agentick/component
  */
 
 export * from "./component";

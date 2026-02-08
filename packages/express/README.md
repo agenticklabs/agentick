@@ -1,23 +1,23 @@
-# @tentickle/express
+# @agentick/express
 
-Express middleware for Tentickle Gateway.
+Express middleware for Agentick Gateway.
 
-This is a **thin adapter** (~50 lines) that delegates all business logic to `@tentickle/gateway`. Use this when you want to integrate Tentickle into an existing Express application.
+This is a **thin adapter** (~50 lines) that delegates all business logic to `@agentick/gateway`. Use this when you want to integrate Agentick into an existing Express application.
 
 ## Installation
 
 ```bash
-npm install @tentickle/express
+npm install @agentick/express
 # or
-pnpm add @tentickle/express
+pnpm add @agentick/express
 ```
 
 ## Quick Start
 
 ```typescript
 import express from "express";
-import { createTentickleMiddleware } from "@tentickle/express";
-import { createApp, Model, System, Timeline } from "@tentickle/core";
+import { createAgentickMiddleware } from "@agentick/express";
+import { createApp, Model, System, Timeline } from "@agentick/core";
 
 const app = express();
 app.use(express.json());
@@ -31,43 +31,43 @@ const AssistantAgent = () => (
   </>
 );
 
-const tentickleApp = createApp(<AssistantAgent />);
+const agentickApp = createApp(<AssistantAgent />);
 
 // Create middleware
-const tentickle = createTentickleMiddleware({
-  apps: { assistant: tentickleApp },
+const agentick = createAgentickMiddleware({
+  apps: { assistant: agentickApp },
   defaultApp: "assistant",
 });
 
 // Mount at /api
-app.use("/api", tentickle);
+app.use("/api", agentick);
 
 // Start server
 const server = app.listen(3000);
 
 // Graceful shutdown - access gateway via .gateway property
 process.on("SIGTERM", async () => {
-  await tentickle.gateway.close();
+  await agentick.gateway.close();
   server.close();
 });
 ```
 
 ## API
 
-### createTentickleMiddleware(config, options?)
+### createAgentickMiddleware(config, options?)
 
 Creates an Express Router that delegates to an embedded Gateway.
 
-Returns a `TentickleRouter` - an Express Router with an attached `.gateway` property for lifecycle management.
+Returns a `AgentickRouter` - an Express Router with an attached `.gateway` property for lifecycle management.
 
 ```typescript
-import { createTentickleMiddleware, method } from "@tentickle/express";
+import { createAgentickMiddleware, method } from "@agentick/express";
 import { z } from "zod";
 
-const middleware = createTentickleMiddleware({
+const middleware = createAgentickMiddleware({
   // Required: Register your apps
   apps: {
-    assistant: tentickleApp,
+    assistant: agentickApp,
     researcher: researchApp,
   },
   defaultApp: "assistant",
@@ -104,12 +104,12 @@ const middleware = createTentickleMiddleware({
 });
 ```
 
-### TentickleRouter
+### AgentickRouter
 
-The middleware returns a `TentickleRouter` which extends Express Router with:
+The middleware returns a `AgentickRouter` which extends Express Router with:
 
 ```typescript
-interface TentickleRouter extends Router {
+interface AgentickRouter extends Router {
   /** The underlying Gateway instance for lifecycle management */
   gateway: Gateway;
 }
@@ -124,7 +124,7 @@ Use `.gateway` for:
 ### Options
 
 ```typescript
-interface TentickleMiddlewareOptions {
+interface AgentickMiddlewareOptions {
   /**
    * Extract token from Express request.
    * By default, extracts from Authorization header.
@@ -201,12 +201,12 @@ const response = await fetch("/api/invoke", {
 Define methods using the `method()` helper for schema validation and guards:
 
 ```typescript
-import { method } from "@tentickle/express";
+import { method } from "@agentick/express";
 import { z } from "zod";
-import { Context } from "@tentickle/kernel";
+import { Context } from "@agentick/kernel";
 
-const middleware = createTentickleMiddleware({
-  apps: { assistant: tentickleApp },
+const middleware = createAgentickMiddleware({
+  apps: { assistant: agentickApp },
   defaultApp: "assistant",
   methods: {
     // Simple method - no schema
@@ -220,7 +220,7 @@ const middleware = createTentickleMiddleware({
           priority: z.enum(["low", "medium", "high"]).optional(),
         }),
         handler: async (params) => {
-          // Access Tentickle context
+          // Access Agentick context
           const ctx = Context.get();
           return todoService.create({
             title: params.title,
@@ -281,8 +281,8 @@ auth: {
 The middleware exposes the underlying Gateway for lifecycle management:
 
 ```typescript
-const tentickle = createTentickleMiddleware({ ... });
-app.use("/api", tentickle);
+const agentick = createAgentickMiddleware({ ... });
+app.use("/api", agentick);
 
 const server = app.listen(3000);
 
@@ -290,7 +290,7 @@ const shutdown = async (signal: string) => {
   console.log(`${signal} received, shutting down...`);
 
   // Close gateway first (cleanly disconnects all sessions)
-  await tentickle.gateway.close();
+  await agentick.gateway.close();
 
   // Then close HTTP server
   server.close(() => {
@@ -305,7 +305,7 @@ process.once("SIGINT", () => shutdown("SIGINT"));
 
 ## Re-exports
 
-For convenience, the package re-exports common types from `@tentickle/gateway`:
+For convenience, the package re-exports common types from `@agentick/gateway`:
 
 ```typescript
 export {
@@ -314,15 +314,15 @@ export {
   type GatewayConfig,
   type MethodDefinition,
   type AuthConfig,
-} from "@tentickle/gateway";
+} from "@agentick/gateway";
 ```
 
 ## Related Packages
 
-- [`@tentickle/gateway`](../gateway) - Core gateway (used internally)
-- [`@tentickle/core`](../core) - JSX runtime for agents
-- [`@tentickle/client`](../client) - Browser/Node client SDK
-- [`@tentickle/server`](../server) - SSE utilities
+- [`@agentick/gateway`](../gateway) - Core gateway (used internally)
+- [`@agentick/core`](../core) - JSX runtime for agents
+- [`@agentick/client`](../client) - Browser/Node client SDK
+- [`@agentick/server`](../server) - SSE utilities
 
 ## License
 

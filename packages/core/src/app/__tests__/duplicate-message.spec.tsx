@@ -13,8 +13,8 @@
 import { describe, it, expect } from "vitest";
 import { createApp, Model, System, Timeline } from "../../index";
 import { createTestAdapter } from "../../testing/test-adapter";
-import type { Message, TextBlock } from "@tentickle/shared";
-import { isTextBlock } from "@tentickle/shared/blocks";
+import type { Message, TextBlock } from "@agentick/shared";
+import { isTextBlock } from "@agentick/shared/blocks";
 
 describe("Duplicate Message Prevention", () => {
   describe("First tick - single user message", () => {

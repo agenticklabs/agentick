@@ -1,6 +1,6 @@
 # Model System
 
-Model adapters and configuration for Tentickle. Defines the `EngineModel` interface that all model adapters implement.
+Model adapters and configuration for Agentick. Defines the `EngineModel` interface that all model adapters implement.
 
 ## Key Types
 
@@ -48,7 +48,7 @@ interface ModelMetadata {
 Model adapters can provide a `tokenEstimator` function in metadata for accurate token counting. When provided, the compiler uses it instead of the default `char/4 + 4` heuristic to annotate compiled entries with token estimates.
 
 ```typescript
-import { createAdapter } from "@tentickle/core";
+import { createAdapter } from "@agentick/core";
 import { encoding_for_model } from "tiktoken";
 
 const enc = encoding_for_model("gpt-4o");
@@ -68,7 +68,7 @@ The estimator must be **synchronous** — the compile loop runs multiple iterati
 
 ### ModelInput
 
-Extends `@tentickle/shared`'s `ModelInput` with backend-specific fields:
+Extends `@agentick/shared`'s `ModelInput` with backend-specific fields:
 
 ```typescript
 interface ModelInput extends BaseModelInput {
@@ -80,7 +80,7 @@ interface ModelInput extends BaseModelInput {
 
 ### ResponseFormat
 
-Normalized structured output format, defined in `@tentickle/shared`:
+Normalized structured output format, defined in `@agentick/shared`:
 
 ```typescript
 type ResponseFormat =
@@ -116,7 +116,7 @@ interface ModelConfig extends BaseModelConfig {
 ## Creating Adapters
 
 ```typescript
-import { createAdapter } from "@tentickle/core";
+import { createAdapter } from "@agentick/core";
 
 const myModel = createAdapter({
   metadata: {

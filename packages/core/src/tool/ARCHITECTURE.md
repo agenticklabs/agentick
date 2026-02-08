@@ -1,6 +1,6 @@
 # Tool Module Architecture
 
-> **Tool definition and execution for Tentickle agents**
+> **Tool definition and execution for Agentick agents**
 
 The tool module provides primitives for defining, validating, and executing tools that allow agents to interact with the outside world. Tools are the bridge between LLM reasoning and real-world actions.
 
@@ -564,7 +564,7 @@ sequenceDiagram
 ### Basic Server Tool
 
 ```typescript
-import { createTool } from 'tentickle';
+import { createTool } from 'agentick';
 import { z } from 'zod';
 
 const Calculator = createTool({
@@ -620,7 +620,7 @@ await BookmarkTool.run({ url: 'https://example.com', title: 'Example' });
 ### Client Render Tool (Non-blocking)
 
 ```typescript
-import { createTool, ToolExecutionType, ToolIntent } from "tentickle";
+import { createTool, ToolExecutionType, ToolIntent } from "agentick";
 import { z } from "zod";
 
 const RenderChart = createTool({
@@ -646,7 +646,7 @@ const RenderChart = createTool({
 ### Client Form Tool (Blocking)
 
 ```typescript
-import { createTool, ToolExecutionType, ToolIntent } from "tentickle";
+import { createTool, ToolExecutionType, ToolIntent } from "agentick";
 import { z } from "zod";
 
 const UserInfoForm = createTool({
@@ -672,7 +672,7 @@ const UserInfoForm = createTool({
 ### Tool with Hooks
 
 ```typescript
-import { createTool } from "tentickle";
+import { createTool } from "agentick";
 import { z } from "zod";
 
 const DatabaseQuery = createTool({
@@ -709,7 +709,7 @@ const DatabaseQuery = createTool({
 ### Tool with Component Lifecycle
 
 ```typescript
-import { createTool } from "tentickle";
+import { createTool } from "agentick";
 import { z } from "zod";
 
 const WeatherTool = createTool({
@@ -745,10 +745,10 @@ const WeatherTool = createTool({
 ### Provider Tool (OpenAI Code Interpreter)
 
 ```typescript
-import { createTool, ToolExecutionType, ToolIntent } from "tentickle";
+import { createTool, ToolExecutionType, ToolIntent } from "agentick";
 import { z } from "zod";
 
-// Provider tools are executed by the LLM provider, not Tentickle
+// Provider tools are executed by the LLM provider, not Agentick
 const CodeInterpreter = createTool({
   name: "code_interpreter",
   description: "Executes Python code in a sandboxed environment",
@@ -771,7 +771,7 @@ const CodeInterpreter = createTool({
 ### MCP Tool
 
 ```typescript
-import { createTool, ToolExecutionType } from "tentickle";
+import { createTool, ToolExecutionType } from "agentick";
 import { z } from "zod";
 
 const GitHubSearch = createTool({
@@ -802,7 +802,7 @@ const GitHubSearch = createTool({
 Component tools let the model decide when to delegate work to specialized sub-agents. This is a powerful pattern for orchestration - the LLM naturally chooses which specialist to invoke via tool calls.
 
 ```typescript
-import { createComponentTool } from "tentickle";
+import { createComponentTool } from "agentick";
 
 // Define a specialist agent as a component
 const ResearchAgent = () => (
@@ -887,9 +887,9 @@ const CodeReviewTool = createComponentTool({
 ### Tool with Confirmation
 
 ```typescript
-import { createTool } from "tentickle";
+import { createTool } from "agentick";
 import { z } from "zod";
-import { Context } from "tentickle";
+import { Context } from "agentick";
 
 const DeployApplication = createTool({
   name: "deploy_application",
@@ -968,7 +968,7 @@ const DeployApplication = createTool({
 
 ## Summary
 
-The tool module provides comprehensive tool support for Tentickle:
+The tool module provides comprehensive tool support for Agentick:
 
 - **`createTool()`** - Type-safe tool creation with three usage patterns
 - **`createComponentTool()`** - Wrap components as tools for sub-agent delegation

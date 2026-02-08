@@ -1,11 +1,11 @@
-# @tentickle/shared
+# @agentick/shared
 
-Platform-independent types and utilities for Tentickle. Works in both Node.js and browser environments.
+Platform-independent types and utilities for Agentick. Works in both Node.js and browser environments.
 
 ## Installation
 
 ```bash
-pnpm add @tentickle/shared
+pnpm add @agentick/shared
 ```
 
 ## Model Catalog
@@ -17,7 +17,7 @@ Reference data for known LLM models including context windows and capabilities. 
 Use `registerModel()` to add custom or fine-tuned models that aren't in the built-in catalog:
 
 ```typescript
-import { registerModel } from "@tentickle/shared";
+import { registerModel } from "@agentick/shared";
 
 // Register a custom fine-tuned model
 registerModel("myorg/custom-model-v1", {
@@ -31,7 +31,7 @@ registerModel("myorg/custom-model-v1", {
 });
 
 // Register multiple models at once
-import { registerModels } from "@tentickle/shared";
+import { registerModels } from "@agentick/shared";
 
 registerModels({
   "myorg/model-small": {
@@ -55,7 +55,7 @@ registerModels({
 ### Looking Up Model Info
 
 ```typescript
-import { getModelInfo, getContextWindow, getContextUtilization } from "@tentickle/shared";
+import { getModelInfo, getContextWindow, getContextUtilization } from "@agentick/shared";
 
 // Get full model info
 const info = getModelInfo("gpt-4o");
@@ -102,7 +102,7 @@ The catalog includes models from:
 When using adapters, model info from the adapter takes precedence over the catalog:
 
 ```typescript
-import { getEffectiveModelInfo, getEffectiveContextWindow } from "@tentickle/shared";
+import { getEffectiveModelInfo, getEffectiveContextWindow } from "@agentick/shared";
 
 // Adapter metadata overrides catalog values
 const effectiveInfo = getEffectiveModelInfo(
@@ -117,7 +117,7 @@ const contextWindow = getEffectiveContextWindow(adapterMetadata, modelId);
 ### Formatting Utilities
 
 ```typescript
-import { formatContextWindow } from "@tentickle/shared";
+import { formatContextWindow } from "@agentick/shared";
 
 formatContextWindow(128000);   // "128K"
 formatContextWindow(1000000);  // "1M"
@@ -129,7 +129,7 @@ formatContextWindow(2097152);  // "2.1M"
 Normalized response format type for structured output across providers:
 
 ```typescript
-import type { ResponseFormat } from "@tentickle/shared";
+import type { ResponseFormat } from "@agentick/shared";
 
 // Free-form text (default behavior)
 const text: ResponseFormat = { type: "text" };
@@ -161,7 +161,7 @@ const structured: ResponseFormat = {
 Content blocks represent different types of content in messages:
 
 ```typescript
-import type { ContentBlock, TextBlock, ImageBlock, ToolUseBlock, ToolResultBlock } from "@tentickle/shared";
+import type { ContentBlock, TextBlock, ImageBlock, ToolUseBlock, ToolResultBlock } from "@agentick/shared";
 
 // Text content
 const text: TextBlock = {
@@ -198,7 +198,7 @@ const toolResult: ToolResultBlock = {
 ### Message Types
 
 ```typescript
-import type { Message, UserMessage, AssistantMessage } from "@tentickle/shared";
+import type { Message, UserMessage, AssistantMessage } from "@agentick/shared";
 
 const userMessage: UserMessage = {
   role: "user",
@@ -222,7 +222,7 @@ import type {
   MessageEndEvent,
   ToolCallEvent,
   ContextUpdateEvent,
-} from "@tentickle/shared";
+} from "@agentick/shared";
 
 // Text streaming
 const delta: ContentDeltaEvent = {
@@ -253,12 +253,12 @@ Typed errors with codes for proper error handling:
 
 ```typescript
 import {
-  TentickleError,
+  AgentickError,
   ValidationError,
   AbortError,
   isAbortError,
-  isTentickleError,
-} from "@tentickle/shared";
+  isAgentickError,
+} from "@agentick/shared";
 
 // Check error types
 try {
@@ -266,7 +266,7 @@ try {
 } catch (error) {
   if (isAbortError(error)) {
     console.log("Operation was cancelled");
-  } else if (isTentickleError(error)) {
+  } else if (isAgentickError(error)) {
     console.log(`Error [${error.code}]: ${error.message}`);
   }
 }
@@ -282,7 +282,7 @@ throw AbortError.timeout(30000);  // Timeout via AbortError factory
 Utilities for normalizing various input formats:
 
 ```typescript
-import { normalizeContent, normalizeMessage } from "@tentickle/shared";
+import { normalizeContent, normalizeMessage } from "@agentick/shared";
 
 // Normalize string to content blocks
 const content = normalizeContent("Hello!");
@@ -302,7 +302,7 @@ const message2 = normalizeMessage({
 ## Tool Types
 
 ```typescript
-import type { ToolDefinition, ToolCall, ToolResult } from "@tentickle/shared";
+import type { ToolDefinition, ToolCall, ToolResult } from "@agentick/shared";
 
 const tool: ToolDefinition = {
   name: "calculator",

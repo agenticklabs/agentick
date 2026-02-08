@@ -1,7 +1,7 @@
 /**
- * @tentickle/server - Server SDK for Tentickle
+ * @agentick/server - Server SDK for Agentick
  *
- * Provides server-side components for running Tentickle applications:
+ * Provides server-side components for running Agentick applications:
  * - SSE streaming utilities
  * - SSE utilities for streaming
  *
@@ -11,7 +11,7 @@
  *
  * @example
  * ```typescript
- * import { createSSEWriter, setSSEHeaders } from '@tentickle/server';
+ * import { createSSEWriter, setSSEHeaders } from '@agentick/server';
  *
  * app.get('/events', (req, res) => {
  *   setSSEHeaders(res);
@@ -20,7 +20,7 @@
  * });
  * ```
  *
- * @module @tentickle/server
+ * @module @agentick/server
  */
 
 // SSE utilities

@@ -1,9 +1,9 @@
 /**
- * TentickleService - Modern Angular service for Tentickle.
+ * AgentickService - Modern Angular service for Agentick.
  *
  * Uses Angular signals for reactive state management with RxJS interop.
  *
- * @module @tentickle/angular/service
+ * @module @agentick/angular/service
  */
 
 import {
@@ -18,65 +18,65 @@ import { toObservable } from "@angular/core/rxjs-interop";
 import { Observable, Subject, filter, takeUntil } from "rxjs";
 import {
   createClient,
-  type TentickleClient,
+  type AgentickClient,
   type ConnectionState,
   type StreamEvent,
   type StreamingTextState,
   type SessionStreamEvent,
   type SessionAccessor,
   type ClientExecutionHandle,
-} from "@tentickle/client";
-import type { TentickleConfig } from "./types";
+} from "@agentick/client";
+import type { AgentickConfig } from "./types";
 
 /**
- * Injection token for Tentickle configuration.
+ * Injection token for Agentick configuration.
  */
-export const TENTICKLE_CONFIG = new InjectionToken<TentickleConfig>("TENTICKLE_CONFIG");
+export const TENTICKLE_CONFIG = new InjectionToken<AgentickConfig>("TENTICKLE_CONFIG");
 
 /**
- * Provides TentickleService with configuration at component level.
+ * Provides AgentickService with configuration at component level.
  *
  * Use this to create isolated service instances for different components,
  * each with their own connection and state.
  *
  * @example Multiple agents in one app
  * ```typescript
- * // Each component gets its own TentickleService instance
+ * // Each component gets its own AgentickService instance
  *
  * @Component({
  *   selector: 'app-support-chat',
- *   providers: [provideTentickle({ baseUrl: '/api/support-agent' })],
- *   template: `<div>{{ tentickle.text() }}</div>`,
+ *   providers: [provideAgentick({ baseUrl: '/api/support-agent' })],
+ *   template: `<div>{{ agentick.text() }}</div>`,
  * })
  * export class SupportChatComponent {
- *   tentickle = inject(TentickleService);
+ *   agentick = inject(AgentickService);
  * }
  *
  * @Component({
  *   selector: 'app-sales-chat',
- *   providers: [provideTentickle({ baseUrl: '/api/sales-agent' })],
- *   template: `<div>{{ tentickle.text() }}</div>`,
+ *   providers: [provideAgentick({ baseUrl: '/api/sales-agent' })],
+ *   template: `<div>{{ agentick.text() }}</div>`,
  * })
  * export class SalesChatComponent {
- *   tentickle = inject(TentickleService);
+ *   agentick = inject(AgentickService);
  * }
  * ```
  *
  * @param config - Configuration for this service instance
  * @returns Provider array to spread into component's providers
  */
-export function provideTentickle(config: TentickleConfig) {
-  return [{ provide: TENTICKLE_CONFIG, useValue: config }, TentickleService];
+export function provideAgentick(config: AgentickConfig) {
+  return [{ provide: TENTICKLE_CONFIG, useValue: config }, AgentickService];
 }
 
 /**
- * Modern Angular service for Tentickle.
+ * Modern Angular service for Agentick.
  *
  * Uses signals for state, with RxJS observables available for compatibility.
  *
  * @example Standalone setup
  * ```typescript
- * import { TentickleService, TENTICKLE_CONFIG } from '@tentickle/angular';
+ * import { AgentickService, TENTICKLE_CONFIG } from '@agentick/angular';
  *
  * bootstrapApplication(AppComponent, {
  *   providers: [
@@ -89,10 +89,10 @@ export function provideTentickle(config: TentickleConfig) {
  * ```typescript
  * @Component({
  *   template: `
- *     @if (tentickle.isConnected()) {
+ *     @if (agentick.isConnected()) {
  *       <div class="response">
- *         {{ tentickle.text() }}
- *         @if (tentickle.isStreaming()) {
+ *         {{ agentick.text() }}
+ *         @if (agentick.isStreaming()) {
  *           <span class="cursor">|</span>
  *         }
  *       </div>
@@ -104,14 +104,14 @@ export function provideTentickle(config: TentickleConfig) {
  *   `,
  * })
  * export class ChatComponent {
- *   tentickle = inject(TentickleService);
+ *   agentick = inject(AgentickService);
  *
  *   constructor() {
- *     this.tentickle.subscribe("conv-123");
+ *     this.agentick.subscribe("conv-123");
  *   }
  *
  *   async send(message: string) {
- *     const handle = this.tentickle.send(message);
+ *     const handle = this.agentick.send(message);
  *     await handle.result;
  *   }
  * }
@@ -123,14 +123,14 @@ export function provideTentickle(config: TentickleConfig) {
  *   template: `{{ text$ | async }}`,
  * })
  * export class LegacyComponent {
- *   tentickle = inject(TentickleService);
- *   text$ = this.tentickle.text$;
+ *   agentick = inject(AgentickService);
+ *   text$ = this.agentick.text$;
  * }
  * ```
  */
 @Injectable({ providedIn: "root" })
-export class TentickleService implements OnDestroy {
-  private readonly client: TentickleClient;
+export class AgentickService implements OnDestroy {
+  private readonly client: AgentickClient;
   private readonly destroy$ = new Subject<void>();
   private currentSession?: SessionAccessor;
 
@@ -207,11 +207,11 @@ export class TentickleService implements OnDestroy {
   // ══════════════════════════════════════════════════════════════════════════
 
   /**
-   * Creates a new TentickleService.
+   * Creates a new AgentickService.
    *
    * @param configOrInjected - Config passed directly (for testing) or undefined to use DI
    */
-  constructor(configOrInjected?: TentickleConfig) {
+  constructor(configOrInjected?: AgentickConfig) {
     // Support both direct config (for testing) and DI injection
     let config = configOrInjected;
     if (!config) {
@@ -223,7 +223,7 @@ export class TentickleService implements OnDestroy {
     }
 
     if (!config) {
-      throw new Error("TentickleService requires TENTICKLE_CONFIG to be provided");
+      throw new Error("AgentickService requires TENTICKLE_CONFIG to be provided");
     }
 
     this.client = createClient(config);
@@ -339,7 +339,7 @@ export class TentickleService implements OnDestroy {
   /**
    * Send a message to the session.
    */
-  send(input: Parameters<TentickleClient["send"]>[0]): ClientExecutionHandle {
+  send(input: Parameters<AgentickClient["send"]>[0]): ClientExecutionHandle {
     if (this.currentSession) {
       return this.currentSession.send(input as any);
     }

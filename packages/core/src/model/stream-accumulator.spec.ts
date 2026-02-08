@@ -8,7 +8,7 @@
 
 import { describe, it, expect } from "vitest";
 import { StreamAccumulator } from "./stream-accumulator";
-import { StopReason } from "@tentickle/shared";
+import { StopReason } from "@agentick/shared";
 
 describe("StreamAccumulator", () => {
   describe("text accumulation", () => {

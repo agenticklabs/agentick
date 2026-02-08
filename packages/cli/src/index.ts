@@ -1,10 +1,10 @@
 /**
- * @tentickle/cli - Terminal client for Tentickle agents
+ * @agentick/cli - Terminal client for Agentick agents
  *
  * Provides interactive and non-interactive modes for communicating
- * with Tentickle servers.
+ * with Agentick servers.
  *
- * @module @tentickle/cli
+ * @module @agentick/cli
  */
 
 export { CLI, createCLI, type CLIConfig, type CLIEvents } from "./cli.js";

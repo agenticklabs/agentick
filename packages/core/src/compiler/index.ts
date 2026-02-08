@@ -3,7 +3,7 @@
  *
  * The v2 fiber compiler using react-reconciler.
  *
- * @module tentickle/compiler
+ * @module agentick/compiler
  */
 
 // ============================================================================
@@ -64,7 +64,7 @@ export { createEmptyCompiledStructure } from "./types";
 // ============================================================================
 
 // Context hooks
-export { useCom, useTickState, TentickleProvider } from "../hooks";
+export { useCom, useTickState, AgentickProvider } from "../hooks";
 
 // Lifecycle hooks
 export {

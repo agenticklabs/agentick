@@ -1,7 +1,7 @@
-import type { ContentBlock, Message, MessageRoles } from "@tentickle/shared";
+import type { ContentBlock, Message, MessageRoles } from "@agentick/shared";
 import React, { useDebugValue } from "react";
 import type { JSX } from "react";
-import type { JSX as TentickleJSX } from "../jsx-runtime";
+import type { JSX as AgentickJSX } from "../jsx-runtime";
 import type { StreamEvent } from "../../engine/engine-events";
 import type { ComponentBaseProps } from "../jsx-types";
 
@@ -78,7 +78,7 @@ export type EntryProps = {
 
 export function Entry(props: EntryProps): JSX.Element {
   // Use intrinsic "entry" element for react-reconciler compatibility
-  // The reconciler's hostConfig will create a TentickleNode for this
+  // The reconciler's hostConfig will create a AgentickNode for this
   // Type assertion needed because React.createElement doesn't handle discriminated unions well
   return h("entry", props as any);
 }
@@ -88,7 +88,7 @@ export function Entry(props: EntryProps): JSX.Element {
  * When used in JSX: <Section id="..." content="..." />
  * Returns an intrinsic "section" element for react-reconciler compatibility.
  */
-export function Section(props: TentickleJSX.IntrinsicElements["section"]): JSX.Element {
+export function Section(props: AgentickJSX.IntrinsicElements["section"]): JSX.Element {
   // Debug value shows section title for React DevTools
   useDebugValue(`Section: ${props.title ?? props.id ?? "untitled"}`);
   // Use intrinsic "section" element for react-reconciler compatibility
@@ -162,7 +162,7 @@ export function Message(props: MessageProps): JSX.Element {
  * Tool primitive component.
  * When used in JSX: <Tool definition={myTool} />
  */
-export function Tool(props: TentickleJSX.IntrinsicElements["tool"]): JSX.Element {
+export function Tool(props: AgentickJSX.IntrinsicElements["tool"]): JSX.Element {
   // Debug value shows tool name for React DevTools
   useDebugValue(`Tool: ${props.name ?? "unnamed"}`);
   // Use intrinsic "tool" element for react-reconciler compatibility

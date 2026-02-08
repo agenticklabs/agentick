@@ -1,7 +1,7 @@
 /**
  * Client Method Invocation Tests
  *
- * Tests for TentickleClient custom method invocation, including:
+ * Tests for AgentickClient custom method invocation, including:
  * - invoke() for request/response methods
  * - stream() for streaming methods
  * - getAuthHeaders() for fetch integration
@@ -9,7 +9,7 @@
  */
 
 import { describe, it, expect, vi } from "vitest";
-import { TentickleClient, createClient } from "../client.js";
+import { AgentickClient, createClient } from "../client.js";
 
 // ============================================================================
 // Mock fetch
@@ -54,10 +54,10 @@ function createMockFetch(responseData: unknown, options?: { status?: number; str
 }
 
 // ============================================================================
-// TentickleClient.invoke() tests
+// AgentickClient.invoke() tests
 // ============================================================================
 
-describe("TentickleClient.invoke()", () => {
+describe("AgentickClient.invoke()", () => {
   it("should invoke a method and return result", async () => {
     const mockFetch = createMockFetch({ tasks: [{ id: 1, title: "Test" }] });
     const client = createClient({
@@ -145,10 +145,10 @@ describe("TentickleClient.invoke()", () => {
 });
 
 // ============================================================================
-// TentickleClient.stream() tests
+// AgentickClient.stream() tests
 // ============================================================================
 
-describe("TentickleClient.stream()", () => {
+describe("AgentickClient.stream()", () => {
   it("should yield chunks from streaming method", async () => {
     const mockFetch = createMockFetch(
       [
@@ -241,10 +241,10 @@ describe("TentickleClient.stream()", () => {
 });
 
 // ============================================================================
-// TentickleClient.getAuthHeaders() tests
+// AgentickClient.getAuthHeaders() tests
 // ============================================================================
 
-describe("TentickleClient.getAuthHeaders()", () => {
+describe("AgentickClient.getAuthHeaders()", () => {
   it("should return empty object when no token configured", () => {
     const client = createClient({
       baseUrl: "http://localhost:3000",
@@ -373,12 +373,12 @@ describe("SessionAccessor.stream()", () => {
 // ============================================================================
 
 describe("createClient()", () => {
-  it("should create a TentickleClient instance", () => {
+  it("should create a AgentickClient instance", () => {
     const client = createClient({
       baseUrl: "http://localhost:3000",
     });
 
-    expect(client).toBeInstanceOf(TentickleClient);
+    expect(client).toBeInstanceOf(AgentickClient);
   });
 
   it("should default to SSE transport for http URLs", () => {
@@ -386,7 +386,7 @@ describe("createClient()", () => {
       baseUrl: "http://localhost:3000",
     });
 
-    expect(client).toBeInstanceOf(TentickleClient);
+    expect(client).toBeInstanceOf(AgentickClient);
   });
 
   it("should strip trailing slash from baseUrl", async () => {

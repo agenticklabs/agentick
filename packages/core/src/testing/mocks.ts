@@ -6,7 +6,7 @@
  *
  * @example
  * ```tsx
- * import { createMockCom, createMockTickState, createMockTickResult } from '@tentickle/core/testing';
+ * import { createMockCom, createMockTickState, createMockTickResult } from '@agentick/core/testing';
  *
  * const ctx = createMockCom();
  * const tickState = createMockTickState({ tick: 2 });
@@ -17,7 +17,7 @@
 import type { TickState } from "../component/component";
 import type { TickResult } from "../hooks/types";
 import type { COMStopRequest, COMContinueRequest } from "../com/object-model";
-import type { ContentBlock, ToolCall, ToolResult } from "@tentickle/shared";
+import type { ContentBlock, ToolCall, ToolResult } from "@agentick/shared";
 import type { COMTimelineEntry, COMInput, TokenEstimator } from "../com/types";
 
 // ============================================================================
@@ -224,7 +224,7 @@ export function createMockTickResult(options: MockTickResultOptions = {}): MockT
  *
  * @example
  * ```tsx
- * import { makeTimelineEntry } from '@tentickle/core/testing';
+ * import { makeTimelineEntry } from '@agentick/core/testing';
  *
  * const entry = makeTimelineEntry("user", "Hello!", 10);
  * const entries = [
@@ -255,7 +255,7 @@ export function makeTimelineEntry(
  *
  * @example
  * ```tsx
- * import { makeTimelineEntry, makeCOMInput } from '@tentickle/core/testing';
+ * import { makeTimelineEntry, makeCOMInput } from '@agentick/core/testing';
  *
  * const previous = makeCOMInput([
  *   makeTimelineEntry("user", "Hello", 10),

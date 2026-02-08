@@ -1,7 +1,7 @@
 /**
  * Content types, blocks, and message utilities.
  *
- * @module tentickle/content
+ * @module agentick/content
  */
 
 // Re-export content types, but exclude ones we extend locally
@@ -12,13 +12,13 @@ export {
   normalizeContentArray,
   isMessage,
   isContentBlock,
-} from "@tentickle/shared";
-export * from "@tentickle/shared/blocks";
-export * from "@tentickle/shared/block-types";
-export * from "@tentickle/shared/input";
-export * from "@tentickle/shared/messages";
+} from "@agentick/shared";
+export * from "@agentick/shared/blocks";
+export * from "@agentick/shared/block-types";
+export * from "@agentick/shared/input";
+export * from "@agentick/shared/messages";
 
 // Re-export all streaming types and utilities
 // ModelStreamEvent types are model output streaming events
 // OrchestrationStreamEvent types are execution/tick/tool events
-export * from "@tentickle/shared/streaming";
+export * from "@agentick/shared/streaming";

@@ -1,13 +1,13 @@
-# @tentickle/kernel
+# @agentick/kernel
 
-Low-level execution primitives for Tentickle. Provides procedures, async context management, schema validation, logging, telemetry, and event streaming.
+Low-level execution primitives for Agentick. Provides procedures, async context management, schema validation, logging, telemetry, and event streaming.
 
-> **Note:** Most applications should use `@tentickle/core` instead. This package is the foundation that core builds upon.
+> **Note:** Most applications should use `@agentick/core` instead. This package is the foundation that core builds upon.
 
 ## Installation
 
 ```bash
-pnpm add @tentickle/kernel
+pnpm add @agentick/kernel
 ```
 
 ## Core Primitives
@@ -17,7 +17,7 @@ pnpm add @tentickle/kernel
 Procedures wrap async functions with middleware, validation, and execution control:
 
 ```typescript
-import { createProcedure } from "@tentickle/kernel";
+import { createProcedure } from "@agentick/kernel";
 import { z } from "zod";
 
 const fetchUser = createProcedure(
@@ -66,7 +66,7 @@ const user = await handle.result;
 #### Composition
 
 ```typescript
-import { pipe, compose } from "@tentickle/kernel";
+import { pipe, compose } from "@agentick/kernel";
 
 // Chain procedures left-to-right
 const pipeline = pipe(validate, transform, save);
@@ -80,7 +80,7 @@ const composed = compose(save, transform, validate);
 Request-scoped state that flows through async operations automatically:
 
 ```typescript
-import { Context } from "@tentickle/kernel";
+import { Context } from "@agentick/kernel";
 
 // Create and run within context
 Context.run({ user: { id: "123" }, metadata: { traceId: "abc" } }, async () => {
@@ -114,7 +114,7 @@ Context.emit("custom:event", { data: "value" });
 Unified handling for Zod 3, Zod 4, and Standard Schema:
 
 ```typescript
-import { detectSchemaType, toJSONSchema, validateSchema, parseSchema } from "@tentickle/kernel";
+import { detectSchemaType, toJSONSchema, validateSchema, parseSchema } from "@agentick/kernel";
 
 // Detect schema type
 const type = detectSchemaType(schema); // "zod3" | "zod4" | "standard-schema" | "json-schema"
@@ -139,7 +139,7 @@ const data = parseSchema(schema, input);
 Structured logging with automatic context injection:
 
 ```typescript
-import { Logger } from "@tentickle/kernel";
+import { Logger } from "@agentick/kernel";
 
 // Configure globally
 Logger.configure({
@@ -161,7 +161,7 @@ dbLog.debug("Query executed", { query, duration });
 Spans and metrics for observability:
 
 ```typescript
-import { Telemetry } from "@tentickle/kernel";
+import { Telemetry } from "@agentick/kernel";
 
 // Start a trace
 const trace = Telemetry.startTrace("handle-request");
@@ -190,7 +190,7 @@ latencyHistogram.record(42, { endpoint: "/api/users" });
 Bidirectional communication for real-time updates:
 
 ```typescript
-import { Channel } from "@tentickle/kernel";
+import { Channel } from "@agentick/kernel";
 
 const channel = new Channel();
 
@@ -214,7 +214,7 @@ channel.broadcast("notification", { message: "System update" });
 Type-safe event streaming with replay:
 
 ```typescript
-import { EventBuffer } from "@tentickle/kernel";
+import { EventBuffer } from "@agentick/kernel";
 
 type MyEvent =
   | { type: "start"; id: string }
@@ -252,7 +252,7 @@ buffer.close();
 Gate procedure execution with access control checks:
 
 ```typescript
-import { createGuard, GuardError } from "@tentickle/kernel";
+import { createGuard, GuardError } from "@agentick/kernel";
 
 // Simple predicate — deny throws GuardError
 const adminOnly = createGuard(
@@ -286,7 +286,7 @@ Guards are middleware — they compose with `.use()` like any other middleware b
 #### GuardError
 
 ```typescript
-import { GuardError, isGuardError } from "@tentickle/kernel";
+import { GuardError, isGuardError } from "@agentick/kernel";
 
 // Factories
 GuardError.role(["admin"]);              // "Requires one of roles [admin]"
@@ -305,7 +305,7 @@ if (isGuardError(error)) {
 ### Middleware Pipelines
 
 ```typescript
-import { createPipeline } from "@tentickle/kernel";
+import { createPipeline } from "@agentick/kernel";
 
 const authPipeline = createPipeline([
   async (args, ctx, next) => {

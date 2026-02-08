@@ -1,7 +1,7 @@
 {
-  "name": "@tentickle/react",
+  "name": "@agentick/react",
   "version": "0.0.1",
-  "description": "React hooks and components for Tentickle applications",
+  "description": "React hooks and components for Agentick applications",
   "files": [
     "dist",
     "src"
@@ -24,8 +24,8 @@
     "test:watch": "vitest --config vitest.config.ts"
   },
   "dependencies": {
-    "@tentickle/client": "workspace:*",
-    "@tentickle/shared": "workspace:*"
+    "@agentick/client": "workspace:*",
+    "@agentick/shared": "workspace:*"
   },
   "devDependencies": {
     "@testing-library/react": "^16.0.0",

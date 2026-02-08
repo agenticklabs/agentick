@@ -1,24 +1,24 @@
-# @tentickle/server Architecture
+# @agentick/server Architecture
 
-Server-side utilities for Tentickle applications.
+Server-side utilities for Agentick applications.
 
 ## Wire Protocol
 
-> **All wire protocol types come from `@tentickle/shared`.**
+> **All wire protocol types come from `@agentick/shared`.**
 >
-> See [`@tentickle/shared/ARCHITECTURE.md`](../shared/ARCHITECTURE.md) for the protocol specification.
+> See [`@agentick/shared/ARCHITECTURE.md`](../shared/ARCHITECTURE.md) for the protocol specification.
 
 ```typescript
 // Protocol types - ALWAYS from shared, never duplicated
-import type { StreamEvent, SendInput, Message } from "@tentickle/shared";
+import type { StreamEvent, SendInput, Message } from "@agentick/shared";
 ```
 
 ## Design Philosophy
 
 **This package provides SSE utilities and type re-exports.**
 
-The actual session management is handled by `@tentickle/core` (`App`, `Session`).
-Framework integration is handled by `@tentickle/express` (or other adapters).
+The actual session management is handled by `@agentick/core` (`App`, `Session`).
+Framework integration is handled by `@agentick/express` (or other adapters).
 
 This package is kept minimal - just the utilities that multiple adapters might need.
 
@@ -26,15 +26,15 @@ This package is kept minimal - just the utilities that multiple adapters might n
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                    @tentickle/express                        │
-│                    @tentickle/nestjs                         │
-│                    @tentickle/socket.io                      │
+│                    @agentick/express                        │
+│                    @agentick/nestjs                         │
+│                    @agentick/socket.io                      │
 │                                                              │
-│   createTentickleHandler(app) / modules                      │
+│   createAgentickHandler(app) / modules                      │
 └────────────────────────────┬─────────────────────────────────┘
                              │
 ┌────────────────────────────▼─────────────────────────────────┐
-│                     @tentickle/server                         │
+│                     @agentick/server                         │
 │                                                              │
 │   ┌──────────────────┐       ┌──────────────────┐            │
 │   │  SSE Utilities   │       │  Type Re-exports │            │
@@ -46,7 +46,7 @@ This package is kept minimal - just the utilities that multiple adapters might n
 └────────────────────────────┬─────────────────────────────────┘
                              │
 ┌────────────────────────────▼─────────────────────────────────┐
-│                     @tentickle/core                           │
+│                     @agentick/core                           │
 │                                                              │
 │   App, Session, SessionRegistry                              │
 └──────────────────────────────────────────────────────────────┘
@@ -59,7 +59,7 @@ This package is kept minimal - just the utilities that multiple adapters might n
 Helpers for Server-Sent Events:
 
 ```typescript
-import { createSSEWriter, setSSEHeaders } from "@tentickle/server";
+import { createSSEWriter, setSSEHeaders } from "@agentick/server";
 
 // Set SSE headers on response
 setSSEHeaders(res);
@@ -89,7 +89,7 @@ interface SSEWriter {
 
 ### Type Re-exports
 
-Re-exports from `@tentickle/shared` for convenience:
+Re-exports from `@agentick/shared` for convenience:
 
 ```typescript
 export type {
@@ -98,7 +98,7 @@ export type {
   ToolConfirmationResponse,
   SessionState,
   CreateSessionResponse,
-} from "@tentickle/shared";
+} from "@agentick/shared";
 ```
 
 ## File Structure
@@ -115,7 +115,7 @@ packages/server/src/
 ### With Express
 
 ```typescript
-import { setSSEHeaders, createSSEWriter } from "@tentickle/server";
+import { setSSEHeaders, createSSEWriter } from "@agentick/server";
 
 app.get("/events", (req, res) => {
   setSSEHeaders(res);
@@ -139,7 +139,7 @@ app.get("/events", (req, res) => {
 ### Streaming Events
 
 ```typescript
-import { setSSEHeaders, createSSEWriter } from "@tentickle/server";
+import { setSSEHeaders, createSSEWriter } from "@agentick/server";
 
 app.post("/send", async (req, res) => {
   setSSEHeaders(res);
@@ -160,7 +160,7 @@ app.post("/send", async (req, res) => {
 
 ## Why This Package Exists
 
-Framework adapters (`@tentickle/express`, `@tentickle/nestjs`, etc.) need shared utilities:
+Framework adapters (`@agentick/express`, `@agentick/nestjs`, etc.) need shared utilities:
 
 1. **SSE helpers** - Consistent SSE formatting across adapters
 2. **Type re-exports** - Convenient imports for adapter authors
@@ -170,7 +170,7 @@ This package keeps the shared utilities in one place without duplicating code.
 
 ## What This Package Doesn't Do
 
-- **Session management** - Use `@tentickle/core` (`App`, `Session`)
-- **Routing** - Use framework adapters (`@tentickle/express`, etc.)
+- **Session management** - Use `@agentick/core` (`App`, `Session`)
+- **Routing** - Use framework adapters (`@agentick/express`, etc.)
 - **Authentication** - Handle in your framework middleware
 - **Connection tracking** - Handled by framework adapters

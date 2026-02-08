@@ -9,7 +9,7 @@
  */
 
 import { useState, useEffect, useCallback } from "react";
-import { useSession } from "@tentickle/react";
+import { useSession } from "@agentick/react";
 
 export interface TodoItem {
   id: number;

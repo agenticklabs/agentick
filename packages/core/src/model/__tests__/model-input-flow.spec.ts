@@ -8,7 +8,7 @@
 import { describe, it, expect } from "vitest";
 import { fromEngineState, toEngineState } from "../utils/language-model";
 import type { COMInput, COMTimelineEntry } from "../../com/types";
-import type { Message, TextBlock, ToolResultBlock, ToolUseBlock } from "@tentickle/shared";
+import type { Message, TextBlock, ToolResultBlock, ToolUseBlock } from "@agentick/shared";
 import type { ModelOutput } from "../model";
 
 // Helper to create a COMTimelineEntry

@@ -20,7 +20,7 @@ import {
 } from "./execution-tracker";
 import { randomUUID } from "node:crypto";
 import type { ProcedureNode } from "./procedure-graph";
-import { AbortError, ValidationError } from "@tentickle/shared";
+import { AbortError, ValidationError } from "@agentick/shared";
 import { EventBuffer, type TypedEvent } from "./event-buffer";
 import { parseSchema } from "./schema";
 
@@ -110,7 +110,7 @@ export function createProcedurePromise<T>(promise: Promise<T>): ProcedurePromise
  * Symbol used to brand Procedure objects for deterministic type checking.
  * Using Symbol.for() ensures the same symbol across module instances.
  */
-export const PROCEDURE_SYMBOL = Symbol.for("@tentickle/kernel.procedure");
+export const PROCEDURE_SYMBOL = Symbol.for("@agentick/kernel.procedure");
 
 /**
  * Check if a value is a Procedure using Symbol branding.
@@ -441,7 +441,7 @@ export interface ProcedureOptions {
    * @example Pass-through procedure
    * ```typescript
    * const run = createProcedure(
-   *   { name: 'tentickle:run', handleFactory: false },
+   *   { name: 'agentick:run', handleFactory: false },
    *   (element, input) => app.run(input)  // Returns SessionExecutionHandle directly
    * );
    * ```
@@ -496,7 +496,7 @@ export interface ProcedureOptions {
 /**
  * A callable function wrapper with middleware, validation, and execution control.
  *
- * Procedures are the core execution primitive in Tentickle. They wrap any async function
+ * Procedures are the core execution primitive in Agentick. They wrap any async function
  * and provide:
  * - **Middleware pipeline** - Transform args, intercept results, handle errors
  * - **Schema validation** - Zod-based input validation
@@ -977,7 +977,7 @@ class ProcedureImpl<
       );
     }
 
-    // Get context middleware at execution time (from Tentickle instance)
+    // Get context middleware at execution time (from Agentick instance)
     // This enables runtime middleware configuration that can differ per-app or per-request
     const procedureName = this.procedureName || "anonymous";
     const contextMiddleware: InternalMiddleware<TArgs, ExtractReturn<THandler>>[] = [];
@@ -1571,7 +1571,7 @@ export function generatorProcedure<TThis, TArgs extends any[], THandler extends 
  * @example Pass-through procedure (returns handler result directly)
  * ```typescript
  * const run = createProcedure(
- *   { name: 'tentickle:run', handleFactory: false },
+ *   { name: 'agentick:run', handleFactory: false },
  *   (element, input) => app.run(input)  // Returns SessionExecutionHandle
  * );
  * const handle = run(<jsx />, opts);  // SessionExecutionHandle directly

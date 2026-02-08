@@ -9,15 +9,15 @@
 
 import { EventEmitter } from "events";
 import type { IncomingMessage as NodeRequest, ServerResponse as NodeResponse } from "http";
-import type { Message } from "@tentickle/shared";
-import { GuardError, isGuardError } from "@tentickle/shared";
+import type { Message } from "@agentick/shared";
+import { GuardError, isGuardError } from "@agentick/shared";
 import {
   devToolsEmitter,
   type DTClientConnectedEvent,
   type DTClientDisconnectedEvent,
   type DTGatewayRequestEvent,
   type DTGatewayResponseEvent,
-} from "@tentickle/shared";
+} from "@agentick/shared";
 import {
   Context,
   createProcedure,
@@ -29,11 +29,11 @@ import {
   type UserContext,
   type ChannelServiceInterface,
   type ChannelEvent,
-} from "@tentickle/kernel";
-import type { Session } from "@tentickle/core";
+} from "@agentick/kernel";
+import type { Session } from "@agentick/core";
 
 const log = Logger.for("Gateway");
-import { extractToken, validateAuth, setSSEHeaders, type AuthResult } from "@tentickle/server";
+import { extractToken, validateAuth, setSSEHeaders, type AuthResult } from "@agentick/server";
 import { AppRegistry } from "./app-registry.js";
 import { SessionManager } from "./session-manager.js";
 import { WSTransport } from "./ws-transport.js";
@@ -1234,7 +1234,7 @@ export class Gateway extends EventEmitter {
   }
 
   /**
-   * Execute a custom method within Tentickle ALS context.
+   * Execute a custom method within Agentick ALS context.
    */
   private async executeCustomMethod(
     transport: Transport,

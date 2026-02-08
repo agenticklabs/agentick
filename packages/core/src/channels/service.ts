@@ -1,4 +1,4 @@
-import type { Channel } from "@tentickle/kernel";
+import type { Channel } from "@agentick/kernel";
 import {
   ChannelSession,
   type ChannelEvent,
@@ -6,9 +6,9 @@ import {
   type ChannelTarget,
   Context,
   type KernelContext,
-} from "@tentickle/kernel";
+} from "@agentick/kernel";
 import type { EngineContext } from "../types";
-import { NotFoundError, ValidationError } from "@tentickle/shared";
+import { NotFoundError, ValidationError } from "@agentick/shared";
 
 // Re-export channel types from Kernel so Engine users don't need to import from Kernel
 export {
@@ -17,7 +17,7 @@ export {
   type ChannelEvent,
   type ChannelServiceInterface,
   type ChannelTarget,
-} from "@tentickle/kernel";
+} from "@agentick/kernel";
 
 /**
  * Connection metadata for routing decisions.

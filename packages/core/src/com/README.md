@@ -21,7 +21,7 @@ The COM holds:
 Use the `useCom` hook in components:
 
 ```typescript
-import { useCom } from '@tentickle/core';
+import { useCom } from '@agentick/core';
 
 function MyComponent() {
   const ctx = useCom();

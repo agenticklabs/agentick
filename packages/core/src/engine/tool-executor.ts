@@ -6,8 +6,8 @@ import {
   ToolExecutionType,
 } from "../tool/tool";
 import type { COM } from "../com/object-model";
-import { type ContentBlock } from "@tentickle/shared";
-import { type Middleware, type MiddlewarePipeline } from "@tentickle/kernel";
+import { type ContentBlock } from "@agentick/shared";
+import { type Middleware, type MiddlewarePipeline } from "@agentick/kernel";
 import type { ToolHookRegistry } from "../tool/tool-hooks";
 import { type ToolHookMiddleware, type ToolHookName } from "../tool/tool-hooks";
 import { applyRegistryMiddleware } from "../procedure";

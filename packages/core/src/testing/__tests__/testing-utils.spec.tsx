@@ -1,7 +1,7 @@
 /**
  * Testing Utilities Tests
  *
- * Tests for the @tentickle/core/testing module.
+ * Tests for the @agentick/core/testing module.
  */
 
 import { describe, it, expect, afterEach, vi } from "vitest";
@@ -9,7 +9,7 @@ import React from "react";
 import { renderAgent, compileAgent, createTestAdapter, act, cleanup } from "../index";
 import { System, Timeline, Section, Model } from "../../jsx/components";
 import { useSignal, useEffect } from "../../index";
-import type { Message } from "@tentickle/shared";
+import type { Message } from "@agentick/shared";
 
 // Cleanup after each test
 afterEach(() => {

@@ -252,8 +252,8 @@ this.run = createEngineProcedure()
 ### Option 1: EngineConfig (Automatic)
 
 ```typescript
-import { Engine } from 'tentickle';
-import { openai } from '@tentickle/openai';
+import { Engine } from 'agentick';
+import { openai } from '@agentick/openai';
 
 // Create engine with MCP servers configured
 const engine = new Engine({
@@ -285,8 +285,8 @@ const result = await engine.execute(
 ### Option 2: Manual Registration (Programmatic)
 
 ```typescript
-import { Engine, MCPClient, MCPService, MCPConfig } from 'tentickle';
-import { EngineComponent } from 'tentickle';
+import { Engine, MCPClient, MCPService, MCPConfig } from 'agentick';
+import { EngineComponent } from 'agentick';
 
 // Create engine WITHOUT mcpServers config
 const engine = new Engine({

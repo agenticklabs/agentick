@@ -1,7 +1,7 @@
 import type { COMInput, COMOutput } from "../com/types";
 import type { COM } from "../com/object-model";
 import type { JSX } from "../jsx/jsx-runtime";
-import type { StopReason, UsageStats } from "@tentickle/shared";
+import type { StopReason, UsageStats } from "@agentick/shared";
 import type { ExecutableTool } from "../tool/tool";
 import {
   type ComponentHookMiddleware,

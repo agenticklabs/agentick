@@ -12,7 +12,7 @@ import { Timeline } from "../../jsx/components/timeline";
 import { createTestAdapter } from "../../testing";
 import { useContinuation, useOnTickEnd, useOnTickStart } from "../../hooks";
 import type { TickResult } from "../types";
-import { type ToolCall, StopReason } from "@tentickle/shared";
+import { type ToolCall, StopReason } from "@agentick/shared";
 import { z } from "zod";
 
 // ============================================================================

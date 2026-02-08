@@ -1,8 +1,8 @@
 /**
- * @tentickle/agent — Opinionated agent composition
+ * @agentick/agent — Opinionated agent composition
  *
  * High-level Agent component and createAgent factory.
- * Built on @tentickle/core primitives.
+ * Built on @agentick/core primitives.
  */
 
 export {

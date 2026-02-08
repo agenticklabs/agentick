@@ -1,7 +1,7 @@
 {
-  "name": "@tentickle/client-multiplexer",
+  "name": "@agentick/client-multiplexer",
   "version": "0.0.1",
-  "description": "Multi-tab connection multiplexer for Tentickle client",
+  "description": "Multi-tab connection multiplexer for Agentick client",
   "files": [
     "dist"
   ],
@@ -21,12 +21,12 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@tentickle/client": "workspace:*"
+    "@agentick/client": "workspace:*"
   },
   "devDependencies": {
     "typescript": "^5.8.3"
   },
   "peerDependencies": {
-    "@tentickle/client": "workspace:*"
+    "@agentick/client": "workspace:*"
   }
 }

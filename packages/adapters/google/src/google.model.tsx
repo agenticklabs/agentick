@@ -2,8 +2,8 @@
 // JSX Component
 // ============================================================================
 
-import { type ModelComponentProps, Model } from "@tentickle/core/jsx";
-import { createElement } from "@tentickle/core/jsx-runtime";
+import { type ModelComponentProps, Model } from "@agentick/core/jsx";
+import { createElement } from "@agentick/core/jsx-runtime";
 import { createGoogleModel } from "./google";
 import { type GoogleAdapterConfig } from "./types";
 

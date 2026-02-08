@@ -1,4 +1,4 @@
-# tentickle
+# agentick
 
 **React for AI agents.**
 
@@ -11,8 +11,8 @@ You're not configuring a chatbot. You're building the application through which 
 
 ```tsx
 import { createApp, System, Timeline, Message, Section,
-         createTool, useContinuation } from "@tentickle/core";
-import { openai } from "@tentickle/openai";
+         createTool, useContinuation } from "@agentick/core";
+import { openai } from "@agentick/openai";
 import { z } from "zod";
 
 // Tools are components — they render state into model context
@@ -78,11 +78,11 @@ const result = await app.run({
 console.log(result.response);
 ```
 
-## Why Tentickle
+## Why Agentick
 
 Every other AI framework gives you a pipeline. A chain. A graph. You slot your prompt into a template, bolt on some tools, and hope the model figures it out.
 
-Tentickle gives you a **programming language for AI applications.** The context window is your canvas. Components compose into it. Tools render their state back into it. Hooks run arbitrary code between ticks — verify output, summarize history, gate continuation. The model's entire world is JSX that you control, down to how individual content blocks render.
+Agentick gives you a **programming language for AI applications.** The context window is your canvas. Components compose into it. Tools render their state back into it. Hooks run arbitrary code between ticks — verify output, summarize history, gate continuation. The model's entire world is JSX that you control, down to how individual content blocks render.
 
 There are no prompt templates because JSX _is_ the template language. There are no special abstractions between you and what the model sees — you build it, the framework compiles it, the model reads it. When the model calls a tool, your component re-renders. When you want older messages compressed, you write a component. When you need to verify output before continuing, you write a hook.
 
@@ -345,8 +345,8 @@ Context is maintained with AsyncLocalStorage, so tools and hooks can access sess
 ### One-Shot Run
 
 ```tsx
-import { run, System, Timeline } from "@tentickle/core";
-import { openai } from "@tentickle/openai";
+import { run, System, Timeline } from "@agentick/core";
+import { openai } from "@agentick/openai";
 
 const result = await run(
   <><System>You are helpful.</System><Timeline /></>,
@@ -424,23 +424,23 @@ function AdaptiveAgent({ task }: { task: string }) {
 
 ## Packages
 
-| Package                | Description                                                  |
-| ---------------------- | ------------------------------------------------------------ |
-| `@tentickle/core`      | Reconciler, components, hooks, tools, sessions               |
-| `@tentickle/kernel`    | Execution kernel — procedures, context, middleware, channels |
-| `@tentickle/shared`    | Platform-independent types and utilities                     |
-| `@tentickle/openai`    | OpenAI adapter (GPT-4o, o1, etc.)                            |
-| `@tentickle/google`    | Google AI adapter (Gemini)                                   |
-| `@tentickle/ai-sdk`    | Vercel AI SDK adapter (any provider)                         |
-| `@tentickle/gateway`   | Multi-app server with auth, routing, and channels            |
-| `@tentickle/express`   | Express.js integration                                       |
-| `@tentickle/nestjs`    | NestJS integration                                           |
-| `@tentickle/client`    | TypeScript client for gateway connections                    |
-| `@tentickle/react`     | React hooks for building UIs over sessions                   |
-| `@tentickle/devtools`  | Fiber tree inspector, tick scrubber, token tracker           |
-| `@tentickle/cli`       | CLI for running agents                                       |
-| `@tentickle/server`    | Server utilities                                             |
-| `@tentickle/socket.io` | Socket.IO transport                                          |
+| Package               | Description                                                  |
+| --------------------- | ------------------------------------------------------------ |
+| `@agentick/core`      | Reconciler, components, hooks, tools, sessions               |
+| `@agentick/kernel`    | Execution kernel — procedures, context, middleware, channels |
+| `@agentick/shared`    | Platform-independent types and utilities                     |
+| `@agentick/openai`    | OpenAI adapter (GPT-4o, o1, etc.)                            |
+| `@agentick/google`    | Google AI adapter (Gemini)                                   |
+| `@agentick/ai-sdk`    | Vercel AI SDK adapter (any provider)                         |
+| `@agentick/gateway`   | Multi-app server with auth, routing, and channels            |
+| `@agentick/express`   | Express.js integration                                       |
+| `@agentick/nestjs`    | NestJS integration                                           |
+| `@agentick/client`    | TypeScript client for gateway connections                    |
+| `@agentick/react`     | React hooks for building UIs over sessions                   |
+| `@agentick/devtools`  | Fiber tree inspector, tick scrubber, token tracker           |
+| `@agentick/cli`       | CLI for running agents                                       |
+| `@agentick/server`    | Server utilities                                             |
+| `@agentick/socket.io` | Socket.IO transport                                          |
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -450,18 +450,18 @@ function AdaptiveAgent({ task }: { task: string }) {
                            │
 ┌──────────────────────────┴──────────────────────────────────────┐
 │                       Framework Layer                            │
-│  @tentickle/core    @tentickle/gateway    @tentickle/client     │
-│  @tentickle/express @tentickle/devtools                         │
+│  @agentick/core    @agentick/gateway    @agentick/client     │
+│  @agentick/express @agentick/devtools                         │
 └──────────────────────────┬──────────────────────────────────────┘
                            │
 ┌──────────────────────────┴──────────────────────────────────────┐
 │                       Adapter Layer                              │
-│  @tentickle/openai  @tentickle/google  @tentickle/ai-sdk        │
+│  @agentick/openai  @agentick/google  @agentick/ai-sdk        │
 └──────────────────────────┬──────────────────────────────────────┘
                            │
 ┌──────────────────────────┴──────────────────────────────────────┐
 │                     Foundation Layer                              │
-│           @tentickle/kernel         @tentickle/shared            │
+│           @agentick/kernel         @agentick/shared            │
 │           (Node.js only)            (Platform-independent)       │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -471,9 +471,9 @@ function AdaptiveAgent({ task }: { task: string }) {
 Three built-in, same interface. Or build your own — implement `prepareInput`, `mapChunk`, `execute`, and `executeStream`. See [`packages/adapters/README.md`](packages/adapters/README.md).
 
 ```tsx
-import { openai } from "@tentickle/openai";
-import { google } from "@tentickle/google";
-import { aiSdk } from "@tentickle/ai-sdk";
+import { openai } from "@agentick/openai";
+import { google } from "@agentick/google";
+import { aiSdk } from "@agentick/ai-sdk";
 
 const gpt = openai({ model: "gpt-4o" });
 const gemini = google({ model: "gemini-2.5-pro" });
@@ -493,7 +493,7 @@ Fiber tree inspector, tick-by-tick scrubber, token usage tracking, real-time exe
 Deploy multiple apps behind a single server with auth, routing, and channel adapters:
 
 ```tsx
-import { createGateway } from "@tentickle/gateway";
+import { createGateway } from "@agentick/gateway";
 
 const gateway = createGateway({
   apps: { support: supportApp, sales: salesApp },
@@ -505,7 +505,7 @@ const gateway = createGateway({
 ## Quick Start
 
 ```bash
-npm install @tentickle/core @tentickle/openai zod
+npm install @agentick/core @agentick/openai zod
 ```
 
 **TypeScript config** — add to `tsconfig.json`:

@@ -1,4 +1,4 @@
-# Tentickle Tools
+# Agentick Tools
 
 Tools are the bridge between LLM reasoning and real-world actions. They define what actions the model can take.
 
@@ -7,7 +7,7 @@ Tools are the bridge between LLM reasoning and real-world actions. They define w
 Use `createTool` to create tools with type-safe schemas:
 
 ```typescript
-import { createTool } from '@tentickle/core';
+import { createTool } from '@agentick/core';
 import { z } from 'zod';
 
 const SearchTool = createTool({
@@ -73,7 +73,7 @@ engine.execute({ tools: [SearchTool] });
 | `MCP`      | Routed to MCP server                  |
 
 ```typescript
-import { ToolExecutionType, ToolIntent } from '@tentickle/core';
+import { ToolExecutionType, ToolIntent } from '@agentick/core';
 
 const ChartTool = createTool({
   name: 'render_chart',

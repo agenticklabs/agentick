@@ -2,7 +2,7 @@
  * Streaming Types
  *
  * Platform-independent types for streaming model responses and engine events.
- * Used by both backend (@tentickle/core) and frontend (@tentickle/client).
+ * Used by both backend (@agentick/core) and frontend (@agentick/client).
  *
  * ## Event Architecture
  *
@@ -504,14 +504,14 @@ export type CompiledEvent = {
 } & StreamEventBase;
 
 /**
- * DevTools event: Model request (Tentickle format input)
+ * DevTools event: Model request (Agentick format input)
  */
 export type ModelRequestEvent = {
   type: "model_request";
   executionId?: string;
   /** Model identifier */
   modelId?: string;
-  /** The input sent to the model (Tentickle format) */
+  /** The input sent to the model (Agentick format) */
   input: unknown;
 } & StreamEventBase;
 
@@ -537,7 +537,7 @@ export type ModelResponseEvent = {
   executionId?: string;
   /** Provider output (raw SDK response, may be reconstructed for streaming) */
   providerOutput?: unknown;
-  /** ModelOutput (normalized Tentickle format) */
+  /** ModelOutput (normalized Agentick format) */
   modelOutput?: {
     model?: string;
     message?: unknown;

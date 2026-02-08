@@ -1,27 +1,27 @@
 /**
- * Angular integration types for Tentickle.
+ * Angular integration types for Agentick.
  *
- * @module @tentickle/angular/types
+ * @module @agentick/angular/types
  */
 
-import type { ClientTransport } from "@tentickle/client";
+import type { ClientTransport } from "@agentick/client";
 
 // ============================================================================
 // Configuration Types
 // ============================================================================
 
 /**
- * Transport configuration for TentickleService.
+ * Transport configuration for AgentickService.
  * Can be a built-in transport type or a custom ClientTransport instance.
  */
 export type TransportConfig = "sse" | "websocket" | "auto" | ClientTransport;
 
 /**
- * Configuration for TentickleService.
+ * Configuration for AgentickService.
  */
-export interface TentickleConfig {
+export interface AgentickConfig {
   /**
-   * Base URL of the Tentickle server.
+   * Base URL of the Agentick server.
    */
   baseUrl: string;
 
@@ -34,7 +34,7 @@ export interface TentickleConfig {
    *
    * @example
    * ```typescript
-   * import { createSharedTransport } from '@tentickle/client-multiplexer';
+   * import { createSharedTransport } from '@agentick/client-multiplexer';
    *
    * providers: [
    *   {
@@ -89,11 +89,11 @@ export interface TentickleConfig {
 // ============================================================================
 
 export type {
-  TentickleClient,
+  AgentickClient,
   ConnectionState,
   StreamEvent,
   SessionStreamEvent,
   ClientExecutionHandle,
   StreamingTextState,
   ClientTransport,
-} from "@tentickle/client";
+} from "@agentick/client";

@@ -2,9 +2,9 @@
  * Wire Protocol Types - Shared between client and server
  *
  * These types define the contract for client-server communication.
- * Both @tentickle/client and @tentickle/server MUST use these types.
+ * Both @agentick/client and @agentick/server MUST use these types.
  *
- * @module @tentickle/shared/protocol
+ * @module @agentick/shared/protocol
  */
 
 // ============================================================================

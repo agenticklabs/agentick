@@ -59,7 +59,7 @@ export class SqliteSessionStore implements SessionStore {
 
   constructor(config: Omit<SqliteStoreConfig, "type"> = {}) {
     const path = config.path ?? ":memory:";
-    this.tableName = config.table ?? "tentickle_sessions";
+    this.tableName = config.table ?? "agentick_sessions";
 
     // Start async initialization
     this.initPromise = this.initAsync(path);

@@ -6,7 +6,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { z } from "zod";
-import { Context, type KernelContext, type UserContext } from "@tentickle/kernel";
+import { Context, type KernelContext, type UserContext } from "@agentick/kernel";
 import {
   method,
   isMethodDefinition,

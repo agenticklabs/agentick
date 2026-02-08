@@ -1,9 +1,9 @@
 {
-  "name": "@tentickle/gateway",
+  "name": "@agentick/gateway",
   "version": "0.0.1",
   "description": "Standalone daemon for multi-client, multi-agent access",
   "bin": {
-    "tentickle-gateway": "./dist/bin.js"
+    "agentick-gateway": "./dist/bin.js"
   },
   "files": [
     "dist",
@@ -32,10 +32,10 @@
     "start": "tsx src/bin.ts"
   },
   "dependencies": {
-    "@tentickle/core": "workspace:*",
-    "@tentickle/kernel": "workspace:*",
-    "@tentickle/server": "workspace:*",
-    "@tentickle/shared": "workspace:*",
+    "@agentick/core": "workspace:*",
+    "@agentick/kernel": "workspace:*",
+    "@agentick/server": "workspace:*",
+    "@agentick/shared": "workspace:*",
     "ws": "^8.16.0"
   },
   "devDependencies": {
@@ -46,6 +46,6 @@
     "vitest": "^3.0.0"
   },
   "peerDependencies": {
-    "@tentickle/core": "workspace:*"
+    "@agentick/core": "workspace:*"
   }
 }

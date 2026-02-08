@@ -1,6 +1,6 @@
 packages:
   - packages/*
-  # packages/core/v2 removed - v2 code is now in main @tentickle/core
+  # packages/core/v2 removed - v2 code is now in main @agentick/core
   - packages/adapters/*
   - example/*
 

@@ -1,18 +1,18 @@
-# Tentickle Reconciler
+# Agentick Reconciler
 
 React-based reconciler for building LLM prompt trees. This is the foundation that enables JSX syntax for composing model inputs.
 
 ## Overview
 
-Tentickle uses `react-reconciler` to build a virtual tree from JSX components. This tree is then compiled into model-ready format (messages, tools, system prompt).
+Agentick uses `react-reconciler` to build a virtual tree from JSX components. This tree is then compiled into model-ready format (messages, tools, system prompt).
 
 ```
-JSX Components → Reconciler → TentickleNode Tree → Compiler → ModelInput
+JSX Components → Reconciler → AgentickNode Tree → Compiler → ModelInput
 ```
 
 ## How It Works
 
-The reconciler implements React's host config interface to build `TentickleNode` trees instead of DOM nodes:
+The reconciler implements React's host config interface to build `AgentickNode` trees instead of DOM nodes:
 
 ```typescript
 // JSX like this:
@@ -22,7 +22,7 @@ The reconciler implements React's host config interface to build `TentickleNode`
   <MyTool />
 </>
 
-// Becomes a TentickleNode tree:
+// Becomes a AgentickNode tree:
 {
   type: Fragment,
   children: [
@@ -47,29 +47,29 @@ The reconciler implements React's host config interface to build `TentickleNode`
 
 ## Types
 
-### TentickleNode
+### AgentickNode
 
 A node in the rendered tree:
 
 ```typescript
-interface TentickleNode {
-  type: TentickleNodeType;      // Component type
+interface AgentickNode {
+  type: AgentickNodeType;      // Component type
   props: Record<string, unknown>;
-  children: TentickleNode[];
-  parent: TentickleNode | null;
+  children: AgentickNode[];
+  parent: AgentickNode | null;
   renderer: Renderer | null;    // Inherited renderer context
   key: string | number | null;
   index: number;
 }
 ```
 
-### TentickleContainer
+### AgentickContainer
 
 The root container:
 
 ```typescript
-interface TentickleContainer {
-  children: TentickleNode[];
+interface AgentickContainer {
+  children: AgentickNode[];
   renderer: Renderer;           // Default renderer (markdown/xml)
 }
 ```
@@ -79,7 +79,7 @@ interface TentickleContainer {
 Connect to standalone React DevTools for debugging:
 
 ```typescript
-import { enableReactDevTools } from '@tentickle/core/reconciler';
+import { enableReactDevTools } from '@agentick/core/reconciler';
 
 // Before creating sessions
 enableReactDevTools(); // Connects to npx react-devtools on port 8097

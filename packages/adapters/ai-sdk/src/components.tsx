@@ -1,18 +1,18 @@
 /**
  * AI SDK-specific JSX components
  *
- * These wrap core Tentickle components with ai-sdk-native interfaces.
+ * These wrap core Agentick components with ai-sdk-native interfaces.
  * Users can use the same mental model as ai-sdk's message format.
  */
 
-import { createElement, type JSX } from "@tentickle/core/jsx-runtime";
+import { createElement, type JSX } from "@agentick/core/jsx-runtime";
 import {
   Message as CoreMessage,
   Timeline as CoreTimeline,
   System as CoreSystem,
   type MessageProps as CoreMessageProps,
-} from "@tentickle/core/jsx";
-import type { ContentBlock, Message as MessageType } from "@tentickle/shared";
+} from "@agentick/core/jsx";
+import type { ContentBlock, Message as MessageType } from "@agentick/shared";
 
 // ============================================================================
 // Types - AI SDK Message Format
@@ -77,7 +77,7 @@ export interface ToolResultProps {
 // ============================================================================
 
 /**
- * Convert ai-sdk content to tentickle ContentBlock[].
+ * Convert ai-sdk content to agentick ContentBlock[].
  */
 function toContentBlocks(content: AiSdkContent): ContentBlock[] {
   if (typeof content === "string") {
@@ -159,7 +159,7 @@ function toContentBlocks(content: AiSdkContent): ContentBlock[] {
 }
 
 /**
- * Map ai-sdk role to tentickle role.
+ * Map ai-sdk role to agentick role.
  */
 function toAidkRole(role: MessageProps["role"]): MessageType["role"] {
   switch (role) {
@@ -184,7 +184,7 @@ function toAidkRole(role: MessageProps["role"]): MessageType["role"] {
  * AI SDK-style Message component.
  *
  * Provides a familiar interface for ai-sdk users while mapping
- * to tentickle's internal timeline entry format.
+ * to agentick's internal timeline entry format.
  *
  * @example Simple text message
  * ```tsx

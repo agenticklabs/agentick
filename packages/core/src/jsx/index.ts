@@ -1,12 +1,12 @@
 /**
- * # Tentickle JSX
+ * # Agentick JSX
  *
- * JSX runtime and components for building Tentickle agents declaratively.
+ * JSX runtime and components for building Agentick agents declaratively.
  * Use familiar React-like syntax to define agent behavior.
  *
  * ## Features
  *
- * - **JSX Runtime** - Custom JSX implementation for Tentickle
+ * - **JSX Runtime** - Custom JSX implementation for Agentick
  * - **Message Components** - User, Assistant, System, ToolResult
  * - **Semantic Components** - H1, H2, Paragraph, List, Table, etc.
  * - **Primitives** - Timeline, Section, Model, Markdown
@@ -15,7 +15,7 @@
  * ## Quick Start
  *
  * ```tsx
- * import { User, System, Assistant } from 'tentickle';
+ * import { User, System, Assistant } from 'agentick';
  *
  * const MyAgent = () => (
  *   <>
@@ -48,7 +48,7 @@
  * @see {@link User} - User message component
  * @see {@link System} - System message component
  *
- * @module tentickle/jsx
+ * @module agentick/jsx
  */
 
 // JSX Runtime

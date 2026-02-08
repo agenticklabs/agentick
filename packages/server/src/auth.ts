@@ -1,13 +1,13 @@
 /**
- * Authentication utilities for @tentickle/server
+ * Authentication utilities for @agentick/server
  *
  * Provides standalone auth functions that can be used by Gateway
  * and framework adapters.
  *
- * @module @tentickle/server/auth
+ * @module @agentick/server/auth
  */
 
-import type { UserContext } from "@tentickle/kernel";
+import type { UserContext } from "@agentick/kernel";
 
 /**
  * Result returned by auth validation.

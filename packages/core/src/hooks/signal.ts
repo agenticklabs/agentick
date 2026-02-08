@@ -70,7 +70,7 @@ interface TrackingContext {
  *
  * 1. **Defensive design** - If async code is ever introduced in batch/computed,
  *    it won't break.
- * 2. **Explicit isolation** - Each Tentickle execution has its own context,
+ * 2. **Explicit isolation** - Each Agentick execution has its own context,
  *    making the concurrency model clear.
  * 3. **Consistency** - Same pattern as RenderContext.scheduleWork.
  *
@@ -93,14 +93,14 @@ class SignalContext {
 
 /**
  * AsyncLocalStorage for signal execution context.
- * Each Tentickle execution (app.run, session.tick) runs within its own context.
+ * Each Agentick execution (app.run, session.tick) runs within its own context.
  */
 const signalContextStorage = new AsyncLocalStorage<SignalContext>();
 
 /**
- * Global fallback context for signals used outside of Tentickle execution.
+ * Global fallback context for signals used outside of Agentick execution.
  * This allows standalone signal usage (e.g., in tests, scripts) while
- * maintaining full concurrency safety within Tentickle.
+ * maintaining full concurrency safety within Agentick.
  */
 const globalSignalContext = new SignalContext();
 
@@ -136,9 +136,9 @@ export async function runWithSignalContextAsync<T>(fn: () => Promise<T>): Promis
 // Types
 // ============================================================================
 
-export const SIGNAL_SYMBOL = Symbol.for("tentickle.signal");
-export const COMPUTED_SYMBOL = Symbol.for("tentickle.computed");
-export const EFFECT_SYMBOL = Symbol.for("tentickle.effect");
+export const SIGNAL_SYMBOL = Symbol.for("agentick.signal");
+export const COMPUTED_SYMBOL = Symbol.for("agentick.computed");
+export const EFFECT_SYMBOL = Symbol.for("agentick.effect");
 
 type EqualityFn<T> = (a: T, b: T) => boolean;
 type CleanupFn = () => void;
@@ -704,7 +704,7 @@ export function useSignal<T>(initialValue: T): Signal<T> {
   const [version, setVersion] = useState(0);
 
   // Get COM for requestRecompile - this triggers the scheduler when idle
-  // Returns null if not in Tentickle context
+  // Returns null if not in Agentick context
   const ctx = useContext(COMContext);
 
   // Store setVersion in a ref so it's always current
@@ -860,7 +860,7 @@ export function isEffect(value: unknown): value is EffectRef {
 // COM State Signal
 // ============================================================================
 
-export const COM_SIGNAL_SYMBOL = Symbol.for("tentickle.comSignal");
+export const COM_SIGNAL_SYMBOL = Symbol.for("agentick.comSignal");
 
 /**
  * Creates a signal bound to COM state.
@@ -934,7 +934,7 @@ export function createCOMStateSignal<T>(
     // DEV WARNING: Setting comState during render
     if (process.env["NODE_ENV"] === "development" && isCompilerRendering()) {
       console.warn(
-        `[Tentickle] comState '${key}' is being set during render phase.\n` +
+        `[Agentick] comState '${key}' is being set during render phase.\n` +
           `This may cause sibling components to see stale data in the current iteration.\n` +
           `Consider updating state in lifecycle methods (onTickStart, onMount) instead.\n` +
           `An automatic recompile will be triggered to ensure consistency.`,
@@ -986,9 +986,9 @@ export function createCOMStateSignal<T>(
   return sig;
 }
 
-export const WATCH_SIGNAL_SYMBOL = Symbol.for("tentickle.watchSignal");
-export const PROPS_SIGNAL_SYMBOL = Symbol.for("tentickle.propsSignal");
-export const REQUIRED_INPUT_SYMBOL = Symbol.for("tentickle.requiredInput");
+export const WATCH_SIGNAL_SYMBOL = Symbol.for("agentick.watchSignal");
+export const PROPS_SIGNAL_SYMBOL = Symbol.for("agentick.propsSignal");
+export const REQUIRED_INPUT_SYMBOL = Symbol.for("agentick.requiredInput");
 
 /**
  * Creates a read-only signal that watches COM state.

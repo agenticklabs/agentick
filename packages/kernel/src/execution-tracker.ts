@@ -2,7 +2,7 @@ import { Context, type KernelContext } from "./context";
 import type { ProcedureNode } from "./procedure-graph";
 import { ProcedureGraph, type ProcedureStatus } from "./procedure-graph";
 import { Telemetry } from "./telemetry";
-import { AbortError } from "@tentickle/shared";
+import { AbortError } from "@agentick/shared";
 import { isAsyncIterable } from "./stream";
 
 /**
@@ -12,7 +12,7 @@ import { isAsyncIterable } from "./stream";
  * but manage their own lifecycle) from pure async generators (where iteration
  * IS the execution). Branded objects pass through the tracker without wrapping.
  */
-export const ExecutionHandleBrand: unique symbol = Symbol("tentickle.execution-handle");
+export const ExecutionHandleBrand: unique symbol = Symbol("agentick.execution-handle");
 
 /**
  * Execution boundary behavior configuration.

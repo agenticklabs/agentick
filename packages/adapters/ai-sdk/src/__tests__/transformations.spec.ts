@@ -1,7 +1,7 @@
 /**
  * Tests for AI-SDK Adapter Transformations
  *
- * Tests the data shape transformations between Tentickle format and AI SDK format.
+ * Tests the data shape transformations between Agentick format and AI SDK format.
  */
 
 import {
@@ -15,7 +15,7 @@ import {
   mapToolResultContent,
   convertToolsToToolSet,
 } from "../adapter";
-import { ImageMimeType, StopReason } from "@tentickle/shared";
+import { ImageMimeType, StopReason } from "@agentick/shared";
 import type {
   Message,
   ContentBlock,
@@ -24,7 +24,7 @@ import type {
   ToolUseBlock,
   ToolResultBlock,
   ReasoningBlock,
-} from "@tentickle/shared";
+} from "@agentick/shared";
 
 // =============================================================================
 // Stop Reason Mapping
@@ -61,7 +61,7 @@ describe("toStopReason", () => {
 });
 
 // =============================================================================
-// Message Transformation: Tentickle -> AI SDK
+// Message Transformation: Agentick -> AI SDK
 // =============================================================================
 
 describe("toAiSdkMessages", () => {
@@ -188,7 +188,7 @@ describe("toAiSdkMessages", () => {
 });
 
 // =============================================================================
-// Message Transformation: AI SDK -> Tentickle
+// Message Transformation: AI SDK -> Agentick
 // =============================================================================
 
 describe("fromAiSdkMessages", () => {
@@ -229,7 +229,7 @@ describe("fromAiSdkMessages", () => {
 });
 
 // =============================================================================
-// Content Block Transformation: Tentickle -> AI SDK
+// Content Block Transformation: Agentick -> AI SDK
 // =============================================================================
 
 describe("mapContentBlockToAiSdkPart", () => {
@@ -354,7 +354,7 @@ describe("mapContentBlocksToAiSdkContent", () => {
 });
 
 // =============================================================================
-// Content Block Transformation: AI SDK -> Tentickle
+// Content Block Transformation: AI SDK -> Agentick
 // =============================================================================
 
 describe("mapAiSdkPartToContentBlock", () => {

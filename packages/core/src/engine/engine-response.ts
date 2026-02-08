@@ -1,7 +1,7 @@
 import { type ToolCall, type ToolResult } from "../tool/tool";
 import type { COMSection, COMTimelineEntry } from "../com/types";
 import type { StopReasonInfo } from "../component/component";
-import type { UsageStats } from "@tentickle/shared";
+import type { UsageStats } from "@agentick/shared";
 
 export type { COMSection, COMTimelineEntry }; // Re-export for convenience
 

@@ -2,8 +2,8 @@ import { describe, it, expect, vi } from "vitest";
 import { toolGuardrail } from "./tool";
 import { deny, allow } from "./policy";
 import { GuardrailDenied } from "./errors";
-import { GuardError, isGuardError } from "@tentickle/shared";
-import type { ProcedureEnvelope } from "@tentickle/kernel";
+import { GuardError, isGuardError } from "@agentick/shared";
+import type { ProcedureEnvelope } from "@agentick/kernel";
 
 /**
  * Helper to invoke a middleware with a fake envelope.

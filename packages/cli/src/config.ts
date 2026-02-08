@@ -30,7 +30,7 @@ interface ConfigFile {
  * Get config file path
  */
 function getConfigPath(): string {
-  return path.join(os.homedir(), ".tentickle", "config.json");
+  return path.join(os.homedir(), ".agentick", "config.json");
 }
 
 /**

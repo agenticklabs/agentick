@@ -12,15 +12,15 @@
 
 import React, { useEffect, useRef } from "react";
 import { createEngineProcedure, isProcedure } from "../procedure";
-import type { ExtractArgs, Middleware, Procedure } from "@tentickle/kernel";
+import type { ExtractArgs, Middleware, Procedure } from "@agentick/kernel";
 import type { ProviderToolOptions, LibraryToolOptions } from "../types";
 import {
   ToolExecutionType,
   ToolIntent,
   type ClientToolDefinition,
   type ToolDefinition as BaseToolDefinition,
-} from "@tentickle/shared/tools";
-import type { ContentBlock } from "@tentickle/shared/blocks";
+} from "@agentick/shared/tools";
+import type { ContentBlock } from "@agentick/shared/blocks";
 import { type RecoveryAction, type TickState } from "../component/component";
 import type { TickResult } from "../hooks/types";
 import type { COM } from "../com/object-model";
@@ -37,10 +37,10 @@ export {
   type ToolCall,
   type ToolResult,
   type ToolConfirmationResult,
-} from "@tentickle/shared/tools";
+} from "@agentick/shared/tools";
 
 // Re-export wire protocol type from protocol.ts (via main shared export)
-export type { ToolConfirmationResponse } from "@tentickle/shared";
+export type { ToolConfirmationResponse } from "@agentick/shared";
 export type { BaseToolDefinition, ClientToolDefinition };
 
 // ============================================================================
@@ -464,7 +464,7 @@ export function createTool<TInput = any, TOutput extends ContentBlock[] = Conten
  * Tool definition in provider-compatible format (JSON Schema).
  * This is what gets passed to model adapters.
  *
- * Extends the base ToolDefinition from @tentickle/shared with backend-specific fields.
+ * Extends the base ToolDefinition from @agentick/shared with backend-specific fields.
  */
 export interface ToolDefinition extends BaseToolDefinition {
   /**
@@ -587,7 +587,7 @@ export interface ExecutableTool<
   run?: Procedure<THandler>; // Optional - tools without handlers (e.g., client tools) don't need run
 }
 
-// ClientToolDefinition is now exported from '@tentickle/shared'
+// ClientToolDefinition is now exported from '@agentick/shared'
 
 /**
  * Convert ClientToolDefinition to ToolDefinition for engine use.

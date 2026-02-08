@@ -1,7 +1,7 @@
 /**
  * Tests for the Harness component.
  *
- * @module tentickle/components/harness.spec
+ * @module agentick/components/harness.spec
  */
 
 import React from "react";

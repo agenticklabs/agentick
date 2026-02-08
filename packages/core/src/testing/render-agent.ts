@@ -1,13 +1,13 @@
 /**
  * Agent Testing Utilities
  *
- * Provides a React Testing Library-like API for testing Tentickle agents.
+ * Provides a React Testing Library-like API for testing Agentick agents.
  */
 
 import { createApp } from "../app";
 import type { AppOptions, SessionOptions, SendResult, ComponentFunction } from "../app/types";
 import type { Session } from "../app/types";
-import type { Message, ContentBlock } from "@tentickle/shared";
+import type { Message, ContentBlock } from "@agentick/shared";
 import type { TestAdapterInstance } from "./test-adapter";
 import { createTestAdapter } from "./test-adapter";
 import { flushMicrotasks } from "./act";
@@ -132,7 +132,7 @@ const sessionsToCleanup: Set<Session<any>> = new Set();
  *
  * @example
  * ```tsx
- * import { cleanup } from '@tentickle/core/testing';
+ * import { cleanup } from '@agentick/core/testing';
  *
  * afterEach(() => {
  *   cleanup();
@@ -157,11 +157,11 @@ export function cleanup(): void {
 /**
  * Render an agent for testing.
  *
- * Similar to React Testing Library's `render()`, but for Tentickle agents.
+ * Similar to React Testing Library's `render()`, but for Agentick agents.
  *
  * @example
  * ```tsx
- * import { renderAgent, cleanup, act } from '@tentickle/core/testing';
+ * import { renderAgent, cleanup, act } from '@agentick/core/testing';
  *
  * afterEach(() => cleanup());
  *

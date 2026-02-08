@@ -2,17 +2,17 @@
  * Host Config for react-reconciler
  *
  * This defines how React interacts with our "host" environment.
- * Instead of DOM nodes, we build TentickleNode trees.
+ * Instead of DOM nodes, we build AgentickNode trees.
  */
 
 import type ReactReconciler from "react-reconciler";
 import type {
-  TentickleNode,
-  TentickleContainer,
+  AgentickNode,
+  AgentickContainer,
   HostContext,
   Props,
   UpdatePayload,
-  TentickleTextNode,
+  AgentickTextNode,
 } from "./types";
 import { createNode, createTextNode } from "./types";
 import type { Renderer } from "../renderers/types";
@@ -48,12 +48,12 @@ export function getRendererForComponent(type: unknown): Renderer | undefined {
 export const hostConfig: ReactReconciler.HostConfig<
   string, // Type
   Props, // Props
-  TentickleContainer, // Container
-  TentickleNode, // Instance
-  TentickleTextNode, // TextInstance
+  AgentickContainer, // Container
+  AgentickNode, // Instance
+  AgentickTextNode, // TextInstance
   never, // SuspenseInstance
   never, // HydratableInstance
-  TentickleNode, // PublicInstance
+  AgentickNode, // PublicInstance
   HostContext, // HostContext
   UpdatePayload, // UpdatePayload
   never, // ChildSet
@@ -78,10 +78,10 @@ export const hostConfig: ReactReconciler.HostConfig<
   createInstance(
     type: string,
     props: Props,
-    _rootContainer: TentickleContainer,
+    _rootContainer: AgentickContainer,
     hostContext: HostContext,
     _internalHandle: unknown,
-  ): TentickleNode {
+  ): AgentickNode {
     const key = (props.key as string | number | null) ?? null;
     const { key: _k, children: _c, ...restProps } = props;
     return createNode(type, restProps, hostContext.renderer, key);
@@ -89,10 +89,10 @@ export const hostConfig: ReactReconciler.HostConfig<
 
   createTextInstance(
     text: string,
-    _rootContainer: TentickleContainer,
+    _rootContainer: AgentickContainer,
     _hostContext: HostContext,
     _internalHandle: unknown,
-  ): TentickleTextNode {
+  ): AgentickTextNode {
     return createTextNode(text);
   },
 
@@ -100,25 +100,25 @@ export const hostConfig: ReactReconciler.HostConfig<
   // Tree Operations (Mutation Mode)
   // ============================================================
 
-  appendChild(parent: TentickleNode, child: TentickleNode): void {
+  appendChild(parent: AgentickNode, child: AgentickNode): void {
     child.parent = parent;
     child.index = parent.children.length;
     parent.children.push(child);
   },
 
-  appendInitialChild(parent: TentickleNode, child: TentickleNode): void {
+  appendInitialChild(parent: AgentickNode, child: AgentickNode): void {
     child.parent = parent;
     child.index = parent.children.length;
     parent.children.push(child);
   },
 
-  appendChildToContainer(container: TentickleContainer, child: TentickleNode): void {
+  appendChildToContainer(container: AgentickContainer, child: AgentickNode): void {
     child.parent = null;
     child.index = container.children.length;
     container.children.push(child);
   },
 
-  insertBefore(parent: TentickleNode, child: TentickleNode, beforeChild: TentickleNode): void {
+  insertBefore(parent: AgentickNode, child: AgentickNode, beforeChild: AgentickNode): void {
     const index = parent.children.indexOf(beforeChild);
     if (index === -1) {
       parent.children.push(child);
@@ -130,9 +130,9 @@ export const hostConfig: ReactReconciler.HostConfig<
   },
 
   insertInContainerBefore(
-    container: TentickleContainer,
-    child: TentickleNode,
-    beforeChild: TentickleNode,
+    container: AgentickContainer,
+    child: AgentickNode,
+    beforeChild: AgentickNode,
   ): void {
     const index = container.children.indexOf(beforeChild);
     if (index === -1) {
@@ -144,7 +144,7 @@ export const hostConfig: ReactReconciler.HostConfig<
     container.children.forEach((c, i) => (c.index = i));
   },
 
-  removeChild(parent: TentickleNode, child: TentickleNode): void {
+  removeChild(parent: AgentickNode, child: AgentickNode): void {
     const index = parent.children.indexOf(child);
     if (index !== -1) {
       parent.children.splice(index, 1);
@@ -153,7 +153,7 @@ export const hostConfig: ReactReconciler.HostConfig<
     child.parent = null;
   },
 
-  removeChildFromContainer(container: TentickleContainer, child: TentickleNode): void {
+  removeChildFromContainer(container: AgentickContainer, child: AgentickNode): void {
     const index = container.children.indexOf(child);
     if (index !== -1) {
       container.children.splice(index, 1);
@@ -162,7 +162,7 @@ export const hostConfig: ReactReconciler.HostConfig<
     child.parent = null;
   },
 
-  clearContainer(container: TentickleContainer): void {
+  clearContainer(container: AgentickContainer): void {
     container.children.length = 0;
   },
 
@@ -170,14 +170,14 @@ export const hostConfig: ReactReconciler.HostConfig<
   // Context (for nested renderers)
   // ============================================================
 
-  getRootHostContext(rootContainer: TentickleContainer): HostContext {
+  getRootHostContext(rootContainer: AgentickContainer): HostContext {
     return { renderer: rootContainer.renderer };
   },
 
   getChildHostContext(
     parentContext: HostContext,
     type: string,
-    _rootContainer: TentickleContainer,
+    _rootContainer: AgentickContainer,
   ): HostContext {
     const renderer = RENDERER_COMPONENTS.get(type);
     if (renderer) {
@@ -191,11 +191,11 @@ export const hostConfig: ReactReconciler.HostConfig<
   // ============================================================
 
   prepareUpdate(
-    _instance: TentickleNode,
+    _instance: AgentickNode,
     _type: string,
     oldProps: Props,
     newProps: Props,
-    _rootContainer: TentickleContainer,
+    _rootContainer: AgentickContainer,
     _hostContext: HostContext,
   ): UpdatePayload | null {
     if (shallowDiffers(oldProps, newProps)) {
@@ -205,7 +205,7 @@ export const hostConfig: ReactReconciler.HostConfig<
   },
 
   commitUpdate(
-    instance: TentickleNode,
+    instance: AgentickNode,
     updatePayload: UpdatePayload,
     _type: string,
     _prevProps: Props,
@@ -216,7 +216,7 @@ export const hostConfig: ReactReconciler.HostConfig<
     instance.props = restProps;
   },
 
-  commitTextUpdate(textInstance: TentickleTextNode, _oldText: string, newText: string): void {
+  commitTextUpdate(textInstance: AgentickTextNode, _oldText: string, newText: string): void {
     textInstance.text = newText;
   },
 
@@ -225,26 +225,26 @@ export const hostConfig: ReactReconciler.HostConfig<
   // ============================================================
 
   finalizeInitialChildren(
-    _instance: TentickleNode,
+    _instance: AgentickNode,
     _type: string,
     _props: Props,
-    _rootContainer: TentickleContainer,
+    _rootContainer: AgentickContainer,
     _hostContext: HostContext,
   ): boolean {
     return false;
   },
 
-  prepareForCommit(_containerInfo: TentickleContainer): Record<string, unknown> | null {
+  prepareForCommit(_containerInfo: AgentickContainer): Record<string, unknown> | null {
     return null;
   },
 
-  resetAfterCommit(_containerInfo: TentickleContainer): void {},
+  resetAfterCommit(_containerInfo: AgentickContainer): void {},
 
   // ============================================================
   // Misc Required Methods
   // ============================================================
 
-  getPublicInstance(instance: TentickleNode): TentickleNode {
+  getPublicInstance(instance: AgentickNode): AgentickNode {
     return instance;
   },
 

@@ -4,13 +4,13 @@
  * This ensures that when Engine users call Context.create(), they get EngineContext
  * (which includes Engine-specific fields via module augmentation) instead of KernelContext.
  *
- * @module tentickle/context
+ * @module agentick/context
  */
 
 import {
   Context as KernelContext,
   type KernelContext as KernelContextType,
-} from "@tentickle/kernel";
+} from "@agentick/kernel";
 import type { EngineContext } from "../types";
 
 /**

@@ -1,11 +1,11 @@
-# @tentickle/openai
+# @agentick/openai
 
-Native OpenAI adapter for Tentickle.
+Native OpenAI adapter for Agentick.
 
 ## Installation
 
 ```bash
-pnpm add @tentickle/openai
+pnpm add @agentick/openai
 ```
 
 ## Usage
@@ -13,8 +13,8 @@ pnpm add @tentickle/openai
 ### Factory Pattern (Recommended)
 
 ```tsx
-import { openai } from '@tentickle/openai';
-import { createApp } from '@tentickle/core';
+import { openai } from '@agentick/openai';
+import { createApp } from '@agentick/core';
 
 const model = openai({ model: 'gpt-4o' });
 
@@ -42,7 +42,7 @@ const result = await model.generate({
 ### JSX Component Pattern
 
 ```tsx
-import { OpenAIModel } from '@tentickle/openai';
+import { OpenAIModel } from '@agentick/openai';
 
 function MyAgent() {
   return (

@@ -1,5 +1,5 @@
 /**
- * # Tentickle Context Object Model (COM)
+ * # Agentick Context Object Model (COM)
  *
  * The Context Object Model is the intermediate representation between JSX components
  * and model input. Components render to the COM, which is then compiled into the
@@ -22,7 +22,7 @@
  * @see {@link COMSection} - Section structure
  * @see {@link COMTimelineEntry} - Timeline entry structure
  *
- * @module tentickle/com
+ * @module agentick/com
  */
 
 export * from "./object-model";

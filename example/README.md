@@ -1,6 +1,6 @@
-# Tentickle Example App
+# Agentick Example App
 
-A full-stack example demonstrating idiomatic Tentickle usage with an Express backend and React frontend.
+A full-stack example demonstrating idiomatic Agentick usage with an Express backend and React frontend.
 
 ## Features
 
@@ -22,7 +22,7 @@ This example showcases:
 │   React App     │     │            Express Server               │
 │                 │     │                                         │
 │  ┌───────────┐  │ SSE │  ┌─────────────────────────────────┐   │
-│  │ Chat UI   │◄─┼─────┼──│  createTentickleRouter          │   │
+│  │ Chat UI   │◄─┼─────┼──│  createAgentickRouter          │   │
 │  │           │  │     │  │  ├─ POST /sessions              │   │
 │  │ useSession│  │     │  │  ├─ GET  /events (SSE)          │   │
 │  │ useStream │──┼─────┼──│  └─ POST /events                │   │
@@ -235,7 +235,7 @@ function TodoPanel() {
 
 ## API Endpoints
 
-### Tentickle Routes (via `createTentickleRouter`)
+### Agentick Routes (via `createAgentickRouter`)
 
 | Method | Path                | Description        |
 | ------ | ------------------- | ------------------ |

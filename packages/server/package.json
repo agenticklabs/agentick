@@ -1,7 +1,7 @@
 {
-  "name": "@tentickle/server",
+  "name": "@agentick/server",
   "version": "0.0.1",
-  "description": "Server SDK for Tentickle - channel routing, session handling, transport adapters",
+  "description": "Server SDK for Agentick - channel routing, session handling, transport adapters",
   "keywords": [
     "agent",
     "ai",
@@ -42,8 +42,8 @@
     "dev": "tsc --watch"
   },
   "dependencies": {
-    "@tentickle/kernel": "workspace:*",
-    "@tentickle/shared": "workspace:*"
+    "@agentick/kernel": "workspace:*",
+    "@agentick/shared": "workspace:*"
   },
   "devDependencies": {
     "typescript": "^5.8.3"

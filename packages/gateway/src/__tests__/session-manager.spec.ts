@@ -5,7 +5,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { SessionManager } from "../session-manager.js";
 import { AppRegistry } from "../app-registry.js";
-import type { App } from "@tentickle/core";
+import type { App } from "@agentick/core";
 
 // Mock App for testing
 function createMockApp(name: string): App {

@@ -13,8 +13,8 @@ import { createApp } from "../../app";
 import { createTool } from "../../tool/tool";
 import { Model, Section } from "../../jsx/components/primitives";
 import { createTestAdapter, type TestAdapterInstance } from "../../testing";
-import type { ToolCall } from "@tentickle/shared";
-import { StopReason } from "@tentickle/shared";
+import type { ToolCall } from "@agentick/shared";
+import { StopReason } from "@agentick/shared";
 import { z } from "zod";
 
 // ============================================================================

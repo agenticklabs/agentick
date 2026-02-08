@@ -1,7 +1,7 @@
 /**
- * Tentickle-aware act() wrapper
+ * Agentick-aware act() wrapper
  *
- * Extends React's act() to handle Tentickle-specific concerns:
+ * Extends React's act() to handle Agentick-specific concerns:
  * - Signal notifications (microtask-based)
  * - Scheduler flushing
  * - Async compilation
@@ -36,7 +36,7 @@ export function flushAll(): void {
 }
 
 /**
- * Tentickle-aware act() wrapper.
+ * Agentick-aware act() wrapper.
  *
  * Use this in tests to wrap any code that triggers state updates,
  * signal changes, or reconciliation. It ensures all effects and
@@ -44,7 +44,7 @@ export function flushAll(): void {
  *
  * @example
  * ```tsx
- * import { act } from '@tentickle/core/testing';
+ * import { act } from '@agentick/core/testing';
  *
  * test('signal updates trigger reconciliation', async () => {
  *   const { send } = renderAgent(MyAgent);
@@ -64,7 +64,7 @@ export async function act<T>(callback: () => T | Promise<T>): Promise<T> {
   await reactAct(async () => {
     result = await callback();
 
-    // Flush Tentickle-specific concerns
+    // Flush Agentick-specific concerns
     flushAll();
     await flushMicrotasks();
 

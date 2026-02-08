@@ -15,12 +15,12 @@ export interface RedisChannelAdapterConfig {
   db?: number;
 
   /**
-   * Channel prefix for pub/sub (default: 'tentickle:channels:')
+   * Channel prefix for pub/sub (default: 'agentick:channels:')
    */
   channelPrefix?: string;
 
   /**
-   * Room prefix for pub/sub (default: 'tentickle:rooms:')
+   * Room prefix for pub/sub (default: 'agentick:rooms:')
    */
   roomPrefix?: string;
 
@@ -38,7 +38,7 @@ export interface RedisChannelAdapterConfig {
  * Supports room-based routing:
  * - Events with target.rooms publish to room-specific Redis channels
  * - Each instance subscribes to rooms when local connections join
- * - Uses prefix pattern: `tentickle:rooms:{roomName}`
+ * - Uses prefix pattern: `agentick:rooms:{roomName}`
  *
  * Requires 'redis' or 'ioredis' package.
  */
@@ -60,8 +60,8 @@ export class RedisChannelAdapter implements ChannelAdapter {
 
   constructor(config: RedisChannelAdapterConfig) {
     this.config = {
-      channelPrefix: config.channelPrefix || "tentickle:channels:",
-      roomPrefix: config.roomPrefix || "tentickle:rooms:",
+      channelPrefix: config.channelPrefix || "agentick:channels:",
+      roomPrefix: config.roomPrefix || "agentick:rooms:",
       url: config.url,
       host: config.host,
       port: config.port,

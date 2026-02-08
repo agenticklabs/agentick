@@ -1,22 +1,22 @@
 /**
- * @tentickle/express - Express adapter for Tentickle Gateway
+ * @agentick/express - Express adapter for Agentick Gateway
  *
  * Provides an Express middleware that delegates to Gateway.
- * This is a thin adapter - all business logic lives in @tentickle/gateway.
+ * This is a thin adapter - all business logic lives in @agentick/gateway.
  *
  * @example Quick start
  * ```typescript
  * import express from "express";
- * import { createTentickleMiddleware } from "@tentickle/express";
- * import { createApp } from "@tentickle/core";
+ * import { createAgentickMiddleware } from "@agentick/express";
+ * import { createApp } from "@agentick/core";
  *
  * const app = express();
  * app.use(express.json());
  *
- * const tentickleApp = createApp(<MyAgent />);
+ * const agentickApp = createApp(<MyAgent />);
  *
- * app.use("/api", createTentickleMiddleware({
- *   apps: { assistant: tentickleApp },
+ * app.use("/api", createAgentickMiddleware({
+ *   apps: { assistant: agentickApp },
  *   defaultApp: "assistant",
  * }));
  *
@@ -28,11 +28,11 @@
  *
  * @example With custom methods and auth
  * ```typescript
- * import { createTentickleMiddleware, method } from "@tentickle/express";
+ * import { createAgentickMiddleware, method } from "@agentick/express";
  * import { z } from "zod";
  *
- * app.use("/api", createTentickleMiddleware({
- *   apps: { assistant: tentickleApp },
+ * app.use("/api", createAgentickMiddleware({
+ *   apps: { assistant: agentickApp },
  *   defaultApp: "assistant",
  *   auth: {
  *     type: "custom",
@@ -52,17 +52,17 @@
  * }));
  * ```
  *
- * @module @tentickle/express
+ * @module @agentick/express
  */
 
 import { Router } from "express";
 import type { Request, Response, NextFunction } from "express";
-import { Gateway, type GatewayConfig } from "@tentickle/gateway";
+import { Gateway, type GatewayConfig } from "@agentick/gateway";
 
 /**
  * Options for the Express middleware.
  */
-export interface TentickleMiddlewareOptions {
+export interface AgentickMiddlewareOptions {
   /**
    * Extract token from Express request.
    * By default, extracts from Authorization header.
@@ -74,15 +74,12 @@ export interface TentickleMiddlewareOptions {
  * Gateway config type for Express middleware.
  * Excludes standalone-mode-only options.
  */
-export type TentickleExpressConfig = Omit<
-  GatewayConfig,
-  "port" | "host" | "transport" | "httpPort"
->;
+export type AgentickExpressConfig = Omit<GatewayConfig, "port" | "host" | "transport" | "httpPort">;
 
 /**
  * Express Router with attached Gateway instance for lifecycle management.
  */
-export interface TentickleRouter extends Router {
+export interface AgentickRouter extends Router {
   /** The underlying Gateway instance for lifecycle management */
   gateway: Gateway;
 }
@@ -96,7 +93,7 @@ export interface TentickleRouter extends Router {
  *
  * @example
  * ```typescript
- * const middleware = createTentickleMiddleware({
+ * const middleware = createAgentickMiddleware({
  *   apps: { assistant: myApp },
  *   defaultApp: "assistant",
  * });
@@ -107,17 +104,17 @@ export interface TentickleRouter extends Router {
  * process.on("SIGTERM", () => middleware.gateway.close());
  * ```
  */
-export function createTentickleMiddleware(
-  gatewayConfig: TentickleExpressConfig,
-  options: TentickleMiddlewareOptions = {},
-): TentickleRouter {
+export function createAgentickMiddleware(
+  gatewayConfig: AgentickExpressConfig,
+  options: AgentickMiddlewareOptions = {},
+): AgentickRouter {
   // Create gateway in embedded mode
   const gateway = new Gateway({
     ...gatewayConfig,
     embedded: true,
   });
 
-  const router = Router() as TentickleRouter;
+  const router = Router() as AgentickRouter;
 
   // Attach gateway for lifecycle management
   router.gateway = gateway;
@@ -143,7 +140,7 @@ export function createTentickleMiddleware(
  * Get the Gateway instance from middleware for advanced use.
  * Useful for lifecycle management, events, etc.
  */
-export function createTentickleGateway(gatewayConfig: TentickleExpressConfig): Gateway {
+export function createAgentickGateway(gatewayConfig: AgentickExpressConfig): Gateway {
   return new Gateway({
     ...gatewayConfig,
     embedded: true,
@@ -157,4 +154,4 @@ export {
   type GatewayConfig,
   type MethodDefinition,
   type AuthConfig,
-} from "@tentickle/gateway";
+} from "@agentick/gateway";

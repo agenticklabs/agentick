@@ -1,7 +1,7 @@
 {
-  "name": "@tentickle/angular",
+  "name": "@agentick/angular",
   "version": "0.0.1",
-  "description": "Angular services and utilities for Tentickle applications",
+  "description": "Angular services and utilities for Agentick applications",
   "files": [
     "dist",
     "src"
@@ -24,8 +24,8 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@tentickle/client": "workspace:*",
-    "@tentickle/shared": "workspace:*"
+    "@agentick/client": "workspace:*",
+    "@agentick/shared": "workspace:*"
   },
   "devDependencies": {
     "@angular/core": "^19.0.0",

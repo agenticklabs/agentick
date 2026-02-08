@@ -20,7 +20,7 @@ export async function statusCommand(options: StatusOptions): Promise<void> {
     process.exit(1);
   }
 
-  renderer.info("\nTentickle Status");
+  renderer.info("\nAgentick Status");
   renderer.separator();
   renderer.info(`URL: ${config.url}`);
   renderer.info(`Session: ${config.sessionId ?? "(auto-create)"}`);
@@ -28,5 +28,5 @@ export async function statusCommand(options: StatusOptions): Promise<void> {
   renderer.separator();
 
   renderer.info("\nNote: Server status check not yet implemented.");
-  renderer.info("Use 'tentickle chat' to connect and '/status' for session info.\n");
+  renderer.info("Use 'agentick chat' to connect and '/status' for session info.\n");
 }

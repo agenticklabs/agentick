@@ -1,41 +1,41 @@
-# @tentickle/cli
+# @agentick/cli
 
-Terminal client for Tentickle agents.
+Terminal client for Agentick agents.
 
 ## Installation
 
 ```bash
 # Global install
-npm install -g @tentickle/cli
+npm install -g @agentick/cli
 
 # Or use npx
-npx @tentickle/cli chat --url http://localhost:3000/api/agent
+npx @agentick/cli chat --url http://localhost:3000/api/agent
 
 # Or add to your project
-pnpm add @tentickle/cli
+pnpm add @agentick/cli
 ```
 
 ## Quick Start
 
 ```bash
 # Start interactive chat
-tentickle chat --url http://localhost:3000/api/agent
+agentick chat --url http://localhost:3000/api/agent
 
 # Send a single message
-tentickle send "What is 2+2?" --url http://localhost:3000/api/agent
+agentick send "What is 2+2?" --url http://localhost:3000/api/agent
 
 # Check server status
-tentickle status --url http://localhost:3000/api/agent
+agentick status --url http://localhost:3000/api/agent
 ```
 
 ## Commands
 
-### `tentickle chat`
+### `agentick chat`
 
 Interactive chat mode with streaming responses.
 
 ```bash
-tentickle chat [options]
+agentick chat [options]
 
 Options:
   -u, --url <url>       Server URL (or set TENTICKLE_URL)
@@ -55,12 +55,12 @@ Options:
 | `/clear`           | Clear the screen        |
 | `/debug`           | Toggle debug mode       |
 
-### `tentickle send`
+### `agentick send`
 
 Send a single message and print the response. Great for scripting.
 
 ```bash
-tentickle send <message> [options]
+agentick send <message> [options]
 
 Options:
   -u, --url <url>           Server URL
@@ -75,24 +75,24 @@ Options:
 
 ```bash
 # Simple message
-tentickle send "Hello, agent!" --url http://localhost:3000/api/agent
+agentick send "Hello, agent!" --url http://localhost:3000/api/agent
 
 # Pipe file content
-cat document.txt | tentickle send "Summarize this:" --stdin --url $URL
+cat document.txt | agentick send "Summarize this:" --stdin --url $URL
 
 # JSON output for scripting
-tentickle send "List 5 ideas" --format json --url $URL | jq '.response'
+agentick send "List 5 ideas" --format json --url $URL | jq '.response'
 
 # Non-streaming (wait for complete response)
-tentickle send "Complex question" --no-stream --url $URL
+agentick send "Complex question" --no-stream --url $URL
 ```
 
-### `tentickle status`
+### `agentick status`
 
 Show server and session status.
 
 ```bash
-tentickle status [options]
+agentick status [options]
 
 Options:
   -u, --url <url>       Server URL
@@ -113,7 +113,7 @@ export TENTICKLE_DEBUG="1"
 
 ### Config File
 
-Create `~/.tentickle/config.json`:
+Create `~/.agentick/config.json`:
 
 ```json
 {
@@ -130,15 +130,15 @@ Create `~/.tentickle/config.json`:
 With aliases, you can use:
 
 ```bash
-tentickle chat --url local
-tentickle chat --url prod
+agentick chat --url local
+agentick chat --url prod
 ```
 
 ### Priority
 
 Configuration is loaded in this order (later overrides earlier):
 
-1. Config file (`~/.tentickle/config.json`)
+1. Config file (`~/.agentick/config.json`)
 2. Environment variables
 3. CLI arguments
 
@@ -149,7 +149,7 @@ Configuration is loaded in this order (later overrides earlier):
 Raw text output, suitable for reading or piping.
 
 ```bash
-tentickle send "Hello" --format plain
+agentick send "Hello" --format plain
 # Hello! How can I help you today?
 ```
 
@@ -158,7 +158,7 @@ tentickle send "Hello" --format plain
 Structured output for scripting.
 
 ```bash
-tentickle send "Hello" --format json
+agentick send "Hello" --format json
 # {
 #   "response": "Hello! How can I help you today?",
 #   "sessionId": "sess-abc123"
@@ -170,7 +170,7 @@ tentickle send "Hello" --format json
 Rendered markdown in terminal (with colors and formatting).
 
 ```bash
-tentickle send "Show me code" --format markdown
+agentick send "Show me code" --format markdown
 ```
 
 ## Features
@@ -206,7 +206,7 @@ Based on my search, here are the top stories...
 Enable debug mode to see what's happening under the hood:
 
 ```bash
-tentickle chat --debug
+agentick chat --debug
 
 # Or toggle during chat
 /debug
@@ -222,7 +222,7 @@ Debug output shows:
 
 ```
 ┌─────────────┐     ┌──────────────────┐     ┌─────────────────┐
-│    CLI      │────►│ @tentickle/client │────►│ Tentickle Server│
+│    CLI      │────►│ @agentick/client │────►│ Agentick Server│
 │             │     │                  │     │                 │
 │  - chat     │     │  - SSE transport │     │  - Express      │
 │  - send     │     │  - Session mgmt  │     │  - Gateway      │
@@ -230,9 +230,9 @@ Debug output shows:
 └─────────────┘     └──────────────────┘     └─────────────────┘
 ```
 
-The CLI uses `@tentickle/client` under the hood, which means:
+The CLI uses `@agentick/client` under the hood, which means:
 
-- Works with any Tentickle server (Express, Gateway, etc.)
+- Works with any Agentick server (Express, Gateway, etc.)
 - Automatic transport detection (SSE for http://, WebSocket for ws://)
 - Same session management as web clients
 
@@ -240,8 +240,8 @@ The CLI uses `@tentickle/client` under the hood, which means:
 
 ```bash
 # Clone the repo
-git clone https://github.com/your-org/tentickle.git
-cd tentickle
+git clone https://github.com/your-org/agentick.git
+cd agentick
 
 # Install dependencies
 pnpm install
@@ -269,7 +269,7 @@ pnpm test
 The CLI can also be used as a library:
 
 ```typescript
-import { CLI, createCLI } from '@tentickle/cli';
+import { CLI, createCLI } from '@agentick/cli';
 
 const cli = createCLI({
   url: 'http://localhost:3000/api/agent',
@@ -303,7 +303,7 @@ cli.destroy();
 For interactive sessions:
 
 ```typescript
-import { ChatSession } from '@tentickle/cli';
+import { ChatSession } from '@agentick/cli';
 
 const session = new ChatSession({
   url: 'http://localhost:3000/api/agent',
@@ -318,7 +318,7 @@ await session.start();
 For custom terminal output:
 
 ```typescript
-import { Renderer } from '@tentickle/cli';
+import { Renderer } from '@agentick/cli';
 
 const renderer = new Renderer({
   markdown: true,
@@ -343,10 +343,10 @@ renderer.toolStart('web_search', { query: 'test' });
 
 ## Related Packages
 
-- [`@tentickle/core`](../core) - JSX runtime for agents
-- [`@tentickle/client`](../client) - Client SDK
-- [`@tentickle/server`](../server) - SSE server
-- [`@tentickle/express`](../express) - Express middleware
+- [`@agentick/core`](../core) - JSX runtime for agents
+- [`@agentick/client`](../client) - Client SDK
+- [`@agentick/server`](../server) - SSE server
+- [`@agentick/express`](../express) - Express middleware
 
 ## License
 

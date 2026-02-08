@@ -1,12 +1,12 @@
 /**
  * Task Assistant App
  *
- * Main application component with TentickleProvider and layout.
+ * Main application component with AgentickProvider and layout.
  */
 
 import { useState, useEffect } from "react";
-import { TentickleProvider } from "@tentickle/react";
-import { createSharedTransport } from "@tentickle/client-multiplexer";
+import { AgentickProvider } from "@agentick/react";
+import { createSharedTransport } from "@agentick/client-multiplexer";
 import { ChatInterface } from "./components/ChatInterface";
 import { TodoListUI } from "./components/TodoListUI";
 
@@ -18,12 +18,12 @@ import { TodoListUI } from "./components/TodoListUI";
 // but the old elector's Web Lock callback is still running as a zombie.
 declare global {
   interface Window {
-    __tentickleTransport?: ReturnType<typeof createSharedTransport>;
+    __agentickTransport?: ReturnType<typeof createSharedTransport>;
   }
 }
 
-const sharedTransport = window.__tentickleTransport ?? createSharedTransport({ baseUrl: "/api" });
-window.__tentickleTransport = sharedTransport;
+const sharedTransport = window.__agentickTransport ?? createSharedTransport({ baseUrl: "/api" });
+window.__agentickTransport = sharedTransport;
 
 /**
  * Shows the current tab's leader/follower status for the shared connection.
@@ -53,14 +53,14 @@ function LeadershipIndicator() {
 
 export function App() {
   return (
-    <TentickleProvider clientConfig={{ baseUrl: "/api", transport: sharedTransport }}>
+    <AgentickProvider clientConfig={{ baseUrl: "/api", transport: sharedTransport }}>
       <div className="app">
         <header className="app-header">
           <div className="header-row">
             <h1>Task Assistant</h1>
             <LeadershipIndicator />
           </div>
-          <p>A Tentickle example app with todo management and calculations</p>
+          <p>A Agentick example app with todo management and calculations</p>
         </header>
 
         <main className="app-main">
@@ -75,10 +75,10 @@ export function App() {
 
         <footer className="app-footer">
           <p>
-            Powered by <a href="https://github.com/tentickle/tentickle">Tentickle</a>
+            Powered by <a href="https://github.com/agentick/agentick">Agentick</a>
           </p>
         </footer>
       </div>
-    </TentickleProvider>
+    </AgentickProvider>
   );
 }

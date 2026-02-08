@@ -1,7 +1,7 @@
 {
-  "name": "@tentickle/client",
+  "name": "@agentick/client",
   "version": "0.0.1",
-  "description": "Client SDK for Tentickle - multiplexed sessions over SSE",
+  "description": "Client SDK for Agentick - multiplexed sessions over SSE",
   "keywords": [
     "agent",
     "ai",
@@ -42,7 +42,7 @@
     "dev": "tsc --watch"
   },
   "dependencies": {
-    "@tentickle/shared": "workspace:*"
+    "@agentick/shared": "workspace:*"
   },
   "devDependencies": {
     "typescript": "^5.8.3"

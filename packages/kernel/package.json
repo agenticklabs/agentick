@@ -1,7 +1,7 @@
 {
-  "name": "@tentickle/kernel",
+  "name": "@agentick/kernel",
   "version": "0.0.1",
-  "description": "Kernel for Tentickle",
+  "description": "Kernel for Agentick",
   "keywords": [
     "agent",
     "ai"
@@ -43,7 +43,7 @@
     "dev": "tsc --watch"
   },
   "dependencies": {
-    "@tentickle/shared": "workspace:*",
+    "@agentick/shared": "workspace:*",
     "pino": "^9.6.0",
     "zod": "^4.2.1",
     "zod-to-json-schema": "^3.25.1"

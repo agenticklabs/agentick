@@ -1,7 +1,7 @@
 /**
- * React hooks for Tentickle.
+ * React hooks for Agentick.
  *
- * @module @tentickle/react/hooks
+ * @module @agentick/react/hooks
  */
 
 import {
@@ -14,14 +14,14 @@ import {
   useContext,
 } from "react";
 import type {
-  TentickleClient,
+  AgentickClient,
   ConnectionState,
   StreamEvent,
   SessionStreamEvent,
   StreamingTextState,
   SessionAccessor,
-} from "@tentickle/client";
-import { TentickleContext } from "./context";
+} from "@agentick/client";
+import { AgentickContext } from "./context";
 import type {
   UseSessionOptions,
   UseSessionResult,
@@ -38,13 +38,13 @@ import type {
 // ============================================================================
 
 /**
- * Access the Tentickle client from context.
+ * Access the Agentick client from context.
  *
- * @throws If used outside of TentickleProvider
+ * @throws If used outside of AgentickProvider
  *
  * @example
  * ```tsx
- * import { useClient } from '@tentickle/react';
+ * import { useClient } from '@agentick/react';
  *
  * function MyComponent() {
  *   const client = useClient();
@@ -60,11 +60,11 @@ import type {
  * }
  * ```
  */
-export function useClient(): TentickleClient {
-  const context = useContext(TentickleContext);
+export function useClient(): AgentickClient {
+  const context = useContext(AgentickContext);
 
   if (!context) {
-    throw new Error("useClient must be used within a TentickleProvider");
+    throw new Error("useClient must be used within a AgentickProvider");
   }
 
   return context.client;
@@ -79,7 +79,7 @@ export function useClient(): TentickleClient {
  *
  * @example
  * ```tsx
- * import { useConnectionState } from '@tentickle/react';
+ * import { useConnectionState } from '@agentick/react';
  *
  * function ConnectionIndicator() {
  *   const state = useConnectionState();
@@ -140,7 +140,7 @@ export function useConnection(_options: UseConnectionOptions = {}): UseConnectio
  *
  * @example Basic usage with session ID
  * ```tsx
- * import { useSession } from '@tentickle/react';
+ * import { useSession } from '@agentick/react';
  *
  * function Chat({ sessionId }: { sessionId: string }) {
  *   const { send, isSubscribed, subscribe } = useSession({ sessionId });
@@ -303,7 +303,7 @@ export function useSession(options: UseSessionOptions = {}): UseSessionResult {
  *
  * @example
  * ```tsx
- * import { useEvents } from '@tentickle/react';
+ * import { useEvents } from '@agentick/react';
  *
  * function EventLog() {
  *   const { event } = useEvents();
@@ -389,7 +389,7 @@ export function useEvents(options: UseEventsOptions = {}): UseEventsResult {
  *
  * @example
  * ```tsx
- * import { useStreamingText } from '@tentickle/react';
+ * import { useStreamingText } from '@agentick/react';
  *
  * function StreamingResponse() {
  *   const { text, isStreaming } = useStreamingText();
@@ -513,7 +513,7 @@ export interface UseContextInfoResult {
  *
  * @example Basic usage
  * ```tsx
- * import { useContextInfo } from '@tentickle/react';
+ * import { useContextInfo } from '@agentick/react';
  *
  * function ContextBar() {
  *   const { contextInfo } = useContextInfo();

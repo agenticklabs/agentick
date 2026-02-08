@@ -9,7 +9,7 @@
  * - Session is an EventEmitter that emits streaming events
  * - Props are inputs, SendResult is output
  *
- * @module tentickle/app
+ * @module agentick/app
  */
 
 import type { EventEmitter } from "node:events";
@@ -21,12 +21,12 @@ import type {
   TimelineEntry,
   SendInput as SharedSendInput,
   ContentBlock,
-} from "@tentickle/shared";
+} from "@agentick/shared";
 import type { COMInput } from "../com/types";
 import type { ExecutableTool } from "../tool/tool";
 import type { MCPConfig } from "../mcp";
 import type { EngineModel } from "../model/model";
-import type { ExecutionHandle, Channel, Procedure } from "@tentickle/kernel";
+import type { ExecutionHandle, Channel, Procedure } from "@agentick/kernel";
 import type { JSX } from "../jsx/jsx-runtime";
 // Signal type removed - schedulerState now returns SchedulerState directly
 import type { SchedulerState } from "../compiler/scheduler";
@@ -188,7 +188,7 @@ export interface SqliteStoreConfig {
   path?: string;
   /**
    * Table name for storing sessions.
-   * @default 'tentickle_sessions'
+   * @default 'agentick_sessions'
    */
   table?: string;
 }
@@ -453,11 +453,11 @@ export interface AppOptions extends LifecycleCallbacks {
   onToolConfirmation?: (call: ToolCall, message: string) => Promise<boolean>;
 
   /**
-   * Whether to inherit middleware and telemetry from the global Tentickle instance.
+   * Whether to inherit middleware and telemetry from the global Agentick instance.
    *
    * When true (default), the app inherits:
-   * - Middleware registered via `Tentickle.use('*', mw)`, `Tentickle.use('tool:*', mw)`, etc.
-   * - Telemetry provider from `Tentickle.telemetryProvider`
+   * - Middleware registered via `Agentick.use('*', mw)`, `Agentick.use('tool:*', mw)`, etc.
+   * - Telemetry provider from `Agentick.telemetryProvider`
    *
    * Set to false for isolated apps (useful in testing).
    *
@@ -465,10 +465,10 @@ export interface AppOptions extends LifecycleCallbacks {
    *
    * @example
    * ```typescript
-   * // App inherits Tentickle defaults (default behavior)
+   * // App inherits Agentick defaults (default behavior)
    * const app = createApp(MyAgent, { model });
    *
-   * // Isolated app - no Tentickle middleware
+   * // Isolated app - no Agentick middleware
    * const testApp = createApp(TestAgent, { model, inheritDefaults: false });
    * ```
    */

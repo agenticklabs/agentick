@@ -7,7 +7,7 @@
  * @example
  * ```typescript
  * // Define a symbol for your component type
- * const MY_COMPONENT_SYMBOL = Symbol.for('tentickle.myComponent');
+ * const MY_COMPONENT_SYMBOL = Symbol.for('agentick.myComponent');
  *
  * // Mark the component
  * export const MyComponent = markWithSymbol(MY_COMPONENT_SYMBOL, (props) => {
@@ -26,17 +26,17 @@
  * These are structural primitives that should be handled by the renderer,
  * not executed as functions.
  */
-export const HOST_PRIMITIVE_SYMBOL = Symbol.for("tentickle.hostPrimitive");
+export const HOST_PRIMITIVE_SYMBOL = Symbol.for("agentick.hostPrimitive");
 
 /**
  * Symbol used to mark semantic components.
  */
-export const SEMANTIC_COMPONENT_SYMBOL = Symbol.for("tentickle.semanticComponent");
+export const SEMANTIC_COMPONENT_SYMBOL = Symbol.for("agentick.semanticComponent");
 
 /**
  * Symbol used to mark content components.
  */
-export const CONTENT_COMPONENT_SYMBOL = Symbol.for("tentickle.contentComponent");
+export const CONTENT_COMPONENT_SYMBOL = Symbol.for("agentick.contentComponent");
 
 /**
  * Check if a value has a specific symbol marker.

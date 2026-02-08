@@ -1,13 +1,13 @@
 {
-  "name": "@tentickle/nestjs",
+  "name": "@agentick/nestjs",
   "version": "0.0.1",
-  "description": "NestJS module for Tentickle servers",
+  "description": "NestJS module for Agentick servers",
   "keywords": [
     "agent",
+    "agentick",
     "ai",
     "llm",
-    "nestjs",
-    "tentickle"
+    "nestjs"
   ],
   "license": "MIT",
   "files": [
@@ -29,8 +29,8 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@nestjs/common": "^10.4.15",
-    "@tentickle/gateway": "workspace:*"
+    "@agentick/gateway": "workspace:*",
+    "@nestjs/common": "^10.4.15"
   },
   "devDependencies": {
     "@nestjs/core": "^10.4.15",

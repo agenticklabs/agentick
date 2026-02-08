@@ -1,4 +1,4 @@
-import type { ProcedureEnvelope } from "@tentickle/kernel";
+import type { ProcedureEnvelope } from "@agentick/kernel";
 
 export type GuardrailAction = "allow" | "deny";
 

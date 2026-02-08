@@ -17,7 +17,7 @@ import {
   type SendInput,
   type ChannelEvent,
   type ToolConfirmationResponse,
-} from "@tentickle/client";
+} from "@agentick/client";
 import { createLeaderElector, type LeaderElector } from "./leader-elector.js";
 import {
   createBroadcastBridge,

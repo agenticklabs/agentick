@@ -147,7 +147,7 @@ export function App() {
               <path d="M2 17l10 5 10-5" />
               <path d="M2 12l10 5 10-5" />
             </svg>
-            Tentickle DevTools
+            Agentick DevTools
           </div>
         </div>
         <div className="header-status">

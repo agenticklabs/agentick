@@ -4,7 +4,7 @@
  * Manages available apps and their configurations.
  */
 
-import type { App } from "@tentickle/core";
+import type { App } from "@agentick/core";
 
 export interface AppInfo {
   id: string;

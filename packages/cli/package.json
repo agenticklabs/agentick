@@ -1,9 +1,9 @@
 {
-  "name": "@tentickle/cli",
+  "name": "@agentick/cli",
   "version": "0.0.1",
-  "description": "Terminal client for Tentickle agents",
+  "description": "Terminal client for Agentick agents",
   "bin": {
-    "tentickle": "./dist/bin.js"
+    "agentick": "./dist/bin.js"
   },
   "files": [
     "dist",
@@ -29,8 +29,8 @@
     "cli": "tsx src/bin.ts"
   },
   "dependencies": {
-    "@tentickle/client": "workspace:*",
-    "@tentickle/shared": "workspace:*",
+    "@agentick/client": "workspace:*",
+    "@agentick/shared": "workspace:*",
     "chalk": "^5.3.0",
     "commander": "^12.1.0",
     "eventsource": "^2.0.2",

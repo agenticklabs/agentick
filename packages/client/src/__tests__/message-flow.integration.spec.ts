@@ -10,8 +10,8 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { TentickleClient } from "../client";
-import type { StreamEvent } from "@tentickle/shared";
+import { AgentickClient } from "../client";
+import type { StreamEvent } from "@agentick/shared";
 
 // Helper to create SSE response text
 function createSSEResponse(events: any[]): string {
@@ -39,8 +39,8 @@ function createEventBase(overrides: Partial<StreamEvent> = {}): Partial<StreamEv
   };
 }
 
-describe("TentickleClient Message Flow", () => {
-  let client: TentickleClient;
+describe("AgentickClient Message Flow", () => {
+  let client: AgentickClient;
   let mockFetch: ReturnType<typeof vi.fn>;
   let mockEventSource: any;
 
@@ -58,7 +58,7 @@ describe("TentickleClient Message Flow", () => {
     };
     (global as any).EventSource = vi.fn(() => mockEventSource);
 
-    client = new TentickleClient({
+    client = new AgentickClient({
       baseUrl: "http://localhost:3000",
     });
   });
@@ -336,7 +336,7 @@ describe("TentickleClient Message Flow", () => {
 });
 
 describe("Client Connection", () => {
-  let client: TentickleClient;
+  let client: AgentickClient;
   let mockEventSource: any;
 
   beforeEach(() => {
@@ -348,7 +348,7 @@ describe("Client Connection", () => {
     };
     (global as any).EventSource = vi.fn(() => mockEventSource);
 
-    client = new TentickleClient({
+    client = new AgentickClient({
       baseUrl: "http://localhost:3000",
     });
   });

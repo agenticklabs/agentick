@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { createGuard } from "./guard";
 import { createProcedure, type ProcedureEnvelope } from "./procedure";
-import { GuardError, isGuardError } from "@tentickle/shared";
+import { GuardError, isGuardError } from "@agentick/shared";
 
 // =============================================================================
 // createGuard — simple form: createGuard(fn)

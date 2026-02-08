@@ -1,8 +1,8 @@
 # Model Module Architecture
 
-> **The AI model integration layer for Tentickle**
+> **The AI model integration layer for Agentick**
 
-The model module provides the abstraction layer for integrating AI language models (LLMs) into Tentickle. It defines a unified interface for model operations, supports multiple providers through adapters, and handles the transformation between engine state and model-specific formats.
+The model module provides the abstraction layer for integrating AI language models (LLMs) into Agentick. It defines a unified interface for model operations, supports multiple providers through adapters, and handles the transformation between engine state and model-specific formats.
 
 ---
 
@@ -25,7 +25,7 @@ The model module provides the abstraction layer for integrating AI language mode
 The model module provides:
 
 - **Unified Model Interface** - `EngineModel` defines a consistent API for all AI models
-- **Adapter Pattern** - Transform between Tentickle's format and provider-specific formats
+- **Adapter Pattern** - Transform between Agentick's format and provider-specific formats
 - **Generation Operations** - Both streaming and non-streaming generation
 - **State Transformation** - Convert between engine state (COMInput) and model input/output
 - **Hook System** - Middleware for intercepting and modifying model operations
@@ -33,10 +33,10 @@ The model module provides:
 
 ### Why It Exists
 
-Tentickle needs to work with multiple AI providers (OpenAI, Anthropic, Google, etc.) while maintaining a consistent internal representation. The model module:
+Agentick needs to work with multiple AI providers (OpenAI, Anthropic, Google, etc.) while maintaining a consistent internal representation. The model module:
 
 1. **Abstracts provider differences** - Each provider has different APIs, message formats, and capabilities
-2. **Normalizes input/output** - Converts Tentickle's rich content types to model-understandable formats
+2. **Normalizes input/output** - Converts Agentick's rich content types to model-understandable formats
 3. **Enables composability** - Models work seamlessly with the engine's component system
 4. **Supports extensibility** - New providers can be added through the adapter pattern
 
@@ -137,7 +137,7 @@ interface EngineModel<TModelInput = ModelInput, TModelOutput = ModelOutput> {
 
 ### 2. Model Creation with `createAdapter()`
 
-All models in Tentickle are created using `createAdapter()`:
+All models in Agentick are created using `createAdapter()`:
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -175,7 +175,7 @@ All models in Tentickle are created using `createAdapter()`:
 
 ### 3. Message Transformation
 
-The model module handles transformation of Tentickle's rich message types to formats models understand:
+The model module handles transformation of Agentick's rich message types to formats models understand:
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -306,7 +306,7 @@ interface ModelOutput {
 Factory function for creating model adapters:
 
 ```typescript
-import { createAdapter } from '@tentickle/core/model';
+import { createAdapter } from '@agentick/core/model';
 
 const model = createAdapter({
   metadata: {
@@ -532,8 +532,8 @@ graph LR
 ### Creating a Simple Adapter
 
 ```typescript
-import { createAdapter } from "@tentickle/core/model";
-import { fromEngineState, toEngineState } from "@tentickle/core/model/utils";
+import { createAdapter } from "@agentick/core/model";
+import { fromEngineState, toEngineState } from "@agentick/core/model/utils";
 import { MyProviderSDK } from "my-provider";
 
 const model = createAdapter({
@@ -571,7 +571,7 @@ const model = createAdapter({
 ### Using AI SDK Adapter
 
 ```typescript
-import { aiSdk } from "@tentickle/ai-sdk";
+import { aiSdk } from "@agentick/ai-sdk";
 import { openai } from "@ai-sdk/openai";
 
 const model = aiSdk({
@@ -587,7 +587,7 @@ const app = createApp(MyAgent, { model });
 ### Using OpenAI Adapter
 
 ```typescript
-import { openai } from "@tentickle/openai";
+import { openai } from "@agentick/openai";
 
 const model = openai({ model: "gpt-4o" });
 
@@ -606,7 +606,7 @@ function Agent() {
 ### Registering Model Hooks
 
 ```typescript
-import { configureEngine } from "tentickle";
+import { configureEngine } from "agentick";
 
 // Global hooks via engine configuration
 configureEngine({
@@ -671,14 +671,14 @@ const model = createAdapter({
 
 ## Provider Adapters
 
-Tentickle provides official adapters for popular AI SDKs:
+Agentick provides official adapters for popular AI SDKs:
 
 ### ai-sdk Adapter
 
 Wraps Vercel AI SDK models:
 
 ```typescript
-import { createAiSdkModel } from "tentickle/adapters/ai-sdk";
+import { createAiSdkModel } from "agentick/adapters/ai-sdk";
 import { openai } from "@ai-sdk/openai";
 import { anthropic } from "@ai-sdk/anthropic";
 
@@ -701,7 +701,7 @@ Each adapter must handle:
 2. **Output transformation** - Convert provider response to ModelOutput
 3. **Stream handling** - Transform provider chunks to StreamEvent
 4. **Tool conversion** - Convert tool definitions to provider format
-5. **Error mapping** - Map provider errors to Tentickle errors
+5. **Error mapping** - Map provider errors to Agentick errors
 6. **Stop reason mapping** - Normalize finish reasons
 
 ### Creating New Adapters
@@ -725,4 +725,4 @@ The model module provides:
 - **Message transformation** - Handle events, ephemeral, and special content types
 - **Stream accumulation** - Built-in handling of tool calls, reasoning, and usage stats
 
-This abstraction layer enables Tentickle to work with any AI provider while maintaining a consistent internal representation and providing automatic tracking, middleware support, and observability.
+This abstraction layer enables Agentick to work with any AI provider while maintaining a consistent internal representation and providing automatic tracking, middleware support, and observability.

@@ -1,8 +1,8 @@
-# tentickle/core Renderers Architecture
+# agentick/core Renderers Architecture
 
 > **Transform semantic content into formatted output for AI models**
 
-The renderers module provides a pluggable system for converting semantic content blocks into formatted text representations. Renderers bridge the gap between Tentickle's semantic JSX components and the text formats that AI models consume.
+The renderers module provides a pluggable system for converting semantic content blocks into formatted text representations. Renderers bridge the gap between Agentick's semantic JSX components and the text formats that AI models consume.
 
 ---
 
@@ -168,7 +168,7 @@ type SemanticContentBlock = ContentBlock & {
 
 ### 4. Structural vs Semantic Components
 
-Tentickle distinguishes between two component styles:
+Agentick distinguishes between two component styles:
 
 | Component Style              | Example                        | Result                                |
 | ---------------------------- | ------------------------------ | ------------------------------------- |
@@ -381,8 +381,8 @@ XMLRenderer automatically escapes special characters:
 ### Step 1: Extend the Base Class
 
 ```typescript
-import { Renderer, type SemanticContentBlock, type SemanticNode } from "tentickle";
-import type { ContentBlock, TextBlock } from "@tentickle/shared";
+import { Renderer, type SemanticContentBlock, type SemanticNode } from "agentick";
+import type { ContentBlock, TextBlock } from "@agentick/shared";
 
 export class PlainTextRenderer extends Renderer {
   /**
@@ -447,7 +447,7 @@ export class PlainTextRenderer extends Renderer {
 ### Step 2: Use with JSX
 
 ```tsx
-import { Renderer } from "tentickle";
+import { Renderer } from "agentick";
 
 function MyAgent() {
   return (
@@ -464,8 +464,8 @@ function MyAgent() {
 ### Step 3: Create a Wrapper Component (Optional)
 
 ```tsx
-import { createElement, type JSX } from "tentickle";
-import { Renderer, type ComponentBaseProps } from "tentickle";
+import { createElement, type JSX } from "agentick";
+import { Renderer, type ComponentBaseProps } from "agentick";
 
 interface PlainTextProps extends ComponentBaseProps {
   children?: any;
@@ -495,7 +495,7 @@ export function PlainText(props: PlainTextProps): JSX.Element {
 The base `<Renderer>` component wraps children with a specific renderer:
 
 ```tsx
-import { Renderer } from "tentickle";
+import { Renderer } from "agentick";
 
 <Renderer instance={new MarkdownRenderer("gfm")}>
   <H1>GitHub Flavored</H1>
@@ -508,7 +508,7 @@ import { Renderer } from "tentickle";
 Convenience wrapper for `MarkdownRenderer`:
 
 ```tsx
-import { Markdown } from "tentickle";
+import { Markdown } from "agentick";
 
 <Markdown flavor="github">
   <H1>Title</H1>
@@ -535,7 +535,7 @@ import { Markdown } from "tentickle";
 Convenience wrapper for `XMLRenderer`:
 
 ```tsx
-import { XML } from "tentickle";
+import { XML } from "agentick";
 
 <XML>
   <H1>Title</H1>
@@ -653,7 +653,7 @@ flowchart TD
 ### Basic Markdown Rendering
 
 ```tsx
-import { Markdown, H1, H2, Text, List, ListItem } from "tentickle";
+import { Markdown, H1, H2, Text, List, ListItem } from "agentick";
 
 function DocumentAgent() {
   return (
@@ -685,7 +685,7 @@ function DocumentAgent() {
 ### XML for Structured Prompts
 
 ```tsx
-import { XML, H1, Text, System } from "tentickle";
+import { XML, H1, Text, System } from "agentick";
 
 function StructuredPrompt() {
   return (
@@ -720,7 +720,7 @@ function StructuredPrompt() {
 ### Mixed Inline Formatting
 
 ```tsx
-import { Markdown, Text } from "tentickle";
+import { Markdown, Text } from "agentick";
 
 function CodeExample() {
   return (
@@ -742,7 +742,7 @@ function CodeExample() {
 ### Handling Media Content
 
 ```tsx
-import { Markdown, Text, Image } from "tentickle";
+import { Markdown, Text, Image } from "agentick";
 
 function MediaExample() {
   return (
@@ -769,7 +769,7 @@ function MediaExample() {
 ### Event Block Formatting
 
 ```tsx
-import { Markdown, Event, UserAction } from "tentickle";
+import { Markdown, Event, UserAction } from "agentick";
 
 function EventExample() {
   return (
@@ -790,7 +790,7 @@ function EventExample() {
 ### Direct Renderer Usage
 
 ```typescript
-import { MarkdownRenderer, XMLRenderer, type SemanticContentBlock } from "tentickle";
+import { MarkdownRenderer, XMLRenderer, type SemanticContentBlock } from "agentick";
 
 const blocks: SemanticContentBlock[] = [
   {

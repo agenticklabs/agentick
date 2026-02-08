@@ -1,10 +1,10 @@
 /**
- * Tests for TentickleService (signals-based)
+ * Tests for AgentickService (signals-based)
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { firstValueFrom } from "rxjs";
-import type { StreamingTextState, SessionStreamEvent } from "@tentickle/client";
+import type { StreamingTextState, SessionStreamEvent } from "@agentick/client";
 
 let mockStreamingTextState: StreamingTextState = { text: "", isStreaming: false };
 let mockStreamingTextHandlers = new Set<(state: StreamingTextState) => void>();
@@ -86,20 +86,20 @@ const mockClient = {
   },
 };
 
-vi.mock("@tentickle/client", () => ({
+vi.mock("@agentick/client", () => ({
   createClient: vi.fn(() => mockClient),
 }));
 
-import { TentickleService } from "./tentickle.service";
+import { AgentickService } from "./agentick.service";
 
-describe("TentickleService", () => {
-  let service: TentickleService;
+describe("AgentickService", () => {
+  let service: AgentickService;
 
   beforeEach(() => {
     vi.clearAllMocks();
     mockStreamingTextState = { text: "", isStreaming: false };
     mockStreamingTextHandlers.clear();
-    service = new TentickleService({ baseUrl: "https://api.example.com" });
+    service = new AgentickService({ baseUrl: "https://api.example.com" });
   });
 
   afterEach(() => {

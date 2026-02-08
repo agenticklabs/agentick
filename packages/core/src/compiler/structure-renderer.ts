@@ -1,9 +1,9 @@
 import type { COM } from "../com/object-model";
 import type { COMInput, COMSection, COMTimelineEntry } from "../com/types";
-import type { ContentBlock, TextBlock } from "@tentickle/shared";
+import type { ContentBlock, TextBlock } from "@agentick/shared";
 import type { ContentRenderer } from "../renderers";
 import { type SemanticContentBlock, MarkdownRenderer } from "../renderers";
-import { Logger } from "@tentickle/kernel";
+import { Logger } from "@agentick/kernel";
 import type { CompiledStructure, CompiledSection, CompiledEphemeral } from "./types";
 
 const log = Logger.for("StructureRenderer");

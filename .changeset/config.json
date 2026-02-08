@@ -5,16 +5,16 @@
   "fixed": [],
   "linked": [
     [
-      "tentickle",
-      "@tentickle/kernel",
-      "@tentickle/shared",
-      "@tentickle/client",
-      "@tentickle/server",
-      "@tentickle/express",
-      "@tentickle/nestjs",
-      "@tentickle/react",
-      "@tentickle/angular",
-      "@tentickle/devtools"
+      "agentick",
+      "@agentick/kernel",
+      "@agentick/shared",
+      "@agentick/client",
+      "@agentick/server",
+      "@agentick/express",
+      "@agentick/nestjs",
+      "@agentick/react",
+      "@agentick/angular",
+      "@agentick/devtools"
     ]
   ],
   "access": "public",

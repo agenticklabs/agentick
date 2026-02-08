@@ -83,7 +83,7 @@ function isSpecialType(value: unknown): boolean {
 
 /**
  * Check if value looks like a schema object (Zod, Standard Schema, etc.)
- * Detection patterns aligned with @tentickle/kernel/schema.ts
+ * Detection patterns aligned with @agentick/kernel/schema.ts
  */
 function isSchemaObject(obj: Record<string, unknown>): boolean {
   // Standard Schema v1: has ~standard property with version and vendor
@@ -101,7 +101,7 @@ function isSchemaObject(obj: Record<string, unknown>): boolean {
 
 /**
  * Get a human-readable label for a schema object.
- * Detection patterns aligned with @tentickle/kernel/schema.ts
+ * Detection patterns aligned with @agentick/kernel/schema.ts
  *
  * Note: Schema internals (like _def.shape) are functions that don't serialize
  * over the wire. We show a simplified label based on what does serialize.

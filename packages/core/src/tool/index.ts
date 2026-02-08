@@ -1,7 +1,7 @@
 /**
- * # Tentickle Tools
+ * # Agentick Tools
  *
- * Tool definition and execution for Tentickle agents. Tools are the bridge between
+ * Tool definition and execution for Agentick agents. Tools are the bridge between
  * LLM reasoning and real-world actions.
  *
  * ## Features
@@ -15,7 +15,7 @@
  * ## Quick Start
  *
  * ```typescript
- * import { createTool, ToolExecutionType } from 'tentickle';
+ * import { createTool, ToolExecutionType } from 'agentick';
  * import { z } from 'zod';
  *
  * // Server-side tool
@@ -54,7 +54,7 @@
  * @see {@link ToolDefinition} - Tool definition interface
  * @see {@link ToolExecutionType} - Execution type enum
  *
- * @module tentickle/tool
+ * @module agentick/tool
  */
 
 export * from "./tool";

@@ -1,7 +1,7 @@
 /**
- * Tentickle Testing Utilities
+ * Agentick Testing Utilities
  *
- * Provides a React Testing Library-like API for testing Tentickle agents.
+ * Provides a React Testing Library-like API for testing Agentick agents.
  *
  * @example
  * ```tsx
@@ -11,7 +11,7 @@
  *   createTestAdapter,
  *   act,
  *   cleanup,
- * } from '@tentickle/core/testing';
+ * } from '@agentick/core/testing';
  *
  * afterEach(() => cleanup());
  *
@@ -38,7 +38,7 @@
  * });
  * ```
  *
- * @module @tentickle/core/testing
+ * @module @agentick/core/testing
  */
 
 // Act wrapper
@@ -101,5 +101,5 @@ export type {
 } from "./mock-app";
 
 // Kernel testing primitives (re-exported for convenience)
-export { createTestProcedure } from "@tentickle/kernel/testing";
-export type { TestProcedure, TestProcedureOptions } from "@tentickle/kernel/testing";
+export { createTestProcedure } from "@agentick/kernel/testing";
+export type { TestProcedure, TestProcedureOptions } from "@agentick/kernel/testing";

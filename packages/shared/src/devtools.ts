@@ -4,7 +4,7 @@
  * This module provides the event types and singleton emitter for DevTools integration.
  * The engine emits events to this emitter, and DevTools subscribes to receive them.
  *
- * @module @tentickle/shared/devtools
+ * @module @agentick/shared/devtools
  */
 
 import type { UsageStats, Message, ToolDefinition } from "./index";
@@ -164,9 +164,9 @@ export interface DTModelRequestEvent extends DevToolsEventBase {
   tick: number;
   /** Model ID */
   modelId?: string;
-  /** The formatted input in Tentickle format (before provider transformation) */
+  /** The formatted input in Agentick format (before provider transformation) */
   input?: {
-    /** Messages array in Tentickle format */
+    /** Messages array in Agentick format */
     messages?: unknown[];
     /** System prompt */
     system?: string;
@@ -200,7 +200,7 @@ export interface DTProviderResponseEvent extends DevToolsEventBase {
   modelId?: string;
   /** Provider name (e.g., "openai", "anthropic", "google") */
   provider?: string;
-  /** Raw provider response before Tentickle transformation */
+  /** Raw provider response before Agentick transformation */
   providerOutput?: unknown;
 }
 
@@ -209,7 +209,7 @@ export interface DTModelResponseEvent extends DevToolsEventBase {
   tick: number;
   /** Provider output (raw SDK response, may be reconstructed for streaming) */
   providerOutput?: unknown;
-  /** ModelOutput (normalized Tentickle format) */
+  /** ModelOutput (normalized Agentick format) */
   modelOutput?: {
     model?: string;
     message?: Message;
@@ -1112,7 +1112,7 @@ const devToolsForwarders: Record<string, Forwarder> = {
       tick: e.tick as number,
       // Pipeline visibility: provider output (raw SDK response)
       providerOutput: e.providerOutput,
-      // Pipeline visibility: ModelOutput (normalized Tentickle format)
+      // Pipeline visibility: ModelOutput (normalized Agentick format)
       modelOutput: e.modelOutput as DTModelResponseEvent["modelOutput"],
       // Pipeline visibility: Engine state (timeline integration)
       engineState: e.engineState as DTModelResponseEvent["engineState"],

@@ -2,7 +2,7 @@
  * Model Types
  *
  * Platform-independent types for model input/output and configuration.
- * Used by both backend (@tentickle/core) and frontend (@tentickle/client) for direct model execution.
+ * Used by both backend (@agentick/core) and frontend (@agentick/client) for direct model execution.
  *
  * These are simplified versions that exclude backend-specific adapter concerns.
  * Backend extends these with providerOptions, libraryOptions, ephemeralConfig, etc.

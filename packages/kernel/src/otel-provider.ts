@@ -1,10 +1,10 @@
 /**
- * OpenTelemetry provider for Tentickle telemetry.
+ * OpenTelemetry provider for Agentick telemetry.
  *
  * Creates a TelemetryProvider that wraps the standard @opentelemetry/api,
  * eliminating boilerplate for users who already have OTel configured.
  *
- * @module @tentickle/kernel/otel-provider
+ * @module @agentick/kernel/otel-provider
  */
 
 import type { TelemetryProvider, Span, Counter, Histogram } from "./telemetry";
@@ -12,7 +12,7 @@ import type { TelemetryProvider, Span, Counter, Histogram } from "./telemetry";
 export interface OTelProviderOptions {
   /**
    * Service name for traces and metrics.
-   * @default 'tentickle'
+   * @default 'agentick'
    */
   serviceName?: string;
 
@@ -68,7 +68,7 @@ export function createOTelProvider(options: OTelProviderOptions = {}): Telemetry
     );
   }
 
-  const serviceName = options.serviceName ?? "tentickle";
+  const serviceName = options.serviceName ?? "agentick";
   const tracerName = options.tracerName ?? serviceName;
   const meterName = options.meterName ?? serviceName;
 

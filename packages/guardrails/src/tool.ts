@@ -1,5 +1,5 @@
-import { createGuard } from "@tentickle/kernel";
-import type { Middleware } from "@tentickle/kernel";
+import { createGuard } from "@agentick/kernel";
+import type { Middleware } from "@agentick/kernel";
 import type { ToolGuardrailConfig } from "./types";
 import { GuardrailDenied } from "./errors";
 import { evaluateRules } from "./policy";
@@ -20,7 +20,7 @@ import { evaluateRules } from "./policy";
  *
  * @example
  * ```typescript
- * import { toolGuardrail, deny, allow } from "@tentickle/guardrails";
+ * import { toolGuardrail, deny, allow } from "@agentick/guardrails";
  *
  * const guardrail = toolGuardrail({
  *   rules: [

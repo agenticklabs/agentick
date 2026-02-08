@@ -24,7 +24,7 @@ import {
   StopReason,
   // bufferToBase64Source,
   // isUrlString,
-} from "@tentickle/shared";
+} from "@agentick/shared";
 
 import {
   type ModelInput,
@@ -32,15 +32,15 @@ import {
   type ModelClass,
   createAdapter,
   type AdapterDelta,
-} from "@tentickle/core/model";
+} from "@agentick/core/model";
 
-import { type LibraryGenerationOptions, type ProviderToolOptions } from "@tentickle/core";
+import { type LibraryGenerationOptions, type ProviderToolOptions } from "@agentick/core";
 
-import { Logger } from "@tentickle/core";
+import { Logger } from "@agentick/core";
 
-import type { ToolDefinition, ExecutableTool } from "@tentickle/core/tool";
+import type { ToolDefinition, ExecutableTool } from "@agentick/core/tool";
 
-import { mergeDeep } from "@tentickle/shared/utils";
+import { mergeDeep } from "@agentick/shared/utils";
 
 import {
   generateText,
@@ -107,7 +107,7 @@ export interface AiSdkAdapterConfig {
 }
 
 // Module augmentation for type safety
-declare module "@tentickle/core" {
+declare module "@agentick/core" {
   interface LibraryGenerationOptions {
     "ai-sdk"?: Partial<Parameters<typeof generateText>[0]>;
   }

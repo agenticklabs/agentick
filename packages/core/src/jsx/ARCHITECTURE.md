@@ -1,8 +1,8 @@
-# tentickle/core JSX Architecture
+# agentick/core JSX Architecture
 
-> **The JSX runtime that transforms React-style syntax into Tentickle agent definitions**
+> **The JSX runtime that transforms React-style syntax into Agentick agent definitions**
 
-The JSX module provides a custom JSX implementation that enables developers to define AI agents using familiar React-like syntax. Instead of rendering to the DOM, Tentickle JSX elements become agent components, timeline entries, content blocks, and configuration primitives.
+The JSX module provides a custom JSX implementation that enables developers to define AI agents using familiar React-like syntax. Instead of rendering to the DOM, Agentick JSX elements become agent components, timeline entries, content blocks, and configuration primitives.
 
 ---
 
@@ -26,10 +26,10 @@ The JSX module provides a custom JSX implementation that enables developers to d
 The JSX module provides:
 
 - **Custom JSX Runtime** - `jsx`, `jsxs`, `jsxDEV`, and `createElement` functions compatible with React 17+ automatic JSX transform
-- **JSX.Element Type System** - Type definitions for all Tentickle elements including intrinsic elements and component classes
+- **JSX.Element Type System** - Type definitions for all Agentick elements including intrinsic elements and component classes
 - **Component Primitives** - Pre-built components for messages, timelines, sections, content blocks, and more
 - **Fragment Support** - Symbol-based Fragment for grouping elements without extra wrappers
-- **Async Component Support** - Unlike React, Tentickle JSX supports `async` function components
+- **Async Component Support** - Unlike React, Agentick JSX supports `async` function components
 
 ### Why It Exists
 
@@ -171,7 +171,7 @@ flowchart TD
 
     subgraph "TypeScript Compiler"
         TC1["Parse JSX syntax"]
-        TC2["Resolve jsxImportSource: 'tentickle'"]
+        TC2["Resolve jsxImportSource: 'agentick'"]
         TC3["Generate jsx() call"]
     end
 
@@ -214,7 +214,7 @@ namespace JSX {
 
 ### 2. JSX Functions
 
-Tentickle implements the React 17+ automatic JSX transform:
+Agentick implements the React 17+ automatic JSX transform:
 
 ```typescript
 // Single child element
@@ -238,7 +238,7 @@ Fragments group elements without adding extra wrapper nodes:
 
 ```typescript
 // Symbol-based Fragment (not a string or function)
-export const Fragment: any = Symbol.for('tentickle.fragment');
+export const Fragment: any = Symbol.for('agentick.fragment');
 
 // Usage
 <Fragment>
@@ -290,7 +290,7 @@ namespace JSX {
 
 ### 5. Component Types
 
-Tentickle JSX supports multiple component types:
+Agentick JSX supports multiple component types:
 
 ```typescript
 // Function component (can be async!)
@@ -298,7 +298,7 @@ function MyComponent(props: MyProps): JSX.Element {
   return <Message role="user">{props.content}</Message>;
 }
 
-// Async function component (unique to Tentickle)
+// Async function component (unique to Agentick)
 async function AsyncComponent(props: Props): Promise<JSX.Element> {
   const data = await fetchData();
   return <Text>{data}</Text>;
@@ -516,7 +516,7 @@ Apply content renderers:
 {
   "compilerOptions": {
     "jsx": "react-jsx",
-    "jsxImportSource": "tentickle"
+    "jsxImportSource": "agentick"
   }
 }
 ```
@@ -524,14 +524,14 @@ Apply content renderers:
 ### How It Works
 
 1. **`jsx: "react-jsx"`** - Uses React 17+ automatic transform (not classic `React.createElement`)
-2. **`jsxImportSource: "tentickle"`** - TypeScript imports `jsx` from `tentickle/jsx-runtime`
+2. **`jsxImportSource: "agentick"`** - TypeScript imports `jsx` from `agentick/jsx-runtime`
 
 ```typescript
 // TypeScript sees:
 <User>Hello</User>
 
 // Compiles to:
-import { jsx } from "tentickle/jsx-runtime";
+import { jsx } from "agentick/jsx-runtime";
 jsx(User, { children: "Hello" });
 ```
 
@@ -543,7 +543,7 @@ For development or monorepo setups:
 {
   "compilerOptions": {
     "paths": {
-      "tentickle/jsx-runtime": ["./packages/core/src/jsx/jsx-runtime.ts"]
+      "agentick/jsx-runtime": ["./packages/core/src/jsx/jsx-runtime.ts"]
     }
   }
 }
@@ -556,7 +556,7 @@ For development or monorepo setups:
 ### Basic Agent Definition
 
 ```tsx
-import { Fragment, Model, User, Assistant, System } from "tentickle";
+import { Fragment, Model, User, Assistant, System } from "agentick";
 
 const ChatAgent = () => (
   <Fragment>
@@ -573,7 +573,7 @@ const result = await engine.execute.call({ timeline: [] }, <ChatAgent />);
 ### Async Components
 
 ```tsx
-// Tentickle supports async function components
+// Agentick supports async function components
 async function DataFetchingComponent() {
   const data = await fetchExternalData();
 
@@ -670,7 +670,7 @@ function ForkingAgent() {
 The Engine uses the Fiber Compiler to process JSX elements:
 
 ```typescript
-import { createEngine } from 'tentickle';
+import { createEngine } from 'agentick';
 
 const engine = createEngine({ model: myModel });
 
@@ -704,7 +704,7 @@ registry.register(MyCustomBlock, (props) => ({
 
 ### Exports
 
-From `tentickle`:
+From `agentick`:
 
 ```typescript
 // JSX runtime
@@ -760,8 +760,8 @@ The JSX module enables declarative agent definition using React-style syntax:
 
 - **`jsx-runtime.ts`** provides the core transformation functions (`jsx`, `jsxs`, `createElement`, `Fragment`)
 - **Components** provide semantic building blocks for agents (messages, content, configuration)
-- **TypeScript integration** via `jsxImportSource: "tentickle"` enables full type safety
-- **Async components** are supported since Tentickle doesn't have UI rendering constraints
+- **TypeScript integration** via `jsxImportSource: "agentick"` enables full type safety
+- **Async components** are supported since Agentick doesn't have UI rendering constraints
 - **Fiber Compiler** processes JSX trees into ContextObjectModel updates
 
 This allows developers to write AI agents with the same declarative, compositional patterns they use for React UIs.

@@ -1,16 +1,16 @@
 /**
- * Tentickle App Setup
+ * Agentick App Setup
  *
  * Creates the app with model configuration and agent component.
  */
 
-import { createApp } from "@tentickle/core/app";
+import { createApp } from "@agentick/core/app";
 import { TaskAssistantAgent } from "./agents/index.js";
 
 /**
- * Create the Tentickle app instance.
+ * Create the Agentick app instance.
  */
-export function createTentickleApp() {
+export function createAgentickApp() {
   return createApp(TaskAssistantAgent, {
     maxTicks: 50,
     devTools: true,

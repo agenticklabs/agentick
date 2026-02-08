@@ -1,7 +1,7 @@
 {
-  "name": "@tentickle/google",
+  "name": "@agentick/google",
   "version": "0.1.8",
-  "description": "Google AI adapter for Tentickle",
+  "description": "Google AI adapter for Agentick",
   "keywords": [
     "adapter",
     "agent",
@@ -9,15 +9,15 @@
     "gemini",
     "google"
   ],
-  "homepage": "https://github.com/rlindgren/tentickle#readme",
+  "homepage": "https://github.com/rlindgren/agentick#readme",
   "bugs": {
-    "url": "https://github.com/rlindgren/tentickle/issues"
+    "url": "https://github.com/rlindgren/agentick/issues"
   },
   "license": "ISC",
   "author": "Ryan Lindgren",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/rlindgren/tentickle.git",
+    "url": "git+https://github.com/rlindgren/agentick.git",
     "directory": "packages/adapters/google"
   },
   "files": [
@@ -41,8 +41,8 @@
     "dev": "tsc --watch"
   },
   "dependencies": {
-    "@tentickle/core": "workspace:*",
-    "@tentickle/shared": "workspace:*"
+    "@agentick/core": "workspace:*",
+    "@agentick/shared": "workspace:*"
   },
   "peerDependencies": {
     "@google/genai": "^1.31.0"

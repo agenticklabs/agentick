@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Tentickle CLI - Entry point
+ * Agentick CLI - Entry point
  */
 
 import { program } from "commander";
@@ -8,12 +8,12 @@ import { chatCommand } from "./commands/chat.js";
 import { sendCommand } from "./commands/send.js";
 import { statusCommand } from "./commands/status.js";
 
-program.name("tentickle").description("Terminal client for Tentickle agents").version("0.0.1");
+program.name("agentick").description("Terminal client for Agentick agents").version("0.0.1");
 
 // Chat command (interactive)
 program
   .command("chat")
-  .description("Interactive chat with a Tentickle agent")
+  .description("Interactive chat with a Agentick agent")
   .option("-u, --url <url>", "Server URL (e.g., http://localhost:3000/api/agent)")
   .option("-s, --session <id>", "Session ID")
   .option("-t, --token <token>", "Authentication token")

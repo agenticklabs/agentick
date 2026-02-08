@@ -1,18 +1,18 @@
-# @tentickle/core
+# @agentick/core
 
-Core engine for Tentickle. Provides the React-like reconciler, JSX components, and hooks for building LLM applications.
+Core engine for Agentick. Provides the React-like reconciler, JSX components, and hooks for building LLM applications.
 
 ## Installation
 
 ```bash
-pnpm add @tentickle/core
+pnpm add @agentick/core
 ```
 
 ## Quick Start
 
 ```tsx
-import { createApp, System, Timeline, Message, createTool } from "@tentickle/core";
-import { createOpenAIModel } from "@tentickle/openai";
+import { createApp, System, Timeline, Message, createTool } from "@agentick/core";
+import { createOpenAIModel } from "@agentick/openai";
 import { z } from "zod";
 
 // Create a tool
@@ -48,8 +48,8 @@ await session.send({ messages: [{ role: "user", content: [{ type: "text", text: 
 For simple agents that don't need custom rendering or hooks:
 
 ```tsx
-import { createAgent, knob } from "@tentickle/core";
-import { createOpenAIModel } from "@tentickle/openai";
+import { createAgent, knob } from "@agentick/core";
+import { createOpenAIModel } from "@agentick/openai";
 
 const agent = createAgent({
   system: "You are a helpful researcher.",
@@ -79,7 +79,7 @@ await session.send({
 `createAgent` wraps the `<Agent>` component and `createApp` — same capabilities, no JSX. For conditional tools, custom hooks, or composition, use `<Agent>` directly (Level 1+):
 
 ```tsx
-import { Agent, createApp } from "@tentickle/core";
+import { Agent, createApp } from "@agentick/core";
 
 function MyAgent() {
   const [verbose] = useKnob("verbose", false, { description: "Verbose mode" });
@@ -218,7 +218,7 @@ Normalized across providers. Three modes:
 | `{ type: "json" }`                       | Valid JSON output                |
 | `{ type: "json_schema", schema, name? }` | JSON conforming to a JSON Schema |
 
-For Zod schemas, call `zodToJsonSchema()` yourself — Tentickle doesn't bundle Zod.
+For Zod schemas, call `zodToJsonSchema()` yourself — Agentick doesn't bundle Zod.
 
 ### `<Markdown>` / `<XML>`
 
@@ -244,7 +244,7 @@ Control output formatting:
 ### State Hooks
 
 ```tsx
-import { useState, useSignal, useComputed, useComState } from "@tentickle/core";
+import { useState, useSignal, useComputed, useComState } from "@agentick/core";
 
 function MyComponent() {
   // React-style state
@@ -272,7 +272,7 @@ function MyComponent() {
 All lifecycle hooks follow the pattern: data first, COM (context) last.
 
 ```tsx
-import { useOnMount, useOnUnmount, useOnTickStart, useOnTickEnd, useAfterCompile, useContinuation } from "@tentickle/core";
+import { useOnMount, useOnUnmount, useOnTickStart, useOnTickEnd, useAfterCompile, useContinuation } from "@agentick/core";
 
 function MyComponent() {
   // Called when component mounts
@@ -319,7 +319,7 @@ function MyComponent() {
 ### Message Hooks
 
 ```tsx
-import { useQueuedMessages, useOnMessage } from "@tentickle/core";
+import { useQueuedMessages, useOnMessage } from "@agentick/core";
 
 function MyComponent() {
   // Access messages queued for this tick
@@ -335,7 +335,7 @@ function MyComponent() {
 ### Context Hooks
 
 ```tsx
-import { useCom, useTickState, useContextInfo } from "@tentickle/core";
+import { useCom, useTickState, useContextInfo } from "@agentick/core";
 
 function MyComponent() {
   // Access the Context Object Model
@@ -363,7 +363,7 @@ Knobs are **form controls for models**. The same way HTML inputs bridge humans t
 `useKnob()` creates reactive state + renders it to model context + registers a tool — all in one line.
 
 ```tsx
-import { useKnob, Knobs } from "@tentickle/core";
+import { useKnob, Knobs } from "@agentick/core";
 
 function Agent() {
   // String with options → model sees [select] type
@@ -422,7 +422,7 @@ The `set_knob` tool is always registered automatically. You control how knobs ar
 The provider pattern also exposes `useKnobsContext()` for fully custom rendering:
 
 ```tsx
-import { useKnobsContext } from "@tentickle/core";
+import { useKnobsContext } from "@agentick/core";
 
 function MyKnobUI() {
   const { knobs, groups, get } = useKnobsContext();
@@ -440,7 +440,7 @@ function MyKnobUI() {
 For `createAgent` / `<Agent>`, declare knobs as descriptors with `knob()`:
 
 ```tsx
-import { knob, createAgent } from "@tentickle/core";
+import { knob, createAgent } from "@agentick/core";
 
 const agent = createAgent({
   system: "You are a researcher.",
@@ -458,7 +458,7 @@ See `packages/core/src/hooks/README.md` for complete API reference including `Kn
 The `useContextInfo` hook provides real-time information about model context usage:
 
 ```tsx
-import { useContextInfo, type ContextInfo } from "@tentickle/core";
+import { useContextInfo, type ContextInfo } from "@agentick/core";
 
 function ContextAwareComponent() {
   const contextInfo = useContextInfo();
@@ -535,7 +535,7 @@ interface ContextInfo {
 For custom setups, you can create and provide your own context info store:
 
 ```tsx
-import { createContextInfoStore, ContextInfoProvider } from "@tentickle/core";
+import { createContextInfoStore, ContextInfoProvider } from "@agentick/core";
 
 // Create a store
 const contextInfoStore = createContextInfoStore();
@@ -563,7 +563,7 @@ const current = contextInfoStore.current;
 Create tools the model can call:
 
 ```tsx
-import { createTool } from "@tentickle/core";
+import { createTool } from "@agentick/core";
 import { z } from "zod";
 
 const WeatherTool = createTool({
@@ -603,7 +603,7 @@ function App() {
 ### Creating an App
 
 ```tsx
-import { createApp } from "@tentickle/core";
+import { createApp } from "@agentick/core";
 
 const app = createApp(MyApp, {
   model: myModel,
@@ -796,14 +796,14 @@ await handle.result;
 
 ### Middleware Inheritance
 
-Apps inherit from the global `Tentickle` instance by default:
+Apps inherit from the global `Agentick` instance by default:
 
 ```typescript
-import { Tentickle, createApp } from "@tentickle/core";
+import { Agentick, createApp } from "@agentick/core";
 
 // Register global middleware
-Tentickle.use('*', loggingMiddleware);
-Tentickle.use('tool:*', authMiddleware);
+Agentick.use('*', loggingMiddleware);
+Agentick.use('tool:*', authMiddleware);
 
 // App inherits global middleware (default)
 const app = createApp(MyApp, { model });
@@ -820,7 +820,7 @@ const testApp = createApp(TestApp, {
 For one-off executions without session management:
 
 ```tsx
-import { run } from "@tentickle/core";
+import { run } from "@agentick/core";
 
 const result = await run(
   <MyApp />,
@@ -864,7 +864,7 @@ const app = createApp(MyApp, {
 For debugging the reconciler itself with React DevTools:
 
 ```tsx
-import { enableReactDevTools } from "@tentickle/core";
+import { enableReactDevTools } from "@agentick/core";
 
 // Before creating sessions
 enableReactDevTools();  // Connects to npx react-devtools on port 8097

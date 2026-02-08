@@ -8,7 +8,7 @@ import { DevToolsServer, type DevToolsServerConfig } from "./devtools-server";
  *
  * @example
  * ```typescript
- * import { startDevToolsServer } from '@tentickle/devtools';
+ * import { startDevToolsServer } from '@agentick/devtools';
  *
  * const server = startDevToolsServer({ port: 3001, debug: true });
  * console.log(`DevTools: ${server.getUrl()}`);

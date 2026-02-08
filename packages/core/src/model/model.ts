@@ -5,18 +5,18 @@
  * Use createAdapter() from ./adapter.ts to create model adapters.
  */
 
-import type { Procedure } from "@tentickle/kernel";
+import type { Procedure } from "@agentick/kernel";
 import type {
   ModelInput as BaseModelInput,
   ModelOutput as BaseModelOutput,
   ModelConfig as BaseModelConfig,
   ModelToolReference as BaseModelToolReference,
-} from "@tentickle/shared/models";
-import type { StreamEvent } from "@tentickle/shared/streaming";
-import type { Message } from "@tentickle/shared/messages";
+} from "@agentick/shared/models";
+import type { StreamEvent } from "@agentick/shared/streaming";
+import type { Message } from "@agentick/shared/messages";
 import type { COMInput, TokenEstimator } from "../com/types";
 import type { EngineResponse } from "../engine/engine-response";
-import type { EventBlock, TextBlock, ContentBlock } from "@tentickle/shared";
+import type { EventBlock, TextBlock, ContentBlock } from "@agentick/shared";
 import type {
   LibraryGenerationOptions,
   ProviderGenerationOptions,
@@ -37,7 +37,7 @@ export type { BaseModelToolReference, BaseModelConfig, BaseModelInput, BaseModel
  *
  * @example
  * ```typescript
- * import { createAdapter } from '@tentickle/core/model';
+ * import { createAdapter } from '@agentick/core/model';
  *
  * const model = createAdapter({
  *   metadata: { id: 'my-model', provider: 'my-provider', capabilities: [] },
@@ -265,7 +265,7 @@ export interface ModelMetadata {
 /**
  * Model input (normalized across all providers)
  *
- * Extends the base ModelInput from @tentickle/shared with backend-specific fields.
+ * Extends the base ModelInput from @agentick/shared with backend-specific fields.
  */
 export interface ModelInput extends BaseModelInput {
   /**
@@ -321,7 +321,7 @@ export interface ModelInput extends BaseModelInput {
 /**
  * Model output (normalized across all providers)
  *
- * Extends the base ModelOutput from @tentickle/shared with backend-specific fields.
+ * Extends the base ModelOutput from @agentick/shared with backend-specific fields.
  */
 export interface ModelOutput extends BaseModelOutput {
   /**
@@ -335,7 +335,7 @@ export interface ModelOutput extends BaseModelOutput {
   raw: any;
 }
 
-// StreamEvent types are exported from '@tentickle/shared/streaming'
+// StreamEvent types are exported from '@agentick/shared/streaming'
 
 export type ModelToolReference =
   | BaseModelToolReference
@@ -375,7 +375,7 @@ export interface ModelOperations {
 /**
  * Model configuration
  *
- * Extends the base ModelConfig from @tentickle/shared with backend-specific fields.
+ * Extends the base ModelConfig from @agentick/shared with backend-specific fields.
  */
 export interface ModelConfig extends BaseModelConfig {
   /**

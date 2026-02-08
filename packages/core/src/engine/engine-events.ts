@@ -1,7 +1,7 @@
 /**
  * Engine Stream Events
  *
- * Re-exports and extends the platform-independent streaming types from @tentickle/shared.
+ * Re-exports and extends the platform-independent streaming types from @agentick/shared.
  * The engine emits StreamEvent (model + orchestration + result).
  *
  * Event Pattern:
@@ -22,7 +22,7 @@ export {
   isOrchestrationStreamEvent,
   isDeltaEvent,
   isFinalEvent,
-} from "@tentickle/shared";
+} from "@agentick/shared";
 
 export type {
   // Base types
@@ -72,7 +72,7 @@ export type {
   OrchestrationStreamEvent,
   ResultStreamEvent,
   StreamEvent,
-} from "@tentickle/shared";
+} from "@agentick/shared";
 
 // ============================================================================
 // Event Creation Helpers
@@ -94,7 +94,7 @@ import type {
   StopReason,
   ToolExecutor,
   Message,
-} from "@tentickle/shared";
+} from "@agentick/shared";
 
 let eventIdCounter = 0;
 

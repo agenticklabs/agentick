@@ -60,37 +60,37 @@ importers:
 
   example/express:
     dependencies:
-      '@tentickle/client':
+      '@agentick/client':
         specifier: link:../../packages/client
         version: link:../../packages/client
-      '@tentickle/client-multiplexer':
+      '@agentick/client-multiplexer':
         specifier: link:../../packages/client-multiplexer
         version: link:../../packages/client-multiplexer
-      '@tentickle/core':
+      '@agentick/core':
         specifier: link:../../packages/core
         version: link:../../packages/core
-      '@tentickle/devtools':
+      '@agentick/devtools':
         specifier: link:../../packages/devtools
         version: link:../../packages/devtools
-      '@tentickle/express':
+      '@agentick/express':
         specifier: link:../../packages/express
         version: link:../../packages/express
-      '@tentickle/gateway':
+      '@agentick/gateway':
         specifier: link:../../packages/gateway
         version: link:../../packages/gateway
-      '@tentickle/google':
+      '@agentick/google':
         specifier: link:../../packages/adapters/google
         version: link:../../packages/adapters/google
-      '@tentickle/kernel':
+      '@agentick/kernel':
         specifier: link:../../packages/kernel
         version: link:../../packages/kernel
-      '@tentickle/openai':
+      '@agentick/openai':
         specifier: link:../../packages/adapters/openai
         version: link:../../packages/adapters/openai
-      '@tentickle/server':
+      '@agentick/server':
         specifier: link:../../packages/server
         version: link:../../packages/server
-      '@tentickle/shared':
+      '@agentick/shared':
         specifier: link:../../packages/shared
         version: link:../../packages/shared
       cors:
@@ -133,10 +133,10 @@ importers:
 
   example/react:
     dependencies:
-      '@tentickle/client-multiplexer':
+      '@agentick/client-multiplexer':
         specifier: link:../../packages/client-multiplexer
         version: link:../../packages/client-multiplexer
-      '@tentickle/react':
+      '@agentick/react':
         specifier: link:../../packages/react
         version: link:../../packages/react
       react:
@@ -164,37 +164,37 @@ importers:
 
   packages/adapters/ai-sdk:
     dependencies:
+      '@agentick/core':
+        specifier: workspace:*
+        version: link:../../core
+      '@agentick/shared':
+        specifier: workspace:*
+        version: link:../../shared
       '@ai-sdk/openai':
         specifier: ^2.0.0
         version: 2.0.89(zod@4.3.5)
-      '@tentickle/core':
-        specifier: workspace:*
-        version: link:../../core
-      '@tentickle/shared':
-        specifier: workspace:*
-        version: link:../../shared
       ai:
         specifier: ^5.0.0
         version: 5.0.123(zod@4.3.5)
 
   packages/adapters/google:
     dependencies:
+      '@agentick/core':
+        specifier: workspace:*
+        version: link:../../core
+      '@agentick/shared':
+        specifier: workspace:*
+        version: link:../../shared
       '@google/genai':
         specifier: ^1.31.0
         version: 1.38.0(@modelcontextprotocol/sdk@1.25.3(hono@4.11.5)(zod@4.3.5))
-      '@tentickle/core':
-        specifier: workspace:*
-        version: link:../../core
-      '@tentickle/shared':
-        specifier: workspace:*
-        version: link:../../shared
 
   packages/adapters/openai:
     dependencies:
-      '@tentickle/core':
+      '@agentick/core':
         specifier: workspace:*
         version: link:../../core
-      '@tentickle/shared':
+      '@agentick/shared':
         specifier: workspace:*
         version: link:../../shared
       openai:
@@ -203,10 +203,10 @@ importers:
 
   packages/agent:
     dependencies:
-      '@tentickle/core':
+      '@agentick/core':
         specifier: workspace:*
         version: link:../core
-      '@tentickle/shared':
+      '@agentick/shared':
         specifier: workspace:*
         version: link:../shared
       react:
@@ -222,10 +222,10 @@ importers:
 
   packages/angular:
     dependencies:
-      '@tentickle/client':
+      '@agentick/client':
         specifier: workspace:*
         version: link:../client
-      '@tentickle/shared':
+      '@agentick/shared':
         specifier: workspace:*
         version: link:../shared
     devDependencies:
@@ -247,10 +247,10 @@ importers:
 
   packages/cli:
     dependencies:
-      '@tentickle/client':
+      '@agentick/client':
         specifier: workspace:*
         version: link:../client
-      '@tentickle/shared':
+      '@agentick/shared':
         specifier: workspace:*
         version: link:../shared
       chalk:
@@ -287,7 +287,7 @@ importers:
 
   packages/client:
     dependencies:
-      '@tentickle/shared':
+      '@agentick/shared':
         specifier: workspace:*
         version: link:../shared
     devDependencies:
@@ -297,7 +297,7 @@ importers:
 
   packages/client-multiplexer:
     dependencies:
-      '@tentickle/client':
+      '@agentick/client':
         specifier: workspace:*
         version: link:../client
     devDependencies:
@@ -307,15 +307,15 @@ importers:
 
   packages/core:
     dependencies:
+      '@agentick/kernel':
+        specifier: workspace:*
+        version: link:../kernel
+      '@agentick/shared':
+        specifier: workspace:*
+        version: link:../shared
       '@modelcontextprotocol/sdk':
         specifier: ^1.25.1
         version: 1.25.3(hono@4.11.5)(zod@4.3.5)
-      '@tentickle/kernel':
-        specifier: workspace:*
-        version: link:../kernel
-      '@tentickle/shared':
-        specifier: workspace:*
-        version: link:../shared
       react:
         specifier: ^18.2.0
         version: 18.3.1
@@ -338,7 +338,7 @@ importers:
 
   packages/devtools:
     dependencies:
-      '@tentickle/shared':
+      '@agentick/shared':
         specifier: workspace:*
         version: link:../shared
     devDependencies:
@@ -375,7 +375,7 @@ importers:
 
   packages/express:
     dependencies:
-      '@tentickle/gateway':
+      '@agentick/gateway':
         specifier: workspace:*
         version: link:../gateway
     devDependencies:
@@ -403,16 +403,16 @@ importers:
 
   packages/gateway:
     dependencies:
-      '@tentickle/core':
+      '@agentick/core':
         specifier: workspace:*
         version: link:../core
-      '@tentickle/kernel':
+      '@agentick/kernel':
         specifier: workspace:*
         version: link:../kernel
-      '@tentickle/server':
+      '@agentick/server':
         specifier: workspace:*
         version: link:../server
-      '@tentickle/shared':
+      '@agentick/shared':
         specifier: workspace:*
         version: link:../shared
       ws:
@@ -435,9 +435,18 @@ importers:
         specifier: ^3.0.0
         version: 3.2.4(@types/node@22.19.7)(happy-dom@17.6.3)(jiti@2.6.1)(tsx@4.21.0)
 
+  packages/guardrails:
+    dependencies:
+      '@agentick/kernel':
+        specifier: workspace:*
+        version: link:../kernel
+      '@agentick/shared':
+        specifier: workspace:*
+        version: link:../shared
+
   packages/kernel:
     dependencies:
-      '@tentickle/shared':
+      '@agentick/shared':
         specifier: workspace:*
         version: link:../shared
       pino:
@@ -456,12 +465,12 @@ importers:
 
   packages/nestjs:
     dependencies:
+      '@agentick/gateway':
+        specifier: workspace:*
+        version: link:../gateway
       '@nestjs/common':
         specifier: ^10.4.15
         version: 10.4.22(reflect-metadata@0.2.2)(rxjs@7.8.2)
-      '@tentickle/gateway':
-        specifier: workspace:*
-        version: link:../gateway
     devDependencies:
       '@nestjs/core':
         specifier: ^10.4.15
@@ -490,10 +499,10 @@ importers:
 
   packages/react:
     dependencies:
-      '@tentickle/client':
+      '@agentick/client':
         specifier: workspace:*
         version: link:../client
-      '@tentickle/shared':
+      '@agentick/shared':
         specifier: workspace:*
         version: link:../shared
     devDependencies:
@@ -524,10 +533,10 @@ importers:
 
   packages/server:
     dependencies:
-      '@tentickle/kernel':
+      '@agentick/kernel':
         specifier: workspace:*
         version: link:../kernel
-      '@tentickle/shared':
+      '@agentick/shared':
         specifier: workspace:*
         version: link:../shared
     devDependencies:

@@ -1,23 +1,23 @@
-# Tentickle Adapters
+# Agentick Adapters
 
-Model adapters connect Tentickle to AI providers. This document explains how to create custom adapters.
+Model adapters connect Agentick to AI providers. This document explains how to create custom adapters.
 
 ## Available Adapters
 
-| Package             | Provider            | Description           |
-| ------------------- | ------------------- | --------------------- |
-| `@tentickle/openai` | OpenAI              | Native OpenAI API     |
-| `@tentickle/google` | Google AI / Vertex  | Native Google GenAI   |
-| `@tentickle/ai-sdk` | Any AI SDK provider | Vercel AI SDK wrapper |
+| Package            | Provider            | Description           |
+| ------------------ | ------------------- | --------------------- |
+| `@agentick/openai` | OpenAI              | Native OpenAI API     |
+| `@agentick/google` | Google AI / Vertex  | Native Google GenAI   |
+| `@agentick/ai-sdk` | Any AI SDK provider | Vercel AI SDK wrapper |
 
 ## Creating Custom Adapters
 
-Use `createAdapter` from `@tentickle/core/model` to create adapters with minimal boilerplate.
+Use `createAdapter` from `@agentick/core/model` to create adapters with minimal boilerplate.
 
 ### Basic Structure
 
 ```typescript
-import { createAdapter, StopReason, type ModelClass } from '@tentickle/core/model';
+import { createAdapter, StopReason, type ModelClass } from '@agentick/core/model';
 
 export function createMyProviderModel(config: MyConfig): ModelClass {
   const client = new MyProviderClient(config);
@@ -30,7 +30,7 @@ export function createMyProviderModel(config: MyConfig): ModelClass {
     },
 
     prepareInput: (input) => {
-      // Transform Tentickle ModelInput → provider format
+      // Transform Agentick ModelInput → provider format
       return {
         model: config.model,
         messages: input.messages.map(toProviderMessage),
@@ -160,7 +160,7 @@ if (chunk.usage && !chunk.choices?.length) {
 ## StopReason Values
 
 ```typescript
-import { StopReason } from '@tentickle/shared';
+import { StopReason } from '@agentick/shared';
 
 StopReason.STOP           // Normal completion
 StopReason.MAX_TOKENS     // Hit token limit
@@ -317,6 +317,6 @@ export function myProvider(config?: MyConfig): ModelClass {
 }
 
 // Usage
-import { myProvider } from '@tentickle/my-provider';
+import { myProvider } from '@agentick/my-provider';
 const model = myProvider({ model: 'my-model' });
 ```

@@ -6,8 +6,8 @@
  */
 
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from "http";
-import { extractToken, validateAuth, setSSEHeaders, type AuthResult } from "@tentickle/server";
-import { isGuardError } from "@tentickle/shared";
+import { extractToken, validateAuth, setSSEHeaders, type AuthResult } from "@agentick/server";
+import { isGuardError } from "@agentick/shared";
 import type { GatewayMessage, RequestMessage } from "./transport-protocol.js";
 import type { ClientState } from "./types.js";
 import { BaseTransport, type TransportClient, type TransportConfig } from "./transport.js";

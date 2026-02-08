@@ -1,4 +1,4 @@
-# @tentickle/core/com Architecture
+# @agentick/core/com Architecture
 
 > **The Context Object Model - shared state tree for agent execution**
 
@@ -40,7 +40,7 @@ The COM module provides:
 
 ### Why It Exists
 
-Tentickle components need a shared data structure that:
+Agentick components need a shared data structure that:
 
 1. **Enables composition** - Multiple components contribute to the same context
 2. **Maintains conversation history** - Timeline persists across ticks
@@ -1077,7 +1077,7 @@ section2.content = [block];
 
 ## Summary
 
-The Context Object Model (COM) is the shared state tree for Tentickle agent execution:
+The Context Object Model (COM) is the shared state tree for Agentick agent execution:
 
 - **ContextObjectModel** - The mutable tree that components populate
 - **Timeline** - Conversation history (user, assistant, tool messages)

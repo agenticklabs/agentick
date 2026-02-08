@@ -1,4 +1,4 @@
-import { GuardError } from "@tentickle/shared";
+import { GuardError } from "@agentick/shared";
 
 /**
  * Error thrown when a guardrail denies a tool execution.

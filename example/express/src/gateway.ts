@@ -1,5 +1,5 @@
 /**
- * Tentickle Example - Gateway Server
+ * Agentick Example - Gateway Server
  *
  * Demonstrates running the Gateway as a standalone server.
  * The Gateway provides both WebSocket and HTTP/SSE access to the same agent.
@@ -16,7 +16,7 @@
  * - Gateway server (pnpm gateway): http://localhost:18790/api
  *
  * Both provide the same API surface via different mechanisms:
- * - Express: REST routes + createTentickleHandler
+ * - Express: REST routes + createAgentickHandler
  * - Gateway: /invoke endpoint + custom methods
  */
 
@@ -24,9 +24,9 @@ import { config as loadEnv } from "dotenv";
 loadEnv();
 
 import { z } from "zod";
-import { createGateway, method } from "@tentickle/gateway";
-import { DevToolsServer } from "@tentickle/devtools";
-import { createTentickleApp } from "./setup.js";
+import { createGateway, method } from "@agentick/gateway";
+import { DevToolsServer } from "@agentick/devtools";
+import { createAgentickApp } from "./setup.js";
 import { TodoListService } from "./services/todo-list.service.js";
 
 const GATEWAY_PORT = Number(process.env["GATEWAY_PORT"]) || 18789;
@@ -38,8 +38,8 @@ async function main() {
   const devtools = new DevToolsServer({ port: DEVTOOLS_PORT, debug: true });
   devtools.start();
 
-  // Create Tentickle app
-  const tentickleApp = createTentickleApp();
+  // Create Agentick app
+  const agentickApp = createAgentickApp();
 
   // Create Gateway with custom methods for todo operations
   const gateway = createGateway({
@@ -55,7 +55,7 @@ async function main() {
 
     // Apps
     apps: {
-      assistant: tentickleApp,
+      assistant: agentickApp,
     },
     defaultApp: "assistant",
 
@@ -190,8 +190,8 @@ async function main() {
           }),
           handler: async (params) => {
             const session = params.sessionId
-              ? await tentickleApp.session(params.sessionId)
-              : await tentickleApp.session();
+              ? await agentickApp.session(params.sessionId)
+              : await agentickApp.session();
             return { sessionId: session.id };
           },
         }),
@@ -206,12 +206,12 @@ async function main() {
           }),
           handler: async (params) => {
             // Check both in-memory and hibernated sessions
-            const inMemory = tentickleApp.has(params.sessionId);
-            const hibernated = await tentickleApp.isHibernated(params.sessionId);
+            const inMemory = agentickApp.has(params.sessionId);
+            const hibernated = await agentickApp.isHibernated(params.sessionId);
             if (!inMemory && !hibernated) {
               throw new Error("Session not found");
             }
-            const session = await tentickleApp.session(params.sessionId);
+            const session = await agentickApp.session(params.sessionId);
             const snapshot = session.snapshot();
             return {
               sessionId: params.sessionId,
@@ -240,7 +240,7 @@ async function main() {
   gateway.on("started", ({ port, host }) => {
     console.log(`
 ╔══════════════════════════════════════════════════════════════╗
-║           Tentickle Gateway Server                           ║
+║           Agentick Gateway Server                           ║
 ╠══════════════════════════════════════════════════════════════╣
 ║  WebSocket:  ws://${host}:${port}                       ║
 ║  HTTP/SSE:   http://${host}:${HTTP_PORT}                      ║
@@ -262,7 +262,7 @@ async function main() {
 ║    health                      Health check                  ║
 ╠══════════════════════════════════════════════════════════════╣
 ║  Connect with CLI (WebSocket):                               ║
-║    tentickle chat --url ws://${host}:${port}            ║
+║    agentick chat --url ws://${host}:${port}            ║
 ║                                                              ║
 ║  Connect from browser (HTTP/SSE):                            ║
 ║    createClient({ baseUrl: 'http://${host}:${HTTP_PORT}/api' })    ║

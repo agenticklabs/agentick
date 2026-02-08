@@ -1,7 +1,7 @@
 /**
  * Model component - React function component version.
  *
- * Uses React hooks (useEffect) for lifecycle instead of Tentickle Component class.
+ * Uses React hooks (useEffect) for lifecycle instead of Agentick Component class.
  */
 
 import React, { useEffect, useDebugValue } from "react";

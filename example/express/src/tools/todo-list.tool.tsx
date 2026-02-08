@@ -8,8 +8,8 @@
  * - JSX render function for showing current state to model
  */
 
-import { createTool, Context } from "@tentickle/core";
-import { Section } from "@tentickle/core";
+import { createTool, Context } from "@agentick/core";
+import { Section } from "@agentick/core";
 import { z } from "zod";
 import { TodoListService, type TodoItem } from "../services/todo-list.service";
 

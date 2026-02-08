@@ -1,10 +1,10 @@
 /**
- * Server Types for @tentickle/server
+ * Server Types for @agentick/server
  *
- * @module @tentickle/server/types
+ * @module @agentick/server/types
  */
 
-import type { ChannelEvent } from "@tentickle/shared";
+import type { ChannelEvent } from "@agentick/shared";
 
 // Re-export protocol types from shared for convenience
 export type {
@@ -17,8 +17,8 @@ export type {
   ToolConfirmationResponse,
   SessionState,
   CreateSessionResponse,
-} from "@tentickle/shared";
-export { FrameworkChannels, ErrorCodes } from "@tentickle/shared";
+} from "@agentick/shared";
+export { FrameworkChannels, ErrorCodes } from "@agentick/shared";
 
 // ============================================================================
 // SSE Types

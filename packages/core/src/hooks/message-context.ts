@@ -230,7 +230,7 @@ export function useQueuedMessages(): ExecutionMessage[] {
     const tickState = useTickState();
     return (tickState?.queuedMessages ?? []) as ExecutionMessage[];
   } catch {
-    // Fallback to message context queue if outside TentickleProvider
+    // Fallback to message context queue if outside AgentickProvider
     const ctx = useContext(MessageContext);
     return ctx?.getQueuedMessages() ?? [];
   }

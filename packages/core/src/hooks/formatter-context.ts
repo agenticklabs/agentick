@@ -6,7 +6,7 @@
  */
 
 import React, { createContext, useContext, type ReactNode } from "react";
-import type { ContentBlock } from "@tentickle/shared";
+import type { ContentBlock } from "@agentick/shared";
 import type { SemanticContentBlock } from "../renderers";
 
 // Helper for createElement

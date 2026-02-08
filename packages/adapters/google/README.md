@@ -1,11 +1,11 @@
-# @tentickle/google
+# @agentick/google
 
-Google AI / Vertex AI adapter for Tentickle.
+Google AI / Vertex AI adapter for Agentick.
 
 ## Installation
 
 ```bash
-pnpm add @tentickle/google
+pnpm add @agentick/google
 ```
 
 ## Usage
@@ -13,8 +13,8 @@ pnpm add @tentickle/google
 ### Factory Pattern (Recommended)
 
 ```tsx
-import { google } from '@tentickle/google';
-import { createApp } from '@tentickle/core';
+import { google } from '@agentick/google';
+import { createApp } from '@agentick/core';
 
 // Google AI Studio
 const model = google({
@@ -60,7 +60,7 @@ const model = google({
 ### JSX Component Pattern
 
 ```tsx
-import { GoogleModel } from '@tentickle/google';
+import { GoogleModel } from '@agentick/google';
 
 function MyAgent() {
   return (

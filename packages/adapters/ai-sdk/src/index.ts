@@ -1,13 +1,13 @@
 /**
- * # Tentickle Vercel AI SDK Adapter
+ * # Agentick Vercel AI SDK Adapter
  *
- * Use Vercel AI SDK models with Tentickle apps.
+ * Use Vercel AI SDK models with Agentick apps.
  *
  * ## Usage
  *
  * ```typescript
- * import { createApp } from '@tentickle/core/app';
- * import { aiSdk } from '@tentickle/ai-sdk';
+ * import { createApp } from '@agentick/core/app';
+ * import { aiSdk } from '@agentick/ai-sdk';
  * import { openai } from '@ai-sdk/openai';
  *
  * // Create an EngineModel from AI SDK LanguageModel
@@ -33,7 +33,7 @@
  * @see {@link aiSdk} - Create EngineModel from AI SDK LanguageModel
  * @see {@link createAiSdkModel} - Alternative factory function
  *
- * @module @tentickle/ai-sdk
+ * @module @agentick/ai-sdk
  */
 
 // ============================================================================

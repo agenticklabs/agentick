@@ -1,17 +1,17 @@
-# @tentickle/guardrails
+# @agentick/guardrails
 
-Guardrail middleware for Tentickle — gate tool execution with rules and classifiers.
+Guardrail middleware for Agentick — gate tool execution with rules and classifiers.
 
 ## Install
 
 ```bash
-pnpm add @tentickle/guardrails
+pnpm add @agentick/guardrails
 ```
 
 ## Quick Start
 
 ```typescript
-import { toolGuardrail, deny, allow } from "@tentickle/guardrails";
+import { toolGuardrail, deny, allow } from "@agentick/guardrails";
 
 const guardrail = toolGuardrail({
   rules: [
@@ -96,7 +96,7 @@ const guardrail = toolGuardrail({
 Denied tools throw `GuardrailDenied` (extends `GuardError`):
 
 ```typescript
-import { isGuardError } from "@tentickle/shared";
+import { isGuardError } from "@agentick/shared";
 
 try {
   await tool.run(input);

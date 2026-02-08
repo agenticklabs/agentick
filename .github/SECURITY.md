@@ -36,4 +36,4 @@ We follow responsible disclosure:
 3. We release the fix
 4. We publicly disclose the issue (with credit to reporter)
 
-Thank you for helping keep Tentickle secure!
+Thank you for helping keep Agentick secure!

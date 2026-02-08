@@ -1,4 +1,4 @@
-# @tentickle/client Architecture
+# @agentick/client Architecture
 
 The client is a multiplexed SSE consumer that provides **cold/hot session accessors** and **execution handles**. It is intentionally thin and mirrors the server’s session model.
 

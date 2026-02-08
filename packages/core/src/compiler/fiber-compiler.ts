@@ -1,7 +1,7 @@
 /**
  * V2 Fiber Compiler
  *
- * Uses react-reconciler to build a TentickleNode tree from React elements.
+ * Uses react-reconciler to build a AgentickNode tree from React elements.
  * With React's native JSX runtime, elements are already React elements -
  * no conversion needed.
  */
@@ -18,13 +18,13 @@ import {
   flushSync,
   flushPassiveEffects,
   type FiberRoot,
-  type TentickleContainer,
+  type AgentickContainer,
 } from "../reconciler";
 import { collect } from "./collector";
 import type { CompiledStructure, CompileResult } from "./types";
 import { createEmptyCompiledStructure } from "./types";
 import {
-  TentickleProvider,
+  AgentickProvider,
   createRuntimeStore,
   storeHasPendingData,
   storeResolvePendingData,
@@ -130,7 +130,7 @@ type Phase =
  */
 export class FiberCompiler {
   // React reconciler state
-  private container: TentickleContainer;
+  private container: AgentickContainer;
   private root: FiberRoot;
 
   // Per-session runtime store (isolated state)
@@ -264,7 +264,7 @@ export class FiberCompiler {
                   MessageProvider,
                   { store: this.messageStore },
                   h(
-                    TentickleProvider,
+                    AgentickProvider,
                     {
                       ctx: this.ctx as any,
                       tickState: this.tickState as any, // Different TickState types are compatible
@@ -572,7 +572,7 @@ export class FiberCompiler {
 
   /**
    * Serialize the fiber tree for debugging/devtools.
-   * In v2, we serialize the TentickleNode tree from the container.
+   * In v2, we serialize the AgentickNode tree from the container.
    */
   serializeFiberTree(): SerializedFiberNode | null {
     if (this.container.children.length === 0) {

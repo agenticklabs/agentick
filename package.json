@@ -1,8 +1,8 @@
 {
-  "name": "tentickle",
+  "name": "agentick",
   "version": "0.0.1",
   "private": true,
-  "description": "JSX agent harness framework",
+  "description": "Build agents like you build apps.",
   "keywords": [
     "agent",
     "ai",
@@ -10,15 +10,15 @@
     "harness",
     "jsx"
   ],
-  "homepage": "https://github.com/rlindgren/tentickle#readme",
+  "homepage": "https://github.com/rlindgren/agentick#readme",
   "bugs": {
-    "url": "https://github.com/rlindgren/tentickle/issues"
+    "url": "https://github.com/rlindgren/agentick/issues"
   },
   "license": "ISC",
   "author": "Ryan Lindgren",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/rlindgren/tentickle.git"
+    "url": "git+https://github.com/rlindgren/agentick.git"
   },
   "type": "module",
   "scripts": {

@@ -2,8 +2,8 @@
 // JSX Component
 // ============================================================================
 
-import { type ModelComponentProps, Model } from "@tentickle/core/jsx";
-import { createElement } from "@tentickle/core/jsx-runtime";
+import { type ModelComponentProps, Model } from "@agentick/core/jsx";
+import { createElement } from "@agentick/core/jsx-runtime";
 import { createOpenAIModel } from "./openai";
 import { type OpenAIAdapterConfig } from "./types";
 

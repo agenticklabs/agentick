@@ -1,5 +1,5 @@
 /**
- * @tentickle/gateway
+ * @agentick/gateway
  *
  * Standalone daemon for multi-client, multi-agent access.
  * Supports both WebSocket and HTTP/SSE transports.

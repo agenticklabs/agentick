@@ -2,7 +2,7 @@ import { fromEngineState, toEngineState } from "./language-model";
 import type { COMInput } from "../../com/types";
 import type { EventMessage, Message } from "../../content";
 import { type ModelOutput } from "../model";
-import { StopReason } from "@tentickle/shared";
+import { StopReason } from "@agentick/shared";
 
 describe("language-model transformers", () => {
   describe("fromEngineState", () => {

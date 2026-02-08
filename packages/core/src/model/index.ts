@@ -1,8 +1,8 @@
 /**
- * # Tentickle Models
+ * # Agentick Models
  *
  * Model adapters and utilities for connecting to AI providers.
- * Models are the interface between Tentickle and AI services.
+ * Models are the interface between Agentick and AI services.
  *
  * ## Features
  *
@@ -14,7 +14,7 @@
  * ## Quick Start
  *
  * ```typescript
- * import { createAdapter, StopReason } from '@tentickle/core/model';
+ * import { createAdapter, StopReason } from '@agentick/core/model';
  *
  * const model = createAdapter({
  *   metadata: { id: 'my-model', provider: 'my-provider', capabilities: [] },
@@ -36,14 +36,14 @@
  *
  * ## Pre-built Adapters
  *
- * - `@tentickle/ai-sdk` - Vercel AI SDK (multi-provider)
- * - `@tentickle/openai` - OpenAI native
- * - `@tentickle/google` - Google AI native
+ * - `@agentick/ai-sdk` - Vercel AI SDK (multi-provider)
+ * - `@agentick/openai` - OpenAI native
+ * - `@agentick/google` - Google AI native
  *
  * @see {@link createAdapter} - Main adapter factory
  * @see {@link ModelClass} - Unified model type
  *
- * @module tentickle/model
+ * @module agentick/model
  */
 
 export * from "./model";

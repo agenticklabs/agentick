@@ -9,7 +9,7 @@ import React from "react";
 import { FiberCompiler } from "../compiler/fiber-compiler";
 import type { CompiledStructure, CompiledTool } from "../compiler/types";
 import type { ComponentFunction } from "../app/types";
-import type { ContentBlock } from "@tentickle/shared";
+import type { ContentBlock } from "@agentick/shared";
 import type { SemanticContentBlock, SemanticNode } from "../renderers/base";
 
 // ============================================================================
@@ -107,7 +107,7 @@ import { createMockCom, createMockTickState } from "./mocks";
  *
  * @example
  * ```tsx
- * import { compileAgent } from '@tentickle/core/testing';
+ * import { compileAgent } from '@agentick/core/testing';
  *
  * test('agent renders correct system prompt', async () => {
  *   const { sections, tools } = await compileAgent(MyAgent, {

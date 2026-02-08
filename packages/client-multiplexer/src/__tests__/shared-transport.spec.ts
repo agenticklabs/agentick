@@ -7,7 +7,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { SharedTransport, createSharedTransport } from "../shared-transport";
-import type { TransportState } from "@tentickle/client";
+import type { TransportState } from "@agentick/client";
 
 // Mock BroadcastChannel
 class MockBroadcastChannel {

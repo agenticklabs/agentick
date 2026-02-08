@@ -12,7 +12,7 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { existsSync, readFileSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { devToolsEmitter, type DevToolsEvent } from "@tentickle/shared";
+import { devToolsEmitter, type DevToolsEvent } from "@agentick/shared";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 

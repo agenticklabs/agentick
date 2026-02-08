@@ -1,9 +1,9 @@
 /**
- * TentickleModule - NestJS module for Tentickle Gateway.
+ * AgentickModule - NestJS module for Agentick Gateway.
  *
- * This is a thin adapter - all business logic lives in @tentickle/gateway.
+ * This is a thin adapter - all business logic lives in @agentick/gateway.
  *
- * @module @tentickle/nestjs/module
+ * @module @agentick/nestjs/module
  */
 
 import {
@@ -18,7 +18,7 @@ import {
   Res,
 } from "@nestjs/common";
 import type { Request, Response } from "express";
-import { Gateway, type GatewayConfig } from "@tentickle/gateway";
+import { Gateway, type GatewayConfig } from "@agentick/gateway";
 
 // ============================================================================
 // Injection Tokens
@@ -34,7 +34,7 @@ export const TENTICKLE_GATEWAY = "TENTICKLE_GATEWAY";
  * Gateway config type for NestJS module.
  * Excludes standalone-mode-only options.
  */
-export type TentickleModuleOptions = Omit<
+export type AgentickModuleOptions = Omit<
   GatewayConfig,
   "port" | "host" | "transport" | "httpPort"
 > & {
@@ -51,7 +51,7 @@ export type TentickleModuleOptions = Omit<
 // ============================================================================
 
 @Injectable()
-export class TentickleService {
+export class AgentickService {
   constructor(@Inject(TENTICKLE_GATEWAY) public readonly gateway: Gateway) {}
 
   /**
@@ -67,12 +67,12 @@ export class TentickleService {
 // ============================================================================
 
 @Controller()
-export class TentickleController {
-  constructor(private readonly tentickle: TentickleService) {}
+export class AgentickController {
+  constructor(private readonly agentick: AgentickService) {}
 
   @All("*")
   async handleAll(@Req() req: Request, @Res() res: Response): Promise<void> {
-    await this.tentickle.handleRequest(req, res);
+    await this.agentick.handleRequest(req, res);
   }
 }
 
@@ -81,16 +81,16 @@ export class TentickleController {
 // ============================================================================
 
 /**
- * NestJS module for Tentickle.
+ * NestJS module for Agentick.
  *
  * @example Default controller (simplest)
  * ```typescript
- * import { TentickleModule } from '@tentickle/nestjs';
- * import { createApp } from '@tentickle/core';
+ * import { AgentickModule } from '@agentick/nestjs';
+ * import { createApp } from '@agentick/core';
  *
  * @Module({
  *   imports: [
- *     TentickleModule.forRoot({
+ *     AgentickModule.forRoot({
  *       apps: { assistant: createApp(<MyAgent />) },
  *       defaultApp: "assistant",
  *     }),
@@ -102,12 +102,12 @@ export class TentickleController {
  *
  * @example With custom methods
  * ```typescript
- * import { TentickleModule, method } from '@tentickle/nestjs';
+ * import { AgentickModule, method } from '@agentick/nestjs';
  * import { z } from "zod";
  *
  * @Module({
  *   imports: [
- *     TentickleModule.forRoot({
+ *     AgentickModule.forRoot({
  *       apps: { assistant: myApp },
  *       defaultApp: "assistant",
  *       methods: {
@@ -124,11 +124,11 @@ export class TentickleController {
  * export class AppModule {}
  * ```
  *
- * @example Custom controller with TentickleService
+ * @example Custom controller with AgentickService
  * ```typescript
  * @Module({
  *   imports: [
- *     TentickleModule.forRoot({
+ *     AgentickModule.forRoot({
  *       apps: { assistant: myApp },
  *       defaultApp: "assistant",
  *       registerController: false,
@@ -140,21 +140,21 @@ export class TentickleController {
  *
  * @Controller('chat')
  * export class ChatController {
- *   constructor(private tentickle: TentickleService) {}
+ *   constructor(private agentick: AgentickService) {}
  *
  *   @All('*')
  *   async handleAll(@Req() req: Request, @Res() res: Response) {
- *     await this.tentickle.handleRequest(req, res);
+ *     await this.agentick.handleRequest(req, res);
  *   }
  * }
  * ```
  */
 @Module({})
-export class TentickleModule {
+export class AgentickModule {
   /**
    * Register module with static configuration.
    */
-  static forRoot(options: TentickleModuleOptions): DynamicModule {
+  static forRoot(options: AgentickModuleOptions): DynamicModule {
     // Create gateway in embedded mode
     const gateway = new Gateway({
       ...options,
@@ -166,16 +166,16 @@ export class TentickleModule {
         provide: TENTICKLE_GATEWAY,
         useValue: gateway,
       },
-      TentickleService,
+      AgentickService,
     ];
 
-    const controllers = options.registerController !== false ? [TentickleController] : [];
+    const controllers = options.registerController !== false ? [AgentickController] : [];
 
     return {
-      module: TentickleModule,
+      module: AgentickModule,
       providers,
       controllers,
-      exports: [TentickleService, TENTICKLE_GATEWAY],
+      exports: [AgentickService, TENTICKLE_GATEWAY],
     };
   }
 }

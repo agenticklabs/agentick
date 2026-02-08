@@ -1,20 +1,20 @@
-# @tentickle/client-multiplexer
+# @agentick/client-multiplexer
 
-Multi-tab connection multiplexer for Tentickle client. Reduces server connections by sharing a single SSE connection across all browser tabs.
+Multi-tab connection multiplexer for Agentick client. Reduces server connections by sharing a single SSE connection across all browser tabs.
 
 ## Installation
 
 ```bash
-npm install @tentickle/client-multiplexer
+npm install @agentick/client-multiplexer
 # or
-pnpm add @tentickle/client-multiplexer
+pnpm add @agentick/client-multiplexer
 ```
 
 ## Quick Start
 
 ```typescript
-import { createClient } from '@tentickle/client';
-import { createSharedTransport } from '@tentickle/client-multiplexer';
+import { createClient } from '@agentick/client';
+import { createSharedTransport } from '@agentick/client-multiplexer';
 
 // Create client with shared transport
 const client = createClient({
@@ -44,7 +44,7 @@ The multiplexer uses browser tab leader election to ensure only one tab maintain
 ## Features
 
 - **Resource Efficient**: Single server connection regardless of tab count
-- **Transparent**: Works with existing Tentickle client code
+- **Transparent**: Works with existing Agentick client code
 - **Automatic Failover**: Seamless recovery when leader tab closes
 - **Subscription Aggregation**: Leader maintains union of all tabs' subscriptions
 - **Per-Tab Filtering**: Each tab only receives events for its own sessions
@@ -56,7 +56,7 @@ The multiplexer uses browser tab leader election to ensure only one tab maintain
 Creates a shared transport instance. Supports both SSE and WebSocket transports.
 
 ```typescript
-import { createSharedTransport, type SharedTransportConfig } from '@tentickle/client-multiplexer';
+import { createSharedTransport, type SharedTransportConfig } from '@agentick/client-multiplexer';
 
 // SSE transport (default for http:// URLs)
 const sseTransport = createSharedTransport({
@@ -87,7 +87,7 @@ const explicitTransport = createSharedTransport({
 
 ### SharedTransport
 
-The transport implements `ClientTransport` from `@tentickle/client` plus additional properties:
+The transport implements `ClientTransport` from `@agentick/client` plus additional properties:
 
 ```typescript
 // Check leadership status
@@ -105,8 +105,8 @@ transport.onLeadershipChange((isLeader) => {
 ### Accessing Transport from Client
 
 ```typescript
-import { createClient, type ClientTransport } from '@tentickle/client';
-import { createSharedTransport, type SharedTransport } from '@tentickle/client-multiplexer';
+import { createClient, type ClientTransport } from '@agentick/client';
+import { createSharedTransport, type SharedTransport } from '@agentick/client-multiplexer';
 
 const client = createClient({
   baseUrl: '/api',

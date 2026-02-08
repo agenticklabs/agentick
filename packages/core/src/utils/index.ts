@@ -1,5 +1,5 @@
 /**
- * Utility functions and services for the Tentickle engine.
+ * Utility functions and services for the Agentick engine.
  *
  * Includes:
  * - Deep merge utilities
@@ -9,10 +9,10 @@
  * - Normalization utilities
  * - Entity ID generation
  *
- * @module tentickle/utils
+ * @module agentick/utils
  */
 
-export * from "@tentickle/shared/utils";
+export * from "@agentick/shared/utils";
 export * from "./abort-utils";
 export * from "./registry";
 export * from "./normalization";

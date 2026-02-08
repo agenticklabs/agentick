@@ -2,7 +2,7 @@
  * Input Normalization Types
  *
  * Platform-independent types for flexible input handling.
- * Used by both backend (@tentickle/core) and frontend (@tentickle/client) for
+ * Used by both backend (@agentick/core) and frontend (@agentick/client) for
  * normalizing various input formats into standardized structures.
  */
 

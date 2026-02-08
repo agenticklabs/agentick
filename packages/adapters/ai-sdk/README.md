@@ -1,11 +1,11 @@
-# @tentickle/ai-sdk
+# @agentick/ai-sdk
 
-Vercel AI SDK adapter for Tentickle. Use any AI SDK provider (OpenAI, Anthropic, Google, Mistral, etc.).
+Vercel AI SDK adapter for Agentick. Use any AI SDK provider (OpenAI, Anthropic, Google, Mistral, etc.).
 
 ## Installation
 
 ```bash
-pnpm add @tentickle/ai-sdk ai @ai-sdk/openai
+pnpm add @agentick/ai-sdk ai @ai-sdk/openai
 # or @ai-sdk/anthropic, @ai-sdk/google, etc.
 ```
 
@@ -14,9 +14,9 @@ pnpm add @tentickle/ai-sdk ai @ai-sdk/openai
 ### Factory Pattern (Recommended)
 
 ```tsx
-import { createAiSdkModel } from '@tentickle/ai-sdk';
+import { createAiSdkModel } from '@agentick/ai-sdk';
 import { openai } from '@ai-sdk/openai';
-import { createApp } from '@tentickle/core';
+import { createApp } from '@agentick/core';
 
 const model = createAiSdkModel({
   model: openai('gpt-4o'),
@@ -47,7 +47,7 @@ const result = await model.generate({
 ### Multiple Providers
 
 ```tsx
-import { createAiSdkModel } from '@tentickle/ai-sdk';
+import { createAiSdkModel } from '@agentick/ai-sdk';
 import { openai } from '@ai-sdk/openai';
 import { anthropic } from '@ai-sdk/anthropic';
 import { google } from '@ai-sdk/google';
@@ -65,7 +65,7 @@ const gemini = createAiSdkModel({ model: google('gemini-2.0-flash') });
 ### JSX Component Pattern
 
 ```tsx
-import { AiSdkModel } from '@tentickle/ai-sdk';
+import { AiSdkModel } from '@agentick/ai-sdk';
 import { openai } from '@ai-sdk/openai';
 
 function MyAgent() {

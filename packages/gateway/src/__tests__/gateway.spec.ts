@@ -4,7 +4,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { Gateway, createGateway } from "../gateway.js";
-import { createMockApp as createCoreMockApp, type MockApp } from "@tentickle/core/testing";
+import { createMockApp as createCoreMockApp, type MockApp } from "@agentick/core/testing";
 import WebSocket from "ws";
 
 describe("Gateway", () => {

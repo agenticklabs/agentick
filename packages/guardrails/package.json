@@ -1,7 +1,7 @@
 {
-  "name": "@tentickle/guardrails",
+  "name": "@agentick/guardrails",
   "version": "0.0.1",
-  "description": "Guardrail middleware for Tentickle — gate tool execution with rules and classifiers",
+  "description": "Guardrail middleware for Agentick — gate tool execution with rules and classifiers",
   "type": "module",
   "main": "src/index.ts",
   "exports": {
@@ -25,7 +25,7 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@tentickle/kernel": "workspace:*",
-    "@tentickle/shared": "workspace:*"
+    "@agentick/kernel": "workspace:*",
+    "@agentick/shared": "workspace:*"
   }
 }

@@ -1,7 +1,7 @@
 /**
- * # Tentickle Channels
+ * # Agentick Channels
  *
- * Real-time bidirectional communication channels for Tentickle agents.
+ * Real-time bidirectional communication channels for Agentick agents.
  * Enables pub/sub messaging between server and clients.
  *
  * ## Features
@@ -14,7 +14,7 @@
  * ## Quick Start
  *
  * ```typescript
- * import { ChannelService } from 'tentickle/channels';
+ * import { ChannelService } from 'agentick/channels';
  *
  * const channels = new ChannelService();
  *
@@ -30,7 +30,7 @@
  * @see {@link ChannelService} - Main channel service
  * @see {@link ChannelRouter} - Message routing
  *
- * @module tentickle/channels
+ * @module agentick/channels
  */
 
 export * from "./service";

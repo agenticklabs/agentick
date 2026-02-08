@@ -5,11 +5,11 @@
  * a final ModelOutput. Adapters only need to map provider chunks to
  * AdapterDelta - the accumulator handles the rest.
  *
- * @module tentickle/model/stream-accumulator
+ * @module agentick/model/stream-accumulator
  */
 
-import type { ContentBlock, UsageStats, Message } from "@tentickle/shared";
-import { StopReason, BlockType } from "@tentickle/shared";
+import type { ContentBlock, UsageStats, Message } from "@agentick/shared";
+import { StopReason, BlockType } from "@agentick/shared";
 import type {
   StreamEvent,
   StreamEventBase,
@@ -27,7 +27,7 @@ import type {
   ToolCallEndEvent,
   ToolCallEvent,
   StreamErrorEvent,
-} from "@tentickle/shared/streaming";
+} from "@agentick/shared/streaming";
 import type { ModelOutput } from "./model";
 
 // ============================================================================

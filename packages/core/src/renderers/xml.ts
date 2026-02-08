@@ -1,6 +1,6 @@
 import { Renderer, type SemanticContentBlock, type SemanticNode } from "./base";
-import type { ContentBlock, TextBlock, CodeBlock } from "@tentickle/shared";
-import { extractText } from "@tentickle/shared";
+import type { ContentBlock, TextBlock, CodeBlock } from "@agentick/shared";
+import { extractText } from "@agentick/shared";
 
 /**
  * XML renderer.

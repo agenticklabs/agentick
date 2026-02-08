@@ -1,8 +1,8 @@
-# @tentickle/core Component Architecture
+# @agentick/core Component Architecture
 
-> **The component model for Tentickle agents**
+> **The component model for Agentick agents**
 
-The component module defines how Tentickle agents are structured and executed. Components are the building blocks of agents, providing lifecycle management, state, and rendering capabilities. Like React components render to the DOM, Tentickle components render to the Context Object Model (COM).
+The component module defines how Agentick agents are structured and executed. Components are the building blocks of agents, providing lifecycle management, state, and rendering capabilities. Like React components render to the DOM, Agentick components render to the Context Object Model (COM).
 
 ---
 
@@ -35,7 +35,7 @@ The component module provides:
 
 ### Why It Exists
 
-Tentickle agents need a structured way to:
+Agentick agents need a structured way to:
 
 1. **Compose behavior** - Build complex agents from smaller, reusable components
 2. **Manage state** - Track component-local and shared state across ticks
@@ -48,7 +48,7 @@ Tentickle agents need a structured way to:
 - **React-inspired** - Familiar patterns for React developers
 - **Async-first** - All lifecycle methods can be async (no UI to freeze)
 - **Tick-based** - Components operate within engine ticks, not continuous renders
-- **JSX-compatible** - Components work with Tentickle's custom JSX runtime
+- **JSX-compatible** - Components work with Agentick's custom JSX runtime
 - **Composable** - Components can be nested, wrapped, and combined
 
 ---
@@ -140,7 +140,7 @@ interface TickState {
 
 ### 3. Component Definition Types
 
-Tentickle supports multiple ways to define components:
+Agentick supports multiple ways to define components:
 
 ```typescript
 // Class component
@@ -301,7 +301,7 @@ abstract class Component<P = {}, S = {}> implements EngineComponent {
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                        Tentickle Component Lifecycle                              │
+│                        Agentick Component Lifecycle                              │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                              │
 │  INITIALIZATION                                                              │
@@ -817,8 +817,8 @@ function getComponentName(
 ### Basic Class Component
 
 ```tsx
-import { Component } from "tentickle";
-import type { ContextObjectModel, TickState } from "tentickle";
+import { Component } from "agentick";
+import type { ContextObjectModel, TickState } from "agentick";
 
 interface GreetingProps {
   name: string;
@@ -856,7 +856,7 @@ class GreetingAgent extends Component<GreetingProps, GreetingState> {
 ### Function Component with Hooks
 
 ```tsx
-import { useSignal, useInit, useOnMount, useOnTickEnd } from "tentickle";
+import { useSignal, useInit, useOnMount, useOnTickEnd } from "agentick";
 
 function CounterAgent(props: { initialCount: number }) {
   const count = useSignal(props.initialCount);
@@ -919,7 +919,7 @@ class InteractiveAgent extends Component {
 ### Component with Tools
 
 ```tsx
-import { createTool } from "tentickle";
+import { createTool } from "agentick";
 import { z } from "zod";
 
 const calculatorTool = createTool({
@@ -990,7 +990,7 @@ class ResilientAgent extends Component {
 
 ### Similarities
 
-| Feature             | React                | Tentickle Components     |
+| Feature             | React                | Agentick Components      |
 | ------------------- | -------------------- | ------------------------ |
 | Function components | Yes                  | Yes                      |
 | Class components    | Yes                  | Yes (`Component<P,S>`)   |
@@ -999,13 +999,13 @@ class ResilientAgent extends Component {
 | Effects             | `useEffect`          | `useEffect`, lifecycle   |
 | Refs                | `useRef`             | `useRef`, `useCOMRef`    |
 | Context             | `useContext`         | COM state, `useComState` |
-| JSX                 | React JSX            | Tentickle JSX            |
+| JSX                 | React JSX            | Agentick JSX             |
 | Keys                | `key` prop           | `key` prop               |
 | Fragments           | `<Fragment>` or `<>` | Same                     |
 
 ### Key Differences
 
-| Aspect                | React                    | Tentickle Components          |
+| Aspect                | React                    | Agentick Components           |
 | --------------------- | ------------------------ | ----------------------------- |
 | **Async support**     | Requires Suspense        | Native async components/hooks |
 | **Render target**     | DOM                      | Context Object Model (COM)    |
@@ -1030,7 +1030,7 @@ class ResilientAgent extends Component {
 
 ## Summary
 
-The component module provides the foundational building blocks for Tentickle agents:
+The component module provides the foundational building blocks for Agentick agents:
 
 - **EngineComponent interface** defines the contract for all components
 - **Component base class** provides stateful class components with lifecycle methods

@@ -1,18 +1,18 @@
 /**
- * @tentickle/nestjs - NestJS adapter for Tentickle Gateway
+ * @agentick/nestjs - NestJS adapter for Agentick Gateway
  *
  * Provides NestJS integration that delegates to Gateway.
- * This is a thin adapter - all business logic lives in @tentickle/gateway.
+ * This is a thin adapter - all business logic lives in @agentick/gateway.
  *
  * @example Default controller
  * ```typescript
  * import { Module } from '@nestjs/common';
- * import { TentickleModule } from '@tentickle/nestjs';
- * import { createApp } from '@tentickle/core';
+ * import { AgentickModule } from '@agentick/nestjs';
+ * import { createApp } from '@agentick/core';
  *
  * @Module({
  *   imports: [
- *     TentickleModule.forRoot({
+ *     AgentickModule.forRoot({
  *       apps: { assistant: createApp(<MyAgent />) },
  *       defaultApp: "assistant",
  *     }),
@@ -24,12 +24,12 @@
  *
  * @example With custom methods
  * ```typescript
- * import { TentickleModule, method } from '@tentickle/nestjs';
+ * import { AgentickModule, method } from '@agentick/nestjs';
  * import { z } from "zod";
  *
  * @Module({
  *   imports: [
- *     TentickleModule.forRoot({
+ *     AgentickModule.forRoot({
  *       apps: { assistant: myApp },
  *       defaultApp: "assistant",
  *       methods: {
@@ -57,17 +57,17 @@
  * | POST | `/abort` | Abort execution |
  * | POST | `/close` | Close session |
  *
- * @module @tentickle/nestjs
+ * @module @agentick/nestjs
  */
 
 // Module, Service, Controller
 export {
-  TentickleModule,
-  TentickleService,
-  TentickleController,
+  AgentickModule,
+  AgentickService,
+  AgentickController,
   TENTICKLE_GATEWAY,
-  type TentickleModuleOptions,
-} from "./tentickle.module";
+  type AgentickModuleOptions,
+} from "./agentick.module";
 
 // Re-export gateway types for convenience
 export {
@@ -75,4 +75,4 @@ export {
   type GatewayConfig,
   type MethodDefinition,
   type AuthConfig,
-} from "@tentickle/gateway";
+} from "@agentick/gateway";

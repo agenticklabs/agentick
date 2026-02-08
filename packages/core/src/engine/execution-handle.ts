@@ -11,14 +11,14 @@ import {
 import type { COMInput } from "../com/types";
 import type { StreamEvent } from "./engine-events";
 import { EventEmitter } from "node:events";
-import type { ProcedureGraph, ProcedureNode } from "@tentickle/kernel";
+import type { ProcedureGraph, ProcedureNode } from "@agentick/kernel";
 import {
   EventBuffer,
   ExecutionHandleBrand,
   type ExecutionHandle as KernelExecutionHandle,
-} from "@tentickle/kernel";
-import { Context } from "@tentickle/kernel";
-import { AbortError, StateError } from "@tentickle/shared";
+} from "@agentick/kernel";
+import { Context } from "@agentick/kernel";
+import { AbortError, StateError } from "@agentick/shared";
 import type { COM } from "../com/object-model";
 
 /**

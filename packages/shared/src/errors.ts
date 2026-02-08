@@ -1,8 +1,8 @@
 /**
- * Tentickle Error Hierarchy
+ * Agentick Error Hierarchy
  *
  * Structured error classes for consistent error handling across the framework.
- * All errors extend TentickleError which provides:
+ * All errors extend AgentickError which provides:
  * - Unique error codes for programmatic handling
  * - Rich metadata for debugging
  * - Serialization support for client/server communication
@@ -24,8 +24,8 @@
  *     // Handle cancellation
  *   } else if (isNotFoundError(error)) {
  *     // Handle missing resource
- *   } else if (isTentickleError(error)) {
- *     // Handle any Tentickle error
+ *   } else if (isAgentickError(error)) {
+ *     // Handle any Agentick error
  *     console.log(error.code, error.toJSON());
  *   }
  * }
@@ -40,7 +40,7 @@
  * Error codes for programmatic error handling.
  * Format: CATEGORY_SPECIFIC (e.g., ABORT_CANCELLED, NOT_FOUND_MODEL)
  */
-export type TentickleErrorCode =
+export type AgentickErrorCode =
   // Abort/Cancellation
   | "ABORT_CANCELLED"
   | "ABORT_TIMEOUT"
@@ -84,22 +84,22 @@ export type TentickleErrorCode =
 /**
  * Serialized error format for transport
  */
-export interface SerializedTentickleError {
+export interface SerializedAgentickError {
   name: string;
-  code: TentickleErrorCode;
+  code: AgentickErrorCode;
   message: string;
   details?: Record<string, unknown>;
-  cause?: SerializedTentickleError | { message: string; name?: string };
+  cause?: SerializedAgentickError | { message: string; name?: string };
   stack?: string;
 }
 
 /**
- * Base class for all Tentickle errors.
+ * Base class for all Agentick errors.
  * Provides consistent structure, serialization, and type identification.
  */
-export class TentickleError extends Error {
+export class AgentickError extends Error {
   /** Unique error code for programmatic handling */
-  readonly code: TentickleErrorCode;
+  readonly code: AgentickErrorCode;
 
   /** Additional error details */
   readonly details: Record<string, unknown>;
@@ -108,13 +108,13 @@ export class TentickleError extends Error {
   readonly cause?: Error;
 
   constructor(
-    code: TentickleErrorCode,
+    code: AgentickErrorCode,
     message: string,
     details: Record<string, unknown> = {},
     cause?: Error,
   ) {
     super(message);
-    this.name = "TentickleError";
+    this.name = "AgentickError";
     this.code = code;
     this.details = details;
     this.cause = cause;
@@ -134,8 +134,8 @@ export class TentickleError extends Error {
   /**
    * Serialize error for transport (JSON-safe)
    */
-  toJSON(): SerializedTentickleError {
-    const serialized: SerializedTentickleError = {
+  toJSON(): SerializedAgentickError {
+    const serialized: SerializedAgentickError = {
       name: this.name,
       code: this.code,
       message: this.message,
@@ -146,7 +146,7 @@ export class TentickleError extends Error {
     }
 
     if (this.cause) {
-      if (this.cause instanceof TentickleError) {
+      if (this.cause instanceof AgentickError) {
         serialized.cause = this.cause.toJSON();
       } else if (this.cause instanceof Error) {
         serialized.cause = {
@@ -166,14 +166,14 @@ export class TentickleError extends Error {
   /**
    * Create error from serialized format
    */
-  static fromJSON(json: SerializedTentickleError): TentickleError {
+  static fromJSON(json: SerializedAgentickError): AgentickError {
     const cause = json.cause
-      ? (json.cause as SerializedTentickleError).code
-        ? TentickleError.fromJSON(json.cause as SerializedTentickleError)
+      ? (json.cause as SerializedAgentickError).code
+        ? AgentickError.fromJSON(json.cause as SerializedAgentickError)
         : new Error((json.cause as { message: string }).message)
       : undefined;
 
-    return new TentickleError(json.code, json.message, json.details, cause);
+    return new AgentickError(json.code, json.message, json.details, cause);
   }
 }
 
@@ -190,7 +190,7 @@ export class TentickleError extends Error {
  * throw new AbortError('Operation timed out', 'ABORT_TIMEOUT', { timeoutMs: 30000 });
  * ```
  */
-export class AbortError extends TentickleError {
+export class AbortError extends AgentickError {
   constructor(
     message: string = "Operation aborted",
     code: "ABORT_CANCELLED" | "ABORT_TIMEOUT" | "ABORT_SIGNAL" = "ABORT_CANCELLED",
@@ -258,7 +258,7 @@ export type ResourceType =
  * throw new NotFoundError('execution', 'exec-123', 'Parent execution not found');
  * ```
  */
-export class NotFoundError extends TentickleError {
+export class NotFoundError extends AgentickError {
   /** Type of resource that was not found */
   readonly resourceType: ResourceType;
 
@@ -266,7 +266,7 @@ export class NotFoundError extends TentickleError {
   readonly resourceId: string;
 
   constructor(resourceType: ResourceType, resourceId: string, message?: string, cause?: Error) {
-    const codeMap: Record<ResourceType, TentickleErrorCode> = {
+    const codeMap: Record<ResourceType, AgentickErrorCode> = {
       model: "NOT_FOUND_MODEL",
       tool: "NOT_FOUND_TOOL",
       agent: "NOT_FOUND_AGENT",
@@ -305,7 +305,7 @@ export class NotFoundError extends TentickleError {
  * throw new ValidationError('input.model', 'Model identifier must be provided');
  * ```
  */
-export class ValidationError extends TentickleError {
+export class ValidationError extends AgentickError {
   /** Field or parameter that failed validation */
   readonly field: string;
 
@@ -384,7 +384,7 @@ export class ValidationError extends TentickleError {
  * throw new StateError('initializing', 'ready', 'Engine is still initializing');
  * ```
  */
-export class StateError extends TentickleError {
+export class StateError extends AgentickError {
   /** Current state */
   readonly current: string;
 
@@ -447,7 +447,7 @@ export class StateError extends TentickleError {
  * throw new TransportError('response', 'No response body');
  * ```
  */
-export class TransportError extends TentickleError {
+export class TransportError extends AgentickError {
   /** Type of transport error */
   readonly transportCode: "timeout" | "connection" | "response" | "parse";
 
@@ -526,7 +526,7 @@ export class TransportError extends TentickleError {
  * throw new AdapterError('anthropic', 'Content blocked', 'ADAPTER_CONTENT_FILTER');
  * ```
  */
-export class AdapterError extends TentickleError {
+export class AdapterError extends AgentickError {
   /** Provider name (openai, google, anthropic, etc.) */
   readonly provider: string;
 
@@ -605,7 +605,7 @@ export class AdapterError extends TentickleError {
  * throw new ContextError('Invalid context: missing required field', 'CONTEXT_INVALID');
  * ```
  */
-export class ContextError extends TentickleError {
+export class ContextError extends AgentickError {
   constructor(
     message: string,
     code: "CONTEXT_NOT_FOUND" | "CONTEXT_INVALID" = "CONTEXT_NOT_FOUND",
@@ -640,7 +640,7 @@ export class ContextError extends TentickleError {
  * throw new ReactivityError('Attempted to set disposed signal', 'REACTIVITY_DISPOSED');
  * ```
  */
-export class ReactivityError extends TentickleError {
+export class ReactivityError extends AgentickError {
   constructor(
     message: string,
     code: "REACTIVITY_CIRCULAR" | "REACTIVITY_DISPOSED" = "REACTIVITY_CIRCULAR",
@@ -678,7 +678,7 @@ export class ReactivityError extends TentickleError {
  * throw GuardError.denied('Insufficient permissions', { resource: 'settings' });
  * ```
  */
-export class GuardError extends TentickleError {
+export class GuardError extends AgentickError {
   /** Type of guard that denied access */
   readonly guardType?: string;
 
@@ -713,10 +713,10 @@ export class GuardError extends TentickleError {
 // =============================================================================
 
 /**
- * Check if error is any Tentickle error
+ * Check if error is any Agentick error
  */
-export function isTentickleError(error: unknown): error is TentickleError {
-  return error instanceof TentickleError;
+export function isAgentickError(error: unknown): error is AgentickError {
+  return error instanceof AgentickError;
 }
 
 /**
@@ -798,15 +798,15 @@ export function ensureError(value: unknown): Error {
 }
 
 /**
- * Wrap any error as an Tentickle error if it isn't already.
+ * Wrap any error as an Agentick error if it isn't already.
  */
-export function wrapAsTentickleError(
+export function wrapAsAgentickError(
   error: unknown,
-  defaultCode: TentickleErrorCode = "STATE_INVALID",
-): TentickleError {
-  if (error instanceof TentickleError) {
+  defaultCode: AgentickErrorCode = "STATE_INVALID",
+): AgentickError {
+  if (error instanceof AgentickError) {
     return error;
   }
   const err = ensureError(error);
-  return new TentickleError(defaultCode, err.message, {}, err);
+  return new AgentickError(defaultCode, err.message, {}, err);
 }

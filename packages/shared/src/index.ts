@@ -1,7 +1,7 @@
 /**
- * # Tentickle Shared Types
+ * # Agentick Shared Types
  *
- * Platform-independent type definitions shared across all Tentickle packages.
+ * Platform-independent type definitions shared across all Agentick packages.
  * These types define the core data structures for messages, content blocks,
  * tools, and streaming.
  *
@@ -26,7 +26,7 @@
  * ## Usage
  *
  * ```typescript
- * import type { Message, ContentBlock, ToolDefinition } from '@tentickle/shared';
+ * import type { Message, ContentBlock, ToolDefinition } from '@agentick/shared';
  *
  * const message: Message = {
  *   role: 'user',
@@ -38,7 +38,7 @@
  * @see {@link Message} - Conversation message structure
  * @see {@link ToolDefinition} - Tool schema definition
  *
- * @module @tentickle/shared
+ * @module @agentick/shared
  */
 
 export * from "./block-types";

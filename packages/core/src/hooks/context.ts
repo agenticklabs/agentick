@@ -32,7 +32,7 @@ export { COMContext, TickStateContext };
 export function useCom(): COM {
   const ctx = useContext(COMContext);
   if (!ctx) {
-    throw new Error("useCom must be used within a TentickleProvider");
+    throw new Error("useCom must be used within a AgentickProvider");
   }
   useDebugValue(ctx ? "COM" : "No COM");
   return ctx;
@@ -70,7 +70,7 @@ export function COMProvider({
 export function useTickState(): TickState {
   const state = useContext(TickStateContext);
   if (!state) {
-    throw new Error("useTickState must be used within a TentickleProvider");
+    throw new Error("useTickState must be used within a AgentickProvider");
   }
   useDebugValue(state ? `Tick ${state.tick}` : "No TickState");
   return state;
@@ -93,7 +93,7 @@ export function TickStateProvider({
 // Combined Provider
 // ============================================================
 
-export interface TentickleProviderProps {
+export interface AgentickProviderProps {
   ctx: COM;
   tickState: TickState;
   runtimeStore: RuntimeStore;
@@ -102,15 +102,15 @@ export interface TentickleProviderProps {
 }
 
 /**
- * Combined provider for all Tentickle contexts.
+ * Combined provider for all Agentick contexts.
  */
-export function TentickleProvider({
+export function AgentickProvider({
   ctx,
   tickState,
   runtimeStore,
   contextInfoStore,
   children,
-}: TentickleProviderProps): React.ReactElement {
+}: AgentickProviderProps): React.ReactElement {
   // Build provider chain: Runtime -> ContextInfo -> COM -> TickState
   // Using explicit ReactNode typing to avoid type inference issues
   let content: ReactNode = h(TickStateContext.Provider, { value: tickState }, children);

@@ -1,11 +1,11 @@
 /**
- * @tentickle/angular - Modern Angular bindings for Tentickle
+ * @agentick/angular - Modern Angular bindings for Agentick
  *
  * Uses Angular signals for reactive state with RxJS interop for compatibility.
  *
  * @example Standalone setup
  * ```typescript
- * import { TENTICKLE_CONFIG } from '@tentickle/angular';
+ * import { TENTICKLE_CONFIG } from '@agentick/angular';
  *
  * bootstrapApplication(AppComponent, {
  *   providers: [
@@ -17,15 +17,15 @@
  * @example Component with signals (recommended)
  * ```typescript
  * import { Component, inject } from '@angular/core';
- * import { TentickleService } from '@tentickle/angular';
+ * import { AgentickService } from '@agentick/angular';
  *
  * @Component({
  *   selector: 'app-chat',
  *   standalone: true,
  *   template: `
  *     <div class="response">
- *       {{ tentickle.text() }}
- *       @if (tentickle.isStreaming()) {
+ *       {{ agentick.text() }}
+ *       @if (agentick.isStreaming()) {
  *         <span class="cursor">|</span>
  *       }
  *     </div>
@@ -34,14 +34,14 @@
  *   `,
  * })
  * export class ChatComponent {
- *   tentickle = inject(TentickleService);
+ *   agentick = inject(AgentickService);
  *
  *   constructor() {
- *     this.tentickle.subscribe("conv-123");
+ *     this.agentick.subscribe("conv-123");
  *   }
  *
  *   async send(message: string) {
- *     const handle = this.tentickle.send(message);
+ *     const handle = this.agentick.send(message);
  *     await handle.result;
  *   }
  * }
@@ -55,34 +55,34 @@
  *   `,
  * })
  * export class LegacyComponent {
- *   tentickle = inject(TentickleService);
- *   text$ = this.tentickle.text$;
+ *   agentick = inject(AgentickService);
+ *   text$ = this.agentick.text$;
  * }
  * ```
  *
  * @example Multiple agents with separate instances
  * ```typescript
- * import { provideTentickle, TentickleService } from '@tentickle/angular';
+ * import { provideAgentick, AgentickService } from '@agentick/angular';
  *
  * // Each component gets its own service instance
  * @Component({
  *   selector: 'app-support-chat',
  *   standalone: true,
- *   providers: [provideTentickle({ baseUrl: '/api/support-agent' })],
- *   template: `<div>{{ tentickle.text() }}</div>`,
+ *   providers: [provideAgentick({ baseUrl: '/api/support-agent' })],
+ *   template: `<div>{{ agentick.text() }}</div>`,
  * })
  * export class SupportChatComponent {
- *   tentickle = inject(TentickleService);
+ *   agentick = inject(AgentickService);
  * }
  *
  * @Component({
  *   selector: 'app-sales-chat',
  *   standalone: true,
- *   providers: [provideTentickle({ baseUrl: '/api/sales-agent' })],
- *   template: `<div>{{ tentickle.text() }}</div>`,
+ *   providers: [provideAgentick({ baseUrl: '/api/sales-agent' })],
+ *   template: `<div>{{ agentick.text() }}</div>`,
  * })
  * export class SalesChatComponent {
- *   tentickle = inject(TentickleService);
+ *   agentick = inject(AgentickService);
  * }
  * ```
  *
@@ -123,17 +123,17 @@
  * | `eventsOfType(...types)` | Filter events by type |
  * | `clearStreamingText()` | Clear accumulated text |
  *
- * @module @tentickle/angular
+ * @module @agentick/angular
  */
 
 // Service, token, and provider factory
-export { TentickleService, TENTICKLE_CONFIG, provideTentickle } from "./tentickle.service";
+export { AgentickService, TENTICKLE_CONFIG, provideAgentick } from "./agentick.service";
 
 // Types
 export type {
-  TentickleConfig,
+  AgentickConfig,
   TransportConfig,
-  TentickleClient,
+  AgentickClient,
   ConnectionState,
   StreamEvent,
   SessionStreamEvent,
@@ -143,4 +143,4 @@ export type {
 } from "./types";
 
 // Re-export createClient for advanced usage
-export { createClient } from "@tentickle/client";
+export { createClient } from "@agentick/client";

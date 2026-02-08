@@ -4,11 +4,11 @@
  * These are opt-in helpers adapters can import and use.
  * No magic, no DSLs - just functions.
  *
- * @module tentickle/model/adapter-helpers
+ * @module agentick/model/adapter-helpers
  */
 
-import type { ContentBlock, Message, UsageStats } from "@tentickle/shared";
-import { StopReason } from "@tentickle/shared";
+import type { ContentBlock, Message, UsageStats } from "@agentick/shared";
+import { StopReason } from "@agentick/shared";
 
 // ============================================================================
 // Message Helpers

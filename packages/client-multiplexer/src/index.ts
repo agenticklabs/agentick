@@ -1,7 +1,7 @@
 /**
- * @tentickle/client-multiplexer
+ * @agentick/client-multiplexer
  *
- * Multi-tab connection multiplexer for Tentickle client.
+ * Multi-tab connection multiplexer for Agentick client.
  *
  * Reduces server connections by electing a leader tab that maintains
  * the SSE connection while other tabs communicate via BroadcastChannel.
@@ -15,8 +15,8 @@
  *
  * @example
  * ```typescript
- * import { createClient } from '@tentickle/client';
- * import { createSharedTransport } from '@tentickle/client-multiplexer';
+ * import { createClient } from '@agentick/client';
+ * import { createSharedTransport } from '@agentick/client-multiplexer';
  *
  * // Create client with shared transport
  * const client = createClient({

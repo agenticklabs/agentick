@@ -1,26 +1,26 @@
-# @tentickle/server
+# @agentick/server
 
-Server-side utilities for Tentickle applications:
+Server-side utilities for Agentick applications:
 
 - **SSE utilities** - Stream events to clients via Server-Sent Events
-- **Type re-exports** - Convenient imports from `@tentickle/shared`
+- **Type re-exports** - Convenient imports from `@agentick/shared`
 
 ## Installation
 
 ```bash
-npm install @tentickle/server @tentickle/core @tentickle/shared
+npm install @agentick/server @agentick/core @agentick/shared
 ```
 
 ## Quick Start
 
-For most use cases, use `@tentickle/express` instead - it provides a complete handler:
+For most use cases, use `@agentick/express` instead - it provides a complete handler:
 
 ```typescript
-import { createApp } from "@tentickle/core";
-import { createTentickleHandler } from "@tentickle/express";
+import { createApp } from "@agentick/core";
+import { createAgentickHandler } from "@agentick/express";
 
 const app = createApp(MyAgent, { model });
-expressApp.use("/api/agent", createTentickleHandler(app));
+expressApp.use("/api/agent", createAgentickHandler(app));
 ```
 
 ## Direct Usage
@@ -28,7 +28,7 @@ expressApp.use("/api/agent", createTentickleHandler(app));
 If building a custom framework adapter:
 
 ```typescript
-import { setSSEHeaders, createSSEWriter } from "@tentickle/server";
+import { setSSEHeaders, createSSEWriter } from "@agentick/server";
 
 // SSE endpoint
 app.get("/events", (req, res) => {
@@ -91,7 +91,7 @@ writer.close();
 
 ## Type Re-exports
 
-For convenience, this package re-exports common types from `@tentickle/shared`:
+For convenience, this package re-exports common types from `@agentick/shared`:
 
 ```typescript
 import type {
@@ -100,7 +100,7 @@ import type {
   ToolConfirmationResponse,
   SessionState,
   CreateSessionResponse,
-} from "@tentickle/server";
+} from "@agentick/server";
 ```
 
 ## Philosophy
@@ -111,4 +111,4 @@ This package follows the "primitives, not opinions" philosophy:
 - **Framework-agnostic** - Works with any HTTP framework
 - **Composable** - Use what you need
 
-For a complete server integration, use `@tentickle/express`, `@tentickle/nestjs`, or build your own using these utilities.
+For a complete server integration, use `@agentick/express`, `@agentick/nestjs`, or build your own using these utilities.

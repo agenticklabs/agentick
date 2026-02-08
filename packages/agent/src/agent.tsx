@@ -21,8 +21,8 @@ import {
   type ProviderGenerationOptions,
   type CompactionStrategy,
   type COMTimelineEntry,
-} from "@tentickle/core";
-import type { ResponseFormat } from "@tentickle/shared";
+} from "@agentick/core";
+import type { ResponseFormat } from "@agentick/shared";
 
 // ============================================================================
 // Types

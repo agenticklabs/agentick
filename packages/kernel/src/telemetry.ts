@@ -76,8 +76,8 @@ export interface Histogram {
  * import { trace, metrics } from '@opentelemetry/api';
  *
  * const otelProvider: TelemetryProvider = {
- *   startTrace(name) { return trace.getTracer('tentickle').startSpan(name).spanContext().traceId; },
- *   startSpan(name) { return trace.getTracer('tentickle').startSpan(name); },
+ *   startTrace(name) { return trace.getTracer('agentick').startSpan(name).spanContext().traceId; },
+ *   startSpan(name) { return trace.getTracer('agentick').startSpan(name); },
  *   // ... implement other methods
  * };
  *
@@ -162,7 +162,7 @@ export class Telemetry {
   private static provider: TelemetryProvider = new NoOpProvider();
 
   /**
-   * Set the telemetry provider for all Tentickle operations.
+   * Set the telemetry provider for all Agentick operations.
    * @param provider - The telemetry provider implementation
    */
   static setProvider(provider: TelemetryProvider): void {
@@ -211,7 +211,7 @@ export class Telemetry {
 
   /**
    * Get or create a counter metric.
-   * @param name - Metric name (e.g., 'tentickle.tokens')
+   * @param name - Metric name (e.g., 'agentick.tokens')
    * @param unit - Unit of measurement (e.g., 'count', 'bytes')
    * @param description - Human-readable description
    * @returns A Counter instance
@@ -222,7 +222,7 @@ export class Telemetry {
 
   /**
    * Get or create a histogram metric.
-   * @param name - Metric name (e.g., 'tentickle.latency')
+   * @param name - Metric name (e.g., 'agentick.latency')
    * @param unit - Unit of measurement (e.g., 'ms', 'bytes')
    * @param description - Human-readable description
    * @returns A Histogram instance

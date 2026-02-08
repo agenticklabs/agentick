@@ -1,9 +1,9 @@
 /**
- * Tests for the Tentickle error hierarchy
+ * Tests for the Agentick error hierarchy
  */
 
 import {
-  TentickleError,
+  AgentickError,
   AbortError,
   NotFoundError,
   ValidationError,
@@ -12,7 +12,7 @@ import {
   AdapterError,
   ContextError,
   ReactivityError,
-  isTentickleError,
+  isAgentickError,
   isAbortError,
   isNotFoundError,
   isValidationError,
@@ -22,62 +22,62 @@ import {
   isContextError,
   isReactivityError,
   ensureError,
-  wrapAsTentickleError,
+  wrapAsAgentickError,
 } from "../errors";
 
-describe("TentickleError", () => {
+describe("AgentickError", () => {
   describe("constructor", () => {
     it("should create error with code and message", () => {
-      const error = new TentickleError("STATE_INVALID", "Something went wrong");
+      const error = new AgentickError("STATE_INVALID", "Something went wrong");
 
       expect(error.message).toBe("Something went wrong");
       expect(error.code).toBe("STATE_INVALID");
-      expect(error.name).toBe("TentickleError");
+      expect(error.name).toBe("AgentickError");
       expect(error.details).toEqual({});
     });
 
     it("should create error with details", () => {
-      const error = new TentickleError("STATE_INVALID", "Error", { foo: "bar" });
+      const error = new AgentickError("STATE_INVALID", "Error", { foo: "bar" });
 
       expect(error.details).toEqual({ foo: "bar" });
     });
 
     it("should create error with cause", () => {
       const cause = new Error("Original error");
-      const error = new TentickleError("STATE_INVALID", "Wrapped", {}, cause);
+      const error = new AgentickError("STATE_INVALID", "Wrapped", {}, cause);
 
       expect(error.cause).toBe(cause);
     });
 
     it("should have proper prototype chain", () => {
-      const error = new TentickleError("STATE_INVALID", "Test");
+      const error = new AgentickError("STATE_INVALID", "Test");
 
-      expect(error instanceof TentickleError).toBe(true);
+      expect(error instanceof AgentickError).toBe(true);
       expect(error instanceof Error).toBe(true);
     });
   });
 
   describe("toJSON", () => {
     it("should serialize basic error", () => {
-      const error = new TentickleError("STATE_INVALID", "Test message");
+      const error = new AgentickError("STATE_INVALID", "Test message");
       const json = error.toJSON();
 
-      expect(json.name).toBe("TentickleError");
+      expect(json.name).toBe("AgentickError");
       expect(json.code).toBe("STATE_INVALID");
       expect(json.message).toBe("Test message");
       expect(json.stack).toBeDefined();
     });
 
     it("should serialize details", () => {
-      const error = new TentickleError("STATE_INVALID", "Test", { key: "value" });
+      const error = new AgentickError("STATE_INVALID", "Test", { key: "value" });
       const json = error.toJSON();
 
       expect(json.details).toEqual({ key: "value" });
     });
 
-    it("should serialize TentickleError cause recursively", () => {
-      const cause = new TentickleError("NOT_FOUND_MODEL", "Model not found");
-      const error = new TentickleError("STATE_INVALID", "Wrapped", {}, cause);
+    it("should serialize AgentickError cause recursively", () => {
+      const cause = new AgentickError("NOT_FOUND_MODEL", "Model not found");
+      const error = new AgentickError("STATE_INVALID", "Wrapped", {}, cause);
       const json = error.toJSON();
 
       expect(json.cause).toBeDefined();
@@ -86,7 +86,7 @@ describe("TentickleError", () => {
 
     it("should serialize regular Error cause", () => {
       const cause = new Error("Original");
-      const error = new TentickleError("STATE_INVALID", "Wrapped", {}, cause);
+      const error = new AgentickError("STATE_INVALID", "Wrapped", {}, cause);
       const json = error.toJSON();
 
       expect(json.cause).toEqual({ message: "Original", name: "Error" });
@@ -96,12 +96,12 @@ describe("TentickleError", () => {
   describe("fromJSON", () => {
     it("should deserialize basic error", () => {
       const json = {
-        name: "TentickleError",
+        name: "AgentickError",
         code: "STATE_INVALID" as const,
         message: "Test message",
       };
 
-      const error = TentickleError.fromJSON(json);
+      const error = AgentickError.fromJSON(json);
 
       expect(error.code).toBe("STATE_INVALID");
       expect(error.message).toBe("Test message");
@@ -109,33 +109,33 @@ describe("TentickleError", () => {
 
     it("should deserialize with details", () => {
       const json = {
-        name: "TentickleError",
+        name: "AgentickError",
         code: "STATE_INVALID" as const,
         message: "Test",
         details: { foo: "bar" },
       };
 
-      const error = TentickleError.fromJSON(json);
+      const error = AgentickError.fromJSON(json);
 
       expect(error.details).toEqual({ foo: "bar" });
     });
 
     it("should deserialize nested cause", () => {
       const json = {
-        name: "TentickleError",
+        name: "AgentickError",
         code: "STATE_INVALID" as const,
         message: "Outer",
         cause: {
-          name: "TentickleError",
+          name: "AgentickError",
           code: "NOT_FOUND_MODEL" as const,
           message: "Inner",
         },
       };
 
-      const error = TentickleError.fromJSON(json);
+      const error = AgentickError.fromJSON(json);
 
-      expect(error.cause).toBeInstanceOf(TentickleError);
-      expect((error.cause as TentickleError).code).toBe("NOT_FOUND_MODEL");
+      expect(error.cause).toBeInstanceOf(AgentickError);
+      expect((error.cause as AgentickError).code).toBe("NOT_FOUND_MODEL");
     });
   });
 });
@@ -463,23 +463,23 @@ describe("ReactivityError", () => {
 });
 
 describe("Type Guards", () => {
-  it("should identify TentickleError", () => {
-    expect(isTentickleError(new TentickleError("STATE_INVALID", "test"))).toBe(true);
-    expect(isTentickleError(new AbortError())).toBe(true);
-    expect(isTentickleError(new Error("test"))).toBe(false);
-    expect(isTentickleError("string")).toBe(false);
-    expect(isTentickleError(null)).toBe(false);
+  it("should identify AgentickError", () => {
+    expect(isAgentickError(new AgentickError("STATE_INVALID", "test"))).toBe(true);
+    expect(isAgentickError(new AbortError())).toBe(true);
+    expect(isAgentickError(new Error("test"))).toBe(false);
+    expect(isAgentickError("string")).toBe(false);
+    expect(isAgentickError(null)).toBe(false);
   });
 
   it("should identify AbortError", () => {
     expect(isAbortError(new AbortError())).toBe(true);
-    expect(isAbortError(new TentickleError("ABORT_CANCELLED", "test"))).toBe(false);
+    expect(isAbortError(new AgentickError("ABORT_CANCELLED", "test"))).toBe(false);
     expect(isAbortError(new Error())).toBe(false);
   });
 
   it("should identify NotFoundError", () => {
     expect(isNotFoundError(new NotFoundError("model", "x"))).toBe(true);
-    expect(isNotFoundError(new TentickleError("NOT_FOUND_MODEL", "test"))).toBe(false);
+    expect(isNotFoundError(new AgentickError("NOT_FOUND_MODEL", "test"))).toBe(false);
   });
 
   it("should identify ValidationError", () => {
@@ -542,31 +542,31 @@ describe("Utility Functions", () => {
     });
   });
 
-  describe("wrapAsTentickleError", () => {
-    it("should return TentickleError unchanged", () => {
+  describe("wrapAsAgentickError", () => {
+    it("should return AgentickError unchanged", () => {
       const error = new AbortError();
-      expect(wrapAsTentickleError(error)).toBe(error);
+      expect(wrapAsAgentickError(error)).toBe(error);
     });
 
     it("should wrap regular Error", () => {
       const original = new Error("test");
-      const wrapped = wrapAsTentickleError(original);
+      const wrapped = wrapAsAgentickError(original);
 
-      expect(wrapped).toBeInstanceOf(TentickleError);
+      expect(wrapped).toBeInstanceOf(AgentickError);
       expect(wrapped.message).toBe("test");
       expect(wrapped.cause).toBe(original);
     });
 
     it("should use provided default code", () => {
-      const wrapped = wrapAsTentickleError(new Error("test"), "TRANSPORT_TIMEOUT");
+      const wrapped = wrapAsAgentickError(new Error("test"), "TRANSPORT_TIMEOUT");
 
       expect(wrapped.code).toBe("TRANSPORT_TIMEOUT");
     });
 
     it("should wrap non-Error values", () => {
-      const wrapped = wrapAsTentickleError("string error");
+      const wrapped = wrapAsAgentickError("string error");
 
-      expect(wrapped).toBeInstanceOf(TentickleError);
+      expect(wrapped).toBeInstanceOf(AgentickError);
       expect(wrapped.message).toBe("string error");
     });
   });

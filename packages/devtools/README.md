@@ -1,18 +1,18 @@
-# @tentickle/devtools
+# @agentick/devtools
 
-Real-time debugging and observability for Tentickle applications. Provides a server that captures execution events and a browser UI for inspection.
+Real-time debugging and observability for Agentick applications. Provides a server that captures execution events and a browser UI for inspection.
 
 ## Installation
 
 ```bash
-pnpm add @tentickle/devtools
+pnpm add @agentick/devtools
 ```
 
 ## Quick Start
 
 ```typescript
-import { startDevToolsServer } from "@tentickle/devtools";
-import { createApp } from "@tentickle/core";
+import { startDevToolsServer } from "@agentick/devtools";
+import { createApp } from "@agentick/core";
 
 // Start DevTools server
 const devtools = startDevToolsServer({ port: 3001 });
@@ -52,7 +52,7 @@ devtools.stop();
 For more control, use the class directly:
 
 ```typescript
-import { DevToolsServer } from "@tentickle/devtools";
+import { DevToolsServer } from "@agentick/devtools";
 
 const server = new DevToolsServer({ port: 3001 });
 await server.start();
@@ -72,7 +72,7 @@ await server.stop();
 
 ## Event Types
 
-The DevTools server captures these events from `@tentickle/core`:
+The DevTools server captures these events from `@agentick/core`:
 
 | Event               | Description                    |
 | ------------------- | ------------------------------ |
@@ -126,29 +126,29 @@ Monitor context utilization:
 
 ```typescript
 import express from "express";
-import { createExpressAdapter } from "@tentickle/express";
-import { startDevToolsServer } from "@tentickle/devtools";
+import { createExpressAdapter } from "@agentick/express";
+import { startDevToolsServer } from "@agentick/devtools";
 
 const app = express();
 
 // Start DevTools on separate port
 startDevToolsServer({ port: 3001 });
 
-// Your Tentickle app with DevTools enabled
-const tentickle = createExpressAdapter(MyApp, {
+// Your Agentick app with DevTools enabled
+const agentick = createExpressAdapter(MyApp, {
   model: myModel,
   devTools: true,
 });
 
-app.use("/api", tentickle);
+app.use("/api", agentick);
 app.listen(3000);
 ```
 
 ### With Gateway
 
 ```typescript
-import { createGateway } from "@tentickle/gateway";
-import { startDevToolsServer } from "@tentickle/devtools";
+import { createGateway } from "@agentick/gateway";
+import { startDevToolsServer } from "@agentick/devtools";
 
 startDevToolsServer({ port: 3001 });
 
@@ -162,7 +162,7 @@ const gateway = createGateway({
 
 ```
 ┌─────────────────────────┐
-│  Tentickle App/Session  │
+│  Agentick App/Session  │
 │   (devTools: true)      │
 └────────────┬────────────┘
              │ devToolsEmitter.emit()

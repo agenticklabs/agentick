@@ -9,11 +9,11 @@
  * - Timeline rendering
  */
 
-import { Model, Section, Timeline, Message } from "@tentickle/core";
-import { useComputed, useComState } from "@tentickle/core";
-import type { MessageRoles, ModelMessage } from "@tentickle/shared";
-import { openai } from "@tentickle/openai";
-import { google } from "@tentickle/google";
+import { Model, Section, Timeline, Message } from "@agentick/core";
+import { useComputed, useComState } from "@agentick/core";
+import type { MessageRoles, ModelMessage } from "@agentick/shared";
+import { openai } from "@agentick/openai";
+import { google } from "@agentick/google";
 import { TodoListTool } from "../tools/todo-list.tool.js";
 import { CalculatorTool } from "../tools/calculator.tool.js";
 

@@ -7,7 +7,7 @@ import { describe, it, expect } from "vitest";
 import { createTestAdapter } from "../test-adapter";
 // Note: createTestModel has been replaced by createTestAdapter
 import type { ModelInput, ModelOutput } from "../../model/model";
-import type { ModelMessage, TextBlock } from "@tentickle/shared";
+import type { ModelMessage, TextBlock } from "@agentick/shared";
 
 // Helper to create minimal ModelInput
 const createInput = (text: string): ModelInput => ({

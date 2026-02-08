@@ -8,14 +8,14 @@
 import { createGateway } from "./gateway.js";
 
 // For now, just a placeholder that shows usage
-console.log("@tentickle/gateway");
+console.log("@agentick/gateway");
 console.log("");
 console.log("Usage:");
 console.log("  The gateway is typically started programmatically:");
 console.log("");
 console.log("  ```typescript");
-console.log("  import { createGateway } from '@tentickle/gateway';");
-console.log("  import { createApp } from '@tentickle/core';");
+console.log("  import { createGateway } from '@agentick/gateway';");
+console.log("  import { createApp } from '@agentick/core';");
 console.log("");
 console.log("  const Agent = () => (");
 console.log("    <>");
@@ -35,4 +35,4 @@ console.log("  await gateway.start();");
 console.log("  ```");
 console.log("");
 console.log("Future versions will support a config file:");
-console.log("  tentickle-gateway --config ./gateway.config.ts");
+console.log("  agentick-gateway --config ./gateway.config.ts");

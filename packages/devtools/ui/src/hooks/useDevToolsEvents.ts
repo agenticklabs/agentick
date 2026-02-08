@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 
-// Types matching @tentickle/shared DevToolsEvent
+// Types matching @agentick/shared DevToolsEvent
 interface DevToolsEvent {
   type: string;
   executionId: string;
@@ -44,7 +44,7 @@ export interface Tick {
     ephemeral: unknown[];
     metadata?: Record<string, unknown>;
   };
-  /** 3. ModelInput (what we pass to model layer) - Tentickle format */
+  /** 3. ModelInput (what we pass to model layer) - Agentick format */
   modelInput?: unknown;
   /** 4. Provider input (what SDK receives) - OpenAI/Anthropic/Google format */
   providerInput?: unknown;
@@ -52,7 +52,7 @@ export interface Tick {
   // === RESPONSE PIPELINE ===
   /** 1. Provider output (raw SDK response) */
   providerOutput?: unknown;
-  /** 2. ModelOutput (normalized Tentickle format) */
+  /** 2. ModelOutput (normalized Agentick format) */
   modelOutput?: {
     model?: string;
     message?: unknown;

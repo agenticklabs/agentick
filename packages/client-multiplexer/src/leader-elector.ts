@@ -49,7 +49,7 @@ export function createLeaderElector(channelName: string): LeaderElector {
   let releaseLock: (() => void) | null = null;
 
   async function acquireWithWebLocks(): Promise<void> {
-    const lockName = `tentickle:leader:${channelName}`;
+    const lockName = `agentick:leader:${channelName}`;
 
     // First, try to acquire the lock WITHOUT waiting (ifAvailable: true)
     // This tells us immediately if we can become leader
@@ -109,7 +109,7 @@ export function createLeaderElector(channelName: string): LeaderElector {
   let fallbackTimeout: ReturnType<typeof setTimeout> | null = null;
 
   async function acquireWithFallback(): Promise<void> {
-    fallbackChannel = new BroadcastChannel(`tentickle:election:${channelName}`);
+    fallbackChannel = new BroadcastChannel(`agentick:election:${channelName}`);
 
     const HEARTBEAT_INTERVAL = 1000;
     const LEADER_TIMEOUT = 2500;

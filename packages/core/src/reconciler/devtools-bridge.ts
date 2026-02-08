@@ -1,7 +1,7 @@
 /**
  * DevTools Bridge
  *
- * Enables connection to React DevTools for Tentickle component tree inspection.
+ * Enables connection to React DevTools for Agentick component tree inspection.
  * Uses react-devtools-core for standalone DevTools connection.
  */
 
@@ -20,7 +20,7 @@ let connectToDevTools: ((options?: Record<string, unknown>) => void) | null = nu
  *
  * @example
  * ```typescript
- * import { enableReactDevTools } from '@tentickle/core';
+ * import { enableReactDevTools } from '@agentick/core';
  *
  * // Before creating sessions
  * enableReactDevTools();
@@ -31,7 +31,7 @@ let connectToDevTools: ((options?: Record<string, unknown>) => void) | null = nu
  */
 export function enableReactDevTools(options?: { host?: string; port?: number }): void {
   if (connected) {
-    console.warn("[Tentickle] React DevTools already connected");
+    console.warn("[Agentick] React DevTools already connected");
     return;
   }
 
@@ -43,14 +43,14 @@ export function enableReactDevTools(options?: { host?: string; port?: number }):
     connectToDevTools = devToolsCore.connectToDevTools;
   } catch {
     console.warn(
-      "[Tentickle] react-devtools-core not installed. " +
+      "[Agentick] react-devtools-core not installed. " +
         "Install it with: pnpm add -D react-devtools-core",
     );
     return;
   }
 
   if (!connectToDevTools) {
-    console.warn("[Tentickle] Could not load react-devtools-core");
+    console.warn("[Agentick] Could not load react-devtools-core");
     return;
   }
 
@@ -65,10 +65,10 @@ export function enableReactDevTools(options?: { host?: string; port?: number }):
 
     connected = true;
     console.log(
-      `[Tentickle] Connected to React DevTools at ${options?.host ?? "localhost"}:${options?.port ?? 8097}`,
+      `[Agentick] Connected to React DevTools at ${options?.host ?? "localhost"}:${options?.port ?? 8097}`,
     );
   } catch (error) {
-    console.warn("[Tentickle] Failed to connect to React DevTools:", error);
+    console.warn("[Agentick] Failed to connect to React DevTools:", error);
   }
 }
 

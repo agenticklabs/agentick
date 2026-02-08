@@ -1,10 +1,10 @@
 /**
  * V2 Collector
  *
- * Traverses the TentickleNode tree and collects into CompiledStructure.
+ * Traverses the AgentickNode tree and collects into CompiledStructure.
  */
 
-import type { TentickleNode, TentickleContainer, TentickleTextNode } from "../reconciler/types";
+import type { AgentickNode, AgentickContainer, AgentickTextNode } from "../reconciler/types";
 import { isTextNode } from "../reconciler/types";
 import type {
   CompiledStructure,
@@ -16,7 +16,7 @@ import type {
 import { createEmptyCompiledStructure } from "./types";
 import type { SemanticContentBlock, Renderer } from "../renderers/types";
 import type { TokenEstimator } from "../com/types";
-import { Logger } from "@tentickle/kernel";
+import { Logger } from "@agentick/kernel";
 
 const log = Logger.for("Collector");
 
@@ -51,7 +51,7 @@ const JSON_LOWER = "json";
  * @param estimator - Optional token estimator. When provided, annotates all compiled entries with token estimates.
  */
 export function collect(
-  container: TentickleContainer,
+  container: AgentickContainer,
   estimator?: TokenEstimator,
 ): CompiledStructure {
   const result = createEmptyCompiledStructure();
@@ -88,7 +88,7 @@ export function collect(
 /**
  * Collect from a single node and its descendants.
  */
-function collectNode(node: TentickleNode | TentickleTextNode, result: CompiledStructure): void {
+function collectNode(node: AgentickNode | AgentickTextNode, result: CompiledStructure): void {
   // Skip text nodes - they don't have structural meaning at this level
   if (isTextNode(node)) {
     return;
@@ -132,7 +132,7 @@ function collectNode(node: TentickleNode | TentickleTextNode, result: CompiledSt
 /**
  * Collect a Section node.
  */
-function collectSection(node: TentickleNode, result: CompiledStructure): void {
+function collectSection(node: AgentickNode, result: CompiledStructure): void {
   const id = node.props.id as string;
   if (!id) {
     console.warn("Section missing id prop");
@@ -172,7 +172,7 @@ function collectSection(node: TentickleNode, result: CompiledStructure): void {
  * System role entries are routed to `result.systemEntries` (rebuilt each tick),
  * while all other roles go to `result.timelineEntries`.
  */
-function collectTimelineEntry(node: TentickleNode, result: CompiledStructure): void {
+function collectTimelineEntry(node: AgentickNode, result: CompiledStructure): void {
   // Check for intrinsic format (lowercase "entry" with message prop)
   if (node.props.message && typeof node.props.message === "object") {
     const msg = node.props.message as {
@@ -235,7 +235,7 @@ function collectTimelineEntry(node: TentickleNode, result: CompiledStructure): v
 /**
  * Collect a Tool node.
  */
-function collectTool(node: TentickleNode, result: CompiledStructure): void {
+function collectTool(node: AgentickNode, result: CompiledStructure): void {
   const tool: CompiledTool = {
     name: node.props.name as string,
     description: node.props.description as string | undefined,
@@ -249,7 +249,7 @@ function collectTool(node: TentickleNode, result: CompiledStructure): void {
 /**
  * Collect an Ephemeral node.
  */
-function collectEphemeral(node: TentickleNode, result: CompiledStructure): void {
+function collectEphemeral(node: AgentickNode, result: CompiledStructure): void {
   const ephemeral: CompiledEphemeral = {
     content: collectContent(node.children, node.renderer),
     position: (node.props.position as CompiledEphemeral["position"]) ?? "end",
@@ -265,7 +265,7 @@ function collectEphemeral(node: TentickleNode, result: CompiledStructure): void 
  * Collect content blocks from child nodes.
  */
 function collectContent(
-  children: (TentickleNode | TentickleTextNode)[] | undefined,
+  children: (AgentickNode | AgentickTextNode)[] | undefined,
   parentRenderer: Renderer | null,
 ): SemanticContentBlock[] {
   const blocks: SemanticContentBlock[] = [];
@@ -340,7 +340,7 @@ function collectContent(
  * Extract text content from a Text node.
  * Supports both `text` prop (preferred) and `children` prop (fallback).
  */
-function extractText(node: TentickleNode): string {
+function extractText(node: AgentickNode): string {
   // Prefer explicit `text` prop (avoids React trying to reconcile children)
   const text = node.props.text ?? node.props.children;
 

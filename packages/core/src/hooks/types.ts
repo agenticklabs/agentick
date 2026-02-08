@@ -3,7 +3,7 @@
  */
 
 import type { CompiledStructure } from "../compiler/types";
-import type { ContentBlock, ToolCall, ToolResult } from "@tentickle/shared";
+import type { ContentBlock, ToolCall, ToolResult } from "@agentick/shared";
 import type { COMStopRequest, COMContinueRequest, COM as COMImpl } from "../com/object-model";
 import type { COMTimelineEntry } from "../com/types";
 

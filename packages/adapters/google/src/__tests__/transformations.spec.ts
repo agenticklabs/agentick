@@ -1,7 +1,7 @@
 /**
  * Tests for Google Adapter Transformations
  *
- * Tests the data shape transformations between Tentickle format and Google GenAI format.
+ * Tests the data shape transformations between Agentick format and Google GenAI format.
  */
 
 import {
@@ -11,8 +11,8 @@ import {
   mapToolDefinition,
 } from "../google";
 import { STOP_REASON_MAP } from "../types";
-import { StopReason } from "@tentickle/shared";
-import type { ContentBlock, ImageBlock, ToolUseBlock, ToolResultBlock } from "@tentickle/shared";
+import { StopReason } from "@agentick/shared";
+import type { ContentBlock, ImageBlock, ToolUseBlock, ToolResultBlock } from "@agentick/shared";
 
 // =============================================================================
 // Stop Reason Mapping
@@ -234,7 +234,7 @@ describe("buildClientOptions", () => {
 });
 
 // =============================================================================
-// Content Block Transformation: Tentickle -> Google
+// Content Block Transformation: Agentick -> Google
 // =============================================================================
 
 describe("convertBlocksToGoogleParts", () => {

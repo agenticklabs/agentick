@@ -1,18 +1,18 @@
 /**
- * @tentickle/react - React hooks and components for Tentickle
+ * @agentick/react - React hooks and components for Agentick
  *
- * Provides React bindings for connecting to Tentickle servers.
- * Wraps @tentickle/client with idiomatic React patterns.
+ * Provides React bindings for connecting to Agentick servers.
+ * Wraps @agentick/client with idiomatic React patterns.
  *
  * @example Quick start
  * ```tsx
- * import { TentickleProvider, useSession, useStreamingText } from '@tentickle/react';
+ * import { AgentickProvider, useSession, useStreamingText } from '@agentick/react';
  *
  * function App() {
  *   return (
- *     <TentickleProvider clientConfig={{ baseUrl: 'https://api.example.com' }}>
+ *     <AgentickProvider clientConfig={{ baseUrl: 'https://api.example.com' }}>
  *       <Chat />
- *     </TentickleProvider>
+ *     </AgentickProvider>
  *   );
  * }
  *
@@ -45,14 +45,14 @@
  *   const { token } = useAuth();
  *
  *   return (
- *     <TentickleProvider
+ *     <AgentickProvider
  *       clientConfig={{
  *         baseUrl: 'https://api.example.com',
  *         token,
  *       }}
  *     >
  *       <Chat />
- *     </TentickleProvider>
+ *     </AgentickProvider>
  *   );
  * }
  * ```
@@ -69,11 +69,11 @@
  * | `useStreamingText(opts?)` | Accumulated text from deltas |
  * | `useEvents(opts?)` | Stream event subscription |
  *
- * @module @tentickle/react
+ * @module @agentick/react
  */
 
 // Provider
-export { TentickleProvider } from "./context";
+export { AgentickProvider } from "./context";
 
 // Hooks
 export {
@@ -92,8 +92,8 @@ export {
 // Types
 export type {
   // Provider types
-  TentickleProviderProps,
-  TentickleContextValue,
+  AgentickProviderProps,
+  AgentickContextValue,
   TransportConfig,
 
   // Hook types
@@ -109,7 +109,7 @@ export type {
 
 // Re-export client types and factory for convenience
 export type {
-  TentickleClient,
+  AgentickClient,
   ConnectionState,
   StreamEvent,
   SessionAccessor,
@@ -117,7 +117,7 @@ export type {
   ClientExecutionHandle,
   SessionStreamEvent,
   ClientTransport,
-} from "@tentickle/client";
+} from "@agentick/client";
 
 // Re-export createClient for users who want to create a client manually
-export { createClient } from "@tentickle/client";
+export { createClient } from "@agentick/client";

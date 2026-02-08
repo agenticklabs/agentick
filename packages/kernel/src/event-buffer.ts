@@ -11,7 +11,7 @@
  * Events must have a `type` property that acts as the channel discriminator.
  * This aligns with discriminated union patterns common in TypeScript.
  *
- * @module tentickle/core/event-buffer
+ * @module agentick/core/event-buffer
  */
 
 /**

@@ -8,7 +8,7 @@
  * visualization, not for accurate billing or context window management.
  */
 
-import type { Message, ContentBlock, ToolDefinition } from "@tentickle/shared";
+import type { Message, ContentBlock, ToolDefinition } from "@agentick/shared";
 import type {
   CompiledStructure,
   CompiledTimelineEntry,

@@ -9,7 +9,7 @@
  *
  * @example
  * ```tsx
- * import { createMockApp, createMockSession, createMockExecutionHandle } from '@tentickle/core/testing';
+ * import { createMockApp, createMockSession, createMockExecutionHandle } from '@agentick/core/testing';
  *
  * // Full app mock
  * const app = createMockApp();
@@ -28,13 +28,13 @@
  * expect(result.response).toBe("Hello!");
  * ```
  *
- * @module @tentickle/core/testing
+ * @module @agentick/core/testing
  */
 
 import { EventEmitter } from "node:events";
-import { EventBuffer, ExecutionHandleBrand, Channel } from "@tentickle/kernel";
-import { createTestProcedure } from "@tentickle/kernel/testing";
-import type { StreamEvent, UsageStats, Message } from "@tentickle/shared";
+import { EventBuffer, ExecutionHandleBrand, Channel } from "@agentick/kernel";
+import { createTestProcedure } from "@agentick/kernel/testing";
+import type { StreamEvent, UsageStats, Message } from "@agentick/shared";
 import type {
   Session,
   SessionStatus,

@@ -1,7 +1,7 @@
 /**
  * Ambient module declaration for react-reconciler
  *
- * This allows other packages that import from @tentickle/core to compile
+ * This allows other packages that import from @agentick/core to compile
  * without needing react-reconciler types directly.
  */
 

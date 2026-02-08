@@ -6,7 +6,7 @@
  *
  * ## Why createAdapter?
  *
- * Creating adapters is one of the most common tasks when extending Tentickle.
+ * Creating adapters is one of the most common tasks when extending Agentick.
  * This API minimizes boilerplate while maximizing flexibility:
  *
  * - **Minimal API**: Just implement prepareInput, mapChunk, execute, executeStream
@@ -18,7 +18,7 @@
  * ## Quick Start
  *
  * ```typescript
- * import { createAdapter, StopReason } from '@tentickle/core/model';
+ * import { createAdapter, StopReason } from '@agentick/core/model';
  *
  * const model = createAdapter({
  *   metadata: {
@@ -45,11 +45,11 @@
  * });
  * ```
  *
- * @module tentickle/model/adapter
+ * @module agentick/model/adapter
  */
 
 import React from "react";
-import { Context } from "@tentickle/kernel";
+import { Context } from "@agentick/kernel";
 import type { COMInput } from "../com/types";
 import type { EngineResponse } from "../engine/engine-response";
 import type { EngineModel, ModelInput, ModelOutput, ModelMetadata } from "./model";
@@ -65,8 +65,8 @@ import type {
   ContentMetadata,
   MessageEvent,
   StreamEventBase,
-} from "@tentickle/shared/streaming";
-import type { ContentBlock } from "@tentickle/shared";
+} from "@agentick/shared/streaming";
+import type { ContentBlock } from "@agentick/shared";
 import { fromEngineState, toEngineState } from "./utils/language-model";
 import type { LibraryGenerationOptions, ProviderGenerationOptions } from "../types";
 import { Model } from "../jsx/components/model";
@@ -75,7 +75,7 @@ import { Model } from "../jsx/components/model";
 // Re-exports for adapter convenience
 // ============================================================================
 
-export { StopReason } from "@tentickle/shared";
+export { StopReason } from "@agentick/shared";
 export type { AdapterDelta, ChunkMapping } from "./stream-accumulator";
 export { createChunkMapper } from "./stream-accumulator";
 
@@ -84,7 +84,7 @@ export { createChunkMapper } from "./stream-accumulator";
 // ============================================================================
 
 import type { COM } from "../com/object-model";
-import type { ModelConfig as SharedModelConfig } from "@tentickle/shared/models";
+import type { ModelConfig as SharedModelConfig } from "@agentick/shared/models";
 
 /**
  * Props for ModelClass when used as a JSX component.
@@ -534,7 +534,7 @@ export interface DeclarativeOptions<TProviderInput, TProviderOutput, TChunk> ext
  *
  * @example
  * ```typescript
- * import { createAdapter, StopReason, extractAdapterOptions } from '@tentickle/core/model';
+ * import { createAdapter, StopReason, extractAdapterOptions } from '@agentick/core/model';
  * import { openai } from '@ai-sdk/openai';
  *
  * const model = createAdapter({

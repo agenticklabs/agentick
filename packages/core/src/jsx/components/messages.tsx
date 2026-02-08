@@ -15,7 +15,7 @@
 
 import React, { useDebugValue } from "react";
 import type { JSX } from "react";
-import type { ContentBlock, EventAllowedBlock } from "@tentickle/shared";
+import type { ContentBlock, EventAllowedBlock } from "@agentick/shared";
 import { Message as MessagePrimitive, type MessageProps } from "./primitives";
 import type { EphemeralPosition } from "../../com/types";
 

@@ -6,7 +6,7 @@
 
 import ReactReconciler from "react-reconciler";
 import { hostConfig, registerRendererComponent } from "./host-config";
-import type { TentickleContainer, TentickleNode } from "./types";
+import type { AgentickContainer, AgentickNode } from "./types";
 import type { Renderer } from "../renderers/types";
 import { markdownRenderer } from "../renderers/markdown";
 
@@ -23,7 +23,7 @@ export type FiberRoot = ReturnType<typeof reconciler.createContainer>;
 /**
  * Create a new container for rendering.
  */
-export function createContainer(renderer: Renderer = markdownRenderer): TentickleContainer {
+export function createContainer(renderer: Renderer = markdownRenderer): AgentickContainer {
   return {
     children: [],
     renderer,
@@ -33,7 +33,7 @@ export function createContainer(renderer: Renderer = markdownRenderer): Tentickl
 /**
  * Create a fiber root for a container.
  */
-export function createRoot(container: TentickleContainer): FiberRoot {
+export function createRoot(container: AgentickContainer): FiberRoot {
   // Arguments match react-reconciler 0.29.x
   // Note: @types/react-reconciler 0.28.x has fewer args, so we use type assertion
   return (reconciler.createContainer as any)(
@@ -45,15 +45,15 @@ export function createRoot(container: TentickleContainer): FiberRoot {
     "", // identifierPrefix
     // uncaughtError
     (error: Error) => {
-      console.error("Uncaught error in Tentickle:", error);
+      console.error("Uncaught error in Agentick:", error);
     },
     // onCaughtError
     (error: Error) => {
-      console.error("Caught error in Tentickle:", error);
+      console.error("Caught error in Agentick:", error);
     },
     // onRecoverableError
     (error: Error) => {
-      console.warn("Recoverable error in Tentickle:", error);
+      console.warn("Recoverable error in Agentick:", error);
     },
     // transitionCallbacks - not used
     null,
@@ -91,13 +91,13 @@ export function flushPassiveEffects(): boolean {
 /**
  * Get all children from a container.
  */
-export function getContainerChildren(container: TentickleContainer): TentickleNode[] {
+export function getContainerChildren(container: AgentickContainer): AgentickNode[] {
   return container.children;
 }
 
 // Re-export
 export { registerRendererComponent };
-export type { TentickleNode, TentickleContainer };
+export type { AgentickNode, AgentickContainer };
 
 // Re-export devtools bridge
 export {
@@ -108,11 +108,11 @@ export {
 
 /**
  * Inject renderer info into React DevTools.
- * This allows React DevTools to recognize Tentickle as a custom renderer.
+ * This allows React DevTools to recognize Agentick as a custom renderer.
  */
 reconciler.injectIntoDevTools({
   bundleType: process.env.NODE_ENV === "development" ? 1 : 0,
   version: "1.0.0",
-  rendererPackageName: "@tentickle/core",
+  rendererPackageName: "@agentick/core",
   findFiberByHostInstance: () => null,
 });

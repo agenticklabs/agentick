@@ -1,22 +1,22 @@
 /**
- * React JSX Type Augmentation for Tentickle
+ * React JSX Type Augmentation for Agentick
  *
- * This file extends React's JSX namespace to include Tentickle's
+ * This file extends React's JSX namespace to include Agentick's
  * intrinsic elements (section, entry, tool, message, etc.)
  *
- * This allows TypeScript to properly type-check Tentickle JSX when
+ * This allows TypeScript to properly type-check Agentick JSX when
  * using React's JSX runtime.
  */
 
 import type z from "zod";
 import type { ToolClass, ExecutableTool } from "../tool/tool";
-import type { ContentBlock, MessageRoles, ToolExecutionType } from "@tentickle/shared";
+import type { ContentBlock, MessageRoles, ToolExecutionType } from "@agentick/shared";
 import type { EntryKindMap } from "./components/primitives";
 
 declare global {
   namespace JSX {
     interface IntrinsicElements {
-      // Core Tentickle elements
+      // Core Agentick elements
       entry: {
         kind: keyof EntryKindMap;
         children?: React.ReactNode;

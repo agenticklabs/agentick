@@ -1,5 +1,5 @@
 import type { Middleware, ProcedureEnvelope } from "./procedure";
-import { GuardError } from "@tentickle/shared";
+import { GuardError } from "@agentick/shared";
 
 /**
  * Guard function that inspects the procedure envelope to decide allow/deny.

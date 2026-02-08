@@ -2,7 +2,7 @@
 
 > **Model Context Protocol integration for external tool services**
 
-The MCP module provides Tentickle integration with the [Model Context Protocol](https://modelcontextprotocol.io/) (MCP), an open standard for connecting AI models to external data sources and tools. MCP tools are discovered at runtime and execute on external servers while appearing as native Tentickle tools to the Engine.
+The MCP module provides Agentick integration with the [Model Context Protocol](https://modelcontextprotocol.io/) (MCP), an open standard for connecting AI models to external data sources and tools. MCP tools are discovered at runtime and execute on external servers while appearing as native Agentick tools to the Engine.
 
 ---
 
@@ -35,17 +35,17 @@ The MCP module provides:
 
 - **Connection Management** - Connect to multiple MCP servers via different transports
 - **Tool Discovery** - Automatically discover tools exposed by MCP servers
-- **Schema Conversion** - Convert MCP JSON Schema to Zod schemas for Tentickle compatibility
+- **Schema Conversion** - Convert MCP JSON Schema to Zod schemas for Agentick compatibility
 - **Tool Wrapping** - Wrap MCP tools as `ExecutableTool` instances
 - **JSX Integration** - Declarative MCP tool registration via components
 
 ### Why It Exists
 
-MCP enables Tentickle agents to use tools that:
+MCP enables Agentick agents to use tools that:
 
 1. **Run externally** - File systems, databases, APIs on separate servers
 2. **Are dynamically discovered** - No compile-time tool definitions needed
-3. **Follow a standard** - Any MCP-compatible server works with Tentickle
+3. **Follow a standard** - Any MCP-compatible server works with Agentick
 4. **Isolate concerns** - Tool implementation separate from agent logic
 
 ### Design Principles
@@ -188,7 +188,7 @@ The `normalizeMCPConfig()` function converts Cursor-style to full MCPConfig.
 
 ### 3. Tool Discovery and Schema Conversion
 
-MCP servers expose tools via `listTools()`. Tentickle converts these to native tools:
+MCP servers expose tools via `listTools()`. Agentick converts these to native tools:
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -730,8 +730,8 @@ sequenceDiagram
 ### EngineConfig (Automatic Discovery)
 
 ```typescript
-import { Engine } from "tentickle";
-import { openai } from "@tentickle/openai";
+import { Engine } from "agentick";
+import { openai } from "@agentick/openai";
 
 const engine = new Engine({
   model: openai({ model: "gpt-5.2" }),
@@ -760,7 +760,7 @@ const result = await engine.execute({
 ### JSX Component (Declarative)
 
 ```tsx
-import { Engine, MCPTool, Model } from "tentickle";
+import { Engine, MCPTool, Model } from "agentick";
 
 function MyAgent({ userToken }: { userToken: string }) {
   return (
@@ -800,7 +800,7 @@ await engine.execute(input, <MyAgent userToken={session.token} />);
 ### Programmatic Discovery
 
 ```typescript
-import { MCPClient, MCPService, discoverMCPTools } from 'tentickle';
+import { MCPClient, MCPService, discoverMCPTools } from 'agentick';
 
 // Option 1: Using discoverMCPTools()
 const tools = await discoverMCPTools({
@@ -839,7 +839,7 @@ for (const def of safeTools) {
 ### Component Factory Pattern
 
 ```tsx
-import { createMCPTool } from "tentickle";
+import { createMCPTool } from "agentick";
 
 // Create reusable MCP tool component
 const ReadFile = createMCPTool({
@@ -865,7 +865,7 @@ function CodeReviewAgent() {
 ### Shared Client (Connection Pooling)
 
 ```tsx
-import { MCPClient, MCPTool } from 'tentickle';
+import { MCPClient, MCPTool } from 'agentick';
 
 // Single client for all MCP connections
 const sharedClient = new MCPClient();
@@ -893,7 +893,7 @@ function MultiServerAgent() {
 
 ## Integration Points
 
-### How MCP Integrates with Tentickle
+### How MCP Integrates with Agentick
 
 | Component          | Integration Point                           |
 | ------------------ | ------------------------------------------- |
@@ -956,7 +956,7 @@ MCP tools implement `ExecutableTool` and work identically to native tools:
 
 ## Summary
 
-The MCP module enables Tentickle to connect to any MCP-compatible server and use its tools as native Engine tools:
+The MCP module enables Agentick to connect to any MCP-compatible server and use its tools as native Engine tools:
 
 - **`MCPClient`** - Manages connections using the official SDK
 - **`MCPService`** - Handles discovery and registration
@@ -964,6 +964,6 @@ The MCP module enables Tentickle to connect to any MCP-compatible server and use
 - **`MCPToolComponent`** - JSX component for declarative tool registration
 - **Factory functions** - `createMCPTool()`, `discoverMCPTools()` for different patterns
 
-MCP tools integrate seamlessly with Tentickle's tool system, appearing identical to native tools from the Engine and model perspective. The module supports flexible configuration, runtime auth, tool filtering, and both programmatic and declarative usage patterns.
+MCP tools integrate seamlessly with Agentick's tool system, appearing identical to native tools from the Engine and model perspective. The module supports flexible configuration, runtime auth, tool filtering, and both programmatic and declarative usage patterns.
 
 For more information on the Model Context Protocol, see the [MCP Specification](https://modelcontextprotocol.io/specification).

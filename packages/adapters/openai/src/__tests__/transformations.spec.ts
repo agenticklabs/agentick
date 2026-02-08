@@ -1,13 +1,13 @@
 /**
  * Tests for OpenAI Adapter Transformations
  *
- * Tests the data shape transformations between Tentickle format and OpenAI format.
+ * Tests the data shape transformations between Agentick format and OpenAI format.
  */
 
 import { buildClientOptions, toOpenAIMessages, mapToolDefinition } from "../openai";
 import { STOP_REASON_MAP } from "../types";
-import { StopReason } from "@tentickle/shared";
-import type { Message, ImageBlock, ToolUseBlock, ToolResultBlock } from "@tentickle/shared";
+import { StopReason } from "@agentick/shared";
+import type { Message, ImageBlock, ToolUseBlock, ToolResultBlock } from "@agentick/shared";
 
 // =============================================================================
 // Stop Reason Mapping
@@ -147,7 +147,7 @@ describe("buildClientOptions", () => {
 });
 
 // =============================================================================
-// Message Transformation: Tentickle -> OpenAI
+// Message Transformation: Agentick -> OpenAI
 // =============================================================================
 
 describe("toOpenAIMessages", () => {

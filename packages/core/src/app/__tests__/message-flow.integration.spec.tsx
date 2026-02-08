@@ -16,7 +16,7 @@ import { describe, it, expect } from "vitest";
 import { createApp, Model, System, Timeline, Message } from "../../index";
 import { useConversationHistory, useQueuedMessages, useTickState } from "../../hooks";
 import type { COMTimelineEntry } from "../../com/types";
-import type { MessageRoles } from "@tentickle/shared";
+import type { MessageRoles } from "@agentick/shared";
 import { createTestAdapter } from "../../testing";
 
 // Helper to create a mock model that captures input using the shared test utility

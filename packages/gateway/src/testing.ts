@@ -5,7 +5,7 @@
  *
  * @example
  * ```typescript
- * import { createTestGateway, createMockApp } from '@tentickle/gateway/testing';
+ * import { createTestGateway, createMockApp } from '@agentick/gateway/testing';
  *
  * test('gateway handles messages', async () => {
  *   const mockApp = createMockApp({
@@ -26,7 +26,7 @@
  * });
  * ```
  *
- * @module @tentickle/gateway/testing
+ * @module @agentick/gateway/testing
  */
 
 import WebSocket from "ws";
@@ -48,7 +48,7 @@ export {
   type MockExecutionHandleOptions,
   type TestProcedure,
   type TestProcedureOptions,
-} from "@tentickle/core/testing";
+} from "@agentick/core/testing";
 
 // ============================================================================
 // Test Gateway Factory

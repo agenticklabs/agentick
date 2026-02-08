@@ -1,7 +1,7 @@
 {
-  "name": "@tentickle/core",
+  "name": "@agentick/core",
   "version": "0.0.1",
-  "description": "Core engine for Tentickle",
+  "description": "Core engine for Agentick",
   "keywords": [
     "agent",
     "ai",
@@ -90,9 +90,9 @@
     "dev": "tsc --watch"
   },
   "dependencies": {
+    "@agentick/kernel": "workspace:*",
+    "@agentick/shared": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.25.1",
-    "@tentickle/kernel": "workspace:*",
-    "@tentickle/shared": "workspace:*",
     "react": "^18.2.0",
     "react-reconciler": "^0.29.2",
     "zod": "^4.2.1",

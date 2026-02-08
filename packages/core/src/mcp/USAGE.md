@@ -61,7 +61,7 @@ await engine.execute(input, <MyAgent />);
 ### 2. MCPToolComponent in JSX (Per-Agent)
 
 ```tsx
-import { MCPTool } from 'tentickle';
+import { MCPTool } from 'agentick';
 
 const engine = new Engine({ model: myModel });
 
@@ -93,7 +93,7 @@ await engine.execute(input, <MyAgent />);
 ### 3. MCPToolComponent with Runtime Config (Dynamic Auth)
 
 ```tsx
-import { MCPTool } from 'tentickle';
+import { MCPTool } from 'agentick';
 
 function MyAgent({ userApiToken }: { userApiToken: string }) {
   return (
@@ -156,7 +156,7 @@ await engine.execute(
 ### Shared MCP Client (Connection Pooling)
 
 ```tsx
-import { MCPClient, MCPTool } from 'tentickle';
+import { MCPClient, MCPTool } from 'agentick';
 
 // Create shared client
 const sharedClient = new MCPClient();
@@ -236,7 +236,7 @@ runtimeConfig={{
 ## Complete Example
 
 ```tsx
-import { Engine, MCPTool } from 'tentickle';
+import { Engine, MCPTool } from 'agentick';
 
 const engine = new Engine({
   model: myModel,

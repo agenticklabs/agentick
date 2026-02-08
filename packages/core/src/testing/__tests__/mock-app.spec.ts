@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { createMockExecutionHandle, createMockSession, createMockApp } from "../mock-app";
-import { ExecutionHandleBrand, isProcedure } from "@tentickle/kernel";
+import { ExecutionHandleBrand, isProcedure } from "@agentick/kernel";
 
 // ============================================================================
 // createMockExecutionHandle

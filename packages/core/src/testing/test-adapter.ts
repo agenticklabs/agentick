@@ -21,7 +21,7 @@ import {
 } from "../model/adapter";
 import type { ModelInput, ModelOutput } from "../model/model";
 import { fromEngineState, toEngineState } from "../model/utils/language-model";
-import type { Message, ToolCall } from "@tentickle/shared";
+import type { Message, ToolCall } from "@agentick/shared";
 import type { Mock } from "vitest";
 import { vi } from "vitest";
 import { randomUUID } from "crypto";

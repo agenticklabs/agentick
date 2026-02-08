@@ -33,7 +33,7 @@ export class MCPClient {
 
     const client = new Client(
       {
-        name: "@tentickle/engine",
+        name: "@agentick/engine",
         version: "1.0.0",
       },
       {

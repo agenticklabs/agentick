@@ -10,7 +10,7 @@
  * - render() is a Procedure returning SessionExecutionHandle (AsyncIterable)
  * - Clean, elegant code over feature completeness
  *
- * @module tentickle/app/session
+ * @module agentick/app/session
  */
 
 import { EventEmitter } from "node:events";
@@ -26,7 +26,7 @@ import {
   type Procedure,
   type ChannelServiceInterface,
   type ChannelEvent,
-} from "@tentickle/kernel";
+} from "@agentick/kernel";
 import {
   FiberCompiler,
   StructureRenderer,
@@ -42,7 +42,7 @@ import { jsx } from "../jsx/jsx-runtime";
 import type { JSX } from "../jsx/jsx-runtime";
 import type { COMInput, COMOutput, COMTimelineEntry, TimelineTag } from "../com/types";
 import type { EngineModel } from "../model/model";
-import type { ToolResult, ToolCall, Message, UsageStats, ContentBlock } from "@tentickle/shared";
+import type { ToolResult, ToolCall, Message, UsageStats, ContentBlock } from "@agentick/shared";
 import {
   devToolsEmitter,
   forwardToDevTools,
@@ -54,7 +54,7 @@ import {
   type SessionContextPayload,
   getEffectiveModelInfo,
   getContextUtilization,
-} from "@tentickle/shared";
+} from "@agentick/shared";
 import { computeTokenSummary } from "../utils/token-estimate";
 import type { CompiledStructure } from "../compiler/types";
 import type { ExecutableTool, ToolClass } from "../tool/tool";
@@ -231,14 +231,14 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
     this.sessionOptions = sessionOptions;
 
     // Capture ALS context at session creation time
-    // Include Tentickle middleware registry if available (for procedure middleware support)
+    // Include Agentick middleware registry if available (for procedure middleware support)
     const currentContext = Context.tryGet();
-    const tentickleInstance = (appOptions as { _tentickleInstance?: KernelContext["middleware"] })
-      ._tentickleInstance;
-    if (tentickleInstance && currentContext) {
-      this._capturedContext = { ...currentContext, middleware: tentickleInstance };
-    } else if (tentickleInstance && !currentContext) {
-      this._capturedContext = Context.create({ middleware: tentickleInstance });
+    const agentickInstance = (appOptions as { _agentickInstance?: KernelContext["middleware"] })
+      ._agentickInstance;
+    if (agentickInstance && currentContext) {
+      this._capturedContext = { ...currentContext, middleware: agentickInstance };
+    } else if (agentickInstance && !currentContext) {
+      this._capturedContext = Context.create({ middleware: agentickInstance });
     } else {
       this._capturedContext = currentContext;
     }
@@ -1101,7 +1101,7 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
     const names = new Set<string>();
     const collectNames = (node: SerializedFiberNode) => {
       // Skip host primitives (Section, Message, etc.) and fragments
-      if (!node.type.startsWith("tentickle.") && node.type !== "Fragment") {
+      if (!node.type.startsWith("agentick.") && node.type !== "Fragment") {
         names.add(node.type);
       }
       for (const child of node.children) {
@@ -1789,13 +1789,13 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
         const modelStartTime = Date.now();
 
         // Emit model request to DevTools
-        // modelInput is the Tentickle ModelInput format (after fromEngineState transformation)
+        // modelInput is the Agentick ModelInput format (after fromEngineState transformation)
         this.emitEvent({
           type: "model_request",
           tick: currentTick,
           timestamp: timestamp(),
           modelId: model?.metadata?.id ?? model?.metadata?.model,
-          // ModelInput: Tentickle's model input format
+          // ModelInput: Agentick's model input format
           input: modelInput,
           // Stage marker for pipeline visualization
           stage: "model_input",
@@ -1905,7 +1905,7 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
           timestamp: timestamp(),
           // Provider output (raw from SDK - may be reconstructed for streaming)
           providerOutput: modelOutput?.raw,
-          // ModelOutput (normalized Tentickle format)
+          // ModelOutput (normalized Agentick format)
           modelOutput: {
             model: modelOutput?.model,
             message: modelOutput?.message,

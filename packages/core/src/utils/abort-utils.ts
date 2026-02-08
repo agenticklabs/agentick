@@ -38,7 +38,7 @@ export function mergeAbortSignals(signals: AbortSignal[]): AbortSignal {
   return mergedController.signal;
 }
 
-import { AbortError, isAbortError as isSharedAbortError } from "@tentickle/shared";
+import { AbortError, isAbortError as isSharedAbortError } from "@agentick/shared";
 
 export { AbortError };
 

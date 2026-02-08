@@ -5,8 +5,8 @@
  * This allows the same GatewayCore to serve clients via different protocols.
  */
 
-import type { Message } from "@tentickle/shared";
-import { validateAuth, type AuthResult } from "@tentickle/server";
+import type { Message } from "@agentick/shared";
+import { validateAuth, type AuthResult } from "@agentick/server";
 import type { GatewayMessage, ClientMessage } from "./transport-protocol.js";
 import type { AuthConfig, ClientState, UserContext } from "./types.js";
 

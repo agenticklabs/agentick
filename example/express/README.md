@@ -1,6 +1,6 @@
-# Tentickle Example - Express + Gateway
+# Agentick Example - Express + Gateway
 
-This example demonstrates two different ways to serve a Tentickle agent:
+This example demonstrates two different ways to serve a Agentick agent:
 
 1. **Express Server** (`server.ts`) - Traditional REST API with Express routes
 2. **Gateway Server** (`gateway.ts`) - Standalone Gateway with custom methods
@@ -221,10 +221,10 @@ while (true) {
 }
 ```
 
-### Using TentickleClient (Gateway-specific features)
+### Using AgentickClient (Gateway-specific features)
 
 ```typescript
-import { createClient } from "@tentickle/client";
+import { createClient } from "@agentick/client";
 
 const client = createClient({
   baseUrl: "http://localhost:18790/api",
@@ -261,7 +261,7 @@ session.on("*", (event) => {
 src/
 ├── server.ts           # Express server entry point
 ├── gateway.ts          # Gateway server entry point
-├── setup.ts            # Shared Tentickle app configuration
+├── setup.ts            # Shared Agentick app configuration
 ├── agents/
 │   └── assistant.tsx   # AI assistant component
 ├── routes/
@@ -297,7 +297,7 @@ GATEWAY_TOKEN=my-secret-token
 - You have an existing Express application
 - You need fine-grained control over routes and middleware
 - Your frontend already uses REST patterns
-- You want to add Tentickle to specific routes only
+- You want to add Agentick to specific routes only
 
 ### Use Gateway Server when:
 

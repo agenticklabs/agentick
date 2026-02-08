@@ -328,7 +328,7 @@ function getOrCreateGlobalLogger(): PinoLogger {
 // =============================================================================
 
 /**
- * Logger singleton for Tentickle applications.
+ * Logger singleton for Agentick applications.
  *
  * Provides structured logging with automatic context injection from the
  * current execution context (via AsyncLocalStorage).

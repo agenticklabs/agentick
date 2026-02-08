@@ -2,7 +2,7 @@
  * Tool Types
  *
  * Platform-independent types for tool calling.
- * Used by both backend (@tentickle/core) and frontend (@tentickle/client).
+ * Used by both backend (@agentick/core) and frontend (@agentick/client).
  */
 
 import type { ContentBlock } from "./blocks";
@@ -52,7 +52,7 @@ export enum ToolExecutionType {
  * A SERVER-type tool can be executed by either the engine or an adapter library.
  */
 export type ToolExecutor =
-  /** Executed by Tentickle engine's ToolExecutor */
+  /** Executed by Agentick engine's ToolExecutor */
   | "engine"
   /** Executed by adapter library (e.g., AI SDK with maxSteps) */
   | "adapter"

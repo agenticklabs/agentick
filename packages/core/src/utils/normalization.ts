@@ -1,4 +1,4 @@
-import type { Message } from "@tentickle/shared";
+import type { Message } from "@agentick/shared";
 import { toolRegistry } from "./registry";
 import type {
   ModelConfig,

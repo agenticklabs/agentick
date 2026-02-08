@@ -6,12 +6,12 @@ import type {
   TextBlock,
   ToolResult,
   ToolCall,
-} from "@tentickle/shared";
-import { isEventBlock, StopReason } from "@tentickle/shared";
+} from "@agentick/shared";
+import { isEventBlock, StopReason } from "@agentick/shared";
 import type { EngineResponse } from "../../engine/engine-response";
 import type { DelimiterConfig, EventBlockDelimiters } from "../../types";
 import type { ModelConfig, ModelInput, ModelOutput, MessageTransformationConfig } from "../model";
-import { Logger } from "@tentickle/kernel";
+import { Logger } from "@agentick/kernel";
 
 const log = Logger.for("language-model");
 

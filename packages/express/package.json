@@ -1,7 +1,7 @@
 {
-  "name": "@tentickle/express",
+  "name": "@agentick/express",
   "version": "0.0.1",
-  "description": "Express middleware and router for Tentickle applications",
+  "description": "Express middleware and router for Agentick applications",
   "files": [
     "dist",
     "src"
@@ -24,7 +24,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@tentickle/gateway": "workspace:*"
+    "@agentick/gateway": "workspace:*"
   },
   "devDependencies": {
     "@types/express": "^4.17.21",

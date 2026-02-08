@@ -1,17 +1,17 @@
-# @tentickle/react
+# @agentick/react
 
-React bindings for Tentickle. Provides hooks around `@tentickle/client` for building chat interfaces and real-time AI applications.
+React bindings for Agentick. Provides hooks around `@agentick/client` for building chat interfaces and real-time AI applications.
 
 ## Installation
 
 ```bash
-pnpm add @tentickle/react
+pnpm add @agentick/react
 ```
 
 ## Quick Start
 
 ```tsx
-import { TentickleProvider, useSession, useStreamingText, useContextInfo } from "@tentickle/react";
+import { AgentickProvider, useSession, useStreamingText, useContextInfo } from "@agentick/react";
 
 function Chat() {
   const { send } = useSession({ sessionId: "my-session", autoSubscribe: true });
@@ -39,9 +39,9 @@ function Chat() {
 
 export function App() {
   return (
-    <TentickleProvider clientConfig={{ baseUrl: "/api" }}>
+    <AgentickProvider clientConfig={{ baseUrl: "/api" }}>
       <Chat />
-    </TentickleProvider>
+    </AgentickProvider>
   );
 }
 ```
@@ -206,7 +206,7 @@ const state = useConnectionState(); // "disconnected" | "connecting" | "connecte
 
 ### `useClient()`
 
-Direct access to the underlying `TentickleClient` for advanced use cases.
+Direct access to the underlying `AgentickClient` for advanced use cases.
 
 ```tsx
 const client = useClient();
@@ -219,19 +219,19 @@ channel.publish("event", { data: "value" });
 
 ## Provider
 
-### `TentickleProvider`
+### `AgentickProvider`
 
-Wraps your app to provide the Tentickle client context.
+Wraps your app to provide the Agentick client context.
 
 ```tsx
-<TentickleProvider
+<AgentickProvider
   clientConfig={{
     baseUrl: "https://api.example.com",  // Required - API base URL
     token: "auth-token",                  // Optional - auth token
   }}
 >
   <App />
-</TentickleProvider>
+</AgentickProvider>
 ```
 
 ## Types
@@ -241,8 +241,8 @@ All hooks are fully typed. Import types from the package:
 ```typescript
 import type {
   // Provider types
-  TentickleProviderProps,
-  TentickleContextValue,
+  AgentickProviderProps,
+  AgentickContextValue,
   TransportConfig,
 
   // Hook types
@@ -258,8 +258,8 @@ import type {
   UseContextInfoResult,
   ContextInfo,
 
-  // Re-exported from @tentickle/client
-  TentickleClient,
+  // Re-exported from @agentick/client
+  AgentickClient,
   ConnectionState,
   StreamEvent,
   SessionAccessor,
@@ -267,7 +267,7 @@ import type {
   ClientExecutionHandle,
   SessionStreamEvent,
   ClientTransport,
-} from "@tentickle/react";
+} from "@agentick/react";
 ```
 
 ## License

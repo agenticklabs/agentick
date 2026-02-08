@@ -1,7 +1,7 @@
 import type { GoogleGenAI } from "@google/genai";
 import { type GenerateContentParameters } from "@google/genai";
-import { type ProviderClientOptions } from "@tentickle/core";
-import { StopReason } from "@tentickle/shared";
+import { type ProviderClientOptions } from "@agentick/core";
+import { StopReason } from "@agentick/shared";
 
 /**
  * Google-specific client initialization options.
@@ -48,7 +48,7 @@ export interface GoogleToolOptions {
 /**
  * Module augmentation: Extend provider option interfaces to include Google-specific options.
  */
-declare module "@tentickle/core" {
+declare module "@agentick/core" {
   interface ProviderClientOptions {
     google?: GoogleClientOptions;
   }

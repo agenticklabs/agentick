@@ -7,7 +7,7 @@
  *
  * @example
  * ```typescript
- * import { createTestProcedure } from "@tentickle/kernel/testing";
+ * import { createTestProcedure } from "@agentick/kernel/testing";
  *
  * const proc = createTestProcedure({ handler: async (x: number) => x * 2 });
  * const result = await proc(5).result;  // 10
@@ -15,7 +15,7 @@
  * expect(proc._lastArgs).toEqual([5]);
  * ```
  *
- * @module @tentickle/kernel/testing
+ * @module @agentick/kernel/testing
  */
 
 import { createProcedurePromise, PROCEDURE_SYMBOL } from "./procedure";

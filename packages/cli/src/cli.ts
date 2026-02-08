@@ -2,7 +2,7 @@
  * CLI - Main CLI class
  */
 
-import { createClient, type TentickleClient, type TentickleClientConfig } from "@tentickle/client";
+import { createClient, type AgentickClient, type AgentickClientConfig } from "@agentick/client";
 import EventSource from "eventsource";
 import { EventEmitter } from "events";
 
@@ -49,7 +49,7 @@ export interface CLIEvents {
  * CLI class for programmatic usage
  */
 export class CLI extends EventEmitter {
-  private client: TentickleClient;
+  private client: AgentickClient;
   private config: CLIConfig;
   private _sessionId?: string;
   private _isConnected = false;
@@ -59,7 +59,7 @@ export class CLI extends EventEmitter {
     this.config = config;
 
     // Create client with Node.js EventSource
-    const clientConfig: TentickleClientConfig = {
+    const clientConfig: AgentickClientConfig = {
       baseUrl: config.url,
       token: config.token,
       headers: config.headers,

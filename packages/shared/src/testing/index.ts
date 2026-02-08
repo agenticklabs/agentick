@@ -1,8 +1,8 @@
 /**
- * # Tentickle Testing Utilities
+ * # Agentick Testing Utilities
  *
- * Fixtures, mocks, and helpers for testing Tentickle applications.
- * Import from `@tentickle/shared/testing` for test utilities.
+ * Fixtures, mocks, and helpers for testing Agentick applications.
+ * Import from `@agentick/shared/testing` for test utilities.
  *
  * ## Features
  *
@@ -20,7 +20,7 @@
  *   createTextStreamSequence,
  *   captureAsyncGenerator,
  *   waitForEvent,
- * } from '@tentickle/shared/testing';
+ * } from '@agentick/shared/testing';
  *
  * // Create test fixtures
  * const messages = [
@@ -35,7 +35,7 @@
  * const items = await captureAsyncGenerator(myStream());
  * ```
  *
- * @module @tentickle/shared/testing
+ * @module @agentick/shared/testing
  */
 
 // Fixtures - factory functions for test data

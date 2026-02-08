@@ -1,23 +1,23 @@
-# @tentickle/nestjs
+# @agentick/nestjs
 
-NestJS integration for Tentickle with multiplexed SSE sessions.
+NestJS integration for Agentick with multiplexed SSE sessions.
 
 ## Installation
 
 ```bash
-pnpm add @tentickle/nestjs
+pnpm add @agentick/nestjs
 ```
 
 ## Quick Start
 
 ```typescript
 import { Module } from "@nestjs/common";
-import { TentickleModule } from "@tentickle/nestjs";
-import { createApp } from "@tentickle/core";
+import { AgentickModule } from "@agentick/nestjs";
+import { createApp } from "@agentick/core";
 
 @Module({
   imports: [
-    TentickleModule.forRoot({
+    AgentickModule.forRoot({
       app: createApp(<MyAgent />),
     }),
   ],
@@ -42,7 +42,7 @@ export class AppModule {}
 ```typescript
 @Module({
   imports: [
-    TentickleModule.forRoot({
+    AgentickModule.forRoot({
       app,
       registerController: false,
     }),
@@ -53,16 +53,16 @@ export class AppModule {}
 
 @Controller("chat")
 export class ChatController {
-  constructor(private tentickle: TentickleService) {}
+  constructor(private agentick: AgentickService) {}
 
   @Post("send")
   async send(@Body() body: SendDto, @Res() res: Response) {
-    await this.tentickle.sendAndStream(body.sessionId, body, res);
+    await this.agentick.sendAndStream(body.sessionId, body, res);
   }
 }
 ```
 
-## TentickleService
+## AgentickService
 
 ```typescript
 service.createConnection(res)             // SSE connection

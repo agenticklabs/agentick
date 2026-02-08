@@ -26,7 +26,7 @@ What actually happened.
 
 ## Environment
 
-- Tentickle version:
+- Agentick version:
 - Node.js version:
 - OS:
 - Package manager: pnpm / npm / yarn

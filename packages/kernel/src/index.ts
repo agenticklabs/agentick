@@ -1,8 +1,8 @@
 /**
- * # Tentickle Kernel
+ * # Agentick Kernel
  *
- * Low-level execution primitives for the Tentickle framework. The kernel provides
- * the foundational infrastructure that all other Tentickle packages build upon.
+ * Low-level execution primitives for the Agentick framework. The kernel provides
+ * the foundational infrastructure that all other Agentick packages build upon.
  *
  * ## Core Primitives
  *
@@ -14,10 +14,10 @@
  *
  * ## When to Use Kernel Directly
  *
- * Most applications should use the higher-level `tentickle` package. Use kernel directly when:
+ * Most applications should use the higher-level `agentick` package. Use kernel directly when:
  *
  * - Building custom execution infrastructure
- * - Creating new Tentickle adapters or integrations
+ * - Creating new Agentick adapters or integrations
  * - Need fine-grained control over procedure execution
  *
  * ## Example
@@ -40,7 +40,7 @@
  * @see {@link Channel} - Streaming primitive
  * @see {@link Telemetry} - Execution tracking
  *
- * @module @tentickle/kernel
+ * @module @agentick/kernel
  */
 
 export * from "./context";
@@ -60,4 +60,4 @@ export * from "./schema";
 export * from "./guard";
 
 // Re-export guard errors from shared (guards are a procedure concept)
-export { GuardError, isGuardError } from "@tentickle/shared";
+export { GuardError, isGuardError } from "@agentick/shared";

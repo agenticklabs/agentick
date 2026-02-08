@@ -1,7 +1,7 @@
 /**
- * Schema utilities - re-exported from @tentickle/kernel
+ * Schema utilities - re-exported from @agentick/kernel
  *
- * @see @tentickle/kernel/schema for implementation
+ * @see @agentick/kernel/schema for implementation
  */
 export {
   // Types
@@ -24,4 +24,4 @@ export {
   // Validation
   validateSchema,
   parseSchema,
-} from "@tentickle/kernel";
+} from "@agentick/kernel";

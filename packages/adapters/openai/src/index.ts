@@ -1,7 +1,7 @@
 /**
- * # Tentickle OpenAI Adapter
+ * # Agentick OpenAI Adapter
  *
- * Native OpenAI API adapter for Tentickle. Provides direct integration with
+ * Native OpenAI API adapter for Agentick. Provides direct integration with
  * OpenAI models without requiring the Vercel AI SDK.
  *
  * ## Features
@@ -14,7 +14,7 @@
  * ## Quick Start
  *
  * ```typescript
- * import { openai } from '@tentickle/openai';
+ * import { openai } from '@agentick/openai';
  *
  * const model = openai('gpt-4o');
  *
@@ -23,7 +23,7 @@
  * const result = await app.run({ messages });
  * ```
  *
- * @module @tentickle/openai
+ * @module @agentick/openai
  */
 export * from "./openai-model";
 export * from "./openai";

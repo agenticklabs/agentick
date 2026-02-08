@@ -1,11 +1,11 @@
-# Tentickle Compiler
+# Agentick Compiler
 
 Transforms JSX component trees into `CompiledStructure` - the format-agnostic intermediate representation used by the engine.
 
 ## Overview
 
 ```
-TentickleNode Tree → Collector → CompiledStructure → COM
+AgentickNode Tree → Collector → CompiledStructure → COM
 ```
 
 The compiler:
@@ -43,7 +43,7 @@ interface CompiledStructure {
 The compiler is used internally by the session. Direct usage:
 
 ```typescript
-import { createFiberCompiler } from '@tentickle/core/compiler';
+import { createFiberCompiler } from '@agentick/core/compiler';
 
 const compiler = createFiberCompiler(ctx);
 
@@ -89,7 +89,7 @@ The compiler uses `react-reconciler` directly to build and manage a fiber tree f
 
 - **Fiber tree**: Built by react-reconciler, represents component hierarchy with hooks state
 - **Reconciliation**: React's diffing algorithm schedules updates
-- **Collection**: Traverses the reconciled TentickleNode tree to extract content blocks
+- **Collection**: Traverses the reconciled AgentickNode tree to extract content blocks
 - **Token annotation**: Stamps token estimates on all compiled entries when an estimator is available
 - **Lifecycle integration**: Notifies components of tick start/end events
 

@@ -4,7 +4,7 @@
  * Provides helpers for streaming events to clients via SSE.
  * Works with any web framework that supports writable streams.
  *
- * @module @tentickle/server/sse
+ * @module @agentick/server/sse
  */
 
 import type { SSEWriter, SSEWriterOptions } from "./types";

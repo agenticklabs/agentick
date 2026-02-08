@@ -1,11 +1,11 @@
-# @tentickle/agent
+# @agentick/agent
 
-Opinionated agent composition for Tentickle. Provides the `<Agent>` component and `createAgent()` factory — high-level building blocks on top of `@tentickle/core` primitives.
+Opinionated agent composition for Agentick. Provides the `<Agent>` component and `createAgent()` factory — high-level building blocks on top of `@agentick/core` primitives.
 
 ## Installation
 
 ```bash
-pnpm add @tentickle/agent
+pnpm add @agentick/agent
 ```
 
 ## Quick Start
@@ -13,9 +13,9 @@ pnpm add @tentickle/agent
 ### Level 0: No JSX Required
 
 ```typescript
-import { createAgent } from "@tentickle/agent";
-import { knob } from "@tentickle/core";
-import { openai } from "@tentickle/openai";
+import { createAgent } from "@agentick/agent";
+import { knob } from "@agentick/core";
+import { openai } from "@agentick/openai";
 
 const agent = createAgent({
   system: "You are a helpful researcher.",
@@ -35,9 +35,9 @@ await session.send({
 ### Level 1: JSX Component
 
 ```tsx
-import { Agent } from "@tentickle/agent";
-import { useKnob, createApp } from "@tentickle/core";
-import { openai } from "@tentickle/openai";
+import { Agent } from "@agentick/agent";
+import { useKnob, createApp } from "@agentick/core";
+import { openai } from "@agentick/openai";
 
 function MyAgent() {
   const [verbose] = useKnob("verbose", false, { description: "Verbose output" });

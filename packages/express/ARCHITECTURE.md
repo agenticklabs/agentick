@@ -1,18 +1,18 @@
-# @tentickle/express Architecture
+# @agentick/express Architecture
 
-Express integration providing an **app-centric handler** for Tentickle servers.
+Express integration providing an **app-centric handler** for Agentick servers.
 
 ## Philosophy
 
 **One function, batteries included.**
 
-Users call `createTentickleHandler(app)` with their Tentickle `App` instance and get a complete router with SSE multiplexing, session management, and authentication support.
+Users call `createAgentickHandler(app)` with their Agentick `App` instance and get a complete router with SSE multiplexing, session management, and authentication support.
 
 ```typescript
-import { createTentickleHandler } from "@tentickle/express";
+import { createAgentickHandler } from "@agentick/express";
 
 const app = createApp(MyAgent, { model });
-const handler = createTentickleHandler(app);
+const handler = createAgentickHandler(app);
 
 expressApp.use("/api/agent", handler);
 // Done. All routes work with multiplexed sessions.
@@ -43,9 +43,9 @@ All paths are customizable via `paths` config.
 └────────────────────────────┬─────────────────────────────────┘
                              │
 ┌────────────────────────────▼─────────────────────────────────┐
-│                   @tentickle/express                          │
+│                   @agentick/express                          │
 │                                                              │
-│   createTentickleHandler(app, options)                       │
+│   createAgentickHandler(app, options)                       │
 │       │                                                      │
 │       ├── Manages SSE connections (connectionId → Response)  │
 │       ├── Tracks session subscriptions per connection        │
@@ -55,7 +55,7 @@ All paths are customizable via `paths` config.
 └────────────────────────────┬─────────────────────────────────┘
                              │
 ┌────────────────────────────▼─────────────────────────────────┐
-│                    @tentickle/core                            │
+│                    @agentick/core                            │
 │                                                              │
 │   App<P> with SessionRegistry                                │
 │       - send(input, { sessionId })                           │
@@ -95,7 +95,7 @@ Client                                  Server
 ## Authentication & Authorization
 
 ```typescript
-createTentickleHandler(app, {
+createAgentickHandler(app, {
   // Extract user from request (runs on /events connection)
   authenticate: async (req) => {
     const token = req.headers.authorization?.replace("Bearer ", "");
@@ -122,7 +122,7 @@ The handler enforces authorization on subscribe operations - unauthorized attemp
 The handler sends periodic SSE comments (`: keepalive`) to prevent proxy timeouts:
 
 ```typescript
-createTentickleHandler(app, {
+createAgentickHandler(app, {
   keepaliveInterval: 15000, // Default: 15 seconds
 });
 ```
@@ -194,7 +194,7 @@ createTentickleHandler(app, {
 ## Handler Options
 
 ```typescript
-interface TentickleHandlerOptions<User = unknown> {
+interface AgentickHandlerOptions<User = unknown> {
   // Authentication
   authenticate?: (req: Request) => Promise<User | undefined> | User | undefined;
   authorize?: (user: User | undefined, sessionId: string, req: Request) => Promise<boolean> | boolean;
@@ -231,14 +231,14 @@ packages/express/src/
 
 ```typescript
 import express from "express";
-import { createApp } from "@tentickle/core";
-import { createTentickleHandler } from "@tentickle/express";
+import { createApp } from "@agentick/core";
+import { createAgentickHandler } from "@agentick/express";
 
 const app = createApp(MyAgent, { model });
 const expressApp = express();
 
 expressApp.use(express.json());
-expressApp.use("/api/agent", createTentickleHandler(app));
+expressApp.use("/api/agent", createAgentickHandler(app));
 
 expressApp.listen(3000);
 ```
@@ -246,7 +246,7 @@ expressApp.listen(3000);
 ### With Authentication
 
 ```typescript
-expressApp.use("/api/agent", createTentickleHandler(app, {
+expressApp.use("/api/agent", createAgentickHandler(app, {
   authenticate: async (req) => {
     const token = req.headers.authorization?.replace("Bearer ", "");
     return await verifyJWT(token);
@@ -260,7 +260,7 @@ expressApp.use("/api/agent", createTentickleHandler(app, {
 ### Custom Paths
 
 ```typescript
-expressApp.use("/chat", createTentickleHandler(app, {
+expressApp.use("/chat", createAgentickHandler(app, {
   paths: {
     events: "/stream",
     send: "/message",
@@ -279,4 +279,4 @@ expressApp.use("/chat", createTentickleHandler(app, {
 - **Body parsing** - Use express.json() middleware
 - **Logging** - Use morgan or similar
 
-We handle Tentickle-specific concerns. Standard Express concerns are yours.
+We handle Agentick-specific concerns. Standard Express concerns are yours.

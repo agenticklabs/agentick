@@ -1,6 +1,6 @@
-# Contributing to Tentickle
+# Contributing to Agentick
 
-Thank you for your interest in contributing to Tentickle! This document provides guidelines and instructions for contributing.
+Thank you for your interest in contributing to Agentick! This document provides guidelines and instructions for contributing.
 
 ## AI-Assisted Development
 
@@ -20,7 +20,7 @@ If you're an AI agent or using one:
 - **Read `CLAUDE.md`** - Overview of the codebase for AI agents
 - **Check `ARCHITECTURE.md` files** - Each package has detailed architecture docs
 - **Use `CONVENTIONS.md`** - Naming and coding standards
-- **Use testing utilities** - `@tentickle/shared/testing` provides fixtures and helpers
+- **Use testing utilities** - `@agentick/shared/testing` provides fixtures and helpers
 
 ### Attribution
 
@@ -39,8 +39,8 @@ No special attribution is required for AI-assisted contributions. The standard c
 
 ```bash
 # Clone the repository
-git clone https://github.com/rlindgren/tentickle.git
-cd tentickle
+git clone https://github.com/rlindgren/agentick.git
+cd agentick
 
 # Install dependencies
 pnpm install
@@ -55,19 +55,19 @@ pnpm test
 ### Project Structure
 
 ```
-tentickle/
+agentick/
 ├── packages/           # Published packages
-│   ├── core/          # tentickle - Core framework
-│   ├── kernel/        # @tentickle/kernel - Execution primitives
-│   ├── client/        # @tentickle/client - Browser client
-│   ├── express/       # @tentickle/express - Express middleware
-│   ├── server/        # @tentickle/server - Server utilities
-│   ├── react/         # @tentickle/react - React bindings
-│   ├── angular/       # @tentickle/angular - Angular bindings
+│   ├── core/          # agentick - Core framework
+│   ├── kernel/        # @agentick/kernel - Execution primitives
+│   ├── client/        # @agentick/client - Browser client
+│   ├── express/       # @agentick/express - Express middleware
+│   ├── server/        # @agentick/server - Server utilities
+│   ├── react/         # @agentick/react - React bindings
+│   ├── angular/       # @agentick/angular - Angular bindings
 │   └── adapters/      # AI provider adapters
-│       ├── ai-sdk/    # @tentickle/ai-sdk
-│       ├── openai/    # @tentickle/openai
-│       └── google/    # @tentickle/google
+│       ├── ai-sdk/    # @agentick/ai-sdk
+│       ├── openai/    # @agentick/openai
+│       └── google/    # @agentick/google
 ├── example/           # Example applications (separate workspace)
 │   ├── backend/       # Express backend example
 │   ├── frontend-react/    # React frontend example
@@ -98,13 +98,13 @@ pnpm dev:frontend   # Terminal 2
 pnpm test
 
 # Run tests for a specific package
-pnpm --filter tentickle test
+pnpm --filter agentick test
 
 # Run tests in watch mode
-pnpm --filter tentickle test -- --watch
+pnpm --filter agentick test -- --watch
 
 # Run a specific test file
-pnpm --filter tentickle test -- src/engine/engine.spec.ts
+pnpm --filter agentick test -- src/engine/engine.spec.ts
 ```
 
 ### Type Checking
@@ -114,7 +114,7 @@ pnpm --filter tentickle test -- src/engine/engine.spec.ts
 pnpm typecheck
 
 # Type check a specific package
-pnpm --filter tentickle typecheck
+pnpm --filter agentick typecheck
 ```
 
 ### Building
@@ -124,7 +124,7 @@ pnpm --filter tentickle typecheck
 pnpm build
 
 # Build a specific package
-pnpm --filter tentickle build
+pnpm --filter agentick build
 
 # Clean build artifacts
 pnpm clean
@@ -141,7 +141,7 @@ pnpm clean
 
 ### JSX
 
-- The core package uses a custom JSX runtime (`tentickle/jsx-runtime`)
+- The core package uses a custom JSX runtime (`agentick/jsx-runtime`)
 - React/Angular packages use their respective JSX runtimes
 - Use `.tsx` extension for files with JSX
 
@@ -266,7 +266,7 @@ Each package should have a README with:
 
 ## Testing Utilities
 
-Use the testing utilities from `@tentickle/shared/testing` for consistent test patterns:
+Use the testing utilities from `@agentick/shared/testing` for consistent test patterns:
 
 ```typescript
 import {
@@ -276,7 +276,7 @@ import {
   createTextStreamSequence,
   captureAsyncGenerator,
   waitFor,
-} from "@tentickle/shared/testing";
+} from "@agentick/shared/testing";
 
 describe("MyFeature", () => {
   it("should handle messages", async () => {

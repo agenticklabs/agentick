@@ -1,19 +1,19 @@
-# @tentickle/client
+# @agentick/client
 
-Client SDK for multiplexed session access to a Tentickle server. One client per app, many sessions per client.
+Client SDK for multiplexed session access to a Agentick server. One client per app, many sessions per client.
 
 ## Installation
 
 ```bash
-pnpm add @tentickle/client
+pnpm add @agentick/client
 # or
-npm install @tentickle/client
+npm install @agentick/client
 ```
 
 ## Quick Start
 
 ```typescript
-import { createClient } from "@tentickle/client";
+import { createClient } from "@agentick/client";
 
 const client = createClient({ baseUrl: "https://api.example.com" });
 
@@ -39,7 +39,7 @@ console.log(result.response);
 
 ### `createClient(config)`
 
-Creates a new TentickleClient instance.
+Creates a new AgentickClient instance.
 
 ```typescript
 const client = createClient({

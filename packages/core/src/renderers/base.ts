@@ -1,4 +1,4 @@
-import type { ContentBlock, TextBlock } from "@tentickle/shared";
+import type { ContentBlock, TextBlock } from "@agentick/shared";
 
 /**
  * Formatter function type.

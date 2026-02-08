@@ -1,5 +1,5 @@
 {
-  "name": "@tentickle/devtools",
+  "name": "@agentick/devtools",
   "version": "0.0.1",
   "files": [
     "dist",
@@ -22,7 +22,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@tentickle/shared": "workspace:*"
+    "@agentick/shared": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^22.10.10",

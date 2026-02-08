@@ -19,17 +19,17 @@ import {
   type ModelClass,
   type ModelInput,
   type ModelOutput,
-} from "@tentickle/core/model";
-// import { Logger } from "@tentickle/core";
-import { normalizeModelInput } from "@tentickle/core/utils";
-import type { ToolDefinition } from "@tentickle/core/tool";
+} from "@agentick/core/model";
+// import { Logger } from "@agentick/core";
+import { normalizeModelInput } from "@agentick/core/utils";
+import type { ToolDefinition } from "@agentick/core/tool";
 import {
   type Message,
   type ContentBlock,
   type TextBlock,
   StopReason,
   AdapterError,
-} from "@tentickle/shared";
+} from "@agentick/shared";
 import { type OpenAIAdapterConfig, STOP_REASON_MAP } from "./types";
 
 // const logger = Logger.for("OpenAIAdapter");

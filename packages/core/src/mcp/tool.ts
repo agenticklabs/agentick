@@ -11,11 +11,11 @@ import {
   type ToolHandler,
   ToolExecutionType,
 } from "../tool/tool";
-import type { ContentBlock } from "@tentickle/shared";
+import type { ContentBlock } from "@agentick/shared";
 import type { MCPClient } from "./client";
 import type { MCPToolDefinition } from "./types";
 import { z } from "zod";
-import type { Procedure } from "@tentickle/kernel";
+import type { Procedure } from "@agentick/kernel";
 import { createEngineProcedure } from "../procedure";
 
 // ============================================================================

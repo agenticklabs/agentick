@@ -1,6 +1,6 @@
-# Tentickle Hooks
+# Agentick Hooks
 
-React-like hooks for building agentic applications with Tentickle.
+React-like hooks for building agentic applications with Agentick.
 
 ## Agent Loop Control
 
@@ -13,7 +13,7 @@ The primary hook for implementing agent loops with custom termination conditions
 All callbacks receive data first, COM (context) last. Most callbacks only need the data parameter.
 
 ```tsx
-import { useContinuation } from "@tentickle/core";
+import { useContinuation } from "@agentick/core";
 
 function MyAgent() {
   // Simple: continue until model outputs a done marker
@@ -89,7 +89,7 @@ useContinuation(async (r) => {
 Let the model explicitly signal completion by calling a tool:
 
 ```tsx
-import { Tool, useContinuation } from "@tentickle/core";
+import { Tool, useContinuation } from "@agentick/core";
 
 function AgentWithDoneTool() {
   const [isDone, setIsDone] = useState(false);
@@ -414,7 +414,7 @@ The model sees primitive values (string, number, boolean) and can change them vi
 Create a knob descriptor for use in config objects. Detected by `isKnob()`.
 
 ```tsx
-import { knob } from "@tentickle/core";
+import { knob } from "@agentick/core";
 
 const config = {
   mode: knob("broad", { description: "Operating mode", options: ["broad", "deep"] }),
@@ -428,7 +428,7 @@ const config = {
 Create a live knob inside a component. Returns `[value, setter]`.
 
 ```tsx
-import { useKnob, Knobs } from "@tentickle/core";
+import { useKnob, Knobs } from "@agentick/core";
 
 function Agent() {
   // Simple — mode is "broad" or "deep"
@@ -547,7 +547,7 @@ The `set_knob` tool is still registered automatically. You control only the sect
 Full custom rendering. `<Knobs.Provider>` registers the tool and exposes knob data via React context. Use `<Knobs.Controls />` or `useKnobsContext()` to consume.
 
 ```tsx
-import { useKnobsContext, type KnobInfo, type KnobGroup } from "@tentickle/core";
+import { useKnobsContext, type KnobInfo, type KnobGroup } from "@agentick/core";
 
 function MyKnobDisplay() {
   const { knobs, groups, get } = useKnobsContext();

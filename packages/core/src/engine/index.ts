@@ -10,7 +10,7 @@
  * Note: The Engine class has been replaced by SessionImpl.
  * Use createApp() and session.render() for execution.
  *
- * @module tentickle/engine
+ * @module agentick/engine
  */
 
 // Execution Handle
