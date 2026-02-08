@@ -1,5 +1,5 @@
 /**
- * V2 Message Context
+ * Message Context
  *
  * Provides message handling capabilities to components.
  * This enables components to react to incoming messages and queue outgoing messages.

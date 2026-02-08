@@ -19,7 +19,7 @@ const SearchTool = createTool({
   }),
   handler: async ({ query, maxResults }) => {
     const results = await searchWeb(query, maxResults);
-    return results.map(r => `${r.title}: ${r.snippet}`).join("\n");
+    return results.map((r) => `${r.title}: ${r.snippet}`).join("\n");
   },
 });
 ```
@@ -45,8 +45,8 @@ function MyAgent() {
 const result = await SearchTool.run({ query: "agentick" });
 
 // Access metadata
-console.log(SearchTool.metadata.name);        // "web_search"
-console.log(SearchTool.metadata.description);  // "Search the web..."
+console.log(SearchTool.metadata.name); // "web_search"
+console.log(SearchTool.metadata.description); // "Search the web..."
 ```
 
 ## Inline Tools
@@ -93,9 +93,7 @@ const TodoTool = createTool({
       ## Current Todos
       {todos.length === 0
         ? "No todos yet."
-        : todos.map((t, i) =>
-            `${i}. [${t.done ? "x" : " "}] ${t.text}`
-          ).join("\n")}
+        : todos.map((t, i) => `${i}. [${t.done ? "x" : " "}] ${t.text}`).join("\n")}
     </Section>
   ),
 });
@@ -106,7 +104,7 @@ The `render` function is a React component. It's part of the fiber tree. When to
 ## Tool Handler Signature
 
 ```typescript
-(input: TInput, ctx?: COM) => TOutput | Promise<TOutput>
+(input: TInput, ctx?: COM) => TOutput | Promise<TOutput>;
 ```
 
 The `ctx` parameter provides access to the Context Object Model — session state, emit events, etc.
@@ -123,6 +121,7 @@ handler: async ({ query }, ctx) => {
 ## Tool Output Types
 
 Handlers can return:
+
 - **String**: plain text result
 - **Object**: serialized as JSON
 - **Array of content blocks**: `[{ type: "text", text: "..." }]` for rich responses

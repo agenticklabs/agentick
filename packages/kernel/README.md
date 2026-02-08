@@ -27,7 +27,7 @@ const fetchUser = createProcedure(
   },
   async ({ id }) => {
     return await db.users.find(id);
-  }
+  },
 );
 
 // Execute
@@ -289,14 +289,14 @@ Guards are middleware — they compose with `.use()` like any other middleware b
 import { GuardError, isGuardError } from "@agentick/kernel";
 
 // Factories
-GuardError.role(["admin"]);              // "Requires one of roles [admin]"
-GuardError.denied("Custom reason");      // Custom denial
+GuardError.role(["admin"]); // "Requires one of roles [admin]"
+GuardError.denied("Custom reason"); // Custom denial
 
 // Type guard
 if (isGuardError(error)) {
-  error.code;       // "GUARD_DENIED"
-  error.guardType;  // "role", "custom", etc.
-  error.details;    // { roles: [...], guard: "name", ... }
+  error.code; // "GUARD_DENIED"
+  error.guardType; // "role", "custom", etc.
+  error.details; // { roles: [...], guard: "name", ... }
 }
 ```
 

@@ -11,21 +11,21 @@ Agentick hooks follow React conventions — they're functions starting with `use
 
 Before creating a new hook, check if an existing one covers your use case:
 
-| Hook | Purpose |
-|------|---------|
-| `useState` | Local state (standard React) |
-| `useEffect` | Side effects (standard React) |
-| `useSignal` | Reactive signal state |
-| `useKnob` | Model-visible, model-settable reactive state |
-| `useOnMount` | Run once on first tick |
-| `useOnUnmount` | Cleanup on component removal |
-| `useOnTickStart` | Run at start of tick 2+ |
-| `useOnTickEnd` | Run at end of every tick |
-| `useContinuation` | Control whether execution continues |
-| `useAfterCompile` | Run after each compilation |
-| `useOnMessage` | React to individual messages |
-| `useComState` | Subscribe to COM state changes |
-| `useData` | Reactive data cache with serialization |
+| Hook              | Purpose                                      |
+| ----------------- | -------------------------------------------- |
+| `useState`        | Local state (standard React)                 |
+| `useEffect`       | Side effects (standard React)                |
+| `useSignal`       | Reactive signal state                        |
+| `useKnob`         | Model-visible, model-settable reactive state |
+| `useOnMount`      | Run once on first tick                       |
+| `useOnUnmount`    | Cleanup on component removal                 |
+| `useOnTickStart`  | Run at start of tick 2+                      |
+| `useOnTickEnd`    | Run at end of every tick                     |
+| `useContinuation` | Control whether execution continues          |
+| `useAfterCompile` | Run after each compilation                   |
+| `useOnMessage`    | React to individual messages                 |
+| `useComState`     | Subscribe to COM state changes               |
+| `useData`         | Reactive data cache with serialization       |
 
 ## Steps
 
@@ -135,6 +135,7 @@ describe("useMyHook", () => {
 ```
 
 After creating, run:
+
 ```bash
 pnpm --filter @agentick/core typecheck
 pnpm --filter @agentick/core test

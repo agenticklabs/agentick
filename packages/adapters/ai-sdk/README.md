@@ -14,19 +14,19 @@ pnpm add @agentick/ai-sdk ai @ai-sdk/openai
 ### Factory Pattern (Recommended)
 
 ```tsx
-import { createAiSdkModel } from '@agentick/ai-sdk';
-import { openai } from '@ai-sdk/openai';
-import { createApp } from '@agentick/core';
+import { createAiSdkModel } from "@agentick/ai-sdk";
+import { openai } from "@ai-sdk/openai";
+import { createApp } from "@agentick/core";
 
 const model = createAiSdkModel({
-  model: openai('gpt-4o'),
+  model: openai("gpt-4o"),
   temperature: 0.7,
 });
 
 // Use with createApp
 const app = createApp(MyAgent, { model });
 const session = await app.session();
-await session.run({ messages: [{ role: 'user', content: [{ type: 'text', text: 'Hello!' }] }] });
+await session.run({ messages: [{ role: "user", content: [{ type: "text", text: "Hello!" }] }] });
 
 // Or use as JSX component
 function MyAgent() {
@@ -40,41 +40,37 @@ function MyAgent() {
 
 // Or call directly
 const result = await model.generate({
-  messages: [{ role: 'user', content: 'Hello!' }],
+  messages: [{ role: "user", content: "Hello!" }],
 });
 ```
 
 ### Multiple Providers
 
 ```tsx
-import { createAiSdkModel } from '@agentick/ai-sdk';
-import { openai } from '@ai-sdk/openai';
-import { anthropic } from '@ai-sdk/anthropic';
-import { google } from '@ai-sdk/google';
+import { createAiSdkModel } from "@agentick/ai-sdk";
+import { openai } from "@ai-sdk/openai";
+import { anthropic } from "@ai-sdk/anthropic";
+import { google } from "@ai-sdk/google";
 
 // OpenAI
-const gpt4 = createAiSdkModel({ model: openai('gpt-4o') });
+const gpt4 = createAiSdkModel({ model: openai("gpt-4o") });
 
 // Anthropic
-const claude = createAiSdkModel({ model: anthropic('claude-3-5-sonnet-20241022') });
+const claude = createAiSdkModel({ model: anthropic("claude-3-5-sonnet-20241022") });
 
 // Google
-const gemini = createAiSdkModel({ model: google('gemini-2.0-flash') });
+const gemini = createAiSdkModel({ model: google("gemini-2.0-flash") });
 ```
 
 ### JSX Component Pattern
 
 ```tsx
-import { AiSdkModel } from '@agentick/ai-sdk';
-import { openai } from '@ai-sdk/openai';
+import { AiSdkModel } from "@agentick/ai-sdk";
+import { openai } from "@ai-sdk/openai";
 
 function MyAgent() {
   return (
-    <AiSdkModel
-      model={openai('gpt-4o')}
-      temperature={0.7}
-      maxTokens={4096}
-    >
+    <AiSdkModel model={openai("gpt-4o")} temperature={0.7} maxTokens={4096}>
       <System>You are helpful.</System>
       <Timeline />
     </AiSdkModel>

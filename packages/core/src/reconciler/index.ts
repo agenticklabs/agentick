@@ -1,5 +1,5 @@
 /**
- * V2 Reconciler Exports
+ * Reconciler Exports
  */
 
 export * from "./types";

@@ -2,6 +2,11 @@
   "name": "@agentick/gateway",
   "version": "0.2.0",
   "description": "Standalone daemon for multi-client, multi-agent access",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/agenticklabs/agentick.git",
+    "directory": "packages/gateway"
+  },
   "bin": {
     "agentick-gateway": "./dist/bin.js"
   },
@@ -43,11 +48,6 @@
     "@types/ws": "^8.5.10",
     "tsx": "^4.19.2",
     "typescript": "^5.7.3",
-    "vitest": "^3.0.0"
-  },
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/agenticklabs/agentick.git",
-    "directory": "packages/gateway"
+    "vitest": "^4.0.18"
   }
 }

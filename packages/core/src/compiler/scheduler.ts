@@ -1,9 +1,9 @@
 /**
- * V2 Reconciliation Scheduler
+ * Reconciliation Scheduler
  *
- * Manages reconciliation timing and batching for the v2 fiber compiler.
+ * Manages reconciliation timing and batching for the fiber compiler.
  *
- * In v2 with react-reconciler:
+ * With react-reconciler:
  * - The React tree stays mounted (persistent fiber root)
  * - State changes trigger React's own reconciliation
  * - This scheduler coordinates when to notify listeners about reconciliation
@@ -145,7 +145,7 @@ export class ReconciliationScheduler {
     const combinedReason = reasons.join("; ");
 
     // Trigger reconciliation on the compiler
-    // In v2, the compiler will update the React tree
+    // The compiler will update the React tree
     try {
       // The compiler's reconcile method will be called by the session
       // when the next tick starts. We just emit the event to notify listeners.

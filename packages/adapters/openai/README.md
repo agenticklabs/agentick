@@ -13,15 +13,15 @@ pnpm add @agentick/openai
 ### Factory Pattern (Recommended)
 
 ```tsx
-import { openai } from '@agentick/openai';
-import { createApp } from '@agentick/core';
+import { openai } from "@agentick/openai";
+import { createApp } from "@agentick/core";
 
-const model = openai({ model: 'gpt-4o' });
+const model = openai({ model: "gpt-4o" });
 
 // Use with createApp
 const app = createApp(MyAgent, { model });
 const session = await app.session();
-await session.run({ messages: [{ role: 'user', content: [{ type: 'text', text: 'Hello!' }] }] });
+await session.run({ messages: [{ role: "user", content: [{ type: "text", text: "Hello!" }] }] });
 
 // Or use as JSX component
 function MyAgent() {
@@ -35,22 +35,18 @@ function MyAgent() {
 
 // Or call directly
 const result = await model.generate({
-  messages: [{ role: 'user', content: 'Hello!' }],
+  messages: [{ role: "user", content: "Hello!" }],
 });
 ```
 
 ### JSX Component Pattern
 
 ```tsx
-import { OpenAIModel } from '@agentick/openai';
+import { OpenAIModel } from "@agentick/openai";
 
 function MyAgent() {
   return (
-    <OpenAIModel
-      model="gpt-4o"
-      temperature={0.7}
-      maxTokens={4096}
-    >
+    <OpenAIModel model="gpt-4o" temperature={0.7} maxTokens={4096}>
       <System>You are helpful.</System>
       <Timeline />
     </OpenAIModel>
@@ -63,8 +59,8 @@ function MyAgent() {
 ```tsx
 const model = openai({
   apiKey: process.env.AZURE_OPENAI_KEY,
-  baseURL: 'https://your-resource.openai.azure.com',
-  model: 'gpt-4o',
+  baseURL: "https://your-resource.openai.azure.com",
+  model: "gpt-4o",
 });
 ```
 

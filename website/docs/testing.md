@@ -29,12 +29,14 @@ Control exactly what the model returns, including tool calls:
 const adapter = createTestAdapter({ defaultResponse: "Done." });
 
 // Queue a tool call response
-adapter.respondWith([{
-  tool: {
-    name: "web_search",
-    input: { query: "agentick framework" },
+adapter.respondWith([
+  {
+    tool: {
+      name: "web_search",
+      input: { query: "agentick framework" },
+    },
   },
-}]);
+]);
 
 // Next call returns the tool call, then default response
 const result = await run(app, {

@@ -50,14 +50,12 @@ function Agent() {
         description="Add a note"
         input={z.object({ note: z.string() })}
         handler={({ note }) => {
-          setNotepad(n => [...n, note]);
+          setNotepad((n) => [...n, note]);
           return "Noted.";
         }}
       />
       {notepad.length > 0 && (
-        <Section id="notepad">
-          {notepad.map(n => `- ${n}`).join("\n")}
-        </Section>
+        <Section id="notepad">{notepad.map((n) => `- ${n}`).join("\n")}</Section>
       )}
       <Timeline />
     </>

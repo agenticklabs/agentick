@@ -102,7 +102,7 @@ function AgentWithDoneTool() {
         name="done"
         description="Call this when the task is complete"
         input={z.object({
-          summary: z.string().describe("Summary of what was accomplished")
+          summary: z.string().describe("Summary of what was accomplished"),
         })}
         handler={async ({ summary }) => {
           setIsDone(true);
@@ -251,8 +251,12 @@ function AgentWithSetup() {
 > For first-tick setup, use `useOnMount`. For logic on every tick including the first, combine both:
 >
 > ```tsx
-> useOnMount((ctx) => { /* runs on mount tick */ });
-> useOnTickStart((tickState, ctx) => { /* runs on tick 2+ */ });
+> useOnMount((ctx) => {
+>   /* runs on mount tick */
+> });
+> useOnTickStart((tickState, ctx) => {
+>   /* runs on tick 2+ */
+> });
 > ```
 
 ### useOnTickEnd
@@ -448,7 +452,9 @@ function Agent() {
     <>
       <Knobs />
       <Model model={model} />
-      <Section id="system" audience="model">Mode: {mode}</Section>
+      <Section id="system" audience="model">
+        Mode: {mode}
+      </Section>
       <Timeline />
     </>
   );
@@ -475,7 +481,7 @@ useKnob("mode", "quick", {
   options: ["quick", "deep"],
   group: "Behavior",
   required: true,
-  validate: (v) => v !== "invalid" ? true : "Cannot use 'invalid'",
+  validate: (v) => (v !== "invalid" ? true : "Cannot use 'invalid'"),
 });
 ```
 
@@ -530,7 +536,10 @@ function Agent() {
       <Knobs>
         {(groups) => (
           <Section id="my-knobs" audience="model">
-            {groups.flatMap(g => g.knobs).map(k => `${k.name}=${k.value}`).join("\n")}
+            {groups
+              .flatMap((g) => g.knobs)
+              .map((k) => `${k.name}=${k.value}`)
+              .join("\n")}
           </Section>
         )}
       </Knobs>

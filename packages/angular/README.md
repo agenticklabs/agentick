@@ -53,9 +53,9 @@ service.channel(name)           // session-scoped channel
 Signals:
 
 ```ts
-service.connectionState()
-service.sessionId()
-service.streamingText()
-service.text()
-service.isStreaming()
+service.connectionState();
+service.sessionId();
+service.streamingText();
+service.text();
+service.isStreaming();
 ```

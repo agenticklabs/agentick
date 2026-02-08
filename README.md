@@ -1,80 +1,66 @@
 # agentick
 
-**React for AI agents.**
+**Build agents like you build apps.**
 
-A React reconciler where the render target is a language model. No prompt templates, no YAML chains, no Jinja. You build the context window with JSX — the same components, hooks, and composition you already know — and the framework compiles it into what the model sees.
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=for-the-badge)](LICENSE)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.9-blue?style=for-the-badge&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+[![React](https://img.shields.io/badge/React_19-reconciler-blue?style=for-the-badge&logo=react&logoColor=white)](https://react.dev/)
+[![Node.js](https://img.shields.io/badge/Node.js-%E2%89%A520-339933?style=for-the-badge&logo=node.js&logoColor=white)](https://nodejs.org/)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg?style=for-the-badge)](https://github.com/agenticklabs/agentick/pulls)
 
-You're not configuring a chatbot. You're building the application through which the model sees and experiences the world.
-
-[![License: ISC](https://img.shields.io/badge/License-ISC-blue.svg?style=for-the-badge)](LICENSE)
+A React reconciler where the render target is a language model. You build the context window with JSX — the same components, hooks, and composition you already know — and the framework compiles it into what the model sees.
 
 ```tsx
-import { createApp, System, Timeline, Message, Section,
-         createTool, useContinuation } from "@agentick/core";
+import { createApp, System, Timeline, createTool, useContinuation } from "@agentick/core";
 import { openai } from "@agentick/openai";
 import { z } from "zod";
 
-// Tools are components — they render state into model context
 const Search = createTool({
   name: "search",
   description: "Search the knowledge base",
   input: z.object({ query: z.string() }),
-  handler: async ({ query }, com) => {
+  handler: async ({ query }) => {
     const results = await knowledgeBase.search(query);
-    const sources = com.getState("sources") ?? [];
-    com.setState("sources", [...sources, ...results.map((r) => r.title)]);
     return [{ type: "text", text: JSON.stringify(results) }];
-  },
-  // render() injects live state into the context window every tick
-  render: (tickState, com) => {
-    const sources = com.getState("sources");
-    return sources?.length ? (
-      <Section id="sources" audience="model">
-        Sources found so far: {sources.join(", ")}
-      </Section>
-    ) : null;
   },
 });
 
-// Agents are functions that return JSX
-function ResearchAgent({ topic }: { topic: string }) {
-  // The model auto-continues when it makes tool calls.
-  // Hooks add your own stop conditions.
-  useContinuation((result) => {
-    if (result.tick >= 20) result.stop("too-many-ticks");
-  });
+function ResearchAgent() {
+  useContinuation((result) => result.tick < 10);
 
   return (
     <>
-      <System>
-        You are a research agent. Search thoroughly, then write a summary.
-      </System>
-
-      {/* You control exactly how conversation history renders */}
-      <Timeline>
-        {(history, pending) => <>
-          {history.map((entry, i) =>
-            i < history.length - 4
-              ? <CompactMessage key={i} entry={entry} />
-              : <Message key={i} {...entry.message} />
-          )}
-          {pending.map((msg, i) => <Message key={`p-${i}`} {...msg.message} />)}
-        </>}
-      </Timeline>
-
+      <System>Search thoroughly, then write a summary.</System>
+      <Timeline />
       <Search />
     </>
   );
 }
 
-const model = openai({ model: "gpt-4o" });
-const app = createApp(ResearchAgent, { model });
+const app = createApp(ResearchAgent, { model: openai({ model: "gpt-4o" }) });
 const result = await app.run({
-  props: { topic: "quantum computing" },
-  messages: [{ role: "user", content: [{ type: "text", text: "What's new in quantum computing?" }] }],
+  messages: [
+    { role: "user", content: [{ type: "text", text: "What's new in quantum computing?" }] },
+  ],
 });
-
 console.log(result.response);
+```
+
+## Quick Start
+
+```bash
+npm install agentick @agentick/openai zod
+```
+
+Add to `tsconfig.json`:
+
+```json
+{
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "jsxImportSource": "react"
+  }
+}
 ```
 
 ## Why Agentick
@@ -89,9 +75,51 @@ This is application development, not chatbot configuration.
 
 ## The Context Is Yours
 
-The core insight: **only what you render gets sent to the model.** `<Timeline>` isn't a magic black box — it accepts a render function with `(history, pending)`, and you decide exactly how every message appears in the context window. Skip a message? The model never sees it. Rewrite it? That's what the model reads.
+The core insight: **only what you render gets sent to the model.** `<Timeline>` isn't a magic black box — it accepts a render function, and you decide exactly how every message appears in the context window. Skip a message? The model never sees it. Rewrite it? That's what the model reads.
+
+```tsx
+<Timeline>
+  {(history, pending) => (
+    <>
+      {history.map((entry, i) => {
+        const msg = entry.message;
+        const isOld = i < history.length - 6;
+
+        if (isOld && msg.role === "user") {
+          const textOnly = msg.content
+            .filter((b) => b.type === "text")
+            .map((b) => b.text)
+            .join(" ");
+          return (
+            <Message key={i} role="user">
+              [Earlier: {textOnly.slice(0, 100)}...]
+            </Message>
+          );
+        }
+
+        if (isOld && msg.role === "assistant") {
+          return (
+            <Message key={i} role="assistant">
+              [Previous response]
+            </Message>
+          );
+        }
+
+        return <Message key={i} {...msg} />;
+      })}
+      {pending.map((msg, i) => (
+        <Message key={`p-${i}`} {...msg.message} />
+      ))}
+    </>
+  )}
+</Timeline>
+```
+
+Images from 20 messages ago eating your context window? Render them as `[Image: beach sunset]`. Tool results from early in the conversation? Collapse them. Recent messages? Full detail. You write the function, you decide.
 
 ### Default — Just Works
+
+With no children, `<Timeline />` renders conversation history with sensible defaults:
 
 ```tsx
 function SimpleAgent() {
@@ -104,80 +132,54 @@ function SimpleAgent() {
 }
 ```
 
-`<Timeline />` with no children renders conversation history with sensible defaults.
-
-### Custom Rendering — Control What the Model Sees
-
-The render function receives `history` (completed entries) and `pending` (messages queued this tick). Only what you return from this function enters the model's context:
-
-```tsx
-<Timeline>
-  {(history, pending) => <>
-    {history.map((entry, i) => {
-      const msg = entry.message;
-      const isOld = i < history.length - 6;
-
-      // Old user messages — drop images, keep text summaries
-      if (isOld && msg.role === "user") {
-        const textOnly = msg.content
-          .filter((b) => b.type === "text")
-          .map((b) => b.text)
-          .join(" ");
-        return <Message key={i} role="user">[Earlier: {textOnly.slice(0, 100)}...]</Message>;
-      }
-
-      // Old assistant messages — collapse
-      if (isOld && msg.role === "assistant") {
-        return <Message key={i} role="assistant">[Previous response]</Message>;
-      }
-
-      // Recent messages — full fidelity
-      return <Message key={i} {...msg} />;
-    })}
-    {pending.map((msg, i) => <Message key={`p-${i}`} {...msg.message} />)}
-  </>}
-</Timeline>
-```
-
-Images from 20 messages ago eating your context window? Render them as `[Image: beach sunset]`. Tool results from early in the conversation? Collapse them. Recent messages? Full detail. You write the function, you decide.
-
 ### Composability — It's React
 
-That render logic getting complex? Extract it into a component. It's React — components compose:
+That render logic getting complex? Extract it into a component:
 
 ```tsx
-// A reusable component for rendering older messages compactly
 function CompactMessage({ entry }: { entry: COMTimelineEntry }) {
   const msg = entry.message;
 
-  // Walk content blocks — handle each type differently
-  const summary = msg.content.map((block) => {
-    switch (block.type) {
-      case "text":    return block.text.slice(0, 80);
-      case "image":   return `[Image: ${block.source?.description ?? "image"}]`;
-      case "tool_use": return `[Called ${block.name}]`;
-      case "tool_result": return `[Result from ${block.name}]`;
-      default:        return "";
-    }
-  }).filter(Boolean).join(" | ");
+  const summary = msg.content
+    .map((block) => {
+      switch (block.type) {
+        case "text":
+          return block.text.slice(0, 80);
+        case "image":
+          return `[Image: ${block.source?.description ?? "image"}]`;
+        case "tool_use":
+          return `[Called ${block.name}]`;
+        case "tool_result":
+          return `[Result from ${block.name}]`;
+        default:
+          return "";
+      }
+    })
+    .filter(Boolean)
+    .join(" | ");
 
   return <Message role={msg.role}>{summary}</Message>;
 }
 
-// Use it in your Timeline
 function Agent() {
   return (
     <>
       <System>You are helpful.</System>
       <Timeline>
-        {(history, pending) => <>
-          {history.map((entry, i) =>
-            i < history.length - 4
-              ? <CompactMessage key={i} entry={entry} />
-              : <Message key={i} {...entry.message} />
-          )}
-          {pending.map((msg, i) => <Message key={`p-${i}`} {...msg.message} />)}
-        </>}
+        {(history, pending) => (
+          <>
+            {history.map((entry, i) =>
+              i < history.length - 4 ? (
+                <CompactMessage key={i} entry={entry} />
+              ) : (
+                <Message key={i} {...entry.message} />
+              ),
+            )}
+            {pending.map((msg, i) => (
+              <Message key={`p-${i}`} {...msg.message} />
+            ))}
+          </>
+        )}
       </Timeline>
     </>
   );
@@ -206,7 +208,7 @@ function NarrativeAgent() {
 
 The framework doesn't care how you structure the context. Multiple messages, one message, XML, prose — anything that compiles to content blocks gets sent.
 
-### Sections — Structured Context for the Model
+### Sections — Structured Context
 
 ```tsx
 function AgentWithContext({ userId }: { userId: string }) {
@@ -215,11 +217,9 @@ function AgentWithContext({ userId }: { userId: string }) {
   return (
     <>
       <System>You are a support agent.</System>
-
       <Section id="user-context" audience="model">
         Customer: {profile?.name}, Plan: {profile?.plan}, Since: {profile?.joinDate}
       </Section>
-
       <Timeline />
       <TicketTool />
     </>
@@ -229,43 +229,39 @@ function AgentWithContext({ userId }: { userId: string }) {
 
 `<Section>` injects structured context that the model sees every tick — live data, computed state, whatever you need. The `audience` prop controls visibility (`"model"`, `"user"`, or `"all"`).
 
-## Hooks Control Everything
+## Hooks Control the Loop
 
-Hooks are where the real power lives. They're real React hooks — `useState`, `useEffect`, `useMemo` — plus lifecycle hooks that fire at each phase of execution.
+Hooks are real React hooks — `useState`, `useEffect`, `useMemo` — plus lifecycle hooks that fire at each phase of execution.
 
-### `useContinuation` — Add Stop Conditions
+### Stop Conditions
 
-The agent loop auto-continues when the model makes tool calls. `useContinuation` lets you add your own stop conditions:
+The agent loop auto-continues when the model makes tool calls. `useContinuation` adds your own stop conditions:
 
 ```tsx
-// Stop after a done marker
 useContinuation((result) => !result.text?.includes("<DONE>"));
 
-// Stop after too many ticks or too many tokens
 useContinuation((result) => {
-  if (result.tick >= 10) { result.stop("max-ticks"); return false; }
+  if (result.tick >= 10) {
+    result.stop("max-ticks");
+    return false;
+  }
   if (result.usage && result.usage.totalTokens > 100_000) {
-    result.stop("token-budget"); return false;
+    result.stop("token-budget");
+    return false;
   }
 });
 ```
 
-### `useOnTickEnd` — Run Code After Every Model Response
+### Between-Tick Logic
 
-`useContinuation` is sugar for `useOnTickEnd`. Use the full version when you need to do real work between ticks:
+`useContinuation` is sugar for `useOnTickEnd`. Use the full version when you need to do real work:
 
 ```tsx
 function VerifiedAgent() {
   useOnTickEnd(async (result) => {
-    // Log every tick
-    analytics.track("tick", { tokens: result.usage?.totalTokens });
-
-    // When the model is done (no more tool calls), verify before accepting
     if (result.text && !result.toolCalls.length) {
       const quality = await verifyWithModel(result.text);
-      if (!quality.acceptable) {
-        result.continue("failed-verification"); // force another tick
-      }
+      if (!quality.acceptable) result.continue("failed-verification");
     }
   });
 
@@ -278,7 +274,7 @@ function VerifiedAgent() {
 }
 ```
 
-### Build Your Own Hooks
+### Custom Hooks
 
 Custom hooks work exactly like React — they're just functions that call other hooks:
 
@@ -313,48 +309,18 @@ function CarefulAgent() {
   return (
     <>
       <System>You have a token budget. Be concise.</System>
-      <Section id="budget" audience="model">Tokens used: {spent}</Section>
+      <Section id="budget" audience="model">
+        Tokens used: {spent}
+      </Section>
       <Timeline />
     </>
   );
 }
 ```
 
-## Everything Is Dual-Use
+## Tools Render State
 
-`createTool` and `createAdapter` (used under the hood by `openai()`, `google()`, etc.) return objects that work both as JSX components and as direct function calls:
-
-```tsx
-const Search = createTool({ name: "search", ... });
-const model = openai({ model: "gpt-4o" });
-
-// As JSX — self-closing tags in the component tree
-<model temperature={0.2} />
-<Search />
-
-// As direct calls — use programmatically
-const handle = await model.generate(input);
-const output = await Search.run({ query: "test" });
-```
-
-Context is maintained with AsyncLocalStorage, so tools and hooks can access session state from anywhere — no prop drilling required.
-
-## More Examples
-
-### One-Shot Run
-
-```tsx
-import { run, System, Timeline } from "@agentick/core";
-import { openai } from "@agentick/openai";
-
-const result = await run(
-  <><System>You are helpful.</System><Timeline /></>,
-  { model: openai({ model: "gpt-4o" }), messages: [{ role: "user", content: [{ type: "text", text: "Hello!" }] }] },
-);
-console.log(result.response);
-```
-
-### Stateful Tool with Render
+Tools aren't just functions the model calls — they render their state back into the context window. The model sees the current state _every time it thinks_, not just in the tool response.
 
 ```tsx
 const TodoTool = createTool({
@@ -365,12 +331,11 @@ const TodoTool = createTool({
     text: z.string().optional(),
     id: z.number().optional(),
   }),
-  handler: async ({ action, text, id }) => {
+  handler: async ({ action, text, id }, ctx) => {
     if (action === "add") todos.push({ id: todos.length, text, done: false });
     if (action === "complete") todos[id!].done = true;
     return [{ type: "text", text: "Done." }];
   },
-  // render() injects live state into the model's context every tick
   render: () => (
     <Section id="todos" audience="model">
       Current todos: {JSON.stringify(todos)}
@@ -379,15 +344,28 @@ const TodoTool = createTool({
 });
 ```
 
-The model sees the current todo list _every time it thinks_ — not just in the tool response, but as persistent context. When it decides what to do next, the state is right there.
+Everything is dual-use — tools and models work as JSX components in the tree _and_ as direct function calls:
 
-### Multi-Turn Session
+```tsx
+// JSX — in the component tree
+<Search />
+<model temperature={0.2} />
+
+// Direct calls — use programmatically
+const output = await Search.run({ query: "test" });
+const handle = await model.generate(input);
+```
+
+## Sessions
 
 ```tsx
 const app = createApp(Agent, { model: openai({ model: "gpt-4o" }) });
 const session = await app.session("conv-1");
 
-const msg = (text: string) => ({ role: "user" as const, content: [{ type: "text" as const, text }] });
+const msg = (text: string) => ({
+  role: "user" as const,
+  content: [{ type: "text" as const, text }],
+});
 
 await session.send({ messages: [msg("Hi there!")] });
 await session.send({ messages: [msg("Tell me a joke")] });
@@ -402,18 +380,16 @@ session.close();
 
 ### Dynamic Model Selection
 
-Models are JSX components — conditionally render them to switch models mid-session:
+Models are JSX components — conditionally render them:
 
 ```tsx
 const gpt = openai({ model: "gpt-4o" });
 const gemini = google({ model: "gemini-2.5-pro" });
 
 function AdaptiveAgent({ task }: { task: string }) {
-  const needsCreativity = task.includes("creative");
-
   return (
     <>
-      {needsCreativity ? <gemini temperature={0.9} /> : <gpt temperature={0.2} />}
+      {task.includes("creative") ? <gemini temperature={0.9} /> : <gpt temperature={0.2} />}
       <System>Handle this task: {task}</System>
       <Timeline />
     </>
@@ -440,30 +416,6 @@ function AdaptiveAgent({ task }: { task: string }) {
 | `@agentick/cli`       | CLI for running agents                                       |
 | `@agentick/server`    | Server utilities                                             |
 | `@agentick/socket.io` | Socket.IO transport                                          |
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                          Applications                           │
-│       (express, nestjs, cli, user apps)                         │
-└──────────────────────────┬──────────────────────────────────────┘
-                           │
-┌──────────────────────────┴──────────────────────────────────────┐
-│                       Framework Layer                            │
-│  @agentick/core    @agentick/gateway    @agentick/client     │
-│  @agentick/express @agentick/devtools                         │
-└──────────────────────────┬──────────────────────────────────────┘
-                           │
-┌──────────────────────────┴──────────────────────────────────────┐
-│                       Adapter Layer                              │
-│  @agentick/openai  @agentick/google  @agentick/ai-sdk        │
-└──────────────────────────┬──────────────────────────────────────┘
-                           │
-┌──────────────────────────┴──────────────────────────────────────┐
-│                     Foundation Layer                              │
-│           @agentick/kernel         @agentick/shared            │
-│           (Node.js only)            (Platform-independent)       │
-└─────────────────────────────────────────────────────────────────┘
-```
 
 ## Adapters
 
@@ -499,23 +451,6 @@ const gateway = createGateway({
   defaultApp: "support",
   auth: { type: "token", token: process.env.API_TOKEN! },
 });
-```
-
-## Quick Start
-
-```bash
-npm install agentick @agentick/openai zod
-```
-
-**TypeScript config** — add to `tsconfig.json`:
-
-```json
-{
-  "compilerOptions": {
-    "jsx": "react-jsx",
-    "jsxImportSource": "react"
-  }
-}
 ```
 
 ## License

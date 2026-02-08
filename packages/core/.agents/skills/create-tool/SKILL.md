@@ -76,7 +76,9 @@ export const ItemTool = createTool({
     <Section id="items" audience="model">
       <H2>Current Items</H2>
       <List>
-        {items.map(item => <ListItem>{item}</ListItem>)}
+        {items.map((item) => (
+          <ListItem>{item}</ListItem>
+        ))}
       </List>
     </Section>
   ),
@@ -88,7 +90,7 @@ Use semantic components (`<H2>`, `<List>`, `<ListItem>`, `<Table>`, `<Json>`) in
 ## Handler Signature
 
 ```typescript
-type ToolHandler = (input: TInput, ctx?: COM) => ContentBlock[] | Promise<ContentBlock[]>
+type ToolHandler = (input: TInput, ctx?: COM) => ContentBlock[] | Promise<ContentBlock[]>;
 ```
 
 - `ctx` is the COM (Component Object Model) — session state, getState/setState

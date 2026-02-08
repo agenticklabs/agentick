@@ -112,8 +112,8 @@ const DelegateTool = createTool({
 
 ```typescript
 const [a, b] = await Promise.all([
-  session.spawn(AgentA, input).then(h => h.result),
-  session.spawn(AgentB, input).then(h => h.result),
+  session.spawn(AgentA, input).then((h) => h.result),
+  session.spawn(AgentB, input).then((h) => h.result),
 ]);
 ```
 

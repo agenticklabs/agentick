@@ -1,9 +1,7 @@
 /**
- * V2 Fiber Compiler
+ * Fiber Compiler
  *
- * Uses react-reconciler to build a AgentickNode tree from React elements.
- * With React's native JSX runtime, elements are already React elements -
- * no conversion needed.
+ * Uses react-reconciler to build an AgentickNode tree from React elements.
  */
 
 import React from "react";
@@ -15,8 +13,7 @@ import {
   createContainer,
   createRoot,
   updateContainer,
-  flushSync,
-  flushPassiveEffects,
+  flushSyncWork,
   type FiberRoot,
   type AgentickContainer,
 } from "../reconciler";
@@ -108,7 +105,7 @@ export interface FiberSummary {
   hookCount: number;
   effectCount: number;
   depth: number;
-  /** Hook count by type (empty in v2 since React manages hooks internally) */
+  /** Hook count by type (React manages hooks internally) */
   hooksByType: Partial<Record<HookType, number>>;
 }
 
@@ -123,10 +120,7 @@ type Phase =
   | "unmount";
 
 /**
- * V2 FiberCompiler - uses react-reconciler internally.
- *
- * This maintains API compatibility with v1 FiberCompiler so Session
- * can use it as a drop-in replacement.
+ * FiberCompiler — drives react-reconciler to produce compiled model input.
  */
 export class FiberCompiler {
   // React reconciler state
@@ -161,11 +155,7 @@ export class FiberCompiler {
   // Reconciliation callback (for reactive model)
   private onScheduleReconcile?: (reason?: string) => void;
 
-  constructor(
-    ctx: COM,
-    _hookRegistry?: unknown, // ComponentHookRegistry - not used in v2
-    config: FiberCompilerConfig = {},
-  ) {
+  constructor(ctx: COM, config: FiberCompilerConfig = {}) {
     this.ctx = ctx;
     this.config = {
       dev: config.dev ?? process.env.NODE_ENV === "development",
@@ -257,35 +247,26 @@ export class FiberCompiler {
         try {
           // Render with React
           // Wrap with MessageProvider for useOnMessage/useQueuedMessages
-          try {
-            flushSync(() => {
-              updateContainer(
-                h(
-                  MessageProvider,
-                  { store: this.messageStore },
-                  h(
-                    AgentickProvider,
-                    {
-                      ctx: this.ctx as any,
-                      tickState: this.tickState as any, // Different TickState types are compatible
-                      runtimeStore: this.runtimeStore,
-                      contextInfoStore: this._contextInfoStore,
-                    },
-                    reactElement,
-                  ),
-                ),
-                this.root,
-              );
-            });
-          } catch (flushError) {
-            console.error("[FiberCompiler.reconcile] flushSync error:", flushError);
-            throw flushError;
-          }
-
-          // Flush passive effects (useEffect callbacks) immediately.
-          // In non-DOM environments, these don't auto-flush.
-          // This ensures lifecycle hooks are registered before we call them.
-          flushPassiveEffects();
+          // Render synchronously and flush all work + passive effects (useEffect).
+          // react-reconciler 0.33: updateContainer queues sync, flushSyncWork processes all.
+          updateContainer(
+            h(
+              MessageProvider,
+              { store: this.messageStore },
+              h(
+                AgentickProvider,
+                {
+                  ctx: this.ctx as any,
+                  tickState: this.tickState as any, // Different TickState types are compatible
+                  runtimeStore: this.runtimeStore,
+                  contextInfoStore: this._contextInfoStore,
+                },
+                reactElement,
+              ),
+            ),
+            this.root,
+          );
+          flushSyncWork();
 
           // If we get here without throwing, check for any pending data
           // that was triggered during render
@@ -390,7 +371,7 @@ export class FiberCompiler {
   // ============================================================
 
   async notifyStart(): Promise<void> {
-    // Nothing special in v2 - components use useEffect for mount
+    // Components use useEffect for mount
   }
 
   async notifyTickStart(state: TickState): Promise<void> {
@@ -427,7 +408,7 @@ export class FiberCompiler {
 
   async notifyComplete(_finalState: unknown): Promise<void> {
     this.currentPhase = "complete";
-    // Nothing special in v2
+    // No-op
     this.currentPhase = "idle";
   }
 
@@ -457,12 +438,8 @@ export class FiberCompiler {
     this.currentPhase = "unmount";
     try {
       // Clear the tree
-      flushSync(() => {
-        updateContainer(null, this.root);
-      });
-
-      // Flush any pending cleanup effects
-      flushPassiveEffects();
+      updateContainer(null, this.root);
+      flushSyncWork();
 
       // Clear any remaining state
       storeClearLifecycleCallbacks(this.runtimeStore);
@@ -572,7 +549,7 @@ export class FiberCompiler {
 
   /**
    * Serialize the fiber tree for debugging/devtools.
-   * In v2, we serialize the AgentickNode tree from the container.
+   * Serializes the AgentickNode tree from the container.
    */
   serializeFiberTree(): SerializedFiberNode | null {
     if (this.container.children.length === 0) {
@@ -629,7 +606,6 @@ export class FiberCompiler {
    */
   getFiberSummary(): FiberSummary {
     let componentCount = 0;
-    let _depth = 0;
     let maxDepth = 0;
 
     const countNodes = (nodes: any[], currentDepth: number): void => {
@@ -656,14 +632,10 @@ export class FiberCompiler {
 }
 
 /**
- * Create a V2 FiberCompiler.
+ * Create a FiberCompiler.
  */
-export function createFiberCompiler(
-  ctx: COM,
-  hookRegistry?: unknown,
-  config?: FiberCompilerConfig,
-): FiberCompiler {
-  return new FiberCompiler(ctx, hookRegistry, config);
+export function createFiberCompiler(ctx: COM, config?: FiberCompilerConfig): FiberCompiler {
+  return new FiberCompiler(ctx, config);
 }
 
 // ============================================================

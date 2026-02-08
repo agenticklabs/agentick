@@ -1,5 +1,5 @@
 /**
- * V2 Session Hibernation
+ * Session Hibernation
  *
  * Serialize and restore session state for persistence.
  *

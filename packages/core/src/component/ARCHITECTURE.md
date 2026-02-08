@@ -85,33 +85,17 @@ interface EngineComponent {
   onMount?: (ctx: COM) => Promise<void> | void;
   onUnmount?: (ctx: COM) => Promise<void> | void;
   onStart?: (ctx: COM) => Promise<void> | void;
-  onTickStart?: (
-    ctx: COM,
-    state: TickState,
-  ) => Promise<void> | void;
+  onTickStart?: (ctx: COM, state: TickState) => Promise<void> | void;
   onAfterCompile?: (
     ctx: COM,
     compiled: CompiledStructure,
     state: TickState,
     ctx: AfterCompileContext,
   ) => Promise<void> | void;
-  onTickEnd?: (
-    ctx: COM,
-    state: TickState,
-  ) => Promise<void> | void;
-  onComplete?: (
-    ctx: COM,
-    finalState: COMInput,
-  ) => Promise<void> | void;
-  onMessage?: (
-    ctx: COM,
-    message: ExecutionMessage,
-    state: TickState,
-  ) => Promise<void> | void;
-  onError?: (
-    ctx: COM,
-    state: TickState,
-  ) => Promise<RecoveryAction | void> | RecoveryAction | void;
+  onTickEnd?: (ctx: COM, state: TickState) => Promise<void> | void;
+  onComplete?: (ctx: COM, finalState: COMInput) => Promise<void> | void;
+  onMessage?: (ctx: COM, message: ExecutionMessage, state: TickState) => Promise<void> | void;
+  onError?: (ctx: COM, state: TickState) => Promise<RecoveryAction | void> | RecoveryAction | void;
 
   // Render
   render?: (
@@ -147,18 +131,12 @@ Agentick supports multiple ways to define components:
 type ComponentClass = new (props?: any) => EngineComponent;
 
 // Factory function (returns instance)
-type ComponentFactory = (
-  props?: any,
-) => EngineComponent | Promise<EngineComponent>;
+type ComponentFactory = (props?: any) => EngineComponent | Promise<EngineComponent>;
 
 // Pure function component (React-style or Engine-style)
 type PureFunctionComponent<P = any> =
   | ((props: P) => JSX.Element | null)
-  | ((
-      props: P,
-      ctx: COM,
-      state: TickState,
-    ) => JSX.Element | null);
+  | ((props: P, ctx: COM, state: TickState) => JSX.Element | null);
 
 // Any component definition
 type ComponentDefinition =
@@ -194,11 +172,7 @@ function StatefulGreeting(props: { name: string }, ctx: COM) {
 }
 
 // Full access (props + COM + TickState)
-function TickAwareGreeting(
-  props: { name: string },
-  ctx: COM,
-  state: TickState,
-) {
+function TickAwareGreeting(props: { name: string }, ctx: COM, state: TickState) {
   return (
     <User>
       Hello on tick {state.tick}, {props.name}!
@@ -487,12 +461,7 @@ class ComponentHookRegistry extends BaseHookRegistry<
   register(middleware): void;
 
   // Get middleware for component
-  getMiddleware(
-    hookName,
-    componentClass,
-    componentName,
-    componentTags,
-  ): Middleware[];
+  getMiddleware(hookName, componentClass, componentName, componentTags): Middleware[];
 }
 ```
 
@@ -520,14 +489,10 @@ registry.register(ChatAgent, async (args, envelope, next) => {
 });
 
 // Tag-based, specific hook
-registry.register(
-  "onTickEnd",
-  { tags: ["logging"] },
-  async (args, envelope, next) => {
-    console.log("Logging component tick end");
-    return next();
-  },
-);
+registry.register("onTickEnd", { tags: ["logging"] }, async (args, envelope, next) => {
+  console.log("Logging component tick end");
+  return next();
+});
 
 // Name-based
 registry.register("render", "TimelineManager", async (args, envelope, next) => {
@@ -804,10 +769,7 @@ function autoGenerateTags(componentClass: any): string[];
 function getComponentTags(componentClass: any): string[];
 
 // Get component name from instance or class
-function getComponentName(
-  instance: EngineComponent,
-  componentClass: any,
-): string;
+function getComponentName(instance: EngineComponent, componentClass: any): string;
 ```
 
 ---
@@ -888,11 +850,7 @@ function CounterAgent(props: { initialCount: number }) {
 
 ```tsx
 class InteractiveAgent extends Component {
-  onMessage(
-    ctx: COM,
-    message: ExecutionMessage,
-    state: TickState,
-  ) {
+  onMessage(ctx: COM, message: ExecutionMessage, state: TickState) {
     if (message.type === "stop") {
       ctx.abort("User requested stop");
     } else if (message.type === "feedback") {

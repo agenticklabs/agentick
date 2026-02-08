@@ -929,9 +929,7 @@ class ToolProvider extends Component {
 ```typescript
 class ResponseVerifier extends Component {
   render(ctx, state) {
-    const lastResponse = state.current?.timeline?.find(
-      (e) => e.message.role === "assistant",
-    );
+    const lastResponse = state.current?.timeline?.find((e) => e.message.role === "assistant");
 
     if (lastResponse && this.isComplete(lastResponse)) {
       // Signal completion

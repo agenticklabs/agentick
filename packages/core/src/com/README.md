@@ -48,11 +48,11 @@ The full context state:
 
 ```typescript
 interface COMInput {
-  timeline: COMTimelineEntry[];       // Conversation messages
-  system: COMTimelineEntry[];         // System prompt content
+  timeline: COMTimelineEntry[]; // Conversation messages
+  system: COMTimelineEntry[]; // System prompt content
   sections: Record<string, COMSection>;
   tools: ToolDefinition[];
-  ephemeral: EphemeralEntry[];        // Transient content
+  ephemeral: EphemeralEntry[]; // Transient content
   metadata: Record<string, unknown>;
   modelOptions?: ModelConfig;
 }
@@ -79,7 +79,7 @@ Transient content rebuilt each tick (not persisted):
 ```typescript
 interface EphemeralEntry {
   content: ContentBlock[];
-  position: 'start' | 'end' | 'before-user' | 'after-system' | 'flow';
+  position: "start" | "end" | "before-user" | "after-system" | "flow";
   type?: string;
   order?: number;
 }

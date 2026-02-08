@@ -17,7 +17,7 @@ import {
   ChannelEventMetadata,
 
   // Framework channel names
-  FrameworkChannels,  // MESSAGES, EVENTS, CONTROL, RESULT, TOOL_CONFIRMATION
+  FrameworkChannels, // MESSAGES, EVENTS, CONTROL, RESULT, TOOL_CONFIRMATION
 
   // Channel payloads
   SessionMessagePayload,
@@ -45,11 +45,11 @@ import {
 
 ```typescript
 const FrameworkChannels = {
-  MESSAGES: "session:messages",        // Client → Server: user messages
-  EVENTS: "session:events",            // Server → Client: stream events
-  CONTROL: "session:control",          // Client → Server: tick, abort
-  RESULT: "session:result",            // Server → Client: final result
-  TOOL_CONFIRMATION: "session:tool_confirmation",  // Bidirectional
+  MESSAGES: "session:messages", // Client → Server: user messages
+  EVENTS: "session:events", // Server → Client: stream events
+  CONTROL: "session:control", // Client → Server: tick, abort
+  RESULT: "session:result", // Server → Client: final result
+  TOOL_CONFIRMATION: "session:tool_confirmation", // Bidirectional
 };
 ```
 
@@ -71,19 +71,19 @@ Structured protocol errors use the `ProtocolError` type and `ErrorCodes`:
 
 ```typescript
 interface ProtocolError {
-  code: string;       // Error code from ErrorCodes
-  message: string;    // Human-readable description
-  details?: Record<string, unknown>;  // Optional context
+  code: string; // Error code from ErrorCodes
+  message: string; // Human-readable description
+  details?: Record<string, unknown>; // Optional context
 }
 
 const ErrorCodes = {
-  SESSION_NOT_FOUND: "SESSION_NOT_FOUND",      // Session doesn't exist
-  SESSION_CLOSED: "SESSION_CLOSED",            // Session has been closed
-  NOT_CONNECTED: "NOT_CONNECTED",              // Transport not connected
-  TIMEOUT: "TIMEOUT",                          // Operation timed out
-  INVALID_MESSAGE: "INVALID_MESSAGE",          // Malformed message
-  EXECUTION_ERROR: "EXECUTION_ERROR",          // General execution failure
-  SERIALIZATION_ERROR: "SERIALIZATION_ERROR",  // JSON serialization failed
+  SESSION_NOT_FOUND: "SESSION_NOT_FOUND", // Session doesn't exist
+  SESSION_CLOSED: "SESSION_CLOSED", // Session has been closed
+  NOT_CONNECTED: "NOT_CONNECTED", // Transport not connected
+  TIMEOUT: "TIMEOUT", // Operation timed out
+  INVALID_MESSAGE: "INVALID_MESSAGE", // Malformed message
+  EXECUTION_ERROR: "EXECUTION_ERROR", // General execution failure
+  SERIALIZATION_ERROR: "SERIALIZATION_ERROR", // JSON serialization failed
 };
 ```
 

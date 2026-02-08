@@ -53,11 +53,11 @@ A node in the rendered tree:
 
 ```typescript
 interface AgentickNode {
-  type: AgentickNodeType;      // Component type
+  type: AgentickNodeType; // Component type
   props: Record<string, unknown>;
   children: AgentickNode[];
   parent: AgentickNode | null;
-  renderer: Renderer | null;    // Inherited renderer context
+  renderer: Renderer | null; // Inherited renderer context
   key: string | number | null;
   index: number;
 }
@@ -70,7 +70,7 @@ The root container:
 ```typescript
 interface AgentickContainer {
   children: AgentickNode[];
-  renderer: Renderer;           // Default renderer (markdown/xml)
+  renderer: Renderer; // Default renderer (markdown/xml)
 }
 ```
 
@@ -79,7 +79,7 @@ interface AgentickContainer {
 Connect to standalone React DevTools for debugging:
 
 ```typescript
-import { enableReactDevTools } from '@agentick/core/reconciler';
+import { enableReactDevTools } from "@agentick/core/reconciler";
 
 // Before creating sessions
 enableReactDevTools(); // Connects to npx react-devtools on port 8097

@@ -21,6 +21,7 @@ function Agent() {
 ```
 
 The reconciler handles:
+
 - **Mounting** `<SearchTools />` on first render, registering its tools
 - **Unmounting** `<SearchTools />` when phase changes, deregistering tools
 - **Mounting** `<WritingTools />` in its place, registering new tools
@@ -32,6 +33,7 @@ Without a reconciler, you'd manage tool registration manually, rebuild prompt st
 ## Fiber Tree
 
 Every component instance becomes a **fiber** — a node in a linked tree. The fiber stores:
+
 - Component function reference
 - Props and state
 - Child/sibling/parent links
@@ -61,28 +63,28 @@ The "compile until stable" loop handles cascading state updates — a hook that 
 
 Like React's `<div>` and `<span>`, agentick has intrinsic elements that compile to model context:
 
-| Element | Compiles To |
-|---------|------------|
-| `<System>` | System prompt |
-| `<Section>` | Context block |
-| `<Tool>` | Tool registration |
-| `<Timeline>` | Message history |
-| `<Message>` | Single message |
-| `<Knobs>` | Knob section + set_knob tool |
+| Element      | Compiles To                  |
+| ------------ | ---------------------------- |
+| `<System>`   | System prompt                |
+| `<Section>`  | Context block                |
+| `<Tool>`     | Tool registration            |
+| `<Timeline>` | Message history              |
+| `<Message>`  | Single message               |
+| `<Knobs>`    | Knob section + set_knob tool |
 
 Custom components (`<MyAgent>`, `<SearchTools>`) are transparent to the compiler — they're just function calls that return intrinsic elements.
 
 ## Comparison to React
 
-| Concept | React | Agentick |
-|---------|-------|----------|
-| Tree type | DOM elements | Model context |
-| Output | HTML/Native views | Compiled prompt structure |
-| Trigger | User events | Tick lifecycle |
-| Effects | `useEffect` | `useOnMount`, `useOnTickEnd`, etc. |
-| Re-render | State change → diff → DOM patch | State change → diff → recompile |
-| Refs | DOM nodes | N/A |
-| Portals | Different DOM trees | N/A |
-| Suspense | Loading boundaries | N/A (yet) |
+| Concept   | React                           | Agentick                           |
+| --------- | ------------------------------- | ---------------------------------- |
+| Tree type | DOM elements                    | Model context                      |
+| Output    | HTML/Native views               | Compiled prompt structure          |
+| Trigger   | User events                     | Tick lifecycle                     |
+| Effects   | `useEffect`                     | `useOnMount`, `useOnTickEnd`, etc. |
+| Re-render | State change → diff → DOM patch | State change → diff → recompile    |
+| Refs      | DOM nodes                       | N/A                                |
+| Portals   | Different DOM trees             | N/A                                |
+| Suspense  | Loading boundaries              | N/A (yet)                          |
 
 The main difference from React DOM is the output target. Instead of DOM mutations, agentick produces a compiled context structure for the model. Everything else — fibers, work loops, hooks, effects — works the way you'd expect from React.

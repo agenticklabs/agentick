@@ -1,5 +1,5 @@
 /**
- * V2 Runtime Context
+ * Runtime Context
  *
  * Holds per-session state that hooks need access to.
  * This is what makes each FiberCompiler/Session isolated.

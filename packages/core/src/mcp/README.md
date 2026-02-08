@@ -15,38 +15,38 @@ MCP (Model Context Protocol) tools allow the Engine to connect to external MCP s
 ### 1. Define MCP Server Configuration
 
 ```typescript
-import { MCPConfig } from 'agentick';
-import { MCPClient, MCPService } from 'agentick';
+import { MCPConfig } from "agentick";
+import { MCPClient, MCPService } from "agentick";
 
 // Example 1: Stdio transport (spawns a process)
 const filesystemMCPConfig: MCPConfig = {
-  serverName: 'filesystem-mcp',
-  transport: 'stdio',
+  serverName: "filesystem-mcp",
+  transport: "stdio",
   connection: {
-    command: 'npx',
-    args: ['-y', '@modelcontextprotocol/server-filesystem', '/path/to/allowed/dir'],
+    command: "npx",
+    args: ["-y", "@modelcontextprotocol/server-filesystem", "/path/to/allowed/dir"],
   },
 };
 
 // Example 2: SSE transport (Server-Sent Events)
 const apiMCPConfig: MCPConfig = {
-  serverName: 'api-mcp',
-  transport: 'sse',
+  serverName: "api-mcp",
+  transport: "sse",
   connection: {
-    url: 'https://mcp.example.com/sse',
+    url: "https://mcp.example.com/sse",
   },
   auth: {
-    type: 'bearer',
-    token: 'your-api-token',
+    type: "bearer",
+    token: "your-api-token",
   },
 };
 
 // Example 3: Streamable HTTP transport (modern WebSocket replacement)
 const cloudMCPConfig: MCPConfig = {
-  serverName: 'cloud-mcp',
-  transport: 'websocket', // Maps to StreamableHTTPClientTransport
+  serverName: "cloud-mcp",
+  transport: "websocket", // Maps to StreamableHTTPClientTransport
   connection: {
-    url: 'https://mcp.cloud.example.com',
+    url: "https://mcp.cloud.example.com",
   },
 };
 ```
@@ -54,7 +54,7 @@ const cloudMCPConfig: MCPConfig = {
 ### 2. Initialize MCP Service and Discover Tools
 
 ```typescript
-import { Engine, MCPClient, MCPService } from 'agentick';
+import { Engine, MCPClient, MCPService } from "agentick";
 
 // Create MCP client (manages connections)
 const mcpClient = new MCPClient();
@@ -98,8 +98,8 @@ const engine = new Engine({
   model: myModel,
   mcpServers: {
     filesystem: {
-      command: 'npx',
-      args: ['-y', '@modelcontextprotocol/server-filesystem', '/allowed/path'],
+      command: "npx",
+      args: ["-y", "@modelcontextprotocol/server-filesystem", "/allowed/path"],
     },
   },
 });
@@ -170,8 +170,8 @@ Model receives tools in tool calling format
 ```typescript
 // Discover tools but filter before registering
 const allTools = await mcpService.connectAndDiscover(config);
-const filteredTools = allTools.filter(tool =>
-  tool.name.startsWith('allowed_') // Only register certain tools
+const filteredTools = allTools.filter(
+  (tool) => tool.name.startsWith("allowed_"), // Only register certain tools
 );
 
 // Register manually
@@ -198,7 +198,7 @@ for (const mcpToolDef of tools) {
       // Modify input schema (add prefix to name)
       name: `mcp_${mcpToolDef.name}`,
     },
-    mcpConfig
+    mcpConfig,
   );
 
   ctx.addTool(transformedTool);
@@ -247,9 +247,9 @@ class PrefixToolTransformer implements ToolTransformer {
 }
 
 // Use in MCPService
-const transformer = new PrefixToolTransformer('mcp');
+const transformer = new PrefixToolTransformer("mcp");
 const tools = await mcpService.connectAndDiscover(config);
-const transformed = tools.map(t => transformer.transform(t)).filter(Boolean);
+const transformed = tools.map((t) => transformer.transform(t)).filter(Boolean);
 for (const tool of transformed) {
   mcpService.registerMCPTool(config, tool, ctx);
 }
@@ -306,16 +306,13 @@ Model receives tool result in next tick
 2. **Filter Tools**: Only register tools you need
 
    ```typescript
-   const safeTools = tools.filter(t =>
-     !t.name.includes('delete') &&
-     !t.name.includes('write')
-   );
+   const safeTools = tools.filter((t) => !t.name.includes("delete") && !t.name.includes("write"));
    ```
 
 3. **Add Descriptions**: Enhance MCP tool descriptions with context
 
    ```typescript
-   description: `[Filesystem MCP] ${mcpToolDef.description}`
+   description: `[Filesystem MCP] ${mcpToolDef.description}`;
    ```
 
 4. **Use Provider Options**: Configure tool behavior per provider
@@ -329,5 +326,5 @@ Model receives tool result in next tick
 5. **Track Tool Sources**: Keep a map of tool → server for cleanup
    ```typescript
    const toolToServer = new Map<string, string>();
-   toolToServer.set('mcp_read_file', 'filesystem-mcp');
+   toolToServer.set("mcp_read_file", "filesystem-mcp");
    ```

@@ -11,7 +11,6 @@ import type {
   AgentickContainer,
   HostContext,
   Props,
-  UpdatePayload,
   AgentickTextNode,
 } from "./types";
 import { createNode, createTextNode } from "./types";
@@ -42,8 +41,8 @@ export function getRendererForComponent(type: unknown): Renderer | undefined {
 }
 
 /**
- * The host config for react-reconciler 0.29.x.
- * Type parameters match @types/react-reconciler 0.28.x.
+ * The host config for react-reconciler 0.33.x.
+ * Type parameters match @types/react-reconciler 0.33.x.
  */
 export const hostConfig: ReactReconciler.HostConfig<
   string, // Type
@@ -53,12 +52,13 @@ export const hostConfig: ReactReconciler.HostConfig<
   AgentickTextNode, // TextInstance
   never, // SuspenseInstance
   never, // HydratableInstance
+  never, // FormInstance
   AgentickNode, // PublicInstance
   HostContext, // HostContext
-  UpdatePayload, // UpdatePayload
   never, // ChildSet
   ReturnType<typeof setTimeout>, // TimeoutHandle
-  -1 // NoTimeout
+  -1, // NoTimeout
+  null // TransitionStatus
 > = {
   // ============================================================
   // Mode Configuration
@@ -190,29 +190,14 @@ export const hostConfig: ReactReconciler.HostConfig<
   // Updates
   // ============================================================
 
-  prepareUpdate(
-    _instance: AgentickNode,
-    _type: string,
-    oldProps: Props,
-    newProps: Props,
-    _rootContainer: AgentickContainer,
-    _hostContext: HostContext,
-  ): UpdatePayload | null {
-    if (shallowDiffers(oldProps, newProps)) {
-      return { props: newProps };
-    }
-    return null;
-  },
-
   commitUpdate(
     instance: AgentickNode,
-    updatePayload: UpdatePayload,
     _type: string,
     _prevProps: Props,
-    _nextProps: Props,
+    nextProps: Props,
     _internalHandle: unknown,
   ): void {
-    const { key: _k, children: _c, ...restProps } = updatePayload.props;
+    const { key: _k, children: _c, ...restProps } = nextProps;
     instance.props = restProps;
   },
 
@@ -261,9 +246,21 @@ export const hostConfig: ReactReconciler.HostConfig<
   scheduleTimeout: setTimeout,
   cancelTimeout: clearTimeout,
 
-  getCurrentEventPriority(): number {
+  // ============================================================
+  // Priority & Event Methods (React 19)
+  // ============================================================
+
+  setCurrentUpdatePriority(_newPriority: number): void {},
+  getCurrentUpdatePriority(): number {
     return 16; // DefaultEventPriority
   },
+  resolveUpdatePriority(): number {
+    return 16; // DefaultEventPriority
+  },
+
+  // ============================================================
+  // Instance & Scope Methods
+  // ============================================================
 
   getInstanceFromNode(): null {
     return null;
@@ -278,21 +275,52 @@ export const hostConfig: ReactReconciler.HostConfig<
   },
 
   detachDeletedInstance(): void {},
+
+  // ============================================================
+  // Transition & Form Methods (React 19)
+  // ============================================================
+
+  NotPendingTransition: null,
+  HostTransitionContext: {
+    $$typeof: Symbol.for("react.context"),
+    Consumer: null as any,
+    Provider: null as any,
+    _currentValue: null,
+    _currentValue2: null,
+    _threadCount: 0,
+  } as any,
+
+  resetFormInstance(): void {},
+
+  // ============================================================
+  // Suspense Commit Methods (React 19)
+  // ============================================================
+
+  maySuspendCommit(): boolean {
+    return false;
+  },
+  preloadInstance(): boolean {
+    return true; // true = ready immediately
+  },
+  startSuspendingCommit(): void {},
+  suspendInstance(): void {},
+  waitForCommitToBeReady(): null {
+    return null;
+  },
+
+  // ============================================================
+  // Misc (React 19)
+  // ============================================================
+
+  requestPostPaintCallback(): void {},
+  shouldAttemptEagerTransition(): boolean {
+    return false;
+  },
+  trackSchedulerEvent(): void {},
+  resolveEventType(): null {
+    return null;
+  },
+  resolveEventTimeStamp(): number {
+    return Date.now();
+  },
 };
-
-/**
- * Shallow comparison of props objects.
- */
-function shallowDiffers(a: Props, b: Props): boolean {
-  const aKeys = Object.keys(a);
-  const bKeys = Object.keys(b);
-
-  if (aKeys.length !== bKeys.length) return true;
-
-  for (const key of aKeys) {
-    if (key === "children") continue;
-    if (a[key] !== b[key]) return true;
-  }
-
-  return false;
-}

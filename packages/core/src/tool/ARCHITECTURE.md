@@ -335,9 +335,7 @@ const TransferFunds = createTool({
 Creates a tool that can be passed to models, run directly, or used in JSX.
 
 ```typescript
-function createTool<TInput>(
-  options: CreateToolOptions<TInput>,
-): ToolClass<TInput>;
+function createTool<TInput>(options: CreateToolOptions<TInput>): ToolClass<TInput>;
 ```
 
 #### `CreateToolOptions<TInput>`
@@ -400,9 +398,7 @@ interface ToolMetadata<TInput> {
   providerOptions?: ProviderToolOptions;
   libraryOptions?: LibraryToolOptions;
   mcpConfig?: object;
-  requiresConfirmation?:
-    | boolean
-    | ((input: TInput) => boolean | Promise<boolean>);
+  requiresConfirmation?: boolean | ((input: TInput) => boolean | Promise<boolean>);
   confirmationMessage?: string | ((input: TInput) => string);
 }
 ```
@@ -452,9 +448,7 @@ class ToolHookRegistry {
   ): void;
 
   // Get all middleware for a hook (global + instance)
-  getMiddleware(
-    hookName: ToolHookName | ComponentHookName,
-  ): ToolHookMiddleware<typeof hookName>[];
+  getMiddleware(hookName: ToolHookName | ComponentHookName): ToolHookMiddleware<typeof hookName>[];
 }
 ```
 
@@ -602,19 +596,19 @@ Handlers receive an optional `ctx` (Context Object Model) as a second argument d
 
 ```typescript
 const BookmarkTool = createTool({
-  name: 'bookmark',
-  description: 'Save a bookmark',
+  name: "bookmark",
+  description: "Save a bookmark",
   input: z.object({ url: z.string(), title: z.string() }),
   handler: async ({ url, title }, ctx) => {
     await db.saveBookmark(url, title);
-    ctx?.setState('lastBookmark', { url, title });
-    return [{ type: 'text', text: `Bookmarked: ${title}` }];
+    ctx?.setState("lastBookmark", { url, title });
+    return [{ type: "text", text: `Bookmarked: ${title}` }];
   },
 });
 
 // During agent execution: ctx is provided
 // Via direct call: ctx is undefined
-await BookmarkTool.run({ url: 'https://example.com', title: 'Example' });
+await BookmarkTool.run({ url: "https://example.com", title: "Example" });
 ```
 
 ### Client Render Tool (Non-blocking)

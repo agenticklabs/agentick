@@ -977,7 +977,7 @@ export interface SerializedFiberNode {
   key: string | number | null;
   /** JSON-safe props (functions/symbols removed) */
   props: Record<string, unknown>;
-  /** Hook states (empty in v2 since React manages hooks internally) */
+  /** Hook states (React manages hooks internally) */
   hooks: SerializedHook[];
   /** Child fibers */
   children: SerializedFiberNode[];

@@ -1,5 +1,5 @@
 /**
- * V2 Context Hooks
+ * Context Hooks
  *
  * React contexts for COM, TickState, and other engine-provided values.
  */

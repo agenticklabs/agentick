@@ -52,8 +52,8 @@ function Chat() {
       ))}
       <input
         value={input}
-        onChange={e => setInput(e.target.value)}
-        onKeyDown={e => {
+        onChange={(e) => setInput(e.target.value)}
+        onKeyDown={(e) => {
           if (e.key === "Enter") {
             session.send(input);
             setInput("");
@@ -68,6 +68,7 @@ function Chat() {
 ## Transport
 
 The client-server communication uses:
+
 - **SSE (Server-Sent Events)** for streaming model responses
 - **HTTP POST** for method calls and message sending
 - **WebSocket** (optional) for bidirectional real-time communication

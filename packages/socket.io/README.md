@@ -79,7 +79,7 @@ Creates a `Transport` for use with `@agentick/client`.
 
 ```typescript
 interface SocketIOClientConfig {
-  socket: Socket;  // Socket.IO client socket
+  socket: Socket; // Socket.IO client socket
 }
 ```
 
@@ -101,7 +101,7 @@ Creates a `ServerTransportAdapter` for the gateway.
 
 ```typescript
 interface SocketIOServerConfig {
-  io: Server | Namespace;  // Socket.IO server or namespace
+  io: Server | Namespace; // Socket.IO server or namespace
   onEvent?: (connection: ServerConnection, event: ChannelEvent) => void;
 }
 ```
@@ -118,8 +118,8 @@ interface SocketIOServerConfig {
 ```typescript
 import { CHANNEL_EVENT, JOIN_SESSION } from "@agentick/socket.io";
 
-CHANNEL_EVENT  // "agentick:event" - bidirectional channel events
-JOIN_SESSION   // "agentick:join" - join a session room
+CHANNEL_EVENT; // "agentick:event" - bidirectional channel events
+JOIN_SESSION; // "agentick:join" - join a session room
 ```
 
 ## Session Rooms

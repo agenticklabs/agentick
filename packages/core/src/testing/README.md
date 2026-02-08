@@ -5,12 +5,7 @@ Test your agents without making real API calls.
 ## Quick Start
 
 ```tsx
-import {
-  renderAgent,
-  createTestAdapter,
-  act,
-  cleanup,
-} from "@agentick/core/testing";
+import { renderAgent, createTestAdapter, act, cleanup } from "@agentick/core/testing";
 
 afterEach(() => cleanup());
 
@@ -83,16 +78,10 @@ model.respondWith([
 ]);
 
 // With image
-model.respondWith([
-  "Here's the image:",
-  { image: { url: "https://example.com/image.png" } },
-]);
+model.respondWith(["Here's the image:", { image: { url: "https://example.com/image.png" } }]);
 
 // With reasoning
-model.respondWith([
-  { reasoning: "Let me think about this..." },
-  "The answer is 42",
-]);
+model.respondWith([{ reasoning: "Let me think about this..." }, "The answer is 42"]);
 ```
 
 `respondWith` is consumed on the next call - subsequent calls fall back to `defaultResponse`.
@@ -130,9 +119,7 @@ model.setStreaming({ enabled: true, chunkSize: 5, chunkDelay: 10 });
 // Check what the model received
 const inputs = model.getCapturedInputs();
 expect(inputs).toHaveLength(2);
-expect(inputs[0].messages).toContainEqual(
-  expect.objectContaining({ role: "user" })
-);
+expect(inputs[0].messages).toContainEqual(expect.objectContaining({ role: "user" }));
 
 // Use vitest mocks
 expect(model.mocks.execute).toHaveBeenCalledTimes(1);
@@ -190,12 +177,7 @@ expect(messages).toHaveLength(1);
 ## Async Helpers
 
 ```typescript
-import {
-  sleep,
-  waitFor,
-  createDeferred,
-  captureAsyncGenerator,
-} from "@agentick/core/testing";
+import { sleep, waitFor, createDeferred, captureAsyncGenerator } from "@agentick/core/testing";
 
 // Wait for condition
 await waitFor(() => expect(result.current.done).toBe(true));
@@ -243,10 +225,7 @@ test("agent uses search tool", async () => {
   const { send, result } = renderAgent(SearchAgent, { model });
 
   // First tick: model calls tool
-  model.respondWith([
-    "Let me search",
-    { tool: { name: "search", input: { q: "weather" } } },
-  ]);
+  model.respondWith(["Let me search", { tool: { name: "search", input: { q: "weather" } } }]);
 
   // Second tick: model responds with result
   model.respondWith(["The weather is sunny!"]);

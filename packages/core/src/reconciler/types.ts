@@ -1,7 +1,7 @@
 /**
- * V2 Reconciler Types
+ * Reconciler Types
  *
- * Core types for the react-reconciler based implementation.
+ * Core types for the react-reconciler host environment.
  */
 
 import type { Renderer } from "../renderers/types";
@@ -66,13 +66,6 @@ export interface HostContext {
  * Props type (generic record).
  */
 export type Props = Record<string, unknown>;
-
-/**
- * Update payload for commitUpdate.
- */
-export interface UpdatePayload {
-  props: Props;
-}
 
 /**
  * Create a new AgentickNode.

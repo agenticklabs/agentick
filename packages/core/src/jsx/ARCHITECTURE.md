@@ -595,9 +595,7 @@ function ConditionalAgent({ includeContext }: { includeContext: boolean }) {
       <Model model={myModel} />
 
       {includeContext && (
-        <Grounding type="context">
-          Current state: {JSON.stringify(state)}
-        </Grounding>
+        <Grounding type="context">Current state: {JSON.stringify(state)}</Grounding>
       )}
 
       <User>{userMessage}</User>
@@ -611,11 +609,7 @@ function ConditionalAgent({ includeContext }: { includeContext: boolean }) {
 ```tsx
 // Reusable system prompt component
 function SystemPrompt() {
-  return (
-    <System>
-      You are a helpful AI assistant. Always be polite and professional.
-    </System>
-  );
+  return <System>You are a helpful AI assistant. Always be polite and professional.</System>;
 }
 
 // Reusable context component

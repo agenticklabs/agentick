@@ -61,7 +61,7 @@ await engine.execute(input, <MyAgent />);
 ### 2. MCPToolComponent in JSX (Per-Agent)
 
 ```tsx
-import { MCPTool } from 'agentick';
+import { MCPTool } from "agentick";
 
 const engine = new Engine({ model: myModel });
 
@@ -72,8 +72,8 @@ function MyAgent() {
       <MCPTool
         server="postgres"
         config={{
-          command: 'npx',
-          args: ['-y', '@modelcontextprotocol/server-postgres', 'postgresql://localhost/mydb'],
+          command: "npx",
+          args: ["-y", "@modelcontextprotocol/server-postgres", "postgresql://localhost/mydb"],
         }}
       />
       {/* Other components */}
@@ -93,7 +93,7 @@ await engine.execute(input, <MyAgent />);
 ### 3. MCPToolComponent with Runtime Config (Dynamic Auth)
 
 ```tsx
-import { MCPTool } from 'agentick';
+import { MCPTool } from "agentick";
 
 function MyAgent({ userApiToken }: { userApiToken: string }) {
   return (
@@ -101,18 +101,18 @@ function MyAgent({ userApiToken }: { userApiToken: string }) {
       <MCPTool
         server="api-server"
         config={{
-          transport: 'sse',
+          transport: "sse",
           connection: {
-            url: 'https://api.example.com/mcp',
+            url: "https://api.example.com/mcp",
           },
         }}
         runtimeConfig={{
           auth: {
-            type: 'bearer',
+            type: "bearer",
             token: userApiToken, // From user context!
           },
         }}
-        exclude={['dangerous_tool']} // Filter out unsafe tools
+        exclude={["dangerous_tool"]} // Filter out unsafe tools
         toolPrefix="api_" // Prefix tool names: api_read_data
       />
     </>
@@ -120,10 +120,7 @@ function MyAgent({ userApiToken }: { userApiToken: string }) {
 }
 
 // Pass user context
-await engine.execute(
-  input,
-  <MyAgent userApiToken={userContext.apiToken} />
-);
+await engine.execute(input, <MyAgent userApiToken={userContext.apiToken} />);
 ```
 
 **Use when:**
@@ -191,7 +188,7 @@ class MyAgent extends Component {
     if (this.mcpToolRef) {
       await this.mcpToolRef.updateRuntimeConfig(ctx, {
         auth: {
-          type: 'bearer',
+          type: "bearer",
           token: await this.refreshToken(),
         },
       });
@@ -236,15 +233,15 @@ runtimeConfig={{
 ## Complete Example
 
 ```tsx
-import { Engine, MCPTool } from 'agentick';
+import { Engine, MCPTool } from "agentick";
 
 const engine = new Engine({
   model: myModel,
   // Optionally configure some servers at Engine level
   mcpServers: {
     common: {
-      command: 'npx',
-      args: ['-y', '@modelcontextprotocol/server-filesystem', '/packages/path'],
+      command: "npx",
+      args: ["-y", "@modelcontextprotocol/server-filesystem", "/packages/path"],
     },
   },
 });
@@ -258,40 +255,37 @@ function UserAgent({ userId, apiToken }: { userId: string; apiToken: string }) {
       <MCPTool
         server="user-api"
         config={{
-          transport: 'sse',
+          transport: "sse",
           connection: {
-            url: 'https://api.example.com/mcp',
+            url: "https://api.example.com/mcp",
           },
         }}
         runtimeConfig={{
           auth: {
-            type: 'bearer',
+            type: "bearer",
             token: apiToken, // User-specific!
           },
         }}
-        exclude={['admin_tools']} // Filter out admin tools for regular users
+        exclude={["admin_tools"]} // Filter out admin tools for regular users
         toolPrefix="user_" // Prefix: user_get_data, user_update_profile
       />
 
       {/* Conditional MCP server (only for premium users) */}
-      {userId.startsWith('premium_') && (
+      {userId.startsWith("premium_") && (
         <MCPTool
           server="premium-features"
           config={{
-            command: 'npx',
-            args: ['-y', '@modelcontextprotocol/server-premium', '--user', userId],
+            command: "npx",
+            args: ["-y", "@modelcontextprotocol/server-premium", "--user", userId],
           }}
-          include={['advanced_search', 'analytics']} // Only premium tools
+          include={["advanced_search", "analytics"]} // Only premium tools
         />
       )}
     </>
   );
 }
 
-await engine.execute(
-  input,
-  <UserAgent userId={user.id} apiToken={user.apiToken} />
-);
+await engine.execute(input, <UserAgent userId={user.id} apiToken={user.apiToken} />);
 ```
 
 ## Key Benefits

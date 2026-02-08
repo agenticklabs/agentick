@@ -63,13 +63,13 @@ export { MyComponent } from "./jsx/components";
 
 These are the low-level elements the reconciler understands:
 
-| Element | Purpose |
-|---------|---------|
+| Element     | Purpose                   |
+| ----------- | ------------------------- |
 | `<message>` | A message in the timeline |
 | `<section>` | A content section with id |
-| `<tool>` | A tool registration |
-| `<entry>` | A timeline entry |
-| `<system>` | System prompt content |
+| `<tool>`    | A tool registration       |
+| `<entry>`   | A timeline entry          |
+| `<system>`  | System prompt content     |
 
 Components compose these to produce model context.
 
@@ -133,6 +133,7 @@ describe("MyComponent", () => {
 ```
 
 After creating, run:
+
 ```bash
 pnpm --filter @agentick/core typecheck
 pnpm --filter @agentick/core test

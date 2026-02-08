@@ -20,7 +20,7 @@ const devtools = startDevToolsServer({ port: 3001 });
 // Enable DevTools in your app
 const app = createApp(MyApp, {
   model: myModel,
-  devTools: true,  // Enables event emission
+  devTools: true, // Enables event emission
 });
 
 // Navigate to http://localhost:3001 to view DevTools UI
@@ -34,10 +34,10 @@ Convenience function to create and start a DevTools server:
 
 ```typescript
 const devtools = startDevToolsServer({
-  port: 3001,           // Default: 3001
-  host: "127.0.0.1",    // Default: 127.0.0.1
-  debug: false,         // Enable debug logging
-  heartbeatInterval: 30000,  // SSE heartbeat interval (ms)
+  port: 3001, // Default: 3001
+  host: "127.0.0.1", // Default: 127.0.0.1
+  debug: false, // Enable debug logging
+  heartbeatInterval: 30000, // SSE heartbeat interval (ms)
 });
 
 // Get server URL

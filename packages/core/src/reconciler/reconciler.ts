@@ -1,5 +1,5 @@
 /**
- * V2 Reconciler
+ * Reconciler
  *
  * Creates the react-reconciler instance with our host config.
  */
@@ -34,8 +34,6 @@ export function createContainer(renderer: Renderer = markdownRenderer): Agentick
  * Create a fiber root for a container.
  */
 export function createRoot(container: AgentickContainer): FiberRoot {
-  // Arguments match react-reconciler 0.29.x
-  // Note: @types/react-reconciler 0.28.x has fewer args, so we use type assertion
   return (reconciler.createContainer as any)(
     container,
     0, // LegacyRoot (ConcurrentRoot = 1)
@@ -61,31 +59,28 @@ export function createRoot(container: AgentickContainer): FiberRoot {
 }
 
 /**
- * Update the container with new elements.
+ * Queue a synchronous update to the container.
+ *
+ * In react-reconciler 0.33, `updateContainerSync` queues a sync update.
+ * Follow with `flushSyncWork()` to process it and run all passive effects.
  */
 export function updateContainer(
   element: React.ReactNode,
   root: FiberRoot,
   callback?: () => void,
 ): void {
-  reconciler.updateContainer(element, root, null, callback);
+  (reconciler as any).updateContainerSync(element, root, null, callback);
 }
 
 /**
- * Flush all pending work synchronously.
- */
-export function flushSync<T>(fn: () => T): T {
-  return reconciler.flushSync(fn);
-}
-
-/**
- * Flush all pending passive effects (useEffect callbacks).
+ * Flush all pending synchronous work and passive effects.
  *
- * In a non-DOM environment, passive effects don't automatically flush.
- * Call this after flushSync to ensure useEffect callbacks run immediately.
+ * In react-reconciler 0.33, this single call replaces the old
+ * `flushSync()` + `flushPassiveEffects()` combo. It synchronously
+ * processes all queued updates AND runs useEffect callbacks.
  */
-export function flushPassiveEffects(): boolean {
-  return reconciler.flushPassiveEffects();
+export function flushSyncWork(): void {
+  (reconciler as any).flushSyncWork();
 }
 
 /**
@@ -110,9 +105,13 @@ export {
  * Inject renderer info into React DevTools.
  * This allows React DevTools to recognize Agentick as a custom renderer.
  */
-reconciler.injectIntoDevTools({
-  bundleType: process.env.NODE_ENV === "development" ? 1 : 0,
-  version: "1.0.0",
-  rendererPackageName: "@agentick/core",
-  findFiberByHostInstance: () => null,
-});
+try {
+  (reconciler as any).injectIntoDevTools({
+    bundleType: process.env.NODE_ENV === "development" ? 1 : 0,
+    version: "1.0.0",
+    rendererPackageName: "@agentick/core",
+    findFiberByHostInstance: () => null,
+  });
+} catch {
+  // DevTools injection is optional
+}

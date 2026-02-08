@@ -40,7 +40,9 @@ function MyApp() {
 // Create and run
 const app = createApp(MyApp, { model: createOpenAIModel() });
 const session = await app.session();
-await session.send({ messages: [{ role: "user", content: [{ type: "text", text: "What is 2 + 2?" }] }] }).result;
+await session.send({
+  messages: [{ role: "user", content: [{ type: "text", text: "What is 2 + 2?" }] }],
+}).result;
 ```
 
 ## Level 0: `createAgent` (No JSX Required)
@@ -151,11 +153,11 @@ When `maxTokens` is set, Timeline automatically compacts entries that exceed the
 
 ```typescript
 interface TokenBudgetInfo {
-  maxTokens: number;       // configured budget
+  maxTokens: number; // configured budget
   effectiveBudget: number; // maxTokens - headroom
-  currentTokens: number;   // tokens in kept entries
-  evictedCount: number;    // entries dropped
-  isCompacted: boolean;    // whether compaction fired
+  currentTokens: number; // tokens in kept entries
+  evictedCount: number; // entries dropped
+  isCompacted: boolean; // whether compaction fired
 }
 ```
 
@@ -180,8 +182,7 @@ Group content with semantic meaning:
 
 ```tsx
 <Section id="context" title="Current Context">
-  Today is {new Date().toDateString()}.
-  User is logged in as {user.name}.
+  Today is {new Date().toDateString()}. User is logged in as {user.name}.
 </Section>
 ```
 
@@ -254,15 +255,15 @@ function MyComponent() {
   const counter = useSignal(0);
   const doubled = useComputed(() => counter() * 2, [counter]);
 
-  counter();              // read: 0
-  counter.set(5);         // write
-  counter.update(v => v + 1); // update with function
-  doubled();              // read: 12
+  counter(); // read: 0
+  counter.set(5); // write
+  counter.update((v) => v + 1); // update with function
+  doubled(); // read: 12
 
   // COM state (persisted across ticks, shared between components)
   // Returns Signal<T>, NOT a tuple
   const notes = useComState<string[]>("notes", []);
-  notes();                // read current value
+  notes(); // read current value
   notes.set(["a", "b"]); // write new value
 }
 ```
@@ -272,7 +273,14 @@ function MyComponent() {
 All lifecycle hooks follow the pattern: data first, COM (context) last.
 
 ```tsx
-import { useOnMount, useOnUnmount, useOnTickStart, useOnTickEnd, useAfterCompile, useContinuation } from "@agentick/core";
+import {
+  useOnMount,
+  useOnUnmount,
+  useOnTickStart,
+  useOnTickEnd,
+  useAfterCompile,
+  useContinuation,
+} from "@agentick/core";
 
 function MyComponent() {
   // Called when component mounts
@@ -304,7 +312,7 @@ function MyComponent() {
   useContinuation((result) => {
     // Return true to continue, false to stop
     if (result.text?.includes("<DONE>")) return false;
-    if (result.tick >= 10) return false;  // Safety limit
+    if (result.tick >= 10) return false; // Safety limit
     return true;
   });
 
@@ -376,7 +384,9 @@ function Agent() {
   const [temp] = useKnob("temp", 0.7, {
     description: "Temperature",
     group: "Model",
-    min: 0, max: 2, step: 0.1,
+    min: 0,
+    max: 2,
+    step: 0.1,
   });
 
   // Boolean → model sees [toggle] type
@@ -496,13 +506,13 @@ function ContextAwareComponent() {
 ```typescript
 interface ContextInfo {
   // Model identification
-  modelId: string;           // "gpt-4o", "claude-3-5-sonnet", etc.
-  modelName?: string;        // Human-readable name
-  provider?: string;         // "openai", "anthropic", etc.
+  modelId: string; // "gpt-4o", "claude-3-5-sonnet", etc.
+  modelName?: string; // Human-readable name
+  provider?: string; // "openai", "anthropic", etc.
 
   // Context limits
-  contextWindow?: number;    // Total context window size
-  maxOutputTokens?: number;  // Max output tokens for model
+  contextWindow?: number; // Total context window size
+  maxOutputTokens?: number; // Max output tokens for model
 
   // Token usage (current tick)
   inputTokens: number;
@@ -510,7 +520,7 @@ interface ContextInfo {
   totalTokens: number;
 
   // Utilization
-  utilization?: number;      // Percentage (0-100)
+  utilization?: number; // Percentage (0-100)
 
   // Model capabilities
   supportsVision?: boolean;
@@ -518,7 +528,7 @@ interface ContextInfo {
   isReasoningModel?: boolean;
 
   // Execution info
-  tick: number;              // Current tick number
+  tick: number; // Current tick number
 
   // Cumulative usage across all ticks
   cumulativeUsage?: {
@@ -543,7 +553,7 @@ const contextInfoStore = createContextInfoStore();
 // Provide to components
 <ContextInfoProvider store={contextInfoStore}>
   <MyApp />
-</ContextInfoProvider>
+</ContextInfoProvider>;
 
 // Update the store
 contextInfoStore.update({
@@ -579,11 +589,7 @@ const WeatherTool = createTool({
     return [{ type: "text", text: JSON.stringify(weather) }];
   },
   // Optional: render state to model context (receives tickState, ctx)
-  render: (tickState, ctx) => (
-    <Section id="weather-info">
-      Last checked: {lastChecked}
-    </Section>
-  ),
+  render: (tickState, ctx) => <Section id="weather-info">Last checked: {lastChecked}</Section>,
 });
 
 // Use in your app
@@ -607,7 +613,7 @@ import { createApp } from "@agentick/core";
 
 const app = createApp(MyApp, {
   model: myModel,
-  devTools: true,  // Enable DevTools
+  devTools: true, // Enable DevTools
 });
 ```
 
@@ -638,11 +644,17 @@ const app = createApp(MyApp, {
   onError: (error) => console.error(error),
 
   // All events (fine-grained)
-  onEvent: (event) => { /* handle any stream event */ },
+  onEvent: (event) => {
+    /* handle any stream event */
+  },
 
   // Send lifecycle
-  onBeforeSend: (session, input) => { /* modify input */ },
-  onAfterSend: (session, result) => { /* post-processing */ },
+  onBeforeSend: (session, input) => {
+    /* modify input */
+  },
+  onAfterSend: (session, result) => {
+    /* post-processing */
+  },
 
   // Tool confirmation
   onToolConfirmation: async (call, message) => {
@@ -689,18 +701,17 @@ const handle = await session.spawn(
 );
 
 // Spawn with a JSX element (props from element + input.props are merged)
-const handle = await session.spawn(
-  <Researcher query="quantum computing" />,
-  { messages: [{ role: "user", content: [{ type: "text", text: "Go" }] }] },
-);
+const handle = await session.spawn(<Researcher query="quantum computing" />, {
+  messages: [{ role: "user", content: [{ type: "text", text: "Go" }] }],
+});
 ```
 
 **Parallel spawns** work with `Promise.all`:
 
 ```tsx
 const [researchResult, factCheckResult] = await Promise.all([
-  session.spawn(Researcher, { messages }).then(h => h.result),
-  session.spawn(FactChecker, { messages }).then(h => h.result),
+  session.spawn(Researcher, { messages }).then((h) => h.result),
+  session.spawn(FactChecker, { messages }).then((h) => h.result),
 ]);
 ```
 
@@ -738,26 +749,34 @@ Control hibernation, limits, and auto-cleanup:
 const app = createApp(MyApp, {
   model,
   sessions: {
-    store: new RedisSessionStore(redis),  // Or ":memory:" for SQLite
-    maxActive: 100,                        // Max concurrent sessions
-    idleTimeout: 5 * 60 * 1000,           // Hibernate after 5 min idle
-    autoHibernate: true,                  // Auto-hibernate on idle
+    store: new RedisSessionStore(redis), // Or ":memory:" for SQLite
+    maxActive: 100, // Max concurrent sessions
+    idleTimeout: 5 * 60 * 1000, // Hibernate after 5 min idle
+    autoHibernate: true, // Auto-hibernate on idle
   },
 
   // Session lifecycle hooks
-  onSessionCreate: (session) => { /* ... */ },
-  onSessionClose: (sessionId) => { /* ... */ },
+  onSessionCreate: (session) => {
+    /* ... */
+  },
+  onSessionClose: (sessionId) => {
+    /* ... */
+  },
 
   // Hibernation hooks
   onBeforeHibernate: (session, snapshot) => {
     // Return false to cancel, modified snapshot, or void
     if (session.inspect().lastToolCalls.length > 0) return false;
   },
-  onAfterHibernate: (sessionId, snapshot) => { /* ... */ },
+  onAfterHibernate: (sessionId, snapshot) => {
+    /* ... */
+  },
   onBeforeHydrate: (sessionId, snapshot) => {
     // Migrate old formats, validate, etc.
   },
-  onAfterHydrate: (session, snapshot) => { /* ... */ },
+  onAfterHydrate: (session, snapshot) => {
+    /* ... */
+  },
 });
 ```
 
@@ -802,8 +821,8 @@ Apps inherit from the global `Agentick` instance by default:
 import { Agentick, createApp } from "@agentick/core";
 
 // Register global middleware
-Agentick.use('*', loggingMiddleware);
-Agentick.use('tool:*', authMiddleware);
+Agentick.use("*", loggingMiddleware);
+Agentick.use("tool:*", authMiddleware);
 
 // App inherits global middleware (default)
 const app = createApp(MyApp, { model });
@@ -811,7 +830,7 @@ const app = createApp(MyApp, { model });
 // Isolated app (for testing)
 const testApp = createApp(TestApp, {
   model,
-  inheritDefaults: false
+  inheritDefaults: false,
 });
 ```
 
@@ -822,10 +841,10 @@ For one-off executions without session management:
 ```tsx
 import { run } from "@agentick/core";
 
-const result = await run(
-  <MyApp />,
-  { messages: [{ role: "user", content: [{ type: "text", text: "Hello!" }] }], model: myModel }
-);
+const result = await run(<MyApp />, {
+  messages: [{ role: "user", content: [{ type: "text", text: "Hello!" }] }],
+  model: myModel,
+});
 ```
 
 ### Choosing `run()` vs `createApp`
@@ -867,7 +886,7 @@ For debugging the reconciler itself with React DevTools:
 import { enableReactDevTools } from "@agentick/core";
 
 // Before creating sessions
-enableReactDevTools();  // Connects to npx react-devtools on port 8097
+enableReactDevTools(); // Connects to npx react-devtools on port 8097
 ```
 
 ## License

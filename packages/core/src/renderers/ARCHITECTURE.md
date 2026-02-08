@@ -435,10 +435,7 @@ export class PlainTextRenderer extends Renderer {
   /**
    * Apply block-level formatting after node formatting.
    */
-  protected applyBlockLevelFormatting(
-    block: SemanticContentBlock,
-    formattedText: string,
-  ): string {
+  protected applyBlockLevelFormatting(block: SemanticContentBlock, formattedText: string): string {
     return formattedText;
   }
 }
@@ -748,15 +745,11 @@ function MediaExample() {
   return (
     <Markdown>
       {/* Structural: Native ImageBlock passed to model */}
-      <Image
-        source={{ type: "url", url: "https://example.com/chart.png" }}
-        altText="Sales chart"
-      />
+      <Image source={{ type: "url", url: "https://example.com/chart.png" }} altText="Sales chart" />
 
       {/* Semantic: Converted to markdown inline */}
       <Text>
-        See the diagram:{" "}
-        <img src="https://example.com/diagram.png" alt="Diagram" />
+        See the diagram: <img src="https://example.com/diagram.png" alt="Diagram" />
       </Text>
     </Markdown>
   );
@@ -796,10 +789,7 @@ const blocks: SemanticContentBlock[] = [
   {
     type: "text",
     semanticNode: {
-      children: [
-        { text: "Hello " },
-        { semantic: "strong", children: [{ text: "world" }] },
-      ],
+      children: [{ text: "Hello " }, { semantic: "strong", children: [{ text: "world" }] }],
     },
   },
 ];

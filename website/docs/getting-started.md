@@ -144,10 +144,11 @@ const app = createApp(() => {
 
   return (
     <>
-      {provider === "openai"
-        ? <OpenAIModel model="gpt-4o" />
-        : <GoogleModel model="gemini-2.0-flash" />
-      }
+      {provider === "openai" ? (
+        <OpenAIModel model="gpt-4o" />
+      ) : (
+        <GoogleModel model="gemini-2.0-flash" />
+      )}
       <System>You are a helpful assistant.</System>
       <Knobs />
       <Timeline />

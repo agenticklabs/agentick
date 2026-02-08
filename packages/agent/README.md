@@ -99,8 +99,8 @@ Control timeline compaction via the `tokenBudget` prop:
 <Agent
   tokenBudget={{
     maxTokens: 4000,
-    strategy: "sliding-window",  // "truncate" | "sliding-window" | custom function
-    headroom: 500,               // reserve tokens for safety margin
+    strategy: "sliding-window", // "truncate" | "sliding-window" | custom function
+    headroom: 500, // reserve tokens for safety margin
     onEvict: (entries) => console.log(`Evicted ${entries.length} entries`),
   }}
 />
@@ -188,6 +188,11 @@ export { Agent } from "./agent";
 export { createAgent, agentComponent } from "./create-agent";
 
 // Types
-export type { AgentProps, AgentTokenBudgetConfig, AgentTimelineConfig, AgentSectionConfig } from "./agent";
+export type {
+  AgentProps,
+  AgentTokenBudgetConfig,
+  AgentTimelineConfig,
+  AgentSectionConfig,
+} from "./agent";
 export type { AgentConfig } from "./create-agent";
 ```

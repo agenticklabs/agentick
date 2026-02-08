@@ -4,10 +4,10 @@ Agentick is model-agnostic. Adapters translate between the framework's compiled 
 
 ## Available Adapters
 
-| Package | Provider | Models |
-|---------|----------|--------|
-| `@agentick/openai` | OpenAI | GPT-4o, GPT-4, o1, o3 |
-| `@agentick/google` | Google | Gemini Pro, Gemini Flash |
+| Package            | Provider      | Models                      |
+| ------------------ | ------------- | --------------------------- |
+| `@agentick/openai` | OpenAI        | GPT-4o, GPT-4, o1, o3       |
+| `@agentick/google` | Google        | Gemini Pro, Gemini Flash    |
 | `@agentick/ai-sdk` | Vercel AI SDK | Any AI SDK-compatible model |
 
 ## Usage as JSX Components
@@ -35,10 +35,7 @@ Because the model is a component, it's dynamic:
 function MyAgent({ useGoogle }: { useGoogle: boolean }) {
   return (
     <>
-      {useGoogle
-        ? <GoogleModel model="gemini-2.0-flash" />
-        : <OpenAIModel model="gpt-4o" />
-      }
+      {useGoogle ? <GoogleModel model="gemini-2.0-flash" /> : <OpenAIModel model="gpt-4o" />}
       <System>You are helpful.</System>
       <Timeline />
     </>
@@ -64,7 +61,7 @@ const agent = createAgent({
 });
 
 // Or pass to <Agent> component
-<Agent model={openai({ model: "gpt-4o" })} />
+<Agent model={openai({ model: "gpt-4o" })} />;
 ```
 
 The lowercase factory returns a `ModelClass` — both a callable and a value that `<Agent>` wraps in a `<Model>` component internally.

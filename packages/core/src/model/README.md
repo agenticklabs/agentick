@@ -124,10 +124,14 @@ const myModel = createAdapter({
     provider: "my-provider",
     capabilities: [{ stream: true, toolCalls: true }],
   },
-  prepareInput: (input) => ({ /* provider format */ }),
+  prepareInput: (input) => ({
+    /* provider format */
+  }),
   mapChunk: (chunk) => ({ type: "text", delta: chunk.text }),
   execute: async (input) => provider.generate(input),
-  executeStream: async function* (input) { /* yield chunks */ },
+  executeStream: async function* (input) {
+    /* yield chunks */
+  },
 });
 ```
 

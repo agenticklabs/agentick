@@ -17,15 +17,15 @@ Use `createAdapter` from `@agentick/core/model` to create adapters with minimal 
 ### Basic Structure
 
 ```typescript
-import { createAdapter, StopReason, type ModelClass } from '@agentick/core/model';
+import { createAdapter, StopReason, type ModelClass } from "@agentick/core/model";
 
 export function createMyProviderModel(config: MyConfig): ModelClass {
   const client = new MyProviderClient(config);
 
   return createAdapter<ProviderInput, ProviderOutput, ProviderChunk>({
     metadata: {
-      id: 'my-provider',
-      provider: 'my-provider',
+      id: "my-provider",
+      provider: "my-provider",
       capabilities: [{ stream: true, toolCalls: true }],
     },
 
@@ -40,11 +40,11 @@ export function createMyProviderModel(config: MyConfig): ModelClass {
 
     mapChunk: (chunk) => {
       // Transform provider chunks → AdapterDelta
-      if (chunk.type === 'text') {
-        return { type: 'text', delta: chunk.text };
+      if (chunk.type === "text") {
+        return { type: "text", delta: chunk.text };
       }
-      if (chunk.type === 'done') {
-        return { type: 'message_end', stopReason: StopReason.STOP };
+      if (chunk.type === "done") {
+        return { type: "message_end", stopReason: StopReason.STOP };
       }
       return null; // Ignore unknown chunks
     },
@@ -83,17 +83,17 @@ The `mapChunk` function returns `AdapterDelta` types that the framework accumula
 
 ```typescript
 type AdapterDelta =
-  | { type: 'text'; delta: string }
-  | { type: 'reasoning'; delta: string }
-  | { type: 'tool_call'; id: string; name: string; input: unknown }
-  | { type: 'tool_call_start'; id: string; name: string }
-  | { type: 'tool_call_delta'; id: string; delta: string }
-  | { type: 'tool_call_end'; id: string; input?: unknown }
-  | { type: 'message_start'; model?: string }
-  | { type: 'message_end'; stopReason: StopReason; usage?: UsageStats }
-  | { type: 'usage'; usage: Partial<UsageStats> }
-  | { type: 'error'; error: Error | string }
-  | { type: 'content_metadata'; metadata: ContentMetadata };
+  | { type: "text"; delta: string }
+  | { type: "reasoning"; delta: string }
+  | { type: "tool_call"; id: string; name: string; input: unknown }
+  | { type: "tool_call_start"; id: string; name: string }
+  | { type: "tool_call_delta"; id: string; delta: string }
+  | { type: "tool_call_end"; id: string; input?: unknown }
+  | { type: "message_start"; model?: string }
+  | { type: "message_end"; stopReason: StopReason; usage?: UsageStats }
+  | { type: "usage"; usage: Partial<UsageStats> }
+  | { type: "error"; error: Error | string }
+  | { type: "content_metadata"; metadata: ContentMetadata };
 ```
 
 ### Common Patterns
@@ -102,7 +102,7 @@ type AdapterDelta =
 
 ```typescript
 if (chunk.delta?.content) {
-  return { type: 'text', delta: chunk.delta.content };
+  return { type: "text", delta: chunk.delta.content };
 }
 ```
 
@@ -111,7 +111,7 @@ if (chunk.delta?.content) {
 ```typescript
 if (chunk.toolCall) {
   return {
-    type: 'tool_call',
+    type: "tool_call",
     id: chunk.toolCall.id,
     name: chunk.toolCall.name,
     input: chunk.toolCall.args,
@@ -124,11 +124,11 @@ if (chunk.toolCall) {
 ```typescript
 // First chunk with name
 if (chunk.toolCallStart) {
-  return { type: 'tool_call_start', id: chunk.id, name: chunk.name };
+  return { type: "tool_call_start", id: chunk.id, name: chunk.name };
 }
 // Argument chunks
 if (chunk.toolCallDelta) {
-  return { type: 'tool_call_delta', id: chunk.id, delta: chunk.args };
+  return { type: "tool_call_delta", id: chunk.id, delta: chunk.args };
 }
 ```
 
@@ -137,13 +137,15 @@ if (chunk.toolCallDelta) {
 ```typescript
 if (chunk.finishReason) {
   return {
-    type: 'message_end',
+    type: "message_end",
     stopReason: mapFinishReason(chunk.finishReason),
-    usage: chunk.usage ? {
-      inputTokens: chunk.usage.promptTokens,
-      outputTokens: chunk.usage.completionTokens,
-      totalTokens: chunk.usage.totalTokens,
-    } : undefined,
+    usage: chunk.usage
+      ? {
+          inputTokens: chunk.usage.promptTokens,
+          outputTokens: chunk.usage.completionTokens,
+          totalTokens: chunk.usage.totalTokens,
+        }
+      : undefined,
   };
 }
 ```
@@ -160,14 +162,14 @@ if (chunk.usage && !chunk.choices?.length) {
 ## StopReason Values
 
 ```typescript
-import { StopReason } from '@agentick/shared';
+import { StopReason } from "@agentick/shared";
 
-StopReason.STOP           // Normal completion
-StopReason.MAX_TOKENS     // Hit token limit
-StopReason.TOOL_USE       // Model wants to call tools
-StopReason.CONTENT_FILTER // Content was filtered
-StopReason.ERROR          // Error occurred
-StopReason.OTHER          // Other reasons
+StopReason.STOP; // Normal completion
+StopReason.MAX_TOKENS; // Hit token limit
+StopReason.TOOL_USE; // Model wants to call tools
+StopReason.CONTENT_FILTER; // Content was filtered
+StopReason.ERROR; // Error occurred
+StopReason.OTHER; // Other reasons
 ```
 
 ## Advanced Options
@@ -181,10 +183,10 @@ createAdapter({
   // ... other options
 
   onMount: (ctx) => {
-    console.log('Model mounted');
+    console.log("Model mounted");
   },
   onUnmount: (ctx) => {
-    console.log('Model unmounted');
+    console.log("Model unmounted");
   },
 });
 ```
@@ -200,17 +202,19 @@ createAdapter({
   reconstructRaw: (accumulated) => ({
     id: `response-${Date.now()}`,
     model: accumulated.model,
-    choices: [{
-      message: {
-        role: 'assistant',
-        content: accumulated.text,
-        tool_calls: accumulated.toolCalls.map(tc => ({
-          id: tc.id,
-          function: { name: tc.name, arguments: JSON.stringify(tc.input) },
-        })),
+    choices: [
+      {
+        message: {
+          role: "assistant",
+          content: accumulated.text,
+          tool_calls: accumulated.toolCalls.map((tc) => ({
+            id: tc.id,
+            function: { name: tc.name, arguments: JSON.stringify(tc.input) },
+          })),
+        },
+        finish_reason: accumulated.stopReason,
       },
-      finish_reason: accumulated.stopReason,
-    }],
+    ],
     usage: {
       prompt_tokens: accumulated.usage.inputTokens,
       completion_tokens: accumulated.usage.outputTokens,
@@ -231,7 +235,7 @@ createAdapter({
   extractMetadata: (chunk, accumulated) => {
     if (chunk.citations?.length) {
       return {
-        citations: chunk.citations.map(c => ({
+        citations: chunk.citations.map((c) => ({
           text: c.citedText,
           url: c.source?.url,
           title: c.source?.title,
@@ -250,20 +254,20 @@ Configure how messages are transformed for specific models:
 ```typescript
 createAdapter({
   metadata: {
-    id: 'my-provider',
+    id: "my-provider",
     capabilities: [
       { stream: true, toolCalls: true },
       {
         messageTransformation: (modelId, provider) => ({
-          preferredRenderer: 'markdown', // or 'xml'
+          preferredRenderer: "markdown", // or 'xml'
           roleMapping: {
-            event: 'user',      // How to render event messages
-            ephemeral: 'user',  // How to render ephemeral content
+            event: "user", // How to render event messages
+            ephemeral: "user", // How to render ephemeral content
           },
           delimiters: {
             useDelimiters: true,
-            event: '[Event]',
-            ephemeral: '[Context]',
+            event: "[Event]",
+            ephemeral: "[Context]",
           },
         }),
       },
@@ -276,32 +280,32 @@ createAdapter({
 ## Testing Adapters
 
 ```typescript
-import { describe, it, expect } from 'vitest';
-import { createMyProviderModel } from './my-provider';
+import { describe, it, expect } from "vitest";
+import { createMyProviderModel } from "./my-provider";
 
-describe('MyProviderAdapter', () => {
-  it('generates text', async () => {
-    const model = createMyProviderModel({ model: 'test-model' });
+describe("MyProviderAdapter", () => {
+  it("generates text", async () => {
+    const model = createMyProviderModel({ model: "test-model" });
 
     const result = await model.generate({
-      messages: [{ role: 'user', content: 'Hello' }],
+      messages: [{ role: "user", content: "Hello" }],
     });
 
     expect(result.message.content).toBeDefined();
   });
 
-  it('streams text', async () => {
-    const model = createMyProviderModel({ model: 'test-model' });
+  it("streams text", async () => {
+    const model = createMyProviderModel({ model: "test-model" });
     const events: StreamEvent[] = [];
 
     for await (const event of model.stream!({
-      messages: [{ role: 'user', content: 'Hello' }],
+      messages: [{ role: "user", content: "Hello" }],
     })) {
       events.push(event);
     }
 
-    expect(events.some(e => e.type === 'content_delta')).toBe(true);
-    expect(events.some(e => e.type === 'message')).toBe(true);
+    expect(events.some((e) => e.type === "content_delta")).toBe(true);
+    expect(events.some((e) => e.type === "message")).toBe(true);
   });
 });
 ```
@@ -317,6 +321,6 @@ export function myProvider(config?: MyConfig): ModelClass {
 }
 
 // Usage
-import { myProvider } from '@agentick/my-provider';
-const model = myProvider({ model: 'my-model' });
+import { myProvider } from "@agentick/my-provider";
+const model = myProvider({ model: "my-model" });
 ```

@@ -30,10 +30,10 @@ The output of compilation:
 
 ```typescript
 interface CompiledStructure {
-  system: CompiledTimelineEntry[];      // System-level content
+  system: CompiledTimelineEntry[]; // System-level content
   timelineEntries: CompiledTimelineEntry[]; // Messages
-  tools: CompiledTool[];                // Available tools
-  ephemeral: CompiledEphemeral[];       // Temporary content
+  tools: CompiledTool[]; // Available tools
+  ephemeral: CompiledEphemeral[]; // Temporary content
   sections: Map<string, CompiledSection>; // Named sections
 }
 ```

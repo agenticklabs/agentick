@@ -2,6 +2,11 @@
   "name": "@agentick/client-multiplexer",
   "version": "0.2.0",
   "description": "Multi-tab connection multiplexer for Agentick client",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/agenticklabs/agentick.git",
+    "directory": "packages/client-multiplexer"
+  },
   "files": [
     "dist"
   ],
@@ -25,10 +30,5 @@
   },
   "devDependencies": {
     "typescript": "^5.8.3"
-  },
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/agenticklabs/agentick.git",
-    "directory": "packages/client-multiplexer"
   }
 }

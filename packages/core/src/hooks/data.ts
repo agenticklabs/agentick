@@ -1,5 +1,5 @@
 /**
- * V2 Data Hook
+ * Data Hook
  *
  * The useData hook for async data fetching with the resolve-then-render pattern.
  */

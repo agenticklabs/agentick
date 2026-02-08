@@ -269,28 +269,28 @@ pnpm test
 The CLI can also be used as a library:
 
 ```typescript
-import { CLI, createCLI } from '@agentick/cli';
+import { CLI, createCLI } from "@agentick/cli";
 
 const cli = createCLI({
-  url: 'http://localhost:3000/api/agent',
-  token: 'your-token',
+  url: "http://localhost:3000/api/agent",
+  token: "your-token",
 });
 
 // Listen for events
-cli.on('stream:delta', ({ text }) => {
+cli.on("stream:delta", ({ text }) => {
   process.stdout.write(text);
 });
 
-cli.on('tool:start', ({ name }) => {
+cli.on("tool:start", ({ name }) => {
   console.log(`[tool: ${name}]`);
 });
 
 // Send a message
-const response = await cli.send('Hello, agent!');
-console.log('Response:', response);
+const response = await cli.send("Hello, agent!");
+console.log("Response:", response);
 
 // Stream a message
-for await (const event of cli.stream('What is 2+2?')) {
+for await (const event of cli.stream("What is 2+2?")) {
   console.log(event);
 }
 
@@ -303,10 +303,10 @@ cli.destroy();
 For interactive sessions:
 
 ```typescript
-import { ChatSession } from '@agentick/cli';
+import { ChatSession } from "@agentick/cli";
 
 const session = new ChatSession({
-  url: 'http://localhost:3000/api/agent',
+  url: "http://localhost:3000/api/agent",
   markdown: true,
 });
 
@@ -318,17 +318,17 @@ await session.start();
 For custom terminal output:
 
 ```typescript
-import { Renderer } from '@agentick/cli';
+import { Renderer } from "@agentick/cli";
 
 const renderer = new Renderer({
   markdown: true,
   debug: false,
 });
 
-renderer.info('Starting...');
-renderer.response('Hello! How can I help?');
-renderer.error('Something went wrong');
-renderer.toolStart('web_search', { query: 'test' });
+renderer.info("Starting...");
+renderer.response("Hello! How can I help?");
+renderer.error("Something went wrong");
+renderer.toolStart("web_search", { query: "test" });
 ```
 
 ## Roadmap

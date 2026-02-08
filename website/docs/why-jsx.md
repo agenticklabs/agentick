@@ -7,6 +7,7 @@ The most common reaction to agentick: "Why would you use JSX for AI agents?"
 JSX is not about HTML. It's syntax for composing tree structures with embedded expressions. React uses it for UI trees. Agentick uses it for **context trees** — the structured prompt that an LLM receives.
 
 An agent's context has the same properties as a UI:
+
 - **Conditional rendering**: show different tools in different phases
 - **Composition**: combine small, reusable pieces into complex behavior
 - **Reactivity**: state changes should propagate automatically
@@ -73,7 +74,10 @@ function Agent() {
         name="set_mode"
         description="Change response mode"
         input={z.object({ mode: z.string() })}
-        handler={({ mode }) => { setMode(mode); return "Mode updated."; }}
+        handler={({ mode }) => {
+          setMode(mode);
+          return "Mode updated.";
+        }}
       />
       <Timeline />
     </>

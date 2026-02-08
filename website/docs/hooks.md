@@ -18,7 +18,7 @@ Reactive signal — updates propagate without re-rendering the full component tr
 
 ```tsx
 const count = useSignal(0);
-count.value++;      // Triggers targeted update
+count.value++; // Triggers targeted update
 console.log(count.value); // Current value
 ```
 
@@ -28,7 +28,8 @@ Creates model-visible, model-settable reactive state. See [Knobs](/docs/knobs) f
 
 ```tsx
 const [depth, setDepth] = useKnob("search_depth", 3, {
-  min: 1, max: 10,
+  min: 1,
+  max: 10,
   description: "Number of results to analyze",
 });
 ```

@@ -18,14 +18,14 @@ const engine = new Engine({
   model: myModel,
   mcpServers: {
     postgres: {
-      command: 'npx',
-      args: ['-y', '@modelcontextprotocol/server-postgres', 'postgresql://localhost/mydb'],
+      command: "npx",
+      args: ["-y", "@modelcontextprotocol/server-postgres", "postgresql://localhost/mydb"],
     },
     filesystem: {
-      command: 'npx',
-      args: ['-y', '@modelcontextprotocol/server-filesystem', '/allowed/path'],
+      command: "npx",
+      args: ["-y", "@modelcontextprotocol/server-filesystem", "/allowed/path"],
       env: {
-        MCP_API_KEY: 'secret-key',
+        MCP_API_KEY: "secret-key",
       },
     },
   },
@@ -40,15 +40,15 @@ For more control (SSE, WebSocket, custom auth):
 const engine = new Engine({
   model: myModel,
   mcpServers: {
-    'api-server': {
-      serverName: 'api-server',
-      transport: 'sse',
+    "api-server": {
+      serverName: "api-server",
+      transport: "sse",
       connection: {
-        url: 'https://mcp.example.com/sse',
+        url: "https://mcp.example.com/sse",
       },
       auth: {
-        type: 'bearer',
-        token: 'your-token',
+        type: "bearer",
+        token: "your-token",
       },
     },
   },
@@ -225,7 +225,7 @@ this.run = createEngineProcedure()
    ```typescript
    // Override initializeMCPServers or call manually
    const tools = await mcpService.connectAndDiscover(config);
-   const filtered = tools.filter(t => t.name.startsWith('safe_'));
+   const filtered = tools.filter((t) => t.name.startsWith("safe_"));
    for (const tool of filtered) {
      mcpService.registerMCPTool(config, tool, ctx);
    }
@@ -234,10 +234,15 @@ this.run = createEngineProcedure()
 3. **Tool Transformation** (via custom initialization)
    ```typescript
    // Transform tool names/descriptions before registration
-   const tool = new MCPTool(mcpClient, serverName, {
-     ...mcpToolDef,
-     name: `mcp_${mcpToolDef.name}`,
-   }, mcpConfig);
+   const tool = new MCPTool(
+     mcpClient,
+     serverName,
+     {
+       ...mcpToolDef,
+       name: `mcp_${mcpToolDef.name}`,
+     },
+     mcpConfig,
+   );
    ctx.addTool(tool);
    ```
 

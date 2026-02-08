@@ -18,12 +18,7 @@ const PACKAGE_GROUPS: Array<{ label: string; packages: string[] }> = [
   },
   {
     label: "Server",
-    packages: [
-      "@agentick/gateway",
-      "@agentick/server",
-      "@agentick/express",
-      "@agentick/nestjs",
-    ],
+    packages: ["@agentick/gateway", "@agentick/server", "@agentick/express", "@agentick/nestjs"],
   },
   {
     label: "Client",
@@ -190,9 +185,7 @@ export default defineConfig({
       "/api/": loadApiSidebar(),
     },
 
-    socialLinks: [
-      { icon: "github", link: "https://github.com/agenticklabs/agentick" },
-    ],
+    socialLinks: [{ icon: "github", link: "https://github.com/agenticklabs/agentick" }],
 
     footer: {
       message: "Released under the ISC License.",
@@ -204,8 +197,7 @@ export default defineConfig({
     },
 
     editLink: {
-      pattern:
-        "https://github.com/agenticklabs/agentick/edit/master/website/:path",
+      pattern: "https://github.com/agenticklabs/agentick/edit/master/website/:path",
     },
   },
 });

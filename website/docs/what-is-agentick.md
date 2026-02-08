@@ -30,7 +30,10 @@ function MyAgent() {
         name="switch_phase"
         description="Switch to writing mode"
         input={z.object({})}
-        handler={() => { setPhase("write"); return "Switched."; }}
+        handler={() => {
+          setPhase("write");
+          return "Switched.";
+        }}
       />
       <Timeline />
     </>
@@ -42,14 +45,14 @@ When `setPhase("write")` fires, `<SearchTool />` unmounts (its tool deregisters)
 
 ## Key Concepts
 
-| Concept | What it is |
-|---------|-----------|
-| **Session** | Long-lived conversation context. Manages identity, state, persistence. |
-| **Execution** | One user message → model response cycle. Contains one or more ticks. |
-| **Tick** | One model API call. Tool use creates multi-tick executions. |
-| **Fiber tree** | Virtual DOM-like component hierarchy defining model context. |
-| **Reconciler** | Diffs the fiber tree, manages component lifecycle. |
-| **Compiler** | Transforms fiber tree → model-ready prompt structure. |
+| Concept        | What it is                                                             |
+| -------------- | ---------------------------------------------------------------------- |
+| **Session**    | Long-lived conversation context. Manages identity, state, persistence. |
+| **Execution**  | One user message → model response cycle. Contains one or more ticks.   |
+| **Tick**       | One model API call. Tool use creates multi-tick executions.            |
+| **Fiber tree** | Virtual DOM-like component hierarchy defining model context.           |
+| **Reconciler** | Diffs the fiber tree, manages component lifecycle.                     |
+| **Compiler**   | Transforms fiber tree → model-ready prompt structure.                  |
 
 ## What it's not
 

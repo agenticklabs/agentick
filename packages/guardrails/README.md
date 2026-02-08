@@ -14,10 +14,7 @@ pnpm add @agentick/guardrails
 import { toolGuardrail, deny, allow } from "@agentick/guardrails";
 
 const guardrail = toolGuardrail({
-  rules: [
-    deny("file_delete", "exec_*"),
-    allow("file_read", "file_write"),
-  ],
+  rules: [deny("file_delete", "exec_*"), allow("file_read", "file_write")],
 });
 
 app.use(guardrail);
@@ -44,7 +41,7 @@ Only intercepts procedures with `operationName === "tool:run"`. Other procedures
 Create a deny rule.
 
 ```typescript
-deny("file_delete", "exec_*")
+deny("file_delete", "exec_*");
 // { patterns: ["file_delete", "exec_*"], action: "deny" }
 ```
 
@@ -53,7 +50,7 @@ deny("file_delete", "exec_*")
 Create an allow rule.
 
 ```typescript
-allow("file_read", "search")
+allow("file_read", "search");
 // { patterns: ["file_read", "search"], action: "allow" }
 ```
 

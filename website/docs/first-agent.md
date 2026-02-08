@@ -52,8 +52,8 @@ const app = createApp(() => {
     <>
       <OpenAIModel model="gpt-4o" />
       <System>
-        You are a research assistant. Search for information,
-        read relevant pages, and compile your findings.
+        You are a research assistant. Search for information, read relevant pages, and compile your
+        findings.
       </System>
       <SearchTool />
       <ReadPageTool />
@@ -62,7 +62,7 @@ const app = createApp(() => {
         description="Save a key finding from your research"
         input={z.object({ finding: z.string() })}
         handler={({ finding }) => {
-          setFindings(f => [...f, finding]);
+          setFindings((f) => [...f, finding]);
           return "Saved.";
         }}
       />
@@ -82,10 +82,12 @@ const app = createApp(() => {
 
 ```tsx
 const result = await app.run({
-  messages: [{
-    role: "user",
-    content: "Research the latest developments in WebAssembly.",
-  }],
+  messages: [
+    {
+      role: "user",
+      content: "Research the latest developments in WebAssembly.",
+    },
+  ],
 }).result;
 
 console.log(result.response);

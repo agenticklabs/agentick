@@ -23,7 +23,7 @@ import { registerModel } from "@agentick/shared";
 registerModel("myorg/custom-model-v1", {
   name: "My Custom Model",
   provider: "myorg",
-  contextWindow: 32768,        // 32k context
+  contextWindow: 32768, // 32k context
   maxOutputTokens: 8192,
   supportsToolUse: true,
   supportsVision: false,
@@ -59,28 +59,28 @@ import { getModelInfo, getContextWindow, getContextUtilization } from "@agentick
 
 // Get full model info
 const info = getModelInfo("gpt-4o");
-console.log(info?.contextWindow);  // 128000
+console.log(info?.contextWindow); // 128000
 console.log(info?.supportsVision); // true
 
 // Just get context window
 const contextWindow = getContextWindow("claude-3-5-sonnet");
-console.log(contextWindow);  // 200000
+console.log(contextWindow); // 200000
 
 // Calculate utilization percentage
 const utilization = getContextUtilization("gpt-4o", 64000);
-console.log(utilization);  // 50
+console.log(utilization); // 50
 ```
 
 ### ModelInfo Interface
 
 ```typescript
 interface ModelInfo {
-  name: string;              // Display name
-  provider: string;          // Provider name (openai, anthropic, google, etc.)
-  contextWindow: number;     // Context window size in tokens
-  maxOutputTokens?: number;  // Max output tokens
-  releaseDate?: string;      // Model release date
-  supportsVision?: boolean;  // Supports image input
+  name: string; // Display name
+  provider: string; // Provider name (openai, anthropic, google, etc.)
+  contextWindow: number; // Context window size in tokens
+  maxOutputTokens?: number; // Max output tokens
+  releaseDate?: string; // Model release date
+  supportsVision?: boolean; // Supports image input
   supportsToolUse?: boolean; // Supports tool/function calling
   isReasoningModel?: boolean; // Extended thinking model (o1, etc.)
 }
@@ -106,8 +106,8 @@ import { getEffectiveModelInfo, getEffectiveContextWindow } from "@agentick/shar
 
 // Adapter metadata overrides catalog values
 const effectiveInfo = getEffectiveModelInfo(
-  { contextWindow: 256000 },  // Adapter reports 256k
-  "custom-model"
+  { contextWindow: 256000 }, // Adapter reports 256k
+  "custom-model",
 );
 
 // Priority: adapter > runtime registry > static catalog
@@ -119,9 +119,9 @@ const contextWindow = getEffectiveContextWindow(adapterMetadata, modelId);
 ```typescript
 import { formatContextWindow } from "@agentick/shared";
 
-formatContextWindow(128000);   // "128K"
-formatContextWindow(1000000);  // "1M"
-formatContextWindow(2097152);  // "2.1M"
+formatContextWindow(128000); // "128K"
+formatContextWindow(1000000); // "1M"
+formatContextWindow(2097152); // "2.1M"
 ```
 
 ## Response Format
@@ -148,7 +148,7 @@ const structured: ResponseFormat = {
     },
     required: ["name"],
   },
-  name: "person",  // optional
+  name: "person", // optional
 };
 ```
 
@@ -161,7 +161,13 @@ const structured: ResponseFormat = {
 Content blocks represent different types of content in messages:
 
 ```typescript
-import type { ContentBlock, TextBlock, ImageBlock, ToolUseBlock, ToolResultBlock } from "@agentick/shared";
+import type {
+  ContentBlock,
+  TextBlock,
+  ImageBlock,
+  ToolUseBlock,
+  ToolResultBlock,
+} from "@agentick/shared";
 
 // Text content
 const text: TextBlock = {
@@ -241,7 +247,7 @@ const contextUpdate: ContextUpdateEvent = {
   inputTokens: 1500,
   outputTokens: 500,
   totalTokens: 2000,
-  utilization: 1.56,  // percentage
+  utilization: 1.56, // percentage
   supportsVision: true,
   supportsToolUse: true,
 };
@@ -274,7 +280,7 @@ try {
 // Throw typed errors
 throw new ValidationError("email", "Invalid email format");
 throw new AbortError("User cancelled");
-throw AbortError.timeout(30000);  // Timeout via AbortError factory
+throw AbortError.timeout(30000); // Timeout via AbortError factory
 ```
 
 ## Input Normalization

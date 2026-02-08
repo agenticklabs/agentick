@@ -1,5 +1,5 @@
 /**
- * V2 Hook Types
+ * Hook Types
  */
 
 import type { CompiledStructure } from "../compiler/types";

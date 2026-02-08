@@ -43,46 +43,46 @@ The framework provides **building blocks**, not opinions.
 
 Use these instead of raw markdown strings in JSX. They compile to renderer-appropriate output.
 
-| Component    | Purpose                                                       |
-| ------------ | ------------------------------------------------------------- |
-| `<H1>`–`<H3>`, `<Header level={n}>` | Headings                                  |
-| `<Paragraph>` | Paragraph block                                              |
-| `<List>`     | List container (`ordered`, `task` props)                      |
-| `<ListItem>` | List item (`checked` prop for task lists)                     |
-| `<Table>`    | Table (`headers`/`rows` props, or `<Row>`/`<Column>` children)|
-| `<Row>`, `<Column>` | Table row and column                                  |
+| Component                           | Purpose                                                        |
+| ----------------------------------- | -------------------------------------------------------------- |
+| `<H1>`–`<H3>`, `<Header level={n}>` | Headings                                                       |
+| `<Paragraph>`                       | Paragraph block                                                |
+| `<List>`                            | List container (`ordered`, `task` props)                       |
+| `<ListItem>`                        | List item (`checked` prop for task lists)                      |
+| `<Table>`                           | Table (`headers`/`rows` props, or `<Row>`/`<Column>` children) |
+| `<Row>`, `<Column>`                 | Table row and column                                           |
 
 #### Content Block Components (`packages/core/src/jsx/components/content.tsx`)
 
 Typed content blocks for composing rich message content:
 
-| Component    | Purpose                                                       |
-| ------------ | ------------------------------------------------------------- |
-| `<Text>`     | Text block (children or `text` prop)                          |
-| `<Image>`    | Image (`source: MediaSource`)                                 |
-| `<Code>`     | Code block (`language` prop)                                  |
-| `<Json>`     | JSON data block (`data` prop)                                 |
-| `<Document>` | Document attachment                                           |
-| `<Audio>`, `<Video>` | Media blocks                                         |
+| Component            | Purpose                              |
+| -------------------- | ------------------------------------ |
+| `<Text>`             | Text block (children or `text` prop) |
+| `<Image>`            | Image (`source: MediaSource`)        |
+| `<Code>`             | Code block (`language` prop)         |
+| `<Json>`             | JSON data block (`data` prop)        |
+| `<Document>`         | Document attachment                  |
+| `<Audio>`, `<Video>` | Media blocks                         |
 
 #### Message Role Components (`packages/core/src/jsx/components/messages.tsx`)
 
-| Component    | Purpose                                                       |
-| ------------ | ------------------------------------------------------------- |
-| `<System>`   | System prompt message                                         |
-| `<User>`     | User message                                                  |
-| `<Assistant>`| Assistant message                                             |
-| `<Event>`    | Persisted event entry                                         |
-| `<Ephemeral>`| Non-persisted context (current state)                         |
-| `<Grounding>`| Semantic wrapper for grounding context                        |
+| Component     | Purpose                                |
+| ------------- | -------------------------------------- |
+| `<System>`    | System prompt message                  |
+| `<User>`      | User message                           |
+| `<Assistant>` | Assistant message                      |
+| `<Event>`     | Persisted event entry                  |
+| `<Ephemeral>` | Non-persisted context (current state)  |
+| `<Grounding>` | Semantic wrapper for grounding context |
 
 #### Model Components
 
-| Component         | Import from          | Purpose                               |
-| ----------------- | -------------------- | ------------------------------------- |
-| `<Model>`         | `agentick`           | Generic model config (takes `EngineModel`) |
-| `<OpenAIModel>`   | `@agentick/openai`   | OpenAI JSX component (takes `model` string) |
-| `<GoogleModel>`   | `@agentick/google`   | Google JSX component (takes `model` string) |
+| Component       | Import from        | Purpose                                     |
+| --------------- | ------------------ | ------------------------------------------- |
+| `<Model>`       | `agentick`         | Generic model config (takes `EngineModel`)  |
+| `<OpenAIModel>` | `@agentick/openai` | OpenAI JSX component (takes `model` string) |
+| `<GoogleModel>` | `@agentick/google` | Google JSX component (takes `model` string) |
 
 **See `packages/core/src/jsx/ARCHITECTURE.md` for the complete JSX reference.**
 
@@ -226,7 +226,7 @@ const greet = createProcedure(async (name: string) => `Hello, ${name}!`);
 **Calling a Procedure** returns a `ProcedurePromise<ExecutionHandle<T>>`:
 
 ```typescript
-const handle = await greet("World");     // ExecutionHandle (status, abort, streaming)
+const handle = await greet("World"); // ExecutionHandle (status, abort, streaming)
 const result = await greet("World").result; // "Hello, World!" (auto-unwraps .result)
 ```
 
@@ -235,11 +235,11 @@ The `.result` auto-unwrap is key: `await proc()` gives the handle, `await proc()
 **Chainable API** — all return a new Procedure (immutable):
 
 ```typescript
-proc.use(middleware)           // Add middleware
-proc.withContext({ user })     // Merge ALS context
-proc.withTimeout(5000)         // Abort after 5s
-proc.withMetadata({ model })   // Add telemetry metadata
-proc.pipe(nextProc)            // Chain output → input
+proc.use(middleware); // Add middleware
+proc.withContext({ user }); // Merge ALS context
+proc.withTimeout(5000); // Abort after 5s
+proc.withMetadata({ model }); // Add telemetry metadata
+proc.pipe(nextProc); // Chain output → input
 ```
 
 **Middleware** intercepts execution — transform args, modify results, or short-circuit:
@@ -331,12 +331,12 @@ Snapshots taken at tick end. Check `tick_end` events are being emitted.
 
 ```css
 .container {
-  height: 100vh;       /* Fixed height, not min-height */
+  height: 100vh; /* Fixed height, not min-height */
   overflow: hidden;
 }
 .child {
   flex: 1;
-  min-height: 0;       /* Critical! Allows shrinking */
+  min-height: 0; /* Critical! Allows shrinking */
   overflow: auto;
 }
 ```

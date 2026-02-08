@@ -50,9 +50,7 @@ Renders the conversation history. Required for multi-turn conversations.
 Supports render props for custom rendering:
 
 ```tsx
-<Timeline>
-  {(messages) => messages.map(m => <CustomMessage msg={m} />)}
-</Timeline>
+<Timeline>{(messages) => messages.map((m) => <CustomMessage msg={m} />)}</Timeline>
 ```
 
 ### `<Message>`
@@ -90,11 +88,7 @@ function SearchTools({ maxResults = 5 }) {
           return await search(query, maxResults);
         }}
       />
-      {lastQuery && (
-        <Section id="last-search">
-          Last search: {lastQuery}
-        </Section>
-      )}
+      {lastQuery && <Section id="last-search">Last search: {lastQuery}</Section>}
     </>
   );
 }

@@ -3,6 +3,7 @@
 Knobs are model-visible, model-settable reactive state. One hook call creates a value, renders it as a form control the model can see, and registers a tool for the model to change it.
 
 This is the killer feature of the reconciler approach. Without a component model, you'd need to manually:
+
 1. Define the state variable
 2. Add it to the system prompt
 3. Register a tool to modify it
@@ -72,13 +73,13 @@ const [style] = useKnob("writing_style", "academic", {
 
 Agentick infers a semantic type from the value and constraints:
 
-| Value + Constraints | Semantic Type |
-|-------------------|---------------|
-| `boolean` | `[toggle]` |
-| `number` with min+max | `[range]` |
-| `number` without range | `[number]` |
-| Any type with `options` | `[select]` |
-| `string` | `[text]` |
+| Value + Constraints     | Semantic Type |
+| ----------------------- | ------------- |
+| `boolean`               | `[toggle]`    |
+| `number` with min+max   | `[range]`     |
+| `number` without range  | `[number]`    |
+| Any type with `options` | `[select]`    |
+| `string`                | `[text]`      |
 
 ## Groups
 
@@ -86,10 +87,14 @@ Organize knobs into named groups:
 
 ```tsx
 const [temp] = useKnob("temperature", 0.7, {
-  group: "Model Settings", min: 0, max: 2,
+  group: "Model Settings",
+  min: 0,
+  max: 2,
 });
 const [maxTokens] = useKnob("max_tokens", 1000, {
-  group: "Model Settings", min: 100, max: 4000,
+  group: "Model Settings",
+  min: 100,
+  max: 4000,
 });
 const [style] = useKnob("style", "helpful", {
   group: "Behavior",
@@ -117,7 +122,7 @@ Custom section rendering, tool auto-registered:
 <Knobs>
   {(groups) => (
     <Section id="my-knobs">
-      {groups.map(g => `## ${g.name}\n${g.knobs.map(k => k.display).join("\n")}`).join("\n")}
+      {groups.map((g) => `## ${g.name}\n${g.knobs.map((k) => k.display).join("\n")}`).join("\n")}
     </Section>
   )}
 </Knobs>
@@ -130,7 +135,7 @@ Full control — provider registers the tool, you handle rendering:
 ```tsx
 <Knobs.Provider>
   <MyCustomKnobUI />
-</Knobs.Provider>
+</Knobs.Provider>;
 
 // In MyCustomKnobUI:
 function MyCustomKnobUI() {
@@ -142,6 +147,7 @@ function MyCustomKnobUI() {
 ## Validation
 
 The `set_knob` tool handler validates automatically:
+
 1. Type check (number, string, boolean)
 2. Options check (if `options` defined)
 3. Range check (min/max for numbers)
@@ -152,7 +158,7 @@ The `set_knob` tool handler validates automatically:
 const [priority] = useKnob("priority", 5, {
   min: 1,
   max: 10,
-  validate: (v) => v % 1 === 0 ? true : "Must be a whole number",
+  validate: (v) => (v % 1 === 0 ? true : "Must be a whole number"),
 });
 ```
 

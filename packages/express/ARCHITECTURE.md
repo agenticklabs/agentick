@@ -197,18 +197,22 @@ createAgentickHandler(app, {
 interface AgentickHandlerOptions<User = unknown> {
   // Authentication
   authenticate?: (req: Request) => Promise<User | undefined> | User | undefined;
-  authorize?: (user: User | undefined, sessionId: string, req: Request) => Promise<boolean> | boolean;
+  authorize?: (
+    user: User | undefined,
+    sessionId: string,
+    req: Request,
+  ) => Promise<boolean> | boolean;
   getUserId?: (req: Request) => string | undefined;
 
   // Path customization
   paths?: {
-    events?: string;       // Default: /events
-    send?: string;         // Default: /send
-    subscribe?: string;    // Default: /subscribe
-    abort?: string;        // Default: /abort
-    close?: string;        // Default: /close
+    events?: string; // Default: /events
+    send?: string; // Default: /send
+    subscribe?: string; // Default: /subscribe
+    abort?: string; // Default: /abort
+    close?: string; // Default: /close
     toolResponse?: string; // Default: /tool-response
-    channel?: string;      // Default: /channel
+    channel?: string; // Default: /channel
   };
 
   // SSE
@@ -246,30 +250,36 @@ expressApp.listen(3000);
 ### With Authentication
 
 ```typescript
-expressApp.use("/api/agent", createAgentickHandler(app, {
-  authenticate: async (req) => {
-    const token = req.headers.authorization?.replace("Bearer ", "");
-    return await verifyJWT(token);
-  },
-  authorize: (user, sessionId) => {
-    return sessionId.startsWith(`user-${user.id}-`);
-  },
-}));
+expressApp.use(
+  "/api/agent",
+  createAgentickHandler(app, {
+    authenticate: async (req) => {
+      const token = req.headers.authorization?.replace("Bearer ", "");
+      return await verifyJWT(token);
+    },
+    authorize: (user, sessionId) => {
+      return sessionId.startsWith(`user-${user.id}-`);
+    },
+  }),
+);
 ```
 
 ### Custom Paths
 
 ```typescript
-expressApp.use("/chat", createAgentickHandler(app, {
-  paths: {
-    events: "/stream",
-    send: "/message",
-    subscribe: "/watch",
-    abort: "/cancel",
-    close: "/end",
-    toolResponse: "/confirm",
-  },
-}));
+expressApp.use(
+  "/chat",
+  createAgentickHandler(app, {
+    paths: {
+      events: "/stream",
+      send: "/message",
+      subscribe: "/watch",
+      abort: "/cancel",
+      close: "/end",
+      toolResponse: "/confirm",
+    },
+  }),
+);
 ```
 
 ## What This Doesn't Do

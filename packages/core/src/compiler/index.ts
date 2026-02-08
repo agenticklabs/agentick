@@ -1,7 +1,7 @@
 /**
  * Compiler
  *
- * The v2 fiber compiler using react-reconciler.
+ * The fiber compiler using react-reconciler.
  *
  * @module agentick/compiler
  */

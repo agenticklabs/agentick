@@ -37,13 +37,13 @@ const enhanced = greet
   .withMetadata({ operation: "greeting" });
 ```
 
-| Method | Purpose |
-|--------|---------|
-| `.use(middleware)` | Add middleware |
-| `.withContext(ctx)` | Merge AsyncLocalStorage context |
-| `.withTimeout(ms)` | Abort after timeout |
-| `.withMetadata(meta)` | Add telemetry metadata |
-| `.pipe(nextProc)` | Chain output → input |
+| Method                | Purpose                         |
+| --------------------- | ------------------------------- |
+| `.use(middleware)`    | Add middleware                  |
+| `.withContext(ctx)`   | Merge AsyncLocalStorage context |
+| `.withTimeout(ms)`    | Abort after timeout             |
+| `.withMetadata(meta)` | Add telemetry metadata          |
+| `.pipe(nextProc)`     | Chain output → input            |
 
 ## Middleware
 
@@ -59,8 +59,7 @@ const timing: Middleware = async (args, envelope, next) => {
   return result;
 };
 
-const greet = createProcedure(async (name: string) => `Hello, ${name}!`)
-  .use(timing);
+const greet = createProcedure(async (name: string) => `Hello, ${name}!`).use(timing);
 ```
 
 ## Session Procedures

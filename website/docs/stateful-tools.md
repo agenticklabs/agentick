@@ -32,14 +32,15 @@ const TodoTool = createTool({
   render: () => (
     <Section id="todo-list" audience="model">
       <H2>Current Todos</H2>
-      {todos.length === 0
-        ? <Paragraph>No todos yet.</Paragraph>
-        : <List task>
-            {todos.map((t) => (
-              <ListItem checked={t.done}>{t.text}</ListItem>
-            ))}
-          </List>
-      }
+      {todos.length === 0 ? (
+        <Paragraph>No todos yet.</Paragraph>
+      ) : (
+        <List task>
+          {todos.map((t) => (
+            <ListItem checked={t.done}>{t.text}</ListItem>
+          ))}
+        </List>
+      )}
     </Section>
   ),
 });
@@ -58,11 +59,13 @@ The key insight: **the tool's handler and render function share state**. The han
 ## When to Use Stateful Tools
 
 Use stateful tools when:
+
 - A tool manages a collection (todos, notes, artifacts)
 - The model needs to see current state to make good decisions
 - State accumulates across multiple tool calls
 
 Use plain tools when:
+
 - The tool is a pure function (search, calculate, fetch)
 - No state to display between calls
 - The tool result alone is sufficient context

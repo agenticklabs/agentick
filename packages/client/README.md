@@ -131,7 +131,7 @@ const session = client.subscribe("conv-123");
 const tasks = await session.invoke("tasks:list");
 const newTask = await session.invoke("tasks:create", {
   title: "Buy groceries",
-  priority: "high"
+  priority: "high",
 });
 
 // Nested namespaces

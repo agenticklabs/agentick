@@ -2,6 +2,11 @@
   "name": "@agentick/cli",
   "version": "0.2.0",
   "description": "Terminal client for Agentick agents",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/agenticklabs/agentick.git",
+    "directory": "packages/cli"
+  },
   "bin": {
     "agentick": "./dist/bin.js"
   },
@@ -42,11 +47,6 @@
     "@types/node": "^22.10.5",
     "tsx": "^4.19.2",
     "typescript": "^5.7.3",
-    "vitest": "^3.0.0"
-  },
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/agenticklabs/agentick.git",
-    "directory": "packages/cli"
+    "vitest": "^4.0.18"
   }
 }

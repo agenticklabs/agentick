@@ -16,9 +16,7 @@ import { createTestAdapter } from "@agentick/core/testing";
 const adapter = createTestAdapter({ defaultResponse: "Hello!" });
 
 // Scripted tool calls
-adapter.respondWith([
-  { tool: { name: "search", input: { query: "test" } } },
-]);
+adapter.respondWith([{ tool: { name: "search", input: { query: "test" } } }]);
 
 // Sequence of responses
 adapter.respondWith("First response");

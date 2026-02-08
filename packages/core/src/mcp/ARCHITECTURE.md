@@ -399,11 +399,7 @@ class MCPClient {
   async listTools(serverName: string): Promise<MCPToolDefinition[]>;
 
   // Call a tool on an MCP server
-  async callTool(
-    serverName: string,
-    toolName: string,
-    input: any,
-  ): Promise<any>;
+  async callTool(serverName: string, toolName: string, input: any): Promise<any>;
 
   // Disconnect from a server
   async disconnect(serverName: string): Promise<void>;
@@ -432,17 +428,10 @@ class MCPService {
   async connectAndDiscover(config: MCPConfig): Promise<MCPToolDefinition[]>;
 
   // Discover and register tools with COM
-  async discoverAndRegister(
-    config: MCPConfig,
-    ctx: COM,
-  ): Promise<void>;
+  async discoverAndRegister(config: MCPConfig, ctx: COM): Promise<void>;
 
   // Register a single tool
-  registerMCPTool(
-    config: MCPConfig,
-    def: MCPToolDefinition,
-    ctx: COM,
-  ): void;
+  registerMCPTool(config: MCPConfig, def: MCPToolDefinition, ctx: COM): void;
 
   // List tools from a server
   async listTools(serverName: string): Promise<MCPToolDefinition[]>;
@@ -484,9 +473,7 @@ function normalizeResult(result: any): ContentBlock[];
 Wraps an MCP tool as an `ExecutableTool`:
 
 ```typescript
-class MCPTool<
-  THandler extends ToolHandler,
-> implements ExecutableTool<THandler> {
+class MCPTool<THandler extends ToolHandler> implements ExecutableTool<THandler> {
   readonly metadata: ToolMetadata<Parameters<THandler>[0]>;
   readonly run: Procedure<THandler>;
 
@@ -508,10 +495,7 @@ class MCPTool<
 Converts Cursor-style config to full MCPConfig:
 
 ```typescript
-function normalizeMCPConfig(
-  serverName: string,
-  config: MCPServerConfig | MCPConfig,
-): MCPConfig;
+function normalizeMCPConfig(serverName: string, config: MCPServerConfig | MCPConfig): MCPConfig;
 ```
 
 #### `mergeMCPConfig(base, runtime)`
@@ -519,10 +503,7 @@ function normalizeMCPConfig(
 Merges base config with runtime overrides:
 
 ```typescript
-function mergeMCPConfig(
-  base: MCPConfig,
-  runtime?: Partial<MCPConfig>,
-): MCPConfig;
+function mergeMCPConfig(base: MCPConfig, runtime?: Partial<MCPConfig>): MCPConfig;
 ```
 
 #### `createMCPTool(options)`
@@ -551,9 +532,7 @@ interface CreateMCPToolOptions {
 Creates an `ExecutableTool` from a known definition:
 
 ```typescript
-function createMCPToolFromDefinition(
-  options: CreateMCPToolFromDefinitionOptions,
-): ExecutableTool;
+function createMCPToolFromDefinition(options: CreateMCPToolFromDefinitionOptions): ExecutableTool;
 
 interface CreateMCPToolFromDefinitionOptions {
   client: MCPClient; // Active client
@@ -568,9 +547,7 @@ interface CreateMCPToolFromDefinitionOptions {
 Batch discovers all tools from an MCP server:
 
 ```typescript
-async function discoverMCPTools(
-  options: DiscoverMCPToolsOptions,
-): Promise<ExecutableTool[]>;
+async function discoverMCPTools(options: DiscoverMCPToolsOptions): Promise<ExecutableTool[]>;
 
 interface DiscoverMCPToolsOptions {
   config: MCPConfig; // Server config
@@ -596,10 +573,7 @@ class MCPToolComponent extends Component<MCPToolComponentProps> {
   async onUnmount(ctx: COM): Promise<void>;
 
   // Runtime updates
-  async updateRuntimeConfig(
-    ctx: COM,
-    runtimeConfig: Partial<MCPConfig>,
-  ): Promise<void>;
+  async updateRuntimeConfig(ctx: COM, runtimeConfig: Partial<MCPConfig>): Promise<void>;
 }
 
 interface MCPToolComponentProps {
@@ -742,11 +716,7 @@ const engine = new Engine({
     },
     postgres: {
       command: "npx",
-      args: [
-        "-y",
-        "@modelcontextprotocol/server-postgres",
-        "postgresql://localhost/db",
-      ],
+      args: ["-y", "@modelcontextprotocol/server-postgres", "postgresql://localhost/db"],
     },
   },
 });

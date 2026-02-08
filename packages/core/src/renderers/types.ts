@@ -1,7 +1,7 @@
 /**
  * Renderer Types
  *
- * Re-exports types from base.ts for v2 compatibility.
+ * Re-exports types from base.ts.
  */
 
 export {

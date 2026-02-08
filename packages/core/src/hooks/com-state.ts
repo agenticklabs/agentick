@@ -9,12 +9,13 @@
  * - State persists across ticks
  * - Returns a Signal-like interface
  *
- * Reactivity: Subscribes to COM's "state:changed" events via a React
- * version counter, ensuring the component re-renders when state is
- * modified externally (e.g. from a tool handler).
+ * Reactivity: Uses `useSyncExternalStore` to subscribe to COM state changes.
+ * This is the React 18+ recommended pattern for external stores, and works
+ * correctly with react-reconciler 0.33's synchronous rendering model where
+ * external setState calls are batched on the async scheduler.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useSyncExternalStore } from "react";
 import { useCom } from "./context";
 import type { Signal } from "./signal";
 
@@ -48,28 +49,34 @@ export function useComState<T>(key: string, initialValue: T): Signal<T> {
     ctx.setState(key, initialValue);
   }
 
-  // Version counter triggers React re-render when COM state changes externally
-  const [, setVersion] = useState(0);
-  const setVersionRef = useRef(setVersion);
-  setVersionRef.current = setVersion;
+  // Subscribe to COM state changes via useSyncExternalStore.
+  // This replaces the old useState+useEffect pattern which relied on external
+  // setState propagating synchronously — broken in react-reconciler 0.33.
+  const subscribe = useCallback(
+    (onStoreChange: () => void) => {
+      const handler = (changedKey: string) => {
+        if (changedKey === key) {
+          onStoreChange();
+        }
+      };
+      ctx.on("state:changed", handler);
+      return () => {
+        ctx.off("state:changed", handler);
+      };
+    },
+    [ctx, key],
+  );
 
-  // Subscribe to COM "state:changed" events for this key
-  useEffect(() => {
-    const handler = (changedKey: string) => {
-      if (changedKey === key) {
-        setVersionRef.current((v) => v + 1);
-      }
-    };
-    ctx.on("state:changed", handler);
-    return () => {
-      ctx.off("state:changed", handler);
-    };
-  }, [ctx, key]);
-
-  // Read directly from COM (always fresh — works in tool handlers, effects, etc.)
-  const getValue = useCallback((): T => {
+  const getSnapshot = useCallback((): T => {
     return (ctx.getState<T>(key) ?? initialValue) as T;
   }, [ctx, key, initialValue]);
+
+  // useSyncExternalStore ensures React re-renders when the snapshot changes,
+  // even when the change originates outside of React (e.g. from a tool handler).
+  useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+
+  // Read directly from COM (always fresh — works in tool handlers, effects, etc.)
+  const getValue = getSnapshot;
 
   // Set a new value — writes to COM, which emits event, which triggers re-render
   const setValue = useCallback(

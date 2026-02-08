@@ -8,7 +8,7 @@
  */
 
 import { act as reactAct } from "react";
-import { flushSync, flushPassiveEffects } from "../reconciler/reconciler";
+import { flushSyncWork } from "../reconciler/reconciler";
 
 /**
  * Flush all pending microtasks.
@@ -31,8 +31,7 @@ export async function flushMicrotasks(): Promise<void> {
  * Combines React's flushSync with passive effects flushing.
  */
 export function flushAll(): void {
-  flushSync(() => {});
-  flushPassiveEffects();
+  flushSyncWork();
 }
 
 /**

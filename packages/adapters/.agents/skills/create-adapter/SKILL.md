@@ -82,10 +82,12 @@ export const MyProviderModel = createAdapter({
   processOutput(output) {
     // Transform provider response → ModelOutput
     return {
-      messages: [{
-        role: "assistant",
-        content: [{ type: "text", text: output.content }],
-      }],
+      messages: [
+        {
+          role: "assistant",
+          content: [{ type: "text", text: output.content }],
+        },
+      ],
       usage: {
         inputTokens: output.usage?.input_tokens ?? 0,
         outputTokens: output.usage?.output_tokens ?? 0,
@@ -130,7 +132,7 @@ export const myProvider = MyProviderModel;
 
 ```tsx
 // JSX (best practice — dynamic, conditional):
-<MyProviderModel model="my-model-v1" temperature={0.7} />
+<MyProviderModel model="my-model-v1" temperature={0.7} />;
 
 // Factory:
 const model = myProvider({ model: "my-model-v1" });
@@ -143,11 +145,11 @@ const agent = createAgent({ model: myProvider({ model: "my-model-v1" }) });
 
 Study these existing adapters:
 
-| Adapter | Path | Notes |
-|---------|------|-------|
-| OpenAI | `packages/adapters/openai/src/` | Native API, streaming with separate usage chunk |
-| Google | `packages/adapters/google/src/` | Gemini API |
-| AI SDK | `packages/adapters/ai-sdk/src/` | Wraps Vercel AI SDK LanguageModel |
+| Adapter | Path                            | Notes                                           |
+| ------- | ------------------------------- | ----------------------------------------------- |
+| OpenAI  | `packages/adapters/openai/src/` | Native API, streaming with separate usage chunk |
+| Google  | `packages/adapters/google/src/` | Gemini API                                      |
+| AI SDK  | `packages/adapters/ai-sdk/src/` | Wraps Vercel AI SDK LanguageModel               |
 
 ## Key Files
 

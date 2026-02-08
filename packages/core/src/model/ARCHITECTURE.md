@@ -614,11 +614,7 @@ configureEngine({
     model: {
       generate: [
         async (args, envelope, next) => {
-          console.log(
-            "Model generating with input:",
-            args[0].messages.length,
-            "messages",
-          );
+          console.log("Model generating with input:", args[0].messages.length, "messages");
           const start = Date.now();
           const result = await next();
           console.log("Generation took:", Date.now() - start, "ms");

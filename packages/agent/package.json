@@ -9,6 +9,11 @@
   ],
   "license": "ISC",
   "author": "Ryan Lindgren",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/agenticklabs/agentick.git",
+    "directory": "packages/agent"
+  },
   "files": [
     "dist"
   ],
@@ -32,15 +37,10 @@
   "dependencies": {
     "@agentick/core": "workspace:*",
     "@agentick/shared": "workspace:*",
-    "react": "^18.2.0"
+    "react": "^19.2.4"
   },
   "devDependencies": {
-    "@types/react": "^18.2.0",
-    "zod": "^4.2.1"
-  },
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/agenticklabs/agentick.git",
-    "directory": "packages/agent"
+    "@types/react": "^19.2.13",
+    "zod": "^4.3.6"
   }
 }

@@ -13,19 +13,19 @@ pnpm add @agentick/google
 ### Factory Pattern (Recommended)
 
 ```tsx
-import { google } from '@agentick/google';
-import { createApp } from '@agentick/core';
+import { google } from "@agentick/google";
+import { createApp } from "@agentick/core";
 
 // Google AI Studio
 const model = google({
   apiKey: process.env.GOOGLE_API_KEY,
-  model: 'gemini-2.0-flash',
+  model: "gemini-2.0-flash",
 });
 
 // Use with createApp
 const app = createApp(MyAgent, { model });
 const session = await app.session();
-await session.run({ messages: [{ role: 'user', content: [{ type: 'text', text: 'Hello!' }] }] });
+await session.run({ messages: [{ role: "user", content: [{ type: "text", text: "Hello!" }] }] });
 
 // Or use as JSX component
 function MyAgent() {
@@ -39,7 +39,7 @@ function MyAgent() {
 
 // Or call directly
 const result = await model.generate({
-  messages: [{ role: 'user', content: 'Hello!' }],
+  messages: [{ role: "user", content: "Hello!" }],
 });
 ```
 
@@ -49,8 +49,8 @@ const result = await model.generate({
 const model = google({
   vertexai: true,
   project: process.env.GCP_PROJECT_ID,
-  location: 'us-central1',
-  model: 'gemini-2.0-flash',
+  location: "us-central1",
+  model: "gemini-2.0-flash",
   googleAuthOptions: {
     credentials: JSON.parse(process.env.GCP_CREDENTIALS),
   },
@@ -60,15 +60,11 @@ const model = google({
 ### JSX Component Pattern
 
 ```tsx
-import { GoogleModel } from '@agentick/google';
+import { GoogleModel } from "@agentick/google";
 
 function MyAgent() {
   return (
-    <GoogleModel
-      apiKey={process.env.GOOGLE_API_KEY}
-      model="gemini-2.0-flash"
-      temperature={0.7}
-    >
+    <GoogleModel apiKey={process.env.GOOGLE_API_KEY} model="gemini-2.0-flash" temperature={0.7}>
       <System>You are helpful.</System>
       <Timeline />
     </GoogleModel>

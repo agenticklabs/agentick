@@ -2176,7 +2176,7 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
       metadata: {},
     });
 
-    this.compiler = new FiberCompiler(this.ctx, undefined, {});
+    this.compiler = new FiberCompiler(this.ctx);
 
     // Apply pending hydration data if available
     if (this._pendingHydrationData) {
@@ -2299,7 +2299,7 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
     try {
       // Compile until stable
       // Note: tickControl and getChannel are available for future use
-      // but not currently used by the v2 FiberCompiler
+      // but not currently used by FiberCompiler
       void tickControl;
       void getChannel;
       const result = await this.compiler.compileUntilStable(

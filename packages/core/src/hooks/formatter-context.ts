@@ -1,8 +1,7 @@
 /**
- * V2 Formatter Context
+ * Formatter Context
  *
  * React context for providing formatters to child components.
- * Replaces the v1 FormatterBoundary pattern.
  */
 
 import React, { createContext, useContext, type ReactNode } from "react";

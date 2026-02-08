@@ -176,17 +176,17 @@ The same REST code works with both Express and Gateway servers - just change the
 
 ```typescript
 // Works with Express (3000) or Gateway (18790)
-const API_BASE = "http://localhost:3000/api";  // or :18790
+const API_BASE = "http://localhost:3000/api"; // or :18790
 
 // Create session
 const { sessionId } = await fetch(`${API_BASE}/sessions`, {
   method: "POST",
   headers: { "Content-Type": "application/json" },
   body: JSON.stringify({ sessionId: "my-session" }),
-}).then(r => r.json());
+}).then((r) => r.json());
 
 // CRUD with REST
-const { todos } = await fetch(`${API_BASE}/tasks?sessionId=${sessionId}`).then(r => r.json());
+const { todos } = await fetch(`${API_BASE}/tasks?sessionId=${sessionId}`).then((r) => r.json());
 
 await fetch(`${API_BASE}/tasks`, {
   method: "POST",

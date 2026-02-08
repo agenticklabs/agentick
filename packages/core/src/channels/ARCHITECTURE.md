@@ -154,10 +154,7 @@ interface ChannelAdapter {
 
   // Event distribution
   publish(event: ChannelEvent): Promise<void>;
-  subscribe(
-    channel: string,
-    handler: (event: ChannelEvent) => void,
-  ): Promise<() => void>;
+  subscribe(channel: string, handler: (event: ChannelEvent) => void): Promise<() => void>;
 
   // Room support (optional)
   joinRoom?(room: string): Promise<void>;
@@ -180,10 +177,7 @@ class ChannelRouter<TSubscribeContext> {
   onError(handler: (error: Error, event: ChannelEvent) => void): this;
 
   // Event handling
-  handle<TResult>(
-    event: ChannelEvent,
-    context: TSubscribeContext,
-  ): Promise<TResult | undefined>;
+  handle<TResult>(event: ChannelEvent, context: TSubscribeContext): Promise<TResult | undefined>;
 
   // Context registry
   registerContext(
@@ -192,10 +186,7 @@ class ChannelRouter<TSubscribeContext> {
     onEvent?: ContextEventCallback,
   ): ChannelPublisher;
   unregisterContext(ctx: EngineContext): void;
-  forEachContext(
-    scope: string | TSubscribeContext,
-    fn: (ctx: TSubscribeContext) => void,
-  ): void;
+  forEachContext(scope: string | TSubscribeContext, fn: (ctx: TSubscribeContext) => void): void;
 
   // Publishing
   publisher(): ChannelPublisher;
@@ -331,8 +322,7 @@ const transport = new WebSocketTransport({
   token: "auth-token",
   reconnectDelay: 1000,
   maxReconnectAttempts: 10,
-  autoJoinRooms: (meta) =>
-    [meta.userId && `user:${meta.userId}`].filter(Boolean),
+  autoJoinRooms: (meta) => [meta.userId && `user:${meta.userId}`].filter(Boolean),
 });
 ```
 
@@ -353,8 +343,7 @@ const transport = new SocketIOTransport({
     transports: ["websocket"],
     reconnection: true,
   },
-  autoJoinRooms: (meta) =>
-    [meta.userId && `user:${meta.userId}`].filter(Boolean),
+  autoJoinRooms: (meta) => [meta.userId && `user:${meta.userId}`].filter(Boolean),
 });
 ```
 
@@ -371,8 +360,7 @@ const transport = new StreamableHTTPTransport({
   url: "https://api.example.com/channels",
   token: "auth-token",
   timeout: 30000,
-  autoJoinRooms: (meta) =>
-    [meta.userId && `user:${meta.userId}`].filter(Boolean),
+  autoJoinRooms: (meta) => [meta.userId && `user:${meta.userId}`].filter(Boolean),
 });
 ```
 
@@ -540,12 +528,7 @@ channelService.publish(ctx, "user-input", {
   id: requestId,
   payload: { prompt: "Confirm action?" },
 });
-const response = await channelService.waitForResponse(
-  ctx,
-  "user-input",
-  requestId,
-  30000,
-);
+const response = await channelService.waitForResponse(ctx, "user-input", requestId, 30000);
 ```
 
 ### Engine Integration
@@ -605,15 +588,11 @@ const scratchpadChannel = new ChannelRouter<{ userId: string }>("scratchpad", {
 
 // In AI component
 function onMount(ctx: EngineContext, com: ComponentHandle) {
-  const publisher = scratchpadChannel.registerContext(
-    ctx,
-    { userId },
-    (event, result) => {
-      if (result?.notes) {
-        ctx.setState("notes", result.notes);
-      }
-    },
-  );
+  const publisher = scratchpadChannel.registerContext(ctx, { userId }, (event, result) => {
+    if (result?.notes) {
+      ctx.setState("notes", result.notes);
+    }
+  });
 }
 
 function onUnmount(ctx: EngineContext, com: ComponentHandle) {

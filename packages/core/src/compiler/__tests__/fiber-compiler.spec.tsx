@@ -1,7 +1,7 @@
 /**
  * FiberCompiler Tests
  *
- * Comprehensive tests for the V2 react-reconciler based compiler.
+ * Comprehensive tests for the react-reconciler based compiler.
  * @jsxImportSource react
  */
 

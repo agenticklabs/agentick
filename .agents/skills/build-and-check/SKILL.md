@@ -33,14 +33,14 @@ pnpm build
 
 ## When to Run What
 
-| Change | Command |
-|--------|---------|
-| Modified a type/interface | `pnpm typecheck` (ALL packages — structural typing) |
+| Change                    | Command                                                                             |
+| ------------------------- | ----------------------------------------------------------------------------------- |
+| Modified a type/interface | `pnpm typecheck` (ALL packages — structural typing)                                 |
 | Modified a single package | `pnpm --filter @agentick/PACKAGE typecheck && pnpm --filter @agentick/PACKAGE test` |
-| Modified kernel or shared | `pnpm typecheck && pnpm test` (foundation packages affect everything) |
-| Added a new export | `pnpm typecheck` |
-| Before committing | `pnpm typecheck && pnpm test` |
-| Before publishing | `pnpm build && pnpm typecheck && pnpm test` |
+| Modified kernel or shared | `pnpm typecheck && pnpm test` (foundation packages affect everything)               |
+| Added a new export        | `pnpm typecheck`                                                                    |
+| Before committing         | `pnpm typecheck && pnpm test`                                                       |
+| Before publishing         | `pnpm build && pnpm typecheck && pnpm test`                                         |
 
 ## Important: Interface Changes
 
@@ -56,6 +56,7 @@ grep -r "eventBuffer" packages/ --include="*.ts"
 ## Common Issues
 
 **pnpm install fails with CodeArtifact error**: Your `~/.npmrc` may have a stale registry. Workaround:
+
 ```bash
 NPM_CONFIG_REGISTRY=https://registry.npmjs.org pnpm install
 ```

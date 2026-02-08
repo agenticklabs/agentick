@@ -39,14 +39,7 @@
     "sanitizeComments": true,
     "useHTMLEncodedBrackets": true,
     "sort": ["kind", "alphabetical"],
-    "kindSortOrder": [
-      "Function",
-      "Class",
-      "Interface",
-      "TypeAlias",
-      "Variable",
-      "Enum"
-    ],
+    "kindSortOrder": ["Function", "Class", "Interface", "TypeAlias", "Variable", "Enum"],
     "categorizeByGroup": true,
     "excludeExternals": true,
     "excludePrivate": true,

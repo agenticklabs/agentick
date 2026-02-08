@@ -31,51 +31,51 @@ Foundation: @agentick/kernel (Node.js), @agentick/shared (universal)
 
 **Core**
 
-| Package | Path | Purpose |
-|---------|------|---------|
-| `agentick` | `packages/agentick` | Convenience re-export of @agentick/core |
-| `@agentick/core` | `packages/core` | Reconciler, hooks, JSX, compiler, session, app |
-| `@agentick/kernel` | `packages/kernel` | Procedures, execution tracking, ALS context |
-| `@agentick/shared` | `packages/shared` | Wire-safe types, blocks, messages, streaming |
+| Package            | Path                | Purpose                                        |
+| ------------------ | ------------------- | ---------------------------------------------- |
+| `agentick`         | `packages/agentick` | Convenience re-export of @agentick/core        |
+| `@agentick/core`   | `packages/core`     | Reconciler, hooks, JSX, compiler, session, app |
+| `@agentick/kernel` | `packages/kernel`   | Procedures, execution tracking, ALS context    |
+| `@agentick/shared` | `packages/shared`   | Wire-safe types, blocks, messages, streaming   |
 
 **Agent**
 
-| Package | Path | Purpose |
-|---------|------|---------|
-| `@agentick/agent` | `packages/agent` | High-level createAgent factory |
-| `@agentick/guardrails` | `packages/guardrails` | Guard system |
+| Package                | Path                  | Purpose                        |
+| ---------------------- | --------------------- | ------------------------------ |
+| `@agentick/agent`      | `packages/agent`      | High-level createAgent factory |
+| `@agentick/guardrails` | `packages/guardrails` | Guard system                   |
 
 **Adapters**
 
-| Package | Path | Purpose |
-|---------|------|---------|
-| `@agentick/openai` | `packages/adapters/openai` | OpenAI adapter |
+| Package            | Path                       | Purpose               |
+| ------------------ | -------------------------- | --------------------- |
+| `@agentick/openai` | `packages/adapters/openai` | OpenAI adapter        |
 | `@agentick/google` | `packages/adapters/google` | Google Gemini adapter |
 | `@agentick/ai-sdk` | `packages/adapters/ai-sdk` | Vercel AI SDK adapter |
 
 **Server**
 
-| Package | Path | Purpose |
-|---------|------|---------|
+| Package             | Path               | Purpose                           |
+| ------------------- | ------------------ | --------------------------------- |
 | `@agentick/gateway` | `packages/gateway` | Multi-session management, methods |
-| `@agentick/server` | `packages/server` | Transport server (SSE, WebSocket) |
-| `@agentick/express` | `packages/express` | Express.js integration |
-| `@agentick/nestjs` | `packages/nestjs` | NestJS module |
+| `@agentick/server`  | `packages/server`  | Transport server (SSE, WebSocket) |
+| `@agentick/express` | `packages/express` | Express.js integration            |
+| `@agentick/nestjs`  | `packages/nestjs`  | NestJS module                     |
 
 **Client**
 
-| Package | Path | Purpose |
-|---------|------|---------|
-| `@agentick/client` | `packages/client` | Browser/Node client for real-time sessions |
-| `@agentick/react` | `packages/react` | React hooks & UI components |
-| `@agentick/angular` | `packages/angular` | Angular services & utilities |
-| `@agentick/cli` | `packages/cli` | Terminal client for agents |
-| `@agentick/client-multiplexer` | `packages/client-multiplexer` | Multi-tab connection multiplexer |
+| Package                        | Path                          | Purpose                                    |
+| ------------------------------ | ----------------------------- | ------------------------------------------ |
+| `@agentick/client`             | `packages/client`             | Browser/Node client for real-time sessions |
+| `@agentick/react`              | `packages/react`              | React hooks & UI components                |
+| `@agentick/angular`            | `packages/angular`            | Angular services & utilities               |
+| `@agentick/cli`                | `packages/cli`                | Terminal client for agents                 |
+| `@agentick/client-multiplexer` | `packages/client-multiplexer` | Multi-tab connection multiplexer           |
 
 **DevTools**
 
-| Package | Path | Purpose |
-|---------|------|---------|
+| Package              | Path                | Purpose                          |
+| -------------------- | ------------------- | -------------------------------- |
 | `@agentick/devtools` | `packages/devtools` | Fiber inspector, timeline viewer |
 
 ## Core Concepts
@@ -118,7 +118,9 @@ const SearchTool = createTool({
   name: "search",
   description: "Search the web",
   input: z.object({ query: z.string() }),
-  handler: async ({ query }) => { /* ... */ },
+  handler: async ({ query }) => {
+    /* ... */
+  },
 });
 // Use as JSX: <SearchTool />
 // Or call directly: SearchTool.run({ query: "test" })
@@ -126,26 +128,26 @@ const SearchTool = createTool({
 
 ### Model Adapters
 
-| Import | Usage |
-|--------|-------|
-| `import { openai } from "@agentick/openai"` | Factory: `openai({ model: "gpt-4o" })` → ModelClass |
-| `import { OpenAIModel } from "@agentick/openai"` | JSX: `<OpenAIModel model="gpt-4o" />` |
-| `import { google } from "@agentick/google"` | Factory: `google({ model: "gemini-2.0-flash" })` |
-| `import { GoogleModel } from "@agentick/google"` | JSX: `<GoogleModel model="gemini-2.0-flash" />` |
+| Import                                           | Usage                                               |
+| ------------------------------------------------ | --------------------------------------------------- |
+| `import { openai } from "@agentick/openai"`      | Factory: `openai({ model: "gpt-4o" })` → ModelClass |
+| `import { OpenAIModel } from "@agentick/openai"` | JSX: `<OpenAIModel model="gpt-4o" />`               |
+| `import { google } from "@agentick/google"`      | Factory: `google({ model: "gemini-2.0-flash" })`    |
+| `import { GoogleModel } from "@agentick/google"` | JSX: `<GoogleModel model="gemini-2.0-flash" />`     |
 
 Best practice: declare the model as a JSX component in the tree (makes it dynamic/conditional).
 
 ### Hooks
 
-| Hook | Signature | When |
-|------|-----------|------|
-| `useOnMount` | `(ctx) => void` | First tick only |
-| `useOnTickStart` | `(tickState, ctx) => void` | Tick 2+ (after mount) |
-| `useOnTickEnd` | `(result, ctx) => void` | Every tick end |
-| `useAfterCompile` | `(compiled, ctx) => void` | After each compile |
-| `useContinuation` | `(result, ctx) => boolean` | Control multi-turn |
-| `useOnMessage` | `(message, ctx, state) => void` | On each message |
-| `useKnob` | `(name, default, opts?) => [value, setter]` | Model-visible reactive state |
+| Hook              | Signature                                   | When                         |
+| ----------------- | ------------------------------------------- | ---------------------------- |
+| `useOnMount`      | `(ctx) => void`                             | First tick only              |
+| `useOnTickStart`  | `(tickState, ctx) => void`                  | Tick 2+ (after mount)        |
+| `useOnTickEnd`    | `(result, ctx) => void`                     | Every tick end               |
+| `useAfterCompile` | `(compiled, ctx) => void`                   | After each compile           |
+| `useContinuation` | `(result, ctx) => boolean`                  | Control multi-turn           |
+| `useOnMessage`    | `(message, ctx, state) => void`             | On each message              |
+| `useKnob`         | `(name, default, opts?) => [value, setter]` | Model-visible reactive state |
 
 ### JSX Components
 
@@ -183,21 +185,21 @@ const result = await session.send({ messages: [...] }).result;  // SendResult
 
 ## File Locations
 
-| What | Where |
-|------|-------|
-| Kernel primitives | `packages/kernel/src/` |
-| Shared types | `packages/shared/src/` |
-| Core reconciler | `packages/core/src/reconciler/` |
-| Built-in JSX | `packages/core/src/jsx/` |
-| Hooks | `packages/core/src/hooks/` |
-| Compiler | `packages/core/src/compiler/` |
-| Session & App | `packages/core/src/app/` |
-| Tools | `packages/core/src/tool/` |
-| Model abstraction | `packages/core/src/model/` |
-| Testing utilities | `packages/core/src/testing/` |
-| Tests | `packages/*/src/**/*.spec.ts` |
-| Website | `website/` |
-| Examples | `example/` |
+| What              | Where                           |
+| ----------------- | ------------------------------- |
+| Kernel primitives | `packages/kernel/src/`          |
+| Shared types      | `packages/shared/src/`          |
+| Core reconciler   | `packages/core/src/reconciler/` |
+| Built-in JSX      | `packages/core/src/jsx/`        |
+| Hooks             | `packages/core/src/hooks/`      |
+| Compiler          | `packages/core/src/compiler/`   |
+| Session & App     | `packages/core/src/app/`        |
+| Tools             | `packages/core/src/tool/`       |
+| Model abstraction | `packages/core/src/model/`      |
+| Testing utilities | `packages/core/src/testing/`    |
+| Tests             | `packages/*/src/**/*.spec.ts`   |
+| Website           | `website/`                      |
+| Examples          | `example/`                      |
 
 ## Testing
 

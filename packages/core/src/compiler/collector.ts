@@ -1,5 +1,5 @@
 /**
- * V2 Collector
+ * Collector
  *
  * Traverses the AgentickNode tree and collects into CompiledStructure.
  */

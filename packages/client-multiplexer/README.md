@@ -13,21 +13,21 @@ pnpm add @agentick/client-multiplexer
 ## Quick Start
 
 ```typescript
-import { createClient } from '@agentick/client';
-import { createSharedTransport } from '@agentick/client-multiplexer';
+import { createClient } from "@agentick/client";
+import { createSharedTransport } from "@agentick/client-multiplexer";
 
 // Create client with shared transport
 const client = createClient({
-  baseUrl: '/api',
-  transport: createSharedTransport({ baseUrl: '/api', token: 'your-token' }),
+  baseUrl: "/api",
+  transport: createSharedTransport({ baseUrl: "/api", token: "your-token" }),
 });
 
 // Use exactly like a regular client
-const session = client.session('main');
+const session = client.session("main");
 session.subscribe();
 session.onEvent((event) => console.log(event));
 
-const handle = session.send('Hello!');
+const handle = session.send("Hello!");
 await handle.result;
 ```
 
@@ -56,22 +56,23 @@ The multiplexer uses browser tab leader election to ensure only one tab maintain
 Creates a shared transport instance. Supports both SSE and WebSocket transports.
 
 ```typescript
-import { createSharedTransport, type SharedTransportConfig } from '@agentick/client-multiplexer';
+import { createSharedTransport, type SharedTransportConfig } from "@agentick/client-multiplexer";
 
 // SSE transport (default for http:// URLs)
 const sseTransport = createSharedTransport({
-  baseUrl: 'https://api.example.com',
-  token: 'your-auth-token',      // Optional
-  timeout: 30000,                 // Optional
-  withCredentials: true,          // Optional
+  baseUrl: "https://api.example.com",
+  token: "your-auth-token", // Optional
+  timeout: 30000, // Optional
+  withCredentials: true, // Optional
 });
 
 // WebSocket transport (default for ws:// URLs)
 const wsTransport = createSharedTransport({
-  baseUrl: 'wss://api.example.com',
-  token: 'your-auth-token',
-  clientId: 'my-client',          // Optional
-  reconnect: {                    // Optional
+  baseUrl: "wss://api.example.com",
+  token: "your-auth-token",
+  clientId: "my-client", // Optional
+  reconnect: {
+    // Optional
     enabled: true,
     maxAttempts: 5,
     delay: 1000,
@@ -80,8 +81,8 @@ const wsTransport = createSharedTransport({
 
 // Explicit transport selection
 const explicitTransport = createSharedTransport({
-  baseUrl: 'https://api.example.com',
-  transport: 'websocket',         // Force WebSocket even with http:// URL
+  baseUrl: "https://api.example.com",
+  transport: "websocket", // Force WebSocket even with http:// URL
 });
 ```
 
@@ -91,31 +92,31 @@ The transport implements `ClientTransport` from `@agentick/client` plus addition
 
 ```typescript
 // Check leadership status
-transport.isLeader;  // boolean
+transport.isLeader; // boolean
 
 // Get unique tab identifier
-transport.tabId;     // string
+transport.tabId; // string
 
 // Listen for leadership changes
 transport.onLeadershipChange((isLeader) => {
-  console.log(isLeader ? 'This tab is now the leader' : 'Leadership transferred');
+  console.log(isLeader ? "This tab is now the leader" : "Leadership transferred");
 });
 ```
 
 ### Accessing Transport from Client
 
 ```typescript
-import { createClient, type ClientTransport } from '@agentick/client';
-import { createSharedTransport, type SharedTransport } from '@agentick/client-multiplexer';
+import { createClient, type ClientTransport } from "@agentick/client";
+import { createSharedTransport, type SharedTransport } from "@agentick/client-multiplexer";
 
 const client = createClient({
-  baseUrl: '/api',
-  transport: createSharedTransport({ baseUrl: '/api' }),
+  baseUrl: "/api",
+  transport: createSharedTransport({ baseUrl: "/api" }),
 });
 
 // Access the transport for leadership info
 const transport = client.getTransport() as SharedTransport | undefined;
-console.log('Is leader:', transport?.isLeader);
+console.log("Is leader:", transport?.isLeader);
 ```
 
 ## Architecture

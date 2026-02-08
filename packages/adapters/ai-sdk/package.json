@@ -11,6 +11,11 @@
   ],
   "license": "ISC",
   "author": "Ryan Lindgren",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/agenticklabs/agentick.git",
+    "directory": "packages/adapters/ai-sdk"
+  },
   "files": [
     "dist"
   ],
@@ -38,10 +43,5 @@
   "peerDependencies": {
     "@ai-sdk/openai": "^2.0.0",
     "ai": "^5.0.0"
-  },
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/agenticklabs/agentick.git",
-    "directory": "packages/adapters/ai-sdk"
   }
 }

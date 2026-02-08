@@ -159,9 +159,7 @@ function TaskAssistantAgent() {
       </Section>
       <TodoListTool />
       <CalculatorTool />
-      <Timeline>
-        {(history) => history.map((e, i) => <Message key={i} {...e.message} />)}
-      </Timeline>
+      <Timeline>{(history) => history.map((e, i) => <Message key={i} {...e.message} />)}</Timeline>
     </>
   );
 }

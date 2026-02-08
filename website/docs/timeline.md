@@ -32,11 +32,7 @@ Customize how messages render:
 
 ```tsx
 <Timeline>
-  {(messages) =>
-    messages.map((msg) => (
-      <Message role={msg.role}>{msg.content}</Message>
-    ))
-  }
+  {(messages) => messages.map((msg) => <Message role={msg.role}>{msg.content}</Message>)}
 </Timeline>
 ```
 

@@ -26,7 +26,7 @@ const GreetTool = createTool({
 });
 
 // Use as component
-<GreetTool />
+<GreetTool />;
 
 // Call programmatically
 await GreetTool.run({ name: "Ryan" });
@@ -59,7 +59,7 @@ function DataTools({ database }: { database: Database }) {
 }
 
 // Use in any agent
-<DataTools database={productionDb} />
+<DataTools database={productionDb} />;
 ```
 
 ## Async Handlers

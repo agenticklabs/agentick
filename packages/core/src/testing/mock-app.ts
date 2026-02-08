@@ -331,7 +331,7 @@ export function createMockSession(options: MockSessionOptions = {}): MockSession
     }) as any;
 
     spawn = createTestProcedure({
-      handler: (component: ComponentFunction | JSX.Element, input?: SendInput) => {
+      handler: (component: ComponentFunction | React.ReactNode, input?: SendInput) => {
         spawnCalls.push({ component, input });
         const handle = createMockExecutionHandle(getEffectiveOptions());
         lastHandle = handle;

@@ -1,5 +1,5 @@
 /**
- * V2 Hooks
+ * Hooks
  *
  * Custom hooks for Agentick components.
  */

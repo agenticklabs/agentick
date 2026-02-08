@@ -2,6 +2,11 @@
   "name": "@agentick/express",
   "version": "0.2.0",
   "description": "Express middleware and router for Agentick applications",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/agenticklabs/agentick.git",
+    "directory": "packages/express"
+  },
   "files": [
     "dist",
     "src"
@@ -33,14 +38,9 @@
     "express": "^4.21.0",
     "supertest": "^7.0.0",
     "typescript": "^5.7.3",
-    "vitest": "^3.0.0"
+    "vitest": "^4.0.18"
   },
   "peerDependencies": {
     "express": "^4.0.0 || ^5.0.0"
-  },
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/agenticklabs/agentick.git",
-    "directory": "packages/express"
   }
 }

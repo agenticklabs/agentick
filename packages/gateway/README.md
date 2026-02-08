@@ -93,16 +93,16 @@ await middleware.gateway.close();
 ```typescript
 interface GatewayConfig {
   // Server (standalone mode only)
-  port?: number;              // Default: 18789
-  host?: string;              // Default: "127.0.0.1"
-  id?: string;                // Auto-generated if not provided
+  port?: number; // Default: 18789
+  host?: string; // Default: "127.0.0.1"
+  id?: string; // Auto-generated if not provided
 
   // Apps
   apps: Record<string, AgentickApp>;
   defaultApp: string;
 
   // Mode
-  embedded?: boolean;         // Skip transport init, use handleRequest()
+  embedded?: boolean; // Skip transport init, use handleRequest()
 
   // Authentication
   auth?: AuthConfig;
@@ -270,7 +270,7 @@ import { isGuardError } from "@agentick/kernel";
 
 // In your error handling
 if (isGuardError(error)) {
-  error.code;      // "GUARD_DENIED"
+  error.code; // "GUARD_DENIED"
   error.guardType; // "role" or "custom"
 }
 ```

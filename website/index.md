@@ -50,9 +50,7 @@ function App() {
   return (
     <div>
       <p>Count: {count}</p>
-      <button onClick={() => setCount(c => c + 1)}>
-        Increment
-      </button>
+      <button onClick={() => setCount((c) => c + 1)}>Increment</button>
     </div>
   );
 }
@@ -75,13 +73,15 @@ function Agent() {
         description="Add a todo item"
         input={z.object({ text: z.string() })}
         handler={({ text }) => {
-          setTodos(t => [...t, text]);
+          setTodos((t) => [...t, text]);
           return `Added: ${text}`;
         }}
       />
       <Section title="Current Todos">
         <List>
-          {todos.map(t => <ListItem>{t}</ListItem>)}
+          {todos.map((t) => (
+            <ListItem>{t}</ListItem>
+          ))}
         </List>
       </Section>
       <Timeline />
@@ -177,7 +177,7 @@ const TodoTool = createTool({
   render: () => (
     <Section id="todos" audience="model">
       <List title="Current Todos" task>
-        {todos.map(t => (
+        {todos.map((t) => (
           <ListItem checked={t.done}>{t.text}</ListItem>
         ))}
       </List>
@@ -197,7 +197,8 @@ The `render` function is a component in the fiber tree. `<List task>` and `<List
 ```tsx
 function ResearchAgent() {
   const [depth, setDepth] = useKnob("search_depth", 3, {
-    min: 1, max: 10,
+    min: 1,
+    max: 10,
     description: "How many search results to analyze",
   });
 
@@ -209,9 +210,7 @@ function ResearchAgent() {
   return (
     <>
       <System>
-        You are a research assistant.
-        Analyze the top {depth} results.
-        Write in a {style} style.
+        You are a research assistant. Analyze the top {depth} results. Write in a {style} style.
       </System>
       <SearchTool maxResults={depth} />
       <Knobs />
@@ -229,51 +228,51 @@ One `useKnob` call creates reactive state, renders it to model context as a form
 
 ### Core
 
-| Package | Description |
-|---------|-------------|
-| `agentick` | Convenience re-export of @agentick/core |
-| `@agentick/core` | Reconciler, hooks, JSX, compiler, app |
+| Package            | Description                                   |
+| ------------------ | --------------------------------------------- |
+| `agentick`         | Convenience re-export of @agentick/core       |
+| `@agentick/core`   | Reconciler, hooks, JSX, compiler, app         |
 | `@agentick/kernel` | Procedures, execution tracking, context (ALS) |
-| `@agentick/shared` | Wire-safe types, blocks, messages, streaming |
+| `@agentick/shared` | Wire-safe types, blocks, messages, streaming  |
 
 ### Agent
 
-| Package | Description |
-|---------|-------------|
-| `@agentick/agent` | High-level createAgent factory |
-| `@agentick/guardrails` | Guard system |
+| Package                | Description                    |
+| ---------------------- | ------------------------------ |
+| `@agentick/agent`      | High-level createAgent factory |
+| `@agentick/guardrails` | Guard system                   |
 
 ### Adapters
 
-| Package | Description |
-|---------|-------------|
-| `@agentick/openai` | OpenAI adapter |
+| Package            | Description           |
+| ------------------ | --------------------- |
+| `@agentick/openai` | OpenAI adapter        |
 | `@agentick/google` | Google Gemini adapter |
 | `@agentick/ai-sdk` | Vercel AI SDK adapter |
 
 ### Server
 
-| Package | Description |
-|---------|-------------|
+| Package             | Description                       |
+| ------------------- | --------------------------------- |
 | `@agentick/gateway` | Multi-session management, methods |
-| `@agentick/server` | Transport server (SSE, WebSocket) |
-| `@agentick/express` | Express.js integration |
-| `@agentick/nestjs` | NestJS module |
+| `@agentick/server`  | Transport server (SSE, WebSocket) |
+| `@agentick/express` | Express.js integration            |
+| `@agentick/nestjs`  | NestJS module                     |
 
 ### Client
 
-| Package | Description |
-|---------|-------------|
-| `@agentick/client` | Browser/Node client for real-time sessions |
-| `@agentick/react` | React hooks & components for UI |
-| `@agentick/angular` | Angular services & utilities |
-| `@agentick/cli` | Terminal client for agents |
-| `@agentick/client-multiplexer` | Multi-tab connection multiplexer |
+| Package                        | Description                                |
+| ------------------------------ | ------------------------------------------ |
+| `@agentick/client`             | Browser/Node client for real-time sessions |
+| `@agentick/react`              | React hooks & components for UI            |
+| `@agentick/angular`            | Angular services & utilities               |
+| `@agentick/cli`                | Terminal client for agents                 |
+| `@agentick/client-multiplexer` | Multi-tab connection multiplexer           |
 
 ### DevTools
 
-| Package | Description |
-|---------|-------------|
+| Package              | Description                      |
+| -------------------- | -------------------------------- |
 | `@agentick/devtools` | Fiber inspector, timeline viewer |
 
 ## Install
