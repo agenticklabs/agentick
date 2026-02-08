@@ -18,3 +18,4 @@ export * from "./registry";
 export * from "./normalization";
 export * from "./schema";
 export * from "./token-estimate";
+export * from "./classify-error";

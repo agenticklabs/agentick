@@ -361,6 +361,7 @@ export function createTool<TInput = any, TOutput extends ContentBlock[] = Conten
             name: "tool:run", // Low cardinality span name
             metadata: {
               type: "tool",
+              toolName: options.name,
               id: options.name,
               operation: "run",
             },

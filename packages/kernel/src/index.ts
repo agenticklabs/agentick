@@ -57,3 +57,7 @@ export * from "./procedure";
 export * from "./logger";
 export * from "./event-buffer";
 export * from "./schema";
+export * from "./guard";
+
+// Re-export guard errors from shared (guards are a procedure concept)
+export { GuardError, isGuardError } from "@tentickle/shared";

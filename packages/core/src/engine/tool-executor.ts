@@ -11,6 +11,7 @@ import { type Middleware, type MiddlewarePipeline } from "@tentickle/kernel";
 import type { ToolHookRegistry } from "../tool/tool-hooks";
 import { type ToolHookMiddleware, type ToolHookName } from "../tool/tool-hooks";
 import { applyRegistryMiddleware } from "../procedure";
+import { classifyError } from "../utils/classify-error";
 import { ClientToolCoordinator } from "./client-tool-coordinator";
 import { ToolConfirmationCoordinator } from "./tool-confirmation-coordinator";
 
@@ -325,10 +326,9 @@ export class ToolExecutor {
 
       // Execute tool (execution type doesn't change the call pattern,
       // but MCP/CLIENT tools have different run() implementations)
-      // Add runtime metadata for DevTools/telemetry
+      // Add per-call metadata (toolName is set at definition time by createTool)
       const toolProcedure = wrappedRun.withMetadata({
-        toolName: call.name,
-        toolId: call.id,
+        toolCallId: call.id,
       });
       // Procedure returns ExecutionHandle by default - access .result for actual return value
       // Pass ctx so tool handlers can access agent state during execution
@@ -380,7 +380,7 @@ export class ToolExecutor {
     } catch (error: any) {
       // Enhanced error handling
       const errorMessage = error?.message || "Tool execution failed";
-      const errorType = this.classifyError(error);
+      const errorType = classifyError(error);
 
       return this.createErrorResult(call, errorMessage, errorType, error);
     }
@@ -423,45 +423,6 @@ export class ToolExecutor {
     call.result = toolResult;
 
     return toolResult;
-  }
-
-  /**
-   * Classify errors for better recovery handling.
-   */
-  private classifyError(error: any): string {
-    if (!error) return "UNKNOWN_ERROR";
-
-    // Network/timeout errors
-    if (error.code === "ETIMEDOUT" || error.code === "ECONNRESET" || error.code === "ENOTFOUND") {
-      return "NETWORK_ERROR";
-    }
-
-    // Rate limiting
-    if (error.status === 429 || error.code === "RATE_LIMIT_EXCEEDED") {
-      return "RATE_LIMIT_ERROR";
-    }
-
-    // Authentication/authorization
-    if (error.status === 401 || error.status === 403) {
-      return "AUTH_ERROR";
-    }
-
-    // Validation errors
-    if (error.name === "ZodError" || error.name === "ValidationError") {
-      return "VALIDATION_ERROR";
-    }
-
-    // Timeout errors
-    if (error.name === "TimeoutError" || error.message?.includes("timeout")) {
-      return "TIMEOUT_ERROR";
-    }
-
-    // Generic application errors
-    if (error.name === "Error") {
-      return "APPLICATION_ERROR";
-    }
-
-    return "UNKNOWN_ERROR";
   }
 
   /**

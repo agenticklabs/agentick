@@ -148,6 +148,7 @@ export class MCPTool<
         name: "tool:run", // Low cardinality span name (same as regular tools)
         metadata: {
           type: "mcp",
+          toolName: mcpToolDefinition.name,
           id: mcpToolDefinition.name,
           operation: "run",
           server: this.serverName,

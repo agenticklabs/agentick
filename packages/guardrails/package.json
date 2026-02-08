@@ -1,0 +1,31 @@
+{
+  "name": "@tentickle/guardrails",
+  "version": "0.0.1",
+  "description": "Guardrail middleware for Tentickle — gate tool execution with rules and classifiers",
+  "type": "module",
+  "main": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "publishConfig": {
+    "access": "public",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "import": "./dist/index.js"
+      }
+    },
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "test": "echo \"Tests run from workspace root\"",
+    "typecheck": "tsc -p tsconfig.build.json --noEmit",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@tentickle/kernel": "workspace:*",
+    "@tentickle/shared": "workspace:*"
+  }
+}

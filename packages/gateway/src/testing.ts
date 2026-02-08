@@ -135,6 +135,12 @@ export function createMockApp(options: MockAppOptions = {}): App {
     return handle as unknown as SessionExecutionHandle;
   };
 
+  async function createMockExecutionProcedure() {
+    return await createMockExecution();
+  }
+
+  createMockExecutionProcedure.exec = createMockExecutionProcedure;
+
   const mockSession: Partial<Session> = {
     id: "mock-session",
     status: "idle",
@@ -143,8 +149,8 @@ export function createMockApp(options: MockAppOptions = {}): App {
     queuedMessages: [],
     schedulerState: null,
     queue: { exec: async () => {} } as any,
-    send: () => createMockExecution(),
-    render: () => createMockExecution(),
+    send: createMockExecutionProcedure as any,
+    render: createMockExecutionProcedure as any,
     interrupt: () => {},
     clearAbort: () => {},
     events: async function* () {},

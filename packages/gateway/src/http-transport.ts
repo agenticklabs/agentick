@@ -7,6 +7,7 @@
 
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from "http";
 import { extractToken, validateAuth, setSSEHeaders, type AuthResult } from "@tentickle/server";
+import { isGuardError } from "@tentickle/shared";
 import type { GatewayMessage, RequestMessage } from "./transport-protocol.js";
 import type { ClientState } from "./types.js";
 import { BaseTransport, type TransportClient, type TransportConfig } from "./transport.js";
@@ -375,7 +376,7 @@ export class HTTPTransport extends BaseTransport {
       res.end(JSON.stringify(result));
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
-      const statusCode = errorMessage.includes("Forbidden") ? 403 : 400;
+      const statusCode = isGuardError(error) ? 403 : 400;
       res.writeHead(statusCode, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: errorMessage }));
     }

@@ -10,6 +10,7 @@
 import { EventEmitter } from "events";
 import type { IncomingMessage as NodeRequest, ServerResponse as NodeResponse } from "http";
 import type { Message } from "@tentickle/shared";
+import { GuardError, isGuardError } from "@tentickle/shared";
 import {
   devToolsEmitter,
   type DTClientConnectedEvent,
@@ -20,6 +21,7 @@ import {
 import {
   Context,
   createProcedure,
+  createGuard,
   Logger,
   type KernelContext,
   type Procedure,
@@ -67,32 +69,22 @@ const DEFAULT_HOST = "127.0.0.1";
 
 /** Guard middleware that checks user roles */
 function createRoleGuardMiddleware(roles: string[]): Middleware<any[]> {
-  return async (_args: any[], _envelope: any, next: () => Promise<any>) => {
-    const kernelCtx = Context.get();
-    const userRoles = kernelCtx.user?.roles ?? [];
-
+  return createGuard({ name: "gateway-role", guardType: "role" }, () => {
+    const userRoles = Context.get().user?.roles ?? [];
     if (!roles.some((r) => userRoles.includes(r))) {
-      throw new Error(`Forbidden: requires one of roles [${roles.join(", ")}]`);
+      throw GuardError.role(roles);
     }
-
-    return next();
-  };
+    return true;
+  });
 }
 
 /** Guard middleware that runs custom guard function */
 function createCustomGuardMiddleware(
   guard: (ctx: KernelContext) => boolean | Promise<boolean>,
 ): Middleware<any[]> {
-  return async (_args: any[], _envelope: any, next: () => Promise<any>) => {
-    const kernelCtx = Context.get();
-    const allowed = await guard(kernelCtx);
-
-    if (!allowed) {
-      throw new Error("Forbidden: guard check failed");
-    }
-
-    return next();
-  };
+  return createGuard({ name: "gateway-custom", reason: "Guard check failed" }, () =>
+    guard(Context.get()),
+  );
 }
 
 // ============================================================================
@@ -786,7 +778,7 @@ export class Gateway extends EventEmitter {
         } as DTGatewayResponseEvent);
       }
 
-      const statusCode = errorMessage.includes("Forbidden") ? 403 : 400;
+      const statusCode = isGuardError(error) ? 403 : 400;
       res.writeHead(statusCode, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: errorMessage }));
     }
@@ -1382,7 +1374,7 @@ export class Gateway extends EventEmitter {
         content: [{ type: "text" as const, text: messageText }],
       };
 
-      const execution = coreSession.send({ messages: [message] });
+      const execution = await coreSession.send({ messages: [message] });
 
       for await (const event of execution) {
         // Use the original sessionId for events (ensures client matching)
@@ -1480,7 +1472,7 @@ export class Gateway extends EventEmitter {
     );
 
     try {
-      const execution = managedSession.coreSession.send({ messages: [message] });
+      const execution = await managedSession.coreSession.send({ messages: [message] });
 
       // Increment message count
       this.sessions.incrementMessageCount(managedSession.state.id);

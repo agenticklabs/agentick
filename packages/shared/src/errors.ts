@@ -75,6 +75,8 @@ export type TentickleErrorCode =
   // Context
   | "CONTEXT_NOT_FOUND"
   | "CONTEXT_INVALID"
+  // Guard/Access Control
+  | "GUARD_DENIED"
   // Reactivity
   | "REACTIVITY_CIRCULAR"
   | "REACTIVITY_DISPOSED";
@@ -664,6 +666,49 @@ export class ReactivityError extends TentickleError {
 }
 
 // =============================================================================
+// Guard/Access Control Errors
+// =============================================================================
+
+/**
+ * Error thrown when a guard denies access to a procedure or resource.
+ *
+ * @example
+ * ```typescript
+ * throw GuardError.role(['admin', 'moderator']);
+ * throw GuardError.denied('Insufficient permissions', { resource: 'settings' });
+ * ```
+ */
+export class GuardError extends TentickleError {
+  /** Type of guard that denied access */
+  readonly guardType?: string;
+
+  constructor(
+    message: string,
+    guardType?: string,
+    details: Record<string, unknown> = {},
+    cause?: Error,
+  ) {
+    super("GUARD_DENIED", message, { ...details, ...(guardType && { guardType }) }, cause);
+    this.name = "GuardError";
+    this.guardType = guardType;
+  }
+
+  /**
+   * Create a role-based guard error
+   */
+  static role(roles: string[]): GuardError {
+    return new GuardError(`Requires one of roles [${roles.join(", ")}]`, "role", { roles });
+  }
+
+  /**
+   * Create a custom guard denied error
+   */
+  static denied(reason: string, details?: Record<string, unknown>): GuardError {
+    return new GuardError(reason, "custom", details);
+  }
+}
+
+// =============================================================================
 // Type Guards
 // =============================================================================
 
@@ -728,6 +773,13 @@ export function isContextError(error: unknown): error is ContextError {
  */
 export function isReactivityError(error: unknown): error is ReactivityError {
   return error instanceof ReactivityError;
+}
+
+/**
+ * Check if error is a GuardError
+ */
+export function isGuardError(error: unknown): error is GuardError {
+  return error instanceof GuardError;
 }
 
 // =============================================================================

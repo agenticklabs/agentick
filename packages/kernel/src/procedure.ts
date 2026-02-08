@@ -206,6 +206,8 @@ export interface ProcedureEnvelope<TArgs extends any[]> {
   args: TArgs;
   /** The current kernel context */
   context: KernelContext;
+  /** Procedure metadata (tool names, model IDs, etc.) */
+  metadata?: Record<string, unknown>;
 }
 
 /**
@@ -922,6 +924,7 @@ class ProcedureImpl<
           operationName: this.procedureName || "anonymous",
           args,
           context: ctx,
+          metadata: this.metadata,
         };
         return mw(args, envelope, async (transformedArgs?: TArgs) => {
           return nextFn(transformedArgs);
@@ -992,6 +995,7 @@ class ProcedureImpl<
             operationName: procedureName,
             args: mwArgs,
             context: ctx,
+            metadata: this.metadata,
           };
           // Cast envelope to any[] version since external middleware uses Middleware<any[]>
           return mw(
