@@ -2,7 +2,7 @@
 layout: home
 hero:
   name: agentick
-  text: Build agents like you build apps.
+  text: The component framework for AI.
   tagline: React, but the render target is model context instead of DOM. Build AI applications with the tools you already know.
   actions:
     - theme: brand
@@ -41,16 +41,33 @@ If you've used React, you've already learned 80% of agentick. The remaining 20% 
 <div class="code-compare">
 <div class="code-block">
 
-### React App
+### React — renders UI for humans
 
 ```tsx
-function App() {
-  const [count, setCount] = useState(0);
+function TodoApp() {
+  const [todos, setTodos] = useState<string[]>([]);
+  const [input, setInput] = useState("");
 
   return (
     <div>
-      <p>Count: {count}</p>
-      <button onClick={() => setCount((c) => c + 1)}>Increment</button>
+      <h1>Todo List</h1>
+      <input
+        value={input}
+        onChange={(e) => setInput(e.target.value)}
+      />
+      <button
+        onClick={() => {
+          setTodos((t) => [...t, input]);
+          setInput("");
+        }}
+      >
+        Add
+      </button>
+      <ul>
+        {todos.map((t) => (
+          <li key={t}>{t}</li>
+        ))}
+      </ul>
     </div>
   );
 }
@@ -59,10 +76,10 @@ function App() {
 </div>
 <div class="code-block">
 
-### Agentick Agent
+### Agentick — renders context for models
 
 ```tsx
-function Agent() {
+function TodoAgent() {
   const [todos, setTodos] = useState<string[]>([]);
 
   return (
@@ -93,20 +110,15 @@ function Agent() {
 </div>
 </div>
 
-## The pitch
+Same `useState`, same JSX, same component model. The React app renders a `<div>` for a browser. The agent renders `<System>`, `<Tool>`, and `<Section>` for an LLM's context window. When state changes, the reconciler diffs and recompiles — just like a DOM update.
 
-React renders UI for humans. Agentick renders context for models. Same reconciler, same component model, different target.
+## Quick Start
 
-Your agent is a React app. Components define what the model sees — system prompts, tools, conversation history, state. The reconciler diffs, hooks manage lifecycle, JSX composes. When state changes, the model sees updated context on the next tick. Same way a DOM update works, but for an LLM's context window.
-
-<div class="code-example">
-
-### Use What You Need
+```bash
+npm install agentick @agentick/openai
+```
 
 ```tsx
-// npm install agentick @agentick/openai
-
-// Config object — no JSX required
 import { createAgent } from "agentick";
 import { openai } from "@agentick/openai";
 
@@ -116,24 +128,31 @@ const agent = createAgent({
   tools: [SearchTool, CalculatorTool],
 });
 
-// Component — hooks, children, composition
-import { createApp, Agent } from "agentick";
+const result = await agent.run({
+  messages: [{ role: "user", content: "Hello!" }],
+});
+```
 
-const agent = createApp(() => (
-  <Agent
-    model={openai({ model: "gpt-4o" })}
-    system="You are a helpful assistant."
-    tools={[SearchTool, CalculatorTool]}
-  >
-    <MyCustomKnobs />
-  </Agent>
-));
+Five lines to a working agent. No JSX required. Want more control? Keep reading.
 
-// Full JSX — complete control over the context tree
+<div class="cta-buttons">
+  <a href="/docs/getting-started" class="cta-button primary">Read the Docs</a>
+  <a href="https://github.com/agenticklabs/agentick" class="cta-button secondary">View on GitHub</a>
+</div>
+
+## Going Deeper
+
+<div class="code-example">
+
+### Full JSX Control
+
+When you need composition, hooks, and full control over the context tree:
+
+```tsx
 import { createApp, useKnob } from "agentick";
 import { OpenAIModel } from "@agentick/openai";
 
-const agent = createApp(() => {
+const app = createApp(() => {
   const [mode, setMode] = useKnob("mode", "helpful", {
     options: ["helpful", "concise", "creative"],
     description: "Response style",
@@ -152,11 +171,15 @@ const agent = createApp(() => {
 });
 ```
 
+`createAgent` and full JSX are the same thing underneath — `createAgent` just wraps `<Agent>` in a `createApp` call. Start simple, eject when you need to.
+
 </div>
 
 <div class="code-example">
 
 ### Tools That Render Context
+
+Tools aren't just functions the model calls. They're components in the fiber tree with their own render output:
 
 ```tsx
 const TodoTool = createTool({
@@ -186,13 +209,15 @@ const TodoTool = createTool({
 });
 ```
 
-The `render` function is a component in the fiber tree. `<List task>` and `<ListItem checked>` are semantic primitives — the compiler renders them appropriately for the model (markdown checkboxes, structured content, etc.). When tool state changes, the reconciler diffs and recompiles. No string templates, no manual prompt assembly.
+The `render` function lives in the fiber tree. `<List task>` and `<ListItem checked>` are semantic primitives — the compiler renders them as markdown checkboxes, structured content, whatever the model needs. When tool state changes, the reconciler diffs and recompiles. No string templates.
 
 </div>
 
 <div class="code-example">
 
 ### Knobs: Agent Self-Modification
+
+One hook creates reactive state, renders it to model context, and registers a tool — the model can adjust its own behavior mid-conversation:
 
 ```tsx
 function ResearchAgent() {
@@ -210,7 +235,9 @@ function ResearchAgent() {
   return (
     <>
       <System>
-        You are a research assistant. Analyze the top {depth} results. Write in a {style} style.
+        You are a research assistant.
+        Analyze the top {depth} results.
+        Write in a {style} style.
       </System>
       <SearchTool maxResults={depth} />
       <Knobs />
@@ -220,74 +247,106 @@ function ResearchAgent() {
 }
 ```
 
-One `useKnob` call creates reactive state, renders it to model context as a form control, and registers a `set_knob` tool. The model can adjust its own behavior mid-conversation.
+The model sees the knobs as form controls in its context and gets a `set_knob` tool to change them. The agent decides mid-conversation that it needs more search depth? It sets the knob, the state updates, the context recompiles, next tick sees the new value.
 
 </div>
 
-## Packages
+<div class="code-example">
 
-### Core
+### Multi-Turn Agent Loops
 
-| Package            | Description                                   |
-| ------------------ | --------------------------------------------- |
-| `agentick`         | Convenience re-export of @agentick/core       |
-| `@agentick/core`   | Reconciler, hooks, JSX, compiler, app         |
-| `@agentick/kernel` | Procedures, execution tracking, context (ALS) |
-| `@agentick/shared` | Wire-safe types, blocks, messages, streaming  |
+Hooks control the tick loop — how many times the model runs, what happens between turns, and when to stop:
 
-### Agent
+```tsx
+function DeepResearchAgent() {
+  const [sources, setSources] = useState<Source[]>([]);
 
-| Package                | Description                    |
-| ---------------------- | ------------------------------ |
-| `@agentick/agent`      | High-level createAgent factory |
-| `@agentick/guardrails` | Guard system                   |
+  // Keep running until we have enough sources
+  useContinuation((result) => sources.length < 5);
 
-### Adapters
+  // Log after each model turn
+  useOnTickEnd((result, ctx) => {
+    console.log(`Tick ${ctx.tick}: ${sources.length} sources`);
+  });
 
-| Package            | Description           |
-| ------------------ | --------------------- |
-| `@agentick/openai` | OpenAI adapter        |
-| `@agentick/google` | Google Gemini adapter |
-| `@agentick/ai-sdk` | Vercel AI SDK adapter |
+  return (
+    <>
+      <System>
+        Find and analyze sources. Use the search tool repeatedly
+        until you have at least 5 quality sources.
+      </System>
+      <SearchTool
+        onResult={(s) => setSources((prev) => [...prev, s])}
+      />
+      <Section title="Sources Found">
+        <List>
+          {sources.map((s) => (
+            <ListItem key={s.url}>{s.title}</ListItem>
+          ))}
+        </List>
+      </Section>
+      <Timeline />
+    </>
+  );
+}
+```
 
-### Server
+`useContinuation` returns `true` to keep the agent running after a tool call. `useOnTickEnd` fires after each model response. Same lifecycle model as React effects — `useOnMount`, `useOnTickStart`, `useOnTickEnd`, `useAfterCompile`.
 
-| Package             | Description                       |
-| ------------------- | --------------------------------- |
-| `@agentick/gateway` | Multi-session management, methods |
-| `@agentick/server`  | Transport server (SSE, WebSocket) |
-| `@agentick/express` | Express.js integration            |
-| `@agentick/nestjs`  | NestJS module                     |
+</div>
 
-### Client
+<div class="code-example">
 
-| Package                        | Description                                |
-| ------------------------------ | ------------------------------------------ |
-| `@agentick/client`             | Browser/Node client for real-time sessions |
-| `@agentick/react`              | React hooks & components for UI            |
-| `@agentick/angular`            | Angular services & utilities               |
-| `@agentick/cli`                | Terminal client for agents                 |
-| `@agentick/client-multiplexer` | Multi-tab connection multiplexer           |
+### Deploy It
 
-### DevTools
+Serve agents over HTTP with sessions, auth, and real-time streaming:
 
-| Package              | Description                      |
-| -------------------- | -------------------------------- |
-| `@agentick/devtools` | Fiber inspector, timeline viewer |
+```tsx
+import { createGateway } from "@agentick/gateway";
 
-## Install
+const gateway = createGateway({
+  port: 3000,
+  apps: {
+    assistant: createApp(() => <AssistantAgent />),
+    research: createApp(() => <DeepResearchAgent />),
+  },
+  defaultApp: "assistant",
+  auth: {
+    type: "token",
+    token: process.env.API_TOKEN,
+  },
+});
+
+await gateway.start();
+```
+
+Gateway manages sessions, handles SSE streaming to clients, and supports custom RPC methods. Use `@agentick/client` to connect from browsers, or `@agentick/express` and `@agentick/nestjs` to embed into existing apps.
+
+</div>
+
+## Get Started
+
+<div class="get-started-grid">
+<div class="get-started-install">
 
 ```bash
 npm install agentick @agentick/openai
 ```
 
 </div>
+<div class="get-started-actions">
+  <a href="/docs/getting-started" class="cta-button primary">Read the Docs</a>
+  <a href="https://github.com/agenticklabs/agentick" class="cta-button secondary">View on GitHub</a>
+</div>
+</div>
+
+</div>
 
 <style>
 .content-section {
-  max-width: 900px;
+  max-width: 1152px;
   margin: 0 auto;
-  padding: 2rem 1.5rem;
+  padding: 2rem 0;
 }
 
 .content-section h2 {
@@ -347,5 +406,58 @@ npm install agentick @agentick/openai
   color: var(--vp-c-text-2);
   font-size: 0.95rem;
   line-height: 1.6;
+}
+
+.get-started-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.5rem;
+  align-items: center;
+}
+
+.get-started-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem;
+}
+
+@media (max-width: 768px) {
+  .get-started-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .get-started-actions {
+    grid-template-columns: 1fr;
+  }
+}
+
+.cta-buttons {
+  display: flex;
+  gap: 1rem;
+  margin-top: 1.5rem;
+}
+
+.cta-button {
+  display: inline-block;
+  padding: 0.75rem 2rem;
+  border-radius: 8px;
+  font-weight: 600;
+  font-size: 1rem;
+  text-decoration: none;
+  transition: opacity 0.2s;
+}
+
+.cta-button:hover {
+  opacity: 0.85;
+}
+
+.cta-button.primary {
+  background: var(--vp-c-brand-1);
+  color: white;
+}
+
+.cta-button.secondary {
+  border: 1px solid var(--vp-c-divider);
+  color: var(--vp-c-text-1);
 }
 </style>

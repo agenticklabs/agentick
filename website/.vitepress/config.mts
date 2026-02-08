@@ -94,7 +94,7 @@ function loadApiSidebar() {
 
 export default defineConfig({
   title: "agentick",
-  description: "Build agents like you build apps.",
+  description: "The component framework for AI.",
   base: "/agentick/",
 
   // Ignore dead links in auto-generated API docs (TypeDoc cross-references to
@@ -109,7 +109,7 @@ export default defineConfig({
       "meta",
       {
         property: "og:description",
-        content: "Build agents like you build apps.",
+        content: "The component framework for AI.",
       },
     ],
     ["meta", { name: "twitter:card", content: "summary_large_image" }],
@@ -118,7 +118,7 @@ export default defineConfig({
       "meta",
       {
         name: "twitter:description",
-        content: "Build agents like you build apps.",
+        content: "The component framework for AI.",
       },
     ],
   ],

@@ -1,7 +1,7 @@
 {
   "name": "agentick",
-  "version": "0.2.1",
-  "description": "Build agents like you build apps.",
+  "version": "0.2.0",
+  "description": "The component framework for AI.",
   "keywords": [
     "agent",
     "ai",
