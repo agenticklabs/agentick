@@ -1,5 +1,14 @@
 # agentick
 
+## 0.2.1
+
+### Patch Changes
+
+- Updated dependencies [07b630c]
+  - @agentick/core@0.2.1
+  - @agentick/agent@0.2.1
+  - @agentick/guardrails@0.2.1
+
 ## 0.2.0
 
 ### Minor Changes

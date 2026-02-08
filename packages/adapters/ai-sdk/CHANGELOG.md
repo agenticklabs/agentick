@@ -1,5 +1,14 @@
 # @agentick/ai-sdk
 
+## 0.2.1
+
+### Patch Changes
+
+- 07b630c: Upgrade to React 19 and react-reconciler 0.33. useComState now uses useSyncExternalStore for correct external state synchronization. Clean up dead code from reconciler migration.
+- Updated dependencies [07b630c]
+  - @agentick/core@0.2.1
+  - @agentick/shared@0.2.1
+
 ## 0.2.0
 
 ### Minor Changes
