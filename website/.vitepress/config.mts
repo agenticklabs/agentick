@@ -24,13 +24,14 @@ function loadApiSidebar() {
 export default defineConfig({
   title: "agentick",
   description: "Build agents like you build apps.",
+  base: "/agentick/",
 
   // Ignore dead links in auto-generated API docs (TypeDoc cross-references to
   // packages not included in documentation, like _media/nestjs)
   ignoreDeadLinks: [/\/_media\//, /\.md$/],
 
   head: [
-    ["link", { rel: "icon", type: "image/svg+xml", href: "/logo.svg" }],
+    ["link", { rel: "icon", type: "image/svg+xml", href: "/agentick/logo.svg" }],
     ["meta", { property: "og:type", content: "website" }],
     ["meta", { property: "og:title", content: "agentick" }],
     [
