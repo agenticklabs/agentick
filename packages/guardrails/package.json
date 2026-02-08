@@ -27,5 +27,10 @@
   "dependencies": {
     "@agentick/kernel": "workspace:*",
     "@agentick/shared": "workspace:*"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/agenticklabs/agentick.git",
+    "directory": "packages/guardrails"
   }
 }

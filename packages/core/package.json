@@ -101,5 +101,10 @@
   "devDependencies": {
     "@types/react": "^18.2.0",
     "@types/react-reconciler": "0.28.9"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/agenticklabs/agentick.git",
+    "directory": "packages/core"
   }
 }

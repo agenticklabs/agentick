@@ -37,5 +37,10 @@
   },
   "peerDependencies": {
     "openai": "^6.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/agenticklabs/agentick.git",
+    "directory": "packages/adapters/openai"
   }
 }

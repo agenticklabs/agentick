@@ -47,5 +47,10 @@
     "react-dom": {
       "optional": true
     }
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/agenticklabs/agentick.git",
+    "directory": "packages/devtools"
   }
 }

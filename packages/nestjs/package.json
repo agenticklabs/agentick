@@ -47,5 +47,10 @@
     "@nestjs/core": ">=9.0.0",
     "reflect-metadata": ">=0.1.0",
     "rxjs": ">=7.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/agenticklabs/agentick.git",
+    "directory": "packages/nestjs"
   }
 }

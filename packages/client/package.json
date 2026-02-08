@@ -46,5 +46,10 @@
   },
   "devDependencies": {
     "typescript": "^5.8.3"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/agenticklabs/agentick.git",
+    "directory": "packages/client"
   }
 }

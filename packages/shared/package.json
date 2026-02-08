@@ -97,5 +97,10 @@
     "clean": "rm -rf dist",
     "prepublishOnly": "pnpm build",
     "dev": "tsc --watch"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/agenticklabs/agentick.git",
+    "directory": "packages/shared"
   }
 }

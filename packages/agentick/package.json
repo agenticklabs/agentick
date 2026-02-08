@@ -13,7 +13,8 @@
   "author": "Ryan Lindgren",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/agenticklabs/agentick.git"
+    "url": "git+https://github.com/agenticklabs/agentick.git",
+    "directory": "packages/agentick"
   },
   "files": [
     "dist"

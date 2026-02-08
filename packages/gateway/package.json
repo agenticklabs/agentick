@@ -47,5 +47,10 @@
   },
   "peerDependencies": {
     "@agentick/core": "workspace:*"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/agenticklabs/agentick.git",
+    "directory": "packages/gateway"
   }
 }
