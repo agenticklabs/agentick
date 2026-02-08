@@ -26,9 +26,6 @@
   "devDependencies": {
     "typescript": "^5.8.3"
   },
-  "peerDependencies": {
-    "@agentick/client": "workspace:*"
-  },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/agenticklabs/agentick.git",

@@ -45,9 +45,6 @@
     "typescript": "^5.7.3",
     "vitest": "^3.0.0"
   },
-  "peerDependencies": {
-    "@agentick/core": "workspace:*"
-  },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/agenticklabs/agentick.git",
