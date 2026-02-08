@@ -38,10 +38,14 @@ Foundation: @agentick/kernel (Node.js), @agentick/shared (universal)
 | `@agentick/client` | `packages/client` | Browser/Node client for real-time sessions |
 | `@agentick/server` | `packages/server` | Transport server (SSE, WebSocket) |
 | `@agentick/express` | `packages/express` | Express.js integration |
+| `@agentick/nestjs` | `packages/nestjs` | NestJS module |
 | `@agentick/react` | `packages/react` | React hooks & UI components |
+| `@agentick/angular` | `packages/angular` | Angular services & utilities |
 | `@agentick/devtools` | `packages/devtools` | Fiber inspector, timeline viewer |
 | `@agentick/agent` | `packages/agent` | High-level createAgent factory |
+| `@agentick/cli` | `packages/cli` | Terminal client for agents |
 | `@agentick/guardrails` | `packages/guardrails` | Guard system |
+| `@agentick/client-multiplexer` | `packages/client-multiplexer` | Multi-tab connection multiplexer |
 | `@agentick/openai` | `packages/adapters/openai` | OpenAI adapter |
 | `@agentick/google` | `packages/adapters/google` | Google Gemini adapter |
 | `@agentick/ai-sdk` | `packages/adapters/ai-sdk` | Vercel AI SDK adapter |

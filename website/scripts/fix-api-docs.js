@@ -129,10 +129,14 @@ Browse the sidebar to explore types, functions, and classes from each package.
 | [@agentick/client](./@agentick/client/) | Browser/Node client |
 | [@agentick/server](./@agentick/server/) | Transport server |
 | [@agentick/express](./@agentick/express/) | Express.js integration |
+| [@agentick/nestjs](./@agentick/nestjs/) | NestJS module |
 | [@agentick/react](./@agentick/react/) | React hooks & components |
+| [@agentick/angular](./@agentick/angular/) | Angular services & utilities |
 | [@agentick/devtools](./@agentick/devtools/) | Inspector & debugging |
 | [@agentick/agent](./@agentick/agent/) | High-level agent factory |
+| [@agentick/cli](./@agentick/cli/) | Terminal client |
 | [@agentick/guardrails](./@agentick/guardrails/) | Guard system |
+| [@agentick/client-multiplexer](./@agentick/client-multiplexer/) | Multi-tab multiplexer |
 | [@agentick/openai](./@agentick/openai/) | OpenAI adapter |
 | [@agentick/google](./@agentick/google/) | Google Gemini adapter |
 | [@agentick/ai-sdk](./@agentick/ai-sdk/) | Vercel AI SDK adapter |

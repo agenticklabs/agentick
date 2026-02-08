@@ -227,9 +227,13 @@ One `useKnob` call creates reactive state, renders it to model context as a form
 | `@agentick/client` | Browser/Node client for real-time sessions |
 | `@agentick/server` | Transport server (SSE, WebSocket) |
 | `@agentick/express` | Express.js integration |
+| `@agentick/nestjs` | NestJS module |
 | `@agentick/react` | React hooks & components for UI |
+| `@agentick/angular` | Angular services & utilities |
 | `@agentick/devtools` | Fiber inspector, timeline viewer |
 | `@agentick/agent` | High-level createAgent factory |
+| `@agentick/cli` | Terminal client for agents |
+| `@agentick/client-multiplexer` | Multi-tab connection multiplexer |
 | `@agentick/openai` | OpenAI adapter |
 | `@agentick/google` | Google Gemini adapter |
 | `@agentick/ai-sdk` | Vercel AI SDK adapter |

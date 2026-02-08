@@ -7,8 +7,12 @@
 "@agentick/client": patch
 "@agentick/server": patch
 "@agentick/express": patch
+"@agentick/nestjs": patch
 "@agentick/react": patch
+"@agentick/angular": patch
 "@agentick/devtools": patch
+"@agentick/cli": patch
+"@agentick/client-multiplexer": patch
 "@agentick/openai": patch
 "@agentick/google": patch
 "@agentick/ai-sdk": patch
