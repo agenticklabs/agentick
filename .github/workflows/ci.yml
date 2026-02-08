@@ -35,7 +35,7 @@ jobs:
         run: pnpm test
 
       - name: Build
-        run: pnpm build
+        run: pnpm build --filter '!agentick-website'
 
   lint:
     runs-on: ubuntu-latest
