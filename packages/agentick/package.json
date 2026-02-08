@@ -39,7 +39,7 @@
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.build.json --noEmit",
     "clean": "rm -rf dist",
-    "prepublishOnly": "pnpm build"
+    "prepublishOnly": "cp ../../README.md . && pnpm build"
   },
   "dependencies": {
     "@agentick/core": "workspace:*"
