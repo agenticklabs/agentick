@@ -101,17 +101,25 @@ Your agent is a React app. Components define what the model sees — system prom
 
 <div class="code-example">
 
-### Progressive Disclosure
+### Use What You Need
 
 ```tsx
-// Level 0: Config object (no JSX needed)
+// Config object — no JSX required
+// npm install @agentick/agent @agentick/openai
+import { createAgent } from "@agentick/agent";
+import { openai } from "@agentick/openai";
+
 const agent = createAgent({
   model: openai({ model: "gpt-4o" }),
   system: "You are a helpful assistant.",
   tools: [SearchTool, CalculatorTool],
 });
 
-// Level 1: Wrap with hooks
+// Component — hooks, children, composition
+// npm install agentick @agentick/agent @agentick/openai
+import { Agent } from "@agentick/agent";
+import { createApp } from "agentick";
+
 const agent = createApp(() => (
   <Agent
     model={openai({ model: "gpt-4o" })}
@@ -122,7 +130,11 @@ const agent = createApp(() => (
   </Agent>
 ));
 
-// Level 2: Full JSX control
+// Full JSX — complete control over the context tree
+// npm install agentick @agentick/openai
+import { createApp, useKnob } from "agentick";
+import { OpenAIModel } from "@agentick/openai";
+
 const agent = createApp(() => {
   const [mode, setMode] = useKnob("mode", "helpful", {
     options: ["helpful", "concise", "creative"],
