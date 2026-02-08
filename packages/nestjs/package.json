@@ -30,7 +30,7 @@
   },
   "dependencies": {
     "@agentick/gateway": "workspace:*",
-    "@nestjs/common": "^10.4.15"
+    "@nestjs/common": "^11.1.13"
   },
   "devDependencies": {
     "@nestjs/core": "^10.4.15",
