@@ -3,9 +3,6 @@ name: Deploy Website
 on:
   push:
     branches: [master]
-    paths:
-      - "website/**"
-      - ".github/workflows/deploy-docs.yml"
   workflow_dispatch:
 
 permissions:
@@ -28,8 +25,10 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install
-      - name: Build website
-        run: pnpm --filter agentick-website run build:no-api
+      - name: Build packages
+        run: pnpm build --filter '!agentick-website'
+      - name: Build website (with API docs)
+        run: pnpm --filter agentick-website run build
       - uses: actions/upload-pages-artifact@v3
         with:
           path: website/.vitepress/dist
