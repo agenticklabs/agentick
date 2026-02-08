@@ -1,5 +1,11 @@
 # @agentick/shared
 
+## 0.2.0
+
+### Minor Changes
+
+- a9cf566: agentick convenience package now re-exports @agentick/agent and @agentick/guardrails. One install, one import source.
+
 ## 0.1.9
 
 ### Patch Changes
