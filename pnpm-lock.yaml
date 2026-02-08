@@ -61,37 +61,37 @@ importers:
   example/express:
     dependencies:
       '@agentick/client':
-        specifier: link:../../packages/client
+        specifier: workspace:*
         version: link:../../packages/client
       '@agentick/client-multiplexer':
-        specifier: link:../../packages/client-multiplexer
+        specifier: workspace:*
         version: link:../../packages/client-multiplexer
       '@agentick/core':
-        specifier: link:../../packages/core
+        specifier: workspace:*
         version: link:../../packages/core
       '@agentick/devtools':
-        specifier: link:../../packages/devtools
+        specifier: workspace:*
         version: link:../../packages/devtools
       '@agentick/express':
-        specifier: link:../../packages/express
+        specifier: workspace:*
         version: link:../../packages/express
       '@agentick/gateway':
-        specifier: link:../../packages/gateway
+        specifier: workspace:*
         version: link:../../packages/gateway
       '@agentick/google':
-        specifier: link:../../packages/adapters/google
+        specifier: workspace:*
         version: link:../../packages/adapters/google
       '@agentick/kernel':
-        specifier: link:../../packages/kernel
+        specifier: workspace:*
         version: link:../../packages/kernel
       '@agentick/openai':
-        specifier: link:../../packages/adapters/openai
+        specifier: workspace:*
         version: link:../../packages/adapters/openai
       '@agentick/server':
-        specifier: link:../../packages/server
+        specifier: workspace:*
         version: link:../../packages/server
       '@agentick/shared':
-        specifier: link:../../packages/shared
+        specifier: workspace:*
         version: link:../../packages/shared
       cors:
         specifier: ^2.8.5
@@ -106,8 +106,8 @@ importers:
         specifier: ^18.3.1
         version: 18.3.1
       zod:
-        specifier: ^3.24.0
-        version: 3.25.76
+        specifier: ^4.1.13
+        version: 4.3.5
     devDependencies:
       '@types/cors':
         specifier: ^2.8.17
@@ -134,11 +134,14 @@ importers:
   example/react:
     dependencies:
       '@agentick/client-multiplexer':
-        specifier: link:../../packages/client-multiplexer
+        specifier: workspace:*
         version: link:../../packages/client-multiplexer
       '@agentick/react':
-        specifier: link:../../packages/react
+        specifier: workspace:*
         version: link:../../packages/react
+      '@agentick/shared':
+        specifier: workspace:*
+        version: link:../../packages/shared
       react:
         specifier: ^18.3.1
         version: 18.3.1
@@ -4394,9 +4397,6 @@ packages:
     peerDependencies:
       zod: ^3.25 || ^4
 
-  zod@3.25.76:
-    resolution: {integrity: sha512-gzUt/qt81nXsFGKIFcC3YnfEAx5NkunCfnDlvuBSSFS02bcXu4Lmea0AFIUwbLWxWPx3d9p8S5QoaujKcNQxcQ==}
-
   zod@4.3.5:
     resolution: {integrity: sha512-k7Nwx6vuWx1IJ9Bjuf4Zt1PEllcwe7cls3VNzm4CQ1/hgtFUK2bRNG3rvnpPUhFjmqJKAKtjV576KnUkHocg/g==}
 
@@ -8337,8 +8337,6 @@ snapshots:
   zod-to-json-schema@3.25.1(zod@4.3.5):
     dependencies:
       zod: 4.3.5
-
-  zod@3.25.76: {}
 
   zod@4.3.5: {}
 

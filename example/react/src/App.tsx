@@ -75,7 +75,7 @@ export function App() {
 
         <footer className="app-footer">
           <p>
-            Powered by <a href="https://github.com/agentick/agentick">Agentick</a>
+            Powered by <a href="https://github.com/agenticklabs/agentick">Agentick</a>
           </p>
         </footer>
       </div>

@@ -60,10 +60,10 @@ describe("BroadcastBridge", () => {
     const received: BridgeMessage[] = [];
     bridge2.onMessage((msg) => received.push(msg));
 
-    bridge1.broadcast({ type: "leader:ready", tabId: "tab-1" });
+    bridge1.broadcast({ type: "leader:transport_ready", tabId: "tab-1" });
 
     expect(received).toHaveLength(1);
-    expect(received[0]).toEqual({ type: "leader:ready", tabId: "tab-1" });
+    expect(received[0]).toEqual({ type: "leader:transport_ready", tabId: "tab-1" });
   });
 
   it("does not receive own messages", () => {
@@ -72,7 +72,7 @@ describe("BroadcastBridge", () => {
     const received: BridgeMessage[] = [];
     bridge.onMessage((msg) => received.push(msg));
 
-    bridge.broadcast({ type: "leader:ready", tabId: "tab-1" });
+    bridge.broadcast({ type: "leader:transport_ready", tabId: "tab-1" });
 
     expect(received).toHaveLength(0);
   });
@@ -82,9 +82,9 @@ describe("BroadcastBridge", () => {
     const bridge2 = createBroadcastBridge("test", "tab-2");
     const bridge3 = createBroadcastBridge("test", "tab-3");
 
-    // Tab 2 and 3 respond to leader:ready
+    // Tab 2 and 3 respond to leader:transport_ready
     bridge2.onMessage((msg) => {
-      if (msg.type === "leader:ready") {
+      if (msg.type === "leader:transport_ready") {
         bridge2.broadcast({
           type: "subscriptions:announce",
           tabId: "tab-2",
@@ -95,7 +95,7 @@ describe("BroadcastBridge", () => {
     });
 
     bridge3.onMessage((msg) => {
-      if (msg.type === "leader:ready") {
+      if (msg.type === "leader:transport_ready") {
         bridge3.broadcast({
           type: "subscriptions:announce",
           tabId: "tab-3",
@@ -113,7 +113,7 @@ describe("BroadcastBridge", () => {
       channels: string[];
     }>("subscriptions:announce", 100);
 
-    bridge1.broadcast({ type: "leader:ready", tabId: "tab-1" });
+    bridge1.broadcast({ type: "leader:transport_ready", tabId: "tab-1" });
 
     const responses = await collectPromise;
 
@@ -130,7 +130,7 @@ describe("BroadcastBridge", () => {
 
     cleanup();
 
-    bridge1.broadcast({ type: "leader:ready", tabId: "tab-1" });
+    bridge1.broadcast({ type: "leader:transport_ready", tabId: "tab-1" });
 
     expect(received).toHaveLength(0);
   });
@@ -144,7 +144,7 @@ describe("BroadcastBridge", () => {
 
     bridge2.close();
 
-    bridge1.broadcast({ type: "leader:ready", tabId: "tab-1" });
+    bridge1.broadcast({ type: "leader:transport_ready", tabId: "tab-1" });
 
     expect(received).toHaveLength(0);
   });

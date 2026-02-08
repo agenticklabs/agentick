@@ -39,7 +39,7 @@ No special attribution is required for AI-assisted contributions. The standard c
 
 ```bash
 # Clone the repository
-git clone https://github.com/rlindgren/agentick.git
+git clone https://github.com/agenticklabs/agentick.git
 cd agentick
 
 # Install dependencies

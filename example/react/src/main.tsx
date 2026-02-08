@@ -4,6 +4,6 @@ import "./App.css";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   // Note: StrictMode disabled - causes issues with Agentick client lifecycle
-  // See: https://github.com/agentick/agentick/issues/XXX
+  // See: https://github.com/agenticklabs/agentick/issues/XXX
   <App />,
 );

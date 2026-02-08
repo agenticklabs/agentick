@@ -9,8 +9,9 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@agentick/client-multiplexer": "link:../../packages/client-multiplexer",
-    "@agentick/react": "link:../../packages/react",
+    "@agentick/client-multiplexer": "workspace:*",
+    "@agentick/react": "workspace:*",
+    "@agentick/shared": "workspace:*",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },

@@ -10,15 +10,15 @@
     "harness",
     "jsx"
   ],
-  "homepage": "https://github.com/rlindgren/agentick#readme",
+  "homepage": "https://github.com/agenticklabs/agentick#readme",
   "bugs": {
-    "url": "https://github.com/rlindgren/agentick/issues"
+    "url": "https://github.com/agenticklabs/agentick/issues"
   },
   "license": "ISC",
   "author": "Ryan Lindgren",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/rlindgren/agentick.git"
+    "url": "git+https://github.com/agenticklabs/agentick.git"
   },
   "type": "module",
   "scripts": {
