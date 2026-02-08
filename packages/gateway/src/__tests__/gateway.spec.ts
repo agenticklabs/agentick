@@ -4,70 +4,19 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { Gateway, createGateway } from "../gateway.js";
-import type { App, Session } from "@tentickle/core";
+import { createMockApp as createCoreMockApp, type MockApp } from "@tentickle/core/testing";
 import WebSocket from "ws";
-
-// Mock App for testing
-function createMockApp(name: string): App {
-  const mockSession = {
-    id: `session-${Date.now()}`,
-    status: "idle",
-    currentTick: 0,
-    isAborted: false,
-    queuedMessages: [],
-    schedulerState: null,
-    queue: { exec: vi.fn() } as any,
-    send: vi.fn().mockReturnValue({
-      [Symbol.asyncIterator]: async function* () {
-        yield { type: "content_delta", delta: "Hello" };
-        yield { type: "message_end" };
-      },
-      then: (resolve: any) =>
-        Promise.resolve({ response: "Hello", outputs: {}, usage: {} }).then(resolve),
-    }),
-    tick: vi.fn(),
-    interrupt: vi.fn(),
-    clearAbort: vi.fn(),
-    events: vi.fn(),
-    snapshot: vi.fn(),
-    hibernate: vi.fn(),
-    inspect: vi.fn(),
-    startRecording: vi.fn(),
-    stopRecording: vi.fn(),
-    getRecording: vi.fn(),
-    getSnapshotAt: vi.fn(),
-    channel: vi.fn(),
-    submitToolResult: vi.fn(),
-    close: vi.fn(),
-    on: vi.fn(),
-    emit: vi.fn(),
-  } as unknown as Session;
-
-  return {
-    session: vi.fn().mockReturnValue(mockSession),
-    run: vi.fn() as any,
-    send: vi.fn() as any,
-    close: vi.fn(),
-    sessions: [],
-    has: vi.fn(),
-    isHibernated: vi.fn(),
-    hibernate: vi.fn(),
-    hibernatedSessions: vi.fn(),
-    onSessionCreate: vi.fn(),
-    onSessionClose: vi.fn(),
-  } as unknown as App;
-}
 
 describe("Gateway", () => {
   const TEST_PORT = 19998;
   const TEST_HOST = "127.0.0.1";
   let gateway: Gateway;
-  let chatApp: App;
-  let researchApp: App;
+  let chatApp: MockApp;
+  let researchApp: MockApp;
 
   beforeEach(() => {
-    chatApp = createMockApp("chat");
-    researchApp = createMockApp("research");
+    chatApp = createCoreMockApp();
+    researchApp = createCoreMockApp();
   });
 
   afterEach(async () => {
@@ -347,7 +296,7 @@ describe("Gateway", () => {
       expect(response?.payload?.messageId).toBeDefined();
 
       // Should have created a session and sent to it
-      expect(chatApp.session).toHaveBeenCalled();
+      expect(chatApp._sessions.size).toBeGreaterThan(0);
     });
 
     it("handles unknown method", async () => {

@@ -14,23 +14,7 @@ import { z } from "zod";
 import { Gateway, createGateway, type ExpressRequestHandler } from "../gateway.js";
 import { method, type AuthResult, type AuthConfig, type GatewayConfig } from "../types.js";
 import { Context, type UserContext } from "@tentickle/kernel";
-
-// ============================================================================
-// Mock App for testing
-// ============================================================================
-
-function createMockApp() {
-  return {
-    session: vi.fn().mockReturnValue({
-      send: vi.fn().mockReturnValue({
-        [Symbol.asyncIterator]: async function* () {
-          yield { type: "tick_start" };
-          yield { type: "tick_end" };
-        },
-      }),
-    }),
-  };
-}
+import { createMockApp } from "@tentickle/core/testing";
 
 // ============================================================================
 // Gateway initialization tests

@@ -33,181 +33,22 @@ import WebSocket from "ws";
 import type { Gateway } from "./gateway.js";
 import { createGateway } from "./gateway.js";
 import type { GatewayConfig, GatewayEvents } from "./types.js";
-import type { App, Session, SessionExecutionHandle, SendResult } from "@tentickle/core";
 
-// ============================================================================
-// Mock App Factory
-// ============================================================================
-
-export interface MockAppOptions {
-  /** Response text from model */
-  response?: string;
-  /** Simulate streaming with these deltas */
-  streamDeltas?: string[];
-  /** Simulate tool calls */
-  toolCalls?: Array<{ name: string; input: unknown; result: unknown }>;
-  /** Error to throw */
-  error?: Error;
-  /** Delay before responding (ms) */
-  delay?: number;
-}
-
-/**
- * Create a mock App for testing.
- *
- * The mock app simulates model responses without requiring actual API calls.
- */
-export function createMockApp(options: MockAppOptions = {}): App {
-  const { response = "Mock response", streamDeltas, toolCalls, error, delay } = options;
-
-  const createMockExecution = (): SessionExecutionHandle => {
-    const events: Array<{ type: string; [key: string]: unknown }> = [];
-
-    if (streamDeltas) {
-      for (const delta of streamDeltas) {
-        events.push({ type: "content_delta", delta });
-      }
-    } else if (response) {
-      events.push({ type: "content_delta", delta: response });
-    }
-
-    if (toolCalls) {
-      for (const call of toolCalls) {
-        events.push({ type: "tool_call_start", name: call.name, input: call.input });
-        events.push({ type: "tool_result", name: call.name, result: call.result });
-      }
-    }
-
-    events.push({ type: "message_end" });
-
-    // Create a minimal mock that satisfies the interface
-    const handle = {
-      sessionId: "mock-session",
-      currentTick: 1,
-      queueMessage: () => {},
-      submitToolResult: () => {},
-      abort: () => {},
-      isRunning: () => false,
-      isCompleted: () => true,
-      isAborted: () => false,
-      status: "completed" as const,
-      traceId: "mock-trace",
-      events: async function* () {
-        for (const event of events) {
-          yield event;
-        }
-      },
-      eventBuffer: { events: [] },
-      result: Promise.resolve({
-        response,
-        outputs: {},
-        usage: { inputTokens: 10, outputTokens: 20, totalTokens: 30 },
-        raw: {} as any,
-      }),
-      [Symbol.asyncIterator]: async function* () {
-        if (delay) await new Promise((r) => setTimeout(r, delay));
-        if (error) throw error;
-        for (const event of events) {
-          yield event;
-        }
-      },
-      then: async <T>(
-        resolve?: ((value: SendResult) => T | PromiseLike<T>) | null,
-        reject?: ((reason: unknown) => T | PromiseLike<T>) | null,
-      ): Promise<T> => {
-        try {
-          if (delay) await new Promise((r) => setTimeout(r, delay));
-          if (error) throw error;
-          const result: SendResult = {
-            response,
-            outputs: {},
-            usage: { inputTokens: 10, outputTokens: 20, totalTokens: 30 },
-            raw: {} as any,
-          };
-          return resolve ? resolve(result) : (result as unknown as T);
-        } catch (e) {
-          if (reject) return reject(e);
-          throw e;
-        }
-      },
-    };
-
-    return handle as unknown as SessionExecutionHandle;
-  };
-
-  async function createMockExecutionProcedure() {
-    return await createMockExecution();
-  }
-
-  createMockExecutionProcedure.exec = createMockExecutionProcedure;
-
-  const mockSession: Partial<Session> = {
-    id: "mock-session",
-    status: "idle",
-    currentTick: 0,
-    isAborted: false,
-    queuedMessages: [],
-    schedulerState: null,
-    queue: { exec: async () => {} } as any,
-    send: createMockExecutionProcedure as any,
-    render: createMockExecutionProcedure as any,
-    interrupt: () => {},
-    clearAbort: () => {},
-    events: async function* () {},
-    snapshot: () => ({
-      version: "1.0",
-      sessionId: "mock-session",
-      tick: 0,
-      timeline: [],
-      componentState: {},
-      timestamp: Date.now(),
-    }),
-    hibernate: async () => null,
-    inspect: () => ({
-      id: "mock-session",
-      status: "idle" as const,
-      currentTick: 0,
-      queuedMessages: [],
-      isAborted: false,
-      lastOutput: null,
-      lastModelOutput: null,
-      lastToolCalls: [],
-      lastToolResults: [],
-      totalUsage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
-      tickCount: 0,
-      components: { count: 0, names: [] },
-      hooks: { count: 0, byType: {} },
-    }),
-    startRecording: () => {},
-    stopRecording: () => {},
-    getRecording: () => null,
-    getSnapshotAt: () => null,
-    channel: () => ({ publish: () => {}, subscribe: () => () => {} }) as any,
-    submitToolResult: () => {},
-    close: () => {},
-    on: () => mockSession as Session,
-    emit: () => true,
-    off: () => mockSession as Session,
-  };
-
-  return {
-    session: () => mockSession as Session,
-    run: Object.assign(() => createMockExecution(), {
-      exec: () => createMockExecution(),
-      withContext: () => ({}) as any,
-      use: () => ({}) as any,
-    }) as any,
-    send: () => createMockExecution(),
-    close: async () => {},
-    sessions: [],
-    has: () => false,
-    isHibernated: async () => false,
-    hibernate: async () => null,
-    hibernatedSessions: async () => [],
-    onSessionCreate: () => () => {},
-    onSessionClose: () => () => {},
-  } as unknown as App;
-}
+// Re-export mock factories from core
+export {
+  createMockApp,
+  createMockSession,
+  createMockExecutionHandle,
+  createTestProcedure,
+  type MockAppOptions,
+  type MockSessionOptions,
+  type MockSession,
+  type MockApp,
+  type MockSessionExecutionHandle,
+  type MockExecutionHandleOptions,
+  type TestProcedure,
+  type TestProcedureOptions,
+} from "@tentickle/core/testing";
 
 // ============================================================================
 // Test Gateway Factory

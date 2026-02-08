@@ -288,3 +288,77 @@ test("agent handles model errors", async () => {
   expect(result.current.error).toBeDefined();
 });
 ```
+
+## Mock Factories
+
+Test code that consumes `App`, `Session`, or `ExecutionHandle` without a real engine.
+
+### createTestProcedure
+
+Lightweight Procedure stub. Branded with `PROCEDURE_SYMBOL` so `isProcedure()` returns true. Returns `ProcedurePromise` with `.result` chaining. Chainable methods (`.use()`, `.withContext()`, etc.) are no-ops.
+
+```typescript
+import { createTestProcedure } from "@tentickle/core/testing";
+
+const proc = createTestProcedure({ handler: async (x: number) => x * 2 });
+const result = await proc(5).result; // 10
+
+// Spy tracking
+expect(proc._callCount).toBe(1);
+expect(proc._lastArgs).toEqual([5]);
+
+// Override responses
+proc.respondWith("one-shot"); // next call only
+proc.setResponse("persistent"); // all subsequent calls
+proc.reset(); // clear calls + overrides
+```
+
+### createMockSession
+
+Mock `Session` with spy tracking on all procedures. Extends `EventEmitter`.
+
+```typescript
+import { createMockSession } from "@tentickle/core/testing";
+
+const session = createMockSession({ executionOptions: { response: "Hello!" } });
+const handle = await session.send({ messages: [] });
+const result = await handle.result;
+
+expect(result.response).toBe("Hello!");
+expect(session._sendCalls).toHaveLength(1);
+
+// Override next response
+session.respondWith({ response: "Custom!" });
+```
+
+### createMockApp
+
+Mock `App` with lazy session creation and lifecycle tracking.
+
+```typescript
+import { createMockApp } from "@tentickle/core/testing";
+
+const app = createMockApp();
+const session = await app.session("test");
+expect(app.has("test")).toBe(true);
+
+await app.close("test");
+expect(app._closedSessions).toContain("test");
+```
+
+### createMockExecutionHandle
+
+Mock `SessionExecutionHandle` with real `EventBuffer` for streaming.
+
+```typescript
+import { createMockExecutionHandle } from "@tentickle/core/testing";
+
+const handle = createMockExecutionHandle({
+  response: "Hello!",
+  streamDeltas: ["Hel", "lo!"],
+});
+
+for await (const event of handle) {
+  console.log(event);
+}
+```

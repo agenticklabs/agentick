@@ -88,3 +88,18 @@ export type {
   MockTickResultOptions,
   MockTickResult,
 } from "./mocks";
+
+// App/Session/Handle mocks
+export { createMockExecutionHandle, createMockSession, createMockApp } from "./mock-app";
+export type {
+  MockExecutionHandleOptions,
+  MockSessionExecutionHandle,
+  MockSessionOptions,
+  MockSession,
+  MockAppOptions,
+  MockApp,
+} from "./mock-app";
+
+// Kernel testing primitives (re-exported for convenience)
+export { createTestProcedure } from "@tentickle/kernel/testing";
+export type { TestProcedure, TestProcedureOptions } from "@tentickle/kernel/testing";
