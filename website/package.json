@@ -1,0 +1,24 @@
+{
+  "name": "agentick-website",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vitepress dev",
+    "build": "pnpm run docs:api && vitepress build",
+    "build:no-api": "vitepress build",
+    "preview": "vitepress preview",
+    "docs:api": "typedoc && node scripts/fix-api-docs.js",
+    "docs:api:watch": "typedoc --watch"
+  },
+  "dependencies": {
+    "vue": "^3.4.38"
+  },
+  "devDependencies": {
+    "typedoc": "^0.28.15",
+    "typedoc-plugin-markdown": "^4.9.0",
+    "typedoc-vitepress-theme": "^1.1.2",
+    "typescript": "^5.9.3",
+    "vitepress": "^1.4.5"
+  }
+}

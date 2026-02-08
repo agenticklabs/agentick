@@ -1,0 +1,174 @@
+# Knobs & Controls
+
+Knobs are model-visible, model-settable reactive state. One hook call creates a value, renders it as a form control the model can see, and registers a tool for the model to change it.
+
+This is the killer feature of the reconciler approach. Without a component model, you'd need to manually:
+1. Define the state variable
+2. Add it to the system prompt
+3. Register a tool to modify it
+4. Update the prompt when it changes
+5. Validate the new value
+
+`useKnob` does all five in one line.
+
+## Basic Usage
+
+```tsx
+function Agent() {
+  const [depth, setDepth] = useKnob("search_depth", 3, {
+    min: 1,
+    max: 10,
+    description: "Number of search results to analyze",
+  });
+
+  return (
+    <>
+      <System>Analyze the top {depth} results for each query.</System>
+      <SearchTool maxResults={depth} />
+      <Knobs />
+      <Timeline />
+    </>
+  );
+}
+```
+
+The model sees something like:
+
+```
+### Knobs
+- search_depth [range]: 3 (min: 1, max: 10) — Number of search results to analyze
+  Use set_knob to change.
+```
+
+And has access to a `set_knob` tool to modify it.
+
+## Type-Safe Constraints
+
+Constraints are inferred from the value type:
+
+```tsx
+// Number knobs: min, max, step
+const [temp] = useKnob("temperature", 0.7, { min: 0, max: 2, step: 0.1 });
+
+// String knobs: maxLength, pattern
+const [format] = useKnob("output_format", "markdown", {
+  maxLength: 20,
+  pattern: "^(markdown|html|text)$",
+});
+
+// Boolean knobs: rendered as toggles
+const [verbose] = useKnob("verbose", false, {
+  description: "Include detailed explanations",
+});
+
+// Enum knobs: rendered as selects
+const [style] = useKnob("writing_style", "academic", {
+  options: ["academic", "casual", "technical", "creative"],
+  description: "Output writing style",
+});
+```
+
+## Semantic Types
+
+Agentick infers a semantic type from the value and constraints:
+
+| Value + Constraints | Semantic Type |
+|-------------------|---------------|
+| `boolean` | `[toggle]` |
+| `number` with min+max | `[range]` |
+| `number` without range | `[number]` |
+| Any type with `options` | `[select]` |
+| `string` | `[text]` |
+
+## Groups
+
+Organize knobs into named groups:
+
+```tsx
+const [temp] = useKnob("temperature", 0.7, {
+  group: "Model Settings", min: 0, max: 2,
+});
+const [maxTokens] = useKnob("max_tokens", 1000, {
+  group: "Model Settings", min: 100, max: 4000,
+});
+const [style] = useKnob("style", "helpful", {
+  group: "Behavior",
+  options: ["helpful", "concise", "creative"],
+});
+```
+
+Groups render with `### GroupName` headers in the model context.
+
+## Rendering Modes
+
+### Default
+
+`<Knobs />` renders a section and registers the `set_knob` tool:
+
+```tsx
+<Knobs />
+```
+
+### Render Prop
+
+Custom section rendering, tool auto-registered:
+
+```tsx
+<Knobs>
+  {(groups) => (
+    <Section id="my-knobs">
+      {groups.map(g => `## ${g.name}\n${g.knobs.map(k => k.display).join("\n")}`).join("\n")}
+    </Section>
+  )}
+</Knobs>
+```
+
+### Provider
+
+Full control — provider registers the tool, you handle rendering:
+
+```tsx
+<Knobs.Provider>
+  <MyCustomKnobUI />
+</Knobs.Provider>
+
+// In MyCustomKnobUI:
+function MyCustomKnobUI() {
+  const { knobs, groups, get } = useKnobsContext();
+  // Full custom rendering
+}
+```
+
+## Validation
+
+The `set_knob` tool handler validates automatically:
+1. Type check (number, string, boolean)
+2. Options check (if `options` defined)
+3. Range check (min/max for numbers)
+4. Length/pattern check (for strings)
+5. Custom `validate` function (if provided)
+
+```tsx
+const [priority] = useKnob("priority", 5, {
+  min: 1,
+  max: 10,
+  validate: (v) => v % 1 === 0 ? true : "Must be a whole number",
+});
+```
+
+## Config-Level Knobs
+
+For declaring knobs outside components (e.g., in `createAgent` config):
+
+```tsx
+import { knob } from "agentick";
+
+const agent = createAgent({
+  knobs: {
+    temperature: knob(0.7, { min: 0, max: 2 }),
+    style: knob("helpful", { options: ["helpful", "concise"] }),
+  },
+});
+```
+
+`knob()` returns a `KnobDescriptor` — a branded object detected by `isKnob()` at runtime.

@@ -1,0 +1,53 @@
+{
+  "$schema": "https://typedoc.org/schema.json",
+  "entryPointStrategy": "packages",
+  "entryPoints": [
+    "../packages/core",
+    "../packages/kernel",
+    "../packages/shared",
+    "../packages/gateway",
+    "../packages/client",
+    "../packages/server",
+    "../packages/express",
+    "../packages/react",
+    "../packages/devtools",
+    "../packages/agent",
+    "../packages/guardrails",
+    "../packages/adapters/openai",
+    "../packages/adapters/google",
+    "../packages/adapters/ai-sdk"
+  ],
+  "out": "api",
+  "plugin": ["typedoc-plugin-markdown", "typedoc-vitepress-theme"],
+  "readme": "none",
+  "entryFileName": "index",
+  "hideGenerator": true,
+  "packageOptions": {
+    "entryPoints": ["src/index.ts"],
+    "tsconfig": "tsconfig.json",
+    "indexFormat": "table",
+    "parametersFormat": "table",
+    "interfacePropertiesFormat": "table",
+    "classPropertiesFormat": "table",
+    "enumMembersFormat": "table",
+    "typeDeclarationFormat": "table",
+    "propertyMembersFormat": "table",
+    "sanitizeComments": true,
+    "useHTMLEncodedBrackets": true,
+    "sort": ["kind", "alphabetical"],
+    "kindSortOrder": [
+      "Function",
+      "Class",
+      "Interface",
+      "TypeAlias",
+      "Variable",
+      "Enum"
+    ],
+    "categorizeByGroup": true,
+    "excludeExternals": true,
+    "excludePrivate": true,
+    "excludeProtected": true,
+    "disableSources": false,
+    "sourceLinkTemplate": "https://github.com/agenticklabs/agentick/blob/master/{path}#L{line}"
+  }
+}

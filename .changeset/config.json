@@ -5,6 +5,7 @@
   "fixed": [],
   "linked": [
     [
+      "agentick",
       "@agentick/kernel",
       "@agentick/shared",
       "@agentick/core",
@@ -12,17 +13,13 @@
       "@agentick/client",
       "@agentick/server",
       "@agentick/express",
-      "@agentick/nestjs",
       "@agentick/react",
-      "@agentick/angular",
       "@agentick/devtools",
       "@agentick/openai",
       "@agentick/google",
       "@agentick/ai-sdk",
-      "@agentick/cli",
       "@agentick/agent",
-      "@agentick/guardrails",
-      "@agentick/client-multiplexer"
+      "@agentick/guardrails"
     ]
   ],
   "access": "public",

@@ -3,5 +3,6 @@ packages:
   # packages/core/v2 removed - v2 code is now in main @agentick/core
   - packages/adapters/*
   - example/*
+  - website
 
 autoInstallPeers: true
