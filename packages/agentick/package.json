@@ -42,6 +42,8 @@
     "prepublishOnly": "cp ../../README.md . && pnpm build"
   },
   "dependencies": {
-    "@agentick/core": "workspace:*"
+    "@agentick/core": "workspace:*",
+    "@agentick/agent": "workspace:*",
+    "@agentick/guardrails": "workspace:*"
   }
 }

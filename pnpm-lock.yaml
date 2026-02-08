@@ -225,9 +225,15 @@ importers:
 
   packages/agentick:
     dependencies:
+      '@agentick/agent':
+        specifier: workspace:*
+        version: link:../agent
       '@agentick/core':
         specifier: workspace:*
         version: link:../core
+      '@agentick/guardrails':
+        specifier: workspace:*
+        version: link:../guardrails
 
   packages/angular:
     dependencies:

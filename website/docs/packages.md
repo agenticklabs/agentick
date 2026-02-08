@@ -94,7 +94,7 @@ Vercel AI SDK adapter. Any model supported by the AI SDK.
 
 ### agentick
 
-Re-exports everything from `@agentick/core`. Use this for the simplest install:
+Re-exports everything from `@agentick/core`, `@agentick/agent`, and `@agentick/guardrails`. One install, one import source:
 
 ```bash
 npm install agentick

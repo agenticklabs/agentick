@@ -104,9 +104,10 @@ Your agent is a React app. Components define what the model sees — system prom
 ### Use What You Need
 
 ```tsx
+// npm install agentick @agentick/openai
+
 // Config object — no JSX required
-// npm install @agentick/agent @agentick/openai
-import { createAgent } from "@agentick/agent";
+import { createAgent } from "agentick";
 import { openai } from "@agentick/openai";
 
 const agent = createAgent({
@@ -116,9 +117,7 @@ const agent = createAgent({
 });
 
 // Component — hooks, children, composition
-// npm install agentick @agentick/agent @agentick/openai
-import { Agent } from "@agentick/agent";
-import { createApp } from "agentick";
+import { createApp, Agent } from "agentick";
 
 const agent = createApp(() => (
   <Agent
@@ -131,7 +130,6 @@ const agent = createApp(() => (
 ));
 
 // Full JSX — complete control over the context tree
-// npm install agentick @agentick/openai
 import { createApp, useKnob } from "agentick";
 import { OpenAIModel } from "@agentick/openai";
 

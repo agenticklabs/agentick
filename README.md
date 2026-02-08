@@ -504,7 +504,7 @@ const gateway = createGateway({
 ## Quick Start
 
 ```bash
-npm install @agentick/core @agentick/openai zod
+npm install agentick @agentick/openai zod
 ```
 
 **TypeScript config** — add to `tsconfig.json`:

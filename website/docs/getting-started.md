@@ -95,7 +95,7 @@ const result = await run(<MyAgent />, {
 ## Use createAgent for less boilerplate
 
 ```tsx
-import { createAgent } from "@agentick/agent";
+import { createAgent } from "agentick";
 import { openai } from "@agentick/openai";
 
 const agent = createAgent({
