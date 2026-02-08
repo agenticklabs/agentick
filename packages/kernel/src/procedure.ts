@@ -574,11 +574,13 @@ export interface Procedure<
 
   /**
    * Add middleware to the procedure. Returns a new Procedure (immutable).
-   * @param middleware - Middleware functions or pipelines to add
+   * Typed overload preserves IntelliSense for inline middleware.
+   * Generic overload accepts pre-built middleware (guards, logging, etc.).
    */
   use(
     ...middleware: (Middleware<ExtractArgs<THandler>> | MiddlewarePipeline)[]
   ): Procedure<THandler, TPassThrough>;
+  use(...middleware: (Middleware | MiddlewarePipeline)[]): Procedure<THandler, TPassThrough>;
 
   /**
    * Create a procedure variant with merged context. Returns a new Procedure.
@@ -591,7 +593,7 @@ export interface Procedure<
    * Convenience method equivalent to `.use(mw)`.
    */
   withMiddleware(
-    mw: Middleware<ExtractArgs<THandler>> | MiddlewarePipeline,
+    mw: Middleware<ExtractArgs<THandler>> | Middleware | MiddlewarePipeline,
   ): Procedure<THandler, TPassThrough>;
 
   /**
@@ -1311,7 +1313,7 @@ class ProcedureImpl<
   /**
    * Add middleware to the procedure. Returns a new Procedure.
    */
-  use(...middleware: (Middleware<TArgs> | MiddlewarePipeline)[]): Procedure<THandler> {
+  use(...middleware: (Middleware<TArgs> | Middleware | MiddlewarePipeline)[]): Procedure<THandler> {
     const flattened = flattenMiddleware(
       middleware as unknown as (Middleware<TArgs> | MiddlewarePipeline)[],
     );
@@ -1383,7 +1385,7 @@ class ProcedureImpl<
   /**
    * Add a single middleware. Returns a new Procedure.
    */
-  withMiddleware(mw: Middleware<TArgs> | MiddlewarePipeline): Procedure<THandler> {
+  withMiddleware(mw: Middleware<TArgs> | Middleware | MiddlewarePipeline): Procedure<THandler> {
     return this.use(mw);
   }
 

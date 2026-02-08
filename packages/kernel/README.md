@@ -247,6 +247,59 @@ buffer.push({ type: "complete", result: { success: true } });
 buffer.close();
 ```
 
+### Guards
+
+Gate procedure execution with access control checks:
+
+```typescript
+import { createGuard, GuardError } from "@tentickle/kernel";
+
+// Simple predicate — deny throws GuardError
+const adminOnly = createGuard(
+  (envelope) => envelope.context.user?.roles?.includes("admin") ?? false,
+);
+
+// With config — custom reason and guard type
+const roleGuard = createGuard(
+  {
+    name: "role-guard",
+    guardType: "role",
+    reason: (envelope) => `User ${envelope.context.user?.id} lacks required role`,
+  },
+  (envelope) => envelope.context.user?.roles?.includes("admin") ?? false,
+);
+
+// Throw GuardError directly for full control
+const customGuard = createGuard({ name: "acl-guard" }, (envelope) => {
+  if (!hasPermission(envelope.context.user)) {
+    throw GuardError.role(["admin", "moderator"]);
+  }
+  return true;
+});
+
+// Apply to any procedure via .use()
+const secured = fetchUser.use(adminOnly);
+```
+
+Guards are middleware — they compose with `.use()` like any other middleware but are purpose-built for allow/deny decisions.
+
+#### GuardError
+
+```typescript
+import { GuardError, isGuardError } from "@tentickle/kernel";
+
+// Factories
+GuardError.role(["admin"]);              // "Requires one of roles [admin]"
+GuardError.denied("Custom reason");      // Custom denial
+
+// Type guard
+if (isGuardError(error)) {
+  error.code;       // "GUARD_DENIED"
+  error.guardType;  // "role", "custom", etc.
+  error.details;    // { roles: [...], guard: "name", ... }
+}
+```
+
 ## Key Patterns
 
 ### Middleware Pipelines
@@ -293,6 +346,17 @@ console.log(base === withTimeout); // false
 | `pipe(...procedures)`               | Chain left-to-right     |
 | `compose(...procedures)`            | Chain right-to-left     |
 | `createPipeline(middleware)`        | Bundle middleware       |
+
+### Guards
+
+| Export                      | Description                 |
+| --------------------------- | --------------------------- |
+| `createGuard(fn)`           | Create guard from predicate |
+| `createGuard(config, fn)`   | Create guard with config    |
+| `GuardError`                | Access denied error class   |
+| `GuardError.role(roles)`    | Role-based denial factory   |
+| `GuardError.denied(reason)` | Custom denial factory       |
+| `isGuardError(error)`       | Type guard for GuardError   |
 
 ### Context
 

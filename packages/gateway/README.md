@@ -261,6 +261,20 @@ const gateway = createGateway({
 
 Methods are invoked using colon-separated paths: `tasks:list`, `tasks:admin:archive`, `admin:stats`.
 
+### Guard Errors
+
+Role and custom guards throw `GuardError` (from `@tentickle/kernel`) on denial. The gateway returns HTTP 403 for guard denials:
+
+```typescript
+import { isGuardError } from "@tentickle/kernel";
+
+// In your error handling
+if (isGuardError(error)) {
+  error.code;      // "GUARD_DENIED"
+  error.guardType; // "role" or "custom"
+}
+```
+
 ## HTTP Endpoints
 
 Gateway exposes these HTTP endpoints:
