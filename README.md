@@ -73,6 +73,72 @@ There are no prompt templates because JSX _is_ the template language. There are 
 
 This is application development, not chatbot configuration.
 
+## Built-in Components
+
+Everything in the component tree compiles to what the model sees. Components are the building blocks — compose them to construct the context window.
+
+### Structure
+
+| Component | Description |
+|-----------|-------------|
+| `<Timeline>` | Conversation history. Accepts a render function for full control, or renders with sensible defaults. Token budget compaction via `maxTokens`, `strategy`, `filter`, `limit`, `roles`. |
+| `<Timeline.Provider>` | Context provider exposing timeline entries to descendants via `useTimelineContext()`. |
+| `<Timeline.Messages>` | Renders messages from `Timeline.Provider` context. Optional `renderEntry` prop for custom rendering. |
+| `<Section>` | Structured context block injected every tick. `audience` controls visibility: `"model"`, `"user"`, or `"all"`. |
+| `<Model>` | Model configuration. Pass `engine` prop, or use adapter-specific components like `<OpenAIModel>` or `<GoogleModel>`. |
+
+### Messages
+
+| Component | Description |
+|-----------|-------------|
+| `<System>` | System/instruction message. |
+| `<User>` | User message. |
+| `<Assistant>` | Assistant message. |
+| `<Message>` | Generic message — takes `role` prop. The primitive underlying all role-specific components. |
+| `<ToolResult>` | Tool execution result. Requires `toolCallId`. |
+| `<Event>` | Persisted application event. Use for structured logging that survives in the timeline. |
+| `<Ephemeral>` | Non-persisted context. Visible during compilation but not saved to history. `position`: `"start"`, `"before-user"`, `"end"`. |
+| `<Grounding>` | Semantic wrapper for grounding context (ephemeral). `audience`: `"model"`, `"user"`, `"both"`. |
+
+### Event Blocks
+
+Use inside `<Event>` messages for structured event content:
+
+| Component | Description |
+|-----------|-------------|
+| `<UserAction>` | User action block. Props: `action`, `actor?`, `target?`, `details?`. |
+| `<SystemEvent>` | System event block. Props: `event`, `source?`, `data?`. |
+| `<StateChange>` | State change block. Props: `entity`, `field?`, `from`, `to`, `trigger?`. |
+
+### Semantic Formatting
+
+Compile to renderer-appropriate output (markdown, XML, etc.):
+
+| Component | Description |
+|-----------|-------------|
+| `<H1>`, `<H2>`, `<H3>` | Heading levels 1–3. |
+| `<Header level={n}>` | Generic heading (levels 1–6). |
+| `<Paragraph>` | Text paragraph block. |
+| `<List>` | List container. `ordered` for numbered, `task` for checkboxes. `title` for a heading. |
+| `<ListItem>` | List item. `checked` prop for task lists. |
+| `<Table>` | Table. `headers`/`rows` props for data, or `<Row>`/`<Column>` children for JSX composition. |
+| `<Row>` | Table row. `header` prop for header rows. |
+| `<Column>` | Table column. `align`: `"left"`, `"center"`, `"right"`. |
+
+### Content Blocks
+
+Typed content for composing rich message content:
+
+| Component | Description |
+|-----------|-------------|
+| `<Text>` | Text content. Children or `text` prop. Supports inline formatting: `<b>`, `<em>`, `<code>`. |
+| `<Image>` | Image. `source: MediaSource` (URL or base64). |
+| `<Document>` | Document attachment. `source: MediaSource`, `title?`. |
+| `<Audio>` | Audio content. `source: MediaSource`, `transcript?`. |
+| `<Video>` | Video content. `source: MediaSource`, `transcript?`. |
+| `<Code>` | Code block. `language` prop (typescript, python, etc.). |
+| `<Json>` | JSON data block. `data` prop for objects, or `text`/children for raw JSON strings. |
+
 ## The Context Is Yours
 
 The core insight: **only what you render gets sent to the model.** `<Timeline>` isn't a magic black box — it accepts a render function, and you decide exactly how every message appears in the context window. Skip a message? The model never sees it. Rewrite it? That's what the model reads.
@@ -229,9 +295,76 @@ function AgentWithContext({ userId }: { userId: string }) {
 
 `<Section>` injects structured context that the model sees every tick — live data, computed state, whatever you need. The `audience` prop controls visibility (`"model"`, `"user"`, or `"all"`).
 
-## Hooks Control the Loop
+## Hooks
 
-Hooks are real React hooks — `useState`, `useEffect`, `useMemo` — plus lifecycle hooks that fire at each phase of execution.
+Hooks are real React hooks — `useState`, `useEffect`, `useMemo` — plus lifecycle hooks that fire at each phase of the agent execution loop.
+
+### All Hooks
+
+#### Lifecycle
+
+| Hook | Description |
+|------|-------------|
+| `useOnMount(cb)` | Run once when component first mounts. |
+| `useOnUnmount(cb)` | Run once when component unmounts. |
+| `useOnTickStart(cb)` | Run at start of each tick (tick 2+). Receives `(tickState, ctx)`. |
+| `useOnTickEnd(cb)` | Run at end of each tick. Receives `(result, ctx)`. Return `false` or call `result.stop()` to halt. |
+| `useAfterCompile(cb)` | Run after compilation completes. Receives `(compiled, ctx)`. |
+| `useContinuation(cb)` | Control whether execution continues. Sugar for `useOnTickEnd`. |
+
+#### State & Signals
+
+| Hook | Description |
+|------|-------------|
+| `useSignal(initial)` | Reactive signal. `.set()`, `.update()`, `.subscribe()`. Reads outside render, triggers reconciliation on write. |
+| `useComputed(fn, deps)` | Computed signal. Auto-updates when dependencies change. |
+| `useComState(key, default?)` | Reactive COM state. Bidirectional sync with the context object model. |
+
+Standalone signal factories (no hook rules — use anywhere):
+
+| Function | Description |
+|----------|-------------|
+| `signal(initial)` | Create a signal. |
+| `computed(fn)` | Create a computed signal. |
+| `effect(fn)` | Run side effect with automatic dependency tracking. Returns `EffectRef` with `.dispose()`. |
+| `batch(fn)` | Batch signal updates — effects fire once after all updates. |
+| `untracked(fn)` | Read signals without tracking as dependencies. |
+
+#### Data
+
+| Hook | Description |
+|------|-------------|
+| `useData(key, fetcher, deps?)` | Async data fetch with resolve-then-render. Throws promise on first render, returns cached value on re-render. |
+| `useInvalidateData()` | Returns `(pattern: string \| RegExp) => void` to invalidate cached data. |
+
+#### Knobs (Model-Visible State)
+
+Knobs are reactive values the model can see _and set_ via tool calls:
+
+| API | Description |
+|-----|-------------|
+| `knob(default, opts?)` | Create a knob descriptor at config level. |
+| `useKnob(name, descriptor)` | Hook returning `[resolvedValue, setValue]`. |
+| `<Knobs />` | Component that renders all knobs as a `<Section>` + registers `set_knob` tool. |
+| `<Knobs.Provider>` | Context provider for custom knob rendering. |
+| `<Knobs.Controls>` | Renders knob controls from `Knobs.Provider` context. |
+| `isKnob(value)` | Type guard for knob descriptors. |
+
+#### Context & Environment
+
+| Hook | Description |
+|------|-------------|
+| `useCom()` | Access the COM (context object model) — state, timeline, channels. |
+| `useTickState()` | Current tick state: `{tick, previous, queuedMessages}`. |
+| `useRuntimeStore()` | Runtime data store (hooks, knobs, lifecycle callbacks). |
+| `useFormatter()` | Access message formatter context. |
+| `useContextInfo()` | Real-time context utilization: token counts, utilization %. |
+| `useTimelineContext()` | Timeline context (requires `Timeline.Provider` ancestor). |
+| `useConversationHistory()` | Full conversation history from COM (no provider needed). |
+
+#### React (re-exported)
+
+All standard React hooks work in agent components: `useState`, `useEffect`, `useReducer`, `useMemo`, `useCallback`, `useRef`.
 
 ### Stop Conditions
 
@@ -356,6 +489,23 @@ const output = await Search.run({ query: "test" });
 const handle = await model.generate(input);
 ```
 
+### Tool Types
+
+Tools have execution types and intents that control routing and behavior:
+
+| Execution Type | Description |
+|---------------|-------------|
+| `SERVER` | Executes on server (default). |
+| `CLIENT` | Executes in browser. |
+| `MCP` | Routed to Model Context Protocol server. |
+| `PROVIDER` | Handled by model provider natively. |
+
+| Intent | Description |
+|--------|-------------|
+| `COMPUTE` | Returns data (default). |
+| `ACTION` | Performs side effects. |
+| `RENDER` | Produces UI/visualization. |
+
 ## Sessions
 
 ```tsx
@@ -378,6 +528,20 @@ for await (const event of session.send({ messages: [msg("Another one")] })) {
 session.close();
 ```
 
+Sessions are long-lived conversation contexts. Each `send()` creates an **execution** (one user message → model response cycle). Each model API call within an execution is a **tick**. Multi-tick executions happen automatically with tool use.
+
+```
+Session
+├── Execution 1 (user: "Hello")
+│   └── Tick 1 → model response
+├── Execution 2 (user: "Use calculator")
+│   ├── Tick 1 → tool_use (calculator)
+│   └── Tick 2 → final response
+└── Execution 3 ...
+```
+
+Session states: `idle` → `running` → `idle` (or `hibernated` / `closed`).
+
 ### Dynamic Model Selection
 
 Models are JSX components — conditionally render them:
@@ -397,26 +561,198 @@ function AdaptiveAgent({ task }: { task: string }) {
 }
 ```
 
+## Testing
+
+Agentick includes a full testing toolkit. Render agents, compile context, mock models, and assert on behavior — all without making real API calls.
+
+### `renderAgent` — Full Execution
+
+Render an agent in a test environment with a mock model:
+
+```tsx
+import { renderAgent, cleanup } from "@agentick/core/testing";
+import { afterEach, test, expect } from "vitest";
+
+afterEach(cleanup);
+
+test("research agent searches then summarizes", async () => {
+  const { send, model } = renderAgent(<ResearchAgent />);
+
+  // Queue model responses
+  model.addResponse({ text: "", toolCalls: [{ name: "search", input: { query: "quantum" } }] });
+  model.addResponse({ text: "Here's a summary of quantum computing..." });
+
+  const result = await send("What's new in quantum computing?");
+
+  expect(result.response).toContain("summary");
+  expect(model.calls).toHaveLength(2); // two ticks
+});
+```
+
+### `compileAgent` — Inspect Context
+
+Compile an agent without executing to inspect what the model would see:
+
+```tsx
+test("agent includes user context in system prompt", async () => {
+  const { sections, tools } = compileAgent(
+    <AgentWithContext userId="user-123" />,
+  );
+
+  expect(sections).toContainEqual(
+    expect.objectContaining({ id: "user-context" }),
+  );
+  expect(tools.map((t) => t.name)).toContain("create_ticket");
+});
+```
+
+### Test Adapter
+
+Create a mock model adapter for fine-grained control over streaming:
+
+```tsx
+import { createTestAdapter } from "@agentick/core/testing";
+
+const adapter = createTestAdapter();
+
+// Simulate streaming chunks
+adapter.stream([
+  { type: "text", text: "Hello " },
+  { type: "text", text: "world!" },
+  { type: "finish", stopReason: "end_turn" },
+]);
+```
+
+### Mocks & Helpers
+
+| Utility | Description |
+|---------|-------------|
+| `createMockApp()` | Mock app for client/transport tests. |
+| `createMockSession()` | Mock session with send/close/abort. |
+| `createMockExecutionHandle()` | Mock execution handle (async iterable + result). |
+| `createMockCom()` | Mock COM for hook tests. |
+| `createMockTickState()` | Mock tick state. |
+| `createMockTickResult()` | Mock tick result for `useOnTickEnd` tests. |
+| `makeTimelineEntry()` | Create timeline entries for assertions. |
+| `act(fn)` / `actSync(fn)` | Execute in act context. |
+| `waitFor(fn)` | Poll until condition is met. |
+| `flushMicrotasks()` | Flush pending microtasks. |
+| `createDeferred()` | Create deferred promise with external resolve/reject. |
+
+## Terminal UI
+
+`@agentick/tui` provides an Ink-based terminal interface for chatting with agents — locally or over the network.
+
+```bash
+npm install @agentick/tui
+```
+
+### Local — In-Process
+
+Connect directly to an app. No server needed:
+
+```tsx
+import { createTUI } from "@agentick/tui";
+import { createApp, System, Timeline } from "@agentick/core";
+import { openai } from "@agentick/openai";
+
+function Agent() {
+  return (
+    <>
+      <System>You are helpful.</System>
+      <Timeline />
+    </>
+  );
+}
+
+const app = createApp(Agent, { model: openai({ model: "gpt-4o" }) });
+const tui = createTUI({ app });
+await tui.start();
+```
+
+### Remote — Over SSE
+
+Connect to a running gateway or express server:
+
+```tsx
+const tui = createTUI({ url: "http://localhost:3000/api" });
+await tui.start();
+```
+
+### CLI
+
+```bash
+# Run a local agent file
+agentick-tui --app ./my-agent.tsx
+
+# Connect to a remote server
+agentick-tui --url http://localhost:3000/api
+
+# Custom export name
+agentick-tui --app ./agents.tsx --export SalesAgent
+
+# Custom UI component
+agentick-tui --app ./my-agent.tsx --ui ./dashboard.tsx
+```
+
+### Pluggable UI
+
+The TUI ships with a default `Chat` component, but you can provide your own:
+
+```tsx
+import { createTUI, type TUIComponent } from "@agentick/tui";
+import { useSession, useStreamingText } from "@agentick/react";
+
+const Dashboard: TUIComponent = ({ sessionId }) => {
+  const { send } = useSession({ sessionId });
+  const { text, isStreaming } = useStreamingText({ sessionId });
+  // ... your Ink components
+};
+
+const tui = createTUI({ app, ui: Dashboard });
+```
+
+All building-block components are exported for custom UIs: `MessageList`, `StreamingMessage`, `ToolCallIndicator`, `ToolConfirmationPrompt`, `InputBar`, `ErrorDisplay`.
+
+## React Hooks for UIs
+
+`@agentick/react` provides hooks for building browser or terminal UIs over agent sessions. These are pure React — no browser APIs — so they work in both React DOM and Ink.
+
+```bash
+npm install @agentick/react
+```
+
+| Hook | Description |
+|------|-------------|
+| `useClient()` | Access the Agentick client from context. |
+| `useConnection()` | SSE connection state: `{state, isConnected, isConnecting}`. |
+| `useSession(opts?)` | Session accessor: `{send, abort, close, subscribe, accessor}`. |
+| `useEvents(opts?)` | Subscribe to stream events. Returns `{event, clear()}`. |
+| `useStreamingText(opts?)` | Accumulated streaming text: `{text, isStreaming, clear()}`. |
+| `useContextInfo(opts?)` | Context utilization info (token counts, %). |
+
+Wrap your app in `<AgentickProvider client={client}>` to provide the client context.
+
 ## Packages
 
-| Package               | Description                                                  |
-| --------------------- | ------------------------------------------------------------ |
-| `@agentick/core`      | Reconciler, components, hooks, tools, sessions               |
-| `@agentick/kernel`    | Execution kernel — procedures, context, middleware, channels |
-| `@agentick/shared`    | Platform-independent types and utilities                     |
-| `@agentick/openai`    | OpenAI adapter (GPT-4o, o1, etc.)                            |
-| `@agentick/google`    | Google AI adapter (Gemini)                                   |
-| `@agentick/ai-sdk`    | Vercel AI SDK adapter (any provider)                         |
-| `@agentick/gateway`   | Multi-app server with auth, routing, and channels            |
-| `@agentick/express`   | Express.js integration                                       |
-| `@agentick/nestjs`    | NestJS integration                                           |
-| `@agentick/client`    | TypeScript client for gateway connections                    |
-| `@agentick/react`     | React hooks for building UIs over sessions                   |
-| `@agentick/tui`       | Terminal UI — Ink-based chat interface for local or remote agents |
-| `@agentick/devtools`  | Fiber tree inspector, tick scrubber, token tracker           |
-| `@agentick/cli`       | CLI for running agents                                       |
-| `@agentick/server`    | Server utilities                                             |
-| `@agentick/socket.io` | Socket.IO transport                                          |
+| Package | Description |
+|---------|-------------|
+| `@agentick/core` | Reconciler, components, hooks, tools, sessions, testing utilities |
+| `@agentick/kernel` | Execution kernel — procedures, context, middleware, channels |
+| `@agentick/shared` | Platform-independent types and utilities |
+| `@agentick/openai` | OpenAI adapter (GPT-4o, o1, etc.) |
+| `@agentick/google` | Google AI adapter (Gemini) |
+| `@agentick/ai-sdk` | Vercel AI SDK adapter (any provider) |
+| `@agentick/gateway` | Multi-app server with auth, routing, and channels |
+| `@agentick/express` | Express.js integration |
+| `@agentick/nestjs` | NestJS integration |
+| `@agentick/client` | TypeScript client for gateway connections |
+| `@agentick/react` | React hooks for building UIs over sessions |
+| `@agentick/tui` | Terminal UI — Ink-based chat interface for local or remote agents |
+| `@agentick/devtools` | Fiber tree inspector, tick scrubber, token tracker |
+| `@agentick/cli` | CLI for running agents |
+| `@agentick/server` | Server utilities |
+| `@agentick/socket.io` | Socket.IO transport |
 
 ## Adapters
 
@@ -430,6 +766,16 @@ import { aiSdk } from "@agentick/ai-sdk";
 const gpt = openai({ model: "gpt-4o" });
 const gemini = google({ model: "gemini-2.5-pro" });
 const sdk = aiSdk({ model: yourAiSdkModel });
+```
+
+Adapters return a `ModelClass` — callable _and_ a JSX component:
+
+```tsx
+// As JSX — configure model in the component tree
+<gpt temperature={0.2} maxTokens={1000} />
+
+// As function — call programmatically
+const handle = await gpt.generate(input);
 ```
 
 ## DevTools
