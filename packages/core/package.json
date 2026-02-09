@@ -7,7 +7,7 @@
     "ai",
     "core"
   ],
-  "license": "ISC",
+  "license": "MIT",
   "author": "Ryan Lindgren",
   "repository": {
     "type": "git",

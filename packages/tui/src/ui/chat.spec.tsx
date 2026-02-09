@@ -193,7 +193,7 @@ describe("Chat", () => {
     await flush();
 
     // Trigger tool confirmation
-    const responsePromise = client._triggerToolConfirmation({
+    client._triggerToolConfirmation({
       toolUseId: "tool-1",
       name: "delete_file",
       arguments: { path: "/tmp/test.txt" },

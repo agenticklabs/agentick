@@ -9,7 +9,7 @@
     "terminal",
     "tui"
   ],
-  "license": "ISC",
+  "license": "MIT",
   "author": "Ryan Lindgren",
   "repository": {
     "type": "git",
@@ -46,6 +46,8 @@
     "dev": "tsc --watch",
     "typecheck": "tsc -p tsconfig.build.json --noEmit",
     "clean": "rm -rf dist",
+    "lint": "oxlint src/",
+    "format:check": "oxfmt --check src/",
     "start": "tsx --tsconfig tsconfig.json src/bin.ts",
     "test": "vitest run --config vitest.config.ts",
     "test:watch": "vitest --config vitest.config.ts"

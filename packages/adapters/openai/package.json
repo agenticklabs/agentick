@@ -9,7 +9,7 @@
     "gpt",
     "openai"
   ],
-  "license": "ISC",
+  "license": "MIT",
   "author": "Ryan Lindgren",
   "repository": {
     "type": "git",

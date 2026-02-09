@@ -10,7 +10,7 @@
     "sse",
     "streaming"
   ],
-  "license": "ISC",
+  "license": "MIT",
   "author": "Ryan Lindgren",
   "repository": {
     "type": "git",

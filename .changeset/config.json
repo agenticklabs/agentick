@@ -23,11 +23,12 @@
       "@agentick/cli",
       "@agentick/agent",
       "@agentick/guardrails",
-      "@agentick/client-multiplexer"
+      "@agentick/client-multiplexer",
+      "@agentick/tui"
     ]
   ],
   "access": "public",
   "baseBranch": "master",
   "updateInternalDependencies": "patch",
-  "ignore": ["example-express", "example-react"]
+  "ignore": ["example-express", "example-react", "example-agent"]
 }
