@@ -257,7 +257,8 @@ class SessionRegistry<P> {
       if (result && typeof result === "object" && "version" in result) {
         // Use modified snapshot
         await this.store.save(sessionId, result as SessionSnapshot);
-        this.remove(sessionId, true);
+        this.remove(sessionId, false);
+        session.teardown("hibernated");
         await this.options.onAfterHibernate?.(sessionId, result as SessionSnapshot);
         return result as SessionSnapshot;
       }
@@ -266,8 +267,9 @@ class SessionRegistry<P> {
     // Save to store
     await this.store.save(sessionId, snapshot);
 
-    // Remove from memory (close session)
-    this.remove(sessionId, true);
+    // Remove from memory and mark hibernated (not closed)
+    this.remove(sessionId, false);
+    session.teardown("hibernated");
 
     // Call onAfterHibernate
     await this.options.onAfterHibernate?.(sessionId, snapshot);

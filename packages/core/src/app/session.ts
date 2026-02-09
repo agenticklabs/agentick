@@ -290,6 +290,18 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
     return this._status;
   }
 
+  /** Whether the session is in a terminal state (hibernated or closed). */
+  private get isTerminal(): boolean {
+    return this._status === "closed" || this._status === "hibernated";
+  }
+
+  /** Error message for operations attempted on a terminal session. */
+  private get terminalError(): string {
+    return this._status === "hibernated"
+      ? "Session is hibernated — re-acquire via app.session(id) to rehydrate"
+      : "Session is closed";
+  }
+
   get currentTick(): number {
     return this._tick;
   }
@@ -355,8 +367,8 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
         executionBoundary: false,
       },
       async (message: Message): Promise<void> => {
-        if (this._status === "closed") {
-          throw new Error("Session is closed");
+        if (this.isTerminal) {
+          throw new Error(this.terminalError);
         }
         const messageWithId = ensureMessageId(message);
         this._queuedMessages.push(messageWithId);
@@ -395,8 +407,8 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
         executionBoundary: false,
       },
       async (input: SendInput<P>): Promise<SessionExecutionHandle> => {
-        if (this._status === "closed") {
-          throw new Error("Session is closed");
+        if (this.isTerminal) {
+          throw new Error(this.terminalError);
         }
 
         const { messages = [], props, metadata, maxTicks, signal } = input;
@@ -469,8 +481,8 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
         executionBoundary: false,
       },
       (props: P, options?: ExecutionOptions): SessionExecutionHandle => {
-        if (this._status === "closed") {
-          throw new Error("Session is closed");
+        if (this.isTerminal) {
+          throw new Error(this.terminalError);
         }
 
         // Props is explicitly provided (even if empty object) - always run tick
@@ -507,8 +519,8 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
         component: ComponentFunction | JSX.Element,
         input: SendInput = {},
       ): Promise<SessionExecutionHandle> => {
-        if (this._status === "closed") {
-          throw new Error("Session is closed");
+        if (this.isTerminal) {
+          throw new Error(this.terminalError);
         }
         if (this._spawnDepth >= SessionImpl.MAX_SPAWN_DEPTH) {
           throw new Error(`Maximum spawn depth (${SessionImpl.MAX_SPAWN_DEPTH}) exceeded`);
@@ -848,8 +860,8 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
   // ════════════════════════════════════════════════════════════════════════
 
   interrupt(message?: Message, reason?: string): void {
-    if (this._status === "closed") {
-      throw new Error("Session is closed");
+    if (this.isTerminal) {
+      throw new Error(this.terminalError);
     }
 
     if (message) {
@@ -1027,7 +1039,7 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
   }
 
   async hibernate(): Promise<SessionSnapshot | null> {
-    if (this._status === "closed") {
+    if (this.isTerminal) {
       return null;
     }
 
@@ -1044,7 +1056,7 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
     // No callback - just return the snapshot without persisting
     // This allows sessions created outside of App management to still hibernate
     const snapshot = this.snapshot();
-    this.close();
+    this.teardown("hibernated");
     return snapshot;
   }
 
@@ -1504,13 +1516,23 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
   }
 
   // ════════════════════════════════════════════════════════════════════════
-  // Close
+  // Close & Teardown
   // ════════════════════════════════════════════════════════════════════════
 
   close(): void {
-    if (this._status === "closed") return;
+    this.teardown("closed");
+  }
 
-    this._status = "closed";
+  /**
+   * Shared teardown for both close() and hibernate().
+   * Releases all in-memory resources and sets the terminal status.
+   *
+   * @internal Used by SessionRegistry for hibernate teardown.
+   */
+  teardown(status: "closed" | "hibernated"): void {
+    if (this.isTerminal) return;
+
+    this._status = status;
 
     // Close all child sessions
     for (const child of [...this._children]) {
@@ -1518,8 +1540,9 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
     }
     this._children = [];
 
-    this.sessionAbortController.abort("Session closed");
-    this.executionAbortController?.abort("Session closed");
+    const reason = status === "hibernated" ? "Session hibernated" : "Session closed";
+    this.sessionAbortController.abort(reason);
+    this.executionAbortController?.abort(reason);
 
     // Complete any pending event iterators
     this._executionComplete = true;
@@ -1543,7 +1566,11 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
     this.ctx = null;
     this.structureRenderer = null;
 
-    this.emit("close", this.id);
+    if (status === "hibernated") {
+      this.emit("hibernate", this.id);
+    } else {
+      this.emit("close", this.id);
+    }
   }
 
   // ════════════════════════════════════════════════════════════════════════
@@ -1632,8 +1659,8 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
    * 3. Return result
    */
   private async executeTick(props: P, options?: ExecutionOptions): Promise<SendResult> {
-    if (this._status === "closed") {
-      throw new Error("Session is closed");
+    if (this.isTerminal) {
+      throw new Error(this.terminalError);
     }
 
     const signal = this.executionAbortController?.signal ?? this.sessionAbortController.signal;

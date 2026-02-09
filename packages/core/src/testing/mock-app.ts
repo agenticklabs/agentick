@@ -398,6 +398,10 @@ export function createMockSession(options: MockSessionOptions = {}): MockSession
       currentStatus = "closed";
     }
 
+    teardown(status: "closed" | "hibernated") {
+      currentStatus = status;
+    }
+
     // Spy arrays
     get _sendCalls() {
       return sendCalls;

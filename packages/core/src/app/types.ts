@@ -800,8 +800,13 @@ export interface SessionExecutionHandle extends ExecutionHandle<SendResult, Stre
 
 /**
  * Session status.
+ *
+ * - `idle` — Ready, not executing
+ * - `running` — Tick in progress (model call / tool execution)
+ * - `hibernated` — Snapshotted & persisted, resources released. Re-acquire via `app.session(id)`
+ * - `closed` — Permanently shut down, cannot return
  */
-export type SessionStatus = "idle" | "running" | "closed";
+export type SessionStatus = "idle" | "running" | "hibernated" | "closed";
 
 /**
  * Execution phase during a tick.
