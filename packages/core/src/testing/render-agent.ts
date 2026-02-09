@@ -4,7 +4,7 @@
  * Provides a React Testing Library-like API for testing Agentick agents.
  */
 
-import { createApp } from "../app";
+import { createApp } from "../app.js";
 import type { AppOptions, SessionOptions, SendResult, ComponentFunction } from "../app/types";
 import type { Session } from "../app/types";
 import type { Message, ContentBlock } from "@agentick/shared";

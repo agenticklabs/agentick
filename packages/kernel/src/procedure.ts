@@ -13,11 +13,8 @@
 
 import type { EventEmitter } from "node:events";
 import { Context, type KernelContext, isKernelContext } from "./context";
-import {
-  ExecutionTracker,
-  ExecutionHandleBrand,
-  type ExecutionBoundaryConfig,
-} from "./execution-tracker";
+import { ExecutionTracker, type ExecutionBoundaryConfig } from "./execution-tracker";
+import { ExecutionHandleBrand } from "./execution-handle-brand";
 import { randomUUID } from "node:crypto";
 import type { ProcedureNode } from "./procedure-graph";
 import { AbortError, ValidationError } from "@agentick/shared";

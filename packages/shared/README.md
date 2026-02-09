@@ -305,6 +305,49 @@ const message2 = normalizeMessage({
 // { role: "user", content: [{ type: "text", text: "Hello!" }] }
 ```
 
+## Transport Types
+
+The transport layer abstracts the connection between `@agentick/client` and an Agentick backend. Transport types live in `@agentick/shared` so both `@agentick/client` and `@agentick/core` can implement transports without circular dependencies.
+
+```typescript
+import type {
+  ClientTransport,
+  TransportState,
+  TransportEventData,
+  TransportEventHandler,
+  TransportConfig,
+} from "@agentick/shared";
+```
+
+### ClientTransport
+
+The core transport interface. All transports implement this — SSE/HTTP, WebSocket, and local (in-process).
+
+| Method                                           | Description                                                                 |
+| ------------------------------------------------ | --------------------------------------------------------------------------- |
+| `connect()`                                      | Establish connection                                                        |
+| `disconnect()`                                   | Close connection                                                            |
+| `send(input, sessionId?)`                        | Send a message, returns `AsyncIterable<TransportEventData>` with `.abort()` |
+| `subscribeToSession(id)`                         | Subscribe to session events                                                 |
+| `abortSession(id, reason?)`                      | Abort a running execution                                                   |
+| `closeSession(id)`                               | Close a session                                                             |
+| `submitToolResult(sessionId, toolUseId, result)` | Submit tool confirmation result                                             |
+| `onEvent(handler)`                               | Register event handler, returns unsubscribe function                        |
+| `onStateChange(handler)`                         | Register state change handler                                               |
+
+### TransportState
+
+`"disconnected" | "connecting" | "connected" | "error"`
+
+### Available Transports
+
+| Transport | Package            | Description                                          |
+| --------- | ------------------ | ---------------------------------------------------- |
+| SSE/HTTP  | `@agentick/client` | Default remote transport (HTTP + Server-Sent Events) |
+| Local     | `@agentick/core`   | In-process bridge via `createLocalTransport(app)`    |
+
+See [`packages/shared/src/transport.ts`](src/transport.ts) for the full interface definition.
+
 ## Tool Types
 
 ```typescript

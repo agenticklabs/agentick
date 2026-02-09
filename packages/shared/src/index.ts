@@ -54,3 +54,5 @@ export * from "./identity";
 export * from "./devtools";
 export * from "./protocol";
 export * from "./model-catalog";
+export * from "./transport";
+export * from "./context";

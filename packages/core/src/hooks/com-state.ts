@@ -98,6 +98,22 @@ export function useComState<T>(key: string, initialValue: T): Signal<T> {
     [setValue],
   );
 
+  // Subscribe to value changes (used by useComputed for dep tracking)
+  const subscribeToValue = useCallback(
+    (callback: (value: T) => void) => {
+      const handler = (changedKey: string) => {
+        if (changedKey === key) {
+          callback(getValue());
+        }
+      };
+      ctx.on("state:changed", handler);
+      return () => {
+        ctx.off("state:changed", handler);
+      };
+    },
+    [ctx, key, getValue],
+  );
+
   // Create the Signal-like interface — reads from COM directly, always fresh
   const signal = useMemo((): Signal<T> => {
     const fn = getValue as Signal<T>;
@@ -107,8 +123,9 @@ export function useComState<T>(key: string, initialValue: T): Signal<T> {
     });
     fn.set = setValue;
     fn.update = update;
+    fn.subscribe = subscribeToValue;
     return fn;
-  }, [getValue, setValue, update]);
+  }, [getValue, setValue, update, subscribeToValue]);
 
   return signal;
 }

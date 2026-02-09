@@ -13,6 +13,8 @@ When refactoring:
 - Don't keep unused exports "for backwards compat"
 - One way to do things, done well
 
+**Architecture over expediency.** Every architectural decision compounds. Take 20 minutes to think through the right abstraction boundary, the right package home, the right interface shape. A wrong architectural decision early means the project fails later. When in doubt, think about who else will need this, where the interface should live, and whether the dependency graph stays clean.
+
 ### Documentation
 
 **Document features with README files at all levels of the codebase.**

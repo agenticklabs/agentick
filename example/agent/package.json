@@ -1,0 +1,25 @@
+{
+  "name": "example-agent",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "tsx src/main.ts",
+    "dev": "tsx watch src/main.ts"
+  },
+  "dependencies": {
+    "@agentick/agent": "workspace:*",
+    "@agentick/core": "workspace:*",
+    "@agentick/openai": "workspace:*",
+    "@agentick/shared": "workspace:*",
+    "@agentick/tui": "workspace:*",
+    "dotenv": "^16.4.7",
+    "react": "^19.2.4",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.13",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3"
+  }
+}

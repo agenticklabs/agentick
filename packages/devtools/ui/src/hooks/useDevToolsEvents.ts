@@ -1,4 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
+import type { ContextInfo } from "@agentick/shared";
+export { type ContextInfo };
 
 // Types matching @agentick/shared DevToolsEvent
 interface DevToolsEvent {
@@ -78,38 +80,6 @@ export interface Tick {
   compiledPreview?: CompiledPreview;
   /** Context utilization info from session:context channel */
   contextInfo?: ContextInfo;
-}
-
-export interface ContextInfo {
-  /** Model ID (e.g., "gpt-4o") */
-  modelId: string;
-  /** Human-readable model name */
-  modelName?: string;
-  /** Provider name */
-  provider?: string;
-  /** Context window size in tokens */
-  contextWindow?: number;
-  /** Input tokens used this tick */
-  inputTokens: number;
-  /** Output tokens generated this tick */
-  outputTokens: number;
-  /** Total tokens this tick */
-  totalTokens: number;
-  /** Context utilization percentage (0-100) */
-  utilization?: number;
-  /** Max output tokens */
-  maxOutputTokens?: number;
-  /** Model capabilities */
-  supportsVision?: boolean;
-  supportsToolUse?: boolean;
-  isReasoningModel?: boolean;
-  /** Cumulative usage across all ticks */
-  cumulativeUsage?: {
-    inputTokens: number;
-    outputTokens: number;
-    totalTokens: number;
-    ticks: number;
-  };
 }
 
 export interface TickEvent {
@@ -542,6 +512,7 @@ export function useDevToolsEvents() {
           supportsToolUse: event.supportsToolUse as boolean | undefined,
           isReasoningModel: event.isReasoningModel as boolean | undefined,
           cumulativeUsage: event.cumulativeUsage as ContextInfo["cumulativeUsage"],
+          tick: event.tick as number,
         };
         setExecutions((prev) => {
           const next = new Map(prev);

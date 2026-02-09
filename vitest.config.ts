@@ -19,6 +19,7 @@ export default defineConfig({
       "**/node_modules/**",
       "**/dist/**",
       "packages/react/**",
+      "packages/tui/**",
       "packages/angular/**",
       "packages/nestjs/**",
     ],

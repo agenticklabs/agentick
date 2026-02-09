@@ -32,7 +32,8 @@
     "./errors": "./src/errors.ts",
     "./identity": "./src/identity.ts",
     "./testing": "./src/testing/index.ts",
-    "./utils": "./src/utils/index.ts"
+    "./utils": "./src/utils/index.ts",
+    "./transport": "./src/transport.ts"
   },
   "publishConfig": {
     "access": "public",
@@ -88,6 +89,10 @@
       "./utils": {
         "types": "./dist/utils/index.d.ts",
         "import": "./dist/utils/index.js"
+      },
+      "./transport": {
+        "types": "./dist/transport.d.ts",
+        "import": "./dist/transport.js"
       }
     },
     "main": "./dist/index.js",

@@ -24,7 +24,7 @@
   "scripts": {
     "prepare": "simple-git-hooks",
     "build": "turbo build",
-    "test": "vitest run",
+    "test": "vitest run && pnpm --filter @agentick/tui test",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "typecheck": "turbo typecheck",
@@ -37,7 +37,8 @@
     "format:check": "turbo format:check",
     "changeset": "changeset",
     "version-packages": "changeset version",
-    "publish-packages": "turbo run test build && changeset publish"
+    "publish-packages": "turbo run test build && changeset publish",
+    "tui": "tsx --tsconfig packages/tui/tsconfig.json packages/tui/src/bin.ts"
   },
   "devDependencies": {
     "@changesets/cli": "^2.0.0",
@@ -63,5 +64,13 @@
     "pre-commit": "pnpm run format:check && pnpm run lint:all",
     "commit-msg": "npx --no -- commitlint --config commitlint.config.cjs --edit ${1}"
   },
-  "packageManager": "pnpm@10.25.0"
+  "packageManager": "pnpm@10.25.0",
+  "pnpm": {
+    "overrides": {
+      "react-reconciler": "0.31.0"
+    },
+    "patchedDependencies": {
+      "ink@5.2.1": "patches/ink@5.2.1.patch"
+    }
+  }
 }

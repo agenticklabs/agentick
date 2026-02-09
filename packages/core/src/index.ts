@@ -113,6 +113,11 @@ export * from "./types";
 export type { COMTimelineEntry, COMSection, COMInput, TokenEstimator } from "./com/types";
 
 // ============================================================================
+// Local Transport
+// ============================================================================
+export { createLocalTransport } from "./local-transport";
+
+// ============================================================================
 // DevTools
 // ============================================================================
 export {

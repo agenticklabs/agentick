@@ -889,6 +889,24 @@ import { enableReactDevTools } from "@agentick/core";
 enableReactDevTools(); // Connects to npx react-devtools on port 8097
 ```
 
+## Local Transport
+
+`createLocalTransport(app)` bridges an in-process `App` to the `ClientTransport` interface. This enables `@agentick/client` (and `@agentick/react` hooks) to work with a local app without any network layer.
+
+```typescript
+import { createApp } from "@agentick/core";
+import { createLocalTransport } from "@agentick/core";
+import { createClient } from "@agentick/client";
+
+const app = createApp(MyAgent, { model });
+const transport = createLocalTransport(app);
+const client = createClient({ baseUrl: "local://", transport });
+```
+
+The transport is always "connected" — there's no network. `send()` delegates to `app.send()` and streams `SessionExecutionHandle` events as `TransportEventData`. Used by `@agentick/tui` for local agent mode.
+
+See [`packages/shared/src/transport.ts`](../shared/src/transport.ts) for the `ClientTransport` interface.
+
 ## License
 
 MIT

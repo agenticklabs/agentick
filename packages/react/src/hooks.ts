@@ -21,6 +21,7 @@ import type {
   StreamingTextState,
   SessionAccessor,
 } from "@agentick/client";
+import type { ContextInfo } from "@agentick/shared";
 import { AgentickContext } from "./context";
 import type {
   UseSessionOptions,
@@ -245,10 +246,12 @@ export function useSession(options: UseSessionOptions = {}): UseSessionResult {
         const normalizedInput =
           typeof input === "string"
             ? {
-                message: {
-                  role: "user" as const,
-                  content: [{ type: "text" as const, text: input }],
-                },
+                messages: [
+                  {
+                    role: "user" as const,
+                    content: [{ type: "text" as const, text: input }],
+                  },
+                ],
               }
             : input;
         return accessor.send(normalizedInput as any);
@@ -435,39 +438,7 @@ export function useStreamingText(options: UseStreamingTextOptions = {}): UseStre
  * Context utilization info from the server.
  * Updated after each tick with token usage and model capabilities.
  */
-export interface ContextInfo {
-  /** Model ID (e.g., "gpt-4o", "claude-3-5-sonnet-20241022") */
-  modelId: string;
-  /** Human-readable model name */
-  modelName?: string;
-  /** Provider name (e.g., "openai", "anthropic") */
-  provider?: string;
-  /** Context window size in tokens */
-  contextWindow?: number;
-  /** Input tokens used this tick */
-  inputTokens: number;
-  /** Output tokens generated this tick */
-  outputTokens: number;
-  /** Total tokens this tick */
-  totalTokens: number;
-  /** Context utilization percentage (0-100) */
-  utilization?: number;
-  /** Max output tokens for this model */
-  maxOutputTokens?: number;
-  /** Model capabilities */
-  supportsVision?: boolean;
-  supportsToolUse?: boolean;
-  isReasoningModel?: boolean;
-  /** Current tick number */
-  tick: number;
-  /** Cumulative usage across all ticks in this execution */
-  cumulativeUsage?: {
-    inputTokens: number;
-    outputTokens: number;
-    totalTokens: number;
-    ticks: number;
-  };
-}
+export { type ContextInfo };
 
 /**
  * Options for useContextInfo hook.

@@ -4,15 +4,10 @@ import { ProcedureGraph, type ProcedureStatus } from "./procedure-graph";
 import { Telemetry } from "./telemetry";
 import { AbortError } from "@agentick/shared";
 import { isAsyncIterable } from "./stream";
+import { ExecutionHandleBrand } from "./execution-handle-brand";
 
-/**
- * Brand symbol for ExecutionHandle objects.
- *
- * ExecutionTracker uses this to distinguish handles (which are AsyncIterable
- * but manage their own lifecycle) from pure async generators (where iteration
- * IS the execution). Branded objects pass through the tracker without wrapping.
- */
-export const ExecutionHandleBrand: unique symbol = Symbol("agentick.execution-handle");
+// Re-export for backwards compat — external code imports this from execution-tracker
+export { ExecutionHandleBrand };
 
 /**
  * Execution boundary behavior configuration.

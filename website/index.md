@@ -51,10 +51,7 @@ function TodoApp() {
   return (
     <div>
       <h1>Todo List</h1>
-      <input
-        value={input}
-        onChange={(e) => setInput(e.target.value)}
-      />
+      <input value={input} onChange={(e) => setInput(e.target.value)} />
       <button
         onClick={() => {
           setTodos((t) => [...t, input]);
@@ -235,9 +232,7 @@ function ResearchAgent() {
   return (
     <>
       <System>
-        You are a research assistant.
-        Analyze the top {depth} results.
-        Write in a {style} style.
+        You are a research assistant. Analyze the top {depth} results. Write in a {style} style.
       </System>
       <SearchTool maxResults={depth} />
       <Knobs />
@@ -272,12 +267,10 @@ function DeepResearchAgent() {
   return (
     <>
       <System>
-        Find and analyze sources. Use the search tool repeatedly
-        until you have at least 5 quality sources.
+        Find and analyze sources. Use the search tool repeatedly until you have at least 5 quality
+        sources.
       </System>
-      <SearchTool
-        onResult={(s) => setSources((prev) => [...prev, s])}
-      />
+      <SearchTool onResult={(s) => setSources((prev) => [...prev, s])} />
       <Section title="Sources Found">
         <List>
           {sources.map((s) => (
