@@ -412,6 +412,7 @@ function AdaptiveAgent({ task }: { task: string }) {
 | `@agentick/nestjs`    | NestJS integration                                           |
 | `@agentick/client`    | TypeScript client for gateway connections                    |
 | `@agentick/react`     | React hooks for building UIs over sessions                   |
+| `@agentick/tui`       | Terminal UI — Ink-based chat interface for local or remote agents |
 | `@agentick/devtools`  | Fiber tree inspector, tick scrubber, token tracker           |
 | `@agentick/cli`       | CLI for running agents                                       |
 | `@agentick/server`    | Server utilities                                             |
@@ -433,11 +434,37 @@ const sdk = aiSdk({ model: yourAiSdkModel });
 
 ## DevTools
 
+### Agentick DevTools
+
 ```tsx
 const app = createApp(Agent, { model, devTools: true });
 ```
 
 Fiber tree inspector, tick-by-tick scrubber, token usage tracking, real-time execution timeline. Record full sessions for replay with `session({ recording: 'full' })`.
+
+### React DevTools
+
+Agentick is built on `react-reconciler` — the same foundation as React DOM and React Native. This means [React DevTools](https://github.com/facebook/react/tree/main/packages/react-devtools) works out of the box. You can inspect the component tree that compiles into the model's context window, live.
+
+```sh
+npm install --save-dev react-devtools-core
+```
+
+```tsx
+import { enableReactDevTools } from "@agentick/core";
+
+enableReactDevTools(); // connects to standalone DevTools on port 8097
+```
+
+```sh
+# Terminal 1: start React DevTools
+npx react-devtools
+
+# Terminal 2: run your agent
+node my-agent.js
+```
+
+You'll see the full component tree — `<System>`, `<Timeline>`, `<Section>`, your custom components, tools — in the same inspector you use for web and mobile apps. Inspect props, watch state changes between ticks, and see exactly what compiles into the context window.
 
 ## Gateway
 
