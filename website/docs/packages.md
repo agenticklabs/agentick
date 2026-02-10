@@ -14,6 +14,7 @@ Agentick is organized as a monorepo with layered packages. Each layer depends on
 │                       Framework Layer                               │
 │   @agentick/core      @agentick/gateway      @agentick/client       │
 │   @agentick/express   @agentick/devtools     @agentick/agent        │
+│   @agentick/tui       @agentick/react                               │
 └──────────────────────────────┬──────────────────────────────────────┘
                                │
 ┌──────────────────────────────┴──────────────────────────────────────┐
@@ -67,6 +68,10 @@ Express.js middleware integration. Mount agentick endpoints on an Express server
 ### @agentick/react
 
 React hooks and components for building UIs that connect to agentick sessions.
+
+### @agentick/tui
+
+Terminal UI for Agentick agents. Uses Ink (React for CLIs) with `@agentick/react` hooks — same hooks, same streaming, different renderer. Works locally or over HTTP/SSE.
 
 ### @agentick/devtools
 

@@ -1,6 +1,6 @@
 # Testing
 
-Agentick provides first-class testing utilities — mock adapters, mock apps, and test procedures.
+Agentick provides first-class testing utilities — mock adapters, agent rendering, mock apps, and test environments.
 
 ## Test Adapter
 
@@ -12,59 +12,176 @@ import { createTestAdapter } from "@agentick/core/testing";
 const adapter = createTestAdapter({
   defaultResponse: "Hello! How can I help?",
 });
-
-const result = await run(app, {
-  model: adapter,
-  messages: [{ role: "user", content: "Hi" }],
-});
-
-expect(result.response).toContain("Hello");
 ```
 
-## Scripted Responses
+### respondWith
 
-Control exactly what the model returns, including tool calls:
+Queue exact responses for the next model call with automatic content detection:
 
 ```tsx
-const adapter = createTestAdapter({ defaultResponse: "Done." });
+const model = createTestAdapter();
 
-// Queue a tool call response
-adapter.respondWith([
-  {
-    tool: {
-      name: "web_search",
-      input: { query: "agentick framework" },
-    },
-  },
+// Simple text
+model.respondWith(["Hello world"]);
+
+// Text + tool call
+model.respondWith([
+  "Let me search for that",
+  { tool: { name: "search", input: { query: "test" } } },
 ]);
 
-// Next call returns the tool call, then default response
-const result = await run(app, {
-  model: adapter,
-  messages: [{ role: "user", content: "Search for agentick" }],
+// With reasoning
+model.respondWith([{ reasoning: "Let me think..." }, "The answer is 42"]);
+```
+
+`respondWith` is consumed on the next call — subsequent calls fall back to `defaultResponse`.
+
+### Content Types
+
+| Input                             | Detected As              |
+| --------------------------------- | ------------------------ |
+| `"text"`                          | Text block               |
+| `{ tool: { name, input } }`       | Single tool call         |
+| `{ tool: [...] }`                 | Parallel tool calls      |
+| `{ image: { url } }`              | Image from URL           |
+| `{ reasoning: "..." }`            | Reasoning/thinking block |
+
+### Imperative Methods
+
+```tsx
+model.setResponse("New default response");
+model.setToolCalls([{ name: "foo", input: {} }]);
+model.setError(new Error("Simulated failure"));
+```
+
+### Assertions
+
+```tsx
+const inputs = model.getCapturedInputs();
+expect(inputs).toHaveLength(2);
+expect(inputs[0].messages).toContainEqual(expect.objectContaining({ role: "user" }));
+```
+
+## renderAgent
+
+Full agent lifecycle testing with send, result inspection, and rerender:
+
+```tsx
+import { renderAgent, act, cleanup } from "@agentick/core/testing";
+
+afterEach(() => cleanup());
+
+test("agent responds to user", async () => {
+  const model = createTestAdapter();
+  const { send, result } = renderAgent(MyAgent, { model });
+
+  model.respondWith(["Hi there!"]);
+  await act(() => send("Hello"));
+
+  expect(result.current.lastAssistantMessage).toBe("Hi there!");
+  expect(model.getCapturedInputs()).toHaveLength(1);
 });
 ```
 
-## Mock App
+### Options
 
-`createMockApp` creates a mock application with sessions for integration testing:
+| Option     | Description                                       |
+| ---------- | ------------------------------------------------- |
+| `props`    | Props to pass to the agent component              |
+| `model`    | Custom test model (default: `createTestAdapter()`) |
+| `maxTicks` | Max ticks per execution (default: 10)             |
+
+## compileAgent
+
+Test the compiled structure without execution:
+
+```tsx
+import { compileAgent } from "@agentick/core/testing";
+
+const { sections, tools, messages } = await compileAgent(MyAgent, {
+  props: { mode: "helpful" },
+  messages: [{ role: "user", content: "Hello" }],
+});
+
+expect(sections.get("instructions")).toContain("helpful");
+expect(tools.map((t) => t.name)).toContain("search");
+```
+
+## Test Environment
+
+`createTestEnvironment` creates a mock `ExecutionEnvironment` with lifecycle call tracking:
+
+```tsx
+import { createTestEnvironment } from "@agentick/core/testing";
+
+const { environment, tracker } = createTestEnvironment();
+const app = createApp(Agent, { model, environment });
+const session = await app.session();
+await session.send({ messages: [...] }).result;
+
+expect(tracker.initCalls).toHaveLength(1);
+expect(tracker.prepareModelInputCalls).toHaveLength(1);
+```
+
+### Intercept Tools
+
+Replace tool execution with test responses:
+
+```tsx
+// Static string results
+const { environment } = createTestEnvironment({
+  interceptTools: { execute: "sandbox result" },
+});
+
+// Dynamic function results
+const { environment } = createTestEnvironment({
+  interceptTools: {
+    execute: (call) => ({
+      id: call.id, toolUseId: call.id, name: call.name,
+      success: true,
+      content: [{ type: "text", text: `ran: ${call.input.code}` }],
+    }),
+  },
+});
+```
+
+### Tracker Fields
+
+| Field                    | Tracks                              |
+| ------------------------ | ----------------------------------- |
+| `initCalls`              | Session IDs from `onSessionInit`    |
+| `prepareModelInputCalls` | Tool names from `prepareModelInput` |
+| `toolCalls`              | Tool names + intercepted flag       |
+| `persistCalls`           | Session IDs from `onPersist`        |
+| `restoreCalls`           | Session IDs from `onRestore`        |
+| `destroyCalls`           | Session IDs from `onDestroy`        |
+
+## Mock Factories
+
+### createMockSession
+
+```tsx
+import { createMockSession } from "@agentick/core/testing";
+
+const session = createMockSession({ executionOptions: { response: "Hello!" } });
+const handle = await session.send({ messages: [] });
+const result = await handle.result;
+
+expect(result.response).toBe("Hello!");
+expect(session._sendCalls).toHaveLength(1);
+```
+
+### createMockApp
 
 ```tsx
 import { createMockApp } from "@agentick/core/testing";
 
 const app = createMockApp();
-const session = app._sessions.get("test-session");
-
-// Send a message
-await session.send({ messages: [{ role: "user", content: "Hello" }] });
-
-// Verify session state
-expect(app._sessions.size).toBeGreaterThan(0);
+const session = await app.session("test");
+expect(app.has("test")).toBe(true);
 ```
 
-## Test Procedures
-
-`createTestProcedure` from `@agentick/kernel/testing` creates mock procedures for unit testing:
+### createTestProcedure
 
 ```tsx
 import { createTestProcedure } from "@agentick/kernel/testing";
@@ -73,55 +190,57 @@ const mockSend = createTestProcedure({
   handler: (input) => ({ response: "mocked" }),
 });
 
-// Verify calls
 await mockSend({ messages: [] });
 expect(mockSend._callCount).toBe(1);
-expect(mockSend._lastArgs).toEqual([{ messages: [] }]);
 
-// Override responses
 mockSend.respondWith({ response: "custom" }); // One-shot
 mockSend.setResponse({ response: "permanent" }); // Persistent
 ```
 
 ## Testing Patterns
 
-### Test a tool handler
+### Test tool execution
 
 ```tsx
-const result = await MyTool.run({ query: "test" });
-expect(result).toContain("expected output");
-```
+test("agent uses search tool", async () => {
+  const model = createTestAdapter();
+  const { send, result } = renderAgent(SearchAgent, { model });
 
-### Test a full agent turn
+  model.respondWith(["Let me search", { tool: { name: "search", input: { q: "weather" } } }]);
+  model.respondWith(["The weather is sunny!"]);
 
-```tsx
-const adapter = createTestAdapter({ defaultResponse: "I'll search for that." });
-adapter.respondWith([{ tool: { name: "search", input: { q: "test" } } }]);
-
-const result = await run(myApp, {
-  model: adapter,
-  messages: [{ role: "user", content: "Search for test" }],
+  await act(() => send("What's the weather?"));
+  expect(result.current.lastAssistantMessage).toContain("sunny");
 });
-
-expect(result.response).toBeDefined();
 ```
 
-### Test multi-turn with sessions
+### Test multi-turn conversations
 
 ```tsx
-const adapter = createTestAdapter({ defaultResponse: "Noted." });
-const app = createApp(() => (
-  <>
-    <System>You are a helpful assistant.</System>
-    <Timeline />
-  </>
-));
+test("agent remembers context", async () => {
+  const model = createTestAdapter();
+  const { send, result } = renderAgent(ChatAgent, { model });
 
-const session = await app.session({ id: "test" });
-await session.send({ messages: [{ role: "user", content: "Turn 1" }] });
-const result = await session.send({
-  messages: [{ role: "user", content: "Turn 2" }],
-}).result;
+  model.respondWith(["Nice to meet you, Alice!"]);
+  await act(() => send("Hi, I'm Alice"));
 
-expect(result).toBeDefined();
+  model.respondWith(["Of course, Alice!"]);
+  await act(() => send("Remember my name?"));
+
+  expect(result.current.lastAssistantMessage).toContain("Alice");
+});
+```
+
+### Test error handling
+
+```tsx
+test("agent handles model errors", async () => {
+  const model = createTestAdapter();
+  const { send, result } = renderAgent(MyAgent, { model });
+
+  model.setError(new Error("API rate limited"));
+  await act(() => send("Hello"));
+
+  expect(result.current.error).toBeDefined();
+});
 ```

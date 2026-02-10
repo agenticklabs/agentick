@@ -65,6 +65,28 @@ function Chat() {
 }
 ```
 
+## Terminal UI
+
+`@agentick/tui` is a terminal client built on the same `@agentick/client` and `@agentick/react` hooks. It connects to agents locally or over HTTP/SSE, with a **pluggable UI** — swap the interface by passing any Ink component:
+
+```tsx
+import { createTUI } from "@agentick/tui";
+
+// Default chat UI
+createTUI({ url: "http://localhost:3000/api" }).start();
+
+// Custom dashboard UI
+createTUI({ url: "http://localhost:3000/api", ui: MyDashboard }).start();
+```
+
+Or from the CLI:
+
+```sh
+agentick-tui --url http://localhost:3000/api --ui ./dashboard.tsx
+```
+
+See the [Terminal UI guide](/docs/tui) for details.
+
 ## Transport
 
 The client-server communication uses:
@@ -73,4 +95,4 @@ The client-server communication uses:
 - **HTTP POST** for method calls and message sending
 - **WebSocket** (optional) for bidirectional real-time communication
 
-The transport is abstracted — the client API is the same regardless of the underlying transport.
+The transport is abstracted — the client API is the same regardless of the underlying transport. The TUI, React web apps, and custom Node.js clients all use the same `ClientTransport` interface.
