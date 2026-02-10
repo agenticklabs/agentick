@@ -30,10 +30,12 @@ describe("ToolConfirmationPrompt", () => {
 
   it("Y key calls onRespond with approved: true", async () => {
     const onRespond = vi.fn();
-    const { stdin } = render(
+    const { stdin, lastFrame } = render(
       <ToolConfirmationPrompt request={makeRequest()} onRespond={onRespond} />,
     );
-    await flush();
+
+    // Ensure component is fully mounted (useInput effect registered)
+    await waitFor(() => expect(lastFrame()!).toContain("[Y] Approve"));
 
     stdin.write("y");
     await waitFor(() => expect(onRespond).toHaveBeenCalledWith({ approved: true }));
@@ -41,10 +43,12 @@ describe("ToolConfirmationPrompt", () => {
 
   it("N key calls onRespond with approved: false", async () => {
     const onRespond = vi.fn();
-    const { stdin } = render(
+    const { stdin, lastFrame } = render(
       <ToolConfirmationPrompt request={makeRequest()} onRespond={onRespond} />,
     );
-    await flush();
+
+    // Ensure component is fully mounted (useInput effect registered)
+    await waitFor(() => expect(lastFrame()!).toContain("[N] Reject"));
 
     stdin.write("n");
     await waitFor(() =>
@@ -57,10 +61,12 @@ describe("ToolConfirmationPrompt", () => {
 
   it("A key calls onRespond with approved: true", async () => {
     const onRespond = vi.fn();
-    const { stdin } = render(
+    const { stdin, lastFrame } = render(
       <ToolConfirmationPrompt request={makeRequest()} onRespond={onRespond} />,
     );
-    await flush();
+
+    // Ensure component is fully mounted (useInput effect registered)
+    await waitFor(() => expect(lastFrame()!).toContain("[A] Always Allow"));
 
     stdin.write("a");
     await waitFor(() => expect(onRespond).toHaveBeenCalledWith({ approved: true }));

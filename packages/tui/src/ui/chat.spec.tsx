@@ -186,10 +186,11 @@ describe("Chat", () => {
       </AgentickProvider>,
     );
 
+    // Wait for Chat to fully mount (effects register onToolConfirmation handler)
+    await waitFor(() => expect(lastFrame()!).toContain("agentick"));
+
     // Simulate streaming state first
     client._emitEvent({ type: "tick_start", timestamp: Date.now() });
-
-    // Wait for React to process
     await flush();
 
     // Trigger tool confirmation
@@ -213,6 +214,9 @@ describe("Chat", () => {
         <Chat sessionId="main" />
       </AgentickProvider>,
     );
+
+    // Wait for Chat to fully mount
+    await waitFor(() => expect(lastFrame()!).toContain("agentick"));
 
     // Simulate streaming state
     client._emitEvent({ type: "tick_start", timestamp: Date.now() });
@@ -249,6 +253,9 @@ describe("Chat", () => {
         <Chat sessionId="main" />
       </AgentickProvider>,
     );
+
+    // Wait for Chat to fully mount
+    await waitFor(() => expect(lastFrame()!).toContain("agentick"));
 
     client._emitEvent({ type: "tick_start", timestamp: Date.now() });
     await flush();
