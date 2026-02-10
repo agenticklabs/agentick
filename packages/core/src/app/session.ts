@@ -77,6 +77,7 @@ import type {
   SessionRecording,
   SessionExecutionHandle,
   SendInput,
+  SpawnOptions,
   HookType,
   ResolveConfig,
   ResolveContext,
@@ -216,6 +217,9 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
   // Snapshot for resolve (set when restoring from store)
   private _snapshotForResolve: SessionSnapshot | null = null;
 
+  // Execution environment initialization tracking
+  private _environmentInitialized = false;
+
   // Spawn hierarchy
   private _parent: Session | null = null;
   private _children: Session[] = [];
@@ -343,7 +347,11 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
   send!: Procedure<(input: SendInput<P>) => SessionExecutionHandle, true>;
   render!: Procedure<(props: P, options?: ExecutionOptions) => SessionExecutionHandle, true>;
   spawn!: Procedure<
-    (component: ComponentFunction | JSX.Element, input?: SendInput) => SessionExecutionHandle,
+    (
+      component: ComponentFunction | JSX.Element,
+      input?: SendInput,
+      options?: SpawnOptions,
+    ) => SessionExecutionHandle,
     true
   >;
 
@@ -509,7 +517,8 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
       },
       async (
         component: ComponentFunction | JSX.Element,
-        input: SendInput = {},
+        input?: SendInput,
+        spawnOptions?: SpawnOptions,
       ): Promise<SessionExecutionHandle> => {
         if (this.isTerminal) {
           throw new Error(this.terminalError);
@@ -519,18 +528,25 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
         }
 
         // 1. Resolve to ComponentFunction
-        const { Component, mergedProps } = this.resolveSpawnTarget(component, input);
+        const resolvedInput = input ?? {};
+        const { Component, mergedProps } = this.resolveSpawnTarget(component, resolvedInput);
 
         // 2. Create child SessionImpl (ephemeral — NOT registered in App's registry)
         //    Whitelist structural fields only — lifecycle callbacks, session management,
         //    signal, and devTools are intentionally excluded. New AppOptions fields
         //    must be explicitly added here if children should inherit them.
+        //
+        //    NOTE: `environment` IS inherited by default. A REPL environment, sandbox,
+        //    or human-in-the-loop gateway should apply to sub-agents — the execution
+        //    model is structural, not observational (unlike lifecycle callbacks).
+        //    Use SpawnOptions to override for specific children.
         const childAppOptions: AppOptions = {
-          model: this.appOptions.model,
+          model: spawnOptions?.model ?? this.appOptions.model,
           tools: this.appOptions.tools,
           mcpServers: this.appOptions.mcpServers,
-          maxTicks: this.appOptions.maxTicks,
+          maxTicks: spawnOptions?.maxTicks ?? this.appOptions.maxTicks,
           inheritDefaults: this.appOptions.inheritDefaults,
+          environment: spawnOptions?.environment ?? this.appOptions.environment,
         };
 
         const childOptions: SessionOptions = {
@@ -544,15 +560,15 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
 
         // 3. Delegate to child.send()
         const handle = await child.send({
-          ...input,
+          ...resolvedInput,
           props: mergedProps,
         });
 
         // 4. Cleanup on completion
         handle.result
-          .finally(() => {
+          .finally(async () => {
             this._children = this._children.filter((c) => c !== (child as unknown as Session));
-            child.close();
+            await child.close();
           })
           .catch(() => {});
 
@@ -1500,15 +1516,22 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
   // Close & Teardown
   // ════════════════════════════════════════════════════════════════════════
 
-  close(): void {
+  async close(): Promise<void> {
     if (this.isTerminal) return;
 
     this._status = "closed";
 
-    // Close all child sessions
-    for (const child of [...this._children]) {
-      child.close();
+    // Notify execution environment of destroy
+    if (this._environmentInitialized && this.appOptions.environment?.onDestroy) {
+      try {
+        await this.appOptions.environment.onDestroy(this);
+      } catch (err) {
+        this.log.warn({ error: err }, "Environment onDestroy failed");
+      }
     }
+
+    // Close all child sessions
+    await Promise.all(this._children.map((child) => child.close()));
     this._children = [];
 
     this.sessionAbortController.abort("Session closed");
@@ -1529,7 +1552,11 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
 
     // Unmount compiler if it exists
     if (this.compiler) {
-      this.compiler.unmount().catch(() => {});
+      try {
+        await this.compiler.unmount();
+      } catch {
+        // Unmount errors during close are non-fatal
+      }
       this.compiler = null;
     }
 
@@ -1655,7 +1682,7 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
     let stopReason: string | undefined;
     let output: COMInput | undefined;
     const outputs: Record<string, unknown> = {};
-    const responseChunks: string[] = [];
+    let responseText = "";
     const toolExecutor = new ToolExecutor();
 
     this.emitEvent({
@@ -1751,7 +1778,16 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
           throw new AbortError("Execution aborted", signal.reason);
         }
 
-        const modelInput = compiled.modelInput ?? compiled.formatted;
+        let modelInput = compiled.modelInput ?? compiled.formatted;
+
+        // Apply execution environment transformation
+        if (this.appOptions.environment?.prepareModelInput) {
+          modelInput = await this.appOptions.environment.prepareModelInput(
+            modelInput,
+            (compiled.tools ?? []) as ExecutableTool[],
+          );
+        }
+
         const modelStartTime = Date.now();
 
         // Emit model request to DevTools
@@ -1783,18 +1819,12 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
         // Stream model output if supported
         let modelOutput: any;
         if (model.stream) {
-          const streamEvents: StreamEvent[] = [];
           const streamIterable = await model.stream(modelInput);
           for await (const event of streamIterable) {
             if (signal.aborted) {
               throw new AbortError("Execution aborted", signal.reason);
             }
-            streamEvents.push(event as StreamEvent);
             this.emitEvent(event as StreamEvent);
-
-            if (event.type === "content_delta" && "delta" in event) {
-              responseChunks.push((event as any).delta);
-            }
 
             if (event.type === "message" && "message" in event) {
               const messageEvent = event as any;
@@ -1808,25 +1838,8 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
             }
           }
 
-          // Aggregate stream events into final output
           if (!modelOutput) {
-            if (model.processStream) {
-              // Use model's processStream if available
-              modelOutput = await model.processStream(streamEvents);
-            } else if (responseChunks.length > 0) {
-              // Construct from collected chunks
-              const text = responseChunks.join("");
-              modelOutput = {
-                message: {
-                  role: "assistant",
-                  content: [{ type: "text", text }],
-                },
-                stopReason: "stop" as const,
-                raw: { streamed: true },
-              };
-            } else {
-              throw new Error("Streaming completed but no response was received");
-            }
+            throw new Error("Streaming completed but no model output was received");
           }
         } else {
           // Procedure returns ExecutionHandle by default - access .result for actual return value
@@ -1842,8 +1855,7 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
         if (modelOutput?.message) {
           const textContent = modelOutput.message.content?.find((b: any) => b.type === "text");
           if (textContent && "text" in textContent) {
-            responseChunks.length = 0;
-            responseChunks.push(textContent.text);
+            responseText = textContent.text;
           }
         }
 
@@ -2044,7 +2056,7 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
       this._totalUsage.ticks = (this._totalUsage.ticks ?? 0) + (usage.ticks ?? 0);
 
       const resultPayload = {
-        response: responseChunks.join(""),
+        response: responseText,
         outputs,
         usage,
         stopReason,
@@ -2074,7 +2086,10 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
 
       // Auto-persist snapshot after successful execution (fire-and-forget, skip on abort)
       if (this._persistCallback && !this._isAborted) {
-        const snap = this.snapshot();
+        let snap = this.snapshot();
+        if (this.appOptions.environment?.onPersist) {
+          snap = await this.appOptions.environment.onPersist(this, snap);
+        }
         this._persistCallback(snap).catch((err) => {
           this.log.warn({ error: err }, "Auto-persist failed");
         });
@@ -2116,7 +2131,7 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
     }
 
     return {
-      response: responseChunks.join(""),
+      response: responseText,
       outputs,
       usage,
       stopReason,
@@ -2206,9 +2221,22 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
             this.compiler.setDataCache(snap.dataCache);
           }
         }
+
+        // Notify execution environment of restore
+        if (this.appOptions.environment?.onRestore) {
+          await this.appOptions.environment.onRestore(this, this._snapshotForResolve);
+        }
       } finally {
         this._snapshotForResolve = null;
       }
+    }
+
+    // Initialize execution environment (once per session lifecycle)
+    if (!this._environmentInitialized) {
+      if (this.appOptions.environment?.onSessionInit) {
+        await this.appOptions.environment.onSessionInit(this);
+      }
+      this._environmentInitialized = true;
     }
   }
 
@@ -2411,17 +2439,29 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
         continue;
       }
 
-      // Execute tool
+      // Execute tool (optionally wrapped by execution environment)
       try {
-        const result = await executor.processToolWithConfirmation(call, this.ctx!, executableTools);
-        results.push(result.result);
+        const env = this.appOptions.environment;
+        let toolResult: ToolResult;
+
+        if (env?.executeToolCall) {
+          toolResult = await env.executeToolCall(call, tool, async () => {
+            const r = await executor.processToolWithConfirmation(call, this.ctx!, executableTools);
+            return r.result;
+          });
+        } else {
+          const r = await executor.processToolWithConfirmation(call, this.ctx!, executableTools);
+          toolResult = r.result;
+        }
+
+        results.push(toolResult);
         const completedAt = timestamp();
         this.emitEvent({
           type: "tool_result",
-          callId: result.result.toolUseId,
-          name: result.result.name,
-          result: result.result,
-          isError: !result.result.success,
+          callId: toolResult.toolUseId,
+          name: toolResult.name,
+          result: toolResult,
+          isError: !toolResult.success,
           executedBy: "engine",
           startedAt,
           completedAt,

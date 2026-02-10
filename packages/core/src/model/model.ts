@@ -64,9 +64,6 @@ export interface EngineModel<TModelInput = ModelInput, TModelOutput = ModelOutpu
   /** Convert model output to engine response */
   toEngineState?: (output: TModelOutput) => Promise<EngineResponse>;
 
-  /** Aggregate stream events into final output */
-  processStream?: (events: StreamEvent[]) => Promise<TModelOutput>;
-
   /** Transform model input to provider-specific format (for DevTools visibility) */
   getProviderInput?: (input: TModelInput) => Promise<unknown>;
 }

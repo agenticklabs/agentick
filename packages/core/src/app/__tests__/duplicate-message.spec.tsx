@@ -59,7 +59,7 @@ describe("Duplicate Message Prevention", () => {
       expect(isTextBlock(userMessages[0].content[0])).toBe(true);
       expect((userMessages[0].content[0] as TextBlock).text).toBe("Hello world");
 
-      session.close();
+      await session.close();
     });
   });
 
@@ -124,7 +124,7 @@ describe("Duplicate Message Prevention", () => {
       expect(firstCount).toBe(1); // First message appears once
       expect(secondCount).toBe(1); // Second message appears once
 
-      session.close();
+      await session.close();
     });
 
     it("should NOT duplicate assistant messages", async () => {
@@ -194,7 +194,7 @@ describe("Duplicate Message Prevention", () => {
         expect(count).toBe(1);
       }
 
-      session.close();
+      await session.close();
     });
   });
 
@@ -252,7 +252,7 @@ describe("Duplicate Message Prevention", () => {
         expect(count).toBe(1);
       }
 
-      session.close();
+      await session.close();
     });
 
     it("should preserve all messages across 3 exchanges", async () => {
@@ -309,7 +309,7 @@ describe("Duplicate Message Prevention", () => {
       expect(userTexts.filter((t: string) => t === "How are you?").length).toBe(1);
       expect(userTexts.filter((t: string) => t === "Goodbye").length).toBe(1);
 
-      session.close();
+      await session.close();
     });
   });
 });

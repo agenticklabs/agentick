@@ -144,7 +144,7 @@ export class SessionManager {
 
     // Clean up session if active
     if (session.coreSession) {
-      session.coreSession.close();
+      await session.coreSession.close();
       session.coreSession = null;
     }
 
@@ -168,7 +168,7 @@ export class SessionManager {
     session.state.messageCount = 0;
     session.state.lastActivityAt = new Date();
     if (session.coreSession) {
-      session.coreSession.close();
+      await session.coreSession.close();
       session.coreSession = null;
     }
 

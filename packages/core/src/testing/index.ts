@@ -100,6 +100,14 @@ export type {
   MockApp,
 } from "./mock-app";
 
+// Test execution environment
+export { createTestEnvironment } from "./test-environment";
+export type {
+  TestEnvironmentOptions,
+  EnvironmentTracker,
+  TestEnvironmentResult,
+} from "./test-environment";
+
 // Kernel testing primitives (re-exported for convenience)
 export { createTestProcedure } from "@agentick/kernel/testing";
 export type { TestProcedure, TestProcedureOptions } from "@agentick/kernel/testing";

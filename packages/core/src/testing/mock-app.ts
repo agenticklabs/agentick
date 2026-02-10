@@ -391,7 +391,7 @@ export function createMockSession(options: MockSessionOptions = {}): MockSession
 
     submitToolResult() {}
 
-    close() {
+    async close() {
       currentStatus = "closed";
     }
 
@@ -505,7 +505,7 @@ export function createMockApp(options: MockAppOptions = {}): MockApp {
     async close(sessionId: string) {
       const session = sessionMap.get(sessionId);
       if (session) {
-        session.close();
+        await session.close();
         sessionMap.delete(sessionId);
         closedSessions.push(sessionId);
         for (const handler of sessionCloseHandlers) {

@@ -325,6 +325,64 @@ await app.close("test");
 expect(app._closedSessions).toContain("test");
 ```
 
+### createTestEnvironment
+
+Mock `ExecutionEnvironment` with lifecycle call tracking.
+
+```typescript
+import { createTestEnvironment } from "@agentick/core/testing";
+
+// Basic — tracks all lifecycle calls
+const { environment, tracker } = createTestEnvironment();
+const app = createApp(Agent, { model, environment });
+const session = await app.session();
+await session.send({ messages: [...] }).result;
+
+expect(tracker.initCalls).toHaveLength(1);
+expect(tracker.prepareModelInputCalls).toHaveLength(1);
+
+// Intercept tools with static string results
+const { environment, tracker } = createTestEnvironment({
+  interceptTools: { execute: "sandbox result" },
+});
+// When model calls "execute" tool, gets "sandbox result" instead of real execution
+
+// Intercept tools with dynamic function results
+const { environment: env2 } = createTestEnvironment({
+  interceptTools: {
+    execute: (call) => ({
+      id: call.id, toolUseId: call.id, name: call.name,
+      success: true,
+      content: [{ type: "text", text: `ran: ${call.input.code}` }],
+    }),
+  },
+});
+
+// Transform model input
+const { environment } = createTestEnvironment({
+  transformInput: (compiled) => ({ ...compiled, tools: [] }),
+});
+
+// Add data to persist snapshots
+const { environment } = createTestEnvironment({
+  persistData: { _sandbox: { id: "abc" } },
+});
+
+// Reset tracking between tests
+tracker.reset();
+```
+
+#### Tracker Fields
+
+| Field                    | Tracks                              |
+| ------------------------ | ----------------------------------- |
+| `initCalls`              | Session IDs from `onSessionInit`    |
+| `prepareModelInputCalls` | Tool names from `prepareModelInput` |
+| `toolCalls`              | Tool names + intercepted flag       |
+| `persistCalls`           | Session IDs from `onPersist`        |
+| `restoreCalls`           | Session IDs from `onRestore`        |
+| `destroyCalls`           | Session IDs from `onDestroy`        |
+
 ### createMockExecutionHandle
 
 Mock `SessionExecutionHandle` with real `EventBuffer` for streaming.

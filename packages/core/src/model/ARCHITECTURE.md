@@ -127,9 +127,6 @@ interface EngineModel<TModelInput = ModelInput, TModelOutput = ModelOutput> {
 
   /** Convert model output to engine response */
   toEngineState?: (output: TModelOutput) => Promise<EngineResponse>;
-
-  /** Aggregate stream events into final output */
-  processStream?: (events: StreamEvent[]) => Promise<TModelOutput>;
 }
 ```
 
@@ -497,10 +494,7 @@ sequenceDiagram
 
     deactivate Provider
 
-    Note over Engine: Collect chunks for aggregation
-
-    Engine->>Model: processStream(chunks)
-    Model-->>Engine: ModelOutput
+    Note over Engine: Final 'message' event contains complete ModelOutput
 
     deactivate Model
 ```

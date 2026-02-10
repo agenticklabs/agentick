@@ -69,7 +69,7 @@ const result = await session.send.use(loggingMw)({ messages: [...] }).result;
 ```typescript
 session.interrupt(message?, reason?)  // Abort current execution, optionally queue a message
 session.clearAbort()                  // Reset abort flag
-session.close()                       // Close session and all children
+await session.close()                 // Close session and all children (async)
 session.snapshot()                    // Get current state as SessionSnapshot
 session.inspect()                     // Detailed inspection (tick, tools, usage, etc.)
 ```
@@ -116,11 +116,43 @@ const [a, b] = await Promise.all([
 ]);
 ```
 
+### SpawnOptions
+
+The optional third argument overrides inherited structural options:
+
+```typescript
+// Override model and maxTicks for a child
+await session.spawn(
+  SummaryAgent,
+  { messages },
+  {
+    model: cheapModel,
+    maxTicks: 3,
+  },
+);
+
+// Override environment for a specific child
+await session.spawn(
+  CodeAgent,
+  { messages },
+  {
+    environment: sandboxEnvironment,
+  },
+);
+```
+
+| Field         | Type                   | Description                       |
+| ------------- | ---------------------- | --------------------------------- |
+| `model`       | `EngineModel`          | Override the parent's model       |
+| `environment` | `ExecutionEnvironment` | Override the parent's environment |
+| `maxTicks`    | `number`               | Override the parent's max ticks   |
+
 ### Spawn Behavior
 
 - **Self-similar**: Returns `SessionExecutionHandle` — identical to `session.send()`.
 - **Isolation**: Child gets a fresh COM. Parent state does not leak.
 - **Callback isolation**: Parent's lifecycle callbacks (onComplete, onTickStart, etc.) do NOT fire for child executions.
+- **Environment inherited**: Child sessions inherit the parent's `ExecutionEnvironment`. A sandbox or REPL applies to all sub-agents. Use `SpawnOptions` to override.
 - **Abort propagation**: Aborting parent execution → aborts all children.
 - **Close propagation**: Closing parent session → closes all children.
 - **Depth limit**: 10 levels max (throws `Error`).
@@ -156,6 +188,58 @@ Additional callbacks on `AppOptions`:
 | `onAfterRestore`     | After auto-restore                          |
 
 **Important**: Spawned child sessions do NOT inherit lifecycle callbacks. This is intentional — the parent's onComplete handler should not fire when a child agent completes.
+
+## Execution Environment
+
+An `ExecutionEnvironment` controls how compiled context reaches the model and how tool calls execute. Set on `AppOptions.environment`.
+
+```typescript
+const env: ExecutionEnvironment = {
+  name: "repl",
+
+  // Transform compiled input before model call (per tick)
+  prepareModelInput(compiled, tools) {
+    return { ...compiled, tools: [] }; // e.g., remove tool schemas
+  },
+
+  // Wrap individual tool execution (per tool call)
+  async executeToolCall(call, tool, next) {
+    if (call.name === "execute") return sandboxRun(call);
+    return next(); // delegate to normal execution
+  },
+
+  // Lifecycle (once per session)
+  onSessionInit(session) {
+    /* set up sandbox */
+  },
+  onPersist(session, snapshot) {
+    return { ...snapshot /* env state */ };
+  },
+  onRestore(session, snapshot) {
+    /* restore env state */
+  },
+  onDestroy(session) {
+    /* cleanup */
+  },
+};
+
+const app = createApp(MyAgent, { model, environment: env });
+```
+
+All methods are optional. Without an environment, standard model→tool_use behavior applies.
+
+Lifecycle hooks receive a `SessionRef` — a narrow interface exposing only `id`, `status`, `currentTick`, and `snapshot()`. This avoids coupling environments to the full `Session` type.
+
+### Hook Timing
+
+| Hook                | When                               | Frequency |
+| ------------------- | ---------------------------------- | --------- |
+| `onSessionInit`     | First send/render (infra creation) | Once      |
+| `prepareModelInput` | Before each model call             | Per tick  |
+| `executeToolCall`   | For each tool call                 | Per tool  |
+| `onPersist`         | After execution (auto-persist)     | Per send  |
+| `onRestore`         | Session restored from store        | Once      |
+| `onDestroy`         | `session.close()`                  | Once      |
 
 ## Persistence
 

@@ -109,7 +109,7 @@ describe("session.render() handle", () => {
     // Handle should be completed after result resolves
     expect(handle.status).toBe("completed");
 
-    session.close();
+    await session.close();
   });
 
   it("should expose session ID through handle", async () => {
@@ -132,7 +132,7 @@ describe("session.render() handle", () => {
     expect(handle.sessionId).toBe(session.id);
 
     await handle.result;
-    session.close();
+    await session.close();
   });
 
   it("should update tick during execution", async () => {
@@ -156,7 +156,7 @@ describe("session.render() handle", () => {
     expect(handle.currentTick).toBeGreaterThanOrEqual(1);
 
     await handle.result;
-    session.close();
+    await session.close();
   });
 });
 
@@ -283,7 +283,7 @@ describe("session.queue.exec()", () => {
       text: "Queued message",
     });
 
-    session.close();
+    await session.close();
   });
 });
 
@@ -322,7 +322,7 @@ describe("handle.abort()", () => {
       // Expected - abort error
     }
 
-    session.close();
+    await session.close();
   });
 
   it("should allow new tick after abort", async () => {
@@ -349,7 +349,7 @@ describe("handle.abort()", () => {
 
     expect(result.response).toContain("Mock");
 
-    session.close();
+    await session.close();
   });
 });
 
@@ -388,7 +388,7 @@ describe("execution abort signals", () => {
 
     await expect(handle.result).rejects.toBeDefined();
 
-    session.close();
+    await session.close();
   });
 });
 
@@ -429,7 +429,7 @@ describe("SendInput flat fields", () => {
     // Should have been capped at 2, not 10
     expect(tickCount).toBeLessThanOrEqual(2);
 
-    session.close();
+    await session.close();
   });
 
   it("should abort via signal passed inside send()", async () => {
@@ -458,7 +458,7 @@ describe("SendInput flat fields", () => {
 
     await expect(handle.result).rejects.toBeDefined();
 
-    session.close();
+    await session.close();
   });
 
   it("should send with no messages (props-only)", async () => {
@@ -485,7 +485,7 @@ describe("SendInput flat fields", () => {
 
     expect(capturedQuery).toBe("from send");
 
-    session.close();
+    await session.close();
   });
 });
 
@@ -522,7 +522,7 @@ describe("ALS Context Capture", () => {
     await Context.run({ traceId: "test-trace-123", events }, async () => {
       const session = await app.session();
       await session.render({ query: "test" }).result;
-      session.close();
+      await session.close();
     });
 
     // The component should have received the trace ID
@@ -565,7 +565,7 @@ describe("ALS Context Capture", () => {
     // Current (send-time) context should win
     expect(capturedTraceId).toBe("send-trace");
 
-    session.close();
+    await session.close();
   });
 });
 
@@ -615,7 +615,7 @@ describe("State Persistence Across Sends", () => {
     // Third send - should start at 2 (persisted), increment to 3
     await session.render({ query: "Third message" }).result;
 
-    session.close();
+    await session.close();
 
     // With state persistence across sends:
     // First send starts with 0
@@ -661,7 +661,7 @@ describe("State Persistence Across Sends", () => {
     // Third send - ref should still persist
     await session.render({ query: "Third message" }).result;
 
-    session.close();
+    await session.close();
 
     // With reconciliation, the ref should accumulate across all sends
     // Without fix (new session each time): would be [1, 1, 1] or similar
@@ -704,7 +704,7 @@ describe("State Persistence Across Sends", () => {
     // Third send - should NOT remount
     await session.render({ query: "Third" }).result;
 
-    session.close();
+    await session.close();
 
     // Component should only mount once across all sends
     expect(mountCount).toBe(1);
@@ -758,7 +758,7 @@ describe("render() hot update when running", () => {
     // If recompilation happened, we'd see "Updated" in later renders
     // But the exact behavior depends on timing
 
-    session.close();
+    await session.close();
   });
 
   it("should not throw when render() called while running", async () => {
@@ -786,7 +786,7 @@ describe("render() hot update when running", () => {
     await secondHandle.result;
 
     await firstHandle.result;
-    session.close();
+    await session.close();
   });
 });
 
@@ -841,7 +841,7 @@ describe("useOnMessage integration", () => {
       },
     });
 
-    session.close();
+    await session.close();
   });
 
   it("should call useOnMessage callback when sendMessage is called while IDLE", async () => {
@@ -906,7 +906,7 @@ describe("useOnMessage integration", () => {
       },
     });
 
-    session.close();
+    await session.close();
   });
 
   it("should execute send on a fresh session without prior props", async () => {
@@ -942,7 +942,7 @@ describe("useOnMessage integration", () => {
     expect(result.response).toBe("Mock response");
     expect(events.some((event) => event.type === "result")).toBe(true);
 
-    session.close();
+    await session.close();
   });
 
   it("should include queued user messages in useConversationHistory on first tick", async () => {
@@ -986,7 +986,7 @@ describe("useOnMessage integration", () => {
       content: [{ type: "text", text: "Hello from send" }],
     });
 
-    session.close();
+    await session.close();
   });
 
   it("should receive message with id and timestamp", async () => {
@@ -1032,7 +1032,7 @@ describe("useOnMessage integration", () => {
     expect(receivedMessage.timestamp).toBeDefined();
     expect(typeof receivedMessage.timestamp).toBe("number");
 
-    session.close();
+    await session.close();
   });
 
   it("should not call useOnMessage when queueMessage is called before first tick", async () => {
@@ -1074,7 +1074,7 @@ describe("useOnMessage integration", () => {
     // (the message would be available via useQueuedMessages in the next tick)
     expect(messagesReceived.length).toBe(0);
 
-    session.close();
+    await session.close();
   });
 });
 
@@ -1135,7 +1135,7 @@ describe("useQueuedMessages integration", () => {
       },
     });
 
-    session.close();
+    await session.close();
   });
 
   it("should clear queued messages after they are consumed in a tick", async () => {
@@ -1185,7 +1185,7 @@ describe("useQueuedMessages integration", () => {
     expect(tick2Results.some((r) => r.count > 0)).toBe(true);
     expect(tick3Results.every((r) => r.count === 0)).toBe(true);
 
-    session.close();
+    await session.close();
   });
 
   it("should make messages queued DURING tick N available in tick N+1", async () => {
@@ -1230,7 +1230,7 @@ describe("useQueuedMessages integration", () => {
     const tick2Results = queuedMessagesPerTick.filter((r) => r.tick === 2);
     expect(tick2Results.some((r) => r.messages.length > 0)).toBe(true);
 
-    session.close();
+    await session.close();
   });
 
   it("full flow: queueMessage triggers onMessage AND useQueuedMessages in next tick", async () => {
@@ -1302,7 +1302,7 @@ describe("useQueuedMessages integration", () => {
       },
     });
 
-    session.close();
+    await session.close();
   });
 });
 
@@ -1339,7 +1339,7 @@ describe("session.inspect()", () => {
     expect(info.totalUsage.totalTokens).toBe(0);
     expect(info.tickCount).toBe(0);
 
-    session.close();
+    await session.close();
   });
 
   it("should return session state after a tick", async () => {
@@ -1368,7 +1368,7 @@ describe("session.inspect()", () => {
     expect(info.totalUsage.totalTokens).toBeGreaterThan(0);
     expect(info.tickCount).toBeGreaterThan(0);
 
-    session.close();
+    await session.close();
   });
 
   it("should track queued messages", async () => {
@@ -1396,7 +1396,7 @@ describe("session.inspect()", () => {
     expect(info.queuedMessages.length).toBe(1);
     expect(info.queuedMessages[0].content).toEqual([{ type: "text", text: "Queued!" }]);
 
-    session.close();
+    await session.close();
   });
 
   it("should return component and hook summaries structure", async () => {
@@ -1426,7 +1426,7 @@ describe("session.inspect()", () => {
     expect(typeof info.hooks.count).toBe("number");
     expect(typeof info.hooks.byType).toBe("object");
 
-    session.close();
+    await session.close();
   });
 });
 
@@ -1454,7 +1454,7 @@ describe("tick snapshots", () => {
     const recording = session.getRecording();
     expect(recording).toBeNull();
 
-    session.close();
+    await session.close();
   });
 
   it("should record snapshots when recording mode is set via options", async () => {
@@ -1478,7 +1478,7 @@ describe("tick snapshots", () => {
     expect(recording!.snapshots.length).toBe(1);
     expect(recording!.sessionId).toBe(session.id);
 
-    session.close();
+    await session.close();
   });
 
   it("should record snapshots when started via startRecording()", async () => {
@@ -1504,7 +1504,7 @@ describe("tick snapshots", () => {
     expect(recording).not.toBeNull();
     expect(recording!.snapshots.length).toBe(2);
 
-    session.close();
+    await session.close();
   });
 
   it("should capture tick metadata in snapshot", async () => {
@@ -1536,7 +1536,7 @@ describe("tick snapshots", () => {
     expect(snapshot!.execution.phase).toBe("complete");
     expect(typeof snapshot!.execution.shouldContinue).toBe("boolean");
 
-    session.close();
+    await session.close();
   });
 
   it("should capture model input/output in snapshot", async () => {
@@ -1565,7 +1565,7 @@ describe("tick snapshots", () => {
     expect(snapshot!.model.output.content.length).toBeGreaterThan(0);
     expect(snapshot!.model.latency).toBeGreaterThanOrEqual(0);
 
-    session.close();
+    await session.close();
   });
 
   it("should capture fiber summary in snapshot", async () => {
@@ -1598,7 +1598,7 @@ describe("tick snapshots", () => {
     // The tree serialization depends on internal fiber access
     expect(snapshot!.fiber.tree === null || typeof snapshot!.fiber.tree === "object").toBe(true);
 
-    session.close();
+    await session.close();
   });
 
   it("should not serialize fiber tree in lightweight mode", async () => {
@@ -1627,7 +1627,7 @@ describe("tick snapshots", () => {
     expect(snapshot!.fiber.summary).toBeDefined();
     expect(typeof snapshot!.fiber.summary.componentCount).toBe("number");
 
-    session.close();
+    await session.close();
   });
 
   it("should stop recording when stopRecording() is called", async () => {
@@ -1656,7 +1656,7 @@ describe("tick snapshots", () => {
     expect(recording!.snapshots.length).toBe(1);
     expect(recording!.snapshots[0].tick).toBe(1);
 
-    session.close();
+    await session.close();
   });
 
   it("should update recording summary", async () => {
@@ -1684,7 +1684,7 @@ describe("tick snapshots", () => {
     expect(typeof recording!.summary.totalDuration).toBe("number");
     expect(recording!.summary.totalDuration).toBeGreaterThanOrEqual(0);
 
-    session.close();
+    await session.close();
   });
 });
 

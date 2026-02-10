@@ -12,11 +12,11 @@
  * 5. fromEngineState() extracts messages for the model adapter
  */
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { createApp, Model, System, Timeline, Message } from "../../index";
 import { useConversationHistory, useQueuedMessages, useTickState } from "../../hooks";
 import type { COMTimelineEntry } from "../../com/types";
-import type { MessageRoles } from "@agentick/shared";
+import type { MessageRoles, ModelMessage } from "@agentick/shared";
 import { createTestAdapter } from "../../testing";
 
 // Helper to create a mock model that captures input using the shared test utility
@@ -70,7 +70,7 @@ describe("Message Flow Integration", () => {
       const userPending = _capturedPending.find((m) => m.type === "message");
       expect(userPending).toBeDefined();
 
-      session.close();
+      await session.close();
     });
 
     it("should have empty conversation history on first tick (user message is queued, not in history)", async () => {
@@ -127,7 +127,7 @@ describe("Message Flow Integration", () => {
       const userQueued = queuedDuringRender.find((m) => m.type === "message");
       expect(userQueued).toBeDefined();
 
-      session.close();
+      await session.close();
     });
 
     it("should include user message in conversation history on SECOND tick", async () => {
@@ -176,7 +176,7 @@ describe("Message Flow Integration", () => {
       const userEntry = historyDuringSecondTick.find((e) => e.message?.role === "user");
       expect(userEntry).toBeDefined();
 
-      session.close();
+      await session.close();
     });
 
     it("should pass user message to model via fromEngineState", async () => {
@@ -213,13 +213,15 @@ describe("Message Flow Integration", () => {
 
       const lastInput = capturedInputs[capturedInputs.length - 1];
       // ModelInput has `messages` array, not `timeline`
-      const userMessages = lastInput.messages.filter((m: any) => m.role === "user");
+      const userMessages = (lastInput.messages as ModelMessage[]).filter(
+        (m: any) => m.role === "user",
+      );
       expect(userMessages.length).toBeGreaterThanOrEqual(1);
 
       const userMessage = userMessages[0];
       expect(userMessage.content).toEqual([{ type: "text", text: "Model should see this" }]);
 
-      session.close();
+      await session.close();
     });
   });
 
@@ -274,7 +276,7 @@ describe("Message Flow Integration", () => {
       // Check that we captured history multiple times (multiple renders)
       expect(allHistoryCaptures.length).toBeGreaterThan(1);
 
-      session.close();
+      await session.close();
     });
   });
 
@@ -331,7 +333,7 @@ describe("Message Flow Integration", () => {
       // (the second tick's message is queued, not in history yet)
       expect(userMessages.length).toBe(1);
 
-      session.close();
+      await session.close();
     });
   });
 
@@ -382,7 +384,7 @@ describe("Message Flow Integration", () => {
       expect(userEntry.message.role).toBe("user");
       expect(userEntry.message.content).toEqual([{ type: "text", text: "Test" }]);
 
-      session.close();
+      await session.close();
     });
   });
 
@@ -436,7 +438,7 @@ describe("Message Flow Integration", () => {
       );
       expect(systemInTimeline.length).toBe(0);
 
-      session.close();
+      await session.close();
     });
   });
 });
@@ -478,7 +480,7 @@ describe("Session Lifecycle", () => {
       // createTestAdapter exposes mocks via .mocks property
       expect(mockModel.model.mocks.executeStream).toHaveBeenCalled();
 
-      session.close();
+      await session.close();
     });
   });
 
@@ -514,7 +516,7 @@ describe("Session Lifecycle", () => {
       // Should have rendered more times for the second tick
       expect(renderCount).toBeGreaterThan(firstRenderCount);
 
-      session.close();
+      await session.close();
     });
   });
 });

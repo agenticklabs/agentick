@@ -18,7 +18,7 @@ import { System, User } from "../../jsx/components/messages";
 import { Model, Section } from "../../jsx/components/primitives";
 import { MemorySessionStore } from "../session-store";
 import { SqliteSessionStore, isSqliteAvailable, createSessionStore } from "../sqlite-session-store";
-import type { SessionSnapshot } from "../types";
+import type { ResolveContext, SessionSnapshot } from "../types";
 import { Timeline } from "../../jsx/components/timeline";
 import { useData } from "../../hooks/data";
 import { useComState } from "../../hooks/com-state";
@@ -216,7 +216,7 @@ describe("Auto-persist", () => {
     expect(saved?.version).toBe("1.0");
     expect(saved?.sessionId).toBe("test-session");
 
-    session.close();
+    await session.close();
   });
 
   it("should update snapshot in store on subsequent executions", async () => {
@@ -257,7 +257,7 @@ describe("Auto-persist", () => {
     // Timeline should grow as more messages are exchanged
     expect(timeline2Length).toBeGreaterThan(timeline1Length);
 
-    session.close();
+    await session.close();
   });
 
   it("should not persist when no store configured", async () => {
@@ -277,7 +277,7 @@ describe("Auto-persist", () => {
       messages: [{ role: "user", content: [{ type: "text", text: "Hello" }] }],
     }).result;
 
-    session.close();
+    await session.close();
   });
 });
 
@@ -312,7 +312,7 @@ describe("Auto-restore", () => {
     expect(await store.has("test-session")).toBe(true);
 
     // Close the session (removes from memory but snapshot stays in store)
-    session1.close();
+    await session1.close();
     expect(app.has("test-session")).toBe(false);
 
     // Restore by requesting same session ID
@@ -325,7 +325,7 @@ describe("Auto-restore", () => {
       messages: [{ role: "user", content: [{ type: "text", text: "Continue" }] }],
     }).result;
 
-    session2.close();
+    await session2.close();
   });
 
   it("should keep snapshot in store after restoring (store is cache)", async () => {
@@ -350,7 +350,7 @@ describe("Auto-restore", () => {
     }).result;
     await new Promise((r) => setTimeout(r, 50));
 
-    session1.close();
+    await session1.close();
 
     // Restore
     const session2 = await app.session("test-session");
@@ -358,7 +358,7 @@ describe("Auto-restore", () => {
     // Snapshot should still be in store (store is a cache, not a transfer)
     expect(await store.has("test-session")).toBe(true);
 
-    session2.close();
+    await session2.close();
   });
 });
 
@@ -396,7 +396,7 @@ describe("Persistence lifecycle hooks", () => {
       expect.objectContaining({ version: "1.0" }),
     );
 
-    session.close();
+    await session.close();
   });
 
   it("should call onBeforeRestore and onAfterRestore on restore", async () => {
@@ -424,7 +424,7 @@ describe("Persistence lifecycle hooks", () => {
       messages: [{ role: "user", content: [{ type: "text", text: "Hello" }] }],
     }).result;
     await new Promise((r) => setTimeout(r, 50));
-    session1.close();
+    await session1.close();
 
     // Restore from store
     const session2 = await app.session("test-session");
@@ -441,7 +441,7 @@ describe("Persistence lifecycle hooks", () => {
       expect.objectContaining({ version: "1.0" }),
     );
 
-    session2.close();
+    await session2.close();
   });
 
   it("should cancel restore when onBeforeRestore returns false", async () => {
@@ -478,7 +478,7 @@ describe("Persistence lifecycle hooks", () => {
     const snapshot = session.snapshot();
     expect(snapshot.tick).toBe(1);
 
-    session.close();
+    await session.close();
   });
 });
 
@@ -591,7 +591,7 @@ describe("Timeline ownership", () => {
     // Timeline should grow across ticks
     expect(timelineAfterTick2.length).toBeGreaterThan(timelineAfterTick1.length);
 
-    session.close();
+    await session.close();
   });
 
   it("should trim timeline when maxTimelineEntries is exceeded", async () => {
@@ -622,7 +622,7 @@ describe("Timeline ownership", () => {
     const timeline = snapshot.timeline!;
     expect(timeline.length).toBeLessThanOrEqual(4);
 
-    session.close();
+    await session.close();
   });
 
   it("should provide useTimeline with session history", async () => {
@@ -653,7 +653,7 @@ describe("Timeline ownership", () => {
     const snap = session.snapshot();
     expect(snap.timeline!.length).toBeGreaterThan(0);
 
-    session.close();
+    await session.close();
   });
 });
 
@@ -863,7 +863,7 @@ describe("App with SQLite store", () => {
     // Session should still be in memory
     expect(app.has("test-session")).toBe(true);
 
-    session.close();
+    await session.close();
   });
 
   it("should accept store as config object", async () => {
@@ -888,7 +888,7 @@ describe("App with SQLite store", () => {
       messages: [{ role: "user", content: [{ type: "text", text: "Hello" }] }],
     }).result;
 
-    session.close();
+    await session.close();
   });
 });
 
@@ -904,7 +904,7 @@ describe("Persist/restore state preservation", () => {
 
     const Agent = () => {
       const counter = useComState("counter", 42);
-      const user = useData("user", fetchUser);
+      const user = useData<any>("user", fetchUser);
 
       return (
         <>
@@ -935,7 +935,7 @@ describe("Persist/restore state preservation", () => {
 
     // Wait for auto-persist then close (evict from memory)
     await new Promise((r) => setTimeout(r, 50));
-    session.close();
+    await session.close();
     expect(app.has("test-session")).toBe(false);
 
     // Restore by requesting the same session ID
@@ -954,7 +954,7 @@ describe("Persist/restore state preservation", () => {
     // fetchUser should have been called only once (initial), not on restoration
     expect(fetchUser).toHaveBeenCalledTimes(1);
 
-    restored.close();
+    await restored.close();
   });
 
   it("should not persist useData entries with persist: false", async () => {
@@ -994,7 +994,7 @@ describe("Persist/restore state preservation", () => {
 
     // Persist and close
     await new Promise((r) => setTimeout(r, 50));
-    session.close();
+    await session.close();
 
     // Restore
     const restored = await app.session("test-session");
@@ -1012,7 +1012,7 @@ describe("Persist/restore state preservation", () => {
     expect(fetchSmall).not.toHaveBeenCalled();
     expect(fetchBig).toHaveBeenCalledTimes(1);
 
-    restored.close();
+    await restored.close();
   });
 
   it("should not persist useComState entries with persist: false", async () => {
@@ -1047,7 +1047,7 @@ describe("Persist/restore state preservation", () => {
     expect(snapshot.comState).toHaveProperty("saved", "keep-me");
     expect(snapshot.comState).not.toHaveProperty("transient");
 
-    session.close();
+    await session.close();
   });
 
   it("should snapshot comState and dataCache as empty objects for fresh sessions", async () => {
@@ -1067,7 +1067,7 @@ describe("Persist/restore state preservation", () => {
     expect(snapshot.comState).toEqual({});
     expect(snapshot.dataCache).toEqual({});
 
-    session.close();
+    await session.close();
   });
 
   it("should survive JSON roundtrip (simulates real store serialization)", async () => {
@@ -1108,7 +1108,7 @@ describe("Persist/restore state preservation", () => {
     expect(roundtripped.tick).toBe(snapshot.tick);
     expect(roundtripped.version).toBe("1.0");
 
-    session.close();
+    await session.close();
   });
 
   it("should restore comState values readable by hooks (not just re-initialized)", async () => {
@@ -1151,7 +1151,7 @@ describe("Persist/restore state preservation", () => {
       comState: { ...snapshot.comState, counter: 99 },
     };
     await store.save("test-session-modified", modifiedSnapshot);
-    session.close();
+    await session.close();
 
     // Restore from the modified snapshot
     const restored = await app.session("test-session-modified");
@@ -1163,7 +1163,7 @@ describe("Persist/restore state preservation", () => {
     // The hook should read 99 from restored COM state, NOT re-initialize to 0
     expect(capturedValue).toBe(99);
 
-    restored.close();
+    await restored.close();
   });
 
   it("should survive double persist/restore cycle", async () => {
@@ -1173,7 +1173,7 @@ describe("Persist/restore state preservation", () => {
 
     const Agent = () => {
       const mode = useComState("mode", "auto");
-      const config = useData("config", fetchConfig);
+      const config = useData<any>("config", fetchConfig);
 
       return (
         <>
@@ -1196,7 +1196,7 @@ describe("Persist/restore state preservation", () => {
     } as any);
     await h1.result;
     await new Promise((r) => setTimeout(r, 50));
-    s1.close();
+    await s1.close();
 
     // Cycle 2: restore → render → persist → close
     const s2 = await app.session("test-session");
@@ -1205,7 +1205,7 @@ describe("Persist/restore state preservation", () => {
     } as any);
     await h2.result;
     await new Promise((r) => setTimeout(r, 50));
-    s2.close();
+    await s2.close();
 
     // Cycle 3: restore → render — should still work
     const s3 = await app.session("test-session");
@@ -1223,7 +1223,7 @@ describe("Persist/restore state preservation", () => {
     expect(finalSnapshot.comState).toHaveProperty("mode", "auto");
     expect(finalSnapshot.dataCache).toHaveProperty("config");
 
-    s3.close();
+    await s3.close();
   });
 
   it("should handle second render on restored session (reuse path)", async () => {
@@ -1232,7 +1232,7 @@ describe("Persist/restore state preservation", () => {
     const fetchItems = vi.fn().mockResolvedValue(["a", "b", "c"]);
 
     const Agent = () => {
-      const items = useData("items", fetchItems);
+      const items = useData<any[]>("items", fetchItems);
 
       return (
         <>
@@ -1255,7 +1255,7 @@ describe("Persist/restore state preservation", () => {
     } as any);
     await h1.result;
     await new Promise((r) => setTimeout(r, 50));
-    s1.close();
+    await s1.close();
 
     // Restore
     const s2 = await app.session("test-session");
@@ -1277,7 +1277,7 @@ describe("Persist/restore state preservation", () => {
     // Data cache should still be intact through the reuse path
     expect(fetchItems).not.toHaveBeenCalled();
 
-    s2.close();
+    await s2.close();
   });
 });
 
@@ -1313,7 +1313,7 @@ describe("Resolve (Layer 2)", () => {
       messages: [{ role: "user", content: [{ type: "text", text: "Hello" }] }],
     }).result;
     await new Promise((r) => setTimeout(r, 50));
-    s1.close();
+    await s1.close();
 
     // Restore
     const s2 = await app.session("test-resolve");
@@ -1322,7 +1322,7 @@ describe("Resolve (Layer 2)", () => {
     }).result;
 
     expect(capturedGreeting).toBe("hello");
-    s2.close();
+    await s2.close();
   });
 
   it("should resolve function form and provide via useResolved", async () => {
@@ -1353,7 +1353,7 @@ describe("Resolve (Layer 2)", () => {
     }).result;
     await new Promise((r) => setTimeout(r, 50));
     const snap = await store.load("test-resolve-fn");
-    s1.close();
+    await s1.close();
 
     // Restore
     const s2 = await app.session("test-resolve-fn");
@@ -1362,7 +1362,7 @@ describe("Resolve (Layer 2)", () => {
     }).result;
 
     expect(capturedTick).toBe(snap!.tick);
-    s2.close();
+    await s2.close();
   });
 
   it("should NOT auto-apply comState when resolve is set", async () => {
@@ -1407,7 +1407,7 @@ describe("Resolve (Layer 2)", () => {
 
     // counter should be 0 (default), NOT 42 (from snapshot)
     expect(capturedCounter).toBe(0);
-    s2.close();
+    await s2.close();
   });
 
   it("should provide snapshot in resolve context", async () => {
@@ -1428,7 +1428,7 @@ describe("Resolve (Layer 2)", () => {
 
     const app = createApp(Agent, {
       sessions: { store },
-      resolve: { snap: (ctx) => ctx.snapshot },
+      resolve: { snap: (ctx: ResolveContext) => ctx.snapshot },
     });
 
     // Manually save a snapshot
@@ -1452,7 +1452,7 @@ describe("Resolve (Layer 2)", () => {
     expect(capturedSnap).toBeDefined();
     expect(capturedSnap!.tick).toBe(7);
     expect(capturedSnap!.comState).toEqual({ key: "val" });
-    s2.close();
+    await s2.close();
   });
 });
 
@@ -1493,7 +1493,7 @@ describe("Timeline mutation (useTimeline)", () => {
     expect(snap.timeline).toHaveLength(1);
     expect(snap.timeline![0].message?.content).toEqual([{ type: "text", text: "injected" }]);
 
-    session.close();
+    await session.close();
   });
 
   it("should transform timeline via update()", async () => {
@@ -1524,7 +1524,7 @@ describe("Timeline mutation (useTimeline)", () => {
     const snap = session.snapshot();
     expect(snap.timeline).toHaveLength(1);
 
-    session.close();
+    await session.close();
   });
 });
 
@@ -1568,7 +1568,7 @@ describe("Persistence error handling", () => {
       messages: [{ role: "user", content: [{ type: "text", text: "Continue" }] }],
     }).result;
 
-    session.close();
+    await session.close();
   });
 
   it("should propagate resolve function errors", async () => {
@@ -1614,7 +1614,7 @@ describe("Persistence error handling", () => {
       }).result,
     ).rejects.toThrow(/resolve\["value"\] failed: boom/);
 
-    session.close();
+    await session.close();
   });
 });
 
@@ -1665,6 +1665,6 @@ describe("maxTimelineEntries trimming", () => {
     );
     expect(hasMessage0).toBe(false);
 
-    session.close();
+    await session.close();
   });
 });

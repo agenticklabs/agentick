@@ -525,7 +525,7 @@ for await (const event of session.send({ messages: [msg("Another one")] })) {
   if (event.type === "content_delta") process.stdout.write(event.delta);
 }
 
-session.close();
+await session.close();
 ```
 
 Sessions are long-lived conversation contexts. Each `send()` creates an **execution** (one user message → model response cycle). Each model API call within an execution is a **tick**. Multi-tick executions happen automatically with tool use.
@@ -559,6 +559,48 @@ function AdaptiveAgent({ task }: { task: string }) {
     </>
   );
 }
+```
+
+## Execution Environments
+
+The context window is JSX. But what _consumes_ that context — and how tool calls _execute_ — is pluggable.
+
+An `ExecutionEnvironment` is a swappable backend that sits between the compiled context and execution. It transforms what the model sees, intercepts how tools run, and manages its own lifecycle state. Your agent code doesn't change — the environment changes the execution model underneath it.
+
+```tsx
+import { type ExecutionEnvironment } from "@agentick/core";
+
+const repl: ExecutionEnvironment = {
+  name: "repl",
+
+  // The model sees command descriptions instead of tool schemas
+  prepareModelInput(compiled, tools) {
+    return { ...compiled, tools: [executeTool] };
+  },
+
+  // "execute" calls go to a sandbox; everything else runs normally
+  async executeToolCall(call, tool, next) {
+    if (call.name === "execute") return sandbox.run(call.input.code);
+    return next();
+  },
+
+  onSessionInit(session) {
+    sandbox.create(session.id);
+  },
+  onDestroy(session) {
+    sandbox.destroy(session.id);
+  },
+};
+
+const app = createApp(Agent, { model, environment: repl });
+```
+
+Same agent, same JSX, different execution model. Build once — run against standard tool_use in production, a sandboxed REPL for code execution, a human-approval gateway for sensitive operations.
+
+All hooks are optional. Without an environment, standard model → tool_use behavior applies. Environments are inherited by spawned child sessions — override per-child via `SpawnOptions`:
+
+```tsx
+await session.spawn(CodeAgent, { messages }, { environment: sandboxEnv });
 ```
 
 ## Testing
@@ -626,6 +668,7 @@ adapter.stream([
 | `createMockApp()`             | Mock app for client/transport tests.                  |
 | `createMockSession()`         | Mock session with send/close/abort.                   |
 | `createMockExecutionHandle()` | Mock execution handle (async iterable + result).      |
+| `createTestEnvironment()`     | Mock execution environment with call tracking.        |
 | `createMockCom()`             | Mock COM for hook tests.                              |
 | `createMockTickState()`       | Mock tick state.                                      |
 | `createMockTickResult()`      | Mock tick result for `useOnTickEnd` tests.            |

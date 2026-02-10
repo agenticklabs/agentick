@@ -29,19 +29,20 @@ README content: Purpose, Usage examples, API reference, Patterns.
 
 The framework provides **building blocks**, not opinions.
 
-| Primitive       | Purpose                                                            |
-| --------------- | ------------------------------------------------------------------ |
-| `<Timeline>`    | Conversation history (IS the conversation — filter/compact/render) |
-| `<Tool>`        | Function the model can call                                        |
-| `<Section>`     | Content rendered to model context                                  |
-| `<Message>`     | Message added to timeline                                          |
-| Signals/hooks   | Reactive state management                                          |
-| Channels        | Real-time sync between session and UI                              |
-| `knob()`        | Config-level knob descriptor (detected by `isKnob()`)              |
-| `useKnob()`     | Model-visible, model-settable reactive state                       |
-| `<Knobs />`     | Knob section + set_knob tool (default, render prop, or provider)   |
-| `useTimeline()` | Direct read/write access to session timeline                       |
-| `useResolved()` | Access resolve data on session restore (Layer 2)                   |
+| Primitive            | Purpose                                                            |
+| -------------------- | ------------------------------------------------------------------ |
+| `<Timeline>`         | Conversation history (IS the conversation — filter/compact/render) |
+| `<Tool>`             | Function the model can call                                        |
+| `<Section>`          | Content rendered to model context                                  |
+| `<Message>`          | Message added to timeline                                          |
+| Signals/hooks        | Reactive state management                                          |
+| Channels             | Real-time sync between session and UI                              |
+| `knob()`             | Config-level knob descriptor (detected by `isKnob()`)              |
+| `useKnob()`          | Model-visible, model-settable reactive state                       |
+| `<Knobs />`          | Knob section + set_knob tool (default, render prop, or provider)   |
+| `useTimeline()`      | Direct read/write access to session timeline                       |
+| `useResolved()`      | Access resolve data on session restore (Layer 2)                   |
+| ExecutionEnvironment | Controls how compiled context reaches model and how tools execute  |
 
 #### Semantic Components (`packages/core/src/jsx/components/semantic.tsx`)
 
@@ -159,6 +160,32 @@ Session
 │   ├── Tick 1 → tool_use (calculator)
 │   └── Tick 2 → final response
 └── Execution 3 ...
+```
+
+### Execution Environment
+
+An `ExecutionEnvironment` controls how compiled context is consumed and how tool calls execute. It's an optional `AppOptions` field — when omitted, the default behavior applies (model calls tools via tool_use protocol).
+
+```typescript
+const env: ExecutionEnvironment = {
+  name: "repl",
+  prepareModelInput(compiled, tools) { ... },  // Transform before model call
+  executeToolCall(call, tool, next) { ... },    // Wrap tool execution
+  onSessionInit(session) { ... },               // Once per session lifecycle
+  onPersist(session, snapshot) { ... },         // Augment snapshot
+  onRestore(session, snapshot) { ... },         // Restore environment state
+  onDestroy(session) { ... },                   // Clean up resources
+};
+
+const app = createApp(MyAgent, { model, environment: env });
+```
+
+All methods are optional. The `prepareModelInput` hook runs per-tick, `executeToolCall` runs per tool call, and lifecycle hooks run at session boundaries. Lifecycle hooks receive `SessionRef` (narrow: `id`, `status`, `currentTick`, `snapshot()`) — not the full `Session`.
+
+Environments are inherited by spawned children. Use `SpawnOptions` (3rd arg to `session.spawn()`) to override:
+
+```typescript
+await session.spawn(Agent, { messages }, { environment: sandboxEnv, model: cheapModel });
 ```
 
 ### React-like Reconciler

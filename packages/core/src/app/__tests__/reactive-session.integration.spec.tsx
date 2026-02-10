@@ -94,7 +94,7 @@ describe("Reactive Session Integration", () => {
       // Should have triggered reconciliation
       expect(reconcileEvents.length).toBeGreaterThan(0);
 
-      session.close();
+      await session.close();
     });
 
     it("should batch multiple state changes into single reconciliation", async () => {
@@ -139,7 +139,7 @@ describe("Reactive Session Integration", () => {
       // (exact number depends on microtask timing, but should be less than 3)
       expect(reconcileEvents.length).toBeLessThanOrEqual(2);
 
-      session.close();
+      await session.close();
     });
   });
 
@@ -184,7 +184,7 @@ describe("Reactive Session Integration", () => {
       // Should have triggered reconciliation
       expect(reconcileEvents.length).toBeGreaterThan(0);
 
-      session.close();
+      await session.close();
     });
   });
 
@@ -235,7 +235,7 @@ describe("Reactive Session Integration", () => {
       // Effect should have run
       expect(effectRan).toBe(true);
 
-      session.close();
+      await session.close();
     });
   });
 
@@ -281,7 +281,7 @@ describe("Reactive Session Integration", () => {
 
       expect(renderHistory).toContain(2);
 
-      session.close();
+      await session.close();
     });
 
     it("should maintain component identity across reconciliations", async () => {
@@ -328,7 +328,7 @@ describe("Reactive Session Integration", () => {
       // Should still only have one mount
       expect(mountLog).toEqual(["mounted"]);
 
-      session.close();
+      await session.close();
     });
   });
 
@@ -373,7 +373,7 @@ describe("Reactive Session Integration", () => {
       // Effect should have run with new value
       expect(effectLog).toContain(1);
 
-      session.close();
+      await session.close();
     });
   });
 
@@ -427,7 +427,7 @@ describe("Reactive Session Integration", () => {
       const lastContent = JSON.stringify(lastInput);
       expect(lastContent).toContain("updated");
 
-      session.close();
+      await session.close();
     });
 
     it("should handle useState updates across reconciliations", async () => {
@@ -465,7 +465,7 @@ describe("Reactive Session Integration", () => {
       // Should have reconciled with new state
       expect(renderHistory).toContain(1);
 
-      session.close();
+      await session.close();
     });
   });
 
@@ -507,7 +507,7 @@ describe("Reactive Session Integration", () => {
       // Final value should be correct
       expect(signalRef!()).toBe(99);
 
-      session.close();
+      await session.close();
     });
 
     it("should not reconcile after session is closed", async () => {
@@ -541,7 +541,7 @@ describe("Reactive Session Integration", () => {
       await session.render({}).result;
 
       // Close session
-      session.close();
+      await session.close();
 
       // Try to change state
       try {
@@ -597,7 +597,7 @@ describe("Reactive Session Integration", () => {
       expect(handle.status).toBe("completed");
       expect(modelInputs.length).toBeGreaterThanOrEqual(1);
 
-      session.close();
+      await session.close();
     });
 
     it("should queue messages and process them in tick", async () => {
@@ -636,7 +636,7 @@ describe("Reactive Session Integration", () => {
       // The message should have triggered another model call
       expect(modelInputs.length).toBeGreaterThan(countAfterFirstTick);
 
-      session.close();
+      await session.close();
     });
 
     it("should return same handle when send() called during running tick", async () => {
@@ -674,7 +674,7 @@ describe("Reactive Session Integration", () => {
 
       await handle1;
 
-      session.close();
+      await session.close();
     });
 
     it("should work with state changes between send() calls", async () => {
@@ -724,7 +724,7 @@ describe("Reactive Session Integration", () => {
       const content = JSON.stringify(lastInput);
       expect(content).toContain("active");
 
-      session.close();
+      await session.close();
     });
   });
 });

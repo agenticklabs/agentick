@@ -139,10 +139,10 @@ const sessionsToCleanup: Set<Session<any>> = new Set();
  * });
  * ```
  */
-export function cleanup(): void {
+export async function cleanup(): Promise<void> {
   for (const session of sessionsToCleanup) {
     try {
-      session.close();
+      await session.close();
     } catch {
       // Ignore errors during cleanup
     }
@@ -304,8 +304,8 @@ export async function renderAgent<P extends Record<string, unknown> = Record<str
   };
 
   // Unmount function
-  const unmount = () => {
-    session.close();
+  const unmount = async () => {
+    await session.close();
     sessionsToCleanup.delete(session);
   };
 

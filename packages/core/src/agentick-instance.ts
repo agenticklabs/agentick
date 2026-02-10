@@ -220,11 +220,11 @@ class SessionRegistry<P> {
    * Evict a session from memory (close it).
    * The snapshot remains in store (if any) for future restore.
    */
-  evict(sessionId: string): void {
-    this.remove(sessionId, true);
+  async evict(sessionId: string): Promise<void> {
+    await this.remove(sessionId, true);
   }
 
-  remove(sessionId: string, closeSession = true): void {
+  async remove(sessionId: string, closeSession = true): Promise<void> {
     const session = this.sessions.get(sessionId);
     if (!session) return;
 
@@ -232,7 +232,7 @@ class SessionRegistry<P> {
     this.lastActivity.delete(sessionId);
 
     if (closeSession) {
-      session.close();
+      await session.close();
     }
 
     this.options.onSessionClose?.(sessionId);
@@ -278,20 +278,18 @@ class SessionRegistry<P> {
    * Permanently delete a session from both memory and store.
    */
   async delete(sessionId: string): Promise<void> {
-    this.remove(sessionId, true);
+    await this.remove(sessionId, true);
     if (this.store) {
       await this.store.delete(sessionId);
     }
   }
 
-  destroy(): void {
+  async destroy(): Promise<void> {
     if (this.sweepTimer) {
       clearInterval(this.sweepTimer);
       this.sweepTimer = undefined;
     }
-    for (const sessionId of this.sessions.keys()) {
-      this.remove(sessionId, true);
-    }
+    await Promise.all([...this.sessions.keys()].map((sessionId) => this.remove(sessionId, true)));
   }
 
   private touch(sessionId: string): void {
@@ -320,12 +318,11 @@ class SessionRegistry<P> {
     }
 
     // Evict idle sessions (snapshots remain in store for future restore)
+    // evict() is async but sweep is timer-driven — catch errors, don't block
     for (const sessionId of toEvict) {
-      try {
-        this.evict(sessionId);
-      } catch {
+      this.evict(sessionId).catch(() => {
         /* non-fatal */
-      }
+      });
     }
   }
 
@@ -336,11 +333,12 @@ class SessionRegistry<P> {
       const oldestId = this.sessions.keys().next().value as string | undefined;
       if (!oldestId) break;
 
-      try {
-        this.evict(oldestId);
-      } catch {
-        break;
-      }
+      // evict() is async but enforceMaxActive is called during session creation —
+      // the sync session removal from the map happens immediately in remove(),
+      // async cleanup (environment onDestroy) runs in background
+      this.evict(oldestId).catch(() => {
+        /* non-fatal */
+      });
     }
   }
 }

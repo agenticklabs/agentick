@@ -58,7 +58,7 @@ describe("session.spawn()", () => {
     const childResult = await childHandle.result;
     expect(childResult.response).toBe("Child response");
 
-    session.close();
+    await session.close();
   });
 
   it("should spawn a child session with an inline component", async () => {
@@ -91,7 +91,7 @@ describe("session.spawn()", () => {
     const childResult = await childHandle.result;
     expect(childResult.response).toBe("Inline child response");
 
-    session.close();
+    await session.close();
   });
 
   it("should spawn a child session with a JSX element", async () => {
@@ -126,7 +126,7 @@ describe("session.spawn()", () => {
     const childResult = await childHandle.result;
     expect(childResult.response).toBe("JSX child response");
 
-    session.close();
+    await session.close();
   });
 });
 
@@ -186,7 +186,7 @@ describe("ctx.spawn() from tool handler", () => {
 
     expect(spawnResult).toBe("Child says hello");
 
-    session.close();
+    await session.close();
   });
 });
 
@@ -241,7 +241,7 @@ describe("parallel spawns", () => {
     expect(resultA.response).toBe("Child A response");
     expect(resultB.response).toBe("Child B response");
 
-    session.close();
+    await session.close();
   });
 });
 
@@ -293,7 +293,7 @@ describe("parent/children references", () => {
     await new Promise((r) => setTimeout(r, 10));
     expect(session.children).toHaveLength(0);
 
-    session.close();
+    await session.close();
   });
 });
 
@@ -325,7 +325,7 @@ describe("max spawn depth", () => {
       }),
     ).rejects.toThrow("Maximum spawn depth (10) exceeded");
 
-    session.close();
+    await session.close();
   });
 });
 
@@ -377,7 +377,7 @@ describe("parent abort propagation", () => {
       expect(e).toBeDefined();
     }
 
-    session.close();
+    await session.close();
   });
 });
 
@@ -423,7 +423,7 @@ describe("child isolation", () => {
     // Child ran successfully with its own system prompt
     expect(result.response).toBe("Child response");
 
-    session.close();
+    await session.close();
   });
 });
 
@@ -474,7 +474,7 @@ describe("lifecycle callback isolation", () => {
     // None of the parent's callbacks should have fired for the child
     expect(parentCallbacks).toHaveLength(0);
 
-    session.close();
+    await session.close();
   });
 
   it("should NOT fire parent's onBeforeSend/onAfterSend for child", async () => {
@@ -519,7 +519,7 @@ describe("lifecycle callback isolation", () => {
 
     expect(sendCallbacks).toHaveLength(0);
 
-    session.close();
+    await session.close();
   });
 });
 
@@ -557,7 +557,7 @@ describe("close propagation", () => {
     });
 
     // Close parent immediately
-    session.close();
+    await session.close();
 
     // Child should have been closed too
     try {

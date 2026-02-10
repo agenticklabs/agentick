@@ -626,6 +626,7 @@ const app = createApp(MyApp, {
   devTools: true,              // Enable DevTools emission
   tools: [ExternalTool],       // Additional tools (merged with JSX <Tool>s)
   mcpServers: { ... },         // MCP server configs
+  environment: myEnv,          // Execution environment (see below)
 });
 ```
 
@@ -959,6 +960,78 @@ await run(<Agent query="default" />, { props: { query: "override" }, model, mess
 ```
 
 `createApp` takes a component function and returns a reusable app with session management, persistence, and middleware support.
+
+## Execution Environments
+
+An `ExecutionEnvironment` controls the execution backend — how compiled context reaches the model and how tool calls are routed. The default is the standard model → tool_use protocol. Swap in a different environment to change the entire execution model without touching your agent code.
+
+```tsx
+import { createApp, type ExecutionEnvironment } from "@agentick/core";
+
+const replEnvironment: ExecutionEnvironment = {
+  name: "repl",
+
+  // Transform what the model sees — replace tool schemas with prose descriptions,
+  // expose a single "execute" tool, restructure sections, anything.
+  prepareModelInput(compiled, tools) {
+    const commandList = tools
+      .map((t) => `- ${t.metadata?.name}: ${t.metadata?.description}`)
+      .join("\n");
+    return {
+      ...compiled,
+      tools: [executeToolSchema],
+      system: [...compiled.system, { content: `Available commands:\n${commandList}` }],
+    };
+  },
+
+  // Route tool calls — intercept "execute" to a sandbox, let others pass through.
+  async executeToolCall(call, tool, next) {
+    if (call.name === "execute") {
+      return sandbox.run(call.input.code);
+    }
+    return next();
+  },
+
+  // Session lifecycle
+  onSessionInit(session) {
+    sandbox.create(session.id);
+  },
+  onDestroy(session) {
+    sandbox.destroy(session.id);
+  },
+  onPersist(session, snapshot) {
+    return { ...snapshot, comState: { ...snapshot.comState, _sandbox: sandbox.state() } };
+  },
+  onRestore(session, snapshot) {
+    sandbox.restore(snapshot.comState._sandbox);
+  },
+};
+
+// Same agent, different execution model
+const app = createApp(MyAgent, { model, environment: replEnvironment });
+```
+
+The agent's JSX — its `<System>`, `<Timeline>`, `<Tool>` components — stays identical. The environment transforms how that compiled context is consumed and how tool calls execute. This means you can build one agent and run it against multiple backends: standard tool_use for production, a sandboxed REPL for code execution, a human-in-the-loop gateway for approval workflows.
+
+### Interface
+
+All methods are optional. Omitted methods use default behavior.
+
+| Hook                | Purpose                                             | Timing        |
+| ------------------- | --------------------------------------------------- | ------------- |
+| `prepareModelInput` | Transform compiled context before the model sees it | Per tick      |
+| `executeToolCall`   | Intercept, transform, or replace tool execution     | Per tool call |
+| `onSessionInit`     | Set up per-session resources (sandbox, workspace)   | Once          |
+| `onPersist`         | Add environment state to session snapshot           | Per save      |
+| `onRestore`         | Restore environment state from snapshot             | Once          |
+| `onDestroy`         | Clean up resources                                  | Once          |
+
+### Use Cases
+
+- **REPL/Code Execution**: Replace tool schemas with command descriptions, route `execute` calls to a sandboxed runtime, persist sandbox state across sessions.
+- **Human-in-the-Loop**: Transform tool calls into approval requests, gate execution on human confirmation, log decisions.
+- **Sandboxing**: Run tools in isolated containers, inject security boundaries, audit tool invocations.
+- **Testing**: Intercept specific tools to return canned responses, track all lifecycle calls for assertions. See `createTestEnvironment()` in `@agentick/core/testing`.
 
 ## DevTools Integration
 

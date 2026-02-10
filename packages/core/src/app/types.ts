@@ -17,6 +17,7 @@ import type {
   Message,
   StreamEvent as SharedStreamEvent,
   ToolCall,
+  ToolResult,
   UsageStats,
   TimelineEntry,
   SendInput as SharedSendInput,
@@ -89,6 +90,122 @@ export interface LifecycleCallbacks {
    * @param error - The error that occurred
    */
   onError?: (error: Error) => void;
+}
+
+// ============================================================================
+// Execution Environment
+// ============================================================================
+
+/**
+ * Execution Environment
+ *
+ * Controls how a session's compiled context is consumed and how tool calls execute.
+ * The default environment is the standard model→tool_use protocol.
+ * Alternative environments (REPL, human-in-the-loop) transform the execution pattern.
+ *
+ * All methods are optional — omitted methods use default behavior.
+ *
+ * @example Custom REPL environment
+ * ```typescript
+ * const repl: ExecutionEnvironment = {
+ *   name: "repl",
+ *   prepareModelInput(compiled, tools) {
+ *     // Replace tool schemas with command descriptions
+ *     return { ...compiled, tools: [] };
+ *   },
+ *   async executeToolCall(call, tool, next) {
+ *     // Route to sandbox instead of direct execution
+ *     return sandboxExecute(call);
+ *   },
+ * };
+ *
+ * const app = createApp(MyAgent, { model, environment: repl });
+ * ```
+ */
+/**
+ * Narrow session reference for environment hooks.
+ *
+ * Environment hooks receive this instead of the full Session interface.
+ * This avoids generic type friction (SessionImpl<P> vs Session) and
+ * exposes only what environments actually need: identity + state.
+ */
+export interface SessionRef {
+  /** Unique session ID */
+  readonly id: string;
+  /** Current session status */
+  readonly status: SessionStatus;
+  /** Current tick number */
+  readonly currentTick: number;
+  /** Export session state */
+  snapshot(): SessionSnapshot;
+}
+
+export interface ExecutionEnvironment {
+  /** Environment identifier (e.g., "default", "repl") */
+  name: string;
+
+  /**
+   * Transform compiled model input before it reaches the model.
+   *
+   * Use cases:
+   * - REPL: Replace tool schemas with command descriptions in a section,
+   *   expose a single `execute` tool
+   * - Filtering: Remove tools the model shouldn't see in this environment
+   *
+   * @param compiled - The COMInput from compilation (timeline, sections, tools, etc.)
+   * @param tools - The resolved executable tools
+   * @returns Transformed COMInput (or original if no transformation needed)
+   */
+  prepareModelInput?(compiled: COMInput, tools: ExecutableTool[]): COMInput | Promise<COMInput>;
+
+  /**
+   * Wrap individual tool call execution.
+   *
+   * Called for each tool call. The `next` function executes the tool normally
+   * (via ToolExecutor). Environments can intercept, transform, or replace execution.
+   *
+   * Use cases:
+   * - REPL: Route `execute` tool to sandbox, run code with tools as callable functions
+   * - Logging: Add environment-specific telemetry around tool execution
+   * - Sandboxing: Run tools in isolated contexts
+   *
+   * @param call - The tool call from the model
+   * @param tool - The resolved executable tool (undefined if not found)
+   * @param next - Execute the tool normally (delegates to ToolExecutor)
+   * @returns Tool result
+   */
+  executeToolCall?(
+    call: ToolCall,
+    tool: ExecutableTool | undefined,
+    next: () => Promise<ToolResult>,
+  ): Promise<ToolResult>;
+
+  /**
+   * Called once when the environment is first used by a session.
+   * Set up per-session environment state (sandbox, working directory, etc.).
+   */
+  onSessionInit?(session: SessionRef): void | Promise<void>;
+
+  /**
+   * Called when a session snapshot is being created.
+   * Environment can add its own state to the snapshot.
+   */
+  onPersist?(
+    session: SessionRef,
+    snapshot: SessionSnapshot,
+  ): SessionSnapshot | Promise<SessionSnapshot>;
+
+  /**
+   * Called when a session is being restored from a snapshot.
+   * Environment can restore its own state from the snapshot.
+   */
+  onRestore?(session: SessionRef, snapshot: SessionSnapshot): void | Promise<void>;
+
+  /**
+   * Called when a session is closed/destroyed.
+   * Clean up environment resources (sandbox, temp files, etc.).
+   */
+  onDestroy?(session: SessionRef): void | Promise<void>;
 }
 
 // ============================================================================
@@ -306,6 +423,22 @@ export interface AppOptions extends LifecycleCallbacks {
   maxTicks?: number;
 
   /**
+   * Execution environment for all sessions created by this app.
+   *
+   * Controls how compiled context reaches the model and how tool calls execute.
+   * Default: standard model→tool_use protocol (no transformation).
+   *
+   * @example REPL environment
+   * ```typescript
+   * const app = createApp(MyAgent, {
+   *   model,
+   *   environment: replEnvironment({ sandbox: true }),
+   * });
+   * ```
+   */
+  environment?: ExecutionEnvironment;
+
+  /**
    * Enable DevTools event emission for all sessions created by this app.
    *
    * When true, lifecycle events (execution_start, tick_start, tick_end,
@@ -485,6 +618,35 @@ export type RecordingMode = "full" | "lightweight" | "none";
  * Lifecycle callbacks from AppOptions are inherited; SessionOptions
  * callbacks will override them.
  */
+/**
+ * Options for overriding inherited behavior in spawned child sessions.
+ *
+ * By default, children inherit structural options (model, tools, environment,
+ * maxTicks) from the parent. SpawnOptions lets you override any of these.
+ *
+ * @example
+ * ```typescript
+ * // Spawn with a different environment
+ * await session.spawn(CodeAgent, { messages }, {
+ *   environment: sandboxEnvironment,
+ * });
+ *
+ * // Spawn with a different model
+ * await session.spawn(SummaryAgent, { messages }, {
+ *   model: cheapModel,
+ *   maxTicks: 3,
+ * });
+ * ```
+ */
+export interface SpawnOptions {
+  /** Override the parent's model */
+  model?: EngineModel;
+  /** Override the parent's execution environment */
+  environment?: ExecutionEnvironment;
+  /** Override the parent's max ticks */
+  maxTicks?: number;
+}
+
 export interface SessionOptions extends LifecycleCallbacks {
   /**
    * Explicit session ID (used by App-managed sessions).
@@ -1239,7 +1401,7 @@ export interface SessionRecording {
  * session.interrupt({ role: "user", content: [...] }, "user_interrupt");
  *
  * // Clean up when done
- * session.close();
+ * await session.close();
  * ```
  */
 export interface Session<P = Record<string, unknown>> extends EventEmitter {
@@ -1337,20 +1499,30 @@ export interface Session<P = Record<string, unknown>> extends EventEmitter {
    * The child session is NOT registered in the App's session registry.
    * Parent abort propagates to child. Max spawn depth is 10.
    *
+   * By default, child inherits parent's structural options (model, tools,
+   * environment, maxTicks). Use `options` to override any of these.
+   *
    * @param component - ComponentFunction or JSX element
    * @param input - Optional SendInput for the child session
+   * @param options - Optional overrides for the child's structural options
    *
    * @example
    * ```typescript
-   * // From a tool handler via ctx.spawn()
-   * const handle = await ctx.spawn(ResearchAgent, {
-   *   messages: [{ role: "user", content: [{ type: "text", text: query }] }],
+   * // Basic spawn
+   * const handle = await session.spawn(ResearchAgent, { messages });
+   *
+   * // Spawn with different environment
+   * const handle = await session.spawn(CodeAgent, { messages }, {
+   *   environment: sandboxEnvironment,
    * });
-   * const result = await handle.result;
    * ```
    */
   spawn: Procedure<
-    (component: ComponentFunction | JSX.Element, input?: SendInput) => SessionExecutionHandle,
+    (
+      component: ComponentFunction | JSX.Element,
+      input?: SendInput,
+      options?: SpawnOptions,
+    ) => SessionExecutionHandle,
     true
   >;
 
@@ -1509,8 +1681,9 @@ export interface Session<P = Record<string, unknown>> extends EventEmitter {
 
   /**
    * Close the session and release resources.
+   * Awaits environment cleanup (onDestroy) and child session teardown.
    */
-  close(): void;
+  close(): Promise<void>;
 }
 
 // ============================================================================
@@ -1552,7 +1725,7 @@ export type ComponentFunction<P = Record<string, unknown>> = (props: P) => JSX.E
  * const session = app.session();
  * await session.render({ query: "Hello!" });
  * await session.render({ query: "Follow up" });
- * session.close();
+ * await session.close();
  *
  * // Named session (get-or-create by ID)
  * const conv = app.session('conv-123');
