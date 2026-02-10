@@ -342,6 +342,19 @@ function ComponentB() {
 }
 ```
 
+#### Snapshot Persistence
+
+COM state entries are included in session snapshots by default. On restore, values are applied before the component tree renders, so `useComState` reads the persisted value instead of reinitializing.
+
+Set `{ persist: false }` for transient state that shouldn't survive session restore:
+
+```tsx
+// Transient state — don't persist across sessions
+const isExpanded = useComState("ui:expanded", false, { persist: false });
+```
+
+Values must be JSON-serializable. Non-serializable values are silently skipped during snapshot creation.
+
 ## Context Hooks
 
 ### useCom
@@ -361,7 +374,7 @@ Access current tick information:
 ```tsx
 const state = useTickState();
 console.log(`Tick ${state.tick}`);
-console.log(state.previous?.timeline); // Previous tick's output
+console.log(state.timeline); // Session's full timeline
 ```
 
 ## Message Hooks
@@ -389,6 +402,62 @@ for (const msg of messages) {
 }
 ```
 
+## Timeline Hooks
+
+### useTimeline
+
+Direct read/write access to the session's timeline (the append-only source of truth):
+
+```tsx
+function MyAgent() {
+  const timeline = useTimeline();
+
+  // Read entries
+  console.log(`${timeline.entries.length} messages in history`);
+
+  // Replace entire timeline (e.g., after summarization)
+  timeline.set([summaryEntry, ...recentEntries]);
+
+  // Transform timeline via function
+  timeline.update((entries) => entries.slice(-10)); // Keep last 10
+}
+```
+
+The timeline is the session's complete conversation history. Use `<Timeline>` component props (`limit`, `maxTokens`, `roles`) for non-destructive context management. Use `useTimeline().set()` / `.update()` for destructive mutations (e.g., context compression with summarization).
+
+### useConversationHistory
+
+Read-only access to the full timeline, without needing a `<Timeline.Provider>`:
+
+```tsx
+function HistoryViewer() {
+  const history = useConversationHistory();
+  return <Section id="stats">Messages: {history.length}</Section>;
+}
+```
+
+## Resolve Hooks
+
+### useResolved
+
+Access data loaded by the `resolve` configuration during session restore (Layer 2).
+
+```tsx
+function MyAgent() {
+  const greeting = useResolved<string>("greeting");
+  const userData = useResolved<User>("userData");
+
+  return (
+    <>
+      {greeting && <System>{greeting}</System>}
+      <Timeline />
+    </>
+  );
+}
+```
+
+`useResolved` returns `undefined` for keys that weren't resolved (or when no resolve is configured). Results are set once during restore and are read-only thereafter.
+
 ## Data Hooks
 
 ### useData
@@ -406,6 +475,19 @@ const status = useData("status", fetchStatus, [tick]);
 // Cache forever (no deps)
 const config = useData("config", fetchConfig);
 ```
+
+#### Snapshot Persistence
+
+`useData` cache entries are included in session snapshots by default. On restore, cached values are applied without re-fetching.
+
+Set `{ persist: false }` to exclude large datasets, frequently-changing data, or values already stored elsewhere. These entries will re-fetch on restore as if the session were starting fresh.
+
+```tsx
+// Large data — re-fetch on restore instead of persisting
+const embeddings = useData("embeddings", () => fetchEmbeddings(query), [query], { persist: false });
+```
+
+Values must be JSON-serializable. Non-serializable values (functions, circular references, etc.) are silently skipped during snapshot creation.
 
 ## Knobs
 

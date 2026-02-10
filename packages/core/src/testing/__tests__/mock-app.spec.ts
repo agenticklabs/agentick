@@ -296,13 +296,6 @@ describe("createMockApp", () => {
     expect(app.has("nonexistent")).toBe(false);
   });
 
-  it("hibernation methods return defaults", async () => {
-    const app = createMockApp();
-    expect(await app.isHibernated("test")).toBe(false);
-    expect(await app.hibernate("test")).toBeNull();
-    expect(await app.hibernatedSessions()).toEqual([]);
-  });
-
   it("onSessionCreate fires when session is created", async () => {
     const app = createMockApp();
     const created: string[] = [];

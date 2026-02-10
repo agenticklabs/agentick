@@ -102,8 +102,8 @@ export function createMockCom(options: MockComOptions = {}): MockCom {
 
 export interface MockTickStateOptions {
   tick?: number;
-  previous?: TickState["previous"];
   current?: TickState["current"];
+  timeline?: TickState["timeline"];
   queuedMessages?: TickState["queuedMessages"];
 }
 
@@ -135,8 +135,8 @@ export function createMockTickState(
 
   return {
     tick: options.tick ?? 1,
-    previous: options.previous,
     current: options.current,
+    timeline: options.timeline ?? [],
     queuedMessages: options.queuedMessages ?? [],
     stop(reason: string) {
       stopCalls.push(reason);
@@ -257,11 +257,10 @@ export function makeTimelineEntry(
  * ```tsx
  * import { makeTimelineEntry, makeCOMInput } from '@agentick/core/testing';
  *
- * const previous = makeCOMInput([
+ * const input = makeCOMInput([
  *   makeTimelineEntry("user", "Hello", 10),
  *   makeTimelineEntry("assistant", "Hi there", 15),
  * ]);
- * const tickState = createMockTickState({ previous });
  * ```
  */
 export function makeCOMInput(entries: COMTimelineEntry[]): COMInput {

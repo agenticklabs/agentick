@@ -22,7 +22,7 @@ import type {
   SendInput as SharedSendInput,
   ContentBlock,
 } from "@agentick/shared";
-import type { COMInput } from "../com/types";
+import type { COMInput, COMTimelineEntry } from "../com/types";
 import type { ExecutableTool } from "../tool/tool";
 import type { MCPConfig } from "../mcp";
 import type { EngineModel } from "../model/model";
@@ -30,6 +30,7 @@ import type { ExecutionHandle, Channel, Procedure } from "@agentick/kernel";
 import type { JSX } from "../jsx/jsx-runtime";
 // Signal type removed - schedulerState now returns SchedulerState directly
 import type { SchedulerState } from "../compiler/scheduler";
+import type { SerializableCacheEntry } from "../hooks/runtime-context";
 
 // ============================================================================
 // Lifecycle Callbacks
@@ -91,13 +92,13 @@ export interface LifecycleCallbacks {
 }
 
 // ============================================================================
-// Session Store (for hibernation persistence)
+// Session Store (for session persistence)
 // ============================================================================
 
 /**
- * Storage adapter for persisting hibernated sessions.
+ * Storage adapter for persisting session snapshots.
  *
- * Implement this interface to enable session hibernation with your storage backend
+ * Implement this interface to enable session persistence with your storage backend
  * (Redis, database, filesystem, etc.).
  *
  * @example In-memory implementation
@@ -146,13 +147,13 @@ export interface LifecycleCallbacks {
 export interface SessionStore {
   /**
    * Save a session snapshot to storage.
-   * Called when a session hibernates.
+   * Called after each execution (auto-persist).
    */
   save(sessionId: string, snapshot: SessionSnapshot): Promise<void>;
 
   /**
    * Load a session snapshot from storage.
-   * Called when hydrating a hibernated session.
+   * Called when restoring a session via app.session(id).
    * Returns null if session not found.
    */
   load(sessionId: string): Promise<SessionSnapshot | null>;
@@ -164,13 +165,13 @@ export interface SessionStore {
   delete(sessionId: string): Promise<void>;
 
   /**
-   * List all hibernated session IDs.
+   * List all persisted session IDs.
    * Optional - used for session discovery/management.
    */
   list?(): Promise<string[]>;
 
   /**
-   * Check if a hibernated session exists.
+   * Check if a persisted session exists.
    * Optional - optimization to avoid full load when checking existence.
    */
   has?(sessionId: string): Promise<boolean>;
@@ -227,11 +228,11 @@ export type StoreConfig = string | SqliteStoreConfig | SessionStore;
  * Session management configuration.
  *
  * Controls how the App manages session lifecycles including
- * hibernation, limits, and auto-cleanup.
+ * persistence, limits, and auto-cleanup.
  */
 export interface SessionManagementOptions {
   /**
-   * Storage adapter for hibernated sessions.
+   * Storage adapter for session snapshots.
    *
    * Can be:
    * - A file path string for SQLite storage (e.g., './sessions.db')
@@ -239,7 +240,8 @@ export interface SessionManagementOptions {
    * - A `{ type: 'sqlite', ... }` config object
    * - A custom `SessionStore` implementation
    *
-   * If not provided, sessions cannot hibernate (they will be closed instead).
+   * When configured, snapshots auto-save after each execution and
+   * auto-restore on `app.session(id)`.
    *
    * @example File-based SQLite
    * ```typescript
@@ -255,23 +257,18 @@ export interface SessionManagementOptions {
 
   /**
    * Maximum number of active (in-memory) sessions.
-   * When exceeded, the least-recently used session is hibernated.
+   * When exceeded, the least-recently used session is evicted from memory.
+   * Evicted sessions can be restored from store via `app.session(id)`.
    * @default unlimited
    */
   maxActive?: number;
 
   /**
-   * Milliseconds of inactivity before auto-hibernating a session.
+   * Milliseconds of inactivity before evicting a session from memory.
    * Activity is tracked via send(), render(), queue(), and channel publish.
-   * Set to 0 or undefined to disable auto-hibernation.
+   * Set to 0 or undefined to disable idle eviction.
    */
   idleTimeout?: number;
-
-  /**
-   * Whether to automatically hibernate idle sessions.
-   * @default true if store is provided, false otherwise
-   */
-  autoHibernate?: boolean;
 }
 
 // ============================================================================
@@ -327,7 +324,7 @@ export interface AppOptions extends LifecycleCallbacks {
   /**
    * Session management configuration.
    *
-   * Controls hibernation, limits, and auto-cleanup of sessions.
+   * Controls persistence, limits, and auto-cleanup of sessions.
    *
    * @example
    * ```typescript
@@ -353,83 +350,52 @@ export interface AppOptions extends LifecycleCallbacks {
   onSessionClose?: (sessionId: string) => void;
 
   /**
-   * Called before a session hibernates.
+   * Called before a session snapshot is persisted to store.
    *
    * Use this to:
-   * - Cancel hibernation (return false)
+   * - Cancel persistence (return false)
    * - Modify the snapshot before saving (return modified snapshot)
-   * - Perform cleanup before hibernation
    *
-   * @param session - The session about to hibernate
+   * @param session - The session being persisted
    * @param snapshot - The snapshot that will be saved
    * @returns false to cancel, modified snapshot, or void to proceed
-   *
-   * @example
-   * ```typescript
-   * onBeforeHibernate: (session, snapshot) => {
-   *   // Don't hibernate sessions with pending tool calls
-   *   if (session.inspect().lastToolCalls.length > 0) {
-   *     return false;
-   *   }
-   *   // Add custom metadata to snapshot
-   *   return { ...snapshot, metadata: { hibernatedAt: Date.now() } };
-   * }
-   * ```
    */
-  onBeforeHibernate?: (
+  onBeforePersist?: (
     session: Session,
     snapshot: SessionSnapshot,
   ) => boolean | SessionSnapshot | void | Promise<boolean | SessionSnapshot | void>;
 
   /**
-   * Called after a session has been hibernated.
+   * Called after a session snapshot has been persisted.
    *
-   * The session is no longer in memory at this point.
-   * Use this for logging, metrics, or cleanup.
-   *
-   * @param sessionId - The ID of the hibernated session
+   * @param sessionId - The ID of the persisted session
    * @param snapshot - The snapshot that was saved
    */
-  onAfterHibernate?: (sessionId: string, snapshot: SessionSnapshot) => void | Promise<void>;
+  onAfterPersist?: (sessionId: string, snapshot: SessionSnapshot) => void | Promise<void>;
 
   /**
-   * Called before a session is hydrated from storage.
+   * Called before a session is restored from storage.
    *
    * Use this to:
-   * - Cancel hydration (return false)
+   * - Cancel restoration (return false)
    * - Migrate/transform old snapshot formats (return modified snapshot)
-   * - Validate snapshot before restoration
    *
-   * @param sessionId - The ID of the session being hydrated
+   * @param sessionId - The ID of the session being restored
    * @param snapshot - The snapshot loaded from storage
    * @returns false to cancel, modified snapshot, or void to proceed
-   *
-   * @example
-   * ```typescript
-   * onBeforeHydrate: (sessionId, snapshot) => {
-   *   // Migrate old snapshot format
-   *   if (snapshot.version === '0.9') {
-   *     return migrateSnapshot(snapshot);
-   *   }
-   *   return snapshot;
-   * }
-   * ```
    */
-  onBeforeHydrate?: (
+  onBeforeRestore?: (
     sessionId: string,
     snapshot: SessionSnapshot,
   ) => boolean | SessionSnapshot | void | Promise<boolean | SessionSnapshot | void>;
 
   /**
-   * Called after a session has been hydrated.
+   * Called after a session has been restored.
    *
-   * The session is now live and in memory.
-   * Use this for post-restoration setup, logging, or metrics.
-   *
-   * @param session - The hydrated session
+   * @param session - The restored session
    * @param snapshot - The snapshot that was used
    */
-  onAfterHydrate?: (session: Session, snapshot: SessionSnapshot) => void | Promise<void>;
+  onAfterRestore?: (session: Session, snapshot: SessionSnapshot) => void | Promise<void>;
 
   /**
    * Called before send is executed.
@@ -451,6 +417,24 @@ export interface AppOptions extends LifecycleCallbacks {
    * Return true to allow, false to deny.
    */
   onToolConfirmation?: (call: ToolCall, message: string) => Promise<boolean>;
+
+  /**
+   * Maximum timeline entries to keep in memory per session.
+   * When exceeded, oldest entries are trimmed after each tick.
+   * Default: unbounded.
+   */
+  maxTimelineEntries?: number;
+
+  /**
+   * Resolve configuration for loading data before session render.
+   *
+   * When a session is restored from a store, resolve functions receive
+   * the snapshot as context. Results are available via `useResolved(key)`.
+   *
+   * When resolve is set, snapshots are NOT auto-applied on restore —
+   * the resolve function controls reconstruction (Layer 2).
+   */
+  resolve?: ResolveConfig;
 
   /**
    * Whether to inherit middleware and telemetry from the global Agentick instance.
@@ -517,27 +501,7 @@ export interface SessionOptions extends LifecycleCallbacks {
    */
   signal?: AbortSignal;
 
-  /**
-   * Initial timeline entries to hydrate the conversation history.
-   *
-   * Use this to load an existing conversation when creating a session.
-   * These entries will be available via `useConversationHistory()` and
-   * rendered by `<Timeline />` on tick 1 and beyond.
-   *
-   * @example
-   * ```typescript
-   * const session = app.session({
-   *   initialTimeline: loadedConversation.entries,
-   * });
-   * ```
-   */
-  initialTimeline?: TimelineEntry[];
-
-  /**
-   * Initial state to hydrate (for resuming sessions).
-   * @future Phase 3 serialization
-   */
-  snapshot?: SessionSnapshot;
+  // initialTimeline and snapshot removed — use resolve + useTimeline().set() instead
 
   /**
    * Recording mode for time-travel debugging.
@@ -584,6 +548,31 @@ export interface ExecutionOptions {
   signal?: AbortSignal;
 }
 
+// ============================================================================
+// Resolve Types
+// ============================================================================
+
+/**
+ * Context passed to resolve functions.
+ */
+export interface ResolveContext {
+  sessionId: string;
+  snapshot: SessionSnapshot | null;
+}
+
+/**
+ * Resolve configuration for loading data before session render.
+ *
+ * Can be:
+ * - Object form: `{ key: value | (ctx) => value }`
+ * - Function form: `(ctx) => { key: value }`
+ *
+ * Results available via `useResolved(key)`.
+ */
+export type ResolveConfig =
+  | Record<string, unknown | ((ctx: ResolveContext) => unknown | Promise<unknown>)>
+  | ((ctx: ResolveContext) => Record<string, unknown> | Promise<Record<string, unknown>>);
+
 /**
  * Serialized session state for persistence/resumption.
  */
@@ -595,9 +584,11 @@ export interface SessionSnapshot {
   /** Tick number at snapshot time */
   tick: number;
   /** Serialized conversation/timeline */
-  timeline: unknown;
-  /** Serialized component state (hooks) */
-  componentState: unknown;
+  timeline: COMTimelineEntry[] | null;
+  /** COM key-value state (useComState) */
+  comState: Record<string, unknown>;
+  /** useData cache (entries with persist !== false) */
+  dataCache: Record<string, SerializableCacheEntry>;
   /** Accumulated usage stats across all sends */
   usage?: UsageStats;
   /** Timestamp of snapshot */
@@ -803,10 +794,9 @@ export interface SessionExecutionHandle extends ExecutionHandle<SendResult, Stre
  *
  * - `idle` — Ready, not executing
  * - `running` — Tick in progress (model call / tool execution)
- * - `hibernated` — Snapshotted & persisted, resources released. Re-acquire via `app.session(id)`
  * - `closed` — Permanently shut down, cannot return
  */
-export type SessionStatus = "idle" | "running" | "hibernated" | "closed";
+export type SessionStatus = "idle" | "running" | "closed";
 
 /**
  * Execution phase during a tick.
@@ -1398,36 +1388,6 @@ export interface Session<P = Record<string, unknown>> extends EventEmitter {
   snapshot(): SessionSnapshot;
 
   /**
-   * Hibernate the session (serialize and remove from memory).
-   *
-   * This is called automatically by the App when:
-   * - Session exceeds idle timeout
-   * - Max active sessions limit is reached
-   *
-   * Can also be called manually to explicitly hibernate a session.
-   *
-   * After hibernation:
-   * - The session is removed from memory
-   * - The snapshot is saved to the configured SessionStore
-   * - Calling `app.session(id)` will rehydrate from storage
-   *
-   * @returns The snapshot that was saved, or null if hibernation was cancelled
-   *
-   * @example
-   * ```typescript
-   * const session = app.session('conv-123');
-   * await session.render({ query: "Hello!" });
-   *
-   * // Manually hibernate
-   * const snapshot = await session.hibernate();
-   *
-   * // Later, rehydrate by accessing the session
-   * const restored = app.session('conv-123'); // Loads from store
-   * ```
-   */
-  hibernate(): Promise<SessionSnapshot | null>;
-
-  /**
    * Inspect the current session state for debugging.
    *
    * Returns a snapshot of live status, last outputs, aggregated usage,
@@ -1689,32 +1649,6 @@ export interface App<P = Record<string, unknown>> {
    * Check if a session exists (in memory).
    */
   has(sessionId: string): boolean;
-
-  /**
-   * Check if a session is hibernated (in storage but not in memory).
-   *
-   * Returns false if no SessionStore is configured.
-   */
-  isHibernated(sessionId: string): Promise<boolean>;
-
-  /**
-   * Hibernate a session by ID.
-   *
-   * Convenience method equivalent to `app.session(id).hibernate()`.
-   * Returns the snapshot that was saved, or null if:
-   * - Session doesn't exist
-   * - Hibernation was cancelled by onBeforeHibernate
-   * - No SessionStore is configured
-   */
-  hibernate(sessionId: string): Promise<SessionSnapshot | null>;
-
-  /**
-   * List all hibernated session IDs.
-   *
-   * Returns empty array if no SessionStore is configured or
-   * if the store doesn't implement `list()`.
-   */
-  hibernatedSessions(): Promise<string[]>;
 
   /**
    * Register onSessionCreate handler.

@@ -79,7 +79,7 @@ export interface MiddlewareRegistry {
 }
 
 // ============================================================================
-// Session Registry (App-managed sessions with hibernation support)
+// Session Registry (App-managed sessions with auto-persist/restore)
 // ============================================================================
 
 import type { SessionStore, SessionSnapshot, SessionManagementOptions } from "./app/types";
@@ -91,16 +91,16 @@ interface SessionRegistryOptions<P> {
 
   // Callbacks
   onSessionClose?: (sessionId: string) => void;
-  onBeforeHibernate?: (
+  onBeforePersist?: (
     session: SessionImpl<P>,
     snapshot: SessionSnapshot,
   ) => boolean | SessionSnapshot | void | Promise<boolean | SessionSnapshot | void>;
-  onAfterHibernate?: (sessionId: string, snapshot: SessionSnapshot) => void | Promise<void>;
-  onBeforeHydrate?: (
+  onAfterPersist?: (sessionId: string, snapshot: SessionSnapshot) => void | Promise<void>;
+  onBeforeRestore?: (
     sessionId: string,
     snapshot: SessionSnapshot,
   ) => boolean | SessionSnapshot | void | Promise<boolean | SessionSnapshot | void>;
-  onAfterHydrate?: (session: SessionImpl<P>, snapshot: SessionSnapshot) => void | Promise<void>;
+  onAfterRestore?: (session: SessionImpl<P>, snapshot: SessionSnapshot) => void | Promise<void>;
 }
 
 class SessionRegistry<P> {
@@ -112,21 +112,27 @@ class SessionRegistry<P> {
   private readonly store?: SessionStore;
   private readonly idleTimeout: number;
   private readonly maxActive: number;
-  private readonly autoHibernate: boolean;
 
   constructor(private readonly options: SessionRegistryOptions<P>) {
-    // Resolve options with backwards compatibility
     const sessionsConfig = options.sessions ?? {};
     // Resolve store configuration (string path, config object, or SessionStore instance)
     this.store = createSessionStore(sessionsConfig.store);
     this.idleTimeout = sessionsConfig.idleTimeout ?? 0;
     this.maxActive = sessionsConfig.maxActive ?? 0;
-    this.autoHibernate = sessionsConfig.autoHibernate ?? !!this.store;
 
     // Start sweep timer if we have an idle timeout
     if (this.idleTimeout > 0) {
       const interval = Math.max(1000, Math.min(this.idleTimeout, 30000));
-      this.sweepTimer = setInterval(() => this.sweep(), interval);
+      this.sweepTimer = setInterval(() => {
+        try {
+          this.sweep();
+        } catch {
+          /* non-fatal */
+        }
+      }, interval);
+      if (typeof this.sweepTimer === "object" && "unref" in this.sweepTimer) {
+        this.sweepTimer.unref();
+      }
     }
   }
 
@@ -162,38 +168,38 @@ class SessionRegistry<P> {
       return undefined;
     }
 
-    // Call onBeforeHydrate hook
-    if (this.options.onBeforeHydrate) {
-      const result = await this.options.onBeforeHydrate(sessionId, snapshot);
+    // Call onBeforeRestore hook
+    if (this.options.onBeforeRestore) {
+      const result = await this.options.onBeforeRestore(sessionId, snapshot);
       if (result === false) {
-        return undefined; // Hydration cancelled
+        return undefined; // Restore cancelled
       }
       if (result && typeof result === "object" && "version" in result) {
         // Use modified snapshot
-        const session = createSession(result as SessionSnapshot);
-        this.register(session.id, session);
-
-        // Call onAfterHydrate
-        await this.options.onAfterHydrate?.(session, result as SessionSnapshot);
-
-        // Delete from store since it's now in memory
-        await this.store.delete(sessionId);
-
-        return session;
+        try {
+          const session = createSession(result as SessionSnapshot);
+          this.register(session.id, session);
+          await this.options.onAfterRestore?.(session, result as SessionSnapshot);
+          return session;
+        } catch (err) {
+          this.sessions.delete(sessionId);
+          this.lastActivity.delete(sessionId);
+          throw err;
+        }
       }
     }
 
     // Create session from snapshot
-    const session = createSession(snapshot);
-    this.register(session.id, session);
-
-    // Call onAfterHydrate
-    await this.options.onAfterHydrate?.(session, snapshot);
-
-    // Delete from store since it's now in memory
-    await this.store.delete(sessionId);
-
-    return session;
+    try {
+      const session = createSession(snapshot);
+      this.register(session.id, session);
+      await this.options.onAfterRestore?.(session, snapshot);
+      return session;
+    } catch (err) {
+      this.sessions.delete(sessionId);
+      this.lastActivity.delete(sessionId);
+      throw err;
+    }
   }
 
   register(sessionId: string, session: SessionImpl<P>): void {
@@ -206,75 +212,16 @@ class SessionRegistry<P> {
     return this.sessions.has(sessionId);
   }
 
-  async isHibernated(sessionId: string): Promise<boolean> {
-    if (!this.store) {
-      return false;
-    }
-    if (this.store.has) {
-      return this.store.has(sessionId);
-    }
-    // Fallback: try to load
-    const snapshot = await this.store.load(sessionId);
-    return snapshot !== null;
-  }
-
   list(): string[] {
     return Array.from(this.sessions.keys());
   }
 
-  async listHibernated(): Promise<string[]> {
-    if (!this.store?.list) {
-      return [];
-    }
-    return this.store.list();
-  }
-
   /**
-   * Hibernate a session (save to store and remove from memory).
-   * Returns the snapshot if successful, null if cancelled or no store.
+   * Evict a session from memory (close it).
+   * The snapshot remains in store (if any) for future restore.
    */
-  async hibernate(sessionId: string): Promise<SessionSnapshot | null> {
-    const session = this.sessions.get(sessionId);
-    if (!session) {
-      return null;
-    }
-
-    if (!this.store) {
-      // No store configured - just close the session
-      this.remove(sessionId, true);
-      return null;
-    }
-
-    // Get snapshot
-    const snapshot = session.snapshot();
-
-    // Call onBeforeHibernate hook
-    if (this.options.onBeforeHibernate) {
-      const result = await this.options.onBeforeHibernate(session, snapshot);
-      if (result === false) {
-        return null; // Hibernation cancelled
-      }
-      if (result && typeof result === "object" && "version" in result) {
-        // Use modified snapshot
-        await this.store.save(sessionId, result as SessionSnapshot);
-        this.remove(sessionId, false);
-        session.teardown("hibernated");
-        await this.options.onAfterHibernate?.(sessionId, result as SessionSnapshot);
-        return result as SessionSnapshot;
-      }
-    }
-
-    // Save to store
-    await this.store.save(sessionId, snapshot);
-
-    // Remove from memory and mark hibernated (not closed)
-    this.remove(sessionId, false);
-    session.teardown("hibernated");
-
-    // Call onAfterHibernate
-    await this.options.onAfterHibernate?.(sessionId, snapshot);
-
-    return snapshot;
+  evict(sessionId: string): void {
+    this.remove(sessionId, true);
   }
 
   remove(sessionId: string, closeSession = true): void {
@@ -289,6 +236,42 @@ class SessionRegistry<P> {
     }
 
     this.options.onSessionClose?.(sessionId);
+  }
+
+  /**
+   * Check if a store is configured.
+   */
+  hasStore(): boolean {
+    return !!this.store;
+  }
+
+  /**
+   * Persist a session snapshot to store (for auto-persist).
+   */
+  async persist(sessionId: string, snapshot: SessionSnapshot): Promise<void> {
+    if (!this.store) return;
+
+    // Call onBeforePersist hook
+    let finalSnapshot = snapshot;
+    if (this.options.onBeforePersist) {
+      const session = this.sessions.get(sessionId);
+      if (session) {
+        const result = await this.options.onBeforePersist(session, snapshot);
+        if (result === false) return; // Persist cancelled
+        if (result && typeof result === "object" && "version" in result) {
+          finalSnapshot = result as SessionSnapshot;
+        }
+      }
+    }
+
+    await this.store.save(sessionId, finalSnapshot);
+
+    // Call onAfterPersist hook — non-fatal after successful save
+    try {
+      await this.options.onAfterPersist?.(sessionId, finalSnapshot);
+    } catch {
+      // Hook errors after successful save are non-fatal
+    }
   }
 
   /**
@@ -324,39 +307,39 @@ class SessionRegistry<P> {
     this.touch(sessionId);
   }
 
-  private async sweep(): Promise<void> {
+  private sweep(): void {
     if (this.idleTimeout <= 0) return;
 
     const now = Date.now();
-    const toHibernate: string[] = [];
+    const toEvict: string[] = [];
 
     for (const [sessionId, last] of this.lastActivity.entries()) {
       if (now - last >= this.idleTimeout) {
-        toHibernate.push(sessionId);
+        toEvict.push(sessionId);
       }
     }
 
-    // Hibernate idle sessions
-    for (const sessionId of toHibernate) {
-      if (this.autoHibernate && this.store) {
-        await this.hibernate(sessionId);
-      } else {
-        this.remove(sessionId, true);
+    // Evict idle sessions (snapshots remain in store for future restore)
+    for (const sessionId of toEvict) {
+      try {
+        this.evict(sessionId);
+      } catch {
+        /* non-fatal */
       }
     }
   }
 
-  private async enforceMaxActive(): Promise<void> {
+  private enforceMaxActive(): void {
     if (this.maxActive <= 0) return;
 
     while (this.sessions.size > this.maxActive) {
       const oldestId = this.sessions.keys().next().value as string | undefined;
       if (!oldestId) break;
 
-      if (this.autoHibernate && this.store) {
-        await this.hibernate(oldestId);
-      } else {
-        this.remove(oldestId, true);
+      try {
+        this.evict(oldestId);
+      } catch {
+        break;
       }
     }
   }
@@ -386,10 +369,10 @@ class AppImpl<P extends Record<string, unknown>> implements App<P> {
           handler(sessionId);
         }
       },
-      onBeforeHibernate: options.onBeforeHibernate as any,
-      onAfterHibernate: options.onAfterHibernate,
-      onBeforeHydrate: options.onBeforeHydrate,
-      onAfterHydrate: options.onAfterHydrate as any,
+      onBeforePersist: options.onBeforePersist as any,
+      onAfterPersist: options.onAfterPersist,
+      onBeforeRestore: options.onBeforeRestore,
+      onAfterRestore: options.onAfterRestore as any,
     });
 
     this.run = createProcedure(
@@ -409,7 +392,6 @@ class AppImpl<P extends Record<string, unknown>> implements App<P> {
         } = input;
 
         const sessionOptions: SessionOptions = {
-          initialTimeline: history.length > 0 ? history : undefined,
           devTools: devTools ?? this.options.devTools,
           recording,
         };
@@ -420,6 +402,19 @@ class AppImpl<P extends Record<string, unknown>> implements App<P> {
         };
 
         const session = this.createSession(undefined, sessionOptions);
+
+        // Seed timeline from history if provided
+        if (history.length > 0) {
+          session.setSnapshotForResolve({
+            version: "1.0",
+            sessionId: session.id,
+            tick: 0,
+            timeline: history,
+            comState: {},
+            dataCache: {},
+            timestamp: Date.now(),
+          });
+        }
 
         for (const message of messages) {
           session.queue.exec(message);
@@ -493,7 +488,7 @@ class AppImpl<P extends Record<string, unknown>> implements App<P> {
   }
 
   async close(sessionId: string): Promise<void> {
-    this.registry.remove(sessionId, true);
+    await this.registry.delete(sessionId);
   }
 
   get sessions(): readonly string[] {
@@ -502,18 +497,6 @@ class AppImpl<P extends Record<string, unknown>> implements App<P> {
 
   has(sessionId: string): boolean {
     return this.registry.has(sessionId);
-  }
-
-  async isHibernated(sessionId: string): Promise<boolean> {
-    return this.registry.isHibernated(sessionId);
-  }
-
-  async hibernate(sessionId: string): Promise<SessionSnapshot | null> {
-    return this.registry.hibernate(sessionId);
-  }
-
-  async hibernatedSessions(): Promise<string[]> {
-    return this.registry.listHibernated();
   }
 
   onSessionCreate(handler: (session: Session<P>) => void): () => void {
@@ -545,7 +528,7 @@ class AppImpl<P extends Record<string, unknown>> implements App<P> {
   }
 
   /**
-   * Create a session from a hibernation snapshot.
+   * Create a session from a stored snapshot.
    * Used by registry.getOrHydrate() - does NOT register (getOrHydrate handles that).
    */
   private createSessionFromSnapshot(
@@ -555,10 +538,14 @@ class AppImpl<P extends Record<string, unknown>> implements App<P> {
     const sessionOptions: SessionOptions = {
       ...options,
       sessionId: snapshot.sessionId,
-      snapshot,
       devTools: options.devTools ?? this.options.devTools,
     };
     const session = new SessionImpl(this.Component, this.options, sessionOptions);
+
+    // Use _snapshotForResolve instead of passing snapshot via SessionOptions.
+    // This defers restoration to ensureCompilationInfrastructure() where
+    // both Layer 1 (auto-apply) and Layer 2 (resolve) paths are handled.
+    session.setSnapshotForResolve(snapshot);
 
     this.initializeSession(session);
 
@@ -570,8 +557,12 @@ class AppImpl<P extends Record<string, unknown>> implements App<P> {
    * Shared by createSession and createSessionFromSnapshot.
    */
   private initializeSession(session: SessionImpl<P>): void {
-    // Set hibernate callback so session.hibernate() delegates to the registry
-    session.setHibernateCallback(() => this.registry.hibernate(session.id));
+    // Set auto-persist callback if store is configured
+    if (this.registry.hasStore()) {
+      session.setPersistCallback(async (snapshot) => {
+        await this.registry.persist(session.id, snapshot);
+      });
+    }
 
     session.on("event", () => {
       this.registry.markActive(session.id);

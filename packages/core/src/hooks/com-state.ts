@@ -17,13 +17,20 @@
 
 import { useCallback, useMemo, useSyncExternalStore } from "react";
 import { useCom } from "./context";
+import { useRuntimeStore, type HookPersistenceOptions } from "./runtime-context";
 import type { Signal } from "./signal";
+
+/**
+ * Options for {@link useComState}.
+ */
+export interface UseComStateOptions extends HookPersistenceOptions {}
 
 /**
  * Use state stored in the COM.
  *
  * @param key - Unique key for this state in the COM
  * @param initialValue - Initial value if not already set
+ * @param options - Persistence options
  * @returns A Signal-like object for reading and writing the state
  *
  * @example
@@ -40,9 +47,25 @@ import type { Signal } from "./signal";
  *   return <System>Status: {status()}</System>;
  * }
  * ```
+ *
+ * @example Opt out of snapshot persistence
+ * ```tsx
+ * // Transient UI state — don't survive persistence
+ * const isExpanded = useComState('ui:expanded', false, { persist: false });
+ * ```
  */
-export function useComState<T>(key: string, initialValue: T): Signal<T> {
+export function useComState<T>(
+  key: string,
+  initialValue: T,
+  options?: UseComStateOptions,
+): Signal<T> {
   const ctx = useCom();
+  const store = useRuntimeStore();
+
+  // Register persistence preference
+  if (options?.persist === false) {
+    store.comStatePersist.set(key, false);
+  }
 
   // Initialize if needed
   if (ctx.getState<T>(key) === undefined) {

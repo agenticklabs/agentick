@@ -205,12 +205,7 @@ async function main() {
             sessionId: z.string(),
           }),
           handler: async (params) => {
-            // Check both in-memory and hibernated sessions
-            const inMemory = agentickApp.has(params.sessionId);
-            const hibernated = await agentickApp.isHibernated(params.sessionId);
-            if (!inMemory && !hibernated) {
-              throw new Error("Session not found");
-            }
+            // app.session() auto-restores from store if needed
             const session = await agentickApp.session(params.sessionId);
             const snapshot = session.snapshot();
             return {

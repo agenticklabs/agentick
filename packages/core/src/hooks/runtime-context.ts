@@ -15,9 +15,39 @@ import type {
   TickState,
 } from "./types";
 import type { COM } from "../com/object-model";
+import type { COMTimelineEntry } from "../com/types";
 
 // Helper for createElement
 const h = React.createElement;
+
+// ============================================================
+// Persistence Options
+// ============================================================
+
+/**
+ * Base options for hook snapshot persistence.
+ *
+ * Hooks that store state (`useData`, `useComState`) extend this to let
+ * callers opt individual entries out of session snapshots.
+ *
+ * Values **must be JSON-serializable** — no Dates, Maps, Sets, functions,
+ * or circular references. Non-serializable values are silently skipped
+ * at snapshot time.
+ */
+export interface HookPersistenceOptions {
+  /**
+   * Whether to include this entry in session snapshots.
+   *
+   * When `true` (default), the value is saved in session snapshots
+   * and restored when the session is loaded from store.
+   *
+   * Set to `false` for large datasets, frequently-changing data, or
+   * values already persisted elsewhere.
+   *
+   * @default true
+   */
+  persist?: boolean;
+}
 
 // ============================================================
 // Cache Entry Types
@@ -27,6 +57,7 @@ export interface CacheEntry {
   value: unknown;
   tick: number;
   deps?: unknown[];
+  persist?: boolean;
 }
 
 export interface SerializableCacheEntry {
@@ -78,6 +109,9 @@ export interface RuntimeStore {
   /** Pending data fetches */
   pendingFetches: Map<string, Promise<unknown>>;
 
+  /** Persistence opt-outs for COM state keys (useComState with persist: false) */
+  comStatePersist: Map<string, boolean>;
+
   /** Lifecycle callbacks */
   tickStartCallbacks: Set<TickStartCallback>;
   tickEndCallbacks: Set<TickEndCallback>;
@@ -85,6 +119,18 @@ export interface RuntimeStore {
 
   /** Knob registry — all active knobs registered by useKnob */
   knobRegistry: Map<string, KnobRegistration>;
+
+  /** Get session's full timeline (source of truth) */
+  getSessionTimeline: () => COMTimelineEntry[];
+  /** Replace session's timeline */
+  setSessionTimeline: (entries: COMTimelineEntry[]) => void;
+
+  /**
+   * Resolve results accessible via useResolved().
+   * Set once during restore in ensureCompilationInfrastructure().
+   * Read-only after initialization — hooks read by key, never mutate.
+   */
+  resolvedData: Record<string, unknown>;
 }
 
 /**
@@ -94,10 +140,14 @@ export function createRuntimeStore(): RuntimeStore {
   return {
     dataCache: new Map(),
     pendingFetches: new Map(),
+    comStatePersist: new Map(),
     tickStartCallbacks: new Set(),
     tickEndCallbacks: new Set(),
     afterCompileCallbacks: new Set(),
     knobRegistry: new Map(),
+    getSessionTimeline: () => [],
+    setSessionTimeline: () => {},
+    resolvedData: {},
   };
 }
 
@@ -229,11 +279,46 @@ export function storeGetSerializableDataCache(
 ): Record<string, SerializableCacheEntry> {
   const result: Record<string, SerializableCacheEntry> = {};
   for (const [key, entry] of store.dataCache) {
+    // Skip entries opted out of persistence
+    if (entry.persist === false) continue;
+
+    // Skip entries that fail serialization
+    try {
+      JSON.stringify(entry.value);
+    } catch {
+      continue;
+    }
+
     result[key] = {
       value: entry.value,
       tick: entry.tick,
       deps: entry.deps,
     };
+  }
+  return result;
+}
+
+/**
+ * Filter COM state for snapshot serialization.
+ *
+ * Skips keys opted out via `useComState(..., { persist: false })`
+ * and values that fail JSON.stringify.
+ */
+export function storeGetSerializableComState(
+  store: RuntimeStore,
+  rawState: Record<string, unknown>,
+): Record<string, unknown> {
+  const result: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(rawState)) {
+    if (store.comStatePersist.get(key) === false) continue;
+
+    try {
+      JSON.stringify(value);
+    } catch {
+      continue;
+    }
+
+    result[key] = value;
   }
   return result;
 }

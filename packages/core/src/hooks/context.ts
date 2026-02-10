@@ -62,8 +62,7 @@ export function COMProvider({
  * ```tsx
  * const MyComponent = () => {
  *   const state = useTickState();
- *   console.log(`Tick ${state.tick}`);
- *   // Access previous output via state.previous
+ *   console.log(`Tick ${state.tick}, timeline: ${state.timeline.length} entries`);
  * };
  * ```
  */

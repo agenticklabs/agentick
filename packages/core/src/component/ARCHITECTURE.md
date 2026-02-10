@@ -112,9 +112,10 @@ interface EngineComponent {
 ```typescript
 interface TickState {
   tick: number; // Current tick number (1-indexed)
-  previous?: COMInput; // Compiled state from previous tick
   current?: COMOutput; // Model outputs from current tick
+  timeline: COMTimelineEntry[]; // Session's full timeline (append-only source of truth)
   stopReason?: StopReasonInfo; // Why model stopped (if applicable)
+  usage?: UsageStats; // Token usage from last model execution
   error?: EngineError; // Error info (if applicable)
   stop: (reason: string) => void; // Signal engine to stop
   queuedMessages: ExecutionMessage[]; // Messages since last tick
@@ -295,7 +296,7 @@ abstract class Component<P = {}, S = {}> implements EngineComponent {
 │        │                                                                     │
 │        ▼                                                                     │
 │  ┌──────────────┐                                                            │
-│  │ onTickStart  │ ← Before render (react to previous/current)     │
+│  │ onTickStart  │ ← Before render (react to current tick state)    │
 │  └─────┬────────┘                                                            │
 │        │                                                                     │
 │        ▼                                                                     │
@@ -654,9 +655,10 @@ Execution context for each tick:
 ```typescript
 interface TickState {
   tick: number;
-  previous?: COMInput;
   current?: COMOutput;
+  timeline: COMTimelineEntry[];
   stopReason?: StopReasonInfo;
+  usage?: UsageStats;
   error?: EngineError;
   stop: (reason: string) => void;
   queuedMessages: ExecutionMessage[];
@@ -818,15 +820,10 @@ class GreetingAgent extends Component<GreetingProps, GreetingState> {
 ### Function Component with Hooks
 
 ```tsx
-import { useSignal, useInit, useOnMount, useOnTickEnd } from "agentick";
+import { useSignal, useOnMount, useOnTickEnd } from "agentick";
 
 function CounterAgent(props: { initialCount: number }) {
   const count = useSignal(props.initialCount);
-
-  await useInit(async (ctx, state) => {
-    const saved = await loadSavedCount();
-    if (saved !== undefined) count.set(saved);
-  });
 
   useOnMount((ctx) => {
     console.log("CounterAgent mounted");

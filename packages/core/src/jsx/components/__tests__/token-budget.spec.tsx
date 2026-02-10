@@ -47,6 +47,7 @@ describe("Timeline token budget", () => {
   ) {
     const tickState = createMockTickState({
       previous: makePrevious(entries),
+      timeline: entries,
     });
     const App = () => h(Timeline, { maxTokens: 100, ...budgetProps });
     return compiler.compile(h(App), tickState);
@@ -87,6 +88,7 @@ describe("Timeline token budget", () => {
       const entries = [makeEntry("user", "Hello", 500), makeEntry("assistant", "World", 500)];
       const tickState = createMockTickState({
         previous: makePrevious(entries),
+        timeline: entries,
       });
       // No maxTokens — no compaction
       const App = () => h(Timeline);
@@ -399,6 +401,7 @@ describe("Timeline token budget", () => {
       const entries = [makeEntry("user", "Old", 60), makeEntry("assistant", "New", 40)];
       const tickState = createMockTickState({
         previous: makePrevious(entries),
+        timeline: entries,
       });
 
       const renderFn = vi.fn(
@@ -433,6 +436,7 @@ describe("Timeline token budget", () => {
       const entries = [makeEntry("user", "Hello", 10)];
       const tickState = createMockTickState({
         previous: makePrevious(entries),
+        timeline: entries,
       });
 
       const renderFn = vi.fn(
@@ -455,6 +459,7 @@ describe("Timeline token budget", () => {
       const entries = [makeEntry("user", "Hello", 30), makeEntry("assistant", "World", 30)];
       const tickState = createMockTickState({
         previous: makePrevious(entries),
+        timeline: entries,
       });
 
       const renderFn = vi.fn(
@@ -512,6 +517,7 @@ describe("Timeline token budget", () => {
       // Budget 25: newest two fit (10+10=20 ≤ 25)
       const tickState = createMockTickState({
         previous: makePrevious(entries),
+        timeline: entries,
       });
 
       const App = () => h(Timeline, { maxTokens: 25, strategy: "truncate" });

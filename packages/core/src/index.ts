@@ -67,7 +67,14 @@ export {
   // Data hooks
   useData,
   useInvalidateData,
+  type UseDataOptions,
   useComState,
+  type UseComStateOptions,
+  type HookPersistenceOptions,
+  // Timeline
+  useTimeline,
+  // Resolve
+  useResolved,
   // Knobs
   knob,
   isKnob,

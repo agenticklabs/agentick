@@ -419,12 +419,24 @@ export class ContextObjectModel extends EventEmitter {
   }
 
   /**
+   * Replace the entire timeline with the given entries.
+   * Used by auto-restore and resolve to set session timeline.
+   */
+  setTimeline(entries: COMTimelineEntry[]): void {
+    this.timeline = [...entries];
+    this._injectedHistory = [];
+    for (const entry of entries) {
+      this.emit("timeline:modified", entry, "add");
+    }
+  }
+
+  /**
    * Inject historical timeline entries at the beginning.
    *
    * Use this to load an existing conversation history when the component mounts.
    * Injected entries are prepended to the timeline, appearing before any new entries.
    *
-   * Best called in `useInit()` or `onMount()` on tick 1. After tick 1, the timeline
+   * Best called in `onMount()` on tick 1. After tick 1, the timeline
    * naturally includes all previous entries via `TickState.previous.timeline`.
    *
    * @param entries - Timeline entries to inject (prepended to existing timeline)
@@ -432,9 +444,7 @@ export class ContextObjectModel extends EventEmitter {
    * @example
    * ```tsx
    * const ChatAgent = () => {
-   *   const ctx = useCom();
-   *
-   *   await useInit(async () => {
+   *   useOnMount(async (ctx) => {
    *     const conversation = await loadConversation(id);
    *     ctx.injectHistory(conversation.entries);
    *   });

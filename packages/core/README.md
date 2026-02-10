@@ -741,42 +741,138 @@ const DelegateTool = createTool({
 - **Depth limit**: Maximum 10 levels of nesting (throws if exceeded).
 - **Cleanup**: Children are removed from `session.children` when they complete.
 
-### Session Persistence & Hibernation
+### Session Persistence
 
-Control hibernation, limits, and auto-cleanup:
+Sessions auto-persist after each execution and auto-restore when accessed via `app.session(id)`.
 
 ```typescript
 const app = createApp(MyApp, {
   model,
   sessions: {
-    store: new RedisSessionStore(redis), // Or ":memory:" for SQLite
-    maxActive: 100, // Max concurrent sessions
-    idleTimeout: 5 * 60 * 1000, // Hibernate after 5 min idle
-    autoHibernate: true, // Auto-hibernate on idle
+    store: "./data/sessions.db", // SQLite file (or ':memory:', or custom SessionStore)
+    maxActive: 100, // Max concurrent in-memory sessions
+    idleTimeout: 5 * 60 * 1000, // Evict from memory after 5 min idle
+  },
+});
+```
+
+**How it works:**
+
+1. After each execution, session state is auto-saved to the store (fire-and-forget — persist failures don't block execution)
+2. When `app.session("user-123")` is called and the session isn't in memory, it's auto-restored from the store
+3. `useComState` and `useData` values are included in snapshots by default (set `{ persist: false }` to exclude)
+4. `maxActive` and `idleTimeout` control memory — evicted sessions can be restored from store
+
+#### Snapshot Contents
+
+A `SessionSnapshot` captures:
+
+| Field       | Type                        | Description                                            |
+| ----------- | --------------------------- | ------------------------------------------------------ |
+| `timeline`  | `COMTimelineEntry[] ∣ null` | Full conversation history                              |
+| `comState`  | `Record<string, unknown>`   | All `useComState` values (with `persist !== false`)    |
+| `dataCache` | `Record<string, ...>`       | All `useData` cached values (with `persist !== false`) |
+| `tick`      | `number`                    | Tick count at snapshot time                            |
+| `usage`     | `UsageStats`                | Accumulated token usage                                |
+
+#### Lifecycle Hooks
+
+```typescript
+const app = createApp(MyApp, {
+  model,
+  sessions: { store: "./sessions.db" },
+
+  // Before save — cancel or modify snapshot
+  onBeforePersist: (session, snapshot) => {
+    if (snapshot.tick < 2) return false; // Don't persist short sessions
   },
 
-  // Session lifecycle hooks
-  onSessionCreate: (session) => {
-    /* ... */
-  },
-  onSessionClose: (sessionId) => {
-    /* ... */
+  // After save
+  onAfterPersist: (sessionId, snapshot) => {
+    console.log(`Saved session ${sessionId}`);
   },
 
-  // Hibernation hooks
-  onBeforeHibernate: (session, snapshot) => {
-    // Return false to cancel, modified snapshot, or void
-    if (session.inspect().lastToolCalls.length > 0) return false;
+  // Before restore — migrate old formats
+  onBeforeRestore: (sessionId, snapshot) => {
+    if (snapshot.version !== "1.0") return migrateSnapshot(snapshot);
   },
-  onAfterHibernate: (sessionId, snapshot) => {
-    /* ... */
+
+  // After restore
+  onAfterRestore: (session, snapshot) => {
+    console.log(`Restored session ${session.id} at tick ${snapshot.tick}`);
   },
-  onBeforeHydrate: (sessionId, snapshot) => {
-    // Migrate old formats, validate, etc.
+});
+```
+
+#### Restore Layers
+
+**Layer 1 (default):** Snapshot data is auto-applied. Timeline, comState, and dataCache are restored directly. Components see their previous state via `useComState` and `useData`.
+
+**Layer 2 (resolve):** When `resolve` is configured, auto-apply is disabled. Resolve functions control reconstruction and receive the snapshot as context. Results are available via `useResolved(key)`.
+
+```typescript
+const app = createApp(MyApp, {
+  model,
+  sessions: { store: "./sessions.db" },
+
+  // Layer 2: resolve controls reconstruction
+  resolve: {
+    greeting: (ctx) => `Welcome back! You were on tick ${ctx.snapshot?.tick}`,
+    userData: async (ctx) => fetchUser(ctx.sessionId),
   },
-  onAfterHydrate: (session, snapshot) => {
-    /* ... */
-  },
+});
+
+// In components:
+function MyAgent() {
+  const greeting = useResolved<string>("greeting");
+  const userData = useResolved<User>("userData");
+  // ...
+}
+```
+
+#### Context Management vs History
+
+The session's `_timeline` is the append-only historical log — it grows with every message. The `<Timeline>` component controls what the model _sees_ (context) via its props:
+
+```tsx
+// Full history → model context (default)
+<Timeline />
+
+// Only recent messages in context
+<Timeline limit={20} />
+
+// Token-budgeted context
+<Timeline maxTokens={8000} strategy="sliding-window" headroom={500} />
+
+// Role filtering
+<Timeline roles={['user', 'assistant']} />
+```
+
+The `useTimeline()` hook provides direct access for advanced patterns:
+
+```tsx
+function MyAgent() {
+  const timeline = useTimeline();
+
+  // Read current entries
+  console.log(timeline.entries.length);
+
+  // Replace timeline (e.g., after summarization)
+  timeline.set([summaryEntry, ...recentEntries]);
+
+  // Transform timeline
+  timeline.update((entries) => entries.filter((e) => e.message.role !== "system"));
+}
+```
+
+#### `maxTimelineEntries` — OOM Safety Net
+
+For long-running sessions, `maxTimelineEntries` prevents unbounded memory growth by trimming the oldest entries after each tick. This is a safety net, not a context management strategy — use `<Timeline>` props for context control.
+
+```typescript
+const app = createApp(MyApp, {
+  model,
+  maxTimelineEntries: 500, // Keep at most 500 entries in memory
 });
 ```
 
@@ -862,7 +958,7 @@ const result = await run(<MyApp />, {
 await run(<Agent query="default" />, { props: { query: "override" }, model, messages });
 ```
 
-`createApp` takes a component function and returns a reusable app with session management, hibernation, and middleware support.
+`createApp` takes a component function and returns a reusable app with session management, persistence, and middleware support.
 
 ## DevTools Integration
 

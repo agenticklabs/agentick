@@ -11,7 +11,7 @@ export { useState, useEffect, useRef, useCallback, useMemo, useContext } from "r
 export { useCom, useTickState, COMProvider, TickStateProvider, AgentickProvider } from "./context";
 
 // COM state hook
-export { useComState } from "./com-state";
+export { useComState, type UseComStateOptions } from "./com-state";
 
 // Runtime context (per-session state)
 export {
@@ -26,12 +26,14 @@ export {
   storeClearLifecycleCallbacks,
   storeClearDataCache,
   storeGetSerializableDataCache,
+  storeGetSerializableComState,
   storeSetDataCache,
   storeInvalidateData,
   type RuntimeStore,
   type CacheEntry,
   type SerializableCacheEntry,
   type KnobRegistration,
+  type HookPersistenceOptions,
 } from "./runtime-context";
 
 // Knobs
@@ -65,7 +67,7 @@ export {
 } from "./lifecycle";
 
 // Data hook
-export { useData, useInvalidateData } from "./data";
+export { useData, useInvalidateData, type UseDataOptions } from "./data";
 
 // Signal hooks and utilities
 export {
@@ -121,6 +123,12 @@ export {
   type MessageHandler,
   type MessageContextValue,
 } from "./message-context";
+
+// Timeline hooks
+export { useTimeline } from "./timeline";
+
+// Resolve hooks
+export { useResolved } from "./resolved";
 
 // Timeline hooks (re-exported from jsx/components/timeline for convenience)
 export {

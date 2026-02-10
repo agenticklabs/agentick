@@ -203,12 +203,7 @@ async function main() {
             console.log(`[sessions:get] params.sessionId=${params.sessionId}`);
             console.log(`[sessions:get] app.has=${agentickApp.has(params.sessionId)}`);
             console.log(`[sessions:get] app.sessions=${agentickApp.sessions}`);
-            // Check both in-memory and hibernated sessions
-            const inMemory = agentickApp.has(params.sessionId);
-            const hibernated = await agentickApp.isHibernated(params.sessionId);
-            if (!inMemory && !hibernated) {
-              throw new Error("Session not found");
-            }
+            // app.session() auto-restores from store if needed
             const session = await agentickApp.session(params.sessionId);
             console.log(
               `[sessions:get] session.id=${session.id}, status=${(session as any)._status}`,

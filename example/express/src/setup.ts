@@ -18,17 +18,17 @@ export function createAgentickApp() {
     sessions: {
       // SQLite file for persistent sessions (survives server restarts)
       store: "./data/sessions.db",
-      // Auto-hibernate sessions after 5 minutes of inactivity
+      // Evict sessions from memory after 5 minutes of inactivity
       idleTimeout: 5 * 60 * 1000,
       // Keep max 100 sessions in memory
       maxActive: 100,
     },
     // Lifecycle hooks for debugging
-    onAfterHibernate: (sessionId, snapshot) => {
-      console.log(`[Session] Hibernated ${sessionId} (tick ${snapshot.tick})`);
+    onAfterPersist: (sessionId, snapshot) => {
+      console.log(`[Session] Persisted ${sessionId} (tick ${snapshot.tick})`);
     },
-    onAfterHydrate: (session, snapshot) => {
-      console.log(`[Session] Hydrated ${session.id} from tick ${snapshot.tick}`);
+    onAfterRestore: (session, snapshot) => {
+      console.log(`[Session] Restored ${session.id} from tick ${snapshot.tick}`);
     },
   });
 }

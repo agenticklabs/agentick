@@ -19,9 +19,6 @@ function createMockApp(name: string): App {
     close: vi.fn(),
     sessions: [],
     has: vi.fn(),
-    isHibernated: vi.fn(),
-    hibernate: vi.fn(),
-    hibernatedSessions: vi.fn(),
     onSessionCreate: vi.fn(),
     onSessionClose: vi.fn(),
   } as unknown as App;

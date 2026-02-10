@@ -70,8 +70,7 @@ const result = await session.send.use(loggingMw)({ messages: [...] }).result;
 session.interrupt(message?, reason?)  // Abort current execution, optionally queue a message
 session.clearAbort()                  // Reset abort flag
 session.close()                       // Close session and all children
-session.hibernate()                   // Snapshot + close (for persistence)
-session.snapshot()                    // Get current state without closing
+session.snapshot()                    // Get current state as SessionSnapshot
 session.inspect()                     // Detailed inspection (tick, tools, usage, etc.)
 ```
 
@@ -144,19 +143,61 @@ interface LifecycleCallbacks {
 
 Additional callbacks on `AppOptions`:
 
-| Callback             | When it fires                           |
-| -------------------- | --------------------------------------- |
-| `onBeforeSend`       | Before send executes (can modify input) |
-| `onAfterSend`        | After send completes                    |
-| `onToolConfirmation` | Tool with `requiresConfirmation`        |
-| `onSessionCreate`    | Session created                         |
-| `onSessionClose`     | Session closed                          |
-| `onBeforeHibernate`  | Before hibernation (can cancel)         |
-| `onAfterHibernate`   | After hibernation                       |
-| `onBeforeHydrate`    | Before hydration (can cancel/migrate)   |
-| `onAfterHydrate`     | After hydration                         |
+| Callback             | When it fires                               |
+| -------------------- | ------------------------------------------- |
+| `onBeforeSend`       | Before send executes (can modify input)     |
+| `onAfterSend`        | After send completes                        |
+| `onToolConfirmation` | Tool with `requiresConfirmation`            |
+| `onSessionCreate`    | Session created                             |
+| `onSessionClose`     | Session closed                              |
+| `onBeforePersist`    | Before auto-save (can cancel or modify)     |
+| `onAfterPersist`     | After auto-save                             |
+| `onBeforeRestore`    | Before auto-restore (can cancel or migrate) |
+| `onAfterRestore`     | After auto-restore                          |
 
 **Important**: Spawned child sessions do NOT inherit lifecycle callbacks. This is intentional — the parent's onComplete handler should not fire when a child agent completes.
+
+## Persistence
+
+Sessions auto-persist after each execution and auto-restore on `app.session(id)`.
+
+### Auto-Persist
+
+After every execution completes, the session calls `snapshot()` and saves to the configured store. This is fire-and-forget — persist failures are logged but never block execution.
+
+### Auto-Restore
+
+When `app.session("user-123")` is called and the session isn't in memory:
+
+1. Load snapshot from store
+2. Call `onBeforeRestore` (can cancel or migrate)
+3. Create session with snapshot data
+4. Call `onAfterRestore`
+
+**Layer 1 (default):** Timeline, comState, and dataCache from the snapshot are applied directly. Components read their persisted state via `useComState` and `useData`.
+
+**Layer 2 (resolve):** When `AppOptions.resolve` is set, auto-apply is disabled. Resolve functions run with the snapshot as context. Results available via `useResolved(key)` in components.
+
+### Session Registry
+
+The `SessionRegistry` (in `agentick-instance.ts`) manages active sessions:
+
+- **`maxActive`** — When exceeded, least-recently-used sessions are evicted from memory (saved to store first)
+- **`idleTimeout`** — Sessions inactive for this duration are evicted. Tracked via `send()`, `render()`, `queue()`, and channel publish
+- **Sweep timer** — Periodic check for idle sessions. Timer is `unref()`'d so it doesn't keep Node.js alive
+
+### `maxTimelineEntries`
+
+Safety net for unbounded memory growth. Trims the oldest entries from the session's timeline after each tick. This is NOT a context management strategy — use `<Timeline>` props (`limit`, `maxTokens`, `roles`) for context control.
+
+### Timeline Ownership
+
+The session owns `_timeline: COMTimelineEntry[]` — the append-only source of truth. Components access it via:
+
+- **`<Timeline />`** — Renders timeline to model context with filtering/compaction
+- **`useTimeline()`** — Direct read/write access (`entries`, `set()`, `update()`)
+- **`useConversationHistory()`** — Read-only access to full timeline
+- **`useTickState().timeline`** — Read-only access via tick state
 
 ## Files
 

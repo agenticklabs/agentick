@@ -352,13 +352,10 @@ export function createMockSession(options: MockSessionOptions = {}): MockSession
         sessionId: id,
         tick: 0,
         timeline: [],
-        componentState: {},
+        comState: {},
+        dataCache: {},
         timestamp: Date.now(),
-      } as SessionSnapshot;
-    }
-
-    async hibernate() {
-      return null;
+      };
     }
 
     inspect(): SessionInspection {
@@ -398,9 +395,7 @@ export function createMockSession(options: MockSessionOptions = {}): MockSession
       currentStatus = "closed";
     }
 
-    teardown(status: "closed" | "hibernated") {
-      currentStatus = status;
-    }
+    // No teardown — close() handles it
 
     // Spy arrays
     get _sendCalls() {
@@ -525,18 +520,6 @@ export function createMockApp(options: MockAppOptions = {}): MockApp {
 
     has(sessionId: string) {
       return sessionMap.has(sessionId);
-    },
-
-    async isHibernated() {
-      return false;
-    },
-
-    async hibernate() {
-      return null;
-    },
-
-    async hibernatedSessions() {
-      return [];
     },
 
     onSessionCreate(handler: (session: Session) => void) {

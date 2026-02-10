@@ -274,26 +274,23 @@ export function Timeline(props: TimelineProps): JSX.Element {
     // Outside of AgentickProvider - return empty
   }
 
-  // Get raw timeline entries, apply filters
+  // Get raw timeline entries from session's timeline (source of truth), apply filters
   const filteredEntries = useMemo(() => {
-    if (!tickState?.previous?.timeline) {
-      log.debug(
-        { tick: tickState?.tick, hasPrevious: !!tickState?.previous },
-        "Timeline: No previous timeline available",
-      );
+    const rawEntries = tickState?.timeline ?? [];
+    if (rawEntries.length === 0) {
+      log.debug({ tick: tickState?.tick }, "Timeline: No timeline entries available");
       return [];
     }
-    const rawEntries = tickState.previous.timeline as COMTimelineEntry[];
     log.debug(
       {
-        tick: tickState.tick,
+        tick: tickState?.tick,
         rawCount: rawEntries.length,
         roles: rawEntries.map((e) => e.message?.role),
       },
-      "Timeline: Processing previous timeline",
+      "Timeline: Processing timeline",
     );
     return applyFilters(rawEntries, props);
-  }, [tickState?.previous?.timeline, props.filter, props.limit, props.roles]);
+  }, [tickState?.timeline, props.filter, props.limit, props.roles]);
 
   // Apply token budget compaction (when maxTokens is set)
   const { entries, evicted, budgetInfo } = useMemo(() => {
@@ -408,8 +405,8 @@ Timeline.Provider = function TimelineProvider(props: TimelineProviderProps): JSX
     // Outside of AgentickProvider
   }
 
-  // Use provided entries or get from tickState.previous.timeline
-  const rawEntries = props.entries ?? ((tickState?.previous?.timeline ?? []) as COMTimelineEntry[]);
+  // Use provided entries or get from tickState.timeline (source of truth)
+  const rawEntries = props.entries ?? tickState?.timeline ?? [];
   const pending = props.pending ?? ((tickState?.queuedMessages ?? []) as ExecutionMessage[]);
 
   // Apply filters
@@ -555,6 +552,6 @@ export function useConversationHistory(): COMTimelineEntry[] {
     return [];
   }
 
-  // Return timeline entries from tickState.previous
-  return (tickState?.previous?.timeline ?? []) as COMTimelineEntry[];
+  // Return timeline entries from session's timeline (source of truth)
+  return tickState?.timeline ?? [];
 }

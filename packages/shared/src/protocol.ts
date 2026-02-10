@@ -255,7 +255,7 @@ export interface ConnectionMetadata {
  */
 export interface SessionState {
   sessionId: string;
-  status: "idle" | "running" | "hibernated" | "closed";
+  status: "idle" | "running" | "closed";
   tick: number;
   queuedMessages: number;
 }

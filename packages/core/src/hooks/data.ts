@@ -5,7 +5,12 @@
  */
 
 import { useTickState } from "./context";
-import { useRuntimeStore } from "./runtime-context";
+import { useRuntimeStore, type HookPersistenceOptions } from "./runtime-context";
+
+/**
+ * Options for {@link useData}.
+ */
+export interface UseDataOptions extends HookPersistenceOptions {}
 
 /**
  * Fetch and cache async data.
@@ -28,8 +33,24 @@ import { useRuntimeStore } from "./runtime-context";
  *   return <Section>{user.name}: {status}</Section>;
  * };
  * ```
+ *
+ * @example Opt out of snapshot persistence
+ * ```tsx
+ * // Large or frequently-changing data — re-fetch on hydration instead
+ * const embeddings = useData(
+ *   'embeddings',
+ *   () => fetchEmbeddings(query),
+ *   [query],
+ *   { persist: false },
+ * );
+ * ```
  */
-export function useData<T>(key: string, fetcher: () => Promise<T>, deps?: unknown[]): T {
+export function useData<T>(
+  key: string,
+  fetcher: () => Promise<T>,
+  deps?: unknown[],
+  options?: UseDataOptions,
+): T {
   const store = useRuntimeStore();
   const tickState = useTickState();
   const tick = tickState.tick;
@@ -52,7 +73,7 @@ export function useData<T>(key: string, fetcher: () => Promise<T>, deps?: unknow
   // Check if fetch already pending
   if (!store.pendingFetches.has(key)) {
     const promise = fetcher().then((value) => {
-      store.dataCache.set(key, { value, tick, deps });
+      store.dataCache.set(key, { value, tick, deps, persist: options?.persist });
       store.pendingFetches.delete(key);
       return value;
     });

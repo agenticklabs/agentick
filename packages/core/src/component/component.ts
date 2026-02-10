@@ -1,4 +1,4 @@
-import type { COMInput, COMOutput } from "../com/types";
+import type { COMInput, COMOutput, COMTimelineEntry } from "../com/types";
 import type { COM } from "../com/object-model";
 import type { JSX } from "../jsx/jsx-runtime";
 import type { StopReason, UsageStats } from "@agentick/shared";
@@ -96,12 +96,6 @@ export interface TickState {
   tick: number;
 
   /**
-   * The COMInput from the previous tick (what was sent to model.fromEngineState).
-   * This is the compiled state that was passed to the model.
-   */
-  previous?: COMInput;
-
-  /**
    * The COMOutput from the last tick (what was produced by model execution and tool execution).
    * Contains new timeline entries, tool calls, and tool results.
    *
@@ -150,6 +144,12 @@ export interface TickState {
    * Components can publish/subscribe to channels for UI integration.
    */
   channels?: ChannelService;
+
+  /**
+   * Session's full timeline (append-only source of truth).
+   * Contains all timeline entries accumulated across executions.
+   */
+  timeline: COMTimelineEntry[];
 }
 
 /**

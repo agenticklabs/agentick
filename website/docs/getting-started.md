@@ -15,7 +15,7 @@ npm install @agentick/core @agentick/openai
 ## Your first agent
 
 ```tsx
-import { createApp, run } from "agentick";
+import { createApp } from "agentick";
 import { OpenAIModel } from "@agentick/openai";
 
 const app = createApp(() => (

@@ -31,6 +31,7 @@ import {
   storeClearLifecycleCallbacks,
   storeClearDataCache,
   storeGetSerializableDataCache,
+  storeGetSerializableComState,
   storeSetDataCache,
   type RuntimeStore,
   type SerializableCacheEntry,
@@ -84,7 +85,7 @@ export interface SerializedFiberNode {
 }
 
 /**
- * Serialized hook state for hibernation.
+ * Serialized hook state for persistence.
  */
 export interface SerializedHookState {
   index: number;
@@ -488,7 +489,7 @@ export class FiberCompiler {
   // ============================================================
 
   /**
-   * Get the runtime store for hibernation.
+   * Get the runtime store for session persistence.
    */
   getRuntimeStore(): RuntimeStore {
     return this.runtimeStore;
@@ -496,9 +497,18 @@ export class FiberCompiler {
 
   /**
    * Get the data cache as a serializable object.
+   * Skips entries with `persist: false` and non-serializable values.
    */
   getSerializableDataCache(): Record<string, SerializableCacheEntry> {
     return storeGetSerializableDataCache(this.runtimeStore);
+  }
+
+  /**
+   * Filter COM state for snapshot serialization.
+   * Skips keys with `persist: false` and non-serializable values.
+   */
+  getSerializableComState(rawState: Record<string, unknown>): Record<string, unknown> {
+    return storeGetSerializableComState(this.runtimeStore, rawState);
   }
 
   /**
@@ -506,41 +516,6 @@ export class FiberCompiler {
    */
   setDataCache(data: Record<string, SerializableCacheEntry>): void {
     storeSetDataCache(this.runtimeStore, data);
-  }
-
-  // ============================================================
-  // Hydration Support (session.ts compatibility)
-  // ============================================================
-
-  private _hydrationData: unknown = null;
-  private _isHydrating = false;
-
-  /**
-   * Set hydration data for restoring session state.
-   */
-  setHydrationData(data: unknown): void {
-    this._hydrationData = data;
-    this._isHydrating = true;
-
-    // If data includes a serialized data cache, restore it
-    if (data && typeof data === "object" && "dataCache" in data) {
-      this.setDataCache((data as any).dataCache);
-    }
-  }
-
-  /**
-   * Complete the hydration process.
-   */
-  completeHydration(): void {
-    this._isHydrating = false;
-    this._hydrationData = null;
-  }
-
-  /**
-   * Check if currently hydrating.
-   */
-  isHydratingNow(): boolean {
-    return this._isHydrating;
   }
 
   // ============================================================

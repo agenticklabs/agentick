@@ -78,6 +78,8 @@ import type {
   SessionExecutionHandle,
   SendInput,
   HookType,
+  ResolveConfig,
+  ResolveContext,
 } from "./types";
 import React from "react";
 
@@ -138,21 +140,19 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
   private _isAborted = false;
   private _currentExecutionId: string | null = null;
 
-  // Hydration state (pending fiber tree data to restore)
-  private _pendingHydrationData: SerializedFiberNode | null = null;
-
   // Compilation infrastructure (no intermediate layer)
   private compiler: FiberCompiler | null = null;
   private ctx: COM | null = null;
   private structureRenderer: StructureRenderer | null = null;
   private scheduler: ReconciliationScheduler | null = null;
 
-  // State that persists across ticks
-  private _previousOutput: COMInput | null = null;
+  // Last completed tick's compiled output. Used only by inspect().lastOutput.
+  private _lastCompleteOutput: COMInput | null = null;
   private _currentOutput: COMOutput | null = null;
 
-  // Track timeline sent to model (for combining with response in complete())
-  private _lastSentTimeline: COMTimelineEntry[] = [];
+  // Session-owned timeline (source of truth, append-only)
+  private _timeline: COMTimelineEntry[] = [];
+  private _maxTimelineEntries: number | undefined;
 
   // Estimated context tokens from last compilation (pre-model-call)
   private _estimatedContextTokens?: number;
@@ -210,8 +210,11 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
   private _currentResultResolve: ((result: SendResult) => void) | null = null;
   private _currentResultReject: ((error: Error) => void) | null = null;
 
-  // Hibernate callback (set by App when registering session)
-  private _hibernateCallback: (() => Promise<SessionSnapshot | null>) | null = null;
+  // Auto-persist callback (set by App when store is configured)
+  private _persistCallback: ((snapshot: SessionSnapshot) => Promise<void>) | null = null;
+
+  // Snapshot for resolve (set when restoring from store)
+  private _snapshotForResolve: SessionSnapshot | null = null;
 
   // Spawn hierarchy
   private _parent: Session | null = null;
@@ -256,22 +259,11 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
       }
     }
 
-    // Hydrate from snapshot if provided
-    if (sessionOptions.snapshot) {
-      this.hydrate(sessionOptions.snapshot);
-    }
+    // Read maxTimelineEntries from appOptions
+    this._maxTimelineEntries = appOptions.maxTimelineEntries;
 
-    // Seed initial timeline if provided
-    if (sessionOptions.initialTimeline?.length) {
-      this._previousOutput = {
-        timeline: sessionOptions.initialTimeline as any,
-        system: [],
-        ephemeral: [],
-        sections: {},
-        tools: [],
-        metadata: {},
-      };
-    }
+    // Note: snapshot/initialTimeline hydration now handled via _snapshotForResolve
+    // set by App.createSessionFromSnapshot() — applied in ensureCompilationInfrastructure()
 
     // Start recording if enabled via options
     if (sessionOptions.recording) {
@@ -290,16 +282,14 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
     return this._status;
   }
 
-  /** Whether the session is in a terminal state (hibernated or closed). */
+  /** Whether the session is in a terminal state (closed). */
   private get isTerminal(): boolean {
-    return this._status === "closed" || this._status === "hibernated";
+    return this._status === "closed";
   }
 
   /** Error message for operations attempted on a terminal session. */
   private get terminalError(): string {
-    return this._status === "hibernated"
-      ? "Session is hibernated — re-acquire via app.session(id) to rehydrate"
-      : "Session is closed";
+    return "Session is closed";
   }
 
   get currentTick(): number {
@@ -390,6 +380,7 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
           };
           const tickState: TickState = {
             tick: this._tick,
+            timeline: this._timeline,
             stop: () => {},
             queuedMessages: [],
           };
@@ -441,6 +432,7 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
             };
             const tickState: TickState = {
               tick: this._tick,
+              timeline: this._timeline,
               stop: () => {},
               queuedMessages: [],
             };
@@ -1022,42 +1014,31 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
       version: "1.0",
       sessionId: this.id,
       tick: this._tick,
-      timeline: this._previousOutput?.timeline ?? null,
-      componentState: this.serializeFiberTree(), // Serialized fiber tree with hook states
+      timeline: [...this._timeline],
+      comState: this.compiler
+        ? this.compiler.getSerializableComState(this.ctx?.getStateAll() ?? {})
+        : {},
+      dataCache: this.compiler?.getSerializableDataCache() ?? {},
       usage: { ...this._totalUsage },
       timestamp: Date.now(),
     };
   }
 
   /**
-   * Set the hibernate callback.
-   * Called by the App when registering this session.
+   * Set the auto-persist callback.
+   * Called by the App when a store is configured.
    * @internal
    */
-  setHibernateCallback(callback: () => Promise<SessionSnapshot | null>): void {
-    this._hibernateCallback = callback;
+  setPersistCallback(callback: (snapshot: SessionSnapshot) => Promise<void>): void {
+    this._persistCallback = callback;
   }
 
-  async hibernate(): Promise<SessionSnapshot | null> {
-    if (this.isTerminal) {
-      return null;
-    }
-
-    if (this._status === "running") {
-      // Cannot hibernate while running - abort first
-      this.interrupt(undefined, "Hibernation requested");
-    }
-
-    // Delegate to the App's hibernate callback if available
-    if (this._hibernateCallback) {
-      return this._hibernateCallback();
-    }
-
-    // No callback - just return the snapshot without persisting
-    // This allows sessions created outside of App management to still hibernate
-    const snapshot = this.snapshot();
-    this.teardown("hibernated");
-    return snapshot;
+  /**
+   * Set a snapshot to be applied/resolved when compilation infrastructure is created.
+   * @internal
+   */
+  setSnapshotForResolve(snapshot: SessionSnapshot): void {
+    this._snapshotForResolve = snapshot;
   }
 
   inspect(): SessionInspection {
@@ -1078,7 +1059,7 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
       queuedMessages: [...this._queuedMessages],
       currentPhase: this._status === "running" ? "model" : undefined, // Approximate
       isAborted: this._isAborted,
-      lastOutput: this._previousOutput,
+      lastOutput: this._lastCompleteOutput,
       lastModelOutput: this._lastModelOutput,
       lastToolCalls: lastSnapshot?.tools.calls ?? [],
       lastToolResults:
@@ -1520,19 +1501,9 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
   // ════════════════════════════════════════════════════════════════════════
 
   close(): void {
-    this.teardown("closed");
-  }
-
-  /**
-   * Shared teardown for both close() and hibernate().
-   * Releases all in-memory resources and sets the terminal status.
-   *
-   * @internal Used by SessionRegistry for hibernate teardown.
-   */
-  teardown(status: "closed" | "hibernated"): void {
     if (this.isTerminal) return;
 
-    this._status = status;
+    this._status = "closed";
 
     // Close all child sessions
     for (const child of [...this._children]) {
@@ -1540,9 +1511,8 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
     }
     this._children = [];
 
-    const reason = status === "hibernated" ? "Session hibernated" : "Session closed";
-    this.sessionAbortController.abort(reason);
-    this.executionAbortController?.abort(reason);
+    this.sessionAbortController.abort("Session closed");
+    this.executionAbortController?.abort("Session closed");
 
     // Complete any pending event iterators
     this._executionComplete = true;
@@ -1566,11 +1536,7 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
     this.ctx = null;
     this.structureRenderer = null;
 
-    if (status === "hibernated") {
-      this.emit("hibernate", this.id);
-    } else {
-      this.emit("close", this.id);
-    }
+    this.emit("close", this.id);
   }
 
   // ════════════════════════════════════════════════════════════════════════
@@ -1621,33 +1587,6 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
     // Merge base, current, and session context
     const merged = { ...baseContext, ...(current ?? {}), ...sessionContext };
     return Context.run(merged as any, fn);
-  }
-
-  private hydrate(snapshot: SessionSnapshot): void {
-    this._tick = snapshot.tick;
-
-    // Hydrate timeline (conversation history)
-    if (snapshot.timeline) {
-      this._previousOutput = {
-        timeline: snapshot.timeline as any,
-        system: [],
-        ephemeral: [],
-        sections: {},
-        tools: [],
-        metadata: {},
-      };
-    }
-
-    // Hydrate usage stats
-    if (snapshot.usage) {
-      this._totalUsage = { ...snapshot.usage };
-    }
-
-    // Hydrate fiber tree (component state)
-    // This will be applied when the compiler is first created
-    if (snapshot.componentState) {
-      this._pendingHydrationData = snapshot.componentState as SerializedFiberNode;
-    }
   }
 
   /**
@@ -2030,9 +1969,9 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
         // These can call tickResult.stop() or tickResult.continue() to influence continuation
         const tickEndState: TickState = {
           tick: currentTick,
-          previous: this._previousOutput ?? undefined,
           current: this._currentOutput as any,
           queuedMessages: [],
+          timeline: this._timeline,
           stop: () => {}, // No-op at tick end - use tickResult.stop() instead
         };
         await this.compiler?.notifyTickEnd(tickEndState, tickResult);
@@ -2091,22 +2030,12 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
           stopReason,
         });
 
-        // Update _previousOutput after each tick so the next tick has access to the timeline
-        // This is critical for <Timeline> to render conversation history on subsequent ticks
         output = await this.complete();
-        this._previousOutput = output;
-        this.log.debug(
-          { timelineLength: output.timeline?.length ?? 0 },
-          "Updated _previousOutput after tick",
-        );
+        this._lastCompleteOutput = output;
 
         this._tick++;
         usage.ticks = (usage.ticks ?? 0) + 1;
       }
-
-      // Final complete (may be redundant but ensures consistency)
-      output = await this.complete();
-      this._previousOutput = output;
 
       // Accumulate usage
       this._totalUsage.inputTokens += usage.inputTokens;
@@ -2142,6 +2071,14 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
         output: output ?? null,
         timestamp: timestamp(),
       });
+
+      // Auto-persist snapshot after successful execution (fire-and-forget, skip on abort)
+      if (this._persistCallback && !this._isAborted) {
+        const snap = this.snapshot();
+        this._persistCallback(snap).catch((err) => {
+          this.log.warn({ error: err }, "Auto-persist failed");
+        });
+      }
 
       // Publish timeline delta to channel for real-time sync across clients
       // Only send NEW messages since last publish - O(delta) not O(n)
@@ -2205,11 +2142,12 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
 
     this.compiler = new FiberCompiler(this.ctx);
 
-    // Apply pending hydration data if available
-    if (this._pendingHydrationData) {
-      this.compiler.setHydrationData(this._pendingHydrationData);
-      this._pendingHydrationData = null; // Clear after applying
-    }
+    // Wire timeline accessors to RuntimeStore
+    const runtimeStore = this.compiler.getRuntimeStore();
+    runtimeStore.getSessionTimeline = () => this._timeline;
+    runtimeStore.setSessionTimeline = (entries) => {
+      this._timeline = [...entries];
+    };
 
     // Create scheduler and wire it to the compiler
     // This enables the reactive model: state changes between ticks trigger reconciliation
@@ -2245,6 +2183,68 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
 
     // Notify compiler that compilation is starting
     await this.compiler.notifyStart();
+
+    // Apply snapshot-for-resolve if set (restore from store)
+    if (this._snapshotForResolve) {
+      try {
+        const resolveConfig = this.appOptions.resolve as ResolveConfig | undefined;
+        if (resolveConfig) {
+          // Layer 2: resolve controls reconstruction
+          const ctx: ResolveContext = { sessionId: this.id, snapshot: this._snapshotForResolve };
+          const resolved = await this.executeResolve(resolveConfig, ctx);
+          runtimeStore.resolvedData = resolved;
+        } else {
+          // Layer 1: auto-apply snapshot
+          const snap = this._snapshotForResolve;
+          this._timeline = [...(snap.timeline ?? [])];
+          this._tick = snap.tick;
+          if (snap.usage) this._totalUsage = { ...snap.usage };
+          if (snap.comState && Object.keys(snap.comState).length > 0) {
+            this.ctx.setStatePartial(snap.comState);
+          }
+          if (snap.dataCache && Object.keys(snap.dataCache).length > 0) {
+            this.compiler.setDataCache(snap.dataCache);
+          }
+        }
+      } finally {
+        this._snapshotForResolve = null;
+      }
+    }
+  }
+
+  /**
+   * Execute resolve configuration and return results.
+   */
+  private async executeResolve(
+    config: ResolveConfig,
+    ctx: ResolveContext,
+  ): Promise<Record<string, unknown>> {
+    if (typeof config === "function") {
+      try {
+        return await config(ctx);
+      } catch (err) {
+        throw new Error(
+          `resolve function failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
+
+    // Object form: resolve each entry
+    const results: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(config)) {
+      if (typeof value === "function") {
+        try {
+          results[key] = await value(ctx);
+        } catch (err) {
+          throw new Error(
+            `resolve["${key}"] failed: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+      } else {
+        results[key] = value;
+      }
+    }
+    return results;
   }
 
   /**
@@ -2290,9 +2290,9 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
     // Prepare tick state
     const tickState: TickState = {
       tick: this._tick,
-      previous: this._previousOutput ?? undefined,
       current: this._currentOutput as any,
       queuedMessages: queuedMessages,
+      timeline: [...this._timeline],
       stop: (reason: string) => {
         (tickState as any).stopReason = reason;
       },
@@ -2322,7 +2322,6 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
     this.scheduler?.enterTick();
 
     let compiled;
-    const wasHydrating = this.compiler.isHydratingNow();
     try {
       // Compile until stable
       // Note: tickControl and getChannel are available for future use
@@ -2337,11 +2336,6 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
         },
       );
       compiled = result.compiled;
-
-      // Complete hydration after first successful compile
-      if (wasHydrating) {
-        this.compiler.completeHydration();
-      }
     } finally {
       // Exit tick mode - any pending reconciliations will now flush
       this.scheduler?.exitTick();
@@ -2353,9 +2347,6 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
     // Format input - compiled structure IS the complete projection
     // JSX components render history as <Message>, so compiled.timelineEntries is complete
     const formatted = await this.structureRenderer.formatInput(this.ctx.toInput());
-
-    // Track what we're sending to the model (for combining with response in complete())
-    this._lastSentTimeline = formatted.timeline ?? [];
 
     // Track estimated context tokens for contextInfo
     this._estimatedContextTokens = formatted.totalTokens;
@@ -2492,8 +2483,9 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
     const newUserEntries: COMTimelineEntry[] = [];
 
     for (const queued of queuedMessages) {
-      if (queued.type !== "user" || !queued.content) continue;
+      if (!queued.content) continue;
       const message = queued.content as Message;
+      if (message.role !== "user") continue;
       const existing = existingByMessage.get(message);
       if (existing) {
         userEntries.push(existing);
@@ -2537,19 +2529,21 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
       toolResults,
     };
 
-    // Add entries to COM - user entries first, then assistant response
+    // Add entries to COM and session timeline - user entries first, then assistant response
     for (const entry of newUserEntries) {
       this.ctx.addTimelineEntry(entry);
+      this._timeline.push(entry);
     }
 
     if (response.newTimelineEntries) {
       for (const entry of response.newTimelineEntries) {
         this.ctx.addTimelineEntry(entry);
+        this._timeline.push(entry);
       }
     }
 
     if (toolResults.length > 0) {
-      this.ctx.addTimelineEntry({
+      const toolResultEntry: COMTimelineEntry = {
         kind: "message",
         message: {
           role: "tool" as const,
@@ -2562,7 +2556,19 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
           })),
         },
         tags: ["tool_output"],
-      });
+      };
+      this.ctx.addTimelineEntry(toolResultEntry);
+      this._timeline.push(toolResultEntry);
+    }
+
+    // Apply maxTimelineEntries trim
+    if (this._maxTimelineEntries && this._timeline.length > this._maxTimelineEntries) {
+      const removed = this._timeline.length - this._maxTimelineEntries;
+      this._timeline = this._timeline.slice(-this._maxTimelineEntries);
+      this.log.debug(
+        { removed, remaining: this._timeline.length },
+        "Timeline trimmed (maxTimelineEntries)",
+      );
     }
 
     this._currentOutput = current;
@@ -2581,64 +2587,19 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
   /**
    * Complete execution and return final state.
    *
-   * Returns the complete timeline for this execution:
-   * - What was sent to the model (from compiled JSX via _lastSentTimeline)
-   * - What the model responded (from _currentOutput.timeline - only NEW entries)
-   *
-   * This ensures the full conversation history is preserved across executions.
+   * Session._timeline is the source of truth. No merge/dedup logic needed.
    */
   private async complete(): Promise<COMInput> {
     if (!this.ctx || !this.structureRenderer || !this.compiler) {
       throw new Error("Compilation infrastructure not initialized");
     }
 
-    // Build complete timeline:
-    // 1. _lastSentTimeline = what was sent to model (includes history rendered by JSX)
-    // 2. _currentOutput.timeline = new entries from this tick (user input + model response + tool results)
-    //
-    // Only USER messages might overlap (rendered via JSX AND in queuedMessages).
-    // Model responses (assistant/tool) are ALWAYS new and should NEVER be deduplicated.
-    //
-    // NOTE: We use content-based comparison for user messages because <Message {...entry.message}>
-    // creates NEW message objects when rendering history, so reference equality fails.
-    const sentTimeline = this._lastSentTimeline ?? [];
-    const currentTimeline = this._currentOutput?.timeline ?? [];
-
-    // Create a signature for user messages only
-    const userMessageSignature = (entry: COMTimelineEntry): string | null => {
-      if (!entry.message || entry.message.role !== "user") return null;
-      const m = entry.message;
-      if (m.id) return `id:${m.id}`;
-      const contentStr = JSON.stringify(m.content);
-      return `user:${contentStr}`;
-    };
-
-    // Only track signatures of USER messages that were sent
-    const sentUserSignatures = new Set(
-      sentTimeline.map(userMessageSignature).filter((s): s is string => s !== null),
-    );
-
-    // Filter currentTimeline:
-    // - USER messages: dedupe against sentTimeline (might be rendered via JSX)
-    // - Other roles (assistant, tool): always include (they're new from this tick)
-    const newEntries = currentTimeline.filter((entry) => {
-      if (!entry.message) return true; // Non-message entries always included
-      if (entry.message.role !== "user") return true; // Assistant/tool always included
-
-      // User message: check for duplicates
-      const sig = userMessageSignature(entry);
-      return sig === null || !sentUserSignatures.has(sig);
-    });
-
-    const timeline = [...sentTimeline, ...newEntries];
-
     const comOutput = this.ctx.toInput();
     const finalOutput: COMInput = {
       ...comOutput,
-      timeline,
+      timeline: [...this._timeline],
     };
 
-    // Notify compiler of completion
     try {
       await this.compiler.notifyComplete(finalOutput);
     } catch {

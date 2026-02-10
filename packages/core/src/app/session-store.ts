@@ -1,7 +1,7 @@
 /**
  * Session Store Implementations
  *
- * Provides storage adapters for session hibernation.
+ * Provides storage adapters for session persistence.
  */
 
 import type { SessionSnapshot, SessionStore } from "./types";
