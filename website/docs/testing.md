@@ -38,13 +38,13 @@ model.respondWith([{ reasoning: "Let me think..." }, "The answer is 42"]);
 
 ### Content Types
 
-| Input                             | Detected As              |
-| --------------------------------- | ------------------------ |
-| `"text"`                          | Text block               |
-| `{ tool: { name, input } }`       | Single tool call         |
-| `{ tool: [...] }`                 | Parallel tool calls      |
-| `{ image: { url } }`              | Image from URL           |
-| `{ reasoning: "..." }`            | Reasoning/thinking block |
+| Input                       | Detected As              |
+| --------------------------- | ------------------------ |
+| `"text"`                    | Text block               |
+| `{ tool: { name, input } }` | Single tool call         |
+| `{ tool: [...] }`           | Parallel tool calls      |
+| `{ image: { url } }`        | Image from URL           |
+| `{ reasoning: "..." }`      | Reasoning/thinking block |
 
 ### Imperative Methods
 
@@ -85,11 +85,11 @@ test("agent responds to user", async () => {
 
 ### Options
 
-| Option     | Description                                       |
-| ---------- | ------------------------------------------------- |
-| `props`    | Props to pass to the agent component              |
+| Option     | Description                                        |
+| ---------- | -------------------------------------------------- |
+| `props`    | Props to pass to the agent component               |
 | `model`    | Custom test model (default: `createTestAdapter()`) |
-| `maxTicks` | Max ticks per execution (default: 10)             |
+| `maxTicks` | Max ticks per execution (default: 10)              |
 
 ## compileAgent
 
@@ -137,7 +137,9 @@ const { environment } = createTestEnvironment({
 const { environment } = createTestEnvironment({
   interceptTools: {
     execute: (call) => ({
-      id: call.id, toolUseId: call.id, name: call.name,
+      id: call.id,
+      toolUseId: call.id,
+      name: call.name,
       success: true,
       content: [{ type: "text", text: `ran: ${call.input.code}` }],
     }),

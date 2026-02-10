@@ -136,11 +136,15 @@ const DelegateTool = createTool({
 The optional third argument overrides inherited options:
 
 ```tsx
-await session.spawn(SummaryAgent, { messages }, {
-  model: cheapModel,        // Override the parent's model
-  maxTicks: 3,              // Limit child ticks
-  environment: sandboxEnv,  // Override the parent's environment
-});
+await session.spawn(
+  SummaryAgent,
+  { messages },
+  {
+    model: cheapModel, // Override the parent's model
+    maxTicks: 3, // Limit child ticks
+    environment: sandboxEnv, // Override the parent's environment
+  },
+);
 ```
 
 ### Spawn Behavior
@@ -173,8 +177,12 @@ const env: ExecutionEnvironment = {
   },
 
   // Lifecycle (once per session)
-  onSessionInit(session) { /* set up sandbox */ },
-  onDestroy(session) { /* cleanup */ },
+  onSessionInit(session) {
+    /* set up sandbox */
+  },
+  onDestroy(session) {
+    /* cleanup */
+  },
 };
 
 const app = createApp(MyAgent, { model, environment: env });
