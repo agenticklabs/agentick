@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 import { render } from "ink-testing-library";
 import { ToolConfirmationPrompt } from "./ToolConfirmationPrompt.js";
 import type { ToolConfirmationRequest } from "@agentick/client";
-import { flush } from "../testing.js";
+import { flush, waitFor } from "../testing.js";
 
 function makeRequest(overrides: Partial<ToolConfirmationRequest> = {}): ToolConfirmationRequest {
   return {
@@ -14,20 +14,14 @@ function makeRequest(overrides: Partial<ToolConfirmationRequest> = {}): ToolConf
 }
 
 describe("ToolConfirmationPrompt", () => {
-  let cleanup: (() => void) | undefined;
-  afterEach(async () => {
-    cleanup?.();
-    cleanup = undefined;
-    await flush();
-  });
-
   it("renders tool name and arguments", async () => {
     const onRespond = vi.fn();
-    const inst = render(<ToolConfirmationPrompt request={makeRequest()} onRespond={onRespond} />);
-    cleanup = inst.unmount;
+    const { lastFrame } = render(
+      <ToolConfirmationPrompt request={makeRequest()} onRespond={onRespond} />,
+    );
     await flush();
 
-    const frame = inst.lastFrame()!;
+    const frame = lastFrame()!;
     expect(frame).toContain("delete_file");
     expect(frame).toContain("/tmp/test.txt");
     expect(frame).toContain("[Y] Approve");
@@ -36,51 +30,51 @@ describe("ToolConfirmationPrompt", () => {
 
   it("Y key calls onRespond with approved: true", async () => {
     const onRespond = vi.fn();
-    const inst = render(<ToolConfirmationPrompt request={makeRequest()} onRespond={onRespond} />);
-    cleanup = inst.unmount;
+    const { stdin } = render(
+      <ToolConfirmationPrompt request={makeRequest()} onRespond={onRespond} />,
+    );
     await flush();
 
-    inst.stdin.write("y");
-    await flush();
-
-    expect(onRespond).toHaveBeenCalledWith({ approved: true });
+    stdin.write("y");
+    await waitFor(() => expect(onRespond).toHaveBeenCalledWith({ approved: true }));
   });
 
   it("N key calls onRespond with approved: false", async () => {
     const onRespond = vi.fn();
-    const inst = render(<ToolConfirmationPrompt request={makeRequest()} onRespond={onRespond} />);
-    cleanup = inst.unmount;
+    const { stdin } = render(
+      <ToolConfirmationPrompt request={makeRequest()} onRespond={onRespond} />,
+    );
     await flush();
 
-    inst.stdin.write("n");
-    await flush();
-
-    expect(onRespond).toHaveBeenCalledWith({
-      approved: false,
-      reason: "rejected by user",
-    });
+    stdin.write("n");
+    await waitFor(() =>
+      expect(onRespond).toHaveBeenCalledWith({
+        approved: false,
+        reason: "rejected by user",
+      }),
+    );
   });
 
   it("A key calls onRespond with approved: true", async () => {
     const onRespond = vi.fn();
-    const inst = render(<ToolConfirmationPrompt request={makeRequest()} onRespond={onRespond} />);
-    cleanup = inst.unmount;
+    const { stdin } = render(
+      <ToolConfirmationPrompt request={makeRequest()} onRespond={onRespond} />,
+    );
     await flush();
 
-    inst.stdin.write("a");
-    await flush();
-
-    expect(onRespond).toHaveBeenCalledWith({ approved: true });
+    stdin.write("a");
+    await waitFor(() => expect(onRespond).toHaveBeenCalledWith({ approved: true }));
   });
 
   it("shows message when present in request", async () => {
     const onRespond = vi.fn();
     const request = makeRequest({ message: "This will delete an important file" });
-    const inst = render(<ToolConfirmationPrompt request={request} onRespond={onRespond} />);
-    cleanup = inst.unmount;
+    const { lastFrame } = render(
+      <ToolConfirmationPrompt request={request} onRespond={onRespond} />,
+    );
     await flush();
 
-    expect(inst.lastFrame()!).toContain("This will delete an important file");
+    expect(lastFrame()!).toContain("This will delete an important file");
   });
 
   it("truncates long arguments", async () => {
@@ -90,10 +84,11 @@ describe("ToolConfirmationPrompt", () => {
       longArgs[`key_${i}`] = `value_${i}`;
     }
     const request = makeRequest({ arguments: longArgs });
-    const inst = render(<ToolConfirmationPrompt request={request} onRespond={onRespond} />);
-    cleanup = inst.unmount;
+    const { lastFrame } = render(
+      <ToolConfirmationPrompt request={request} onRespond={onRespond} />,
+    );
     await flush();
 
-    expect(inst.lastFrame()!).toContain("...");
+    expect(lastFrame()!).toContain("...");
   });
 });

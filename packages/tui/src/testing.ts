@@ -15,17 +15,33 @@
  *     (render + commit) have drained
  *   - setImmediate runs in Node's check phase, AFTER React's Scheduler has
  *     flushed passive effects (also scheduled via setImmediate, but earlier)
- *
- * This works regardless of setTimeout vs setImmediate ordering (which is
- * non-deterministic at the top level in Node.js):
- *   - If setImmediate fires first: effects already ran, our flush confirms it
- *   - If setTimeout fires first: our setImmediate queues after React's, runs after effects
  */
 
 /**
  * Flush pending React renders and effects.
  *
  * Call after render(), stdin.write(), or any state-triggering action.
- * One call is sufficient — no need for double-flush or magic timeouts.
  */
 export const flush = () => new Promise<void>((r) => setTimeout(() => setImmediate(r), 0));
+
+/**
+ * Poll until an assertion passes, flushing the event loop between attempts.
+ *
+ * Use this instead of `flush()` + immediate assertion when the timing between
+ * a trigger (e.g., stdin.write) and its effect (e.g., useInput callback) is
+ * non-deterministic across environments (local macOS vs CI Linux).
+ */
+export async function waitFor(assertion: () => void, timeout = 2000): Promise<void> {
+  const start = Date.now();
+  let lastError: unknown;
+  while (Date.now() - start < timeout) {
+    await flush();
+    try {
+      assertion();
+      return;
+    } catch (e) {
+      lastError = e;
+    }
+  }
+  throw lastError;
+}
