@@ -219,12 +219,23 @@ methods: {
 
 ### Procedures & Middleware
 
-A **Procedure** wraps any async function with middleware, validation, execution tracking, and `ProcedurePromise` return values. Procedures are the core execution primitive — every model call, tool run, and engine operation is a Procedure.
+A **Procedure** wraps any async function, generator, or async iterable with middleware, execution tracking, and streaming. Procedures are the core execution primitive — every model call, tool run, and engine operation is a Procedure.
 
 ```typescript
 import { createProcedure } from "@agentick/kernel";
 
+// Async function
 const greet = createProcedure(async (name: string) => `Hello, ${name}!`);
+
+// Async generator — streaming with automatic context preservation
+const stream = createProcedure(
+  { name: "tokens", handleFactory: false },
+  async function* (prompt: string) {
+    for (const token of ["Hello", " ", "World"]) {
+      yield token;
+    }
+  },
+);
 ```
 
 **Calling a Procedure** returns a `ProcedurePromise<ExecutionHandle<T>>`:
@@ -235,6 +246,25 @@ const result = await greet("World").result; // "Hello, World!" (auto-unwraps .re
 ```
 
 The `.result` auto-unwrap is key: `await proc()` gives the handle, `await proc().result` gives the final value. This is how `await run(<Agent />, opts)` returns `SendResult` directly.
+
+**Streaming with generators** — procedures that return async iterables get automatic context propagation, `stream:chunk` events, and cleanup:
+
+```typescript
+const iter = await stream("test");
+for await (const token of iter) {
+  process.stdout.write(token); // "Hello World"
+}
+```
+
+**Stream utilities** — compose stream transformations on procedure output:
+
+```typescript
+import { mapStream, tapStream, mergeStreams } from "@agentick/kernel";
+
+const doubled = mapStream(iter, (token) => token.repeat(2));
+const logged = tapStream(iter, (token) => console.log(token));
+const merged = mergeStreams([stream1, stream2]); // race, yield as they arrive
+```
 
 **Chainable API** — all return a new Procedure (immutable):
 

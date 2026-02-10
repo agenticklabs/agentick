@@ -14,12 +14,13 @@ pnpm add @agentick/kernel
 
 ### Procedures
 
-Procedures wrap async functions with middleware, validation, and execution control:
+Procedures wrap any async function, generator, or async iterable with middleware, execution tracking, and streaming:
 
 ```typescript
 import { createProcedure } from "@agentick/kernel";
 import { z } from "zod";
 
+// Async function with schema validation
 const fetchUser = createProcedure(
   {
     name: "fetchUser",
@@ -41,6 +42,29 @@ const withLogging = fetchUser.use(async (args, ctx, next) => {
   return result;
 });
 ```
+
+#### Async Generators
+
+Procedures wrapping generators get automatic context preservation, `stream:chunk` events, abort handling, and iterator cleanup:
+
+```typescript
+const tokenStream = createProcedure(
+  { name: "tokens", handleFactory: false },
+  async function* (prompt: string) {
+    const response = await fetchSSE(prompt);
+    for await (const chunk of response) {
+      yield chunk.text;
+    }
+  },
+);
+
+const iter = await tokenStream("tell me a joke");
+for await (const token of iter) {
+  process.stdout.write(token);
+}
+```
+
+Any function returning an `AsyncIterable` gets the same treatment — it doesn't have to be `async function*`.
 
 #### ExecutionHandle
 
@@ -339,13 +363,14 @@ console.log(base === withTimeout); // false
 
 ### Procedures
 
-| Export                              | Description             |
-| ----------------------------------- | ----------------------- |
-| `createProcedure(options, handler)` | Create a procedure      |
-| `createHook(options, handler)`      | Create a hook procedure |
-| `pipe(...procedures)`               | Chain left-to-right     |
-| `compose(...procedures)`            | Chain right-to-left     |
-| `createPipeline(middleware)`        | Bundle middleware       |
+| Export                              | Description                                |
+| ----------------------------------- | ------------------------------------------ |
+| `createProcedure(options, handler)` | Create a procedure (function or generator) |
+| `generatorProcedure(options, fn)`   | Create a generator procedure with `this`   |
+| `createHook(options, handler)`      | Create a hook procedure                    |
+| `pipe(...procedures)`               | Chain left-to-right                        |
+| `compose(...procedures)`            | Chain right-to-left                        |
+| `createPipeline(middleware)`        | Bundle middleware                          |
 
 ### Guards
 
@@ -391,10 +416,14 @@ console.log(base === withTimeout); // false
 
 ### Streaming
 
-| Export           | Description                   |
-| ---------------- | ----------------------------- |
-| `Channel`        | Pub/sub with request/response |
-| `EventBuffer<T>` | Type-safe event streaming     |
+| Export            | Description                           |
+| ----------------- | ------------------------------------- |
+| `Channel`         | Pub/sub with request/response         |
+| `EventBuffer<T>`  | Type-safe event streaming with replay |
+| `mapStream(s,fn)` | Transform items in an async stream    |
+| `tapStream(s,fn)` | Side effects without modifying stream |
+| `mergeStreams(s)` | Merge multiple streams (race)         |
+| `isAsyncIterable` | Type guard for async iterables        |
 
 ## License
 
