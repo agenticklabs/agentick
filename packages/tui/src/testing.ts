@@ -21,8 +21,17 @@
  * Flush pending React renders and effects.
  *
  * Call after render(), stdin.write(), or any state-triggering action.
+ *
+ * Multiple rounds are needed because reconciler 0.31 can cascade scheduling:
+ * render (microtask) → commit → Scheduler (setImmediate) → effects →
+ * possibly more microtasks → more setImmediate work. A single round may
+ * catch the render but miss the effects.
  */
-export const flush = () => new Promise<void>((r) => setTimeout(() => setImmediate(r), 0));
+export const flush = async () => {
+  for (let i = 0; i < 3; i++) {
+    await new Promise<void>((r) => setTimeout(() => setImmediate(r), 0));
+  }
+};
 
 /**
  * Poll until an assertion passes, flushing the event loop between attempts.
