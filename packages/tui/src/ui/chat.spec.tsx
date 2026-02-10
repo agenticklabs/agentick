@@ -10,7 +10,7 @@ import type {
   ToolConfirmationResponse,
 } from "@agentick/client";
 import { Chat } from "./chat.js";
-import { flush } from "../testing.js";
+import { flush, waitFor } from "../testing.js";
 
 // ============================================================================
 // Mock Client (mirrors the pattern from @agentick/react tests)
@@ -199,11 +199,11 @@ describe("Chat", () => {
       arguments: { path: "/tmp/test.txt" },
     });
 
-    await flush();
-
-    const frame = lastFrame()!;
-    expect(frame).toContain("delete_file");
-    expect(frame).toContain("[Y] Approve");
+    await waitFor(() => {
+      const frame = lastFrame()!;
+      expect(frame).toContain("delete_file");
+      expect(frame).toContain("[Y] Approve");
+    });
   });
 
   it("tool confirmation Y key approves and returns to streaming", async () => {
@@ -224,26 +224,27 @@ describe("Chat", () => {
       name: "delete_file",
       arguments: { path: "/tmp/test.txt" },
     });
-    await flush();
+
+    // Wait for confirmation prompt to render
+    await waitFor(() => {
+      expect(lastFrame()!).toContain("[Y] Approve");
+    });
 
     // Press Y
     stdin.write("y");
-    await flush();
 
     const response = await responsePromise;
     expect(response.approved).toBe(true);
 
-    // Wait for React to re-render after state update
-    await flush();
-
     // Prompt should be gone
-    const frame = lastFrame()!;
-    expect(frame).not.toContain("[Y] Approve");
+    await waitFor(() => {
+      expect(lastFrame()!).not.toContain("[Y] Approve");
+    });
   });
 
   it("tool confirmation N key rejects", async () => {
     const client = createMockClient();
-    const { stdin } = render(
+    const { stdin, lastFrame } = render(
       <AgentickProvider client={client}>
         <Chat sessionId="main" />
       </AgentickProvider>,
@@ -257,10 +258,13 @@ describe("Chat", () => {
       name: "delete_file",
       arguments: { path: "/tmp/test.txt" },
     });
-    await flush();
+
+    // Wait for confirmation prompt to render
+    await waitFor(() => {
+      expect(lastFrame()!).toContain("[Y] Approve");
+    });
 
     stdin.write("n");
-    await flush();
 
     const response = await responsePromise;
     expect(response.approved).toBe(false);
