@@ -21,7 +21,8 @@
     "../packages/adapters/google",
     "../packages/adapters/ai-sdk",
     "../packages/tui",
-    "../packages/sandbox"
+    "../packages/sandbox",
+    "../packages/sandbox-local"
   ],
   "out": "api",
   "plugin": ["typedoc-plugin-markdown", "typedoc-vitepress-theme"],

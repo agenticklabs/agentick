@@ -241,3 +241,11 @@ const provider = createMockProvider({
 ```
 
 Both return objects with `vi.fn()` stubs and sensible defaults. Override any method via the options parameter.
+
+## Providers
+
+| Package                                         | Strategy                                      | Description                                                                                          |
+| ----------------------------------------------- | --------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| [`@agentick/sandbox-local`](/api/sandbox-local) | `seatbelt` (macOS), `bwrap`/`unshare` (Linux) | Host machine with OS-level sandbox. Safe by default — denies reads to home dirs, volumes, keychains. |
+
+See each provider's README for platform requirements and security model details.

@@ -109,6 +109,9 @@ export interface ExecOptions {
 
   /** Timeout in milliseconds. */
   timeout?: number;
+
+  /** Streaming output callback. Called for each chunk of stdout/stderr. */
+  onOutput?: (chunk: OutputChunk) => void;
 }
 
 export interface ExecResult {
@@ -149,8 +152,13 @@ export interface Permissions {
   /** Filesystem access. Default: true. */
   fs?: boolean;
 
-  /** Network access. Default: false. */
-  net?: boolean;
+  /**
+   * Network access. Default: false.
+   * - `false` — deny all (default)
+   * - `true` — allow all
+   * - `NetworkRule[]` — apply rules in order, first match wins, default deny
+   */
+  net?: boolean | NetworkRule[];
 
   /** Child process spawning. Default: true. */
   childProcess?: boolean;
@@ -176,4 +184,46 @@ export interface ResourceLimits {
 
   /** Maximum concurrent processes. */
   maxProcesses?: number;
+}
+
+// ── Network Rules ──────────────────────────────────────────────────────────
+
+export interface NetworkRule {
+  /** "allow" or "deny". Rules evaluated in order; first match wins. */
+  action: "allow" | "deny";
+
+  /** Domain pattern. Supports wildcards: "*.example.com", "api.github.com". */
+  domain?: string;
+
+  /** URL regex pattern. Matched against full URL. */
+  urlPattern?: string;
+
+  /** HTTP methods to match. Default: all. */
+  methods?: string[];
+
+  /** Port to match. */
+  port?: number;
+}
+
+export interface ProxiedRequest {
+  /** Full URL of the request. */
+  url: string;
+
+  /** HTTP method. */
+  method: string;
+
+  /** Target host. */
+  host: string;
+
+  /** Target port. */
+  port: number;
+
+  /** Unix timestamp (ms) when the request was made. */
+  timestamp: number;
+
+  /** Whether the request was blocked. */
+  blocked: boolean;
+
+  /** The rule that matched, if any. */
+  matchedRule?: NetworkRule;
 }

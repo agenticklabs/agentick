@@ -17,6 +17,8 @@ export type {
   Mount,
   Permissions,
   ResourceLimits,
+  NetworkRule,
+  ProxiedRequest,
 } from "./types";
 
 // ── Edit Types & Utilities ───────────────────────────────────────────────────

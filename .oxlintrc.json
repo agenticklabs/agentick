@@ -27,6 +27,7 @@
     "react-hooks/exhaustive-deps": "off",
     "no-constant-condition": "off",
     "vitest/no-disabled-tests": "off",
+    "vitest/warn-todo": "off",
     "no-unsafe-finally": "off",
     "@typescript-eslint/no-extraneous-class": "off",
     "import/no-unassigned-import": "off",

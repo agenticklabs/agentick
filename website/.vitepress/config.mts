@@ -33,7 +33,7 @@ const PACKAGE_GROUPS: Array<{ label: string; packages: string[] }> = [
   },
   {
     label: "Sandbox",
-    packages: ["@agentick/sandbox"],
+    packages: ["@agentick/sandbox", "@agentick/sandbox-local"],
   },
   {
     label: "DevTools",
