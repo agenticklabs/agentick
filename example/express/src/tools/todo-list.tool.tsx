@@ -21,29 +21,36 @@ export const TODO_CHANNEL = "todo-list";
 /**
  * Zod schema for todo list actions.
  */
-const todoActionSchema = z.discriminatedUnion("action", [
-  z.object({
-    action: z.literal("list"),
-  }),
-  z.object({
-    action: z.literal("create"),
-    title: z.string().describe("The title of the new todo item"),
-  }),
-  z.object({
-    action: z.literal("complete"),
-    id: z.number().describe("The ID of the todo item to mark as completed"),
-  }),
-  z.object({
-    action: z.literal("update"),
-    id: z.number().describe("The ID of the todo item to update"),
-    title: z.string().optional().describe("New title for the todo item"),
-    completed: z.boolean().optional().describe("New completed status"),
-  }),
-  z.object({
-    action: z.literal("delete"),
-    id: z.number().describe("The ID of the todo item to delete"),
-  }),
-]);
+// const todoActionSchema = z.discriminatedUnion("action", [
+//   z.object({
+//     action: z.literal("list"),
+//   }),
+//   z.object({
+//     action: z.literal("create"),
+//     title: z.string().describe("The title of the new todo item"),
+//   }),
+//   z.object({
+//     action: z.literal("complete"),
+//     id: z.number().describe("The ID of the todo item to mark as completed"),
+//   }),
+//   z.object({
+//     action: z.literal("update"),
+//     id: z.number().describe("The ID of the todo item to update"),
+//     title: z.string().optional().describe("New title for the todo item"),
+//     completed: z.boolean().optional().describe("New completed status"),
+//   }),
+//   z.object({
+//     action: z.literal("delete"),
+//     id: z.number().describe("The ID of the todo item to delete"),
+//   }),
+// ]);
+
+const todoActionSchema = z.object({
+  action: z.enum(["list", "create", "complete", "update", "delete"]),
+  id: z.number().optional().describe("Required for complete, update, delete"),
+  title: z.string().optional().describe("Required for create, optional for update"),
+  completed: z.boolean().optional().describe("For update action"),
+});
 
 type TodoAction = z.infer<typeof todoActionSchema>;
 
@@ -153,7 +160,7 @@ export const TodoListTool = createTool({
       }
 
       case "complete": {
-        const todo = TodoListService.complete(sessionId, input.id);
+        const todo = TodoListService.complete(sessionId, input.id!);
         if (!todo) {
           return [
             {
@@ -176,7 +183,7 @@ export const TodoListTool = createTool({
       }
 
       case "update": {
-        const todo = TodoListService.update(sessionId, input.id, {
+        const todo = TodoListService.update(sessionId, input.id!, {
           title: input.title,
           completed: input.completed,
         });
@@ -202,7 +209,7 @@ export const TodoListTool = createTool({
       }
 
       case "delete": {
-        const deleted = TodoListService.delete(sessionId, input.id);
+        const deleted = TodoListService.delete(sessionId, input.id!);
         if (!deleted) {
           return [
             {
