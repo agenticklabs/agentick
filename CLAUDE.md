@@ -29,20 +29,21 @@ README content: Purpose, Usage examples, API reference, Patterns.
 
 The framework provides **building blocks**, not opinions.
 
-| Primitive            | Purpose                                                            |
-| -------------------- | ------------------------------------------------------------------ |
-| `<Timeline>`         | Conversation history (IS the conversation — filter/compact/render) |
-| `<Tool>`             | Function the model can call                                        |
-| `<Section>`          | Content rendered to model context                                  |
-| `<Message>`          | Message added to timeline                                          |
-| Signals/hooks        | Reactive state management                                          |
-| Channels             | Real-time sync between session and UI                              |
-| `knob()`             | Config-level knob descriptor (detected by `isKnob()`)              |
-| `useKnob()`          | Model-visible, model-settable reactive state                       |
-| `<Knobs />`          | Knob section + set_knob tool (default, render prop, or provider)   |
-| `useTimeline()`      | Direct read/write access to session timeline                       |
-| `useResolved()`      | Access resolve data on session restore (Layer 2)                   |
-| ExecutionEnvironment | Controls how compiled context reaches model and how tools execute  |
+| Primitive            | Purpose                                                              |
+| -------------------- | -------------------------------------------------------------------- |
+| `<Timeline>`         | Conversation history (IS the conversation — filter/compact/render)   |
+| `<Tool>`             | Function the model can call                                          |
+| `<Section>`          | Content rendered to model context                                    |
+| `<Message>`          | Message added to timeline                                            |
+| Signals/hooks        | Reactive state management                                            |
+| Channels             | Real-time sync between session and UI                                |
+| `knob()`             | Config-level knob descriptor (detected by `isKnob()`)                |
+| `useKnob()`          | Model-visible, model-settable reactive state                         |
+| `<Knobs />`          | Knob section + set_knob tool (default, render prop, or provider)     |
+| `useTimeline()`      | Direct read/write access to session timeline                         |
+| `useResolved()`      | Access resolve data on session restore (Layer 2)                     |
+| `use()` on tools     | Bridge render-time context (React Context, hooks) into tool handlers |
+| ExecutionEnvironment | Controls how compiled context reaches model and how tools execute    |
 
 #### Semantic Components (`packages/core/src/jsx/components/semantic.tsx`)
 
@@ -116,6 +117,25 @@ export const MyStatefulTool = createTool({
 });
 ```
 
+### Context Injection Pattern
+
+When tools need tree-scoped context (providers, React Context), use `use()`:
+
+```typescript
+const ShellTool = createTool({
+  name: "shell",
+  description: "Execute a command in the sandbox",
+  input: z.object({ command: z.string() }),
+  use: () => ({ sandbox: useSandbox() }), // render-time hook
+  handler: async ({ command }, deps) => {
+    const result = await deps!.sandbox.exec(command);
+    return [{ type: "text", text: result.stdout }];
+  },
+});
+```
+
+`use()` runs at render time, captures values from the component tree, and passes them to the handler as `deps` (merged with `{ ctx }`). Direct `.run()` calls get `undefined` deps.
+
 ## Package Architecture
 
 ```
@@ -127,7 +147,7 @@ export const MyStatefulTool = createTool({
 ┌────────────────────────────────┴────────────────────────────────────────┐
 │                          Framework Layer                                │
 │   @agentick/core     @agentick/gateway     @agentick/client          │
-│   @agentick/express  @agentick/devtools                               │
+│   @agentick/express  @agentick/devtools    @agentick/sandbox         │
 └────────────────────────────────┬────────────────────────────────────────┘
                                  │
 ┌────────────────────────────────┴────────────────────────────────────────┐
@@ -369,6 +389,7 @@ Context.emit("custom:event", { data: "value" });
 | Hooks             | `packages/core/src/hooks/`      |
 | Gateway           | `packages/gateway/src/`         |
 | Client            | `packages/client/src/`          |
+| Sandbox           | `packages/sandbox/src/`         |
 | Express example   | `example/express/src/`          |
 | Tests             | `packages/*/src/**/*.spec.ts`   |
 

@@ -99,6 +99,42 @@ handler: async ({ query }, ctx) => {
 },
 ```
 
+## Context Injection with `use()`
+
+Tools defined at module scope can't access React Context directly in their handlers. The `use()` hook solves this — it runs at render time, captures values from the tree, and passes them to the handler as deps.
+
+**The problem**: You have a `<SandboxProvider>` that provides a sandbox via React Context. A tool needs that sandbox, but its handler runs outside the component tree.
+
+**The solution**: `use()` bridges the gap.
+
+```tsx
+const ShellTool = createTool({
+  name: "shell",
+  description: "Run a shell command",
+  input: z.object({ command: z.string() }),
+  use: () => ({ sandbox: useSandbox() }),
+  handler: async ({ command }, deps) => {
+    const result = await deps!.sandbox.exec(command);
+    return [{ type: "text", text: result.stdout }];
+  },
+});
+```
+
+The deps parameter is `{ ctx, sandbox }` when rendered in JSX, `undefined` when called via `.run()`. This makes it safe — direct calls still work, they just don't get tree context.
+
+**Multiple providers**: Two tool instances under different providers capture different values:
+
+```tsx
+<SandboxProvider sandbox={localSandbox}>
+  <ShellTool />  {/* gets localSandbox */}
+</SandboxProvider>
+<SandboxProvider sandbox={dockerSandbox}>
+  <ShellTool />  {/* gets dockerSandbox */}
+</SandboxProvider>
+```
+
+**When to use `use()`**: When your tool handler needs something from the component tree — a provider value, a custom hook result, a context-scoped service. If the tool only needs COM state, plain `ctx` is sufficient.
+
 ## Error Handling
 
 Throw from handlers to return tool errors to the model:

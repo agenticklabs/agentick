@@ -101,13 +101,50 @@ const TodoTool = createTool({
 
 The `render` function is a React component. It's part of the fiber tree. When tool state changes, the reconciler diffs and the model sees updated context on the next tick.
 
+## Context Injection with `use()`
+
+Tools exist at module scope but often need tree-scoped context — a sandbox, database, or React Context value. The `use()` hook runs at render time and passes captured values to the handler as **deps**.
+
+```tsx
+const ShellTool = createTool({
+  name: "shell",
+  description: "Execute a command in the sandbox",
+  input: z.object({ command: z.string() }),
+  use: () => ({ sandbox: useSandbox() }),
+  handler: async ({ command }, deps) => {
+    const result = await deps!.sandbox.exec(command);
+    return [{ type: "text", text: result.stdout }];
+  },
+});
+```
+
+The handler's second argument is `{ ctx, ...useReturn }` when rendered in JSX, or `undefined` when called via `.run()`. This makes dependencies explicit and tree-scoped — two `<ShellTool />`s under different providers get different sandboxes.
+
+```tsx
+// Each tool instance captures its own provider's sandbox
+<SandboxProvider sandbox={localSandbox}>
+  <ShellTool />
+</SandboxProvider>
+<SandboxProvider sandbox={remoteSandbox}>
+  <ShellTool />
+</SandboxProvider>
+```
+
 ## Tool Handler Signature
+
+Without `use()`:
 
 ```typescript
 (input: TInput, ctx?: COM) => TOutput | Promise<TOutput>;
 ```
 
-The `ctx` parameter provides access to the Context Object Model — session state, emit events, etc.
+With `use()`:
+
+```typescript
+(input: TInput, deps?: { ctx: COM } & TDeps) => TOutput | Promise<TOutput>;
+```
+
+The `ctx` parameter (or `deps.ctx`) provides access to the Context Object Model — session state, emit events, etc.
 
 ```tsx
 handler: async ({ query }, ctx) => {

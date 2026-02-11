@@ -592,6 +592,18 @@ const WeatherTool = createTool({
   render: (tickState, ctx) => <Section id="weather-info">Last checked: {lastChecked}</Section>,
 });
 
+// Tools can capture tree-scoped context via use():
+const ShellTool = createTool({
+  name: "shell",
+  description: "Execute a command in the sandbox",
+  input: z.object({ command: z.string() }),
+  use: () => ({ sandbox: useSandbox() }),  // runs at render time
+  handler: async ({ command }, deps) => {
+    const result = await deps!.sandbox.exec(command);
+    return [{ type: "text", text: result.stdout }];
+  },
+});
+
 // Use in your app
 function App() {
   return (

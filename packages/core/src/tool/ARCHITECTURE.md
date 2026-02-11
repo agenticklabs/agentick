@@ -357,6 +357,12 @@ function createTool<TInput>(options: CreateToolOptions<TInput>): ToolClass<TInpu
 | `requiresConfirmation?` | `boolean \| ((input: TInput) => boolean \| Promise<boolean>)` | Require user confirmation before execution                                                                                   |
 | `confirmationMessage?`  | `string \| ((input: TInput) => string)`                       | Custom confirmation prompt message                                                                                           |
 
+**Render-time context injection:**
+
+| Field  | Type          | Description                                                                                                                                     |
+| ------ | ------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `use?` | `() => TDeps` | Hook that runs at render time inside the component tree. Return value is merged with `{ ctx }` and passed to handler as deps (second argument). |
+
 **Component lifecycle hooks (for JSX usage):**
 
 | Hook             | When Called                         |
@@ -592,7 +598,7 @@ function MyAgent() {
 
 ### Tool with COM Access
 
-Handlers receive an optional `ctx` (Context Object Model) as a second argument during agent execution:
+Handlers receive an optional `ctx` (Context Object Model) as a second argument. When rendered in JSX, `ctx` is auto-populated from the component tree. When calling directly via `.run()`, `ctx` is undefined.
 
 ```typescript
 const BookmarkTool = createTool({
@@ -606,10 +612,88 @@ const BookmarkTool = createTool({
   },
 });
 
-// During agent execution: ctx is provided
+// During agent execution: ctx is provided from the component tree
 // Via direct call: ctx is undefined
 await BookmarkTool.run({ url: "https://example.com", title: "Example" });
 ```
+
+### Tool with `use()` — Context Injection
+
+Tools defined at module scope often need access to tree-scoped context — a sandbox, database, or React Context value. The `use()` hook bridges render-time context into execution-time handlers.
+
+```typescript
+import { createTool } from "agentick";
+import { z } from "zod";
+
+// useSandbox() is a custom hook that reads from <SandboxProvider>
+const ShellTool = createTool({
+  name: "shell",
+  description: "Execute a shell command in the sandbox",
+  input: z.object({ command: z.string() }),
+  // use() runs at render time — captures values from the component tree
+  use: () => ({ sandbox: useSandbox() }),
+  // deps = { ctx, sandbox } when rendered in JSX; undefined for .run()
+  handler: async ({ command }, deps) => {
+    const result = await deps!.sandbox.exec(command);
+    return [{ type: "text", text: result.stdout }];
+  },
+});
+
+// Two instances under different providers get different sandboxes:
+function MultiSandboxAgent() {
+  return (
+    <>
+      <SandboxProvider sandbox={localSandbox}>
+        <ShellTool />  {/* handler gets localSandbox */}
+      </SandboxProvider>
+      <SandboxProvider sandbox={remoteSandbox}>
+        <ShellTool />  {/* handler gets remoteSandbox */}
+      </SandboxProvider>
+    </>
+  );
+}
+```
+
+**How it works:**
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    use() Context Injection                        │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  Module scope: ShellTool = createTool({ use: () => ... })       │
+│                                                                 │
+│  Render time (component tree):                                  │
+│  ┌──────────────────────────────────────┐                       │
+│  │  <SandboxProvider sandbox={...}>     │                       │
+│  │    <ShellTool />                     │  use() captures       │
+│  │      → use() runs every render       │  React Context,       │
+│  │      → depsRef = { ctx, sandbox }    │  custom hooks, etc.   │
+│  │      → creates instance procedure    │                       │
+│  └──────────────────────────────────────┘                       │
+│                                                                 │
+│  Execution time (model calls tool):                             │
+│  ┌──────────────────────────────────────┐                       │
+│  │  instanceProcedure(input)            │                       │
+│  │    → handler(input, depsRef.current) │  deps has fresh       │
+│  │    → deps.sandbox.exec(command)      │  tree-scoped values   │
+│  └──────────────────────────────────────┘                       │
+│                                                                 │
+│  Direct call (no tree):                                         │
+│  ┌──────────────────────────────────────┐                       │
+│  │  ShellTool.run(input)               │                       │
+│  │    → handler(input, undefined)       │  deps is undefined    │
+│  └──────────────────────────────────────┘                       │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Key design points:**
+
+- `use()` is fixed per tool definition — hook call order is consistent across renders (no rules-of-hooks violation)
+- All JSX-rendered tools get instance procedures — ctx always comes from the tree, not the executor
+- Type inference flows: `use()` return type → `TDeps` generic → handler's deps parameter
+- Core deps (`{ ctx }`) are auto-merged — `use()` only needs to return custom deps
 
 ### Client Render Tool (Non-blocking)
 

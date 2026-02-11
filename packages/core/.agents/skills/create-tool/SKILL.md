@@ -87,14 +87,54 @@ export const ItemTool = createTool({
 
 Use semantic components (`<H2>`, `<List>`, `<ListItem>`, `<Table>`, `<Json>`) in `render`, not raw markdown strings.
 
+## Context Injection with `use()`
+
+When a tool needs access to tree-scoped context (a sandbox, database, React Context value), use the `use()` hook to bridge render-time context into the handler:
+
+```tsx
+import { createTool } from "agentick";
+import { z } from "zod";
+
+export const ShellTool = createTool({
+  name: "shell",
+  description: "Execute a command in the sandbox",
+  input: z.object({ command: z.string() }),
+  use: () => ({ sandbox: useSandbox() }), // runs at render time
+  handler: async ({ command }, deps) => {
+    // deps = { ctx, sandbox } when in JSX; undefined for .run()
+    const result = await deps!.sandbox.exec(command);
+    return [{ type: "text", text: result.stdout }];
+  },
+});
+```
+
+- `use()` runs every render, capturing fresh values from the component tree
+- Deps include `ctx` (COM) plus whatever `use()` returns
+- Direct `.run()` calls skip `use()` — deps is `undefined`
+- Type inference flows from `use()` return type into the handler's deps parameter
+- Two instances of `<ShellTool />` under different providers get different sandboxes
+
+**When to use `use()`**: The tool handler needs something from the component tree — a provider value, a custom hook result, a context-scoped service. If the tool only needs COM state, plain `ctx` (without `use()`) is sufficient.
+
 ## Handler Signature
+
+Without `use()`:
 
 ```typescript
 type ToolHandler = (input: TInput, ctx?: COM) => ContentBlock[] | Promise<ContentBlock[]>;
 ```
 
-- `ctx` is the COM (Component Object Model) — session state, getState/setState
-- `ctx` is `undefined` when called via `MyTool.run(input)` outside an execution
+With `use()`:
+
+```typescript
+type ToolHandler = (
+  input: TInput,
+  deps?: { ctx: COM } & TDeps,
+) => ContentBlock[] | Promise<ContentBlock[]>;
+```
+
+- `ctx` (or `deps.ctx`) is the COM (Component Object Model) — session state, getState/setState
+- `ctx`/`deps` is `undefined` when called via `MyTool.run(input)` outside an execution
 - Return `ContentBlock[]` — typically `[{ type: "text", text: "..." }]`
 
 ## Key Files

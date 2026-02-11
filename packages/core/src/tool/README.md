@@ -26,7 +26,7 @@ const SearchTool = createTool({
 
 ## COM in Handlers
 
-Tool handlers receive an optional `ctx` (Context Object Model) as their second argument. During agent execution (when the model calls the tool), `ctx` is provided. When calling directly via `MyTool.run(input)`, `ctx` is undefined.
+Tool handlers receive an optional `ctx` (Context Object Model) as their second argument. When rendered in JSX, `ctx` is auto-populated from the component tree. When calling directly via `MyTool.run(input)`, `ctx` is undefined.
 
 ```typescript
 const StatefulTool = createTool({
@@ -40,6 +40,39 @@ const StatefulTool = createTool({
   },
 });
 ```
+
+## Context Injection with `use()`
+
+Tools defined with `createTool` exist at module scope, but often need access to tree-scoped context — a sandbox from `<SandboxProvider>`, a database connection, a React Context value. The `use()` hook bridges this gap.
+
+`use()` runs at **render time** inside the component tree, captures values from React Context or custom hooks, and passes them to the handler as **deps** (merged with `{ ctx }`).
+
+```typescript
+import { createTool } from "@agentick/core";
+import { z } from "zod";
+
+const ShellTool = createTool({
+  name: "shell",
+  description: "Execute a command in the sandbox",
+  input: z.object({ command: z.string() }),
+  use: () => ({ sandbox: useSandbox() }),
+  handler: async ({ command }, deps) => {
+    const result = await deps!.sandbox.exec(command);
+    return [{ type: "text", text: result.stdout }];
+  },
+});
+```
+
+**Why this matters**: Without `use()`, every tool that needs a sandbox, database, or other provider would need to wire it through global state or closures. `use()` makes the dependency explicit and scoped to the component tree — two instances of `<ShellTool />` under different `<SandboxProvider>`s get different sandboxes.
+
+**Key behaviors:**
+
+- `use()` runs every render, capturing fresh values from the tree
+- Deps include `ctx` (COM) plus whatever `use()` returns
+- Direct `.run()` calls skip `use()` — deps is `undefined`
+- Type inference flows from `use()` return type to handler's deps parameter
+
+````
 
 ## The ToolClass Pattern
 
@@ -61,7 +94,7 @@ const result = await SearchTool.run({ query: 'hello' });
 
 // Pass to engine
 engine.execute({ tools: [SearchTool] });
-```
+````
 
 ## Execution Types
 
