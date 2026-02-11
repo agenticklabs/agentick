@@ -70,12 +70,37 @@ export type ToolHandler<TInput = any, TOutput extends ContentBlock[] = ContentBl
 ) => TOutput | Promise<TOutput>;
 
 /**
+ * Core dependencies auto-populated by createTool when rendered in a component tree.
+ * Always includes `ctx` (COM). Additional fields come from the tool's `use()` hook.
+ */
+export interface ToolCoreDeps {
+  ctx: COM;
+}
+
+/**
+ * Tool handler with deps — used when `use()` is provided on createTool.
+ * The handler receives typed input and optional deps (core + custom from use()).
+ *
+ * When rendered in JSX: deps is populated (core + use() return value).
+ * When called directly via `.run(input)`: deps is undefined.
+ */
+export type ToolHandlerWithDeps<
+  TInput = any,
+  TOutput extends ContentBlock[] = ContentBlock[],
+  TDeps extends Record<string, any> = {},
+> = (input: TInput, deps?: ToolCoreDeps & TDeps) => TOutput | Promise<TOutput>;
+
+/**
  * Options for createTool().
  *
  * Mirrors ToolMetadata but with additional creation-time options
  * (handler, middleware, component lifecycle hooks).
  */
-export interface CreateToolOptions<TInput = any, TOutput extends ContentBlock[] = ContentBlock[]> {
+export interface CreateToolOptions<
+  TInput = any,
+  TOutput extends ContentBlock[] = ContentBlock[],
+  TDeps extends Record<string, any> = {},
+> {
   // === Core Metadata ===
 
   /** Tool name (used by model to call the tool) */
@@ -219,6 +244,36 @@ export interface CreateToolOptions<TInput = any, TOutput extends ContentBlock[] 
   /** Middleware applied to handler execution */
   middleware?: Middleware[];
 
+  // === Render-time Hook ===
+
+  /**
+   * Hook function that runs at render time inside the component tree.
+   * Has full access to React hooks (useContext, useData, custom hooks).
+   *
+   * Return value is merged with core deps ({ ctx }) and passed to the
+   * handler as the second argument. This bridges render-time context
+   * (tree-scoped) into execution-time handlers.
+   *
+   * Only runs when the tool is rendered in JSX (`<MyTool />`).
+   * When called directly via `.run(input)`, `use()` does not run
+   * and the handler's deps parameter is undefined.
+   *
+   * @example
+   * ```typescript
+   * const Shell = createTool({
+   *   name: 'shell',
+   *   description: 'Execute a command in the sandbox',
+   *   input: z.object({ command: z.string() }),
+   *   use: () => ({ sandbox: useSandbox() }),
+   *   handler: async ({ command }, deps) => {
+   *     const result = await deps!.sandbox.exec(command);
+   *     return [{ type: 'text', text: result.stdout }];
+   *   },
+   * });
+   * ```
+   */
+  use?: () => TDeps;
+
   // === Component Lifecycle Hooks (for JSX usage) ===
   // All callbacks receive data first, ctx (context) last.
 
@@ -321,7 +376,19 @@ export interface RunnableToolClass<TInput = any> extends ToolClass<TInput> {
  * });
  * ```
  */
-// Overload: handler provided → run is defined
+// Overload: use() + handler provided → deps inferred from use(), run defined
+export function createTool<
+  TInput = any,
+  TOutput extends ContentBlock[] = ContentBlock[],
+  TDeps extends Record<string, any> = Record<string, any>,
+>(
+  options: Omit<CreateToolOptions<TInput, TOutput, TDeps>, "handler" | "use"> & {
+    handler: ToolHandlerWithDeps<TInput, TOutput, TDeps>;
+    use: () => TDeps;
+  },
+): RunnableToolClass<TInput>;
+
+// Overload: handler provided (no use()) → standard handler, run defined
 export function createTool<TInput = any, TOutput extends ContentBlock[] = ContentBlock[]>(
   options: CreateToolOptions<TInput, TOutput> & { handler: ToolHandler<TInput> },
 ): RunnableToolClass<TInput>;
@@ -352,26 +419,27 @@ export function createTool<TInput = any, TOutput extends ContentBlock[] = Conten
     mcpConfig: options.mcpConfig,
   };
 
+  // Procedure options shared between static run and instance run
+  const procedureOptions = {
+    name: "tool:run" as const,
+    metadata: {
+      type: "tool",
+      toolName: options.name,
+      id: options.name,
+      operation: "run",
+    },
+    middleware: options.middleware || [],
+    executionBoundary: "child" as const,
+    executionType: "tool",
+  };
+
   // Create run procedure if handler is provided
+  // This is the static run — used for direct execution (MyTool.run(input))
+  // and as fallback when use() is not provided in JSX.
   const run = options.handler
     ? isProcedure(options.handler)
       ? options.handler
-      : createEngineProcedure<ToolHandler<TInput>>(
-          {
-            name: "tool:run", // Low cardinality span name
-            metadata: {
-              type: "tool",
-              toolName: options.name,
-              id: options.name,
-              operation: "run",
-            },
-            middleware: options.middleware || [],
-            // Execution boundary: tool runs are child executions of the model call
-            executionBoundary: "child",
-            executionType: "tool",
-          },
-          options.handler,
-        )
+      : createEngineProcedure<ToolHandler<TInput>>(procedureOptions, options.handler)
     : undefined;
 
   // Create functional component with static tool properties
@@ -385,6 +453,48 @@ export function createTool<TInput = any, TOutput extends ContentBlock[] = Conten
     // expect component/component.ts TickState. They're compatible at runtime,
     // so we use type assertion. The hooks version is a simplified subset.
     const tickState = useTickState() as unknown as TickState;
+
+    // === Context injection: all JSX-rendered tools get ctx/deps from the component tree ===
+    // The tool executor does NOT pass ctx — the component is the source of truth.
+
+    // Capture ctx ref (always up-to-date for instance procedure closure)
+    const ctxRef = useRef<COM>(ctx);
+    ctxRef.current = ctx;
+
+    // Call use() every render to capture fresh hook values (tree-scoped).
+    // This is safe: options.use is fixed per tool definition, so hook call
+    // order is consistent across renders (no rules-of-hooks violation).
+    const userDeps = options.use?.();
+
+    // Build deps: core values (ctx) + user's use() return
+    const depsRef = useRef<(ToolCoreDeps & Record<string, any>) | undefined>(undefined);
+    if (options.use) {
+      depsRef.current = { ctx, ...userDeps };
+    }
+
+    // Create instance procedure once (stable via ref).
+    // ALL tools with handlers get an instance procedure so context comes from
+    // the component tree, not from the executor. This is what makes
+    // `toolProcedure(input)` work without a second arg.
+    const instanceRunRef = useRef<any>(null);
+    if (options.handler && !instanceRunRef.current) {
+      if (isProcedure(options.handler)) {
+        instanceRunRef.current = options.handler;
+      } else if (options.use) {
+        // use() provided — inject full deps (ToolCoreDeps & user deps)
+        instanceRunRef.current = createEngineProcedure(procedureOptions, async (...args: any[]) =>
+          (options.handler as any)(args[0], depsRef.current),
+        );
+      } else {
+        // No use() — inject ctx from component tree (preserves handler(input, ctx?) signature)
+        instanceRunRef.current = createEngineProcedure(procedureOptions, async (...args: any[]) =>
+          (options.handler as any)(args[0], ctxRef.current),
+        );
+      }
+    }
+
+    // Use instance procedure when available, otherwise static run (config tools fallback)
+    const effectiveRun = instanceRunRef.current || run;
 
     // Track lifecycle callbacks (should only fire once per component lifecycle)
     const hasCalledMountRef = useRef(false);
@@ -439,7 +549,7 @@ export function createTool<TInput = any, TOutput extends ContentBlock[] = Conten
       name: metadata.name,
       description: metadata.description,
       schema: metadata.input,
-      handler: run,
+      handler: effectiveRun,
       // Include full metadata for advanced use cases
       metadata,
     });

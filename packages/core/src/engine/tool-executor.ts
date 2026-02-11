@@ -330,9 +330,9 @@ export class ToolExecutor {
       const toolProcedure = wrappedRun.withMetadata({
         toolCallId: call.id,
       });
-      // Procedure returns ExecutionHandle by default - access .result for actual return value
-      // Pass ctx so tool handlers can access agent state during execution
-      const result = await toolProcedure(call.input, ctx).result;
+      // JSX-rendered tools inject ctx/deps via instance procedure (from component tree).
+      // Config tools (passed via tools array) get no ctx — they're standalone.
+      const result = await toolProcedure(call.input).result;
 
       // Handle async iterable result (shouldn't happen for tools, but be safe)
       let content: ContentBlock[];
