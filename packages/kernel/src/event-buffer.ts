@@ -160,15 +160,23 @@ export class EventBuffer<T extends TypedEvent> {
     eventTypeOrEvent: K | "*" | T,
     maybeEvent?: Omit<EventMap<T>[K], "type"> | T,
   ): boolean {
+    if (maybeEvent !== undefined && eventTypeOrEvent === WILDCARD) {
+      // emit("*", fullEvent) — no-op for EventBuffer.
+      //
+      // Context.emit calls emit(type, event) then emit("*", event).
+      // The first call goes through push(), which already notifies BOTH
+      // type-specific AND wildcard subscribers. EventBuffer handles wildcards
+      // in push(), unlike Node EventEmitter where "*" is just a channel name.
+      // Doing anything here would cause wildcard subscribers to fire twice.
+      //
+      // For direct event injection, use push() instead.
+      return this.getTotalListenerCount() > 0;
+    }
+
     let event: T;
     if (maybeEvent !== undefined) {
-      if (eventTypeOrEvent === WILDCARD) {
-        // emit("*", fullEvent) - backwards compat, push as-is
-        event = maybeEvent as T;
-      } else {
-        // Two params: emit('delta', { value: 'hi' })
-        event = { type: eventTypeOrEvent, ...maybeEvent } as T;
-      }
+      // Two params: emit('delta', { value: 'hi' })
+      event = { type: eventTypeOrEvent, ...maybeEvent } as T;
     } else {
       // One param: emit({ type: 'delta', value: 'hi' })
       event = eventTypeOrEvent as T;

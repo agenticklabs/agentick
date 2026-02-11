@@ -234,6 +234,12 @@ export interface KernelContext {
   parentExecutionId?: string;
 
   /**
+   * Session ID (set by session's runWithContext).
+   * Available during all session execution — tool calls, prepareModelInput, etc.
+   */
+  sessionId?: string;
+
+  /**
    * Current tick number (set by engine during tick loop).
    * Enables events to include tick context for correlation.
    */
@@ -326,6 +332,8 @@ export class Context {
       executionHandle: overrides.executionHandle,
       // Agentick middleware registry (for context-based middleware resolution)
       middleware: overrides.middleware,
+      // Session context
+      sessionId: overrides.sessionId,
       // Execution context fields (Phase 3)
       executionId: overrides.executionId,
       executionType: overrides.executionType,

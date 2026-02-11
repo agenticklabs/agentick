@@ -29,7 +29,8 @@
     "vitest/no-disabled-tests": "off",
     "no-unsafe-finally": "off",
     "@typescript-eslint/no-extraneous-class": "off",
-    "import/no-unassigned-import": "off"
+    "import/no-unassigned-import": "off",
+    "require-yield": "off"
   },
   "ignorePatterns": [
     "node_modules",

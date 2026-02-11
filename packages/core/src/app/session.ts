@@ -110,7 +110,7 @@ type StreamEventInput =
 function getSessionContext(): SessionContext {
   const ctx = Context.tryGet();
   return {
-    sessionId: (ctx as any)?.sessionId,
+    sessionId: ctx?.sessionId,
     rootComponent: (ctx as any)?.rootComponent,
     devToolsEnabled: (ctx as any)?.devToolsEnabled,
   };

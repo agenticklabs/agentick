@@ -563,14 +563,17 @@ describe("EventBuffer", () => {
       ]);
     });
 
-    it("emit('*', event) should push the event as-is", () => {
+    it("emit('*', event) should be a no-op (push handles wildcards)", () => {
       const buffer = new EventBuffer<TestEvent>();
       const received: TestEvent[] = [];
 
       buffer.on((event) => received.push(event));
       buffer.emit("*", { type: "delta", value: "test" });
 
-      expect(received).toEqual([{ type: "delta", value: "test" }]);
+      // emit("*", ...) is a no-op — push() already notifies wildcards.
+      // Use push() for direct event injection.
+      expect(received).toEqual([]);
+      expect(buffer.length).toBe(0);
     });
 
     it("once('*', handler) should fire once for any event", () => {

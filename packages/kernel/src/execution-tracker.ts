@@ -47,6 +47,12 @@ export interface ExecutionTrackerOptions {
    * If not provided, derived from procedure name.
    */
   executionType?: string;
+
+  /**
+   * Event type name for stream chunks. Defaults to "stream:chunk".
+   * Use a custom name (e.g., "sandbox:output") to distinguish different streaming sources.
+   */
+  streamEventType?: string;
 }
 
 /**
@@ -270,15 +276,32 @@ export class ExecutionTracker {
           if (isAsyncIterable(result) && !(result as any)[ExecutionHandleBrand]) {
             // Capture the forked context for use during iteration
             const forkedContext = Context.get();
+            const streamEvent = options.streamEventType ?? "stream:chunk";
 
             const wrappedIterable = (async function* () {
               const iterator = (result as AsyncIterable<unknown>)[Symbol.asyncIterator]();
+              let finalized = false;
               try {
                 while (true) {
                   // Run iterator.next() inside the forked context to maintain procedurePid
                   const next = await Context.run(forkedContext, async () => iterator.next());
 
-                  if (next.done) break;
+                  if (next.done) {
+                    // Generator returned a value — emit procedure:end and propagate the return value
+                    finalized = true;
+                    ctx.procedureGraph!.updateStatus(procedurePid, "completed");
+                    ExecutionTracker.sendMetricsToTelemetry(node, span);
+                    span.end();
+                    await Context.run(forkedContext, async () => {
+                      Context.emit("procedure:end", {
+                        pid: procedurePid,
+                        executionId: node.executionId,
+                        metrics: node.metrics,
+                        durationMs: node.durationMs,
+                      });
+                    });
+                    return next.value;
+                  }
 
                   // Check abort after getting next value but before yielding
                   // This allows the producer to call abort() between yields
@@ -286,29 +309,17 @@ export class ExecutionTracker {
                     throw new AbortError();
                   }
 
-                  // Emit stream:chunk event for consumers listening to the handle
+                  // Emit stream event for consumers listening to the handle
                   // The value is emitted directly (not wrapped) - it's typically an engine event
                   await Context.run(forkedContext, async () => {
-                    Context.emit("stream:chunk", next.value);
+                    Context.emit(streamEvent, next.value);
                   });
 
                   yield next.value;
                 }
-
-                // Completed successfully - update status and emit end
-                ctx.procedureGraph!.updateStatus(procedurePid, "completed");
-                ExecutionTracker.sendMetricsToTelemetry(node, span);
-                span.end();
-                await Context.run(forkedContext, async () => {
-                  Context.emit("procedure:end", {
-                    pid: procedurePid,
-                    executionId: node.executionId,
-                    metrics: node.metrics,
-                    durationMs: node.durationMs,
-                  });
-                });
               } catch (error) {
                 // Handle errors during iteration
+                finalized = true;
                 const isAbort =
                   (error as Error)?.name === "AbortError" ||
                   (error as Error)?.message?.includes("aborted");
@@ -329,6 +340,22 @@ export class ExecutionTracker {
                 // Clean up iterator if it has a return method
                 if (iterator.return) {
                   await Context.run(forkedContext, async () => iterator.return!());
+                }
+                // If iteration was interrupted (consumer called .return() via break/early exit),
+                // neither the done nor catch paths ran. Finalize here to prevent stale "running"
+                // nodes in the procedure graph and leaked telemetry spans.
+                if (!finalized) {
+                  ctx.procedureGraph!.updateStatus(procedurePid, "completed");
+                  ExecutionTracker.sendMetricsToTelemetry(node, span);
+                  span.end();
+                  await Context.run(forkedContext, async () => {
+                    Context.emit("procedure:end", {
+                      pid: procedurePid,
+                      executionId: node.executionId,
+                      metrics: node.metrics,
+                      durationMs: node.durationMs,
+                    });
+                  });
                 }
               }
             })();

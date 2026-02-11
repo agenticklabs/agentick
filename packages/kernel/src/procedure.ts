@@ -314,8 +314,10 @@ export class ExecutionHandleImpl<
   private _abortController: AbortController;
   public readonly events: EventBuffer<TEvent>;
 
+  readonly result: Promise<TResult>;
+
   constructor(
-    public readonly result: Promise<TResult>,
+    result: Promise<TResult>,
     events: EventBuffer<TEvent>,
     public readonly traceId: string,
     abortController?: AbortController,
@@ -323,8 +325,27 @@ export class ExecutionHandleImpl<
     this._abortController = abortController ?? new AbortController();
     this.events = events;
 
+    // Auto-drain: if result resolves to an async iterable (not a branded ExecutionHandle),
+    // iterate it to drive execution and resolve .result to the generator's return value.
+    // Note: We do NOT push to EventBuffer here — the ExecutionTracker already emits
+    // stream:chunk events to ctx.events (which IS this EventBuffer) during iteration.
+    this.result = result.then(async (value) => {
+      if (isAsyncIterable(value) && !(value as any)[ExecutionHandleBrand]) {
+        const iter = (value as AsyncIterable<unknown>)[Symbol.asyncIterator]();
+        while (true) {
+          const current = await iter.next();
+          if (current.done) {
+            return current.value as TResult;
+          }
+          // Yielded values are consumed here to drive the generator forward.
+          // Events are emitted by ExecutionTracker's wrapper, not by auto-drain.
+        }
+      }
+      return value;
+    }) as Promise<TResult>;
+
     // Update status when result settles
-    result.then(
+    this.result.then(
       () => {
         if (this._status === "running") {
           this._status = "completed";
@@ -465,6 +486,13 @@ export interface ProcedureOptions {
    * @internal
    */
   skipTracking?: boolean;
+
+  /**
+   * Event type name for stream chunks emitted during async generator iteration.
+   * Defaults to "stream:chunk". Use a custom name (e.g., "sandbox:output") to
+   * distinguish different streaming sources.
+   */
+  streamEventType?: string;
 
   // ─────────────────────────────────────────────────────────────────────────────
   // Execution Boundary Configuration (Phase 3)
@@ -891,6 +919,7 @@ class ProcedureImpl<
   private skipTracking?: boolean; // Skip ExecutionTracker for transparent wrappers
   private executionBoundary?: ExecutionBoundaryConfig; // Execution boundary config (Phase 3)
   private executionType?: string; // Explicit execution type (Phase 3)
+  private streamEventType?: string; // Custom event type for stream chunks
 
   constructor(options: ProcedureOptions = {}, handler?: THandler) {
     this.procedureName = options.name;
@@ -903,6 +932,7 @@ class ProcedureImpl<
     this.skipTracking = options.skipTracking; // Store skipTracking flag
     this.executionBoundary = options.executionBoundary; // Execution boundary config (Phase 3)
     this.executionType = options.executionType; // Explicit execution type (Phase 3)
+    this.streamEventType = options.streamEventType; // Custom stream event type
 
     if (options.middleware) {
       this.middlewares = flattenMiddleware(
@@ -950,12 +980,12 @@ class ProcedureImpl<
         handleFactory: this.handleFactory,
         sourceType: this.sourceType,
         sourceId: this.sourceId,
-        metadata: this.metadata, // Preserve metadata when setting new handler
-        // Preserve execution tracking options (Phase 3)
+        metadata: this.metadata,
         executionBoundary: this.executionBoundary,
         executionType: this.executionType,
         skipTracking: this.skipTracking,
         timeout: this.timeout,
+        streamEventType: this.streamEventType,
       },
       fn,
     );
@@ -1074,6 +1104,7 @@ class ProcedureImpl<
         // Execution boundary configuration (Phase 3)
         executionBoundary: this.executionBoundary,
         executionType: this.executionType,
+        streamEventType: this.streamEventType,
       },
       async (_node: ProcedureNode) => {
         return executeMiddlewarePipeline();
@@ -1325,12 +1356,12 @@ class ProcedureImpl<
         handleFactory: this.handleFactory,
         sourceType: this.sourceType,
         sourceId: this.sourceId,
-        metadata: this.metadata, // Preserve metadata when adding middleware
-        // Preserve execution tracking options (Phase 3)
+        metadata: this.metadata,
         executionBoundary: this.executionBoundary,
         executionType: this.executionType,
         skipTracking: this.skipTracking,
         timeout: this.timeout,
+        streamEventType: this.streamEventType,
       },
       this.handler!,
     );
@@ -1372,8 +1403,9 @@ class ProcedureImpl<
         handleFactory: this.handleFactory,
         sourceType: this.sourceType,
         sourceId: this.sourceId,
-        metadata: this.metadata, // Preserve metadata for telemetry
+        metadata: this.metadata,
         skipTracking: true, // Wrapper delegates to original - don't double-track
+        streamEventType: this.streamEventType,
       },
       wrappedHandler,
     );
@@ -1403,10 +1435,10 @@ class ProcedureImpl<
         sourceId: this.sourceId,
         metadata: this.metadata,
         timeout: ms,
-        // Preserve execution tracking options (Phase 3)
         executionBoundary: this.executionBoundary,
         executionType: this.executionType,
         skipTracking: this.skipTracking,
+        streamEventType: this.streamEventType,
       },
       this.handler!,
     );
@@ -1427,13 +1459,12 @@ class ProcedureImpl<
         handleFactory: this.handleFactory,
         sourceType: this.sourceType,
         sourceId: this.sourceId,
-        // Merge metadata - new values override existing
         metadata: { ...this.metadata, ...metadata },
         timeout: this.timeout,
-        // Preserve execution tracking options (Phase 3)
         executionBoundary: this.executionBoundary,
         executionType: this.executionType,
         skipTracking: this.skipTracking,
+        streamEventType: this.streamEventType,
       },
       this.handler!,
     );
@@ -1461,6 +1492,7 @@ class ProcedureImpl<
         sourceId: this.sourceId,
         metadata: this.metadata,
         timeout: this.timeout,
+        streamEventType: this.streamEventType,
       },
       pipedHandler,
     ) as any;

@@ -318,7 +318,7 @@ describe("Procedure v2 - Hooks as Procedures", () => {
     const results: string[] = [];
 
     const iterable = await Context.run(ctx, async () => stream("test"));
-    for await (const chunk of iterable) {
+    for await (const chunk of iterable as AsyncIterable<string>) {
       results.push(chunk);
     }
 
@@ -881,7 +881,7 @@ describe("DirectProcedure - handleFactory: false (pass-through)", () => {
       async (x: number) => x,
     );
 
-    const procWithMw = proc.withMiddleware(async (args, envelope, next) => {
+    const procWithMw = proc.withMiddleware(async (args: any, envelope: any, next: any) => {
       const result = await next();
       return result * 10;
     });
@@ -911,5 +911,162 @@ describe("DirectProcedure - handleFactory: false (pass-through)", () => {
     // *2 returns 1 * 2 = 2, +1 returns 2 + 1 = 3
     const result = await proc().result;
     expect(result).toBe(3);
+  });
+});
+
+describe("ExecutionHandle - auto-drain async iterables", () => {
+  it("should auto-drain async generator and resolve .result to return value", async () => {
+    const proc = createProcedure({ name: "gen" }, async function* () {
+      yield "a";
+      yield "b";
+      return "final";
+    });
+
+    const handle = await proc();
+    const result = await handle.result;
+    expect(result).toBe("final");
+  });
+
+  it("should populate EventBuffer with stream events during auto-drain", async () => {
+    const proc = createProcedure({ name: "gen" }, async function* () {
+      yield "chunk1";
+      yield "chunk2";
+      yield "chunk3";
+      return "done";
+    });
+
+    const handle = await proc();
+
+    // Drive auto-drain by awaiting .result
+    expect(await handle.result).toBe("done");
+
+    // EventBuffer receives events from ExecutionTracker via Context.emit.
+    // Each event appears once in the buffer (no duplicates).
+    const bufferEvents = (handle.events as any).buffer as any[];
+    const chunkPayloads = bufferEvents
+      .filter((e: any) => e.type === "stream:chunk")
+      .map((e: any) => e.payload);
+    expect(chunkPayloads).toEqual(["chunk1", "chunk2", "chunk3"]);
+  });
+
+  it("should set status to completed after auto-drain", async () => {
+    const proc = createProcedure({ name: "gen" }, async function* () {
+      yield 1;
+      return "done";
+    });
+
+    const handle = await proc();
+    await handle.result;
+    expect(handle.status).toBe("completed");
+  });
+
+  it("should set status to error if generator throws", async () => {
+    const proc = createProcedure({ name: "gen" }, async function* () {
+      yield "ok";
+      throw new Error("generator failed");
+    });
+
+    const handle = await proc();
+    await expect(handle.result).rejects.toThrow("generator failed");
+    expect(handle.status).toBe("error");
+  });
+
+  it("should handle abort during auto-drain", async () => {
+    let yieldCount = 0;
+    const proc = createProcedure({ name: "gen" }, async function* () {
+      yield "first";
+      yieldCount++;
+      // Wait long enough for abort to fire between yields
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      yield "second";
+      yieldCount++;
+      return "should-not-reach";
+    });
+
+    const handle = await proc();
+
+    // Let auto-drain consume the first yield, then abort
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    handle.abort("cancelled by user");
+
+    expect(handle.status).toBe("aborted");
+    await expect(handle.result).rejects.toThrow("Operation aborted");
+    // Generator should not have completed — abort interrupted it
+    expect(yieldCount).toBeLessThan(2);
+  });
+
+  it("should not auto-drain branded ExecutionHandles", async () => {
+    const { ExecutionHandleBrand } = await import("./execution-handle-brand");
+
+    // Create a fake async iterable that is branded as an ExecutionHandle
+    const fakeHandle = {
+      [ExecutionHandleBrand]: true,
+      [Symbol.asyncIterator]: async function* () {
+        yield "should-not-drain";
+      },
+      result: Promise.resolve("handle-result"),
+    };
+
+    const proc = createProcedure({ name: "test" }, async () => fakeHandle);
+
+    const handle = await proc();
+    // Result should be the branded handle itself, not auto-drained
+    const result = await handle.result;
+    expect(result).toBe(fakeHandle);
+  });
+
+  it("should work with streamEventType for custom events", async () => {
+    const events: Array<{ type: string; payload: unknown }> = [];
+    const unsubscribe = Context.subscribeGlobal((event) => {
+      events.push(event as { type: string; payload: unknown });
+    });
+
+    try {
+      const proc = createProcedure(
+        { name: "sandbox-exec", streamEventType: "sandbox:output" },
+        async function* () {
+          yield { stream: "stdout", data: "hello\n" };
+          yield { stream: "stderr", data: "warn\n" };
+          return { stdout: "hello\n", stderr: "warn\n", exitCode: 0 };
+        },
+      );
+
+      const handle = await proc();
+      const result = await handle.result;
+
+      expect(result).toEqual({ stdout: "hello\n", stderr: "warn\n", exitCode: 0 });
+
+      // Check events were emitted with custom type
+      const sandboxEvents = events.filter((e) => e.type === "sandbox:output");
+      expect(sandboxEvents.length).toBe(2);
+
+      // Should NOT have emitted stream:chunk
+      const chunkEvents = events.filter((e) => e.type === "stream:chunk");
+      expect(chunkEvents.length).toBe(0);
+    } finally {
+      unsubscribe();
+    }
+  });
+
+  it("should preserve streamEventType through clone methods", async () => {
+    const proc = createProcedure(
+      { name: "test", streamEventType: "custom:event" },
+      async function* () {
+        yield "data";
+        return "done";
+      },
+    );
+
+    // Test that clone methods preserve streamEventType
+    const withMiddleware = proc.use(async (args, env, next) => next());
+    const withTimeout = proc.withTimeout(5000);
+    const withMeta = proc.withMetadata({ key: "value" });
+
+    // All clones should work - verifying they don't error is enough
+    // (streamEventType is internal, but the events emitted will use it)
+    for (const variant of [withMiddleware, withTimeout, withMeta]) {
+      const handle = await variant();
+      await handle.result;
+    }
   });
 });

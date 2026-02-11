@@ -460,6 +460,176 @@ describe("ExecutionTracker", () => {
     });
   });
 
+  describe("streamEventType", () => {
+    it("should emit stream:chunk by default for async iterables", async () => {
+      const events: Array<{ type: string; payload: unknown }> = [];
+      const unsubscribe = Context.subscribeGlobal((event) => {
+        events.push(event as { type: string; payload: unknown });
+      });
+
+      try {
+        await runInContext(async () => {
+          const result = await ExecutionTracker.track(ctx, { name: "test" }, async () => {
+            return (async function* () {
+              yield "a";
+              yield "b";
+            })();
+          });
+
+          // Drain the iterable
+          for await (const _chunk of result as AsyncIterable<string>) {
+            // consume
+          }
+        });
+
+        const chunkEvents = events.filter((e) => e.type === "stream:chunk");
+        expect(chunkEvents.length).toBe(2);
+        expect(chunkEvents[0].payload).toBe("a");
+        expect(chunkEvents[1].payload).toBe("b");
+      } finally {
+        unsubscribe();
+      }
+    });
+
+    it("should emit custom event type when streamEventType is set", async () => {
+      const events: Array<{ type: string; payload: unknown }> = [];
+      const unsubscribe = Context.subscribeGlobal((event) => {
+        events.push(event as { type: string; payload: unknown });
+      });
+
+      try {
+        await runInContext(async () => {
+          const result = await ExecutionTracker.track(
+            ctx,
+            { name: "test", streamEventType: "sandbox:output" },
+            async () => {
+              return (async function* () {
+                yield { stream: "stdout", data: "hello" };
+                yield { stream: "stderr", data: "warn" };
+              })();
+            },
+          );
+
+          for await (const _chunk of result as AsyncIterable<unknown>) {
+            // consume
+          }
+        });
+
+        const sandboxEvents = events.filter((e) => e.type === "sandbox:output");
+        const chunkEvents = events.filter((e) => e.type === "stream:chunk");
+        expect(sandboxEvents.length).toBe(2);
+        expect(chunkEvents.length).toBe(0);
+        expect((sandboxEvents[0].payload as any).stream).toBe("stdout");
+      } finally {
+        unsubscribe();
+      }
+    });
+  });
+
+  describe("generator return value", () => {
+    it("should preserve generator return value through wrapped iterable", async () => {
+      let returnValue: unknown;
+
+      await runInContext(async () => {
+        const result = await ExecutionTracker.track(ctx, { name: "test" }, async () => {
+          return (async function* () {
+            yield "chunk1";
+            yield "chunk2";
+            return "final-result";
+          })();
+        });
+
+        // Drain the iterable and capture the return value
+        const iter = (result as AsyncIterable<string>)[Symbol.asyncIterator]();
+        let next = await iter.next();
+        while (!next.done) {
+          next = await iter.next();
+        }
+        returnValue = next.value;
+      });
+
+      expect(returnValue).toBe("final-result");
+    });
+
+    it("should preserve generator return value even when it yields nothing", async () => {
+      let returnValue: unknown;
+
+      await runInContext(async () => {
+        const result = await ExecutionTracker.track(ctx, { name: "test" }, async () => {
+          return (async function* () {
+            return "immediate-return";
+          })();
+        });
+
+        const iter = (result as AsyncIterable<string>)[Symbol.asyncIterator]();
+        const next = await iter.next();
+        expect(next.done).toBe(true);
+        returnValue = next.value;
+      });
+
+      expect(returnValue).toBe("immediate-return");
+    });
+  });
+
+  describe("early consumer return (break from for-await)", () => {
+    it("should emit procedure:end when consumer breaks early", async () => {
+      const events: Array<{ type: string; payload: any }> = [];
+      const unsubscribe = Context.subscribeGlobal((event) => {
+        events.push(event as { type: string; payload: any });
+      });
+
+      try {
+        await runInContext(async () => {
+          const result = await ExecutionTracker.track(ctx, { name: "test" }, async () => {
+            return (async function* () {
+              yield "a";
+              yield "b";
+              yield "c";
+              return "done";
+            })();
+          });
+
+          // Break after first chunk — simulates early consumer exit
+          for await (const chunk of result as AsyncIterable<string>) {
+            if (chunk === "a") break;
+          }
+        });
+
+        // procedure:end should still fire despite the break
+        const endEvents = events.filter((e) => e.type === "procedure:end");
+        expect(endEvents.length).toBe(1);
+
+        // Should NOT have a procedure:error
+        const errorEvents = events.filter((e) => e.type === "procedure:error");
+        expect(errorEvents.length).toBe(0);
+      } finally {
+        unsubscribe();
+      }
+    });
+
+    it("should update procedure graph status to completed on early return", async () => {
+      await runInContext(async () => {
+        const result = await ExecutionTracker.track(ctx, { name: "test" }, async () => {
+          return (async function* () {
+            yield 1;
+            yield 2;
+            yield 3;
+          })();
+        });
+
+        for await (const _chunk of result as AsyncIterable<number>) {
+          break;
+        }
+
+        // Check procedure graph — the node should be completed, not stuck as running
+        const nodes = ctx.procedureGraph!.getAllNodes();
+        const testNode = nodes.find((n) => n.name === "test");
+        expect(testNode).toBeDefined();
+        expect(testNode!.status).toBe("completed");
+      });
+    });
+  });
+
   describe("context isolation", () => {
     it("should have forked context with procedurePid inside callback", async () => {
       const initialPid = ctx.procedurePid;
