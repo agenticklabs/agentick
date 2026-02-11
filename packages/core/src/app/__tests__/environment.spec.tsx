@@ -127,7 +127,7 @@ describe("ExecutionRunner", () => {
         },
       };
 
-      const app = createApp(AgentWithTool, { model, maxTicks: 1, runner});
+      const app = createApp(AgentWithTool, { model, maxTicks: 1, runner });
       const session = await app.session();
 
       await session.send({
@@ -150,7 +150,7 @@ describe("ExecutionRunner", () => {
         },
       };
 
-      const app = createApp(SimpleAgent, { model, maxTicks: 1, runner});
+      const app = createApp(SimpleAgent, { model, maxTicks: 1, runner });
       const session = await app.session();
 
       const result = await session.send({
@@ -191,7 +191,7 @@ describe("ExecutionRunner", () => {
       // Make model call tool on first tick, then stop on second
       model.respondWith([{ tool: { name: "noop_tool", input: {} } }]);
 
-      const app = createApp(AgentWithTool, { model, maxTicks: 3, runner});
+      const app = createApp(AgentWithTool, { model, maxTicks: 3, runner });
       const session = await app.session();
 
       await session.send({
@@ -246,7 +246,7 @@ describe("ExecutionRunner", () => {
       // Make model call the tool
       model.respondWith([{ tool: { name: "intercepted_tool", input: { value: "test" } } }]);
 
-      const app = createApp(AgentWithTool, { model, maxTicks: 3, runner});
+      const app = createApp(AgentWithTool, { model, maxTicks: 3, runner });
       const session = await app.session();
 
       const result = await session.send({
@@ -298,7 +298,7 @@ describe("ExecutionRunner", () => {
 
       model.respondWith([{ tool: { name: "passthrough_tool", input: {} } }]);
 
-      const app = createApp(AgentWithTool, { model, maxTicks: 3, runner});
+      const app = createApp(AgentWithTool, { model, maxTicks: 3, runner });
       const session = await app.session();
 
       await session.send({
@@ -339,7 +339,7 @@ describe("ExecutionRunner", () => {
 
       model.respondWith([{ tool: { name: "my_tool", input: {} } }]);
 
-      const app = createApp(AgentWithTool, { model, maxTicks: 3, runner});
+      const app = createApp(AgentWithTool, { model, maxTicks: 3, runner });
       const session = await app.session();
 
       await session.send({
@@ -367,7 +367,7 @@ describe("ExecutionRunner", () => {
       // Model calls a tool that doesn't exist
       model.respondWith([{ tool: { name: "nonexistent_tool", input: {} } }]);
 
-      const app = createApp(SimpleAgent, { model, maxTicks: 3, runner});
+      const app = createApp(SimpleAgent, { model, maxTicks: 3, runner });
       const session = await app.session();
 
       await session.send({
@@ -396,7 +396,7 @@ describe("ExecutionRunner", () => {
           },
         };
 
-        const app = createApp(SimpleAgent, { model, maxTicks: 1, runner});
+        const app = createApp(SimpleAgent, { model, maxTicks: 1, runner });
         const session = await app.session();
 
         expect(initCalls).toHaveLength(0);
@@ -420,7 +420,7 @@ describe("ExecutionRunner", () => {
           },
         };
 
-        const app = createApp(SimpleAgent, { model, maxTicks: 1, runner});
+        const app = createApp(SimpleAgent, { model, maxTicks: 1, runner });
         const session = await app.session();
 
         await session.send({
@@ -450,7 +450,7 @@ describe("ExecutionRunner", () => {
           },
         };
 
-        const app = createApp(SimpleAgent, { model, maxTicks: 1, runner});
+        const app = createApp(SimpleAgent, { model, maxTicks: 1, runner });
         const session = await app.session();
 
         await session.send({
@@ -594,7 +594,7 @@ describe("ExecutionRunner", () => {
           },
         };
 
-        const app = createApp(SimpleAgent, { model, maxTicks: 1, runner});
+        const app = createApp(SimpleAgent, { model, maxTicks: 1, runner });
         const session = await app.session();
 
         // Must send at least once to initialize the runner
@@ -625,7 +625,7 @@ describe("ExecutionRunner", () => {
           },
         };
 
-        const app = createApp(SimpleAgent, { model, maxTicks: 1, runner});
+        const app = createApp(SimpleAgent, { model, maxTicks: 1, runner });
         const session = await app.session();
 
         // Close without ever sending (no infrastructure initialized)
@@ -795,7 +795,7 @@ describe("ExecutionRunner", () => {
         },
       };
 
-      const app = createApp(ParentAgent, { maxTicks: 1, runner});
+      const app = createApp(ParentAgent, { maxTicks: 1, runner });
       const session = await app.session();
 
       // Spawn a child — should inherit the runner
@@ -864,7 +864,7 @@ describe("ExecutionRunner", () => {
       // Make child model call the tool
       childModel.respondWith([{ tool: { name: "child_tool", input: {} } }]);
 
-      const app = createApp(ParentAgent, { maxTicks: 3, runner});
+      const app = createApp(ParentAgent, { maxTicks: 3, runner });
       const session = await app.session();
 
       const childHandle = await session.spawn(ChildAgent, {

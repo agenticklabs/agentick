@@ -5,7 +5,6 @@
 ### Minor Changes
 
 - d38460c: Add ExecutionRunner, SessionRef, SpawnOptions, async close()
-
   - ExecutionRunner interface with 6 optional hooks: prepareModelInput, executeToolCall, onSessionInit, onPersist, onRestore, onDestroy
   - SessionRef narrow interface for runner lifecycle hooks (avoids generic type friction)
   - SpawnOptions (3rd arg to session.spawn()) for overriding model, runner, maxTicks

@@ -141,11 +141,11 @@ await session.spawn(
 );
 ```
 
-| Field         | Type                   | Description                       |
-| ------------- | ---------------------- | --------------------------------- |
-| `model`       | `EngineModel`          | Override the parent's model       |
-| `runner`      | `ExecutionRunner`      | Override the parent's runner      |
-| `maxTicks`    | `number`               | Override the parent's max ticks   |
+| Field      | Type              | Description                     |
+| ---------- | ----------------- | ------------------------------- |
+| `model`    | `EngineModel`     | Override the parent's model     |
+| `runner`   | `ExecutionRunner` | Override the parent's runner    |
+| `maxTicks` | `number`          | Override the parent's max ticks |
 
 ### Spawn Behavior
 

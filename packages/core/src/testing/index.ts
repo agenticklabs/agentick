@@ -102,11 +102,7 @@ export type {
 
 // Test execution runner
 export { createTestRunner } from "./test-runner";
-export type {
-  TestRunnerOptions,
-  RunnerTracker,
-  TestRunnerResult,
-} from "./test-runner";
+export type { TestRunnerOptions, RunnerTracker, TestRunnerResult } from "./test-runner";
 
 // Kernel testing primitives (re-exported for convenience)
 export { createTestProcedure } from "@agentick/kernel/testing";
