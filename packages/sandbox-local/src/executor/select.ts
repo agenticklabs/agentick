@@ -7,7 +7,7 @@ import type { CommandExecutor } from "./types";
 import { BaseExecutor } from "./base";
 import { DarwinExecutor } from "./darwin";
 import { BwrapExecutor, UnshareExecutor } from "./linux";
-import { CgroupManager } from "../linux/cgroup";
+import type { CgroupManager } from "../linux/cgroup";
 
 /**
  * Create a CommandExecutor for the given strategy.

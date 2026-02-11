@@ -10,7 +10,7 @@ import type { CommandExecutor, SpawnOptions } from "./types";
 import type { SandboxStrategy } from "../platform/types";
 import { buildBwrapArgs } from "../linux/bwrap";
 import { buildUnshareArgs } from "../linux/unshare";
-import { CgroupManager } from "../linux/cgroup";
+import type { CgroupManager } from "../linux/cgroup";
 
 export class BwrapExecutor implements CommandExecutor {
   readonly strategy: SandboxStrategy = "bwrap";

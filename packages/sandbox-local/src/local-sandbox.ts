@@ -5,6 +5,7 @@
 import { readFile, writeFile, rename, unlink, mkdir } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { randomBytes } from "node:crypto";
+import type { ChildProcess } from "node:child_process";
 import type { SandboxHandle, ExecOptions, ExecResult, OutputChunk } from "@agentick/sandbox";
 import type { Edit, EditResult } from "@agentick/sandbox";
 import { applyEdits } from "@agentick/sandbox";
@@ -41,7 +42,7 @@ export class LocalSandbox implements SandboxHandle {
   private readonly proxy?: NetworkProxyServer;
   private readonly cleanupWorkspace: boolean;
   private readonly _destroyWorkspace: () => Promise<void>;
-  private activeProcesses = new Set<ReturnType<typeof import("node:child_process").spawn>>();
+  private activeProcesses = new Set<ChildProcess>();
   private destroyed = false;
 
   constructor(init: LocalSandboxInit) {
