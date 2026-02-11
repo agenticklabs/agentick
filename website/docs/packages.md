@@ -14,7 +14,7 @@ Agentick is organized as a monorepo with layered packages. Each layer depends on
 │                       Framework Layer                               │
 │   @agentick/core      @agentick/gateway      @agentick/client       │
 │   @agentick/express   @agentick/devtools     @agentick/agent        │
-│   @agentick/tui       @agentick/react                               │
+│   @agentick/tui       @agentick/react        @agentick/sandbox        │
 └──────────────────────────────┬──────────────────────────────────────┘
                                │
 ┌──────────────────────────────┴──────────────────────────────────────┐
@@ -76,6 +76,10 @@ Terminal UI for Agentick agents. Uses Ink (React for CLIs) with `@agentick/react
 ### @agentick/devtools
 
 Fiber tree inspector, timeline viewer, execution debugger. Connect to running agents for real-time inspection.
+
+### @agentick/sandbox
+
+Sandbox primitive layer. Types, `<Sandbox>` component, pre-built tools (Shell, ReadFile, WriteFile, EditFile), and edit utilities. Provider adapters build on this.
 
 ### @agentick/guardrails
 

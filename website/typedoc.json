@@ -20,7 +20,8 @@
     "../packages/adapters/openai",
     "../packages/adapters/google",
     "../packages/adapters/ai-sdk",
-    "../packages/tui"
+    "../packages/tui",
+    "../packages/sandbox"
   ],
   "out": "api",
   "plugin": ["typedoc-plugin-markdown", "typedoc-vitepress-theme"],

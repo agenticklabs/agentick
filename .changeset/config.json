@@ -24,7 +24,8 @@
       "@agentick/agent",
       "@agentick/guardrails",
       "@agentick/client-multiplexer",
-      "@agentick/tui"
+      "@agentick/tui",
+      "@agentick/sandbox"
     ]
   ],
   "access": "public",

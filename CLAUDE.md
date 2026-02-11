@@ -43,6 +43,7 @@ The framework provides **building blocks**, not opinions.
 | `useTimeline()`      | Direct read/write access to session timeline                         |
 | `useResolved()`      | Access resolve data on session restore (Layer 2)                     |
 | `use()` on tools     | Bridge render-time context (React Context, hooks) into tool handlers |
+| `<Sandbox>`          | Sandboxed execution (provider-backed, tree-scoped tools)             |
 | ExecutionEnvironment | Controls how compiled context reaches model and how tools execute    |
 
 #### Semantic Components (`packages/core/src/jsx/components/semantic.tsx`)

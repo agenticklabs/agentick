@@ -32,6 +32,10 @@ const PACKAGE_GROUPS: Array<{ label: string; packages: string[] }> = [
     ],
   },
   {
+    label: "Sandbox",
+    packages: ["@agentick/sandbox"],
+  },
+  {
     label: "DevTools",
     packages: ["@agentick/devtools"],
   },
@@ -170,6 +174,7 @@ export default defineConfig({
             { text: "Multi-turn Conversations", link: "/docs/multi-turn" },
             { text: "Knobs & Controls", link: "/docs/knobs" },
             { text: "Model Adapters", link: "/docs/adapters" },
+            { text: "Sandbox", link: "/docs/sandbox" },
             { text: "Terminal UI (TUI)", link: "/docs/tui" },
             { text: "Testing", link: "/docs/testing" },
           ],
