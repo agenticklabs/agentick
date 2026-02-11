@@ -220,6 +220,21 @@ pnpm --filter @agentick/core test          # Run specific package
 - **Errors over nulls**: Throw typed errors, don't return null for failures
 - **Single source of truth for types**: Never define the same interface in multiple files
 
+### New Package Checklist
+
+When adding a new `@agentick/*` package, update all of these:
+
+1. **Package setup**: `packages/my-package/` with `package.json`, `tsconfig.json`, `tsconfig.build.json`, `src/index.ts`
+2. **Changeset linked list**: Add to `.changeset/config.json` → `linked[0]` array
+3. **TypeDoc entry points**: Add to `website/typedoc.json` → `entryPoints` array
+4. **Website package groups**: Add to `website/.vitepress/config.mts` → `PACKAGE_GROUPS` in the appropriate group
+5. **README**: Create `packages/my-package/README.md` following the style of existing package READMEs (Purpose, Quick Start, API, Patterns)
+6. **pnpm install**: Run `pnpm install` to register the workspace package
+
+### Cross-Package Changes
+
+When implementing a feature in one package, **don't treat code in other packages as static.** If modifying an underlying system (kernel, shared, core) would lead to a cleaner, more elegant solution — propose the change. Always confirm with the user before modifying interfaces or behavior in packages outside the one you're working in.
+
 ### Before Making Type Changes
 
 1. Run `pnpm build` or `pnpm typecheck` first (not just tests)
