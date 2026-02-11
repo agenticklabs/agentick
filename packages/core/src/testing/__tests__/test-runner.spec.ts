@@ -1,35 +1,35 @@
 /**
- * Test Environment Factory Tests
+ * Test Runner Factory Tests
  *
- * Tests for createTestEnvironment helper.
+ * Tests for createTestRunner helper.
  */
 
 import { describe, it, expect } from "vitest";
-import { createTestEnvironment } from "../test-environment";
+import { createTestRunner } from "../test-runner";
 
-describe("createTestEnvironment", () => {
-  it("should create environment with default name", () => {
-    const { environment } = createTestEnvironment();
-    expect(environment.name).toBe("test");
+describe("createTestRunner", () => {
+  it("should create runner with default name", () => {
+    const { runner } = createTestRunner();
+    expect(runner.name).toBe("test");
   });
 
-  it("should create environment with custom name", () => {
-    const { environment } = createTestEnvironment({ name: "repl" });
-    expect(environment.name).toBe("repl");
+  it("should create runner with custom name", () => {
+    const { runner } = createTestRunner({ name: "repl" });
+    expect(runner.name).toBe("repl");
   });
 
   it("should have all lifecycle hooks defined", () => {
-    const { environment } = createTestEnvironment();
-    expect(environment.onSessionInit).toBeTypeOf("function");
-    expect(environment.prepareModelInput).toBeTypeOf("function");
-    expect(environment.executeToolCall).toBeTypeOf("function");
-    expect(environment.onPersist).toBeTypeOf("function");
-    expect(environment.onRestore).toBeTypeOf("function");
-    expect(environment.onDestroy).toBeTypeOf("function");
+    const { runner } = createTestRunner();
+    expect(runner.onSessionInit).toBeTypeOf("function");
+    expect(runner.prepareModelInput).toBeTypeOf("function");
+    expect(runner.executeToolCall).toBeTypeOf("function");
+    expect(runner.onPersist).toBeTypeOf("function");
+    expect(runner.onRestore).toBeTypeOf("function");
+    expect(runner.onDestroy).toBeTypeOf("function");
   });
 
   it("should start with empty tracker", () => {
-    const { tracker } = createTestEnvironment();
+    const { tracker } = createTestRunner();
     expect(tracker.initCalls).toHaveLength(0);
     expect(tracker.prepareModelInputCalls).toHaveLength(0);
     expect(tracker.toolCalls).toHaveLength(0);
@@ -39,7 +39,7 @@ describe("createTestEnvironment", () => {
   });
 
   it("should reset tracker", () => {
-    const { tracker } = createTestEnvironment();
+    const { tracker } = createTestRunner();
     tracker.initCalls.push("session-1");
     tracker.prepareModelInputCalls.push({ tools: ["tool-1"] });
     tracker.toolCalls.push({ name: "tool-1", intercepted: false });
@@ -58,11 +58,11 @@ describe("createTestEnvironment", () => {
   });
 
   it("should intercept configured tools", async () => {
-    const { environment, tracker } = createTestEnvironment({
+    const { runner, tracker } = createTestRunner({
       interceptTools: { execute: "sandbox result" },
     });
 
-    const result = await environment.executeToolCall!(
+    const result = await runner.executeToolCall!(
       { id: "call-1", name: "execute", input: { code: "1+1" } },
       undefined,
       async () => ({
@@ -79,11 +79,11 @@ describe("createTestEnvironment", () => {
   });
 
   it("should pass through non-intercepted tools", async () => {
-    const { environment, tracker } = createTestEnvironment({
+    const { runner, tracker } = createTestRunner({
       interceptTools: { execute: "sandbox result" },
     });
 
-    const result = await environment.executeToolCall!(
+    const result = await runner.executeToolCall!(
       { id: "call-1", name: "other_tool", input: {} },
       undefined,
       async () => ({
@@ -100,21 +100,21 @@ describe("createTestEnvironment", () => {
   });
 
   it("should apply transformInput when provided", async () => {
-    const { environment } = createTestEnvironment({
+    const { runner } = createTestRunner({
       transformInput: (compiled) => ({ ...compiled, tools: [] }),
     });
 
     const input = { system: [], timeline: [], tools: [{ name: "tool" }] } as any;
-    const result = await environment.prepareModelInput!(input, []);
+    const result = await runner.prepareModelInput!(input, []);
 
     expect(result.tools).toEqual([]);
   });
 
   it("should pass through input when no transformInput", async () => {
-    const { environment } = createTestEnvironment();
+    const { runner } = createTestRunner();
 
     const input = { system: [], timeline: [], tools: [{ name: "tool" }] } as any;
-    const result = await environment.prepareModelInput!(input, []);
+    const result = await runner.prepareModelInput!(input, []);
 
     expect(result).toBe(input);
   });
@@ -125,7 +125,7 @@ describe("createTestEnvironment", () => {
 
   describe("function interceptors", () => {
     it("should call function interceptor with the ToolCall", async () => {
-      const { environment, tracker } = createTestEnvironment({
+      const { runner, tracker } = createTestRunner({
         interceptTools: {
           execute: (call) => ({
             id: call.id,
@@ -137,7 +137,7 @@ describe("createTestEnvironment", () => {
         },
       });
 
-      const result = await environment.executeToolCall!(
+      const result = await runner.executeToolCall!(
         { id: "call-1", name: "execute", input: { code: "1+1" } },
         undefined,
         async () => ({
@@ -154,7 +154,7 @@ describe("createTestEnvironment", () => {
     });
 
     it("should support async function interceptors", async () => {
-      const { environment } = createTestEnvironment({
+      const { runner } = createTestRunner({
         interceptTools: {
           slow_tool: async (call) => {
             await new Promise((r) => setTimeout(r, 5));
@@ -169,7 +169,7 @@ describe("createTestEnvironment", () => {
         },
       });
 
-      const result = await environment.executeToolCall!(
+      const result = await runner.executeToolCall!(
         { id: "call-1", name: "slow_tool", input: {} },
         undefined,
         async () => ({
@@ -185,7 +185,7 @@ describe("createTestEnvironment", () => {
     });
 
     it("should mix string and function interceptors", async () => {
-      const { environment, tracker } = createTestEnvironment({
+      const { runner, tracker } = createTestRunner({
         interceptTools: {
           simple: "static result",
           dynamic: (call) => ({
@@ -198,13 +198,13 @@ describe("createTestEnvironment", () => {
         },
       });
 
-      const staticResult = await environment.executeToolCall!(
+      const staticResult = await runner.executeToolCall!(
         { id: "c1", name: "simple", input: {} },
         undefined,
         async () => ({ id: "x", toolUseId: "c1", name: "simple", success: true, content: [] }),
       );
 
-      const dynamicResult = await environment.executeToolCall!(
+      const dynamicResult = await runner.executeToolCall!(
         { id: "c2", name: "dynamic", input: { x: 42 } },
         undefined,
         async () => ({ id: "x", toolUseId: "c2", name: "dynamic", success: true, content: [] }),

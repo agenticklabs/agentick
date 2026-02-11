@@ -638,7 +638,7 @@ const app = createApp(MyApp, {
   devTools: true,              // Enable DevTools emission
   tools: [ExternalTool],       // Additional tools (merged with JSX <Tool>s)
   mcpServers: { ... },         // MCP server configs
-  environment: myEnv,          // Execution environment (see below)
+  runner: myRunner,            // Execution runner (see below)
 });
 ```
 
@@ -973,14 +973,14 @@ await run(<Agent query="default" />, { props: { query: "override" }, model, mess
 
 `createApp` takes a component function and returns a reusable app with session management, persistence, and middleware support.
 
-## Execution Environments
+## Execution Runners
 
-An `ExecutionEnvironment` controls the execution backend — how compiled context reaches the model and how tool calls are routed. The default is the standard model → tool_use protocol. Swap in a different environment to change the entire execution model without touching your agent code.
+An `ExecutionRunner` controls the execution backend — how compiled context reaches the model and how tool calls are routed. The default is the standard model → tool_use protocol. Swap in a different runner to change the entire execution model without touching your agent code.
 
 ```tsx
-import { createApp, type ExecutionEnvironment } from "@agentick/core";
+import { createApp, type ExecutionRunner } from "@agentick/core";
 
-const replEnvironment: ExecutionEnvironment = {
+const replRunner: ExecutionRunner = {
   name: "repl",
 
   // Transform what the model sees — replace tool schemas with prose descriptions,
@@ -1020,10 +1020,10 @@ const replEnvironment: ExecutionEnvironment = {
 };
 
 // Same agent, different execution model
-const app = createApp(MyAgent, { model, environment: replEnvironment });
+const app = createApp(MyAgent, { model, runner: replRunner });
 ```
 
-The agent's JSX — its `<System>`, `<Timeline>`, `<Tool>` components — stays identical. The environment transforms how that compiled context is consumed and how tool calls execute. This means you can build one agent and run it against multiple backends: standard tool_use for production, a sandboxed REPL for code execution, a human-in-the-loop gateway for approval workflows.
+The agent's JSX — its `<System>`, `<Timeline>`, `<Tool>` components — stays identical. The runner transforms how that compiled context is consumed and how tool calls execute. This means you can build one agent and run it against multiple backends: standard tool_use for production, a sandboxed REPL for code execution, a human-in-the-loop gateway for approval workflows.
 
 ### Interface
 
@@ -1034,8 +1034,8 @@ All methods are optional. Omitted methods use default behavior.
 | `prepareModelInput` | Transform compiled context before the model sees it | Per tick      |
 | `executeToolCall`   | Intercept, transform, or replace tool execution     | Per tool call |
 | `onSessionInit`     | Set up per-session resources (sandbox, workspace)   | Once          |
-| `onPersist`         | Add environment state to session snapshot           | Per save      |
-| `onRestore`         | Restore environment state from snapshot             | Once          |
+| `onPersist`         | Add runner state to session snapshot                | Per save      |
+| `onRestore`         | Restore runner state from snapshot                  | Once          |
 | `onDestroy`         | Clean up resources                                  | Once          |
 
 ### Use Cases
@@ -1043,7 +1043,7 @@ All methods are optional. Omitted methods use default behavior.
 - **REPL/Code Execution**: Replace tool schemas with command descriptions, route `execute` calls to a sandboxed runtime, persist sandbox state across sessions.
 - **Human-in-the-Loop**: Transform tool calls into approval requests, gate execution on human confirmation, log decisions.
 - **Sandboxing**: Run tools in isolated containers, inject security boundaries, audit tool invocations.
-- **Testing**: Intercept specific tools to return canned responses, track all lifecycle calls for assertions. See `createTestEnvironment()` in `@agentick/core/testing`.
+- **Testing**: Intercept specific tools to return canned responses, track all lifecycle calls for assertions. See `createTestRunner()` in `@agentick/core/testing`.
 
 ## DevTools Integration
 

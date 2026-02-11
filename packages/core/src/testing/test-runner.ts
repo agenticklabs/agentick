@@ -1,17 +1,17 @@
 /**
- * Test Environment Factory
+ * Test Runner Factory
  *
- * Creates mock ExecutionEnvironment instances for testing.
+ * Creates mock ExecutionRunner instances for testing.
  * Tracks all lifecycle hook invocations for assertions.
  *
  * @example
  * ```typescript
- * const { environment, tracker } = createTestEnvironment({
+ * const { runner, tracker } = createTestRunner({
  *   name: "test",
  *   interceptTools: { my_tool: "intercepted!" },
  * });
  *
- * const app = createApp(Agent, { model, environment });
+ * const app = createApp(Agent, { model, runner });
  * // ... run agent ...
  *
  * expect(tracker.initCalls).toHaveLength(1);
@@ -20,7 +20,7 @@
  * ```
  */
 
-import type { ExecutionEnvironment, SessionRef, SessionSnapshot } from "../app/types";
+import type { ExecutionRunner, SessionRef, SessionSnapshot } from "../app/types";
 import type { COMInput } from "../com/types";
 import type { ExecutableTool } from "../tool/tool";
 import type { ToolCall, ToolResult } from "@agentick/shared";
@@ -29,9 +29,9 @@ import type { ToolCall, ToolResult } from "@agentick/shared";
 // Types
 // ============================================================================
 
-export interface TestEnvironmentOptions {
+export interface TestRunnerOptions {
   /**
-   * Environment name.
+   * Runner name.
    * @default "test"
    */
   name?: string;
@@ -69,7 +69,7 @@ export interface TestEnvironmentOptions {
   persistData?: Record<string, unknown>;
 }
 
-export interface EnvironmentTracker {
+export interface RunnerTracker {
   /** All onSessionInit calls (session IDs) */
   initCalls: string[];
   /** All prepareModelInput calls */
@@ -87,11 +87,11 @@ export interface EnvironmentTracker {
   reset(): void;
 }
 
-export interface TestEnvironmentResult {
-  /** The environment instance to pass to AppOptions */
-  environment: ExecutionEnvironment;
+export interface TestRunnerResult {
+  /** The runner instance to pass to AppOptions */
+  runner: ExecutionRunner;
   /** Tracker for asserting lifecycle calls */
-  tracker: EnvironmentTracker;
+  tracker: RunnerTracker;
 }
 
 // ============================================================================
@@ -99,12 +99,12 @@ export interface TestEnvironmentResult {
 // ============================================================================
 
 /**
- * Create a test execution environment with call tracking.
+ * Create a test execution runner with call tracking.
  *
  * @example Basic usage
  * ```typescript
- * const { environment, tracker } = createTestEnvironment();
- * const app = createApp(Agent, { model, environment });
+ * const { runner, tracker } = createTestRunner();
+ * const app = createApp(Agent, { model, runner });
  * const session = await app.session();
  * await session.send({ messages: [...] }).result;
  *
@@ -114,7 +114,7 @@ export interface TestEnvironmentResult {
  *
  * @example Intercepting tools
  * ```typescript
- * const { environment, tracker } = createTestEnvironment({
+ * const { runner, tracker } = createTestRunner({
  *   interceptTools: { execute: "sandboxed!" },
  * });
  * // When model calls "execute" tool, it gets "sandboxed!" instead of real execution
@@ -122,7 +122,7 @@ export interface TestEnvironmentResult {
  *
  * @example Transforming model input
  * ```typescript
- * const { environment } = createTestEnvironment({
+ * const { runner } = createTestRunner({
  *   transformInput: (compiled, tools) => ({
  *     ...compiled,
  *     tools: [], // Remove all tools from model input
@@ -130,10 +130,10 @@ export interface TestEnvironmentResult {
  * });
  * ```
  */
-export function createTestEnvironment(options: TestEnvironmentOptions = {}): TestEnvironmentResult {
+export function createTestRunner(options: TestRunnerOptions = {}): TestRunnerResult {
   const { name = "test", interceptTools = {}, transformInput, persistData } = options;
 
-  const tracker: EnvironmentTracker = {
+  const tracker: RunnerTracker = {
     initCalls: [],
     prepareModelInputCalls: [],
     toolCalls: [],
@@ -150,7 +150,7 @@ export function createTestEnvironment(options: TestEnvironmentOptions = {}): Tes
     },
   };
 
-  const environment: ExecutionEnvironment = {
+  const runner: ExecutionRunner = {
     name,
 
     onSessionInit(session: SessionRef) {
@@ -210,5 +210,5 @@ export function createTestEnvironment(options: TestEnvironmentOptions = {}): Tes
     },
   };
 
-  return { environment, tracker };
+  return { runner, tracker };
 }

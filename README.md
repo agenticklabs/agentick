@@ -561,16 +561,16 @@ function AdaptiveAgent({ task }: { task: string }) {
 }
 ```
 
-## Execution Environments
+## Execution Runners
 
 The context window is JSX. But what _consumes_ that context — and how tool calls _execute_ — is pluggable.
 
-An `ExecutionEnvironment` is a swappable backend that sits between the compiled context and execution. It transforms what the model sees, intercepts how tools run, and manages its own lifecycle state. Your agent code doesn't change — the environment changes the execution model underneath it.
+An `ExecutionRunner` is a swappable backend that sits between the compiled context and execution. It transforms what the model sees, intercepts how tools run, and manages its own lifecycle state. Your agent code doesn't change — the runner changes the execution model underneath it.
 
 ```tsx
-import { type ExecutionEnvironment } from "@agentick/core";
+import { type ExecutionRunner } from "@agentick/core";
 
-const repl: ExecutionEnvironment = {
+const repl: ExecutionRunner = {
   name: "repl",
 
   // The model sees command descriptions instead of tool schemas
@@ -592,15 +592,15 @@ const repl: ExecutionEnvironment = {
   },
 };
 
-const app = createApp(Agent, { model, environment: repl });
+const app = createApp(Agent, { model, runner: repl });
 ```
 
 Same agent, same JSX, different execution model. Build once — run against standard tool_use in production, a sandboxed REPL for code execution, a human-approval gateway for sensitive operations.
 
-All hooks are optional. Without an environment, standard model → tool_use behavior applies. Environments are inherited by spawned child sessions — override per-child via `SpawnOptions`:
+All hooks are optional. Without a runner, standard model → tool_use behavior applies. Runners are inherited by spawned child sessions — override per-child via `SpawnOptions`:
 
 ```tsx
-await session.spawn(CodeAgent, { messages }, { environment: sandboxEnv });
+await session.spawn(CodeAgent, { messages }, { runner: replEnv });
 ```
 
 ## Testing
@@ -668,7 +668,7 @@ adapter.stream([
 | `createMockApp()`             | Mock app for client/transport tests.                  |
 | `createMockSession()`         | Mock session with send/close/abort.                   |
 | `createMockExecutionHandle()` | Mock execution handle (async iterable + result).      |
-| `createTestEnvironment()`     | Mock execution environment with call tracking.        |
+| `createTestRunner()`          | Mock execution runner with call tracking.             |
 | `createMockCom()`             | Mock COM for hook tests.                              |
 | `createMockTickState()`       | Mock tick state.                                      |
 | `createMockTickResult()`      | Mock tick result for `useOnTickEnd` tests.            |

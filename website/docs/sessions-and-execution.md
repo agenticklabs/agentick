@@ -142,7 +142,7 @@ await session.spawn(
   {
     model: cheapModel, // Override the parent's model
     maxTicks: 3, // Limit child ticks
-    environment: sandboxEnv, // Override the parent's environment
+    runner: replRunner, // Override the parent's runner
   },
 );
 ```
@@ -151,18 +151,18 @@ await session.spawn(
 
 - **Self-similar**: Returns `SessionExecutionHandle` — identical to `session.send()`
 - **Isolation**: Child gets a fresh component tree. Parent state does not leak
-- **Environment inherited**: Child sessions inherit the parent's `ExecutionEnvironment` (override via `SpawnOptions`)
+- **Runner inherited**: Child sessions inherit the parent's `ExecutionRunner` (override via `SpawnOptions`)
 - **Abort propagation**: Aborting parent → aborts all children
 - **Close propagation**: Closing parent → closes all children
 - **Depth limit**: 10 levels max
 - **Ephemeral**: Child sessions are NOT registered in the app's session registry
 
-## Execution Environment
+## Execution Runner
 
-An `ExecutionEnvironment` controls how compiled context reaches the model and how tool calls execute. Set on `AppOptions.environment`.
+An `ExecutionRunner` controls how compiled context reaches the model and how tool calls execute. Set on `AppOptions.runner`.
 
 ```tsx
-const env: ExecutionEnvironment = {
+const runner: ExecutionRunner = {
   name: "repl",
 
   // Transform compiled input before model call (per tick)
@@ -185,10 +185,10 @@ const env: ExecutionEnvironment = {
   },
 };
 
-const app = createApp(MyAgent, { model, environment: env });
+const app = createApp(MyAgent, { model, runner });
 ```
 
-All methods are optional. Without an environment, standard model→tool_use behavior applies.
+All methods are optional. Without a runner, standard model→tool_use behavior applies.
 
 ### Hook Timing
 
@@ -201,7 +201,7 @@ All methods are optional. Without an environment, standard model→tool_use beha
 | `onRestore`         | Session restored from store        | Once      |
 | `onDestroy`         | `session.close()`                  | Once      |
 
-Environments are inherited by spawned children. Use `SpawnOptions.environment` to override for a specific child.
+Runners are inherited by spawned children. Use `SpawnOptions.runner` to override for a specific child.
 
 ## Persistence
 

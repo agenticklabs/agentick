@@ -1,6 +1,6 @@
 # Testing
 
-Agentick provides first-class testing utilities — mock adapters, agent rendering, mock apps, and test environments.
+Agentick provides first-class testing utilities — mock adapters, agent rendering, mock apps, and test runners.
 
 ## Test Adapter
 
@@ -107,15 +107,15 @@ expect(sections.get("instructions")).toContain("helpful");
 expect(tools.map((t) => t.name)).toContain("search");
 ```
 
-## Test Environment
+## Test Runner
 
-`createTestEnvironment` creates a mock `ExecutionEnvironment` with lifecycle call tracking:
+`createTestRunner` creates a mock `ExecutionRunner` with lifecycle call tracking:
 
 ```tsx
-import { createTestEnvironment } from "@agentick/core/testing";
+import { createTestRunner } from "@agentick/core/testing";
 
-const { environment, tracker } = createTestEnvironment();
-const app = createApp(Agent, { model, environment });
+const { runner, tracker } = createTestRunner();
+const app = createApp(Agent, { model, runner });
 const session = await app.session();
 await session.send({ messages: [...] }).result;
 
@@ -129,12 +129,12 @@ Replace tool execution with test responses:
 
 ```tsx
 // Static string results
-const { environment } = createTestEnvironment({
+const { runner } = createTestRunner({
   interceptTools: { execute: "sandbox result" },
 });
 
 // Dynamic function results
-const { environment } = createTestEnvironment({
+const { runner } = createTestRunner({
   interceptTools: {
     execute: (call) => ({
       id: call.id,

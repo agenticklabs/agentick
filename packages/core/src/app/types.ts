@@ -93,21 +93,21 @@ export interface LifecycleCallbacks {
 }
 
 // ============================================================================
-// Execution Environment
+// Execution Runner
 // ============================================================================
 
 /**
- * Execution Environment
+ * Execution Runner
  *
  * Controls how a session's compiled context is consumed and how tool calls execute.
- * The default environment is the standard model→tool_use protocol.
- * Alternative environments (REPL, human-in-the-loop) transform the execution pattern.
+ * The default runner is the standard model→tool_use protocol.
+ * Alternative runners (REPL, human-in-the-loop) transform the execution pattern.
  *
  * All methods are optional — omitted methods use default behavior.
  *
- * @example Custom REPL environment
+ * @example Custom REPL runner
  * ```typescript
- * const repl: ExecutionEnvironment = {
+ * const repl: ExecutionRunner = {
  *   name: "repl",
  *   prepareModelInput(compiled, tools) {
  *     // Replace tool schemas with command descriptions
@@ -119,15 +119,15 @@ export interface LifecycleCallbacks {
  *   },
  * };
  *
- * const app = createApp(MyAgent, { model, environment: repl });
+ * const app = createApp(MyAgent, { model, runner: repl });
  * ```
  */
 /**
- * Narrow session reference for environment hooks.
+ * Narrow session reference for runner hooks.
  *
- * Environment hooks receive this instead of the full Session interface.
+ * Runner hooks receive this instead of the full Session interface.
  * This avoids generic type friction (SessionImpl<P> vs Session) and
- * exposes only what environments actually need: identity + state.
+ * exposes only what runners actually need: identity + state.
  */
 export interface SessionRef {
   /** Unique session ID */
@@ -140,8 +140,8 @@ export interface SessionRef {
   snapshot(): SessionSnapshot;
 }
 
-export interface ExecutionEnvironment {
-  /** Environment identifier (e.g., "default", "repl") */
+export interface ExecutionRunner {
+  /** Runner identifier (e.g., "default", "repl") */
   name: string;
 
   /**
@@ -150,7 +150,7 @@ export interface ExecutionEnvironment {
    * Use cases:
    * - REPL: Replace tool schemas with command descriptions in a section,
    *   expose a single `execute` tool
-   * - Filtering: Remove tools the model shouldn't see in this environment
+   * - Filtering: Remove tools the model shouldn't see in this runner
    *
    * @param compiled - The COMInput from compilation (timeline, sections, tools, etc.)
    * @param tools - The resolved executable tools
@@ -162,11 +162,11 @@ export interface ExecutionEnvironment {
    * Wrap individual tool call execution.
    *
    * Called for each tool call. The `next` function executes the tool normally
-   * (via ToolExecutor). Environments can intercept, transform, or replace execution.
+   * (via ToolExecutor). Runners can intercept, transform, or replace execution.
    *
    * Use cases:
    * - REPL: Route `execute` tool to sandbox, run code with tools as callable functions
-   * - Logging: Add environment-specific telemetry around tool execution
+   * - Logging: Add runner-specific telemetry around tool execution
    * - Sandboxing: Run tools in isolated contexts
    *
    * @param call - The tool call from the model
@@ -181,14 +181,14 @@ export interface ExecutionEnvironment {
   ): Promise<ToolResult>;
 
   /**
-   * Called once when the environment is first used by a session.
-   * Set up per-session environment state (sandbox, working directory, etc.).
+   * Called once when the runner is first used by a session.
+   * Set up per-session runner state (sandbox, working directory, etc.).
    */
   onSessionInit?(session: SessionRef): void | Promise<void>;
 
   /**
    * Called when a session snapshot is being created.
-   * Environment can add its own state to the snapshot.
+   * Runner can add its own state to the snapshot.
    */
   onPersist?(
     session: SessionRef,
@@ -197,13 +197,13 @@ export interface ExecutionEnvironment {
 
   /**
    * Called when a session is being restored from a snapshot.
-   * Environment can restore its own state from the snapshot.
+   * Runner can restore its own state from the snapshot.
    */
   onRestore?(session: SessionRef, snapshot: SessionSnapshot): void | Promise<void>;
 
   /**
    * Called when a session is closed/destroyed.
-   * Clean up environment resources (sandbox, temp files, etc.).
+   * Clean up runner resources (sandbox, temp files, etc.).
    */
   onDestroy?(session: SessionRef): void | Promise<void>;
 }
@@ -395,7 +395,7 @@ export interface SessionManagementOptions {
 /**
  * Configuration options for creating an App instance.
  *
- * AppOptions configure the execution environment - things that apply
+ * AppOptions configure the execution runner - things that apply
  * across all sessions created from this app.
  */
 export interface AppOptions extends LifecycleCallbacks {
@@ -423,20 +423,20 @@ export interface AppOptions extends LifecycleCallbacks {
   maxTicks?: number;
 
   /**
-   * Execution environment for all sessions created by this app.
+   * Execution runner for all sessions created by this app.
    *
    * Controls how compiled context reaches the model and how tool calls execute.
    * Default: standard model→tool_use protocol (no transformation).
    *
-   * @example REPL environment
+   * @example REPL runner
    * ```typescript
    * const app = createApp(MyAgent, {
    *   model,
-   *   environment: replEnvironment({ sandbox: true }),
+   *   runner: replRunner({ sandbox: true }),
    * });
    * ```
    */
-  environment?: ExecutionEnvironment;
+  runner?: ExecutionRunner;
 
   /**
    * Enable DevTools event emission for all sessions created by this app.
@@ -621,14 +621,14 @@ export type RecordingMode = "full" | "lightweight" | "none";
 /**
  * Options for overriding inherited behavior in spawned child sessions.
  *
- * By default, children inherit structural options (model, tools, environment,
+ * By default, children inherit structural options (model, tools, runner,
  * maxTicks) from the parent. SpawnOptions lets you override any of these.
  *
  * @example
  * ```typescript
- * // Spawn with a different environment
+ * // Spawn with a different runner
  * await session.spawn(CodeAgent, { messages }, {
- *   environment: sandboxEnvironment,
+ *   runner: replRunner,
  * });
  *
  * // Spawn with a different model
@@ -641,8 +641,8 @@ export type RecordingMode = "full" | "lightweight" | "none";
 export interface SpawnOptions {
   /** Override the parent's model */
   model?: EngineModel;
-  /** Override the parent's execution environment */
-  environment?: ExecutionEnvironment;
+  /** Override the parent's execution runner */
+  runner?: ExecutionRunner;
   /** Override the parent's max ticks */
   maxTicks?: number;
 }
@@ -1500,7 +1500,7 @@ export interface Session<P = Record<string, unknown>> extends EventEmitter {
    * Parent abort propagates to child. Max spawn depth is 10.
    *
    * By default, child inherits parent's structural options (model, tools,
-   * environment, maxTicks). Use `options` to override any of these.
+   * runner, maxTicks). Use `options` to override any of these.
    *
    * @param component - ComponentFunction or JSX element
    * @param input - Optional SendInput for the child session
@@ -1511,9 +1511,9 @@ export interface Session<P = Record<string, unknown>> extends EventEmitter {
    * // Basic spawn
    * const handle = await session.spawn(ResearchAgent, { messages });
    *
-   * // Spawn with different environment
+   * // Spawn with different runner
    * const handle = await session.spawn(CodeAgent, { messages }, {
-   *   environment: sandboxEnvironment,
+   *   runner: replRunner,
    * });
    * ```
    */
@@ -1681,7 +1681,7 @@ export interface Session<P = Record<string, unknown>> extends EventEmitter {
 
   /**
    * Close the session and release resources.
-   * Awaits environment cleanup (onDestroy) and child session teardown.
+   * Awaits runner cleanup (onDestroy) and child session teardown.
    */
   close(): Promise<void>;
 }

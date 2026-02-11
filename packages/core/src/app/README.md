@@ -131,12 +131,12 @@ await session.spawn(
   },
 );
 
-// Override environment for a specific child
+// Override runner for a specific child
 await session.spawn(
   CodeAgent,
   { messages },
   {
-    environment: sandboxEnvironment,
+    runner: replRunner,
   },
 );
 ```
@@ -144,7 +144,7 @@ await session.spawn(
 | Field         | Type                   | Description                       |
 | ------------- | ---------------------- | --------------------------------- |
 | `model`       | `EngineModel`          | Override the parent's model       |
-| `environment` | `ExecutionEnvironment` | Override the parent's environment |
+| `runner`      | `ExecutionRunner`      | Override the parent's runner      |
 | `maxTicks`    | `number`               | Override the parent's max ticks   |
 
 ### Spawn Behavior
@@ -152,7 +152,7 @@ await session.spawn(
 - **Self-similar**: Returns `SessionExecutionHandle` — identical to `session.send()`.
 - **Isolation**: Child gets a fresh COM. Parent state does not leak.
 - **Callback isolation**: Parent's lifecycle callbacks (onComplete, onTickStart, etc.) do NOT fire for child executions.
-- **Environment inherited**: Child sessions inherit the parent's `ExecutionEnvironment`. A sandbox or REPL applies to all sub-agents. Use `SpawnOptions` to override.
+- **Runner inherited**: Child sessions inherit the parent's `ExecutionRunner`. A sandbox or REPL applies to all sub-agents. Use `SpawnOptions` to override.
 - **Abort propagation**: Aborting parent execution → aborts all children.
 - **Close propagation**: Closing parent session → closes all children.
 - **Depth limit**: 10 levels max (throws `Error`).
@@ -189,12 +189,12 @@ Additional callbacks on `AppOptions`:
 
 **Important**: Spawned child sessions do NOT inherit lifecycle callbacks. This is intentional — the parent's onComplete handler should not fire when a child agent completes.
 
-## Execution Environment
+## Execution Runner
 
-An `ExecutionEnvironment` controls how compiled context reaches the model and how tool calls execute. Set on `AppOptions.environment`.
+An `ExecutionRunner` controls how compiled context reaches the model and how tool calls execute. Set on `AppOptions.runner`.
 
 ```typescript
-const env: ExecutionEnvironment = {
+const runner: ExecutionRunner = {
   name: "repl",
 
   // Transform compiled input before model call (per tick)
@@ -213,22 +213,22 @@ const env: ExecutionEnvironment = {
     /* set up sandbox */
   },
   onPersist(session, snapshot) {
-    return { ...snapshot /* env state */ };
+    return { ...snapshot /* runner state */ };
   },
   onRestore(session, snapshot) {
-    /* restore env state */
+    /* restore runner state */
   },
   onDestroy(session) {
     /* cleanup */
   },
 };
 
-const app = createApp(MyAgent, { model, environment: env });
+const app = createApp(MyAgent, { model, runner });
 ```
 
-All methods are optional. Without an environment, standard model→tool_use behavior applies.
+All methods are optional. Without a runner, standard model→tool_use behavior applies.
 
-Lifecycle hooks receive a `SessionRef` — a narrow interface exposing only `id`, `status`, `currentTick`, and `snapshot()`. This avoids coupling environments to the full `Session` type.
+Lifecycle hooks receive a `SessionRef` — a narrow interface exposing only `id`, `status`, `currentTick`, and `snapshot()`. This avoids coupling runners to the full `Session` type.
 
 ### Hook Timing
 

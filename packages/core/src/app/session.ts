@@ -217,8 +217,8 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
   // Snapshot for resolve (set when restoring from store)
   private _snapshotForResolve: SessionSnapshot | null = null;
 
-  // Execution environment initialization tracking
-  private _environmentInitialized = false;
+  // Execution runner initialization tracking
+  private _runnerInitialized = false;
 
   // Spawn hierarchy
   private _parent: Session | null = null;
@@ -536,7 +536,7 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
         //    signal, and devTools are intentionally excluded. New AppOptions fields
         //    must be explicitly added here if children should inherit them.
         //
-        //    NOTE: `environment` IS inherited by default. A REPL environment, sandbox,
+        //    NOTE: `runner` IS inherited by default. A REPL runner, sandbox,
         //    or human-in-the-loop gateway should apply to sub-agents — the execution
         //    model is structural, not observational (unlike lifecycle callbacks).
         //    Use SpawnOptions to override for specific children.
@@ -546,7 +546,7 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
           mcpServers: this.appOptions.mcpServers,
           maxTicks: spawnOptions?.maxTicks ?? this.appOptions.maxTicks,
           inheritDefaults: this.appOptions.inheritDefaults,
-          environment: spawnOptions?.environment ?? this.appOptions.environment,
+          runner: spawnOptions?.runner ?? this.appOptions.runner,
         };
 
         const childOptions: SessionOptions = {
@@ -1521,12 +1521,12 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
 
     this._status = "closed";
 
-    // Notify execution environment of destroy
-    if (this._environmentInitialized && this.appOptions.environment?.onDestroy) {
+    // Notify execution runner of destroy
+    if (this._runnerInitialized && this.appOptions.runner?.onDestroy) {
       try {
-        await this.appOptions.environment.onDestroy(this);
+        await this.appOptions.runner.onDestroy(this);
       } catch (err) {
-        this.log.warn({ error: err }, "Environment onDestroy failed");
+        this.log.warn({ error: err }, "Runner onDestroy failed");
       }
     }
 
@@ -1780,9 +1780,9 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
 
         let modelInput = compiled.modelInput ?? compiled.formatted;
 
-        // Apply execution environment transformation
-        if (this.appOptions.environment?.prepareModelInput) {
-          modelInput = await this.appOptions.environment.prepareModelInput(
+        // Apply execution runner transformation
+        if (this.appOptions.runner?.prepareModelInput) {
+          modelInput = await this.appOptions.runner.prepareModelInput(
             modelInput,
             (compiled.tools ?? []) as ExecutableTool[],
           );
@@ -2087,8 +2087,8 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
       // Auto-persist snapshot after successful execution (fire-and-forget, skip on abort)
       if (this._persistCallback && !this._isAborted) {
         let snap = this.snapshot();
-        if (this.appOptions.environment?.onPersist) {
-          snap = await this.appOptions.environment.onPersist(this, snap);
+        if (this.appOptions.runner?.onPersist) {
+          snap = await this.appOptions.runner.onPersist(this, snap);
         }
         this._persistCallback(snap).catch((err) => {
           this.log.warn({ error: err }, "Auto-persist failed");
@@ -2222,21 +2222,21 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
           }
         }
 
-        // Notify execution environment of restore
-        if (this.appOptions.environment?.onRestore) {
-          await this.appOptions.environment.onRestore(this, this._snapshotForResolve);
+        // Notify execution runner of restore
+        if (this.appOptions.runner?.onRestore) {
+          await this.appOptions.runner.onRestore(this, this._snapshotForResolve);
         }
       } finally {
         this._snapshotForResolve = null;
       }
     }
 
-    // Initialize execution environment (once per session lifecycle)
-    if (!this._environmentInitialized) {
-      if (this.appOptions.environment?.onSessionInit) {
-        await this.appOptions.environment.onSessionInit(this);
+    // Initialize execution runner (once per session lifecycle)
+    if (!this._runnerInitialized) {
+      if (this.appOptions.runner?.onSessionInit) {
+        await this.appOptions.runner.onSessionInit(this);
       }
-      this._environmentInitialized = true;
+      this._runnerInitialized = true;
     }
   }
 
@@ -2439,13 +2439,13 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
         continue;
       }
 
-      // Execute tool (optionally wrapped by execution environment)
+      // Execute tool (optionally wrapped by execution runner)
       try {
-        const env = this.appOptions.environment;
+        const runner = this.appOptions.runner;
         let toolResult: ToolResult;
 
-        if (env?.executeToolCall) {
-          toolResult = await env.executeToolCall(call, tool, async () => {
+        if (runner?.executeToolCall) {
+          toolResult = await runner.executeToolCall(call, tool, async () => {
             const r = await executor.processToolWithConfirmation(call, this.ctx!, executableTools);
             return r.result;
           });

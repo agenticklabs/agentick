@@ -325,16 +325,16 @@ await app.close("test");
 expect(app._closedSessions).toContain("test");
 ```
 
-### createTestEnvironment
+### createTestRunner
 
-Mock `ExecutionEnvironment` with lifecycle call tracking.
+Mock `ExecutionRunner` with lifecycle call tracking.
 
 ```typescript
-import { createTestEnvironment } from "@agentick/core/testing";
+import { createTestRunner } from "@agentick/core/testing";
 
 // Basic — tracks all lifecycle calls
-const { environment, tracker } = createTestEnvironment();
-const app = createApp(Agent, { model, environment });
+const { runner, tracker } = createTestRunner();
+const app = createApp(Agent, { model, runner });
 const session = await app.session();
 await session.send({ messages: [...] }).result;
 
@@ -342,13 +342,13 @@ expect(tracker.initCalls).toHaveLength(1);
 expect(tracker.prepareModelInputCalls).toHaveLength(1);
 
 // Intercept tools with static string results
-const { environment, tracker } = createTestEnvironment({
+const { runner, tracker } = createTestRunner({
   interceptTools: { execute: "sandbox result" },
 });
 // When model calls "execute" tool, gets "sandbox result" instead of real execution
 
 // Intercept tools with dynamic function results
-const { environment: env2 } = createTestEnvironment({
+const { runner: runner2 } = createTestRunner({
   interceptTools: {
     execute: (call) => ({
       id: call.id, toolUseId: call.id, name: call.name,
@@ -359,12 +359,12 @@ const { environment: env2 } = createTestEnvironment({
 });
 
 // Transform model input
-const { environment } = createTestEnvironment({
+const { runner } = createTestRunner({
   transformInput: (compiled) => ({ ...compiled, tools: [] }),
 });
 
 // Add data to persist snapshots
-const { environment } = createTestEnvironment({
+const { runner } = createTestRunner({
   persistData: { _sandbox: { id: "abc" } },
 });
 

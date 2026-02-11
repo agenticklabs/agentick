@@ -1,8 +1,8 @@
 /**
- * ExecutionEnvironment Tests
+ * ExecutionRunner Tests
  *
- * Comprehensive tests for the ExecutionEnvironment system including:
- * - Default behavior (no environment configured)
+ * Comprehensive tests for the ExecutionRunner system including:
+ * - Default behavior (no runner configured)
  * - prepareModelInput: transforming compiled input before model call
  * - executeToolCall: intercepting/wrapping tool execution
  * - Lifecycle hooks: onSessionInit, onPersist, onRestore, onDestroy
@@ -13,13 +13,13 @@ import { describe, it, expect } from "vitest";
 import { z } from "zod";
 import { createApp } from "../../app";
 import { createTestAdapter } from "../../testing/test-adapter";
-import { createTestEnvironment } from "../../testing/test-environment";
+import { createTestRunner } from "../../testing/test-runner";
 import { createTool } from "../../tool";
 import { System, User } from "../../jsx/components/messages";
 import { Model } from "../../jsx/components/primitives";
 import { Timeline } from "../../jsx/components/timeline";
 import { MemorySessionStore } from "../session-store";
-import type { ExecutionEnvironment } from "../types";
+import type { ExecutionRunner } from "../types";
 import type { ExecutableTool } from "../../tool/tool";
 
 // ============================================================================
@@ -39,12 +39,12 @@ const SimpleAgent = ({ query }: { query: string }) => (
 );
 
 // ============================================================================
-// Default Behavior (no environment)
+// Default Behavior (no runner)
 // ============================================================================
 
-describe("ExecutionEnvironment", () => {
-  describe("default behavior (no environment)", () => {
-    it("should work identically without an environment configured", async () => {
+describe("ExecutionRunner", () => {
+  describe("default behavior (no runner)", () => {
+    it("should work identically without an runner configured", async () => {
       const model = createMockModel("Hello from model");
 
       const app = createApp(SimpleAgent, { model, maxTicks: 1 });
@@ -67,7 +67,7 @@ describe("ExecutionEnvironment", () => {
       const model = createMockModel("Transformed response");
       const capturedInputs: any[] = [];
 
-      const env: ExecutionEnvironment = {
+      const runner: ExecutionRunner = {
         name: "test-transform",
         prepareModelInput(compiled) {
           capturedInputs.push(compiled);
@@ -78,7 +78,7 @@ describe("ExecutionEnvironment", () => {
               kind: "message" as const,
               message: {
                 role: "system" as const,
-                content: [{ type: "text" as const, text: "ENVIRONMENT INJECTED" }],
+                content: [{ type: "text" as const, text: "RUNNER INJECTED" }],
               },
             },
           ];
@@ -86,7 +86,7 @@ describe("ExecutionEnvironment", () => {
         },
       };
 
-      const app = createApp(SimpleAgent, { model, maxTicks: 1, environment: env });
+      const app = createApp(SimpleAgent, { model, maxTicks: 1, runner });
       const session = await app.session();
 
       const result = await session.send({
@@ -119,7 +119,7 @@ describe("ExecutionEnvironment", () => {
         </>
       );
 
-      const env: ExecutionEnvironment = {
+      const runner: ExecutionRunner = {
         name: "test-tools",
         prepareModelInput(compiled, tools) {
           receivedTools = tools;
@@ -127,7 +127,7 @@ describe("ExecutionEnvironment", () => {
         },
       };
 
-      const app = createApp(AgentWithTool, { model, maxTicks: 1, environment: env });
+      const app = createApp(AgentWithTool, { model, maxTicks: 1, runner});
       const session = await app.session();
 
       await session.send({
@@ -141,7 +141,7 @@ describe("ExecutionEnvironment", () => {
     it("should support async prepareModelInput", async () => {
       const model = createMockModel("Async transformed");
 
-      const env: ExecutionEnvironment = {
+      const runner: ExecutionRunner = {
         name: "test-async-transform",
         async prepareModelInput(compiled) {
           // Simulate async work
@@ -150,7 +150,7 @@ describe("ExecutionEnvironment", () => {
         },
       };
 
-      const app = createApp(SimpleAgent, { model, maxTicks: 1, environment: env });
+      const app = createApp(SimpleAgent, { model, maxTicks: 1, runner});
       const session = await app.session();
 
       const result = await session.send({
@@ -180,7 +180,7 @@ describe("ExecutionEnvironment", () => {
         </>
       );
 
-      const env: ExecutionEnvironment = {
+      const runner: ExecutionRunner = {
         name: "test-multi-tick",
         prepareModelInput(compiled) {
           callCount++;
@@ -191,7 +191,7 @@ describe("ExecutionEnvironment", () => {
       // Make model call tool on first tick, then stop on second
       model.respondWith([{ tool: { name: "noop_tool", input: {} } }]);
 
-      const app = createApp(AgentWithTool, { model, maxTicks: 3, environment: env });
+      const app = createApp(AgentWithTool, { model, maxTicks: 3, runner});
       const session = await app.session();
 
       await session.send({
@@ -227,7 +227,7 @@ describe("ExecutionEnvironment", () => {
         </>
       );
 
-      const env: ExecutionEnvironment = {
+      const runner: ExecutionRunner = {
         name: "test-intercept",
         async executeToolCall(call, _tool, _next) {
           if (call.name === "intercepted_tool") {
@@ -246,7 +246,7 @@ describe("ExecutionEnvironment", () => {
       // Make model call the tool
       model.respondWith([{ tool: { name: "intercepted_tool", input: { value: "test" } } }]);
 
-      const app = createApp(AgentWithTool, { model, maxTicks: 3, environment: env });
+      const app = createApp(AgentWithTool, { model, maxTicks: 3, runner});
       const session = await app.session();
 
       const result = await session.send({
@@ -279,7 +279,7 @@ describe("ExecutionEnvironment", () => {
         </>
       );
 
-      const env: ExecutionEnvironment = {
+      const runner: ExecutionRunner = {
         name: "test-passthrough",
         async executeToolCall(call, _tool, next) {
           // Only intercept "intercepted_tool", let everything else pass through
@@ -298,7 +298,7 @@ describe("ExecutionEnvironment", () => {
 
       model.respondWith([{ tool: { name: "passthrough_tool", input: {} } }]);
 
-      const app = createApp(AgentWithTool, { model, maxTicks: 3, environment: env });
+      const app = createApp(AgentWithTool, { model, maxTicks: 3, runner});
       const session = await app.session();
 
       await session.send({
@@ -329,7 +329,7 @@ describe("ExecutionEnvironment", () => {
         </>
       );
 
-      const env: ExecutionEnvironment = {
+      const runner: ExecutionRunner = {
         name: "test-tool-ref",
         async executeToolCall(call, tool, next) {
           receivedTool = tool;
@@ -339,7 +339,7 @@ describe("ExecutionEnvironment", () => {
 
       model.respondWith([{ tool: { name: "my_tool", input: {} } }]);
 
-      const app = createApp(AgentWithTool, { model, maxTicks: 3, environment: env });
+      const app = createApp(AgentWithTool, { model, maxTicks: 3, runner});
       const session = await app.session();
 
       await session.send({
@@ -355,7 +355,7 @@ describe("ExecutionEnvironment", () => {
       let receivedTool: ExecutableTool | undefined = undefined;
       let executeToolCallCalled = false;
 
-      const env: ExecutionEnvironment = {
+      const runner: ExecutionRunner = {
         name: "test-unknown-tool",
         async executeToolCall(_call, tool, next) {
           receivedTool = tool;
@@ -367,7 +367,7 @@ describe("ExecutionEnvironment", () => {
       // Model calls a tool that doesn't exist
       model.respondWith([{ tool: { name: "nonexistent_tool", input: {} } }]);
 
-      const app = createApp(SimpleAgent, { model, maxTicks: 3, environment: env });
+      const app = createApp(SimpleAgent, { model, maxTicks: 3, runner});
       const session = await app.session();
 
       await session.send({
@@ -389,14 +389,14 @@ describe("ExecutionEnvironment", () => {
         const model = createMockModel("Response");
         const initCalls: string[] = [];
 
-        const env: ExecutionEnvironment = {
+        const runner: ExecutionRunner = {
           name: "test-init",
           onSessionInit(session) {
             initCalls.push(session.id);
           },
         };
 
-        const app = createApp(SimpleAgent, { model, maxTicks: 1, environment: env });
+        const app = createApp(SimpleAgent, { model, maxTicks: 1, runner});
         const session = await app.session();
 
         expect(initCalls).toHaveLength(0);
@@ -413,14 +413,14 @@ describe("ExecutionEnvironment", () => {
         const model = createMockModel("Response");
         let initCount = 0;
 
-        const env: ExecutionEnvironment = {
+        const runner: ExecutionRunner = {
           name: "test-init-once",
           onSessionInit() {
             initCount++;
           },
         };
 
-        const app = createApp(SimpleAgent, { model, maxTicks: 1, environment: env });
+        const app = createApp(SimpleAgent, { model, maxTicks: 1, runner});
         const session = await app.session();
 
         await session.send({
@@ -442,7 +442,7 @@ describe("ExecutionEnvironment", () => {
         const model = createMockModel("Response");
         let initCompleted = false;
 
-        const env: ExecutionEnvironment = {
+        const runner: ExecutionRunner = {
           name: "test-async-init",
           async onSessionInit() {
             await new Promise((r) => setTimeout(r, 10));
@@ -450,7 +450,7 @@ describe("ExecutionEnvironment", () => {
           },
         };
 
-        const app = createApp(SimpleAgent, { model, maxTicks: 1, environment: env });
+        const app = createApp(SimpleAgent, { model, maxTicks: 1, runner});
         const session = await app.session();
 
         await session.send({
@@ -467,7 +467,7 @@ describe("ExecutionEnvironment", () => {
         const store = new MemorySessionStore();
         const persistCalls: { sessionId: string; snapshotVersion: string }[] = [];
 
-        const env: ExecutionEnvironment = {
+        const runner: ExecutionRunner = {
           name: "test-persist",
           onPersist(session, snapshot) {
             persistCalls.push({
@@ -481,7 +481,7 @@ describe("ExecutionEnvironment", () => {
         const app = createApp(SimpleAgent, {
           model,
           maxTicks: 1,
-          environment: env,
+          runner,
           sessions: { store },
         });
         const session = await app.session();
@@ -497,19 +497,19 @@ describe("ExecutionEnvironment", () => {
         expect(persistCalls[0].sessionId).toBe(session.id);
       });
 
-      it("should allow environment to augment snapshot", async () => {
+      it("should allow runner to augment snapshot", async () => {
         const model = createMockModel("Response");
         const store = new MemorySessionStore();
 
-        const env: ExecutionEnvironment = {
+        const runner: ExecutionRunner = {
           name: "test-persist-augment",
           onPersist(_session, snapshot) {
-            // Add custom data to snapshot (environments can store their state here)
+            // Add custom data to snapshot (runners can store their state here)
             return {
               ...snapshot,
               comState: {
                 ...snapshot.comState,
-                _env_data: { sandboxId: "sandbox-123" },
+                _runner_data: { sandboxId: "sandbox-123" },
               },
             };
           },
@@ -518,7 +518,7 @@ describe("ExecutionEnvironment", () => {
         const app = createApp(SimpleAgent, {
           model,
           maxTicks: 1,
-          environment: env,
+          runner,
           sessions: { store },
         });
         const session = await app.session();
@@ -532,7 +532,7 @@ describe("ExecutionEnvironment", () => {
 
         const saved = await store.load(session.id);
         expect(saved).not.toBeNull();
-        expect(saved!.comState._env_data).toEqual({ sandboxId: "sandbox-123" });
+        expect(saved!.comState._runner_data).toEqual({ sandboxId: "sandbox-123" });
       });
     });
 
@@ -542,7 +542,7 @@ describe("ExecutionEnvironment", () => {
         const store = new MemorySessionStore();
         const restoreCalls: { sessionId: string }[] = [];
 
-        const env: ExecutionEnvironment = {
+        const runner: ExecutionRunner = {
           name: "test-restore",
           onRestore(session, _snapshot) {
             restoreCalls.push({ sessionId: session.id });
@@ -552,7 +552,7 @@ describe("ExecutionEnvironment", () => {
         const app = createApp(SimpleAgent, {
           model,
           maxTicks: 1,
-          environment: env,
+          runner,
           sessions: { store },
         });
 
@@ -587,17 +587,17 @@ describe("ExecutionEnvironment", () => {
         const model = createMockModel("Response");
         const destroyCalls: string[] = [];
 
-        const env: ExecutionEnvironment = {
+        const runner: ExecutionRunner = {
           name: "test-destroy",
           onDestroy(session) {
             destroyCalls.push(session.id);
           },
         };
 
-        const app = createApp(SimpleAgent, { model, maxTicks: 1, environment: env });
+        const app = createApp(SimpleAgent, { model, maxTicks: 1, runner});
         const session = await app.session();
 
-        // Must send at least once to initialize the environment
+        // Must send at least once to initialize the runner
         await session.send({
           messages: [{ role: "user", content: [{ type: "text", text: "Hello" }] }],
         }).result;
@@ -613,11 +613,11 @@ describe("ExecutionEnvironment", () => {
         expect(destroyCalls[0]).toBe(session.id);
       });
 
-      it("should not be called if environment was never initialized", async () => {
+      it("should not be called if runner was never initialized", async () => {
         const model = createMockModel("Response");
         const destroyCalls: string[] = [];
 
-        const env: ExecutionEnvironment = {
+        const runner: ExecutionRunner = {
           name: "test-destroy-no-init",
           onSessionInit() {},
           onDestroy(session) {
@@ -625,7 +625,7 @@ describe("ExecutionEnvironment", () => {
           },
         };
 
-        const app = createApp(SimpleAgent, { model, maxTicks: 1, environment: env });
+        const app = createApp(SimpleAgent, { model, maxTicks: 1, runner});
         const session = await app.session();
 
         // Close without ever sending (no infrastructure initialized)
@@ -643,12 +643,12 @@ describe("ExecutionEnvironment", () => {
   // ============================================================================
 
   describe("combined scenarios", () => {
-    it("should support environment with all hooks", async () => {
+    it("should support runner with all hooks", async () => {
       const model = createMockModel("Response");
       const store = new MemorySessionStore();
       const events: string[] = [];
 
-      const env: ExecutionEnvironment = {
+      const runner: ExecutionRunner = {
         name: "test-all-hooks",
         onSessionInit() {
           events.push("init");
@@ -695,7 +695,7 @@ describe("ExecutionEnvironment", () => {
       const app = createApp(AgentWithTool, {
         model,
         maxTicks: 3,
-        environment: env,
+        runner,
         sessions: { store },
       });
       const session = await app.session();
@@ -725,7 +725,7 @@ describe("ExecutionEnvironment", () => {
       const model = createMockModel("Ephemeral response");
       let initCalled = false;
 
-      const env: ExecutionEnvironment = {
+      const runner: ExecutionRunner = {
         name: "test-ephemeral",
         onSessionInit() {
           initCalled = true;
@@ -738,7 +738,7 @@ describe("ExecutionEnvironment", () => {
       const app = createApp(SimpleAgent, {
         model,
         maxTicks: 1,
-        environment: env,
+        runner,
       });
 
       const result = await app.run({
@@ -750,21 +750,21 @@ describe("ExecutionEnvironment", () => {
       expect(initCalled).toBe(true);
     });
 
-    it("should support environment name for identification", async () => {
-      const env: ExecutionEnvironment = {
+    it("should support runner name for identification", async () => {
+      const runner: ExecutionRunner = {
         name: "repl-v2",
       };
 
-      expect(env.name).toBe("repl-v2");
+      expect(runner.name).toBe("repl-v2");
     });
   });
 
   // ============================================================================
-  // Spawn: environment inheritance and SpawnOptions
+  // Spawn: runner inheritance and SpawnOptions
   // ============================================================================
 
-  describe("spawn environment inheritance", () => {
-    it("should inherit parent environment in spawned children", async () => {
+  describe("spawn runner inheritance", () => {
+    it("should inherit parent runner in spawned children", async () => {
       const parentModel = createMockModel("Parent response");
       const childModel = createMockModel("Child response");
       const hookCalls: { hook: string; sessionId: string }[] = [];
@@ -785,8 +785,8 @@ describe("ExecutionEnvironment", () => {
         </>
       );
 
-      const env: ExecutionEnvironment = {
-        name: "inherited-env",
+      const runner: ExecutionRunner = {
+        name: "inherited-runner",
         onSessionInit(session) {
           hookCalls.push({ hook: "init", sessionId: session.id });
         },
@@ -795,17 +795,17 @@ describe("ExecutionEnvironment", () => {
         },
       };
 
-      const app = createApp(ParentAgent, { maxTicks: 1, environment: env });
+      const app = createApp(ParentAgent, { maxTicks: 1, runner});
       const session = await app.session();
 
-      // Spawn a child — should inherit the environment
+      // Spawn a child — should inherit the runner
       const childHandle = await session.spawn(ChildAgent, {
         messages: [{ role: "user", content: [{ type: "text", text: "Hello child" }] }],
       });
 
       await childHandle.result;
 
-      // Environment onSessionInit should have been called for the child
+      // Runner onSessionInit should have been called for the child
       // (the parent hasn't sent yet, so only the child triggered init)
       expect(hookCalls).toHaveLength(1);
       expect(hookCalls[0].hook).toBe("init");
@@ -815,7 +815,7 @@ describe("ExecutionEnvironment", () => {
       await session.close();
     });
 
-    it("should intercept child tool calls via inherited environment", async () => {
+    it("should intercept child tool calls via inherited runner", async () => {
       const parentModel = createMockModel("Parent done");
       const childModel = createMockModel("Child done");
 
@@ -844,8 +844,8 @@ describe("ExecutionEnvironment", () => {
       );
 
       let intercepted = false;
-      const env: ExecutionEnvironment = {
-        name: "intercepting-env",
+      const runner: ExecutionRunner = {
+        name: "intercepting-runner",
         async executeToolCall(call, _tool, next) {
           if (call.name === "child_tool") {
             intercepted = true;
@@ -854,7 +854,7 @@ describe("ExecutionEnvironment", () => {
               toolUseId: call.id,
               name: call.name,
               success: true,
-              content: [{ type: "text" as const, text: "env intercepted" }],
+              content: [{ type: "text" as const, text: "runner intercepted" }],
             };
           }
           return next();
@@ -864,7 +864,7 @@ describe("ExecutionEnvironment", () => {
       // Make child model call the tool
       childModel.respondWith([{ tool: { name: "child_tool", input: {} } }]);
 
-      const app = createApp(ParentAgent, { maxTicks: 3, environment: env });
+      const app = createApp(ParentAgent, { maxTicks: 3, runner});
       const session = await app.session();
 
       const childHandle = await session.spawn(ChildAgent, {
@@ -877,11 +877,11 @@ describe("ExecutionEnvironment", () => {
       await session.close();
     });
 
-    it("should allow SpawnOptions to override the inherited environment", async () => {
+    it("should allow SpawnOptions to override the inherited runner", async () => {
       const parentModel = createMockModel("Parent");
       const childModel = createMockModel("Child");
-      const parentEnvCalls: string[] = [];
-      const childEnvCalls: string[] = [];
+      const parentRunnerCalls: string[] = [];
+      const childRunnerCalls: string[] = [];
 
       const ChildAgent = () => (
         <>
@@ -899,44 +899,44 @@ describe("ExecutionEnvironment", () => {
         </>
       );
 
-      const parentEnv: ExecutionEnvironment = {
-        name: "parent-env",
+      const parentRunner: ExecutionRunner = {
+        name: "parent-runner",
         onSessionInit() {
-          parentEnvCalls.push("init");
+          parentRunnerCalls.push("init");
         },
         prepareModelInput(compiled) {
-          parentEnvCalls.push("prepare");
+          parentRunnerCalls.push("prepare");
           return compiled;
         },
       };
 
-      const childEnv: ExecutionEnvironment = {
-        name: "child-env",
+      const childRunner: ExecutionRunner = {
+        name: "child-runner",
         onSessionInit() {
-          childEnvCalls.push("init");
+          childRunnerCalls.push("init");
         },
         prepareModelInput(compiled) {
-          childEnvCalls.push("prepare");
+          childRunnerCalls.push("prepare");
           return compiled;
         },
       };
 
-      const app = createApp(ParentAgent, { maxTicks: 1, environment: parentEnv });
+      const app = createApp(ParentAgent, { maxTicks: 1, runner: parentRunner });
       const session = await app.session();
 
-      // Spawn with overridden environment
+      // Spawn with overridden runner
       const childHandle = await session.spawn(
         ChildAgent,
         { messages: [{ role: "user", content: [{ type: "text", text: "Hello" }] }] },
-        { environment: childEnv },
+        { runner: childRunner },
       );
 
       await childHandle.result;
 
-      // Child should use its own environment, not the parent's
-      expect(childEnvCalls).toContain("init");
-      expect(childEnvCalls).toContain("prepare");
-      expect(parentEnvCalls).toHaveLength(0); // Parent never sent, so parent env unused
+      // Child should use its own runner, not the parent's
+      expect(childRunnerCalls).toContain("init");
+      expect(childRunnerCalls).toContain("prepare");
+      expect(parentRunnerCalls).toHaveLength(0); // Parent never sent, so parent runner unused
     });
 
     it("should allow SpawnOptions to override model", async () => {
@@ -1022,10 +1022,10 @@ describe("ExecutionEnvironment", () => {
   });
 
   // ============================================================================
-  // createTestEnvironment integration
+  // createTestRunner integration
   // ============================================================================
 
-  describe("createTestEnvironment helper", () => {
+  describe("createTestRunner helper", () => {
     it("should track all lifecycle calls end-to-end", async () => {
       const model = createMockModel("Response");
       const store = new MemorySessionStore();
@@ -1048,12 +1048,12 @@ describe("ExecutionEnvironment", () => {
 
       model.respondWith([{ tool: { name: "tracked_tool", input: {} } }]);
 
-      const { environment, tracker } = createTestEnvironment({ name: "integration" });
+      const { runner, tracker } = createTestRunner({ name: "integration" });
 
       const app = createApp(AgentWithTool, {
         model,
         maxTicks: 3,
-        environment,
+        runner,
         sessions: { store },
       });
 
@@ -1109,11 +1109,11 @@ describe("ExecutionEnvironment", () => {
 
       model.respondWith([{ tool: { name: "sandbox_exec", input: { code: "1+1" } } }]);
 
-      const { environment, tracker } = createTestEnvironment({
+      const { runner, tracker } = createTestRunner({
         interceptTools: { sandbox_exec: "2" },
       });
 
-      const app = createApp(AgentWithTool, { model, maxTicks: 3, environment });
+      const app = createApp(AgentWithTool, { model, maxTicks: 3, runner });
       const session = await app.session();
 
       await session.send({
@@ -1144,7 +1144,7 @@ describe("ExecutionEnvironment", () => {
         </>
       );
 
-      const { environment } = createTestEnvironment({
+      const { runner } = createTestRunner({
         transformInput: (compiled) => {
           modelReceivedTools = compiled.tools?.length ?? 0;
           // Remove all tools from model input
@@ -1152,7 +1152,7 @@ describe("ExecutionEnvironment", () => {
         },
       });
 
-      const app = createApp(AgentWithTool, { model, maxTicks: 1, environment });
+      const app = createApp(AgentWithTool, { model, maxTicks: 1, runner });
       const session = await app.session();
 
       await session.send({
@@ -1184,7 +1184,7 @@ describe("ExecutionEnvironment", () => {
 
       model.respondWith([{ tool: { name: "execute", input: { code: "2+2" } } }]);
 
-      const { environment, tracker } = createTestEnvironment({
+      const { runner, tracker } = createTestRunner({
         interceptTools: {
           execute: (call) => ({
             id: call.id,
@@ -1196,7 +1196,7 @@ describe("ExecutionEnvironment", () => {
         },
       });
 
-      const app = createApp(AgentWithTool, { model, maxTicks: 3, environment });
+      const app = createApp(AgentWithTool, { model, maxTicks: 3, runner });
       const session = await app.session();
 
       await session.send({
@@ -1208,7 +1208,7 @@ describe("ExecutionEnvironment", () => {
     });
 
     it("should reset tracker between tests", async () => {
-      const { tracker } = createTestEnvironment();
+      const { tracker } = createTestRunner();
 
       // Simulate some tracking
       tracker.initCalls.push("session-1");

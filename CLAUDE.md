@@ -44,7 +44,7 @@ The framework provides **building blocks**, not opinions.
 | `useResolved()`      | Access resolve data on session restore (Layer 2)                     |
 | `use()` on tools     | Bridge render-time context (React Context, hooks) into tool handlers |
 | `<Sandbox>`          | Sandboxed execution (provider-backed, tree-scoped tools)             |
-| ExecutionEnvironment | Controls how compiled context reaches model and how tools execute    |
+| ExecutionRunner      | Controls how compiled context reaches model and how tools execute    |
 
 #### Semantic Components (`packages/core/src/jsx/components/semantic.tsx`)
 
@@ -183,30 +183,30 @@ Session
 └── Execution 3 ...
 ```
 
-### Execution Environment
+### Execution Runner
 
-An `ExecutionEnvironment` controls how compiled context is consumed and how tool calls execute. It's an optional `AppOptions` field — when omitted, the default behavior applies (model calls tools via tool_use protocol).
+An `ExecutionRunner` controls how compiled context is consumed and how tool calls execute. It's an optional `AppOptions` field — when omitted, the default behavior applies (model calls tools via tool_use protocol).
 
 ```typescript
-const env: ExecutionEnvironment = {
+const runner: ExecutionRunner = {
   name: "repl",
   prepareModelInput(compiled, tools) { ... },  // Transform before model call
   executeToolCall(call, tool, next) { ... },    // Wrap tool execution
   onSessionInit(session) { ... },               // Once per session lifecycle
   onPersist(session, snapshot) { ... },         // Augment snapshot
-  onRestore(session, snapshot) { ... },         // Restore environment state
+  onRestore(session, snapshot) { ... },         // Restore runner state
   onDestroy(session) { ... },                   // Clean up resources
 };
 
-const app = createApp(MyAgent, { model, environment: env });
+const app = createApp(MyAgent, { model, runner });
 ```
 
 All methods are optional. The `prepareModelInput` hook runs per-tick, `executeToolCall` runs per tool call, and lifecycle hooks run at session boundaries. Lifecycle hooks receive `SessionRef` (narrow: `id`, `status`, `currentTick`, `snapshot()`) — not the full `Session`.
 
-Environments are inherited by spawned children. Use `SpawnOptions` (3rd arg to `session.spawn()`) to override:
+Runners are inherited by spawned children. Use `SpawnOptions` (3rd arg to `session.spawn()`) to override:
 
 ```typescript
-await session.spawn(Agent, { messages }, { environment: sandboxEnv, model: cheapModel });
+await session.spawn(Agent, { messages }, { runner: replRunner, model: cheapModel });
 ```
 
 ### React-like Reconciler

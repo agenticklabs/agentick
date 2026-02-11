@@ -335,7 +335,7 @@ class SessionRegistry<P> {
 
       // evict() is async but enforceMaxActive is called during session creation —
       // the sync session removal from the map happens immediately in remove(),
-      // async cleanup (environment onDestroy) runs in background
+      // async cleanup (runner onDestroy) runs in background
       this.evict(oldestId).catch(() => {
         /* non-fatal */
       });
