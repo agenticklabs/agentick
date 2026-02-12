@@ -89,24 +89,39 @@ export function ChatInterface() {
     };
   }, []);
 
-  // Subscribe to execution_end events to get timeline updates
-  // execution_end contains output.timeline with all messages
+  // Subscribe to execution_end events to get timeline updates.
+  // Prefers newTimelineEntries (delta/append) over output.timeline (full replace).
   useEffect(() => {
     if (!accessor) return;
+
+    type TimelineEntry = { kind: string; message?: Message };
+
+    const extractMessages = (entries: TimelineEntry[]): Message[] =>
+      entries.filter((e) => e.kind === "message" && e.message).map((e) => e.message!);
 
     const unsubscribe = accessor.onEvent((event) => {
       if (event.type === "execution_end") {
         const execEnd = event as {
           type: "execution_end";
-          output?: { timeline?: Array<{ kind: string; message?: Message }> };
+          newTimelineEntries?: TimelineEntry[];
+          output?: { timeline?: TimelineEntry[] };
         };
+
+        // Prefer delta (append) over full timeline (replace)
+        if (execEnd.newTimelineEntries && execEnd.newTimelineEntries.length > 0) {
+          const newMessages = extractMessages(execEnd.newTimelineEntries);
+          if (newMessages.length > 0) {
+            setServerMessages((prev) => [...prev, ...newMessages]);
+            setPendingMessage(null);
+          }
+          return;
+        }
+
+        // Fallback: full timeline replace
         if (execEnd.output?.timeline) {
-          const messages = execEnd.output.timeline
-            .filter((entry) => entry.kind === "message" && entry.message)
-            .map((entry) => entry.message!);
+          const messages = extractMessages(execEnd.output.timeline);
           if (messages.length > 0) {
             setServerMessages(messages);
-            // Clear pending message since server has confirmed it
             setPendingMessage(null);
           }
         }

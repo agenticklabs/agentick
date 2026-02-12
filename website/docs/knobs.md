@@ -201,7 +201,11 @@ function Agent() {
   return (
     <>
       <Knobs />
-      {showPlanning && <Section id="planning" audience="model">...</Section>}
+      {showPlanning && (
+        <Section id="planning" audience="model">
+          ...
+        </Section>
+      )}
       <Timeline />
     </>
   );

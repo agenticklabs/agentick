@@ -43,3 +43,4 @@ export { ToolCallIndicator } from "./components/ToolCallIndicator.js";
 export { ToolConfirmationPrompt } from "./components/ToolConfirmationPrompt.js";
 export { ErrorDisplay } from "./components/ErrorDisplay.js";
 export { InputBar } from "./components/InputBar.js";
+export { default as Spinner } from "ink-spinner";

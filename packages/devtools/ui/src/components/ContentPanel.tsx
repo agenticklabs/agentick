@@ -876,11 +876,12 @@ function ModelOutputView({ data }: { data: unknown }) {
 
 // ---- Engine State View ----
 function EngineStateView({ data }: { data: unknown }) {
+  console.log("EngineStateView", data);
   const state = data as {
     newTimelineEntries?: unknown[];
     toolCalls?: unknown[];
     shouldStop?: boolean;
-    stopReason?: unknown;
+    stopReason?: any;
   };
 
   return (
@@ -890,11 +891,11 @@ function EngineStateView({ data }: { data: unknown }) {
         <span className="pretty-config-item">
           <span className="pretty-config-label">Stop:</span> {state.shouldStop ? "Yes" : "No"}
         </span>
-        {state.stopReason && (
+        {state.stopReason ? (
           <span className="pretty-config-item">
-            <span className="pretty-config-label">Reason:</span> {String(state.stopReason)}
+            <span className="pretty-config-label">Reason:</span> {String(state.stopReason.reason)}
           </span>
-        )}
+        ) : null}
         {state.newTimelineEntries && (
           <span className="pretty-config-item">
             <span className="pretty-config-label">New Entries:</span>{" "}

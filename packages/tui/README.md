@@ -54,6 +54,16 @@ import { MyDashboard } from "./dashboard.js";
 createTUI({ app, ui: MyDashboard }).start();
 ```
 
+### Alternate Screen
+
+Use the terminal's alternate screen buffer to avoid polluting scrollback:
+
+```typescript
+createTUI({ app, alternateScreen: true }).start();
+```
+
+When enabled, the TUI takes over the alternate screen on start and restores the normal screen on exit. This prevents terminal scrollbar confusion where native scrollback doesn't interact with Ink's rendering.
+
 ## CLI
 
 The `agentick-tui` binary launches a TUI from the command line.
@@ -104,20 +114,22 @@ Returns `{ start(): Promise<void> }`.
 
 **Local options:**
 
-| Option      | Type           | Description                           |
-| ----------- | -------------- | ------------------------------------- |
-| `app`       | `App`          | Agentick App instance                 |
-| `sessionId` | `string`       | Session ID (default: `"main"`)        |
-| `ui`        | `TUIComponent` | Custom UI component (default: `Chat`) |
+| Option            | Type           | Description                                  |
+| ----------------- | -------------- | -------------------------------------------- |
+| `app`             | `App`          | Agentick App instance                        |
+| `sessionId`       | `string`       | Session ID (default: `"main"`)               |
+| `ui`              | `TUIComponent` | Custom UI component (default: `Chat`)        |
+| `alternateScreen` | `boolean`      | Use alternate screen buffer (default: false) |
 
 **Remote options:**
 
-| Option      | Type           | Description                           |
-| ----------- | -------------- | ------------------------------------- |
-| `url`       | `string`       | Gateway URL                           |
-| `token`     | `string`       | Auth token                            |
-| `sessionId` | `string`       | Session ID (default: `"main"`)        |
-| `ui`        | `TUIComponent` | Custom UI component (default: `Chat`) |
+| Option            | Type           | Description                                  |
+| ----------------- | -------------- | -------------------------------------------- |
+| `url`             | `string`       | Gateway URL                                  |
+| `token`           | `string`       | Auth token                                   |
+| `sessionId`       | `string`       | Session ID (default: `"main"`)               |
+| `ui`              | `TUIComponent` | Custom UI component (default: `Chat`)        |
+| `alternateScreen` | `boolean`      | Use alternate screen buffer (default: false) |
 
 ### TUIComponent
 
@@ -144,7 +156,34 @@ All components are exported for building custom UIs.
 | `ToolCallIndicator`      | Spinner during tool execution                     |
 | `ToolConfirmationPrompt` | Y/N/A prompt for tools with `requireConfirmation` |
 | `ErrorDisplay`           | Error box with optional dismiss                   |
-| `InputBar`               | Text input, disabled while streaming              |
+| `InputBar`               | Text input with controlled/uncontrolled modes     |
+
+### InputBar
+
+Supports two modes:
+
+**Uncontrolled** (default) — manages its own value, clears on submit:
+
+```typescript
+<InputBar onSubmit={(text) => send(text)} isDisabled={isStreaming} />
+```
+
+**Controlled** — parent owns the value (needed for Ctrl+L clear, scroll mode, etc.):
+
+```typescript
+const [value, setValue] = useState("");
+
+<InputBar
+  value={value}
+  onChange={setValue}
+  onSubmit={(text) => { send(text); setValue(""); }}
+  isDisabled={isStreaming}
+/>
+```
+
+### MessageList
+
+Uses `execution_end` events as its data source. When the event includes `newTimelineEntries` (a delta of entries added during that execution), MessageList appends them. Falls back to replacing all messages from `output.timeline` for backwards compatibility.
 
 ## Architecture
 

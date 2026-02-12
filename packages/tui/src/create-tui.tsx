@@ -20,6 +20,11 @@
  * createTUI({ app: myApp, ui: MyDashboard }).start();
  * ```
  *
+ * @example Alternate Screen (no scrollback pollution)
+ * ```typescript
+ * createTUI({ app: myApp, alternateScreen: true }).start();
+ * ```
+ *
  * @module @agentick/tui/create-tui
  */
 
@@ -35,13 +40,20 @@ import EventSourcePolyfill from "eventsource";
 /** A TUI component receives a sessionId and renders the full interface. */
 export type TUIComponent = ComponentType<{ sessionId: string }>;
 
+interface TUIOptionsBase {
+  sessionId?: string;
+  ui?: TUIComponent;
+  /** Use alternate screen buffer to avoid polluting terminal scrollback. */
+  alternateScreen?: boolean;
+}
+
 export type TUIOptions =
-  | { app: App; sessionId?: string; ui?: TUIComponent }
-  | { url: string; token?: string; sessionId?: string; ui?: TUIComponent };
+  | ({ app: App } & TUIOptionsBase)
+  | ({ url: string; token?: string } & TUIOptionsBase);
 
 export function createTUI(options: TUIOptions) {
   return {
-    start() {
+    async start() {
       const sessionId = options.sessionId ?? "main";
       const Component = options.ui ?? Chat;
 
@@ -58,6 +70,10 @@ export function createTUI(options: TUIOptions) {
                 EventSourcePolyfill) as unknown as typeof EventSource,
             });
 
+      if (options.alternateScreen) {
+        process.stdout.write("\x1b[?1049h\x1b[H\x1b[2J");
+      }
+
       const { waitUntilExit } = render(
         <AgentickProvider client={client}>
           <Component sessionId={sessionId} />
@@ -65,7 +81,13 @@ export function createTUI(options: TUIOptions) {
         { exitOnCtrlC: false },
       );
 
-      return waitUntilExit();
+      try {
+        await waitUntilExit();
+      } finally {
+        if (options.alternateScreen) {
+          process.stdout.write("\x1b[?1049l");
+        }
+      }
     },
   };
 }

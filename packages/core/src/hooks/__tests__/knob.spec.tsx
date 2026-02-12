@@ -995,9 +995,7 @@ describe("momentary knobs integration", () => {
 
     const model = createTestAdapter({ defaultResponse: "Done" });
     // First tick: model sets the knob
-    model.respondWith([
-      { tool: { name: "set_knob", input: { name: "planning", value: true } } },
-    ]);
+    model.respondWith([{ tool: { name: "set_knob", input: { name: "planning", value: true } } }]);
 
     function Agent() {
       const [planning] = useKnob(
@@ -1033,9 +1031,7 @@ describe("momentary knobs integration", () => {
 
     const model = createTestAdapter({ defaultResponse: "Done" });
     // First execution: set the knob to true
-    model.respondWith([
-      { tool: { name: "set_knob", input: { name: "planning", value: true } } },
-    ]);
+    model.respondWith([{ tool: { name: "set_knob", input: { name: "planning", value: true } } }]);
 
     function Agent() {
       const [planning] = useKnob(
@@ -1076,9 +1072,7 @@ describe("momentary knobs integration", () => {
     let capturedResolved: string | undefined;
 
     const model = createTestAdapter({ defaultResponse: "Done" });
-    model.respondWith([
-      { tool: { name: "set_knob", input: { name: "detail", value: true } } },
-    ]);
+    model.respondWith([{ tool: { name: "set_knob", input: { name: "detail", value: true } } }]);
 
     function Agent() {
       const [detail] = useKnob(
@@ -1120,9 +1114,7 @@ describe("momentary knobs integration", () => {
     let capturedValue: boolean | undefined;
 
     const model = createTestAdapter({ defaultResponse: "Done" });
-    model.respondWith([
-      { tool: { name: "set_knob", input: { name: "expand", value: true } } },
-    ]);
+    model.respondWith([{ tool: { name: "set_knob", input: { name: "expand", value: true } } }]);
 
     function Agent() {
       const [expand] = useKnob("expand", false, {
@@ -1303,9 +1295,7 @@ describe("useOnExecutionEnd", () => {
 describe("momentary knobs snapshot", () => {
   it("should have momentary knob at default value in snapshot after execution", async () => {
     const model = createTestAdapter({ defaultResponse: "Done" });
-    model.respondWith([
-      { tool: { name: "set_knob", input: { name: "planning", value: true } } },
-    ]);
+    model.respondWith([{ tool: { name: "set_knob", input: { name: "planning", value: true } } }]);
 
     function Agent() {
       useKnob("planning", knob.momentary(false, { description: "Planning workflow" }));
@@ -1336,9 +1326,7 @@ describe("momentary knobs snapshot", () => {
 
   it("should NOT reset non-momentary knob in snapshot", async () => {
     const model = createTestAdapter({ defaultResponse: "Done" });
-    model.respondWith([
-      { tool: { name: "set_knob", input: { name: "mode", value: "deep" } } },
-    ]);
+    model.respondWith([{ tool: { name: "set_knob", input: { name: "mode", value: "deep" } } }]);
 
     function Agent() {
       useKnob("mode", "broad", { description: "Mode", options: ["broad", "deep"] });

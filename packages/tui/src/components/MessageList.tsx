@@ -2,7 +2,8 @@
  * MessageList — displays completed conversation messages.
  *
  * Uses Ink's <Static> for messages that won't re-render (performance critical).
- * Listens for execution_end events which contain `output.timeline` with all entries.
+ * Listens for execution_end events. Uses newTimelineEntries (delta) when available,
+ * falls back to output.timeline (full replace) for backwards compatibility.
  */
 
 import { useState, useEffect, useCallback } from "react";
@@ -50,6 +51,21 @@ function roleColor(role: string): string {
   }
 }
 
+type TimelineEntry = { kind?: string; message?: Message };
+
+function timelineToMessages(entries: TimelineEntry[]): CompletedMessage[] {
+  return entries
+    .filter((entry) => entry.kind === "message" && entry.message)
+    .map((entry, i) => {
+      const msg = entry.message!;
+      return {
+        id: msg.id ?? `msg-${i}-${Date.now()}`,
+        role: msg.role,
+        text: renderContent(msg.content),
+      };
+    });
+}
+
 interface MessageListProps {
   sessionId?: string;
 }
@@ -64,27 +80,25 @@ export function MessageList({ sessionId }: MessageListProps) {
   useEffect(() => {
     if (!event || event.type !== "execution_end") return;
 
-    // execution_end.output is the COMInput which has a timeline array
-    // Each entry has { kind: "message", message: Message } structure
     const execEnd = event as StreamEvent & {
-      output?: { timeline?: Array<{ kind?: string; message?: Message }> };
+      newTimelineEntries?: TimelineEntry[];
+      output?: { timeline?: TimelineEntry[] };
     };
 
+    // Prefer delta (append) over full timeline (replace)
+    if (execEnd.newTimelineEntries && execEnd.newTimelineEntries.length > 0) {
+      const newMessages = timelineToMessages(execEnd.newTimelineEntries);
+      if (newMessages.length > 0) {
+        setMessages((prev) => [...prev, ...newMessages]);
+      }
+      return;
+    }
+
+    // Fallback: full timeline replace
     const timeline = execEnd.output?.timeline;
-    if (!Array.isArray(timeline)) return;
-
-    const newMessages: CompletedMessage[] = timeline
-      .filter((entry) => entry.kind === "message" && entry.message)
-      .map((entry, i) => {
-        const msg = entry.message!;
-        return {
-          id: msg.id ?? `msg-${i}-${Date.now()}`,
-          role: msg.role,
-          text: renderContent(msg.content),
-        };
-      });
-
-    setMessages(newMessages);
+    if (Array.isArray(timeline)) {
+      setMessages(timelineToMessages(timeline));
+    }
   }, [event]);
 
   const renderMessage = useCallback((msg: CompletedMessage) => {

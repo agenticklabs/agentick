@@ -402,6 +402,8 @@ export type ExecutionEndEvent = {
   /** Whether execution was aborted */
   aborted?: boolean;
   output: unknown;
+  /** Timeline entries added during this execution (delta, not full timeline) */
+  newTimelineEntries?: unknown[];
   /** User-provided metadata (includes threadId, userId, etc.) */
   metadata?: Record<string, unknown>;
 } & StreamEventBase;
