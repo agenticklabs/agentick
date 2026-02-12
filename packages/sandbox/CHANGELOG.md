@@ -1,5 +1,12 @@
 # @agentick/sandbox
 
+## 0.5.0
+
+### Patch Changes
+
+- Updated dependencies [156bc2f]
+  - @agentick/core@0.5.0
+
 ## 0.4.1
 
 ### Patch Changes
