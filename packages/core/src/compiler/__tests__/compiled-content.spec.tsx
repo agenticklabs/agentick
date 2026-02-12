@@ -385,8 +385,8 @@ describe("Compiled Content", () => {
       const compiled = await compiler.compile(h(App), tickState);
 
       expect(compiled.tools.length).toBe(1);
-      expect(compiled.tools[0].name).toBe("get_weather");
-      expect(compiled.tools[0].handler).toBe(handler);
+      expect(compiled.tools[0].metadata.name).toBe("get_weather");
+      expect(compiled.tools[0].run).toBe(handler);
     });
 
     it("should collect Tool with description", async () => {
@@ -399,7 +399,7 @@ describe("Compiled Content", () => {
 
       const compiled = await compiler.compile(h(App), tickState);
 
-      expect(compiled.tools[0].description).toBe("Search the web for information");
+      expect(compiled.tools[0].metadata.description).toBe("Search the web for information");
     });
 
     it("should collect Tool with schema", async () => {
@@ -415,7 +415,7 @@ describe("Compiled Content", () => {
 
       const compiled = await compiler.compile(h(App), tickState);
 
-      expect(compiled.tools[0].schema).toEqual(schema);
+      expect(compiled.tools[0].metadata.input).toEqual(schema);
     });
 
     it("should collect multiple tools", async () => {
@@ -431,7 +431,7 @@ describe("Compiled Content", () => {
       const compiled = await compiler.compile(h(App), tickState);
 
       expect(compiled.tools.length).toBe(3);
-      expect(compiled.tools.map((t) => t.name)).toEqual(["tool_a", "tool_b", "tool_c"]);
+      expect(compiled.tools.map((t) => t.metadata.name)).toEqual(["tool_a", "tool_b", "tool_c"]);
     });
   });
 
@@ -580,8 +580,8 @@ describe("Compiled Content", () => {
       expect(renderSectionContent(systemSection!)).toBe("You are a helpful assistant.");
 
       // Verify tool
-      expect(compiled.tools[0].name).toBe("calculate");
-      expect(compiled.tools[0].handler).toBe(toolHandler);
+      expect(compiled.tools[0].metadata.name).toBe("calculate");
+      expect(compiled.tools[0].run).toBe(toolHandler);
 
       // Verify conversation
       expect(compiled.timelineEntries[0].role).toBe("user");

@@ -32,7 +32,7 @@ The output of compilation:
 interface CompiledStructure {
   system: CompiledTimelineEntry[]; // System-level content
   timelineEntries: CompiledTimelineEntry[]; // Messages
-  tools: CompiledTool[]; // Available tools
+  tools: ExecutableTool[]; // Available tools (full metadata)
   ephemeral: CompiledEphemeral[]; // Temporary content
   sections: Map<string, CompiledSection>; // Named sections
 }

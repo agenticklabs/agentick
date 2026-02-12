@@ -52,7 +52,6 @@ export type {
   CompiledStructure,
   CompiledSection,
   CompiledTimelineEntry,
-  CompiledTool,
   CompiledEphemeral,
   CompileResult,
 } from "./types";

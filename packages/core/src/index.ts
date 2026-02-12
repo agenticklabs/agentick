@@ -104,7 +104,7 @@ export {
 // Tools
 // ============================================================================
 export { createTool } from "./tool/index";
-export type { ToolClass, ToolDefinition, ToolMetadata } from "./tool/index";
+export type { ToolClass, ToolDefinition, ToolMetadata, ToolPropOverrides } from "./tool/index";
 
 // ============================================================================
 // Model

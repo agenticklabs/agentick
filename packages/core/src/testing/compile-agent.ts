@@ -7,7 +7,8 @@
 
 import React from "react";
 import { FiberCompiler } from "../compiler/fiber-compiler";
-import type { CompiledStructure, CompiledTool } from "../compiler/types";
+import type { CompiledStructure } from "../compiler/types";
+import type { ExecutableTool } from "../tool/tool";
 import type { ComponentFunction } from "../app/types";
 import type { ContentBlock } from "@agentick/shared";
 import type { SemanticContentBlock, SemanticNode } from "../renderers/base";
@@ -49,7 +50,7 @@ export interface CompileAgentResult {
   /**
    * Tools from the compiled structure.
    */
-  tools: CompiledTool[];
+  tools: ExecutableTool[];
 
   /**
    * System messages.
@@ -84,7 +85,7 @@ export interface CompileAgentResult {
   /**
    * Get a tool by name.
    */
-  getTool: (name: string) => CompiledTool | undefined;
+  getTool: (name: string) => ExecutableTool | undefined;
 
   /**
    * Check if a tool exists.
@@ -157,7 +158,7 @@ export async function compileAgent<P extends Record<string, unknown> = Record<st
   }
 
   // Extract tools
-  const tools: CompiledTool[] = compiled.tools ?? [];
+  const tools: ExecutableTool[] = compiled.tools ?? [];
 
   // Extract system messages
   const systemMessages: string[] = (compiled.systemEntries ?? [])
@@ -178,9 +179,9 @@ export async function compileAgent<P extends Record<string, unknown> = Record<st
     return content ? content.includes(text) : false;
   };
 
-  const getTool = (name: string) => tools.find((t) => t.name === name);
+  const getTool = (name: string) => tools.find((t) => t.metadata.name === name);
 
-  const hasTool = (name: string) => tools.some((t) => t.name === name);
+  const hasTool = (name: string) => tools.some((t) => t.metadata.name === name);
 
   return {
     compiled,

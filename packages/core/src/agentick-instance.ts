@@ -387,6 +387,7 @@ class AppImpl<P extends Record<string, unknown>> implements App<P> {
           signal,
           devTools,
           recording,
+          tools,
         } = input;
 
         const sessionOptions: SessionOptions = {
@@ -397,6 +398,7 @@ class AppImpl<P extends Record<string, unknown>> implements App<P> {
         const executionOptions: ExecutionOptions = {
           maxTicks,
           signal,
+          executionTools: tools,
         };
 
         const session = this.createSession(undefined, sessionOptions);

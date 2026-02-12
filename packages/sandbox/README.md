@@ -111,6 +111,14 @@ import { Shell, ReadFile, WriteFile, EditFile } from "@agentick/sandbox";
   <ReadFile />
   <MyAgent />
 </Sandbox>
+
+// Override descriptions via JSX props
+<Sandbox provider={provider}>
+  <Shell description="Run commands. Prefer one-liners. Avoid interactive programs." />
+  <EditFile description="Apply surgical edits. Include enough surrounding context to uniquely match." />
+  <ReadFile />
+  <MyAgent />
+</Sandbox>
 ```
 
 ### Tree Scoping

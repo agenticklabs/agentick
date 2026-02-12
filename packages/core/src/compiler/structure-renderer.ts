@@ -66,26 +66,15 @@ export class StructureRenderer {
       this.applySection(section);
     }
 
-    // 2. Apply tools (must await since addTool is async for schema conversion)
-    for (const tool of compiled.tools) {
-      // Convert CompiledTool to ExecutableTool format
-      // ExecutableTool expects { metadata: {...}, run?: Procedure }
-      await this.ctx.addTool({
-        metadata: {
-          name: tool.name,
-          description: tool.description ?? "",
-          input: tool.schema,
-        },
-        run: tool.handler,
-      } as any);
-    }
+    // Tools are no longer registered here — they flow declaratively through
+    // compiled.tools and are merged with other tool sources in session.compileTick()
 
-    // 3. Apply ephemeral entries
+    // 2. Apply ephemeral entries
     for (const ephemeral of compiled.ephemeral) {
       this.applyEphemeral(ephemeral);
     }
 
-    // 4. Apply metadata
+    // 3. Apply metadata
     for (const [key, value] of Object.entries(compiled.metadata)) {
       this.ctx.addMetadata(key, value);
     }

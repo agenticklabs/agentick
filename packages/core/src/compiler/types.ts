@@ -5,6 +5,7 @@
  */
 
 import type { Renderer, SemanticContentBlock } from "../renderers/types";
+import type { ExecutableTool } from "../tool/tool";
 
 /**
  * The compiled structure output from traversing the tree.
@@ -21,7 +22,7 @@ export interface CompiledStructure {
   systemEntries: CompiledTimelineEntry[];
 
   /** Available tools */
-  tools: CompiledTool[];
+  tools: ExecutableTool[];
 
   /** Ephemeral content */
   ephemeral: CompiledEphemeral[];
@@ -61,16 +62,6 @@ export interface CompiledTimelineEntry {
   createdAt?: Date;
   /** Estimated token count (set by collector) */
   tokens?: number;
-}
-
-/**
- * A compiled tool.
- */
-export interface CompiledTool {
-  name: string;
-  description?: string;
-  schema?: unknown;
-  handler: (...args: unknown[]) => unknown;
 }
 
 /**

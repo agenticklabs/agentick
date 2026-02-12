@@ -570,9 +570,14 @@ export class ContextObjectModel extends EventEmitter {
         description: tool.metadata.description,
         input: inputJsonSchema as Record<string, unknown>,
         output: outputJsonSchema as Record<string, unknown> | undefined,
-        type: tool.metadata.type, // Preserve execution type
-        providerOptions: tool.metadata.providerOptions, // Preserve provider-specific options
-        mcpConfig: tool.metadata.mcpConfig, // Preserve MCP configuration
+        type: tool.metadata.type,
+        intent: tool.metadata.intent,
+        requiresResponse: tool.metadata.requiresResponse,
+        timeout: tool.metadata.timeout,
+        defaultResult: tool.metadata.defaultResult,
+        providerOptions: tool.metadata.providerOptions,
+        libraryOptions: tool.metadata.libraryOptions,
+        mcpConfig: tool.metadata.mcpConfig,
       });
       // Emit event synchronously
       this.emit("tool:registered", tool);

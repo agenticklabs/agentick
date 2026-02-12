@@ -1782,6 +1782,41 @@ describe("standalone run() function", () => {
     // Input props should win
     expect(capturedQuery).toBe("from input");
   });
+
+  it("should make tools from RunInput available to the model", async () => {
+    const adapter = createTestAdapter({ defaultResponse: "Done" });
+
+    const Agent = ({ query }: { query: string }) => (
+      <>
+        <Model model={adapter} />
+        <System>Test</System>
+        <Timeline />
+        <User>{query}</User>
+      </>
+    );
+
+    const { createTool } = await import("../../tool");
+    const { z } = await import("zod");
+
+    const ExtraTool = createTool({
+      name: "extra_tool",
+      description: "Tool passed via run() input",
+      input: z.object({ x: z.string() }),
+      handler: async ({ x }) => [{ type: "text" as const, text: x }],
+    });
+
+    const element = jsx(Agent, { query: "Hello!" });
+    const result = await run(element, {
+      tools: [ExtraTool],
+      maxTicks: 1,
+    }).result;
+
+    expect(result).toBeDefined();
+    const captured = adapter.getCapturedInputs();
+    expect(captured.length).toBeGreaterThan(0);
+    const toolNames = captured[0].tools?.map((t: any) => t.name) ?? [];
+    expect(toolNames).toContain("extra_tool");
+  });
 });
 
 // ============================================================================

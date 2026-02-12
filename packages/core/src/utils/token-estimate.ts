@@ -9,12 +9,8 @@
  */
 
 import type { Message, ContentBlock, ToolDefinition } from "@agentick/shared";
-import type {
-  CompiledStructure,
-  CompiledTimelineEntry,
-  CompiledTool,
-  CompiledSection,
-} from "../compiler/types";
+import type { CompiledStructure, CompiledTimelineEntry, CompiledSection } from "../compiler/types";
+import type { ExecutableTool } from "../tool/tool";
 import type { SemanticContentBlock } from "../renderers/types";
 
 /**
@@ -116,23 +112,22 @@ export function estimateSectionTokens(section: CompiledSection): number {
 }
 
 /**
- * Estimate tokens for a compiled tool.
+ * Estimate tokens for a tool (ExecutableTool or ToolDefinition).
  */
-export function estimateToolTokens(tool: CompiledTool | ToolDefinition): number {
+export function estimateToolTokens(tool: ExecutableTool | ToolDefinition): number {
   let total = 0;
-  total += estimateTokens(tool.name);
-  if (tool.description) {
-    total += estimateTokens(tool.description);
-  }
-  if ((tool as CompiledTool).schema) {
-    total += estimateTokens(JSON.stringify((tool as CompiledTool).schema));
-  }
-  if ((tool as ToolDefinition).input) {
-    total += estimateTokens(JSON.stringify((tool as ToolDefinition).input));
-  }
-  if ((tool as ToolDefinition).output) {
-    total += estimateTokens(JSON.stringify((tool as ToolDefinition).output));
-  }
+  // ExecutableTool: metadata.name/description/input
+  // ToolDefinition: name/description/input directly
+  const name = (tool as ExecutableTool).metadata?.name ?? (tool as ToolDefinition).name;
+  const description =
+    (tool as ExecutableTool).metadata?.description ?? (tool as ToolDefinition).description;
+  const input = (tool as ExecutableTool).metadata?.input ?? (tool as ToolDefinition).input;
+  const output = (tool as ToolDefinition).output;
+
+  if (name) total += estimateTokens(name);
+  if (description) total += estimateTokens(description);
+  if (input) total += estimateTokens(JSON.stringify(input));
+  if (output) total += estimateTokens(JSON.stringify(output));
   return total;
 }
 
@@ -196,7 +191,7 @@ export function computeTokenSummary(compiled: CompiledStructure): TokenSummary {
   for (const tool of compiled.tools) {
     const toolTokens = estimateToolTokens(tool);
     tools += toolTokens;
-    byComponent.set(`tool:${tool.name}`, toolTokens);
+    byComponent.set(`tool:${tool.metadata.name}`, toolTokens);
   }
 
   // Ephemeral content

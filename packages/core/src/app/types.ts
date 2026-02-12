@@ -652,6 +652,13 @@ export interface SessionOptions extends LifecycleCallbacks {
    * Explicit session ID (used by App-managed sessions).
    */
   sessionId?: string;
+
+  /**
+   * Additional tools for this session.
+   * Merged with app-level tools (session tools take priority on name conflict).
+   */
+  tools?: ExecutableTool[];
+
   /**
    * Maximum number of ticks for this session.
    * Overrides AppOptions.maxTicks.
@@ -708,6 +715,8 @@ export interface ExecutionOptions {
   maxTicks?: number;
   /** Per-execution abort signal */
   signal?: AbortSignal;
+  /** Per-execution tools (scoped to this execution only, cleared when it ends) */
+  executionTools?: ExecutableTool[];
 }
 
 // ============================================================================
@@ -780,6 +789,11 @@ export interface SendInput<P = Record<string, unknown>> extends SharedSendInput<
   maxTicks?: number;
   /** Per-execution abort signal (not serializable — local only) */
   signal?: AbortSignal;
+  /**
+   * Additional tools for this execution.
+   * Merged with session and app tools (execution tools take priority on name conflict).
+   */
+  tools?: ExecutableTool[];
 }
 
 // ============================================================================

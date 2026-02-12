@@ -10,9 +10,9 @@ import type {
   CompiledStructure,
   CompiledSection,
   CompiledTimelineEntry,
-  CompiledTool,
   CompiledEphemeral,
 } from "./types";
+import type { ExecutableTool, ToolMetadata } from "../tool/tool";
 import { createEmptyCompiledStructure } from "./types";
 import type { SemanticContentBlock, Renderer } from "../renderers/types";
 import type { TokenEstimator } from "../com/types";
@@ -234,16 +234,25 @@ function collectTimelineEntry(node: AgentickNode, result: CompiledStructure): vo
 
 /**
  * Collect a Tool node.
+ *
+ * Preserves full ToolMetadata when available (from createTool-based components).
+ * Falls back to individual props for raw <tool> elements.
  */
 function collectTool(node: AgentickNode, result: CompiledStructure): void {
-  const tool: CompiledTool = {
+  // Prefer full metadata (from createTool-based components), fallback to individual props
+  const metadata: ToolMetadata = (node.props.metadata as ToolMetadata) ?? {
     name: node.props.name as string,
-    description: node.props.description as string | undefined,
-    schema: node.props.schema,
-    handler: node.props.handler as (...args: unknown[]) => unknown,
+    description: (node.props.description as string) ?? "",
+    input: node.props.schema,
   };
 
-  result.tools.push(tool);
+  // Safe cast: only ToolComponent creates <tool> elements, and it passes
+  // effectiveRun (a Procedure or undefined) as handler. Raw <tool> elements
+  // are not part of the public API.
+  result.tools.push({
+    metadata,
+    run: node.props.handler,
+  } as ExecutableTool);
 }
 
 /**

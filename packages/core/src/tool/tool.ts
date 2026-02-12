@@ -298,6 +298,30 @@ export interface CreateToolOptions<
  * - await MyTool.run(input)              -- calls static run procedure
  * - <MyTool />                           -- renders component that registers tool
  */
+/**
+ * Fields that can be overridden via JSX props on tool components.
+ * Notably excludes `input` (schema) — overriding schema without the handler is a type-safety foot-gun.
+ * To change the schema, create a new tool.
+ */
+const OVERRIDABLE_FIELDS = [
+  "name",
+  "description",
+  "requiresConfirmation",
+  "confirmationMessage",
+  "intent",
+  "type",
+  "providerOptions",
+  "libraryOptions",
+] as const;
+
+type OverridableField = (typeof OVERRIDABLE_FIELDS)[number];
+
+/**
+ * Props that can be overridden on tool components via JSX.
+ * Derived from OVERRIDABLE_FIELDS — single source of truth.
+ */
+export type ToolPropOverrides = Partial<Pick<ToolMetadata, OverridableField>>;
+
 export interface ToolClass<TInput = any> {
   /** Tool metadata (static property) */
   metadata: ToolMetadata<TInput>;
@@ -306,7 +330,7 @@ export interface ToolClass<TInput = any> {
   run?: Procedure<ToolHandler<TInput>>;
 
   /** Functional component that registers the tool on mount */
-  (props?: ComponentBaseProps): React.ReactElement | null;
+  (props?: ComponentBaseProps & ToolPropOverrides): React.ReactElement | null;
 }
 
 /**
@@ -446,8 +470,17 @@ export function createTool<TInput = any, TOutput extends ContentBlock[] = Conten
   // Using a functional component instead of a class ensures compatibility
   // with React's reconciler (class components must extend React.Component)
   const ToolComponent = function ToolComponent(
-    _props: ComponentBaseProps,
+    props: ComponentBaseProps & ToolPropOverrides,
   ): React.ReactElement | null {
+    // Merge JSX prop overrides with default metadata
+    // Props take priority over createTool defaults
+    const overrides: Record<string, unknown> = {};
+    for (const field of OVERRIDABLE_FIELDS) {
+      if (props[field as keyof typeof props] !== undefined) {
+        overrides[field] = props[field as keyof typeof props];
+      }
+    }
+    const effectiveMetadata = { ...metadata, ...overrides } as ToolMetadata<TInput, TOutput>;
     const ctx = useCom();
     // Note: useTickState returns hooks/types.ts TickState, but lifecycle callbacks
     // expect component/component.ts TickState. They're compatible at runtime,
@@ -546,12 +579,11 @@ export function createTool<TInput = any, TOutput extends ContentBlock[] = Conten
     // Render a <tool> element for the collector to find
     // This is the declarative approach - tools are collected from the tree
     const toolElement = React.createElement("tool", {
-      name: metadata.name,
-      description: metadata.description,
-      schema: metadata.input,
+      name: effectiveMetadata.name,
+      description: effectiveMetadata.description,
+      schema: effectiveMetadata.input,
       handler: effectiveRun,
-      // Include full metadata for advanced use cases
-      metadata,
+      metadata: effectiveMetadata,
     });
 
     // If custom render provided, wrap both tool element and render output

@@ -410,7 +410,7 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
           throw new Error(this.terminalError);
         }
 
-        const { messages = [], props, metadata, maxTicks, signal } = input;
+        const { messages = [], props, metadata, maxTicks, signal, tools: executionTools } = input;
 
         // Apply metadata to messages
         const allMessages = messages.map((m) => (metadata ? { ...m, metadata } : m));
@@ -453,6 +453,7 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
         const executionOptions: ExecutionOptions = {};
         if (maxTicks !== undefined) executionOptions.maxTicks = maxTicks;
         if (signal) executionOptions.signal = signal;
+        if (executionTools?.length) executionOptions.executionTools = executionTools;
 
         // If already running, return the existing handle (concurrent send idempotency)
         if (this._status === "running" && this._currentHandle) {
@@ -1709,7 +1710,7 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
         });
 
         // Phase 1: Compile
-        const compiled = await this.compileTick(rootElement);
+        const compiled = await this.compileTick(rootElement, options?.executionTools ?? []);
 
         // Emit compiled context to DevTools
         // Extract system text from COMTimelineEntry[]
@@ -2119,7 +2120,7 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
         }
       }
 
-      // Clear execution ID after emitting execution_end
+      // Clear per-execution state
       this._currentExecutionId = null;
 
       for (const resolve of this._eventResolvers) {
@@ -2189,12 +2190,7 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
     this.structureRenderer = new StructureRenderer(this.ctx);
     this.structureRenderer.setDefaultRenderer(new MarkdownRenderer());
 
-    // Register tools from appOptions
-    if (this.appOptions.tools) {
-      for (const tool of this.appOptions.tools) {
-        this.ctx.addTool(tool);
-      }
-    }
+    // Tools are registered in compileTick() after merging all sources
 
     // Notify compiler that compilation is starting
     await this.compiler.notifyStart();
@@ -2278,7 +2274,10 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
   /**
    * Compile a single tick.
    */
-  private async compileTick(rootElement: JSX.Element): Promise<{
+  private async compileTick(
+    rootElement: JSX.Element,
+    executionTools: ExecutableTool[] = [],
+  ): Promise<{
     formatted: COMInput;
     model?: EngineModel;
     modelInput?: any;
@@ -2301,12 +2300,7 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
     // - formatInput merges previousTimeline + new entries
     // - No imperative accumulation during render
 
-    // Re-register tools
-    if (this.appOptions.tools) {
-      for (const tool of this.appOptions.tools) {
-        this.ctx.addTool(tool);
-      }
-    }
+    // Tools are NOT registered here — they're merged after compilation (see below)
 
     // Get queued messages for TickState - these are NEW messages for this tick
     const queuedMessages = this.ctx.getQueuedMessages();
@@ -2369,8 +2363,23 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
       this.scheduler?.exitTick();
     }
 
-    // Apply compiled structure (sections, tools, metadata - but NOT timeline entries)
+    // Apply compiled structure (sections, ephemeral, metadata — NOT tools or timeline)
     await this.structureRenderer.apply(compiled);
+
+    // Merge tools from all sources (lowest → highest priority):
+    // 1. App-level tools (appOptions.tools)
+    // 2. Session-level tools (sessionOptions.tools)
+    // 3. Per-execution tools (SendInput.tools)
+    // 4. JSX-reconciled tools (compiled.tools) — highest priority
+    const mergedTools = this.mergeTools(
+      this.appOptions.tools ?? [],
+      this.sessionOptions.tools ?? [],
+      executionTools,
+      compiled.tools,
+    );
+
+    // Register merged tools on COM (awaits schema conversion → ToolDefinition for model)
+    await Promise.all(mergedTools.map((tool) => this.ctx!.addTool(tool)));
 
     // Format input - compiled structure IS the complete projection
     // JSX components render history as <Message>, so compiled.timelineEntries is complete
@@ -2386,9 +2395,6 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
       modelInput = await model.fromEngineState(formatted);
     }
 
-    // Get tools
-    const tools = this.ctx.getTools?.() ?? [];
-
     // Check for stop
     const stopReason = (tickState as any).stopReason;
 
@@ -2396,11 +2402,34 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
       formatted,
       model,
       modelInput,
-      tools: tools as (ToolClass | ExecutableTool)[],
+      tools: mergedTools,
       shouldStop: !!stopReason,
       stopReason,
       rawCompiled: compiled,
     };
+  }
+
+  /**
+   * Merge tools from multiple sources, deduplicating by name.
+   * Later sources take priority (last-in wins).
+   */
+  private mergeTools(...sources: ExecutableTool[][]): ExecutableTool[] {
+    const sourceLabels = ["app", "session", "execution", "JSX"];
+    const byName = new Map<string, ExecutableTool>();
+    for (let i = 0; i < sources.length; i++) {
+      for (const tool of sources[i]) {
+        const name = tool.metadata.name;
+        if (byName.has(name)) {
+          this.log.debug(
+            { tool: name, source: sourceLabels[i] },
+            "Tool collision: %s source overrides previous",
+            sourceLabels[i],
+          );
+        }
+        byName.set(name, tool);
+      }
+    }
+    return Array.from(byName.values());
   }
 
   /**

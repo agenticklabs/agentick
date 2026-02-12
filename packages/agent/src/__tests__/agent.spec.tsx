@@ -42,7 +42,7 @@ describe("<Agent> compilation", () => {
 
     const result = await compileAgent(MyAgent);
     expect(result.hasTool("greet")).toBe(true);
-    expect(result.getTool("greet")?.description).toBe("Greet someone");
+    expect(result.getTool("greet")?.metadata.description).toBe("Greet someone");
   });
 
   it("should render knobs section and set_knob tool when knobs prop provided", async () => {

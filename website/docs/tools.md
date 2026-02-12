@@ -162,3 +162,114 @@ Handlers can return:
 - **String**: plain text result
 - **Object**: serialized as JSON
 - **Array of content blocks**: `[{ type: "text", text: "..." }]` for rich responses
+
+## Overriding Props in JSX
+
+Pre-built tools ship with default metadata, but you can customize any metadata field via JSX props. This lets you tailor tool descriptions, names, or behavior without creating new tools.
+
+```tsx
+import { Shell, EditFile } from "@agentick/sandbox";
+
+function Agent() {
+  return (
+    <>
+      <Shell description="Run commands. Prefer one-liners." />
+      <EditFile description="Apply surgical edits. Include enough surrounding context to uniquely match." />
+      <Shell name="bash" requiresConfirmation={true} />
+    </>
+  );
+}
+```
+
+Overridable fields: `name`, `description`, `requiresConfirmation`, `confirmationMessage`, `intent`, `type`, `providerOptions`, `libraryOptions`.
+
+Props take precedence over the tool's built-in defaults. Unset props (or `undefined`) leave the original value unchanged.
+
+## Tool Sources
+
+Tools can come from four sources, listed from lowest to highest priority:
+
+| Source         | Where                                | Lifetime      |
+| -------------- | ------------------------------------ | ------------- |
+| App-level      | `createApp(Agent, { tools: [...] })` | All sessions  |
+| Session-level  | `app.session({ tools: [...] })`      | One session   |
+| Per-execution  | `session.send({ tools: [...] })`     | One execution |
+| JSX-reconciled | `<MyTool />` in the component tree   | While mounted |
+
+When multiple sources define a tool with the same name, the highest-priority source wins.
+
+```tsx
+const SearchTool = createTool({ name: "search", description: "Web search", ... });
+const FileTool = createTool({ name: "search", description: "File search", ... });
+
+// App-level: available to all sessions
+const app = createApp(Agent, { tools: [SearchTool] });
+
+// Session-level: available for this session's lifetime
+const session = await app.session({ tools: [FileTool] });
+
+// Per-execution: available only during this send()
+await session.send({
+  messages: [...],
+  tools: [DynamicTool],
+});
+
+// JSX: highest priority, re-evaluated each tick
+function Agent() {
+  return <SearchTool description="Custom description" />;
+}
+```
+
+### Priority Resolution
+
+On each tick, tools merge in order: app → session → execution → JSX. Last-in wins by name.
+
+If your JSX tree renders `<SearchTool />` and `createApp` also passes a `SearchTool`, the JSX version's metadata (including any prop overrides) takes precedence.
+
+### Per-Execution Tools
+
+Tools passed via `session.send({ tools: [...] })` are scoped to that execution only. They are cleared when the execution ends. This is useful for dynamic tool injection — e.g., providing different tools based on user input.
+
+```tsx
+// First execution: search + calculator
+await session.send({
+  messages: [{ role: "user", content: [{ type: "text", text: "Calculate something" }] }],
+  tools: [CalculatorTool],
+});
+
+// Second execution: search only (calculator is gone)
+await session.send({
+  messages: [{ role: "user", content: [{ type: "text", text: "Search for something" }] }],
+});
+```
+
+### Spawned Sessions
+
+`session.spawn()` creates a fresh child session. Spawned sessions do **not** inherit tools from the parent — they start with only the tools defined in their own JSX tree and any tools passed via `createApp`.
+
+```tsx
+// Parent has SearchTool in its JSX tree
+function ParentAgent() {
+  return (
+    <>
+      <SearchTool />
+      <System>You are a research assistant.</System>
+      <Timeline />
+    </>
+  );
+}
+
+// Child defines its own tools — does NOT inherit SearchTool
+function ChildAgent() {
+  return (
+    <>
+      <WriteFile />
+      <System>You are a writer.</System>
+      <Timeline />
+    </>
+  );
+}
+
+// Spawn a child — it only has WriteFile, not SearchTool
+await session.spawn(ChildAgent, { messages: [...] });
+```

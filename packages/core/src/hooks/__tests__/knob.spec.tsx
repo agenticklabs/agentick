@@ -115,7 +115,7 @@ describe("useKnob + Knobs (compilation)", () => {
 
     const result = await compileAgent(Agent);
     expect(result.hasTool("set_knob")).toBe(true);
-    expect(result.getTool("set_knob")?.description).toContain("Set a knob value");
+    expect(result.getTool("set_knob")?.metadata.description).toContain("Set a knob value");
   });
 
   it("should handle multiple knobs in one section and one tool", async () => {
@@ -130,7 +130,7 @@ describe("useKnob + Knobs (compilation)", () => {
     expect(section).toContain("mode");
     expect(section).toContain("verbose");
     expect(section).toContain("true");
-    expect(result.tools.filter((t) => t.name === "set_knob")).toHaveLength(1);
+    expect(result.tools.filter((t) => t.metadata.name === "set_knob")).toHaveLength(1);
   });
 
   it("should render nothing when no knobs are registered", async () => {

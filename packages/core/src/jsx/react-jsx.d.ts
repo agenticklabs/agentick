@@ -50,12 +50,19 @@ declare global {
         children?: React.ReactNode;
       };
 
+      /**
+       * @internal Intrinsic element for tool registration. Created by ToolComponent, not user-facing.
+       * Use `<MyTool />` (from createTool) instead of raw `<tool>` elements.
+       */
       tool: {
         definition?: ToolClass | ExecutableTool | string;
         name?: string;
         description?: string;
         input?: z.ZodSchema;
+        schema?: unknown;
         executionType?: ToolExecutionType;
+        handler?: (input: any) => Promise<import("@agentick/shared").ContentBlock[]>;
+        metadata?: import("../tool/tool").ToolMetadata;
       };
 
       // Content block primitives

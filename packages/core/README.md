@@ -616,6 +616,39 @@ function App() {
 }
 ```
 
+### Prop Overrides
+
+Customize pre-built tool metadata via JSX props without creating new tools:
+
+```tsx
+<WeatherTool description="Check weather. Always include units." />
+<ShellTool name="bash" requiresConfirmation={true} />
+```
+
+### Tool Sources
+
+Tools merge from four sources (lowest → highest priority):
+
+```tsx
+// 1. App-level — available to all sessions
+const app = createApp(Agent, { tools: [SearchTool] });
+
+// 2. Session-level — available for this session
+const session = await app.session({ tools: [FileTool] });
+
+// 3. Per-execution — available only during this send()
+await session.send({ messages: [...], tools: [DynamicTool] });
+
+// 4. JSX-reconciled — highest priority, re-evaluated each tick
+function Agent() {
+  return <SearchTool description="Custom desc" />;
+}
+```
+
+On each tick, tools merge in order: app → session → execution → JSX. Last-in wins by name.
+
+Spawned sessions (`session.spawn()`) start fresh — they do **not** inherit parent tools. Each child defines its own toolset via JSX and app-level tools.
+
 ## App & Session
 
 ### Creating an App
