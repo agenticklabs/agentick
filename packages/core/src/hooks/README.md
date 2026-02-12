@@ -246,18 +246,7 @@ function AgentWithSetup() {
 }
 ```
 
-> **Timing:** `useOnTickStart` fires from tick 2+ (the tick after the component mounts). This follows the React lifecycle model — the component must render before its effects can register callbacks, and `notifyTickStart` fires before compilation.
->
-> For first-tick setup, use `useOnMount`. For logic on every tick including the first, combine both:
->
-> ```tsx
-> useOnMount((ctx) => {
->   /* runs on mount tick */
-> });
-> useOnTickStart((tickState, ctx) => {
->   /* runs on tick 2+ */
-> });
-> ```
+> **Timing:** `useOnTickStart` fires on every tick the component is alive, including the tick in which it mounts. Newly-mounted components receive a catch-up call after their first render.
 
 ### useOnTickEnd
 
@@ -765,7 +754,11 @@ function Agent() {
   return (
     <>
       <Knobs />
-      {showPlanning && <Section id="planning" audience="model">...</Section>}
+      {showPlanning && (
+        <Section id="planning" audience="model">
+          ...
+        </Section>
+      )}
       <Timeline />
     </>
   );

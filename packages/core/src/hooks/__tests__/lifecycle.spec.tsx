@@ -389,19 +389,45 @@ describe("useOnTickEnd", () => {
 // ============================================================================
 
 describe("useOnTickStart", () => {
-  it("should register callback via useOnTickStart", async () => {
+  it("should fire on tick 1 via catch-up (mount tick)", async () => {
     const model = createMockModel();
-    let tickStartCallCount = 0;
+    const tickStartTicks: number[] = [];
 
     const Agent = () => {
-      // useOnTickStart uses useEffect, which runs after first render
-      // On subsequent ticks (tick 2+), the callback should be registered
-      useOnTickStart((_tickState, _com) => {
-        tickStartCallCount++;
+      useOnTickStart((tickState, _com) => {
+        tickStartTicks.push(tickState.tick);
       });
 
-      // Continue for 2 ticks to ensure callback gets registered and called
-      useContinuation((result, _com) => result.tick < 2);
+      return (
+        <>
+          <Model model={model} />
+          <System>Test</System>
+          <Timeline />
+        </>
+      );
+    };
+
+    const app = createApp(Agent, { maxTicks: 1 });
+    const session = await app.session();
+    await session.send({ messages: [{ role: "user", content: [{ type: "text", text: "Test" }] }] })
+      .result;
+    session.close();
+
+    // Should fire on tick 1 via catch-up after first render
+    expect(tickStartTicks).toContain(1);
+  });
+
+  it("should fire on every tick including mount tick", async () => {
+    const model = createMockModel();
+    const tickStartTicks: number[] = [];
+
+    const Agent = () => {
+      useOnTickStart((tickState, _com) => {
+        tickStartTicks.push(tickState.tick);
+      });
+
+      // Continue for 3 ticks
+      useContinuation((result, _com) => result.tick < 3);
 
       return (
         <>
@@ -418,8 +444,8 @@ describe("useOnTickStart", () => {
       .result;
     session.close();
 
-    // By tick 2, the effect should have run and callback should be called
-    expect(tickStartCallCount).toBeGreaterThanOrEqual(1);
+    // Should fire on ticks 1, 2, 3
+    expect(tickStartTicks).toEqual([1, 2, 3]);
   });
 });
 

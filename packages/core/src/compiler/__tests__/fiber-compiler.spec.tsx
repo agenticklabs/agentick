@@ -195,7 +195,7 @@ describe("FiberCompiler", () => {
       expect(afterCompileCallback).toHaveBeenCalledWith(compiled, expect.anything());
     });
 
-    it("useTickStart callback should run on next tick", async () => {
+    it("useTickStart callback should fire on mount tick via catch-up", async () => {
       const tickStartCallback = vi.fn();
 
       const TickStartComponent = () => {
@@ -205,17 +205,145 @@ describe("FiberCompiler", () => {
 
       const tickState1 = createMockTickState(1);
 
-      // Compile tick 1 - registers the callback
+      // notifyTickStart fires before compile, snapshotting existing callbacks
+      await compiler.notifyTickStart(tickState1);
+
+      // Compile tick 1 - registers the callback via useEffect,
+      // then catch-up fires it because it wasn't in the snapshot
       await compiler.compile(React.createElement(TickStartComponent), tickState1);
 
-      // Tick 1 start already happened, so callback shouldn't have run yet
-      expect(tickStartCallback).not.toHaveBeenCalled();
+      expect(tickStartCallback).toHaveBeenCalledTimes(1);
+      expect(tickStartCallback).toHaveBeenCalledWith(tickState1, expect.anything());
+    });
 
-      // Start tick 2 - now the callback should run
+    it("pre-existing tickStart callbacks should NOT double-fire", async () => {
+      const tickStartCallback = vi.fn();
+
+      const TickStartComponent = () => {
+        useOnTickStart(tickStartCallback);
+        return React.createElement("Section", { id: "tickstart" });
+      };
+
+      const tickState1 = createMockTickState(1);
+
+      // Tick 1: mount and register
+      await compiler.notifyTickStart(tickState1);
+      await compiler.compile(React.createElement(TickStartComponent), tickState1);
+
+      // Callback fires once via catch-up (newly mounted)
+      expect(tickStartCallback).toHaveBeenCalledTimes(1);
+
+      // Tick 2: callback was already present when notifyTickStart ran
       const tickState2 = createMockTickState(2);
       await compiler.notifyTickStart(tickState2);
+      await compiler.compile(React.createElement(TickStartComponent), tickState2);
+
+      // Should fire exactly once more (in notifyTickStart), NOT again in catch-up
+      expect(tickStartCallback).toHaveBeenCalledTimes(2);
+    });
+
+    it("conditionally-mounted component should get catch-up on mount tick", async () => {
+      const tickStartCallback = vi.fn();
+      let showComponent = false;
+
+      const ConditionalComponent = () => {
+        useOnTickStart(tickStartCallback);
+        return React.createElement("Section", { id: "conditional" });
+      };
+
+      const ParentComponent = () => {
+        if (showComponent) {
+          return React.createElement(ConditionalComponent);
+        }
+        return React.createElement("Section", { id: "empty" });
+      };
+
+      const tickState1 = createMockTickState(1);
+
+      // Tick 1: component not mounted
+      await compiler.notifyTickStart(tickState1);
+      await compiler.compile(React.createElement(ParentComponent), tickState1);
+      expect(tickStartCallback).not.toHaveBeenCalled();
+
+      // Tick 2: mount the component — should get catch-up
+      showComponent = true;
+      const tickState2 = createMockTickState(2);
+      await compiler.notifyTickStart(tickState2);
+      await compiler.compile(React.createElement(ParentComponent), tickState2);
 
       expect(tickStartCallback).toHaveBeenCalledTimes(1);
+      expect(tickStartCallback).toHaveBeenCalledWith(tickState2, expect.anything());
+    });
+
+    it("catch-up should fire only once per tick (not on recompile iterations)", async () => {
+      const tickStartCallback = vi.fn();
+      let compileCount = 0;
+
+      const RecompileComponent = () => {
+        const ctx = useCom();
+        useOnTickStart(tickStartCallback);
+
+        useAfterCompile(() => {
+          compileCount++;
+          if (compileCount < 3) {
+            ctx.requestRecompile("force recompile");
+          }
+        });
+
+        return React.createElement("Section", { id: "recompile" });
+      };
+
+      const tickState1 = createMockTickState(1);
+      await compiler.notifyTickStart(tickState1);
+
+      // compileUntilStable will iterate multiple times
+      await compiler.compileUntilStable(React.createElement(RecompileComponent), tickState1);
+
+      // Catch-up fires on first compile() iteration. Snapshot is updated (not cleared),
+      // so the same callback is in the snapshot for subsequent iterations → no double-fire.
+      expect(tickStartCallback).toHaveBeenCalledTimes(1);
+      expect(compileCount).toBe(3);
+    });
+
+    it("component mounting during second compile should get catch-up", async () => {
+      const earlyCallback = vi.fn();
+      const lateCallback = vi.fn();
+
+      const EarlyComponent = () => {
+        useOnTickStart(earlyCallback);
+        return React.createElement("Section", { id: "early" });
+      };
+
+      const LateComponent = () => {
+        useOnTickStart(lateCallback);
+        return React.createElement("Section", { id: "late" });
+      };
+
+      const tickState1 = createMockTickState(1);
+      await compiler.notifyTickStart(tickState1);
+
+      // First compile: only EarlyComponent — earlyCallback gets catch-up
+      await compiler.compile(React.createElement(EarlyComponent), tickState1);
+      expect(earlyCallback).toHaveBeenCalledTimes(1);
+      expect(lateCallback).not.toHaveBeenCalled();
+
+      // Second compile within same tick: LateComponent mounts
+      // Its tickStart callback should get catch-up too
+      await compiler.compile(
+        React.createElement(
+          React.Fragment,
+          null,
+          React.createElement(EarlyComponent),
+          React.createElement(LateComponent),
+        ),
+        tickState1,
+      );
+
+      // earlyCallback was already fired — should NOT fire again
+      expect(earlyCallback).toHaveBeenCalledTimes(1);
+      // lateCallback is new — should get catch-up
+      expect(lateCallback).toHaveBeenCalledTimes(1);
+      expect(lateCallback).toHaveBeenCalledWith(tickState1, expect.anything());
     });
 
     it("unmounted component should not have its callbacks called", async () => {

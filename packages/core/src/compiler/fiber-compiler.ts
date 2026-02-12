@@ -26,6 +26,7 @@ import {
   storeHasPendingData,
   storeResolvePendingData,
   storeRunTickStartCallbacks,
+  storeRunTickStartCatchUp,
   storeRunTickEndCallbacks,
   storeRunAfterCompileCallbacks,
   storeRunExecutionEndCallbacks,
@@ -49,7 +50,7 @@ import type { Renderer } from "../renderers/types";
 import { markdownRenderer } from "../renderers";
 import type { COM } from "../com/object-model";
 import type { TickState } from "../component/component";
-import type { TickResult } from "../hooks/types";
+import type { TickResult, TickStartCallback } from "../hooks/types";
 
 export interface FiberCompilerConfig {
   dev?: boolean;
@@ -150,6 +151,10 @@ export class FiberCompiler {
   // Phase tracking
   private currentPhase: Phase = "idle";
   private isRendering = false;
+
+  // Tick-start catch-up: tracks which callbacks were fired in notifyTickStart
+  // so compile() can fire catch-up for newly-registered callbacks
+  private tickStartFiredSet: Set<TickStartCallback> | null = null;
 
   // Recompile tracking
   private recompileRequested = false;
@@ -322,6 +327,17 @@ export class FiberCompiler {
 
     try {
       await this.reconcile(element, { tickState: state });
+
+      // Catch-up: fire tick-start for callbacks registered during this render
+      // (newly mounted components) that missed the initial notifyTickStart
+      if (this.tickStartFiredSet && this.ctx) {
+        await storeRunTickStartCatchUp(this.runtimeStore, this.tickStartFiredSet, state, this.ctx);
+        // Update snapshot to include everything fired so far — prevents double-fire
+        // on subsequent compileUntilStable iterations while still catching components
+        // that mount during recompile
+        this.tickStartFiredSet = new Set(this.runtimeStore.tickStartCallbacks);
+      }
+
       return this.collect();
     } finally {
       this.currentPhase = "idle";
@@ -381,6 +397,9 @@ export class FiberCompiler {
     this.tickState = state;
     this.currentPhase = "tickStart";
     try {
+      // Snapshot callbacks that will be fired now — used by compile()
+      // to detect newly-registered callbacks that need catch-up
+      this.tickStartFiredSet = new Set(this.runtimeStore.tickStartCallbacks);
       if (this.ctx) {
         await storeRunTickStartCallbacks(this.runtimeStore, state, this.ctx);
       }
@@ -390,6 +409,7 @@ export class FiberCompiler {
   }
 
   async notifyTickEnd(state: TickState, result: TickResult): Promise<void> {
+    this.tickStartFiredSet = null; // Defensive cleanup
     this.tickState = state;
     this.currentPhase = "tickEnd";
     try {

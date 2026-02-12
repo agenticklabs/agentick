@@ -68,6 +68,10 @@ export function useOnUnmount(callback: UnmountCallback): void {
 /**
  * Register a callback to run at the start of each tick.
  *
+ * **Timing:** Fires on every tick the component is alive, including
+ * the tick in which it mounts. Newly-mounted components receive a
+ * catch-up call after their first render.
+ *
  * @example
  * ```tsx
  * useOnTickStart((tickState) => {
@@ -77,19 +81,6 @@ export function useOnUnmount(callback: UnmountCallback): void {
  * useOnTickStart((tickState, ctx) => {
  *   ctx.setState("lastTickStart", tickState.tick);
  * });
- * ```
- *
- * **Timing:** Fires from tick 2+ (the tick after the component mounts).
- * This follows the React lifecycle model — the component must render
- * before its effects can register callbacks, and `notifyTickStart`
- * fires before compilation.
- *
- * For first-tick setup, use `useOnMount`. For logic that must run
- * on every tick including the first, combine both:
- *
- * ```tsx
- * useOnMount((ctx) => { setupForFirstTick(ctx); });
- * useOnTickStart((tickState, ctx) => { setupForSubsequentTicks(tickState, ctx); });
  * ```
  */
 export function useOnTickStart(callback: TickStartCallback): void {

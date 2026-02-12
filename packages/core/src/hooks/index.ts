@@ -21,6 +21,7 @@ export {
   storeHasPendingData,
   storeResolvePendingData,
   storeRunTickStartCallbacks,
+  storeRunTickStartCatchUp,
   storeRunTickEndCallbacks,
   storeRunAfterCompileCallbacks,
   storeRunExecutionEndCallbacks,

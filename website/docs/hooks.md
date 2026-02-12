@@ -50,7 +50,7 @@ useOnMount((ctx) => {
 
 ### useOnTickStart
 
-Runs at the start of each tick (tick 2+). Does NOT fire on the mount tick — use `useOnMount` for first-tick setup.
+Runs at the start of each tick, including the mount tick. Newly-mounted components receive a catch-up call after their first render.
 
 ```tsx
 useOnTickStart((tickState, ctx) => {

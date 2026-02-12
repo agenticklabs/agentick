@@ -218,6 +218,23 @@ export async function storeRunTickStartCallbacks(
 }
 
 /**
+ * Run tick-start catch-up for callbacks that were NOT present when
+ * notifyTickStart fired (i.e. newly mounted components).
+ */
+export async function storeRunTickStartCatchUp(
+  store: RuntimeStore,
+  alreadyFired: Set<TickStartCallback>,
+  tickState: TickState,
+  ctx: COM,
+): Promise<void> {
+  for (const callback of store.tickStartCallbacks) {
+    if (!alreadyFired.has(callback)) {
+      await callback(tickState, ctx);
+    }
+  }
+}
+
+/**
  * Run tick end callbacks with TickResult and COM.
  *
  * Callbacks receive TickResult (data) and COM (context).
@@ -262,10 +279,7 @@ export async function storeRunAfterCompileCallbacks(
 /**
  * Run execution end callbacks with COM.
  */
-export async function storeRunExecutionEndCallbacks(
-  store: RuntimeStore,
-  ctx: COM,
-): Promise<void> {
+export async function storeRunExecutionEndCallbacks(store: RuntimeStore, ctx: COM): Promise<void> {
   for (const callback of store.executionEndCallbacks) {
     await callback(ctx);
   }
