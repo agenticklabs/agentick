@@ -1,5 +1,11 @@
 # @agentick/sandbox
 
+## 0.4.1
+
+### Patch Changes
+
+- fe10ade: Enhanced EditFile tool with 5 editing modes (replace, delete, insert before/after/start/end, range), smart line deletion, 3-level whitespace-tolerant matching, and diagnostic error messages with file context.
+
 ## 0.4.0
 
 ### Minor Changes

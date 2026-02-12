@@ -1,5 +1,12 @@
 # @agentick/sandbox-local
 
+## 0.4.1
+
+### Patch Changes
+
+- Updated dependencies [fe10ade]
+  - @agentick/sandbox@0.4.1
+
 ## 0.4.0
 
 ### Minor Changes
