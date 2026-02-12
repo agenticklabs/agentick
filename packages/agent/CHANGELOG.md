@@ -1,5 +1,12 @@
 # @agentick/agent
 
+## 0.5.0
+
+### Patch Changes
+
+- Updated dependencies [156bc2f]
+  - @agentick/core@0.5.0
+
 ## 0.4.0
 
 ### Minor Changes
