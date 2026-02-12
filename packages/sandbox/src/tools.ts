@@ -67,22 +67,78 @@ export const WriteFile = createTool({
  */
 export const EditFile = createTool({
   name: "edit_file",
-  description:
-    "Apply surgical edits to a file. Each edit specifies an old string to find and a new string to replace it with.",
+  description: `Apply surgical text edits to a file. Supports replace, delete, insert, and range operations.
+
+MODES:
+- Replace: { old: "target text", new: "replacement" } — find and replace
+- Delete: { old: "text to remove", delete: true } — find and delete (trailing newline auto-consumed for complete lines)
+- Insert: { old: "anchor", insert: "after", content: "new lines" } — insert before/after anchor
+- Append: { insert: "end", content: "new content" } — append to end of file
+- Prepend: { insert: "start", content: "new content" } — prepend to start of file
+- Rename: { old: "name", new: "newName", all: true } — replace every occurrence
+- Range: { from: "start marker", to: "end marker", content: "replacement" } — replace block between markers (inclusive)
+
+MATCHING:
+- old/from/to must uniquely match one location (unless all: true)
+- Include 1-3 surrounding lines of context for unique identification
+- Whitespace-tolerant: trailing whitespace and indentation differences handled automatically
+- Multi-line matching supported — include complete lines for best results
+- Copy exact text from the file — do not retype from memory
+
+BEST PRACTICES:
+- Prefer multiple small, focused edits over one large edit
+- Use insert mode for adding imports, methods, config entries, or test cases
+- Use range mode for replacing function bodies or large blocks — only match boundaries, not entire content
+- Use all: true only for variable/function renames
+- For text files only (code, config, markdown, JSON, YAML, TOML, HTML, CSV, etc.)
+- NOT for binary files (images, audio, PDFs) — use write_file for full replacement or shell for transformations`,
   input: z.object({
     path: z.string().describe("Path to the file to edit."),
     edits: z
       .array(
         z.object({
-          old: z.string().describe("Exact string to find in the file."),
-          new: z.string().describe("Replacement string. Empty string deletes the match."),
+          old: z
+            .string()
+            .optional()
+            .describe(
+              "Text to find. Required for replace, delete, and insert before/after. In insert mode, this is the anchor (not replaced).",
+            ),
+          new: z
+            .string()
+            .optional()
+            .describe(
+              "Replacement text. Required for replace. Use delete: true instead of new: '' for clarity.",
+            ),
           all: z
             .boolean()
             .optional()
-            .describe("Replace all occurrences. Default: false (requires unique match)."),
+            .describe("Apply to all occurrences. Default: false (requires unique match)."),
+          delete: z.boolean().optional().describe("Delete the matched text. Sugar for new: ''."),
+          insert: z
+            .enum(["before", "after", "start", "end"])
+            .optional()
+            .describe(
+              "Insert mode. 'before'/'after' insert content relative to anchor (old). 'start'/'end' prepend/append to file.",
+            ),
+          content: z
+            .string()
+            .optional()
+            .describe("Content to insert (insert mode) or replacement content (range mode)."),
+          from: z
+            .string()
+            .optional()
+            .describe("Start boundary for range replacement (inclusive). Used with 'to'."),
+          to: z
+            .string()
+            .optional()
+            .describe(
+              "End boundary for range replacement (inclusive). Everything from 'from' through 'to' is replaced with 'content'.",
+            ),
         }),
       )
-      .describe("Array of edits to apply."),
+      .describe(
+        "Array of edits to apply. All edits resolved against original content, applied atomically.",
+      ),
   }),
   use: () => ({ sandbox: useSandbox() }),
   handler: async ({ path, edits }, deps) => {

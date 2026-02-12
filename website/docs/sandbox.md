@@ -139,28 +139,86 @@ const GrepTool = createTool({
 
 ## Edit Utilities
 
-The `applyEdits` function is a pure string transform with 3-level matching that recovers from whitespace and indentation mismatches — designed for LLM-generated edits.
+The `EditFile` tool and underlying `applyEdits` function support 5 editing modes with 3-level whitespace-tolerant matching — designed for LLM-generated edits.
+
+### Edit Modes
+
+| Mode                    | Fields                     | Description                                                               |
+| ----------------------- | -------------------------- | ------------------------------------------------------------------------- |
+| **Replace**             | `old`, `new`               | Find `old`, replace with `new`                                            |
+| **Delete**              | `old`, `delete: true`      | Find `old`, remove it (auto-consumes trailing newline for complete lines) |
+| **Insert before/after** | `old`, `insert`, `content` | Insert `content` relative to anchor `old`                                 |
+| **Insert start/end**    | `insert`, `content`        | Prepend/append `content` to file                                          |
+| **Range**               | `from`, `to`, `content`    | Replace everything from `from` through `to` (inclusive)                   |
+
+Mode is detected by field presence (precedence: range > insert > delete > replace).
+
+```typescript
+// Replace
+{ old: "return 1;", new: "return 2;" }
+
+// Rename all occurrences
+{ old: "oldName", new: "newName", all: true }
+
+// Delete
+{ old: "// TODO: remove\n", delete: true }
+
+// Insert after anchor
+{ old: "import { foo } from 'foo';", insert: "after", content: "import { bar } from 'bar';" }
+
+// Append to end of file
+{ insert: "end", content: "export default main;" }
+
+// Range replacement
+{ from: "function old() {", to: "} // old", content: "function new() {\n  return 42;\n}" }
+```
+
+### Matching Strategy
+
+Each anchor (`old`, `from`, `to`) is matched using 3 strategies in order:
+
+1. **Exact byte match** — the string appears verbatim
+2. **Line-normalized** — trailing whitespace stripped from both sides
+3. **Indent-adjusted** — leading whitespace baseline stripped, replacement re-indented
+
+Models don't need to perfectly reproduce whitespace — the tool recovers from trailing spaces and indentation mismatches.
+
+### The `Edit` Interface
+
+```typescript
+interface Edit {
+  old?: string; // Text to find (replace, delete, insert before/after)
+  new?: string; // Replacement text (replace mode)
+  all?: boolean; // Apply to all occurrences (default: false)
+  delete?: boolean; // Delete matched text (sugar for new: "")
+  insert?: "before" | "after" | "start" | "end"; // Insert mode
+  content?: string; // Content to insert or range replacement
+  from?: string; // Range start boundary (inclusive)
+  to?: string; // Range end boundary (inclusive)
+}
+```
+
+### `applyEdits(source, edits)` — Pure Transform
+
+No I/O. All edits resolve against the original source, validate for overlaps, and apply atomically.
 
 ```typescript
 import { applyEdits } from "@agentick/sandbox";
 
 const result = applyEdits(source, [
   { old: "return 1;", new: "return 2;" },
-  { old: "oldName", new: "newName", all: true },
+  { old: "debugLog()", delete: true },
+  { insert: "end", content: "\nexport default main;" },
 ]);
 
-// result.content  — the modified source
-// result.applied  — number of edits applied
-// result.changes  — array of { line, removed, added }
+result.content; // Transformed source
+result.applied; // Number of edits applied
+result.changes; // [{ line, removed, added }, ...]
 ```
 
-**Matching strategy** (per edit, in order):
+### `editFile(path, edits)` — Atomic File I/O
 
-1. **Exact byte match** — the `old` string appears verbatim
-2. **Line-normalized** — trailing whitespace stripped from both sides
-3. **Indent-adjusted** — leading whitespace baseline stripped
-
-The `editFile` wrapper adds atomic file I/O (temp + rename):
+Reads, applies edits, writes atomically (temp + rename).
 
 ```typescript
 import { editFile } from "@agentick/sandbox";

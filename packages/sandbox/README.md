@@ -138,24 +138,52 @@ Multiple sandboxes in the same tree work naturally. Each tool accesses its neare
 
 ## Edit Utilities
 
-Surgical code editing with 3-level matching that recovers from trailing whitespace, indentation mismatch, and CRLF/LF differences.
+Surgical code editing with 3-level matching that recovers from trailing whitespace, indentation mismatch, and CRLF/LF differences. Supports replace, delete, insert, and range modes.
 
 ### `applyEdits(source, edits)`
 
-Pure transform, no I/O. Matching strategy per edit (in order):
+Pure transform, no I/O.
+
+**Modes** (detected by field presence, precedence: range > insert > delete > replace):
+
+| Mode                | Fields                     | Description                                                               |
+| ------------------- | -------------------------- | ------------------------------------------------------------------------- |
+| Replace             | `old`, `new`               | Find `old`, replace with `new`                                            |
+| Delete              | `old`, `delete: true`      | Find `old`, remove it (trailing newline auto-consumed for complete lines) |
+| Insert before/after | `old`, `insert`, `content` | Insert `content` relative to anchor `old`                                 |
+| Insert start/end    | `insert`, `content`        | Prepend/append `content` to file                                          |
+| Range               | `from`, `to`, `content`    | Replace everything from `from` through `to` (inclusive)                   |
+
+**Matching strategy** per anchor (in order):
 
 1. Exact byte match
 2. Line-normalized (trailing whitespace stripped)
-3. Indent-adjusted (leading whitespace baseline stripped)
+3. Indent-adjusted (leading whitespace baseline stripped, replacement re-indented)
 
 ```typescript
 import { applyEdits } from "@agentick/sandbox";
 
-const result = applyEdits(source, [
-  { old: "return 1;", new: "return 2;" },
-  { old: "oldName", new: "newName", all: true },
+// Replace
+applyEdits(source, [{ old: "return 1;", new: "return 2;" }]);
+
+// Rename (all occurrences)
+applyEdits(source, [{ old: "oldName", new: "newName", all: true }]);
+
+// Delete
+applyEdits(source, [{ old: "// TODO: remove this\n", delete: true }]);
+
+// Insert after anchor
+applyEdits(source, [
+  { old: "import { foo } from 'foo';", insert: "after", content: "import { bar } from 'bar';" },
 ]);
-// result.content, result.applied, result.changes
+
+// Append to file
+applyEdits(source, [{ insert: "end", content: "export default main;" }]);
+
+// Range replacement (replace function body)
+applyEdits(source, [
+  { from: "function old() {", to: "} // old", content: "function new() {\n  return 42;\n}" },
+]);
 ```
 
 ### `editFile(path, edits)`
@@ -165,7 +193,26 @@ File wrapper. Reads, applies edits, writes atomically (temp + rename).
 ```typescript
 import { editFile } from "@agentick/sandbox";
 
-await editFile("/path/to/file.ts", [{ old: "const x = 1;", new: "const x = 42;" }]);
+await editFile("/path/to/file.ts", [
+  { old: "const x = 1;", new: "const x = 42;" },
+  { old: "debugLog()", delete: true },
+  { insert: "end", content: "\nexport default main;" },
+]);
+```
+
+### `Edit` interface
+
+```typescript
+interface Edit {
+  old?: string; // Text to find (replace, delete, insert before/after)
+  new?: string; // Replacement text (replace mode)
+  all?: boolean; // Apply to all occurrences (default: false)
+  delete?: boolean; // Delete matched text (sugar for new: "")
+  insert?: "before" | "after" | "start" | "end"; // Insert mode
+  content?: string; // Content to insert or range replacement
+  from?: string; // Range start boundary (inclusive)
+  to?: string; // Range end boundary (inclusive)
+}
 ```
 
 ## Types
@@ -173,14 +220,14 @@ await editFile("/path/to/file.ts", [{ old: "const x = 1;", new: "const x = 42;" 
 ```typescript
 import type {
   // Core types
-  SandboxHandle, // Runtime handle: exec, readFile, writeFile, editFile, destroy
+  Sandbox, // Runtime handle: exec, readFile, writeFile, editFile, destroy
   SandboxProvider, // Factory: name, create, restore?, destroy?
   SandboxCreateOptions, // Passed to provider.create()
   SandboxConfig, // Component-level config
   SandboxSnapshot, // Serializable state for persistence
 
   // Execution
-  ExecOptions, // Per-command: cwd, env, timeout
+  ExecOptions, // Per-command: cwd, env, timeout, onOutput
   ExecResult, // Output: stdout, stderr, exitCode
   OutputChunk, // Streaming: stream, data
 
@@ -190,9 +237,10 @@ import type {
   ResourceLimits, // Constraints: memory, cpu, timeout, disk, maxProcesses
 
   // Edit
-  Edit, // { old, new, all? }
+  Edit, // { old?, new?, all?, delete?, insert?, content?, from?, to? }
   EditResult, // { content, applied, changes }
   EditChange, // { line, removed, added }
+  EditError, // Error with editIndex + diagnostic context
 } from "@agentick/sandbox";
 ```
 
