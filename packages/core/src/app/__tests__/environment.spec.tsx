@@ -3,7 +3,7 @@
  *
  * Comprehensive tests for the ExecutionRunner system including:
  * - Default behavior (no runner configured)
- * - prepareModelInput: transforming compiled input before model call
+ * - transformCompiled: transforming compiled input before model call
  * - executeToolCall: intercepting/wrapping tool execution
  * - Lifecycle hooks: onSessionInit, onPersist, onRestore, onDestroy
  * - Edge cases: async hooks, error handling, multi-tick interactions
@@ -59,19 +59,19 @@ describe("ExecutionRunner", () => {
   });
 
   // ============================================================================
-  // prepareModelInput
+  // transformCompiled
   // ============================================================================
 
-  describe("prepareModelInput", () => {
-    it("should transform model input before model call", async () => {
+  describe("transformCompiled", () => {
+    it("should transform compiled input before model call", async () => {
       const model = createMockModel("Transformed response");
       const capturedInputs: any[] = [];
 
       const runner: ExecutionRunner = {
         name: "test-transform",
-        prepareModelInput(compiled) {
+        transformCompiled(compiled) {
           capturedInputs.push(compiled);
-          // Add a custom section to the system messages
+          // Add a custom system entry
           const modifiedSystem = [
             ...(compiled.system ?? []),
             {
@@ -95,8 +95,9 @@ describe("ExecutionRunner", () => {
 
       expect(result.response).toBe("Transformed response");
       expect(capturedInputs).toHaveLength(1);
-      // Verify the transform was called with a COMInput-like object
+      // Verify the transform was called with a COMInput object
       expect(capturedInputs[0]).toHaveProperty("system");
+      expect(capturedInputs[0]).toHaveProperty("timeline");
     });
 
     it("should receive tools list as second argument", async () => {
@@ -121,7 +122,7 @@ describe("ExecutionRunner", () => {
 
       const runner: ExecutionRunner = {
         name: "test-tools",
-        prepareModelInput(compiled, tools) {
+        transformCompiled(compiled, tools) {
           receivedTools = tools;
           return compiled;
         },
@@ -138,12 +139,12 @@ describe("ExecutionRunner", () => {
       expect(receivedTools.some((t) => t.metadata?.name === "test_tool")).toBe(true);
     });
 
-    it("should support async prepareModelInput", async () => {
+    it("should support async transformCompiled", async () => {
       const model = createMockModel("Async transformed");
 
       const runner: ExecutionRunner = {
         name: "test-async-transform",
-        async prepareModelInput(compiled) {
+        async transformCompiled(compiled) {
           // Simulate async work
           await new Promise((r) => setTimeout(r, 5));
           return compiled;
@@ -182,7 +183,7 @@ describe("ExecutionRunner", () => {
 
       const runner: ExecutionRunner = {
         name: "test-multi-tick",
-        prepareModelInput(compiled) {
+        transformCompiled(compiled) {
           callCount++;
           return compiled;
         },
@@ -653,8 +654,8 @@ describe("ExecutionRunner", () => {
         onSessionInit() {
           events.push("init");
         },
-        prepareModelInput(compiled) {
-          events.push("prepareModelInput");
+        transformCompiled(compiled) {
+          events.push("transformCompiled");
           return compiled;
         },
         async executeToolCall(_call, _tool, next) {
@@ -712,13 +713,13 @@ describe("ExecutionRunner", () => {
 
       // Verify lifecycle order
       expect(events).toContain("init");
-      expect(events).toContain("prepareModelInput");
+      expect(events).toContain("transformCompiled");
       expect(events).toContain("executeToolCall");
       expect(events).toContain("persist");
       expect(events).toContain("destroy");
 
-      // init should come before prepareModelInput
-      expect(events.indexOf("init")).toBeLessThan(events.indexOf("prepareModelInput"));
+      // init should come before transformCompiled
+      expect(events.indexOf("init")).toBeLessThan(events.indexOf("transformCompiled"));
     });
 
     it("should work with app.run() ephemeral execution", async () => {
@@ -730,7 +731,7 @@ describe("ExecutionRunner", () => {
         onSessionInit() {
           initCalled = true;
         },
-        prepareModelInput(compiled) {
+        transformCompiled(compiled) {
           return compiled;
         },
       };
@@ -790,7 +791,7 @@ describe("ExecutionRunner", () => {
         onSessionInit(session) {
           hookCalls.push({ hook: "init", sessionId: session.id });
         },
-        prepareModelInput(compiled) {
+        transformCompiled(compiled) {
           return compiled;
         },
       };
@@ -904,8 +905,8 @@ describe("ExecutionRunner", () => {
         onSessionInit() {
           parentRunnerCalls.push("init");
         },
-        prepareModelInput(compiled) {
-          parentRunnerCalls.push("prepare");
+        transformCompiled(compiled) {
+          parentRunnerCalls.push("transform");
           return compiled;
         },
       };
@@ -915,8 +916,8 @@ describe("ExecutionRunner", () => {
         onSessionInit() {
           childRunnerCalls.push("init");
         },
-        prepareModelInput(compiled) {
-          childRunnerCalls.push("prepare");
+        transformCompiled(compiled) {
+          childRunnerCalls.push("transform");
           return compiled;
         },
       };
@@ -935,7 +936,7 @@ describe("ExecutionRunner", () => {
 
       // Child should use its own runner, not the parent's
       expect(childRunnerCalls).toContain("init");
-      expect(childRunnerCalls).toContain("prepare");
+      expect(childRunnerCalls).toContain("transform");
       expect(parentRunnerCalls).toHaveLength(0); // Parent never sent, so parent runner unused
     });
 
@@ -1070,9 +1071,9 @@ describe("ExecutionRunner", () => {
       expect(tracker.initCalls).toHaveLength(1);
       expect(tracker.initCalls[0]).toBe(session.id);
 
-      // Verify model input transformation was called (once per tick)
-      expect(tracker.prepareModelInputCalls.length).toBeGreaterThanOrEqual(1);
-      expect(tracker.prepareModelInputCalls[0].tools).toContain("tracked_tool");
+      // Verify compiled transformation was called (once per tick)
+      expect(tracker.transformCompiledCalls.length).toBeGreaterThanOrEqual(1);
+      expect(tracker.transformCompiledCalls[0].tools).toContain("tracked_tool");
 
       // Verify tool call tracking
       expect(tracker.toolCalls).toHaveLength(1);
@@ -1124,9 +1125,9 @@ describe("ExecutionRunner", () => {
       expect(tracker.toolCalls[0]).toEqual({ name: "sandbox_exec", intercepted: true });
     });
 
-    it("should transform model input via transformInput option", async () => {
+    it("should transform compiled input via transformInput option", async () => {
       const model = createMockModel("Response");
-      let modelReceivedTools: number | undefined;
+      let compiledReceivedTools: number | undefined;
 
       const TestTool = createTool({
         name: "removed_tool",
@@ -1146,8 +1147,8 @@ describe("ExecutionRunner", () => {
 
       const { runner } = createTestRunner({
         transformInput: (compiled) => {
-          modelReceivedTools = compiled.tools?.length ?? 0;
-          // Remove all tools from model input
+          compiledReceivedTools = compiled.tools?.length ?? 0;
+          // Remove all tools from compiled input
           return { ...compiled, tools: [] };
         },
       });
@@ -1160,7 +1161,7 @@ describe("ExecutionRunner", () => {
       }).result;
 
       // transformInput was called and saw tools
-      expect(modelReceivedTools).toBeGreaterThan(0);
+      expect(compiledReceivedTools).toBeGreaterThan(0);
     });
 
     it("should support function interceptors end-to-end", async () => {

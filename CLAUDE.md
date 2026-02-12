@@ -208,7 +208,7 @@ An `ExecutionRunner` controls how compiled context is consumed and how tool call
 ```typescript
 const runner: ExecutionRunner = {
   name: "repl",
-  prepareModelInput(compiled, tools) { ... },  // Transform before model call
+  transformCompiled(compiled, tools) { ... },   // Transform before model call
   executeToolCall(call, tool, next) { ... },    // Wrap tool execution
   onSessionInit(session) { ... },               // Once per session lifecycle
   onPersist(session, snapshot) { ... },         // Augment snapshot
@@ -219,7 +219,7 @@ const runner: ExecutionRunner = {
 const app = createApp(MyAgent, { model, runner });
 ```
 
-All methods are optional. The `prepareModelInput` hook runs per-tick, `executeToolCall` runs per tool call, and lifecycle hooks run at session boundaries. Lifecycle hooks receive `SessionRef` (narrow: `id`, `status`, `currentTick`, `snapshot()`) — not the full `Session`.
+All methods are optional. The `transformCompiled` hook runs per-tick, `executeToolCall` runs per tool call, and lifecycle hooks run at session boundaries. Lifecycle hooks receive `SessionRef` (narrow: `id`, `status`, `currentTick`, `snapshot()`) — not the full `Session`.
 
 Runners are inherited by spawned children. Use `SpawnOptions` (3rd arg to `session.spawn()`) to override:
 

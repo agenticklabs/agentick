@@ -1781,14 +1781,21 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
           throw new AbortError("Execution aborted", signal.reason);
         }
 
-        let modelInput = compiled.modelInput ?? compiled.formatted;
+        // Start with compiled COMInput — the rich semantic structure
+        let formatted = compiled.formatted;
 
-        // Apply execution runner transformation
-        if (this.appOptions.runner?.prepareModelInput) {
-          modelInput = await this.appOptions.runner.prepareModelInput(
-            modelInput,
+        // Apply execution runner transformation (operates on COMInput, before model flattening)
+        if (this.appOptions.runner?.transformCompiled) {
+          formatted = await this.appOptions.runner.transformCompiled(
+            formatted,
             (compiled.tools ?? []) as ExecutableTool[],
           );
+        }
+
+        // Convert COMInput → ModelInput via adapter's fromEngineState
+        let modelInput: any = formatted;
+        if (model?.fromEngineState) {
+          modelInput = await model.fromEngineState(formatted);
         }
 
         const modelStartTime = Date.now();
@@ -2401,10 +2408,6 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
 
     // Get model from COM (set by <Model> components), fall back to appOptions
     const model = (this.ctx.getModel?.() as EngineModel | undefined) ?? this.appOptions.model;
-    let modelInput: any;
-    if (model?.fromEngineState) {
-      modelInput = await model.fromEngineState(formatted);
-    }
 
     // Check for stop
     const stopReason = (tickState as any).stopReason;
@@ -2412,7 +2415,6 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
     return {
       formatted,
       model,
-      modelInput,
       tools: mergedTools,
       shouldStop: !!stopReason,
       stopReason,

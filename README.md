@@ -575,7 +575,7 @@ const repl: ExecutionRunner = {
   name: "repl",
 
   // The model sees command descriptions instead of tool schemas
-  prepareModelInput(compiled, tools) {
+  transformCompiled(compiled, tools) {
     return { ...compiled, tools: [executeTool] };
   },
 

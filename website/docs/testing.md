@@ -120,7 +120,7 @@ const session = await app.session();
 await session.send({ messages: [...] }).result;
 
 expect(tracker.initCalls).toHaveLength(1);
-expect(tracker.prepareModelInputCalls).toHaveLength(1);
+expect(tracker.transformCompiledCalls).toHaveLength(1);
 ```
 
 ### Intercept Tools
@@ -152,7 +152,7 @@ const { runner } = createTestRunner({
 | Field                    | Tracks                              |
 | ------------------------ | ----------------------------------- |
 | `initCalls`              | Session IDs from `onSessionInit`    |
-| `prepareModelInputCalls` | Tool names from `prepareModelInput` |
+| `transformCompiledCalls` | Tool names from `transformCompiled` |
 | `toolCalls`              | Tool names + intercepted flag       |
 | `persistCalls`           | Session IDs from `onPersist`        |
 | `restoreCalls`           | Session IDs from `onRestore`        |

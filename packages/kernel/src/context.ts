@@ -235,7 +235,7 @@ export interface KernelContext {
 
   /**
    * Session ID (set by session's runWithContext).
-   * Available during all session execution — tool calls, prepareModelInput, etc.
+   * Available during all session execution — tool calls, transformCompiled, etc.
    */
   sessionId?: string;
 

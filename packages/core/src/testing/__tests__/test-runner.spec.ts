@@ -21,7 +21,7 @@ describe("createTestRunner", () => {
   it("should have all lifecycle hooks defined", () => {
     const { runner } = createTestRunner();
     expect(runner.onSessionInit).toBeTypeOf("function");
-    expect(runner.prepareModelInput).toBeTypeOf("function");
+    expect(runner.transformCompiled).toBeTypeOf("function");
     expect(runner.executeToolCall).toBeTypeOf("function");
     expect(runner.onPersist).toBeTypeOf("function");
     expect(runner.onRestore).toBeTypeOf("function");
@@ -31,7 +31,7 @@ describe("createTestRunner", () => {
   it("should start with empty tracker", () => {
     const { tracker } = createTestRunner();
     expect(tracker.initCalls).toHaveLength(0);
-    expect(tracker.prepareModelInputCalls).toHaveLength(0);
+    expect(tracker.transformCompiledCalls).toHaveLength(0);
     expect(tracker.toolCalls).toHaveLength(0);
     expect(tracker.persistCalls).toHaveLength(0);
     expect(tracker.restoreCalls).toHaveLength(0);
@@ -41,7 +41,7 @@ describe("createTestRunner", () => {
   it("should reset tracker", () => {
     const { tracker } = createTestRunner();
     tracker.initCalls.push("session-1");
-    tracker.prepareModelInputCalls.push({ tools: ["tool-1"] });
+    tracker.transformCompiledCalls.push({ tools: ["tool-1"] });
     tracker.toolCalls.push({ name: "tool-1", intercepted: false });
     tracker.persistCalls.push("session-1");
     tracker.restoreCalls.push("session-1");
@@ -50,7 +50,7 @@ describe("createTestRunner", () => {
     tracker.reset();
 
     expect(tracker.initCalls).toHaveLength(0);
-    expect(tracker.prepareModelInputCalls).toHaveLength(0);
+    expect(tracker.transformCompiledCalls).toHaveLength(0);
     expect(tracker.toolCalls).toHaveLength(0);
     expect(tracker.persistCalls).toHaveLength(0);
     expect(tracker.restoreCalls).toHaveLength(0);
@@ -105,7 +105,7 @@ describe("createTestRunner", () => {
     });
 
     const input = { system: [], timeline: [], tools: [{ name: "tool" }] } as any;
-    const result = await runner.prepareModelInput!(input, []);
+    const result = await runner.transformCompiled!(input, []);
 
     expect(result.tools).toEqual([]);
   });
@@ -114,7 +114,7 @@ describe("createTestRunner", () => {
     const { runner } = createTestRunner();
 
     const input = { system: [], timeline: [], tools: [{ name: "tool" }] } as any;
-    const result = await runner.prepareModelInput!(input, []);
+    const result = await runner.transformCompiled!(input, []);
 
     expect(result).toBe(input);
   });

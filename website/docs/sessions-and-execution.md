@@ -169,8 +169,8 @@ An `ExecutionRunner` controls how compiled context reaches the model and how too
 const runner: ExecutionRunner = {
   name: "repl",
 
-  // Transform compiled input before model call (per tick)
-  prepareModelInput(compiled, tools) {
+  // Transform compiled structure before model call (per tick)
+  transformCompiled(compiled, tools) {
     return { ...compiled, tools: [] };
   },
 
@@ -199,7 +199,7 @@ All methods are optional. Without a runner, standard model→tool_use behavior a
 | Hook                | When                               | Frequency |
 | ------------------- | ---------------------------------- | --------- |
 | `onSessionInit`     | First send/render (infra creation) | Once      |
-| `prepareModelInput` | Before each model call             | Per tick  |
+| `transformCompiled` | Before each model call             | Per tick  |
 | `executeToolCall`   | For each tool call                 | Per tool  |
 | `onPersist`         | After execution (auto-persist)     | Per send  |
 | `onRestore`         | Session restored from store        | Once      |

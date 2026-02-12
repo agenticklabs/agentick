@@ -15,7 +15,7 @@
  * // ... run agent ...
  *
  * expect(tracker.initCalls).toHaveLength(1);
- * expect(tracker.prepareModelInputCalls).toHaveLength(1);
+ * expect(tracker.transformCompiledCalls).toHaveLength(1);
  * expect(tracker.toolCalls).toHaveLength(1);
  * ```
  */
@@ -58,7 +58,7 @@ export interface TestRunnerOptions {
   interceptTools?: Record<string, string | ((call: ToolCall) => ToolResult | Promise<ToolResult>)>;
 
   /**
-   * Transform function for prepareModelInput.
+   * Transform function for transformCompiled.
    * If not provided, input passes through unchanged.
    */
   transformInput?: (compiled: COMInput, tools: ExecutableTool[]) => COMInput | Promise<COMInput>;
@@ -72,8 +72,8 @@ export interface TestRunnerOptions {
 export interface RunnerTracker {
   /** All onSessionInit calls (session IDs) */
   initCalls: string[];
-  /** All prepareModelInput calls */
-  prepareModelInputCalls: Array<{ tools: string[] }>;
+  /** All transformCompiled calls */
+  transformCompiledCalls: Array<{ tools: string[] }>;
   /** All executeToolCall calls */
   toolCalls: Array<{ name: string; intercepted: boolean }>;
   /** All onPersist calls (session IDs) */
@@ -109,7 +109,7 @@ export interface TestRunnerResult {
  * await session.send({ messages: [...] }).result;
  *
  * expect(tracker.initCalls).toHaveLength(1);
- * expect(tracker.prepareModelInputCalls).toHaveLength(1);
+ * expect(tracker.transformCompiledCalls).toHaveLength(1);
  * ```
  *
  * @example Intercepting tools
@@ -120,12 +120,12 @@ export interface TestRunnerResult {
  * // When model calls "execute" tool, it gets "sandboxed!" instead of real execution
  * ```
  *
- * @example Transforming model input
+ * @example Transforming compiled input
  * ```typescript
  * const { runner } = createTestRunner({
  *   transformInput: (compiled, tools) => ({
  *     ...compiled,
- *     tools: [], // Remove all tools from model input
+ *     tools: [], // Remove all tools from compiled input
  *   }),
  * });
  * ```
@@ -135,14 +135,14 @@ export function createTestRunner(options: TestRunnerOptions = {}): TestRunnerRes
 
   const tracker: RunnerTracker = {
     initCalls: [],
-    prepareModelInputCalls: [],
+    transformCompiledCalls: [],
     toolCalls: [],
     persistCalls: [],
     restoreCalls: [],
     destroyCalls: [],
     reset() {
       this.initCalls = [];
-      this.prepareModelInputCalls = [];
+      this.transformCompiledCalls = [];
       this.toolCalls = [];
       this.persistCalls = [];
       this.restoreCalls = [];
@@ -157,8 +157,8 @@ export function createTestRunner(options: TestRunnerOptions = {}): TestRunnerRes
       tracker.initCalls.push(session.id);
     },
 
-    async prepareModelInput(compiled: COMInput, tools: ExecutableTool[]) {
-      tracker.prepareModelInputCalls.push({
+    async transformCompiled(compiled: COMInput, tools: ExecutableTool[]) {
+      tracker.transformCompiledCalls.push({
         tools: tools.map((t) => t.metadata?.name ?? "unknown"),
       });
       if (transformInput) {

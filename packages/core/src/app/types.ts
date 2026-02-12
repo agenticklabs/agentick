@@ -109,7 +109,7 @@ export interface LifecycleCallbacks {
  * ```typescript
  * const repl: ExecutionRunner = {
  *   name: "repl",
- *   prepareModelInput(compiled, tools) {
+ *   transformCompiled(compiled, tools) {
  *     // Replace tool schemas with command descriptions
  *     return { ...compiled, tools: [] };
  *   },
@@ -145,18 +145,22 @@ export interface ExecutionRunner {
   name: string;
 
   /**
-   * Transform compiled model input before it reaches the model.
+   * Transform the compiled structure before it reaches the model.
+   *
+   * Called per tick, after compilation but before the adapter's fromEngineState
+   * flattens COMInput into model-specific format. This lets runners operate on
+   * the rich semantic structure (system, timeline, sections, tools, ephemeral).
    *
    * Use cases:
    * - REPL: Replace tool schemas with command descriptions in a section,
    *   expose a single `execute` tool
    * - Filtering: Remove tools the model shouldn't see in this runner
    *
-   * @param compiled - The COMInput from compilation (timeline, sections, tools, etc.)
+   * @param compiled - The COMInput from compilation (timeline, system, sections, tools, etc.)
    * @param tools - The resolved executable tools
    * @returns Transformed COMInput (or original if no transformation needed)
    */
-  prepareModelInput?(compiled: COMInput, tools: ExecutableTool[]): COMInput | Promise<COMInput>;
+  transformCompiled?(compiled: COMInput, tools: ExecutableTool[]): COMInput | Promise<COMInput>;
 
   /**
    * Wrap individual tool call execution.

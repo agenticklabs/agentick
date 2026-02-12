@@ -1016,9 +1016,9 @@ import { createApp, type ExecutionRunner } from "@agentick/core";
 const replRunner: ExecutionRunner = {
   name: "repl",
 
-  // Transform what the model sees — replace tool schemas with prose descriptions,
+  // Transform the compiled structure — replace tool schemas with prose descriptions,
   // expose a single "execute" tool, restructure sections, anything.
-  prepareModelInput(compiled, tools) {
+  transformCompiled(compiled, tools) {
     const commandList = tools
       .map((t) => `- ${t.metadata?.name}: ${t.metadata?.description}`)
       .join("\n");
@@ -1064,7 +1064,7 @@ All methods are optional. Omitted methods use default behavior.
 
 | Hook                | Purpose                                             | Timing        |
 | ------------------- | --------------------------------------------------- | ------------- |
-| `prepareModelInput` | Transform compiled context before the model sees it | Per tick      |
+| `transformCompiled` | Transform compiled context before the model sees it | Per tick      |
 | `executeToolCall`   | Intercept, transform, or replace tool execution     | Per tool call |
 | `onSessionInit`     | Set up per-session resources (sandbox, workspace)   | Once          |
 | `onPersist`         | Add runner state to session snapshot                | Per save      |
