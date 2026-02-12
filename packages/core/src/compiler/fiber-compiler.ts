@@ -28,6 +28,7 @@ import {
   storeRunTickStartCallbacks,
   storeRunTickEndCallbacks,
   storeRunAfterCompileCallbacks,
+  storeRunExecutionEndCallbacks,
   storeClearLifecycleCallbacks,
   storeClearDataCache,
   storeGetSerializableDataCache,
@@ -116,6 +117,7 @@ type Phase =
   | "render"
   | "compile"
   | "tickEnd"
+  | "executionEnd"
   | "mount"
   | "complete"
   | "unmount";
@@ -399,6 +401,17 @@ export class FiberCompiler {
     }
   }
 
+  async notifyExecutionEnd(): Promise<void> {
+    this.currentPhase = "executionEnd";
+    try {
+      if (this.ctx) {
+        await storeRunExecutionEndCallbacks(this.runtimeStore, this.ctx);
+      }
+    } finally {
+      this.currentPhase = "idle";
+    }
+  }
+
   async notifyAfterCompile(
     compiled: CompiledStructure,
     _state: TickState,
@@ -470,6 +483,7 @@ export class FiberCompiler {
     return (
       this.currentPhase === "tickStart" ||
       this.currentPhase === "tickEnd" ||
+      this.currentPhase === "executionEnd" ||
       this.currentPhase === "complete" ||
       this.currentPhase === "unmount" ||
       this.isRendering

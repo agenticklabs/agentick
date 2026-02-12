@@ -1692,6 +1692,8 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
       timestamp: timestamp(),
     });
 
+    const executionStartTimelineIndex = this._timeline.length;
+
     try {
       // Tick loop
       let shouldContinue = true;
@@ -2075,6 +2077,14 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
       // (normal path already clears at tick_end, this is a safety net)
       this.ctx?.clearQueuedMessages();
 
+      // Notify execution end (runs useOnExecutionEnd callbacks)
+      // Fires before snapshot — state changes here are persisted clean
+      try {
+        await this.compiler?.notifyExecutionEnd();
+      } catch {
+        // Ignore execution end errors (same pattern as notifyComplete)
+      }
+
       this.emitEvent({
         type: "execution_end",
         executionId,
@@ -2082,6 +2092,7 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
         aborted: this._isAborted,
         usage,
         output: output ?? null,
+        newTimelineEntries: this._timeline.slice(executionStartTimelineIndex),
         timestamp: timestamp(),
       });
 
@@ -2388,8 +2399,8 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
     // Track estimated context tokens for contextInfo
     this._estimatedContextTokens = formatted.totalTokens;
 
-    // Get model from COM if not in options
-    const model = this.ctx.getModel?.() as EngineModel | undefined;
+    // Get model from COM (set by <Model> components), fall back to appOptions
+    const model = (this.ctx.getModel?.() as EngineModel | undefined) ?? this.appOptions.model;
     let modelInput: any;
     if (model?.fromEngineState) {
       modelInput = await model.fromEngineState(formatted);

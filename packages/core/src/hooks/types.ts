@@ -210,4 +210,13 @@ export type AfterCompileCallback = (
   ctx: COMImpl,
 ) => void | Promise<void>;
 
+/**
+ * Callback for useOnExecutionEnd hook.
+ *
+ * Called once per send() call, after the tick loop exits but before
+ * the session snapshot is persisted. State changes here are captured
+ * in the snapshot.
+ */
+export type ExecutionEndCallback = (ctx: COMImpl) => void | Promise<void>;
+
 // Signal type is exported from ./signal.ts

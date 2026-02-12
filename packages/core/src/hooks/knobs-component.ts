@@ -41,6 +41,7 @@ export interface KnobInfo {
   maxLength?: number;
   pattern?: string;
   required?: boolean;
+  momentary?: boolean;
 }
 
 export interface KnobGroup {
@@ -99,6 +100,7 @@ function buildKnobInfo(reg: KnobRegistration): KnobInfo {
     maxLength: reg.maxLength,
     pattern: reg.pattern,
     required: reg.required,
+    momentary: reg.momentary,
   };
 }
 
@@ -136,8 +138,9 @@ function formatValue(value: string | number | boolean): string {
 }
 
 function formatKnobLine(knob: KnobInfo): string {
+  const typeLabel = knob.momentary ? `momentary ${knob.semanticType}` : knob.semanticType;
   const parts: string[] = [
-    `${knob.name} [${knob.semanticType}]: ${formatValue(knob.value)} — ${knob.description}`,
+    `${knob.name} [${typeLabel}]: ${formatValue(knob.value)} — ${knob.description}`,
   ];
 
   const hints: string[] = [];
@@ -152,6 +155,7 @@ function formatKnobLine(knob: KnobInfo): string {
   if (knob.maxLength !== undefined) hints.push(`max ${knob.maxLength} chars`);
   if (knob.pattern !== undefined) hints.push(`pattern: ${knob.pattern}`);
   if (knob.required) hints.push("required");
+  if (knob.momentary) hints.push("resets after use");
 
   if (hints.length > 0) {
     parts.push(` (${hints.join(", ")})`);

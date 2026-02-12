@@ -11,6 +11,7 @@ import type {
   TickStartCallback,
   TickEndCallback,
   AfterCompileCallback,
+  ExecutionEndCallback,
   TickResult,
   TickState,
 } from "./types";
@@ -92,6 +93,7 @@ export interface KnobRegistration {
   step?: number;
   maxLength?: number;
   pattern?: string;
+  momentary?: boolean;
 }
 
 // ============================================================
@@ -116,6 +118,7 @@ export interface RuntimeStore {
   tickStartCallbacks: Set<TickStartCallback>;
   tickEndCallbacks: Set<TickEndCallback>;
   afterCompileCallbacks: Set<AfterCompileCallback>;
+  executionEndCallbacks: Set<ExecutionEndCallback>;
 
   /** Knob registry — all active knobs registered by useKnob */
   knobRegistry: Map<string, KnobRegistration>;
@@ -144,6 +147,7 @@ export function createRuntimeStore(): RuntimeStore {
     tickStartCallbacks: new Set(),
     tickEndCallbacks: new Set(),
     afterCompileCallbacks: new Set(),
+    executionEndCallbacks: new Set(),
     knobRegistry: new Map(),
     getSessionTimeline: () => [],
     setSessionTimeline: () => {},
@@ -256,12 +260,25 @@ export async function storeRunAfterCompileCallbacks(
 }
 
 /**
+ * Run execution end callbacks with COM.
+ */
+export async function storeRunExecutionEndCallbacks(
+  store: RuntimeStore,
+  ctx: COM,
+): Promise<void> {
+  for (const callback of store.executionEndCallbacks) {
+    await callback(ctx);
+  }
+}
+
+/**
  * Clear lifecycle callbacks.
  */
 export function storeClearLifecycleCallbacks(store: RuntimeStore): void {
   store.tickStartCallbacks.clear();
   store.tickEndCallbacks.clear();
   store.afterCompileCallbacks.clear();
+  store.executionEndCallbacks.clear();
 }
 
 /**

@@ -12,6 +12,7 @@ import type {
   TickStartCallback,
   TickEndCallback,
   AfterCompileCallback,
+  ExecutionEndCallback,
   MountCallback,
   UnmountCallback,
 } from "./types";
@@ -190,6 +191,37 @@ export function useAfterCompile(callback: AfterCompileCallback): void {
     store.afterCompileCallbacks.add(cb);
     return () => {
       store.afterCompileCallbacks.delete(cb);
+    };
+  }, [store]);
+}
+
+/**
+ * Register a callback to run when execution completes (after all ticks finish).
+ * Fires once per send() call, after the tick loop exits.
+ *
+ * Timing: fires after the last tick_end but before the session snapshot
+ * is persisted. State changes here are captured in the snapshot.
+ *
+ * @example
+ * ```tsx
+ * useOnExecutionEnd((ctx) => {
+ *   console.log("Execution complete");
+ *   ctx.setState("lastCompleted", Date.now());
+ * });
+ * ```
+ */
+export function useOnExecutionEnd(callback: ExecutionEndCallback): void {
+  const store = useRuntimeStore();
+  const savedCallback = useRef(callback);
+  savedCallback.current = callback;
+
+  useDebugValue("onExecutionEnd registered");
+
+  useEffect(() => {
+    const cb: ExecutionEndCallback = (ctx) => savedCallback.current(ctx);
+    store.executionEndCallbacks.add(cb);
+    return () => {
+      store.executionEndCallbacks.delete(cb);
     };
   }, [store]);
 }

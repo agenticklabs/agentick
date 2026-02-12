@@ -23,6 +23,7 @@ export {
   storeRunTickStartCallbacks,
   storeRunTickEndCallbacks,
   storeRunAfterCompileCallbacks,
+  storeRunExecutionEndCallbacks,
   storeClearLifecycleCallbacks,
   storeClearDataCache,
   storeGetSerializableDataCache,
@@ -63,6 +64,7 @@ export {
   useOnTickStart,
   useOnTickEnd,
   useAfterCompile,
+  useOnExecutionEnd,
   useContinuation,
 } from "./lifecycle";
 

@@ -16,6 +16,7 @@
 import { useEffect, useMemo } from "react";
 import { useRuntimeStore } from "./runtime-context";
 import { useComState } from "./com-state";
+import type { ExecutionEndCallback } from "./types";
 
 // ============================================================================
 // Types — Primitives, Constraints, Options
@@ -45,6 +46,7 @@ export type KnobOpts<T extends KnobPrimitive> = KnobConstraints<T> & {
   group?: string;
   required?: boolean;
   validate?: (value: T) => true | string;
+  momentary?: boolean;
 };
 
 // ============================================================================
@@ -68,6 +70,7 @@ export interface KnobDescriptor<T extends KnobPrimitive = KnobPrimitive, R = T> 
   group?: string;
   required?: boolean;
   validate?: (value: T) => true | string;
+  momentary?: boolean;
   // Number constraints
   min?: number;
   max?: number;
@@ -109,12 +112,42 @@ export function knob(
     group: opts.group,
     required: opts.required,
     validate: opts.validate,
+    momentary: opts.momentary,
     min: (opts as any).min,
     max: (opts as any).max,
     step: (opts as any).step,
     maxLength: (opts as any).maxLength,
     pattern: (opts as any).pattern,
   };
+}
+
+/**
+ * Create a momentary knob descriptor (auto-resets to default at execution end).
+ *
+ * Use for lazy-loaded context: the model sets the knob to expand instructions,
+ * acts on them, and the knob resets automatically — reclaiming tokens.
+ */
+export namespace knob {
+  export function momentary<T extends KnobPrimitive>(
+    defaultValue: T,
+    opts: KnobOpts<T>,
+  ): KnobDescriptor<T, T>;
+
+  export function momentary<T extends KnobPrimitive, R>(
+    defaultValue: T,
+    opts: KnobOpts<T>,
+    resolve: (value: T) => R,
+  ): KnobDescriptor<T, R>;
+
+  export function momentary(
+    defaultValue: KnobPrimitive,
+    opts: KnobOpts<any>,
+    resolve?: (value: any) => any,
+  ): KnobDescriptor {
+    const descriptor = knob(defaultValue, opts, resolve!);
+    descriptor.momentary = true;
+    return descriptor;
+  }
 }
 
 /**
@@ -170,6 +203,7 @@ export function useKnob(
   let group: string | undefined;
   let required: boolean | undefined;
   let validate: ((value: any) => true | string) | undefined;
+  let momentary: boolean | undefined;
   let min: number | undefined;
   let max: number | undefined;
   let step: number | undefined;
@@ -185,6 +219,7 @@ export function useKnob(
     group = defaultOrDescriptor.group;
     required = defaultOrDescriptor.required;
     validate = defaultOrDescriptor.validate;
+    momentary = defaultOrDescriptor.momentary;
     min = defaultOrDescriptor.min;
     max = defaultOrDescriptor.max;
     step = defaultOrDescriptor.step;
@@ -200,6 +235,7 @@ export function useKnob(
     group = opts.group;
     required = opts.required;
     validate = opts.validate;
+    momentary = opts.momentary;
     min = (opts as any).min;
     max = (opts as any).max;
     step = (opts as any).step;
@@ -233,15 +269,28 @@ export function useKnob(
       step,
       maxLength,
       pattern,
+      momentary,
     });
   }, [name]);
 
-  // Cleanup on unmount
+  // Cleanup on unmount + momentary reset registration
   useEffect(() => {
+    // Register execution-end reset for momentary knobs
+    let resetCb: ExecutionEndCallback | undefined;
+    if (momentary) {
+      resetCb = (_ctx) => {
+        primitiveSignal.set(defaultValue);
+      };
+      store.executionEndCallbacks.add(resetCb);
+    }
+
     return () => {
       store.knobRegistry.delete(name);
+      if (resetCb) {
+        store.executionEndCallbacks.delete(resetCb);
+      }
     };
-  }, [name, store]);
+  }, [name, store, momentary]);
 
   // Current value — resolved if callback provided, primitive otherwise
   const primitive = primitiveSignal();

@@ -88,6 +88,17 @@ useContinuation((result, ctx) => {
 });
 ```
 
+### useOnExecutionEnd
+
+Runs once when execution completes (after all ticks finish). Fires before the session snapshot is persisted, so state changes here are captured cleanly. Always fires — even on abort or error.
+
+```tsx
+useOnExecutionEnd((ctx) => {
+  console.log("Execution complete");
+  ctx.setState("lastCompleted", Date.now());
+});
+```
+
 ### useOnMessage
 
 Fires when a new message is added to the timeline.
@@ -176,6 +187,7 @@ useOnMount((ctx) => {});
 useOnTickStart((tickState, ctx) => {});
 useOnTickEnd((result, ctx) => {});
 useAfterCompile((compiled, ctx) => {});
+useOnExecutionEnd((ctx) => {});
 useContinuation((result, ctx) => boolean);
 useOnMessage((message, ctx, state) => {});
 ```

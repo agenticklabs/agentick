@@ -301,6 +301,22 @@ function AgentWithContextManagement() {
 }
 ```
 
+### useOnExecutionEnd
+
+Run code when execution completes (after all ticks, before snapshot persistence):
+
+```tsx
+function AgentWithCleanup() {
+  useOnExecutionEnd((ctx) => {
+    ctx.setState("lastCompleted", Date.now());
+  });
+
+  return <Timeline />;
+}
+```
+
+> **Timing:** `useOnExecutionEnd` fires once per `send()` call, after the tick loop exits but before the session snapshot is persisted. State changes here are captured in the snapshot.
+
 ## State Hooks
 
 ### useState
@@ -726,6 +742,37 @@ Returned by `useKnobsContext()`:
 | --------------------------- | ----------------------------------------------------- |
 | `useKnobsContext()`         | Access knob context (throws outside `Knobs.Provider`) |
 | `useKnobsContextOptional()` | Access knob context (returns null outside provider)   |
+
+### Momentary Knobs
+
+Momentary knobs auto-reset to their default value at the end of each execution. Use them for lazy-loaded context that the model expands on demand, with automatic token reclamation.
+
+```tsx
+import { knob, useKnob, Knobs } from "@agentick/core";
+
+// Config-level descriptor
+const planningWorkflow = knob.momentary(false, {
+  description: "Account planning workflow",
+});
+
+// Or inline with useKnob
+function Agent() {
+  const [showPlanning] = useKnob("planning", false, {
+    description: "Account planning workflow",
+    momentary: true,
+  });
+
+  return (
+    <>
+      <Knobs />
+      {showPlanning && <Section id="planning" audience="model">...</Section>}
+      <Timeline />
+    </>
+  );
+}
+```
+
+Momentary knobs display as `[momentary toggle]` with a `(resets after use)` hint in the model-visible section. The model sets the knob to expand context, acts on it, and the knob resets at execution end — before the snapshot is persisted, so restored sessions start clean.
 
 ### When no knobs exist
 

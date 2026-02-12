@@ -178,3 +178,34 @@ const agent = createAgent({
 ```
 
 `knob()` returns a `KnobDescriptor` — a branded object detected by `isKnob()` at runtime.
+
+## Momentary Knobs
+
+Momentary knobs auto-reset to their default value at the end of each execution. The model sets the knob to expand context, acts on it, and the knob resets automatically — reclaiming tokens.
+
+```tsx
+import { knob, useKnob, Knobs } from "agentick";
+
+// Config-level
+const planningWorkflow = knob.momentary(false, {
+  description: "Account planning workflow",
+});
+
+// Or inline
+function Agent() {
+  const [showPlanning] = useKnob("planning", false, {
+    description: "Account planning workflow",
+    momentary: true,
+  });
+
+  return (
+    <>
+      <Knobs />
+      {showPlanning && <Section id="planning" audience="model">...</Section>}
+      <Timeline />
+    </>
+  );
+}
+```
+
+The model sees `planning [momentary toggle]: false — Account planning workflow (resets after use)`. The reset happens after the tick loop but before the snapshot is persisted, so restored sessions always start clean.

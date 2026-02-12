@@ -94,6 +94,10 @@ Each tick follows this sequence:
 
 If the model responds with tool calls, steps 1–7 repeat for the next tick.
 
+After the tick loop exits (or on abort/error):
+
+8. **Execution end** — `useOnExecutionEnd` callbacks fire (before snapshot persistence)
+
 ## Spawn
 
 `session.spawn()` creates an ephemeral child session with a different agent. The child runs to completion and returns the same `SessionExecutionHandle` as `session.send()`.

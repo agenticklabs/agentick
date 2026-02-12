@@ -11,6 +11,7 @@ import {
   useKnob,
   Knobs,
   useKnobsContext,
+  useOnExecutionEnd,
   type KnobGroup,
   type KnobInfo,
 } from "../../hooks";
@@ -895,5 +896,473 @@ describe("Knobs provider integration", () => {
     session.close();
 
     expect(capturedValue).toBe("deep");
+  });
+});
+
+// ============================================================================
+// knob.momentary() Descriptor Tests
+// ============================================================================
+
+describe("knob.momentary()", () => {
+  it("should return a descriptor with momentary: true", () => {
+    const desc = knob.momentary(false, { description: "Planning workflow" });
+    expect(isKnob(desc)).toBe(true);
+    expect(desc.momentary).toBe(true);
+    expect(desc.defaultValue).toBe(false);
+    expect(desc.description).toBe("Planning workflow");
+  });
+
+  it("should carry all opts through", () => {
+    const desc = knob.momentary("quick", {
+      description: "Mode",
+      options: ["quick", "deep"],
+      group: "Behavior",
+      required: true,
+    });
+    expect(desc.momentary).toBe(true);
+    expect(desc.options).toEqual(["quick", "deep"]);
+    expect(desc.group).toBe("Behavior");
+    expect(desc.required).toBe(true);
+  });
+
+  it("should carry resolve callback", () => {
+    const resolve = (v: boolean) => (v ? "expanded" : "collapsed");
+    const desc = knob.momentary(false, { description: "Expand" }, resolve);
+    expect(desc.momentary).toBe(true);
+    expect(desc.resolve).toBe(resolve);
+  });
+
+  it("should set momentary via knob() opts as well", () => {
+    const desc = knob(false, { description: "Toggle", momentary: true });
+    expect(desc.momentary).toBe(true);
+  });
+
+  it("should default momentary to undefined for normal knobs", () => {
+    const desc = knob(false, { description: "Toggle" });
+    expect(desc.momentary).toBeUndefined();
+  });
+});
+
+// ============================================================================
+// Momentary Knobs — Rendering Tests
+// ============================================================================
+
+describe("momentary knobs rendering", () => {
+  it("should show [momentary toggle] semantic type for momentary boolean knobs", async () => {
+    function Agent() {
+      useKnob("planning", knob.momentary(false, { description: "Planning workflow" }));
+      return <Knobs />;
+    }
+
+    const result = await compileAgent(Agent);
+    const section = result.getSection("knobs")!;
+    expect(section).toContain("[momentary toggle]");
+    expect(section).toContain("resets after use");
+  });
+
+  it("should NOT show momentary label for standard knobs", async () => {
+    function Agent() {
+      useKnob("mode", "broad", { description: "Operating mode", options: ["broad", "deep"] });
+      return <Knobs />;
+    }
+
+    const result = await compileAgent(Agent);
+    const section = result.getSection("knobs")!;
+    expect(section).not.toContain("momentary");
+    expect(section).not.toContain("resets after use");
+  });
+
+  it("should show momentary for inline opts", async () => {
+    function Agent() {
+      useKnob("expand", false, { description: "Expand context", momentary: true });
+      return <Knobs />;
+    }
+
+    const result = await compileAgent(Agent);
+    const section = result.getSection("knobs")!;
+    expect(section).toContain("[momentary toggle]");
+    expect(section).toContain("resets after use");
+  });
+});
+
+// ============================================================================
+// Momentary Knobs — Integration Tests (multi-execution reset)
+// ============================================================================
+
+describe("momentary knobs integration", () => {
+  it("should stay at set value within same execution (multi-tick)", async () => {
+    const capturedValues: boolean[] = [];
+
+    const model = createTestAdapter({ defaultResponse: "Done" });
+    // First tick: model sets the knob
+    model.respondWith([
+      { tool: { name: "set_knob", input: { name: "planning", value: true } } },
+    ]);
+
+    function Agent() {
+      const [planning] = useKnob(
+        "planning",
+        knob.momentary(false, { description: "Planning workflow" }),
+      );
+      capturedValues.push(planning);
+
+      return (
+        <>
+          <Model model={model} />
+          <Timeline />
+          <Knobs />
+        </>
+      );
+    }
+
+    const app = createApp(Agent, { maxTicks: 5 });
+    const session = await app.session();
+    await session.send({
+      messages: [{ role: "user", content: [{ type: "text", text: "Plan" }] }],
+    }).result;
+    session.close();
+
+    // First render: false (default). After tool call, re-render: true.
+    // Final render (tick 2): true.
+    expect(capturedValues[0]).toBe(false); // Initial render
+    expect(capturedValues[capturedValues.length - 1]).toBe(true); // Still true within execution
+  });
+
+  it("should reset to default on next send() call", async () => {
+    let capturedValueAfterReset: boolean | undefined;
+
+    const model = createTestAdapter({ defaultResponse: "Done" });
+    // First execution: set the knob to true
+    model.respondWith([
+      { tool: { name: "set_knob", input: { name: "planning", value: true } } },
+    ]);
+
+    function Agent() {
+      const [planning] = useKnob(
+        "planning",
+        knob.momentary(false, { description: "Planning workflow" }),
+      );
+      capturedValueAfterReset = planning;
+
+      return (
+        <>
+          <Model model={model} />
+          <Timeline />
+          <Knobs />
+        </>
+      );
+    }
+
+    const app = createApp(Agent, { maxTicks: 5 });
+    const session = await app.session();
+
+    // First execution — sets knob to true
+    await session.send({
+      messages: [{ role: "user", content: [{ type: "text", text: "Plan" }] }],
+    }).result;
+
+    // Second execution — knob should be reset to false
+    await session.send({
+      messages: [{ role: "user", content: [{ type: "text", text: "What next?" }] }],
+    }).result;
+
+    session.close();
+
+    // After second execution render, the value should be false (reset)
+    expect(capturedValueAfterReset).toBe(false);
+  });
+
+  it("should reset momentary knob with resolver", async () => {
+    let capturedResolved: string | undefined;
+
+    const model = createTestAdapter({ defaultResponse: "Done" });
+    model.respondWith([
+      { tool: { name: "set_knob", input: { name: "detail", value: true } } },
+    ]);
+
+    function Agent() {
+      const [detail] = useKnob(
+        "detail",
+        knob.momentary(false, { description: "Show details" }, (v) =>
+          v ? "EXPANDED" : "COLLAPSED",
+        ),
+      );
+      capturedResolved = detail;
+
+      return (
+        <>
+          <Model model={model} />
+          <Timeline />
+          <Knobs />
+        </>
+      );
+    }
+
+    const app = createApp(Agent, { maxTicks: 5 });
+    const session = await app.session();
+
+    // First execution — sets knob to true → EXPANDED
+    await session.send({
+      messages: [{ role: "user", content: [{ type: "text", text: "Show" }] }],
+    }).result;
+
+    // Second execution — should reset to false → COLLAPSED
+    await session.send({
+      messages: [{ role: "user", content: [{ type: "text", text: "Next" }] }],
+    }).result;
+
+    session.close();
+
+    expect(capturedResolved).toBe("COLLAPSED");
+  });
+
+  it("should reset momentary knob with inline opts", async () => {
+    let capturedValue: boolean | undefined;
+
+    const model = createTestAdapter({ defaultResponse: "Done" });
+    model.respondWith([
+      { tool: { name: "set_knob", input: { name: "expand", value: true } } },
+    ]);
+
+    function Agent() {
+      const [expand] = useKnob("expand", false, {
+        description: "Expand context",
+        momentary: true,
+      });
+      capturedValue = expand;
+
+      return (
+        <>
+          <Model model={model} />
+          <Timeline />
+          <Knobs />
+        </>
+      );
+    }
+
+    const app = createApp(Agent, { maxTicks: 5 });
+    const session = await app.session();
+
+    await session.send({
+      messages: [{ role: "user", content: [{ type: "text", text: "Expand" }] }],
+    }).result;
+
+    await session.send({
+      messages: [{ role: "user", content: [{ type: "text", text: "Next" }] }],
+    }).result;
+
+    session.close();
+
+    expect(capturedValue).toBe(false);
+  });
+});
+
+// ============================================================================
+// useOnExecutionEnd Tests
+// ============================================================================
+
+describe("useOnExecutionEnd", () => {
+  it("should fire callback after execution completes", async () => {
+    let callbackFired = false;
+
+    const model = createTestAdapter({ defaultResponse: "Done" });
+
+    function Agent() {
+      useOnExecutionEnd(() => {
+        callbackFired = true;
+      });
+
+      return (
+        <>
+          <Model model={model} />
+          <Timeline />
+        </>
+      );
+    }
+
+    const app = createApp(Agent, { maxTicks: 1 });
+    const session = await app.session();
+    await session.send({
+      messages: [{ role: "user", content: [{ type: "text", text: "Hello" }] }],
+    }).result;
+    session.close();
+
+    expect(callbackFired).toBe(true);
+  });
+
+  it("should fire multiple callbacks", async () => {
+    const calls: string[] = [];
+
+    const model = createTestAdapter({ defaultResponse: "Done" });
+
+    function Agent() {
+      useOnExecutionEnd(() => {
+        calls.push("first");
+      });
+      useOnExecutionEnd(() => {
+        calls.push("second");
+      });
+
+      return (
+        <>
+          <Model model={model} />
+          <Timeline />
+        </>
+      );
+    }
+
+    const app = createApp(Agent, { maxTicks: 1 });
+    const session = await app.session();
+    await session.send({
+      messages: [{ role: "user", content: [{ type: "text", text: "Hello" }] }],
+    }).result;
+    session.close();
+
+    expect(calls).toEqual(["first", "second"]);
+  });
+
+  it("should fire once per execution", async () => {
+    let callCount = 0;
+
+    const model = createTestAdapter({ defaultResponse: "Done" });
+
+    function Agent() {
+      useOnExecutionEnd(() => {
+        callCount++;
+      });
+
+      return (
+        <>
+          <Model model={model} />
+          <Timeline />
+        </>
+      );
+    }
+
+    const app = createApp(Agent, { maxTicks: 1 });
+    const session = await app.session();
+
+    await session.send({
+      messages: [{ role: "user", content: [{ type: "text", text: "First" }] }],
+    }).result;
+    expect(callCount).toBe(1);
+
+    await session.send({
+      messages: [{ role: "user", content: [{ type: "text", text: "Second" }] }],
+    }).result;
+    expect(callCount).toBe(2);
+
+    session.close();
+  });
+
+  it("should fire even when execution is aborted", async () => {
+    let callbackFired = false;
+
+    const model = createTestAdapter({ defaultResponse: "Done", delay: 200 });
+
+    function Agent() {
+      useOnExecutionEnd(() => {
+        callbackFired = true;
+      });
+
+      return (
+        <>
+          <Model model={model} />
+          <Timeline />
+        </>
+      );
+    }
+
+    const app = createApp(Agent, { maxTicks: 1 });
+    const session = await app.session();
+
+    const controller = new AbortController();
+    const handle = await session.send({
+      messages: [{ role: "user", content: [{ type: "text", text: "Hello" }] }],
+      signal: controller.signal,
+    });
+
+    // Abort during execution
+    controller.abort("test abort");
+
+    try {
+      await handle.result;
+    } catch {
+      // AbortError expected
+    }
+    session.close();
+
+    expect(callbackFired).toBe(true);
+  });
+});
+
+// ============================================================================
+// Momentary Knobs — Snapshot Persistence Tests
+// ============================================================================
+
+describe("momentary knobs snapshot", () => {
+  it("should have momentary knob at default value in snapshot after execution", async () => {
+    const model = createTestAdapter({ defaultResponse: "Done" });
+    model.respondWith([
+      { tool: { name: "set_knob", input: { name: "planning", value: true } } },
+    ]);
+
+    function Agent() {
+      useKnob("planning", knob.momentary(false, { description: "Planning workflow" }));
+
+      return (
+        <>
+          <Model model={model} />
+          <Timeline />
+          <Knobs />
+        </>
+      );
+    }
+
+    const app = createApp(Agent, { maxTicks: 5 });
+    const session = await app.session();
+
+    // Execution sets knob to true, then execution ends → reset to false
+    await session.send({
+      messages: [{ role: "user", content: [{ type: "text", text: "Plan" }] }],
+    }).result;
+
+    // Snapshot should have the default (false), not the set value (true)
+    const snapshot = session.snapshot();
+    expect(snapshot.comState["knob:planning"]).toBe(false);
+
+    session.close();
+  });
+
+  it("should NOT reset non-momentary knob in snapshot", async () => {
+    const model = createTestAdapter({ defaultResponse: "Done" });
+    model.respondWith([
+      { tool: { name: "set_knob", input: { name: "mode", value: "deep" } } },
+    ]);
+
+    function Agent() {
+      useKnob("mode", "broad", { description: "Mode", options: ["broad", "deep"] });
+
+      return (
+        <>
+          <Model model={model} />
+          <Timeline />
+          <Knobs />
+        </>
+      );
+    }
+
+    const app = createApp(Agent, { maxTicks: 5 });
+    const session = await app.session();
+
+    await session.send({
+      messages: [{ role: "user", content: [{ type: "text", text: "Set mode" }] }],
+    }).result;
+
+    // Non-momentary knob should keep the set value
+    const snapshot = session.snapshot();
+    expect(snapshot.comState["knob:mode"]).toBe("deep");
+
+    session.close();
   });
 });

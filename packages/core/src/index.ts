@@ -63,6 +63,7 @@ export {
   useOnTickStart,
   useOnTickEnd,
   useAfterCompile,
+  useOnExecutionEnd,
   useContinuation,
   // Data hooks
   useData,
