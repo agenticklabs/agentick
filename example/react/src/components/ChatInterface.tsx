@@ -193,8 +193,8 @@ function ChatInner({ initialMessages }: { initialMessages: ChatMessage[] }) {
   return (
     <>
       <div className="chat-messages">
-        {messages.map((msg) => (
-          <div key={msg.id} className={`chat-message ${msg.role}`}>
+        {messages.map((msg, i) => (
+          <div key={msg.id || `msg-${i}`} className={`chat-message ${msg.role}`}>
             <div className="message-role">{msg.role}</div>
             <div className="message-content">{renderMessageContent(msg)}</div>
           </div>

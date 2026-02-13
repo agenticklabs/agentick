@@ -128,6 +128,9 @@ const TimelineContext = createContext<TimelineContextValue | null>(null);
  *
  * Renders directly to the "entry" intrinsic element to avoid
  * React trying to render Agentick components that return Agentick elements.
+ *
+ * Passes through ALL content blocks (text, tool_use, tool_result, image, etc.)
+ * so the model sees its own tool calls and results on subsequent ticks.
  */
 function DefaultMessage({
   entry,
@@ -139,23 +142,14 @@ function DefaultMessage({
 
   const { role, content } = entry.message;
 
-  // Extract text content
-  const textContent = content
-    .filter((block): block is { type: "text"; text: string } => block.type === "text")
-    .map((block) => block.text)
-    .join("\n");
+  if (!content || content.length === 0) return h(React.Fragment, null);
 
-  if (!textContent) return h(React.Fragment, null);
-
-  // Render the "entry" intrinsic element directly
-  // This avoids going through User/Assistant which return Agentick elements
   if (role === "user" || role === "assistant" || role === "tool") {
     return h("entry", {
       kind: "message",
       message: {
         role,
-        content: [{ type: "text", text: textContent }],
-        // Preserve message ID for deduplication in complete()
+        content,
         id: entry.message.id,
       },
     });
