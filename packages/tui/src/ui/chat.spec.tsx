@@ -163,7 +163,7 @@ describe("Chat", () => {
 
     const frame = lastFrame()!;
     expect(frame).toContain("agentick");
-    expect(frame).toContain("/exit");
+    expect(frame).toContain("/help");
   });
 
   it("renders input bar in idle state", async () => {

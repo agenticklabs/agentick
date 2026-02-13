@@ -7,7 +7,8 @@
 import { createApp } from "../app.js";
 import type { AppOptions, SessionOptions, SendResult, ComponentFunction } from "../app/types";
 import type { Session } from "../app/types";
-import type { Message, ContentBlock } from "@agentick/shared";
+import type { Message } from "@agentick/shared";
+import { extractText } from "@agentick/shared";
 import type { TestAdapterInstance } from "./test-adapter";
 import { createTestAdapter } from "./test-adapter";
 import { flushMicrotasks } from "./act";
@@ -244,14 +245,14 @@ export async function renderAgent<P extends Record<string, unknown> = Record<str
     const assistantMessages = resultState.timeline.filter((m) => m.role === "assistant");
     if (assistantMessages.length > 0) {
       const last = assistantMessages[assistantMessages.length - 1];
-      resultState.lastAssistantMessage = extractText(last.content as ContentBlock[]);
+      resultState.lastAssistantMessage = extractText(last.content, "");
     }
 
     // Find last user message
     const userMessages = resultState.timeline.filter((m) => m.role === "user");
     if (userMessages.length > 0) {
       const last = userMessages[userMessages.length - 1];
-      resultState.lastUserMessage = extractText(last.content as ContentBlock[]);
+      resultState.lastUserMessage = extractText(last.content, "");
     }
 
     resultState.status = "completed";
@@ -333,13 +334,3 @@ export async function renderAgent<P extends Record<string, unknown> = Record<str
 // ============================================================================
 // Helpers
 // ============================================================================
-
-/**
- * Extract text from content blocks.
- */
-function extractText(content: ContentBlock[]): string {
-  return content
-    .filter((c): c is { type: "text"; text: string } => c.type === "text")
-    .map((c) => c.text)
-    .join("");
-}

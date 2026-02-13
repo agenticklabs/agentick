@@ -457,11 +457,20 @@ export function isStateChangeBlock(block: ContentBlock): block is StateChangeBlo
   return block.type === "state_change";
 }
 
-export function extractText(blocks: ContentBlock[]): string {
-  return blocks
+/**
+ * Extract plain text from message content.
+ *
+ * Handles string passthrough, ContentBlock[] (concatenates text blocks),
+ * and string[] (joins elements).
+ */
+export function extractText(content: string | string[] | ContentBlock[], separator = "\n"): string {
+  if (typeof content === "string") return content;
+  if (content.length === 0) return "";
+  if (typeof content[0] === "string") return (content as string[]).join(separator);
+  return (content as ContentBlock[])
     .filter(isTextBlock)
     .map((b) => b.text)
-    .join("\n");
+    .join(separator);
 }
 
 export function extractToolUses(blocks: ContentBlock[]): ToolUseBlock[] {

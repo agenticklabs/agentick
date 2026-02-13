@@ -11,7 +11,7 @@
  *   - confirming_tool: reject tool, return to streaming
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Box, Text, useApp, useInput } from "ink";
 import { useSession, useStreamingText } from "@agentick/react";
 import type { ToolConfirmationRequest, ToolConfirmationResponse } from "@agentick/client";
@@ -21,6 +21,8 @@ import { ToolCallIndicator } from "../components/ToolCallIndicator.js";
 import { ToolConfirmationPrompt } from "../components/ToolConfirmationPrompt.js";
 import { ErrorDisplay } from "../components/ErrorDisplay.js";
 import { InputBar } from "../components/InputBar.js";
+import { useSlashCommands, helpCommand, exitCommand } from "../commands.js";
+import { useCommandsConfig } from "../commands-context.js";
 
 interface ChatProps {
   sessionId: string;
@@ -77,12 +79,19 @@ export function Chat({ sessionId }: ChatProps) {
     }
   });
 
+  const configCommands = useCommandsConfig();
+  const commandCtx = useMemo(
+    () => ({ sessionId, send, abort, output: console.log }),
+    [sessionId, send, abort],
+  );
+  const { dispatch } = useSlashCommands(
+    [...configCommands, helpCommand(), exitCommand(exit)],
+    commandCtx,
+  );
+
   const handleSubmit = useCallback(
     (text: string) => {
-      if (text === "/exit" || text === "/quit") {
-        exit();
-        return;
-      }
+      if (dispatch(text)) return;
       setError(null);
       try {
         send(text);
@@ -90,7 +99,7 @@ export function Chat({ sessionId }: ChatProps) {
         setError(err instanceof Error ? err : String(err));
       }
     },
-    [send, exit],
+    [dispatch, send],
   );
 
   const handleToolConfirmationResponse = useCallback(
@@ -122,7 +131,7 @@ export function Chat({ sessionId }: ChatProps) {
         <Text color="cyan" bold>
           agentick
         </Text>
-        <Text color="gray"> — type /exit to quit</Text>
+        <Text color="gray"> — type /help for commands</Text>
       </Box>
 
       <MessageList sessionId={sessionId} />

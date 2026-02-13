@@ -1,13 +1,14 @@
 /**
  * InputBar — user text input for the TUI.
  *
- * Uses ink-text-input. Enter submits, disabled while streaming.
- * Supports controlled mode (value + onChange) or uncontrolled (internal state).
+ * Uses useLineEditor for readline-quality editing. Enter submits, disabled
+ * while streaming. Supports controlled mode (value + onChange) or uncontrolled.
  */
 
-import { useState, useCallback } from "react";
+import { useCallback } from "react";
 import { Box, Text } from "ink";
-import TextInput from "ink-text-input";
+import { useLineEditor } from "../hooks/use-line-editor.js";
+import { RichTextInput } from "./RichTextInput.js";
 
 interface InputBarPropsBase {
   onSubmit: (text: string) => void;
@@ -34,24 +35,25 @@ export function InputBar({
   value,
   onChange,
 }: InputBarProps) {
-  const isControlled = value !== undefined && onChange !== undefined;
-  const [internalValue, setInternalValue] = useState("");
-
-  const currentValue = isControlled ? value : internalValue;
-  const handleChange = isControlled ? onChange : setInternalValue;
-
+  // The hook handles clearing on submit (both controlled via onChange("") and
+  // uncontrolled via internal setState). We just forward to the parent.
   const handleSubmit = useCallback(
     (text: string) => {
-      if (!text.trim() || isDisabled) return;
-      onSubmit(text.trim());
-      if (isControlled) {
-        onChange("");
-      } else {
-        setInternalValue("");
-      }
+      if (isDisabled) return;
+      onSubmit(text);
     },
-    [onSubmit, isDisabled, isControlled, onChange],
+    [onSubmit, isDisabled],
   );
+
+  const isControlled = value !== undefined && onChange !== undefined;
+  const editorOptions = isControlled
+    ? { value, onChange, onSubmit: handleSubmit, isActive: !isDisabled }
+    : { onSubmit: handleSubmit, isActive: !isDisabled };
+
+  const editor = useLineEditor(editorOptions);
+
+  const resolvedPlaceholder =
+    placeholder ?? (isDisabled ? "Waiting for response..." : "Type a message...");
 
   return (
     <Box
@@ -59,18 +61,17 @@ export function InputBar({
       borderStyle="single"
       borderLeft={false}
       borderRight={false}
-      borderColor={isDisabled ? "gray" : "cyan"}
+      borderColor={isDisabled ? "gray" : "#34d399"}
       paddingLeft={1}
     >
-      <Text color={isDisabled ? "gray" : "green"} bold>
+      <Text color={isDisabled ? "gray" : "#34d399"} bold>
         {"› "}
       </Text>
-      <TextInput
-        value={currentValue}
-        onChange={handleChange}
-        onSubmit={handleSubmit}
-        focus={!isDisabled}
-        placeholder={placeholder ?? (isDisabled ? "Waiting for response..." : "Type a message...")}
+      <RichTextInput
+        value={editor.value}
+        cursor={editor.cursor}
+        placeholder={resolvedPlaceholder}
+        isActive={!isDisabled}
       />
     </Box>
   );

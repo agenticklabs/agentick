@@ -43,4 +43,35 @@ export { ToolCallIndicator } from "./components/ToolCallIndicator.js";
 export { ToolConfirmationPrompt } from "./components/ToolConfirmationPrompt.js";
 export { ErrorDisplay } from "./components/ErrorDisplay.js";
 export { InputBar } from "./components/InputBar.js";
+export { RichTextInput } from "./components/RichTextInput.js";
+export {
+  useLineEditor,
+  type UseLineEditorOptions,
+  type LineEditorResult,
+} from "./hooks/use-line-editor.js";
 export { default as Spinner } from "ink-spinner";
+
+// Slash commands
+export {
+  useSlashCommands,
+  helpCommand,
+  clearCommand,
+  exitCommand,
+  loadCommand,
+  type SlashCommand,
+  type CommandContext,
+} from "./commands.js";
+export { CommandsProvider, useCommandsConfig } from "./commands-context.js";
+
+// Rendering — ANSI-styled terminal output for messages and content blocks
+export {
+  theme,
+  formatDuration,
+  renderMarkdown,
+  getTerminalWidth,
+  renderContentBlock,
+  renderToolCall,
+  renderMessage,
+  type RenderMessageOptions,
+  type ToolCallInfo,
+} from "./rendering/index.js";

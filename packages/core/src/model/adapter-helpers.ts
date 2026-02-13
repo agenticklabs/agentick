@@ -88,16 +88,6 @@ export function filterEmptyMessages(messages: Message[]): Message[] {
 // ============================================================================
 
 /**
- * Extract text from content blocks.
- */
-export function extractText(content: ContentBlock[]): string {
-  return content
-    .filter((b): b is { type: "text"; text: string } => b.type === "text")
-    .map((b) => b.text)
-    .join("");
-}
-
-/**
  * Extract text blocks only.
  */
 export function getTextBlocks(content: ContentBlock[]): Array<{ type: "text"; text: string }> {

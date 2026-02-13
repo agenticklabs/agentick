@@ -34,6 +34,8 @@ import { createClient } from "@agentick/client";
 import { createLocalTransport } from "@agentick/core";
 import { AgentickProvider } from "@agentick/react";
 import { Chat } from "./ui/chat.js";
+import { CommandsProvider } from "./commands-context.js";
+import type { SlashCommand } from "./commands.js";
 import type { App } from "@agentick/core";
 import EventSourcePolyfill from "eventsource";
 
@@ -45,6 +47,8 @@ interface TUIOptionsBase {
   ui?: TUIComponent;
   /** Use alternate screen buffer to avoid polluting terminal scrollback. */
   alternateScreen?: boolean;
+  /** Slash commands available in the TUI. Accepts singles and arrays (command packs). */
+  commands?: (SlashCommand | SlashCommand[])[];
 }
 
 export type TUIOptions =
@@ -76,7 +80,9 @@ export function createTUI(options: TUIOptions) {
 
       const { waitUntilExit } = render(
         <AgentickProvider client={client}>
-          <Component sessionId={sessionId} />
+          <CommandsProvider commands={options.commands ?? []}>
+            <Component sessionId={sessionId} />
+          </CommandsProvider>
         </AgentickProvider>,
         { exitOnCtrlC: false },
       );
