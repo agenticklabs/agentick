@@ -66,6 +66,50 @@ export {
 export { SSETransport, createSSETransport, type SSETransportConfig } from "./sse-transport.js";
 export { WSTransport, createWSTransport, type WSTransportConfig } from "./ws-transport.js";
 
+// Message steering
+export {
+  MessageSteering,
+  type MessageSteeringOptions,
+  type MessageSteeringState,
+  type SteeringMode,
+  type FlushMode,
+} from "./message-steering.js";
+
+// Chat primitives
+export { MessageLog } from "./message-log.js";
+export { ToolConfirmations } from "./tool-confirmations.js";
+
+// Chat session (composed from primitives)
+export { ChatSession } from "./chat-session.js";
+
+// Chat transforms
+export {
+  timelineToMessages,
+  extractToolCalls,
+  defaultTransform,
+  defaultDeriveMode,
+} from "./chat-transforms.js";
+
+// Chat types
+export type {
+  ChatMessage,
+  ChatMode,
+  ChatSessionState,
+  ChatSessionOptions,
+  ToolCallEntry,
+  ToolConfirmationState,
+  TimelineEntry,
+  MessageLogOptions,
+  MessageLogState,
+  MessageTransform,
+  MessageTransformContext,
+  ToolConfirmationsOptions,
+  ToolConfirmationsState,
+  ConfirmationDecision,
+  ConfirmationPolicy,
+  ChatModeDeriver,
+} from "./chat-types.js";
+
 // Types - re-exported from types.ts which re-exports from shared
 export type {
   // Connection
@@ -80,6 +124,7 @@ export type {
   ToolConfirmationRequest,
   ToolConfirmationResponse,
   SendInput,
+  Message,
   StreamEvent,
   SessionStreamEvent,
 

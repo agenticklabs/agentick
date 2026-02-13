@@ -23,7 +23,8 @@
   "type": "module",
   "main": "src/index.ts",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./testing": "./src/testing.ts"
   },
   "publishConfig": {
     "access": "public",
@@ -42,7 +43,7 @@
     "typecheck": "tsc -p tsconfig.build.json --noEmit",
     "lint": "oxlint src/",
     "format:check": "oxfmt --check src/",
-    "clean": "rm -rf dist",
+    "clean": "rm -rf dist tsconfig.build.tsbuildinfo",
     "prepublishOnly": "pnpm build",
     "dev": "tsc --watch"
   },

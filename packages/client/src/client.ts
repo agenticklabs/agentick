@@ -139,6 +139,15 @@ export interface SessionAccessor {
   abort(reason?: string): Promise<void>;
 
   /**
+   * Abort current execution and start a new one with the given input.
+   * Atomic abort+send — no race between the two operations.
+   */
+  interrupt(
+    input?: string | Message[] | SendInput,
+    reason?: string,
+  ): Promise<ClientExecutionHandle>;
+
+  /**
    * Close the session.
    */
   close(): Promise<void>;
@@ -522,6 +531,13 @@ class SessionAccessorImpl implements SessionAccessor {
 
   async abort(reason?: string): Promise<void> {
     await this.client.abort(this.sessionId, reason);
+  }
+
+  async interrupt(
+    input?: string | Message[] | SendInput,
+    reason?: string,
+  ): Promise<ClientExecutionHandle> {
+    return this.client.interrupt(this.sessionId, input, reason);
   }
 
   async close(): Promise<void> {
@@ -1247,6 +1263,26 @@ export class AgentickClient {
       const text = await response.text();
       throw new Error(`Failed to abort: ${response.status} ${text}`);
     }
+  }
+
+  /**
+   * Abort current execution and start a new one with the given input.
+   * Sequential abort→send with no race.
+   */
+  async interrupt(
+    sessionId: string,
+    input?: string | ContentBlock | ContentBlock[] | Message | Message[] | SendInput,
+    reason?: string,
+  ): Promise<ClientExecutionHandle> {
+    await this.abort(sessionId, reason ?? "interrupt");
+    if (input) {
+      return this.send(input, { sessionId });
+    }
+    // No input — create a resolved empty handle
+    const abortController = new AbortController();
+    const handle = new ClientExecutionHandleImpl(this, abortController, sessionId);
+    handle._complete();
+    return handle;
   }
 
   /**
