@@ -59,3 +59,27 @@ service.streamingText();
 service.text();
 service.isStreaming();
 ```
+
+## Chat Primitives
+
+The [Chat Primitives](../client/README.md#chat-primitives) from `@agentick/client` (`ChatSession`, `MessageLog`, `ToolConfirmations`, `MessageSteering`) are framework-agnostic and work directly in Angular. Use `ChatSession` with Angular signals for full chat state management:
+
+```ts
+import { ChatSession } from "@agentick/client";
+
+// In a service or component
+const chat = new ChatSession(client, {
+  sessionId: "conv-123",
+  // autoSubscribe: true (default)
+});
+
+// Subscribe to state changes and update a signal
+const messages = signal(chat.messages);
+chat.onStateChange(() => {
+  messages.set(chat.messages);
+});
+
+chat.submit("Hello!");
+```
+
+Angular-specific signal wrappers for chat primitives are planned.

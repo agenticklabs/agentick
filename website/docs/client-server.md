@@ -35,27 +35,41 @@ for await (const chunk of session.send("Hello!")) {
 
 ## React Integration
 
+`useChat` is the all-in-one hook — messages, input steering, and tool confirmations. It auto-subscribes to the SSE transport.
+
 ```tsx
-import { useSession, useMessages } from "@agentick/react";
+import { AgentickProvider, useChat, useStreamingText } from "@agentick/react";
 
 function Chat() {
-  const session = useSession("my-session");
-  const messages = useMessages(session);
+  const { messages, chatMode, submit, respondToConfirmation, toolConfirmation, lastSubmitted } =
+    useChat({ sessionId: "my-session" });
+  const { text: streamingText, isStreaming } = useStreamingText();
   const [input, setInput] = useState("");
 
   return (
     <div>
-      {messages.map((msg, i) => (
-        <div key={i} className={msg.role}>
-          {msg.content}
+      {messages.map((msg) => (
+        <div key={msg.id} className={msg.role}>
+          {typeof msg.content === "string" ? msg.content : "..."}
         </div>
       ))}
+
+      {isStreaming && <div className="assistant">{streamingText}</div>}
+
+      {toolConfirmation && (
+        <div>
+          <p>Allow {toolConfirmation.request.name}?</p>
+          <button onClick={() => respondToConfirmation({ approved: true })}>Allow</button>
+          <button onClick={() => respondToConfirmation({ approved: false })}>Deny</button>
+        </div>
+      )}
+
       <input
         value={input}
         onChange={(e) => setInput(e.target.value)}
         onKeyDown={(e) => {
-          if (e.key === "Enter") {
-            session.send(input);
+          if (e.key === "Enter" && input.trim()) {
+            submit(input);
             setInput("");
           }
         }}
@@ -63,7 +77,17 @@ function Chat() {
     </div>
   );
 }
+
+function App() {
+  return (
+    <AgentickProvider clientConfig={{ baseUrl: "/api" }}>
+      <Chat />
+    </AgentickProvider>
+  );
+}
 ```
+
+For finer control, compose individual primitives: `useMessages`, `useToolConfirmations`, `useMessageSteering`. See the [`@agentick/react` README](/packages/react/README.md) for the full hook reference.
 
 ## Terminal UI
 

@@ -217,6 +217,139 @@ const channel = session.channel("custom");
 channel.publish("event", { data: "value" });
 ```
 
+### Chat Hooks
+
+These hooks wrap the [Chat Primitives](../client/README.md#chat-primitives) from `@agentick/client`. See the client docs for the underlying `ChatSession`, `MessageLog`, `ToolConfirmations`, and `MessageSteering` classes.
+
+#### `useChat(options?)`
+
+Full chat controller hook — messages, steering, and tool confirmations in one call. Wraps [`ChatSession`](../client/README.md#chatsession) with `useSyncExternalStore`. Auto-subscribes to the SSE transport by default (set `autoSubscribe: false` to manage subscription separately via `useSession`).
+
+```tsx
+import { useChat } from "@agentick/react";
+
+function Chat({ sessionId }: { sessionId: string }) {
+  const {
+    messages, // ChatMessage[]
+    chatMode, // "idle" | "streaming" | "confirming_tool"
+    toolConfirmation, // { request, respond } | null
+    lastSubmitted, // Optimistic user message text
+    queued, // Queued messages
+    isExecuting, // Execution in progress
+    mode, // "steer" | "queue"
+
+    submit, // Send or queue based on mode
+    steer, // Always send immediately
+    queue, // Always queue
+    interrupt, // Abort + send
+    flush, // Flush next queued
+    respondToConfirmation,
+    clearMessages,
+    setMode,
+    removeQueued,
+    clearQueued,
+  } = useChat({ sessionId, mode: "queue" });
+
+  return (
+    <div>
+      {messages.map((msg) => (
+        <div key={msg.id} className={msg.role}>
+          {typeof msg.content === "string" ? msg.content : "..."}
+        </div>
+      ))}
+
+      {toolConfirmation && (
+        <dialog open>
+          <p>Allow {toolConfirmation.request.name}?</p>
+          <button onClick={() => respondToConfirmation({ approved: true })}>Allow</button>
+          <button onClick={() => respondToConfirmation({ approved: false })}>Deny</button>
+        </dialog>
+      )}
+
+      <input
+        onKeyDown={(e) => {
+          if (e.key === "Enter") submit(e.currentTarget.value);
+        }}
+      />
+    </div>
+  );
+}
+```
+
+Options are captured at mount time. Changing them requires a new `sessionId`.
+
+#### Custom Chat Modes
+
+```tsx
+type MyMode = "idle" | "working" | "needs_approval";
+
+const { chatMode } = useChat<MyMode>({
+  sessionId,
+  deriveMode: ({ isExecuting, hasPendingConfirmation }) => {
+    if (hasPendingConfirmation) return "needs_approval";
+    if (isExecuting) return "working";
+    return "idle";
+  },
+});
+// chatMode is typed as MyMode
+```
+
+#### `useMessages(options?)`
+
+Message accumulation only. Use when you don't need steering or confirmations.
+
+```tsx
+import { useMessages } from "@agentick/react";
+
+const { messages, clear } = useMessages({
+  sessionId: "my-session",
+  transform: customTransform, // Optional custom MessageTransform
+  initialMessages: [], // Pre-loaded history
+});
+```
+
+#### `useToolConfirmations(options?)`
+
+Tool confirmation management only. Use for custom confirmation UIs.
+
+```tsx
+import { useToolConfirmations } from "@agentick/react";
+
+const { pending, respond } = useToolConfirmations({
+  sessionId: "my-session",
+  policy: (req) => (req.name === "read_file" ? { action: "approve" } : { action: "prompt" }),
+});
+
+if (pending) {
+  // Show confirmation UI
+  respond({ approved: true });
+}
+```
+
+#### `useMessageSteering(options?)`
+
+Input-side message routing with queue/steer modes.
+
+```tsx
+import { useMessageSteering } from "@agentick/react";
+
+const { queued, isExecuting, mode, submit, steer, queue, interrupt, flush, setMode } =
+  useMessageSteering({
+    sessionId: "my-session",
+    mode: "queue",
+    flushMode: "sequential",
+  });
+```
+
+#### Progressive Disclosure
+
+| Level | Hook                                                          | Use case                             |
+| ----- | ------------------------------------------------------------- | ------------------------------------ |
+| 0     | `useChat`                                                     | Full chat — one hook does everything |
+| 1     | `useChat` + options                                           | Custom modes, policies, transforms   |
+| 2     | `useMessages` + `useToolConfirmations` + `useMessageSteering` | Compose individual primitives        |
+| 3     | `useEvents` + custom reducer                                  | Full control, build your own         |
+
 ## Provider
 
 ### `AgentickProvider`
@@ -258,6 +391,21 @@ import type {
   UseContextInfoResult,
   ContextInfo,
 
+  // Chat hook types
+  UseChatOptions,
+  UseChatResult,
+  UseMessagesOptions,
+  UseMessagesResult,
+  UseToolConfirmationsOptions,
+  UseToolConfirmationsResult,
+  UseMessageSteeringOptions,
+  UseMessageSteeringResult,
+  ChatMode,
+  ChatMessage,
+  ToolConfirmationState,
+  SteeringMode,
+  FlushMode,
+
   // Re-exported from @agentick/client
   AgentickClient,
   ConnectionState,
@@ -267,6 +415,14 @@ import type {
   ClientExecutionHandle,
   SessionStreamEvent,
   ClientTransport,
+} from "@agentick/react";
+
+// Transform functions (re-exported from @agentick/client)
+import {
+  timelineToMessages,
+  extractToolCalls,
+  defaultTransform,
+  defaultDeriveMode,
 } from "@agentick/react";
 ```
 

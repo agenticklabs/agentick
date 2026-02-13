@@ -214,6 +214,190 @@ client.onConnectionChange((state) => {
 });
 ```
 
+## Chat Primitives
+
+Composable building blocks for chat UIs. Use `ChatSession` for the common case, or compose individual primitives for custom architectures.
+
+### ChatSession
+
+Complete chat controller — messages, steering, and tool confirmations in one snapshot.
+
+```typescript
+import { ChatSession } from "@agentick/client";
+
+const chat = new ChatSession(client, {
+  sessionId: "conv-123",
+  autoSubscribe: true, // Subscribe to SSE transport (default: true)
+  initialMessages: [], // Pre-loaded history
+  transform: undefined, // Custom MessageTransform (default: timelineToMessages)
+  confirmationPolicy: undefined, // Auto-approve/deny policy (default: prompt all)
+  deriveMode: undefined, // Custom ChatModeDeriver (default: idle/streaming/confirming_tool)
+  onEvent: undefined, // Raw event hook
+  // Inherits all MessageSteering options: mode, flushMode, autoFlush
+});
+
+// State (read-only snapshot, updated on every mutation)
+chat.messages; // ChatMessage[]
+chat.chatMode; // "idle" | "streaming" | "confirming_tool"
+chat.toolConfirmation; // { request, respond } | null
+chat.lastSubmitted; // Optimistic user message text
+chat.queued; // Queued messages (queue mode)
+chat.isExecuting; // Whether an execution is in progress
+chat.mode; // "steer" | "queue"
+
+// Actions
+chat.submit("Hello"); // Send or queue based on mode
+chat.steer("Force send"); // Always send immediately
+chat.queue("Later"); // Always queue
+chat.interrupt("Stop"); // Abort + send
+chat.flush(); // Flush next queued message
+chat.respondToConfirmation({ approved: true });
+chat.clearMessages();
+
+// Subscribe
+const unsub = chat.onStateChange(() => {
+  console.log(chat.state);
+});
+
+chat.destroy();
+```
+
+#### Custom Chat Modes
+
+The `deriveMode` option lets you define custom chat mode enums:
+
+```typescript
+type MyMode = "idle" | "working" | "needs_approval" | "error";
+
+const chat = new ChatSession<MyMode>(client, {
+  sessionId: "conv-123",
+  deriveMode: ({ isExecuting, hasPendingConfirmation }) => {
+    if (hasPendingConfirmation) return "needs_approval";
+    if (isExecuting) return "working";
+    return "idle";
+  },
+});
+
+chat.chatMode; // MyMode — fully type-safe
+```
+
+#### Confirmation Policy
+
+Auto-approve safe tools, prompt for dangerous ones:
+
+```typescript
+const chat = new ChatSession(client, {
+  sessionId: "conv-123",
+  confirmationPolicy: (request) => {
+    if (["read_file", "glob", "grep"].includes(request.name)) {
+      return { action: "approve" };
+    }
+    if (request.name === "rm") {
+      return { action: "deny", reason: "Destructive operation" };
+    }
+    return { action: "prompt" };
+  },
+});
+```
+
+### Individual Primitives
+
+For custom architectures, use the primitives directly. Each supports standalone mode (self-subscribes) or composed mode (`subscribe: false` + manual `processEvent()`).
+
+#### MessageLog
+
+Accumulates messages from execution lifecycle events with tool duration tracking.
+
+```typescript
+import { MessageLog } from "@agentick/client";
+
+const log = new MessageLog(client, {
+  sessionId: "conv-123",
+  initialMessages: [],
+  transform: undefined, // Custom MessageTransform
+});
+
+log.messages; // ChatMessage[]
+log.clear();
+log.destroy();
+```
+
+#### ToolConfirmations
+
+Manages tool confirmation lifecycle with policy-based auto-resolution.
+
+```typescript
+import { ToolConfirmations } from "@agentick/client";
+
+const tc = new ToolConfirmations(client, {
+  sessionId: "conv-123",
+  policy: (req) => (req.name === "read_file" ? { action: "approve" } : { action: "prompt" }),
+});
+
+tc.pending; // { request, respond } | null
+tc.respond({ approved: true });
+tc.destroy();
+```
+
+#### MessageSteering
+
+Input-side message routing with queue/steer modes and auto-flush.
+
+```typescript
+import { MessageSteering } from "@agentick/client";
+
+const steering = new MessageSteering(client, {
+  sessionId: "conv-123",
+  mode: "queue", // "queue" | "steer"
+  flushMode: "sequential", // "sequential" | "batched"
+  autoFlush: true,
+});
+
+steering.submit("Hello"); // Queue or send based on mode + execution state
+steering.steer("Now"); // Always send
+steering.queue("Later"); // Always queue
+steering.flush();
+steering.destroy();
+```
+
+#### Composition Pattern
+
+All primitives support `subscribe: false` for parent-controlled event fan-out:
+
+```typescript
+const log = new MessageLog(client, { sessionId: "s1", subscribe: false });
+const tc = new ToolConfirmations(client, { sessionId: "s1", subscribe: false });
+const steering = new MessageSteering(client, { sessionId: "s1", subscribe: false });
+
+// Single subscription, deterministic fan-out
+const accessor = client.session("s1");
+accessor.onEvent((event) => {
+  steering.processEvent(event);
+  log.processEvent(event);
+});
+accessor.onToolConfirmation((request, respond) => {
+  tc.handleConfirmation(request, respond);
+});
+```
+
+This is exactly what `ChatSession` does internally.
+
+### Transforms
+
+```typescript
+import { timelineToMessages, extractToolCalls, defaultDeriveMode } from "@agentick/client";
+
+// Convert timeline entries to chat messages with tool durations
+const messages = timelineToMessages(entries, toolDurations);
+
+// Extract tool calls from content blocks
+const toolCalls = extractToolCalls(contentBlocks);
+
+// Default chatMode derivation
+const mode = defaultDeriveMode({ isExecuting: true, hasPendingConfirmation: false });
+// → "streaming"
+```
+
 ## Browser Support
 
 - Chrome 89+
