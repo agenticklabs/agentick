@@ -11,6 +11,7 @@ import chalk from "chalk";
 
 const brand = chalk.hex("#34d399"); // emerald-300 — works on light and dark terminals
 const brandBold = brand.bold;
+const brandDim = chalk.hex("#065f46"); // emerald-900 — subtle borders, structural chrome
 
 export const theme = {
   // ── Roles ───────────────────────────────────────────────────────────────
@@ -41,8 +42,8 @@ export const theme = {
   reasoning: chalk.gray.italic,
 
   // ── Structural ─────────────────────────────────────────────────────────
-  border: brand,
-  separator: brand,
+  border: brandDim,
+  separator: brandDim,
   muted: chalk.dim,
 };
 
