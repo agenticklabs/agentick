@@ -51,7 +51,7 @@ mkdir -p packages/my-package/src
     "build": "tsc -p tsconfig.build.json",
     "test": "echo \"Tests run from workspace root\"",
     "typecheck": "tsc -p tsconfig.build.json --noEmit",
-    "clean": "rm -rf dist",
+    "clean": "rm -rf dist tsconfig.build.tsbuildinfo",
     "prepublishOnly": "pnpm build",
     "dev": "tsc --watch"
   },

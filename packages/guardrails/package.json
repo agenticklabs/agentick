@@ -27,7 +27,7 @@
     "build": "tsc -p tsconfig.build.json",
     "test": "echo \"Tests run from workspace root\"",
     "typecheck": "tsc -p tsconfig.build.json --noEmit",
-    "clean": "rm -rf dist"
+    "clean": "rm -rf dist tsconfig.build.tsbuildinfo"
   },
   "dependencies": {
     "@agentick/kernel": "workspace:*",

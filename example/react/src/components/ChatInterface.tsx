@@ -1,173 +1,119 @@
 /**
  * Chat Interface Component
  *
- * Architecture:
- * - execution_end events are the source of truth for messages (contains full timeline)
- * - No local message state - we render what the server sends
- * - Streaming text shows real-time model output
- * - Pending message shows optimistic user input until confirmed
+ * Uses useChat for message lifecycle (accumulation, dedup, tool durations),
+ * useStreamingText for real-time model output, and useConnection/useContextInfo
+ * for status display.
+ *
+ * History is loaded from the server before mounting the chat to seed
+ * initialMessages — useChat handles everything after that.
  */
 
-import { useState, useRef, useEffect, useCallback, useMemo } from "react";
-import { useSession, useConnection, useStreamingText, useContextInfo } from "@agentick/react";
-import type { ContentBlock, MediaSource, Message, ToolResultBlock } from "@agentick/shared";
+import { useState, useRef, useEffect, useCallback } from "react";
+import {
+  useChat,
+  useConnection,
+  useStreamingText,
+  useContextInfo,
+  type ChatMessage,
+} from "@agentick/react";
+import type { ContentBlock, MediaSource, ToolResultBlock } from "@agentick/shared";
 
-interface ChatMessage {
-  id: string;
-  role: Message["role"];
-  content: ContentBlock[];
+const SESSION_ID = "default";
+
+async function invoke(method: string, params: Record<string, unknown>) {
+  const res = await fetch("/api/invoke", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ method, params }),
+  });
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({ error: "Request failed" }));
+    throw new Error(error.error || "Request failed");
+  }
+  return res.json();
 }
 
+/**
+ * Loads session history, then mounts the chat UI.
+ * useChat captures initialMessages at mount time, so history must be
+ * available before ChatInner renders.
+ */
 export function ChatInterface() {
-  const SESSION_ID = "default";
-  const { send, accessor } = useSession({ sessionId: SESSION_ID, autoSubscribe: true });
+  const [initialMessages, setInitialMessages] = useState<ChatMessage[] | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        await invoke("sessions:create", { sessionId: SESSION_ID });
+        const data = (await invoke("sessions:get", { sessionId: SESSION_ID })) as {
+          timeline?: Array<{
+            kind?: string;
+            message?: { id?: string; role: string; content: unknown };
+          }>;
+        };
+        const timeline = Array.isArray(data.timeline) ? data.timeline : [];
+        const messages: ChatMessage[] = timeline
+          .filter((e) => e.kind === "message" && e.message)
+          .filter((e) => e.message!.role === "user" || e.message!.role === "assistant")
+          .map((e, i) => ({
+            id: e.message!.id ?? `msg-${i}`,
+            role: e.message!.role as "user" | "assistant",
+            content: e.message!.content as string | ContentBlock[],
+          }));
+        if (!cancelled) setInitialMessages(messages);
+      } catch {
+        if (!cancelled) setInitialMessages([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  if (!initialMessages) {
+    return (
+      <div className="chat-messages">
+        <p style={{ textAlign: "center", opacity: 0.5, marginTop: "2rem" }}>Loading session...</p>
+      </div>
+    );
+  }
+
+  return <ChatInner initialMessages={initialMessages} />;
+}
+
+function ChatInner({ initialMessages }: { initialMessages: ChatMessage[] }) {
+  const {
+    messages,
+    chatMode,
+    isExecuting,
+    lastSubmitted,
+    toolConfirmation,
+    submit,
+    respondToConfirmation,
+  } = useChat({ sessionId: SESSION_ID, initialMessages });
+
   const { isConnected, isConnecting } = useConnection();
   const { text: streamingText, isStreaming, clear: clearStreamingText } = useStreamingText();
   const { contextInfo } = useContextInfo({ sessionId: SESSION_ID });
 
-  // Input state
   const [input, setInput] = useState("");
-  const [isSending, setIsSending] = useState(false);
-
-  // Messages from server (source of truth)
-  const [serverMessages, setServerMessages] = useState<Message[]>([]);
-
-  // Pending user message (optimistic, shown until server confirms)
-  const [pendingMessage, setPendingMessage] = useState<string | null>(null);
-
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // Scroll to bottom when content changes
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [serverMessages, streamingText, isStreaming, pendingMessage]);
+  }, [messages, streamingText, isStreaming, lastSubmitted, toolConfirmation]);
 
-  // Helper to invoke gateway methods
-  const invoke = async (method: string, params: Record<string, unknown>) => {
-    const res = await fetch("/api/invoke", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ method, params }),
-    });
-    if (!res.ok) {
-      const error = await res.json().catch(() => ({ error: "Request failed" }));
-      throw new Error(error.error || "Request failed");
-    }
-    return res.json();
-  };
-
-  // Load initial history from server
-  useEffect(() => {
-    let isMounted = true;
-
-    const loadHistory = async () => {
-      try {
-        // Ensure session exists
-        await invoke("sessions:create", { sessionId: SESSION_ID });
-
-        // Load timeline
-        const data = (await invoke("sessions:get", { sessionId: SESSION_ID })) as {
-          timeline?: unknown[];
-        };
-        const timeline = Array.isArray(data.timeline) ? data.timeline : [];
-
-        const messages = timeline
-          .map((entry: unknown) => (entry as { message?: Message }).message)
-          .filter((msg: Message | undefined): msg is Message => !!msg);
-
-        if (isMounted) {
-          setServerMessages(messages);
-        }
-      } catch (error) {
-        console.warn("Failed to load session history:", error);
-      }
-    };
-
-    loadHistory();
-    return () => {
-      isMounted = false;
-    };
-  }, []);
-
-  // Subscribe to execution_end events to get timeline updates.
-  // Prefers newTimelineEntries (delta/append) over output.timeline (full replace).
-  useEffect(() => {
-    if (!accessor) return;
-
-    type TimelineEntry = { kind: string; message?: Message };
-
-    const extractMessages = (entries: TimelineEntry[]): Message[] =>
-      entries.filter((e) => e.kind === "message" && e.message).map((e) => e.message!);
-
-    const unsubscribe = accessor.onEvent((event) => {
-      if (event.type === "execution_end") {
-        const execEnd = event as {
-          type: "execution_end";
-          newTimelineEntries?: TimelineEntry[];
-          output?: { timeline?: TimelineEntry[] };
-        };
-
-        // Prefer delta (append) over full timeline (replace)
-        if (execEnd.newTimelineEntries && execEnd.newTimelineEntries.length > 0) {
-          const newMessages = extractMessages(execEnd.newTimelineEntries);
-          if (newMessages.length > 0) {
-            setServerMessages((prev) => [...prev, ...newMessages]);
-            setPendingMessage(null);
-          }
-          return;
-        }
-
-        // Fallback: full timeline replace
-        if (execEnd.output?.timeline) {
-          const messages = extractMessages(execEnd.output.timeline);
-          if (messages.length > 0) {
-            setServerMessages(messages);
-            setPendingMessage(null);
-          }
-        }
-      }
-    });
-
-    return unsubscribe;
-  }, [accessor]);
-
-  // Note: The pendingMessage state provides optimistic UX for the current user's messages
-  // while waiting for the server to confirm via execution_end event.
-
-  // Convert server messages to display format
-  const displayMessages = useMemo((): ChatMessage[] => {
-    return serverMessages.map((msg, idx) => ({
-      id: msg.id ?? `msg-${idx}`,
-      role: msg.role,
-      content: msg.content as ContentBlock[],
-    }));
-  }, [serverMessages]);
-
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-
     const trimmed = input.trim();
-    if (!trimmed && (!isSending || !isConnected)) return;
-
-    setIsSending(true);
+    if (!trimmed) return;
     setInput("");
     clearStreamingText();
-
-    // Show pending message immediately (optimistic)
-    setPendingMessage(trimmed);
-
-    try {
-      await send(trimmed);
-    } catch (err) {
-      console.error("Failed to send message:", err);
-      // On error, clear pending and show error
-      setPendingMessage(null);
-    } finally {
-      setIsSending(false);
-    }
+    submit(trimmed);
   };
 
-  // Render a content block
   const renderContent = useCallback((content: ContentBlock, index: number) => {
     switch (content.type) {
       case "text":
@@ -206,7 +152,7 @@ export function ChatInterface() {
       case "tool_use":
         return (
           <div key={index} className="tool-call">
-            <strong>🔧 {content.name}</strong>
+            <strong>{content.name}</strong>
             <pre>{JSON.stringify(content.input, null, 2)}</pre>
           </div>
         );
@@ -222,7 +168,7 @@ export function ChatInterface() {
 
         return (
           <div key={index} className={`tool-result ${resultContent.isError ? "error" : ""}`}>
-            <strong>📋 {resultContent.name}</strong>
+            <strong>{resultContent.name}</strong>
             <pre>{resultText}</pre>
           </div>
         );
@@ -237,36 +183,63 @@ export function ChatInterface() {
     }
   }, []);
 
+  const renderMessageContent = (msg: ChatMessage) => {
+    if (Array.isArray(msg.content)) {
+      return msg.content.map((block, idx) => renderContent(block as ContentBlock, idx));
+    }
+    return <span className="text-content">{msg.content}</span>;
+  };
+
   return (
     <>
-      {/* <div className="chat-header">
-        <h2>Chat</h2>
-        <span className={`connection-status ${isConnected ? "connected" : ""}`}>
-          {isConnected ? "Connected" : isConnecting ? "Connecting..." : "Disconnected"}
-        </span>
-      </div> */}
-
       <div className="chat-messages">
-        {displayMessages.map((msg) => (
+        {messages.map((msg) => (
           <div key={msg.id} className={`chat-message ${msg.role}`}>
             <div className="message-role">{msg.role}</div>
-            <div className="message-content">
-              {msg.content.map((block, idx) => renderContent(block, idx))}
-            </div>
+            <div className="message-content">{renderMessageContent(msg)}</div>
           </div>
         ))}
 
-        {/* Show pending user message (optimistic) */}
-        {pendingMessage && (
+        {/* Optimistic user message — shown until execution_end confirms it */}
+        {lastSubmitted && (
           <div className="chat-message user pending">
             <div className="message-role">user</div>
             <div className="message-content">
-              <span className="text-content">{pendingMessage}</span>
+              <span className="text-content">{lastSubmitted}</span>
             </div>
           </div>
         )}
 
-        {/* Show streaming assistant response */}
+        {/* Tool confirmation prompt */}
+        {toolConfirmation && (
+          <div className="chat-message tool-confirmation">
+            <div className="message-role">tool confirmation</div>
+            <div className="message-content">
+              <div className="confirmation-body">
+                <strong>{toolConfirmation.request.name}</strong> wants to run:
+                <pre>{JSON.stringify(toolConfirmation.request.arguments, null, 2)}</pre>
+                <div className="confirmation-actions">
+                  <button
+                    className="confirm-approve"
+                    onClick={() => respondToConfirmation({ approved: true })}
+                  >
+                    Approve
+                  </button>
+                  <button
+                    className="confirm-deny"
+                    onClick={() =>
+                      respondToConfirmation({ approved: false, reason: "User denied" })
+                    }
+                  >
+                    Deny
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Streaming assistant response */}
         {isStreaming && streamingText && (
           <div className="chat-message assistant streaming">
             <div className="message-role">assistant</div>
@@ -290,14 +263,10 @@ export function ChatInterface() {
             placeholder={
               isConnected ? "Type a message..." : isConnecting ? "Connecting..." : "Disconnected"
             }
-            disabled={false && (!isConnected || isSending)}
+            disabled={chatMode === "confirming_tool"}
           />
-          <button
-            type="submit"
-            className="chat-send-btn"
-            disabled={false && (!isConnected || isSending || !input.trim())}
-          >
-            {isSending ? "..." : "Send"}
+          <button type="submit" className="chat-send-btn" disabled={isExecuting || !input.trim()}>
+            {chatMode === "streaming" ? "..." : "Send"}
           </button>
         </form>
 
@@ -307,8 +276,10 @@ export function ChatInterface() {
             {isConnected ? "Connected" : isConnecting ? "Connecting..." : "Disconnected"}
           </span>
 
-          {isSending && <span>Sending...</span>}
-          {isStreaming && <span>Streaming...</span>}
+          {chatMode === "streaming" && <span>Streaming...</span>}
+          {chatMode === "confirming_tool" && (
+            <span className="confirming">Awaiting confirmation...</span>
+          )}
 
           {contextInfo && (
             <span className="context-info">

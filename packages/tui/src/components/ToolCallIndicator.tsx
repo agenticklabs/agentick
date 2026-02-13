@@ -9,7 +9,7 @@ import { useState, useEffect } from "react";
 import { Box, Text } from "ink";
 import Spinner from "ink-spinner";
 import { useEvents } from "@agentick/react";
-import type { StreamEvent } from "@agentick/shared";
+import type { ToolCallEvent, ToolCallStartEvent, ToolResultEvent } from "@agentick/shared";
 
 interface ActiveTool {
   id: string;
@@ -32,8 +32,13 @@ export function ToolCallIndicator({ sessionId }: ToolCallIndicatorProps) {
     if (!event) return;
 
     if (event.type === "tool_call_start" || event.type === "tool_call") {
-      const e = event as StreamEvent & { toolUseId?: string; name?: string; id?: string };
-      const id = e.toolUseId ?? e.id ?? "unknown";
+      let e: ToolCallStartEvent | ToolCallEvent;
+      if (event.type === "tool_call_start") {
+        e = event as ToolCallStartEvent;
+      } else {
+        e = event as ToolCallEvent;
+      }
+      const id = e.callId ?? "unknown";
       const name = e.name ?? "tool";
       setTools((prev) => {
         if (prev.some((t) => t.id === id)) return prev;
@@ -42,8 +47,8 @@ export function ToolCallIndicator({ sessionId }: ToolCallIndicatorProps) {
     }
 
     if (event.type === "tool_result") {
-      const e = event as StreamEvent & { toolUseId?: string };
-      const id = e.toolUseId ?? "unknown";
+      const e = event as ToolResultEvent;
+      const id = e.callId ?? "unknown";
       setTools((prev) => prev.map((t) => (t.id === id ? { ...t, status: "done" } : t)));
     }
   }, [event]);
@@ -62,7 +67,7 @@ export function ToolCallIndicator({ sessionId }: ToolCallIndicatorProps) {
   return (
     <Box flexDirection="column" marginLeft={2}>
       {tools.map((tool) => (
-        <Box key={tool.id} gap={1}>
+        <Box key={tool.id} gap={1} flexDirection="row">
           {tool.status === "running" ? (
             <Text color="yellow">
               <Spinner type="dots" />

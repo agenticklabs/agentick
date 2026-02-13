@@ -2150,6 +2150,12 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
       this._eventResolvers = [];
 
       this._status = "idle";
+
+      // Auto-resume if messages were queued during execution
+      if (this._queuedMessages.length > 0) {
+        const tickProps = (this._lastProps ?? ({} as P)) as P;
+        void this.render(tickProps);
+      }
     }
 
     return {
@@ -2662,7 +2668,8 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
     const shouldStop = response.shouldStop || false;
     const stopReason = response.stopReason?.reason;
     const hasToolCalls = (response.toolCalls?.length ?? 0) > 0;
-    const hasPendingMessages = (this.ctx?.getQueuedMessages().length ?? 0) > 0;
+    const hasPendingMessages =
+      (this.ctx?.getQueuedMessages().length ?? 0) > 0 || this._queuedMessages.length > 0;
 
     return {
       shouldContinue: !shouldStop && (hasToolCalls || hasPendingMessages),

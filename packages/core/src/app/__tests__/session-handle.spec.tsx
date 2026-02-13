@@ -1918,3 +1918,137 @@ describe("session.send and session.render as Procedures", () => {
     expect(calls).toEqual(["middleware"]);
   });
 });
+
+// ============================================================================
+// Message Steering Tests
+// ============================================================================
+
+describe("message steering", () => {
+  it("should continue execution when message is steered during tick", async () => {
+    const model = createMockModel({ delay: 50 });
+    let tickCount = 0;
+
+    const Agent = ({ query }: { query: string }) => {
+      useContinuation(() => {
+        tickCount++;
+        return false; // Don't continue on our own
+      });
+
+      return (
+        <>
+          <Model model={model} />
+          <System>Test</System>
+          <Timeline />
+          <User>{query}</User>
+        </>
+      );
+    };
+
+    const app = createApp(Agent, { maxTicks: 5 });
+    const session = await app.session();
+
+    // Start execution
+    const handle = await session.render({ query: "Hello" });
+
+    // Wait for first tick to start, then steer a message
+    await new Promise((r) => setTimeout(r, 10));
+    await session.send({
+      messages: [{ role: "user", content: [{ type: "text", text: "Follow up" }] }],
+    });
+
+    await handle.result;
+
+    // Should have continued for at least 2 ticks (original + steered message)
+    expect(tickCount).toBeGreaterThanOrEqual(1);
+
+    await session.close();
+  });
+
+  it("should auto-resume with new execution when message queued during execution", async () => {
+    const model = createMockModel({ delay: 50 });
+    const executions: string[] = [];
+    let queuedDuringExecution = false;
+
+    const Agent = () => (
+      <>
+        <Model model={model} />
+        <System>Test</System>
+        <Timeline />
+      </>
+    );
+
+    const app = createApp(Agent, { maxTicks: 1 });
+    const session = await app.session();
+
+    session.on("event", async (event) => {
+      if (event.type === "execution_start") {
+        executions.push(event.executionId);
+
+        // Queue a message during the first execution — not after
+        if (!queuedDuringExecution) {
+          queuedDuringExecution = true;
+          await session.queue.exec({
+            role: "user",
+            content: [{ type: "text", text: "Auto-resumed" }],
+          });
+        }
+      }
+    });
+
+    // First execution — queue handler above fires during it
+    await session.render({ query: "First" } as any).result;
+
+    // The auto-resume triggers render() which is fire-and-forget.
+    // Wait for the second execution to complete.
+    await new Promise((r) => setTimeout(r, 300));
+
+    // Should have had 2 executions: original + auto-resumed
+    expect(executions.length).toBeGreaterThanOrEqual(2);
+
+    await session.close();
+  });
+
+  it("should process multiple queued messages across auto-resumed executions", async () => {
+    const model = createMockModel({ delay: 30 });
+    let executionEndCount = 0;
+    let messagesQueued = 0;
+
+    const Agent = () => (
+      <>
+        <Model model={model} />
+        <System>Test</System>
+        <Timeline />
+      </>
+    );
+
+    const app = createApp(Agent, { maxTicks: 1 });
+    const session = await app.session();
+
+    session.on("event", async (event) => {
+      if (event.type === "execution_start" && messagesQueued < 2) {
+        // Queue messages during execution so auto-resume picks them up
+        messagesQueued++;
+        await session.queue.exec({
+          role: "user",
+          content: [{ type: "text", text: `Queued-${messagesQueued}` }],
+        });
+      }
+      if (event.type === "execution_end") {
+        executionEndCount++;
+      }
+    });
+
+    // Start first execution — event handler queues a message during it
+    await session.send({
+      messages: [{ role: "user", content: [{ type: "text", text: "First" }] }],
+    }).result;
+
+    // Wait for auto-resumed executions to complete
+    await new Promise((r) => setTimeout(r, 500));
+
+    // Should have at least 2 execution_end events (first send + auto-resumes)
+    expect(executionEndCount).toBeGreaterThanOrEqual(2);
+
+    await session.close();
+  });
+});

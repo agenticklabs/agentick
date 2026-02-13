@@ -84,9 +84,27 @@ export {
   useEvents,
   useStreamingText,
   useContextInfo,
+  useMessageSteering,
+  useMessages,
+  useToolConfirmations,
+  useChat,
   type ContextInfo,
   type UseContextInfoOptions,
   type UseContextInfoResult,
+  type UseMessageSteeringOptions,
+  type UseMessageSteeringResult,
+  type MessageSteeringState,
+  type SteeringMode,
+  type FlushMode,
+  type UseMessagesOptions,
+  type UseMessagesResult,
+  type UseToolConfirmationsOptions,
+  type UseToolConfirmationsResult,
+  type UseChatOptions,
+  type UseChatResult,
+  type ChatMode,
+  type ChatMessage,
+  type ToolConfirmationState,
 } from "./hooks";
 
 // Types
@@ -121,3 +139,11 @@ export type {
 
 // Re-export createClient for users who want to create a client manually
 export { createClient } from "@agentick/client";
+
+// Re-export chat transform functions for history bootstrapping
+export {
+  timelineToMessages,
+  extractToolCalls,
+  defaultTransform,
+  defaultDeriveMode,
+} from "@agentick/client";

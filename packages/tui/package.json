@@ -45,7 +45,7 @@
     "build": "tsc -p tsconfig.build.json",
     "dev": "tsc --watch",
     "typecheck": "tsc -p tsconfig.build.json --noEmit",
-    "clean": "rm -rf dist",
+    "clean": "rm -rf dist tsconfig.build.tsbuildinfo",
     "lint": "oxlint src/",
     "format:check": "oxfmt --check src/",
     "start": "tsx --tsconfig tsconfig.json src/bin.ts",

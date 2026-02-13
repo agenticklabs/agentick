@@ -31,7 +31,7 @@
     "build": "tsc -p tsconfig.build.json",
     "dev": "tsc --watch",
     "typecheck": "tsc --noEmit",
-    "clean": "rm -rf dist",
+    "clean": "rm -rf dist tsconfig.build.tsbuildinfo",
     "test": "vitest run",
     "test:watch": "vitest",
     "start": "tsx src/bin.ts"

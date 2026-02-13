@@ -558,6 +558,64 @@ body {
   background: var(--primary-hover);
 }
 
+/* Tool confirmation */
+.chat-message.tool-confirmation {
+  background: rgba(245, 158, 11, 0.1);
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  margin-right: auto;
+  max-width: 90%;
+}
+
+.confirmation-body strong {
+  color: #fbbf24;
+}
+
+.confirmation-body pre {
+  background: var(--bg);
+  margin: 0.5rem 0;
+}
+
+.confirmation-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+.confirm-approve {
+  padding: 0.5rem 1rem;
+  background: var(--success);
+  border: none;
+  border-radius: 0.375rem;
+  color: white;
+  font-weight: 500;
+  cursor: pointer;
+  transition: opacity 0.2s;
+}
+
+.confirm-approve:hover {
+  opacity: 0.85;
+}
+
+.confirm-deny {
+  padding: 0.5rem 1rem;
+  background: transparent;
+  border: 1px solid var(--danger);
+  border-radius: 0.375rem;
+  color: var(--danger);
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.confirm-deny:hover {
+  background: var(--danger);
+  color: white;
+}
+
+.chat-status .confirming {
+  color: #fbbf24;
+}
+
 /* Responsive */
 @media (max-width: 768px) {
   .app-main {

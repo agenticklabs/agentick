@@ -42,7 +42,7 @@
     "typecheck": "tsc -p tsconfig.build.json --noEmit",
     "lint": "oxlint src/",
     "format:check": "oxfmt --check src/",
-    "clean": "rm -rf dist",
+    "clean": "rm -rf dist tsconfig.build.tsbuildinfo",
     "prepublishOnly": "pnpm build",
     "dev": "tsc --watch"
   },
