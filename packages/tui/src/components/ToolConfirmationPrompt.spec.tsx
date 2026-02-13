@@ -69,7 +69,7 @@ describe("ToolConfirmationPrompt", () => {
     await waitFor(() => expect(lastFrame()!).toContain("[A] Always Allow"));
 
     stdin.write("a");
-    await waitFor(() => expect(onRespond).toHaveBeenCalledWith({ approved: true }));
+    await waitFor(() => expect(onRespond).toHaveBeenCalledWith({ approved: true, always: true }));
   });
 
   it("shows message when present in request", async () => {
@@ -96,5 +96,39 @@ describe("ToolConfirmationPrompt", () => {
     await flush();
 
     expect(lastFrame()!).toContain("...");
+  });
+
+  it("renders diff view when metadata has type 'diff'", async () => {
+    const onRespond = vi.fn();
+    const request = makeRequest({
+      name: "write_file",
+      arguments: { path: "src/app.ts", content: "new content" },
+      metadata: {
+        type: "diff",
+        filePath: "src/app.ts",
+        patch: `--- a/src/app.ts
++++ b/src/app.ts
+@@ -1,3 +1,3 @@
+ import { foo } from "foo";
+-const x = 1;
++const x = 42;
+ export default x;
+`,
+        isNewFile: false,
+      },
+    });
+    const { lastFrame } = render(
+      <ToolConfirmationPrompt request={request} onRespond={onRespond} />,
+    );
+    await flush();
+
+    const frame = lastFrame()!;
+    // Should show the file path from diff metadata
+    expect(frame).toContain("src/app.ts");
+    // Should show diff lines (additions and removals)
+    expect(frame).toContain("+const x = 42;");
+    expect(frame).toContain("-const x = 1;");
+    // Should NOT show raw JSON arguments
+    expect(frame).not.toContain('"content"');
   });
 });

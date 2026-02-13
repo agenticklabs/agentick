@@ -42,7 +42,14 @@ import { jsx } from "../jsx/jsx-runtime";
 import type { JSX } from "../jsx/jsx-runtime";
 import type { COMInput, COMOutput, COMTimelineEntry, TimelineTag } from "../com/types";
 import type { EngineModel } from "../model/model";
-import type { ToolResult, ToolCall, Message, UsageStats, ContentBlock } from "@agentick/shared";
+import type {
+  ToolResult,
+  ToolCall,
+  Message,
+  UsageStats,
+  ContentBlock,
+  ToolConfirmationResponse,
+} from "@agentick/shared";
 import {
   devToolsEmitter,
   forwardToDevTools,
@@ -85,6 +92,8 @@ import type {
 import React from "react";
 
 // ════════════════════════════════════════════════════════════════════════════
+const log = Logger.for("Session");
+
 // Session Context Extension
 // ════════════════════════════════════════════════════════════════════════════
 
@@ -123,6 +132,19 @@ function getSessionContext(): SessionContext {
 function ensureMessageId(message: Message): Message {
   if (message.id) return message;
   return { ...message, id: randomUUID() };
+}
+
+function tryDisplaySummary(
+  tool: ExecutableTool | undefined,
+  input: Record<string, unknown>,
+): string | undefined {
+  if (!tool?.metadata?.displaySummary) return undefined;
+  try {
+    return tool.metadata.displaySummary(input);
+  } catch (err) {
+    log.warn({ error: err, tool: tool.metadata.name }, "displaySummary threw");
+    return undefined;
+  }
 }
 
 /**
@@ -1925,12 +1947,15 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
           toolStartTime = Date.now();
           for (const call of response.toolCalls) {
             const toolCallTimestamp = timestamp();
+            const toolDef = compiled.tools?.find((t: any) => t.metadata?.name === call.name);
+            const summary = tryDisplaySummary(toolDef, call.input);
             this.emitEvent({
               type: "tool_call",
               callId: call.id,
               blockIndex: 0,
               name: call.name,
               input: call.input,
+              summary,
               startedAt: toolCallTimestamp,
               completedAt: toolCallTimestamp,
             });
@@ -2468,81 +2493,136 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
     const results: ToolResult[] = [];
     const executableTools = configTools.filter((t): t is ExecutableTool => "run" in t);
 
-    for (const call of toolCalls) {
-      const startedAt = timestamp();
-      // Check if OUTPUT tool
-      const tool = executableTools.find((t) => t.metadata?.name === call.name);
-      const isOutputTool = tool && tool.metadata?.type === "output";
+    // Subscribe to tool_confirmation channel to forward responses to the coordinator
+    const confirmationChannel = this.channel("tool_confirmation");
+    const coordinator = executor.getConfirmationCoordinator();
+    const unsubscribe = confirmationChannel.subscribe((event) => {
+      if (event.type === "response" && event.id) {
+        const payload = event.payload as ToolConfirmationResponse | undefined;
+        if (payload) {
+          coordinator.resolveConfirmation(event.id, payload.approved, payload.always ?? false);
+        }
+      }
+    });
 
-      if (isOutputTool) {
-        outputs[call.name] = call.input;
-        const completedAt = timestamp();
+    // Confirmation callbacks for stream event emission
+    const confirmationCallbacks = {
+      onConfirmationRequired: async (
+        call: ToolCall,
+        message: string,
+        metadata?: Record<string, unknown>,
+      ) => {
         this.emitEvent({
-          type: "tool_result",
+          type: "tool_confirmation_required",
           callId: call.id,
           name: call.name,
-          result: call.input,
-          isError: false,
-          executedBy: "engine",
-          startedAt,
-          completedAt,
+          input: call.input,
+          message,
+          metadata,
         });
-        continue;
-      }
+      },
+      onConfirmationResult: async (
+        confirmation: { toolUseId: string; confirmed: boolean; always?: boolean },
+        call: ToolCall,
+      ) => {
+        this.emitEvent({
+          type: "tool_confirmation_result",
+          callId: call.id,
+          confirmed: confirmation.confirmed,
+          always: confirmation.always,
+        });
+      },
+    };
 
-      // Execute tool (optionally wrapped by execution runner)
-      try {
-        const runner = this.appOptions.runner;
-        let toolResult: ToolResult;
+    try {
+      for (const call of toolCalls) {
+        const startedAt = timestamp();
+        // Check if OUTPUT tool
+        const tool = executableTools.find((t) => t.metadata?.name === call.name);
+        const isOutputTool = tool && tool.metadata?.type === "output";
 
-        if (runner?.executeToolCall) {
-          toolResult = await runner.executeToolCall(call, tool, async () => {
-            const r = await executor.processToolWithConfirmation(call, this.ctx!, executableTools);
-            return r.result;
+        if (isOutputTool) {
+          outputs[call.name] = call.input;
+          const completedAt = timestamp();
+          this.emitEvent({
+            type: "tool_result",
+            callId: call.id,
+            name: call.name,
+            result: call.input,
+            isError: false,
+            executedBy: "engine",
+            startedAt,
+            completedAt,
           });
-        } else {
-          const r = await executor.processToolWithConfirmation(call, this.ctx!, executableTools);
-          toolResult = r.result;
+          continue;
         }
 
-        results.push(toolResult);
-        const completedAt = timestamp();
-        this.emitEvent({
-          type: "tool_result",
-          callId: toolResult.toolUseId,
-          name: toolResult.name,
-          result: toolResult,
-          isError: !toolResult.success,
-          executedBy: "engine",
-          startedAt,
-          completedAt,
-        });
-      } catch (error) {
-        const errorResult: ToolResult = {
-          id: randomUUID(),
-          toolUseId: call.id,
-          name: call.name,
-          success: false,
-          content: [
-            {
-              type: "text" as const,
-              text: `Tool execution failed: ${error instanceof Error ? error.message : String(error)}`,
-            },
-          ],
-        };
-        results.push(errorResult);
-        const completedAt = timestamp();
-        this.emitEvent({
-          type: "tool_result",
-          callId: call.id,
-          name: call.name,
-          result: errorResult,
-          isError: true,
-          executedBy: "engine",
-          startedAt,
-          completedAt,
-        });
+        // Execute tool (optionally wrapped by execution runner)
+        try {
+          const runner = this.appOptions.runner;
+          let toolResult: ToolResult;
+
+          if (runner?.executeToolCall) {
+            toolResult = await runner.executeToolCall(call, tool, async () => {
+              const r = await executor.processToolWithConfirmation(
+                call,
+                this.ctx!,
+                executableTools,
+                confirmationCallbacks,
+              );
+              return r.result;
+            });
+          } else {
+            const r = await executor.processToolWithConfirmation(
+              call,
+              this.ctx!,
+              executableTools,
+              confirmationCallbacks,
+            );
+            toolResult = r.result;
+          }
+
+          results.push(toolResult);
+          const completedAt = timestamp();
+          this.emitEvent({
+            type: "tool_result",
+            callId: toolResult.toolUseId,
+            name: toolResult.name,
+            result: toolResult,
+            isError: !toolResult.success,
+            executedBy: "engine",
+            startedAt,
+            completedAt,
+          });
+        } catch (error) {
+          const errorResult: ToolResult = {
+            id: randomUUID(),
+            toolUseId: call.id,
+            name: call.name,
+            success: false,
+            content: [
+              {
+                type: "text" as const,
+                text: `Tool execution failed: ${error instanceof Error ? error.message : String(error)}`,
+              },
+            ],
+          };
+          results.push(errorResult);
+          const completedAt = timestamp();
+          this.emitEvent({
+            type: "tool_result",
+            callId: call.id,
+            name: call.name,
+            result: errorResult,
+            isError: true,
+            executedBy: "engine",
+            startedAt,
+            completedAt,
+          });
+        }
       }
+    } finally {
+      unsubscribe();
     }
 
     return results;

@@ -7,7 +7,9 @@
 
 import { createTool } from "@agentick/core";
 import { z } from "zod";
+import { createTwoFilesPatch } from "diff";
 import { useSandbox } from "./context";
+import { applyEdits } from "./edit";
 
 /**
  * Execute a shell command in the sandbox.
@@ -18,6 +20,7 @@ export const Shell = createTool({
   input: z.object({
     command: z.string().describe("The shell command to execute."),
   }),
+  displaySummary: (input) => input.command.split("\n")[0]!.slice(0, 80),
   use: () => ({ sandbox: useSandbox() }),
   handler: async ({ command }, deps) => {
     const result = await deps!.sandbox.exec(command);
@@ -38,6 +41,7 @@ export const ReadFile = createTool({
   input: z.object({
     path: z.string().describe("Path to the file to read."),
   }),
+  displaySummary: (input) => input.path,
   use: () => ({ sandbox: useSandbox() }),
   handler: async ({ path }, deps) => {
     const content = await deps!.sandbox.readFile(path);
@@ -55,6 +59,22 @@ export const WriteFile = createTool({
     path: z.string().describe("Path to the file to write."),
     content: z.string().describe("Content to write to the file."),
   }),
+  displaySummary: (input) => input.path,
+  requiresConfirmation: true,
+  confirmationPreview: async ({ path, content }, deps) => {
+    let original = "";
+    let isNewFile = true;
+    try {
+      original = await deps.sandbox.readFile(path);
+      isNewFile = false;
+    } catch {
+      // New file
+    }
+    const patch = createTwoFilesPatch(`a/${path}`, `b/${path}`, original, content, "", "", {
+      context: 3,
+    });
+    return { type: "diff", filePath: path, patch, isNewFile };
+  },
   use: () => ({ sandbox: useSandbox() }),
   handler: async ({ path, content }, deps) => {
     await deps!.sandbox.writeFile(path, content);
@@ -67,6 +87,19 @@ export const WriteFile = createTool({
  */
 export const EditFile = createTool({
   name: "edit_file",
+  displaySummary: (input) => `${input.path} (${input.edits.length} edit(s))`,
+  requiresConfirmation: true,
+  // Preview reads the file and applies edits independently of the handler.
+  // Intentional: the file may change between preview and execution, so
+  // the preview must reflect state at preview-time, not handler-time.
+  confirmationPreview: async ({ path, edits }, deps) => {
+    const original = await deps.sandbox.readFile(path);
+    const result = applyEdits(original, edits);
+    const patch = createTwoFilesPatch(`a/${path}`, `b/${path}`, original, result.content, "", "", {
+      context: 3,
+    });
+    return { type: "diff", filePath: path, patch, isNewFile: false };
+  },
   description: `Apply surgical text edits to a file. Supports replace, delete, insert, and range operations.
 
 MODES:

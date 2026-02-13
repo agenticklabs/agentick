@@ -54,10 +54,12 @@
   },
   "dependencies": {
     "@agentick/core": "workspace:*",
+    "diff": "^8.0.3",
     "react": "^19.0.0",
     "zod": "^4.3.6"
   },
   "devDependencies": {
+    "@types/diff": "^8.0.0",
     "@types/react": "^19.2.13",
     "typescript": "^5.7.3",
     "vitest": "^4.0.18"

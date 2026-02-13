@@ -121,6 +121,32 @@ import { Shell, ReadFile, WriteFile, EditFile } from "@agentick/sandbox";
 </Sandbox>
 ```
 
+### Confirmation
+
+`WriteFile` and `EditFile` require user confirmation before execution. The TUI
+renders a colored unified diff so the user can review changes before approving.
+
+```tsx
+// Confirmation is on by default — disable per-instance if needed
+<WriteFile requiresConfirmation={false} />
+```
+
+Custom tools can define `confirmationPreview` to compute preview metadata:
+
+```tsx
+const MyTool = createTool({
+  name: "my_tool",
+  requiresConfirmation: true,
+  confirmationPreview: async (input, deps) => ({
+    type: "diff",
+    filePath: input.path,
+    patch: computePatch(input),
+    isNewFile: false,
+  }),
+  // ...
+});
+```
+
 ### Tree Scoping
 
 Multiple sandboxes in the same tree work naturally. Each tool accesses its nearest `<Sandbox>` provider:

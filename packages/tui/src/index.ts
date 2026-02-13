@@ -41,6 +41,7 @@ export { MessageList } from "./components/MessageList.js";
 export { StreamingMessage } from "./components/StreamingMessage.js";
 export { ToolCallIndicator } from "./components/ToolCallIndicator.js";
 export { ToolConfirmationPrompt } from "./components/ToolConfirmationPrompt.js";
+export { DiffView } from "./components/DiffView.js";
 export { ErrorDisplay } from "./components/ErrorDisplay.js";
 export { InputBar } from "./components/InputBar.js";
 export { RichTextInput } from "./components/RichTextInput.js";

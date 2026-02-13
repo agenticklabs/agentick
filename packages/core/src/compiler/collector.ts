@@ -252,6 +252,7 @@ function collectTool(node: AgentickNode, result: CompiledStructure): void {
   result.tools.push({
     metadata,
     run: node.props.handler,
+    preview: node.props.preview,
   } as ExecutableTool);
 }
 

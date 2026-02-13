@@ -437,6 +437,11 @@ export class ToolExecutor {
    * This is designed for parallel execution - each tool can independently
    * wait for confirmation while other tools are being processed.
    *
+   * Note: Confirmation is currently tool-scoped — only tools with
+   * `requiresConfirmation` trigger this flow. The coordinator and channel
+   * protocol are general-purpose; extending to commands or model-initiated
+   * confirmation is a future possibility.
+   *
    * @param call - The tool call to process
    * @param ctx - COM for tool resolution
    * @param configTools - Optional config tools for fallback
@@ -448,7 +453,11 @@ export class ToolExecutor {
     ctx: COM,
     configTools: ExecutableTool[] = [],
     callbacks: {
-      onConfirmationRequired?: (call: ToolCall, message: string) => void | Promise<void>;
+      onConfirmationRequired?: (
+        call: ToolCall,
+        message: string,
+        metadata?: Record<string, unknown>,
+      ) => void | Promise<void>;
       onConfirmationResult?: (
         confirmation: ToolConfirmationResult,
         call: ToolCall,
@@ -466,11 +475,22 @@ export class ToolExecutor {
     let confirmation: ToolConfirmationResult | null = null;
 
     if (confirmCheck?.required) {
+      // Compute preview metadata if tool provides a confirmationPreview
+      let metadata: Record<string, unknown> | undefined;
+      if (confirmCheck.tool.preview) {
+        try {
+          metadata = await confirmCheck.tool.preview(call.input);
+        } catch {
+          // Preview failure must not block confirmation
+        }
+      }
+
       // Notify that confirmation is required
       if (callbacks.onConfirmationRequired) {
         await callbacks.onConfirmationRequired(
           call,
           confirmCheck.message || `Allow ${call.name} to execute?`,
+          metadata,
         );
       }
 

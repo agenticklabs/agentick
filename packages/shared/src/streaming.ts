@@ -309,6 +309,7 @@ export type ToolCallEvent = {
   blockIndex: number;
   name: string;
   input: Record<string, unknown>;
+  summary?: string;
   startedAt: string;
   completedAt: string;
 } & StreamEventBase;
@@ -474,6 +475,20 @@ export type ToolResultEvent = {
 } & StreamEventBase;
 
 /**
+ * Metadata for diff-based confirmation previews.
+ *
+ * Returned by confirmationPreview hooks (e.g., WriteFile, EditFile) and
+ * carried on ToolConfirmationRequiredEvent.metadata. UI components use
+ * isDiffPreview() to discriminate and render a colored diff view.
+ */
+export interface DiffPreviewMetadata {
+  type: "diff";
+  filePath: string;
+  patch: string;
+  isNewFile: boolean;
+}
+
+/**
  * Tool confirmation events (for requiresConfirmation tools)
  */
 export type ToolConfirmationRequiredEvent = {
@@ -482,6 +497,7 @@ export type ToolConfirmationRequiredEvent = {
   name: string;
   input: Record<string, unknown>;
   message: string;
+  metadata?: Record<string, unknown>;
 } & StreamEventBase;
 
 export type ToolConfirmationResultEvent = {

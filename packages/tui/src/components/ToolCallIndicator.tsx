@@ -14,6 +14,7 @@ import type { ToolCallEvent, ToolCallStartEvent, ToolResultEvent } from "@agenti
 interface ActiveTool {
   id: string;
   name: string;
+  summary?: string;
   status: "running" | "done";
 }
 
@@ -40,9 +41,10 @@ export function ToolCallIndicator({ sessionId }: ToolCallIndicatorProps) {
       }
       const id = e.callId ?? "unknown";
       const name = e.name ?? "tool";
+      const summary = event.type === "tool_call" ? (e as ToolCallEvent).summary : undefined;
       setTools((prev) => {
         if (prev.some((t) => t.id === id)) return prev;
-        return [...prev, { id, name, status: "running" }];
+        return [...prev, { id, name, summary, status: "running" }];
       });
     }
 
@@ -81,6 +83,7 @@ export function ToolCallIndicator({ sessionId }: ToolCallIndicatorProps) {
           >
             {tool.name}
           </Text>
+          {tool.summary && <Text dimColor>{tool.summary}</Text>}
         </Box>
       ))}
     </Box>

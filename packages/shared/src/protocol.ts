@@ -135,6 +135,7 @@ export interface ToolConfirmationRequest {
   name: string;
   arguments: Record<string, unknown>;
   message?: string;
+  metadata?: Record<string, unknown>;
 }
 
 /**
@@ -143,6 +144,7 @@ export interface ToolConfirmationRequest {
 export interface ToolConfirmationResponse {
   approved: boolean;
   reason?: string;
+  always?: boolean;
   modifiedArguments?: Record<string, unknown>;
 }
 

@@ -1464,12 +1464,14 @@ export class AgentickClient {
         name: string;
         input: Record<string, unknown>;
         message?: string;
+        metadata?: Record<string, unknown>;
       };
       const request: ToolConfirmationRequest = {
         toolUseId: required.callId,
         name: required.name,
         arguments: required.input,
         message: required.message,
+        metadata: required.metadata,
       };
       const accessor = this.sessions.get(sessionId);
       if (accessor) {

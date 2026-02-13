@@ -209,7 +209,7 @@ describe("WriteFile tool", () => {
     function Agent() {
       return (
         <Sandbox provider={provider}>
-          <WriteFile />
+          <WriteFile requiresConfirmation={false} />
           <Section id="system" audience="model">
             Test
           </Section>
@@ -257,7 +257,7 @@ describe("EditFile tool", () => {
     function Agent() {
       return (
         <Sandbox provider={provider}>
-          <EditFile />
+          <EditFile requiresConfirmation={false} />
           <Section id="system" audience="model">
             Test
           </Section>

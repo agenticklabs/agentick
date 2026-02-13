@@ -220,6 +220,21 @@ export interface CreateToolOptions<
    */
   confirmationMessage?: string | ((input: TInput) => string);
 
+  /**
+   * Short summary string for tool call indicators in the TUI.
+   * Receives the tool input, returns a human-readable summary
+   * (e.g. file path, command preview).
+   */
+  displaySummary?: (input: TInput) => string;
+
+  /**
+   * Async function that computes preview metadata for the confirmation UI.
+   * Called when confirmation is required, before the user prompt.
+   * Receives tool input + resolved deps (from use()).
+   * Returns metadata attached to the confirmation request (e.g. diff preview).
+   */
+  confirmationPreview?: (input: TInput, deps: TDeps) => Promise<Record<string, unknown>>;
+
   // === Provider Configuration ===
 
   /**
@@ -439,6 +454,8 @@ export function createTool<TInput = any, TOutput extends ContentBlock[] = Conten
     defaultResult: options.defaultResult,
     requiresConfirmation: options.requiresConfirmation,
     confirmationMessage: options.confirmationMessage,
+    displaySummary: options.displaySummary,
+    confirmationPreview: options.confirmationPreview,
     providerOptions: options.providerOptions,
     mcpConfig: options.mcpConfig,
   };
@@ -529,6 +546,19 @@ export function createTool<TInput = any, TOutput extends ContentBlock[] = Conten
     // Use instance procedure when available, otherwise static run (config tools fallback)
     const effectiveRun = instanceRunRef.current || run;
 
+    // Preview closure for confirmation UI.
+    // Reads through depsRef (not a direct capture) because use() may return
+    // new values on re-render. The ref ensures preview always sees the latest
+    // hook-resolved dependencies (e.g., useSandbox()).
+    //
+    // Only available for JSX-rendered tools (in the component tree).
+    // Config tools don't go through the component lifecycle, so they
+    // can't resolve use() deps for preview.
+    const previewFn =
+      options.confirmationPreview && depsRef.current
+        ? (input: any) => options.confirmationPreview!(input, depsRef.current as any)
+        : undefined;
+
     // Track lifecycle callbacks (should only fire once per component lifecycle)
     const hasCalledMountRef = useRef(false);
 
@@ -583,6 +613,7 @@ export function createTool<TInput = any, TOutput extends ContentBlock[] = Conten
       description: effectiveMetadata.description,
       schema: effectiveMetadata.input,
       handler: effectiveRun,
+      preview: previewFn,
       metadata: effectiveMetadata,
     });
 
@@ -693,6 +724,10 @@ export interface ToolMetadata<TInput = any, TOutput = any> {
    * Default: "Allow {tool_name} to execute?"
    */
   confirmationMessage?: string | ((input: any) => string);
+  /** Short summary string for tool call indicators. */
+  displaySummary?: (input: any) => string;
+  /** Async preview metadata for confirmation UI (e.g. diff). */
+  confirmationPreview?: (input: any, deps: any) => Promise<Record<string, unknown>>;
   /**
    * Provider-specific tool configurations.
    * Keyed by provider name (e.g., 'openai', 'google', 'anthropic').
@@ -727,6 +762,7 @@ export interface ExecutableTool<
 > {
   metadata: ToolMetadata<ExtractArgs<THandler>[0]>;
   run?: Procedure<THandler>; // Optional - tools without handlers (e.g., client tools) don't need run
+  preview?: (input: any) => Promise<Record<string, unknown>>; // Confirmation preview closure
 }
 
 // ClientToolDefinition is now exported from '@agentick/shared'
