@@ -140,12 +140,12 @@ Best practice: declare the model as a JSX component in the tree (makes it dynami
 ### Hooks
 
 | Hook              | Signature                                   | When                         |
-| ----------------- | ------------------------------------------- | ---------------------------- |
+| ----------------- | ------------------------------------------- | ---------------------------- | ------------------ |
 | `useOnMount`      | `(ctx) => void`                             | First tick only              |
 | `useOnTickStart`  | `(tickState, ctx) => void`                  | Tick 2+ (after mount)        |
 | `useOnTickEnd`    | `(result, ctx) => void`                     | Every tick end               |
 | `useAfterCompile` | `(compiled, ctx) => void`                   | After each compile           |
-| `useContinuation` | `(result, ctx) => boolean`                  | Control multi-turn           |
+| `useContinuation` | `(result, ctx) => boolean                   | void`                        | Control multi-turn |
 | `useOnMessage`    | `(message, ctx, state) => void`             | On each message              |
 | `useKnob`         | `(name, default, opts?) => [value, setter]` | Model-visible reactive state |
 

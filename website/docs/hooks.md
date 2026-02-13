@@ -80,11 +80,12 @@ useAfterCompile((compiled, ctx) => {
 
 ### useContinuation
 
-Controls whether execution continues with another tick. See [Controlling the Tick Loop](#controlling-the-tick-loop) below.
+Controls whether execution continues with another tick. `result.shouldContinue` shows the framework's decision. Return nothing to defer, or override. See [Controlling the Tick Loop](#controlling-the-tick-loop) below.
 
 ```tsx
-useContinuation((result, ctx) => {
-  return result.hasToolUse && result.tickNumber < 10;
+useContinuation((result) => {
+  if (result.tick >= 10) return { stop: true, reason: "max-ticks" };
+  // No return = defer to framework
 });
 ```
 
@@ -113,31 +114,35 @@ useOnMessage((message, ctx, state) => {
 
 ## Controlling the Tick Loop
 
-An execution is a sequence of ticks. Each tick is one model API call. By default, execution continues when the model returns tool calls and stops when it returns a text response.
+An execution is a sequence of ticks. Each tick is one model API call. By default, execution continues when the model returns tool calls or messages are queued, and stops otherwise.
 
-You control this with `useContinuation` and the `result.stop()` / `result.continue()` methods available on the `TickResult` object.
+You control this with `useContinuation`. The `result.shouldContinue` property shows the framework's current decision (including overrides from prior callbacks in the chain). Return nothing to defer, or override.
 
 ### Default behavior
 
-No tool calls in response → stop. Tool calls in response → run tools, continue to next tick.
+No tool calls and no queued messages → stop. Tool calls or queued messages → continue.
 
 ### `useContinuation`
 
-Override the default with a boolean return or explicit control methods:
+Override the default with a boolean, object, imperative methods, or defer:
 
 ```tsx
-// Simple: return boolean (true = continue, false = stop)
-useContinuation((result, ctx) => {
-  return result.hasToolUse && result.tickNumber < 10;
+// Defer: no return = accept framework decision
+useContinuation((result) => {
+  logger.info(`tick ${result.tick}, continuing: ${result.shouldContinue}`);
 });
 
-// Explicit: call stop/continue with reasons
-useContinuation((result, ctx) => {
-  if (result.text?.includes("<DONE>")) {
-    result.stop("task-complete");
-  } else {
-    result.continue("still-working");
-  }
+// Boolean shorthand
+useContinuation((result) => !result.text?.includes("<DONE>"));
+
+// Object with reason
+useContinuation((result) => {
+  if (result.tick >= 10) return { stop: true, reason: "max-ticks" };
+});
+
+// Imperative methods
+useContinuation((result) => {
+  if (result.text?.includes("<DONE>")) result.stop("task-complete");
 });
 ```
 
@@ -188,6 +193,6 @@ useOnTickStart((tickState, ctx) => {});
 useOnTickEnd((result, ctx) => {});
 useAfterCompile((compiled, ctx) => {});
 useOnExecutionEnd((ctx) => {});
-useContinuation((result, ctx) => boolean);
+useContinuation((result, ctx) => boolean | void); // result.shouldContinue shows framework default
 useOnMessage((message, ctx, state) => {});
 ```

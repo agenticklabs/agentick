@@ -79,6 +79,21 @@ export interface TickResult {
   tick: number;
 
   /**
+   * The current continuation decision.
+   *
+   * Before any callbacks run, this reflects the framework's default:
+   * `true` if tool calls are pending or messages are queued, `false` otherwise.
+   *
+   * When multiple callbacks are registered, each sees the accumulated decision
+   * from prior callbacks — not just the framework default. This enables
+   * chaining: callback A overrides the default, callback B sees A's override.
+   *
+   * Return `undefined` (no return) to accept the current value.
+   * Return `true`/`false` or call `stop()`/`continue()` to override.
+   */
+  shouldContinue: boolean;
+
+  /**
    * Convenience: extracted text from assistant response.
    * Combined text from all text content blocks.
    */
@@ -105,8 +120,6 @@ export interface TickResult {
   /**
    * Request that execution stop after this tick.
    *
-   * @param reason - Why execution should stop (for debugging/logging)
-   *
    * @example
    * ```tsx
    * result.stop("task-complete");
@@ -119,8 +132,6 @@ export interface TickResult {
   /**
    * Request that execution continue to the next tick.
    * Use this to override the default behavior (stop when no tool calls).
-   *
-   * @param reason - Why execution should continue (for debugging/logging)
    *
    * @example
    * ```tsx
@@ -151,31 +162,51 @@ export interface TickResult {
 export type TickStartCallback = (tickState: TickState, ctx: COMImpl) => void | Promise<void>;
 
 /**
+ * Continuation decision returned from tick-end / continuation callbacks.
+ *
+ * Three levels of expressiveness:
+ * - `boolean` — shorthand (`true` = continue, `false` = stop)
+ * - `ContinuationDecision` — decision with reason
+ * - `void` — no opinion, defer to framework / previous callbacks
+ *
+ * Imperative `result.stop()` / `result.continue()` is always available too.
+ */
+export type ContinuationDecision =
+  | { stop: true; reason?: string }
+  | { continue: true; reason?: string };
+
+/**
  * Callback for useOnTickEnd hook.
  *
  * Receives TickResult first (primary data), COM second (context).
- * TickResult contains both data about the completed tick and control methods
- * (stop/continue) to influence whether execution continues.
- *
- * Can return a boolean for simple cases (true = continue, false = stop),
- * or call result.stop()/result.continue() for control with reasons.
+ * `result.shouldContinue` reflects the current accumulated decision —
+ * the framework default as modified by any prior callbacks in the chain.
  *
  * @example
  * ```tsx
- * // Simple boolean return
+ * // Defer to framework (no return = no opinion)
+ * useOnTickEnd((result) => {
+ *   console.log(`Tick ${result.tick}, continuing: ${result.shouldContinue}`);
+ * });
+ *
+ * // Simple boolean override
  * useOnTickEnd((result) => !result.text?.includes("<DONE>"));
  *
- * // With reasons via methods
- * useOnTickEnd((result, ctx) => {
+ * // Object with reason
+ * useOnTickEnd((result) => {
+ *   if (result.tick > 10) return { stop: true, reason: "max ticks" };
+ * });
+ *
+ * // Imperative methods
+ * useOnTickEnd((result) => {
  *   if (result.text?.includes("<DONE>")) result.stop("complete");
- *   else result.continue("working");
  * });
  * ```
  */
 export type TickEndCallback = (
   result: TickResult,
   ctx: COMImpl,
-) => void | boolean | Promise<void | boolean>;
+) => void | boolean | ContinuationDecision | Promise<void | boolean | ContinuationDecision>;
 
 /**
  * Callback for useOnMount hook.

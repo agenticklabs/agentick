@@ -42,8 +42,13 @@ export interface MockCom {
   // EventEmitter-like methods (used by useComState subscription)
   on(event: string, handler: (...args: any[]) => void): void;
   off(event: string, handler: (...args: any[]) => void): void;
+  // Control request methods (used by useContinuation chaining)
+  requestStop(details?: COMStopRequest): void;
+  requestContinue(details?: COMContinueRequest): void;
+  _resolveCurrentShouldContinue(currentShouldContinue: boolean): boolean;
   // Track calls for assertions
   _recompileRequests: string[];
+  _controlRequests: Array<{ kind: "stop" | "continue"; priority: number; reason?: string }>;
 }
 
 /**
@@ -59,6 +64,8 @@ export interface MockCom {
 export function createMockCom(options: MockComOptions = {}): MockCom {
   const state = new Map<string, unknown>(Object.entries(options.initialState ?? {}));
   const recompileRequests: string[] = [];
+  const controlRequests: Array<{ kind: "stop" | "continue"; priority: number; reason?: string }> =
+    [];
   const listeners = new Map<string, Set<(...args: any[]) => void>>();
 
   return {
@@ -82,6 +89,33 @@ export function createMockCom(options: MockComOptions = {}): MockCom {
     requestRecompile(reason?: string) {
       recompileRequests.push(reason ?? "unspecified");
     },
+    requestStop(details: COMStopRequest = {}) {
+      controlRequests.push({
+        kind: "stop",
+        priority: details.priority ?? 0,
+        reason: details.reason,
+      });
+    },
+    requestContinue(details: COMContinueRequest = {}) {
+      controlRequests.push({
+        kind: "continue",
+        priority: details.priority ?? 0,
+        reason: details.reason,
+      });
+    },
+    _resolveCurrentShouldContinue(currentShouldContinue: boolean): boolean {
+      if (controlRequests.length === 0) return currentShouldContinue;
+
+      const sorted = [...controlRequests].sort((a, b) => b.priority - a.priority);
+      const stopReq = sorted.find((r) => r.kind === "stop");
+      const continueReq = sorted.find((r) => r.kind === "continue");
+
+      controlRequests.length = 0;
+
+      if (stopReq) return false;
+      if (!currentShouldContinue && continueReq) return true;
+      return currentShouldContinue;
+    },
     getTokenEstimator(): TokenEstimator {
       return (text: string) => Math.ceil(text.length / 4) + 4;
     },
@@ -93,6 +127,7 @@ export function createMockCom(options: MockComOptions = {}): MockCom {
       listeners.get(event)?.delete(handler);
     },
     _recompileRequests: recompileRequests,
+    _controlRequests: controlRequests,
   };
 }
 
@@ -151,6 +186,7 @@ export function createMockTickState(
 
 export interface MockTickResultOptions {
   tick?: number;
+  shouldContinue?: boolean;
   text?: string;
   content?: ContentBlock[];
   toolCalls?: ToolCall[];
@@ -189,6 +225,7 @@ export function createMockTickResult(options: MockTickResultOptions = {}): MockT
 
   return {
     tick: options.tick ?? 1,
+    shouldContinue: options.shouldContinue ?? false,
     text,
     content,
     toolCalls: options.toolCalls ?? [],

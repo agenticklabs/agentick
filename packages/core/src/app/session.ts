@@ -1961,9 +1961,11 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
           }
         }
 
-        // Build TickResult with data and control methods
+        // Build TickResult with data and control methods.
+        // shouldContinue is initialized from ingestResult so callbacks see the framework default.
         const tickResult: TickResult = {
           tick: currentTick,
+          shouldContinue: ingestResult.shouldContinue,
           text: tickText,
           content: modelOutput?.message?.content ?? [],
           toolCalls: response.toolCalls ?? [],
@@ -1987,8 +1989,9 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
           },
         };
 
-        // Run useTickEnd/useContinuation callbacks
-        // These can call tickResult.stop() or tickResult.continue() to influence continuation
+        // Run useTickEnd/useContinuation callbacks.
+        // storeRunTickEndCallbacks chains shouldContinue through each callback
+        // via _resolveCurrentShouldContinue, so each sees the accumulated decision.
         const tickEndState: TickState = {
           tick: currentTick,
           current: this._currentOutput as any,
@@ -1998,14 +2001,14 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
         };
         await this.compiler?.notifyTickEnd(tickEndState, tickResult);
 
-        // Resolve final tick control using COM's priority-based system
-        // This considers: explicit stop/continue requests from callbacks > default behavior
-        const defaultStatus = ingestResult.shouldContinue ? "continue" : "completed";
-        const tickDecision = this.ctx?._resolveTickControl(
-          defaultStatus,
+        // Final decision comes from tickResult.shouldContinue (already resolved
+        // incrementally through callbacks). Fall back to _resolveTickControl for
+        // any remaining requests not consumed by chaining (shouldn't happen, but safe).
+        const remainingDecision = this.ctx?._resolveTickControl(
+          tickResult.shouldContinue ? "continue" : "completed",
           ingestResult.stopReason,
-        ) ?? { status: defaultStatus };
-        shouldContinue = tickDecision.status === "continue";
+        ) ?? { status: tickResult.shouldContinue ? "continue" : "completed" };
+        shouldContinue = remainingDecision.status === "continue";
 
         // Get actual model ID: prefer response model, then metadata.model, then metadata.id
         const actualModelId =
@@ -2655,12 +2658,14 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
 
     this._currentOutput = current;
 
-    // Resolve tick control
+    // Resolve tick control: continue if tool calls pending OR messages queued
     const shouldStop = response.shouldStop || false;
     const stopReason = response.stopReason?.reason;
+    const hasToolCalls = (response.toolCalls?.length ?? 0) > 0;
+    const hasPendingMessages = (this.ctx?.getQueuedMessages().length ?? 0) > 0;
 
     return {
-      shouldContinue: !shouldStop && (response.toolCalls?.length > 0 || false),
+      shouldContinue: !shouldStop && (hasToolCalls || hasPendingMessages),
       stopReason,
       timeline: current.timeline,
     };

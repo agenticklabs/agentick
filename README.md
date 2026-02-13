@@ -304,14 +304,14 @@ Hooks are real React hooks — `useState`, `useEffect`, `useMemo` — plus lifec
 
 #### Lifecycle
 
-| Hook                  | Description                                                                                        |
-| --------------------- | -------------------------------------------------------------------------------------------------- |
-| `useOnMount(cb)`      | Run once when component first mounts.                                                              |
-| `useOnUnmount(cb)`    | Run once when component unmounts.                                                                  |
-| `useOnTickStart(cb)`  | Run at start of each tick (tick 2+). Receives `(tickState, ctx)`.                                  |
-| `useOnTickEnd(cb)`    | Run at end of each tick. Receives `(result, ctx)`. Return `false` or call `result.stop()` to halt. |
-| `useAfterCompile(cb)` | Run after compilation completes. Receives `(compiled, ctx)`.                                       |
-| `useContinuation(cb)` | Control whether execution continues. Sugar for `useOnTickEnd`.                                     |
+| Hook                  | Description                                                                                                                         |
+| --------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `useOnMount(cb)`      | Run once when component first mounts.                                                                                               |
+| `useOnUnmount(cb)`    | Run once when component unmounts.                                                                                                   |
+| `useOnTickStart(cb)`  | Run at start of each tick (tick 2+). Receives `(tickState, ctx)`.                                                                   |
+| `useOnTickEnd(cb)`    | Run at end of each tick. Receives `(result, ctx)`. Return `false` or call `result.stop()` to halt.                                  |
+| `useAfterCompile(cb)` | Run after compilation completes. Receives `(compiled, ctx)`.                                                                        |
+| `useContinuation(cb)` | Control whether execution continues. `result.shouldContinue` shows framework default. Return `boolean`, object, or `void` to defer. |
 
 #### State & Signals
 
@@ -369,20 +369,20 @@ All standard React hooks work in agent components: `useState`, `useEffect`, `use
 
 ### Stop Conditions
 
-The agent loop auto-continues when the model makes tool calls. `useContinuation` adds your own stop conditions:
+The agent loop auto-continues when the model makes tool calls or messages are queued. `useContinuation` adds your own stop conditions.
+
+`result.shouldContinue` shows the framework's current decision (including overrides from prior callbacks in the chain). Return nothing to defer, or override with a boolean, object, or `result.stop()`/`result.continue()`:
 
 ```tsx
-useContinuation((result) => !result.text?.includes("<DONE>"));
-
+// Veto: stop even if framework would continue
 useContinuation((result) => {
-  if (result.tick >= 10) {
-    result.stop("max-ticks");
-    return false;
-  }
-  if (result.usage && result.usage.totalTokens > 100_000) {
-    result.stop("token-budget");
-    return false;
-  }
+  if (result.tick >= 10) return { stop: true, reason: "max-ticks" };
+  if (result.usage && result.usage.totalTokens > 100_000) return false;
+});
+
+// Defer: no return = accept framework decision
+useContinuation((result) => {
+  logger.info(`tick ${result.tick}, continuing: ${result.shouldContinue}`);
 });
 ```
 

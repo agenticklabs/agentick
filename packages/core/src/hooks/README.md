@@ -10,30 +10,30 @@ The most important hooks for agent development are the lifecycle hooks that cont
 
 The primary hook for implementing agent loops with custom termination conditions.
 
-All callbacks receive data first, COM (context) last. Most callbacks only need the data parameter.
+`result.shouldContinue` reflects the framework's current decision — `true` if tool calls are pending or messages are queued, `false` otherwise. When multiple callbacks are registered, each sees the accumulated decision from prior callbacks (chained).
+
+Return nothing to defer. Return `true`/`false`, an object `{ stop/continue: true, reason? }`, or call `result.stop()`/`result.continue()` to override.
 
 ```tsx
 import { useContinuation } from "@agentick/core";
 
 function MyAgent() {
-  // Simple: continue until model outputs a done marker
-  useContinuation((result) => !result.text?.includes("<DONE>"));
-
-  // With control methods and reasons (for debugging/logging)
+  // Veto: stop even if framework would continue
   useContinuation((result) => {
-    if (result.text?.includes("<DONE>")) {
-      result.stop("task-complete");
-    } else if (result.tick >= 10) {
-      result.stop("max-ticks-reached");
-    } else {
-      result.continue("still-working");
-    }
+    if (result.tick >= 10) return { stop: true, reason: "max-ticks" };
   });
 
-  // Access COM when needed (second parameter)
-  useContinuation((result, ctx) => {
-    ctx.setState("lastTick", result.tick);
-    return !result.text?.includes("<DONE>");
+  // Defer: no return = accept current shouldContinue
+  useContinuation((result) => {
+    logger.info(`tick ${result.tick}, continuing: ${result.shouldContinue}`);
+  });
+
+  // Boolean shorthand
+  useContinuation((result) => !result.text?.includes("<DONE>"));
+
+  // Imperative methods with reasons
+  useContinuation((result) => {
+    if (result.text?.includes("<DONE>")) result.stop("task-complete");
   });
 
   return <Timeline />;
@@ -44,41 +44,47 @@ function MyAgent() {
 
 The `TickResult` object passed to continuation callbacks contains:
 
-| Property            | Type                 | Description                            |
-| ------------------- | -------------------- | -------------------------------------- |
-| `tick`              | `number`             | Current tick number                    |
-| `text`              | `string?`            | Combined text from assistant response  |
-| `content`           | `ContentBlock[]`     | Raw content blocks from response       |
-| `toolCalls`         | `ToolCall[]`         | Tool calls made this tick              |
-| `toolResults`       | `ToolResult[]`       | Results from tool execution            |
-| `stopReason`        | `string?`            | Model's stop reason (e.g., "end_turn") |
-| `usage`             | `UsageStats?`        | Token usage statistics                 |
-| `timeline`          | `COMTimelineEntry[]` | Timeline entries for this tick         |
-| `stop(reason?)`     | `function`           | Request execution to stop              |
-| `continue(reason?)` | `function`           | Request execution to continue          |
+| Property            | Type                 | Description                                              |
+| ------------------- | -------------------- | -------------------------------------------------------- |
+| `shouldContinue`    | `boolean`            | Current continuation decision (chained across callbacks) |
+| `tick`              | `number`             | Current tick number                                      |
+| `text`              | `string?`            | Combined text from assistant response                    |
+| `content`           | `ContentBlock[]`     | Raw content blocks from response                         |
+| `toolCalls`         | `ToolCall[]`         | Tool calls made this tick                                |
+| `toolResults`       | `ToolResult[]`       | Results from tool execution                              |
+| `stopReason`        | `string?`            | Model's stop reason (e.g., "end_turn")                   |
+| `usage`             | `UsageStats?`        | Token usage statistics                                   |
+| `timeline`          | `COMTimelineEntry[]` | Timeline entries for this tick                           |
+| `stop(reason?)`     | `function`           | Request execution to stop                                |
+| `continue(reason?)` | `function`           | Request execution to continue                            |
 
 ### Callback Return Values
 
-The callback can influence continuation in three ways:
+The callback can influence continuation in four ways:
 
-1. **Return boolean**: `true` = continue, `false` = stop
-2. **Call methods**: `result.stop(reason?)` or `result.continue(reason?)`
-3. **Return void**: Let default behavior apply (stop when no tool calls)
+1. **Return void**: No opinion — accept current `shouldContinue` (framework or prior callbacks)
+2. **Return boolean**: `true` = continue, `false` = stop
+3. **Return object**: `{ stop: true, reason? }` or `{ continue: true, reason? }`
+4. **Call methods**: `result.stop(reason?)` or `result.continue(reason?)`
 
 ```tsx
-// Boolean return
+// Defer (no return = accept framework decision)
+useContinuation((r) => {
+  logger.info(`continuing: ${r.shouldContinue}`);
+});
+
+// Boolean shorthand
 useContinuation((r) => !r.text?.includes("<DONE>"));
 
-// Method calls with reasons
+// Object with reason
 useContinuation((r) => {
-  if (r.text?.includes("<DONE>")) r.stop("task-complete");
-  else r.continue("working");
+  if (r.tick > 50) return { stop: true, reason: "budget" };
 });
 
 // Async verification
 useContinuation(async (r) => {
   const verified = await verifyWithModel(r.text);
-  return verified ? false : true; // stop if verified
+  return verified ? false : true;
 });
 ```
 
@@ -122,19 +128,10 @@ Parse the model's response for a completion marker:
 ```tsx
 function AgentWithDoneMarker() {
   useContinuation((result) => {
-    // Look for done marker in response
     if (result.text?.includes("<DONE>") || result.text?.includes("TASK COMPLETE")) {
-      result.stop("done-marker-found");
-      return false;
+      return { stop: true, reason: "done-marker-found" };
     }
-
-    // Continue if there are pending tool calls
-    if (result.toolCalls.length > 0) {
-      return true;
-    }
-
-    // Default: stop if model says it's done
-    return result.stopReason !== "end_turn";
+    // No return = defer to framework (continues if tool calls pending)
   });
 
   return <Timeline />;
@@ -148,21 +145,12 @@ Use another model or external service to verify completion:
 ```tsx
 function AgentWithVerification() {
   useContinuation(async (result) => {
-    // Skip verification if no substantive response
-    if (!result.text || result.toolCalls.length > 0) {
-      return true;
-    }
+    // Skip verification if framework is already continuing (tool calls pending)
+    if (result.shouldContinue) return;
 
     // Verify with a cheaper/faster model
     const isComplete = await verifyCompletion(result.text);
-
-    if (isComplete) {
-      result.stop("verified-complete");
-      return false;
-    }
-
-    result.continue("verification-pending");
-    return true;
+    if (!isComplete) return { continue: true, reason: "verification-pending" };
   });
 
   return <Timeline />;
@@ -171,22 +159,15 @@ function AgentWithVerification() {
 
 ### Max Ticks with Reason
 
-Track why execution stopped:
+Veto continuation with a reason:
 
 ```tsx
 function AgentWithLimits() {
   useContinuation((result) => {
-    if (result.tick >= 20) {
-      result.stop("max-ticks-exceeded");
-      return false;
-    }
-
-    if (result.usage && result.usage.totalTokens > 100000) {
-      result.stop("token-budget-exceeded");
-      return false;
-    }
-
-    return true;
+    if (result.tick >= 20) return { stop: true, reason: "max-ticks-exceeded" };
+    if (result.usage && result.usage.totalTokens > 100000)
+      return { stop: true, reason: "token-budget-exceeded" };
+    // No return = defer to framework
   });
 
   return <Timeline />;

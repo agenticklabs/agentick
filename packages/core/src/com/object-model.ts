@@ -972,6 +972,35 @@ export class ContextObjectModel extends EventEmitter {
     };
   }
 
+  /**
+   * Resolve pending control requests into a shouldContinue boolean.
+   *
+   * Used by `storeRunTickEndCallbacks` to chain shouldContinue through
+   * multiple callbacks. Each callback's stop()/continue() calls push
+   * requests; this method consumes them and returns the updated decision.
+   *
+   * @param currentShouldContinue The current accumulated decision
+   * @returns Updated shouldContinue value
+   * @internal
+   */
+  _resolveCurrentShouldContinue(currentShouldContinue: boolean): boolean {
+    if (this.controlRequests.length === 0) return currentShouldContinue;
+
+    const sortedRequests = [...this.controlRequests].sort((a, b) => b.priority - a.priority);
+    const stopRequest = sortedRequests.find((r) => r.kind === "stop");
+    const continueRequest = sortedRequests.find((r) => r.kind === "continue");
+
+    // Clear requests (consumed)
+    this.controlRequests = [];
+
+    // Stop wins
+    if (stopRequest) return false;
+    // Continue overrides a stop
+    if (!currentShouldContinue && continueRequest) return true;
+
+    return currentShouldContinue;
+  }
+
   // ============================================================================
   // Compilation Stabilization API
   // ============================================================================

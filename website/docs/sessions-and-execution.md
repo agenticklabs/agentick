@@ -90,7 +90,7 @@ Each tick follows this sequence:
 4. **Model call** — adapter sends the compiled context to the model
 5. **Process response** — tool calls executed, timeline updated
 6. **Tick end** — `useOnTickEnd` callbacks fire
-7. **Continuation check** — `useContinuation` decides if another tick runs
+7. **Continuation check** — framework checks tool calls + queued messages, then `useContinuation` callbacks can override
 
 If the model responds with tool calls, steps 1–7 repeat for the next tick.
 

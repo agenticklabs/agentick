@@ -74,7 +74,7 @@ useOnMount((ctx) => {});
 useOnTickStart((tickState, ctx) => {});
 useOnTickEnd((result, ctx) => {});
 useAfterCompile((compiled, ctx) => {});
-useContinuation((result, ctx) => boolean);
+useContinuation((result, ctx) => boolean | void); // result.shouldContinue shows framework default
 useOnMessage((message, ctx, state) => {});
 ```
 

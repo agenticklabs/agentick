@@ -237,14 +237,13 @@ export async function storeRunTickStartCatchUp(
 /**
  * Run tick end callbacks with TickResult and COM.
  *
- * Callbacks receive TickResult (data) and COM (context).
- * TickResult contains both data about the completed tick and control methods
- * (stop/continue) to influence whether execution continues.
+ * Callbacks are chained: each sees `result.shouldContinue` reflecting
+ * the accumulated decision from the framework default + prior callbacks.
  *
- * If a callback returns a boolean, it's automatically converted to a continue/stop call:
- * - true = result.continue()
- * - false = result.stop()
- * - void/undefined = no automatic action (callback may have called methods directly)
+ * Returns: `true`/`false` = override, `{ stop/continue, reason }` = override
+ * with reason, `void` = defer (accept current `shouldContinue`).
+ *
+ * Imperative `result.stop()` / `result.continue()` works identically.
  */
 export async function storeRunTickEndCallbacks(
   store: RuntimeStore,
@@ -253,13 +252,23 @@ export async function storeRunTickEndCallbacks(
 ): Promise<void> {
   for (const callback of store.tickEndCallbacks) {
     const decision = await callback(result, ctx);
-    // If callback returns boolean, auto-convert to continue/stop
+
     if (decision === true) {
       result.continue();
     } else if (decision === false) {
       result.stop();
+    } else if (decision != null && typeof decision === "object") {
+      if ("stop" in decision && decision.stop) {
+        result.stop(decision.reason);
+      } else if ("continue" in decision && decision.continue) {
+        result.continue(decision.reason);
+      }
     }
-    // void/undefined = callback handled it or wants default behavior
+    // void/undefined = no opinion, shouldContinue unchanged
+
+    // Resolve accumulated control requests into shouldContinue for the next callback.
+    // This is the chaining mechanism: each callback sees the result of all prior decisions.
+    result.shouldContinue = ctx._resolveCurrentShouldContinue(result.shouldContinue);
   }
 }
 

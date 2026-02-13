@@ -220,45 +220,29 @@ export function useOnExecutionEnd(callback: ExecutionEndCallback): void {
 /**
  * Control whether execution continues after each tick.
  *
- * This is the primary hook for implementing agent loops with custom termination conditions.
- * The callback receives TickResult and optionally COM, and should return whether to continue.
- *
- * The callback can:
- * 1. Return a boolean (true = continue, false = stop)
- * 2. Call result.stop(reason?) or result.continue(reason?) for control with reasons
- * 3. Be async for verification with external services
- *
- * @param shouldContinue - Callback that determines whether to continue execution
+ * `result.shouldContinue` reflects the framework's current decision
+ * (tool calls pending, messages queued, etc.), modified by any prior
+ * callbacks in the chain. Return nothing to accept it. Return a boolean,
+ * object, or call `result.stop()`/`result.continue()` to override.
  *
  * @example
  * ```tsx
- * // Simple: continue until done token
- * useContinuation((r) => !r.text?.includes("<DONE>"));
- *
- * // With reasons
+ * // Veto: stop even if framework would continue
  * useContinuation((r) => {
- *   if (r.text?.includes("<DONE>")) {
- *     r.stop("task-complete");
- *   } else if (r.tick >= 10) {
- *     r.stop("max-ticks-reached");
- *   } else {
- *     r.continue("still-working");
- *   }
+ *   if (r.tick > 50) return false;
  * });
  *
- * // Async verification
- * useContinuation(async (r) => {
- *   const verified = await verifyWithModel(r.text);
- *   return verified ? false : true; // stop if verified
+ * // Override with reason
+ * useContinuation((r) => {
+ *   if (r.text?.includes("<DONE>")) return { stop: true, reason: "task-complete" };
  * });
  *
- * // Multiple conditions
- * useContinuation((r) =>
- *   r.toolCalls.length > 0 ||           // pending tools
- *   (r.tick < 10 && !r.text?.includes("DONE"))
- * );
+ * // Defer to framework (no return = no opinion)
+ * useContinuation((r) => {
+ *   logger.info(`tick ${r.tick}, continuing: ${r.shouldContinue}`);
+ * });
  * ```
  */
-export function useContinuation(shouldContinue: TickEndCallback): void {
-  useOnTickEnd(shouldContinue);
+export function useContinuation(callback: TickEndCallback): void {
+  useOnTickEnd(callback);
 }

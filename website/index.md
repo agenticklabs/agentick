@@ -284,7 +284,7 @@ function DeepResearchAgent() {
 }
 ```
 
-`useContinuation` returns `true` to keep the agent running after a tool call. `useOnTickEnd` fires after each model response. Same lifecycle model as React effects — `useOnMount`, `useOnTickStart`, `useOnTickEnd`, `useAfterCompile`.
+`useContinuation` controls whether the agent keeps running. `result.shouldContinue` shows the framework's default; return nothing to defer, or override with a boolean or `{ stop/continue: true, reason? }`. Same lifecycle model as React effects — `useOnMount`, `useOnTickStart`, `useOnTickEnd`, `useAfterCompile`.
 
 </div>
 

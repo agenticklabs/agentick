@@ -309,17 +309,11 @@ function MyComponent() {
   });
 
   // Control agent loop continuation (primary hook for agent behavior)
+  // result.shouldContinue shows framework default; return nothing to defer
   useContinuation((result) => {
-    // Return true to continue, false to stop
-    if (result.text?.includes("<DONE>")) return false;
+    if (result.text?.includes("<DONE>")) return { stop: true, reason: "done" };
     if (result.tick >= 10) return false; // Safety limit
-    return true;
-  });
-
-  // Access COM when needed (always the last parameter)
-  useContinuation((result, ctx) => {
-    ctx.setState("lastTick", result.tick);
-    return !result.text?.includes("<DONE>");
+    // No return = defer to framework (continues if tool calls pending)
   });
 }
 ```
