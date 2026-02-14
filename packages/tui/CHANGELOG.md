@@ -1,5 +1,35 @@
 # @agentick/tui
 
+## 0.6.0
+
+### Minor Changes
+
+- 0350de3: Extract LineEditor as framework-agnostic class in @agentick/client. Readline-quality line editing (13 actions, kill ring, history, keybindings) now available to all platforms. Add useLineEditor hook to @agentick/react for web consumers. TUI's useLineEditor becomes a thin Ink-specific wrapper.
+- 4750f5e: Tool call summaries and file confirmation with diff preview.
+
+  Tools can define `displaySummary` to provide a short description (e.g., file
+  path, command) that appears in stream events and TUI indicators.
+
+  File modification tools (`write_file`, `edit_file`) now require confirmation
+  before execution. A new `confirmationPreview` hook computes a unified diff
+  that renders in the TUI confirmation prompt.
+
+  Fixed: session confirmation channel wiring (was previously unconnected).
+
+### Patch Changes
+
+- e30960c: Fix ToolCallIndicator to use ToolCallEntry type from client instead of inline type.
+- Updated dependencies [75960dd]
+- Updated dependencies [e30960c]
+- Updated dependencies [e30960c]
+- Updated dependencies [0350de3]
+- Updated dependencies [e30960c]
+- Updated dependencies [4750f5e]
+  - @agentick/client@0.5.0
+  - @agentick/react@0.5.0
+  - @agentick/core@0.6.0
+  - @agentick/shared@0.6.0
+
 ## 0.5.0
 
 ### Minor Changes

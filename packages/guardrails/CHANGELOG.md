@@ -1,5 +1,13 @@
 # @agentick/guardrails
 
+## 0.4.1
+
+### Patch Changes
+
+- Updated dependencies [4750f5e]
+  - @agentick/shared@0.6.0
+  - @agentick/kernel@0.6.0
+
 ## 0.4.0
 
 ### Minor Changes

@@ -1,5 +1,22 @@
 # @agentick/react
 
+## 0.5.0
+
+### Minor Changes
+
+- 75960dd: Add AttachmentManager for multimodal message support. Platforms add images, PDFs, and other files before submit(), which drains them into ContentBlock[] automatically. Includes default validator (image/png, jpeg, gif, webp, pdf), default block mapper (image/\* → ImageBlock, else → DocumentBlock), and full integration with ChatSession and useChat hook.
+- 0350de3: Extract LineEditor as framework-agnostic class in @agentick/client. Readline-quality line editing (13 actions, kill ring, history, keybindings) now available to all platforms. Add useLineEditor hook to @agentick/react for web consumers. TUI's useLineEditor becomes a thin Ink-specific wrapper.
+
+### Patch Changes
+
+- e30960c: Add useChat, useMessages, useToolConfirmations, useMessageSteering hooks. Split hooks.ts into individual modules. Re-export transform functions from client.
+- Updated dependencies [75960dd]
+- Updated dependencies [e30960c]
+- Updated dependencies [0350de3]
+- Updated dependencies [4750f5e]
+  - @agentick/client@0.5.0
+  - @agentick/shared@0.6.0
+
 ## 0.4.0
 
 ### Minor Changes

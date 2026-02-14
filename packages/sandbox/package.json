@@ -1,6 +1,6 @@
 {
   "name": "@agentick/sandbox",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "Sandbox primitive layer for Agentick — types, context, component, and pre-built tools",
   "keywords": [
     "agent",
