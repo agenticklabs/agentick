@@ -94,9 +94,14 @@ export {
 // Line editor
 export {
   LineEditor,
+  EMPTY_SNAPSHOT,
   type LineEditorOptions,
   type LineEditorSnapshot,
   type EditorUpdate,
+  type CompletionSource,
+  type CompletionItem,
+  type CompletionState,
+  type CompletedRange,
 } from "./line-editor.js";
 
 // Chat transforms

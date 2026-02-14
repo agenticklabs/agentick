@@ -1,4 +1,5 @@
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useMemo, useRef } from "react";
+import type { CompletionSource, CompletionItem } from "@agentick/client";
 
 // --- Types ---
 
@@ -109,6 +110,29 @@ function formatHelp(commands: SlashCommand[]): string {
   return lines.join("\n");
 }
 
+// --- Completion source factory ---
+
+export function createCommandCompletionSource(commands: SlashCommand[]): CompletionSource {
+  return {
+    id: "command",
+    trigger: { type: "char", char: "/" },
+    shouldActivate: (_value, anchor) => anchor === 0,
+    resolve: (query) => {
+      const items: CompletionItem[] = [];
+      for (const cmd of commands) {
+        if (!query || cmd.name.startsWith(query)) {
+          items.push({
+            label: cmd.name,
+            value: `/${cmd.name}`,
+            description: cmd.description,
+          });
+        }
+      }
+      return items;
+    },
+  };
+}
+
 // --- The hook ---
 
 interface UseSlashCommandsResult {
@@ -196,9 +220,11 @@ export function useSlashCommands(
     [ctx, addCommand, removeCommand],
   );
 
+  const commands = useMemo(() => [...registry.values()], [registry]);
+
   return {
     dispatch,
-    commands: [...registry.values()],
+    commands,
     addCommand,
     removeCommand,
   };

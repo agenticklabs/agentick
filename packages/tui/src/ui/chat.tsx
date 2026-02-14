@@ -18,10 +18,10 @@
  *   4. idle → editor.handleInput
  */
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { Box, useApp, useInput } from "ink";
-import { useChat, useStreamingText } from "@agentick/react";
+import { useChat } from "@agentick/react";
 import type { ChatMode } from "@agentick/client";
 import { MessageList } from "../components/MessageList.js";
 import { StreamingMessage } from "../components/StreamingMessage.js";
@@ -29,8 +29,14 @@ import { ToolCallIndicator } from "../components/ToolCallIndicator.js";
 import { ToolConfirmationPrompt } from "../components/ToolConfirmationPrompt.js";
 import { ErrorDisplay } from "../components/ErrorDisplay.js";
 import { InputBar } from "../components/InputBar.js";
+import { CompletionPicker } from "../components/CompletionPicker.js";
 import { DefaultStatusBar } from "../components/status-bar/DefaultStatusBar.js";
-import { useSlashCommands, helpCommand, exitCommand } from "../commands.js";
+import {
+  useSlashCommands,
+  helpCommand,
+  exitCommand,
+  createCommandCompletionSource,
+} from "../commands.js";
 import { useCommandsConfig } from "../commands-context.js";
 import { useLineEditor } from "../hooks/use-line-editor.js";
 import { handleConfirmationKey } from "../input-utils.js";
@@ -71,7 +77,7 @@ export function Chat({ sessionId, statusBar }: ChatProps) {
   });
 
   // StreamingMessage still uses useStreamingText for live token display
-  const { isStreaming } = useStreamingText();
+  // const { isStreaming } = useStreamingText();
 
   const [dismissedError, setDismissedError] = useState(false);
   // Track the error identity so dismissal resets on new errors
@@ -82,7 +88,7 @@ export function Chat({ sessionId, statusBar }: ChatProps) {
     () => ({ sessionId, send: (text: string) => submit(text), abort, output: console.log }),
     [sessionId, submit, abort],
   );
-  const { dispatch } = useSlashCommands(
+  const { dispatch, commands } = useSlashCommands(
     [...configCommands, helpCommand(), exitCommand(exit)],
     commandCtx,
   );
@@ -109,6 +115,11 @@ export function Chat({ sessionId, statusBar }: ChatProps) {
 
   // Chat owns the line editor directly
   const editor = useLineEditor({ onSubmit: handleSubmit });
+
+  // Register "/" command completion source
+  useEffect(() => {
+    return editor.editor.registerCompletion(createCommandCompletionSource(commands));
+  }, [editor.editor, commands]);
 
   // Single centralized input handler — all keystrokes route through here
   useInput((input, key) => {
@@ -155,12 +166,12 @@ export function Chat({ sessionId, statusBar }: ChatProps) {
   if (statusBar === false) {
     statusBarContent = null;
   } else if (typeof statusBar === "function") {
-    statusBarContent = statusBar({ mode: chatMode, isExecuting: isStreaming, sessionId });
+    statusBarContent = statusBar({ mode: chatMode, isExecuting, sessionId });
   } else if (statusBar !== undefined) {
     statusBarContent = statusBar;
   } else {
     statusBarContent = (
-      <DefaultStatusBar sessionId={sessionId} mode={chatMode} isExecuting={isStreaming} />
+      <DefaultStatusBar sessionId={sessionId} mode={chatMode} isExecuting={isExecuting} />
     );
   }
 
@@ -175,6 +186,8 @@ export function Chat({ sessionId, statusBar }: ChatProps) {
       )}
 
       <ErrorDisplay error={displayError} showDismissHint={!!displayError && chatMode === "idle"} />
+
+      {editor.completion && <CompletionPicker completion={editor.completion} />}
 
       <Box marginTop={1}>
         <InputBar

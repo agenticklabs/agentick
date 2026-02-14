@@ -1,7 +1,7 @@
 /**
  * LineEditor — framework-agnostic readline-quality line editor.
  *
- * Manages buffer, cursor, kill ring, history, and keybindings.
+ * Manages buffer, cursor, kill ring, history, keybindings, and completion.
  * Accepts normalized keystroke strings — each UI layer provides
  * its own normalizer (e.g., Ink's Key → "ctrl+a").
  *
@@ -19,12 +19,43 @@ export interface LineEditorOptions {
 export interface LineEditorSnapshot {
   readonly value: string;
   readonly cursor: number;
+  readonly completion: CompletionState | null;
+  readonly completedRanges: readonly CompletedRange[];
 }
 
 export interface EditorUpdate {
   value?: string;
   cursor?: number;
   killed?: string;
+}
+
+export interface CompletionSource {
+  id: string;
+  trigger: { type: "char"; char: string };
+  resolve: (query: string) => CompletionItem[] | Promise<CompletionItem[]>;
+  debounce?: number;
+  shouldActivate?: (value: string, anchor: number) => boolean;
+}
+
+export interface CompletionItem {
+  label: string;
+  value: string;
+  description?: string;
+}
+
+export interface CompletionState {
+  readonly items: readonly CompletionItem[];
+  readonly selectedIndex: number;
+  readonly query: string;
+  readonly loading: boolean;
+  readonly sourceId: string;
+}
+
+export interface CompletedRange {
+  readonly start: number;
+  readonly end: number;
+  readonly value: string;
+  readonly sourceId: string;
 }
 
 // ── Word boundaries ─────────────────────────────────────────────────────────
@@ -161,7 +192,14 @@ export const DEFAULT_BINDINGS: Record<string, string> = {
 
 // ── LineEditor class ────────────────────────────────────────────────────────
 
-const EMPTY_SNAPSHOT: LineEditorSnapshot = { value: "", cursor: 0 };
+export const EMPTY_SNAPSHOT: LineEditorSnapshot = {
+  value: "",
+  cursor: 0,
+  completion: null,
+  completedRanges: [],
+};
+
+const MAX_KILL_RING = 60;
 
 export class LineEditor {
   private _value = "";
@@ -177,6 +215,15 @@ export class LineEditor {
   private _snapshot: LineEditorSnapshot = EMPTY_SNAPSHOT;
   private _listeners = new Set<() => void>();
 
+  // Completion state
+  private _sources: CompletionSource[] = [];
+  private _anchor = -1;
+  private _activeSource: CompletionSource | null = null;
+  private _resolveId = 0;
+  private _debounceTimer: ReturnType<typeof setTimeout> | null = null;
+  private _completionState: CompletionState | null = null;
+  private _completedRanges: CompletedRange[] = [];
+
   constructor(options: LineEditorOptions) {
     this._onSubmit = options.onSubmit;
     this._bindings = options.bindings ?? DEFAULT_BINDINGS;
@@ -184,6 +231,14 @@ export class LineEditor {
 
   get state(): LineEditorSnapshot {
     return this._snapshot;
+  }
+
+  registerCompletion(source: CompletionSource): () => void {
+    this._sources.push(source);
+    return () => {
+      const idx = this._sources.indexOf(source);
+      if (idx !== -1) this._sources.splice(idx, 1);
+    };
   }
 
   /**
@@ -194,6 +249,27 @@ export class LineEditor {
   handleInput(keystroke: string | null, text: string): void {
     const val = this._value;
     const cur = Math.min(this._cursor, val.length);
+
+    // ── Completion interception ──────────────────────────────────────────
+    if (this._activeSource) {
+      if (keystroke === "return" || keystroke === "tab") {
+        this._acceptCompletion();
+        return;
+      }
+      if (keystroke === "escape") {
+        this._dismissCompletion();
+        return;
+      }
+      if (keystroke === "up") {
+        this._navigateCompletion(-1);
+        return;
+      }
+      if (keystroke === "down") {
+        this._navigateCompletion(1);
+        return;
+      }
+      // Fall through to normal handling for all other keystrokes
+    }
 
     // Enter → submit
     if (keystroke === "return") {
@@ -240,8 +316,11 @@ export class LineEditor {
       return;
     }
 
-    // Tab and escape — pass through for now (future: completion)
-    if (keystroke === "tab" || keystroke === "escape") return;
+    // Tab — no-op when not completing
+    if (keystroke === "tab") return;
+
+    // Escape — no-op when not completing
+    if (keystroke === "escape") return;
 
     // Check bindings
     if (keystroke) {
@@ -249,14 +328,22 @@ export class LineEditor {
       if (actionName) {
         const action = actions[actionName];
         if (action) {
-          const snap: LineEditorSnapshot = { value: val, cursor: cur };
+          const snap: LineEditorSnapshot = {
+            value: val,
+            cursor: cur,
+            completion: this._completionState,
+            completedRanges: this._completedRanges,
+          };
           const result = action(snap, this._killRing);
           const newValue = result.value ?? val;
           const newCursor = result.cursor ?? cur;
           if (result.killed) {
             this._killRing.push(result.killed);
+            if (this._killRing.length > MAX_KILL_RING) {
+              this._killRing.splice(0, this._killRing.length - MAX_KILL_RING);
+            }
           }
-          this._update(newValue, newCursor);
+          this._applyEdit(newValue, newCursor);
           return;
         }
       }
@@ -265,7 +352,7 @@ export class LineEditor {
     // Regular character input
     if (!keystroke && text.length > 0) {
       const newValue = val.slice(0, cur) + text + val.slice(cur);
-      this._update(newValue, cur + text.length);
+      this._applyEdit(newValue, cur + text.length);
     }
   }
 
@@ -283,19 +370,280 @@ export class LineEditor {
   }
 
   destroy(): void {
+    this._dismissCompletionSilent();
+    this._completedRanges = [];
     this._listeners.clear();
   }
 
-  private _update(value: string, cursor: number): void {
-    this._value = value;
-    this._cursor = cursor;
-    this._snapshot = { value, cursor };
+  // ── Private: mutation primitives ────────────────────────────────────────
+
+  private _notify(): void {
+    this._snapshot = {
+      value: this._value,
+      cursor: this._cursor,
+      completion: this._completionState,
+      completedRanges: this._completedRanges,
+    };
     for (const listener of this._listeners) {
       try {
         listener();
       } catch {
         // Listeners should not throw
       }
+    }
+  }
+
+  /** Mutate value/cursor and adjust completed ranges. No notification. */
+  private _editValue(newValue: string, newCursor: number): void {
+    const oldValue = this._value;
+    this._value = newValue;
+    this._cursor = newCursor;
+    this._adjustRanges(oldValue, newValue);
+  }
+
+  /** Wholesale replacement — history nav, submit, setValue, clear. */
+  private _update(value: string, cursor: number): void {
+    if (this._activeSource) this._dismissCompletionSilent();
+    this._completedRanges = [];
+    this._value = value;
+    this._cursor = cursor;
+    this._notify();
+  }
+
+  /** Edit-aware mutation: adjust ranges, check completion, notify. */
+  private _applyEdit(newValue: string, newCursor: number): void {
+    this._editValue(newValue, newCursor);
+
+    if (this._activeSource) {
+      this._updateCompletionAfterEdit();
+    } else {
+      this._checkTrigger();
+    }
+
+    this._notify();
+  }
+
+  // ── Private: range tracking ────────────────────────────────────────────
+
+  private _adjustRanges(oldValue: string, newValue: string): void {
+    if (oldValue === newValue || this._completedRanges.length === 0) return;
+
+    // Find the edit region by comparing common prefix and suffix
+    let prefixLen = 0;
+    const minLen = Math.min(oldValue.length, newValue.length);
+    while (prefixLen < minLen && oldValue[prefixLen] === newValue[prefixLen]) {
+      prefixLen++;
+    }
+
+    let suffixLen = 0;
+    while (
+      suffixLen < minLen - prefixLen &&
+      oldValue[oldValue.length - 1 - suffixLen] === newValue[newValue.length - 1 - suffixLen]
+    ) {
+      suffixLen++;
+    }
+
+    const editStart = prefixLen;
+    const editEndOld = oldValue.length - suffixLen;
+    const delta = newValue.length - oldValue.length;
+
+    const kept: CompletedRange[] = [];
+    for (const range of this._completedRanges) {
+      // Range entirely before edit region — unchanged
+      if (range.end <= editStart) {
+        kept.push(range);
+        continue;
+      }
+      // Range entirely after edit region — shift
+      if (range.start >= editEndOld) {
+        kept.push({
+          start: range.start + delta,
+          end: range.end + delta,
+          value: range.value,
+          sourceId: range.sourceId,
+        });
+        continue;
+      }
+      // Overlaps edit region — invalidate (drop it)
+    }
+    this._completedRanges = kept;
+  }
+
+  // ── Private: completion state machine ──────────────────────────────────
+
+  private _checkTrigger(): void {
+    if (this._cursor === 0) return;
+    const charBefore = this._value[this._cursor - 1];
+    if (!charBefore) return;
+
+    for (const source of this._sources) {
+      if (source.trigger.type === "char" && source.trigger.char === charBefore) {
+        const anchor = this._cursor - 1;
+        if (source.shouldActivate && !source.shouldActivate(this._value, anchor)) {
+          continue;
+        }
+        this._activeSource = source;
+        this._anchor = anchor;
+        this._resolve(source, "");
+        return;
+      }
+    }
+  }
+
+  private _updateCompletionAfterEdit(): void {
+    const source = this._activeSource;
+    if (!source) return;
+
+    // Cursor moved before or to the anchor position → dismiss
+    if (this._cursor <= this._anchor) {
+      this._dismissCompletionSilent();
+      return;
+    }
+
+    // Trigger char was deleted → dismiss
+    if (this._anchor >= this._value.length || this._value[this._anchor] !== source.trigger.char) {
+      this._dismissCompletionSilent();
+      return;
+    }
+
+    const query = this._value.slice(this._anchor + 1, this._cursor);
+    this._resolve(source, query);
+  }
+
+  /**
+   * Start or restart resolution.
+   *
+   * Inline path (no debounce): calls _resolveNow, _applyEdit handles notification.
+   * Deferred path (debounce): sets loading, timer calls _resolveNow + _notify.
+   */
+  private _resolve(source: CompletionSource, query: string): void {
+    this._resolveId++;
+    const id = this._resolveId;
+
+    if (this._debounceTimer !== null) {
+      clearTimeout(this._debounceTimer);
+      this._debounceTimer = null;
+    }
+
+    if (source.debounce && source.debounce > 0) {
+      this._completionState = this._loadingState(source, query);
+      this._debounceTimer = setTimeout(() => {
+        this._resolveNow(source, id, query);
+        this._notify();
+      }, source.debounce);
+    } else {
+      this._resolveNow(source, id, query);
+    }
+  }
+
+  /**
+   * Execute resolution immediately. Mutates _completionState but does NOT
+   * notify — caller is responsible. Async promise callbacks self-notify.
+   */
+  private _resolveNow(source: CompletionSource, id: number, query: string): void {
+    const result = source.resolve(query);
+    if (result instanceof Promise) {
+      this._completionState = this._loadingState(source, query);
+      result.then(
+        (items) => {
+          if (this._resolveId !== id) return;
+          this._completionState = {
+            items,
+            selectedIndex: 0,
+            query,
+            loading: false,
+            sourceId: source.id,
+          };
+          this._notify();
+        },
+        () => {
+          if (this._resolveId !== id) return;
+          this._completionState = {
+            items: [],
+            selectedIndex: 0,
+            query,
+            loading: false,
+            sourceId: source.id,
+          };
+          this._notify();
+        },
+      );
+    } else {
+      this._completionState = {
+        items: result,
+        selectedIndex: 0,
+        query,
+        loading: false,
+        sourceId: source.id,
+      };
+    }
+  }
+
+  private _loadingState(source: CompletionSource, query: string): CompletionState {
+    return {
+      items: this._completionState?.items ?? [],
+      selectedIndex: this._completionState?.selectedIndex ?? 0,
+      query,
+      loading: true,
+      sourceId: source.id,
+    };
+  }
+
+  private _acceptCompletion(): void {
+    const state = this._completionState;
+    const source = this._activeSource;
+    if (!state || !source || state.items.length === 0) {
+      this._dismissCompletion();
+      return;
+    }
+
+    const item = state.items[state.selectedIndex];
+    if (!item) {
+      this._dismissCompletion();
+      return;
+    }
+
+    const before = this._value.slice(0, this._anchor);
+    const after = this._value.slice(this._cursor);
+    const newValue = before + item.value + after;
+    const newCursor = before.length + item.value.length;
+
+    const range: CompletedRange = {
+      start: this._anchor,
+      end: newCursor,
+      value: item.value,
+      sourceId: source.id,
+    };
+
+    this._dismissCompletionSilent();
+    this._editValue(newValue, newCursor);
+    this._completedRanges = [...this._completedRanges, range];
+    this._notify();
+  }
+
+  private _navigateCompletion(delta: number): void {
+    const state = this._completionState;
+    if (!state || state.items.length === 0) return;
+
+    const len = state.items.length;
+    const next = (((state.selectedIndex + delta) % len) + len) % len;
+    this._completionState = { ...state, selectedIndex: next };
+    this._notify();
+  }
+
+  private _dismissCompletion(): void {
+    this._dismissCompletionSilent();
+    this._notify();
+  }
+
+  private _dismissCompletionSilent(): void {
+    this._activeSource = null;
+    this._anchor = -1;
+    this._completionState = null;
+    this._resolveId++;
+    if (this._debounceTimer !== null) {
+      clearTimeout(this._debounceTimer);
+      this._debounceTimer = null;
     }
   }
 }

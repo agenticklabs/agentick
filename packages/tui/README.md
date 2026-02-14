@@ -158,6 +158,7 @@ All components are exported for building custom UIs.
 | `DiffView`               | Side-by-side diff display for file changes          |
 | `ErrorDisplay`           | Error box with optional dismiss                     |
 | `InputBar`               | Visual-only text input (value + cursor from parent) |
+| `CompletionPicker`       | Windowed completion list (emerald-themed)           |
 | `StatusBar`              | Container with context provider and layout          |
 | `DefaultStatusBar`       | Pre-composed status bar with responsive layout      |
 
@@ -208,9 +209,48 @@ if (chatMode === "idle") {
 }
 ```
 
-Returns `{ value, cursor, handleInput, setValue, clear }`. Does not call `useInput` internally — the parent routes keystrokes to `editor.handleInput` when appropriate.
+Returns `{ value, cursor, completion, completedRanges, handleInput, setValue, clear, editor }`. Does not call `useInput` internally — the parent routes keystrokes to `editor.handleInput` when appropriate.
+
+The `editor` property exposes the raw `LineEditor` instance for registering completion sources. The `completion` property is the current `CompletionState | null` — pass it to `CompletionPicker` to render the autocomplete picker.
 
 For framework-agnostic usage (web, Angular), use `LineEditor` from `@agentick/client` directly, or `useLineEditor` from `@agentick/react`.
+
+### CompletionPicker
+
+Renders a windowed completion list from `CompletionState`. Emerald-themed border, inverse highlight for the selected item, loading spinner, and "No matches" empty state.
+
+```typescript
+import { CompletionPicker } from "@agentick/tui";
+
+{editor.completion && <CompletionPicker completion={editor.completion} />}
+```
+
+### Slash Commands
+
+`useSlashCommands` provides a command registry with dispatch, dynamic add/remove, and completion integration.
+
+```typescript
+import {
+  useSlashCommands,
+  helpCommand,
+  exitCommand,
+  createCommandCompletionSource,
+} from "@agentick/tui";
+
+const { dispatch, commands } = useSlashCommands([helpCommand(), exitCommand(exit)], {
+  sessionId,
+  send,
+  abort,
+  output: console.log,
+});
+
+// Wire into completion
+useEffect(() => {
+  return editor.editor.registerCompletion(createCommandCompletionSource(commands));
+}, [editor.editor, commands]);
+```
+
+See [`COMPLETION.md`](../client/COMPLETION.md) for the full completion system reference.
 
 ### handleConfirmationKey
 

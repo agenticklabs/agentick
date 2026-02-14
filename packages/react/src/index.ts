@@ -109,7 +109,7 @@ export {
   type Attachment,
   type AttachmentInput,
   type UseLineEditorOptions,
-  type UseLineEditorResult,
+  type LineEditorResult,
 } from "./hooks";
 
 // Types

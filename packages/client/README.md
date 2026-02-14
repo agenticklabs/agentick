@@ -214,6 +214,36 @@ client.onConnectionChange((state) => {
 });
 ```
 
+## LineEditor
+
+Framework-agnostic line editor with readline-quality editing: cursor movement, word navigation, kill/yank, history, and a char-trigger completion engine.
+
+```typescript
+import { LineEditor } from "@agentick/client";
+
+const editor = new LineEditor({ onSubmit: (text) => console.log(text) });
+editor.handleInput(null, "hello"); // insert text
+editor.handleInput("ctrl+a", ""); // move to start
+editor.handleInput("return", ""); // submit
+```
+
+### Completion
+
+Register completion sources that activate on trigger characters:
+
+```typescript
+const unregister = editor.registerCompletion({
+  id: "file",
+  trigger: { type: "char", char: "#" },
+  resolve: async (query) => searchFiles(query),
+  debounce: 150,
+});
+```
+
+When active, `editor.state.completion` contains the current `CompletionState` (items, selectedIndex, query, loading). Accepted completions are tracked as `CompletedRange` entries in `editor.state.completedRanges`.
+
+See [`COMPLETION.md`](./COMPLETION.md) for the full completion system reference covering resolution paths, keybindings, range tracking, slash commands, and custom sources.
+
 ## Chat Primitives
 
 Composable building blocks for chat UIs. Use `ChatSession` for the common case, or compose individual primitives for custom architectures.

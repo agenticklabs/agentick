@@ -217,6 +217,31 @@ const channel = session.channel("custom");
 channel.publish("event", { data: "value" });
 ```
 
+### `useLineEditor(options)`
+
+React wrapper around `@agentick/client`'s `LineEditor` class. Provides readline-quality editing with completion support via `useSyncExternalStore`.
+
+```tsx
+import { useLineEditor } from "@agentick/react";
+
+const { value, cursor, completion, completedRanges, editor } = useLineEditor({
+  onSubmit: (text) => send(text),
+});
+
+// Register completion sources via the raw editor
+useEffect(() => {
+  return editor.registerCompletion({
+    id: "file",
+    trigger: { type: "char", char: "#" },
+    resolve: async (query) => searchFiles(query),
+  });
+}, [editor]);
+```
+
+Returns `{ value, cursor, completion, completedRanges, handleInput, setValue, clear, editor }`. The `editor` property is the raw `LineEditor` instance. The `completion` property is `CompletionState | null`.
+
+For terminal UIs, use `useLineEditor` from `@agentick/tui` which adds Ink keystroke normalization. See [`COMPLETION.md`](../client/COMPLETION.md) for the full completion system reference.
+
 ### Chat Hooks
 
 These hooks wrap the [Chat Primitives](../client/README.md#chat-primitives) from `@agentick/client`. See the client docs for the underlying `ChatSession`, `MessageLog`, `ToolConfirmations`, and `MessageSteering` classes.

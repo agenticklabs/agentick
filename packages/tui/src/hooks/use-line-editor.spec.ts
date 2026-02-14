@@ -67,4 +67,20 @@ describe("normalizeInkKeystroke", () => {
   it("returns null for plain characters", () => {
     expect(normalizeInkKeystroke("a", key())).toBeNull();
   });
+
+  it("returns null for ctrl without input", () => {
+    expect(normalizeInkKeystroke("", key({ ctrl: true }))).toBeNull();
+  });
+
+  it("returns null for meta without input", () => {
+    expect(normalizeInkKeystroke("", key({ meta: true }))).toBeNull();
+  });
+
+  it("return takes priority over ctrl modifier", () => {
+    expect(normalizeInkKeystroke("m", key({ return: true, ctrl: true }))).toBe("return");
+  });
+
+  it("up arrow takes priority over meta", () => {
+    expect(normalizeInkKeystroke("", key({ upArrow: true, meta: true }))).toBe("up");
+  });
 });

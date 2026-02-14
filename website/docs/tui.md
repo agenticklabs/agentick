@@ -127,16 +127,20 @@ All components are exported for composing custom UIs. Mix and match them, or use
 | `ToolConfirmationPrompt` | Y/N/A prompt for tools with `requireConfirmation`   |
 | `ErrorDisplay`           | Error box with optional dismiss                     |
 | `InputBar`               | Visual-only text input (value + cursor from parent) |
+| `CompletionPicker`       | Windowed completion list (emerald-themed)           |
 | `DiffView`               | Side-by-side diff display for file changes          |
 | `StatusBar`              | Container with context provider and layout          |
 | `DefaultStatusBar`       | Pre-composed responsive status bar                  |
 
 **Hooks and utilities** (for building custom UIs):
 
-| Export                  | Purpose                                             |
-| ----------------------- | --------------------------------------------------- |
-| `useLineEditor`         | Terminal line editor with cursor, history, word nav |
-| `handleConfirmationKey` | Maps Y/N/A keys to tool confirmation responses      |
+| Export                          | Purpose                                               |
+| ------------------------------- | ----------------------------------------------------- |
+| `useLineEditor`                 | Terminal line editor with cursor, history, completion |
+| `useSlashCommands`              | Slash command registry with dispatch and completion   |
+| `createCommandCompletionSource` | Completion source factory for slash commands          |
+| `handleConfirmationKey`         | Maps Y/N/A keys to tool confirmation responses        |
+| `CommandsProvider`              | Inject additional slash commands from parent          |
 
 ### Status Bar
 
@@ -234,6 +238,47 @@ useInput((input, key) => {
 
 <InputBar value={editor.value} cursor={editor.cursor} isActive={chatMode === "idle"} />;
 ```
+
+### Completion & Slash Commands
+
+The input system includes a char-trigger completion engine. Register completion sources on the `LineEditor` instance to provide autocomplete for slash commands, file paths, @mentions, or any custom trigger.
+
+```tsx
+import {
+  useLineEditor,
+  useSlashCommands,
+  createCommandCompletionSource,
+  CompletionPicker,
+  helpCommand,
+  exitCommand,
+} from "@agentick/tui";
+
+const { dispatch, commands } = useSlashCommands([helpCommand(), exitCommand(exit)], {
+  sessionId,
+  send,
+  abort,
+  output: console.log,
+});
+
+const editor = useLineEditor({
+  onSubmit: (text) => {
+    if (dispatch(text)) return;
+    send(text);
+  },
+});
+
+// Register slash command completion (triggers on `/` at position 0)
+useEffect(() => {
+  return editor.editor.registerCompletion(createCommandCompletionSource(commands));
+}, [editor.editor, commands]);
+
+// Render the picker when active
+{
+  editor.completion && <CompletionPicker completion={editor.completion} />;
+}
+```
+
+The completion engine supports sync/async resolvers, debounce, and `CompletedRange` tracking. Web/React consumers build their own picker UI using the same `CompletionState` type from `@agentick/client`.
 
 ### Progressive Rendering
 

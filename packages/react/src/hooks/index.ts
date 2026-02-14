@@ -33,8 +33,4 @@ export {
   type Attachment,
   type AttachmentInput,
 } from "./use-chat";
-export {
-  useLineEditor,
-  type UseLineEditorOptions,
-  type UseLineEditorResult,
-} from "./use-line-editor";
+export { useLineEditor, type UseLineEditorOptions, type LineEditorResult } from "./use-line-editor";

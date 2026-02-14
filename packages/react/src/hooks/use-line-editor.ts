@@ -7,16 +7,24 @@
  */
 
 import { useMemo, useEffect, useCallback, useRef, useSyncExternalStore } from "react";
-import { LineEditor, type LineEditorOptions, type LineEditorSnapshot } from "@agentick/client";
+import {
+  LineEditor,
+  EMPTY_SNAPSHOT,
+  type LineEditorOptions,
+  type CompletionState,
+  type CompletedRange,
+} from "@agentick/client";
 
 export interface UseLineEditorOptions {
   onSubmit: (value: string) => void;
   bindings?: LineEditorOptions["bindings"];
 }
 
-export interface UseLineEditorResult {
+export interface LineEditorResult {
   value: string;
   cursor: number;
+  completion: CompletionState | null;
+  completedRanges: readonly CompletedRange[];
   setValue: (value: string) => void;
   clear: () => void;
   /** Process a normalized keystroke. See LineEditor.handleInput. */
@@ -25,9 +33,7 @@ export interface UseLineEditorResult {
   editor: LineEditor;
 }
 
-const EMPTY: LineEditorSnapshot = { value: "", cursor: 0 };
-
-export function useLineEditor(options: UseLineEditorOptions): UseLineEditorResult {
+export function useLineEditor(options: UseLineEditorOptions): LineEditorResult {
   const onSubmitRef = useRef(options.onSubmit);
   onSubmitRef.current = options.onSubmit;
 
@@ -45,12 +51,14 @@ export function useLineEditor(options: UseLineEditorOptions): UseLineEditorResul
   const state = useSyncExternalStore(
     useCallback((cb) => editor.onStateChange(cb), [editor]),
     () => editor.state,
-    () => EMPTY,
+    () => EMPTY_SNAPSHOT,
   );
 
   return {
     value: state.value,
     cursor: state.cursor,
+    completion: state.completion,
+    completedRanges: state.completedRanges,
     setValue: useCallback((v: string) => editor.setValue(v), [editor]),
     clear: useCallback(() => editor.clear(), [editor]),
     handleInput: useCallback(

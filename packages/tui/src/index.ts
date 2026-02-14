@@ -44,6 +44,7 @@ export { ToolConfirmationPrompt } from "./components/ToolConfirmationPrompt.js";
 export { DiffView } from "./components/DiffView.js";
 export { ErrorDisplay, type ErrorDisplayProps } from "./components/ErrorDisplay.js";
 export { InputBar, type InputBarProps } from "./components/InputBar.js";
+export { CompletionPicker, type CompletionPickerProps } from "./components/CompletionPicker.js";
 export { RichTextInput } from "./components/RichTextInput.js";
 export {
   useLineEditor,
@@ -84,6 +85,7 @@ export {
   clearCommand,
   exitCommand,
   loadCommand,
+  createCommandCompletionSource,
   type SlashCommand,
   type CommandContext,
 } from "./commands.js";

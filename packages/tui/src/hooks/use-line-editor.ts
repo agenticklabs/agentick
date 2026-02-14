@@ -8,19 +8,24 @@
 import { useMemo, useEffect, useCallback, useRef, useSyncExternalStore } from "react";
 import type { Key } from "ink";
 import { LineEditor } from "@agentick/client";
+import type { CompletionState, CompletedRange } from "@agentick/client";
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
 export interface UseLineEditorOptions {
   onSubmit: (value: string) => void;
+  bindings?: Record<string, string>;
 }
 
 export interface LineEditorResult {
   value: string;
   cursor: number;
+  completion: CompletionState | null;
+  completedRanges: readonly CompletedRange[];
   setValue: (value: string) => void;
   clear: () => void;
   handleInput: (input: string, key: Key) => void;
+  editor: LineEditor;
 }
 
 // ── Ink key normalization ───────────────────────────────────────────────────
@@ -42,11 +47,14 @@ export function normalizeInkKeystroke(input: string, key: Key): string | null {
 
 // ── Hook ────────────────────────────────────────────────────────────────────
 
-export function useLineEditor({ onSubmit }: UseLineEditorOptions): LineEditorResult {
+export function useLineEditor({ onSubmit, bindings }: UseLineEditorOptions): LineEditorResult {
   const onSubmitRef = useRef(onSubmit);
   onSubmitRef.current = onSubmit;
 
-  const editor = useMemo(() => new LineEditor({ onSubmit: (v) => onSubmitRef.current(v) }), []);
+  const editor = useMemo(
+    () => new LineEditor({ onSubmit: (v) => onSubmitRef.current(v), bindings }),
+    [],
+  );
 
   useEffect(() => () => editor.destroy(), [editor]);
 
@@ -71,8 +79,11 @@ export function useLineEditor({ onSubmit }: UseLineEditorOptions): LineEditorRes
   return {
     value: state.value,
     cursor: state.cursor,
+    completion: state.completion,
+    completedRanges: state.completedRanges,
     setValue: useCallback((v: string) => editor.setValue(v), [editor]),
     clear: useCallback(() => editor.clear(), [editor]),
     handleInput,
+    editor,
   };
 }

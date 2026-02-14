@@ -85,14 +85,31 @@ History is per-component-instance. On submit, the untrimmed input is saved.
 Navigating up saves the current (unsaved) input; pressing down past the
 newest entry restores it.
 
+### Completion (Active Picker)
+
+When a completion picker is active, these keys are intercepted BEFORE normal
+handling:
+
+| Key      | Action                                      |
+| -------- | ------------------------------------------- |
+| `Tab`    | Accept selected item                        |
+| `Enter`  | Accept selected item                        |
+| `Escape` | Dismiss picker (trigger char stays as text) |
+| `Up`     | Select previous item (wraps around)         |
+| `Down`   | Select next item (wraps around)             |
+
+When completion is NOT active, Tab and Escape are no-ops. Up/Down navigate
+history as usual. Enter submits.
+
+See [`COMPLETION.md`](../../../client/COMPLETION.md) for the full completion
+system reference.
+
 ### Passthrough
 
 These keys are explicitly NOT consumed by the editor:
 
 - `Ctrl+C` — handled by parent (abort/exit)
 - `Ctrl+L` — handled by parent (clear screen)
-- `Tab` — reserved for future completion
-- `Escape` — reserved for future completion
 
 ## Architecture
 
