@@ -1,27 +1,26 @@
 /**
- * MessageList — displays completed conversation messages.
+ * MessageList — displays conversation messages.
  *
- * Uses Ink's <Static> for messages that won't re-render (performance critical).
- * Listens for execution_end events. Uses newTimelineEntries (delta) when available,
- * falls back to output.timeline (full replace) for backwards compatibility.
+ * Accepts messages from useChat and splits them into:
+ * - Committed messages → Ink's <Static> (rendered once, never updated)
+ * - In-progress message → regular render (updates as blocks complete)
+ *
+ * When not executing, all messages are committed.
+ * When executing, the last message may still be receiving blocks.
  */
 
-import { useState, useEffect, useCallback } from "react";
+import { useCallback, useRef } from "react";
 import { Static, Box, Text } from "ink";
-import { useEvents } from "@agentick/react";
-import type { StreamEvent, Message, ContentBlock } from "@agentick/shared";
-
-interface CompletedMessage {
-  id: string;
-  role: string;
-  text: string;
-}
+import type { ChatMessage } from "@agentick/client";
+import type { ContentBlock } from "@agentick/shared";
 
 function renderContent(content: ContentBlock[] | string): string {
   if (typeof content === "string") return content;
   return content
     .map((block) => {
       if (block.type === "text") return block.text;
+      if (block.type === "reasoning")
+        return `[thinking: ${block.text.slice(0, 80)}${block.text.length > 80 ? "..." : ""}]`;
       if (block.type === "tool_use") return `[tool: ${block.name}]`;
       if (block.type === "tool_result") {
         const resultContent = Array.isArray(block.content)
@@ -29,7 +28,7 @@ function renderContent(content: ContentBlock[] | string): string {
               .map((c: ContentBlock) => (c.type === "text" ? c.text : `[${c.type}]`))
               .join("")
           : String(block.content ?? "");
-        return `[result: ${resultContent.slice(0, 100)}${resultContent.length > 100 ? "…" : ""}]`;
+        return `[result: ${resultContent.slice(0, 100)}${resultContent.length > 100 ? "..." : ""}]`;
       }
       return `[${block.type}]`;
     })
@@ -44,80 +43,64 @@ function roleColor(role: string): string {
       return "magenta";
     case "system":
       return "gray";
-    case "tool_result":
-      return "yellow";
     default:
       return "white";
   }
 }
 
-type TimelineEntry = { kind?: string; message?: Message };
+function MessageItem({ message }: { message: ChatMessage }) {
+  const text = renderContent(message.content);
+  if (!text) return null;
 
-function timelineToMessages(entries: TimelineEntry[]): CompletedMessage[] {
-  return entries
-    .filter((entry) => entry.kind === "message" && entry.message)
-    .map((entry, i) => {
-      const msg = entry.message!;
-      return {
-        id: msg.id ?? `msg-${i}-${Date.now()}`,
-        role: msg.role,
-        text: renderContent(msg.content),
-      };
-    });
+  return (
+    <Box flexDirection="column" marginBottom={1}>
+      <Text color={roleColor(message.role)} bold>
+        {message.role}:
+      </Text>
+      <Box marginLeft={2}>
+        <Text wrap="wrap">{text}</Text>
+      </Box>
+    </Box>
+  );
 }
 
 interface MessageListProps {
-  sessionId?: string;
+  messages: readonly ChatMessage[];
+  isExecuting: boolean;
 }
 
-export function MessageList({ sessionId }: MessageListProps) {
-  const [messages, setMessages] = useState<CompletedMessage[]>([]);
-  const { event } = useEvents({
-    sessionId,
-    filter: ["execution_end"],
-  });
+export function MessageList({ messages, isExecuting }: MessageListProps) {
+  // Track which message IDs have been committed to Static.
+  // Once committed, a message never leaves Static.
+  const committedIdsRef = useRef(new Set<string>());
 
-  useEffect(() => {
-    if (!event || event.type !== "execution_end") return;
+  // Committed: all messages except the last one when executing
+  // (the last message may still be receiving blocks)
+  const splitIndex = isExecuting && messages.length > 0 ? messages.length - 1 : messages.length;
 
-    const execEnd = event as StreamEvent & {
-      newTimelineEntries?: TimelineEntry[];
-      output?: { timeline?: TimelineEntry[] };
-    };
+  // Mark messages as committed
+  for (let i = 0; i < splitIndex; i++) {
+    committedIdsRef.current.add(messages[i].id);
+  }
 
-    // Prefer delta (append) over full timeline (replace)
-    if (execEnd.newTimelineEntries && execEnd.newTimelineEntries.length > 0) {
-      const newMessages = timelineToMessages(execEnd.newTimelineEntries);
-      if (newMessages.length > 0) {
-        setMessages((prev) => [...prev, ...newMessages]);
-      }
-      return;
-    }
+  // Build stable committed array (only messages we've committed)
+  const committed = messages.filter((m) => committedIdsRef.current.has(m.id));
+  const inProgress =
+    isExecuting &&
+    messages.length > 0 &&
+    !committedIdsRef.current.has(messages[messages.length - 1].id)
+      ? messages[messages.length - 1]
+      : null;
 
-    // Fallback: full timeline replace
-    const timeline = execEnd.output?.timeline;
-    if (Array.isArray(timeline)) {
-      setMessages(timelineToMessages(timeline));
-    }
-  }, [event]);
+  const renderMessage = useCallback(
+    (msg: ChatMessage) => <MessageItem key={msg.id} message={msg} />,
+    [],
+  );
 
-  const renderMessage = useCallback((msg: CompletedMessage) => {
-    // Skip tool_result entries in the message list for cleaner output
-    if (msg.role === "tool_result") return null;
-
-    return (
-      <Box key={msg.id} flexDirection="column" marginBottom={1}>
-        <Text color={roleColor(msg.role)} bold>
-          {msg.role}:
-        </Text>
-        <Box marginLeft={2}>
-          <Text wrap="wrap">{msg.text}</Text>
-        </Box>
-      </Box>
-    );
-  }, []);
-
-  if (messages.length === 0) return null;
-
-  return <Static items={messages}>{renderMessage}</Static>;
+  return (
+    <>
+      {committed.length > 0 && <Static items={committed}>{renderMessage}</Static>}
+      {inProgress && <MessageItem message={inProgress} />}
+    </>
+  );
 }

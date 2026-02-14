@@ -1,24 +1,18 @@
 /**
- * ErrorDisplay — shows errors that occur during execution.
+ * ErrorDisplay — visual-only error display for the TUI.
  *
- * Red bordered box with error message. Optional dismiss handler.
+ * Red bordered box with error message. No internal useInput —
+ * the parent orchestrator handles dismissal keystrokes.
  */
 
-import { Box, Text, useInput } from "ink";
+import { Box, Text } from "ink";
 
-interface ErrorDisplayProps {
+export interface ErrorDisplayProps {
   error: Error | string | null;
-  onDismiss?: () => void;
+  showDismissHint?: boolean;
 }
 
-export function ErrorDisplay({ error, onDismiss }: ErrorDisplayProps) {
-  useInput(
-    () => {
-      onDismiss?.();
-    },
-    { isActive: !!onDismiss && !!error },
-  );
-
+export function ErrorDisplay({ error, showDismissHint = false }: ErrorDisplayProps) {
   if (!error) return null;
 
   const message = error instanceof Error ? error.message : error;
@@ -31,7 +25,7 @@ export function ErrorDisplay({ error, onDismiss }: ErrorDisplayProps) {
       <Box marginTop={1}>
         <Text>{message}</Text>
       </Box>
-      {onDismiss && (
+      {showDismissHint && (
         <Box marginTop={1}>
           <Text color="gray">Press any key to dismiss</Text>
         </Box>

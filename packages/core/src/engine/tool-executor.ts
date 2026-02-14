@@ -481,7 +481,7 @@ export class ToolExecutor {
         try {
           metadata = await confirmCheck.tool.preview(call.input);
         } catch {
-          // Preview failure must not block confirmation
+          // Preview failure must not block confirmation — falls back to raw arguments
         }
       }
 

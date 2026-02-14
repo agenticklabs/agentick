@@ -402,6 +402,8 @@ export type ExecutionEndEvent = {
   stopReason?: StopReason | string;
   /** Whether execution was aborted */
   aborted?: boolean;
+  /** Error that caused execution to fail (absent on success or intentional abort) */
+  error?: { message: string; name: string };
   output: unknown;
   /** Timeline entries added during this execution (delta, not full timeline) */
   newTimelineEntries?: unknown[];

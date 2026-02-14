@@ -29,7 +29,8 @@ import type {
   SendInput,
   ClientExecutionHandle,
 } from "./types";
-import type { ContentBlock, Message } from "@agentick/shared";
+import type { ContentBlock, Message, ExecutionEndEvent } from "@agentick/shared";
+import { AbortError } from "@agentick/shared";
 
 // ============================================================================
 // Client Configuration
@@ -410,7 +411,7 @@ class ClientExecutionHandleImpl implements ClientExecutionHandle {
       void this.client.abort(this._sessionId, reason).catch(() => {});
     }
     this.queue.close();
-    this.rejectResult(new Error(reason ?? "Execution aborted"));
+    this.rejectResult(new AbortError(reason ?? "Execution aborted"));
   }
 
   queueMessage(message: Message): void {
@@ -455,7 +456,12 @@ class ClientExecutionHandleImpl implements ClientExecutionHandle {
     }
 
     if (event.type === "execution_end") {
-      if (this._status === "running") {
+      const endEvent = event as unknown as ExecutionEndEvent;
+      if (endEvent.error && !this.hasResult) {
+        this.hasResult = true;
+        this._status = "error";
+        this.rejectResult(new Error(endEvent.error.message));
+      } else if (this._status === "running") {
         this._status = "completed";
       }
       this.queue.close();

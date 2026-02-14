@@ -110,9 +110,7 @@ class NoOpProvider implements TelemetryProvider {
       recordError: () => {},
     };
   }
-  recordError(error: any): void {
-    console.error("Telemetry Error:", error);
-  }
+  recordError(_error: any): void {}
   endTrace(): void {}
   getCounter(_name: string): Counter {
     return { add: () => {} };

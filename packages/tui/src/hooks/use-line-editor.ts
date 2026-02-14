@@ -2,11 +2,11 @@
  * useLineEditor — readline-quality line editing for Ink.
  *
  * Manages buffer, cursor, kill ring, history, and keybindings.
- * Uses Ink's useInput internally. No rendering — pure editing logic.
+ * Returns a `handleInput` callback that the caller routes keystrokes to.
+ * No internal `useInput` — the caller owns input routing.
  */
 
 import { useState, useRef, useCallback, useEffect } from "react";
-import { useInput } from "ink";
 import type { Key } from "ink";
 
 // ── Types ───────────────────────────────────────────────────────────────────
@@ -15,7 +15,6 @@ export interface UseLineEditorOptions {
   value?: string;
   onChange?: (value: string) => void;
   onSubmit: (value: string) => void;
-  isActive?: boolean;
 }
 
 export interface LineEditorState {
@@ -28,6 +27,7 @@ export interface LineEditorResult {
   cursor: number;
   setValue: (value: string) => void;
   clear: () => void;
+  handleInput: (input: string, key: Key) => void;
 }
 
 export interface EditorUpdate {
@@ -194,7 +194,6 @@ export function useLineEditor({
   value: controlledValue,
   onChange,
   onSubmit,
-  isActive = true,
 }: UseLineEditorOptions): LineEditorResult {
   const isControlled = controlledValue !== undefined && onChange !== undefined;
 
@@ -235,26 +234,35 @@ export function useLineEditor({
     updateValue("", 0);
   }, [updateValue]);
 
-  useInput(
-    (input, key) => {
+  // Stable refs for handleInput closure
+  const currentValueRef = useRef(currentValue);
+  const cursorRef = useRef(cursor);
+  const onSubmitRef = useRef(onSubmit);
+  currentValueRef.current = currentValue;
+  cursorRef.current = cursor;
+  onSubmitRef.current = onSubmit;
+
+  const handleInput = useCallback(
+    (input: string, key: Key) => {
       // Let Ctrl+C pass through — never consume it
       if (key.ctrl && input === "c") return;
       // Let Ctrl+L pass through (clear screen)
       if (key.ctrl && input === "l") return;
 
+      const val = currentValueRef.current;
       // Clamp cursor in case controlled value changed externally
-      const cur = Math.min(cursor, currentValue.length);
+      const cur = Math.min(cursorRef.current, val.length);
 
       const keystroke = normalizeKeystroke(input, key);
 
       // Enter → submit
       if (keystroke === "return") {
-        const trimmed = currentValue.trim();
+        const trimmed = val.trim();
         if (trimmed) {
-          historyRef.current.push(currentValue);
+          historyRef.current.push(val);
           historyIndexRef.current = -1;
           savedInputRef.current = "";
-          onSubmit(trimmed);
+          onSubmitRef.current(trimmed);
           updateValue("", 0);
         }
         return;
@@ -265,7 +273,7 @@ export function useLineEditor({
         const history = historyRef.current;
         if (history.length === 0) return;
         if (historyIndexRef.current === -1) {
-          savedInputRef.current = currentValue;
+          savedInputRef.current = val;
           historyIndexRef.current = history.length - 1;
         } else if (historyIndexRef.current > 0) {
           historyIndexRef.current--;
@@ -302,9 +310,9 @@ export function useLineEditor({
         if (actionName) {
           const action = actions[actionName];
           if (action) {
-            const state: LineEditorState = { value: currentValue, cursor: cur };
+            const state: LineEditorState = { value: val, cursor: cur };
             const update = action(state, killRingRef.current);
-            const newValue = update.value ?? currentValue;
+            const newValue = update.value ?? val;
             const newCursor = update.cursor ?? cur;
             if (update.killed) {
               killRingRef.current.push(update.killed);
@@ -317,15 +325,15 @@ export function useLineEditor({
 
       // Regular character input (not a recognized binding)
       if (!keystroke && input.length > 0) {
-        const newValue = currentValue.slice(0, cur) + input + currentValue.slice(cur);
+        const newValue = val.slice(0, cur) + input + val.slice(cur);
         updateValue(newValue, cur + input.length);
       }
     },
-    { isActive },
+    [updateValue],
   );
 
   // Clamp for the render before the effect fires
   const clampedCursor = Math.min(cursor, currentValue.length);
 
-  return { value: currentValue, cursor: clampedCursor, setValue, clear };
+  return { value: currentValue, cursor: clampedCursor, setValue, clear, handleInput };
 }

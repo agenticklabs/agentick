@@ -19,9 +19,11 @@ import type {
   ContentStartEvent,
   ContentDeltaEvent,
   ContentEndEvent,
+  ContentEvent,
   ReasoningStartEvent,
   ReasoningDeltaEvent,
   ReasoningEndEvent,
+  ReasoningEvent,
   ToolCallStartEvent,
   ToolCallDeltaEvent,
   ToolCallEndEvent,
@@ -191,6 +193,12 @@ export class StreamAccumulator {
   private reasoningStarted = false;
   private blockIndex = 0;
 
+  // Per-block text tracking (for emitting full block events)
+  private currentBlockText = "";
+  private currentBlockStartedAt?: string;
+  private currentReasoningText = "";
+  private currentReasoningStartedAt?: string;
+
   constructor(options: StreamAccumulatorOptions = {}) {
     this.options = options;
     this.modelId = options.modelId;
@@ -231,6 +239,8 @@ export class StreamAccumulator {
         // Emit content_start on first text
         if (!this.textStarted) {
           this.textStarted = true;
+          this.currentBlockText = "";
+          this.currentBlockStartedAt = new Date().toISOString();
           events.push({
             type: "content_start",
             ...createEventBase(tick),
@@ -246,6 +256,7 @@ export class StreamAccumulator {
         }
 
         this.text += delta.delta;
+        this.currentBlockText += delta.delta;
         events.push({
           type: "content_delta",
           ...createEventBase(tick),
@@ -265,6 +276,8 @@ export class StreamAccumulator {
         // Emit reasoning_start on first reasoning
         if (!this.reasoningStarted) {
           this.reasoningStarted = true;
+          this.currentReasoningText = "";
+          this.currentReasoningStartedAt = new Date().toISOString();
           events.push({
             type: "reasoning_start",
             ...createEventBase(tick),
@@ -279,6 +292,7 @@ export class StreamAccumulator {
         }
 
         this.reasoning += delta.delta;
+        this.currentReasoningText += delta.delta;
         events.push({
           type: "reasoning_delta",
           ...createEventBase(tick),
@@ -308,6 +322,7 @@ export class StreamAccumulator {
 
         // End text block if active
         if (this.textStarted) {
+          const completedAt = new Date().toISOString();
           events.push({
             type: "content_end",
             ...createEventBase(tick),
@@ -315,20 +330,43 @@ export class StreamAccumulator {
             blockIndex: this.blockIndex,
             metadata: this.contentMetadata,
           } as ContentEndEvent);
+          events.push({
+            type: "content",
+            ...createEventBase(tick),
+            blockIndex: this.blockIndex,
+            content: { type: "text", text: this.currentBlockText },
+            metadata: this.contentMetadata,
+            startedAt: this.currentBlockStartedAt || completedAt,
+            completedAt,
+          } as ContentEvent);
           this.textStarted = false;
+          this.currentBlockText = "";
+          this.currentBlockStartedAt = undefined;
           this.contentMetadata = undefined; // Reset for next block
           this.blockIndex++;
         }
 
         // End reasoning block if active
         if (this.reasoningStarted) {
+          const completedAt = new Date().toISOString();
           events.push({
             type: "reasoning_end",
             ...createEventBase(tick),
             blockIndex: this.blockIndex,
             metadata: this.reasoningMetadata,
           } as ReasoningEndEvent);
+          events.push({
+            type: "reasoning",
+            ...createEventBase(tick),
+            blockIndex: this.blockIndex,
+            reasoning: this.currentReasoningText,
+            metadata: this.reasoningMetadata,
+            startedAt: this.currentReasoningStartedAt || completedAt,
+            completedAt,
+          } as ReasoningEvent);
           this.reasoningStarted = false;
+          this.currentReasoningText = "";
+          this.currentReasoningStartedAt = undefined;
           this.reasoningMetadata = undefined; // Reset for next block
           this.blockIndex++;
         }
@@ -440,6 +478,7 @@ export class StreamAccumulator {
       case "message_end": {
         // End any active blocks
         if (this.textStarted) {
+          const completedAt = new Date().toISOString();
           events.push({
             type: "content_end",
             ...createEventBase(tick),
@@ -447,16 +486,39 @@ export class StreamAccumulator {
             blockIndex: this.blockIndex,
             metadata: this.contentMetadata,
           } as ContentEndEvent);
+          events.push({
+            type: "content",
+            ...createEventBase(tick),
+            blockIndex: this.blockIndex,
+            content: { type: "text", text: this.currentBlockText },
+            metadata: this.contentMetadata,
+            startedAt: this.currentBlockStartedAt || completedAt,
+            completedAt,
+          } as ContentEvent);
           this.textStarted = false;
+          this.currentBlockText = "";
+          this.currentBlockStartedAt = undefined;
         }
         if (this.reasoningStarted) {
+          const completedAt = new Date().toISOString();
           events.push({
             type: "reasoning_end",
             ...createEventBase(tick),
             blockIndex: this.blockIndex,
             metadata: this.reasoningMetadata,
           } as ReasoningEndEvent);
+          events.push({
+            type: "reasoning",
+            ...createEventBase(tick),
+            blockIndex: this.blockIndex,
+            reasoning: this.currentReasoningText,
+            metadata: this.reasoningMetadata,
+            startedAt: this.currentReasoningStartedAt || completedAt,
+            completedAt,
+          } as ReasoningEvent);
           this.reasoningStarted = false;
+          this.currentReasoningText = "";
+          this.currentReasoningStartedAt = undefined;
         }
 
         // Finalize any in-progress tool calls

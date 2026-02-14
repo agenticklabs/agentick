@@ -1,8 +1,8 @@
 /**
  * DiffView Tests
  *
- * Validates that DiffView renders unified diffs with proper coloring
- * and maxLines truncation.
+ * Validates that DiffView renders unified diffs with line numbers,
+ * change markers, summary counts, and maxLines truncation.
  */
 
 import { describe, it, expect } from "vitest";
@@ -23,22 +23,34 @@ const SAMPLE_PATCH = `--- a/src/main.ts
 `;
 
 describe("DiffView", () => {
-  it("renders addition lines in green", async () => {
+  it("renders addition lines with + marker", async () => {
     const { lastFrame } = render(<DiffView patch={SAMPLE_PATCH} />);
     await flush();
 
     const frame = lastFrame()!;
-    // Addition lines should be present
-    expect(frame).toContain('+import { bar } from "bar"');
-    expect(frame).toContain("+  return bar(foo());");
+    // Addition content should appear (without the leading + which is now a gutter marker)
+    expect(frame).toContain('import { bar } from "bar"');
+    expect(frame).toContain("return bar(foo());");
   });
 
-  it("renders removal lines in red", async () => {
+  it("renders removal lines with - marker", async () => {
     const { lastFrame } = render(<DiffView patch={SAMPLE_PATCH} />);
     await flush();
 
     const frame = lastFrame()!;
-    expect(frame).toContain("-  return foo();");
+    expect(frame).toContain("return foo();");
+    // Marker should be in the gutter
+    expect(frame).toContain("-");
+  });
+
+  it("renders line numbers", async () => {
+    const { lastFrame } = render(<DiffView patch={SAMPLE_PATCH} />);
+    await flush();
+
+    const frame = lastFrame()!;
+    // Line 1 context, line 2 addition, etc.
+    expect(frame).toContain("1");
+    expect(frame).toContain("2");
   });
 
   it("renders hunk headers", async () => {
@@ -49,12 +61,23 @@ describe("DiffView", () => {
     expect(frame).toContain("@@");
   });
 
-  it("renders file path when provided", async () => {
+  it("renders file path with change counts", async () => {
     const { lastFrame } = render(<DiffView patch={SAMPLE_PATCH} filePath="src/main.ts" />);
     await flush();
 
     const frame = lastFrame()!;
     expect(frame).toContain("src/main.ts");
+    expect(frame).toContain("+2");
+    expect(frame).toContain("-1");
+  });
+
+  it("renders summary without file path", async () => {
+    const { lastFrame } = render(<DiffView patch={SAMPLE_PATCH} />);
+    await flush();
+
+    const frame = lastFrame()!;
+    expect(frame).toContain("2 added");
+    expect(frame).toContain("1 removed");
   });
 
   it("truncates with maxLines", async () => {

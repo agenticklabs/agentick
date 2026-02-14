@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect } from "vitest";
 import { render } from "ink-testing-library";
 import { ErrorDisplay } from "./ErrorDisplay.js";
 import { flush } from "../testing.js";
@@ -24,31 +24,18 @@ describe("ErrorDisplay", () => {
     const { lastFrame } = render(<ErrorDisplay error={null} />);
     await flush();
 
-    // lastFrame() may be empty string or contain no error box
     const frame = lastFrame() ?? "";
     expect(frame).not.toContain("Error");
   });
 
-  it("shows dismiss hint when onDismiss is provided", async () => {
-    const onDismiss = vi.fn();
-    const { lastFrame } = render(<ErrorDisplay error="Oops" onDismiss={onDismiss} />);
+  it("shows dismiss hint when showDismissHint is true", async () => {
+    const { lastFrame } = render(<ErrorDisplay error="Oops" showDismissHint />);
     await flush();
 
     expect(lastFrame()!).toContain("Press any key to dismiss");
   });
 
-  it("calls onDismiss on keypress", async () => {
-    const onDismiss = vi.fn();
-    const { stdin } = render(<ErrorDisplay error="Oops" onDismiss={onDismiss} />);
-    await flush();
-
-    stdin.write("x");
-    await flush();
-
-    expect(onDismiss).toHaveBeenCalled();
-  });
-
-  it("does not show dismiss hint without onDismiss", async () => {
+  it("does not show dismiss hint by default", async () => {
     const { lastFrame } = render(<ErrorDisplay error="Oops" />);
     await flush();
 

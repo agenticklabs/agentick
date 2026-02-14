@@ -1,88 +1,86 @@
 /**
- * Chat — default TUI layout.
+ * Chat — default TUI layout and single input orchestrator.
  *
- * Orchestrates the conversation: message history, streaming response,
- * tool call indicators, tool confirmation prompts, error display, and user input.
+ * Uses useChat with renderMode: "block" — content blocks appear as they
+ * complete, while StreamingMessage shows token-by-token text for the
+ * current block being streamed.
  *
  * State machine: idle → streaming → (confirming_tool → streaming) → idle
  * Ctrl+C behavior depends on state:
  *   - idle: exit the process
  *   - streaming: abort current execution
  *   - confirming_tool: reject tool, return to streaming
+ *
+ * Input routing priority:
+ *   1. Ctrl+C → always handled (abort/exit/reject based on state)
+ *   2. confirming_tool → Y/N/A keys via handleConfirmationKey
+ *   3. error displayed → any key dismisses
+ *   4. idle → editor.handleInput
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { Box, Text, useApp, useInput } from "ink";
-import { useSession, useStreamingText } from "@agentick/react";
-import type { ToolConfirmationRequest, ToolConfirmationResponse } from "@agentick/client";
+import { useCallback, useMemo, useState } from "react";
+import type { ReactNode } from "react";
+import { Box, useApp, useInput } from "ink";
+import { useChat, useStreamingText } from "@agentick/react";
+import type { ChatMode } from "@agentick/client";
 import { MessageList } from "../components/MessageList.js";
 import { StreamingMessage } from "../components/StreamingMessage.js";
 import { ToolCallIndicator } from "../components/ToolCallIndicator.js";
 import { ToolConfirmationPrompt } from "../components/ToolConfirmationPrompt.js";
 import { ErrorDisplay } from "../components/ErrorDisplay.js";
 import { InputBar } from "../components/InputBar.js";
+import { DefaultStatusBar } from "../components/status-bar/DefaultStatusBar.js";
 import { useSlashCommands, helpCommand, exitCommand } from "../commands.js";
 import { useCommandsConfig } from "../commands-context.js";
+import { useLineEditor } from "../hooks/use-line-editor.js";
+import { handleConfirmationKey } from "../input-utils.js";
 
-interface ChatProps {
+export interface ChatStatusBarState {
+  mode: ChatMode;
+  isExecuting: boolean;
   sessionId: string;
 }
 
-type ChatState = "idle" | "streaming" | "confirming_tool";
-
-interface ToolConfirmationState {
-  request: ToolConfirmationRequest;
-  respond: (response: ToolConfirmationResponse) => void;
+interface ChatProps {
+  sessionId: string;
+  /**
+   * Status bar configuration:
+   * - `false`: no status bar
+   * - `ReactNode`: custom static status bar
+   * - `(state) => ReactNode`: render prop with chat state
+   * - `undefined` (default): `<DefaultStatusBar>` wired to chat state
+   */
+  statusBar?: false | ReactNode | ((state: ChatStatusBarState) => ReactNode);
 }
 
-export function Chat({ sessionId }: ChatProps) {
+export function Chat({ sessionId, statusBar }: ChatProps) {
   const { exit } = useApp();
-  const { send, abort, accessor } = useSession({ sessionId, autoSubscribe: true });
+
+  const {
+    messages,
+    chatMode,
+    toolConfirmation,
+    isExecuting,
+    error,
+    submit,
+    abort,
+    respondToConfirmation,
+  } = useChat({
+    sessionId,
+    renderMode: "block",
+  });
+
+  // StreamingMessage still uses useStreamingText for live token display
   const { isStreaming } = useStreamingText();
 
-  const [chatState, setChatState] = useState<ChatState>("idle");
-  const [toolConfirmation, setToolConfirmation] = useState<ToolConfirmationState | null>(null);
-  const [error, setError] = useState<Error | string | null>(null);
-
-  // Sync streaming state → chatState (unless we're in confirming_tool, which takes priority)
-  useEffect(() => {
-    if (isStreaming && chatState === "idle") {
-      setChatState("streaming");
-      setError(null); // Clear previous errors on new execution
-    } else if (!isStreaming && chatState === "streaming") {
-      setChatState("idle");
-    }
-  }, [isStreaming, chatState]);
-
-  // Register tool confirmation handler
-  useEffect(() => {
-    if (!accessor) return;
-    return accessor.onToolConfirmation((request, respond) => {
-      setToolConfirmation({ request, respond });
-      setChatState("confirming_tool");
-    });
-  }, [accessor]);
-
-  // Ctrl+C handling
-  useInput((_input, key) => {
-    if (!key.ctrl || _input !== "c") return;
-
-    if (chatState === "idle") {
-      exit();
-    } else if (chatState === "streaming") {
-      abort();
-      setChatState("idle");
-    } else if (chatState === "confirming_tool" && toolConfirmation) {
-      toolConfirmation.respond({ approved: false, reason: "cancelled by user" });
-      setToolConfirmation(null);
-      setChatState("streaming");
-    }
-  });
+  const [dismissedError, setDismissedError] = useState(false);
+  // Track the error identity so dismissal resets on new errors
+  const displayError = error && !dismissedError ? error.message : null;
 
   const configCommands = useCommandsConfig();
   const commandCtx = useMemo(
-    () => ({ sessionId, send, abort, output: console.log }),
-    [sessionId, send, abort],
+    () => ({ sessionId, send: (text: string) => submit(text), abort, output: console.log }),
+    [sessionId, submit, abort],
   );
   const { dispatch } = useSlashCommands(
     [...configCommands, helpCommand(), exitCommand(exit)],
@@ -92,64 +90,102 @@ export function Chat({ sessionId }: ChatProps) {
   const handleSubmit = useCallback(
     (text: string) => {
       if (dispatch(text)) return;
-      setError(null);
-      try {
-        send(text);
-      } catch (err) {
-        setError(err instanceof Error ? err : String(err));
-      }
+      setDismissedError(false);
+      submit(text);
     },
-    [dispatch, send],
+    [dispatch, submit],
   );
 
   const handleToolConfirmationResponse = useCallback(
-    (response: ToolConfirmationResponse) => {
-      if (toolConfirmation) {
-        toolConfirmation.respond(response);
-        setToolConfirmation(null);
-        setChatState("streaming");
-      }
+    (response: { approved: boolean; reason?: string }) => {
+      respondToConfirmation(response);
     },
-    [toolConfirmation],
+    [respondToConfirmation],
   );
 
   const handleErrorDismiss = useCallback(() => {
-    setError(null);
+    setDismissedError(true);
   }, []);
 
-  const isInputDisabled = chatState !== "idle";
+  // Chat owns the line editor directly
+  const editor = useLineEditor({ onSubmit: handleSubmit });
+
+  // Single centralized input handler — all keystrokes route through here
+  useInput((input, key) => {
+    // 1. Ctrl+C → always handled
+    if (key.ctrl && input === "c") {
+      if (chatMode === "idle") {
+        exit();
+      } else if (chatMode === "streaming") {
+        abort();
+      } else if (chatMode === "confirming_tool" && toolConfirmation) {
+        respondToConfirmation({ approved: false, reason: "cancelled by user" });
+      }
+      return;
+    }
+
+    // 2. Tool confirmation → Y/N/A
+    if (chatMode === "confirming_tool" && toolConfirmation) {
+      handleConfirmationKey(input, handleToolConfirmationResponse);
+      return;
+    }
+
+    // 3. Error displayed → any key dismisses
+    if (displayError && chatMode === "idle") {
+      handleErrorDismiss();
+      return;
+    }
+
+    // 4. Idle → route to editor
+    if (chatMode === "idle") {
+      editor.handleInput(input, key);
+    }
+  });
+
+  const isInputActive = chatMode === "idle";
   const placeholder =
-    chatState === "streaming"
+    chatMode === "streaming"
       ? "Waiting for response... (Ctrl+C to abort)"
-      : chatState === "confirming_tool"
+      : chatMode === "confirming_tool"
         ? "Confirm or reject the tool above..."
         : undefined;
 
+  // Resolve status bar content
+  let statusBarContent: ReactNode;
+  if (statusBar === false) {
+    statusBarContent = null;
+  } else if (typeof statusBar === "function") {
+    statusBarContent = statusBar({ mode: chatMode, isExecuting: isStreaming, sessionId });
+  } else if (statusBar !== undefined) {
+    statusBarContent = statusBar;
+  } else {
+    statusBarContent = (
+      <DefaultStatusBar sessionId={sessionId} mode={chatMode} isExecuting={isStreaming} />
+    );
+  }
+
   return (
     <Box flexDirection="column" padding={1}>
-      <Box marginBottom={1}>
-        <Text color="cyan" bold>
-          agentick
-        </Text>
-        <Text color="gray"> — type /help for commands</Text>
-      </Box>
-
-      <MessageList sessionId={sessionId} />
+      <MessageList messages={messages} isExecuting={isExecuting} />
       <StreamingMessage />
       <ToolCallIndicator sessionId={sessionId} />
 
-      {chatState === "confirming_tool" && toolConfirmation && (
-        <ToolConfirmationPrompt
-          request={toolConfirmation.request}
-          onRespond={handleToolConfirmationResponse}
-        />
+      {chatMode === "confirming_tool" && toolConfirmation && (
+        <ToolConfirmationPrompt request={toolConfirmation.request} />
       )}
 
-      <ErrorDisplay error={error} onDismiss={handleErrorDismiss} />
+      <ErrorDisplay error={displayError} showDismissHint={!!displayError && chatMode === "idle"} />
 
       <Box marginTop={1}>
-        <InputBar onSubmit={handleSubmit} isDisabled={isInputDisabled} placeholder={placeholder} />
+        <InputBar
+          value={editor.value}
+          cursor={editor.cursor}
+          isActive={isInputActive}
+          placeholder={placeholder}
+        />
       </Box>
+
+      {statusBarContent}
     </Box>
   );
 }

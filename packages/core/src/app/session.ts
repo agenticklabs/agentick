@@ -1715,6 +1715,7 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
     });
 
     const executionStartTimelineIndex = this._timeline.length;
+    let executionError: Error | undefined;
 
     try {
       // Tick loop
@@ -2105,6 +2106,9 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
         result: resultPayload,
         timestamp: timestamp(),
       });
+    } catch (e) {
+      executionError = e instanceof Error ? e : new Error(String(e));
+      throw e;
     } finally {
       this._executionComplete = true;
 
@@ -2125,6 +2129,11 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
         executionId,
         stopReason,
         aborted: this._isAborted,
+        // Include error details for non-abort failures (abort is intentional, not an error)
+        error:
+          executionError && !this._isAborted
+            ? { message: executionError.message, name: executionError.name }
+            : undefined,
         usage,
         output: output ?? null,
         newTimelineEntries: this._timeline.slice(executionStartTimelineIndex),

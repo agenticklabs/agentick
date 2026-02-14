@@ -27,6 +27,21 @@ export interface ToolConfirmationState {
 }
 
 // ---------------------------------------------------------------------------
+// RenderMode
+// ---------------------------------------------------------------------------
+
+/**
+ * Controls how progressively messages appear in the message list.
+ *
+ * - `"streaming"`: Token-by-token — content deltas, tool call deltas
+ * - `"block"`: Block-at-a-time — full content blocks, full tool calls, tool results
+ * - `"message"`: Full message — entire assistant response at once
+ *
+ * When omitted, messages only appear at `execution_end` (coarsest granularity).
+ */
+export type RenderMode = "streaming" | "block" | "message";
+
+// ---------------------------------------------------------------------------
 // MessageLog types
 // ---------------------------------------------------------------------------
 
@@ -55,6 +70,8 @@ export interface MessageLogOptions {
   transform?: MessageTransform;
   /** When false, caller must call processEvent() manually. Default: true. */
   subscribe?: boolean;
+  /** Progressive rendering mode. When omitted, messages appear at execution_end only. */
+  renderMode?: RenderMode;
 }
 
 export interface MessageLogState {
@@ -117,6 +134,8 @@ export interface ChatSessionState<TMode extends string = ChatMode> {
   readonly queued: readonly Message[];
   readonly isExecuting: boolean;
   readonly mode: SteeringMode;
+  /** Error from the most recent execution failure (null on success or abort) */
+  readonly error: { message: string; name: string } | null;
 }
 
 export interface ChatSessionOptions<
@@ -134,4 +153,6 @@ export interface ChatSessionOptions<
   onEvent?: (event: StreamEvent) => void;
   /** Subscribe to the session's SSE transport on construction. Default: true. */
   autoSubscribe?: boolean;
+  /** Progressive rendering mode. Passed to MessageLog. */
+  renderMode?: RenderMode;
 }

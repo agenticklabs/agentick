@@ -230,6 +230,7 @@ const chat = new ChatSession(client, {
   autoSubscribe: true, // Subscribe to SSE transport (default: true)
   initialMessages: [], // Pre-loaded history
   transform: undefined, // Custom MessageTransform (default: timelineToMessages)
+  renderMode: undefined, // Progressive rendering: "streaming" | "block" | "message"
   confirmationPolicy: undefined, // Auto-approve/deny policy (default: prompt all)
   deriveMode: undefined, // Custom ChatModeDeriver (default: idle/streaming/confirming_tool)
   onEvent: undefined, // Raw event hook
@@ -261,6 +262,35 @@ const unsub = chat.onStateChange(() => {
 
 chat.destroy();
 ```
+
+#### Render Modes
+
+Control how progressively messages appear in the message list. Without `renderMode`, messages only appear at `execution_end` (the entire execution must finish). With a render mode, content appears earlier:
+
+| Mode          | Granularity    | Updates on                                            |
+| ------------- | -------------- | ----------------------------------------------------- |
+| `"streaming"` | Token-by-token | `content_delta`, `reasoning_delta`, `tool_call_delta` |
+| `"block"`     | Full blocks    | `content`, `reasoning`, `tool_call`                   |
+| `"message"`   | Full message   | `message`                                             |
+| _(none)_      | Execution end  | `execution_end`                                       |
+
+Each tier is a superset of the one above — `"streaming"` handles everything `"block"` does, plus finer deltas.
+
+```typescript
+// Block-at-a-time (recommended for terminal UIs)
+const chat = new ChatSession(client, {
+  sessionId: "conv-123",
+  renderMode: "block",
+});
+
+// Token-by-token (recommended for web UIs)
+const chat = new ChatSession(client, {
+  sessionId: "conv-123",
+  renderMode: "streaming",
+});
+```
+
+When `renderMode` is set, user messages appear immediately on `submit()` (before the server responds). Reasoning blocks are included in progressive rendering for all modes.
 
 #### Custom Chat Modes
 
@@ -315,9 +345,11 @@ const log = new MessageLog(client, {
   sessionId: "conv-123",
   initialMessages: [],
   transform: undefined, // Custom MessageTransform
+  renderMode: "block", // Progressive rendering (see below)
 });
 
 log.messages; // ChatMessage[]
+log.pushUserMessage("Hello"); // Immediate (progressive modes)
 log.clear();
 log.destroy();
 ```

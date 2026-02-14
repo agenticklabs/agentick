@@ -1,21 +1,21 @@
 /**
- * ToolConfirmationPrompt — inline confirmation UI for tools that require approval.
+ * ToolConfirmationPrompt — visual-only confirmation UI for tools that require approval.
  *
- * Shows tool name, arguments, and Y/N/A key bindings.
- * Renders as a bordered box inline in the terminal (no overlays).
+ * Shows tool name, arguments, and Y/N/A key hints.
+ * No internal useInput — the parent orchestrator handles keystrokes
+ * and calls respond() directly.
  *
  * When metadata with type "diff" is present, renders a colored diff view
  * instead of raw JSON arguments.
  */
 
-import { Box, Text, useInput } from "ink";
-import type { ToolConfirmationRequest, ToolConfirmationResponse } from "@agentick/client";
+import { Box, Text } from "ink";
+import type { ToolConfirmationRequest } from "@agentick/client";
 import type { DiffPreviewMetadata } from "@agentick/shared";
 import { DiffView } from "./DiffView.js";
 
 interface ToolConfirmationPromptProps {
   request: ToolConfirmationRequest;
-  onRespond: (response: ToolConfirmationResponse) => void;
 }
 
 function isDiffPreview(meta: unknown): meta is DiffPreviewMetadata {
@@ -33,18 +33,7 @@ function formatArguments(args: Record<string, unknown>): string {
   return json;
 }
 
-export function ToolConfirmationPrompt({ request, onRespond }: ToolConfirmationPromptProps) {
-  useInput((input) => {
-    const key = input.toLowerCase();
-    if (key === "y") {
-      onRespond({ approved: true });
-    } else if (key === "n") {
-      onRespond({ approved: false, reason: "rejected by user" });
-    } else if (key === "a") {
-      onRespond({ approved: true, always: true });
-    }
-  });
-
+export function ToolConfirmationPrompt({ request }: ToolConfirmationPromptProps) {
   const diffMeta = isDiffPreview(request.metadata) ? request.metadata : null;
 
   return (
@@ -73,7 +62,7 @@ export function ToolConfirmationPrompt({ request, onRespond }: ToolConfirmationP
         )}
       </Box>
 
-      <Box marginTop={1} gap={2}>
+      <Box marginTop={1} flexDirection="row" gap={2}>
         <Text color="green" bold>
           [Y] Approve
         </Text>

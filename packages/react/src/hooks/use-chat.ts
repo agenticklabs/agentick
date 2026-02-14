@@ -22,11 +22,14 @@ export interface UseChatResult<TMode extends string = ChatMode> {
   queued: readonly Message[];
   isExecuting: boolean;
   mode: SteeringMode;
+  /** Error from the most recent execution failure (null on success or abort) */
+  error: { message: string; name: string } | null;
 
   submit: (text: string) => void;
   steer: (text: string) => void;
   queue: (text: string) => void;
   interrupt: (text: string) => Promise<ClientExecutionHandle>;
+  abort: (reason?: string) => void;
   flush: () => void;
   removeQueued: (index: number) => void;
   clearQueued: () => void;
@@ -43,6 +46,7 @@ const INITIAL_STATE: ChatSessionState = {
   queued: [],
   isExecuting: false,
   mode: "steer",
+  error: null,
 };
 
 /**
@@ -77,6 +81,7 @@ export function useChat<TMode extends string = ChatMode>(
     steer: useCallback((t: string) => session.steer(t), [session]),
     queue: useCallback((t: string) => session.queue(t), [session]),
     interrupt: useCallback((t: string) => session.interrupt(t), [session]),
+    abort: useCallback((r?: string) => session.abort(r), [session]),
     flush: useCallback(() => session.flush(), [session]),
     removeQueued: useCallback((i: number) => session.removeQueued(i), [session]),
     clearQueued: useCallback(() => session.clearQueued(), [session]),

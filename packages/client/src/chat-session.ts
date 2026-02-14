@@ -1,6 +1,6 @@
 import type { AgentickClient, SessionAccessor } from "./client.js";
 import type { ToolConfirmationResponse } from "./types.js";
-import type { StreamEvent } from "@agentick/shared";
+import type { StreamEvent, ExecutionEndEvent } from "@agentick/shared";
 import { MessageSteering, type SteeringMode } from "./message-steering.js";
 import { MessageLog } from "./message-log.js";
 import { ToolConfirmations } from "./tool-confirmations.js";
@@ -30,8 +30,10 @@ export class ChatSession<TMode extends string = ChatMode> {
   private readonly _onEvent?: (event: StreamEvent) => void;
   private readonly _accessor: SessionAccessor | null = null;
   private readonly _autoSubscribed: boolean;
+  private readonly _hasRenderMode: boolean;
 
   private _lastSubmitted: string | null = null;
+  private _error: { message: string; name: string } | null = null;
 
   private _unsubscribeEvents: (() => void) | null = null;
   private _unsubscribeConfirmations: (() => void) | null = null;
@@ -47,6 +49,7 @@ export class ChatSession<TMode extends string = ChatMode> {
     // without it, chatMode values won't match TMode at runtime.
     this._deriveMode = options.deriveMode ?? (defaultDeriveMode as ChatModeDeriver<TMode>);
     this._onEvent = options.onEvent;
+    this._hasRenderMode = !!options.renderMode;
 
     // Create primitives in externally-driven mode (subscribe: false).
     // ChatSession owns the single event subscription.
@@ -54,6 +57,7 @@ export class ChatSession<TMode extends string = ChatMode> {
       sessionId: options.sessionId,
       initialMessages: options.initialMessages,
       transform: options.transform,
+      renderMode: options.renderMode,
       subscribe: false,
     });
 
@@ -85,8 +89,16 @@ export class ChatSession<TMode extends string = ChatMode> {
         this._steering.processEvent(event);
         this._messageLog.processEvent(event);
 
+        if (event.type === "execution_start") {
+          this._error = null;
+        }
+
         if (event.type === "execution_end") {
           this._lastSubmitted = null;
+          const endEvent = event as unknown as ExecutionEndEvent;
+          if (endEvent.error) {
+            this._error = endEvent.error;
+          }
         }
 
         this._notify();
@@ -133,10 +145,17 @@ export class ChatSession<TMode extends string = ChatMode> {
     return this._snapshot.mode;
   }
 
+  get error() {
+    return this._snapshot.error;
+  }
+
   // --- Public API (actions) ---
 
   submit(text: string): void {
     this._lastSubmitted = text;
+    if (this._hasRenderMode) {
+      this._messageLog.pushUserMessage(text);
+    }
     this._steering.submit(text);
     this._notify();
   }
@@ -188,6 +207,10 @@ export class ChatSession<TMode extends string = ChatMode> {
     this._notify();
   }
 
+  abort(reason?: string): void {
+    this._accessor?.abort(reason);
+  }
+
   // --- Subscription ---
 
   onStateChange(listener: () => void): () => void {
@@ -225,6 +248,7 @@ export class ChatSession<TMode extends string = ChatMode> {
       queued: steeringState.queued,
       isExecuting: steeringState.isExecuting,
       mode: steeringState.mode,
+      error: this._error,
     };
   }
 
@@ -233,8 +257,8 @@ export class ChatSession<TMode extends string = ChatMode> {
     for (const listener of this._listeners) {
       try {
         listener();
-      } catch (e) {
-        console.error("Error in chat listener:", e);
+      } catch {
+        // Listeners should not throw
       }
     }
   }

@@ -150,40 +150,139 @@ All components are exported for building custom UIs.
 
 | Component                | Purpose                                           |
 | ------------------------ | ------------------------------------------------- |
-| `Chat`                   | Default chat UI (built-in)                        |
-| `MessageList`            | Completed messages (Ink `<Static>`)               |
-| `StreamingMessage`       | Live streaming response with cursor               |
-| `ToolCallIndicator`      | Spinner during tool execution                     |
-| `ToolConfirmationPrompt` | Y/N/A prompt for tools with `requireConfirmation` |
-| `ErrorDisplay`           | Error box with optional dismiss                   |
-| `InputBar`               | Text input with controlled/uncontrolled modes     |
+| `Chat`                   | Default conversational interface (block rendering)    |
+| `MessageList`            | Prop-driven message display (Static + in-progress)    |
+| `StreamingMessage`       | Live streaming response with cursor                   |
+| `ToolCallIndicator`      | Spinner during tool execution                         |
+| `ToolConfirmationPrompt` | Y/N/A prompt for tools with `requireConfirmation`     |
+| `DiffView`               | Side-by-side diff display for file changes            |
+| `ErrorDisplay`           | Error box with optional dismiss                       |
+| `InputBar`               | Visual-only text input (value + cursor from parent)   |
+| `StatusBar`              | Container with context provider and layout            |
+| `DefaultStatusBar`       | Pre-composed status bar with responsive layout        |
+
+**Status bar widgets** (use standalone or inside `<StatusBar>`):
+
+| Widget               | Purpose                                     |
+| -------------------- | ------------------------------------------- |
+| `ModelInfo`          | Model name/id display                       |
+| `TokenCount`         | Formatted token count (cumulative or tick)  |
+| `TickCount`          | Current execution tick number               |
+| `ContextUtilization` | Utilization % with color thresholds         |
+| `StateIndicator`     | Mode label with color (idle/streaming/etc.) |
+| `KeyboardHints`      | Contextual keyboard shortcut hints          |
+| `BrandLabel`         | Styled app name                             |
+| `Separator`          | Visual divider between segments             |
 
 ### InputBar
 
-Supports two modes:
-
-**Uncontrolled** (default) — manages its own value, clears on submit:
+Visual-only input display. Renders the current value and cursor position — all keystroke handling lives in the parent via `useLineEditor`.
 
 ```typescript
-<InputBar onSubmit={(text) => send(text)} isDisabled={isStreaming} />
-```
+import { InputBar, useLineEditor } from "@agentick/tui";
 
-**Controlled** — parent owns the value (needed for Ctrl+L clear, scroll mode, etc.):
-
-```typescript
-const [value, setValue] = useState("");
+const editor = useLineEditor({ onSubmit: handleSubmit });
 
 <InputBar
-  value={value}
-  onChange={setValue}
-  onSubmit={(text) => { send(text); setValue(""); }}
-  isDisabled={isStreaming}
+  value={editor.value}
+  cursor={editor.cursor}
+  isActive={chatMode === "idle"}
+  placeholder="Type a message..."
 />
+```
+
+### useLineEditor
+
+Terminal line editor hook with cursor movement, history (up/down), and word-level navigation.
+
+```typescript
+const editor = useLineEditor({
+  onSubmit: (text) => send(text),
+});
+
+// In your centralized useInput handler:
+if (chatMode === "idle") {
+  editor.handleInput(input, key);
+}
+```
+
+Returns `{ value, cursor, handleInput, clear }`. Does not call `useInput` internally — the parent routes keystrokes to `editor.handleInput` when appropriate.
+
+### handleConfirmationKey
+
+Input routing utility for tool confirmation prompts. Maps `y`/`n`/`a` keys to confirmation responses.
+
+```typescript
+import { handleConfirmationKey } from "@agentick/tui";
+
+if (chatMode === "confirming_tool") {
+  handleConfirmationKey(input, respondToConfirmation);
+}
 ```
 
 ### MessageList
 
-Uses `execution_end` events as its data source. When the event includes `newTimelineEntries` (a delta of entries added during that execution), MessageList appends them. Falls back to replacing all messages from `output.timeline` for backwards compatibility.
+Prop-driven message display. Accepts `messages` from `useChat` and splits them into committed (Ink `<Static>`) and in-progress (regular render) based on `isExecuting`.
+
+```typescript
+<MessageList messages={messages} isExecuting={isExecuting} />
+```
+
+`Chat` uses `useChat({ renderMode: "block" })` so messages appear block-at-a-time as content completes, rather than waiting for the entire execution to finish.
+
+### StatusBar
+
+`<StatusBar>` is a container that calls `useContextInfo` and `useStreamingText` once, provides the data via React context, and renders a left/right flexbox layout with a top border.
+
+Widgets read from context automatically when inside a `<StatusBar>`, or accept explicit props when used standalone.
+
+**Default** — `Chat` renders `<DefaultStatusBar>` automatically:
+
+```
+Enter send | Ctrl+C exit                          GPT-4o | 6.2K 35% | idle
+```
+
+The default is responsive — hides token/utilization info in narrow terminals.
+
+**Custom** — compose your own from widgets:
+
+```typescript
+import { StatusBar, BrandLabel, ModelInfo, TokenCount,
+  ContextUtilization, StateIndicator, Separator, KeyboardHints } from "@agentick/tui";
+
+<StatusBar sessionId={sessionId} mode={chatMode}
+  left={<KeyboardHints hints={{ idle: [{ key: "Tab", action: "complete" }] }} />}
+  right={<>
+    <BrandLabel name="myapp" />
+    <Separator />
+    <ModelInfo />
+    <Separator />
+    <TokenCount cumulative />
+    <Separator />
+    <ContextUtilization />
+    <Separator />
+    <StateIndicator labels={{ streaming: "active" }} />
+  </>}
+/>
+```
+
+**Chat integration** — control the status bar via the `statusBar` prop:
+
+```typescript
+// Default (renders DefaultStatusBar)
+<Chat sessionId="main" />
+
+// Disabled
+<Chat sessionId="main" statusBar={false} />
+
+// Render prop — receives chat state
+<Chat sessionId="main" statusBar={({ mode, sessionId }) => (
+  <StatusBar sessionId={sessionId} mode={mode}
+    left={<KeyboardHints />}
+    right={<StateIndicator />}
+  />
+)} />
+```
 
 ## Architecture
 

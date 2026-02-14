@@ -34,7 +34,7 @@
 export { createTUI, type TUIOptions, type TUIComponent } from "./create-tui.js";
 
 // Built-in UIs
-export { Chat } from "./ui/chat.js";
+export { Chat, type ChatStatusBarState } from "./ui/chat.js";
 
 // Components for custom UI composition
 export { MessageList } from "./components/MessageList.js";
@@ -42,15 +42,39 @@ export { StreamingMessage } from "./components/StreamingMessage.js";
 export { ToolCallIndicator } from "./components/ToolCallIndicator.js";
 export { ToolConfirmationPrompt } from "./components/ToolConfirmationPrompt.js";
 export { DiffView } from "./components/DiffView.js";
-export { ErrorDisplay } from "./components/ErrorDisplay.js";
-export { InputBar } from "./components/InputBar.js";
+export { ErrorDisplay, type ErrorDisplayProps } from "./components/ErrorDisplay.js";
+export { InputBar, type InputBarProps } from "./components/InputBar.js";
 export { RichTextInput } from "./components/RichTextInput.js";
 export {
   useLineEditor,
   type UseLineEditorOptions,
   type LineEditorResult,
 } from "./hooks/use-line-editor.js";
+
+export { useDoubleCtrlC } from "./hooks/use-double-ctrl-c.js";
+
+// Input routing utilities
+export { handleConfirmationKey } from "./input-utils.js";
 export { default as Spinner } from "ink-spinner";
+
+// StatusBar — composable status bar system
+export {
+  StatusBar,
+  type StatusBarProps,
+  DefaultStatusBar,
+  StatusBarContext,
+  useStatusBarData,
+  type StatusBarData,
+  ModelInfo,
+  TokenCount,
+  TickCount,
+  ContextUtilization,
+  StateIndicator,
+  KeyboardHints,
+  type KeyboardHint,
+  BrandLabel,
+  Separator,
+} from "./components/status-bar/index.js";
 
 // Slash commands
 export {

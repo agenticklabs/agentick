@@ -3,7 +3,10 @@
  *
  * These tests render a real Ink component, simulate keystrokes via stdin.write,
  * and verify the rendered output. They test the full pipeline:
- *   stdin → Ink key parser → useInput → useLineEditor → RichTextInput → frame
+ *   stdin → Ink key parser → useInput → handleInput → RichTextInput → frame
+ *
+ * The test harness owns useInput and routes all keys to editor.handleInput,
+ * matching the centralized input routing pattern used in production.
  *
  * Cursor position is verified indirectly: move the cursor, type a character,
  * check where it was inserted.
@@ -11,7 +14,7 @@
 
 import { describe, it, expect, vi } from "vitest";
 import { render } from "ink-testing-library";
-import { Box, Text } from "ink";
+import { Box, Text, useInput } from "ink";
 import { useLineEditor } from "./use-line-editor.js";
 import { RichTextInput } from "../components/RichTextInput.js";
 import { flush, waitFor } from "../testing.js";
@@ -63,6 +66,11 @@ function TestEditor({
   onValue?: (v: string, cursor: number) => void;
 }) {
   const editor = useLineEditor({ onSubmit });
+
+  // The harness owns useInput and routes all keys to the editor
+  useInput((input, key) => {
+    editor.handleInput(input, key);
+  });
 
   // Expose value/cursor to tests via callback
   if (onValue) onValue(editor.value, editor.cursor);

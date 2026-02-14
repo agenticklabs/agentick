@@ -108,6 +108,7 @@ export type {
   ConfirmationDecision,
   ConfirmationPolicy,
   ChatModeDeriver,
+  RenderMode,
 } from "./chat-types.js";
 
 // Types - re-exported from types.ts which re-exports from shared

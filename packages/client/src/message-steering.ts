@@ -149,8 +149,8 @@ export class MessageSteering {
     for (const listener of this._listeners) {
       try {
         listener();
-      } catch (e) {
-        console.error("Error in steering listener:", e);
+      } catch {
+        // Listeners should not throw
       }
     }
   }
@@ -164,11 +164,11 @@ export class MessageSteering {
   }
 
   private _send(input: SendInput): void {
-    if (this._sessionId) {
-      this._client.send(input, { sessionId: this._sessionId });
-    } else {
-      this._client.send(input);
-    }
+    const handle = this._sessionId
+      ? this._client.send(input, { sessionId: this._sessionId })
+      : this._client.send(input);
+    // Prevent unhandled rejection — errors propagate via execution_end events
+    void handle.result.catch(() => {});
   }
 
   private _sendToSession(text: string): void {

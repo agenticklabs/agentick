@@ -1,8 +1,8 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect } from "vitest";
 import { render } from "ink-testing-library";
 import { ToolConfirmationPrompt } from "./ToolConfirmationPrompt.js";
 import type { ToolConfirmationRequest } from "@agentick/client";
-import { flush, waitFor } from "../testing.js";
+import { flush } from "../testing.js";
 
 function makeRequest(overrides: Partial<ToolConfirmationRequest> = {}): ToolConfirmationRequest {
   return {
@@ -15,10 +15,7 @@ function makeRequest(overrides: Partial<ToolConfirmationRequest> = {}): ToolConf
 
 describe("ToolConfirmationPrompt", () => {
   it("renders tool name and arguments", async () => {
-    const onRespond = vi.fn();
-    const { lastFrame } = render(
-      <ToolConfirmationPrompt request={makeRequest()} onRespond={onRespond} />,
-    );
+    const { lastFrame } = render(<ToolConfirmationPrompt request={makeRequest()} />);
     await flush();
 
     const frame = lastFrame()!;
@@ -26,80 +23,30 @@ describe("ToolConfirmationPrompt", () => {
     expect(frame).toContain("/tmp/test.txt");
     expect(frame).toContain("[Y] Approve");
     expect(frame).toContain("[N] Reject");
-  });
-
-  it("Y key calls onRespond with approved: true", async () => {
-    const onRespond = vi.fn();
-    const { stdin, lastFrame } = render(
-      <ToolConfirmationPrompt request={makeRequest()} onRespond={onRespond} />,
-    );
-
-    // Ensure component is fully mounted (useInput effect registered)
-    await waitFor(() => expect(lastFrame()!).toContain("[Y] Approve"));
-
-    stdin.write("y");
-    await waitFor(() => expect(onRespond).toHaveBeenCalledWith({ approved: true }));
-  });
-
-  it("N key calls onRespond with approved: false", async () => {
-    const onRespond = vi.fn();
-    const { stdin, lastFrame } = render(
-      <ToolConfirmationPrompt request={makeRequest()} onRespond={onRespond} />,
-    );
-
-    // Ensure component is fully mounted (useInput effect registered)
-    await waitFor(() => expect(lastFrame()!).toContain("[N] Reject"));
-
-    stdin.write("n");
-    await waitFor(() =>
-      expect(onRespond).toHaveBeenCalledWith({
-        approved: false,
-        reason: "rejected by user",
-      }),
-    );
-  });
-
-  it("A key calls onRespond with approved: true", async () => {
-    const onRespond = vi.fn();
-    const { stdin, lastFrame } = render(
-      <ToolConfirmationPrompt request={makeRequest()} onRespond={onRespond} />,
-    );
-
-    // Ensure component is fully mounted (useInput effect registered)
-    await waitFor(() => expect(lastFrame()!).toContain("[A] Always Allow"));
-
-    stdin.write("a");
-    await waitFor(() => expect(onRespond).toHaveBeenCalledWith({ approved: true, always: true }));
+    expect(frame).toContain("[A] Always Allow");
   });
 
   it("shows message when present in request", async () => {
-    const onRespond = vi.fn();
     const request = makeRequest({ message: "This will delete an important file" });
-    const { lastFrame } = render(
-      <ToolConfirmationPrompt request={request} onRespond={onRespond} />,
-    );
+    const { lastFrame } = render(<ToolConfirmationPrompt request={request} />);
     await flush();
 
     expect(lastFrame()!).toContain("This will delete an important file");
   });
 
   it("truncates long arguments", async () => {
-    const onRespond = vi.fn();
     const longArgs: Record<string, unknown> = {};
     for (let i = 0; i < 20; i++) {
       longArgs[`key_${i}`] = `value_${i}`;
     }
     const request = makeRequest({ arguments: longArgs });
-    const { lastFrame } = render(
-      <ToolConfirmationPrompt request={request} onRespond={onRespond} />,
-    );
+    const { lastFrame } = render(<ToolConfirmationPrompt request={request} />);
     await flush();
 
     expect(lastFrame()!).toContain("...");
   });
 
   it("renders diff view when metadata has type 'diff'", async () => {
-    const onRespond = vi.fn();
     const request = makeRequest({
       name: "write_file",
       arguments: { path: "src/app.ts", content: "new content" },
@@ -117,17 +64,13 @@ describe("ToolConfirmationPrompt", () => {
         isNewFile: false,
       },
     });
-    const { lastFrame } = render(
-      <ToolConfirmationPrompt request={request} onRespond={onRespond} />,
-    );
+    const { lastFrame } = render(<ToolConfirmationPrompt request={request} />);
     await flush();
 
     const frame = lastFrame()!;
-    // Should show the file path from diff metadata
     expect(frame).toContain("src/app.ts");
-    // Should show diff lines (additions and removals)
-    expect(frame).toContain("+const x = 42;");
-    expect(frame).toContain("-const x = 1;");
+    expect(frame).toContain("const x = 42;");
+    expect(frame).toContain("const x = 1;");
     // Should NOT show raw JSON arguments
     expect(frame).not.toContain('"content"');
   });
