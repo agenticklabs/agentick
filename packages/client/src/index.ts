@@ -7,6 +7,8 @@
  * - Session accessors (cold/hot semantics)
  * - Events tagged with sessionId
  * - Streaming text accumulation
+ * - Chat primitives (ChatSession, MessageLog, ToolConfirmations, MessageSteering)
+ * - LineEditor — framework-agnostic readline-quality line editing
  *
  * @example
  * ```typescript
@@ -81,6 +83,14 @@ export { ToolConfirmations } from "./tool-confirmations.js";
 
 // Chat session (composed from primitives)
 export { ChatSession } from "./chat-session.js";
+
+// Line editor
+export {
+  LineEditor,
+  type LineEditorOptions,
+  type LineEditorSnapshot,
+  type EditorUpdate,
+} from "./line-editor.js";
 
 // Chat transforms
 export {

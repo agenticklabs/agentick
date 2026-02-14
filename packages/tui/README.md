@@ -148,18 +148,18 @@ const MyUI: TUIComponent = ({ sessionId }) => {
 
 All components are exported for building custom UIs.
 
-| Component                | Purpose                                           |
-| ------------------------ | ------------------------------------------------- |
-| `Chat`                   | Default conversational interface (block rendering)    |
-| `MessageList`            | Prop-driven message display (Static + in-progress)    |
-| `StreamingMessage`       | Live streaming response with cursor                   |
-| `ToolCallIndicator`      | Spinner during tool execution                         |
-| `ToolConfirmationPrompt` | Y/N/A prompt for tools with `requireConfirmation`     |
-| `DiffView`               | Side-by-side diff display for file changes            |
-| `ErrorDisplay`           | Error box with optional dismiss                       |
-| `InputBar`               | Visual-only text input (value + cursor from parent)   |
-| `StatusBar`              | Container with context provider and layout            |
-| `DefaultStatusBar`       | Pre-composed status bar with responsive layout        |
+| Component                | Purpose                                             |
+| ------------------------ | --------------------------------------------------- |
+| `Chat`                   | Default conversational interface (block rendering)  |
+| `MessageList`            | Prop-driven message display (Static + in-progress)  |
+| `StreamingMessage`       | Live streaming response with cursor                 |
+| `ToolCallIndicator`      | Spinner during tool execution                       |
+| `ToolConfirmationPrompt` | Y/N/A prompt for tools with `requireConfirmation`   |
+| `DiffView`               | Side-by-side diff display for file changes          |
+| `ErrorDisplay`           | Error box with optional dismiss                     |
+| `InputBar`               | Visual-only text input (value + cursor from parent) |
+| `StatusBar`              | Container with context provider and layout          |
+| `DefaultStatusBar`       | Pre-composed status bar with responsive layout      |
 
 **Status bar widgets** (use standalone or inside `<StatusBar>`):
 
@@ -193,7 +193,9 @@ const editor = useLineEditor({ onSubmit: handleSubmit });
 
 ### useLineEditor
 
-Terminal line editor hook with cursor movement, history (up/down), and word-level navigation.
+Ink-specific wrapper around `@agentick/client`'s `LineEditor` class. Provides
+readline-quality editing with cursor movement, history, kill/yank, and word
+navigation.
 
 ```typescript
 const editor = useLineEditor({
@@ -206,7 +208,9 @@ if (chatMode === "idle") {
 }
 ```
 
-Returns `{ value, cursor, handleInput, clear }`. Does not call `useInput` internally — the parent routes keystrokes to `editor.handleInput` when appropriate.
+Returns `{ value, cursor, handleInput, setValue, clear }`. Does not call `useInput` internally — the parent routes keystrokes to `editor.handleInput` when appropriate.
+
+For framework-agnostic usage (web, Angular), use `LineEditor` from `@agentick/client` directly, or `useLineEditor` from `@agentick/react`.
 
 ### handleConfirmationKey
 

@@ -67,7 +67,7 @@
  * | `useConnectionState()` | Connection state subscription |
  * | `useEvents(opts?)` | Stream event subscription |
  * | `useStreamingText(opts?)` | Accumulated text from deltas |
- * | `useEvents(opts?)` | Stream event subscription |
+ * | `useLineEditor(opts)` | Readline-quality line editing (wraps client LineEditor) |
  *
  * @module @agentick/react
  */
@@ -88,6 +88,7 @@ export {
   useMessages,
   useToolConfirmations,
   useChat,
+  useLineEditor,
   type ContextInfo,
   type UseContextInfoOptions,
   type UseContextInfoResult,
@@ -105,6 +106,8 @@ export {
   type ChatMode,
   type ChatMessage,
   type ToolConfirmationState,
+  type UseLineEditorOptions,
+  type UseLineEditorResult,
 } from "./hooks";
 
 // Types
@@ -135,7 +138,11 @@ export type {
   ClientExecutionHandle,
   SessionStreamEvent,
   ClientTransport,
+  LineEditorSnapshot,
 } from "@agentick/client";
+
+// Re-export LineEditor class for direct use
+export { LineEditor } from "@agentick/client";
 
 // Re-export createClient for users who want to create a client manually
 export { createClient } from "@agentick/client";

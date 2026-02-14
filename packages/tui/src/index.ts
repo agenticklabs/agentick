@@ -47,6 +47,7 @@ export { InputBar, type InputBarProps } from "./components/InputBar.js";
 export { RichTextInput } from "./components/RichTextInput.js";
 export {
   useLineEditor,
+  normalizeInkKeystroke,
   type UseLineEditorOptions,
   type LineEditorResult,
 } from "./hooks/use-line-editor.js";

@@ -118,25 +118,25 @@ agentick-tui --url https://my-agent.fly.dev/api --session my-session
 
 All components are exported for composing custom UIs. Mix and match them, or use them as reference implementations.
 
-| Component                | Purpose                                           |
-| ------------------------ | ------------------------------------------------- |
-| `Chat`                   | Default conversational interface (block rendering)    |
-| `MessageList`            | Prop-driven message display (Static + in-progress)    |
-| `StreamingMessage`       | Live streaming response with cursor                   |
-| `ToolCallIndicator`      | Spinner during tool execution                         |
-| `ToolConfirmationPrompt` | Y/N/A prompt for tools with `requireConfirmation`     |
-| `ErrorDisplay`           | Error box with optional dismiss                       |
-| `InputBar`               | Visual-only text input (value + cursor from parent)   |
-| `DiffView`               | Side-by-side diff display for file changes            |
-| `StatusBar`              | Container with context provider and layout            |
-| `DefaultStatusBar`       | Pre-composed responsive status bar                    |
+| Component                | Purpose                                             |
+| ------------------------ | --------------------------------------------------- |
+| `Chat`                   | Default conversational interface (block rendering)  |
+| `MessageList`            | Prop-driven message display (Static + in-progress)  |
+| `StreamingMessage`       | Live streaming response with cursor                 |
+| `ToolCallIndicator`      | Spinner during tool execution                       |
+| `ToolConfirmationPrompt` | Y/N/A prompt for tools with `requireConfirmation`   |
+| `ErrorDisplay`           | Error box with optional dismiss                     |
+| `InputBar`               | Visual-only text input (value + cursor from parent) |
+| `DiffView`               | Side-by-side diff display for file changes          |
+| `StatusBar`              | Container with context provider and layout          |
+| `DefaultStatusBar`       | Pre-composed responsive status bar                  |
 
 **Hooks and utilities** (for building custom UIs):
 
-| Export                   | Purpose                                              |
-| ------------------------ | ---------------------------------------------------- |
-| `useLineEditor`          | Terminal line editor with cursor, history, word nav   |
-| `handleConfirmationKey`  | Maps Y/N/A keys to tool confirmation responses        |
+| Export                  | Purpose                                             |
+| ----------------------- | --------------------------------------------------- |
+| `useLineEditor`         | Terminal line editor with cursor, history, word nav |
+| `handleConfirmationKey` | Maps Y/N/A keys to tool confirmation responses      |
 
 ### Status Bar
 
@@ -232,7 +232,7 @@ useInput((input, key) => {
   }
 });
 
-<InputBar value={editor.value} cursor={editor.cursor} isActive={chatMode === "idle"} />
+<InputBar value={editor.value} cursor={editor.cursor} isActive={chatMode === "idle"} />;
 ```
 
 ### Progressive Rendering

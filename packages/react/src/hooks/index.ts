@@ -31,3 +31,8 @@ export {
   type ChatMessage,
   type ToolConfirmationState,
 } from "./use-chat";
+export {
+  useLineEditor,
+  type UseLineEditorOptions,
+  type UseLineEditorResult,
+} from "./use-line-editor";

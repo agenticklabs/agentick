@@ -6,18 +6,22 @@ The TUI input system provides readline-quality line editing for Ink-based
 terminal UIs. It replaces `ink-text-input` with a proper editing engine:
 cursor movement, word navigation, kill/yank, history, and transposition.
 
-Two layers:
+Three layers:
 
-- **`useLineEditor`** — React hook managing the editing state machine. Buffer,
-  cursor, kill ring, history, keybindings. Uses Ink's `useInput` internally.
-  No rendering. Pure editing logic.
+- **`LineEditor`** (from `@agentick/client`) — Framework-agnostic class with
+  all editing logic. Buffer, cursor, kill ring, history, keybindings. Accepts
+  normalized keystroke strings. No React dependency.
+
+- **`useLineEditor`** — Thin Ink-specific React hook wrapping `LineEditor`.
+  Converts Ink's `(input, Key)` to normalized keystrokes via
+  `normalizeInkKeystroke`, integrates with `useSyncExternalStore`.
 
 - **`RichTextInput`** — React component that renders the hook's state.
   Cursor shown as inverse character. Handles placeholder, empty, and
   inactive states.
 
-`InputBar` (the user-facing component) wires both together. Consumers don't
-need to interact with the hook or renderer directly.
+`InputBar` (the user-facing component) wires the hook and renderer together.
+Consumers don't need to interact with them directly.
 
 ## Keybindings
 
@@ -92,40 +96,25 @@ These keys are explicitly NOT consumed by the editor:
 
 ## Architecture
 
-### Data-driven bindings
+### LineEditor class (in `@agentick/client`)
 
-Bindings are a flat map from key pattern to action name:
-
-```typescript
-const DEFAULT_BINDINGS = {
-  "ctrl+a": "lineStart",
-  "ctrl+e": "lineEnd",
-  // ...
-};
-```
-
-### Pure action functions
-
-Each action is a pure function: `(state, killRing) => update`
+The core editing logic lives in a framework-agnostic `LineEditor` class.
+It follows the same snapshot + `onStateChange` pattern as `MessageSteering`
+and `ChatSession`:
 
 ```typescript
-actions.lineStart({ value: "hello", cursor: 3 }, []);
-// => { cursor: 0 }
+import { LineEditor } from "@agentick/client";
 
-actions.killToEnd({ value: "hello world", cursor: 5 }, []);
-// => { value: "hello", killed: " world" }
+const editor = new LineEditor({ onSubmit: (text) => console.log(text) });
+editor.handleInput(null, "hello"); // insert text
+editor.handleInput("ctrl+a", ""); // move to start
+editor.handleInput("return", ""); // submit
 ```
-
-This separation makes:
-
-- Actions independently unit-testable (47 tests)
-- Bindings overridable (future: user config)
-- New actions addable without touching key matching
 
 ### Key normalization
 
-Ink's `useInput` provides `(input: string, key: Key)`. We normalize to a
-canonical string:
+The TUI layer converts Ink's `(input: string, key: Key)` to normalized
+keystroke strings via `normalizeInkKeystroke`:
 
 - `Ctrl+A` → `"ctrl+a"`
 - `Alt+F` → `"meta+f"`
@@ -133,17 +122,7 @@ canonical string:
 - Special → `"return"`, `"backspace"`, `"delete"`, `"tab"`, `"escape"`
 - `Alt+Arrow` → `"meta+left"`, `"meta+right"`
 
-### Controlled mode
-
-`useLineEditor` supports controlled (`value` + `onChange`) or uncontrolled
-(internal state) mode, matching React conventions.
-
-In controlled mode:
-
-- The hook reads `value` from the parent
-- Edits call `onChange(newValue)`
-- Cursor is always internal state
-- A `useEffect` clamps cursor when the controlled value changes externally
+Each UI layer (web, Angular, etc.) provides its own normalizer.
 
 ### Word boundaries
 
@@ -159,13 +138,14 @@ npx vitest run
 
 Test files:
 
-- `hooks/use-line-editor.spec.ts` — 47 unit tests for pure action functions,
-  word boundary detection, key normalization, binding coverage
+- `hooks/use-line-editor.spec.ts` — Ink key normalization tests
 - `hooks/use-line-editor.integration.spec.tsx` — 34 integration tests that
   render real Ink components, simulate keystrokes via stdin, and verify
   rendered output
-- `components/InputBar.spec.tsx` — 10 component tests for InputBar's
-  controlled/uncontrolled API
+- `components/InputBar.spec.tsx` — 10 component tests for InputBar's API
+
+Pure action/class tests live in `@agentick/client`
+(`packages/client/src/__tests__/line-editor.spec.ts`).
 
 ## Ink Key Parsing Note
 
