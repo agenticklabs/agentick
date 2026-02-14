@@ -1,5 +1,16 @@
 # @agentick/angular
 
+## 0.5.0
+
+### Patch Changes
+
+- Updated dependencies [75960dd]
+- Updated dependencies [e30960c]
+- Updated dependencies [0350de3]
+- Updated dependencies [4750f5e]
+  - @agentick/client@0.5.0
+  - @agentick/shared@0.6.0
+
 ## 0.4.0
 
 ### Minor Changes
