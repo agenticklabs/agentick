@@ -106,6 +106,8 @@ export {
   type ChatMode,
   type ChatMessage,
   type ToolConfirmationState,
+  type Attachment,
+  type AttachmentInput,
   type UseLineEditorOptions,
   type UseLineEditorResult,
 } from "./hooks";

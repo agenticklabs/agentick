@@ -7,11 +7,13 @@ import {
   type ChatMessage,
   type ToolConfirmationState,
   type SteeringMode,
+  type Attachment,
+  type AttachmentInput,
 } from "@agentick/client";
 import type { ToolConfirmationResponse, Message, ClientExecutionHandle } from "@agentick/client";
 import { useClient } from "./use-client";
 
-export type { ChatMode, ChatMessage, ToolConfirmationState };
+export type { ChatMode, ChatMessage, ToolConfirmationState, Attachment, AttachmentInput };
 export type UseChatOptions<TMode extends string = ChatMode> = ChatSessionOptions<TMode>;
 
 export interface UseChatResult<TMode extends string = ChatMode> {
@@ -24,6 +26,7 @@ export interface UseChatResult<TMode extends string = ChatMode> {
   mode: SteeringMode;
   /** Error from the most recent execution failure (null on success or abort) */
   error: { message: string; name: string } | null;
+  attachments: readonly Attachment[];
 
   submit: (text: string) => void;
   steer: (text: string) => void;
@@ -36,6 +39,9 @@ export interface UseChatResult<TMode extends string = ChatMode> {
   setMode: (mode: SteeringMode) => void;
   respondToConfirmation: (response: ToolConfirmationResponse) => void;
   clearMessages: () => void;
+  addAttachment: (input: AttachmentInput) => Attachment;
+  removeAttachment: (id: string) => void;
+  clearAttachments: () => void;
 }
 
 const INITIAL_STATE: ChatSessionState = {
@@ -47,6 +53,7 @@ const INITIAL_STATE: ChatSessionState = {
   isExecuting: false,
   mode: "steer",
   error: null,
+  attachments: [],
 };
 
 /**
@@ -91,5 +98,11 @@ export function useChat<TMode extends string = ChatMode>(
       [session],
     ),
     clearMessages: useCallback(() => session.clearMessages(), [session]),
+    addAttachment: useCallback(
+      (input: AttachmentInput) => session.attachments.add(input),
+      [session],
+    ),
+    removeAttachment: useCallback((id: string) => session.attachments.remove(id), [session]),
+    clearAttachments: useCallback(() => session.attachments.clear(), [session]),
   };
 }

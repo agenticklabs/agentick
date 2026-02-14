@@ -223,7 +223,7 @@ These hooks wrap the [Chat Primitives](../client/README.md#chat-primitives) from
 
 #### `useChat(options?)`
 
-Full chat controller hook — messages, steering, and tool confirmations in one call. Wraps [`ChatSession`](../client/README.md#chatsession) with `useSyncExternalStore`. Auto-subscribes to the SSE transport by default (set `autoSubscribe: false` to manage subscription separately via `useSession`).
+Full chat controller hook — messages, steering, tool confirmations, and attachments in one call. Wraps [`ChatSession`](../client/README.md#chatsession) with `useSyncExternalStore`. Auto-subscribes to the SSE transport by default (set `autoSubscribe: false` to manage subscription separately via `useSession`).
 
 ```tsx
 import { useChat } from "@agentick/react";
@@ -237,17 +237,21 @@ function Chat({ sessionId }: { sessionId: string }) {
     queued, // Queued messages
     isExecuting, // Execution in progress
     mode, // "steer" | "queue"
+    attachments, // Attachment[] (pending, not yet sent)
 
-    submit, // Send or queue based on mode
-    steer, // Always send immediately
-    queue, // Always queue
-    interrupt, // Abort + send
+    submit, // Send or queue based on mode (drains attachments)
+    steer, // Always send immediately (drains attachments)
+    queue, // Always queue (no attachments)
+    interrupt, // Abort + send (drains attachments)
     flush, // Flush next queued
     respondToConfirmation,
     clearMessages,
     setMode,
     removeQueued,
     clearQueued,
+    addAttachment, // (input: AttachmentInput) => Attachment
+    removeAttachment, // (id: string) => void
+    clearAttachments, // () => void
   } = useChat({ sessionId, mode: "queue" });
 
   return (

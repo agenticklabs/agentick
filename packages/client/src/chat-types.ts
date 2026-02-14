@@ -2,6 +2,41 @@ import type { ContentBlock, Message, TimelineEntry, StreamEvent } from "@agentic
 import type { ToolConfirmationRequest, ToolConfirmationResponse } from "./types.js";
 import type { SteeringMode, MessageSteeringOptions } from "./message-steering.js";
 
+// ---------------------------------------------------------------------------
+// Attachment types
+// ---------------------------------------------------------------------------
+
+export interface Attachment {
+  readonly id: string;
+  readonly name: string;
+  readonly mimeType: string;
+  readonly source: AttachmentSource;
+  readonly size?: number;
+}
+
+export type AttachmentSource =
+  | { readonly type: "base64"; readonly data: string }
+  | { readonly type: "url"; readonly url: string };
+
+export interface AttachmentInput {
+  name: string;
+  mimeType: string;
+  source: string | AttachmentSource;
+  size?: number;
+}
+
+export type AttachmentValidator = (
+  input: AttachmentInput,
+) => { valid: true } | { valid: false; reason: string };
+
+export type AttachmentToBlock = (attachment: Attachment) => ContentBlock;
+
+export interface AttachmentManagerOptions {
+  validator?: AttachmentValidator;
+  toBlock?: AttachmentToBlock;
+  maxAttachments?: number;
+}
+
 // Re-export TimelineEntry from shared (replaces the weak local version)
 export type { TimelineEntry } from "@agentick/shared";
 
@@ -136,6 +171,7 @@ export interface ChatSessionState<TMode extends string = ChatMode> {
   readonly mode: SteeringMode;
   /** Error from the most recent execution failure (null on success or abort) */
   readonly error: { message: string; name: string } | null;
+  readonly attachments: readonly Attachment[];
 }
 
 export interface ChatSessionOptions<
@@ -155,4 +191,6 @@ export interface ChatSessionOptions<
   autoSubscribe?: boolean;
   /** Progressive rendering mode. Passed to MessageLog. */
   renderMode?: RenderMode;
+  /** Attachment manager options. */
+  attachments?: AttachmentManagerOptions;
 }

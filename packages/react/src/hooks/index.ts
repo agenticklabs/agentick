@@ -30,6 +30,8 @@ export {
   type ChatMode,
   type ChatMessage,
   type ToolConfirmationState,
+  type Attachment,
+  type AttachmentInput,
 } from "./use-chat";
 export {
   useLineEditor,

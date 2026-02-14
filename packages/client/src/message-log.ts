@@ -111,10 +111,13 @@ export class MessageLog {
   /**
    * Add a user message immediately (before execution_end).
    * Used in progressive modes so user messages appear right away.
+   * When extraBlocks are provided, content becomes ContentBlock[].
    */
-  pushUserMessage(text: string): void {
+  pushUserMessage(text: string, extraBlocks: ContentBlock[] = []): void {
     const id = generateMessageId();
-    this._messages = [...this._messages, { id, role: "user", content: text }];
+    const content: string | ContentBlock[] =
+      extraBlocks.length > 0 ? [...extraBlocks, { type: "text", text } as ContentBlock] : text;
+    this._messages = [...this._messages, { id, role: "user", content }];
     this._messageCount++;
     this._pushedUserMessageCount++;
     this._notify();

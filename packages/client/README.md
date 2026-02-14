@@ -220,7 +220,7 @@ Composable building blocks for chat UIs. Use `ChatSession` for the common case, 
 
 ### ChatSession
 
-Complete chat controller — messages, steering, and tool confirmations in one snapshot.
+Complete chat controller — messages, steering, tool confirmations, and attachments in one snapshot.
 
 ```typescript
 import { ChatSession } from "@agentick/client";
@@ -234,6 +234,7 @@ const chat = new ChatSession(client, {
   confirmationPolicy: undefined, // Auto-approve/deny policy (default: prompt all)
   deriveMode: undefined, // Custom ChatModeDeriver (default: idle/streaming/confirming_tool)
   onEvent: undefined, // Raw event hook
+  attachments: undefined, // AttachmentManagerOptions (validator, toBlock, maxAttachments)
   // Inherits all MessageSteering options: mode, flushMode, autoFlush
 });
 
@@ -245,12 +246,20 @@ chat.lastSubmitted; // Optimistic user message text
 chat.queued; // Queued messages (queue mode)
 chat.isExecuting; // Whether an execution is in progress
 chat.mode; // "steer" | "queue"
+chat.state.attachments; // Attachment[] (read-only snapshot)
 
-// Actions
-chat.submit("Hello"); // Send or queue based on mode
-chat.steer("Force send"); // Always send immediately
-chat.queue("Later"); // Always queue
-chat.interrupt("Stop"); // Abort + send
+// Attachments — add files before submit()
+chat.attachments.add({ name: "photo.png", mimeType: "image/png", source: base64Data });
+chat.attachments.remove(id);
+chat.attachments.clear();
+chat.attachments.count; // number
+chat.attachments.isEmpty; // boolean
+
+// Actions — submit(), steer(), and interrupt() drain pending attachments
+chat.submit("Describe this image"); // Sends [ImageBlock, TextBlock]
+chat.steer("Force send"); // Always send immediately (drains attachments)
+chat.queue("Later"); // Always queue (no attachments)
+chat.interrupt("Stop"); // Abort + send (drains attachments)
 chat.flush(); // Flush next queued message
 chat.respondToConfirmation({ approved: true });
 chat.clearMessages();
@@ -329,6 +338,47 @@ const chat = new ChatSession(client, {
   },
 });
 ```
+
+#### Attachments
+
+Send images, PDFs, and other files alongside text. Platforms add files to the attachment manager, and `submit()` drains them into the user message automatically.
+
+```typescript
+// Add attachments before submitting
+chat.attachments.add({
+  name: "screenshot.png",
+  mimeType: "image/png",
+  source: base64String, // or URL string, or { type: "base64", data } / { type: "url", url }
+  size: 102400, // optional
+});
+
+chat.submit("What's in this image?");
+// Sends: [ImageBlock(screenshot.png), TextBlock("What's in this image?")]
+// Attachments are cleared atomically on submit
+```
+
+The default validator accepts `image/png`, `image/jpeg`, `image/gif`, `image/webp`, and `application/pdf`. Customize via options:
+
+```typescript
+import { defaultAttachmentValidator } from "@agentick/client";
+
+const chat = new ChatSession(client, {
+  sessionId: "conv-123",
+  attachments: {
+    maxAttachments: 5,
+    validator: (input) => {
+      // Compose with the default, or replace entirely
+      if (input.size && input.size > 10_000_000) {
+        return { valid: false, reason: "File too large (max 10MB)" };
+      }
+      return defaultAttachmentValidator(input);
+    },
+    toBlock: undefined, // Custom Attachment → ContentBlock mapper
+  },
+});
+```
+
+Source strings are auto-detected: `https://`, `http://`, `data:`, and `blob:` prefixes produce URL sources; everything else is treated as base64 data.
 
 ### Individual Primitives
 

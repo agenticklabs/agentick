@@ -1,4 +1,5 @@
 import type { AgentickClient } from "./client.js";
+import type { ContentBlock } from "@agentick/shared";
 import type { SendInput, ClientExecutionHandle, Message, StreamEvent } from "./types.js";
 
 export type SteeringMode = "queue" | "steer";
@@ -19,12 +20,16 @@ export interface MessageSteeringState {
   readonly mode: SteeringMode;
 }
 
-function textToMessage(text: string): Message {
-  return { role: "user", content: [{ type: "text", text }] };
+function contentToMessage(text: string, extraBlocks: ContentBlock[] = []): Message {
+  const content: ContentBlock[] =
+    extraBlocks.length > 0
+      ? [...extraBlocks, { type: "text", text } as ContentBlock]
+      : [{ type: "text", text } as ContentBlock];
+  return { role: "user", content };
 }
 
-function textToSendInput(text: string): SendInput {
-  return { messages: [textToMessage(text)] };
+function contentToSendInput(text: string, extraBlocks: ContentBlock[] = []): SendInput {
+  return { messages: [contentToMessage(text, extraBlocks)] };
 }
 
 export class MessageSteering {
@@ -87,28 +92,28 @@ export class MessageSteering {
     return this._snapshot.mode;
   }
 
-  submit(text: string): void {
+  submit(text: string, extraBlocks: ContentBlock[] = []): void {
     if (this._isExecuting && this._mode === "queue") {
-      this._addToQueue(text);
+      this._addToQueue(text, extraBlocks);
     } else {
-      this._sendToSession(text);
+      this._sendToSession(text, extraBlocks);
     }
   }
 
-  steer(text: string): void {
-    this._sendToSession(text);
+  steer(text: string, extraBlocks: ContentBlock[] = []): void {
+    this._sendToSession(text, extraBlocks);
   }
 
   queue(text: string): void {
     this._addToQueue(text);
   }
 
-  async interrupt(text: string): Promise<ClientExecutionHandle> {
+  async interrupt(text: string, extraBlocks: ContentBlock[] = []): Promise<ClientExecutionHandle> {
     if (!this._sessionId) {
-      return this._client.send(textToSendInput(text));
+      return this._client.send(contentToSendInput(text, extraBlocks));
     }
     const accessor = this._client.session(this._sessionId);
-    return accessor.interrupt(textToSendInput(text));
+    return accessor.interrupt(contentToSendInput(text, extraBlocks));
   }
 
   flush(): void {
@@ -171,16 +176,16 @@ export class MessageSteering {
     void handle.result.catch(() => {});
   }
 
-  private _sendToSession(text: string): void {
-    this._send(textToSendInput(text));
+  private _sendToSession(text: string, extraBlocks: ContentBlock[] = []): void {
+    this._send(contentToSendInput(text, extraBlocks));
   }
 
   private _sendMessages(messages: Message[]): void {
     this._send({ messages });
   }
 
-  private _addToQueue(text: string): void {
-    this._queued = [...this._queued, textToMessage(text)];
+  private _addToQueue(text: string, extraBlocks: ContentBlock[] = []): void {
+    this._queued = [...this._queued, contentToMessage(text, extraBlocks)];
     this._notify();
   }
 

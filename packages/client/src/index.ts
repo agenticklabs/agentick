@@ -84,6 +84,13 @@ export { ToolConfirmations } from "./tool-confirmations.js";
 // Chat session (composed from primitives)
 export { ChatSession } from "./chat-session.js";
 
+// Attachment manager
+export {
+  AttachmentManager,
+  defaultAttachmentValidator,
+  defaultAttachmentToBlock,
+} from "./attachment-manager.js";
+
 // Line editor
 export {
   LineEditor,
@@ -119,6 +126,12 @@ export type {
   ConfirmationPolicy,
   ChatModeDeriver,
   RenderMode,
+  Attachment,
+  AttachmentInput,
+  AttachmentSource,
+  AttachmentValidator,
+  AttachmentToBlock,
+  AttachmentManagerOptions,
 } from "./chat-types.js";
 
 // Types - re-exported from types.ts which re-exports from shared

@@ -1,9 +1,10 @@
 import type { AgentickClient, SessionAccessor } from "./client.js";
 import type { ToolConfirmationResponse } from "./types.js";
-import type { StreamEvent, ExecutionEndEvent } from "@agentick/shared";
+import type { StreamEvent, ExecutionEndEvent, ContentBlock } from "@agentick/shared";
 import { MessageSteering, type SteeringMode } from "./message-steering.js";
 import { MessageLog } from "./message-log.js";
 import { ToolConfirmations } from "./tool-confirmations.js";
+import { AttachmentManager } from "./attachment-manager.js";
 import type {
   ChatMode,
   ChatSessionState,
@@ -13,11 +14,12 @@ import type {
 import { defaultDeriveMode } from "./chat-transforms.js";
 
 /**
- * Complete chat controller — composes MessageLog, ToolConfirmations, and
- * MessageSteering into a single state snapshot.
+ * Complete chat controller — composes MessageLog, ToolConfirmations,
+ * MessageSteering, and AttachmentManager into a single state snapshot.
  *
- * Owns a single event subscription and fans out to all three primitives
- * deterministically. chatMode is derived (not tracked) via `ChatModeDeriver`.
+ * Owns a single event subscription and fans out to all three event-driven
+ * primitives deterministically. chatMode is derived (not tracked) via
+ * `ChatModeDeriver`. AttachmentManager is pure client-side state (no events).
  *
  * Generic over `TMode` for custom chat modes — defaults to
  * `"idle" | "streaming" | "confirming_tool"`.
@@ -26,6 +28,7 @@ export class ChatSession<TMode extends string = ChatMode> {
   private readonly _messageLog: MessageLog;
   private readonly _confirmations: ToolConfirmations;
   private readonly _steering: MessageSteering;
+  private readonly _attachments: AttachmentManager;
   private readonly _deriveMode: ChatModeDeriver<TMode>;
   private readonly _onEvent?: (event: StreamEvent) => void;
   private readonly _accessor: SessionAccessor | null = null;
@@ -34,9 +37,11 @@ export class ChatSession<TMode extends string = ChatMode> {
 
   private _lastSubmitted: string | null = null;
   private _error: { message: string; name: string } | null = null;
+  private _suppressAttachmentNotify = false;
 
   private _unsubscribeEvents: (() => void) | null = null;
   private _unsubscribeConfirmations: (() => void) | null = null;
+  private _unsubAttachments: (() => void) | null = null;
 
   private _snapshot: ChatSessionState<TMode>;
   private _listeners = new Set<() => void>();
@@ -70,6 +75,11 @@ export class ChatSession<TMode extends string = ChatMode> {
     this._steering = new MessageSteering(client, {
       ...options,
       subscribe: false,
+    });
+
+    this._attachments = new AttachmentManager(options.attachments);
+    this._unsubAttachments = this._attachments.onStateChange(() => {
+      if (!this._suppressAttachmentNotify) this._notify();
     });
 
     this._snapshot = this._createSnapshot();
@@ -149,19 +159,25 @@ export class ChatSession<TMode extends string = ChatMode> {
     return this._snapshot.error;
   }
 
+  get attachments(): AttachmentManager {
+    return this._attachments;
+  }
+
   // --- Public API (actions) ---
 
   submit(text: string): void {
     this._lastSubmitted = text;
+    const extraBlocks = this._drainAttachments();
     if (this._hasRenderMode) {
-      this._messageLog.pushUserMessage(text);
+      this._messageLog.pushUserMessage(text, extraBlocks);
     }
-    this._steering.submit(text);
+    this._steering.submit(text, extraBlocks);
     this._notify();
   }
 
   steer(text: string): void {
-    this._steering.steer(text);
+    const extraBlocks = this._drainAttachments();
+    this._steering.steer(text, extraBlocks);
     this._notify();
   }
 
@@ -171,7 +187,10 @@ export class ChatSession<TMode extends string = ChatMode> {
   }
 
   interrupt(text: string) {
-    return this._steering.interrupt(text);
+    const extraBlocks = this._drainAttachments();
+    const handle = this._steering.interrupt(text, extraBlocks);
+    this._notify();
+    return handle;
   }
 
   flush(): void {
@@ -221,16 +240,26 @@ export class ChatSession<TMode extends string = ChatMode> {
   destroy(): void {
     this._unsubscribeEvents?.();
     this._unsubscribeConfirmations?.();
+    this._unsubAttachments?.();
     if (this._autoSubscribed && this._accessor) {
       this._accessor.unsubscribe();
     }
     this._messageLog.destroy();
     this._confirmations.destroy();
     this._steering.destroy();
+    this._attachments.destroy();
     this._listeners.clear();
   }
 
   // --- Private ---
+
+  /** Consume attachments without triggering an intermediate _notify(). */
+  private _drainAttachments(): ContentBlock[] {
+    this._suppressAttachmentNotify = true;
+    const blocks = this._attachments.consume();
+    this._suppressAttachmentNotify = false;
+    return blocks;
+  }
 
   private _createSnapshot(): ChatSessionState<TMode> {
     const steeringState = this._steering.state;
@@ -249,6 +278,7 @@ export class ChatSession<TMode extends string = ChatMode> {
       isExecuting: steeringState.isExecuting,
       mode: steeringState.mode,
       error: this._error,
+      attachments: this._attachments.attachments,
     };
   }
 
