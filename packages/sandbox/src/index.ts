@@ -4,6 +4,8 @@
  * Types, context, component, and pre-built tools for sandboxed execution.
  */
 
+import React from "react";
+
 // ── Types ────────────────────────────────────────────────────────────────────
 export type {
   Sandbox as SandboxHandle,
@@ -33,8 +35,15 @@ export { Sandbox } from "./component";
 export type { SandboxProps } from "./component";
 
 // ── Tools ────────────────────────────────────────────────────────────────────
-export { Shell, ReadFile, WriteFile, EditFile } from "./tools";
+import { Shell, ReadFile, WriteFile, EditFile } from "./tools";
+export { Shell, ReadFile, WriteFile, EditFile };
 
 // ── Testing ──────────────────────────────────────────────────────────────────
 // Import from "@agentick/sandbox/testing" — not re-exported here to avoid
 // pulling vitest into production bundles.
+
+const h = React.createElement;
+
+export function SandboxTools() {
+  return [h(Shell), h(ReadFile), h(WriteFile), h(EditFile)];
+}

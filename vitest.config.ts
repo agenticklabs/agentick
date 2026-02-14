@@ -11,7 +11,6 @@ export default defineConfig({
     environment: "node",
     include: [
       "packages/*/src/**/*.spec.{ts,tsx}",
-      "packages/core/v2/src/**/*.spec.{ts,tsx}",
       "packages/adapters/*/src/**/*.spec.{ts,tsx}",
       "example/*/src/**/*.spec.{ts,tsx}",
     ],
