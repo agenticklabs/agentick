@@ -189,6 +189,7 @@ export default defineConfig({
             { text: "Package Overview", link: "/docs/packages" },
             { text: "Gateway & Sessions", link: "/docs/gateway" },
             { text: "Client-Server", link: "/docs/client-server" },
+            { text: "Connectors", link: "/docs/connectors" },
             { text: "DevTools", link: "/docs/devtools" },
           ],
         },

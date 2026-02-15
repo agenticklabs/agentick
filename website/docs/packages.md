@@ -14,7 +14,8 @@ Agentick is organized as a monorepo with layered packages. Each layer depends on
 │                       Framework Layer                               │
 │   @agentick/core      @agentick/gateway      @agentick/client       │
 │   @agentick/express   @agentick/devtools     @agentick/agent        │
-│   @agentick/tui       @agentick/react        @agentick/sandbox        │
+│   @agentick/tui       @agentick/react        @agentick/sandbox      │
+│   @agentick/connector                                               │
 └──────────────────────────────┬──────────────────────────────────────┘
                                │
 ┌──────────────────────────────┴──────────────────────────────────────┐
@@ -84,6 +85,20 @@ Sandbox primitive layer. Types, `<Sandbox>` component, pre-built tools (Shell, R
 ### @agentick/guardrails
 
 Guard system — `createGuard()`, `GuardError`, input/output validation for safety.
+
+## Connectors
+
+### @agentick/connector
+
+Bridge external platforms to Agentick sessions. Content filtering, delivery timing, rate limiting, retry with backoff, and tool confirmations — so platform adapters only handle I/O.
+
+### @agentick/connector-imessage
+
+iMessage platform adapter. macOS only. Polls `chat.db` for incoming messages and sends responses via AppleScript through Messages.app.
+
+### @agentick/connector-telegram
+
+Telegram platform adapter. Bridge a Telegram bot to an agent session via [grammY](https://grammy.dev).
 
 ## Adapters
 

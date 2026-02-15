@@ -27,6 +27,9 @@ features:
   - icon: 🎛️
     title: Knobs
     details: Model-visible, model-settable reactive state. One hook gives you a form control the model can see and change. Agent self-modification in one line.
+  - icon: 🔌
+    title: Connectors
+    details: Bridge agents to Telegram, iMessage, or any platform. Content filtering, delivery timing, rate limiting, and tool confirmations — adapters just handle I/O.
   - icon: 🏗️
     title: Session Architecture
     details: Sessions manage identity, persistence, spawn/fork. The reconciler is an implementation detail. Scale from one agent to thousands.
