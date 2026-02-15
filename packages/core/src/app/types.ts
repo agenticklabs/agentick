@@ -1435,6 +1435,9 @@ export interface Session<P = Record<string, unknown>> extends EventEmitter {
   /** Whether the session has been aborted */
   readonly isAborted: boolean;
 
+  /** Whether the session is in a terminal state (closed). */
+  readonly isTerminal: boolean;
+
   /** Parent session, or null for root sessions. */
   readonly parent: Session | null;
 

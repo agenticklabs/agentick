@@ -19,7 +19,7 @@ export function createAgentickApp() {
       // SQLite file for persistent sessions (survives server restarts)
       store: "./data/sessions.db",
       // Evict sessions from memory after 5 minutes of inactivity
-      idleTimeout: 5 * 60 * 1000,
+      idleTimeout: 5 * 60 * 1000, // 5 minutes
       // Keep max 100 sessions in memory
       maxActive: 100,
     },

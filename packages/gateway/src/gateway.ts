@@ -986,7 +986,7 @@ export class Gateway extends EventEmitter {
 
     // Get or create the managed session and core session
     const managedSession = await this.sessions.getOrCreate(sessionId);
-    if (!managedSession.coreSession) {
+    if (!managedSession.coreSession || managedSession.coreSession.isTerminal) {
       // Use sessionName (without app prefix) for App - Gateway handles routing
       managedSession.coreSession = await managedSession.appInfo.app.session(
         managedSession.sessionName,
@@ -1049,7 +1049,7 @@ export class Gateway extends EventEmitter {
     payload: unknown,
   ): Promise<void> {
     const managedSession = await this.sessions.getOrCreate(sessionId);
-    if (!managedSession.coreSession) {
+    if (!managedSession.coreSession || managedSession.coreSession.isTerminal) {
       // Use sessionName (without app prefix) for App - Gateway handles routing
       managedSession.coreSession = await managedSession.appInfo.app.session(
         managedSession.sessionName,
@@ -1323,7 +1323,7 @@ export class Gateway extends EventEmitter {
     this.sessions.setActive(managedSession.state.id, true);
 
     // Get or create core session from app
-    if (!managedSession.coreSession) {
+    if (!managedSession.coreSession || managedSession.coreSession.isTerminal) {
       // Use sessionName (without app prefix) for App - Gateway handles routing
       managedSession.coreSession = await managedSession.appInfo.app.session(
         managedSession.sessionName,
@@ -1449,7 +1449,7 @@ export class Gateway extends EventEmitter {
     this.sessions.setActive(managedSession.state.id, true);
 
     // Get or create core session from app
-    if (!managedSession.coreSession) {
+    if (!managedSession.coreSession || managedSession.coreSession.isTerminal) {
       // Use sessionName (without app prefix) for App - Gateway handles routing
       log.debug({ sessionName: managedSession.sessionName }, "directSend: creating core session");
       managedSession.coreSession = await managedSession.appInfo.app.session(
@@ -1462,11 +1462,10 @@ export class Gateway extends EventEmitter {
     }
 
     // Check session status before sending
-    const coreSession = managedSession.coreSession as any;
     log.debug(
       {
-        coreSessionId: coreSession.id,
-        status: coreSession._status,
+        coreSessionId: managedSession.coreSession.id,
+        status: managedSession.coreSession.status,
       },
       "directSend: core session status before send",
     );
@@ -1522,7 +1521,7 @@ export class Gateway extends EventEmitter {
     let channels: ChannelServiceInterface | undefined = undefined;
     if (sessionId) {
       const managedSession = await this.sessions.getOrCreate(sessionId);
-      if (!managedSession.coreSession) {
+      if (!managedSession.coreSession || managedSession.coreSession.isTerminal) {
         // Use sessionName (without app prefix) for App - Gateway handles routing
         managedSession.coreSession = await managedSession.appInfo.app.session(
           managedSession.sessionName,
@@ -1668,7 +1667,7 @@ export class Gateway extends EventEmitter {
         // Internal send (from channels)
         const managedSession = await this.sessions.getOrCreate(sessionId);
 
-        if (!managedSession.coreSession) {
+        if (!managedSession.coreSession || managedSession.coreSession.isTerminal) {
           // Use sessionName (without app prefix) for App - Gateway handles routing
           managedSession.coreSession = await managedSession.appInfo.app.session(
             managedSession.sessionName,

@@ -296,6 +296,9 @@ export function createMockSession(options: MockSessionOptions = {}): MockSession
     readonly id = id;
     readonly currentTick = 0;
     readonly isAborted = false;
+    get isTerminal() {
+      return currentStatus === "closed";
+    }
     readonly parent = parent;
     readonly children = children;
     readonly queuedMessages: Message[] = [];

@@ -309,7 +309,7 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
   }
 
   /** Whether the session is in a terminal state (closed). */
-  private get isTerminal(): boolean {
+  get isTerminal(): boolean {
     return this._status === "closed";
   }
 
