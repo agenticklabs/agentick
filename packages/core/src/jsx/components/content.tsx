@@ -15,17 +15,6 @@ export interface ContentBlockProps extends ComponentBaseProps {
   id?: string;
 }
 
-/**
- * Helper to create a content block component.
- * This wraps createElement to provide type-safe content block creation.
- */
-function createContentBlock<TProps extends ContentBlockProps>(
-  block: (props: TProps) => JSX.Element,
-  props: TProps,
-): JSX.Element {
-  return h(block, props);
-}
-
 // Re-export the type for external use
 export type { ContentBlockType };
 
@@ -52,9 +41,7 @@ export interface TextProps extends ContentBlockProps {
   text?: string;
 }
 export function Text(props: TextProps): JSX.Element {
-  // Pass through - the compiler/extractors will handle JSX children
-  // and apply inline formatting during collection
-  return createContentBlock<TextProps>(Text, props);
+  return h("Text", props);
 }
 
 /**
@@ -67,7 +54,7 @@ export interface ImageProps extends ContentBlockProps {
   altText?: string;
 }
 export function Image(props: ImageProps): JSX.Element {
-  return createContentBlock<ImageProps>(Image, props);
+  return h("Image", props);
 }
 
 /**
@@ -80,7 +67,7 @@ export interface DocumentProps extends ContentBlockProps {
   title?: string;
 }
 export function Document(props: DocumentProps): JSX.Element {
-  return createContentBlock<DocumentProps>(Document, props);
+  return h("Document", props);
 }
 
 /**
@@ -93,7 +80,7 @@ export interface AudioProps extends ContentBlockProps {
   transcript?: string;
 }
 export function Audio(props: AudioProps): JSX.Element {
-  return createContentBlock<AudioProps>(Audio, props);
+  return h("Audio", props);
 }
 
 /**
@@ -106,7 +93,7 @@ export interface VideoProps extends ContentBlockProps {
   transcript?: string;
 }
 export function Video(props: VideoProps): JSX.Element {
-  return createContentBlock<VideoProps>(Video, props);
+  return h("Video", props);
 }
 
 /**
@@ -119,7 +106,7 @@ export interface CodeProps extends ContentBlockProps {
   text?: string;
 }
 export function Code(props: CodeProps): JSX.Element {
-  return createContentBlock<CodeProps>(Code, props);
+  return h("Code", props);
 }
 
 /**
@@ -134,7 +121,6 @@ export interface JsonProps extends ContentBlockProps {
   text?: string;
 }
 export function Json(props: JsonProps): JSX.Element {
-  // Children win over props (more explicit, React convention)
   const childrenText =
     props.children !== undefined
       ? typeof props.children === "string"
@@ -142,7 +128,7 @@ export function Json(props: JsonProps): JSX.Element {
         : props.children?.join("") || ""
       : undefined;
   const text = childrenText ?? props.text ?? "";
-  return createContentBlock<JsonProps>(Json, {
+  return h("Json", {
     ...omit(props, ["children"]),
     text: text || JSON.stringify(props.data),
   });

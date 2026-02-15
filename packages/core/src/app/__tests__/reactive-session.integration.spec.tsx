@@ -297,7 +297,9 @@ describe("Reactive Session Integration", () => {
 
         useEffect(() => {
           mountLog.push("mounted");
-          return () => mountLog.push("unmounted");
+          return () => {
+            mountLog.push("unmounted");
+          };
         }, []);
 
         return (

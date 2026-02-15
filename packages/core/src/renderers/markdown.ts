@@ -272,6 +272,19 @@ export class MarkdownRenderer extends Renderer {
           text: `*${extractText([block])}*`,
         } as TextBlock;
 
+      case "custom":
+        if (semantic.rendererTag === "collapsed") {
+          const attrs = [`name="${semantic.rendererAttrs?.name}"`];
+          if (semantic.rendererAttrs?.group) {
+            attrs.push(`group="${semantic.rendererAttrs.group}"`);
+          }
+          return {
+            type: "text",
+            text: `<collapsed ${attrs.join(" ")}>${extractText([block])}</collapsed>`,
+          } as TextBlock;
+        }
+        return null;
+
       default:
         return null;
     }

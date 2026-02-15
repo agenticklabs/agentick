@@ -16,6 +16,7 @@ import type { ExecutableTool, ToolMetadata } from "../tool/tool";
 import { createEmptyCompiledStructure } from "./types";
 import type { SemanticContentBlock, Renderer } from "../renderers/types";
 import type { TokenEstimator } from "../com/types";
+import { extractText as extractBlocksText } from "@agentick/shared";
 import { Logger } from "@agentick/kernel";
 
 const log = Logger.for("Collector");
@@ -43,6 +44,37 @@ const IMAGE = "Image";
 const IMAGE_LOWER = "image";
 const JSON_BLOCK = "Json";
 const JSON_LOWER = "json";
+const DOCUMENT = "Document";
+const DOCUMENT_LOWER = "document";
+const AUDIO = "Audio";
+const AUDIO_LOWER = "audio";
+const VIDEO = "Video";
+const VIDEO_LOWER = "video";
+const H1 = "H1";
+const H2 = "H2";
+const H3 = "H3";
+const HEADER = "Header";
+const HEADER_LOWER = "header";
+const PARAGRAPH = "Paragraph";
+const PARAGRAPH_LOWER = "paragraph";
+const LIST = "List";
+const LIST_LOWER = "list";
+const LIST_ITEM = "ListItem";
+const LIST_ITEM_LOWER = "listitem";
+const TABLE = "Table";
+const TABLE_LOWER = "table";
+const ROW = "Row";
+const ROW_LOWER = "row";
+const COLUMN = "Column";
+const COLUMN_LOWER = "column";
+const COLLAPSED = "Collapsed";
+const COLLAPSED_LOWER = "collapsed";
+const USER_ACTION = "UserAction";
+const USER_ACTION_LOWER = "user_action";
+const SYSTEM_EVENT = "SystemEvent";
+const SYSTEM_EVENT_LOWER = "system_event";
+const STATE_CHANGE = "StateChange";
+const STATE_CHANGE_LOWER = "state_change";
 
 /**
  * Collect compiled structure from a container.
@@ -309,30 +341,178 @@ function collectContent(
         break;
 
       case CODE:
-      case CODE_LOWER:
+      case CODE_LOWER: {
+        const codeText =
+          ((child.props.code ?? child.props.text ?? child.props.children) as string) ||
+          extractText(child);
         blocks.push({
           type: "code",
-          text: (child.props.code ?? child.props.children) as string,
+          text: codeText,
           language: child.props.language,
         } as SemanticContentBlock);
         break;
+      }
 
       case IMAGE:
       case IMAGE_LOWER:
         blocks.push({
           type: "image",
           source: child.props.source ?? { type: "url", url: child.props.src as string },
-          altText: child.props.alt as string | undefined,
+          altText: (child.props.altText ?? child.props.alt) as string | undefined,
         } as SemanticContentBlock);
         break;
 
       case JSON_BLOCK:
-      case JSON_LOWER:
+      case JSON_LOWER: {
+        const jsonData = child.props.data ?? child.props.children;
+        const jsonText = (child.props.text as string) || JSON.stringify(jsonData);
         blocks.push({
           type: "json",
-          text: JSON.stringify(child.props.data ?? child.props.children),
-          data: child.props.data ?? child.props.children,
+          text: jsonText,
+          data: jsonData,
         } as SemanticContentBlock);
+        break;
+      }
+
+      case DOCUMENT:
+      case DOCUMENT_LOWER:
+        blocks.push({
+          type: "document",
+          source: child.props.source,
+          title: child.props.title,
+        } as SemanticContentBlock);
+        break;
+
+      case AUDIO:
+      case AUDIO_LOWER:
+        blocks.push({
+          type: "audio",
+          source: child.props.source,
+          transcript: child.props.transcript,
+        } as SemanticContentBlock);
+        break;
+
+      case VIDEO:
+      case VIDEO_LOWER:
+        blocks.push({
+          type: "video",
+          source: child.props.source,
+          transcript: child.props.transcript,
+        } as SemanticContentBlock);
+        break;
+
+      // Semantic: Headings
+      case H1:
+      case "h1":
+      case H2:
+      case "h2":
+      case H3:
+      case "h3":
+      case HEADER:
+      case HEADER_LOWER: {
+        const level = (child.props.level as number) ?? getHeadingLevel(typeName);
+        blocks.push({
+          type: "text",
+          text: extractText(child),
+          semantic: { type: "heading", level },
+        });
+        break;
+      }
+
+      // Semantic: Paragraph
+      case PARAGRAPH:
+      case PARAGRAPH_LOWER:
+        blocks.push({
+          type: "text",
+          text: extractText(child),
+          semantic: { type: "paragraph" },
+        });
+        break;
+
+      // Semantic: List
+      case LIST:
+      case LIST_LOWER:
+        blocks.push({
+          type: "text",
+          text: "",
+          semantic: {
+            type: "list",
+            structure: extractListStructure(child),
+          },
+        });
+        break;
+
+      // Semantic: Table
+      case TABLE:
+      case TABLE_LOWER:
+        blocks.push({
+          type: "text",
+          text: "",
+          semantic: {
+            type: "table",
+            structure: extractTableStructure(child),
+          },
+        });
+        break;
+
+      // Semantic: Collapsed
+      case COLLAPSED:
+      case COLLAPSED_LOWER:
+        blocks.push({
+          type: "text",
+          text: extractText(child),
+          semantic: {
+            type: "custom",
+            rendererTag: "collapsed",
+            rendererAttrs: {
+              name: child.props.name,
+              group: child.props.group,
+            },
+          },
+        });
+        break;
+
+      // Event block components
+      case USER_ACTION:
+      case USER_ACTION_LOWER:
+        blocks.push({
+          type: "user_action",
+          text: extractText(child),
+          action: child.props.action,
+          actor: child.props.actor,
+          target: child.props.target,
+        } as SemanticContentBlock);
+        break;
+
+      case SYSTEM_EVENT:
+      case SYSTEM_EVENT_LOWER:
+        blocks.push({
+          type: "system_event",
+          text: extractText(child),
+          event: child.props.event,
+          source: child.props.source,
+        } as SemanticContentBlock);
+        break;
+
+      case STATE_CHANGE:
+      case STATE_CHANGE_LOWER:
+        blocks.push({
+          type: "state_change",
+          text: extractText(child),
+          entity: child.props.entity,
+          field: child.props.field,
+          from: child.props.from,
+          to: child.props.to,
+        } as SemanticContentBlock);
+        break;
+
+      // Skip structural children of semantic containers
+      case LIST_ITEM:
+      case LIST_ITEM_LOWER:
+      case ROW:
+      case ROW_LOWER:
+      case COLUMN:
+      case COLUMN_LOWER:
         break;
 
       default:
@@ -347,11 +527,17 @@ function collectContent(
 }
 
 /**
- * Extract text content from a Text node.
- * Supports both `text` prop (preferred) and `children` prop (fallback).
+ * Extract text content from a node.
+ *
+ * Priority:
+ * 1. `text` prop — fast path for `<Text text="hello" />`
+ * 2. `children` prop — for cases where children were passed as props
+ * 3. `node.children` — reconciled children (the normal JSX case: `<Text>hello</Text>`)
+ *
+ * For case 3, we recurse through children, collect text blocks, and flatten
+ * via the shared `extractText` (which handles ContentBlock[]).
  */
 function extractText(node: AgentickNode): string {
-  // Prefer explicit `text` prop (avoids React trying to reconcile children)
   const text = node.props.text ?? node.props.children;
 
   if (typeof text === "string") {
@@ -368,7 +554,115 @@ function extractText(node: AgentickNode): string {
       .join("");
   }
 
+  // Fallback: collect from reconciled children nodes
+  if (node.children && node.children.length > 0) {
+    const childBlocks = collectContent(node.children, node.renderer);
+    return extractBlocksText(childBlocks, "");
+  }
+
   return "";
+}
+
+/**
+ * Get heading level from type name.
+ */
+function getHeadingLevel(typeName: string): number {
+  switch (typeName) {
+    case "H1":
+    case "h1":
+      return 1;
+    case "H2":
+    case "h2":
+      return 2;
+    case "H3":
+    case "h3":
+      return 3;
+    default:
+      return 1; // Header defaults to h1
+  }
+}
+
+/**
+ * Extract list structure from a List node's children.
+ */
+function extractListStructure(node: AgentickNode): {
+  ordered: boolean;
+  task?: boolean;
+  items: (string | { text: string; checked?: boolean })[];
+} {
+  const ordered = node.props.ordered === true;
+  const task = node.props.task === true;
+  const items: (string | { text: string; checked?: boolean })[] = [];
+
+  if (node.children) {
+    for (const child of node.children) {
+      if (isTextNode(child)) continue;
+      const name = getTypeName(child.type);
+      if (name === LIST_ITEM || name === LIST_ITEM_LOWER) {
+        const text = extractText(child);
+        if (task && child.props.checked !== undefined) {
+          items.push({ text, checked: child.props.checked as boolean });
+        } else {
+          items.push(text);
+        }
+      }
+    }
+  }
+
+  return { ordered, task: task || undefined, items };
+}
+
+/**
+ * Extract table structure from a Table node's children.
+ */
+function extractTableStructure(node: AgentickNode): {
+  headers: string[];
+  rows: string[][];
+} {
+  // Fast path: headers/rows props
+  if (node.props.headers || node.props.rows) {
+    return {
+      headers: (node.props.headers as string[]) ?? [],
+      rows: (node.props.rows as string[][]) ?? [],
+    };
+  }
+
+  const headers: string[] = [];
+  const rows: string[][] = [];
+
+  if (node.children) {
+    for (const child of node.children) {
+      if (isTextNode(child)) continue;
+      const name = getTypeName(child.type);
+      if (name === ROW || name === ROW_LOWER) {
+        const cells = extractRowCells(child);
+        if (child.props.header) {
+          headers.push(...cells);
+        } else {
+          rows.push(cells);
+        }
+      }
+    }
+  }
+
+  return { headers, rows };
+}
+
+/**
+ * Extract cell text from a Row node's Column children.
+ */
+function extractRowCells(node: AgentickNode): string[] {
+  const cells: string[] = [];
+  if (node.children) {
+    for (const child of node.children) {
+      if (isTextNode(child)) continue;
+      const name = getTypeName(child.type);
+      if (name === COLUMN || name === COLUMN_LOWER) {
+        cells.push(extractText(child));
+      }
+    }
+  }
+  return cells;
 }
 
 /**

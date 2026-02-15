@@ -247,6 +247,19 @@ export class XMLRenderer extends Renderer {
       case "table":
         return this.formatTable(semantic.structure);
 
+      case "custom":
+        if (semantic.rendererTag === "collapsed") {
+          const attrs = [`name="${this.escapeXml(semantic.rendererAttrs?.name ?? "")}"`];
+          if (semantic.rendererAttrs?.group) {
+            attrs.push(`group="${this.escapeXml(semantic.rendererAttrs.group)}"`);
+          }
+          return {
+            type: "text",
+            text: `<collapsed ${attrs.join(" ")}>${this.escapeXml(extractText([block]))}</collapsed>`,
+          } as TextBlock;
+        }
+        return null;
+
       default:
         return null;
     }

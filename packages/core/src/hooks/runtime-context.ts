@@ -94,6 +94,7 @@ export interface KnobRegistration {
   maxLength?: number;
   pattern?: string;
   momentary?: boolean;
+  inline?: boolean;
 }
 
 // ============================================================

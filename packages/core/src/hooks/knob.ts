@@ -47,6 +47,7 @@ export type KnobOpts<T extends KnobPrimitive> = KnobConstraints<T> & {
   required?: boolean;
   validate?: (value: T) => true | string;
   momentary?: boolean;
+  inline?: boolean;
 };
 
 // ============================================================================
@@ -71,6 +72,7 @@ export interface KnobDescriptor<T extends KnobPrimitive = KnobPrimitive, R = T> 
   required?: boolean;
   validate?: (value: T) => true | string;
   momentary?: boolean;
+  inline?: boolean;
   // Number constraints
   min?: number;
   max?: number;
@@ -113,6 +115,7 @@ export function knob(
     required: opts.required,
     validate: opts.validate,
     momentary: opts.momentary,
+    inline: opts.inline,
     min: (opts as any).min,
     max: (opts as any).max,
     step: (opts as any).step,
@@ -204,6 +207,7 @@ export function useKnob(
   let required: boolean | undefined;
   let validate: ((value: any) => true | string) | undefined;
   let momentary: boolean | undefined;
+  let inline: boolean | undefined;
   let min: number | undefined;
   let max: number | undefined;
   let step: number | undefined;
@@ -220,6 +224,7 @@ export function useKnob(
     required = defaultOrDescriptor.required;
     validate = defaultOrDescriptor.validate;
     momentary = defaultOrDescriptor.momentary;
+    inline = defaultOrDescriptor.inline;
     min = defaultOrDescriptor.min;
     max = defaultOrDescriptor.max;
     step = defaultOrDescriptor.step;
@@ -236,6 +241,7 @@ export function useKnob(
     required = opts.required;
     validate = opts.validate;
     momentary = opts.momentary;
+    inline = opts.inline;
     min = (opts as any).min;
     max = (opts as any).max;
     step = (opts as any).step;
@@ -270,6 +276,7 @@ export function useKnob(
       maxLength,
       pattern,
       momentary,
+      inline,
     });
   }, [name]);
 

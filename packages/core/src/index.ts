@@ -29,6 +29,8 @@ export {
   ToolResult as ToolResultComponent,
   Markdown,
   XML,
+  Collapsed,
+  type CollapsedProps,
   // Token budget (types + pure functions, used via Timeline props)
   compactEntries,
   type CompactionStrategy,
@@ -76,6 +78,9 @@ export {
   useTimeline,
   // Resolve
   useResolved,
+  // Expandable content
+  Expandable,
+  type ExpandableProps,
   // Knobs
   knob,
   isKnob,

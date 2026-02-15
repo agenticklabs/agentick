@@ -58,6 +58,9 @@ export {
   type KnobsRenderFn,
 } from "./knobs-component";
 
+// Expandable content
+export { Expandable, type ExpandableProps } from "./expandable";
+
 // Lifecycle hooks
 export {
   useOnMount,

@@ -22,6 +22,8 @@ import type { ExecutionMessage } from "../../engine/execution-types";
 import { useTickState } from "../../hooks/context";
 import { compactEntries, type CompactionStrategy, type TokenBudgetInfo } from "./token-budget";
 import { Logger } from "@agentick/kernel";
+import { Entry } from "./primitives";
+import type { ContentBlock, MessageRoles } from "../../content";
 
 const log = Logger.for("Timeline");
 
@@ -145,7 +147,7 @@ function DefaultMessage({
   if (!content || content.length === 0) return h(React.Fragment, null);
 
   if (role === "user" || role === "assistant" || role === "tool") {
-    return h("entry", {
+    return h(Entry, {
       kind: "message",
       message: {
         role,
@@ -178,11 +180,11 @@ function DefaultPendingMessage({
   const { role, content } = msg;
   if (!Array.isArray(content) || content.length === 0) return h(React.Fragment, null);
 
-  return h("entry", {
+  return h(Entry, {
     kind: "message",
     message: {
-      role,
-      content,
+      role: role as MessageRoles,
+      content: content as ContentBlock[],
       id: msg.id,
     },
   });

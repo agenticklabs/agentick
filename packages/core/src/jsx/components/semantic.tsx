@@ -20,7 +20,7 @@ export interface HeaderProps extends BaseProps {
   children?: any;
 }
 export function Header(props: HeaderProps): JSX.Element {
-  return h(Header, props);
+  return h("Header", props);
 }
 
 /**
@@ -30,7 +30,7 @@ export interface H1Props extends BaseProps {
   children?: any;
 }
 export function H1(props: H1Props): JSX.Element {
-  return h(H1, props);
+  return h("H1", props);
 }
 
 /**
@@ -40,7 +40,7 @@ export interface H2Props extends BaseProps {
   children?: any;
 }
 export function H2(props: H2Props): JSX.Element {
-  return h(H2, props);
+  return h("H2", props);
 }
 
 /**
@@ -50,7 +50,7 @@ export interface H3Props extends BaseProps {
   children?: any;
 }
 export function H3(props: H3Props): JSX.Element {
-  return h(H3, props);
+  return h("H3", props);
 }
 
 /**
@@ -61,7 +61,7 @@ export interface ParagraphProps extends BaseProps {
   children?: any;
 }
 export function Paragraph(props: ParagraphProps): JSX.Element {
-  return h(Paragraph, props);
+  return h("Paragraph", props);
 }
 
 /**
@@ -98,7 +98,7 @@ export interface ListProps extends BaseProps {
   children?: any;
 }
 export function List(props: ListProps): JSX.Element {
-  return h(List, props);
+  return h("List", props);
 }
 
 /**
@@ -118,7 +118,7 @@ export interface ListItemProps extends BaseProps {
   children?: any;
 }
 export function ListItem(props: ListItemProps): JSX.Element {
-  return h(ListItem, props);
+  return h("ListItem", props);
 }
 
 /**
@@ -162,7 +162,7 @@ export interface TableProps extends BaseProps {
   rows?: string[][];
 }
 export function Table(props: TableProps): JSX.Element {
-  return h(Table, props);
+  return h("Table", props);
 }
 
 /**
@@ -173,8 +173,7 @@ export interface RowProps extends BaseProps {
   header?: boolean;
 }
 export function Row(props: RowProps): JSX.Element {
-  props.key ??= `row-${Math.random().toString(36).substring(2, 15)}`;
-  return h(Row, props);
+  return h("Row", props);
 }
 
 /**
@@ -185,8 +184,7 @@ export interface ColumnProps extends BaseProps {
   align?: "left" | "center" | "right";
 }
 export function Column(props: ColumnProps): JSX.Element {
-  props.align ??= "left";
-  return h(Column, props);
+  return h("Column", { align: "left", ...props });
 }
 
 // Note: For inline text formatting, use lowercase intrinsic elements:

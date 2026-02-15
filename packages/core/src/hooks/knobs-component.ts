@@ -15,6 +15,7 @@ import { useRuntimeStore, type KnobRegistration } from "./runtime-context";
 import { useCom } from "./context";
 import { createTool } from "../tool/tool";
 import type { COM } from "../com/object-model";
+import { Section } from "../jsx";
 
 const h = React.createElement;
 
@@ -42,6 +43,7 @@ export interface KnobInfo {
   pattern?: string;
   required?: boolean;
   momentary?: boolean;
+  inline?: boolean;
 }
 
 export interface KnobGroup {
@@ -52,6 +54,7 @@ export interface KnobGroup {
 export interface KnobsContextValue {
   knobs: KnobInfo[];
   groups: KnobGroup[];
+  hasInlineKnobs: boolean;
   get: (name: string) => KnobInfo | undefined;
 }
 
@@ -101,6 +104,7 @@ function buildKnobInfo(reg: KnobRegistration): KnobInfo {
     pattern: reg.pattern,
     required: reg.required,
     momentary: reg.momentary,
+    inline: reg.inline,
   };
 }
 
@@ -109,6 +113,7 @@ function buildGroups(knobs: Map<string, KnobRegistration>): KnobGroup[] {
   const grouped = new Map<string, KnobInfo[]>();
 
   for (const [, reg] of knobs) {
+    if (reg.inline) continue;
     const info = buildKnobInfo(reg);
     if (reg.group) {
       const list = grouped.get(reg.group) ?? [];
@@ -164,7 +169,7 @@ function formatKnobLine(knob: KnobInfo): string {
   return parts.join("");
 }
 
-function formatKnobsForModel(groups: KnobGroup[]): string {
+function formatKnobsForModel(groups: KnobGroup[], hasInlineKnobs?: boolean): string {
   const lines: string[] = [
     "Knobs are adjustable parameters you can modify using the set_knob tool.",
     "",
@@ -187,6 +192,13 @@ function formatKnobsForModel(groups: KnobGroup[]): string {
     firstGroup = false;
   }
 
+  if (hasInlineKnobs) {
+    lines.push("");
+    lines.push(
+      "Content tagged <collapsed> can be expanded via set_knob (use name for one, group for batch).",
+    );
+  }
+
   return lines.join("\n").trimEnd();
 }
 
@@ -198,60 +210,92 @@ function error(text: string) {
   return [{ type: "text" as const, text }];
 }
 
+function validateAndSetKnob(
+  knob: KnobRegistration,
+  value: string | number | boolean,
+): string | null {
+  if (typeof value !== knob.valueType) {
+    return `Invalid type for "${knob.name}". Expected ${knob.valueType}, got ${typeof value}.`;
+  }
+  if (knob.options?.length && !knob.options.some((o) => o === value)) {
+    return `Invalid value for "${knob.name}". Valid options: ${knob.options.map(formatValue).join(", ")}`;
+  }
+  if (typeof value === "number") {
+    if (knob.min !== undefined && value < knob.min) {
+      return `Value for "${knob.name}" must be >= ${knob.min}. Got ${value}.`;
+    }
+    if (knob.max !== undefined && value > knob.max) {
+      return `Value for "${knob.name}" must be <= ${knob.max}. Got ${value}.`;
+    }
+  }
+  if (typeof value === "string") {
+    if (knob.maxLength !== undefined && value.length > knob.maxLength) {
+      return `Value for "${knob.name}" exceeds max length of ${knob.maxLength}. Got ${value.length} chars.`;
+    }
+    if (knob.pattern !== undefined && !new RegExp(knob.pattern).test(value)) {
+      return `Value for "${knob.name}" does not match pattern: ${knob.pattern}`;
+    }
+  }
+  if (knob.validate) {
+    const result = knob.validate(value);
+    if (result !== true) return `Validation failed for "${knob.name}": ${result}`;
+  }
+  knob.setPrimitive(value);
+  return null;
+}
+
 function executeSetKnob(
   knobs: Map<string, KnobRegistration>,
-  input: { name: string; value: string | number | boolean },
+  input: { name?: string; group?: string; value: string | number | boolean },
 ) {
-  const knob = knobs.get(input.name);
-  if (!knob) {
-    return error(`Unknown knob "${input.name}". Available: ${[...knobs.keys()].join(", ")}`);
+  const hasName = input.name !== undefined && input.name !== "";
+  const hasGroup = input.group !== undefined && input.group !== "";
+
+  if (hasName && hasGroup) {
+    return error("Provide either name or group, not both.");
+  }
+  if (!hasName && !hasGroup) {
+    return error("Provide either name or group.");
   }
 
-  // Type check
-  if (typeof input.value !== knob.valueType) {
-    return error(
-      `Invalid type for "${input.name}". Expected ${knob.valueType}, got ${typeof input.value}.`,
-    );
-  }
-
-  // Options check (enum constraint)
-  if (knob.options?.length && !knob.options.some((o) => o === input.value)) {
-    const opts = knob.options.map(formatValue).join(", ");
-    return error(`Invalid value for "${input.name}". Valid options: ${opts}`);
-  }
-
-  // Number constraints
-  if (typeof input.value === "number") {
-    if (knob.min !== undefined && input.value < knob.min) {
-      return error(`Value for "${input.name}" must be >= ${knob.min}. Got ${input.value}.`);
+  if (hasName) {
+    const knob = knobs.get(input.name!);
+    if (!knob) {
+      return error(`Unknown knob "${input.name}". Available: ${[...knobs.keys()].join(", ")}`);
     }
-    if (knob.max !== undefined && input.value > knob.max) {
-      return error(`Value for "${input.name}" must be <= ${knob.max}. Got ${input.value}.`);
-    }
+    const err = validateAndSetKnob(knob, input.value);
+    if (err) return error(err);
+    return [{ type: "text" as const, text: `Set ${input.name} to ${formatValue(input.value)}.` }];
   }
 
-  // String constraints
-  if (typeof input.value === "string") {
-    if (knob.maxLength !== undefined && input.value.length > knob.maxLength) {
+  // Group dispatch
+  const targets: KnobRegistration[] = [];
+  for (const [, reg] of knobs) {
+    if (reg.group === input.group) targets.push(reg);
+  }
+  if (targets.length === 0) {
+    return error(`No knobs found in group "${input.group}".`);
+  }
+  // Validate all types match before setting any
+  const expectedType = targets[0].valueType;
+  for (const t of targets) {
+    if (t.valueType !== expectedType) {
       return error(
-        `Value for "${input.name}" exceeds max length of ${knob.maxLength}. Got ${input.value.length} chars.`,
+        `Type mismatch in group "${input.group}": "${t.name}" is ${t.valueType}, expected ${expectedType}.`,
       );
     }
-    if (knob.pattern !== undefined && !new RegExp(knob.pattern).test(input.value)) {
-      return error(`Value for "${input.name}" does not match pattern: ${knob.pattern}`);
-    }
   }
-
-  // Custom validate
-  if (knob.validate) {
-    const result = knob.validate(input.value);
-    if (result !== true) {
-      return error(`Validation failed for "${input.name}": ${result}`);
-    }
+  for (const t of targets) {
+    const err = validateAndSetKnob(t, input.value);
+    if (err) return error(err);
   }
-
-  knob.setPrimitive(input.value);
-  return [{ type: "text" as const, text: `Set ${input.name} to ${formatValue(input.value)}.` }];
+  const names = targets.map((t) => t.name).join(", ");
+  return [
+    {
+      type: "text" as const,
+      text: `Set ${targets.length} knobs in group "${input.group}" to ${formatValue(input.value)}: ${names}.`,
+    },
+  ];
 }
 
 // ============================================================================
@@ -260,10 +304,15 @@ function executeSetKnob(
 
 const SetKnobTool = createTool({
   name: "set_knob",
-  description: "Set a knob value. See the knobs section for available knobs and options.",
+  description:
+    "Set a knob value by name, or set all knobs in a group at once. Provide either name or group, not both.",
   input: z.object({
-    name: z.string().describe("Name of the knob to set"),
-    value: z.union([z.string(), z.number(), z.boolean()]).describe("New value for the knob"),
+    name: z.string().optional().describe("Name of the knob to set (mutually exclusive with group)"),
+    group: z
+      .string()
+      .optional()
+      .describe("Group name — sets all knobs in the group (mutually exclusive with name)"),
+    value: z.union([z.string(), z.number(), z.boolean()]).describe("New value for the knob(s)"),
   }),
 
   handler: (input, ctx?: COM) => {
@@ -300,6 +349,7 @@ export function Knobs(props: KnobsProps): React.ReactElement | null {
   ctx.setState(KNOB_REGISTRY_KEY, store.knobRegistry);
 
   const groups = buildGroups(store.knobRegistry);
+  const hasInlineKnobs = [...store.knobRegistry.values()].some((r) => r.inline);
 
   if (typeof props.children === "function") {
     // Render prop: tool + custom content
@@ -311,7 +361,7 @@ export function Knobs(props: KnobsProps): React.ReactElement | null {
     React.Fragment,
     null,
     h(SetKnobTool),
-    h("section", { id: "knobs", audience: "model" }, formatKnobsForModel(groups)),
+    h(Section, { id: "knobs", audience: "model" }, formatKnobsForModel(groups, hasInlineKnobs)),
   );
 }
 
@@ -342,10 +392,12 @@ Knobs.Provider = function KnobsProvider({ children }: { children: ReactNode }): 
 
   const groups = buildGroups(store.knobRegistry);
   const knobs = groups.flatMap((g) => g.knobs);
+  const hasInlineKnobs = [...store.knobRegistry.values()].some((r) => r.inline);
 
   const contextValue: KnobsContextValue = {
     knobs,
     groups,
+    hasInlineKnobs,
     get: (name) => knobs.find((k) => k.name === name),
   };
 
@@ -386,7 +438,11 @@ Knobs.Controls = function KnobsControls(props: KnobsControlsProps): React.ReactE
   }
 
   // Default rendering from context
-  return h("section", { id: "knobs", audience: "model" }, formatKnobsForModel(context.groups));
+  return h(
+    "section",
+    { id: "knobs", audience: "model" },
+    formatKnobsForModel(context.groups, context.hasInlineKnobs),
+  );
 };
 
 // ============================================================================

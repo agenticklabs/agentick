@@ -251,7 +251,6 @@ export class FiberCompiler {
 
       while (attempts < maxAttempts) {
         attempts++;
-
         try {
           // Render with React
           // Wrap with MessageProvider for useOnMessage/useQueuedMessages

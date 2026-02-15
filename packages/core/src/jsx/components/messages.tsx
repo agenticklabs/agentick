@@ -236,8 +236,7 @@ export interface UserActionProps {
  * </Event>
  */
 export function UserAction(props: UserActionProps): JSX.Element {
-  // Return JSX element - compiler will convert to block via registry
-  return h(UserAction, props);
+  return h("UserAction", props);
 }
 
 export interface SystemEventProps {
@@ -265,8 +264,7 @@ export interface SystemEventProps {
  * </Event>
  */
 export function SystemEvent(props: SystemEventProps): JSX.Element {
-  // Return JSX element - compiler will convert to block via registry
-  return h(SystemEvent, props);
+  return h("SystemEvent", props);
 }
 
 export interface StateChangeProps {
@@ -298,8 +296,7 @@ export interface StateChangeProps {
  * </Event>
  */
 export function StateChange(props: StateChangeProps): JSX.Element {
-  // Return JSX element - compiler will convert to block via registry
-  return h(StateChange, props);
+  return h("StateChange", props);
 }
 
 // ============================================================================
@@ -367,8 +364,7 @@ export interface EphemeralProps {
  */
 export function Ephemeral(props: EphemeralProps): JSX.Element {
   useDebugValue(`Ephemeral: ${props.type ?? "content"} @ ${props.position ?? "end"}`);
-  // Self-reference so compiler can recognize this component type
-  return h(Ephemeral, props);
+  return h("ephemeral", props);
 }
 
 // ============================================================================
