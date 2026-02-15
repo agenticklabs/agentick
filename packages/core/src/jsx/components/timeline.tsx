@@ -163,6 +163,8 @@ function DefaultMessage({
  * Default renderer for a pending (queued) message.
  *
  * ExecutionMessage.content contains the actual Message object.
+ * Passes through ALL content blocks (text, image, document, etc.)
+ * so the model sees attachments on the first tick.
  */
 function DefaultPendingMessage({
   message,
@@ -170,33 +172,18 @@ function DefaultPendingMessage({
   message: ExecutionMessage;
   key?: string | number;
 }): JSX.Element {
-  // The content is the actual Message object
-  const msg = message.content as { role: string; content: unknown[] } | undefined;
+  const msg = message.content as { role: string; content: unknown[]; id?: string } | undefined;
   if (!msg) return h(React.Fragment, null);
 
   const { role, content } = msg;
-  if (!Array.isArray(content)) return h(React.Fragment, null);
+  if (!Array.isArray(content) || content.length === 0) return h(React.Fragment, null);
 
-  // Extract text content
-  const textContent = content
-    .filter(
-      (block): block is { type: "text"; text: string } =>
-        typeof block === "object" && block !== null && (block as { type?: string }).type === "text",
-    )
-    .map((block) => block.text)
-    .join("\n");
-
-  if (!textContent) return h(React.Fragment, null);
-
-  // Render the "entry" intrinsic element
-  // Preserve message ID for deduplication in complete()
-  const msgWithId = msg as { role: string; content: unknown[]; id?: string };
   return h("entry", {
     kind: "message",
     message: {
       role,
-      content: [{ type: "text", text: textContent }],
-      id: msgWithId.id,
+      content,
+      id: msg.id,
     },
   });
 }
