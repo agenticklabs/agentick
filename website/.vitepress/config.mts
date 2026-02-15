@@ -184,6 +184,12 @@ export default defineConfig({
           ],
         },
         {
+          text: "Patterns",
+          items: [
+            { text: "Expandable Context", link: "/docs/patterns/expandable-context" },
+          ],
+        },
+        {
           text: "Architecture",
           items: [
             { text: "Package Overview", link: "/docs/packages" },
