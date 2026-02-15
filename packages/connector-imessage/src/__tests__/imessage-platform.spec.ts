@@ -132,7 +132,10 @@ describe("IMessagePlatform", () => {
     mockDB._addMessage(1, "Hello from iMessage");
     vi.advanceTimersByTime(100);
 
-    expect(bridge.send).toHaveBeenCalledWith("Hello from iMessage");
+    expect(bridge.send).toHaveBeenCalledWith("Hello from iMessage", {
+      type: "imessage",
+      handle: "+15551234567",
+    });
 
     await platform.stop();
   });
@@ -259,7 +262,10 @@ describe("IMessagePlatform", () => {
     mockDB._addMessage(1, "After error");
     vi.advanceTimersByTime(100);
 
-    expect(bridge.send).toHaveBeenCalledWith("After error");
+    expect(bridge.send).toHaveBeenCalledWith("After error", {
+      type: "imessage",
+      handle: "+15551234567",
+    });
 
     consoleSpy.mockRestore();
     await platform.stop();

@@ -1,6 +1,11 @@
 import type { AgentickClient } from "@agentick/client";
 import { MessageLog, ToolConfirmations } from "@agentick/client";
-import type { StreamEvent, SendInput, ToolConfirmationResponse } from "@agentick/shared";
+import type {
+  StreamEvent,
+  SendInput,
+  MessageSource,
+  ToolConfirmationResponse,
+} from "@agentick/shared";
 import type { ToolConfirmationRequest } from "@agentick/shared";
 import type {
   ConnectorConfig,
@@ -156,9 +161,17 @@ export class ConnectorSession {
     return this._status;
   }
 
-  send(text: string): void {
+  send(text: string, source?: MessageSource): void {
     if (this._checkRateLimit()) return;
-    this._accessor.send({ messages: [{ role: "user", content: [{ type: "text", text }] }] });
+    this._accessor.send({
+      messages: [
+        {
+          role: "user",
+          content: [{ type: "text", text }],
+          ...(source && { metadata: { source } }),
+        },
+      ],
+    });
   }
 
   sendInput(input: SendInput): void {

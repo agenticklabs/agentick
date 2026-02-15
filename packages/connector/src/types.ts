@@ -1,5 +1,6 @@
 import type { ChatMessage, RenderMode, ConfirmationPolicy } from "@agentick/client";
 import type {
+  MessageSource,
   SendInput,
   ToolConfirmationRequest,
   ToolConfirmationResponse,
@@ -126,7 +127,7 @@ export interface ConnectorPlatform {
  * delivery-ready output.
  */
 export interface ConnectorBridge {
-  send(text: string): void;
+  send(text: string, source?: MessageSource): void;
   sendInput(input: SendInput): void;
   onDeliver(handler: (output: ConnectorOutput) => void | Promise<void>): () => void;
   onConfirmation(

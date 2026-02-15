@@ -60,11 +60,11 @@ function createMockBot() {
     handlers,
     sentMessages,
     editedMessages,
-    simulateMessage(text: string, userId = 100, chatId = 200) {
+    simulateMessage(text: string, userId = 100, chatId = 200, username?: string) {
       const handler = handlers["message:text"];
       if (!handler) throw new Error("No message:text handler registered");
       return handler({
-        from: { id: userId },
+        from: { id: userId, username },
         chat: { id: chatId },
         message: { text },
       });
@@ -192,7 +192,12 @@ describe("TelegramPlatform", () => {
     await platform.start(bridge);
     await mockBot.simulateMessage("Hello agent");
 
-    expect(bridge.send).toHaveBeenCalledWith("Hello agent");
+    expect(bridge.send).toHaveBeenCalledWith("Hello agent", {
+      type: "telegram",
+      chatId: 200,
+      userId: 100,
+      username: undefined,
+    });
   });
 
   it("auto-detects chatId from first message", async () => {
@@ -215,7 +220,12 @@ describe("TelegramPlatform", () => {
     await mockBot.simulateMessage("From chat 2", 100, 2);
 
     expect(bridge.send).toHaveBeenCalledTimes(1);
-    expect(bridge.send).toHaveBeenCalledWith("From chat 1");
+    expect(bridge.send).toHaveBeenCalledWith("From chat 1", {
+      type: "telegram",
+      chatId: 1,
+      userId: 100,
+      username: undefined,
+    });
   });
 
   it("filters by allowedUsers", async () => {
@@ -230,7 +240,12 @@ describe("TelegramPlatform", () => {
     await mockBot.simulateMessage("Blocked user", 999, 1);
 
     expect(bridge.send).toHaveBeenCalledTimes(1);
-    expect(bridge.send).toHaveBeenCalledWith("Allowed user");
+    expect(bridge.send).toHaveBeenCalledWith("Allowed user", {
+      type: "telegram",
+      chatId: 1,
+      userId: 100,
+      username: undefined,
+    });
   });
 
   it("delivers messages to Telegram as plain text", async () => {

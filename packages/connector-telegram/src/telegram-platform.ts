@@ -13,6 +13,12 @@ import {
 } from "@agentick/connector";
 import type { ToolConfirmationRequest, ToolConfirmationResponse } from "@agentick/shared";
 
+declare module "@agentick/shared" {
+  interface MessageSourceTypes {
+    telegram: { type: "telegram"; chatId: number; userId?: number; username?: string };
+  }
+}
+
 const TELEGRAM_MAX_LENGTH = 4096;
 
 export interface TelegramConnectorOptions {
@@ -93,7 +99,12 @@ export class TelegramPlatform implements ConnectorPlatform {
         return;
       }
 
-      bridge.send(text);
+      bridge.send(text, {
+        type: "telegram",
+        chatId,
+        userId,
+        username: ctx.from.username,
+      });
     });
 
     // Single callback query handler — routes to pending confirmations by toolUseId

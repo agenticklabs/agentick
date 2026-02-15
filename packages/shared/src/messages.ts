@@ -28,6 +28,42 @@ import type { MessageRoles } from "./block-types";
 import type { ContentBlock, EventAllowedBlock } from "./blocks";
 
 // ============================================================================
+// Message Source (augmentable registry)
+// ============================================================================
+
+/**
+ * Registry interface for message sources.
+ *
+ * Connector packages augment this via `declare module "@agentick/shared"`:
+ * ```typescript
+ * declare module "@agentick/shared" {
+ *   interface MessageSourceTypes {
+ *     telegram: { type: "telegram"; chatId: number; userId?: number };
+ *   }
+ * }
+ * ```
+ *
+ * The `MessageSource` union type derives automatically from all registered entries.
+ */
+export interface MessageSourceTypes {
+  local: { type: "local" };
+}
+
+/** Discriminated union of all registered message sources. */
+export type MessageSource = MessageSourceTypes[keyof MessageSourceTypes];
+
+// ============================================================================
+// Message Metadata
+// ============================================================================
+
+/** Typed metadata bag for messages. */
+export interface MessageMetadata {
+  /** Where this message originated (TUI, Telegram, iMessage, etc). */
+  source?: MessageSource;
+  [key: string]: unknown;
+}
+
+// ============================================================================
 // Message Types
 // ============================================================================
 
@@ -37,16 +73,6 @@ import type { ContentBlock, EventAllowedBlock } from "./blocks";
  * Messages are the fundamental unit of conversation in Agentick.
  * Each message has a role indicating its source and an array
  * of content blocks.
- *
- * @example
- * ```typescript
- * const message: Message = {
- *   id: 'msg-123',
- *   role: 'user',
- *   content: [{ type: 'text', text: 'Hello!' }],
- *   metadata: { source: 'web' }
- * };
- * ```
  *
  * @see {@link UserMessage}, {@link AssistantMessage}, {@link SystemMessage}
  */
@@ -58,7 +84,7 @@ export interface Message {
   /** Array of content blocks */
   readonly content: ContentBlock[];
   /** Additional metadata */
-  readonly metadata?: Record<string, any>;
+  readonly metadata?: MessageMetadata;
   /** When the message was created */
   readonly createdAt?: string | Date;
   /** When the message was last updated */
@@ -103,7 +129,7 @@ export interface EventMessage extends Message {
 
 export function createUserMessage(
   content: ContentBlock[] | string,
-  metadata?: Record<string, any>,
+  metadata?: MessageMetadata,
 ): UserMessage {
   return {
     role: "user",
@@ -114,7 +140,7 @@ export function createUserMessage(
 
 export function createAssistantMessage(
   content: ContentBlock[] | string,
-  metadata?: Record<string, any>,
+  metadata?: MessageMetadata,
 ): AssistantMessage {
   return {
     role: "assistant",
@@ -125,7 +151,7 @@ export function createAssistantMessage(
 
 export function createSystemMessage(
   content: ContentBlock[] | string,
-  metadata?: Record<string, any>,
+  metadata?: MessageMetadata,
 ): SystemMessage {
   return {
     role: "system",
@@ -157,7 +183,7 @@ export function isEventMessage(message: Message): message is EventMessage {
 export function createToolMessage(
   content: ContentBlock[] | string,
   toolCallId?: string,
-  metadata?: Record<string, any>,
+  metadata?: MessageMetadata,
 ): ToolMessage {
   return {
     role: "tool",
@@ -170,7 +196,7 @@ export function createToolMessage(
 export function createEventMessage(
   content: EventAllowedBlock[] | string,
   eventType?: string,
-  metadata?: Record<string, any>,
+  metadata?: MessageMetadata,
 ): EventMessage {
   return {
     role: "event",

@@ -9,6 +9,12 @@ import type { ToolConfirmationRequest, ToolConfirmationResponse } from "@agentic
 import { IMessageDB } from "./imessage-db.js";
 import { sendIMessage } from "./imessage-send.js";
 
+declare module "@agentick/shared" {
+  interface MessageSourceTypes {
+    imessage: { type: "imessage"; handle: string };
+  }
+}
+
 export interface IMessageConnectorOptions {
   /** Phone number or email to watch for messages. */
   handle: string;
@@ -124,7 +130,7 @@ export class IMessagePlatform implements ConnectorPlatform {
         continue;
       }
 
-      this._bridge.send(text);
+      this._bridge.send(text, { type: "imessage", handle: this._handle });
     }
   }
 

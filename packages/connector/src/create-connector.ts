@@ -43,8 +43,8 @@ export function createConnector(
       });
 
       const bridge: ConnectorBridge = {
-        send(text) {
-          session?.send(text);
+        send(text, source) {
+          session?.send(text, source);
         },
         sendInput(input) {
           session?.sendInput(input);
