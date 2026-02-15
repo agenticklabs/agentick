@@ -27,6 +27,9 @@ features:
   - icon: 🎛️
     title: Knobs
     details: Model-visible, model-settable reactive state. One hook gives you a form control the model can see and change. Agent self-modification in one line.
+  - icon: 📂
+    title: Expandable Context
+    details: Agents see collapsed summaries and expand what they need. Compact context with on-demand detail — auto-collapsed at execution end to keep the window clean.
   - icon: 🔌
     title: Connectors
     details: Bridge agents to Telegram, iMessage, or any platform. Content filtering, delivery timing, rate limiting, and tool confirmations — adapters just handle I/O.
@@ -246,6 +249,48 @@ function ResearchAgent() {
 ```
 
 The model sees the knobs as form controls in its context and gets a `set_knob` tool to change them. The agent decides mid-conversation that it needs more search depth? It sets the knob, the state updates, the context recompiles, next tick sees the new value.
+
+</div>
+
+<div class="code-example">
+
+### Expandable Context — The Agent Controls Its Own Window
+
+Keep context compact by default. The model sees collapsed summaries and expands only what it needs — full content renders on demand, then auto-collapses when the execution loop ends.
+
+```tsx
+function CodingAgent() {
+  return (
+    <>
+      <System>
+        You have access to project context below. Expand any section
+        you need — they auto-collapse after each turn to keep context clean.
+      </System>
+
+      <Section title="Project Context">
+        <Expandable name="architecture" summary="System architecture (47 components, 12 services)">
+          {architectureDocs}
+        </Expandable>
+        <Expandable name="schema" summary="Database schema (23 tables, 156 columns)">
+          {schemaDocs}
+        </Expandable>
+        <Expandable name="api-spec" summary="API specification (89 endpoints)">
+          {apiSpec}
+        </Expandable>
+        <Expandable name="style-guide" summary="Code style guide and conventions">
+          {styleGuide}
+        </Expandable>
+      </Section>
+
+      <CodingTools />
+      <Knobs />
+      <Timeline />
+    </>
+  );
+}
+```
+
+The model sees four one-line summaries instead of thousands of tokens of documentation. When it needs the database schema to write a migration, it expands just that section — the full content appears in context for that tick. After the execution loop completes, everything collapses back to summaries automatically. The context window stays small, but the agent has access to everything.
 
 </div>
 
