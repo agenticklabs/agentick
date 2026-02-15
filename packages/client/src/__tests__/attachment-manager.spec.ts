@@ -426,7 +426,7 @@ describe("AttachmentManager", () => {
 
 describe("ChatSession attachment integration", () => {
   it("submit with pending attachments sends extraBlocks and clears", () => {
-    const client = createMockClient();
+    const client = createMockClient(vi.fn);
     const session = new ChatSession(client, { sessionId: "s1" });
 
     session.attachments.add({
@@ -462,7 +462,7 @@ describe("ChatSession attachment integration", () => {
   });
 
   it("submit without attachments sends text only", () => {
-    const client = createMockClient();
+    const client = createMockClient(vi.fn);
     const session = new ChatSession(client, { sessionId: "s1" });
 
     session.submit("Hello");
@@ -478,7 +478,7 @@ describe("ChatSession attachment integration", () => {
   });
 
   it("attachment add triggers ChatSession state change", () => {
-    const client = createMockClient();
+    const client = createMockClient(vi.fn);
     const session = new ChatSession(client, { sessionId: "s1" });
     const listener = vi.fn();
     session.onStateChange(listener);
@@ -496,7 +496,7 @@ describe("ChatSession attachment integration", () => {
   });
 
   it("attachments in snapshot after add", () => {
-    const client = createMockClient();
+    const client = createMockClient(vi.fn);
     const session = new ChatSession(client, { sessionId: "s1" });
 
     session.attachments.add({
@@ -513,7 +513,7 @@ describe("ChatSession attachment integration", () => {
   });
 
   it("submit with renderMode includes extraBlocks in pushed user message", () => {
-    const client = createMockClient();
+    const client = createMockClient(vi.fn);
     const session = new ChatSession(client, {
       sessionId: "s1",
       renderMode: "streaming",
@@ -541,7 +541,7 @@ describe("ChatSession attachment integration", () => {
   });
 
   it("submit in queue mode during execution queues message with attachments", () => {
-    const client = createMockClient();
+    const client = createMockClient(vi.fn);
     const session = new ChatSession(client, {
       sessionId: "s1",
       mode: "queue",
@@ -581,7 +581,7 @@ describe("MessageLog pushUserMessage", () => {
   // We need to import MessageLog
   it("pushUserMessage with extraBlocks produces ContentBlock[] content", async () => {
     const { MessageLog } = await import("../message-log");
-    const client = createMockClient();
+    const client = createMockClient(vi.fn);
     const log = new MessageLog(client, { sessionId: "s1", renderMode: "block" });
 
     const imageBlock = {
@@ -607,7 +607,7 @@ describe("MessageLog pushUserMessage", () => {
 
   it("pushUserMessage without extraBlocks produces string content", async () => {
     const { MessageLog } = await import("../message-log");
-    const client = createMockClient();
+    const client = createMockClient(vi.fn);
     const log = new MessageLog(client, { sessionId: "s1", renderMode: "block" });
 
     log.pushUserMessage("Hello");
@@ -622,7 +622,7 @@ describe("MessageLog pushUserMessage", () => {
 
 describe("ChatSession steer/interrupt drain attachments", () => {
   it("steer() drains pending attachments", () => {
-    const client = createMockClient();
+    const client = createMockClient(vi.fn);
     const session = new ChatSession(client, { sessionId: "s1" });
 
     session.attachments.add({
@@ -653,7 +653,7 @@ describe("ChatSession steer/interrupt drain attachments", () => {
   });
 
   it("interrupt() drains pending attachments", () => {
-    const client = createMockClient();
+    const client = createMockClient(vi.fn);
     const session = new ChatSession(client, { sessionId: "s1" });
 
     session.attachments.add({
@@ -689,7 +689,7 @@ describe("ChatSession steer/interrupt drain attachments", () => {
   });
 
   it("steer() without attachments sends text only", () => {
-    const client = createMockClient();
+    const client = createMockClient(vi.fn);
     const session = new ChatSession(client, { sessionId: "s1" });
 
     session.steer("Just text");
@@ -707,7 +707,7 @@ describe("ChatSession steer/interrupt drain attachments", () => {
 
 describe("ChatSession single-notify on submit", () => {
   it("submit with attachments fires exactly one state change notification", () => {
-    const client = createMockClient();
+    const client = createMockClient(vi.fn);
     const session = new ChatSession(client, { sessionId: "s1" });
     const listener = vi.fn();
     session.onStateChange(listener);
@@ -730,7 +730,7 @@ describe("ChatSession single-notify on submit", () => {
   });
 
   it("steer with attachments fires exactly one state change notification", () => {
-    const client = createMockClient();
+    const client = createMockClient(vi.fn);
     const session = new ChatSession(client, { sessionId: "s1" });
     const listener = vi.fn();
     session.onStateChange(listener);
@@ -753,7 +753,7 @@ describe("ChatSession single-notify on submit", () => {
 
 describe("MessageSteering extraBlocks", () => {
   it("submit with extraBlocks sends multimodal message", () => {
-    const client = createMockClient();
+    const client = createMockClient(vi.fn);
     const steering = new MessageSteering(client, { sessionId: "s1" });
 
     const imageBlock = {
@@ -780,7 +780,7 @@ describe("MessageSteering extraBlocks", () => {
   });
 
   it("submit without extraBlocks sends text-only message", () => {
-    const client = createMockClient();
+    const client = createMockClient(vi.fn);
     const steering = new MessageSteering(client, { sessionId: "s1" });
 
     steering.submit("Hello");
@@ -796,7 +796,7 @@ describe("MessageSteering extraBlocks", () => {
   });
 
   it("queue with extraBlocks stores multimodal message", () => {
-    const client = createMockClient();
+    const client = createMockClient(vi.fn);
     const steering = new MessageSteering(client, { sessionId: "s1", mode: "queue" });
 
     const docBlock = {
@@ -822,7 +822,7 @@ describe("MessageSteering extraBlocks", () => {
   });
 
   it("steer with extraBlocks sends multimodal message", () => {
-    const client = createMockClient();
+    const client = createMockClient(vi.fn);
     const steering = new MessageSteering(client, { sessionId: "s1" });
 
     const imageBlock = {
@@ -849,7 +849,7 @@ describe("MessageSteering extraBlocks", () => {
   });
 
   it("interrupt with extraBlocks sends multimodal message", async () => {
-    const client = createMockClient();
+    const client = createMockClient(vi.fn);
     const steering = new MessageSteering(client, { sessionId: "s1" });
 
     const docBlock = {

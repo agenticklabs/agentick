@@ -6,7 +6,7 @@ describe("MessageSteering", () => {
   let client: ReturnType<typeof createMockClient>;
 
   beforeEach(() => {
-    client = createMockClient();
+    client = createMockClient(vi.fn);
   });
 
   describe("initial state", () => {
