@@ -1,5 +1,15 @@
 # @agentick/tui
 
+## 0.7.0
+
+### Patch Changes
+
+- Updated dependencies [c73753e]
+  - @agentick/core@0.7.0
+  - @agentick/shared@0.7.0
+  - @agentick/client@0.7.0
+  - @agentick/react@0.7.0
+
 ## 0.6.0
 
 ### Minor Changes

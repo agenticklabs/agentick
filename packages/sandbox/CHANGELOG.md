@@ -1,5 +1,12 @@
 # @agentick/sandbox
 
+## 0.7.0
+
+### Patch Changes
+
+- Updated dependencies [c73753e]
+  - @agentick/core@0.7.0
+
 ## 0.6.0
 
 ### Minor Changes

@@ -1,5 +1,11 @@
 # @agentick/client
 
+## 0.7.0
+
+### Patch Changes
+
+- @agentick/shared@0.7.0
+
 ## 0.5.0
 
 ### Minor Changes
