@@ -1,23 +1,19 @@
 ---
 "@agentick/core": minor
-"@agentick/shared": minor
-"@agentick/client": minor
-"@agentick/gateway": patch
-"@agentick/tui": minor
-"@agentick/sandbox": patch
-"@agentick/connector": minor
-"@agentick/connector-imessage": minor
-"@agentick/connector-telegram": minor
 ---
+
+Sync all packages to 0.7.0.
 
 **Connector system** — New `@agentick/connector` package with platform integration primitives. Initial adapters for iMessage and Telegram.
 
-**CompletionSource redesign** — `@agentick/client` CompletionSource API now uses match/resolve pattern for cleaner composition.
+**CompletionSource redesign** — `@agentick/client` CompletionSource API uses match/resolve pattern.
 
 **MessageSource registry** — Typed message provenance tracking in `@agentick/shared`, used by connectors.
 
-**Gateway fix** — Re-resolve closed sessions after idle eviction instead of returning stale references.
+**Gateway fix** — Re-resolve closed sessions after idle eviction.
 
-**Content blocks fix** — Pass all content block types through DefaultPendingMessage in core.
+**Content blocks fix** — Pass all content block types through DefaultPendingMessage.
 
-**Testing utilities** — `createMockClient()` no longer imports vitest. Pass `vi.fn` or `jest.fn` as the `fn` parameter for spy-wrapped methods. Fixes TypeDoc build failure.
+**Testing utilities** — `createMockClient()` decoupled from vitest. Pass `vi.fn` or `jest.fn` as `fn` parameter for spy-wrapped methods.
+
+**Knobs documentation** — Accordion pattern for conditional context rendering.
