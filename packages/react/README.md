@@ -232,8 +232,12 @@ const { value, cursor, completion, completedRanges, editor } = useLineEditor({
 useEffect(() => {
   return editor.registerCompletion({
     id: "file",
-    trigger: { type: "char", char: "#" },
-    resolve: async (query) => searchFiles(query),
+    match({ value, cursor }) {
+      const idx = value.lastIndexOf("#", cursor - 1);
+      if (idx < 0) return null;
+      return { from: idx, query: value.slice(idx + 1, cursor) };
+    },
+    resolve: async ({ query }) => searchFiles(query),
   });
 }, [editor]);
 ```

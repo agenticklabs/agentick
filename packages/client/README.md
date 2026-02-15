@@ -216,7 +216,7 @@ client.onConnectionChange((state) => {
 
 ## LineEditor
 
-Framework-agnostic line editor with readline-quality editing: cursor movement, word navigation, kill/yank, history, and a char-trigger completion engine.
+Framework-agnostic line editor with readline-quality editing: cursor movement, word navigation, kill/yank, history, and a match-based completion engine.
 
 ```typescript
 import { LineEditor } from "@agentick/client";
@@ -229,20 +229,24 @@ editor.handleInput("return", ""); // submit
 
 ### Completion
 
-Register completion sources that activate on trigger characters:
+Register completion sources with `match`/`resolve`. The source's `match` function decides when to activate based on the current buffer and cursor; `resolve` produces items.
 
 ```typescript
 const unregister = editor.registerCompletion({
   id: "file",
-  trigger: { type: "char", char: "#" },
-  resolve: async (query) => searchFiles(query),
+  match({ value, cursor }) {
+    const idx = value.lastIndexOf("#", cursor - 1);
+    if (idx < 0) return null;
+    return { from: idx, query: value.slice(idx + 1, cursor) };
+  },
+  resolve: async ({ query }) => searchFiles(query),
   debounce: 150,
 });
 ```
 
-When active, `editor.state.completion` contains the current `CompletionState` (items, selectedIndex, query, loading). Accepted completions are tracked as `CompletedRange` entries in `editor.state.completedRanges`.
+When active, `editor.state.completion` contains the current `CompletionState` (items, selectedIndex, query, loading, from). Accepted completions are tracked as `CompletedRange` entries in `editor.state.completedRanges`.
 
-See [`COMPLETION.md`](./COMPLETION.md) for the full completion system reference covering resolution paths, keybindings, range tracking, slash commands, and custom sources.
+See [`COMPLETION.md`](./COMPLETION.md) for the full completion system reference covering match/resolve API, resolution paths, keybindings, range tracking, slash commands, and custom sources.
 
 ## Chat Primitives
 

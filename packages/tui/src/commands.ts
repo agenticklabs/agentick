@@ -1,5 +1,5 @@
 import { useState, useCallback, useMemo, useRef } from "react";
-import type { CompletionSource, CompletionItem } from "@agentick/client";
+import type { CompletionSource } from "@agentick/client";
 
 // --- Types ---
 
@@ -115,20 +115,20 @@ function formatHelp(commands: SlashCommand[]): string {
 export function createCommandCompletionSource(commands: SlashCommand[]): CompletionSource {
   return {
     id: "command",
-    trigger: { type: "char", char: "/" },
-    shouldActivate: (_value, anchor) => anchor === 0,
-    resolve: (query) => {
-      const items: CompletionItem[] = [];
-      for (const cmd of commands) {
-        if (!query || cmd.name.startsWith(query)) {
-          items.push({
-            label: cmd.name,
-            value: `/${cmd.name}`,
-            description: cmd.description,
-          });
-        }
-      }
-      return items;
+    match({ value, cursor }) {
+      if (cursor < 1 || value[0] !== "/") return null;
+      const spaceIdx = value.indexOf(" ");
+      if (spaceIdx >= 0 && cursor > spaceIdx) return null;
+      return { from: 0, query: value.slice(1, cursor) };
+    },
+    resolve({ query }) {
+      return commands
+        .filter((cmd) => !query || cmd.name.startsWith(query))
+        .map((cmd) => ({
+          label: cmd.name,
+          value: cmd.args ? `/${cmd.name} ` : `/${cmd.name}`,
+          description: cmd.description,
+        }));
     },
   };
 }

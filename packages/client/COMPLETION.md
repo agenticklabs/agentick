@@ -22,21 +22,33 @@ hook that bridges the core into its rendering environment.
 
 ## CompletionSource
 
-A completion source describes when and how to provide suggestions.
+A completion source describes when and how to provide suggestions. The API
+follows the CodeMirror 6 / TipTap mentions pattern: `match` decides if the
+source is active, `resolve` produces items.
 
 ```typescript
+interface CompletionContext {
+  value: string; // Full buffer contents
+  cursor: number; // Cursor position
+}
+
+interface CompletionMatch {
+  from: number; // Replacement range start
+  query: string; // Text extracted by the source for filtering
+}
+
 interface CompletionSource {
   id: string;
-  trigger: { type: "char"; char: string };
-  resolve: (query: string) => CompletionItem[] | Promise<CompletionItem[]>;
+  match(ctx: CompletionContext): CompletionMatch | null;
+  resolve(ctx: CompletionContext & CompletionMatch): CompletionItem[] | Promise<CompletionItem[]>;
   debounce?: number;
-  shouldActivate?: (value: string, anchor: number) => boolean;
 }
 
 interface CompletionItem {
   label: string; // Display text in the picker
   value: string; // Inserted into the buffer on accept
   description?: string; // Secondary text (shown dimmed)
+  continues?: boolean; // Re-probe same source after acceptance
 }
 ```
 
@@ -45,30 +57,40 @@ interface CompletionItem {
 - **`id`** — Unique identifier. Used in `CompletedRange.sourceId` to track
   which source produced an accepted completion.
 
-- **`trigger`** — Character that activates completion. Currently only
-  `{ type: "char", char: string }`. Completion activates when this character
-  is typed (not when it already exists in the buffer).
+- **`match(ctx)`** — Called on every edit with the current buffer and cursor
+  position. Returns a `CompletionMatch` to activate completion, or `null` to
+  skip. Must be cheap — just text scanning, no I/O. The source owns all
+  activation logic (position constraints, prefix checks, etc.).
 
-- **`resolve(query)`** — Called with the text between the trigger character
-  and the cursor. Returns items synchronously or as a Promise. Called on every
-  keystroke while completing (with the updated query).
+- **`resolve(ctx)`** — Called with the full context (value, cursor, from,
+  query) when `match` returns non-null. Returns items synchronously or as a
+  Promise. Called on every keystroke while completing (with updated context).
 
 - **`debounce`** — Milliseconds to delay before calling `resolve`. Typing
   during the debounce window resets the timer. Shows loading state immediately,
   calls `resolve` after the delay. Optional.
 
-- **`shouldActivate(value, anchor)`** — Guard function. If provided, must
-  return `true` for completion to activate. `value` is the full buffer,
-  `anchor` is the position of the trigger character. Use this to restrict
-  triggers to specific positions (e.g., `/` only at column 0 for slash
-  commands).
+### How match works
+
+The `match` function receives `{ value, cursor }` and decides:
+
+1. **Is this source relevant?** Check prefixes, character positions, cursor
+   location. Return `null` if not.
+2. **Where does the replacement start?** Set `from` to the position where
+   accepted text should be inserted.
+3. **What's the filter query?** Extract the substring the user has typed
+   so far for filtering.
+
+The framework calls `match` on every edit. When completion is active, the
+active source's `match` is checked first — if it returns `null`, the source
+is deactivated and all sources are probed for a new match.
 
 ### Resolution Paths
 
 **Sync, no debounce** (simplest):
 
 ```typescript
-resolve: (query) => items.filter((i) => i.label.startsWith(query));
+resolve: ({ query }) => items.filter((i) => i.label.startsWith(query));
 ```
 
 Items appear instantly. No loading state.
@@ -76,7 +98,7 @@ Items appear instantly. No loading state.
 **Async, no debounce:**
 
 ```typescript
-resolve: async (query) => {
+resolve: async ({ query }) => {
   const results = await searchFiles(query);
   return results.map((f) => ({ label: f.name, value: f.path }));
 };
@@ -89,7 +111,7 @@ are automatically dropped.
 **Sync with debounce:**
 
 ```typescript
-resolve: (query) => items.filter(i => i.label.startsWith(query)),
+resolve: ({ query }) => items.filter(i => i.label.startsWith(query)),
 debounce: 100,
 ```
 
@@ -99,14 +121,12 @@ Resolve runs, items appear. Previous items visible during loading.
 **Async with debounce:**
 
 ```typescript
-resolve: async (query) => await searchAPI(query),
+resolve: async ({ query }) => await searchAPI(query),
 debounce: 200,
 ```
 
 Loading state immediately. Timer fires after 200ms. Resolve starts, returns
 Promise. Loading continues until Promise resolves. Stale results dropped.
-This is the most complex path — zero test coverage existed initially,
-now fully tested.
 
 ## Registering Sources
 
@@ -114,17 +134,25 @@ now fully tested.
 const editor = new LineEditor({ onSubmit: handleSubmit });
 
 const unregister = editor.registerCompletion({
-  id: "file",
-  trigger: { type: "char", char: "#" },
-  resolve: (query) => searchFiles(query),
+  id: "mention",
+  match({ value, cursor }) {
+    const idx = value.lastIndexOf("@", cursor - 1);
+    if (idx < 0) return null;
+    return { from: idx, query: value.slice(idx + 1, cursor) };
+  },
+  resolve({ query }) {
+    return users
+      .filter((u) => u.name.startsWith(query))
+      .map((u) => ({ label: u.name, value: `@${u.name}`, description: u.role }));
+  },
 });
 
 // Later, to remove:
 unregister();
 ```
 
-Multiple sources can be registered. When a trigger character is typed, sources
-are checked in registration order. First match wins.
+Multiple sources can be registered. On each edit, sources are checked in
+registration order. First match wins.
 
 ### TUI/React Hook Pattern
 
@@ -150,6 +178,7 @@ interface CompletionState {
   readonly query: string;
   readonly loading: boolean;
   readonly sourceId: string;
+  readonly from: number;
 }
 ```
 
@@ -157,22 +186,24 @@ interface CompletionState {
   (stale items) to avoid flicker. Empty array if no previous results.
 - **`selectedIndex`** — Which item is highlighted. Preserved during loading.
   Reset to 0 when new results arrive.
-- **`query`** — Text between trigger char and cursor.
+- **`query`** — The query string returned by the source's `match`.
 - **`loading`** — True while awaiting async resolve or debounce timer.
 - **`sourceId`** — Which source is active.
+- **`from`** — Replacement range start. On acceptance, the framework replaces
+  `[from, cursor)` with `item.value`.
 
 When completion is inactive, `editor.state.completion` is `null`.
 
 ## Keybindings (During Active Completion)
 
-| Key        | Action                                      |
-| ---------- | ------------------------------------------- |
-| `Tab`      | Accept selected item                        |
-| `Enter`    | Accept selected item                        |
-| `Escape`   | Dismiss picker (trigger char stays as text) |
-| `Up`       | Select previous item (wraps around)         |
-| `Down`     | Select next item (wraps around)             |
-| Other keys | Fall through to normal editing              |
+| Key        | Action                              |
+| ---------- | ----------------------------------- |
+| `Tab`      | Accept selected item                |
+| `Enter`    | Accept selected item                |
+| `Escape`   | Dismiss picker (text stays as-is)   |
+| `Up`       | Select previous item (wraps around) |
+| `Down`     | Select next item (wraps around)     |
+| Other keys | Fall through to normal editing      |
 
 When completion is NOT active, Tab and Escape are no-ops. Up/Down navigate
 history as usual. Enter submits.
@@ -180,6 +211,36 @@ history as usual. Enter submits.
 When completion IS active, these keys are intercepted BEFORE normal handling.
 Up/Down navigate the picker, not history. Enter/Tab accept instead of
 submitting.
+
+## Post-Acceptance Chaining
+
+After accepting a completion, the framework probes sources for a new match.
+By default, the accepted source is skipped to prevent self-re-activation
+(e.g., the command source would re-match `/help` since it starts with `/`).
+Other sources are always probed — this enables cross-source chaining like
+accepting `/attach ` from the command source immediately activating the
+file source.
+
+### `continues` — Same-Source Chaining
+
+Set `continues: true` on a `CompletionItem` to opt into same-source
+re-probing after acceptance. The canonical use case is directory drilling:
+accepting `packages/` should immediately re-probe the file source to show
+that directory's contents.
+
+```typescript
+items.push({
+  label: entry.name + "/",
+  value: `${pathPrefix}${entry.name}/`,
+  description: "dir",
+  continues: true, // re-probe this source after acceptance
+});
+```
+
+Without `continues`, the accepted source is skipped and the picker closes.
+With `continues`, the source's `match` is called with the post-acceptance
+buffer. If it returns a match, `resolve` runs and the picker updates
+in-place.
 
 ## CompletedRange Tracking
 
@@ -272,9 +333,11 @@ useEffect(() => {
 
 This registers a source that:
 
-- Triggers on `/` at position 0 only
-- Resolves to matching command names
-- Shows command descriptions in the picker
+- Matches when the buffer starts with `/` and the cursor is in the command
+  portion (before any space)
+- Deactivates once the cursor passes a space, allowing other sources to
+  take over (e.g., file completion after `/attach `)
+- Resolves to matching command names with descriptions
 
 ### Custom Commands
 
@@ -348,13 +411,13 @@ methods form a clear hierarchy:
    navigation, `setValue`, `clear`.
 
 3. **`_applyEdit(newValue, newCursor)`** — Edit-aware. Calls `_editValue`,
-   then checks completion triggers or updates active completion query,
-   then notifies. Used by keybinding actions and character insertion.
+   then runs the match/probe flow: if an active source still matches, resolve
+   with updated context; if it doesn't, dismiss and probe all sources for a
+   new match. Then notifies.
 
-4. **`_acceptCompletion()`** — Completion-specific. Dismisses completion
-   silently, calls `_editValue` (NOT `_applyEdit` — to avoid re-triggering
-   completion when the accepted value contains a trigger char), appends
-   the new `CompletedRange`, notifies.
+4. **`_acceptCompletion()`** — Completion-specific. Replaces `[from, cursor)`
+   with the item's value, dismisses silently, calls `_editValue`, then probes
+   all _other_ sources for chaining (skips the accepted source). Notifies.
 
 ### Notification Contract
 
@@ -375,8 +438,12 @@ methods form a clear hierarchy:
 ```typescript
 const fileSource: CompletionSource = {
   id: "file",
-  trigger: { type: "char", char: "#" },
-  resolve: async (query) => {
+  match({ value, cursor }) {
+    const idx = value.lastIndexOf("#", cursor - 1);
+    if (idx < 0) return null;
+    return { from: idx, query: value.slice(idx + 1, cursor) };
+  },
+  resolve: async ({ query }) => {
     const files = await glob(`**/*${query}*`, { limit: 20 });
     return files.map((f) => ({
       label: basename(f),
@@ -393,15 +460,20 @@ const fileSource: CompletionSource = {
 ```typescript
 const mentionSource: CompletionSource = {
   id: "mention",
-  trigger: { type: "char", char: "@" },
-  resolve: (query) =>
-    agents
+  match({ value, cursor }) {
+    const idx = value.lastIndexOf("@", cursor - 1);
+    if (idx < 0) return null;
+    return { from: idx, query: value.slice(idx + 1, cursor) };
+  },
+  resolve({ query }) {
+    return agents
       .filter((a) => a.name.toLowerCase().startsWith(query.toLowerCase()))
       .map((a) => ({
         label: a.name,
         value: `@${a.name}`,
         description: a.description,
-      })),
+      }));
+  },
 };
 ```
 
@@ -410,16 +482,21 @@ const mentionSource: CompletionSource = {
 ```typescript
 const commandSource: CompletionSource = {
   id: "command",
-  trigger: { type: "char", char: "/" },
-  shouldActivate: (_value, anchor) => anchor === 0,
-  resolve: (query) =>
-    commands
+  match({ value, cursor }) {
+    if (cursor < 1 || value[0] !== "/") return null;
+    const spaceIdx = value.indexOf(" ");
+    if (spaceIdx >= 0 && cursor > spaceIdx) return null;
+    return { from: 0, query: value.slice(1, cursor) };
+  },
+  resolve({ query }) {
+    return commands
       .filter((c) => !query || c.name.startsWith(query))
       .map((c) => ({
         label: c.name,
         value: `/${c.name}`,
         description: c.description,
-      })),
+      }));
+  },
 };
 ```
 
@@ -443,27 +520,34 @@ Test helpers for completion sources:
 function commandSource(items: CompletionItem[] = []): CompletionSource {
   return {
     id: "command",
-    trigger: { type: "char", char: "/" },
-    resolve: (query) => (query ? items.filter((i) => i.label.startsWith(query)) : items),
-    shouldActivate: (_value, anchor) => anchor === 0,
+    match({ value, cursor }) {
+      if (cursor < 1 || value[0] !== "/") return null;
+      const spaceIdx = value.indexOf(" ");
+      if (spaceIdx >= 0 && cursor > spaceIdx) return null;
+      return { from: 0, query: value.slice(1, cursor) };
+    },
+    resolve({ query }) {
+      return query ? items.filter((i) => i.label.startsWith(query)) : items;
+    },
   };
 }
 ```
 
 Key test scenarios covered:
 
-- Trigger activation and `shouldActivate` guard
+- match activation and deactivation
 - Query update on typing, filtering
 - Accept (Return + Tab), dismiss (Escape)
-- Backspace past anchor dismisses
+- Backspace past `from` boundary dismisses
 - Up/Down wrap-around navigation
 - Multiple sources (first match wins)
+- Post-acceptance cross-source chaining (command → file)
+- Post-acceptance same-source chaining via `continues: true` (directory drilling)
 - Async loading state and stale result rejection
 - Debounced resolution with timer reset
 - Debounce + async combined path
 - Promise rejection handling
 - Multiple CompletedRanges with shift/invalidation
 - Loading state preserving stale items and selectedIndex
-- Accepted value containing trigger char does not re-trigger
 - Kill ring capped at 60 entries
 - `destroy()` during active completion

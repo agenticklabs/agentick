@@ -241,7 +241,7 @@ useInput((input, key) => {
 
 ### Completion & Slash Commands
 
-The input system includes a char-trigger completion engine. Register completion sources on the `LineEditor` instance to provide autocomplete for slash commands, file paths, @mentions, or any custom trigger.
+The input system includes a match-based completion engine. Register completion sources on the `LineEditor` instance to provide autocomplete for slash commands, file paths, @mentions, or any custom pattern.
 
 ```tsx
 import {
@@ -267,7 +267,7 @@ const editor = useLineEditor({
   },
 });
 
-// Register slash command completion (triggers on `/` at position 0)
+// Register slash command completion (matches `/` at position 0, deactivates after space)
 useEffect(() => {
   return editor.editor.registerCompletion(createCommandCompletionSource(commands));
 }, [editor.editor, commands]);
@@ -278,7 +278,7 @@ useEffect(() => {
 }
 ```
 
-The completion engine supports sync/async resolvers, debounce, and `CompletedRange` tracking. Web/React consumers build their own picker UI using the same `CompletionState` type from `@agentick/client`.
+Each source has a `match` function that decides when to activate based on the buffer and cursor, and a `resolve` function that produces items. The engine supports sync/async resolvers, debounce, post-acceptance chaining, and `CompletedRange` tracking. Web/React consumers build their own picker UI using the same `CompletionState` type from `@agentick/client`.
 
 ### Progressive Rendering
 

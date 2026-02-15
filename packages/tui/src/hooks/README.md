@@ -90,13 +90,13 @@ newest entry restores it.
 When a completion picker is active, these keys are intercepted BEFORE normal
 handling:
 
-| Key      | Action                                      |
-| -------- | ------------------------------------------- |
-| `Tab`    | Accept selected item                        |
-| `Enter`  | Accept selected item                        |
-| `Escape` | Dismiss picker (trigger char stays as text) |
-| `Up`     | Select previous item (wraps around)         |
-| `Down`   | Select next item (wraps around)             |
+| Key      | Action                              |
+| -------- | ----------------------------------- |
+| `Tab`    | Accept selected item                |
+| `Enter`  | Accept selected item                |
+| `Escape` | Dismiss picker (text stays as-is)   |
+| `Up`     | Select previous item (wraps around) |
+| `Down`   | Select next item (wraps around)     |
 
 When completion is NOT active, Tab and Escape are no-ops. Up/Down navigate
 history as usual. Enter submits.

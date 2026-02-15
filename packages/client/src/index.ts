@@ -98,6 +98,8 @@ export {
   type LineEditorOptions,
   type LineEditorSnapshot,
   type EditorUpdate,
+  type CompletionContext,
+  type CompletionMatch,
   type CompletionSource,
   type CompletionItem,
   type CompletionState,

@@ -29,18 +29,29 @@ export interface EditorUpdate {
   killed?: string;
 }
 
+export interface CompletionContext {
+  value: string;
+  cursor: number;
+}
+
+export interface CompletionMatch {
+  from: number;
+  query: string;
+}
+
 export interface CompletionSource {
   id: string;
-  trigger: { type: "char"; char: string };
-  resolve: (query: string) => CompletionItem[] | Promise<CompletionItem[]>;
+  match(ctx: CompletionContext): CompletionMatch | null;
+  resolve(ctx: CompletionContext & CompletionMatch): CompletionItem[] | Promise<CompletionItem[]>;
   debounce?: number;
-  shouldActivate?: (value: string, anchor: number) => boolean;
 }
 
 export interface CompletionItem {
   label: string;
   value: string;
   description?: string;
+  /** When true, accepting this item re-probes the same source for follow-up completions (e.g. directory drilling). */
+  continues?: boolean;
 }
 
 export interface CompletionState {
@@ -49,6 +60,7 @@ export interface CompletionState {
   readonly query: string;
   readonly loading: boolean;
   readonly sourceId: string;
+  readonly from: number;
 }
 
 export interface CompletedRange {
@@ -217,7 +229,7 @@ export class LineEditor {
 
   // Completion state
   private _sources: CompletionSource[] = [];
-  private _anchor = -1;
+  private _from = -1;
   private _activeSource: CompletionSource | null = null;
   private _resolveId = 0;
   private _debounceTimer: ReturnType<typeof setTimeout> | null = null;
@@ -410,14 +422,23 @@ export class LineEditor {
     this._notify();
   }
 
-  /** Edit-aware mutation: adjust ranges, check completion, notify. */
+  /** Edit-aware mutation: adjust ranges, run completion state machine, notify. */
   private _applyEdit(newValue: string, newCursor: number): void {
     this._editValue(newValue, newCursor);
 
+    const ctx: CompletionContext = { value: this._value, cursor: this._cursor };
+
     if (this._activeSource) {
-      this._updateCompletionAfterEdit();
+      const match = this._activeSource.match(ctx);
+      if (match) {
+        this._from = match.from;
+        this._resolve(this._activeSource, { ...ctx, ...match });
+      } else {
+        this._dismissCompletionSilent();
+        this._probeAllSources(ctx);
+      }
     } else {
-      this._checkTrigger();
+      this._probeAllSources(ctx);
     }
 
     this._notify();
@@ -471,43 +492,17 @@ export class LineEditor {
 
   // ── Private: completion state machine ──────────────────────────────────
 
-  private _checkTrigger(): void {
-    if (this._cursor === 0) return;
-    const charBefore = this._value[this._cursor - 1];
-    if (!charBefore) return;
-
+  /** Probe all registered sources. First match wins. */
+  private _probeAllSources(ctx: CompletionContext): void {
     for (const source of this._sources) {
-      if (source.trigger.type === "char" && source.trigger.char === charBefore) {
-        const anchor = this._cursor - 1;
-        if (source.shouldActivate && !source.shouldActivate(this._value, anchor)) {
-          continue;
-        }
+      const match = source.match(ctx);
+      if (match) {
         this._activeSource = source;
-        this._anchor = anchor;
-        this._resolve(source, "");
+        this._from = match.from;
+        this._resolve(source, { ...ctx, ...match });
         return;
       }
     }
-  }
-
-  private _updateCompletionAfterEdit(): void {
-    const source = this._activeSource;
-    if (!source) return;
-
-    // Cursor moved before or to the anchor position → dismiss
-    if (this._cursor <= this._anchor) {
-      this._dismissCompletionSilent();
-      return;
-    }
-
-    // Trigger char was deleted → dismiss
-    if (this._anchor >= this._value.length || this._value[this._anchor] !== source.trigger.char) {
-      this._dismissCompletionSilent();
-      return;
-    }
-
-    const query = this._value.slice(this._anchor + 1, this._cursor);
-    this._resolve(source, query);
   }
 
   /**
@@ -516,7 +511,7 @@ export class LineEditor {
    * Inline path (no debounce): calls _resolveNow, _applyEdit handles notification.
    * Deferred path (debounce): sets loading, timer calls _resolveNow + _notify.
    */
-  private _resolve(source: CompletionSource, query: string): void {
+  private _resolve(source: CompletionSource, ctx: CompletionContext & CompletionMatch): void {
     this._resolveId++;
     const id = this._resolveId;
 
@@ -526,13 +521,13 @@ export class LineEditor {
     }
 
     if (source.debounce && source.debounce > 0) {
-      this._completionState = this._loadingState(source, query);
+      this._completionState = this._loadingState(source, ctx.query);
       this._debounceTimer = setTimeout(() => {
-        this._resolveNow(source, id, query);
+        this._resolveNow(source, id, ctx);
         this._notify();
       }, source.debounce);
     } else {
-      this._resolveNow(source, id, query);
+      this._resolveNow(source, id, ctx);
     }
   }
 
@@ -540,19 +535,24 @@ export class LineEditor {
    * Execute resolution immediately. Mutates _completionState but does NOT
    * notify — caller is responsible. Async promise callbacks self-notify.
    */
-  private _resolveNow(source: CompletionSource, id: number, query: string): void {
-    const result = source.resolve(query);
+  private _resolveNow(
+    source: CompletionSource,
+    id: number,
+    ctx: CompletionContext & CompletionMatch,
+  ): void {
+    const result = source.resolve(ctx);
     if (result instanceof Promise) {
-      this._completionState = this._loadingState(source, query);
+      this._completionState = this._loadingState(source, ctx.query);
       result.then(
         (items) => {
           if (this._resolveId !== id) return;
           this._completionState = {
             items,
             selectedIndex: 0,
-            query,
+            query: ctx.query,
             loading: false,
             sourceId: source.id,
+            from: this._from,
           };
           this._notify();
         },
@@ -561,9 +561,10 @@ export class LineEditor {
           this._completionState = {
             items: [],
             selectedIndex: 0,
-            query,
+            query: ctx.query,
             loading: false,
             sourceId: source.id,
+            from: this._from,
           };
           this._notify();
         },
@@ -572,9 +573,10 @@ export class LineEditor {
       this._completionState = {
         items: result,
         selectedIndex: 0,
-        query,
+        query: ctx.query,
         loading: false,
         sourceId: source.id,
+        from: this._from,
       };
     }
   }
@@ -586,6 +588,7 @@ export class LineEditor {
       query,
       loading: true,
       sourceId: source.id,
+      from: this._from,
     };
   }
 
@@ -603,21 +606,37 @@ export class LineEditor {
       return;
     }
 
-    const before = this._value.slice(0, this._anchor);
+    const before = this._value.slice(0, this._from);
     const after = this._value.slice(this._cursor);
     const newValue = before + item.value + after;
     const newCursor = before.length + item.value.length;
 
     const range: CompletedRange = {
-      start: this._anchor,
+      start: this._from,
       end: newCursor,
       value: item.value,
       sourceId: source.id,
     };
 
+    const acceptedSourceId = source.id;
+    const continues = item.continues === true;
     this._dismissCompletionSilent();
     this._editValue(newValue, newCursor);
     this._completedRanges = [...this._completedRanges, range];
+
+    // Probe sources for chaining (e.g. command → file picker, or directory drilling).
+    // Skip the accepted source unless the item signals continuation (e.g. a directory).
+    const ctx: CompletionContext = { value: this._value, cursor: this._cursor };
+    for (const s of this._sources) {
+      if (s.id === acceptedSourceId && !continues) continue;
+      const m = s.match(ctx);
+      if (m) {
+        this._activeSource = s;
+        this._from = m.from;
+        this._resolve(s, { ...ctx, ...m });
+        break;
+      }
+    }
     this._notify();
   }
 
@@ -638,7 +657,7 @@ export class LineEditor {
 
   private _dismissCompletionSilent(): void {
     this._activeSource = null;
-    this._anchor = -1;
+    this._from = -1;
     this._completionState = null;
     this._resolveId++;
     if (this._debounceTimer !== null) {
