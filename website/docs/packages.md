@@ -55,7 +55,7 @@ Multi-session management. Routes messages to sessions, manages lifecycle, provid
 
 ### @agentick/client
 
-Browser/Node.js client for connecting to a running gateway. Real-time message streaming, session management. Includes [Chat Primitives](/packages/client/README.md#chat-primitives) — composable building blocks (`ChatSession`, `MessageLog`, `ToolConfirmations`, `MessageSteering`) for chat UIs. Also provides `LineEditor` — a framework-agnostic readline-quality line editor with cursor movement, kill/yank, history, and keybindings.
+Browser/Node.js client for connecting to a running gateway. Real-time message streaming, session management. Includes Chat Primitives — composable building blocks (`ChatSession`, `MessageLog`, `ToolConfirmations`, `MessageSteering`) for chat UIs. Also provides `LineEditor` — a framework-agnostic readline-quality line editor with cursor movement, kill/yank, history, and keybindings.
 
 ### @agentick/server
 
@@ -67,7 +67,7 @@ Express.js middleware integration. Mount agentick endpoints on an Express server
 
 ### @agentick/react
 
-React hooks and components for building UIs that connect to agentick sessions. Includes `useChat` (all-in-one), `useMessages`, `useToolConfirmations`, `useMessageSteering`, `useLineEditor` — React wrappers around the client's [Chat Primitives](/packages/client/README.md#chat-primitives) and `LineEditor`.
+React hooks and components for building UIs that connect to agentick sessions. Includes `useChat` (all-in-one), `useMessages`, `useToolConfirmations`, `useMessageSteering`, `useLineEditor` — React wrappers around the client's Chat Primitives and `LineEditor`.
 
 ### @agentick/tui
 

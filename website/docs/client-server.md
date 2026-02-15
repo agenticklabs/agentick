@@ -87,7 +87,7 @@ function App() {
 }
 ```
 
-For finer control, compose individual primitives: `useMessages`, `useToolConfirmations`, `useMessageSteering`. See the [`@agentick/react` README](/packages/react/README.md) for the full hook reference.
+For finer control, compose individual primitives: `useMessages`, `useToolConfirmations`, `useMessageSteering`. See the `@agentick/react` README for the full hook reference.
 
 ## Terminal UI
 

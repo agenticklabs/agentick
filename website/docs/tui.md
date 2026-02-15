@@ -282,7 +282,7 @@ Each source has a `match` function that decides when to activate based on the bu
 
 ### Progressive Rendering
 
-`Chat` uses `useChat({ renderMode: "block" })` so messages appear block-at-a-time as content completes. `MessageList` splits messages into committed (Ink `<Static>`, rendered once) and in-progress (re-rendered as blocks arrive). See the [`@agentick/client` render modes documentation](/client#render-modes) for all available modes.
+`Chat` uses `useChat({ renderMode: "block" })` so messages appear block-at-a-time as content completes. `MessageList` splits messages into committed (Ink `<Static>`, rendered once) and in-progress (re-rendered as blocks arrive). See the `@agentick/client` render modes documentation for all available modes.
 
 ## Architecture
 
