@@ -53,7 +53,8 @@ interface TUIOptionsBase {
 
 export type TUIOptions =
   | ({ app: App } & TUIOptionsBase)
-  | ({ url: string; token?: string } & TUIOptionsBase);
+  | ({ url: string; token?: string } & TUIOptionsBase)
+  | ({ client: import("@agentick/client").AgentickClient } & TUIOptionsBase);
 
 export function createTUI(options: TUIOptions) {
   return {
@@ -62,17 +63,19 @@ export function createTUI(options: TUIOptions) {
       const Component = options.ui ?? Chat;
 
       const client =
-        "app" in options
-          ? createClient({
-              baseUrl: "local://",
-              transport: createLocalTransport(options.app),
-            })
-          : createClient({
-              baseUrl: options.url,
-              token: options.token,
-              EventSource: (globalThis.EventSource ??
-                EventSourcePolyfill) as unknown as typeof EventSource,
-            });
+        "client" in options
+          ? options.client
+          : "app" in options
+            ? createClient({
+                baseUrl: "local://",
+                transport: createLocalTransport(options.app),
+              })
+            : createClient({
+                baseUrl: options.url,
+                token: options.token,
+                EventSource: (globalThis.EventSource ??
+                  EventSourcePolyfill) as unknown as typeof EventSource,
+              });
 
       if (options.alternateScreen) {
         process.stdout.write("\x1b[?1049h\x1b[H\x1b[2J");

@@ -507,6 +507,7 @@ export type ToolConfirmationResultEvent = {
   callId: string;
   confirmed: boolean;
   always?: boolean;
+  reason?: string;
 } & StreamEventBase;
 
 /**

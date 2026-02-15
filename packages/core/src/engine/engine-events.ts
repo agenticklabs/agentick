@@ -268,6 +268,7 @@ export function createToolConfirmationResultEvent(params: {
   callId: string;
   confirmed: boolean;
   always?: boolean;
+  reason?: string;
   tick: number;
 }): ToolConfirmationResultEvent {
   return {
@@ -276,6 +277,7 @@ export function createToolConfirmationResultEvent(params: {
     callId: params.callId,
     confirmed: params.confirmed,
     always: params.always,
+    reason: params.reason,
   };
 }
 

@@ -1,0 +1,64 @@
+{
+  "name": "@agentick/connector-telegram",
+  "version": "0.5.0",
+  "description": "Telegram connector for Agentick — bridge Telegram bots to agent sessions",
+  "keywords": [
+    "agent",
+    "ai",
+    "bot",
+    "connector",
+    "telegram"
+  ],
+  "license": "MIT",
+  "author": "Ryan Lindgren",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/agenticklabs/agentick.git",
+    "directory": "packages/connector-telegram"
+  },
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "main": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "publishConfig": {
+    "access": "public",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "import": "./dist/index.js"
+      }
+    },
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "test": "echo \"Tests run from workspace root\"",
+    "typecheck": "tsc -p tsconfig.build.json --noEmit",
+    "lint": "oxlint src/",
+    "format:check": "oxfmt --check src/",
+    "clean": "rm -rf dist tsconfig.build.tsbuildinfo",
+    "prepublishOnly": "pnpm build",
+    "dev": "tsc --watch"
+  },
+  "dependencies": {
+    "@agentick/connector": "workspace:*",
+    "@agentick/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "grammy": "^1.35.0",
+    "typescript": "^5.8.3"
+  },
+  "peerDependencies": {
+    "grammy": "^1.0.0"
+  },
+  "peerDependenciesMeta": {
+    "grammy": {
+      "optional": false
+    }
+  }
+}

@@ -280,6 +280,18 @@ When implementing a feature in one package, **don't treat code in other packages
 2. Search for duplicate definitions: `grep -r "export.*interface MyType" packages/`
 3. Choose one canonical source; have others re-export
 
+### Check `@agentick/shared` Before Writing Utilities
+
+Before writing ANY utility function, **always check `@agentick/shared` first**.
+It is the canonical home for cross-framework utilities: `extractText`,
+`isTextBlock`, block type guards, content helpers, wire types, etc.
+
+- **Before creating**: grep `packages/shared/src/` for the function name
+- **Shared code belongs there**: if a utility will be used across multiple
+  packages (connector, client, core, adapters), put it in shared
+- **Re-exports are fine**: packages can re-export from shared for convenience,
+  but the implementation must live in shared — not be duplicated
+
 ## Common Patterns
 
 ### Adding a Gateway Method

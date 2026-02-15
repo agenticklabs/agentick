@@ -2509,7 +2509,12 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
       if (event.type === "response" && event.id) {
         const payload = event.payload as ToolConfirmationResponse | undefined;
         if (payload) {
-          coordinator.resolveConfirmation(event.id, payload.approved, payload.always ?? false);
+          coordinator.resolveConfirmation(
+            event.id,
+            payload.approved,
+            payload.always ?? false,
+            payload.reason,
+          );
         }
       }
     });
@@ -2531,7 +2536,7 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
         });
       },
       onConfirmationResult: async (
-        confirmation: { toolUseId: string; confirmed: boolean; always?: boolean },
+        confirmation: { toolUseId: string; confirmed: boolean; always?: boolean; reason?: string },
         call: ToolCall,
       ) => {
         this.emitEvent({
@@ -2539,6 +2544,7 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
           callId: call.id,
           confirmed: confirmation.confirmed,
           always: confirmation.always,
+          reason: confirmation.reason,
         });
       },
     };

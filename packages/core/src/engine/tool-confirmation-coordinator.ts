@@ -83,6 +83,7 @@ export class ToolConfirmationCoordinator {
     toolUseId: string,
     confirmed: boolean,
     always: boolean = false,
+    reason?: string,
   ): ToolConfirmationResult | null {
     const pending = this.pendingConfirmations.get(toolUseId);
     if (!pending) {
@@ -95,6 +96,7 @@ export class ToolConfirmationCoordinator {
       toolName: "", // Will be filled by caller who has access to tool metadata
       confirmed,
       always,
+      reason,
     };
 
     // Resolve the promise

@@ -242,4 +242,6 @@ export interface ToolConfirmationResult {
   confirmed: boolean;
   /** Whether this is a persistent preference */
   always: boolean;
+  /** Free-text reason from the user (e.g. "yes but skip tests") */
+  reason?: string;
 }

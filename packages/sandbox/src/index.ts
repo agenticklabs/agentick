@@ -45,5 +45,10 @@ export { Shell, ReadFile, WriteFile, EditFile };
 const h = React.createElement;
 
 export function SandboxTools() {
-  return [h(Shell), h(ReadFile), h(WriteFile), h(EditFile)];
+  return [
+    h(Shell, { key: "shell" }),
+    h(ReadFile, { key: "read-file" }),
+    h(WriteFile, { key: "write-file" }),
+    h(EditFile, { key: "edit-file" }),
+  ];
 }
