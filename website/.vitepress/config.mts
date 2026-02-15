@@ -36,6 +36,10 @@ const PACKAGE_GROUPS: Array<{ label: string; packages: string[] }> = [
     packages: ["@agentick/sandbox", "@agentick/sandbox-local"],
   },
   {
+    label: "Connectors",
+    packages: ["@agentick/connector", "@agentick/connector-imessage", "@agentick/connector-telegram"],
+  },
+  {
     label: "DevTools",
     packages: ["@agentick/devtools"],
   },
