@@ -296,6 +296,41 @@ function AgentWithContext({ userId }: { userId: string }) {
 
 `<Section>` injects structured context that the model sees every tick — live data, computed state, whatever you need. The `audience` prop controls visibility (`"model"`, `"user"`, or `"all"`).
 
+### Knobs — The Model Controls Its Context
+
+Like accordions in a UI. The model sees section headers and expands what it needs:
+
+```tsx
+function SupportAgent() {
+  const [active] = useKnob("section", "none", {
+    options: ["none", "api", "billing", "troubleshooting"],
+    description: "Expand a documentation section",
+    momentary: true, // auto-collapses after each execution
+  });
+
+  return (
+    <>
+      <System>You help users with our product. Expand a section when you need it.</System>
+
+      <Section id="api" audience="model">
+        {active === "api" ? apiDocs : "API Reference (expand to read)"}
+      </Section>
+      <Section id="billing" audience="model">
+        {active === "billing" ? billingDocs : "Billing Guide (expand to read)"}
+      </Section>
+      <Section id="troubleshooting" audience="model">
+        {active === "troubleshooting" ? troubleshootingDocs : "Troubleshooting (expand to read)"}
+      </Section>
+
+      <Knobs />
+      <Timeline />
+    </>
+  );
+}
+```
+
+The model sees collapsed headers → sets the knob → reads the content → answers. The `momentary` flag resets the knob after each execution, so sections collapse automatically. Only what the model needs consumes tokens.
+
 ## Hooks
 
 Hooks are real React hooks — `useState`, `useEffect`, `useMemo` — plus lifecycle hooks that fire at each phase of the agent execution loop.

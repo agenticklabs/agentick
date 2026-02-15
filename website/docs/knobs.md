@@ -213,3 +213,88 @@ function Agent() {
 ```
 
 The model sees `planning [momentary toggle]: false — Account planning workflow (resets after use)`. The reset happens after the tick loop but before the snapshot is persisted, so restored sessions always start clean.
+
+## Conditional Context (Accordion Pattern)
+
+Like accordions in a UI — the model sees section headers and expands what it needs. Combine `useKnob` + `momentary` + conditional rendering:
+
+### Toggle
+
+```tsx
+function Agent() {
+  const [showDocs] = useKnob("show_docs", false, {
+    description: "Expand the full API reference",
+    momentary: true,
+  });
+
+  return (
+    <>
+      <System>Set show_docs when you need the full reference.</System>
+      <Section id="api-ref" audience="model">
+        {showDocs ? fullApiDocs : "API Reference (set show_docs to expand)"}
+      </Section>
+      <Knobs />
+      <Timeline />
+    </>
+  );
+}
+```
+
+Model sees the collapsed placeholder → sets the knob → reads the content → answers. After the execution, `momentary` resets the knob and the section collapses. Tokens reclaimed automatically.
+
+### Mutual Exclusion
+
+Only one section open at a time:
+
+```tsx
+const sections = ["api", "billing", "troubleshooting"] as const;
+const content: Record<string, string> = {
+  /* ... */
+};
+
+function SupportAgent() {
+  const [active] = useKnob("section", "none", {
+    options: ["none", ...sections],
+    description: "Which documentation section to expand",
+    momentary: true,
+  });
+
+  return (
+    <>
+      <System>Expand a section when you need it.</System>
+      {sections.map((s) => (
+        <Section key={s} id={s} audience="model">
+          {active === s ? content[s] : `${s} (expand to read)`}
+        </Section>
+      ))}
+      <Knobs />
+      <Timeline />
+    </>
+  );
+}
+```
+
+The model sees all headers at once, picks the one it needs. Momentary reset means every turn starts with a clean table of contents.
+
+### Detail Levels
+
+Progressive disclosure with a number knob:
+
+```tsx
+const [detail] = useKnob("detail_level", 1, {
+  min: 1,
+  max: 3,
+  description: "1=headers, 2=summaries, 3=full content",
+  momentary: true,
+});
+
+return (
+  <Section id="context" audience="model">
+    {detail >= 1 && headers}
+    {detail >= 2 && summaries}
+    {detail >= 3 && fullContent}
+  </Section>
+);
+```
+
+The pattern works with any knob type — booleans for toggles, enums for mutual exclusion, numbers for granularity. The model controls its own attention window.
