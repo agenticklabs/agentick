@@ -47,7 +47,7 @@ describe("ConnectorSession", () => {
 
   beforeEach(() => {
     vi.useFakeTimers();
-    client = createMockClient();
+    client = createMockClient(vi.fn);
   });
 
   afterEach(() => {
@@ -241,7 +241,7 @@ describe("ConnectorSession", () => {
   });
 
   it("respects autoSubscribe: false", () => {
-    const client2 = createMockClient();
+    const client2 = createMockClient(vi.fn);
     const session = new ConnectorSession(client2, {
       sessionId: "s1",
       autoSubscribe: false,

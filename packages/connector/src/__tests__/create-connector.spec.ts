@@ -65,7 +65,7 @@ describe("createConnector", () => {
 
   beforeEach(() => {
     vi.useFakeTimers();
-    client = createMockClient();
+    client = createMockClient(vi.fn);
   });
 
   afterEach(() => {
