@@ -14,6 +14,7 @@ export type ErrorCategory =
   | "VALIDATION_ERROR"
   | "TIMEOUT_ERROR"
   | "ABORT_ERROR"
+  | "SANDBOX_ACCESS"
   | "APPLICATION_ERROR"
   | "UNKNOWN_ERROR";
 
@@ -61,6 +62,11 @@ export function classifyError(error: any): ErrorCategory {
     return "ABORT_ERROR";
   }
 
+  // Sandbox access violations (duck-typed — core cannot import sandbox)
+  if (error.name === "SandboxAccessError") {
+    return "SANDBOX_ACCESS";
+  }
+
   // Generic application errors
   if (error.name === "Error") {
     return "APPLICATION_ERROR";
@@ -97,6 +103,11 @@ export function isRecoverableError(error: any): boolean {
 
   // Abort errors are not recoverable
   if (errorType === "ABORT_ERROR") {
+    return false;
+  }
+
+  // Sandbox access errors are handled by dedicated recovery, not generic retry
+  if (errorType === "SANDBOX_ACCESS") {
     return false;
   }
 

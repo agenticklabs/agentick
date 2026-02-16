@@ -6,12 +6,13 @@ import { readFile, writeFile, rename, unlink, mkdir } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { randomBytes } from "node:crypto";
 import type { ChildProcess } from "node:child_process";
-import type { SandboxHandle, ExecOptions, ExecResult, OutputChunk } from "@agentick/sandbox";
+import type { SandboxHandle, ExecOptions, ExecResult, OutputChunk, Mount } from "@agentick/sandbox";
 import type { Edit, EditResult } from "@agentick/sandbox";
-import { applyEdits } from "@agentick/sandbox";
+import { applyEdits, SandboxAccessError } from "@agentick/sandbox";
 import type { CommandExecutor, ResolvedMount, ResolvedPermissions } from "./executor/types";
 import type { ResourceEnforcer } from "./resources";
 import { resolveSafePath, filterEnv } from "./paths";
+import { resolveMounts } from "./workspace";
 import type { NetworkProxyServer } from "./network/proxy";
 
 /** Maximum output per stream (stdout/stderr) — 10MB. */
@@ -43,6 +44,7 @@ export class LocalSandbox implements SandboxHandle {
   private readonly cleanupWorkspace: boolean;
   private readonly _destroyWorkspace: () => Promise<void>;
   private activeProcesses = new Set<ChildProcess>();
+  private oneTimeAllows = new Set<string>();
   private destroyed = false;
 
   constructor(init: LocalSandboxInit) {
@@ -124,13 +126,13 @@ export class LocalSandbox implements SandboxHandle {
 
   async readFile(path: string): Promise<string> {
     this.assertAlive();
-    const resolved = await resolveSafePath(path, this.workspacePath, "read", this.mounts);
+    const resolved = await this.resolveWithAllows(path, "read");
     return readFile(resolved, "utf-8");
   }
 
   async writeFile(path: string, content: string): Promise<void> {
     this.assertAlive();
-    const resolved = await resolveSafePath(path, this.workspacePath, "write", this.mounts);
+    const resolved = await this.resolveWithAllows(path, "write");
 
     // Ensure parent directory exists
     await mkdir(dirname(resolved), { recursive: true });
@@ -152,7 +154,7 @@ export class LocalSandbox implements SandboxHandle {
 
   async editFile(path: string, edits: Edit[]): Promise<EditResult> {
     this.assertAlive();
-    const resolved = await resolveSafePath(path, this.workspacePath, "write", this.mounts);
+    const resolved = await this.resolveWithAllows(path, "write");
 
     const source = await readFile(resolved, "utf-8");
     const result = applyEdits(source, edits);
@@ -173,6 +175,75 @@ export class LocalSandbox implements SandboxHandle {
     }
 
     return result;
+  }
+
+  /**
+   * Resolve path with one-time allow check.
+   *
+   * On SandboxAccessError:
+   * - If resolvedPath is in oneTimeAllows → consume it, return path (no mount)
+   * - Otherwise → attach recover() and re-throw for upstream recovery
+   *
+   * One-time allows are consumed atomically (single-threaded JS) to prevent
+   * parallel tool calls from piggybacking on another call's temporary access.
+   */
+  private async resolveWithAllows(path: string, mode: "read" | "write"): Promise<string> {
+    try {
+      return await resolveSafePath(path, this.workspacePath, mode, this.mounts);
+    } catch (err) {
+      if (err instanceof SandboxAccessError) {
+        // Check one-time allowlist (consumed on use)
+        if (this.oneTimeAllows.has(err.resolvedPath)) {
+          this.oneTimeAllows.delete(err.resolvedPath);
+          return err.resolvedPath;
+        }
+
+        // Attach recovery function for upstream (tool executor) to call
+        err.recover = async (always: boolean) => {
+          const dir = dirname(err.resolvedPath);
+          const mountMode = mode === "write" ? "rw" : "ro";
+          if (always) {
+            await this.addMount({ host: dir, sandbox: dir, mode: mountMode });
+          } else {
+            this.oneTimeAllows.add(err.resolvedPath);
+            return () => {
+              this.oneTimeAllows.delete(err.resolvedPath);
+            };
+          }
+        };
+      }
+      throw err;
+    }
+  }
+
+  async addMount(mount: Mount): Promise<void> {
+    this.assertAlive();
+    const [resolved] = await resolveMounts([mount]);
+    // Consolidate: remove any existing mounts that are children of the new one
+    for (let i = this.mounts.length - 1; i >= 0; i--) {
+      const existing = this.mounts[i]!;
+      if (existing.hostPath.startsWith(resolved.hostPath + "/")) {
+        this.mounts.splice(i, 1);
+      }
+    }
+    // Don't add if already mounted (exact match)
+    if (!this.mounts.some((m) => m.hostPath === resolved.hostPath)) {
+      this.mounts.push(resolved);
+    }
+  }
+
+  removeMount(hostPath: string): void {
+    this.assertAlive();
+    const idx = this.mounts.findIndex((m) => m.hostPath === hostPath);
+    if (idx !== -1) this.mounts.splice(idx, 1);
+  }
+
+  listMounts(): Mount[] {
+    return this.mounts.map((m) => ({
+      host: m.hostPath,
+      sandbox: m.sandboxPath,
+      mode: m.mode,
+    }));
   }
 
   async destroy(): Promise<void> {

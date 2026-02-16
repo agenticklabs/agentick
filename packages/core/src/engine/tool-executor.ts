@@ -378,7 +378,11 @@ export class ToolExecutor {
 
       return toolResult;
     } catch (error: any) {
-      // Enhanced error handling
+      // SandboxAccessError propagates to processToolWithConfirmation for recovery
+      if (error?.name === "SandboxAccessError") {
+        throw error;
+      }
+
       const errorMessage = error?.message || "Tool execution failed";
       const errorType = classifyError(error);
 
@@ -426,13 +430,94 @@ export class ToolExecutor {
   }
 
   /**
+   * Execute a tool call with sandbox access recovery.
+   *
+   * If executeSingleTool throws SandboxAccessError (path escapes sandbox),
+   * prompts the user for confirmation via the existing confirmation pipeline.
+   * On approval, calls the error's recover() to mount/allow, retries execution,
+   * then cleans up any temporary allows.
+   *
+   * Uses call.id as the confirmation ID. No collision with pre-execution
+   * confirmations: by the time we get here, the pre-execution confirmation
+   * is already resolved and removed from the coordinator's pending map.
+   */
+  private async executeWithSandboxRecovery(
+    call: ToolCall,
+    ctx: COM,
+    configTools: ExecutableTool[],
+    callbacks: {
+      onConfirmationRequired?: (
+        call: ToolCall,
+        message: string,
+        metadata?: Record<string, unknown>,
+      ) => void | Promise<void>;
+      onConfirmationResult?: (
+        confirmation: ToolConfirmationResult,
+        call: ToolCall,
+      ) => void | Promise<void>;
+    },
+  ): Promise<ToolResult> {
+    try {
+      return await this.executeSingleTool(call, ctx, configTools);
+    } catch (error: any) {
+      // Only handle SandboxAccessError with a recover function
+      if (error?.name !== "SandboxAccessError" || typeof error.recover !== "function") {
+        return this.createErrorResult(
+          call,
+          error?.message || "Tool execution failed",
+          classifyError(error),
+          error,
+        );
+      }
+
+      // Emit sandbox access confirmation
+      const message = `${call.name} wants to access ${error.requestedPath} (outside sandbox). Allow?`;
+      if (callbacks.onConfirmationRequired) {
+        await callbacks.onConfirmationRequired(call, message, {
+          type: "sandbox_access",
+          requestedPath: error.requestedPath,
+          resolvedPath: error.resolvedPath,
+          mode: error.mode,
+        });
+      }
+
+      // Wait for user decision via confirmation coordinator
+      const confirmation = await this.confirmationCoordinator.waitForConfirmation(
+        call.id,
+        call.name,
+      );
+
+      if (callbacks.onConfirmationResult) {
+        await callbacks.onConfirmationResult(confirmation, call);
+      }
+
+      if (!confirmation.confirmed) {
+        return this.createDenialResult(call);
+      }
+
+      // Apply recovery (mount or one-time allow) and retry
+      const cleanup = await error.recover(confirmation.always);
+      try {
+        return await this.executeSingleTool(call, ctx, configTools);
+      } catch (retryError: any) {
+        // Retry failed — return as normal error
+        const retryMessage = retryError?.message || "Tool execution failed after sandbox recovery";
+        return this.createErrorResult(call, retryMessage, classifyError(retryError), retryError);
+      } finally {
+        cleanup?.();
+      }
+    }
+  }
+
+  /**
    * Process a single tool call with confirmation flow.
    *
    * This method handles the full lifecycle of a tool call:
    * 1. Check if confirmation is required
    * 2. If yes, emit confirmation_required event and wait for response
    * 3. Execute tool (or create denial result if denied)
-   * 4. Return result with any events that occurred
+   * 4. If execution hits sandbox boundary, prompt for access and retry
+   * 5. Return result with any events that occurred
    *
    * This is designed for parallel execution - each tool can independently
    * wait for confirmation while other tools are being processed.
@@ -506,12 +591,12 @@ export class ToolExecutor {
         // User denied - create denial result
         result = this.createDenialResult(call);
       } else {
-        // User confirmed - execute the tool
-        result = await this.executeSingleTool(call, ctx, configTools);
+        // User confirmed - execute with sandbox recovery
+        result = await this.executeWithSandboxRecovery(call, ctx, configTools, callbacks);
       }
     } else {
-      // No confirmation needed - execute directly
-      result = await this.executeSingleTool(call, ctx, configTools);
+      // No confirmation needed - execute with sandbox recovery
+      result = await this.executeWithSandboxRecovery(call, ctx, configTools, callbacks);
     }
 
     return { result, confirmCheck, confirmation };

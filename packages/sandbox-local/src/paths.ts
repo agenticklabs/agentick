@@ -7,6 +7,7 @@
 
 import { realpath } from "node:fs/promises";
 import { resolve, isAbsolute } from "node:path";
+import { SandboxAccessError } from "@agentick/sandbox";
 import type { ResolvedMount } from "./executor/types";
 
 /** Environment variables that must never be inherited. */
@@ -76,9 +77,7 @@ export async function resolveSafePath(
             }
           }
           if (!inMount) {
-            throw new Error(
-              `Path escapes sandbox: ${inputPath} resolves to ${resolved} (workspace: ${realWorkspace})`,
-            );
+            throw new SandboxAccessError(inputPath, resolved, mode);
           }
         }
         return resolved;
@@ -106,9 +105,7 @@ export async function resolveSafePath(
     }
   }
 
-  throw new Error(
-    `Path escapes sandbox: ${inputPath} resolves to ${resolved} (workspace: ${realWorkspace})`,
-  );
+  throw new SandboxAccessError(inputPath, resolved, mode);
 }
 
 /**

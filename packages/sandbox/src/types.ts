@@ -29,6 +29,15 @@ export interface Sandbox {
   /** Apply surgical edits to a file. */
   editFile(path: string, edits: Edit[]): Promise<EditResult>;
 
+  /** Add a filesystem mount at runtime. Takes effect immediately. */
+  addMount(mount: Mount): Promise<void>;
+
+  /** Remove a mount by host path. */
+  removeMount(hostPath: string): void;
+
+  /** List current mounts. */
+  listMounts(): Mount[];
+
   /** Tear down the sandbox and release resources. */
   destroy(): Promise<void>;
 }

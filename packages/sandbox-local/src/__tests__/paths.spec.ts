@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { resolveSafePath, filterEnv } from "../paths";
+import { SandboxAccessError } from "@agentick/sandbox";
 import { mkdir, rm, symlink, writeFile, realpath } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -54,6 +55,43 @@ describe("resolveSafePath", () => {
     await expect(resolveSafePath("/etc/passwd", realWorkspace, "read")).rejects.toThrow(
       "escapes sandbox",
     );
+  });
+
+  it("throws SandboxAccessError with metadata for path traversal", async () => {
+    try {
+      await resolveSafePath("../../../etc/passwd", realWorkspace, "read");
+      expect.unreachable("should have thrown");
+    } catch (err) {
+      expect(err).toBeInstanceOf(SandboxAccessError);
+      const sae = err as SandboxAccessError;
+      expect(sae.name).toBe("SandboxAccessError");
+      expect(sae.requestedPath).toBe("../../../etc/passwd");
+      expect(sae.mode).toBe("read");
+      expect(sae.resolvedPath).toMatch(/\/etc\/passwd$/);
+    }
+  });
+
+  it("throws SandboxAccessError with metadata for absolute escape", async () => {
+    try {
+      await resolveSafePath("/etc/hosts", realWorkspace, "read");
+      expect.unreachable("should have thrown");
+    } catch (err) {
+      expect(err).toBeInstanceOf(SandboxAccessError);
+      const sae = err as SandboxAccessError;
+      expect(sae.requestedPath).toBe("/etc/hosts");
+      expect(sae.mode).toBe("read");
+    }
+  });
+
+  it("throws SandboxAccessError for write mode escapes", async () => {
+    try {
+      await resolveSafePath("/tmp/outside.txt", realWorkspace, "write");
+      expect.unreachable("should have thrown");
+    } catch (err) {
+      expect(err).toBeInstanceOf(SandboxAccessError);
+      const sae = err as SandboxAccessError;
+      expect(sae.mode).toBe("write");
+    }
   });
 
   it("allows write to non-existent file in existing parent", async () => {

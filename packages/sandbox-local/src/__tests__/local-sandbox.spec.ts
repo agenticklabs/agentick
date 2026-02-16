@@ -1,8 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { LocalSandbox } from "../local-sandbox";
+import { SandboxAccessError } from "@agentick/sandbox";
 import { BaseExecutor } from "../executor/base";
 import { ResourceEnforcer } from "../resources";
-import { mkdir, rm, realpath } from "node:fs/promises";
+import { mkdir, rm, realpath, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { randomBytes } from "node:crypto";
@@ -117,5 +118,139 @@ describe("LocalSandbox", () => {
   it("respects per-command env", async () => {
     const result = await sandbox.exec("echo $FOO", { env: { FOO: "bar" } });
     expect(result.stdout.trim()).toBe("bar");
+  });
+
+  describe("sandbox access recovery", () => {
+    let outsideDir: string;
+    let outsideFile: string;
+
+    beforeEach(async () => {
+      const raw = join(tmpdir(), `sandbox-outside-${randomBytes(4).toString("hex")}`);
+      await mkdir(raw, { recursive: true });
+      outsideDir = await realpath(raw);
+      outsideFile = join(outsideDir, "secret.txt");
+      await writeFile(outsideFile, "secret content");
+    });
+
+    afterEach(async () => {
+      await rm(outsideDir, { recursive: true, force: true });
+    });
+
+    it("throws SandboxAccessError with recover function for out-of-bounds read", async () => {
+      try {
+        await sandbox.readFile(outsideFile);
+        expect.unreachable("should have thrown");
+      } catch (err) {
+        expect(err).toBeInstanceOf(SandboxAccessError);
+        const sae = err as SandboxAccessError;
+        expect(sae.requestedPath).toBe(outsideFile);
+        expect(sae.mode).toBe("read");
+        expect(typeof sae.recover).toBe("function");
+      }
+    });
+
+    it("throws SandboxAccessError with recover function for out-of-bounds write", async () => {
+      const target = join(outsideDir, "new.txt");
+      try {
+        await sandbox.writeFile(target, "data");
+        expect.unreachable("should have thrown");
+      } catch (err) {
+        expect(err).toBeInstanceOf(SandboxAccessError);
+        const sae = err as SandboxAccessError;
+        expect(sae.mode).toBe("write");
+        expect(typeof sae.recover).toBe("function");
+      }
+    });
+
+    it("recover(always=true) adds permanent mount, retry succeeds", async () => {
+      // First attempt fails
+      let error: SandboxAccessError | undefined;
+      try {
+        await sandbox.readFile(outsideFile);
+      } catch (err) {
+        error = err as SandboxAccessError;
+      }
+      expect(error).toBeDefined();
+
+      // Recover with always=true (permanent mount)
+      await error!.recover!(true);
+
+      // Second attempt succeeds — mount is permanent
+      const content = await sandbox.readFile(outsideFile);
+      expect(content).toBe("secret content");
+
+      // Third attempt also succeeds (mount persists)
+      const again = await sandbox.readFile(outsideFile);
+      expect(again).toBe("secret content");
+
+      // Verify the mount was added
+      const mounts = sandbox.listMounts();
+      expect(mounts.some((m) => outsideFile.startsWith(m.host))).toBe(true);
+    });
+
+    it("recover(always=false) allows single retry, consumed on use", async () => {
+      // First attempt fails
+      let error: SandboxAccessError | undefined;
+      try {
+        await sandbox.readFile(outsideFile);
+      } catch (err) {
+        error = err as SandboxAccessError;
+      }
+      expect(error).toBeDefined();
+
+      // Recover with always=false (one-time allow)
+      const cleanup = await error!.recover!(false);
+      expect(typeof cleanup).toBe("function");
+
+      // Retry succeeds (one-time allow consumed)
+      const content = await sandbox.readFile(outsideFile);
+      expect(content).toBe("secret content");
+
+      // Third attempt fails again (allow was consumed)
+      await expect(sandbox.readFile(outsideFile)).rejects.toBeInstanceOf(SandboxAccessError);
+
+      // No mount was added
+      const mounts = sandbox.listMounts();
+      expect(mounts.some((m) => outsideFile.startsWith(m.host))).toBe(false);
+    });
+
+    it("cleanup function removes unconsumed one-time allow", async () => {
+      let error: SandboxAccessError | undefined;
+      try {
+        await sandbox.readFile(outsideFile);
+      } catch (err) {
+        error = err as SandboxAccessError;
+      }
+
+      // Recover but then immediately clean up without retrying
+      const cleanup = await error!.recover!(false);
+      cleanup!();
+
+      // Retry fails because cleanup removed the one-time allow
+      await expect(sandbox.readFile(outsideFile)).rejects.toBeInstanceOf(SandboxAccessError);
+    });
+
+    it("permanent mount uses correct mode for writes", async () => {
+      const target = join(outsideDir, "writable.txt");
+      let error: SandboxAccessError | undefined;
+      try {
+        await sandbox.writeFile(target, "data");
+      } catch (err) {
+        error = err as SandboxAccessError;
+      }
+
+      // Recover with always=true for write access
+      await error!.recover!(true);
+
+      // Write succeeds
+      await sandbox.writeFile(target, "written!");
+      const content = await sandbox.readFile(target);
+      expect(content).toBe("written!");
+
+      // Verify mount has rw mode
+      const mounts = sandbox.listMounts();
+      const mount = mounts.find((m) => target.startsWith(m.host));
+      expect(mount?.mode).toBe("rw");
+    });
   });
 });

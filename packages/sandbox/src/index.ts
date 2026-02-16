@@ -23,6 +23,9 @@ export type {
   ProxiedRequest,
 } from "./types";
 
+// ── Errors ──────────────────────────────────────────────────────────────────
+export { SandboxAccessError } from "./errors";
+
 // ── Edit Types & Utilities ───────────────────────────────────────────────────
 export { applyEdits, editFile, EditError } from "./edit";
 export type { Edit, EditResult, EditChange } from "./edit";

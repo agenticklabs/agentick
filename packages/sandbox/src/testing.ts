@@ -29,6 +29,9 @@ export function createMockSandbox(overrides?: Partial<Sandbox>): Sandbox {
     readFile: vi.fn().mockResolvedValue(""),
     writeFile: vi.fn().mockResolvedValue(undefined),
     editFile: vi.fn().mockResolvedValue(defaultEditResult),
+    addMount: vi.fn().mockResolvedValue(undefined),
+    removeMount: vi.fn(),
+    listMounts: vi.fn().mockReturnValue([]),
     destroy: vi.fn().mockResolvedValue(undefined),
     ...overrides,
   };
