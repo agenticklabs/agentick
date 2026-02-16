@@ -649,6 +649,8 @@ export interface SpawnOptions {
   runner?: ExecutionRunner;
   /** Override the parent's max ticks */
   maxTicks?: number;
+  /** Display label for this spawn (shown in UI) */
+  label?: string;
 }
 
 export interface SessionOptions extends LifecycleCallbacks {

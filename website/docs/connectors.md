@@ -62,12 +62,12 @@ ConnectorPlatform.start(bridge)
 
 Controls what content reaches the platform.
 
-| Policy | Behavior |
-|--------|----------|
-| `"text-only"` (default) | Strip tool_use and tool_result blocks, keep text and images |
-| `"summarized"` | Collapse tool calls into brief summaries (`[Read config.ts]`, `[Ran: npm test]`) |
-| `"full"` | Pass through unchanged |
-| Function | Full control — receives a message, returns it transformed or `null` to drop |
+| Policy                  | Behavior                                                                         |
+| ----------------------- | -------------------------------------------------------------------------------- |
+| `"text-only"` (default) | Strip tool_use and tool_result blocks, keep text and images                      |
+| `"summarized"`          | Collapse tool calls into brief summaries (`[Read config.ts]`, `[Ran: npm test]`) |
+| `"full"`                | Pass through unchanged                                                           |
+| Function                | Full control — receives a message, returns it transformed or `null` to drop      |
 
 ### Custom Tool Summaries
 
@@ -91,11 +91,11 @@ createConnector(client, platform, {
 
 Controls when messages are delivered to the platform.
 
-| Strategy | Behavior |
-|----------|----------|
-| `"on-idle"` (default) | Deliver when execution completes. Clean, complete messages. |
-| `"debounced"` | Deliver after `debounceMs` (default 1500) of no new content. |
-| `"immediate"` | Deliver on every state change. For incremental rendering. |
+| Strategy              | Behavior                                                     |
+| --------------------- | ------------------------------------------------------------ |
+| `"on-idle"` (default) | Deliver when execution completes. Clean, complete messages.  |
+| `"debounced"`         | Deliver after `debounceMs` (default 1500) of no new content. |
+| `"immediate"`         | Deliver on every state change. For incremental rendering.    |
 
 ## Rate Limiting
 
@@ -107,8 +107,7 @@ createConnector(client, platform, {
   rateLimit: {
     maxPerMinute: 10,
     maxPerDay: 200,
-    onLimited: ({ remaining, resetMs }) =>
-      `Slow down! Try again in ${Math.ceil(resetMs / 1000)}s.`,
+    onLimited: ({ remaining, resetMs }) => `Slow down! Try again in ${Math.ceil(resetMs / 1000)}s.`,
   },
 });
 ```
@@ -120,10 +119,7 @@ When `onLimited` returns a string, it's delivered as a synthetic message. Return
 When the agent requests tool approval, connectors forward the confirmation to the platform. Built-in helpers for text-based confirmation:
 
 ```typescript
-import {
-  parseTextConfirmation,
-  formatConfirmationMessage,
-} from "@agentick/connector";
+import { parseTextConfirmation, formatConfirmationMessage } from "@agentick/connector";
 
 const message = formatConfirmationMessage(request);
 // "Allow shell to execute?\n\n  command: rm -rf /tmp/test"
@@ -137,10 +133,7 @@ const response = parseTextConfirmation("yes but only in /tmp");
 Implement `ConnectorPlatform` — two methods:
 
 ```typescript
-import type {
-  ConnectorPlatform,
-  ConnectorBridge,
-} from "@agentick/connector";
+import type { ConnectorPlatform, ConnectorBridge } from "@agentick/connector";
 
 export class MyPlatform implements ConnectorPlatform {
   async start(bridge: ConnectorBridge): Promise<void> {
@@ -170,14 +163,14 @@ export class MyPlatform implements ConnectorPlatform {
 
 The bridge provides everything the platform needs:
 
-| Method | Direction | Purpose |
-|--------|-----------|---------|
-| `bridge.send(text)` | Inbound | Push a user message to the agent |
-| `bridge.sendInput(input)` | Inbound | Push a rich `SendInput` |
-| `bridge.onDeliver(handler)` | Outbound | Receive filtered, timed messages |
-| `bridge.onConfirmation(handler)` | Outbound | Receive tool confirmation requests |
-| `bridge.abort(reason?)` | Control | Cancel current execution |
-| `bridge.destroy()` | Control | Tear down the session |
+| Method                           | Direction | Purpose                            |
+| -------------------------------- | --------- | ---------------------------------- |
+| `bridge.send(text)`              | Inbound   | Push a user message to the agent   |
+| `bridge.sendInput(input)`        | Inbound   | Push a rich `SendInput`            |
+| `bridge.onDeliver(handler)`      | Outbound  | Receive filtered, timed messages   |
+| `bridge.onConfirmation(handler)` | Outbound  | Receive tool confirmation requests |
+| `bridge.abort(reason?)`          | Control   | Cancel current execution           |
+| `bridge.destroy()`               | Control   | Tear down the session              |
 
 All outbound messages are already filtered by the content policy and timed by the delivery strategy. The platform just handles I/O.
 
@@ -220,12 +213,12 @@ const platform = new IMessagePlatform({
 ```typescript
 interface ConnectorConfig {
   sessionId: string;
-  contentPolicy?: ContentPolicy;      // default: "text-only"
+  contentPolicy?: ContentPolicy; // default: "text-only"
   deliveryStrategy?: DeliveryStrategy; // default: "on-idle"
-  debounceMs?: number;                 // default: 1500 (for "debounced")
-  toolSummarizer?: ToolSummarizer;     // custom summaries for "summarized"
+  debounceMs?: number; // default: 1500 (for "debounced")
+  toolSummarizer?: ToolSummarizer; // custom summaries for "summarized"
   rateLimit?: RateLimitConfig;
-  autoSubscribe?: boolean;             // default: true
-  retry?: RetryConfig;                 // exponential backoff for failed deliveries
+  autoSubscribe?: boolean; // default: true
+  retry?: RetryConfig; // exponential backoff for failed deliveries
 }
 ```

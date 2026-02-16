@@ -26,6 +26,7 @@ import type { ChatMode } from "@agentick/client";
 import { MessageList } from "../components/MessageList.js";
 import { StreamingMessage } from "../components/StreamingMessage.js";
 import { ToolCallIndicator } from "../components/ToolCallIndicator.js";
+import { SpawnIndicator } from "../components/SpawnIndicator.js";
 import { ToolConfirmationPrompt } from "../components/ToolConfirmationPrompt.js";
 import { ErrorDisplay } from "../components/ErrorDisplay.js";
 import { InputBar } from "../components/InputBar.js";
@@ -180,6 +181,7 @@ export function Chat({ sessionId, statusBar }: ChatProps) {
       <MessageList messages={messages} isExecuting={isExecuting} />
       <StreamingMessage />
       <ToolCallIndicator sessionId={sessionId} />
+      <SpawnIndicator sessionId={sessionId} />
 
       {chatMode === "confirming_tool" && toolConfirmation && (
         <ToolConfirmationPrompt request={toolConfirmation.request} />

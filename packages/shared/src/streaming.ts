@@ -170,6 +170,9 @@ export interface StreamEventBase {
   /** Session ID (if available) */
   /** Available on all events emitted from within a session */
   sessionId?: string;
+
+  /** Spawn ancestry chain. Present on events bubbled from child sessions. */
+  spawnPath?: string[];
 }
 
 // ============================================================================
@@ -463,6 +466,18 @@ export type TickEvent = {
 } & StreamEventBase;
 
 /**
+ * Tool result start event - signals tool execution has begun.
+ *
+ * Fills the gap between tool_call (model requests tool) and tool_result
+ * (tool returns). UI can show "executing tool X..." during this window.
+ */
+export type ToolResultStartEvent = {
+  type: "tool_result_start";
+  callId: string;
+  name: string;
+} & StreamEventBase;
+
+/**
  * Tool result event (unified - executedBy indicates source)
  */
 export type ToolResultEvent = {
@@ -682,6 +697,8 @@ export type SpawnStartEvent = {
   label?: string;
   /** Input passed to the spawned execution */
   input?: unknown;
+  /** Tool call ID that triggered this spawn (when spawned from a tool handler) */
+  originCallId?: string;
 } & StreamEventBase;
 
 export type SpawnEndEvent = {
@@ -715,6 +732,7 @@ export type OrchestrationStreamEvent =
   | TickEndEvent
   | TickEvent
   // Tool execution
+  | ToolResultStartEvent
   | ToolResultEvent
   | ToolConfirmationRequiredEvent
   | ToolConfirmationResultEvent
@@ -797,6 +815,7 @@ export function isOrchestrationStreamEvent(event: StreamEvent): event is Orchest
     "tick_start",
     "tick_end",
     "tick",
+    "tool_result_start",
     "tool_result",
     "tool_confirmation_required",
     "tool_confirmation_result",

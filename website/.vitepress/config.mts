@@ -37,7 +37,11 @@ const PACKAGE_GROUPS: Array<{ label: string; packages: string[] }> = [
   },
   {
     label: "Connectors",
-    packages: ["@agentick/connector", "@agentick/connector-imessage", "@agentick/connector-telegram"],
+    packages: [
+      "@agentick/connector",
+      "@agentick/connector-imessage",
+      "@agentick/connector-telegram",
+    ],
   },
   {
     label: "DevTools",
@@ -185,9 +189,7 @@ export default defineConfig({
         },
         {
           text: "Patterns",
-          items: [
-            { text: "Expandable Context", link: "/docs/patterns/expandable-context" },
-          ],
+          items: [{ text: "Expandable Context", link: "/docs/patterns/expandable-context" }],
         },
         {
           text: "Architecture",

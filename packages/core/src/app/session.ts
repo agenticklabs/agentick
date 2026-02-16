@@ -162,6 +162,7 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
   private _tick = 1;
   private _isAborted = false;
   private _currentExecutionId: string | null = null;
+  private _currentToolCallId: string | null = null;
 
   // Compilation infrastructure (no intermediate layer)
   private compiler: FiberCompiler | null = null;
@@ -572,8 +573,16 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
           runner: spawnOptions?.runner ?? this.appOptions.runner,
         };
 
+        // Child abort signal: merge session-level (parent dies → child dies)
+        // and execution-level (parent execution aborted → child aborted).
+        // Session signal always present; execution signal only during active tick.
+        const abortSignals: AbortSignal[] = [this.sessionAbortController.signal];
+        if (this.executionAbortController) {
+          abortSignals.push(this.executionAbortController.signal);
+        }
+
         const childOptions: SessionOptions = {
-          signal: this.executionAbortController?.signal,
+          signal: AbortSignal.any(abortSignals),
           devTools: this.sessionOptions.devTools ?? this.appOptions.devTools,
         };
         const child = new SessionImpl(Component, childAppOptions, childOptions);
@@ -587,9 +596,82 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
           props: mergedProps,
         });
 
-        // 4. Cleanup on completion
-        handle.result
+        // 4. Spawn lifecycle events & child event forwarding
+        const spawnId = randomUUID();
+
+        this.emitEvent({
+          type: "spawn_start",
+          spawnId,
+          parentExecutionId: this._currentExecutionId ?? "",
+          childExecutionId: handle.sessionId,
+          componentName: (Component as any).displayName || Component.name,
+          label: spawnOptions?.label,
+          originCallId: this._currentToolCallId ?? undefined,
+        });
+
+        // Forward child events to parent's buffer, tagged with spawnPath.
+        // Recursive spawns work automatically: child events already have
+        // spawnPath from grandchildren, we prepend our spawnId.
+        const childCallIds = new Set<string>();
+
+        // Forward child events, then emit spawn_end after forwarding completes.
+        // This guarantees spawn_end comes AFTER all forwarded child events —
+        // no interleaving of spawn_end with trailing content deltas.
+        const forwardingPromise = (async () => {
+          for await (const event of handle) {
+            if (event.type === "tool_confirmation_required") {
+              childCallIds.add((event as any).callId);
+            }
+            this.emitEvent({
+              ...event,
+              spawnPath: [spawnId, ...(event.spawnPath ?? [])],
+            });
+          }
+        })();
+        // Prevent unhandled rejection if parent aborts mid-forward
+        forwardingPromise.catch(() => {});
+
+        // Route parent confirmation responses to child's channel
+        const parentConfirmChannel = this.channel("tool_confirmation");
+        const unsubConfirm = parentConfirmChannel.subscribe((event) => {
+          if (event.type === "response" && event.id && childCallIds.has(event.id)) {
+            child.channel("tool_confirmation").publish(event);
+            childCallIds.delete(event.id);
+          }
+        });
+
+        // spawn_end after all child events are forwarded (not racing with them).
+        // We await forwardingPromise to ensure ordering, then use handle.result
+        // for the final output/error.
+        forwardingPromise
+          .then(() => handle.result)
+          .then((result) => {
+            this.emitEvent({
+              type: "spawn_end",
+              spawnId,
+              parentExecutionId: this._currentExecutionId ?? "",
+              childExecutionId: handle.sessionId,
+              output: result.response,
+              usage: result.usage,
+            });
+          })
+          .catch((error) => {
+            this.emitEvent({
+              type: "spawn_end",
+              spawnId,
+              parentExecutionId: this._currentExecutionId ?? "",
+              childExecutionId: handle.sessionId,
+              output: error?.message ?? "spawn failed",
+              isError: true,
+            });
+          });
+
+        // 5. Cleanup after spawn_end is emitted
+        forwardingPromise
+          .then(() => handle.result)
           .finally(async () => {
+            unsubConfirm();
+            childCallIds.clear();
             this._children = this._children.filter((c) => c !== (child as unknown as Session));
             await child.close();
           })
@@ -1017,16 +1099,22 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
     });
 
     // Invoke lifecycle callbacks
+    // Forwarded child events (with spawnPath) only trigger onEvent, not
+    // lifecycle-specific callbacks like onTickStart/onTickEnd — those
+    // semantics belong to the parent's own tick lifecycle.
     const cb = this.callbacks;
+    const isForwarded = enrichedEvent.spawnPath?.length > 0;
     try {
       cb.onEvent?.(enrichedEvent);
 
-      // Call specific callbacks based on event type
-      const eventType = enrichedEvent.type;
-      if (eventType === "tick_start") {
-        cb.onTickStart?.(enrichedEvent.tick, enrichedEvent.executionId);
-      } else if (eventType === "tick_end") {
-        cb.onTickEnd?.(enrichedEvent.tick, enrichedEvent.usage);
+      if (!isForwarded) {
+        // Call specific callbacks based on event type
+        const eventType = enrichedEvent.type;
+        if (eventType === "tick_start") {
+          cb.onTickStart?.(enrichedEvent.tick, enrichedEvent.executionId);
+        } else if (eventType === "tick_end") {
+          cb.onTickEnd?.(enrichedEvent.tick, enrichedEvent.usage);
+        }
       }
     } catch {
       // Callbacks should not throw, but don't let them break execution
@@ -2246,7 +2334,9 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
     });
 
     // Wire COM spawn delegate to session's spawn Procedure
-    this.ctx.setSpawnCallback((agent: any, input: any) => this.spawn(agent, input));
+    this.ctx.setSpawnCallback((agent: any, input: any, options?: any) =>
+      this.spawn(agent, input, options),
+    );
 
     this.structureRenderer = new StructureRenderer(this.ctx);
     this.structureRenderer.setDefaultRenderer(new MarkdownRenderer());
@@ -2560,6 +2650,15 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
         if (abortSignal?.aborted) break;
 
         const startedAt = timestamp();
+        this._currentToolCallId = call.id;
+
+        // Signal tool execution beginning (fills the gap between tool_call and tool_result)
+        this.emitEvent({
+          type: "tool_result_start",
+          callId: call.id,
+          name: call.name,
+        });
+
         // Check if OUTPUT tool
         const tool = executableTools.find((t) => t.metadata?.name === call.name);
         const isOutputTool = tool && tool.metadata?.type === "output";
@@ -2645,6 +2744,7 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
         }
       }
     } finally {
+      this._currentToolCallId = null;
       abortSignal?.removeEventListener("abort", onAbort);
       unsubscribe();
     }

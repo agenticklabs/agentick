@@ -7,7 +7,7 @@
 
 import { describe, it, expect, vi } from "vitest";
 import { ToolExecutor } from "./tool-executor";
-import type { ExecutableTool, ToolCall, ToolConfirmationResult } from "../tool/tool";
+import type { ExecutableTool, ToolCall } from "../tool/tool";
 import { ToolExecutionType } from "../tool/tool";
 import type { COM } from "../com/object-model";
 import { createEngineProcedure } from "../procedure";

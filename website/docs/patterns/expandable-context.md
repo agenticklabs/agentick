@@ -14,7 +14,7 @@ Turn 3: three screenshots (1500 tokens) + response
 Turn 10: ten screenshots (5000 tokens) + response
 ```
 
-By turn 10, the context window has 5000 tokens of images the model probably doesn't need to see. But it *might* — it might need to compare the current state to a previous screenshot to check a visual regression.
+By turn 10, the context window has 5000 tokens of images the model probably doesn't need to see. But it _might_ — it might need to compare the current state to a previous screenshot to check a visual regression.
 
 ## The `<Expandable>` Component
 
@@ -34,13 +34,13 @@ By turn 10, the context window has 5000 tokens of images the model probably does
 
 ### Props
 
-| Prop | Type | Default | Description |
-|------|------|---------|-------------|
-| `name` | `string` | auto-generated | Identifier for the expand/collapse knob |
-| `summary` | `string` | required | Text shown when collapsed |
-| `group` | `string` | — | Group related expandables for knob organization |
-| `momentary` | `boolean` | `true` | Auto-collapse after execution loop |
-| `children` | `ReactNode` | — | Full content rendered when expanded |
+| Prop        | Type        | Default        | Description                                     |
+| ----------- | ----------- | -------------- | ----------------------------------------------- |
+| `name`      | `string`    | auto-generated | Identifier for the expand/collapse knob         |
+| `summary`   | `string`    | required       | Text shown when collapsed                       |
+| `group`     | `string`    | —              | Group related expandables for knob organization |
+| `momentary` | `boolean`   | `true`         | Auto-collapse after execution loop              |
+| `children`  | `ReactNode` | —              | Full content rendered when expanded             |
 
 ### How It Works
 
@@ -114,10 +114,10 @@ The model first sees "47 passed, 3 failed". Expands to see failure summaries. Ex
 
 For an agent that takes 10 screenshots per session:
 
-| Approach | Tokens at turn 10 |
-|----------|-------------------|
-| No collapsing | ~5000 (all 10 images) |
-| Collapse all | ~100 (10 one-line summaries) |
+| Approach              | Tokens at turn 10            |
+| --------------------- | ---------------------------- |
+| No collapsing         | ~5000 (all 10 images)        |
+| Collapse all          | ~100 (10 one-line summaries) |
 | Collapse + 1 expanded | ~600 (9 summaries + 1 image) |
 
 The savings compound — every tick after content is produced benefits from the reduction. For long-running agents with heavy multimodal usage, this can mean the difference between fitting in context and running out.

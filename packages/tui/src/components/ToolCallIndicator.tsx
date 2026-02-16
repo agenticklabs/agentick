@@ -1,21 +1,30 @@
 /**
  * ToolCallIndicator — shows tool execution feedback.
  *
- * Shows a spinner + tool name during execution,
- * completed indicator when done.
+ * Three states per tool:
+ * - queued: model requested this tool (spinner, yellow)
+ * - executing: tool handler has started (spinner, cyan)
+ * - done: result received (checkmark, green)
  */
 
 import { useState, useEffect } from "react";
 import { Box, Text } from "ink";
 import Spinner from "ink-spinner";
 import { useEvents } from "@agentick/react";
-import type { ToolCallEvent, ToolCallStartEvent, ToolResultEvent } from "@agentick/shared";
+import type {
+  ToolCallEvent,
+  ToolCallStartEvent,
+  ToolResultStartEvent,
+  ToolResultEvent,
+} from "@agentick/shared";
+
+type ToolStatus = "queued" | "executing" | "done";
 
 interface ActiveTool {
   id: string;
   name: string;
   summary?: string;
-  status: "running" | "done";
+  status: ToolStatus;
 }
 
 interface ToolCallIndicatorProps {
@@ -26,7 +35,7 @@ export function ToolCallIndicator({ sessionId }: ToolCallIndicatorProps) {
   const [tools, setTools] = useState<ActiveTool[]>([]);
   const { event } = useEvents({
     sessionId,
-    filter: ["tool_call_start", "tool_call", "tool_result"],
+    filter: ["tool_call_start", "tool_call", "tool_result_start", "tool_result"],
   });
 
   useEffect(() => {
@@ -51,8 +60,14 @@ export function ToolCallIndicator({ sessionId }: ToolCallIndicatorProps) {
           }
           return prev;
         }
-        return [...prev, { id, name, summary, status: "running" }];
+        return [...prev, { id, name, summary, status: "queued" }];
       });
+    }
+
+    if (event.type === "tool_result_start") {
+      const e = event as ToolResultStartEvent;
+      const id = e.callId ?? "unknown";
+      setTools((prev) => prev.map((t) => (t.id === id ? { ...t, status: "executing" } : t)));
     }
 
     if (event.type === "tool_result") {
@@ -77,15 +92,17 @@ export function ToolCallIndicator({ sessionId }: ToolCallIndicatorProps) {
     <Box flexDirection="column" marginLeft={2}>
       {tools.map((tool) => (
         <Box key={tool.id} gap={1} flexDirection="row">
-          {tool.status === "running" ? (
-            <Text color="yellow">
+          {tool.status === "done" ? (
+            <Text color="green">✓</Text>
+          ) : (
+            <Text color={tool.status === "executing" ? "cyan" : "yellow"}>
               <Spinner type="dots" />
             </Text>
-          ) : (
-            <Text color="green">✓</Text>
           )}
           <Text
-            color={tool.status === "running" ? "yellow" : "gray"}
+            color={
+              tool.status === "done" ? "gray" : tool.status === "executing" ? "cyan" : "yellow"
+            }
             dimColor={tool.status === "done"}
           >
             {tool.name}

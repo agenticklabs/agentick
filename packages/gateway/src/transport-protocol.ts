@@ -112,7 +112,12 @@ export type GatewayEventType =
   | "content_block_end"
   | "tool_call_start"
   | "tool_call_delta"
+  | "tool_result_start"
   | "tool_result"
+  | "tool_confirmation_required"
+  | "tool_confirmation_result"
+  | "spawn_start"
+  | "spawn_end"
   | "message_start"
   | "message_end"
   | "error";

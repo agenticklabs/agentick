@@ -166,7 +166,7 @@ export class ContextObjectModel extends EventEmitter {
   private _abortReason?: string;
 
   // Spawn callback - delegates to session for child session creation
-  private _spawnCallback: ((agent: any, input: any) => any) | null = null;
+  private _spawnCallback: ((agent: any, input: any, options?: any) => any) | null = null;
 
   // Injected history - entries added via injectHistory() during current tick
   // Separate from timeline to avoid duplication with compiled entries
@@ -1084,7 +1084,7 @@ export class ContextObjectModel extends EventEmitter {
    * This is wired by Session to enable ctx.spawn() from tool handlers.
    * @internal
    */
-  setSpawnCallback(callback: (agent: any, input: any) => any): void {
+  setSpawnCallback(callback: (agent: any, input: any, options?: any) => any): void {
     this._spawnCallback = callback;
   }
 
@@ -1092,17 +1092,18 @@ export class ContextObjectModel extends EventEmitter {
    * Spawn a child session with a different agent/component.
    *
    * Delegates to the session's spawn Procedure. Available in tool handlers
-   * via `ctx.spawn(agentOrConfig, input)`.
+   * via `ctx.spawn(agentOrConfig, input, options)`.
    *
    * @param agentOrConfig - AgentConfig, ComponentFunction, or JSX element
    * @param input - Optional SendInput for the child session
+   * @param options - Optional SpawnOptions (label, maxTicks, model, runner)
    * @returns SessionExecutionHandle (same as session.send())
    */
-  spawn(agentOrConfig: any, input?: any): any {
+  spawn(agentOrConfig: any, input?: any, options?: any): any {
     if (!this._spawnCallback) {
       throw new Error("spawn() is not available in this context. It requires a session.");
     }
-    return this._spawnCallback(agentOrConfig, input);
+    return this._spawnCallback(agentOrConfig, input, options);
   }
 
   // ============================================================================
