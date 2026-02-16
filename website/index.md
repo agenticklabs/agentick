@@ -17,7 +17,7 @@ features:
     details: Same reconciler, same hooks, same JSX. The render target is model context instead of DOM. If you know React, you know this.
   - icon: 🧩
     title: JSX Context Definition
-    details: Define what the model sees with JSX. <Section>, <Tool>, <Timeline>, <Message> — composable, declarative, reactive.
+    details: "Define what the model sees with JSX. `<Section>`, `<Tool>`, `<Timeline>`, `<Message>` — composable, declarative, reactive."
   - icon: 🔧
     title: Tools as Components
     details: createTool returns a component AND a callable. Stateful tools render context to the model. No more stringly-typed function registries.
