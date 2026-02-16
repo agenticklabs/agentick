@@ -96,7 +96,8 @@ export function renderContentBlock(block: ContentBlock): string | null {
 }
 
 /** Render a tool call indicator line. */
-export function renderToolCall(name: string, duration?: number): string {
+export function renderToolCall(name: string, duration?: number, summary?: string): string {
   const dur = duration != null ? ` ${theme.toolDuration(`(${formatDuration(duration)})`)}` : "";
-  return `  ${theme.toolSymbol("+")} ${theme.toolName(name)}${dur}`;
+  const sum = summary ? ` ${theme.dim(summary)}` : "";
+  return `  ${theme.toolSymbol("+")} ${theme.toolName(name)}${sum}${dur}`;
 }

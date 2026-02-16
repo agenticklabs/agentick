@@ -43,7 +43,14 @@ export function ToolCallIndicator({ sessionId }: ToolCallIndicatorProps) {
       const name = e.name ?? "tool";
       const summary = event.type === "tool_call" ? (e as ToolCallEvent).summary : undefined;
       setTools((prev) => {
-        if (prev.some((t) => t.id === id)) return prev;
+        const existing = prev.find((t) => t.id === id);
+        if (existing) {
+          // tool_call arrives after tool_call_start with the summary — merge it
+          if (summary && !existing.summary) {
+            return prev.map((t) => (t.id === id ? { ...t, summary } : t));
+          }
+          return prev;
+        }
         return [...prev, { id, name, summary, status: "running" }];
       });
     }

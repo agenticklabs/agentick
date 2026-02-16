@@ -14,6 +14,7 @@ export interface ToolCallInfo {
   id: string;
   name: string;
   duration?: number;
+  summary?: string;
 }
 
 export interface RenderMessageOptions {
@@ -62,7 +63,7 @@ function renderAssistantMessage(blocks: ContentBlock[], toolCalls?: ToolCallInfo
 
   if (toolCalls && toolCalls.length > 0) {
     for (const tc of toolCalls) {
-      parts.push(renderToolCall(tc.name, tc.duration));
+      parts.push(renderToolCall(tc.name, tc.duration, tc.summary));
     }
   } else {
     const blockToolCalls = blocks.filter((b): b is ToolUseBlock => b.type === "tool_use");

@@ -339,13 +339,13 @@ export class MessageLog {
       case "tool_call": {
         if (mode === "message") break;
         const e = event as ToolCallEvent;
-        this._ensureInProgressMessage();
-        // In streaming mode, tool_call_end already finalized. Skip if already added.
-        if (mode === "streaming") {
-          // Check if already added via tool_call_end
-          const alreadyAdded = this._inProgressMessage!.toolCalls.some((tc) => tc.id === e.callId);
-          if (alreadyAdded) break;
+        // In streaming mode, tool_call_end already added the entry.
+        // The session's Phase 3 tool_call (with summary) may arrive after
+        // message_end finalized the message. Merge summary if found.
+        if (mode === "streaming" && this._mergeToolCallSummary(e.callId, e.summary)) {
+          break;
         }
+        this._ensureInProgressMessage();
         this._inProgressMessage!.content.push({
           type: "tool_use",
           toolUseId: e.callId,
@@ -357,6 +357,7 @@ export class MessageLog {
           name: e.name,
           status: "done" as const,
           duration: this._toolDurations.get(e.callId),
+          summary: e.summary,
         });
         this._notify();
         break;
@@ -446,6 +447,37 @@ export class MessageLog {
       const tc = msg.toolCalls.find((t) => t.id === callId);
       if (tc) {
         tc.duration = duration;
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  /**
+   * Merge a tool call's summary into an existing entry.
+   * Returns true if the tool call was found (entry already exists).
+   * Like _updateToolDuration, searches both in-progress and finalized messages.
+   */
+  private _mergeToolCallSummary(callId: string, summary: string | undefined): boolean {
+    // Check in-progress message first
+    if (this._inProgressMessage) {
+      const tc = this._inProgressMessage.toolCalls.find((t) => t.id === callId);
+      if (tc) {
+        if (summary) tc.summary = summary;
+        this._notify();
+        return true;
+      }
+    }
+
+    // Search finalized messages in reverse (most recent first)
+    for (let i = this._messages.length - 1; i >= 0; i--) {
+      const msg = this._messages[i];
+      if (msg.role !== "assistant" || !msg.toolCalls) continue;
+      const tc = msg.toolCalls.find((t) => t.id === callId);
+      if (tc) {
+        if (summary) tc.summary = summary;
+        this._notify();
         return true;
       }
     }

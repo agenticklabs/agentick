@@ -45,6 +45,7 @@ export interface ToolCallEntry {
   name: string;
   status: "done";
   duration?: number;
+  summary?: string;
 }
 
 export interface ChatMessage {
