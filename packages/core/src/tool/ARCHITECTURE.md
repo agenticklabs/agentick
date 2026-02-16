@@ -340,22 +340,24 @@ function createTool<TInput>(options: CreateToolOptions<TInput>): ToolClass<TInpu
 
 #### `CreateToolOptions<TInput>`
 
-| Field                   | Type                                                          | Description                                                                                                                  |
-| ----------------------- | ------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| `name`                  | `string`                                                      | Tool name (used by model to call)                                                                                            |
-| `description`           | `string`                                                      | Description shown to the model                                                                                               |
-| `parameters`            | `z.ZodSchema<TInput>`                                         | Zod schema for input validation                                                                                              |
-| `handler?`              | `(input: TInput, ctx?: COM) => ContentBlock[]`                | Handler function (optional for CLIENT tools). `ctx` is provided during agent execution, undefined for direct `.run()` calls. |
-| `type?`                 | `ToolExecutionType`                                           | Execution type (default: SERVER)                                                                                             |
-| `intent?`               | `ToolIntent`                                                  | Tool intent (default: COMPUTE)                                                                                               |
-| `requiresResponse?`     | `boolean`                                                     | Wait for client response (CLIENT only)                                                                                       |
-| `timeout?`              | `number`                                                      | Response timeout in ms (default: 30000)                                                                                      |
-| `defaultResult?`        | `ContentBlock[]`                                              | Default result for non-blocking tools                                                                                        |
-| `middleware?`           | `Middleware[]`                                                | Middleware for handler execution                                                                                             |
-| `providerOptions?`      | `ProviderToolOptions`                                         | Provider-specific configuration                                                                                              |
-| `mcpConfig?`            | `object`                                                      | MCP server configuration                                                                                                     |
-| `requiresConfirmation?` | `boolean \| ((input: TInput) => boolean \| Promise<boolean>)` | Require user confirmation before execution                                                                                   |
-| `confirmationMessage?`  | `string \| ((input: TInput) => string)`                       | Custom confirmation prompt message                                                                                           |
+| Field                   | Type                                                          | Description                                                                                                                    |
+| ----------------------- | ------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `name`                  | `string`                                                      | Tool name (used by model to call)                                                                                              |
+| `description`           | `string`                                                      | Description shown to the model                                                                                                 |
+| `parameters`            | `z.ZodSchema<TInput>`                                         | Zod schema for input validation                                                                                                |
+| `handler?`              | `(input: TInput, ctx?: COM) => ContentBlock[]`                | Handler function (optional for CLIENT tools). `ctx` is provided during agent execution, undefined for direct `.run()` calls.   |
+| `type?`                 | `ToolExecutionType`                                           | Execution type (default: SERVER)                                                                                               |
+| `intent?`               | `ToolIntent`                                                  | Tool intent (default: COMPUTE)                                                                                                 |
+| `requiresResponse?`     | `boolean`                                                     | Wait for client response (CLIENT only)                                                                                         |
+| `timeout?`              | `number`                                                      | Response timeout in ms (default: 30000)                                                                                        |
+| `defaultResult?`        | `ContentBlock[]`                                              | Default result for non-blocking tools                                                                                          |
+| `middleware?`           | `Middleware[]`                                                | Middleware for handler execution                                                                                               |
+| `providerOptions?`      | `ProviderToolOptions`                                         | Provider-specific configuration                                                                                                |
+| `mcpConfig?`            | `object`                                                      | MCP server configuration                                                                                                       |
+| `audience?`             | `"model" \| "user"`                                           | Tool audience. `"user"` means the tool is registered for dispatch but excluded from model tool definitions. Default: `"model"` |
+| `aliases?`              | `string[]`                                                    | Alternative names for dispatch lookup via `dispatch`                                                                           |
+| `requiresConfirmation?` | `boolean \| ((input: TInput) => boolean \| Promise<boolean>)` | Require user confirmation before execution                                                                                     |
+| `confirmationMessage?`  | `string \| ((input: TInput) => string)`                       | Custom confirmation prompt message                                                                                             |
 
 **Render-time context injection:**
 
@@ -404,6 +406,8 @@ interface ToolMetadata<TInput> {
   providerOptions?: ProviderToolOptions;
   libraryOptions?: LibraryToolOptions;
   mcpConfig?: object;
+  audience?: "model" | "user";
+  aliases?: string[];
   requiresConfirmation?: boolean | ((input: TInput) => boolean | Promise<boolean>);
   confirmationMessage?: string | ((input: TInput) => string);
 }
@@ -961,6 +965,36 @@ const CodeReviewTool = createComponentTool({
 │                                                                 │
 └─────────────────────────────────────────────────────────────────┘
 ```
+
+### User-Audience Tool
+
+`audience: "user"` is a **visibility flag** — the tool is registered in COM but hidden from the model. `dispatch` is an **invocation mechanism** — it calls any tool by name from user code. They're orthogonal: `dispatch` works on regular tools too, and user-audience tools can only be reached via `dispatch`.
+
+```typescript
+import { createTool } from "agentick";
+import { z } from "zod";
+
+const AddDirCommand = createTool({
+  name: "add-dir",
+  description: "Mount an additional directory into the sandbox",
+  input: z.object({ path: z.string() }),
+  audience: "user",
+  aliases: ["mount", "add-directory"],
+  use: () => ({ sandbox: useSandbox() }),
+  handler: async ({ path }, deps) => {
+    await deps!.sandbox.mount(path);
+    return [{ type: "text", text: `Mounted ${path}` }];
+  },
+});
+```
+
+**Key behaviors:**
+
+- `audience: "user"` — **visibility**: excluded from `ctx.toInput().tools` (model never sees it)
+- Still stored in `ctx.tools` — available for lookup via `ctx.getTool()` and `ctx.getToolByAlias()`
+- `aliases` — registered in COM's `aliasIndex` (first-registered wins on collision)
+- `session.dispatch(name, input)` — **invocation**: works on any tool, input validated against Zod schema
+- Use `audience: "user"` for: TUI slash commands, client actions, admin operations — anything user-initiated
 
 ### Tool with Confirmation
 

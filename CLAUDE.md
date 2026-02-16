@@ -29,40 +29,24 @@ README content: Purpose, Usage examples, API reference, Patterns.
 
 The framework provides **building blocks**, not opinions.
 
-<<<<<<< HEAD
-| Primitive | Purpose |
-| -------------------- | -------------------------------------------------------------------- |
-| `<Timeline>` | Conversation history (IS the conversation — filter/compact/render) |
-| `<Tool>` | Function the model can call |
-| `<Section>` | Content rendered to model context |
-| `<Message>` | Message added to timeline |
-| Signals/hooks | Reactive state management |
-| Channels | Real-time sync between session and UI |
-| `knob()` | Config-level knob descriptor (detected by `isKnob()`) |
-| `useKnob()` | Model-visible, model-settable reactive state |
-| `<Knobs />` | Knob section + set_knob tool (default, render prop, or provider) |
-| `useTimeline()` | Direct read/write access to session timeline |
-| `useResolved()` | Access resolve data on session restore (Layer 2) |
-| `use()` on tools | Bridge render-time context (React Context, hooks) into tool handlers |
-| `<Sandbox>` | Sandboxed execution (provider-backed, tree-scoped tools) |
-| ExecutionRunner | Controls how compiled context reaches model and how tools execute |
-=======
-| Primitive | Purpose |
-| --------------- | ------------------------------------------------------------------ |
-| `<Timeline>` | Conversation history (IS the conversation — filter/compact/render) |
-| `<Tool>` | Function the model can call |
-| `<Section>` | Content rendered to model context |
-| `<Message>` | Message added to timeline |
-| Signals/hooks | Reactive state management |
-| Channels | Real-time sync between session and UI |
-| `knob()` | Config-level knob descriptor (detected by `isKnob()`) |
-| `useKnob()` | Model-visible, model-settable reactive state |
-| `<Knobs />` | Knob section + set_knob tool (default, render prop, or provider) |
-| `useTimeline()` | Direct read/write access to session timeline |
-| `useResolved()` | Access resolve data on session restore (Layer 2) |
-| ExecutionRunner | Controls how compiled context reaches model and how tools execute |
-
-> > > > > > > 8337a99 (chore: update docs and tests for ExecutionRunner change)
+| Primitive                | Purpose                                                              |
+| ------------------------ | -------------------------------------------------------------------- |
+| `<Timeline>`             | Conversation history (IS the conversation — filter/compact/render)   |
+| `<Tool>`                 | Function the model can call                                          |
+| `<Section>`              | Content rendered to model context                                    |
+| `<Message>`              | Message added to timeline                                            |
+| Signals/hooks            | Reactive state management                                            |
+| Channels                 | Real-time sync between session and UI                                |
+| `knob()`                 | Config-level knob descriptor (detected by `isKnob()`)                |
+| `useKnob()`              | Model-visible, model-settable reactive state                         |
+| `<Knobs />`              | Knob section + set_knob tool (default, render prop, or provider)     |
+| `useTimeline()`          | Direct read/write access to session timeline                         |
+| `useResolved()`          | Access resolve data on session restore (Layer 2)                     |
+| `use()` on tools         | Bridge render-time context (React Context, hooks) into tool handlers |
+| `<Sandbox>`              | Sandboxed execution (provider-backed, tree-scoped tools)             |
+| ExecutionRunner          | Controls how compiled context reaches model and how tools execute    |
+| `audience: "user"` tools | Visibility flag: tool hidden from model, only reachable via dispatch |
+| `dispatch()`             | Invoke any tool by name/alias without model involvement (Procedure)  |
 
 #### Semantic Components (`packages/core/src/jsx/components/semantic.tsx`)
 
@@ -389,7 +373,7 @@ const timing: Middleware = async (args, envelope, next) => {
 
 `createEngineProcedure` is not exported from core's public API. It's used internally by adapters, tools, and MCP tools. Users register middleware via `Agentick.use()`, which is resolved at runtime from ALS context.
 
-**Session Procedures** — `session.send`, `session.render`, `session.queue`, and `app.run` are all Procedures:
+**Session Procedures** — `session.send`, `session.render`, `session.queue`, `session.dispatch`, and `app.run` are all Procedures:
 
 ```typescript
 const handle = await session.send({ messages: [...] });       // ProcedurePromise → SessionExecutionHandle
@@ -397,7 +381,13 @@ const result = await session.send({ messages: [...] }).result; // ProcedurePromi
 const handle = await session.render({ query: "Hello" });       // ProcedurePromise → SessionExecutionHandle
 ```
 
-All four use passthrough mode (`handleFactory: false`) — the handler's return value flows through directly. `ProcedurePromise.result` chains to `SessionExecutionHandle.result`, giving `SendResult`.
+All use passthrough mode (`handleFactory: false`) — the handler's return value flows through directly. `ProcedurePromise.result` chains to `SessionExecutionHandle.result`, giving `SendResult`.
+
+`dispatch` invokes any registered tool by name without the model — works on both regular and `audience: "user"` tools. It auto-mounts, validates input against the tool's Zod schema, resolves by name then alias, and returns `ContentBlock[]`:
+
+```typescript
+const result = await session.dispatch("add-dir", { path: "/tmp" });
+```
 
 ### Using ALS Context
 

@@ -79,14 +79,14 @@ Everything in the component tree compiles to what the model sees. Components are
 
 ### Structure
 
-| Component             | Description                                                                                                                                                                           |
-| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `<Timeline>`          | Conversation history. Accepts a render function for full control, or renders with sensible defaults. Token budget compaction via `maxTokens`, `strategy`, `filter`, `limit`, `roles`. |
-| `<Timeline.Provider>` | Context provider exposing timeline entries to descendants via `useTimelineContext()`.                                                                                                 |
-| `<Timeline.Messages>` | Renders messages from `Timeline.Provider` context. Optional `renderEntry` prop for custom rendering.                                                                                  |
-| `<Section>`           | Structured context block injected every tick. `audience` controls visibility: `"model"`, `"user"`, or `"all"`.                                                                        |
-| `<Tool>`              | Tool the model can call. Use inline (`<Tool name="..." handler={...} />`) or via `createTool()`. Supports `render()` for persistent state, `use()` for context injection.             |
-| `<Model>`             | Model configuration. Pass `engine` prop, or use adapter-specific components like `<OpenAIModel>` or `<GoogleModel>`.                                                                  |
+| Component             | Description                                                                                                                                                                                                             |
+| --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `<Timeline>`          | Conversation history. Accepts a render function for full control, or renders with sensible defaults. Token budget compaction via `maxTokens`, `strategy`, `filter`, `limit`, `roles`.                                   |
+| `<Timeline.Provider>` | Context provider exposing timeline entries to descendants via `useTimelineContext()`.                                                                                                                                   |
+| `<Timeline.Messages>` | Renders messages from `Timeline.Provider` context. Optional `renderEntry` prop for custom rendering.                                                                                                                    |
+| `<Section>`           | Structured context block injected every tick. `audience` controls visibility: `"model"`, `"user"`, or `"all"`.                                                                                                          |
+| `<Tool>`              | Tool the model can call. Use inline (`<Tool name="..." handler={...} />`) or via `createTool()`. Supports `render()` for persistent state, `use()` for context injection, `audience: "user"` for model-hidden dispatch. |
+| `<Model>`             | Model configuration. Pass `engine` prop, or use adapter-specific components like `<OpenAIModel>` or `<GoogleModel>`.                                                                                                    |
 
 ### Messages
 

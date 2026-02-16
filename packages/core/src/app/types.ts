@@ -1578,7 +1578,7 @@ export interface Session<P = Record<string, unknown>> extends EventEmitter {
 
   /**
    * Dispatch a tool by name (or alias) from the user side.
-   * Primarily for commandOnly tools, but works on any registered tool.
+   * Works on any registered tool regardless of audience.
    * Ensures tree is mounted before dispatch. Validates input against the
    * tool's schema before calling the handler.
    *
@@ -1586,7 +1586,7 @@ export interface Session<P = Record<string, unknown>> extends EventEmitter {
    * during compilation briefly removes tools. Both operations are
    * client-initiated so this race doesn't occur in single-user practice.
    */
-  dispatchCommand: Procedure<
+  dispatch: Procedure<
     (name: string, input: Record<string, unknown>) => Promise<ContentBlock[]>,
     true
   >;

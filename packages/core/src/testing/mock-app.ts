@@ -342,7 +342,7 @@ export function createMockSession(options: MockSessionOptions = {}): MockSession
       },
     }) as any;
 
-    dispatchCommand = createTestProcedure({
+    dispatch = createTestProcedure({
       handler: async (_name: string, _input: Record<string, unknown>) => {
         return [{ type: "text" as const, text: "mock" }];
       },

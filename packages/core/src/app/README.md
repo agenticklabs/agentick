@@ -33,12 +33,20 @@ const session = await app.session("user-123");
 
 ### Session Methods (All Procedures)
 
-| Method   | Returns                  | Description                                  |
-| -------- | ------------------------ | -------------------------------------------- |
-| `send`   | `SessionExecutionHandle` | Queue messages + run execution               |
-| `render` | `SessionExecutionHandle` | Set props + run execution (no message queue) |
-| `queue`  | `void`                   | Queue messages without triggering execution  |
-| `spawn`  | `SessionExecutionHandle` | Create and run an ephemeral child session    |
+| Method     | Returns                  | Description                                     |
+| ---------- | ------------------------ | ----------------------------------------------- |
+| `send`     | `SessionExecutionHandle` | Queue messages + run execution                  |
+| `render`   | `SessionExecutionHandle` | Set props + run execution (no message queue)    |
+| `queue`    | `void`                   | Queue messages without triggering execution     |
+| `spawn`    | `SessionExecutionHandle` | Create and run an ephemeral child session       |
+| `dispatch` | `ContentBlock[]`         | Invoke a tool by name without model involvement |
+
+Additional lifecycle methods:
+
+| Method    | Returns | Description                                             |
+| --------- | ------- | ------------------------------------------------------- |
+| `mount()` | `void`  | Mount component tree without calling model (idempotent) |
+| `close()` | `void`  | Close session and all children                          |
 
 All are Procedures — they support `.use(middleware)`, `.withContext()`, `.withTimeout()`, etc.
 

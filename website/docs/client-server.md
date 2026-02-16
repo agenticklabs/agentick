@@ -33,6 +33,19 @@ for await (const chunk of session.send("Hello!")) {
 }
 ```
 
+### Dispatching Tools
+
+The session accessor supports `dispatch` for invoking any registered tool by name without model involvement:
+
+```tsx
+const session = client.session("my-session-id");
+
+// Invoke any tool — regular or audience: "user"
+const result = await session.dispatch("add-dir", { path: "/tmp/data" });
+```
+
+This is used by TUI slash commands and client-side actions. It works on all tools — the most common pattern is dispatching `audience: "user"` tools (hidden from model), but regular tools are equally dispatchable.
+
 ## React Integration
 
 `useChat` is the all-in-one hook — messages, input steering, and tool confirmations. It auto-subscribes to the SSE transport.

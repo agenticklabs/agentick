@@ -243,6 +243,39 @@ await session.send({
 });
 ```
 
+## User-Audience Tools
+
+`audience: "user"` is a **visibility flag** — the tool is registered in COM but excluded from the model's tool list. The model never sees it. User code dispatches it via `session.dispatch()`.
+
+```tsx
+const AddDirCommand = createTool({
+  name: "add-dir",
+  description: "Mount an additional directory",
+  input: z.object({ path: z.string() }),
+  audience: "user",
+  aliases: ["mount"],
+  handler: async ({ path }, deps) => {
+    await deps!.sandbox.mount(path);
+    return [{ type: "text", text: `Mounted ${path}` }];
+  },
+  use: () => ({ sandbox: useSandbox() }),
+});
+```
+
+- `audience` controls **visibility** — `"user"` hides the tool from the model, `"model"` (default) makes it visible
+- `dispatch` controls **invocation** — calling any tool by name from user code
+- These are orthogonal: `dispatch` works on regular tools too, and `audience: "user"` tools can only be reached via `dispatch`
+- `aliases` — alternative names for dispatch lookup
+- Input validated against the Zod schema before handler execution
+
+```tsx
+// Dispatch a user-audience tool from a TUI slash command handler
+const result = await accessor.dispatch("add-dir", { path: "/tmp/data" });
+
+// Dispatch a regular (model-visible) tool from user code — also works
+const result = await accessor.dispatch("shell", { command: "ls" });
+```
+
 ### Spawned Sessions
 
 `session.spawn()` creates a fresh child session. Spawned sessions do **not** inherit tools from the parent — they start with only the tools defined in their own JSX tree and any tools passed via `createApp`.

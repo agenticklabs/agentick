@@ -86,8 +86,8 @@ export interface ClientTransport {
   /** Subscribe to a channel */
   subscribeToChannel(sessionId: string, channel: string): Promise<void>;
 
-  /** Dispatch a command-only tool by name. Optional — not all transports support this. */
-  dispatchCommand?(
+  /** Dispatch a tool by name. Optional — not all transports support this. */
+  dispatch?(
     sessionId: string,
     name: string,
     input: Record<string, unknown>,

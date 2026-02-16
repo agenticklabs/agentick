@@ -379,7 +379,7 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
     ) => SessionExecutionHandle,
     true
   >;
-  dispatchCommand!: Procedure<
+  dispatch!: Procedure<
     (name: string, input: Record<string, unknown>) => Promise<ContentBlock[]>,
     true
   >;
@@ -687,11 +687,11 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
       },
     );
 
-    // DispatchCommand procedure - dispatches commandOnly (or any) tools by name/alias
-    this.dispatchCommand = createProcedure(
+    // Dispatch procedure - dispatches tools by name/alias from the user side
+    this.dispatch = createProcedure(
       {
-        name: "session:dispatchCommand",
-        metadata: { operation: "dispatchCommand" },
+        name: "session:dispatch",
+        metadata: { operation: "dispatch" },
         handleFactory: false,
         executionBoundary: false,
       },

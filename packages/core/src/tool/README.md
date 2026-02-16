@@ -121,6 +121,29 @@ const ChartTool = createTool({
 });
 ```
 
+## User-Audience Tools
+
+`audience: "user"` is a visibility flag — the tool is hidden from the model but still registered in COM:
+
+```typescript
+const ResetTool = createTool({
+  name: "reset",
+  description: "Reset working state",
+  input: z.object({}),
+  audience: "user",
+  aliases: ["clear"],
+  handler: async (_, ctx) => {
+    ctx?.setState("buffer", []);
+    return [{ type: "text", text: "Reset" }];
+  },
+});
+```
+
+- `audience` controls **visibility** — `"user"` excludes the tool from model tool definitions
+- `session.dispatch()` controls **invocation** — works on any tool, not just `audience: "user"`
+- `aliases` — alternative dispatch names (e.g., `dispatch("clear", {})`)
+- Input validated against Zod schema before handler execution
+
 ## Rendering State
 
 Tools can render content to the model's context using the `render` function:

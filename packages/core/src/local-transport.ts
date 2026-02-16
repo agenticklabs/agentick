@@ -132,9 +132,9 @@ export function createLocalTransport(app: App): ClientTransport {
       // No-op for local transport — channels are in-process
     },
 
-    async dispatchCommand(sessionId: string, name: string, input: Record<string, unknown>) {
+    async dispatch(sessionId: string, name: string, input: Record<string, unknown>) {
       const session = await app.session(sessionId);
-      return session.dispatchCommand(name, input);
+      return session.dispatch(name, input);
     },
 
     onEvent(handler: TransportEventHandler) {

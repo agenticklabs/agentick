@@ -116,6 +116,36 @@ export const ShellTool = createTool({
 
 **When to use `use()`**: The tool handler needs something from the component tree — a provider value, a custom hook result, a context-scoped service. If the tool only needs COM state, plain `ctx` (without `use()`) is sufficient.
 
+## User-Audience Tools
+
+`audience: "user"` is a **visibility flag** — the tool is hidden from the model but still registered in COM. It can only be reached via `session.dispatch()` (which works on any tool, not just user-audience ones).
+
+```tsx
+import { createTool } from "agentick";
+import { z } from "zod";
+
+export const AddDirCommand = createTool({
+  name: "add-dir",
+  description: "Mount an additional directory into the sandbox",
+  input: z.object({
+    path: z.string().describe("Absolute path to mount"),
+  }),
+  audience: "user",
+  aliases: ["mount", "add-directory"],
+  handler: async ({ path }, deps) => {
+    await deps!.sandbox.mount(path);
+    return [{ type: "text", text: `Mounted ${path}` }];
+  },
+  use: () => ({ sandbox: useSandbox() }),
+});
+```
+
+- `audience: "user"` — **visibility**: excluded from model tool definitions, invisible to the model
+- `dispatch(name, input)` — **invocation**: call any tool by name from user code (works on regular tools too)
+- `aliases` — alternative names for dispatch lookup (`session.dispatch("mount", input)`)
+- Input validated against the Zod schema before handler execution
+- Use for: slash commands, TUI actions, admin operations, anything user-initiated
+
 ## Handler Signature
 
 Without `use()`:

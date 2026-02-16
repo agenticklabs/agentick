@@ -1,9 +1,13 @@
 /**
- * commandOnly Tool Filtering Tests
+ * Tool Audience Filtering Tests
  *
- * Verifies that tools with commandOnly: true are:
+ * Verifies that tools with audience: "user" are:
  * - Stored in ctx.tools (available for dispatch)
  * - Excluded from ctx.toolDefinitions (not sent to model)
+ *
+ * And that audience: "all" tools are:
+ * - Stored in ctx.tools (available for dispatch)
+ * - Included in ctx.toolDefinitions (sent to model)
  */
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
@@ -25,14 +29,14 @@ function makeTool(overrides: Partial<ToolMetadata> = {}): ExecutableTool {
   } as ExecutableTool;
 }
 
-describe("commandOnly tool filtering", () => {
+describe("tool audience filtering", () => {
   let ctx: COM;
 
   beforeEach(() => {
     ctx = new COM();
   });
 
-  it("should include normal tools in both tools and toolDefinitions", async () => {
+  it("should include normal tools (no audience) in both tools and toolDefinitions", async () => {
     await ctx.addTool(makeTool({ name: "normal-tool" }));
 
     expect(ctx.getTool("normal-tool")).toBeDefined();
@@ -41,38 +45,61 @@ describe("commandOnly tool filtering", () => {
     expect(input.tools.some((t) => t.name === "normal-tool")).toBe(true);
   });
 
-  it("should store commandOnly tool for dispatch but exclude from model definitions", async () => {
-    await ctx.addTool(makeTool({ name: "cmd-tool", commandOnly: true }));
+  it("should include audience: 'model' tools in both tools and toolDefinitions", async () => {
+    await ctx.addTool(makeTool({ name: "model-tool", audience: "model" as const }));
+
+    expect(ctx.getTool("model-tool")).toBeDefined();
+
+    const input = ctx.toInput();
+    expect(input.tools.some((t) => t.name === "model-tool")).toBe(true);
+  });
+
+  it("should store audience: 'user' tool for dispatch but exclude from model definitions", async () => {
+    await ctx.addTool(makeTool({ name: "user-tool", audience: "user" as const }));
 
     // Available for dispatch
-    expect(ctx.getTool("cmd-tool")).toBeDefined();
+    expect(ctx.getTool("user-tool")).toBeDefined();
 
     // NOT in model-facing definitions
     const input = ctx.toInput();
-    expect(input.tools.some((t) => t.name === "cmd-tool")).toBe(false);
+    expect(input.tools.some((t) => t.name === "user-tool")).toBe(false);
   });
 
-  it("should handle mix of normal and commandOnly tools", async () => {
-    await ctx.addTool(makeTool({ name: "visible-tool" }));
-    await ctx.addTool(makeTool({ name: "hidden-cmd", commandOnly: true }));
-    await ctx.addTool(makeTool({ name: "another-visible" }));
+  it("should include audience: 'all' tools in both tools and toolDefinitions", async () => {
+    await ctx.addTool(makeTool({ name: "all-tool", audience: "all" as const }));
 
-    // All three stored for dispatch
-    expect(ctx.getTool("visible-tool")).toBeDefined();
-    expect(ctx.getTool("hidden-cmd")).toBeDefined();
-    expect(ctx.getTool("another-visible")).toBeDefined();
+    // Available for dispatch
+    expect(ctx.getTool("all-tool")).toBeDefined();
 
-    // Only non-commandOnly tools in model definitions
+    // Also in model-facing definitions
+    const input = ctx.toInput();
+    expect(input.tools.some((t) => t.name === "all-tool")).toBe(true);
+  });
+
+  it("should handle mix of audience values", async () => {
+    await ctx.addTool(makeTool({ name: "default-tool" }));
+    await ctx.addTool(makeTool({ name: "user-only", audience: "user" as const }));
+    await ctx.addTool(makeTool({ name: "model-only", audience: "model" as const }));
+    await ctx.addTool(makeTool({ name: "both", audience: "all" as const }));
+
+    // All four stored for dispatch
+    expect(ctx.getTool("default-tool")).toBeDefined();
+    expect(ctx.getTool("user-only")).toBeDefined();
+    expect(ctx.getTool("model-only")).toBeDefined();
+    expect(ctx.getTool("both")).toBeDefined();
+
+    // Only non-user-audience tools in model definitions
     const input = ctx.toInput();
     const toolNames = input.tools.map((t) => t.name);
-    expect(toolNames).toContain("visible-tool");
-    expect(toolNames).toContain("another-visible");
-    expect(toolNames).not.toContain("hidden-cmd");
+    expect(toolNames).toContain("default-tool");
+    expect(toolNames).toContain("model-only");
+    expect(toolNames).toContain("both");
+    expect(toolNames).not.toContain("user-only");
   });
 
   it("should preserve aliases on the stored tool metadata", async () => {
     await ctx.addTool(
-      makeTool({ name: "mount-cmd", commandOnly: true, aliases: ["mount", "mnt"] }),
+      makeTool({ name: "mount-cmd", audience: "user" as const, aliases: ["mount", "mnt"] }),
     );
 
     const tool = ctx.getTool("mount-cmd");
@@ -82,7 +109,7 @@ describe("commandOnly tool filtering", () => {
 
   it("should resolve tools by alias via getToolByAlias", async () => {
     await ctx.addTool(
-      makeTool({ name: "mount-cmd", commandOnly: true, aliases: ["mount", "mnt"] }),
+      makeTool({ name: "mount-cmd", audience: "user" as const, aliases: ["mount", "mnt"] }),
     );
 
     expect(ctx.getToolByAlias("mount")?.metadata.name).toBe("mount-cmd");
@@ -91,14 +118,14 @@ describe("commandOnly tool filtering", () => {
   });
 
   it("should clear aliasIndex on clear()", async () => {
-    await ctx.addTool(makeTool({ name: "cmd", commandOnly: true, aliases: ["al"] }));
+    await ctx.addTool(makeTool({ name: "cmd", audience: "user" as const, aliases: ["al"] }));
     expect(ctx.getToolByAlias("al")).toBeDefined();
     ctx.clear();
     expect(ctx.getToolByAlias("al")).toBeUndefined();
   });
 
   it("should remove aliases when removeTool() is called", async () => {
-    await ctx.addTool(makeTool({ name: "cmd", commandOnly: true, aliases: ["al", "al2"] }));
+    await ctx.addTool(makeTool({ name: "cmd", audience: "user" as const, aliases: ["al", "al2"] }));
     expect(ctx.getToolByAlias("al")).toBeDefined();
     expect(ctx.getToolByAlias("al2")).toBeDefined();
     ctx.removeTool("cmd");

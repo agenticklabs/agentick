@@ -47,6 +47,9 @@ export type { BaseToolDefinition, ClientToolDefinition };
 // Types
 // ============================================================================
 
+/** Controls who sees a tool: "model" (default), "user" (dispatch-only), or "all" (both). */
+export type ToolAudience = "model" | "user" | "all";
+
 /**
  * Version-agnostic Zod schema type.
  * Allows different Zod versions to work together without "excessively deep" errors.
@@ -254,10 +257,10 @@ export interface CreateToolOptions<
     [key: string]: any;
   };
 
-  // === User-Invocable Configuration ===
+  // === Audience Configuration ===
 
-  /** If true, tool is not included in model tool definitions. For user-invocable-only tools. */
-  commandOnly?: boolean;
+  /** Controls who sees this tool. "model" (default) = model only, "user" = user dispatch only, "all" = both. */
+  audience?: ToolAudience;
 
   /** Alternative names for user dispatch (e.g. ["mount"] for "add-dir"). */
   aliases?: string[];
@@ -466,7 +469,7 @@ export function createTool<TInput = any, TOutput extends ContentBlock[] = Conten
     confirmationPreview: options.confirmationPreview,
     providerOptions: options.providerOptions,
     mcpConfig: options.mcpConfig,
-    commandOnly: options.commandOnly,
+    audience: options.audience,
     aliases: options.aliases,
   };
 
@@ -763,8 +766,8 @@ export interface ToolMetadata<TInput = any, TOutput = any> {
     [key: string]: any;
   };
 
-  /** If true, tool is not included in model tool definitions. For user-invocable-only tools. */
-  commandOnly?: boolean;
+  /** Controls who sees this tool. "model" (default) = model only, "user" = dispatch only, "all" = both. */
+  audience?: ToolAudience;
 
   /** Alternative names for user dispatch (e.g. ["mount"] for "add-dir"). */
   aliases?: string[];

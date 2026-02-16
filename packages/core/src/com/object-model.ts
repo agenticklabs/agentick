@@ -562,8 +562,8 @@ export class ContextObjectModel extends EventEmitter {
       // Always store ExecutableTool for execution (dispatch lookup)
       this.tools.set(name, tool);
 
-      // commandOnly tools are user-invocable only — skip model-facing definitions
-      if (!tool.metadata.commandOnly) {
+      // audience: "user" tools are user-invocable only — skip model-facing definitions
+      if (tool.metadata.audience !== "user") {
         const inputJsonSchema = await this.convertInputToJSONSchema(tool.metadata.input);
         const outputJsonSchema = tool.metadata.output
           ? await this.convertInputToJSONSchema(tool.metadata.output)

@@ -180,10 +180,10 @@ export interface SessionAccessor {
   channel(name: string): ChannelAccessor;
 
   /**
-   * Dispatch a command-only tool by name (or alias).
+   * Dispatch a tool by name (or alias).
    * Ensures the component tree is mounted before dispatch.
    */
-  dispatchCommand(name: string, input: Record<string, unknown>): Promise<ContentBlock[]>;
+  dispatch(name: string, input: Record<string, unknown>): Promise<ContentBlock[]>;
 
   /**
    * Invoke a custom method with auto-injected sessionId.
@@ -650,8 +650,8 @@ class SessionAccessorImpl implements SessionAccessor {
    * const newTask = await session.invoke("tasks:create", { title: "Buy groceries" });
    * ```
    */
-  async dispatchCommand(name: string, input: Record<string, unknown>): Promise<ContentBlock[]> {
-    return this.client.dispatchCommand(this.sessionId, name, input);
+  async dispatch(name: string, input: Record<string, unknown>): Promise<ContentBlock[]> {
+    return this.client.dispatch(this.sessionId, name, input);
   }
 
   async invoke<T = unknown>(method: string, params: Record<string, unknown> = {}): Promise<T> {
@@ -1336,18 +1336,18 @@ export class AgentickClient {
   }
 
   /**
-   * Dispatch a command-only tool by name.
-   * Requires a transport that supports dispatchCommand (e.g. local transport).
+   * Dispatch a tool by name.
+   * Requires a transport that supports dispatch (e.g. local transport).
    */
-  async dispatchCommand(
+  async dispatch(
     sessionId: string,
     name: string,
     input: Record<string, unknown>,
   ): Promise<ContentBlock[]> {
-    if (!this.customTransport?.dispatchCommand) {
-      throw new Error("dispatchCommand is not supported by this transport");
+    if (!this.customTransport?.dispatch) {
+      throw new Error("dispatch is not supported by this transport");
     }
-    return this.customTransport.dispatchCommand(sessionId, name, input);
+    return this.customTransport.dispatch(sessionId, name, input);
   }
 
   /**

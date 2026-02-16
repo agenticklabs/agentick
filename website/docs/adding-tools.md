@@ -135,6 +135,26 @@ The deps parameter is `{ ctx, sandbox }` when rendered in JSX, `undefined` when 
 
 **When to use `use()`**: When your tool handler needs something from the component tree — a provider value, a custom hook result, a context-scoped service. If the tool only needs COM state, plain `ctx` is sufficient.
 
+## User-Audience Tools
+
+`audience: "user"` is a visibility flag — the tool is hidden from the model but still registered for programmatic invocation.
+
+```tsx
+const ResetTool = createTool({
+  name: "reset-state",
+  description: "Reset the agent's working state",
+  input: z.object({}),
+  audience: "user",
+  aliases: ["reset"],
+  handler: async (_, ctx) => {
+    ctx?.setState("buffer", []);
+    return [{ type: "text", text: "State reset" }];
+  },
+});
+```
+
+`session.dispatch(name, input)` invokes any tool by name — it works on both regular and user-audience tools. User-audience tools can _only_ be reached this way since the model can't see them. Use `aliases` for alternative dispatch names.
+
 ## Error Handling
 
 Throw from handlers to return tool errors to the model:

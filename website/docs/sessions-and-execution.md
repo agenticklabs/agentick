@@ -55,6 +55,41 @@ const handle = await session.send({ messages: [...] });
 const result = await session.send({ messages: [...] }).result;
 ```
 
+### mount()
+
+`session.mount()` mounts the component tree without calling the model. This makes tools available for dispatch before the first `send()` or `render()`.
+
+```tsx
+const session = await app.session();
+await session.mount(); // Component tree mounted, tools registered
+```
+
+Mount is idempotent — calling it multiple times is safe. `send()` and `render()` call mount internally if needed.
+
+### dispatch()
+
+`session.dispatch()` invokes any registered tool by name without going through the model. It's a Procedure, like `send` and `render`.
+
+```tsx
+// Invoke any tool — works on regular and audience: "user" tools alike
+const result = await session.dispatch("shell", { command: "ls" });
+// result: ContentBlock[]
+
+// Alias lookup (falls back after name lookup)
+const result = await session.dispatch("mount", { path: "/tmp/data" });
+```
+
+Key behaviors:
+
+- Works on **any** tool registered in COM — not just `audience: "user"` tools
+- Auto-mounts the session if not yet mounted
+- Validates input against the tool's Zod schema
+- Looks up by name first, then by alias
+- Returns `ContentBlock[]`
+- Throws on unknown command, validation failure, or closed session
+
+This is how TUI slash commands, client-side actions, and external triggers invoke tools without model involvement. The most common pattern is dispatching `audience: "user"` tools (which the model can't see), but regular tools are equally dispatchable.
+
 ## Stateless Execution
 
 For one-off calls without session management, use `run()`:

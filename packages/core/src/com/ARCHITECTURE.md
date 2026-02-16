@@ -100,6 +100,8 @@ graph TB
 | `object-model.ts` | 1134 lines | ContextObjectModel class - the shared state tree |
 | `types.ts`        | 227 lines  | Type definitions for COM structures              |
 
+**Key internal state**: `aliasIndex: Map<string, string>` — maps tool aliases to primary tool names for `getToolByAlias()` lookup. Populated by `addTool()` when `tool.metadata.aliases` is set. Cleared by `clear()` and surgically cleaned by `removeTool()`.
+
 ---
 
 ## Core Concepts
@@ -359,19 +361,25 @@ ctx.getSections(): Record<string, COMSection>;
 
 ```typescript
 // Register executable tool
+// If tool.metadata.audience is "user", the tool is stored for dispatch
+// but excluded from ctx.toInput().tools (model never sees it).
+// If tool.metadata.aliases is set, aliases are registered in the aliasIndex.
 ctx.addTool(tool: ExecutableTool): void;
 
 // Add tool definition (client tools)
 ctx.addToolDefinition(definition: ToolDefinition): void;
 
-// Remove tool
+// Remove tool (also removes its aliases from aliasIndex)
 ctx.removeTool(name: string): void;
 
 // Get tools
 ctx.getTool(name: string): ExecutableTool | undefined;
+ctx.getToolByAlias(alias: string): ExecutableTool | undefined;
 ctx.getTools(): ExecutableTool[];
 ctx.getToolDefinition(name: string): ToolDefinition | undefined;
 ```
+
+**Alias resolution**: `aliasIndex` is a `Map<string, string>` mapping alias → tool name. First-registered wins on collision (warns via `console.warn`). Aliases are cleared on `clear()` and surgically removed on `removeTool()`.
 
 ### State Methods
 
