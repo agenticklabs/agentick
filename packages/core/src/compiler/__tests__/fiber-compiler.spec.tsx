@@ -20,6 +20,7 @@ import {
   useComputed,
   createSignal,
 } from "../index";
+import { Section } from "../../jsx/components/primitives";
 import { createMockCom, createMockTickState, createMockTickResult } from "../../testing/mocks";
 
 describe("FiberCompiler", () => {
@@ -38,7 +39,7 @@ describe("FiberCompiler", () => {
   describe("basic compilation", () => {
     it("should compile a simple element", async () => {
       const SimpleComponent = () => {
-        return React.createElement("Section", { id: "test" });
+        return React.createElement(Section, { id: "test" });
       };
 
       const tickState = createMockTickState();
@@ -50,7 +51,7 @@ describe("FiberCompiler", () => {
 
     it("should compile until stable", async () => {
       const StableComponent = () => {
-        return React.createElement("Section", { id: "stable" });
+        return React.createElement(Section, { id: "stable" });
       };
 
       const tickState = createMockTickState();
@@ -76,7 +77,7 @@ describe("FiberCompiler", () => {
           }
         });
 
-        return React.createElement("Section", { id: "recompile" });
+        return React.createElement(Section, { id: "recompile" });
       };
 
       const tickState = createMockTickState();
@@ -101,7 +102,7 @@ describe("FiberCompiler", () => {
           ctx.requestRecompile("infinite loop");
         });
 
-        return React.createElement("Section", { id: "infinite" });
+        return React.createElement(Section, { id: "infinite" });
       };
 
       const tickState = createMockTickState();
@@ -131,7 +132,7 @@ describe("FiberCompiler", () => {
           }
         });
 
-        return React.createElement("Section", { id: "reasons" });
+        return React.createElement(Section, { id: "reasons" });
       };
 
       const tickState = createMockTickState();
@@ -155,7 +156,7 @@ describe("FiberCompiler", () => {
 
       const LifecycleComponent = () => {
         useOnTickEnd(tickEndCallback);
-        return React.createElement("Section", { id: "lifecycle" });
+        return React.createElement(Section, { id: "lifecycle" });
       };
 
       const tickState = createMockTickState();
@@ -167,7 +168,7 @@ describe("FiberCompiler", () => {
       expect(tickEndCallback).not.toHaveBeenCalled();
 
       // Run tick end
-      await compiler.notifyTickEnd(tickState, createMockTickResult(tickState.tick));
+      await compiler.notifyTickEnd(tickState, createMockTickResult({ tick: tickState.tick }));
 
       expect(tickEndCallback).toHaveBeenCalledTimes(1);
     });
@@ -177,7 +178,7 @@ describe("FiberCompiler", () => {
 
       const AfterCompileComponent = () => {
         useAfterCompile(afterCompileCallback);
-        return React.createElement("Section", { id: "aftercompile" });
+        return React.createElement(Section, { id: "aftercompile" });
       };
 
       const tickState = createMockTickState();
@@ -200,7 +201,7 @@ describe("FiberCompiler", () => {
 
       const TickStartComponent = () => {
         useOnTickStart(tickStartCallback);
-        return React.createElement("Section", { id: "tickstart" });
+        return React.createElement(Section, { id: "tickstart" });
       };
 
       const tickState1 = createMockTickState(1);
@@ -221,7 +222,7 @@ describe("FiberCompiler", () => {
 
       const TickStartComponent = () => {
         useOnTickStart(tickStartCallback);
-        return React.createElement("Section", { id: "tickstart" });
+        return React.createElement(Section, { id: "tickstart" });
       };
 
       const tickState1 = createMockTickState(1);
@@ -248,14 +249,14 @@ describe("FiberCompiler", () => {
 
       const ConditionalComponent = () => {
         useOnTickStart(tickStartCallback);
-        return React.createElement("Section", { id: "conditional" });
+        return React.createElement(Section, { id: "conditional" });
       };
 
       const ParentComponent = () => {
         if (showComponent) {
           return React.createElement(ConditionalComponent);
         }
-        return React.createElement("Section", { id: "empty" });
+        return React.createElement(Section, { id: "empty" });
       };
 
       const tickState1 = createMockTickState(1);
@@ -290,7 +291,7 @@ describe("FiberCompiler", () => {
           }
         });
 
-        return React.createElement("Section", { id: "recompile" });
+        return React.createElement(Section, { id: "recompile" });
       };
 
       const tickState1 = createMockTickState(1);
@@ -311,12 +312,12 @@ describe("FiberCompiler", () => {
 
       const EarlyComponent = () => {
         useOnTickStart(earlyCallback);
-        return React.createElement("Section", { id: "early" });
+        return React.createElement(Section, { id: "early" });
       };
 
       const LateComponent = () => {
         useOnTickStart(lateCallback);
-        return React.createElement("Section", { id: "late" });
+        return React.createElement(Section, { id: "late" });
       };
 
       const tickState1 = createMockTickState(1);
@@ -352,14 +353,14 @@ describe("FiberCompiler", () => {
 
       const ConditionalComponent = () => {
         useOnTickEnd(tickEndCallback);
-        return React.createElement("Section", { id: "conditional" });
+        return React.createElement(Section, { id: "conditional" });
       };
 
       const ParentComponent = () => {
         if (showComponent) {
           return React.createElement(ConditionalComponent);
         }
-        return React.createElement("Section", { id: "empty" });
+        return React.createElement(Section, { id: "empty" });
       };
 
       const tickState = createMockTickState();
@@ -372,7 +373,7 @@ describe("FiberCompiler", () => {
       await compiler.compile(React.createElement(ParentComponent), tickState);
 
       // Tick end - callback should NOT run (component unmounted)
-      await compiler.notifyTickEnd(tickState, createMockTickResult(tickState.tick));
+      await compiler.notifyTickEnd(tickState, createMockTickResult({ tick: tickState.tick }));
 
       expect(tickEndCallback).not.toHaveBeenCalled();
     });
@@ -384,12 +385,12 @@ describe("FiberCompiler", () => {
       const MultiCallbackComponent = () => {
         useOnTickEnd(callback1);
         useOnTickEnd(callback2);
-        return React.createElement("Section", { id: "multi" });
+        return React.createElement(Section, { id: "multi" });
       };
 
       const tickState = createMockTickState();
       await compiler.compile(React.createElement(MultiCallbackComponent), tickState);
-      await compiler.notifyTickEnd(tickState, createMockTickResult(tickState.tick));
+      await compiler.notifyTickEnd(tickState, createMockTickResult({ tick: tickState.tick }));
 
       expect(callback1).toHaveBeenCalledTimes(1);
       expect(callback2).toHaveBeenCalledTimes(1);
@@ -407,12 +408,12 @@ describe("FiberCompiler", () => {
           await new Promise((r) => setTimeout(r, 5));
           order.push("async2");
         });
-        return React.createElement("Section", { id: "async" });
+        return React.createElement(Section, { id: "async" });
       };
 
       const tickState = createMockTickState();
       await compiler.compile(React.createElement(AsyncCallbackComponent), tickState);
-      await compiler.notifyTickEnd(tickState, createMockTickResult(tickState.tick));
+      await compiler.notifyTickEnd(tickState, createMockTickResult({ tick: tickState.tick }));
 
       // Both should have run (order depends on implementation)
       expect(order).toContain("async1");
@@ -431,7 +432,7 @@ describe("FiberCompiler", () => {
           capturedValue = value;
         });
 
-        return React.createElement("Section", { id: "closure" });
+        return React.createElement(Section, { id: "closure" });
       };
 
       const tickState = createMockTickState();
@@ -441,7 +442,7 @@ describe("FiberCompiler", () => {
       // Second compile (re-render)
       await compiler.compile(React.createElement(ClosureComponent), tickState);
 
-      await compiler.notifyTickEnd(tickState, createMockTickResult(tickState.tick));
+      await compiler.notifyTickEnd(tickState, createMockTickResult({ tick: tickState.tick }));
 
       // Should capture the value from the most recent render
       expect(capturedValue).toBe(2);
@@ -460,7 +461,7 @@ describe("FiberCompiler", () => {
       const DataComponent = () => {
         const data = useData<{ name: string }>("user-1", fetchFn);
         capturedData = data;
-        return React.createElement("Section", { id: "data", "data-name": data.name });
+        return React.createElement(Section, { id: "data", "data-name": data.name });
       };
 
       const tickState = createMockTickState();
@@ -481,7 +482,7 @@ describe("FiberCompiler", () => {
       const RefetchComponent = () => {
         const tick = useTickState();
         const data = useData<{ status: string }>("status", fetchFn, [tick.tick]);
-        return React.createElement("Section", { id: "status", "data-status": data.status });
+        return React.createElement(Section, { id: "status", "data-status": data.status });
       };
 
       const tickState1 = createMockTickState(1);
@@ -500,7 +501,7 @@ describe("FiberCompiler", () => {
 
       const DepsComponent = () => {
         const data = useData<{ data: string }>("user-data", fetchFn, [userId]);
-        return React.createElement("Section", { id: "deps", "data-result": data.data });
+        return React.createElement(Section, { id: "deps", "data-result": data.data });
       };
 
       const tickState = createMockTickState();
@@ -525,7 +526,7 @@ describe("FiberCompiler", () => {
 
       const ErrorComponent = () => {
         const _data = useData("error-test", fetchFn);
-        return React.createElement("Section", { id: "error" });
+        return React.createElement(Section, { id: "error" });
       };
 
       const tickState = createMockTickState();
@@ -542,7 +543,7 @@ describe("FiberCompiler", () => {
       const MultiDataComponent = () => {
         const user = useData<{ name: string }>("user", fetchUser);
         const posts = useData<{ id: number }[]>("posts", fetchPosts);
-        return React.createElement("Section", {
+        return React.createElement(Section, {
           id: "multi-data",
           "data-user": user.name,
           "data-posts": posts.length,
@@ -570,7 +571,7 @@ describe("FiberCompiler", () => {
           }
         });
 
-        return React.createElement("Section", { id: "invalidate", "data-value": data.value });
+        return React.createElement(Section, { id: "invalidate", "data-value": data.value });
       };
 
       const tickState = createMockTickState();
@@ -603,7 +604,7 @@ describe("FiberCompiler", () => {
         const _posts = useData("posts", fetchPosts);
         const _invalidate = useInvalidateData();
 
-        return React.createElement("Section", { id: "regex" });
+        return React.createElement(Section, { id: "regex" });
       };
 
       // This would be tested via the store functions directly
@@ -621,7 +622,7 @@ describe("FiberCompiler", () => {
 
       const ComComponent = () => {
         capturedCom = useCom();
-        return React.createElement("Section", { id: "com-test" });
+        return React.createElement(Section, { id: "com-test" });
       };
 
       const tickState = createMockTickState();
@@ -638,7 +639,7 @@ describe("FiberCompiler", () => {
         const ctx = useCom();
         ctx.setState("test-key", "test-value");
         readValue = ctx.getState("test-key");
-        return React.createElement("Section", { id: "state-test" });
+        return React.createElement(Section, { id: "state-test" });
       };
 
       const tickState = createMockTickState();
@@ -653,7 +654,7 @@ describe("FiberCompiler", () => {
       const TickComponent = () => {
         const state = useTickState();
         capturedTick = state.tick;
-        return React.createElement("Section", { id: "tick-test" });
+        return React.createElement(Section, { id: "tick-test" });
       };
 
       const tickState = createMockTickState(42);
@@ -667,7 +668,7 @@ describe("FiberCompiler", () => {
 
       const StopComponent = () => {
         tickState = useTickState();
-        return React.createElement("Section", { id: "stop-test" });
+        return React.createElement(Section, { id: "stop-test" });
       };
 
       const mockTickState = createMockTickState();
@@ -750,7 +751,7 @@ describe("FiberCompiler", () => {
       const SignalComponent = () => {
         const count = useSignal(42);
         signalValue = count();
-        return React.createElement("Section", { id: "signal", "data-count": count() });
+        return React.createElement(Section, { id: "signal", "data-count": count() });
       };
 
       const tickState = createMockTickState();
@@ -766,7 +767,7 @@ describe("FiberCompiler", () => {
         const count = useSignal(5);
         const doubled = useComputed<number>(() => count() * 2, [count]);
         computedValue = doubled();
-        return React.createElement("Section", { id: "computed" });
+        return React.createElement(Section, { id: "computed" });
       };
 
       const tickState = createMockTickState();
@@ -792,12 +793,12 @@ describe("FiberCompiler", () => {
 
       const DataComponent1 = () => {
         const data = useData<any>("shared-key", fetchFn1);
-        return React.createElement("Section", { id: "iso-1", "data-id": data.id });
+        return React.createElement(Section, { id: "iso-1", "data-id": data.id });
       };
 
       const DataComponent2 = () => {
         const data = useData<any>("shared-key", fetchFn2);
-        return React.createElement("Section", { id: "iso-2", "data-id": data.id });
+        return React.createElement(Section, { id: "iso-2", "data-id": data.id });
       };
 
       const tickState = createMockTickState();
@@ -822,12 +823,12 @@ describe("FiberCompiler", () => {
 
       const Component1 = () => {
         useOnTickEnd(callback1);
-        return React.createElement("Section", { id: "1" });
+        return React.createElement(Section, { id: "1" });
       };
 
       const Component2 = () => {
         useOnTickEnd(callback2);
-        return React.createElement("Section", { id: "2" });
+        return React.createElement(Section, { id: "2" });
       };
 
       const tickState = createMockTickState();
@@ -836,13 +837,13 @@ describe("FiberCompiler", () => {
       await compiler2.compile(React.createElement(Component2), tickState);
 
       // Only notify tick end on compiler1
-      await compiler1.notifyTickEnd(tickState, createMockTickResult(tickState.tick));
+      await compiler1.notifyTickEnd(tickState, createMockTickResult({ tick: tickState.tick }));
 
       expect(callback1).toHaveBeenCalledTimes(1);
       expect(callback2).not.toHaveBeenCalled(); // Isolated!
 
       // Now notify on compiler2
-      await compiler2.notifyTickEnd(tickState, createMockTickResult(tickState.tick));
+      await compiler2.notifyTickEnd(tickState, createMockTickResult({ tick: tickState.tick }));
 
       expect(callback2).toHaveBeenCalledTimes(1);
     });
@@ -860,13 +861,13 @@ describe("FiberCompiler", () => {
         const ctx = useCom();
         ctx.setState("shared-key", "value-from-session-1");
         value1 = ctx.getState("shared-key");
-        return React.createElement("Section", { id: "1" });
+        return React.createElement(Section, { id: "1" });
       };
 
       const Component2 = () => {
         const ctx = useCom();
         value2 = ctx.getState("shared-key"); // Should be undefined
-        return React.createElement("Section", { id: "2" });
+        return React.createElement(Section, { id: "2" });
       };
 
       const tickState = createMockTickState();
@@ -888,7 +889,7 @@ describe("FiberCompiler", () => {
 
       const DataComponent = () => {
         const data = useData<any>("hibernate-test", fetchFn);
-        return React.createElement("Section", {
+        return React.createElement(Section, {
           id: "hibernate",
           "data-cached": String(data.cached),
         });
@@ -914,7 +915,7 @@ describe("FiberCompiler", () => {
       const newFetchFn = vi.fn().mockResolvedValue({ cached: false });
       const RestoredComponent = () => {
         const data = useData<any>("hibernate-test", newFetchFn);
-        return React.createElement("Section", {
+        return React.createElement(Section, {
           id: "restored",
           "data-cached": String(data.cached),
         });
@@ -931,7 +932,7 @@ describe("FiberCompiler", () => {
 
       const CacheTickComponent = () => {
         const _data = useData("tick-cache", fetchFn);
-        return React.createElement("Section", { id: "tick-cache" });
+        return React.createElement(Section, { id: "tick-cache" });
       };
 
       const tickState = createMockTickState(5);
@@ -946,7 +947,7 @@ describe("FiberCompiler", () => {
 
       const DepsTickComponent = () => {
         const _data = useData<{ data: string }>("deps-cache", fetchFn, ["a", "b"]);
-        return React.createElement("Section", { id: "deps-cache" });
+        return React.createElement(Section, { id: "deps-cache" });
       };
 
       const tickState = createMockTickState();
@@ -969,7 +970,7 @@ describe("FiberCompiler", () => {
         useOnTickEnd(() => {
           order.push("child");
         });
-        return React.createElement("Section", { id: "child" });
+        return React.createElement(Section, { id: "child" });
       };
 
       const Parent = () => {
@@ -981,7 +982,7 @@ describe("FiberCompiler", () => {
 
       const tickState = createMockTickState();
       await compiler.compile(React.createElement(Parent), tickState);
-      await compiler.notifyTickEnd(tickState, createMockTickResult(tickState.tick));
+      await compiler.notifyTickEnd(tickState, createMockTickResult({ tick: tickState.tick }));
 
       // React's useEffect runs bottom-up: children before parents
       expect(order[0]).toBe("child");
@@ -995,7 +996,7 @@ describe("FiberCompiler", () => {
 
       const Child = () => {
         useOnTickEnd(childCallback);
-        return React.createElement("Section", { id: "child" });
+        return React.createElement(Section, { id: "child" });
       };
 
       const Parent = () => {
@@ -1003,7 +1004,7 @@ describe("FiberCompiler", () => {
         if (showChild) {
           return React.createElement(Child);
         }
-        return React.createElement("Section", { id: "parent-only" });
+        return React.createElement(Section, { id: "parent-only" });
       };
 
       const tickState = createMockTickState();
@@ -1016,7 +1017,7 @@ describe("FiberCompiler", () => {
       await compiler.compile(React.createElement(Parent), tickState);
 
       // Tick end
-      await compiler.notifyTickEnd(tickState, createMockTickResult(tickState.tick));
+      await compiler.notifyTickEnd(tickState, createMockTickResult({ tick: tickState.tick }));
 
       expect(parentCallback).toHaveBeenCalledTimes(1);
       expect(childCallback).not.toHaveBeenCalled(); // Unmounted
@@ -1029,7 +1030,7 @@ describe("FiberCompiler", () => {
 
       const Level3 = () => {
         const _data = useData("level3", fetchC);
-        return React.createElement("Section", { id: "level3" });
+        return React.createElement(Section, { id: "level3" });
       };
 
       const Level2 = () => {
@@ -1058,7 +1059,7 @@ describe("FiberCompiler", () => {
   describe("unmount and cleanup", () => {
     it("unmount should clear the tree", async () => {
       const SimpleComponent = () => {
-        return React.createElement("Section", { id: "unmount-test" });
+        return React.createElement(Section, { id: "unmount-test" });
       };
 
       const tickState = createMockTickState();
@@ -1078,7 +1079,7 @@ describe("FiberCompiler", () => {
 
       const LifecycleComponent = () => {
         useOnTickEnd(callback);
-        return React.createElement("Section", { id: "cleanup-test" });
+        return React.createElement(Section, { id: "cleanup-test" });
       };
 
       const tickState = createMockTickState();
@@ -1087,7 +1088,7 @@ describe("FiberCompiler", () => {
       await compiler.unmount();
 
       // Tick end after unmount should not call the callback
-      await compiler.notifyTickEnd(tickState, createMockTickResult(tickState.tick));
+      await compiler.notifyTickEnd(tickState, createMockTickResult({ tick: tickState.tick }));
       expect(callback).not.toHaveBeenCalled();
     });
 
@@ -1096,7 +1097,7 @@ describe("FiberCompiler", () => {
 
       const DataComponent = () => {
         const _data = useData("unmount-cache", fetchFn);
-        return React.createElement("Section", { id: "cache-test" });
+        return React.createElement(Section, { id: "cache-test" });
       };
 
       const tickState = createMockTickState();
@@ -1123,7 +1124,7 @@ describe("FiberCompiler", () => {
       const RenderingComponent = () => {
         // Note: This won't work as expected because isRenderingNow
         // is set in reconcile(), not in the actual component render
-        return React.createElement("Section", { id: "rendering" });
+        return React.createElement(Section, { id: "rendering" });
       };
 
       const tickState = createMockTickState();
@@ -1146,7 +1147,7 @@ describe("FiberCompiler", () => {
   describe("reconcile and collect", () => {
     it("setRoot and reconcile should work together", async () => {
       const RootComponent = () => {
-        return React.createElement("Section", { id: "root-test" });
+        return React.createElement(Section, { id: "root-test" });
       };
 
       const tickState = createMockTickState();

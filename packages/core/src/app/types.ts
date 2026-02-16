@@ -1570,6 +1570,28 @@ export interface Session<P = Record<string, unknown>> extends EventEmitter {
   clearAbort(): void;
 
   /**
+   * Mount the component tree without calling the model.
+   * Makes tools and commands available for dispatch.
+   * No-op if already mounted.
+   */
+  mount(): Promise<void>;
+
+  /**
+   * Dispatch a tool by name (or alias) from the user side.
+   * Primarily for commandOnly tools, but works on any registered tool.
+   * Ensures tree is mounted before dispatch. Validates input against the
+   * tool's schema before calling the handler.
+   *
+   * **Known limitation:** If called concurrently with render(), ctx.clear()
+   * during compilation briefly removes tools. Both operations are
+   * client-initiated so this race doesn't occur in single-user practice.
+   */
+  dispatchCommand: Procedure<
+    (name: string, input: Record<string, unknown>) => Promise<ContentBlock[]>,
+    true
+  >;
+
+  /**
    * Convert EventEmitter to AsyncIterable for the current/next execution.
    *
    * Call this before send() to capture events as an AsyncIterable.

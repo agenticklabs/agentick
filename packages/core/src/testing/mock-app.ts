@@ -342,8 +342,15 @@ export function createMockSession(options: MockSessionOptions = {}): MockSession
       },
     }) as any;
 
+    dispatchCommand = createTestProcedure({
+      handler: async (_name: string, _input: Record<string, unknown>) => {
+        return [{ type: "text" as const, text: "mock" }];
+      },
+    }) as any;
+
     interrupt() {}
     clearAbort() {}
+    async mount() {}
 
     events() {
       return (async function* () {})();

@@ -22,6 +22,7 @@ import {
   EventBuffer,
   ExecutionHandleBrand,
   Logger,
+  parseSchema,
   type KernelContext,
   type Procedure,
   type ChannelServiceInterface,
@@ -222,6 +223,7 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
 
   // Last props for hot-update support
   private _lastProps: P | null = null;
+  private _mountPromise: Promise<void> | null = null;
 
   // Captured context from session creation
   private readonly _capturedContext: KernelContext | undefined;
@@ -375,6 +377,10 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
       input?: SendInput,
       options?: SpawnOptions,
     ) => SessionExecutionHandle,
+    true
+  >;
+  dispatchCommand!: Procedure<
+    (name: string, input: Record<string, unknown>) => Promise<ContentBlock[]>,
     true
   >;
 
@@ -678,6 +684,36 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
           .catch(() => {});
 
         return handle;
+      },
+    );
+
+    // DispatchCommand procedure - dispatches commandOnly (or any) tools by name/alias
+    this.dispatchCommand = createProcedure(
+      {
+        name: "session:dispatchCommand",
+        metadata: { operation: "dispatchCommand" },
+        handleFactory: false,
+        executionBoundary: false,
+      },
+      async (name: string, input: Record<string, unknown>): Promise<ContentBlock[]> => {
+        if (this.isTerminal) throw new Error(this.terminalError);
+        await this.mount();
+
+        const tool = this.ctx!.getTool(name) ?? this.ctx!.getToolByAlias(name);
+        if (!tool) throw new Error(`Unknown command: ${name}`);
+        if (!tool.run) throw new Error(`Command "${name}" has no handler`);
+
+        // Validate input against tool's schema
+        const validatedInput = tool.metadata.input
+          ? await parseSchema<Record<string, unknown>>(tool.metadata.input, input)
+          : input;
+
+        const result = await tool.run.exec(validatedInput).result;
+        if (Array.isArray(result)) return result;
+        if (typeof result === "string") return [{ type: "text", text: result }];
+        throw new Error(
+          `Unexpected tool result type: ${typeof result}. Expected ContentBlock[] or string.`,
+        );
       },
     );
   }
@@ -994,6 +1030,48 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
 
   clearAbort(): void {
     this._isAborted = false;
+  }
+
+  async mount(): Promise<void> {
+    // Order matters: _mountPromise must be checked FIRST.
+    // _doMount() sets this.compiler synchronously (via ensureCompilationInfrastructure)
+    // before tool registration completes. A concurrent caller seeing compiler=truthy
+    // would skip the mount and fail tool lookup.
+    if (this._mountPromise) return this._mountPromise;
+    if (this.compiler) return; // Mounted via render() or previous mount()
+
+    this._mountPromise = this._doMount();
+    try {
+      await this._mountPromise;
+    } catch (e) {
+      this._mountPromise = null; // Allow retry on failure
+      throw e;
+    }
+  }
+
+  private async _doMount(): Promise<void> {
+    const rootElement = jsx(this.Component as any, this._lastProps ?? {});
+    await this.ensureCompilationInfrastructure(rootElement);
+
+    // Single compile pass — no notifyTickStart (no catch-up), no compileUntilStable (no afterCompile).
+    // This only renders the tree to collect tools. No tick lifecycle hooks fire.
+    const tickState: TickState = {
+      tick: 0,
+      queuedMessages: [],
+      timeline: [],
+      stop: () => {},
+    };
+
+    const compiled = await this.compiler!.compile(rootElement as React.ReactNode, tickState);
+
+    // Register collected tools so they're available for dispatch
+    const mergedTools = this.mergeTools(
+      this.appOptions.tools ?? [],
+      this.sessionOptions.tools ?? [],
+      [],
+      compiled.tools,
+    );
+    await Promise.all(mergedTools.map((tool) => this.ctx!.addTool(tool)));
   }
 
   private startExecutionAbort(signal?: AbortSignal): void {

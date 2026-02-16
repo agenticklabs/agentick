@@ -9,6 +9,7 @@
  */
 
 import type { SendInput, ChannelEvent, ToolConfirmationResponse } from "./protocol";
+import type { ContentBlock } from "./blocks";
 
 // ============================================================================
 // Transport Events
@@ -84,6 +85,13 @@ export interface ClientTransport {
 
   /** Subscribe to a channel */
   subscribeToChannel(sessionId: string, channel: string): Promise<void>;
+
+  /** Dispatch a command-only tool by name. Optional — not all transports support this. */
+  dispatchCommand?(
+    sessionId: string,
+    name: string,
+    input: Record<string, unknown>,
+  ): Promise<ContentBlock[]>;
 
   /** Register event handler for incoming events */
   onEvent(handler: TransportEventHandler): () => void;

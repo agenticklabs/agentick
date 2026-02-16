@@ -131,6 +131,7 @@ export class ContextObjectModel extends EventEmitter {
   private sections = new Map<string, COMSection>();
   private tools = new Map<string, ExecutableTool>(); // Store ExecutableTool instances for execution
   private toolDefinitions = new Map<string, ToolDefinition>(); // Store ToolDefinition for provider compatibility
+  private aliasIndex = new Map<string, string>(); // alias → tool name (first-registered wins)
   private metadata: Record<string, unknown> = {};
   private state: Record<string, unknown> = {}; // COM-level state shared across components
   private modelOptions?: ModelConfig; // Model options from EngineInput
@@ -326,6 +327,7 @@ export class ContextObjectModel extends EventEmitter {
     this.sections.clear();
     this.tools.clear();
     this.toolDefinitions.clear();
+    this.aliasIndex.clear();
     this.metadata = {};
     this.ephemeral = []; // Always cleared - rebuilt fresh each tick
     this.systemMessages = []; // Always cleared - rebuilt fresh each tick from sections
@@ -557,31 +559,55 @@ export class ContextObjectModel extends EventEmitter {
   async addTool(tool: ExecutableTool): Promise<void> {
     const name = tool.metadata.name;
     if (name) {
-      // Store ExecutableTool for execution
+      // Always store ExecutableTool for execution (dispatch lookup)
       this.tools.set(name, tool);
 
-      // Convert to ToolDefinition (provider-compatible format with JSON Schema)
-      const inputJsonSchema = await this.convertInputToJSONSchema(tool.metadata.input);
-      const outputJsonSchema = tool.metadata.output
-        ? await this.convertInputToJSONSchema(tool.metadata.output)
-        : undefined;
-      this.toolDefinitions.set(name, {
-        name: tool.metadata.name,
-        description: tool.metadata.description,
-        input: inputJsonSchema as Record<string, unknown>,
-        output: outputJsonSchema as Record<string, unknown> | undefined,
-        type: tool.metadata.type,
-        intent: tool.metadata.intent,
-        requiresResponse: tool.metadata.requiresResponse,
-        timeout: tool.metadata.timeout,
-        defaultResult: tool.metadata.defaultResult,
-        providerOptions: tool.metadata.providerOptions,
-        libraryOptions: tool.metadata.libraryOptions,
-        mcpConfig: tool.metadata.mcpConfig,
-      });
-      // Emit event synchronously
+      // commandOnly tools are user-invocable only — skip model-facing definitions
+      if (!tool.metadata.commandOnly) {
+        const inputJsonSchema = await this.convertInputToJSONSchema(tool.metadata.input);
+        const outputJsonSchema = tool.metadata.output
+          ? await this.convertInputToJSONSchema(tool.metadata.output)
+          : undefined;
+        this.toolDefinitions.set(name, {
+          name: tool.metadata.name,
+          description: tool.metadata.description,
+          input: inputJsonSchema as Record<string, unknown>,
+          output: outputJsonSchema as Record<string, unknown> | undefined,
+          type: tool.metadata.type,
+          intent: tool.metadata.intent,
+          requiresResponse: tool.metadata.requiresResponse,
+          timeout: tool.metadata.timeout,
+          defaultResult: tool.metadata.defaultResult,
+          providerOptions: tool.metadata.providerOptions,
+          libraryOptions: tool.metadata.libraryOptions,
+          mcpConfig: tool.metadata.mcpConfig,
+        });
+      }
+
+      // Register aliases (first-registered wins, warn on collision)
+      if (tool.metadata.aliases) {
+        for (const alias of tool.metadata.aliases) {
+          const existing = this.aliasIndex.get(alias);
+          if (existing && existing !== name) {
+            console.warn(
+              `[COM] Alias "${alias}" already registered for tool "${existing}", ignoring registration for "${name}"`,
+            );
+          } else {
+            this.aliasIndex.set(alias, name);
+          }
+        }
+      }
+
       this.emit("tool:registered", tool);
     }
+  }
+
+  /**
+   * Get a tool by alias. Returns undefined if the alias is not registered.
+   */
+  getToolByAlias(alias: string): ExecutableTool | undefined {
+    const name = this.aliasIndex.get(alias);
+    return name ? this.tools.get(name) : undefined;
   }
 
   /**
@@ -608,6 +634,10 @@ export class ContextObjectModel extends EventEmitter {
     const hadTool = this.tools.has(name);
     this.tools.delete(name);
     this.toolDefinitions.delete(name);
+    // Remove stale alias entries pointing at the removed tool
+    for (const [alias, target] of this.aliasIndex) {
+      if (target === name) this.aliasIndex.delete(alias);
+    }
     // Emit event if tool was actually removed
     if (hadTool) {
       this.emit("tool:removed", name);

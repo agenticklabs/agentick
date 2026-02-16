@@ -254,6 +254,14 @@ export interface CreateToolOptions<
     [key: string]: any;
   };
 
+  // === User-Invocable Configuration ===
+
+  /** If true, tool is not included in model tool definitions. For user-invocable-only tools. */
+  commandOnly?: boolean;
+
+  /** Alternative names for user dispatch (e.g. ["mount"] for "add-dir"). */
+  aliases?: string[];
+
   // === Middleware ===
 
   /** Middleware applied to handler execution */
@@ -458,6 +466,8 @@ export function createTool<TInput = any, TOutput extends ContentBlock[] = Conten
     confirmationPreview: options.confirmationPreview,
     providerOptions: options.providerOptions,
     mcpConfig: options.mcpConfig,
+    commandOnly: options.commandOnly,
+    aliases: options.aliases,
   };
 
   // Procedure options shared between static run and instance run
@@ -752,6 +762,12 @@ export interface ToolMetadata<TInput = any, TOutput = any> {
     transport?: "stdio" | "sse" | "websocket";
     [key: string]: any;
   };
+
+  /** If true, tool is not included in model tool definitions. For user-invocable-only tools. */
+  commandOnly?: boolean;
+
+  /** Alternative names for user dispatch (e.g. ["mount"] for "add-dir"). */
+  aliases?: string[];
 }
 
 export interface ExecutableTool<

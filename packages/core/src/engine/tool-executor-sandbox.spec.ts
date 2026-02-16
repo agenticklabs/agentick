@@ -12,6 +12,7 @@ import { ToolExecutionType } from "../tool/tool";
 import type { COM } from "../com/object-model";
 import { createEngineProcedure } from "../procedure";
 import type { ContentBlock } from "@agentick/shared";
+import { z } from "zod";
 
 /**
  * Duck-typed SandboxAccessError for testing.
@@ -45,17 +46,24 @@ function makeExecutableTool(
   name: string,
   handler: (input: any) => ContentBlock[] | Promise<ContentBlock[]>,
 ): ExecutableTool {
-  const run = createEngineProcedure(handler, {
-    type: "tool",
-    id: name,
-    operation: "run",
-  });
+  const run = createEngineProcedure(
+    {
+      name: "tool:run",
+      metadata: {
+        type: "tool",
+        toolName: name,
+        id: name,
+        operation: "run",
+      },
+    },
+    handler,
+  );
 
   return {
     metadata: {
       name,
       description: `Test tool: ${name}`,
-      input: { type: "object" },
+      input: z.object({}),
       type: ToolExecutionType.SERVER,
     },
     run,
