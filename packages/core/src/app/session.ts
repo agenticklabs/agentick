@@ -2519,6 +2519,12 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
       }
     });
 
+    // Cancel pending confirmations when execution is aborted (e.g. Ctrl+C).
+    // Without this, waitForConfirmation() hangs forever on abort.
+    const abortSignal = this.executionAbortController?.signal;
+    const onAbort = () => coordinator.cancelAll();
+    abortSignal?.addEventListener("abort", onAbort);
+
     // Confirmation callbacks for stream event emission
     const confirmationCallbacks = {
       onConfirmationRequired: async (
@@ -2551,6 +2557,8 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
 
     try {
       for (const call of toolCalls) {
+        if (abortSignal?.aborted) break;
+
         const startedAt = timestamp();
         // Check if OUTPUT tool
         const tool = executableTools.find((t) => t.metadata?.name === call.name);
@@ -2637,6 +2645,7 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
         }
       }
     } finally {
+      abortSignal?.removeEventListener("abort", onAbort);
       unsubscribe();
     }
 
