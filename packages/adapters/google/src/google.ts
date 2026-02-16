@@ -156,13 +156,19 @@ export function createGoogleModel(config: GoogleAdapterConfig = {}): ModelClass 
             return { type: "text", delta: part.text };
           }
 
-          // Function calls
+          // Function calls — use API's id when present so functionResponse correlates correctly
           if (part.functionCall) {
+            const fc = part.functionCall as {
+              name?: string;
+              id?: string;
+              args?: Record<string, unknown>;
+            };
+            const id = fc.id ?? fc.name ?? "";
             return {
               type: "tool_call",
-              id: part.functionCall.name || "",
-              name: part.functionCall.name || "",
-              input: part.functionCall.args || {},
+              id,
+              name: fc.name || "",
+              input: fc.args || {},
             };
           }
         }
@@ -197,11 +203,17 @@ export function createGoogleModel(config: GoogleAdapterConfig = {}): ModelClass 
           if (part.text) {
             content.push({ type: "text", text: part.text || "" });
           } else if (part.functionCall) {
+            const fc = part.functionCall as {
+              name?: string;
+              id?: string;
+              args?: Record<string, unknown>;
+            };
+            const toolUseId = fc.id ?? fc.name ?? "";
             content.push({
               type: "tool_use",
-              toolUseId: part.functionCall.name || "",
-              name: part.functionCall.name || "",
-              input: part.functionCall.args || {},
+              toolUseId,
+              name: fc.name || "",
+              input: fc.args || {},
             });
           }
         }
