@@ -1,0 +1,50 @@
+{
+  "name": "@agentick/apple",
+  "version": "0.7.0",
+  "description": "Apple Foundation Models adapter for Agentick — on-device inference via macOS 26+",
+  "keywords": [
+    "adapter",
+    "agent",
+    "ai",
+    "apple",
+    "foundation-models",
+    "on-device"
+  ],
+  "license": "MIT",
+  "author": "Ryan Lindgren",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/agenticklabs/agentick.git",
+    "directory": "packages/adapters/apple"
+  },
+  "bin": {
+    "apple-fm-bridge": "bin/apple-fm-bridge"
+  },
+  "files": [
+    "dist",
+    "inference.swift"
+  ],
+  "os": [
+    "darwin"
+  ],
+  "type": "module",
+  "main": "src/index.ts",
+  "publishConfig": {
+    "access": "public",
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts"
+  },
+  "scripts": {
+    "postinstall": "node scripts/compile-bridge.mjs",
+    "build": "tsc -p tsconfig.build.json",
+    "test": "echo \"Tests run from workspace root\"",
+    "typecheck": "tsc -p tsconfig.build.json --noEmit",
+    "clean": "rm -rf dist bin tsconfig.build.tsbuildinfo",
+    "prepublishOnly": "pnpm build",
+    "dev": "tsc --watch"
+  },
+  "dependencies": {
+    "@agentick/core": "workspace:*",
+    "@agentick/shared": "workspace:*"
+  }
+}
