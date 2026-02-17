@@ -14,7 +14,7 @@ import type {
 } from "./types";
 import type { ExecutableTool, ToolMetadata } from "../tool/tool";
 import { createEmptyCompiledStructure } from "./types";
-import type { SemanticContentBlock, Renderer } from "../renderers/types";
+import type { SemanticContentBlock, SemanticNode, Renderer } from "../renderers/types";
 import type { TokenEstimator } from "../com/types";
 import { extractText as extractBlocksText } from "@agentick/shared";
 import { Logger } from "@agentick/kernel";
@@ -73,8 +73,33 @@ const USER_ACTION = "UserAction";
 const USER_ACTION_LOWER = "user_action";
 const SYSTEM_EVENT = "SystemEvent";
 const SYSTEM_EVENT_LOWER = "system_event";
+const TOOL_USE = "ToolUse";
+const TOOL_USE_LOWER = "tooluse";
 const STATE_CHANGE = "StateChange";
 const STATE_CHANGE_LOWER = "state_change";
+
+// Inline semantic element mapping: lowercase HTML intrinsics → SemanticNode types
+const INLINE_SEMANTIC_MAP: Record<string, string> = {
+  strong: "strong",
+  b: "strong",
+  em: "em",
+  i: "em",
+  mark: "mark",
+  u: "underline",
+  s: "strikethrough",
+  del: "strikethrough",
+  sub: "subscript",
+  sup: "superscript",
+  small: "small",
+  inlineCode: "code",
+  blockquote: "blockquote",
+  p: "paragraph",
+  a: "link",
+  q: "quote",
+  cite: "citation",
+  kbd: "keyboard",
+  var: "variable",
+};
 
 /**
  * Collect compiled structure from a container.
@@ -333,12 +358,22 @@ function collectContent(
 
     switch (typeName) {
       case TEXT:
-      case TEXT_LOWER:
-        blocks.push({
-          type: "text",
-          text: extractText(child),
-        });
+      case TEXT_LOWER: {
+        const tree = hasInlineSemantics(child.children) ? buildSemanticTree(child.children) : null;
+        if (tree && tree.length > 0) {
+          blocks.push({
+            type: "text",
+            text: extractText(child),
+            semanticNode: { children: tree },
+          });
+        } else {
+          blocks.push({
+            type: "text",
+            text: extractText(child),
+          });
+        }
         break;
+      }
 
       case CODE:
       case CODE_LOWER: {
@@ -401,6 +436,16 @@ function collectContent(
         } as SemanticContentBlock);
         break;
 
+      case TOOL_USE:
+      case TOOL_USE_LOWER:
+        blocks.push({
+          type: "tool_use",
+          toolUseId: child.props.toolUseId,
+          name: child.props.name,
+          input: child.props.input ?? {},
+        } as SemanticContentBlock);
+        break;
+
       // Semantic: Headings
       case H1:
       case "h1":
@@ -457,20 +502,30 @@ function collectContent(
 
       // Semantic: Collapsed
       case COLLAPSED:
-      case COLLAPSED_LOWER:
+      case COLLAPSED_LOWER: {
+        // Collect children as semantic blocks for renderer-aware formatting.
+        // The renderer formats these through this.format() before wrapping
+        // in <collapsed> tags, preserving inline formatting and block structure.
+        const childBlocks =
+          child.children && child.children.length > 0
+            ? collectContent(child.children, renderer)
+            : [];
+
         blocks.push({
           type: "text",
-          text: extractText(child),
+          text: extractText(child), // plain text fallback
           semantic: {
             type: "custom",
             rendererTag: "collapsed",
             rendererAttrs: {
               name: child.props.name,
               group: child.props.group,
+              childBlocks: childBlocks.length > 0 ? childBlocks : undefined,
             },
           },
         });
         break;
+      }
 
       // Event block components
       case USER_ACTION:
@@ -515,11 +570,47 @@ function collectContent(
       case COLUMN_LOWER:
         break;
 
-      default:
+      default: {
+        // Inline semantic elements (strong, em, code, a, etc.)
+        const inlineSemantic = INLINE_SEMANTIC_MAP[typeName];
+        if (inlineSemantic) {
+          const tree = buildSemanticTree([child]);
+          if (tree.length > 0) {
+            blocks.push({
+              type: "text",
+              text: extractText(child),
+              semanticNode: tree[0],
+            });
+          }
+          break;
+        }
+
+        // img, br, hr — void elements
+        if (typeName === "img") {
+          blocks.push({
+            type: "text",
+            text: "",
+            semanticNode: {
+              semantic: "image" as any,
+              props: { src: child.props.src, alt: child.props.alt },
+            },
+          });
+          break;
+        }
+        if (typeName === "br") {
+          blocks.push({ type: "text", text: "\n", semantic: { type: "line-break" } });
+          break;
+        }
+        if (typeName === "hr") {
+          blocks.push({ type: "text", text: "", semantic: { type: "horizontal-rule" } });
+          break;
+        }
+
         // Recurse for nested containers
         if (child.children && child.children.length > 0) {
           blocks.push(...collectContent(child.children, renderer));
         }
+      }
     }
   }
 
@@ -561,6 +652,99 @@ function extractText(node: AgentickNode): string {
   }
 
   return "";
+}
+
+/**
+ * Build a SemanticNode tree from reconciled children.
+ *
+ * Converts inline HTML intrinsics (<strong>, <em>, <code>, <a>, etc.)
+ * into a tree of SemanticNode objects for renderer-aware formatting.
+ *
+ * For block-level elements (lists, headings, tables), falls back to
+ * extractText since SemanticNode doesn't model block structures.
+ * These are handled via SemanticContentBlock.semantic in collectContent.
+ */
+function buildSemanticTree(
+  children: (AgentickNode | AgentickTextNode)[] | undefined,
+): SemanticNode[] {
+  if (!children) return [];
+  const nodes: SemanticNode[] = [];
+
+  for (const child of children) {
+    if (isTextNode(child)) {
+      if (child.text) {
+        nodes.push({ text: child.text });
+      }
+      continue;
+    }
+
+    const typeName = getTypeName(child.type);
+    const inlineSemantic = INLINE_SEMANTIC_MAP[typeName];
+
+    if (inlineSemantic) {
+      const node: SemanticNode = {
+        semantic: inlineSemantic as any,
+        children: buildSemanticTree(child.children),
+      };
+      if (inlineSemantic === "link" && child.props.href) {
+        node.props = { href: child.props.href };
+      }
+      nodes.push(node);
+      continue;
+    }
+
+    // img — void element with props, no children
+    if (typeName === "img") {
+      nodes.push({
+        semantic: "image" as any,
+        props: { src: child.props.src, alt: child.props.alt },
+      });
+      continue;
+    }
+
+    // br/hr — void elements
+    if (typeName === "br") {
+      nodes.push({ text: "\n" });
+      continue;
+    }
+    if (typeName === "hr") {
+      nodes.push({ text: "\n---\n" });
+      continue;
+    }
+
+    // For all other elements, recurse into children to extract text
+    const text = extractText(child);
+    if (text) {
+      nodes.push({ text });
+    }
+  }
+
+  return nodes;
+}
+
+/**
+ * Check if children contain any inline semantic elements that
+ * would benefit from a SemanticNode tree.
+ */
+function hasInlineSemantics(children: (AgentickNode | AgentickTextNode)[] | undefined): boolean {
+  if (!children) return false;
+  for (const child of children) {
+    if (isTextNode(child)) continue;
+    const typeName = getTypeName(child.type);
+    if (
+      INLINE_SEMANTIC_MAP[typeName] ||
+      typeName === "img" ||
+      typeName === "br" ||
+      typeName === "hr"
+    ) {
+      return true;
+    }
+    // Check nested children (e.g., <Text> wrapping a <strong>)
+    if (child.children && hasInlineSemantics(child.children)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 /**

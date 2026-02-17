@@ -1,4 +1,5 @@
 import { describe, it, expect, afterEach } from "vitest";
+import type { Message as MessageType } from "@agentick/shared";
 import { compileAgent, createTestAdapter, renderAgent, cleanup } from "../../../testing";
 import { Message, Timeline } from "../primitives";
 import { Model } from "../model";
@@ -15,6 +16,10 @@ function timelineTexts(compiled: any): string[] {
       .map((b: any) => b.text)
       .join(""),
   );
+}
+
+function messagesAsMessages(messages: any): MessageType[] {
+  return messages as MessageType[];
 }
 
 describe("Message collapsed prop", () => {
@@ -147,12 +152,14 @@ describe("Message collapsed prop", () => {
       expect(inputs.length).toBeGreaterThanOrEqual(2);
 
       // First model call should see collapsed summary (not full content)
-      const firstText = inputs[0].messages.map((m: any) => extractText(m.content, "")).join(" ");
+      const firstText = messagesAsMessages(inputs[0].messages)
+        .map((m: any) => extractText(m.content, ""))
+        .join(" ");
       expect(firstText).toContain("[ref:0] old user message");
 
       // After set_knob(ref:0, true), some model call should see expanded content
       const allText = inputs
-        .flatMap((i: any) => i.messages)
+        .flatMap((i: any) => messagesAsMessages(i.messages))
         .map((m: any) => extractText(m.content, ""))
         .join(" ");
       expect(allText).toContain("full detailed content");
@@ -193,7 +200,9 @@ describe("Message collapsed prop", () => {
       expect(inputs.length).toBeGreaterThanOrEqual(1);
 
       // First model call of second execution should see collapsed summary
-      const firstText = inputs[0].messages.map((m: any) => extractText(m.content, "")).join(" ");
+      const firstText = messagesAsMessages(inputs[0].messages)
+        .map((m: any) => extractText(m.content, ""))
+        .join(" ");
       expect(firstText).toContain("[ref:0] summary");
       expect(firstText).not.toContain("only appear when expanded");
 
@@ -354,7 +363,12 @@ describe("Message collapsed prop", () => {
       function Agent() {
         return (
           <>
-            <Message role="user" id="msg-123" metadata={{ source: "test" }} collapsed="summary">
+            <Message
+              role="user"
+              id="msg-123"
+              metadata={{ source: { type: "local" } }}
+              collapsed="summary"
+            >
               Full content.
             </Message>
             <Knobs />

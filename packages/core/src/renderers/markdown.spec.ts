@@ -385,4 +385,127 @@ describe("MarkdownRenderer", () => {
       expect(result).toEqual([block]);
     });
   });
+
+  describe("collapsed blocks", () => {
+    it("formatSemantic renders collapsed with name", () => {
+      const renderer = new MarkdownRenderer();
+      const block: SemanticContentBlock = {
+        type: "text",
+        text: "[file contents]",
+        semantic: {
+          type: "custom",
+          rendererTag: "collapsed",
+          rendererAttrs: { name: "ref:0" },
+        },
+      };
+      const result = renderer.formatSemantic(block);
+      expect(result).toEqual({
+        type: "text",
+        text: '<collapsed name="ref:0">[file contents]</collapsed>',
+      });
+    });
+
+    it("formatSemantic renders collapsed with name and group", () => {
+      const renderer = new MarkdownRenderer();
+      const block: SemanticContentBlock = {
+        type: "text",
+        text: "[image: photo.png]",
+        semantic: {
+          type: "custom",
+          rendererTag: "collapsed",
+          rendererAttrs: { name: "img:0", group: "msg:123" },
+        },
+      };
+      const result = renderer.formatSemantic(block);
+      expect(result).toEqual({
+        type: "text",
+        text: '<collapsed name="img:0" group="msg:123">[image: photo.png]</collapsed>',
+      });
+    });
+
+    it("format() routes collapsed blocks through formatSemantic", () => {
+      const renderer = new MarkdownRenderer();
+      const blocks: SemanticContentBlock[] = [
+        {
+          type: "text",
+          text: "visible question",
+        },
+        {
+          type: "text",
+          text: "[screenshot]",
+          semantic: {
+            type: "custom",
+            rendererTag: "collapsed",
+            rendererAttrs: { name: "img:1" },
+          },
+        },
+      ];
+      const result = renderer.format(blocks);
+      expect(result).toHaveLength(2);
+      expect((result[0] as any).text).toBe("visible question");
+      expect((result[1] as any).text).toBe('<collapsed name="img:1">[screenshot]</collapsed>');
+    });
+
+    it("handles empty name gracefully", () => {
+      const renderer = new MarkdownRenderer();
+      const block: SemanticContentBlock = {
+        type: "text",
+        text: "summary",
+        semantic: {
+          type: "custom",
+          rendererTag: "collapsed",
+          rendererAttrs: { name: "" },
+        },
+      };
+      const result = renderer.formatSemantic(block);
+      expect((result as any).text).toBe('<collapsed name="">summary</collapsed>');
+    });
+
+    it("escapes special characters in summary text", () => {
+      const renderer = new MarkdownRenderer();
+      const block: SemanticContentBlock = {
+        type: "text",
+        text: 'user asked: "what <is> this & that?"',
+        semantic: {
+          type: "custom",
+          rendererTag: "collapsed",
+          rendererAttrs: { name: "ref:0" },
+        },
+      };
+      const result = renderer.formatSemantic(block);
+      expect((result as any).text).toBe(
+        '<collapsed name="ref:0">user asked: &quot;what &lt;is&gt; this &amp; that?&quot;</collapsed>',
+      );
+    });
+
+    it("escapes special characters in name attribute", () => {
+      const renderer = new MarkdownRenderer();
+      const block: SemanticContentBlock = {
+        type: "text",
+        text: "summary",
+        semantic: {
+          type: "custom",
+          rendererTag: "collapsed",
+          rendererAttrs: { name: 'ref:"0"' },
+        },
+      };
+      const result = renderer.formatSemantic(block);
+      expect((result as any).text).toContain('name="ref:&quot;0&quot;"');
+    });
+
+    it("non-collapsed custom returns null", () => {
+      const renderer = new MarkdownRenderer();
+      const block: SemanticContentBlock = {
+        type: "text",
+        text: "something",
+        semantic: {
+          type: "custom",
+          rendererTag: "timestamp",
+          rendererAttrs: { format: "iso" },
+        },
+      };
+      const result = renderer.formatSemantic(block);
+      expect(result).toBeNull();
+    });
+  });
 });

@@ -274,13 +274,23 @@ export class MarkdownRenderer extends Renderer {
 
       case "custom":
         if (semantic.rendererTag === "collapsed") {
-          const attrs = [`name="${semantic.rendererAttrs?.name}"`];
+          const name = escapeXml(semantic.rendererAttrs?.name ?? "");
+          const attrs = [`name="${name}"`];
           if (semantic.rendererAttrs?.group) {
-            attrs.push(`group="${semantic.rendererAttrs.group}"`);
+            attrs.push(`group="${escapeXml(semantic.rendererAttrs.group)}"`);
           }
+
+          let contentText: string;
+          const childBlocks = semantic.rendererAttrs?.childBlocks;
+          if (childBlocks && Array.isArray(childBlocks) && childBlocks.length > 0) {
+            contentText = this.formatChildBlocksToText(childBlocks);
+          } else {
+            contentText = escapeXml(extractText([block]));
+          }
+
           return {
             type: "text",
-            text: `<collapsed ${attrs.join(" ")}>${extractText([block])}</collapsed>`,
+            text: `<collapsed ${attrs.join(" ")}>${contentText}</collapsed>`,
           } as TextBlock;
         }
         return null;
@@ -514,3 +524,13 @@ export class MarkdownRenderer extends Renderer {
 
 /** Default markdown renderer instance */
 export const markdownRenderer = new MarkdownRenderer();
+
+/** Escape text for XML-like collapsed tags. Matches XMLRenderer.escapeXml(). */
+function escapeXml(text: string): string {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;");
+}

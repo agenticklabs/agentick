@@ -253,9 +253,18 @@ export class XMLRenderer extends Renderer {
           if (semantic.rendererAttrs?.group) {
             attrs.push(`group="${this.escapeXml(semantic.rendererAttrs.group)}"`);
           }
+
+          let contentText: string;
+          const childBlocks = semantic.rendererAttrs?.childBlocks;
+          if (childBlocks && Array.isArray(childBlocks) && childBlocks.length > 0) {
+            contentText = this.formatChildBlocksToText(childBlocks);
+          } else {
+            contentText = this.escapeXml(extractText([block]));
+          }
+
           return {
             type: "text",
-            text: `<collapsed ${attrs.join(" ")}>${this.escapeXml(extractText([block]))}</collapsed>`,
+            text: `<collapsed ${attrs.join(" ")}>${contentText}</collapsed>`,
           } as TextBlock;
         }
         return null;

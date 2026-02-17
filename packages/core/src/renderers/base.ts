@@ -204,6 +204,40 @@ export abstract class Renderer {
     return formatted;
   }
 
+  /**
+   * Format child blocks into a single text string.
+   *
+   * Unlike format() which passes through non-semantic blocks as-is,
+   * this ensures ALL blocks are converted to text — code blocks become
+   * fenced code, json becomes fenced json, etc. Used by collapsed
+   * content rendering where everything must be text.
+   */
+  formatChildBlocksToText(childBlocks: SemanticContentBlock[]): string {
+    const textParts: string[] = [];
+
+    for (const child of childBlocks) {
+      // Route through format() for semantic/semanticNode handling
+      const formatted = this.format([child]);
+
+      for (const fb of formatted) {
+        if (fb.type === "text") {
+          textParts.push((fb as TextBlock).text);
+        } else {
+          // Non-text blocks (code, json, image, etc.) — force through formatStandard
+          const standardized = this.formatStandard(fb as SemanticContentBlock);
+          for (const sb of standardized) {
+            if (sb.type === "text") {
+              textParts.push((sb as TextBlock).text);
+            }
+            // Non-text types that can't be rendered as text are dropped
+          }
+        }
+      }
+    }
+
+    return textParts.join("\n\n");
+  }
+
   abstract formatNode(node: SemanticNode): string;
   abstract formatSemantic(block: SemanticContentBlock): ContentBlock | null;
   abstract formatStandard(block: SemanticContentBlock): ContentBlock[];
