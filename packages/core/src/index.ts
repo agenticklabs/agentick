@@ -29,8 +29,17 @@ export {
   ToolResult as ToolResultComponent,
   Markdown,
   XML,
+  Ephemeral,
+  type EphemeralProps,
+  type EphemeralPosition,
+  Grounding,
+  type GroundingProps,
   Collapsed,
   type CollapsedProps,
+  // Auto-summary for collapsed components
+  autoMessageSummary,
+  autoSectionSummary,
+  autoContentSummary,
   // Token budget (types + pure functions, used via Timeline props)
   compactEntries,
   type CompactionStrategy,

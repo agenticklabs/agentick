@@ -4,6 +4,9 @@ import type { JSX } from "react";
 import type { JSX as AgentickJSX } from "../jsx-runtime";
 import type { StreamEvent } from "../../engine/engine-events";
 import type { ComponentBaseProps } from "../jsx-types";
+import { Expandable } from "../../hooks/expandable";
+import { Collapsed } from "./collapsed";
+import { autoMessageSummary, autoSectionSummary } from "./auto-summary";
 
 // Helper for createElement
 const h = React.createElement;
@@ -84,15 +87,64 @@ export function Entry(props: EntryProps): JSX.Element {
 }
 
 /**
+ * Section primitive component props.
+ * Extends intrinsic section props with collapse support.
+ */
+export type SectionProps = AgentickJSX.IntrinsicElements["section"] & {
+  /**
+   * Enables collapse behavior.
+   * - `true`: auto-summarize from title/id
+   * - `string`: use as collapsed summary
+   * - `ReactNode`: render as collapsed content (must produce text)
+   */
+  collapsed?: boolean | string | React.ReactNode;
+  /** Explicit knob name for collapse toggle. Auto-generated if omitted. */
+  collapsedName?: string;
+  /** Group name for batch expansion via set_knob. */
+  collapsedGroup?: string;
+};
+
+function SectionInner(props: SectionProps): JSX.Element {
+  useDebugValue(`Section: ${props.title ?? props.id ?? "untitled"}`);
+  return h("section", props);
+}
+
+function CollapsibleSection(props: SectionProps): JSX.Element {
+  const { collapsed, collapsedName, collapsedGroup, ...sectionProps } = props;
+
+  const summary =
+    typeof collapsed === "string"
+      ? collapsed
+      : autoSectionSummary(sectionProps.title, sectionProps.id);
+
+  const collapsedChildren: React.ReactNode = collapsed === true ? summary : collapsed;
+
+  return h(Expandable, {
+    name: collapsedName,
+    group: collapsedGroup,
+    summary,
+    children: (expanded: boolean, name: string) =>
+      expanded
+        ? h(SectionInner, sectionProps)
+        : h(SectionInner, {
+            ...sectionProps,
+            children: h(Collapsed, { name, group: collapsedGroup }, collapsedChildren),
+          }),
+  });
+}
+
+/**
  * Section primitive component.
  * When used in JSX: <Section id="..." content="..." />
  * Returns an intrinsic "section" element for react-reconciler compatibility.
+ *
+ * When `collapsed` is provided, enables collapse/expand behavior via knob.
  */
-export function Section(props: AgentickJSX.IntrinsicElements["section"]): JSX.Element {
-  // Debug value shows section title for React DevTools
-  useDebugValue(`Section: ${props.title ?? props.id ?? "untitled"}`);
-  // Use intrinsic "section" element for react-reconciler compatibility
-  return h("section", props);
+export function Section(props: SectionProps): JSX.Element {
+  if (props.collapsed !== undefined && props.collapsed !== false) {
+    return h(CollapsibleSection, props);
+  }
+  return h(SectionInner, props);
 }
 
 /**
@@ -111,24 +163,26 @@ export type MessageProps = Partial<Omit<Message, "content" | "role">> & {
   tags?: string[]; // Entry-level props (not part of Message)
   visibility?: "model" | "observer" | "log"; // Entry-level props (not part of Message)
   children?: any; // JSX children, will be collected into content
+  /**
+   * Enables collapse behavior.
+   * - `true`: auto-summarize from role and content
+   * - `string`: use as collapsed summary
+   * - `ReactNode`: render as collapsed content (must produce text)
+   */
+  collapsed?: boolean | string | React.ReactNode;
+  /** Explicit knob name for collapse toggle. Auto-generated if omitted. */
+  collapsedName?: string;
+  /** Group name for batch expansion via set_knob. */
+  collapsedGroup?: string;
 } & ComponentBaseProps;
 
 /**
- * Message primitive component.
- * Semantic sugar wrapper that wraps Entry with kind="message" for intuitive API.
- *
- * Accepts Message objects via spreading, converts to Entry structure.
- *
- * Usage:
- *   <Message role="user">Hello</Message>
- *   <Message {...messageFromTimeline} tags={['important']} />
- * Compiles to: <Entry kind="message" message={{ role: 'user', content: [...] }} />
+ * Internal: renders a message entry with useDebugValue.
  */
-export function Message(props: MessageProps): JSX.Element {
+function MessageInner(props: MessageProps): JSX.Element {
   const { role, content, children, id, metadata, tags, visibility, createdAt, updatedAt, ...rest } =
     props;
 
-  // Debug value shows role and content preview for React DevTools
   const preview =
     typeof content === "string"
       ? content.slice(0, 30) + (content.length > 30 ? "..." : "")
@@ -137,11 +191,9 @@ export function Message(props: MessageProps): JSX.Element {
         : "[empty]";
   useDebugValue(`${role}: ${preview}`);
 
-  // Convert MessageProps to Message structure for EntryKindMap
-  // If content is already ContentBlock[], use it; otherwise renderer will convert children
   const message: Message = {
     role,
-    content: (content as Message["content"]) || [], // Will be converted to ContentBlock[] by renderer if needed
+    content: (content as Message["content"]) || [],
     id,
     metadata,
     createdAt,
@@ -151,11 +203,60 @@ export function Message(props: MessageProps): JSX.Element {
   return h(Entry, {
     kind: "message",
     message,
-    tags, // Entry-level props
-    visibility, // Entry-level props
+    tags,
+    visibility,
     ...rest,
-    children, // Pass children through - renderer will collect them into message.content
+    children,
   });
+}
+
+/**
+ * Internal: message with collapse/expand toggle via Expandable.
+ * When collapsed, renders MessageInner with summary as children.
+ * When expanded (knob toggled), renders MessageInner with original content.
+ */
+function CollapsibleMessage(props: MessageProps): JSX.Element {
+  const { collapsed, collapsedName, collapsedGroup, ...messageProps } = props;
+
+  const summary =
+    typeof collapsed === "string"
+      ? collapsed
+      : autoMessageSummary(messageProps.role, messageProps.content as ContentBlock[]);
+
+  const collapsedChildren: React.ReactNode = collapsed === true ? summary : collapsed;
+
+  return h(Expandable, {
+    name: collapsedName,
+    group: collapsedGroup,
+    summary,
+    children: (expanded: boolean, name: string) =>
+      expanded
+        ? h(MessageInner, messageProps)
+        : h(MessageInner, {
+            ...messageProps,
+            content: undefined,
+            children: h(Collapsed, { name, group: collapsedGroup }, collapsedChildren),
+          }),
+  });
+}
+
+/**
+ * Message primitive component.
+ *
+ * Accepts Message objects via spreading, converts to Entry structure.
+ * When `collapsed` is provided, enables collapse/expand behavior via knob.
+ *
+ * Usage:
+ *   <Message role="user">Hello</Message>
+ *   <Message {...messageFromTimeline} tags={['important']} />
+ *   <Message {...msg} collapsed="[ref:3] user asked about weather" />
+ * Compiles to: <Entry kind="message" message={{ role: 'user', content: [...] }} />
+ */
+export function Message(props: MessageProps): JSX.Element {
+  if (props.collapsed !== undefined && props.collapsed !== false) {
+    return h(CollapsibleMessage, props);
+  }
+  return h(MessageInner, props);
 }
 
 /**

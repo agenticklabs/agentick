@@ -9,3 +9,4 @@ export * from "./xml";
 export * from "./token-budget";
 export * from "./timeline";
 export * from "./collapsed";
+export * from "./auto-summary";

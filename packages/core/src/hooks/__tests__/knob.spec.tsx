@@ -547,7 +547,7 @@ describe("useKnob integration", () => {
     function Agent() {
       useKnob("name", "good", {
         description: "Name",
-        validate: (v) => (v !== "bad" ? true : "Value cannot be 'bad'"),
+        validate: (v: string) => (v !== "bad" ? true : "Value cannot be 'bad'"),
       });
 
       useContinuation((result) => {
@@ -1573,11 +1573,20 @@ describe("Expandable", () => {
     function Agent() {
       return (
         <>
-          <Section id="context" audience="model">
-            <Expandable name="login-ss" summary="Login page (1284x720)">
-              Expanded content here
-            </Expandable>
-          </Section>
+          <Expandable name="login-ss" summary="Login page (1284x720)">
+            {(expanded: boolean, _name: string) =>
+              expanded ? (
+                <Section id="context" audience="model">
+                  Expanded content here
+                </Section>
+              ) : (
+                <Section id="context" audience="model">
+                  Login page (1284x720)
+                </Section>
+              )
+            }
+          </Expandable>
+
           <Knobs />
         </>
       );
@@ -1595,8 +1604,8 @@ describe("Expandable", () => {
     function Agent() {
       return (
         <>
-          <Expandable summary="First">Content 1</Expandable>
-          <Expandable summary="Second">Content 2</Expandable>
+          <Expandable summary="First">{() => "Content 1"}</Expandable>
+          <Expandable summary="Second">{() => "Content 2"}</Expandable>
           <Knobs />
         </>
       );
@@ -1617,11 +1626,14 @@ describe("Expandable", () => {
         <>
           <Model model={model} />
           <Timeline />
-          <Expandable name="login-ss" summary="Login page">
-            <Section id="expanded-content" audience="model">
-              Expanded!
-            </Section>
-          </Expandable>
+          <Section
+            id="expanded-content"
+            audience="model"
+            collapsedName="login-ss"
+            collapsed="Login page"
+          >
+            Expanded!
+          </Section>
           <Knobs />
         </>
       );
