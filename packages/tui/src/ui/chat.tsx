@@ -13,7 +13,8 @@
  *
  * Input routing priority:
  *   1. Ctrl+C → always handled (abort/exit/reject based on state)
- *   2. confirming_tool → Y/N/A keys via handleConfirmationKey
+ *   2. confirming_tool → Y/N/A shortcuts when editor empty, else text input
+ *      (Enter with text → reject with that text as reason)
  *   3. error displayed → any key dismisses
  *   4. idle → editor.handleInput
  */
@@ -96,11 +97,17 @@ export function Chat({ sessionId, statusBar }: ChatProps) {
 
   const handleSubmit = useCallback(
     (text: string) => {
+      // Text submitted during tool confirmation → reject with feedback
+      if (chatMode === "confirming_tool" && toolConfirmation) {
+        if (!text.trim()) return; // Enter on empty editor is a no-op during confirmation
+        respondToConfirmation({ approved: false, reason: text });
+        return;
+      }
       if (dispatch(text)) return;
       setDismissedError(false);
       submit(text);
     },
-    [dispatch, submit],
+    [chatMode, toolConfirmation, respondToConfirmation, dispatch, submit],
   );
 
   const handleToolConfirmationResponse = useCallback(
@@ -136,9 +143,15 @@ export function Chat({ sessionId, statusBar }: ChatProps) {
       return;
     }
 
-    // 2. Tool confirmation → Y/N/A
+    // 2. Tool confirmation → Y/N/A shortcuts when editor empty, else text input
     if (chatMode === "confirming_tool" && toolConfirmation) {
-      handleConfirmationKey(input, handleToolConfirmationResponse);
+      if (
+        editor.value.length === 0 &&
+        handleConfirmationKey(input, handleToolConfirmationResponse)
+      ) {
+        return;
+      }
+      editor.handleInput(input, key);
       return;
     }
 
@@ -154,12 +167,12 @@ export function Chat({ sessionId, statusBar }: ChatProps) {
     }
   });
 
-  const isInputActive = chatMode === "idle";
+  const isInputActive = chatMode === "idle" || chatMode === "confirming_tool";
   const placeholder =
     chatMode === "streaming"
       ? "Waiting for response... (Ctrl+C to abort)"
       : chatMode === "confirming_tool"
-        ? "Confirm or reject the tool above..."
+        ? "Type feedback to reject, or press Y/N/A..."
         : undefined;
 
   // Resolve status bar content

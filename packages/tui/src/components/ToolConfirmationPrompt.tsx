@@ -72,6 +72,7 @@ export function ToolConfirmationPrompt({ request }: ToolConfirmationPromptProps)
         <Text color="cyan" bold>
           [A] Always Allow
         </Text>
+        <Text dimColor>or type feedback</Text>
       </Box>
     </Box>
   );

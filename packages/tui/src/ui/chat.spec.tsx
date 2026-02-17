@@ -358,6 +358,72 @@ describe("Chat", () => {
     expect(response.reason).toBe("rejected by user");
   });
 
+  it("typing text and pressing Enter rejects with that text as reason", async () => {
+    const client = createMockClient();
+    const { stdin, lastFrame } = render(
+      <AgentickProvider client={client}>
+        <Chat sessionId="main" />
+      </AgentickProvider>,
+    );
+
+    await waitFor(() => expect(lastFrame()!).toContain("idle"));
+
+    client._emitEvent({ type: "execution_start", timestamp: Date.now() });
+    await flush();
+
+    const responsePromise = client._triggerToolConfirmation({
+      toolUseId: "tool-1",
+      name: "delete_file",
+      arguments: { path: "/tmp/test.txt" },
+    });
+
+    await waitFor(() => {
+      expect(lastFrame()!).toContain("[Y] Approve");
+    });
+
+    // Type feedback text — first char "d" is not y/n/a, goes to editor
+    stdin.write("don't delete that");
+    await flush();
+
+    // Submit with Enter
+    stdin.write("\r");
+
+    const response = await responsePromise;
+    expect(response.approved).toBe(false);
+    expect(response.reason).toBe("don't delete that");
+  });
+
+  it("Enter on empty editor during confirmation is a no-op", async () => {
+    const client = createMockClient();
+    const { stdin, lastFrame } = render(
+      <AgentickProvider client={client}>
+        <Chat sessionId="main" />
+      </AgentickProvider>,
+    );
+
+    await waitFor(() => expect(lastFrame()!).toContain("idle"));
+
+    client._emitEvent({ type: "execution_start", timestamp: Date.now() });
+    await flush();
+
+    client._triggerToolConfirmation({
+      toolUseId: "tool-1",
+      name: "delete_file",
+      arguments: { path: "/tmp/test.txt" },
+    });
+
+    await waitFor(() => {
+      expect(lastFrame()!).toContain("[Y] Approve");
+    });
+
+    // Press Enter with empty editor — should NOT reject
+    stdin.write("\r");
+    await flush();
+
+    // Confirmation prompt should still be visible
+    expect(lastFrame()!).toContain("[Y] Approve");
+  });
+
   it("Y key during confirmation does NOT leak into input bar", async () => {
     const client = createMockClient();
     const { stdin, lastFrame } = render(
