@@ -72,7 +72,9 @@ jsx/
     ├── index.ts             # Component exports
     ├── primitives.ts        # Timeline, Entry, Section, Message, Tool
     ├── messages.tsx         # Role-specific: User, Assistant, System, Event, etc.
-    ├── content.tsx          # Content blocks: Text, Image, Code, Document, etc.
+    ├── content.tsx          # Content blocks: Text, Image, Code, Document, etc. (+ ToolUse)
+    ├── collapsed.tsx        # Collapsed intrinsic wrapper for expandable content
+    ├── auto-summary.ts      # Pure auto-summary functions for collapsed components
     ├── semantic.tsx         # Semantic: H1, H2, Paragraph, List, Table, etc.
     ├── model.tsx            # Model, ModelOptions configuration
     ├── fork.tsx             # Fork execution component
@@ -85,20 +87,22 @@ jsx/
 
 ### File Overview
 
-| File             | Purpose                                                                                                            |
-| ---------------- | ------------------------------------------------------------------------------------------------------------------ |
-| `jsx-runtime.ts` | Core `jsx`/`jsxs`/`jsxDEV`/`createElement` functions, `JSX` namespace, `Fragment` symbol                           |
-| `jsx-types.ts`   | `ComponentBaseProps` with `ref` and `key` props                                                                    |
-| `primitives.ts`  | Foundation primitives: `Timeline`, `Entry`, `Section`, `Message`, `Tool`                                           |
-| `messages.tsx`   | Role-specific message components: `User`, `Assistant`, `System`, `ToolResult`, `Event`, `Ephemeral`, `Grounding`   |
-| `content.tsx`    | Content block components: `Text`, `Image`, `Document`, `Audio`, `Video`, `Code`, `Json`                            |
-| `semantic.tsx`   | Semantic structure: `H1-H3`, `Header`, `Paragraph`, `List` (with task lists), `ListItem`, `Table`, `Row`, `Column` |
-| `model.tsx`      | Configuration: `Model`, `ModelOptions` for setting model adapter and options                                       |
-| `fork.tsx`       | `Fork` component for creating child executions with inherited state                                                |
-| `spawn.tsx`      | `Spawn` component for creating independent executions                                                              |
-| `renderer.tsx`   | `Renderer` wrapper for applying content renderers                                                                  |
-| `markdown.tsx`   | `Markdown` renderer wrapper                                                                                        |
-| `xml.tsx`        | `XML` renderer wrapper                                                                                             |
+| File              | Purpose                                                                                                            |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `jsx-runtime.ts`  | Core `jsx`/`jsxs`/`jsxDEV`/`createElement` functions, `JSX` namespace, `Fragment` symbol                           |
+| `jsx-types.ts`    | `ComponentBaseProps` with `ref` and `key` props                                                                    |
+| `primitives.ts`   | Foundation primitives: `Timeline`, `Entry`, `Section`, `Message`, `Tool`. Section/Message support `collapsed` prop |
+| `messages.tsx`    | Role-specific message components: `User`, `Assistant`, `System`, `ToolResult`, `Event`, `Ephemeral`, `Grounding`   |
+| `content.tsx`     | Content blocks: `Text`, `Image`, `Document`, `Audio`, `Video`, `Code`, `Json`, `ToolUse`. All support `collapsed`  |
+| `collapsed.tsx`   | `Collapsed` intrinsic wrapper — renders `<collapsed name="..." group="...">` for expandable content summaries      |
+| `auto-summary.ts` | Pure functions: `autoMessageSummary`, `autoSectionSummary`, `autoContentSummary` for `collapsed={true}` defaults   |
+| `semantic.tsx`    | Semantic structure: `H1-H3`, `Header`, `Paragraph`, `List` (with task lists), `ListItem`, `Table`, `Row`, `Column` |
+| `model.tsx`       | Configuration: `Model`, `ModelOptions` for setting model adapter and options                                       |
+| `fork.tsx`        | `Fork` component for creating child executions with inherited state                                                |
+| `spawn.tsx`       | `Spawn` component for creating independent executions                                                              |
+| `renderer.tsx`    | `Renderer` wrapper for applying content renderers                                                                  |
+| `markdown.tsx`    | `Markdown` renderer wrapper                                                                                        |
+| `xml.tsx`         | `XML` renderer wrapper                                                                                             |
 
 ---
 

@@ -62,12 +62,12 @@ renderers/
 
 ### File Overview
 
-| File          | Size      | Purpose                                   |
-| ------------- | --------- | ----------------------------------------- |
-| `base.ts`     | 185 lines | Abstract `Renderer` class, semantic types |
-| `markdown.ts` | 452 lines | Markdown formatting (GFM, CommonMark)     |
-| `xml.ts`      | 367 lines | XML/HTML formatting with proper escaping  |
-| `index.ts`    | 5 lines   | Re-exports public API                     |
+| File          | Size      | Purpose                                                              |
+| ------------- | --------- | -------------------------------------------------------------------- |
+| `base.ts`     | 249 lines | Abstract `Renderer` class, semantic types, `formatChildBlocksToText` |
+| `markdown.ts` | 452 lines | Markdown formatting (GFM, CommonMark)                                |
+| `xml.ts`      | 367 lines | XML/HTML formatting with proper escaping                             |
+| `index.ts`    | 5 lines   | Re-exports public API                                                |
 
 ---
 
@@ -643,6 +643,45 @@ flowchart TD
     SWITCH --> TEXT
 ```
 
+### Collapsed Content Rendering
+
+Collapsed content blocks carry `childBlocks` — an array of `SemanticContentBlock[]` stored in `semantic.rendererAttrs.childBlocks`. The renderer converts these to text using `formatChildBlocksToText()`:
+
+```typescript
+// Base Renderer method — ensures ALL blocks become text
+formatChildBlocksToText(childBlocks: SemanticContentBlock[]): string
+```
+
+Unlike `format()` which passes through non-semantic blocks as-is (code, json, image stay as native `ContentBlock` types), `formatChildBlocksToText()` forces everything through `formatStandard()` so code becomes fenced code, JSON becomes fenced JSON, etc. This is necessary because `<collapsed>` tags must contain only text.
+
+The pipeline:
+
+````
+JSX:    <Collapsed name="ref:1">
+          <Text>Asked about <strong>Python</strong></Text>
+          <Code language="ts">function hello() {}</Code>
+        </Collapsed>
+
+Collector:
+  → childBlocks: [
+      { type: "text", text: "Asked about Python",
+        semanticNode: { children: [
+          { text: "Asked about " },
+          { semantic: "strong", children: [{ text: "Python" }] }
+        ]}},
+      { type: "code", language: "ts", text: "function hello() {}" }
+    ]
+
+Renderer (Markdown):
+  → <collapsed name="ref:1">Asked about **Python**
+
+    ```ts
+    function hello() {}
+    ```</collapsed>
+````
+
+The collector builds `semanticNode` trees from inline HTML intrinsics (`<strong>`, `<em>`, `<a>`, etc.) inside `<Text>` blocks. This preserves formatting through the rendering pipeline instead of flattening to plain text via `extractText()`.
+
 ---
 
 ## Usage Examples
@@ -814,6 +853,7 @@ The renderers module enables format-flexible content output:
 - **`SemanticNode`** trees represent formatted content with semantic meaning
 - **`MarkdownRenderer`** formats content as Markdown (GFM, CommonMark)
 - **`XMLRenderer`** formats content as XML/HTML with proper escaping
+- **`formatChildBlocksToText`** converts all block types to text for collapsed content
 - **JSX components** (`<Markdown>`, `<XML>`, `<Renderer>`) integrate with the agent definition system
 - **Custom renderers** extend the base class to support additional output formats
 
