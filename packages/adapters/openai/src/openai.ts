@@ -43,6 +43,99 @@ import { type OpenAIAdapterConfig, STOP_REASON_MAP } from "./types";
  *
  * Returns a ModelClass that can be used both programmatically and as JSX.
  */
+/**
+ * Map an OpenAI streaming chunk to AdapterDelta(s).
+ * Extracted for testability — the id-tracking map is passed in.
+ */
+export function mapOpenAIChunk(
+  chunk: ChatCompletionChunk,
+  toolCallIdByIndex: Map<number, string>,
+): AdapterDelta | AdapterDelta[] | null {
+  // Usage-only chunks (no choices) - emit usage event, not message_end
+  // OpenAI sends usage in a separate final chunk after finish_reason
+  if (!chunk.choices || chunk.choices.length === 0) {
+    if (chunk.usage) {
+      return {
+        type: "usage",
+        usage: {
+          inputTokens: chunk.usage.prompt_tokens ?? 0,
+          outputTokens: chunk.usage.completion_tokens ?? 0,
+          totalTokens: chunk.usage.total_tokens ?? 0,
+        },
+      };
+    }
+    return null;
+  }
+
+  const choice = chunk.choices[0];
+
+  if (!choice || !choice.delta) {
+    return null;
+  }
+
+  const delta = choice.delta;
+
+  // Check finish_reason FIRST - the final chunk has both finish_reason and empty content
+  if (choice.finish_reason) {
+    return {
+      type: "message_end",
+      stopReason: STOP_REASON_MAP[choice.finish_reason] ?? StopReason.OTHER,
+      usage: chunk.usage
+        ? {
+            inputTokens: chunk.usage.prompt_tokens ?? 0,
+            outputTokens: chunk.usage.completion_tokens ?? 0,
+            totalTokens: chunk.usage.total_tokens ?? 0,
+          }
+        : undefined,
+    };
+  }
+
+  // Text content - only emit if non-empty (empty deltas are noise)
+  if (delta.content) {
+    return { type: "text", delta: delta.content };
+  }
+
+  // Tool calls
+  if (delta.tool_calls) {
+    for (const toolCall of delta.tool_calls) {
+      const index = toolCall.index;
+
+      // Track id by index (OpenAI only sends id on first chunk)
+      if (toolCall.id) {
+        toolCallIdByIndex.set(index, toolCall.id);
+      }
+
+      // Get the tracked id for this tool call
+      const id = toolCallIdByIndex.get(index) || "";
+
+      if (toolCall.function) {
+        const results: AdapterDelta[] = [];
+
+        // Tool call start (has name)
+        if (toolCall.function.name) {
+          results.push({
+            type: "tool_call_start",
+            id,
+            name: toolCall.function.name,
+          });
+        }
+        // Tool call delta (has arguments)
+        if (toolCall.function.arguments) {
+          results.push({
+            type: "tool_call_delta",
+            id,
+            delta: toolCall.function.arguments,
+          });
+        }
+
+        if (results.length > 0) return results.length === 1 ? results[0] : results;
+      }
+    }
+  }
+
+  return null;
+}
+
 export function createOpenAIModel(config: OpenAIAdapterConfig = {}): ModelClass {
   const client = config.client ?? new OpenAI(buildClientOptions(config));
 
@@ -145,88 +238,7 @@ export function createOpenAIModel(config: OpenAIAdapterConfig = {}): ModelClass 
       return baseParams;
     },
 
-    mapChunk: (chunk: ChatCompletionChunk): AdapterDelta | null => {
-      // Usage-only chunks (no choices) - emit usage event, not message_end
-      // OpenAI sends usage in a separate final chunk after finish_reason
-      if (!chunk.choices || chunk.choices.length === 0) {
-        if (chunk.usage) {
-          // Emit usage event (not message_end) to avoid duplicate end events
-          return {
-            type: "usage",
-            usage: {
-              inputTokens: chunk.usage.prompt_tokens ?? 0,
-              outputTokens: chunk.usage.completion_tokens ?? 0,
-              totalTokens: chunk.usage.total_tokens ?? 0,
-            },
-          };
-        }
-        return null;
-      }
-
-      const choice = chunk.choices[0];
-
-      if (!choice || !choice.delta) {
-        return null;
-      }
-
-      const delta = choice.delta;
-
-      // Check finish_reason FIRST - the final chunk has both finish_reason and empty content
-      if (choice.finish_reason) {
-        return {
-          type: "message_end",
-          stopReason: STOP_REASON_MAP[choice.finish_reason] ?? StopReason.OTHER,
-          usage: chunk.usage
-            ? {
-                inputTokens: chunk.usage.prompt_tokens ?? 0,
-                outputTokens: chunk.usage.completion_tokens ?? 0,
-                totalTokens: chunk.usage.total_tokens ?? 0,
-              }
-            : undefined,
-        };
-      }
-
-      // Text content - only emit if non-empty (empty deltas are noise)
-      if (delta.content) {
-        return { type: "text", delta: delta.content };
-      }
-
-      // Tool calls
-      if (delta.tool_calls) {
-        for (const toolCall of delta.tool_calls) {
-          const index = toolCall.index;
-
-          // Track id by index (OpenAI only sends id on first chunk)
-          if (toolCall.id) {
-            toolCallIdByIndex.set(index, toolCall.id);
-          }
-
-          // Get the tracked id for this tool call
-          const id = toolCallIdByIndex.get(index) || "";
-
-          if (toolCall.function) {
-            // Tool call start (has name)
-            if (toolCall.function.name) {
-              return {
-                type: "tool_call_start",
-                id,
-                name: toolCall.function.name,
-              };
-            }
-            // Tool call delta (has arguments)
-            if (toolCall.function.arguments) {
-              return {
-                type: "tool_call_delta",
-                id,
-                delta: toolCall.function.arguments,
-              };
-            }
-          }
-        }
-      }
-
-      return null;
-    },
+    mapChunk: (chunk: ChatCompletionChunk) => mapOpenAIChunk(chunk, toolCallIdByIndex),
 
     processOutput: async (output: ChatCompletion): Promise<ModelOutput> => {
       const choice = output.choices?.[0];

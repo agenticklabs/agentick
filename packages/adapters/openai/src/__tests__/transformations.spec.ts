@@ -4,10 +4,12 @@
  * Tests the data shape transformations between Agentick format and OpenAI format.
  */
 
-import { buildClientOptions, toOpenAIMessages, mapToolDefinition } from "../openai";
+import { buildClientOptions, toOpenAIMessages, mapToolDefinition, mapOpenAIChunk } from "../openai";
 import { STOP_REASON_MAP } from "../types";
 import { StopReason } from "@agentick/shared";
+import type { AdapterDelta } from "@agentick/core/model";
 import type { Message, ImageBlock, ToolUseBlock, ToolResultBlock } from "@agentick/shared";
+import type { ChatCompletionChunk } from "openai/resources/chat/completions";
 
 // =============================================================================
 // Stop Reason Mapping
@@ -693,6 +695,205 @@ describe("mapToolDefinition", () => {
           parameters: { type: "object" },
         },
       });
+    });
+  });
+});
+
+// =============================================================================
+// Streaming Chunk Mapping
+// =============================================================================
+
+function makeChunk(overrides: Partial<ChatCompletionChunk> = {}): ChatCompletionChunk {
+  return {
+    id: "chatcmpl-test",
+    object: "chat.completion.chunk" as const,
+    created: 1234567890,
+    model: "gpt-4",
+    choices: [],
+    ...overrides,
+  };
+}
+
+function makeToolCallChunk(toolCall: {
+  index: number;
+  id?: string;
+  name?: string;
+  arguments?: string;
+}): ChatCompletionChunk {
+  return makeChunk({
+    choices: [
+      {
+        index: 0,
+        delta: {
+          tool_calls: [
+            {
+              index: toolCall.index,
+              ...(toolCall.id ? { id: toolCall.id } : {}),
+              ...(toolCall.name || toolCall.arguments
+                ? {
+                    function: {
+                      ...(toolCall.name ? { name: toolCall.name } : {}),
+                      ...(toolCall.arguments ? { arguments: toolCall.arguments } : {}),
+                    },
+                  }
+                : {}),
+            } as any,
+          ],
+        },
+        finish_reason: null,
+      } as any,
+    ],
+  });
+}
+
+describe("mapOpenAIChunk", () => {
+  let idMap: Map<number, string>;
+
+  beforeEach(() => {
+    idMap = new Map();
+  });
+
+  describe("text chunks", () => {
+    it("should map text content", () => {
+      const chunk = makeChunk({
+        choices: [{ index: 0, delta: { content: "hello" }, finish_reason: null } as any],
+      });
+      expect(mapOpenAIChunk(chunk, idMap)).toEqual({ type: "text", delta: "hello" });
+    });
+
+    it("should return null for empty delta", () => {
+      const chunk = makeChunk({
+        choices: [{ index: 0, delta: {}, finish_reason: null } as any],
+      });
+      expect(mapOpenAIChunk(chunk, idMap)).toBeNull();
+    });
+  });
+
+  describe("finish reason", () => {
+    it("should map stop finish_reason to message_end", () => {
+      const chunk = makeChunk({
+        choices: [{ index: 0, delta: {}, finish_reason: "stop" } as any],
+      });
+      const result = mapOpenAIChunk(chunk, idMap) as AdapterDelta;
+      expect(result.type).toBe("message_end");
+      expect((result as any).stopReason).toBe(StopReason.STOP);
+    });
+
+    it("should map tool_calls finish_reason", () => {
+      const chunk = makeChunk({
+        choices: [{ index: 0, delta: {}, finish_reason: "tool_calls" } as any],
+      });
+      const result = mapOpenAIChunk(chunk, idMap) as AdapterDelta;
+      expect(result.type).toBe("message_end");
+      expect((result as any).stopReason).toBe(StopReason.TOOL_USE);
+    });
+  });
+
+  describe("usage-only chunks", () => {
+    it("should emit usage event for chunks with no choices", () => {
+      const chunk = makeChunk({
+        choices: [],
+        usage: { prompt_tokens: 100, completion_tokens: 50, total_tokens: 150 },
+      });
+      expect(mapOpenAIChunk(chunk, idMap)).toEqual({
+        type: "usage",
+        usage: { inputTokens: 100, outputTokens: 50, totalTokens: 150 },
+      });
+    });
+
+    it("should return null for empty chunk with no usage", () => {
+      const chunk = makeChunk({ choices: [] });
+      expect(mapOpenAIChunk(chunk, idMap)).toBeNull();
+    });
+  });
+
+  describe("tool calls — OpenAI style (split chunks)", () => {
+    it("should emit tool_call_start when name arrives", () => {
+      const chunk = makeToolCallChunk({ index: 0, id: "call_123", name: "glob" });
+      const result = mapOpenAIChunk(chunk, idMap);
+      expect(result).toEqual({ type: "tool_call_start", id: "call_123", name: "glob" });
+    });
+
+    it("should emit tool_call_delta for argument fragments", () => {
+      // First: register the id
+      mapOpenAIChunk(makeToolCallChunk({ index: 0, id: "call_123", name: "glob" }), idMap);
+
+      // Second: argument fragment
+      const chunk = makeToolCallChunk({ index: 0, arguments: '{"pat' });
+      const result = mapOpenAIChunk(chunk, idMap);
+      expect(result).toEqual({ type: "tool_call_delta", id: "call_123", delta: '{"pat' });
+    });
+
+    it("should track id by index across chunks", () => {
+      // First chunk sets the id
+      mapOpenAIChunk(makeToolCallChunk({ index: 0, id: "call_abc", name: "search" }), idMap);
+      expect(idMap.get(0)).toBe("call_abc");
+
+      // Subsequent chunks don't have id — should reuse tracked one
+      const chunk = makeToolCallChunk({ index: 0, arguments: '{"q":"test"}' });
+      const result = mapOpenAIChunk(chunk, idMap);
+      expect(result).toEqual({ type: "tool_call_delta", id: "call_abc", delta: '{"q":"test"}' });
+    });
+  });
+
+  describe("tool calls — Grok style (name + arguments in one chunk)", () => {
+    it("should emit both tool_call_start and tool_call_delta", () => {
+      const chunk = makeToolCallChunk({
+        index: 0,
+        id: "call_grok",
+        name: "glob",
+        arguments: '{"pattern":"**/*.ts"}',
+      });
+      const result = mapOpenAIChunk(chunk, idMap);
+
+      // Should be an array of two deltas
+      expect(Array.isArray(result)).toBe(true);
+      const deltas = result as AdapterDelta[];
+      expect(deltas).toHaveLength(2);
+      expect(deltas[0]).toEqual({ type: "tool_call_start", id: "call_grok", name: "glob" });
+      expect(deltas[1]).toEqual({
+        type: "tool_call_delta",
+        id: "call_grok",
+        delta: '{"pattern":"**/*.ts"}',
+      });
+    });
+
+    it("should handle complete tool call with empty arguments in one chunk", () => {
+      const chunk = makeToolCallChunk({
+        index: 0,
+        id: "call_empty",
+        name: "get_time",
+        arguments: "{}",
+      });
+      const result = mapOpenAIChunk(chunk, idMap);
+
+      expect(Array.isArray(result)).toBe(true);
+      const deltas = result as AdapterDelta[];
+      expect(deltas).toHaveLength(2);
+      expect(deltas[0]).toEqual({ type: "tool_call_start", id: "call_empty", name: "get_time" });
+      expect(deltas[1]).toEqual({ type: "tool_call_delta", id: "call_empty", delta: "{}" });
+    });
+  });
+
+  describe("multiple tool calls in one chunk", () => {
+    it("should only process first tool call (per existing behavior)", () => {
+      const chunk = makeChunk({
+        choices: [
+          {
+            index: 0,
+            delta: {
+              tool_calls: [
+                { index: 0, id: "call_1", function: { name: "tool_a" } },
+                { index: 1, id: "call_2", function: { name: "tool_b" } },
+              ],
+            },
+            finish_reason: null,
+          } as any,
+        ],
+      });
+      const result = mapOpenAIChunk(chunk, idMap);
+      // Returns on first match
+      expect(result).toEqual({ type: "tool_call_start", id: "call_1", name: "tool_a" });
     });
   });
 });
