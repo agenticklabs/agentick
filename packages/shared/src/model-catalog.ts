@@ -33,6 +33,8 @@ export interface ModelInfo {
   supportsVision?: boolean;
   /** Whether the model supports tool use */
   supportsToolUse?: boolean;
+  /** Whether the model supports structured output via JSON schema */
+  supportsStructuredOutput?: boolean;
   /** Whether this is a reasoning model (extended thinking) */
   isReasoningModel?: boolean;
 }
@@ -750,6 +752,106 @@ export const MODEL_CATALOG: Record<string, ModelInfo> = {
     supportsToolUse: true,
     isReasoningModel: true,
   },
+
+  // ════════════════════════════════════════════════════════════════════════════
+  // XAI Grok Models
+  // https://x.ai/models
+  // ════════════════════════════════════════════════════════════════════════════
+
+  // Grok 4.1 Fast (February 2026)
+  "grok-4-1-fast-reasoning": {
+    name: "Grok 4.1 Fast Reasoning",
+    provider: "xai",
+    contextWindow: 2000000,
+    supportsVision: true,
+    supportsToolUse: true,
+    isReasoningModel: true,
+  },
+  "grok-4-1-fast-non-reasoning": {
+    name: "Grok 4.1 Fast Non-Reasoning",
+    provider: "xai",
+    contextWindow: 2000000,
+    supportsVision: true,
+    supportsToolUse: true,
+  },
+
+  // Grok Code Fast 1
+  "grok-code-fast-1": {
+    name: "Grok Code Fast 1",
+    provider: "xai",
+    contextWindow: 256000,
+    supportsVision: true,
+    supportsToolUse: true,
+    isReasoningModel: true,
+  },
+
+  // Grok 4 Fast
+  "grok-4-fast-reasoning": {
+    name: "Grok 4 Fast Reasoning",
+    provider: "xai",
+    contextWindow: 2000000,
+    supportsVision: true,
+    supportsToolUse: true,
+    isReasoningModel: true,
+  },
+  "grok-4-fast-non-reasoning": {
+    name: "Grok 4 Fast Non-Reasoning",
+    provider: "xai",
+    contextWindow: 2000000,
+    supportsVision: true,
+    supportsToolUse: true,
+  },
+
+  // Grok 4 (July 2025)
+  "grok-4-0709": {
+    name: "Grok 4",
+    provider: "xai",
+    contextWindow: 256000,
+    supportsVision: true,
+    supportsToolUse: true,
+  },
+
+  // Grok 3
+  "grok-3-mini": {
+    name: "Grok 3 Mini",
+    provider: "xai",
+    contextWindow: 131072,
+    supportsVision: true,
+    supportsToolUse: true,
+    isReasoningModel: true,
+  },
+  "grok-3": {
+    name: "Grok 3",
+    provider: "xai",
+    contextWindow: 131072,
+    supportsVision: true,
+    supportsToolUse: true,
+  },
+
+  // Grok 2 (legacy)
+  "grok-2-vision-1212": {
+    name: "Grok 2 Vision",
+    provider: "xai",
+    contextWindow: 32768,
+    supportsVision: true,
+    supportsToolUse: true,
+  },
+
+  // ════════════════════════════════════════════════════════════════════════════
+  // Apple Foundation Models
+  // On-device inference (macOS 26+, iOS 26+)
+  // https://developer.apple.com/documentation/FoundationModels
+  // ════════════════════════════════════════════════════════════════════════════
+
+  "apple-foundation-3b": {
+    name: "Apple Foundation Model (~3B)",
+    provider: "apple",
+    contextWindow: 4096,
+    supportsVision: false,
+    supportsToolUse: false,
+    supportsStructuredOutput: true,
+    releaseDate: "2025-06",
+  },
 };
 
 /**
@@ -866,6 +968,7 @@ export interface AdapterModelMetadata {
   maxOutputTokens?: number;
   supportsVision?: boolean;
   supportsToolUse?: boolean;
+  supportsStructuredOutput?: boolean;
   isReasoningModel?: boolean;
 }
 
@@ -905,6 +1008,7 @@ export function getEffectiveModelInfo(
       maxOutputTokens: adapterMetadata.maxOutputTokens,
       supportsVision: adapterMetadata.supportsVision,
       supportsToolUse: adapterMetadata.supportsToolUse,
+      supportsStructuredOutput: adapterMetadata.supportsStructuredOutput,
       isReasoningModel: adapterMetadata.isReasoningModel,
     };
   }
@@ -925,6 +1029,9 @@ export function getEffectiveModelInfo(
       }),
       ...(adapterMetadata.supportsToolUse !== undefined && {
         supportsToolUse: adapterMetadata.supportsToolUse,
+      }),
+      ...(adapterMetadata.supportsStructuredOutput !== undefined && {
+        supportsStructuredOutput: adapterMetadata.supportsStructuredOutput,
       }),
       ...(adapterMetadata.isReasoningModel !== undefined && {
         isReasoningModel: adapterMetadata.isReasoningModel,

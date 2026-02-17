@@ -252,6 +252,8 @@ export interface ModelMetadata {
   supportsVision?: boolean;
   /** Whether the model supports tool/function calling */
   supportsToolUse?: boolean;
+  /** Whether the model supports structured output via JSON schema */
+  supportsStructuredOutput?: boolean;
   /** Whether this is a reasoning model (extended thinking) */
   isReasoningModel?: boolean;
 

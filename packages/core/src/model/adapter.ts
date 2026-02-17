@@ -396,7 +396,7 @@ export interface AdapterOptions<TProviderInput, TProviderOutput, TChunk> {
    * }
    * ```
    */
-  mapChunk: (chunk: TChunk) => AdapterDelta | null;
+  mapChunk: (chunk: TChunk) => AdapterDelta | AdapterDelta[] | null;
 
   /**
    * Execute non-streaming generation.
@@ -726,12 +726,15 @@ export function createAdapter<TProviderInput, TProviderOutput, TChunk>(
               }
             }
 
-            // Map chunk to AdapterDelta and push to accumulator
+            // Map chunk to AdapterDelta(s) and push to accumulator
             const delta = mapChunk(chunk);
             if (delta) {
-              const events = accumulator.push(delta);
-              for (const event of events) {
-                yield event;
+              const deltas = Array.isArray(delta) ? delta : [delta];
+              for (const d of deltas) {
+                const events = accumulator.push(d);
+                for (const event of events) {
+                  yield event;
+                }
               }
             }
           }
