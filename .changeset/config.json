@@ -26,6 +26,7 @@
       "@agentick/openai",
       "@agentick/google",
       "@agentick/ai-sdk",
+      "@agentick/apple",
       "@agentick/connector",
       "@agentick/connector-imessage",
       "@agentick/connector-telegram"
