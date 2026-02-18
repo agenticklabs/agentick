@@ -25,7 +25,10 @@
     "../packages/sandbox-local",
     "../packages/connector",
     "../packages/connector-imessage",
-    "../packages/connector-telegram"
+    "../packages/connector-telegram",
+    "../packages/secrets",
+    "../packages/scheduler",
+    "../packages/adapters/apple"
   ],
   "out": "api",
   "plugin": ["typedoc-plugin-markdown", "typedoc-vitepress-theme"],

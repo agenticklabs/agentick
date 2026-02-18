@@ -10,11 +10,16 @@ const PACKAGE_GROUPS: Array<{ label: string; packages: string[] }> = [
   },
   {
     label: "Agent",
-    packages: ["@agentick/agent", "@agentick/guardrails"],
+    packages: [
+      "@agentick/agent",
+      "@agentick/guardrails",
+      "@agentick/scheduler",
+      "@agentick/secrets",
+    ],
   },
   {
     label: "Adapters",
-    packages: ["@agentick/openai", "@agentick/google", "@agentick/ai-sdk"],
+    packages: ["@agentick/openai", "@agentick/google", "@agentick/ai-sdk", "@agentick/apple"],
   },
   {
     label: "Server",

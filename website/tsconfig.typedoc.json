@@ -29,7 +29,20 @@
       "@agentick/guardrails": ["../packages/guardrails/src/index.ts"],
       "@agentick/openai": ["../packages/adapters/openai/src/index.ts"],
       "@agentick/google": ["../packages/adapters/google/src/index.ts"],
-      "@agentick/ai-sdk": ["../packages/adapters/ai-sdk/src/index.ts"]
+      "@agentick/ai-sdk": ["../packages/adapters/ai-sdk/src/index.ts"],
+      "@agentick/apple": ["../packages/adapters/apple/src/index.ts"],
+      "@agentick/tui": ["../packages/tui/src/index.ts"],
+      "@agentick/sandbox": ["../packages/sandbox/src/index.ts"],
+      "@agentick/sandbox-local": ["../packages/sandbox-local/src/index.ts"],
+      "@agentick/connector": ["../packages/connector/src/index.ts"],
+      "@agentick/connector-imessage": ["../packages/connector-imessage/src/index.ts"],
+      "@agentick/connector-telegram": ["../packages/connector-telegram/src/index.ts"],
+      "@agentick/cli": ["../packages/cli/src/index.ts"],
+      "@agentick/angular": ["../packages/angular/src/index.ts"],
+      "@agentick/nestjs": ["../packages/nestjs/src/index.ts"],
+      "@agentick/client-multiplexer": ["../packages/client-multiplexer/src/index.ts"],
+      "@agentick/secrets": ["../packages/secrets/src/index.ts"],
+      "@agentick/scheduler": ["../packages/scheduler/src/index.ts"]
     }
   },
   "include": [
@@ -62,7 +75,20 @@
     "../packages/guardrails/src/index.ts",
     "../packages/adapters/openai/src/index.ts",
     "../packages/adapters/google/src/index.ts",
-    "../packages/adapters/ai-sdk/src/index.ts"
+    "../packages/adapters/ai-sdk/src/index.ts",
+    "../packages/adapters/apple/src/index.ts",
+    "../packages/tui/src/index.ts",
+    "../packages/sandbox/src/index.ts",
+    "../packages/sandbox-local/src/index.ts",
+    "../packages/connector/src/index.ts",
+    "../packages/connector-imessage/src/index.ts",
+    "../packages/connector-telegram/src/index.ts",
+    "../packages/cli/src/index.ts",
+    "../packages/angular/src/index.ts",
+    "../packages/nestjs/src/index.ts",
+    "../packages/client-multiplexer/src/index.ts",
+    "../packages/secrets/src/index.ts",
+    "../packages/scheduler/src/index.ts"
   ],
   "exclude": ["**/node_modules/**", "**/*.spec.ts", "**/*.test.ts", "**/examples/**"]
 }

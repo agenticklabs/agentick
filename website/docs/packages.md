@@ -15,7 +15,7 @@ Agentick is organized as a monorepo with layered packages. Each layer depends on
 │   @agentick/core      @agentick/gateway      @agentick/client       │
 │   @agentick/express   @agentick/devtools     @agentick/agent        │
 │   @agentick/tui       @agentick/react        @agentick/sandbox      │
-│   @agentick/connector  @agentick/secrets                              │
+│   @agentick/connector  @agentick/secrets    @agentick/scheduler       │
 └──────────────────────────────┬──────────────────────────────────────┘
                                │
 ┌──────────────────────────────┴──────────────────────────────────────┐
@@ -85,6 +85,10 @@ Sandbox primitive layer. Types, `<Sandbox>` component, pre-built tools (Shell, R
 ### @agentick/secrets
 
 Platform-native secret storage. Stores credentials in the OS keychain (macOS Keychain, Linux libsecret) with environment variable fallback. Auto-detects the best backend. No native dependencies — shells out to `security` / `secret-tool`.
+
+### @agentick/scheduler
+
+Scheduled jobs, heartbeat, and cron triggers. File-based persistence with crash recovery. JobStore persists jobs as JSON files, Scheduler manages node-cron timers, TriggerWatcher dispatches to sessions. External triggers via filesystem — system cron, scripts, manual writes.
 
 ### @agentick/guardrails
 

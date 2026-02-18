@@ -1,20 +1,20 @@
 {
-  "name": "@agentick/secrets",
+  "name": "@agentick/scheduler",
   "version": "0.7.0",
-  "description": "Platform-native secret storage for Agentick agents",
+  "description": "Scheduled jobs, heartbeat, and cron triggers for Agentick agents",
   "keywords": [
     "agent",
     "ai",
-    "credentials",
-    "keychain",
-    "secrets"
+    "cron",
+    "heartbeat",
+    "scheduler"
   ],
   "license": "MIT",
   "author": "Ryan Lindgren",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/agenticklabs/agentick.git",
-    "directory": "packages/secrets"
+    "directory": "packages/scheduler"
   },
   "files": [
     "dist"
@@ -46,9 +46,19 @@
     "dev": "tsc --watch"
   },
   "dependencies": {
-    "@agentick/shared": "workspace:*"
+    "@agentick/client": "workspace:*",
+    "@agentick/core": "workspace:*",
+    "@agentick/shared": "workspace:*",
+    "node-cron": "^3.0.3",
+    "zod": "^4.3.6"
   },
   "devDependencies": {
+    "@types/node-cron": "^3.0.11",
+    "@types/react": "^19.0.0",
+    "react": "^19.0.0",
     "typescript": "^5.8.3"
+  },
+  "peerDependencies": {
+    "react": "^19.0.0"
   }
 }
