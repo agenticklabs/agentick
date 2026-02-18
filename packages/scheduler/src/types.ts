@@ -29,9 +29,18 @@ export interface Trigger {
   oneshot: boolean;
 }
 
+export interface SchedulerBackend {
+  start(): Promise<void>;
+  stop(): Promise<void>;
+  schedule(job: Job, onFire: () => Promise<void>): void;
+  unschedule(jobId: string): void;
+}
+
 export interface CronServiceOptions {
   dataDir: string;
   client: AgentickClient;
+  backend?: SchedulerBackend;
+  watchExternalTriggers?: boolean;
   defaultTarget?: string;
   onTriggerProcessed?: (trigger: Trigger) => void;
   onError?: (error: Error, context: string) => void;
