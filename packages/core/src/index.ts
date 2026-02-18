@@ -90,6 +90,12 @@ export {
   // Expandable content
   Expandable,
   type ExpandableProps,
+  // Gates
+  gate,
+  useGate,
+  type GateDescriptor,
+  type GateState,
+  type GateValue,
   // Knobs
   knob,
   isKnob,

@@ -58,6 +58,9 @@ export {
   type KnobsRenderFn,
 } from "./knobs-component";
 
+// Gates
+export { gate, useGate, type GateDescriptor, type GateState, type GateValue } from "./gate";
+
 // Expandable content
 export { Expandable, type ExpandableProps } from "./expandable";
 

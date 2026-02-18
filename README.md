@@ -386,6 +386,17 @@ Knobs are reactive values the model can see _and set_ via tool calls:
 | `<Knobs.Controls>`          | Renders knob controls from `Knobs.Provider` context.                           |
 | `isKnob(value)`             | Type guard for knob descriptors.                                               |
 
+#### Gates (Continuation Conditions)
+
+Gates are named checkpoints that block the model from completing until cleared. Built on knobs + continuation — a three-state knob (`inactive`/`active`/`deferred`) with an auto-activation trigger and an exit blocker.
+
+| API                         | Description                                                                       |
+| --------------------------- | --------------------------------------------------------------------------------- |
+| `gate(descriptor)`          | Create a gate descriptor with `description`, `instructions`, and `activateWhen`.  |
+| `useGate(name, descriptor)` | Hook returning `GateState`: `{active, deferred, engaged, clear, defer, element}`. |
+
+The model clears gates via the existing `set_knob` tool. See [hooks README](packages/core/src/hooks/README.md#gates-continuation-conditions) for full documentation.
+
 #### Context & Environment
 
 | Hook                       | Description                                                        |
@@ -442,6 +453,39 @@ function VerifiedAgent() {
   );
 }
 ```
+
+### Gates — Named Exit Conditions
+
+When `useContinuation` is too low-level and you want a named, stateful checkpoint, use `useGate`. The gate activates when a condition is met, blocks the model from completing until it explicitly clears the gate, and auto-renders instructions via `<Ephemeral>`.
+
+```tsx
+import { gate, useGate, Knobs } from "@agentick/core";
+
+const verificationGate = gate({
+  description: "Verify your changes before completing",
+  instructions: `VERIFICATION PENDING: You've modified files.
+Run typecheck, tests, or lint. Clear the gate when satisfied.`,
+  activateWhen: (result) =>
+    result.toolCalls.some((tc) => ["write_file", "edit_file"].includes(tc.name)),
+});
+
+function CodingAgent() {
+  const verification = useGate("verification", verificationGate);
+
+  return (
+    <>
+      <System>You are a coding agent.</System>
+      <Timeline />
+      <Knobs />
+      {verification.element}
+    </>
+  );
+}
+```
+
+The model edits a file → gate activates → model gets another turn with verification instructions → runs checks → calls `set_knob(name="verification", value="inactive")` → execution completes normally.
+
+The model can also `set_knob(name="verification", value="deferred")` to acknowledge the gate without addressing it immediately. Deferred gates still block at exit — they un-defer to `active` first, forcing one more turn.
 
 ### Custom Hooks
 

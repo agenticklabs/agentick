@@ -752,6 +752,149 @@ Momentary knobs display as `[momentary toggle]` with a `(resets after use)` hint
 
 All three modes render nothing when no knobs are registered — no tool, no section, no context. `<Knobs.Provider>` still renders its children (just without context).
 
+## Gates (Continuation Conditions)
+
+Gates are knob-backed continuation conditions. A gate is a named checkpoint that activates when a condition is met, blocks the model from completing until it actively addresses the gate, and auto-renders instructions when active.
+
+Gates compose two existing primitives — a knob (three-state: `inactive`/`active`/`deferred`) and a continuation callback (blocks exit when engaged). The model controls the gate via `set_knob`.
+
+### gate() — Descriptor Factory
+
+Create a gate descriptor at module level:
+
+```tsx
+import { gate } from "@agentick/core";
+
+const verificationGate = gate({
+  description: "Verify your changes before completing",
+  instructions: `VERIFICATION PENDING: You've modified files.
+Run appropriate checks (typecheck, tests, lint).
+Clear the verification gate when satisfied.
+Set to "deferred" if you plan to verify after other work.`,
+  activateWhen: (result) =>
+    result.toolCalls.some((tc) => ["write_file", "edit_file"].includes(tc.name)),
+});
+```
+
+### useGate() — Hook
+
+Wire the gate into a component. Returns `GateState` with the gate's current state and an auto-rendered `<Ephemeral>` element.
+
+```tsx
+import { useGate, Knobs } from "@agentick/core";
+
+function CodingAgent() {
+  const verification = useGate("verification", verificationGate);
+
+  return (
+    <>
+      <System>You are a coding agent.</System>
+      <Timeline />
+      <Knobs />
+      {verification.element}
+    </>
+  );
+}
+```
+
+### Three States
+
+| State      | `active` | `deferred` | `engaged` | Blocks exit | Shows instructions |
+| ---------- | -------- | ---------- | --------- | ----------- | ------------------ |
+| `inactive` | `false`  | `false`    | `false`   | No          | No                 |
+| `active`   | `true`   | `false`    | `true`    | Yes         | Yes (Ephemeral)    |
+| `deferred` | `false`  | `true`     | `true`    | Yes         | No                 |
+
+### How It Works
+
+```
+Tick N: Model edits files
+  └─ tick end: activateWhen fires → knob = "active"
+  └─ continuation: model would stop → gate forces continue
+
+Tick N+1: Model gets another turn
+  └─ sees Ephemeral: "VERIFICATION PENDING: ..."
+  └─ runs shell commands (typecheck, tests)
+  └─ calls set_knob(name="verification", value="inactive")
+
+Tick N+1 ends:
+  └─ gate is inactive → no continuation forced → execution completes
+```
+
+The gate only forces continuation when the model would otherwise **stop**. During multi-step work (tool calls pending, tasks in progress), `shouldContinue` is already `true` — the gate is irrelevant. It only catches the exit.
+
+### Defer
+
+The model can set a gate to `"deferred"` to acknowledge it without addressing it immediately. Deferred gates:
+
+- Still block exit (the model can't slip past)
+- Don't show the instructions Ephemeral (saves tokens)
+- Un-defer to `"active"` when the model would stop — forcing one more turn with full instructions visible
+
+```tsx
+// Model defers during a multi-step refactor:
+// set_knob(name="verification", value="deferred")
+// ... continues working ...
+// When model tries to stop → gate un-defers → instructions reappear
+// Model runs verification → clears gate → execution ends
+```
+
+### Activation Rules
+
+- `activateWhen` only fires when the gate is `inactive`
+- Once engaged (`active` or `deferred`), the model controls it via `set_knob`
+- If the model clears the gate AND `activateWhen` fires in the same tick, the gate re-activates
+- Activation doesn't fire from `deferred` state — preventing unwanted re-engagement
+
+### GateState
+
+Returned by `useGate()`:
+
+| Field      | Type                  | Description                               |
+| ---------- | --------------------- | ----------------------------------------- |
+| `active`   | `boolean`             | Gate is in `"active"` state               |
+| `deferred` | `boolean`             | Gate is in `"deferred"` state             |
+| `engaged`  | `boolean`             | `active \|\| deferred` — gate is blocking |
+| `clear()`  | `() => void`          | Set gate to `"inactive"`                  |
+| `defer()`  | `() => void`          | Set gate to `"deferred"`                  |
+| `element`  | `JSX.Element \| null` | Ephemeral with instructions (when active) |
+
+### GateDescriptor
+
+Passed to `gate()` and `useGate()`:
+
+| Field          | Type                              | Description                           |
+| -------------- | --------------------------------- | ------------------------------------- |
+| `description`  | `string`                          | Shown in knob menu                    |
+| `instructions` | `string`                          | Ephemeral content when gate is active |
+| `activateWhen` | `(result: TickResult) => boolean` | Condition that triggers activation    |
+
+### Multiple Gates
+
+Gates are independent. Multiple gates can be active simultaneously, and each must be cleared individually before the model can exit:
+
+```tsx
+function Agent() {
+  const verification = useGate("verification", verificationGate);
+  const review = useGate("review", reviewGate);
+
+  return (
+    <>
+      <Timeline />
+      <Knobs />
+      {verification.element}
+      {review.element}
+    </>
+  );
+}
+```
+
+### Design Philosophy
+
+Gates are a **nudge, not a jail**. The model CAN call `set_knob(name="verification", value="inactive")` without actually verifying. That's by design — we trust the model's judgment. The gate ensures the model must actively decide to skip verification rather than accidentally forgetting it.
+
+The framework provides the gate. The model provides the intelligence.
+
 ## Priority System
 
 When multiple components call `stop()` or `continue()`, the COM uses a priority system:
