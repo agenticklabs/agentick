@@ -10,7 +10,7 @@
 import { EventEmitter } from "events";
 import type { IncomingMessage as NodeRequest, ServerResponse as NodeResponse } from "http";
 import type { Message } from "@agentick/shared";
-import { GuardError, isGuardError } from "@agentick/shared";
+import { GuardError, isGuardError, extractText } from "@agentick/shared";
 import {
   devToolsEmitter,
   type DTClientConnectedEvent,
@@ -38,7 +38,11 @@ import { AppRegistry } from "./app-registry.js";
 import { SessionManager } from "./session-manager.js";
 import { WSTransport } from "./ws-transport.js";
 import { HTTPTransport } from "./http-transport.js";
+import { EmbeddedSSETransport } from "./sse-transport.js";
+import type { ClientTransport, SendInput, StreamEvent } from "@agentick/shared";
 import type { Transport, TransportClient } from "./transport.js";
+import { LocalGatewayTransport } from "./local-transport.js";
+import { ClientEventBuffer } from "./client-event-buffer.js";
 import type {
   GatewayConfig,
   GatewayEvents,
@@ -51,6 +55,8 @@ import type {
   RequestMessage,
   GatewayMethod,
   GatewayEventType,
+  GatewayMessage,
+  EventMessage,
   SendParams,
   StatusParams,
   HistoryParams,
@@ -126,6 +132,17 @@ function createChannelServiceFromSession(
 // Gateway Class
 // ============================================================================
 
+// ============================================================================
+// Helpers
+// ============================================================================
+
+/** Extract first text content from SendInput for logging */
+function extractTextFromInput(input: SendInput): string {
+  if (!input.messages?.length) return "[no content]";
+  const texts = input.messages.map((msg) => extractText(msg.content, " ")).filter(Boolean);
+  return texts.join(" ") || "[multimodal content]";
+}
+
 /** Built-in methods that cannot be overridden */
 const BUILT_IN_METHODS: Set<string> = new Set([
   "send",
@@ -155,8 +172,8 @@ export class Gateway extends EventEmitter {
   /** Pre-compiled map of method paths to procedures */
   private methodProcedures = new Map<string, Procedure<any>>();
 
-  /** Track open SSE connections for embedded mode */
-  private sseClients = new Map<string, NodeResponse>();
+  /** SSE transport for embedded mode (initialized in constructor when embedded: true) */
+  private sseTransport: EmbeddedSSETransport | null = null;
 
   /** Track channel subscriptions: "sessionId:channelName" -> Set of clientIds */
   private channelSubscriptions = new Map<string, Set<string>>();
@@ -166,6 +183,12 @@ export class Gateway extends EventEmitter {
 
   /** Track client connection times for duration calculation */
   private clientConnectedAt = new Map<string, number>();
+
+  /** Shared local transport instance (created lazily) */
+  private _localTransport: LocalGatewayTransport | null = null;
+
+  /** Per-client event buffers for backpressure */
+  private clientBuffers = new Map<string, ClientEventBuffer>();
 
   /** Sequence counter for DevTools events */
   private devToolsSequence = 0;
@@ -201,8 +224,14 @@ export class Gateway extends EventEmitter {
       this.initializeMethods(config.methods, []);
     }
 
-    // Create transports only in standalone mode
-    if (!this.embedded) {
+    // Create transports
+    if (this.embedded) {
+      // Embedded mode: SSE transport for handleRequest() path
+      this.sseTransport = new EmbeddedSSETransport();
+      this.setupTransportHandlers(this.sseTransport);
+      this.transports.push(this.sseTransport);
+    } else {
+      // Standalone mode: WS and/or HTTP transports
       this.initializeTransports();
     }
   }
@@ -316,7 +345,7 @@ export class Gateway extends EventEmitter {
           type: "client_connected",
           executionId: this.config.id,
           clientId: client.id,
-          transport: transport.type as "websocket" | "sse" | "http",
+          transport: transport.type as "websocket" | "sse" | "http" | "local",
           sequence: this.devToolsSequence++,
           timestamp: connectTime,
         } as DTClientConnectedEvent);
@@ -329,8 +358,14 @@ export class Gateway extends EventEmitter {
       const durationMs = connectedAt ? Date.now() - connectedAt : 0;
       this.clientConnectedAt.delete(clientId);
 
-      // Clean up subscriptions
+      // Clean up subscriptions and buffer
       this.sessions.unsubscribeAll(clientId);
+      this.cleanupClientChannelSubscriptions(clientId);
+      const buffer = this.clientBuffers.get(clientId);
+      if (buffer) {
+        buffer.clear();
+        this.clientBuffers.delete(clientId);
+      }
 
       this.emit("client:disconnected", {
         clientId,
@@ -421,6 +456,145 @@ export class Gateway extends EventEmitter {
    */
   async close(): Promise<void> {
     return this.stop();
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // Public Session API (used by local transport and external callers)
+  // ══════════════════════════════════════════════════════════════════════════
+
+  /**
+   * Get or create a session with multi-app routing.
+   * Parses session key (e.g., "coding:main") and routes to the correct app.
+   */
+  async session(sessionKey: string): Promise<Session> {
+    const managedSession = await this.sessions.getOrCreate(sessionKey);
+    if (!managedSession.coreSession || managedSession.coreSession.isTerminal) {
+      managedSession.coreSession = await managedSession.appInfo.app.session(
+        managedSession.sessionName,
+      );
+    }
+    return managedSession.coreSession;
+  }
+
+  /**
+   * Close a session and clean up managed state.
+   */
+  async closeSession(sessionKey: string): Promise<void> {
+    await this.sessions.close(sessionKey);
+    this.emit("session:closed", { sessionId: sessionKey });
+  }
+
+  /**
+   * Subscribe a client to session events.
+   */
+  async subscribe(sessionKey: string, clientId: string): Promise<void> {
+    await this.sessions.subscribe(sessionKey, clientId);
+  }
+
+  /**
+   * Unsubscribe a client from session events.
+   */
+  unsubscribe(sessionKey: string, clientId: string): void {
+    this.sessions.unsubscribe(sessionKey, clientId);
+  }
+
+  /**
+   * Send a message to a session and stream events.
+   * Broadcasts events to all subscribers (cross-client push), excluding
+   * the sender who iterates the handle directly.
+   *
+   * @param senderClientId - If provided, this client is excluded from
+   *   push broadcasts (they get events through direct handle iteration).
+   */
+  async sendToSession(sessionKey: string, input: SendInput, senderClientId?: string) {
+    const session = await this.session(sessionKey);
+    const handle = await session.send(input);
+
+    // Broadcast events to OTHER subscribers in background.
+    // The sender iterates the handle directly — excluding them from
+    // broadcast prevents double-dispatch. handle.events creates an
+    // independent iterator (EventBuffer supports dual consumption).
+    const broadcast = this.iterateWithBroadcast(sessionKey, handle.events, input, {
+      excludeClientId: senderClientId,
+    });
+    (async () => {
+      for await (const _ of broadcast) {
+      }
+    })().catch((error) => {
+      this.emit("error", error instanceof Error ? error : new Error(String(error)));
+    });
+
+    return handle;
+  }
+
+  /**
+   * Unified execution path: get session, send, iterate events, broadcast.
+   * Used by WS, HTTP, and channel adapter paths.
+   */
+  private async *executeSession(
+    sessionKey: string,
+    input: SendInput,
+    opts?: { excludeClientId?: string; clientId?: string },
+  ): AsyncGenerator<StreamEvent> {
+    const session = await this.session(sessionKey);
+    const handle = await session.send(input);
+    yield* this.iterateWithBroadcast(sessionKey, handle, input, opts);
+  }
+
+  /**
+   * Core state management loop: activate session, track message,
+   * iterate events with broadcast, deactivate on completion.
+   *
+   * Both executeSession (yields to caller) and sendToSession
+   * (broadcasts in background) delegate here. The source is any
+   * AsyncIterable<StreamEvent> — a handle or handle.events.
+   */
+  private async *iterateWithBroadcast(
+    sessionKey: string,
+    source: AsyncIterable<StreamEvent>,
+    input: SendInput,
+    opts?: { excludeClientId?: string; clientId?: string },
+  ): AsyncGenerator<StreamEvent> {
+    this.sessions.setActive(sessionKey, true);
+    try {
+      this.trackMessage(sessionKey, input, opts?.clientId);
+      for await (const event of source) {
+        this.sendEventToSubscribers(sessionKey, event.type, event, opts?.excludeClientId);
+        yield event;
+      }
+      this.sendEventToSubscribers(sessionKey, "execution_end", {}, opts?.excludeClientId);
+    } finally {
+      this.sessions.setActive(sessionKey, false);
+    }
+  }
+
+  /**
+   * Track a user message for state management.
+   * Increments message count and emits session:message event.
+   */
+  private trackMessage(sessionKey: string, input: SendInput, clientId?: string): void {
+    this.sessions.incrementMessageCount(sessionKey, clientId);
+    this.emit("session:message", {
+      sessionId: sessionKey,
+      role: "user",
+      content: extractTextFromInput(input),
+    });
+  }
+
+  /**
+   * Create an in-process ClientTransport connected to this gateway.
+   * Returns a ClientTransport for use with createClient().
+   *
+   * Multiple calls create independent clients sharing the same
+   * underlying LocalGatewayTransport.
+   */
+  createLocalTransport(): ClientTransport {
+    if (!this._localTransport) {
+      this._localTransport = new LocalGatewayTransport();
+      this.setupTransportHandlers(this._localTransport);
+      this.transports.push(this._localTransport);
+    }
+    return this._localTransport.createClientTransport(this);
   }
 
   /**
@@ -536,60 +710,18 @@ export class Gateway extends EventEmitter {
 
     const clientId = url.searchParams.get("clientId") ?? `client-${Date.now().toString(36)}`;
 
-    // Register SSE client for channel forwarding
-    const connectTime = Date.now();
-    this.sseClients.set(clientId, res);
-    this.clientConnectedAt.set(clientId, connectTime);
+    // Register as a real transport client — gets backpressure, DevTools,
+    // appears in gateway.status.clients, cleaned up on disconnect
+    this.sseTransport!.registerClient(clientId, res);
 
-    // Emit DevTools event for connection tracking
-    if (devToolsEmitter.hasSubscribers()) {
-      devToolsEmitter.emitEvent({
-        type: "client_connected",
-        executionId: this.config.id,
-        clientId,
-        transport: "sse",
-        sequence: this.devToolsSequence++,
-        timestamp: connectTime,
-      } as DTClientConnectedEvent);
-    }
-
-    // Send connection confirmation
-    // Client expects type: "connection" to resolve the connection promise
-    const connectData = JSON.stringify({
-      type: "connection",
-      connectionId: clientId,
-      subscriptions: [],
-    });
-    res.write(`data: ${connectData}\n\n`);
-
-    // Keep connection alive with periodic heartbeat
-    const heartbeat = setInterval(() => {
-      res.write(":heartbeat\n\n");
-    }, 30000);
-
-    res.on("close", () => {
-      clearInterval(heartbeat);
-      this.sessions.unsubscribeAll(clientId);
-      this.sseClients.delete(clientId);
-      this.cleanupClientChannelSubscriptions(clientId);
-
-      // Emit DevTools event for disconnection tracking
-      const connectedAt = this.clientConnectedAt.get(clientId);
-      const durationMs = connectedAt ? Date.now() - connectedAt : 0;
-      this.clientConnectedAt.delete(clientId);
-
-      if (devToolsEmitter.hasSubscribers()) {
-        devToolsEmitter.emitEvent({
-          type: "client_disconnected",
-          executionId: this.config.id,
-          clientId,
-          reason: "Connection closed",
-          durationMs,
-          sequence: this.devToolsSequence++,
-          timestamp: Date.now(),
-        } as DTClientDisconnectedEvent);
-      }
-    });
+    // Connection confirmation is written directly to the response rather than
+    // going through client.send() because it's a handshake message — not a
+    // GatewayMessage variant. The client resolves its connection promise on
+    // receiving { type: "connection" }. This is the same pattern HTTP and WS
+    // transports use for their initial handshake.
+    res.write(
+      `data: ${JSON.stringify({ type: "connection", connectionId: clientId, subscriptions: [] })}\n\n`,
+    );
   }
 
   /**
@@ -667,22 +799,27 @@ export class Gateway extends EventEmitter {
 
       for await (const event of events) {
         log.debug({ eventType: event.type }, "handleSend: got event from directSend");
-        const sseData = {
-          type: event.type,
+        const message: EventMessage = {
+          type: "event",
+          event: event.type as GatewayEventType,
           sessionId,
-          ...(event.data && typeof event.data === "object" ? event.data : {}),
+          data: event.data,
         };
-        res.write(`data: ${JSON.stringify(sseData)}\n\n`);
+        res.write(`data: ${JSON.stringify(message)}\n\n`);
       }
 
       log.debug({ sessionId }, "handleSend: directSend complete, sending execution_end");
-      res.write(`data: ${JSON.stringify({ type: "execution_end", sessionId })}\n\n`);
+      res.write(
+        `data: ${JSON.stringify({ type: "event", event: "execution_end", sessionId, data: {} } satisfies EventMessage)}\n\n`,
+      );
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       const errorStack = error instanceof Error ? error.stack : undefined;
       console.error("[Gateway handleSend ERROR]", errorMessage, "\n", errorStack);
       log.error({ errorMessage, errorStack, sessionId }, "handleSend: ERROR in directSend");
-      res.write(`data: ${JSON.stringify({ type: "error", error: errorMessage, sessionId })}\n\n`);
+      res.write(
+        `data: ${JSON.stringify({ type: "event", event: "error", sessionId, data: { error: errorMessage } } satisfies EventMessage)}\n\n`,
+      );
     } finally {
       res.end();
     }
@@ -1004,7 +1141,7 @@ export class Gateway extends EventEmitter {
   }
 
   /**
-   * Forward a channel event to all subscribed SSE clients.
+   * Forward a channel event to all subscribed clients.
    */
   private forwardChannelEvent(
     subscriptionKey: string,
@@ -1021,22 +1158,22 @@ export class Gateway extends EventEmitter {
     const lastColonIndex = subscriptionKey.lastIndexOf(":");
     const sessionId = subscriptionKey.substring(0, lastColonIndex);
 
-    const sseData = JSON.stringify({
-      type: "channel",
+    const message: EventMessage = {
+      type: "event",
+      event: "channel" as GatewayEventType,
       sessionId,
-      channel: event.channel,
-      event: {
-        type: event.type,
-        payload: event.payload,
-        metadata: event.metadata,
+      data: {
+        channel: event.channel,
+        event: {
+          type: event.type,
+          payload: event.payload,
+          metadata: event.metadata,
+        },
       },
-    });
+    };
 
     for (const clientId of clientIds) {
-      const res = this.sseClients.get(clientId);
-      if (res && !res.writableEnded) {
-        res.write(`data: ${sseData}\n\n`);
-      }
+      this.deliverToClient(clientId, message);
     }
   }
 
@@ -1222,6 +1359,24 @@ export class Gateway extends EventEmitter {
           clientId,
           params as unknown as SubscribeParams,
         );
+
+      case "channel-subscribe": {
+        const { sessionId, channel } = params as { sessionId: string; channel: string };
+        if (!sessionId || !channel) throw new Error("sessionId and channel are required");
+        await this.subscribeToChannel(sessionId, channel, clientId);
+        return { ok: true };
+      }
+
+      case "channel": {
+        const { sessionId, channel, payload } = params as {
+          sessionId: string;
+          channel: string;
+          payload?: unknown;
+        };
+        if (!sessionId || !channel) throw new Error("sessionId and channel are required");
+        await this.publishToChannel(sessionId, channel, payload);
+        return { ok: true };
+      }
     }
 
     // Check custom methods
@@ -1308,115 +1463,70 @@ export class Gateway extends EventEmitter {
   ): Promise<{ messageId: string }> {
     const { sessionId, message } = params;
 
-    // Get or create managed session (SessionManager emits DevTools event if new)
-    const managedSession = await this.sessions.getOrCreate(sessionId, clientId);
-
-    // Auto-subscribe sender to session events
-    // Subscribe with the ORIGINAL sessionId so events can be matched by clients
+    // Auto-subscribe sender to session events (transport concern)
     const client = transport.getClient(clientId);
     if (client) {
       client.state.subscriptions.add(sessionId);
       await this.sessions.subscribe(sessionId, clientId);
     }
 
-    // Mark session as active (internal, uses normalized ID)
-    this.sessions.setActive(managedSession.state.id, true);
+    const input: SendInput = {
+      messages: [{ role: "user", content: [{ type: "text", text: message }] }],
+    };
 
-    // Get or create core session from app
-    if (!managedSession.coreSession || managedSession.coreSession.isTerminal) {
-      // Use sessionName (without app prefix) for App - Gateway handles routing
-      managedSession.coreSession = await managedSession.appInfo.app.session(
-        managedSession.sessionName,
-      );
-    }
-
-    // Stream execution to subscribers
     const messageId = `msg-${Date.now().toString(36)}`;
 
-    // Execute in background and stream events
-    // Use ORIGINAL sessionId for events so clients can match them
-    this.executeAndStream(sessionId, managedSession.coreSession, message).catch((error) => {
+    // Execute in background — executeSession handles state management
+    const gen = this.executeSession(sessionId, input, { clientId });
+    (async () => {
+      for await (const _ of gen) {
+        /* drain */
+      }
+    })().catch((error) => {
       this.sendEventToSubscribers(sessionId, "error", {
         message: error instanceof Error ? error.message : String(error),
       });
     });
 
-    // Increment message count (SessionManager emits DevTools event)
-    this.sessions.incrementMessageCount(managedSession.state.id, clientId);
-
-    this.emit("session:message", {
-      sessionId: managedSession.state.id,
-      role: "user",
-      content: message,
-    });
-
     return { messageId };
   }
 
-  /**
-   * Execute a message and stream events to subscribers.
-   *
-   * @param sessionId - The session key as provided by client (may be unnormalized)
-   * @param coreSession - The core session instance
-   * @param messageText - The message text to send
-   *
-   * IMPORTANT: Uses the original sessionId for events to ensure client matching.
-   */
-  private async executeAndStream(
-    sessionId: string,
-    coreSession: Session,
-    messageText: string,
-  ): Promise<void> {
-    try {
-      // Construct a proper Message object from the string
-      const message = {
-        role: "user" as const,
-        content: [{ type: "text" as const, text: messageText }],
-      };
-
-      const execution = await coreSession.send({ messages: [message] });
-
-      for await (const event of execution) {
-        // Use the original sessionId for events (ensures client matching)
-        this.sendEventToSubscribers(sessionId, event.type, event);
+  private deliverToClient(clientId: string, message: GatewayMessage): void {
+    for (const transport of this.transports) {
+      const client = transport.getClient(clientId);
+      if (client) {
+        this.getOrCreateBuffer(client).push(message);
+        return;
       }
-
-      // Send execution_end event
-      this.sendEventToSubscribers(sessionId, "execution_end", {});
-    } finally {
-      this.sessions.setActive(sessionId, false);
     }
   }
 
-  private sendEventToSubscribers(sessionId: string, eventType: string, data: unknown): void {
-    const subscribers = this.sessions.getSubscribers(sessionId);
-
-    // Send to all clients across all transports (standalone mode)
-    for (const transport of this.transports) {
-      for (const clientId of subscribers) {
-        const client = transport.getClient(clientId);
-        if (client) {
-          client.send({
-            type: "event",
-            event: eventType as GatewayEventType,
-            sessionId,
-            data,
-          });
-        }
-      }
+  private getOrCreateBuffer(client: TransportClient): ClientEventBuffer {
+    let buffer = this.clientBuffers.get(client.id);
+    if (!buffer) {
+      buffer = new ClientEventBuffer(client);
+      this.clientBuffers.set(client.id, buffer);
     }
+    return buffer;
+  }
 
-    // Also send to SSE clients (embedded mode)
+  private sendEventToSubscribers(
+    sessionId: string,
+    eventType: string,
+    data: unknown,
+    excludeClientId?: string,
+  ): void {
+    const subscribers = this.sessions.getSubscribers(sessionId);
+    const message: EventMessage = {
+      type: "event",
+      event: eventType as GatewayEventType,
+      sessionId,
+      data,
+    };
+
     for (const clientId of subscribers) {
-      const res = this.sseClients.get(clientId);
-      if (res && !res.writableEnded) {
-        const sseData = JSON.stringify({
-          type: eventType,
-          sessionId,
-          ...(data && typeof data === "object" ? data : {}),
-        });
-        res.write(`data: ${sseData}\n\n`);
-      }
+      if (clientId === excludeClientId) continue;
+      this.deliverToClient(clientId, message);
     }
   }
 
@@ -1432,72 +1542,9 @@ export class Gateway extends EventEmitter {
     sessionId: string,
     message: Message,
   ): AsyncGenerator<{ type: string; data?: unknown }> {
-    // Get or create managed session
-    const managedSession = await this.sessions.getOrCreate(sessionId);
-
-    log.debug(
-      {
-        sessionId,
-        sessionName: managedSession.sessionName,
-        stateId: managedSession.state.id,
-        hasCoreSession: !!managedSession.coreSession,
-      },
-      "directSend: got managed session",
-    );
-
-    // Mark session as active
-    this.sessions.setActive(managedSession.state.id, true);
-
-    // Get or create core session from app
-    if (!managedSession.coreSession || managedSession.coreSession.isTerminal) {
-      // Use sessionName (without app prefix) for App - Gateway handles routing
-      log.debug({ sessionName: managedSession.sessionName }, "directSend: creating core session");
-      managedSession.coreSession = await managedSession.appInfo.app.session(
-        managedSession.sessionName,
-      );
-      log.debug(
-        { coreSessionId: managedSession.coreSession.id },
-        "directSend: created core session",
-      );
-    }
-
-    // Check session status before sending
-    log.debug(
-      {
-        coreSessionId: managedSession.coreSession.id,
-        status: managedSession.coreSession.status,
-      },
-      "directSend: core session status before send",
-    );
-
-    try {
-      const execution = await managedSession.coreSession.send({ messages: [message] });
-
-      // Increment message count
-      this.sessions.incrementMessageCount(managedSession.state.id);
-
-      // Extract text content for logging (first text block if any)
-      const textContent = message.content
-        .filter((b): b is { type: "text"; text: string } => b.type === "text")
-        .map((b) => b.text)
-        .join(" ");
-
-      this.emit("session:message", {
-        sessionId: managedSession.state.id,
-        role: "user",
-        content: textContent || "[multimodal content]",
-      });
-
-      for await (const event of execution) {
-        // Use the ORIGINAL sessionId for events (not normalized managedSession.state.id)
-        // This ensures clients can match events to sessions by the key they used
-        this.sendEventToSubscribers(sessionId, event.type, event);
-
-        // Yield event for HTTP streaming
-        yield { type: event.type, data: event };
-      }
-    } finally {
-      this.sessions.setActive(managedSession.state.id, false);
+    const input: SendInput = { messages: [message] };
+    for await (const event of this.executeSession(sessionId, input)) {
+      yield { type: event.type, data: event };
     }
   }
 
@@ -1664,17 +1711,12 @@ export class Gateway extends EventEmitter {
   private createGatewayContext(): GatewayContext {
     return {
       sendToSession: async (sessionId, message) => {
-        // Internal send (from channels)
-        const managedSession = await this.sessions.getOrCreate(sessionId);
-
-        if (!managedSession.coreSession || managedSession.coreSession.isTerminal) {
-          // Use sessionName (without app prefix) for App - Gateway handles routing
-          managedSession.coreSession = await managedSession.appInfo.app.session(
-            managedSession.sessionName,
-          );
+        const input: SendInput = {
+          messages: [{ role: "user", content: [{ type: "text", text: message }] }],
+        };
+        for await (const _ of this.executeSession(sessionId, input)) {
+          /* drain */
         }
-
-        await this.executeAndStream(managedSession.state.id, managedSession.coreSession, message);
       },
 
       getApps: () => this.registry.ids(),

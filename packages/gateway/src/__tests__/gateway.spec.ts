@@ -299,6 +299,83 @@ describe("Gateway", () => {
       expect(chatApp._sessions.size).toBeGreaterThan(0);
     });
 
+    it("emits session:message for WS send", async () => {
+      const sessionMessages: any[] = [];
+      gateway.on("session:message", (payload) => sessionMessages.push(payload));
+
+      client.send(
+        JSON.stringify({
+          type: "req",
+          id: "req-msg",
+          method: "send",
+          params: {
+            sessionId: "main",
+            message: "WS state test",
+          },
+        }),
+      );
+
+      await new Promise((r) => setTimeout(r, 200));
+
+      expect(sessionMessages).toHaveLength(1);
+      expect(sessionMessages[0].sessionId).toBe("main");
+      expect(sessionMessages[0].role).toBe("user");
+      expect(sessionMessages[0].content).toBe("WS state test");
+    });
+
+    it("WS subscriber receives broadcast events through buffer", async () => {
+      // Subscribe first
+      const subPromise = new Promise<any>((resolve) => {
+        const handler = (data: any) => {
+          const msg = JSON.parse(data.toString());
+          if (msg.type === "res" && msg.id === "req-sub") {
+            client.off("message", handler);
+            resolve(msg);
+          }
+        };
+        client.on("message", handler);
+      });
+
+      client.send(
+        JSON.stringify({
+          type: "req",
+          id: "req-sub",
+          method: "subscribe",
+          params: { sessionId: "main" },
+        }),
+      );
+      await subPromise;
+
+      // Now send — should get events back via subscription broadcast
+      const events: any[] = [];
+      const handler = (data: any) => {
+        const msg = JSON.parse(data.toString());
+        if (msg.type === "event" && msg.sessionId === "main") {
+          events.push(msg);
+        }
+      };
+      client.on("message", handler);
+
+      client.send(
+        JSON.stringify({
+          type: "req",
+          id: "req-send",
+          method: "send",
+          params: {
+            sessionId: "main",
+            message: "broadcast test",
+          },
+        }),
+      );
+
+      await new Promise((r) => setTimeout(r, 200));
+      client.off("message", handler);
+
+      // WS sender auto-subscribes AND gets events via subscription
+      expect(events.length).toBeGreaterThan(0);
+      expect(events[0].event).toBeDefined();
+    });
+
     it("handles unknown method", async () => {
       const responsePromise = new Promise<any>((resolve) => {
         client.on("message", (data) => {
@@ -319,6 +396,101 @@ describe("Gateway", () => {
       const response = await responsePromise;
       expect(response.ok).toBe(false);
       expect(response.error.message).toContain("Unknown method");
+    });
+
+    it("subscribes to channel via channel-subscribe method", async () => {
+      const responsePromise = new Promise<any>((resolve) => {
+        client.on("message", (data) => {
+          const msg = JSON.parse(data.toString());
+          if (msg.type === "res" && msg.id === "req-ch-sub") resolve(msg);
+        });
+      });
+
+      client.send(
+        JSON.stringify({
+          type: "req",
+          id: "req-ch-sub",
+          method: "channel-subscribe",
+          params: {
+            sessionId: "main",
+            channel: "updates",
+          },
+        }),
+      );
+
+      const response = await responsePromise;
+      expect(response.ok).toBe(true);
+      expect(response.payload.ok).toBe(true);
+    });
+
+    it("publishes to channel via channel method", async () => {
+      const responsePromise = new Promise<any>((resolve) => {
+        client.on("message", (data) => {
+          const msg = JSON.parse(data.toString());
+          if (msg.type === "res" && msg.id === "req-ch-pub") resolve(msg);
+        });
+      });
+
+      client.send(
+        JSON.stringify({
+          type: "req",
+          id: "req-ch-pub",
+          method: "channel",
+          params: {
+            sessionId: "main",
+            channel: "updates",
+            payload: { text: "hello channel" },
+          },
+        }),
+      );
+
+      const response = await responsePromise;
+      expect(response.ok).toBe(true);
+      expect(response.payload.ok).toBe(true);
+    });
+
+    it("channel-subscribe requires sessionId and channel", async () => {
+      const responsePromise = new Promise<any>((resolve) => {
+        client.on("message", (data) => {
+          const msg = JSON.parse(data.toString());
+          if (msg.type === "res" && msg.id === "req-bad") resolve(msg);
+        });
+      });
+
+      client.send(
+        JSON.stringify({
+          type: "req",
+          id: "req-bad",
+          method: "channel-subscribe",
+          params: { sessionId: "main" }, // missing channel
+        }),
+      );
+
+      const response = await responsePromise;
+      expect(response.ok).toBe(false);
+      expect(response.error.message).toContain("channel");
+    });
+
+    it("channel publish requires sessionId and channel", async () => {
+      const responsePromise = new Promise<any>((resolve) => {
+        client.on("message", (data) => {
+          const msg = JSON.parse(data.toString());
+          if (msg.type === "res" && msg.id === "req-bad2") resolve(msg);
+        });
+      });
+
+      client.send(
+        JSON.stringify({
+          type: "req",
+          id: "req-bad2",
+          method: "channel",
+          params: { payload: "data" }, // missing sessionId and channel
+        }),
+      );
+
+      const response = await responsePromise;
+      expect(response.ok).toBe(false);
+      expect(response.error.message).toContain("channel");
     });
   });
 

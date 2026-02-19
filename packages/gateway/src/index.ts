@@ -15,11 +15,13 @@ export {
   type Transport,
   type TransportClient,
   type TransportConfig,
+  type NetworkTransportConfig,
   type TransportEvents,
   BaseTransport,
 } from "./transport.js";
 export { WSTransport, createWSTransport } from "./ws-transport.js";
 export { HTTPTransport, createHTTPTransport, type HTTPTransportConfig } from "./http-transport.js";
+export { LocalGatewayTransport } from "./local-transport.js";
 
 // Testing utilities
 export {

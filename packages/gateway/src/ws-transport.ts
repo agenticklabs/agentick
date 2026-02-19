@@ -8,7 +8,7 @@ import { WebSocketServer, WebSocket } from "ws";
 import type { IncomingMessage } from "http";
 import type { ClientMessage, GatewayMessage, ConnectMessage } from "./transport-protocol.js";
 import type { ClientState } from "./types.js";
-import { BaseTransport, type TransportClient, type TransportConfig } from "./transport.js";
+import { BaseTransport, type TransportClient, type NetworkTransportConfig } from "./transport.js";
 
 // ============================================================================
 // WebSocket Client
@@ -46,6 +46,10 @@ class WSClientImpl implements TransportClient {
     return this.socket.readyState === WebSocket.OPEN;
   }
 
+  isPressured(): boolean {
+    return this.socket.bufferedAmount > 64 * 1024;
+  }
+
   /** @internal - Update client ID (for custom client IDs) */
   _setId(newId: string): void {
     (this as { id: string }).id = newId;
@@ -60,6 +64,12 @@ class WSClientImpl implements TransportClient {
 export class WSTransport extends BaseTransport {
   readonly type = "websocket" as const;
   private wss: WebSocketServer | null = null;
+  protected override config: NetworkTransportConfig;
+
+  constructor(config: NetworkTransportConfig) {
+    super(config);
+    this.config = config;
+  }
 
   override start(): Promise<void> {
     return new Promise((resolve, reject) => {
@@ -200,6 +210,6 @@ export class WSTransport extends BaseTransport {
 // Factory Function
 // ============================================================================
 
-export function createWSTransport(config: TransportConfig): WSTransport {
+export function createWSTransport(config: NetworkTransportConfig): WSTransport {
   return new WSTransport(config);
 }

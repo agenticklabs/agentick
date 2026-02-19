@@ -12,6 +12,7 @@ import type {
   TransportEventHandler,
   TransportState,
 } from "./transport.js";
+import { unwrapEventMessage } from "./transport-utils.js";
 import type { SendInput, ChannelEvent, ToolConfirmationResponse } from "./types.js";
 
 // ============================================================================
@@ -202,13 +203,13 @@ export class SSETransport implements ClientTransport {
 
         const onMessage = (event: MessageEvent) => {
           try {
-            const data = JSON.parse(event.data);
+            const data = unwrapEventMessage(JSON.parse(event.data)) as TransportEventData;
             this.handleIncomingEvent(data);
 
             if (data.type === "connection" && data.connectionId) {
-              this._connectionId = data.connectionId;
+              this._connectionId = data.connectionId as string;
               if (data.subscriptions) {
-                for (const sessionId of data.subscriptions) {
+                for (const sessionId of data.subscriptions as string[]) {
                   this.subscriptions.add(sessionId);
                 }
               }
@@ -313,7 +314,7 @@ export class SSETransport implements ClientTransport {
             for (const line of lines) {
               if (!line.startsWith("data: ")) continue;
               try {
-                const data = JSON.parse(line.slice(6)) as TransportEventData;
+                const data = unwrapEventMessage(JSON.parse(line.slice(6))) as TransportEventData;
                 if (data.type === "channel" || data.type === "connection") {
                   continue;
                 }

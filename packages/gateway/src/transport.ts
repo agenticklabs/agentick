@@ -5,10 +5,9 @@
  * This allows the same GatewayCore to serve clients via different protocols.
  */
 
-import type { Message } from "@agentick/shared";
 import { validateAuth, type AuthResult } from "@agentick/server";
 import type { GatewayMessage, ClientMessage } from "./transport-protocol.js";
-import type { AuthConfig, ClientState, UserContext } from "./types.js";
+import type { AuthConfig, ClientState } from "./types.js";
 
 // ============================================================================
 // Transport Interface
@@ -32,6 +31,9 @@ export interface TransportClient {
 
   /** Check if connected */
   readonly isConnected: boolean;
+
+  /** Check if the client is under write pressure (optional) */
+  isPressured?(): boolean;
 }
 
 /**
@@ -52,42 +54,26 @@ export interface TransportEvents {
 }
 
 /**
- * Transport configuration.
+ * Base transport configuration (no network requirements).
  */
 export interface TransportConfig {
+  /** Authentication configuration */
+  auth?: AuthConfig;
+}
+
+/**
+ * Transport configuration for network-bound transports (WS, HTTP).
+ */
+export interface NetworkTransportConfig extends TransportConfig {
   /** Port to listen on */
   port: number;
 
   /** Host to bind to */
   host: string;
-
-  /** Authentication configuration */
-  auth?: AuthConfig;
-
-  /**
-   * Direct send handler for HTTP transport.
-   * Called instead of routing through message handler when streaming response is needed.
-   * Accepts full Message object to support multimodal content (images, audio, video, docs).
-   */
-  onDirectSend?: (
-    sessionId: string,
-    message: Message,
-  ) => AsyncIterable<{ type: string; data?: unknown }>;
-
-  /**
-   * Method invocation handler for HTTP transport.
-   * Called to execute custom gateway methods.
-   * Returns the method result directly (no streaming).
-   */
-  onInvoke?: (
-    method: string,
-    params: Record<string, unknown>,
-    user?: UserContext,
-  ) => Promise<unknown>;
 }
 
 /** Transport type identifier */
-export type TransportType = "websocket" | "http" | "sse";
+export type TransportType = "websocket" | "http" | "sse" | "local";
 
 /**
  * Transport interface - abstracts WebSocket vs HTTP/SSE.
@@ -117,9 +103,6 @@ export interface Transport {
   /** Broadcast to all authenticated clients */
   broadcast(message: GatewayMessage): void;
 
-  /** Send to clients subscribed to a session */
-  sendToSubscribers(sessionId: string, message: GatewayMessage): void;
-
   /** Number of connected clients */
   readonly clientCount: number;
 }
@@ -140,7 +123,7 @@ export abstract class BaseTransport implements Transport {
   protected config: TransportConfig;
   protected clientIdCounter = 0;
 
-  constructor(config: TransportConfig) {
+  constructor(config: TransportConfig = {}) {
     this.config = config;
   }
 
@@ -166,14 +149,6 @@ export abstract class BaseTransport implements Transport {
   broadcast(message: GatewayMessage): void {
     for (const client of this.getAuthenticatedClients()) {
       client.send(message);
-    }
-  }
-
-  sendToSubscribers(sessionId: string, message: GatewayMessage): void {
-    for (const client of this.getAuthenticatedClients()) {
-      if (client.state.subscriptions.has(sessionId)) {
-        client.send(message);
-      }
     }
   }
 

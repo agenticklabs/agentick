@@ -13,6 +13,7 @@ import type {
   TransportState,
 } from "./transport.js";
 import type { SendInput, ChannelEvent, ToolConfirmationResponse } from "./types.js";
+import { unwrapEventMessage } from "./transport-utils.js";
 
 // ============================================================================
 // WebSocket Transport Configuration
@@ -258,12 +259,7 @@ export class WSTransport implements ClientTransport {
 
     // Handle session events (from event subscription or send streaming)
     if (type === "event") {
-      const sessionId = data.sessionId as string;
-      const eventData = {
-        type: data.event as string,
-        sessionId,
-        ...(data.data as object),
-      };
+      const eventData = unwrapEventMessage(data) as TransportEventData;
 
       // Check if this event is for an active send stream
       // We use sessionId to find the stream since executionId may not be set yet

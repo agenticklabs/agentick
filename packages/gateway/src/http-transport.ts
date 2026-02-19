@@ -8,9 +8,16 @@
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from "http";
 import { extractToken, validateAuth, setSSEHeaders, type AuthResult } from "@agentick/server";
 import { isGuardError } from "@agentick/shared";
-import type { GatewayMessage, RequestMessage } from "./transport-protocol.js";
+import type {
+  GatewayMessage,
+  RequestMessage,
+  EventMessage,
+  GatewayEventType,
+} from "./transport-protocol.js";
 import type { ClientState } from "./types.js";
-import { BaseTransport, type TransportClient, type TransportConfig } from "./transport.js";
+import type { Message } from "@agentick/shared";
+import type { UserContext } from "./types.js";
+import { BaseTransport, type TransportClient, type NetworkTransportConfig } from "./transport.js";
 
 // ============================================================================
 // HTTP Client (SSE connection)
@@ -61,28 +68,45 @@ class HTTPClientImpl implements TransportClient {
   get isConnected(): boolean {
     return this._isConnected;
   }
+
+  isPressured(): boolean {
+    return this.response?.writableNeedDrain ?? false;
+  }
 }
 
 // ============================================================================
 // HTTP/SSE Transport
 // ============================================================================
 
-export interface HTTPTransportConfig extends TransportConfig {
+export interface HTTPTransportConfig extends NetworkTransportConfig {
   /** CORS origin (default: "*") */
   corsOrigin?: string;
 
   /** Path prefix for all endpoints (default: "") */
   pathPrefix?: string;
+
+  /** Direct send handler for streaming response */
+  onDirectSend?: (
+    sessionId: string,
+    message: Message,
+  ) => AsyncIterable<{ type: string; data?: unknown }>;
+
+  /** Method invocation handler */
+  onInvoke?: (
+    method: string,
+    params: Record<string, unknown>,
+    user?: UserContext,
+  ) => Promise<unknown>;
 }
 
 export class HTTPTransport extends BaseTransport {
   readonly type = "http" as const;
   private server: Server | null = null;
-  private httpConfig: HTTPTransportConfig;
+  protected override config: HTTPTransportConfig;
 
   constructor(config: HTTPTransportConfig) {
     super(config);
-    this.httpConfig = config;
+    this.config = config;
   }
 
   override start(): Promise<void> {
@@ -134,7 +158,7 @@ export class HTTPTransport extends BaseTransport {
 
   private async handleRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
     // Set CORS headers
-    const origin = this.httpConfig.corsOrigin ?? "*";
+    const origin = this.config.corsOrigin ?? "*";
     res.setHeader("Access-Control-Allow-Origin", origin);
     res.setHeader("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS");
     res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
@@ -147,7 +171,7 @@ export class HTTPTransport extends BaseTransport {
       return;
     }
 
-    const prefix = this.httpConfig.pathPrefix ?? "";
+    const prefix = this.config.pathPrefix ?? "";
     const url = new URL(req.url ?? "/", `http://${req.headers.host}`);
     const path = url.pathname.replace(prefix, "");
 
@@ -305,19 +329,24 @@ export class HTTPTransport extends BaseTransport {
       const events = this.config.onDirectSend(sessionId, message);
 
       for await (const event of events) {
-        const sseData = {
-          type: event.type,
+        const message: EventMessage = {
+          type: "event",
+          event: event.type as GatewayEventType,
           sessionId,
-          ...(event.data && typeof event.data === "object" ? event.data : {}),
+          data: event.data,
         };
-        res.write(`data: ${JSON.stringify(sseData)}\n\n`);
+        res.write(`data: ${JSON.stringify(message)}\n\n`);
       }
 
       // Send execution_end
-      res.write(`data: ${JSON.stringify({ type: "execution_end", sessionId })}\n\n`);
+      res.write(
+        `data: ${JSON.stringify({ type: "event", event: "execution_end", sessionId, data: {} } satisfies EventMessage)}\n\n`,
+      );
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
-      res.write(`data: ${JSON.stringify({ type: "error", error: errorMessage, sessionId })}\n\n`);
+      res.write(
+        `data: ${JSON.stringify({ type: "event", event: "error", sessionId, data: { error: errorMessage } } satisfies EventMessage)}\n\n`,
+      );
     } finally {
       res.end();
     }
@@ -420,17 +449,33 @@ export class HTTPTransport extends BaseTransport {
       return;
     }
 
-    // Update subscriptions
+    // Forward through gateway's RPC handler so SessionManager stays in sync.
+    // Same pattern as handleAbort/handleClose.
     if (add) {
       for (const sessionId of add) {
-        client.state.subscriptions.add(sessionId);
+        const requestMessage: RequestMessage = {
+          type: "req",
+          id: `req-sub-${Date.now().toString(36)}`,
+          method: "subscribe",
+          params: { sessionId },
+        };
+        this.handlers.message?.(client.id, requestMessage);
       }
     }
     if (remove) {
       for (const sessionId of remove) {
-        client.state.subscriptions.delete(sessionId);
+        const requestMessage: RequestMessage = {
+          type: "req",
+          id: `req-unsub-${Date.now().toString(36)}`,
+          method: "unsubscribe",
+          params: { sessionId },
+        };
+        this.handlers.message?.(client.id, requestMessage);
       }
     }
+
+    // Wait a tick for async handlers to process
+    await Promise.resolve();
 
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(

@@ -4,6 +4,8 @@
  * Defines the WebSocket message protocol between clients and the gateway.
  */
 
+import type { StreamEvent } from "@agentick/shared";
+
 // ============================================================================
 // Client → Gateway Messages
 // ============================================================================
@@ -94,7 +96,9 @@ export type BuiltInMethod =
   | "apps" // List available apps
   | "sessions" // List sessions
   | "subscribe" // Subscribe to session events
-  | "unsubscribe"; // Unsubscribe from events
+  | "unsubscribe" // Unsubscribe from events
+  | "channel" // Publish to a channel
+  | "channel-subscribe"; // Subscribe to a channel
 
 /**
  * Gateway method - built-in methods or custom method strings.
@@ -106,21 +110,7 @@ export type GatewayMethod = BuiltInMethod | (string & {});
 // Event Types
 // ============================================================================
 
-export type GatewayEventType =
-  | "content_delta"
-  | "content_block_start"
-  | "content_block_end"
-  | "tool_call_start"
-  | "tool_call_delta"
-  | "tool_result_start"
-  | "tool_result"
-  | "tool_confirmation_required"
-  | "tool_confirmation_result"
-  | "spawn_start"
-  | "spawn_end"
-  | "message_start"
-  | "message_end"
-  | "error";
+export type GatewayEventType = StreamEvent["type"] | "channel" | "method:chunk" | "method:end";
 
 // ============================================================================
 // Method Parameters

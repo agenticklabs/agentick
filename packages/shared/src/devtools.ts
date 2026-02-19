@@ -534,7 +534,7 @@ export interface DTClientConnectedEvent extends DevToolsEventBase {
   /** Unique client identifier */
   clientId: string;
   /** Transport type */
-  transport: "websocket" | "sse" | "http";
+  transport: "websocket" | "sse" | "http" | "local";
   /** Client IP address (if available) */
   ip?: string;
   /** User agent string (if available) */

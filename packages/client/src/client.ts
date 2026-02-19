@@ -37,6 +37,7 @@ import { AbortError } from "@agentick/shared";
 // ============================================================================
 
 import type { ClientTransport } from "./transport.js";
+import { unwrapEventMessage } from "./transport-utils.js";
 
 /**
  * Configuration for AgentickClient.
@@ -910,13 +911,13 @@ export class AgentickClient {
 
         const onMessage = (event: MessageEvent) => {
           try {
-            const data = JSON.parse(event.data);
+            const data = unwrapEventMessage(JSON.parse(event.data));
             this.handleIncomingEvent(data);
 
             if (data.type === "connection" && data.connectionId) {
-              this._connectionId = data.connectionId;
+              this._connectionId = data.connectionId as string;
               if (data.subscriptions) {
-                for (const sessionId of data.subscriptions) {
+                for (const sessionId of data.subscriptions as string[]) {
                   this.subscriptions.add(sessionId);
                 }
               }
@@ -1214,7 +1215,7 @@ export class AgentickClient {
         for (const line of lines) {
           if (!line.startsWith("data: ")) continue;
           try {
-            const data = JSON.parse(line.slice(6)) as Record<string, unknown>;
+            const data = unwrapEventMessage(JSON.parse(line.slice(6))) as Record<string, unknown>;
             if (data.type === "channel" || data.type === "connection") {
               continue;
             }
@@ -1664,7 +1665,7 @@ export class AgentickClient {
       for (const line of lines) {
         if (!line.startsWith("data: ")) continue;
         try {
-          const data = JSON.parse(line.slice(6)) as Record<string, unknown>;
+          const data = unwrapEventMessage(JSON.parse(line.slice(6))) as Record<string, unknown>;
           if (data.type === "method:chunk") {
             yield data.chunk as T;
           } else if (data.type === "method:end") {
