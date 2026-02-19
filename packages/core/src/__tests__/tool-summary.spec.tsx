@@ -49,12 +49,10 @@ describe("tool displaySummary", () => {
 
     const toolCallEvents = events.filter((e): e is ToolCallEvent => e.type === "tool_call");
 
-    expect(toolCallEvents.length).toBeGreaterThanOrEqual(1);
-    // The streaming pipeline emits a tool_call without summary (from adapter).
-    // The session's Phase 3 emits a second tool_call WITH summary.
-    const withSummary = toolCallEvents.find((e) => e.summary !== undefined);
-    expect(withSummary).toBeDefined();
-    expect(withSummary!.summary).toBe("searching: test");
+    // Exactly one tool_call event per invocation — enriched with summary
+    // during the streaming passthrough (no duplicate from Phase 3).
+    expect(toolCallEvents).toHaveLength(1);
+    expect(toolCallEvents[0].summary).toBe("searching: test");
 
     await session.close();
   });

@@ -2098,11 +2098,24 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
 
         // Stream model output if supported
         let modelOutput: any;
+        let streamed = false;
         if (model.stream) {
+          streamed = true;
           const streamIterable = await model.stream(modelInput);
           for await (const event of streamIterable) {
             if (signal.aborted) {
               throw new AbortError("Execution aborted", signal.reason);
+            }
+            // Enrich tool_call with displaySummary — the stream accumulator
+            // doesn't have access to tool definitions, so we add it here.
+            if (event.type === "tool_call" && "name" in event && compiled.tools) {
+              const toolDef = compiled.tools.find((t: any) => t.metadata?.name === event.name);
+              if (toolDef) {
+                const summary = tryDisplaySummary(toolDef, (event as any).input);
+                if (summary) {
+                  (event as any).summary = summary;
+                }
+              }
             }
             this.emitEvent(event as StreamEvent);
 
@@ -2193,20 +2206,24 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
         let toolStartTime: number | undefined;
         if (response.toolCalls?.length && this.ctx) {
           toolStartTime = Date.now();
-          for (const call of response.toolCalls) {
-            const toolCallTimestamp = timestamp();
-            const toolDef = compiled.tools?.find((t: any) => t.metadata?.name === call.name);
-            const summary = tryDisplaySummary(toolDef, call.input);
-            this.emitEvent({
-              type: "tool_call",
-              callId: call.id,
-              blockIndex: 0,
-              name: call.name,
-              input: call.input,
-              summary,
-              startedAt: toolCallTimestamp,
-              completedAt: toolCallTimestamp,
-            });
+          // Only emit tool_call events for non-streaming path.
+          // The streaming path already emitted these via stream accumulator.
+          if (!streamed) {
+            for (const call of response.toolCalls) {
+              const toolCallTimestamp = timestamp();
+              const toolDef = compiled.tools?.find((t: any) => t.metadata?.name === call.name);
+              const summary = tryDisplaySummary(toolDef, call.input);
+              this.emitEvent({
+                type: "tool_call",
+                callId: call.id,
+                blockIndex: 0,
+                name: call.name,
+                input: call.input,
+                summary,
+                startedAt: toolCallTimestamp,
+                completedAt: toolCallTimestamp,
+              });
+            }
           }
 
           toolResults = await this.executeTools(
