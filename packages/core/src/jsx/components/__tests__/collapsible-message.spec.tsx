@@ -379,7 +379,7 @@ describe("Message collapsed prop", () => {
       const result = await compileAgent(Agent);
       const entry = result.compiled.timelineEntries[0];
       expect(entry.id).toBe("msg-123");
-      expect(entry.metadata?.source).toBe("test");
+      expect(entry.metadata?.source).toStrictEqual({ type: "local" });
     });
 
     it("collapsed with very long summary truncates knob description", async () => {

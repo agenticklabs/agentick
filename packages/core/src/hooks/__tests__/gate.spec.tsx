@@ -15,6 +15,7 @@ import { gate, useGate, Knobs, useContinuation } from "../../hooks";
 import type { GateState } from "../gate";
 import { z } from "zod";
 import { StopReason } from "@agentick/shared";
+import type { JSX } from "../../jsx";
 
 // ============================================================================
 // Helpers

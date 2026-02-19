@@ -82,10 +82,18 @@ backend's problem — not the framework's.
 ```typescript
 // BullMQ example (conceptual)
 const bullBackend: SchedulerBackend = {
-  async start() { /* connect to Redis, start worker */ },
-  async stop() { /* close connections */ },
-  schedule(job, onFire) { /* create repeatable BullMQ job */ },
-  unschedule(jobId) { /* remove BullMQ job scheduler */ },
+  async start() {
+    /* connect to Redis, start worker */
+  },
+  async stop() {
+    /* close connections */
+  },
+  schedule(job, onFire) {
+    /* create repeatable BullMQ job */
+  },
+  unschedule(jobId) {
+    /* remove BullMQ job scheduler */
+  },
 };
 
 const service = new CronService({
@@ -144,11 +152,11 @@ echo '{"target":"tui","prompt":"wake up","jobId":"manual","jobName":"manual","fi
 
 ```typescript
 interface CronServiceOptions {
-  dataDir: string;               // Root dir — jobs/ and triggers/ live here
-  client: AgentickClient;        // Client for sending messages to sessions
-  backend?: SchedulerBackend;    // Default: NodeCronBackend
+  dataDir: string; // Root dir — jobs/ and triggers/ live here
+  client: AgentickClient; // Client for sending messages to sessions
+  backend?: SchedulerBackend; // Default: NodeCronBackend
   watchExternalTriggers?: boolean; // Default: true
-  defaultTarget?: string;        // Fallback session ID
+  defaultTarget?: string; // Fallback session ID
   onTriggerProcessed?: (trigger: Trigger) => void;
   onError?: (error: Error, context: string) => void;
 }
