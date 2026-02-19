@@ -89,6 +89,7 @@ import type {
   HookType,
   ResolveConfig,
   ResolveContext,
+  InboxStorage,
 } from "./types";
 import React from "react";
 
@@ -227,6 +228,12 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
 
   // Captured context from session creation
   private readonly _capturedContext: KernelContext | undefined;
+
+  // Inbox (durable external message delivery)
+  private _inboxStorage: InboxStorage | null = null;
+  private _inboxUnsubscribe: (() => void) | null = null;
+  private _draining = false;
+  private _drainRequested = false;
 
   // Channels for pub/sub communication
   private readonly _channels = new Map<string, Channel>();
@@ -1239,6 +1246,75 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
   }
 
   /**
+   * Connect this session to an inbox storage backend.
+   * Subscribes to notifications and drains any pre-existing pending messages.
+   * @internal
+   */
+  setInboxStorage(storage: InboxStorage): void {
+    this._inboxStorage = storage;
+    this._inboxUnsubscribe = storage.subscribe(this.id, () => {
+      this.drainInbox().catch((err) => {
+        this.log.warn({ error: err }, "Inbox drain failed");
+      });
+    });
+    // Drain pre-existing pending messages
+    this.drainInbox().catch((err) => {
+      this.log.warn({ error: err }, "Initial inbox drain failed");
+    });
+  }
+
+  /**
+   * Process all pending inbox messages. Called by App.processInbox().
+   * @internal
+   */
+  async processInboxMessages(): Promise<void> {
+    await this.drainInbox();
+  }
+
+  private async drainInbox(): Promise<void> {
+    const storage = this._inboxStorage;
+    if (this.isTerminal || !storage) return;
+    if (this._draining) {
+      // Signal that new messages arrived; current drain will re-check on exit
+      this._drainRequested = true;
+      return;
+    }
+    this._draining = true;
+    try {
+      do {
+        this._drainRequested = false;
+        const messages = await storage.pending(this.id);
+        for (const msg of messages) {
+          if (this.isTerminal) return;
+          try {
+            if (msg.type === "message") {
+              const handle = await this.send({ messages: [msg.payload] });
+              await handle.result;
+            } else {
+              await this.dispatch.exec(msg.payload.tool, msg.payload.input).result;
+            }
+            if (this.isTerminal) return;
+            await storage.markDone(this.id, msg.id);
+          } catch (err) {
+            this.log.warn({ error: err, messageId: msg.id }, "Inbox message processing failed");
+            break; // Preserve FIFO — stop on first failure
+          }
+        }
+      } while (this._drainRequested && !this.isTerminal);
+    } finally {
+      this._draining = false;
+      // Do NOT clear _drainRequested here — a notification may have arrived
+      // between the while-check and finally. If so, re-enter.
+      if (this._drainRequested && !this.isTerminal) {
+        this._drainRequested = false;
+        this.drainInbox().catch((err) => {
+          this.log.warn({ error: err }, "Inbox re-drain failed");
+        });
+      }
+    }
+  }
+
+  /**
    * Set a snapshot to be applied/resolved when compilation infrastructure is created.
    * @internal
    */
@@ -1709,6 +1785,11 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
     if (this.isTerminal) return;
 
     this._status = "closed";
+
+    // Unsubscribe from inbox before anything else
+    this._inboxUnsubscribe?.();
+    this._inboxUnsubscribe = null;
+    this._inboxStorage = null;
 
     // Notify execution runner of destroy
     if (this._runnerInitialized && this.appOptions.runner?.onDestroy) {

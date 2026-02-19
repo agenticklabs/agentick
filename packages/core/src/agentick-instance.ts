@@ -41,8 +41,12 @@ import type {
   ComponentFunction,
   ExecutionOptions,
   SendInput,
+  InboxStorage,
+  InboxMessageInput,
 } from "./app/types";
+import { randomUUID } from "node:crypto";
 import { SessionImpl } from "./app/session";
+import { MemoryInboxStorage } from "./app/inbox-storage";
 
 /**
  * Key for middleware registration.
@@ -353,11 +357,14 @@ class AppImpl<P extends Record<string, unknown>> implements App<P> {
   private readonly registry: SessionRegistry<P>;
   private readonly sessionCreateHandlers = new Set<(session: Session<P>) => void>();
   private readonly sessionCloseHandlers = new Set<(sessionId: string) => void>();
+  private readonly inboxStorage: InboxStorage;
 
   constructor(
     private readonly Component: ComponentFunction<P>,
     private readonly options: AppOptions,
   ) {
+    this.inboxStorage = options.inbox ?? new MemoryInboxStorage();
+
     this.registry = new SessionRegistry<P>({
       sessions: options.sessions,
       // Callbacks
@@ -513,6 +520,32 @@ class AppImpl<P extends Record<string, unknown>> implements App<P> {
     };
   }
 
+  async receive(message: InboxMessageInput): Promise<void> {
+    const resolver = this.options.sessionResolver;
+    let sessionId: string | null = null;
+    if (resolver) {
+      sessionId = await resolver(message);
+    }
+    if (!sessionId) {
+      sessionId = randomUUID();
+    }
+    await this.inboxStorage.write(sessionId, message);
+    // If session is active, subscriber fires immediately.
+    // If not active, processInbox() or next session(id) call handles it.
+  }
+
+  async processInbox(): Promise<void> {
+    const sessionIds = await this.inboxStorage.sessionsWithPending();
+    await Promise.allSettled(
+      sessionIds.map(async (sessionId) => {
+        const session = await this.session(sessionId);
+        // setInboxStorage called during init triggers drainInbox.
+        // If session was already alive, explicitly drain.
+        await (session as SessionImpl<P>).processInboxMessages();
+      }),
+    );
+  }
+
   private createSession(sessionId: string | undefined, options: SessionOptions): SessionImpl<P> {
     const sessionOptions: SessionOptions = {
       ...options,
@@ -563,6 +596,9 @@ class AppImpl<P extends Record<string, unknown>> implements App<P> {
         await this.registry.persist(session.id, snapshot);
       });
     }
+
+    // Connect session to inbox storage
+    session.setInboxStorage(this.inboxStorage);
 
     session.on("event", () => {
       this.registry.markActive(session.id);

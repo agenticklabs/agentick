@@ -131,10 +131,16 @@ export type {
   SerializedError,
   SnapshotToolDefinition,
   RecordedInput,
+  // Inbox (durable external message delivery)
+  InboxStorage,
+  InboxMessage,
+  InboxMessageInput,
+  DispatchPayload,
 } from "./app/types";
 
 export { SessionImpl } from "./app/session";
 export { MemorySessionStore } from "./app/session-store";
+export { MemoryInboxStorage } from "./app/inbox-storage";
 export {
   SqliteSessionStore,
   createSessionStore,

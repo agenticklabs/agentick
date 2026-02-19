@@ -298,6 +298,58 @@ export interface SessionStore {
   has?(sessionId: string): Promise<boolean>;
 }
 
+// ============================================================================
+// Inbox Storage (for durable external message delivery)
+// ============================================================================
+
+/**
+ * Payload for dispatching a tool by name via the inbox.
+ */
+export interface DispatchPayload {
+  tool: string;
+  input: Record<string, unknown>;
+}
+
+/**
+ * Input for writing a message to the inbox.
+ * Discriminated union on `type` — narrows `payload` automatically.
+ * The storage assigns `id` and `timestamp` on write.
+ */
+export type InboxMessageInput =
+  | { source: string; type: "message"; payload: Message }
+  | { source: string; type: "dispatch"; payload: DispatchPayload };
+
+/**
+ * A message stored in the inbox with assigned identity.
+ */
+export type InboxMessage = InboxMessageInput & {
+  id: string;
+  timestamp: number;
+};
+
+/**
+ * Storage adapter for durable external message delivery.
+ *
+ * External producers write messages to the inbox; sessions self-subscribe
+ * and process. The default `MemoryInboxStorage` is always-on with zero
+ * overhead until the first write. Swap to postgres/redis for durability.
+ *
+ * Same pattern as SessionStore: interface in core, memory impl in core,
+ * external backends in their own packages.
+ */
+export interface InboxStorage {
+  /** Write a message to a session's inbox. Returns assigned message ID. */
+  write(sessionId: string, message: InboxMessageInput): Promise<string>;
+  /** Get all pending messages for a session (FIFO order). */
+  pending(sessionId: string): Promise<InboxMessage[]>;
+  /** Mark a message as done (processed). Idempotent. */
+  markDone(sessionId: string, messageId: string): Promise<void>;
+  /** Subscribe to new messages for a session. Returns unsubscribe function. */
+  subscribe(sessionId: string, cb: () => void): () => void;
+  /** List session IDs that have pending messages. */
+  sessionsWithPending(): Promise<string[]>;
+}
+
 /**
  * Configuration for the built-in SQLite session store.
  */
@@ -475,6 +527,21 @@ export interface AppOptions extends LifecycleCallbacks {
    * ```
    */
   sessions?: SessionManagementOptions;
+
+  /**
+   * Override default in-memory inbox with a durable backend.
+   *
+   * The inbox enables external message delivery to sessions. A
+   * `MemoryInboxStorage` is created automatically if not provided.
+   */
+  inbox?: InboxStorage;
+
+  /**
+   * Route incoming messages to session IDs. Used by `app.receive()`.
+   *
+   * Return a session ID to route to, or null to create a new session.
+   */
+  sessionResolver?: (message: InboxMessageInput) => string | null | Promise<string | null>;
 
   /**
    * Called when a session is created.
@@ -1877,4 +1944,21 @@ export interface App<P = Record<string, unknown>> {
    * Register onSessionClose handler.
    */
   onSessionClose(handler: (sessionId: string) => void): () => void;
+
+  /**
+   * Deliver a message to the inbox with routing.
+   *
+   * Routes via `sessionResolver` if configured, otherwise creates a new session.
+   * The message is written to the inbox storage; if the target session is active,
+   * its subscriber fires immediately and drains.
+   */
+  receive(message: InboxMessageInput): Promise<void>;
+
+  /**
+   * Process all pending inbox messages across all sessions.
+   *
+   * Hydrates sessions as needed (from store) and drains their inboxes.
+   * Call this at startup to sweep durable backends after restart.
+   */
+  processInbox(): Promise<void>;
 }

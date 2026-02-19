@@ -548,6 +548,14 @@ export function createMockApp(options: MockAppOptions = {}): MockApp {
       };
     },
 
+    async receive() {
+      // No-op in mock
+    },
+
+    async processInbox() {
+      // No-op in mock
+    },
+
     // Spy state
     _sessions: sessionMap,
     _closedSessions: closedSessions,
