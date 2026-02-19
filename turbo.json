@@ -3,7 +3,7 @@
   "globalDependencies": ["tsconfig.json", ".oxlintrc.json"],
   "tasks": {
     "build": {
-      "dependsOn": ["^clean", "^build"],
+      "dependsOn": ["^build"],
       "outputs": ["dist/**"],
       "inputs": ["src/**", "tsconfig.json", "package.json"]
     },
