@@ -9,7 +9,9 @@ function makeJob(overrides: Partial<Job> = {}): Job {
   return {
     id: "test-job",
     name: "Test Job",
-    cron: "* * * * *",
+    // Use February 30 (impossible date) so the cron job never fires during tests.
+    // Tests that need the cron to fire should override this.
+    cron: "0 0 30 2 *",
     target: "tui",
     prompt: "Hello",
     oneshot: false,

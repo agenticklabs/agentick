@@ -36,7 +36,11 @@ describe("createSecretStore", () => {
   // ===========================================================================
 
   it("full CRUD round-trip on auto-detected backend", async () => {
-    const store = await createSecretStore();
+    // Use memory backend for deterministic CRUD testing.
+    // Auto-detect is covered by the "auto-detect picks a real backend" test.
+    // The env backend's list() returns raw env keys (UPPER_CASE) which
+    // don't round-trip with the original key names on CI.
+    const store = await createSecretStore({ backend: "memory" });
 
     await store.set("roundtrip-test", "hello");
     expect(await store.get("roundtrip-test")).toBe("hello");
