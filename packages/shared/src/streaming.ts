@@ -591,6 +591,25 @@ export type ModelResponseEvent = {
 } & StreamEventBase;
 
 /**
+ * Entry committed event — fires when a timeline entry is pushed to the session timeline.
+ *
+ * Emitted from session.ingestTickResult() after each _timeline.push().
+ * Carries the full entry with a stable ID for incremental persistence.
+ *
+ * Event ordering guarantee: fires AFTER execution_start and tick_start,
+ * BEFORE tick_end. Safe to INSERT with execution_id FK.
+ */
+export type EntryCommittedEvent = {
+  type: "entry_committed";
+  /** The timeline entry (COMTimelineEntry at runtime, unknown for wire safety) */
+  entry: unknown;
+  /** Execution this entry belongs to */
+  executionId: string;
+  /** Absolute position in session._timeline */
+  timelineIndex: number;
+} & StreamEventBase;
+
+/**
  * Engine error event
  */
 export type EngineErrorEvent = {
@@ -748,6 +767,8 @@ export type OrchestrationStreamEvent =
   | ForkEndEvent
   | SpawnStartEvent
   | SpawnEndEvent
+  // Timeline persistence
+  | EntryCommittedEvent
   // Errors
   | EngineErrorEvent;
 
@@ -827,6 +848,7 @@ export function isOrchestrationStreamEvent(event: StreamEvent): event is Orchest
     "fork_end",
     "spawn_start",
     "spawn_end",
+    "entry_committed",
     "engine_error",
   ].includes(event.type);
 }

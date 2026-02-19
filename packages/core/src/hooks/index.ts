@@ -75,6 +75,9 @@ export {
   useContinuation,
 } from "./lifecycle";
 
+// Execution context hooks
+export { useOnExecutionStart } from "./execution-context";
+
 // Data hook
 export { useData, useInvalidateData, type UseDataOptions } from "./data";
 

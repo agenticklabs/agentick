@@ -2284,6 +2284,7 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
         // via _resolveCurrentShouldContinue, so each sees the accumulated decision.
         const tickEndState: TickState = {
           tick: currentTick,
+          executionId: this._currentExecutionId ?? undefined,
           current: this._currentOutput as any,
           queuedMessages: [],
           timeline: this._timeline,
@@ -2639,6 +2640,7 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
     // Prepare tick state
     const tickState: TickState = {
       tick: this._tick,
+      executionId: this._currentExecutionId ?? undefined,
       current: this._currentOutput as any,
       queuedMessages: queuedMessages,
       timeline: [...this._timeline],
@@ -3002,19 +3004,34 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
 
     // Add entries to COM and session timeline - user entries first, then assistant response
     for (const entry of newUserEntries) {
+      if (!entry.id) entry.id = randomUUID();
       this.ctx.addTimelineEntry(entry);
       this._timeline.push(entry);
+      this.emitEvent({
+        type: "entry_committed",
+        entry,
+        executionId: this._currentExecutionId!,
+        timelineIndex: this._timeline.length - 1,
+      });
     }
 
     if (response.newTimelineEntries) {
       for (const entry of response.newTimelineEntries) {
+        if (!entry.id) entry.id = randomUUID();
         this.ctx.addTimelineEntry(entry);
         this._timeline.push(entry);
+        this.emitEvent({
+          type: "entry_committed",
+          entry,
+          executionId: this._currentExecutionId!,
+          timelineIndex: this._timeline.length - 1,
+        });
       }
     }
 
     if (toolResults.length > 0) {
       const toolResultEntry: COMTimelineEntry = {
+        id: randomUUID(),
         kind: "message",
         message: {
           role: "tool" as const,
@@ -3030,6 +3047,12 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
       };
       this.ctx.addTimelineEntry(toolResultEntry);
       this._timeline.push(toolResultEntry);
+      this.emitEvent({
+        type: "entry_committed",
+        entry: toolResultEntry,
+        executionId: this._currentExecutionId!,
+        timelineIndex: this._timeline.length - 1,
+      });
     }
 
     // Apply maxTimelineEntries trim

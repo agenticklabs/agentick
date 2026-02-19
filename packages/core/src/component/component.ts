@@ -96,6 +96,13 @@ export interface TickState {
   tick: number;
 
   /**
+   * Execution ID for the current execution.
+   * Available during tick_start/tick_end inside an execution.
+   * Undefined during mount (pre-execution) or when no execution is active.
+   */
+  executionId?: string;
+
+  /**
    * The COMOutput from the last tick (what was produced by model execution and tool execution).
    * Contains new timeline entries, tool calls, and tool results.
    *
