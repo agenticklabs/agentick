@@ -303,9 +303,8 @@ function collectTool(node: AgentickNode, result: CompiledStructure): void {
     input: node.props.schema,
   };
 
-  // Safe cast: only ToolComponent creates <tool> elements, and it passes
-  // effectiveRun (a Procedure or undefined) as handler. Raw <tool> elements
-  // are not part of the public API.
+  // Both ToolComponent (createTool) and <Tool> (primitives.ts) create <tool>
+  // elements. Both wrap their handler as a Procedure before passing it here.
   result.tools.push({
     metadata,
     run: node.props.handler,

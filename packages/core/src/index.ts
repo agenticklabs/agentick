@@ -75,6 +75,7 @@ export {
   useOnTickEnd,
   useAfterCompile,
   useOnExecutionEnd,
+  useOnExecutionStart,
   useContinuation,
   // Data hooks
   useData,
@@ -124,7 +125,7 @@ export {
 // ============================================================================
 // Tools
 // ============================================================================
-export { createTool } from "./tool/index";
+export { createTool, useToolProcedure } from "./tool/index";
 export type { ToolClass, ToolDefinition, ToolMetadata, ToolPropOverrides } from "./tool/index";
 
 // ============================================================================

@@ -59,5 +59,6 @@
 
 export * from "./tool";
 export * from "./tool-hooks";
+export { useToolProcedure } from "./tool-procedure";
 // Note: createComponentTool has been removed in Mark II.
 // Use Harness component for sub-agent execution instead.

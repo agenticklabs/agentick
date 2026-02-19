@@ -482,7 +482,9 @@ describe("Compiled Content", () => {
 
       expect(compiled.tools.length).toBe(1);
       expect(compiled.tools[0].metadata.name).toBe("get_weather");
-      expect(compiled.tools[0].run).toBe(handler);
+      // <Tool> wraps the raw handler in a Procedure (so tool executor can call .withMetadata())
+      expect(compiled.tools[0].run).toBeDefined();
+      expect(typeof compiled.tools[0].run).toBe("function");
     });
 
     it("should collect Tool with description", async () => {
@@ -711,7 +713,9 @@ describe("Compiled Content", () => {
 
       // Verify tool
       expect(compiled.tools[0].metadata.name).toBe("calculate");
-      expect(compiled.tools[0].run).toBe(toolHandler);
+      // <Tool> wraps the raw handler in a Procedure
+      expect(compiled.tools[0].run).toBeDefined();
+      expect(typeof compiled.tools[0].run).toBe("function");
 
       // Verify conversation
       expect(compiled.timelineEntries[0].role).toBe("user");

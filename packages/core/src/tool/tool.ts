@@ -12,6 +12,7 @@
 
 import React, { useEffect, useRef } from "react";
 import { createEngineProcedure, isProcedure } from "../procedure";
+import { createToolProcedure } from "./tool-procedure";
 import type { ExtractArgs, Middleware, Procedure } from "@agentick/kernel";
 import type { ProviderToolOptions, LibraryToolOptions } from "../types";
 import {
@@ -543,15 +544,15 @@ export function createTool<TInput = any, TOutput extends ContentBlock[] = Conten
     if (options.handler && !instanceRunRef.current) {
       if (isProcedure(options.handler)) {
         instanceRunRef.current = options.handler;
-      } else if (options.use) {
-        // use() provided — inject full deps (ToolCoreDeps & user deps)
-        instanceRunRef.current = createEngineProcedure(procedureOptions, async (...args: any[]) =>
-          (options.handler as any)(args[0], depsRef.current),
-        );
       } else {
-        // No use() — inject ctx from component tree (preserves handler(input, ctx?) signature)
-        instanceRunRef.current = createEngineProcedure(procedureOptions, async (...args: any[]) =>
-          (options.handler as any)(args[0], ctxRef.current),
+        // use() provided → inject full deps (ToolCoreDeps & user deps)
+        // No use() → inject ctx from component tree (handler(input, ctx?) signature)
+        const contextRef = options.use ? depsRef : ctxRef;
+        instanceRunRef.current = createToolProcedure(
+          effectiveMetadata.name,
+          options.handler,
+          contextRef,
+          options.middleware,
         );
       }
     }

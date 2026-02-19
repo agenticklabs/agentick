@@ -7,6 +7,7 @@ import type { ComponentBaseProps } from "../jsx-types";
 import { Expandable } from "../../hooks/expandable";
 import { Collapsed } from "./collapsed";
 import { autoMessageSummary, autoSectionSummary } from "./auto-summary";
+import { useToolProcedure } from "../../tool/tool-procedure";
 
 // Helper for createElement
 const h = React.createElement;
@@ -264,10 +265,9 @@ export function Message(props: MessageProps): JSX.Element {
  * When used in JSX: <Tool definition={myTool} />
  */
 export function Tool(props: AgentickJSX.IntrinsicElements["tool"]): JSX.Element {
-  // Debug value shows tool name for React DevTools
   useDebugValue(`Tool: ${props.name ?? "unnamed"}`);
-  // Use intrinsic "tool" element for react-reconciler compatibility
-  return h("tool", props);
+  const wrappedHandler = useToolProcedure(props.handler, props.name ?? "unnamed");
+  return h("tool", { ...props, handler: wrappedHandler });
 }
 
 // Re-export Model components
