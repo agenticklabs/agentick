@@ -79,6 +79,54 @@
       ".": {
         "types": "./dist/index.d.ts",
         "import": "./dist/index.js"
+      },
+      "./jsx-runtime": {
+        "types": "./dist/jsx/jsx-runtime.d.ts",
+        "import": "./dist/jsx/jsx-runtime.js"
+      },
+      "./jsx-dev-runtime": {
+        "types": "./dist/jsx/jsx-runtime.d.ts",
+        "import": "./dist/jsx/jsx-runtime.js"
+      },
+      "./app": {
+        "types": "./dist/app.d.ts",
+        "import": "./dist/app.js"
+      },
+      "./model": {
+        "types": "./dist/model/index.d.ts",
+        "import": "./dist/model/index.js"
+      },
+      "./com": {
+        "types": "./dist/com/index.d.ts",
+        "import": "./dist/com/index.js"
+      },
+      "./jsx": {
+        "types": "./dist/jsx/index.d.ts",
+        "import": "./dist/jsx/index.js"
+      },
+      "./hooks": {
+        "types": "./dist/compiler/index.d.ts",
+        "import": "./dist/compiler/index.js"
+      },
+      "./compiler": {
+        "types": "./dist/compiler/index.d.ts",
+        "import": "./dist/compiler/index.js"
+      },
+      "./utils": {
+        "types": "./dist/utils/index.d.ts",
+        "import": "./dist/utils/index.js"
+      },
+      "./tool": {
+        "types": "./dist/tool/index.d.ts",
+        "import": "./dist/tool/index.js"
+      },
+      "./model/utils/language-model": {
+        "types": "./dist/model/utils/language-model.d.ts",
+        "import": "./dist/model/utils/language-model.js"
+      },
+      "./testing": {
+        "types": "./dist/testing/index.d.ts",
+        "import": "./dist/testing/index.js"
       }
     },
     "main": "./dist/index.js",
