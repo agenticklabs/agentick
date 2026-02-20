@@ -33,4 +33,12 @@
  */
 export * from "./apple-model";
 export * from "./apple";
-export type { AppleAdapterConfig, BridgeInput, BridgeOutput, BridgeChunk } from "./types";
+export { appleEmbedding } from "./embedding";
+export type {
+  AppleAdapterConfig,
+  AppleEmbeddingConfig,
+  EmbeddingScript,
+  BridgeInput,
+  BridgeOutput,
+  BridgeChunk,
+} from "./types";

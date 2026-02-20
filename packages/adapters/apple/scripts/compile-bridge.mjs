@@ -53,7 +53,7 @@ console.log("[@agentick/apple] Compiling Swift bridge...");
 
 try {
   execSync(
-    `swiftc -parse-as-library -framework FoundationModels -O "${swiftSource}" -o "${outputBinary}"`,
+    `swiftc -parse-as-library -framework FoundationModels -framework NaturalLanguage -O "${swiftSource}" -o "${outputBinary}"`,
     { stdio: "inherit" },
   );
   console.log("[@agentick/apple] Bridge compiled → bin/apple-fm-bridge");

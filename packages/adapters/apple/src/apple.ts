@@ -34,6 +34,8 @@ import type {
   BridgeResponseFormat,
   BridgeJsonSchema,
   BridgeSchemaProperty,
+  EmbedBridgeInput,
+  EmbedBridgeOutput,
 } from "./types";
 import { STOP_REASON_MAP } from "./types";
 
@@ -167,6 +169,12 @@ export function createAppleModel(config: AppleAdapterConfig = {}): ModelClass {
 
     executeStream: async function* (input: BridgeInput) {
       yield* streamBridge(bridgePath, { ...input, stream: true });
+    },
+
+    embed: async (texts) => {
+      const input: EmbedBridgeInput = { operation: "embed", texts, script: "latin" };
+      const output = await runEmbedBridge(bridgePath, input);
+      return { embeddings: output.embeddings, dimensions: output.dimensions, model: output.model };
     },
   });
 }
@@ -354,4 +362,50 @@ async function* streamBridge(bridgePath: string, input: BridgeInput): AsyncItera
   if (stderrBuf.trim()) {
     yield { type: "error", error: stderrBuf.trim() };
   }
+}
+
+// ============================================================================
+// Embedding Bridge
+// ============================================================================
+
+/** Spawn the Swift bridge with embed operation, collect output as EmbedBridgeOutput */
+function runEmbedBridge(bridgePath: string, input: EmbedBridgeInput): Promise<EmbedBridgeOutput> {
+  return new Promise((resolve, reject) => {
+    const proc = spawn(bridgePath, [], { stdio: ["pipe", "pipe", "pipe"] });
+
+    let stdout = "";
+    let stderr = "";
+
+    proc.stdout.on("data", (data: Buffer) => {
+      stdout += data.toString();
+    });
+    proc.stderr.on("data", (data: Buffer) => {
+      stderr += data.toString();
+    });
+
+    proc.on("error", (err) => {
+      reject(new Error(`Failed to spawn Apple FM bridge at ${bridgePath}: ${err.message}`));
+    });
+
+    proc.on("close", (code) => {
+      if (code !== 0) {
+        reject(new Error(`Apple FM bridge exited with code ${code}: ${stderr}`));
+        return;
+      }
+
+      try {
+        const output = JSON.parse(stdout.trim());
+        if (output.type === "error") {
+          reject(new Error(`Apple embedding: ${output.error}`));
+          return;
+        }
+        resolve(output);
+      } catch {
+        reject(new Error(`Failed to parse bridge output: ${stdout.slice(0, 200)}`));
+      }
+    });
+
+    proc.stdin.write(JSON.stringify(input));
+    proc.stdin.end();
+  });
 }

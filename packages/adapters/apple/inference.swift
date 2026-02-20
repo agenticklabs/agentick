@@ -1,20 +1,27 @@
 /// Apple Foundation Models Bridge
 ///
 /// A CLI executable that wraps Apple's on-device Foundation Models framework
-/// with a JSON wire protocol compatible with agentick's adapter interface.
+/// and NaturalLanguage embedding models with a JSON wire protocol compatible
+/// with agentick's adapter interface.
 ///
 /// Wire protocol:
-///   Input:  JSON on stdin  (subset of ModelInput)
+///   Input:  JSON on stdin
 ///   Output: JSON on stdout (ModelOutput for non-streaming, NDJSON AdapterDeltas for streaming)
 ///
+/// Operations:
+///   "generate" (default) — text generation via Foundation Models
+///   "embed"              — vector embeddings via NLContextualEmbedding
+///
 /// Build:
-///   swiftc -parse-as-library -framework FoundationModels inference.swift -o apple-fm-bridge
+///   swiftc -parse-as-library -framework FoundationModels -framework NaturalLanguage inference.swift -o apple-fm-bridge
 ///
 /// Usage:
-///   echo '{"messages":[{"role":"user","content":"Hello"}],"stream":false}' | ./apple-fm-bridge
+///   echo '{"messages":[{"role":"user","content":"Hello"}]}' | ./apple-fm-bridge
+///   echo '{"operation":"embed","texts":["Hello world"]}' | ./apple-fm-bridge
 
 import Foundation
 import FoundationModels
+import NaturalLanguage
 
 // ============================================================================
 // Wire Protocol Types (aligned with @agentick/shared)
@@ -23,12 +30,29 @@ import FoundationModels
 // --- Input ---
 
 struct BridgeInput: Decodable {
-    let messages: [WireMessage]
+    let operation: String?  // "generate" (default) or "embed"
+    let messages: [WireMessage]?
     let system: String?
     let temperature: Double?
     let maxTokens: Int?
     let stream: Bool?
     let responseFormat: ResponseFormat?
+}
+
+// --- Embedding Input ---
+
+struct EmbedInput: Decodable {
+    let operation: String
+    let texts: [String]
+    let script: String?    // "latin" (default), "cyrillic", "cjk", "indic", "thai", "arabic"
+    let language: String?  // BCP-47 code, e.g. "en", "fr", "de" — optional, refines results
+}
+
+struct EmbedOutput: Encodable {
+    let model: String
+    let embeddings: [[Double]]
+    let dimensions: Int
+    let script: String
 }
 
 struct ResponseFormat: Decodable {
@@ -192,9 +216,19 @@ struct AppleFoundationBridge {
             return
         }
 
+        // Peek at operation field to route
+        struct OperationPeek: Decodable { let operation: String? }
+        let peek = try JSONDecoder().decode(OperationPeek.self, from: inputData)
+
+        if peek.operation == "embed" {
+            let embedInput = try JSONDecoder().decode(EmbedInput.self, from: inputData)
+            try generateEmbeddings(input: embedInput, encoder: encoder)
+            return
+        }
+
+        // Default: text generation
         let input = try JSONDecoder().decode(BridgeInput.self, from: inputData)
 
-        // Check availability
         let model = SystemLanguageModel.default
         guard model.availability == .available else {
             writeJSON(
@@ -204,14 +238,14 @@ struct AppleFoundationBridge {
             return
         }
 
-        // Extract system prompt: explicit field takes precedence, then system-role messages
-        let systemPrompt = input.system ?? input.messages
+        let messages = input.messages ?? []
+
+        let systemPrompt = input.system ?? messages
             .filter { $0.role == "system" }
             .map { $0.content.text }
             .joined(separator: "\n")
 
-        // Build conversation prompt from non-system messages
-        let prompt = buildPrompt(from: input.messages.filter { $0.role != "system" })
+        let prompt = buildPrompt(from: messages.filter { $0.role != "system" })
 
         guard !prompt.isEmpty else {
             writeJSON(ErrorOutput(error: "No user messages provided"), encoder: encoder)
@@ -222,7 +256,6 @@ struct AppleFoundationBridge {
             ? LanguageModelSession()
             : LanguageModelSession(instructions: systemPrompt)
 
-        // Check if structured output is requested
         if let responseFormat = input.responseFormat, responseFormat.type == "json_schema" {
             if input.stream == true {
                 writeJSON(ErrorOutput(error: "Streaming not supported with json_schema response format"), encoder: encoder)
@@ -399,6 +432,76 @@ struct AppleFoundationBridge {
                 NSLocalizedDescriptionKey: "Array types are not supported. Use comma-separated strings or numbered object properties instead."
             ])
         }
+    }
+
+    // MARK: - Embeddings
+
+    static func resolveScript(_ name: String?) -> NLScript {
+        switch name?.lowercased() {
+        case "cyrillic": return .cyrillic
+        case "cjk": return .simplifiedChinese  // CJK model
+        case "devanagari", "indic": return .devanagari
+        case "thai": return .thai
+        case "arabic": return .arabic
+        default: return .latin
+        }
+    }
+
+    static func generateEmbeddings(input: EmbedInput, encoder: JSONEncoder) throws {
+        guard !input.texts.isEmpty else {
+            writeJSON(ErrorOutput(error: "No texts provided for embedding"), encoder: encoder)
+            return
+        }
+
+        let script = resolveScript(input.script)
+        guard let embedding = NLContextualEmbedding(script: script) else {
+            writeJSON(ErrorOutput(error: "No embedding model available for script: \(input.script ?? "latin")"), encoder: encoder)
+            return
+        }
+
+        guard embedding.hasAvailableAssets else {
+            writeJSON(ErrorOutput(error: "Embedding model assets not downloaded. Enable Apple Intelligence and ensure the model is available."), encoder: encoder)
+            return
+        }
+
+        try embedding.load()
+        defer { embedding.unload() }
+
+        let dimensions = embedding.dimension
+        let language: NLLanguage? = input.language.map { NLLanguage(rawValue: $0) }
+
+        var allEmbeddings: [[Double]] = []
+
+        for text in input.texts {
+            let result = try embedding.embeddingResult(for: text, language: language)
+
+            let count = result.sequenceLength
+            guard count > 0 else {
+                allEmbeddings.append(Array(repeating: 0.0, count: dimensions))
+                continue
+            }
+
+            // Mean-pool token vectors into a single sentence embedding
+            var sum = Array(repeating: 0.0, count: dimensions)
+            result.enumerateTokenVectors(in: text.startIndex..<text.endIndex) { vector, tokenRange in
+                for i in 0..<min(vector.count, dimensions) {
+                    sum[i] += Double(vector[i])
+                }
+                return true
+            }
+
+            let divisor = Double(count)
+            let averaged = sum.map { $0 / divisor }
+            allEmbeddings.append(averaged)
+        }
+
+        let output = EmbedOutput(
+            model: "apple-contextual-embedding",
+            embeddings: allEmbeddings,
+            dimensions: dimensions,
+            script: input.script ?? "latin"
+        )
+        writeJSON(output, encoder: encoder)
     }
 
     // MARK: - Prompt Construction

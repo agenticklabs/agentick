@@ -1,13 +1,14 @@
 # @agentick/apple
 
-Apple Foundation Models adapter for Agentick — on-device inference with macOS 26+.
+Apple on-device AI for Agentick — inference and embeddings via Foundation Models and NaturalLanguage, running entirely on your machine.
 
 ## Features
 
 - **On-device inference** — No API keys, no external requests, zero cost
+- **On-device embeddings** — 512-dimensional vector embeddings via `NLContextualEmbedding`
 - **Privacy-first** — All processing happens locally with Apple Intelligence
-- **Structured output** — Native support for JSON schema-constrained generation via `DynamicGenerationSchema`
-- **Streaming support** — Real-time token-by-token responses
+- **Structured output** — JSON schema-constrained generation via `DynamicGenerationSchema`
+- **Streaming** — Real-time token-by-token responses
 - **Auto-compiled binary** — Swift bridge compiles automatically on install
 
 ## Requirements
@@ -24,11 +25,11 @@ npm install @agentick/apple
 pnpm add @agentick/apple
 ```
 
-The postinstall script automatically compiles the Swift bridge binary. If compilation fails (e.g., on non-macOS or without Xcode), the package still installs but won't be functional until the binary is available.
+The postinstall script compiles the Swift bridge binary. If compilation fails (e.g., on non-macOS or without Xcode), the package still installs but won't be functional until the binary is available.
 
 ## Quick Start
 
-### Simple Text Generation
+### Text Generation
 
 ```typescript
 import { apple } from '@agentick/apple';
@@ -44,6 +45,27 @@ const Agent = () => (
 const app = createApp(Agent, { model: apple() });
 const session = app.createSession();
 const result = await session.send({ messages: [{ role: 'user', content: 'Hello!' }] });
+```
+
+### Embeddings
+
+```typescript
+import { appleEmbedding } from "@agentick/apple";
+
+const embed = appleEmbedding();
+
+// Single text
+const { embeddings, dimensions } = await embed("Hello world");
+console.log(dimensions); // 512
+console.log(embeddings[0].length); // 512
+
+// Batch
+const { embeddings } = await embed([
+  "machine learning and AI",
+  "deep neural networks",
+  "the cat sat on the mat",
+]);
+// embeddings → number[3][512]
 ```
 
 ### Structured Output
@@ -68,9 +90,7 @@ const result = await session.send({
   },
 });
 
-// Result is guaranteed valid JSON matching the schema
 const recipe = JSON.parse(result.message.content[0].text);
-console.log(recipe.title); // "Spaghetti Carbonara"
 ```
 
 ### JSX Component
@@ -87,164 +107,133 @@ const Agent = () => (
 );
 ```
 
-### Direct Execution
-
-You can also use the model directly without creating a session:
-
-```typescript
-import { apple } from "@agentick/apple";
-
-const model = apple();
-
-// Simple generation
-const result = await model.execute({
-  messages: [{ role: "user", content: "Hello!" }],
-  stream: false,
-});
-console.log(result.message.content[0].text);
-
-// Structured output
-const structuredResult = await model.execute({
-  messages: [{ role: "user", content: "Generate a person profile" }],
-  responseFormat: {
-    type: "json_schema",
-    schema: {
-      type: "object",
-      properties: {
-        name: { type: "string", description: "Full name" },
-        age: { type: "integer", description: "Age in years" },
-      },
-    },
-  },
-  stream: false,
-});
-
-const person = JSON.parse(structuredResult.message.content[0].text);
-console.log(person); // { name: "...", age: 30 }
-```
-
 ## API
 
 ### `apple(config?)`
 
-Factory function that returns a `ModelClass` for use with `createApp`, as a JSX component, or for direct execution.
+Factory function returning a `ModelClass` for text generation.
 
-**Config:**
+| Option       | Type     | Default                 | Description                 |
+| ------------ | -------- | ----------------------- | --------------------------- |
+| `bridgePath` | `string` | auto-detected           | Path to Swift bridge binary |
+| `model`      | `string` | `"apple-foundation-3b"` | Model identifier            |
 
-- `bridgePath?: string` — Path to Swift bridge binary (defaults to auto-compiled binary)
-- `model?: string` — Model identifier (defaults to `"apple-foundation-3b"`)
-
-**Returns:** `ModelClass` with:
-
-- `.execute(input)` — Direct generation (returns `Promise<ModelOutput>`)
-- `.executeStream(input)` — Streaming generation (returns `AsyncIterable<AdapterDelta>`)
-- Use as JSX: `<model>...</model>`
-
-**Example:**
-
-```typescript
-const model = apple();
-
-// Direct execution
-await model.execute({ messages: [...], stream: false });
-
-// Use with createApp
-createApp(Agent, { model });
-
-// Use as JSX component
-<model><Agent /></model>
-```
+Returns a `ModelClass` usable with `createApp`, as JSX, or for direct execution.
 
 ### `AppleModel`
 
-JSX component for declarative model configuration.
+JSX component wrapping `apple()` for declarative model configuration. Accepts the same props as `apple()`.
 
-**Props:**
+### `appleEmbedding(config?)`
 
-- `bridgePath?: string`
-- `model?: string`
+Factory function returning a callable embedding function.
 
-## Model Capabilities
+| Option       | Type              | Default       | Description                                          |
+| ------------ | ----------------- | ------------- | ---------------------------------------------------- |
+| `bridgePath` | `string`          | auto-detected | Path to Swift bridge binary                          |
+| `script`     | `EmbeddingScript` | `"latin"`     | Script model to load (see below)                     |
+| `language`   | `string`          | —             | BCP-47 code (e.g. `"en"`, `"fr"`) for better results |
 
-| Feature                           | Supported              |
-| --------------------------------- | ---------------------- |
-| Text generation                   | ✅                     |
-| Streaming                         | ✅                     |
-| Structured output (`json_schema`) | ✅                     |
-| Tool calling                      | ❌ (compile-time only) |
-| Vision/multimodal input           | ❌                     |
-| Context window                    | 4096 tokens            |
-
-### Structured Output Details
-
-The adapter uses Apple's `DynamicGenerationSchema` API to enforce schema constraints at generation time. Unlike LLM providers that generate free text and then validate, Apple Foundation Models **guarantee** the output matches your schema.
-
-**Supported types:**
-
-- Primitives: `string`, `integer`, `number`, `boolean`
-- Nested objects (unlimited depth)
-- Arrays: Not yet supported in this bridge implementation
-
-**Example nested schema:**
+Returns an `AppleEmbeddingFunction`:
 
 ```typescript
-const schema = {
-  type: "object",
-  properties: {
-    person: {
-      type: "object",
-      properties: {
-        name: { type: "string", description: "Full name" },
-        age: { type: "integer", description: "Age in years" },
-      },
-    },
-    summary: { type: "string", description: "Brief bio" },
-  },
-};
+const embed = appleEmbedding({ script: "latin" });
 
-const result = await session.send({
-  messages: [{ role: "user", content: "Generate a person profile" }],
-  responseFormat: { type: "json_schema", schema },
-});
+// Call with a single string or array
+const result = await embed("Hello world");
+const batch = await embed(["Hello", "World"]);
+
+// Result shape
+result.embeddings; // number[][] — one vector per input text
+result.dimensions; // number — vector dimensionality (512)
+result.model; // "apple-contextual-embedding"
+result.script; // "latin"
 ```
+
+#### Script Models
+
+Each script model covers a group of languages. You pick the script, not individual languages:
+
+| Script              | Languages                                                                                                                                                                                |
+| ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `"latin"` (default) | English, French, German, Spanish, Portuguese, Italian, Dutch, Swedish, Danish, Norwegian, Finnish, Polish, Czech, Hungarian, Romanian, Slovak, Croatian, Indonesian, Turkish, Vietnamese |
+| `"cyrillic"`        | Russian, Ukrainian, Bulgarian, Kazakh                                                                                                                                                    |
+| `"cjk"`             | Chinese, Japanese, Korean                                                                                                                                                                |
+| `"indic"`           | Hindi, Marathi, Bangla, Urdu, Punjabi, Gujarati, Tamil, Telugu, Kannada, Malayalam                                                                                                       |
+| `"thai"`            | Thai                                                                                                                                                                                     |
+| `"arabic"`          | Arabic                                                                                                                                                                                   |
+
+The optional `language` parameter (BCP-47 code like `"en"`, `"ja"`, `"ru"`) refines results when you know the input language.
+
+## Capabilities
+
+| Feature                           | Supported                               |
+| --------------------------------- | --------------------------------------- |
+| Text generation                   | Yes                                     |
+| Streaming                         | Yes                                     |
+| Structured output (`json_schema`) | Yes                                     |
+| On-device embeddings              | Yes — 512-dim via NLContextualEmbedding |
+| Tool calling                      | Not yet — see [Roadmap](#roadmap)       |
+| Vision/multimodal                 | No                                      |
+| Context window                    | 4096 tokens                             |
+
+### Structured Output
+
+Uses Apple's `DynamicGenerationSchema` to enforce constraints at generation time — the model **cannot** produce invalid output.
+
+Supported types: `string`, `integer`, `number`, `boolean`, nested objects. Arrays not yet supported in bridge.
 
 ## Architecture
 
 ```
-Node.js (agentick adapter)
-    ↓ JSON via stdin
-Swift Bridge (inference.swift)
-    ↓ LanguageModelSession
-Apple Foundation Models (on-device)
-    ↓ stdout JSON/NDJSON
-Node.js (agentick adapter)
+Node.js (agentick)
+    │
+    ├── Text generation ──▶ stdin JSON ──▶ Swift Bridge ──▶ FoundationModels
+    │                                          │                    │
+    │                                          ◀── stdout JSON/NDJSON ──┘
+    │
+    └── Embeddings ──▶ stdin JSON ──▶ Swift Bridge ──▶ NLContextualEmbedding
+                                           │                    │
+                                           ◀── stdout JSON ────┘
 ```
 
-The adapter spawns the Swift bridge as a child process and communicates via JSON over stdin/stdout. This design avoids FFI complexity and provides a stable interface despite Swift's evolving runtime.
+Single Swift binary (`apple-fm-bridge`) handles both operations, routed by the `operation` field:
+
+- `"generate"` (default) — text generation via `LanguageModelSession`
+- `"embed"` — vector embeddings via `NLContextualEmbedding`
 
 ### Manual Compilation
 
-If you need to recompile the bridge manually:
-
 ```bash
 cd node_modules/@agentick/apple
-swiftc -parse-as-library -framework FoundationModels -O inference.swift -o bin/apple-fm-bridge
+swiftc -parse-as-library -framework FoundationModels -framework NaturalLanguage -O inference.swift -o bin/apple-fm-bridge
 ```
+
+## Roadmap
+
+### Tool Calling
+
+Apple Foundation Models support tool calling via the `Tool` protocol — the model can autonomously call Swift functions and use results in its response. Our adapter currently doesn't support this because Apple's tool loop runs internally within `session.respond()`.
+
+The path forward is a **bidirectional bridge protocol**: proxy `Tool` structs in Swift that write `tool_call` messages to stdout and read `tool_result` responses from stdin, letting agentick's tool executors handle execution while Apple's framework manages the model loop.
+
+### Embedding Improvements
+
+- Cosine similarity utility functions
+- Batch performance optimization (keep model loaded across calls)
+- Configurable pooling strategies (mean, CLS, max)
 
 ## Limitations
 
 - **macOS 26+ only** — Foundation Models framework isn't available on earlier versions
 - **Apple Intelligence required** — Model must be downloaded and enabled in System Settings
-- **No tool calling** — While the framework supports tools via the `@Generable` macro, they must be compile-time Swift types. Dynamic tool schemas from Node.js would require bidirectional IPC.
-- **No vision input** — The public `LanguageModelSession` API is text-only. Underlying models may support images, but it's not exposed.
-- **Limited context** — 4096 token window (confirmed empirically)
-- **Array schemas unsupported** — Current bridge doesn't implement array handling in `DynamicGenerationSchema` conversion
+- **Limited context** — 4096 token window
+- **No vision input** — `LanguageModelSession` API is text-only
+- **Array schemas unsupported** — `DynamicGenerationSchema` doesn't support dynamic array generation
 
 ## Troubleshooting
 
 ### "Model not available" error
-
-Apple Intelligence must be enabled and the model downloaded:
 
 1. Open **System Settings** > **Apple Intelligence & Siri**
 2. Enable Apple Intelligence
@@ -252,32 +241,17 @@ Apple Intelligence must be enabled and the model downloaded:
 
 ### Compilation fails on install
 
-Ensure Xcode is installed:
-
 ```bash
 xcode-select --install
 ```
 
-Or download from the App Store / developer.apple.com.
+### "Embedding model assets not downloaded"
 
-### Sandbox access issues
-
-If running in a restricted environment (e.g., Cursor sandbox), the process may not have access to the model:
-
-```typescript
-// Use outside sandbox or request appropriate permissions
-const app = createApp(Agent, { model: apple() });
-```
+The NLContextualEmbedding model assets may need to be downloaded. Ensure Apple Intelligence is enabled and the device has internet access for the initial download.
 
 ### Guardrail violations
 
-Apple's on-device models include safety guardrails. Requests for harmful, illegal, or repetitive content may be rejected with:
-
-```
-Model not available: guardrailViolation(...)
-```
-
-This is expected behavior and cannot be disabled.
+Apple's on-device models include safety guardrails. Requests for harmful or repetitive content may be rejected — this is expected and cannot be disabled.
 
 ## License
 

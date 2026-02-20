@@ -82,6 +82,48 @@ export type BridgeChunk =
   | { type: "error"; error: string };
 
 // ============================================================================
+// Embedding Types
+// ============================================================================
+
+/** Supported script models for NLContextualEmbedding */
+export type EmbeddingScript = "latin" | "cyrillic" | "cjk" | "indic" | "thai" | "arabic";
+
+/** Input sent to the Swift bridge for embedding */
+export interface EmbedBridgeInput {
+  operation: "embed";
+  texts: string[];
+  script?: EmbeddingScript;
+  /** BCP-47 language code (e.g. "en", "fr", "de") — optional, refines results */
+  language?: string;
+}
+
+/** Output from the Swift bridge for embedding */
+export interface EmbedBridgeOutput {
+  model: string;
+  embeddings: number[][];
+  dimensions: number;
+  script: string;
+}
+
+/** Configuration for the embedding API */
+export interface AppleEmbeddingConfig {
+  /** Path to the compiled Swift bridge executable */
+  bridgePath?: string;
+  /**
+   * Script model to use. Each covers multiple languages:
+   * - "latin" (default) — English, French, German, Spanish, Portuguese, Italian, Dutch, etc.
+   * - "cyrillic" — Russian, Ukrainian, Bulgarian, Kazakh
+   * - "cjk" — Chinese, Japanese, Korean
+   * - "indic" — Hindi, Marathi, Bangla, Tamil, Telugu, etc.
+   * - "thai" — Thai
+   * - "arabic" — Arabic
+   */
+  script?: EmbeddingScript;
+  /** BCP-47 language code for better results when language is known */
+  language?: string;
+}
+
+// ============================================================================
 // Stop Reason Mapping
 // ============================================================================
 
