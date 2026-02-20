@@ -1,0 +1,43 @@
+{
+  "name": "@agentick/huggingface",
+  "version": "0.8.0",
+  "description": "HuggingFace adapter for Agentick — local embeddings via transformers.js",
+  "keywords": [
+    "adapter",
+    "agent",
+    "ai",
+    "embeddings",
+    "huggingface",
+    "transformers"
+  ],
+  "license": "MIT",
+  "author": "Ryan Lindgren",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/agenticklabs/agentick.git",
+    "directory": "packages/adapters/huggingface"
+  },
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "main": "src/index.ts",
+  "publishConfig": {
+    "access": "public",
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "lint": "oxlint src/",
+    "test": "echo \"Tests run from workspace root\"",
+    "typecheck": "tsc -p tsconfig.build.json --noEmit",
+    "clean": "rm -rf dist tsconfig.build.tsbuildinfo",
+    "prepublishOnly": "pnpm build"
+  },
+  "dependencies": {
+    "@agentick/core": "workspace:*",
+    "@agentick/shared": "workspace:*",
+    "@huggingface/transformers": "^3.8.0"
+  }
+}

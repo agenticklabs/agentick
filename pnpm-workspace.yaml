@@ -8,3 +8,6 @@ autoInstallPeers: true
 
 onlyBuiltDependencies:
   - esbuild
+  - onnxruntime-node
+
+onlyBuiltDependenciesFile: ""
