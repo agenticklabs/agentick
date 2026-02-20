@@ -2,7 +2,7 @@
  * Unified Execution + Backpressure Integration Tests
  *
  * Validates that all execution paths (WS, HTTP/directSend, Local/sendToSession,
- * channel adapter/GatewayContext) have consistent state management:
+ * plugin/PluginContext) have consistent state management:
  * - setActive(true/false) brackets every execution
  * - incrementMessageCount fires on every send
  * - session:message event emitted for every path

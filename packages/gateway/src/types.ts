@@ -3,6 +3,7 @@
  */
 
 import type { App } from "@agentick/core";
+import type { SendInput, StreamEvent, ToolConfirmationResponse } from "@agentick/shared";
 import type { KernelContext, UserContext } from "@agentick/kernel";
 import type { AuthConfig } from "@agentick/server";
 
@@ -70,14 +71,10 @@ export interface GatewayConfig {
   storage?: StorageConfig;
 
   /**
-   * Channel adapters (WhatsApp, Slack, etc.)
+   * Plugins — connectors, integrations, outbound capabilities.
+   * Also addable at runtime via `gateway.use()`.
    */
-  channels?: ChannelAdapter[];
-
-  /**
-   * Message routing configuration
-   */
-  routing?: RoutingConfig;
+  plugins?: GatewayPlugin[];
 
   /**
    * Transport mode (ignored in embedded mode)
@@ -146,86 +143,66 @@ export interface StorageConfig {
 }
 
 // ============================================================================
-// Channels
+// Gateway Handle (injected into session ALS context)
 // ============================================================================
 
-export interface ChannelAdapter {
-  /**
-   * Channel identifier
-   */
+/**
+ * Handle available to tool handlers via `Context.get().metadata.gateway`.
+ * Injected when a session is created through the gateway.
+ */
+export interface GatewayHandle {
+  /** Invoke any registered gateway method */
+  invoke(method: string, params: unknown): Promise<unknown>;
+  /** Register a plugin at runtime */
+  use(plugin: GatewayPlugin): Promise<void>;
+  /** Remove a plugin at runtime */
+  remove(pluginId: string): Promise<void>;
+}
+
+// ============================================================================
+// Plugins
+// ============================================================================
+
+export interface GatewayPlugin {
+  /** Unique identifier for this plugin */
   id: string;
-
-  /**
-   * Human-readable name
-   */
-  name: string;
-
-  /**
-   * Initialize the channel
-   */
-  initialize(gateway: GatewayContext): Promise<void>;
-
-  /**
-   * Clean up resources
-   */
+  /** Called when the plugin is registered via gateway.use() */
+  initialize(ctx: PluginContext): Promise<void>;
+  /** Called when the plugin is removed or the gateway stops */
   destroy(): Promise<void>;
 }
 
-export interface GatewayContext {
-  /**
-   * Send a message to a session
-   */
-  sendToSession(sessionId: string, message: string): Promise<void>;
+export interface PluginContext {
+  /** Route inbound messages to a session (creates if needed).
+   *  Returns the execution's event stream — iterate to observe responses,
+   *  tool confirmations, etc. The gateway also broadcasts events to
+   *  transport subscribers independently, so ignoring the return is safe. */
+  sendToSession(sessionKey: string, input: SendInput): Promise<AsyncIterable<StreamEvent>>;
 
-  /**
-   * Get available apps
-   */
-  getApps(): string[];
+  /** Respond to a tool confirmation request within a session */
+  respondToConfirmation(
+    sessionKey: string,
+    callId: string,
+    response: ToolConfirmationResponse,
+  ): Promise<void>;
 
-  /**
-   * Get or create a session
-   */
-  getSession(sessionId: string): SessionContext;
-}
+  /** Register a callable method (for outbound capabilities) */
+  registerMethod(path: string, handler: SimpleMethodHandler | MethodDefinition): void;
 
-export interface SessionContext {
-  id: string;
-  appId: string;
-  send(message: string): AsyncGenerator<SessionEvent>;
-}
+  /** Unregister a method this plugin registered */
+  unregisterMethod(path: string): void;
 
-export interface SessionEvent {
-  type: string;
-  data: unknown;
-}
+  /** Invoke any gateway method (including other plugins') */
+  invoke(method: string, params: unknown): Promise<unknown>;
 
-// ============================================================================
-// Routing
-// ============================================================================
+  /** Subscribe to gateway lifecycle events */
+  on<K extends keyof GatewayEvents>(event: K, handler: (payload: GatewayEvents[K]) => void): void;
 
-export interface RoutingConfig {
-  /**
-   * Map channels to agents
-   */
-  channels?: Record<string, string>;
+  /** Unsubscribe from gateway events */
+  off<K extends keyof GatewayEvents>(event: K, handler: (payload: GatewayEvents[K]) => void): void;
 
-  /**
-   * Custom routing function
-   */
-  custom?: (message: IncomingMessage, context: RoutingContext) => string | null;
-}
-
-export interface IncomingMessage {
-  text: string;
-  channel?: string;
-  from?: string;
-  metadata?: Record<string, unknown>;
-}
-
-export interface RoutingContext {
-  availableApps: string[];
-  defaultApp: string;
-  sessionHistory?: Array<{ role: string; content: string }>;
+  /** Gateway ID for logging */
+  gatewayId: string;
 }
 
 // ============================================================================
@@ -278,15 +255,8 @@ export interface GatewayEvents {
     sessionId: string;
     message: string;
   };
-  "channel:message": {
-    channel: string;
-    from: string;
-    message: string;
-  };
-  "channel:error": {
-    channel: string;
-    error: Error;
-  };
+  "plugin:registered": { pluginId: string };
+  "plugin:removed": { pluginId: string };
   error: Error;
 }
 

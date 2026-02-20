@@ -46,9 +46,12 @@ import { ClientEventBuffer } from "./client-event-buffer.js";
 import type {
   GatewayConfig,
   GatewayEvents,
-  GatewayContext,
-  SessionEvent,
+  GatewayHandle,
+  GatewayPlugin,
+  PluginContext,
   MethodNamespace,
+  MethodDefinition,
+  SimpleMethodHandler,
 } from "./types.js";
 import { isMethodDefinition } from "./types.js";
 import type {
@@ -193,6 +196,12 @@ export class Gateway extends EventEmitter {
   /** Sequence counter for DevTools events */
   private devToolsSequence = 0;
 
+  /** Registered plugins: id -> { plugin, ctx } */
+  private plugins = new Map<string, { plugin: GatewayPlugin; ctx: PluginContext }>();
+
+  /** Track which plugin owns which method: method path -> pluginId */
+  private pluginMethodOwnership = new Map<string, string>();
+
   constructor(config: GatewayConfig) {
     super();
 
@@ -233,6 +242,13 @@ export class Gateway extends EventEmitter {
     } else {
       // Standalone mode: WS and/or HTTP transports
       this.initializeTransports();
+    }
+
+    // Initialize plugins from config (fire-and-forget — errors logged, not thrown)
+    if (config.plugins) {
+      for (const plugin of config.plugins) {
+        this.use(plugin).catch((err) => console.error(`Plugin ${plugin.id} init failed:`, err));
+      }
     }
   }
 
@@ -409,14 +425,6 @@ export class Gateway extends EventEmitter {
       throw new Error("Gateway is already running");
     }
 
-    // Initialize channel adapters
-    if (this.config.channels) {
-      const context = this.createGatewayContext();
-      for (const channel of this.config.channels) {
-        await channel.initialize(context);
-      }
-    }
-
     // Start all transports
     await Promise.all(this.transports.map((t) => t.start()));
 
@@ -435,12 +443,14 @@ export class Gateway extends EventEmitter {
   async stop(): Promise<void> {
     if (!this.isRunning && !this.embedded) return;
 
-    // Destroy channel adapters
-    if (this.config.channels) {
-      for (const channel of this.config.channels) {
-        await channel.destroy();
-      }
+    // Destroy plugins in reverse registration order
+    const entries = [...this.plugins.values()].reverse();
+    for (const { plugin } of entries) {
+      await plugin
+        .destroy()
+        .catch((err) => console.error(`Plugin ${plugin.id} destroy failed:`, err));
     }
+    this.plugins.clear();
 
     // Stop all transports (if any)
     await Promise.all(this.transports.map((t) => t.stop()));
@@ -469,8 +479,22 @@ export class Gateway extends EventEmitter {
   async session(sessionKey: string): Promise<Session> {
     const managedSession = await this.sessions.getOrCreate(sessionKey);
     if (!managedSession.coreSession || managedSession.coreSession.isTerminal) {
-      managedSession.coreSession = await managedSession.appInfo.app.session(
-        managedSession.sessionName,
+      // Inject gateway handle into ALS context before session creation.
+      // Session captures this in _capturedContext. All subsequent tick
+      // executions merge it via runWithContext.
+      const gatewayHandle: GatewayHandle = {
+        invoke: (method: string, params: unknown) =>
+          this.invokeMethod(method, params as Record<string, unknown>),
+        use: (plugin: GatewayPlugin) => this.use(plugin),
+        remove: (pluginId: string) => this.remove(pluginId),
+      };
+
+      const ctx = Context.create({
+        metadata: { gateway: gatewayHandle },
+      });
+
+      managedSession.coreSession = await Context.run(ctx, () =>
+        managedSession.appInfo.app.session(managedSession.sessionName),
       );
     }
     return managedSession.coreSession;
@@ -1708,33 +1732,140 @@ export class Gateway extends EventEmitter {
     }
   }
 
-  private createGatewayContext(): GatewayContext {
+  // ══════════════════════════════════════════════════════════════════════════
+  // Plugin System
+  // ══════════════════════════════════════════════════════════════════════════
+
+  /**
+   * Register a plugin. Calls plugin.initialize() with a PluginContext.
+   * Throws if a plugin with the same id is already registered.
+   */
+  async use(plugin: GatewayPlugin): Promise<void> {
+    if (this.plugins.has(plugin.id)) {
+      throw new Error(`Plugin "${plugin.id}" is already registered`);
+    }
+
+    const ctx = this.createPluginContext(plugin.id);
+    try {
+      await plugin.initialize(ctx);
+    } catch (err) {
+      // Clean up any methods registered during partial init
+      for (const [path, owner] of this.pluginMethodOwnership.entries()) {
+        if (owner === plugin.id) {
+          this.methodProcedures.delete(path);
+          this.pluginMethodOwnership.delete(path);
+        }
+      }
+      throw err;
+    }
+    this.plugins.set(plugin.id, { plugin, ctx });
+    this.emit("plugin:registered", { pluginId: plugin.id });
+  }
+
+  /**
+   * Remove a plugin by id. Calls plugin.destroy() and cleans up its methods.
+   * No-op if plugin id is not found.
+   */
+  async remove(pluginId: string): Promise<void> {
+    const entry = this.plugins.get(pluginId);
+    if (!entry) return;
+
+    await entry.plugin.destroy();
+
+    // Remove all methods this plugin registered
+    for (const [path, owner] of this.pluginMethodOwnership.entries()) {
+      if (owner === pluginId) {
+        this.methodProcedures.delete(path);
+        this.pluginMethodOwnership.delete(path);
+      }
+    }
+
+    this.plugins.delete(pluginId);
+    this.emit("plugin:removed", { pluginId });
+  }
+
+  /**
+   * Get a registered plugin by id.
+   */
+  getPlugin<T extends GatewayPlugin = GatewayPlugin>(id: string): T | undefined {
+    return this.plugins.get(id)?.plugin as T | undefined;
+  }
+
+  /**
+   * Create a PluginContext scoped to a specific plugin.
+   */
+  private createPluginContext(pluginId: string): PluginContext {
     return {
-      sendToSession: async (sessionId, message) => {
-        const input: SendInput = {
-          messages: [{ role: "user", content: [{ type: "text", text: message }] }],
-        };
-        for await (const _ of this.executeSession(sessionId, input)) {
-          /* drain */
-        }
+      gatewayId: this.config.id,
+
+      sendToSession: async (sessionKey: string, input: SendInput) => {
+        return this.sendToSession(sessionKey, input);
       },
 
-      getApps: () => this.registry.ids(),
+      respondToConfirmation: async (sessionKey: string, callId: string, response) => {
+        await this.publishToChannel(sessionKey, "tool_confirmation", {
+          type: "response",
+          channel: "tool_confirmation",
+          id: callId,
+          payload: response,
+        });
+      },
 
-      getSession: (sessionId) => {
-        const managedSession = this.sessions.get(sessionId);
-        if (!managedSession) {
-          throw new Error(`Session not found: ${sessionId}`);
+      registerMethod: (path: string, handler: SimpleMethodHandler | MethodDefinition) => {
+        if (BUILT_IN_METHODS.has(path)) {
+          throw new Error(`Cannot override built-in method: ${path}`);
+        }
+        if (this.methodProcedures.has(path)) {
+          throw new Error(`Method "${path}" is already registered`);
         }
 
-        return {
-          id: managedSession.state.id,
-          appId: managedSession.state.appId,
-          send: async function* (message: string): AsyncGenerator<SessionEvent> {
-            yield { type: "message_end", data: {} };
-          },
-        };
+        const isDefinition = isMethodDefinition(handler);
+        const actualHandler = isDefinition ? (handler as MethodDefinition).handler : handler;
+
+        const middleware: Middleware<any[]>[] = [];
+        if (isDefinition) {
+          const def = handler as MethodDefinition;
+          if (def.roles?.length) {
+            middleware.push(createRoleGuardMiddleware(def.roles));
+          }
+          if (def.guard) {
+            middleware.push(createCustomGuardMiddleware(def.guard));
+          }
+        }
+
+        this.methodProcedures.set(
+          path,
+          createProcedure(
+            {
+              name: `gateway:${path}`,
+              executionBoundary: "auto",
+              schema: isDefinition ? ((handler as MethodDefinition).schema as any) : undefined,
+              middleware: middleware.length > 0 ? middleware : undefined,
+              metadata: {
+                gatewayId: this.config.id,
+                method: path,
+                pluginId,
+                ...(isDefinition && { description: (handler as MethodDefinition).description }),
+              },
+            },
+            actualHandler as (...args: any[]) => any,
+          ),
+        );
+        this.pluginMethodOwnership.set(path, pluginId);
       },
+
+      unregisterMethod: (path: string) => {
+        // Only allow unregistering own methods
+        if (this.pluginMethodOwnership.get(path) !== pluginId) return;
+        this.methodProcedures.delete(path);
+        this.pluginMethodOwnership.delete(path);
+      },
+
+      invoke: (method: string, params: unknown) =>
+        this.invokeMethod(method, params as Record<string, unknown>),
+
+      on: (event, handler) => this.on(event, handler),
+      off: (event, handler) => this.off(event, handler),
     };
   }
 }
