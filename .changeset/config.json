@@ -29,7 +29,10 @@
       "@agentick/apple",
       "@agentick/connector",
       "@agentick/connector-imessage",
-      "@agentick/connector-telegram"
+      "@agentick/connector-telegram",
+      "@agentick/huggingface",
+      "@agentick/scheduler",
+      "@agentick/secrets"
     ]
   ],
   "linked": [],
