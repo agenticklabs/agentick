@@ -57,3 +57,5 @@ export * from "./model-catalog";
 export * from "./transport";
 export * from "./context";
 export * from "./secrets";
+export * from "./split-message";
+export * from "./embeddings";
