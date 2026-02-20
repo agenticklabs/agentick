@@ -52,7 +52,7 @@ High-level `createAgent()` factory and `<Agent>` component for quick setup witho
 
 ### @agentick/gateway
 
-Multi-session management. Routes messages to sessions, manages lifecycle, provides a method-based API for external access.
+Multi-session management. Routes messages to sessions, manages lifecycle, provides a method-based API for external access. Supports HTTP/SSE, WebSocket, and Unix socket transports. Unix socket enables daemon mode — gateway as a background process, clients connect locally.
 
 ### @agentick/client
 

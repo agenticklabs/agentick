@@ -22,6 +22,11 @@ export {
 export { WSTransport, createWSTransport } from "./ws-transport.js";
 export { HTTPTransport, createHTTPTransport, type HTTPTransportConfig } from "./http-transport.js";
 export { LocalGatewayTransport } from "./local-transport.js";
+export { UnixSocketTransport, type UnixSocketTransportConfig } from "./unix-socket-transport.js";
+export {
+  createUnixSocketClientTransport,
+  type UnixSocketClientConfig,
+} from "./unix-socket-client-transport.js";
 
 // Testing utilities
 export {

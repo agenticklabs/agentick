@@ -42,6 +42,7 @@ import { EmbeddedSSETransport } from "./sse-transport.js";
 import type { ClientTransport, SendInput, StreamEvent } from "@agentick/shared";
 import type { Transport, TransportClient } from "./transport.js";
 import { LocalGatewayTransport } from "./local-transport.js";
+import { UnixSocketTransport } from "./unix-socket-transport.js";
 import { ClientEventBuffer } from "./client-event-buffer.js";
 import type {
   GatewayConfig,
@@ -342,6 +343,16 @@ export class Gateway extends EventEmitter {
       });
       this.setupTransportHandlers(httpTransportInstance);
       this.transports.push(httpTransportInstance);
+    }
+
+    // Unix socket — orthogonal to WS/HTTP, can run alongside them
+    if (this.config.socketPath) {
+      const unixTransport = new UnixSocketTransport({
+        socketPath: this.config.socketPath,
+        auth,
+      });
+      this.setupTransportHandlers(unixTransport);
+      this.transports.push(unixTransport);
     }
   }
 

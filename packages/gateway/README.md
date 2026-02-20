@@ -104,6 +104,9 @@ interface GatewayConfig {
   // Mode
   embedded?: boolean; // Skip transport init, use handleRequest()
 
+  // Unix socket (daemon mode)
+  socketPath?: string; // When set, gateway also listens on this Unix socket
+
   // Authentication
   auth?: AuthConfig;
 
@@ -275,6 +278,48 @@ if (isGuardError(error)) {
 }
 ```
 
+## Unix Socket Transport (Daemon Mode)
+
+Gateway can listen on a Unix domain socket for local IPC. This enables a daemon architecture where the gateway runs as a background process and lightweight clients connect over the socket.
+
+```typescript
+const gateway = createGateway({
+  apps: { chat: myApp },
+  defaultApp: "chat",
+  socketPath: "/tmp/my-agent.sock",
+  auth: { type: "token", token: process.env.API_TOKEN },
+});
+
+await gateway.start();
+// Gateway now accepts connections on both HTTP and Unix socket
+```
+
+`socketPath` is orthogonal to HTTP/WebSocket — a gateway can listen on Unix socket AND HTTP simultaneously.
+
+### Client Connection
+
+Use `createUnixSocketClientTransport` to connect from another Node.js process:
+
+```typescript
+import { createUnixSocketClientTransport } from "@agentick/gateway";
+import { createClient } from "@agentick/client";
+
+const transport = createUnixSocketClientTransport({
+  socketPath: "/tmp/my-agent.sock",
+  token: process.env.API_TOKEN,
+});
+
+const client = createClient({ baseUrl: "unix://", transport });
+const session = client.subscribe("my-session");
+const handle = session.send("Hello from another process!");
+```
+
+The Unix socket transport uses NDJSON (newline-delimited JSON) — the same message types as WebSocket. The client transport lives in `@agentick/gateway` (not `@agentick/client`) because `node:net` is Node.js-only and the client package must remain browser-compatible.
+
+### Socket Security
+
+The socket file inherits filesystem permissions. For daemon deployments, ensure the socket directory has restricted permissions (0o700) so only the owning user can connect.
+
 ## HTTP Endpoints
 
 Gateway exposes these HTTP endpoints:
@@ -380,44 +425,44 @@ const newTask = await session.invoke("tasks:create", {
 ## Architecture
 
 ```
-┌────────────────────────────────────────────────────────────┐
-│                        GATEWAY                              │
-│                                                             │
-│  ┌───────────────────────────────────────────────────────┐ │
-│  │                   HTTP Transport                       │ │
-│  │              (SSE events + REST endpoints)             │ │
-│  └───────────────────────┬───────────────────────────────┘ │
-│                          │                                  │
-│          ┌───────────────┼───────────────┐                 │
-│          │               │               │                 │
-│          ▼               ▼               ▼                 │
-│    ┌──────────┐   ┌──────────┐   ┌──────────┐             │
-│    │  Web UI  │   │   CLI    │   │  Mobile  │             │
-│    │  Client  │   │  Client  │   │  Client  │             │
-│    └──────────┘   └──────────┘   └──────────┘             │
-│                                                             │
-├─────────────────────────────────────────────────────────────┤
-│                                                             │
-│   ┌─────────────────────────────────────────────────────┐  │
-│   │                    App Registry                      │  │
-│   ├─────────────┬─────────────┬─────────────────────────┤  │
-│   │   chat      │  research   │       coder             │  │
-│   │   (app)     │   (app)     │       (app)             │  │
-│   └──────┬──────┴──────┬──────┴───────────┬─────────────┘  │
-│          │             │                  │                 │
-│   ┌──────┴─────────────┴──────────────────┴──────┐         │
-│   │              Session Manager                  │         │
-│   │   ┌─────┐ ┌─────┐ ┌─────┐                    │         │
-│   │   │sess1│ │sess2│ │sess3│  ...               │         │
-│   │   └─────┘ └─────┘ └─────┘                    │         │
-│   └──────────────────────────────────────────────┘         │
-│                                                             │
-│   ┌─────────────────────────────────────────────────────┐  │
-│   │              Custom Methods                          │  │
-│   │   tasks:list, tasks:create, admin:stats, ...        │  │
-│   └─────────────────────────────────────────────────────┘  │
-│                                                             │
-└─────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────┐
+│                          GATEWAY                              │
+│                                                               │
+│  ┌─────────────────────────┐   ┌───────────────────────────┐ │
+│  │    HTTP/WS Transport    │   │  Unix Socket Transport    │ │
+│  │  (SSE + REST + WebSocket)│   │  (NDJSON over node:net)   │ │
+│  └────────────┬────────────┘   └─────────────┬─────────────┘ │
+│               │                               │               │
+│       ┌───────┼───────┐              ┌────────┘               │
+│       │       │       │              │                        │
+│       ▼       ▼       ▼              ▼                        │
+│   ┌──────┐ ┌──────┐ ┌──────┐  ┌──────────┐                  │
+│   │Web UI│ │Mobile│ │ CLI  │  │  Daemon  │                   │
+│   │Client│ │Client│ │Client│  │  Client  │                   │
+│   └──────┘ └──────┘ └──────┘  └──────────┘                  │
+│                                                               │
+├───────────────────────────────────────────────────────────────┤
+│                                                               │
+│   ┌─────────────────────────────────────────────────────┐    │
+│   │                    App Registry                      │    │
+│   ├─────────────┬─────────────┬──────────────────────────┤   │
+│   │   chat      │  research   │       coder              │   │
+│   │   (app)     │   (app)     │       (app)              │   │
+│   └──────┬──────┴──────┬──────┴───────────┬──────────────┘   │
+│          │             │                  │                   │
+│   ┌──────┴─────────────┴──────────────────┴──────┐           │
+│   │              Session Manager                  │           │
+│   │   ┌─────┐ ┌─────┐ ┌─────┐                    │           │
+│   │   │sess1│ │sess2│ │sess3│  ...               │           │
+│   │   └─────┘ └─────┘ └─────┘                    │           │
+│   └──────────────────────────────────────────────┘           │
+│                                                               │
+│   ┌─────────────────────────────────────────────────────┐    │
+│   │              Custom Methods                          │    │
+│   │   tasks:list, tasks:create, admin:stats, ...        │    │
+│   └─────────────────────────────────────────────────────┘    │
+│                                                               │
+└───────────────────────────────────────────────────────────────┘
 ```
 
 ## Standalone vs Embedded

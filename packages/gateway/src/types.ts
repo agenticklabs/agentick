@@ -77,6 +77,13 @@ export interface GatewayConfig {
   plugins?: GatewayPlugin[];
 
   /**
+   * Unix socket path. When set, gateway also listens on this socket.
+   * Orthogonal to `transport` — a gateway can serve WebSocket, HTTP, and
+   * Unix socket clients simultaneously.
+   */
+  socketPath?: string;
+
+  /**
    * Transport mode (ignored in embedded mode)
    * - "websocket": WebSocket only (default, good for CLI/native clients)
    * - "http": HTTP/SSE only (good for web browsers)

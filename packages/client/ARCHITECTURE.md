@@ -1,13 +1,13 @@
 # @agentick/client Architecture
 
-The client is a multiplexed SSE consumer that provides **cold/hot session accessors** and **execution handles**. It is intentionally thin and mirrors the server’s session model.
+The client is a multiplexed consumer that provides **cold/hot session accessors** and **execution handles**. It is intentionally thin and mirrors the server’s session model. The underlying transport is pluggable — SSE/HTTP, WebSocket, Unix socket, or in-process local.
 
 ## Key Concepts
 
 ### Client
 
 - One client per app endpoint (e.g. `/api/analyst`)
-- Manages a single SSE connection lazily (opened on first subscribe)
+- Manages transport connection lazily (opened on first subscribe)
 - Dispatches multiplexed events to session accessors
 
 ### Session Accessor
@@ -43,9 +43,19 @@ client.subscribe('conv-123')
   └─ events flow → accessor.onEvent(...)
 ```
 
+## Transports
+
+The client works with any `ClientTransport` (from `@agentick/shared`). WebSocket and Unix socket transports are built on `createRPCTransport` — a shared factory that provides all protocol machinery (request correlation, event streaming, reconnection). Each transport delegate provides only wire-specific I/O (~120 lines each).
+
+| Transport   | Factory                                   | Package             |
+| ----------- | ----------------------------------------- | ------------------- |
+| SSE/HTTP    | (default, built into client)              | `@agentick/client`  |
+| WebSocket   | `createWSTransport(config)`               | `@agentick/client`  |
+| Unix Socket | `createUnixSocketClientTransport(config)` | `@agentick/gateway` |
+| Local       | `createLocalTransport(app)`               | `@agentick/core`    |
+
 ## Single Story
 
 - No `createSession()` or `connect()` calls
-- No legacy transport abstraction
 - Sessions are server-managed actors
 - Client is a thin multiplexing layer

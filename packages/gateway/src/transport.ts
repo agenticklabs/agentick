@@ -73,7 +73,7 @@ export interface NetworkTransportConfig extends TransportConfig {
 }
 
 /** Transport type identifier */
-export type TransportType = "websocket" | "http" | "sse" | "local";
+export type TransportType = "websocket" | "http" | "sse" | "local" | "unix";
 
 /**
  * Transport interface - abstracts WebSocket vs HTTP/SSE.

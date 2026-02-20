@@ -341,12 +341,16 @@ The core transport interface. All transports implement this — SSE/HTTP, WebSoc
 
 ### Available Transports
 
-| Transport | Package            | Description                                          |
-| --------- | ------------------ | ---------------------------------------------------- |
-| SSE/HTTP  | `@agentick/client` | Default remote transport (HTTP + Server-Sent Events) |
-| Local     | `@agentick/core`   | In-process bridge via `createLocalTransport(app)`    |
+| Transport   | Package             | Description                                          |
+| ----------- | ------------------- | ---------------------------------------------------- |
+| SSE/HTTP    | `@agentick/client`  | Default remote transport (HTTP + Server-Sent Events) |
+| WebSocket   | `@agentick/client`  | Bidirectional via `createWSTransport(config)`        |
+| Unix Socket | `@agentick/gateway` | NDJSON over Unix domain socket (Node.js only)        |
+| Local       | `@agentick/core`    | In-process bridge via `createLocalTransport(app)`    |
 
-See [`packages/shared/src/transport.ts`](src/transport.ts) for the full interface definition.
+WebSocket and Unix socket transports are built on the shared `createRPCTransport` factory, which provides all protocol machinery (request correlation, event streaming, reconnection, session operations). Each transport is a thin delegate that provides wire-specific I/O.
+
+See [`packages/shared/src/transport.ts`](src/transport.ts) for the `ClientTransport` interface and [`packages/shared/src/rpc-transport.ts`](src/rpc-transport.ts) for the RPC factory.
 
 ## Tool Types
 

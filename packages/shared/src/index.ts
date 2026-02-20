@@ -59,3 +59,5 @@ export * from "./context";
 export * from "./secrets";
 export * from "./split-message";
 export * from "./embeddings";
+export * from "./transport-utils";
+export * from "./rpc-transport";

@@ -126,10 +126,13 @@ See the [Terminal UI guide](/docs/tui) for details.
 
 ## Transport
 
-The client-server communication uses:
+The client-server communication supports multiple transports:
 
-- **SSE (Server-Sent Events)** for streaming model responses
-- **HTTP POST** for method calls and message sending
-- **WebSocket** (optional) for bidirectional real-time communication
+- **SSE/HTTP** — Server-Sent Events for streaming + HTTP POST for sending. Default for browser clients.
+- **WebSocket** — Bidirectional real-time via `createWSTransport`. Browser and Node.js.
+- **Unix Socket** — NDJSON over Unix domain socket via `createUnixSocketClientTransport`. Node.js only. Used for daemon mode where the gateway runs as a background process and TUI clients connect locally.
+- **Local** — In-process bridge via `createLocalTransport`. No network overhead.
 
 The transport is abstracted — the client API is the same regardless of the underlying transport. The TUI, React web apps, and custom Node.js clients all use the same `ClientTransport` interface.
+
+WebSocket and Unix socket transports are built on `createRPCTransport` (from `@agentick/shared`), a shared factory that provides all protocol machinery. Each transport is a thin delegate (~120 lines) providing wire-specific I/O.

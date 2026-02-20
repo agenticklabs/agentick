@@ -66,7 +66,7 @@ export {
 } from "./transport.js";
 
 export { SSETransport, createSSETransport, type SSETransportConfig } from "./sse-transport.js";
-export { WSTransport, createWSTransport, type WSTransportConfig } from "./ws-transport.js";
+export { type WSTransport, createWSTransport, type WSTransportConfig } from "./ws-transport.js";
 export { unwrapEventMessage } from "./transport-utils.js";
 
 // Message steering
