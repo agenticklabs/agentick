@@ -1,7 +1,7 @@
 {
   "name": "@agentick/connector-telegram",
   "version": "0.8.0",
-  "description": "Telegram connector for Agentick — bridge Telegram bots to agent sessions",
+  "description": "Telegram plugin for Agentick gateway — bridge Telegram bots to agent sessions",
   "keywords": [
     "agent",
     "ai",
@@ -46,7 +46,7 @@
     "dev": "tsc --watch"
   },
   "dependencies": {
-    "@agentick/connector": "workspace:*",
+    "@agentick/gateway": "workspace:*",
     "@agentick/shared": "workspace:*"
   },
   "devDependencies": {
