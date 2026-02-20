@@ -69,6 +69,8 @@ import type {
 import type { ContentBlock } from "@agentick/shared";
 import { fromEngineState, toEngineState } from "./utils/language-model";
 import type { LibraryGenerationOptions, ProviderGenerationOptions } from "../types";
+import type { EmbedResult } from "@agentick/shared";
+import type { EmbedOptions } from "./embedding";
 import { Model } from "../jsx/components/model";
 
 // ============================================================================
@@ -502,6 +504,13 @@ export interface AdapterOptions<TProviderInput, TProviderOutput, TChunk> {
    * Use for cleanup when used as JSX.
    */
   onUnmount?: (ctx: COM) => void | Promise<void>;
+
+  /**
+   * Optional embedding function.
+   * When provided, the returned ModelClass will support `embed()` for generating embeddings.
+   * This allows a single adapter to support both text generation and embedding.
+   */
+  embed?: (texts: string[], options?: EmbedOptions) => Promise<EmbedResult>;
 }
 
 /**
@@ -816,6 +825,7 @@ export function createAdapter<TProviderInput, TProviderOutput, TChunk>(
       ? async (output: ModelOutput) => options.toEngineState!(output)
       : (output: ModelOutput) => toEngineState(output),
     getProviderInput: async (input: ModelInput) => prepareInput(input),
+    embed: options.embed,
   };
 
   // Create functional component that wraps <Model>
@@ -848,6 +858,9 @@ export function createAdapter<TProviderInput, TProviderOutput, TChunk>(
   (ModelComponent as any).fromEngineState = engineModel.fromEngineState;
   (ModelComponent as any).toEngineState = engineModel.toEngineState;
   (ModelComponent as any).getProviderInput = engineModel.getProviderInput;
+  if (options.embed) {
+    (ModelComponent as any).embed = options.embed;
+  }
 
   return ModelComponent as unknown as ModelClass;
 }

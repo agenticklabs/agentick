@@ -54,3 +54,6 @@ export * from "./utils";
 export * from "./stream-accumulator"; // AdapterDelta, StreamAccumulator
 export * from "./adapter"; // createAdapter factory
 export * from "./adapter-helpers"; // Composable helpers for adapters
+
+// Embedding adapters
+export * from "./embedding";
