@@ -1,5 +1,13 @@
 # @agentick/server
 
+## 0.9.0
+
+### Patch Changes
+
+- Updated dependencies [d3f9b8d]
+  - @agentick/shared@0.9.0
+  - @agentick/kernel@0.9.0
+
 ## 0.8.0
 
 ### Patch Changes
