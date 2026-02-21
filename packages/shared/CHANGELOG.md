@@ -1,5 +1,11 @@
 # @agentick/shared
 
+## 0.9.1
+
+### Patch Changes
+
+- 596eba0: Switch to NodeNext module resolution with explicit .js extensions on all relative imports. Fixes ESM compatibility for consumers using plain Node without a bundler. Bump target/lib to ES2023.
+
 ## 0.9.0
 
 ### Minor Changes

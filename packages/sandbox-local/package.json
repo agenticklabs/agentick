@@ -1,6 +1,6 @@
 {
   "name": "@agentick/sandbox-local",
-  "version": "0.9.0",
+  "version": "0.9.1",
   "description": "Local sandbox provider for Agentick — OS-level process isolation via macOS seatbelt and Linux bubblewrap",
   "keywords": [
     "agent",

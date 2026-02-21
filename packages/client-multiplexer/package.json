@@ -1,6 +1,6 @@
 {
   "name": "@agentick/client-multiplexer",
-  "version": "0.9.0",
+  "version": "0.9.1",
   "description": "Multi-tab connection multiplexer for Agentick client",
   "repository": {
     "type": "git",
