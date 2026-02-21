@@ -23,7 +23,7 @@ import { existsSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createEmbeddingAdapter, type EmbeddingModel } from "@agentick/core/model";
-import type { AppleEmbeddingConfig, EmbedBridgeInput, EmbedBridgeOutput } from "./types";
+import type { AppleEmbeddingConfig, EmbedBridgeInput, EmbedBridgeOutput } from "./types.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_BRIDGE_PATH = join(__dirname, "..", "bin", "apple-fm-bridge");

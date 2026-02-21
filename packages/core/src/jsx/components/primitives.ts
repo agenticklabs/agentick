@@ -1,20 +1,20 @@
 import type { ContentBlock, Message, MessageRoles } from "@agentick/shared";
 import React, { useDebugValue } from "react";
 import type { JSX } from "react";
-import type { JSX as AgentickJSX } from "../jsx-runtime";
-import type { StreamEvent } from "../../engine/engine-events";
-import type { ComponentBaseProps } from "../jsx-types";
-import { Expandable } from "../../hooks/expandable";
-import { Collapsed } from "./collapsed";
-import { autoMessageSummary, autoSectionSummary } from "./auto-summary";
-import { useToolProcedure } from "../../tool/tool-procedure";
+import type { JSX as AgentickJSX } from "../jsx-runtime.js";
+import type { StreamEvent } from "../../engine/engine-events.js";
+import type { ComponentBaseProps } from "../jsx-types.js";
+import { Expandable } from "../../hooks/expandable.js";
+import { Collapsed } from "./collapsed.js";
+import { autoMessageSummary, autoSectionSummary } from "./auto-summary.js";
+import { useToolProcedure } from "../../tool/tool-procedure.js";
 
 // Helper for createElement
 const h = React.createElement;
 
 // Re-export Timeline component from timeline.tsx
-export { Timeline, useTimelineContext } from "./timeline";
-export type { TimelineProps, TimelineRenderFn, TimelineContextValue } from "./timeline";
+export { Timeline, useTimelineContext } from "./timeline.js";
+export type { TimelineProps, TimelineRenderFn, TimelineContextValue } from "./timeline.js";
 
 /**
  * Entry primitive component.
@@ -271,17 +271,17 @@ export function Tool(props: AgentickJSX.IntrinsicElements["tool"]): JSX.Element 
 }
 
 // Re-export Model components
-export { Model, ModelOptions } from "./model";
-export type { ModelComponentProps, ModelOptionsProps } from "./model";
+export { Model, ModelOptions } from "./model.js";
+export type { ModelComponentProps, ModelOptionsProps } from "./model.js";
 
 // Re-export Markdown component
-export { Markdown } from "./markdown";
+export { Markdown } from "./markdown.js";
 
 // Re-export semantic primitives
-export { H1, H2, H3, Header, Paragraph, List, ListItem, Table, Row, Column } from "./semantic";
+export { H1, H2, H3, Header, Paragraph, List, ListItem, Table, Row, Column } from "./semantic.js";
 
 // Re-export message role components
-export { User, Assistant, System, ToolResult, Event, Ephemeral, Grounding } from "./messages";
+export { User, Assistant, System, ToolResult, Event, Ephemeral, Grounding } from "./messages.js";
 export type {
   UserProps,
   AssistantProps,
@@ -292,10 +292,10 @@ export type {
   GroundingProps,
   EphemeralPosition,
   RoleMessageBaseProps,
-} from "./messages";
+} from "./messages.js";
 
 // Re-export event block components
-export { UserAction, SystemEvent, StateChange } from "./messages";
-export type { UserActionProps, SystemEventProps, StateChangeProps } from "./messages";
+export { UserAction, SystemEvent, StateChange } from "./messages.js";
+export type { UserActionProps, SystemEventProps, StateChangeProps } from "./messages.js";
 
 // Fragment is already exported from jsx-runtime but we can re-export or use <>

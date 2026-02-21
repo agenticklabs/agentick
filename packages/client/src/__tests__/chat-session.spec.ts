@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { ChatSession } from "../chat-session";
-import { createMockClient, makeEvent } from "../testing";
-import type { ChatMessage, TimelineEntry } from "../chat-types";
+import { ChatSession } from "../chat-session.js";
+import { createMockClient, makeEvent } from "../testing.js";
+import type { ChatMessage, TimelineEntry } from "../chat-types.js";
 import type { ContentBlock } from "@agentick/shared";
 
 function textBlock(text: string): ContentBlock {

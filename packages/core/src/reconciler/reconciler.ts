@@ -5,10 +5,10 @@
  */
 
 import ReactReconciler from "react-reconciler";
-import { hostConfig, registerRendererComponent } from "./host-config";
-import type { AgentickContainer, AgentickNode } from "./types";
-import type { Renderer } from "../renderers/types";
-import { markdownRenderer } from "../renderers/markdown";
+import { hostConfig, registerRendererComponent } from "./host-config.js";
+import type { AgentickContainer, AgentickNode } from "./types.js";
+import type { Renderer } from "../renderers/types.js";
+import { markdownRenderer } from "../renderers/markdown.js";
 
 /**
  * The reconciler instance.
@@ -99,7 +99,7 @@ export {
   enableReactDevTools,
   isReactDevToolsConnected,
   disconnectReactDevTools,
-} from "./devtools-bridge";
+} from "./devtools-bridge.js";
 
 /**
  * Inject renderer info into React DevTools.

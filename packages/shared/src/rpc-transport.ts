@@ -17,9 +17,9 @@ import type {
   TransportEventData,
   TransportEventHandler,
   TransportState,
-} from "./transport";
-import type { SendInput, ChannelEvent, ToolConfirmationResponse } from "./protocol";
-import { unwrapEventMessage, extractSendMessage } from "./transport-utils";
+} from "./transport.js";
+import type { SendInput, ChannelEvent, ToolConfirmationResponse } from "./protocol.js";
+import { unwrapEventMessage, extractSendMessage } from "./transport-utils.js";
 
 // ============================================================================
 // Delegate Interface — wire-specific I/O

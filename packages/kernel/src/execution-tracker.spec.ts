@@ -1,7 +1,7 @@
 import type { Mock } from "vitest";
-import { Context, type KernelContext } from "./context";
-import { ExecutionTracker } from "./execution-tracker";
-import { Telemetry } from "./telemetry";
+import { Context, type KernelContext } from "./context.js";
+import { ExecutionTracker } from "./execution-tracker.js";
+import { Telemetry } from "./telemetry.js";
 
 // Mock Telemetry
 vi.mock("./telemetry", () => ({

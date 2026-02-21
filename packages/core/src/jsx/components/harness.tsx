@@ -35,11 +35,11 @@
 
 import React, { useEffect, useRef } from "react";
 import type { JSX } from "react";
-import type { COM } from "../../com/object-model";
-import { type ComponentBaseProps } from "../jsx-types";
-import { SessionImpl } from "../../app/session";
-import type { ComponentFunction, SendResult, AppOptions, SessionOptions } from "../../app/types";
-import type { EngineModel } from "../../model/model";
+import type { COM } from "../../com/object-model.js";
+import { type ComponentBaseProps } from "../jsx-types.js";
+import { SessionImpl } from "../../app/session.js";
+import type { ComponentFunction, SendResult, AppOptions, SessionOptions } from "../../app/types.js";
+import type { EngineModel } from "../../model/model.js";
 
 /**
  * Context for harness topology awareness.

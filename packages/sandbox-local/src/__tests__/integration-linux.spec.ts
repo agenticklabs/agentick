@@ -15,7 +15,7 @@
  */
 
 import { describe, it } from "vitest";
-import { isLinux } from "../testing";
+import { isLinux } from "../testing.js";
 
 describe.skipIf(!isLinux)("linux sandbox enforcement", () => {
   it.todo("runs basic commands under bwrap");

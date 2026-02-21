@@ -1,12 +1,12 @@
 import { describe, it, expect, afterEach } from "vitest";
 import type { Message as MessageType } from "@agentick/shared";
-import { compileAgent, createTestAdapter, renderAgent, cleanup } from "../../../testing";
-import { Message, Timeline, Section, Markdown, List, ListItem } from "../primitives";
-import { XML } from "../xml";
-import { Text, Image, Code, ToolUse } from "../content";
-import { Model } from "../model";
-import { Knobs } from "../../../hooks";
-import { autoMessageSummary, autoSectionSummary, autoContentSummary } from "../auto-summary";
+import { compileAgent, createTestAdapter, renderAgent, cleanup } from "../../../testing/index.js";
+import { Message, Timeline, Section, Markdown, List, ListItem } from "../primitives.js";
+import { XML } from "../xml.js";
+import { Text, Image, Code, ToolUse } from "../content.js";
+import { Model } from "../model.js";
+import { Knobs } from "../../../hooks/index.js";
+import { autoMessageSummary, autoSectionSummary, autoContentSummary } from "../auto-summary.js";
 
 afterEach(cleanup);
 

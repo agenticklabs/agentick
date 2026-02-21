@@ -1,2 +1,2 @@
-export * from "./entity-ids";
-export * from "./merge-deep";
+export * from "./entity-ids.js";
+export * from "./merge-deep.js";

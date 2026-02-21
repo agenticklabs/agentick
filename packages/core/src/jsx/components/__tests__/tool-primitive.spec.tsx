@@ -15,13 +15,13 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { createApp } from "../../../app";
-import { createTool } from "../../../tool/tool";
-import { Model, Tool } from "../primitives";
-import { System, User } from "../messages";
-import { Timeline } from "../timeline";
-import { createTestAdapter } from "../../../testing";
-import { createEngineProcedure } from "../../../procedure";
+import { createApp } from "../../../app.js";
+import { createTool } from "../../../tool/tool.js";
+import { Model, Tool } from "../primitives.js";
+import { System, User } from "../messages.js";
+import { Timeline } from "../timeline.js";
+import { createTestAdapter } from "../../../testing/index.js";
+import { createEngineProcedure } from "../../../procedure/index.js";
 import { z } from "zod";
 
 describe("<Tool> JSX component", () => {

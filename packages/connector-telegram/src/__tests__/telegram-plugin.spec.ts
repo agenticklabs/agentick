@@ -8,7 +8,7 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { PluginContext } from "@agentick/gateway";
-import type { StreamEvent } from "@agentick/shared";
+import type { BlockType, StreamEvent } from "@agentick/shared";
 import { TelegramPlugin } from "../telegram-plugin.js";
 
 // ============================================================================
@@ -326,8 +326,8 @@ describe("TelegramPlugin", () => {
     it("accumulates content_delta events and sends response", async () => {
       const plugin = new TelegramPlugin({ token: "test-token" });
       const events = createEventStream([
-        { type: "content_delta", delta: "Hello ", blockType: "text", blockIndex: 0 },
-        { type: "content_delta", delta: "world!", blockType: "text", blockIndex: 0 },
+        { type: "content_delta", delta: "Hello ", blockType: "text" as BlockType, blockIndex: 0 },
+        { type: "content_delta", delta: "world!", blockType: "text" as BlockType, blockIndex: 0 },
       ]);
       const { ctx } = createMockPluginContext({
         sendToSession: vi.fn(async () => events),
@@ -350,7 +350,7 @@ describe("TelegramPlugin", () => {
       const longText = "A".repeat(5000);
       const plugin = new TelegramPlugin({ token: "test-token" });
       const events = createEventStream([
-        { type: "content_delta", delta: longText, blockType: "text", blockIndex: 0 },
+        { type: "content_delta", delta: longText, blockType: "text" as BlockType, blockIndex: 0 },
       ]);
       const { ctx } = createMockPluginContext({
         sendToSession: vi.fn(async () => events),
@@ -388,7 +388,7 @@ describe("TelegramPlugin", () => {
       const plugin = new TelegramPlugin({ token: "test-token" });
       const events = createEventStream([
         { type: "tick_start" },
-        { type: "content_delta", delta: "response", blockType: "text", blockIndex: 0 },
+        { type: "content_delta", delta: "response", blockType: "text" as BlockType, blockIndex: 0 },
       ]);
       const { ctx } = createMockPluginContext({
         sendToSession: vi.fn(async () => events),
@@ -759,7 +759,7 @@ describe("TelegramPlugin", () => {
             {
               type: "content_delta",
               delta: `Response ${callCount}`,
-              blockType: "text",
+              blockType: "text" as BlockType,
               blockIndex: 0,
             },
           ]);

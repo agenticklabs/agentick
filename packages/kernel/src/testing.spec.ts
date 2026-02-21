@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { createTestProcedure } from "./testing";
-import { isProcedure } from "./procedure";
+import { createTestProcedure } from "./testing.js";
+import { isProcedure } from "./procedure.js";
 
 describe("createTestProcedure", () => {
   it("isProcedure() returns true", () => {

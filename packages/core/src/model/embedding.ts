@@ -20,7 +20,7 @@
  */
 
 import type { EmbedResult } from "@agentick/shared";
-import type { ProviderGenerationOptions, LibraryGenerationOptions } from "../types";
+import type { ProviderGenerationOptions, LibraryGenerationOptions } from "../types.js";
 
 // ============================================================================
 // Options

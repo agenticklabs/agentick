@@ -5,8 +5,8 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { MarkdownRenderer } from "./markdown";
-import type { SemanticContentBlock } from "./base";
+import { MarkdownRenderer } from "./markdown.js";
+import type { SemanticContentBlock } from "./base.js";
 
 describe("MarkdownRenderer", () => {
   describe("formatNode", () => {

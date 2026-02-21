@@ -28,7 +28,7 @@ import type {
   SessionStreamEvent,
   SendInput,
   ClientExecutionHandle,
-} from "./types";
+} from "./types.js";
 import type { ContentBlock, Message, ExecutionEndEvent } from "@agentick/shared";
 import { AbortError } from "@agentick/shared";
 

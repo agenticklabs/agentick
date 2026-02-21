@@ -8,7 +8,7 @@ import {
   type LineEditorSnapshot,
   type CompletionSource,
   type CompletionItem,
-} from "../line-editor";
+} from "../line-editor.js";
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 

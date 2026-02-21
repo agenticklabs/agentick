@@ -11,6 +11,6 @@ export {
   type AgentTokenBudgetConfig,
   type AgentTimelineConfig,
   type AgentSectionConfig,
-} from "./agent";
+} from "./agent.js";
 
-export { createAgent, agentComponent, type AgentConfig } from "./create-agent";
+export { createAgent, agentComponent, type AgentConfig } from "./create-agent.js";

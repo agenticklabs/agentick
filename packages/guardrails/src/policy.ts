@@ -1,4 +1,4 @@
-import type { GuardrailRule, GuardrailAction } from "./types";
+import type { GuardrailRule, GuardrailAction } from "./types.js";
 
 /**
  * Match a tool name against a glob-like pattern.

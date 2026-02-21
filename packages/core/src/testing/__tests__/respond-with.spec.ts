@@ -3,8 +3,8 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { createTestAdapter } from "../test-adapter";
-import { toEngineState } from "../../model/utils/language-model";
+import { createTestAdapter } from "../test-adapter.js";
+import { toEngineState } from "../../model/utils/language-model.js";
 
 describe("respondWith", () => {
   describe("content detection", () => {

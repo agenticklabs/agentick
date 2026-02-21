@@ -9,7 +9,7 @@
  * falls back to char/4 heuristic.
  */
 
-import type { COMTimelineEntry } from "../../com/types";
+import type { COMTimelineEntry } from "../../com/types.js";
 
 // ============================================================================
 // Types

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { ResourceEnforcer } from "../resources";
+import { ResourceEnforcer } from "../resources.js";
 import { EventEmitter } from "node:events";
 import type { ChildProcess } from "node:child_process";
 

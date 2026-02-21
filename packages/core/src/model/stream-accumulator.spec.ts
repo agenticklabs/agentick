@@ -7,7 +7,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { StreamAccumulator } from "./stream-accumulator";
+import { StreamAccumulator } from "./stream-accumulator.js";
 import { StopReason } from "@agentick/shared";
 
 describe("StreamAccumulator", () => {

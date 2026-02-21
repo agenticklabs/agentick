@@ -1,6 +1,6 @@
-import type { Channel } from "./channel";
-import { type ChannelEvent } from "./channel";
-import { Context } from "./context";
+import type { Channel } from "./channel.js";
+import { type ChannelEvent } from "./channel.js";
+import { Context } from "./context.js";
 
 /**
  * Helper functions for accessing channels from KernelContext.

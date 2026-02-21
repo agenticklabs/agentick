@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { SharedTransport, createSharedTransport } from "../shared-transport";
+import { SharedTransport, createSharedTransport } from "../shared-transport.js";
 import type { TransportState } from "@agentick/client";
 
 // Mock BroadcastChannel

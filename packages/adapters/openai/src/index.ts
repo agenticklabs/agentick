@@ -25,5 +25,5 @@
  *
  * @module @agentick/openai
  */
-export * from "./openai-model";
-export * from "./openai";
+export * from "./openai-model.js";
+export * from "./openai.js";

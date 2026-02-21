@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect, beforeEach } from "vitest";
-import { COM } from "../object-model";
+import { COM } from "../object-model.js";
 import type { Message } from "@agentick/shared";
 
 describe("COM Message Queue", () => {

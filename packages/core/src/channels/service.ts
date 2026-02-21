@@ -7,7 +7,7 @@ import {
   Context,
   type KernelContext,
 } from "@agentick/kernel";
-import type { EngineContext } from "../types";
+import type { EngineContext } from "../types.js";
 import { NotFoundError, ValidationError } from "@agentick/shared";
 
 // Re-export channel types from Kernel so Engine users don't need to import from Kernel

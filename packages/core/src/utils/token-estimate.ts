@@ -9,9 +9,13 @@
  */
 
 import type { Message, ContentBlock, ToolDefinition } from "@agentick/shared";
-import type { CompiledStructure, CompiledTimelineEntry, CompiledSection } from "../compiler/types";
-import type { ExecutableTool } from "../tool/tool";
-import type { SemanticContentBlock } from "../renderers/types";
+import type {
+  CompiledStructure,
+  CompiledTimelineEntry,
+  CompiledSection,
+} from "../compiler/types.js";
+import type { ExecutableTool } from "../tool/tool.js";
+import type { SemanticContentBlock } from "../renderers/types.js";
 
 /**
  * Approximate characters per token for English text.

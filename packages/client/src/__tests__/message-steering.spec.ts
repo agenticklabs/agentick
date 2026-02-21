@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { MessageSteering } from "../message-steering";
-import { createMockClient, makeEvent } from "../testing";
+import { MessageSteering } from "../message-steering.js";
+import { createMockClient, makeEvent } from "../testing.js";
 
 describe("MessageSteering", () => {
   let client: ReturnType<typeof createMockClient>;

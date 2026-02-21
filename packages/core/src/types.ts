@@ -44,12 +44,12 @@
 import { type Message, type ContentBlock, type GeneratedImageBlock } from "@agentick/shared";
 import type { Procedure, UserContext } from "@agentick/kernel";
 import type { ProcedureGraph, ProcedureNode } from "@agentick/kernel";
-import type { ChannelService } from "./channels/service";
-import type { ExecutionHandleImpl } from "./engine/execution-handle";
+import type { ChannelService } from "./channels/service.js";
+import type { ExecutionHandleImpl } from "./engine/execution-handle.js";
 import type {
   // ExecutionType,
   ExecutionHandle as EngineExecutionHandle,
-} from "./engine/execution-types";
+} from "./engine/execution-types.js";
 import type { EventEmitter } from "node:events";
 import type { ContextMetadata, ContextMetrics } from "@agentick/kernel";
 

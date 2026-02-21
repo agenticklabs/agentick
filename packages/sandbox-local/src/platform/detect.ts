@@ -9,7 +9,7 @@ import { execFile } from "node:child_process";
 import { access, readFile } from "node:fs/promises";
 import { constants } from "node:fs";
 import { promisify } from "node:util";
-import type { PlatformCapabilities, SandboxStrategy } from "./types";
+import type { PlatformCapabilities, SandboxStrategy } from "./types.js";
 
 const execFileAsync = promisify(execFile);
 

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
-import { toolGuardrail } from "./tool";
-import { deny, allow } from "./policy";
-import { GuardrailDenied } from "./errors";
+import { toolGuardrail } from "./tool.js";
+import { deny, allow } from "./policy.js";
+import { GuardrailDenied } from "./errors.js";
 import { GuardError, isGuardError } from "@agentick/shared";
 import type { ProcedureEnvelope } from "@agentick/kernel";
 

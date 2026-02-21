@@ -1,8 +1,8 @@
 import { createGuard } from "@agentick/kernel";
 import type { Middleware } from "@agentick/kernel";
-import type { ToolGuardrailConfig } from "./types";
-import { GuardrailDenied } from "./errors";
-import { evaluateRules } from "./policy";
+import type { ToolGuardrailConfig } from "./types.js";
+import { GuardrailDenied } from "./errors.js";
+import { evaluateRules } from "./policy.js";
 
 /**
  * Create middleware that gates tool execution with static rules and/or a classifier.

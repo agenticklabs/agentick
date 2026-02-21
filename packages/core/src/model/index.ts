@@ -46,14 +46,14 @@
  * @module agentick/model
  */
 
-export * from "./model";
-export * from "./model-hooks";
-export * from "./utils";
+export * from "./model.js";
+export * from "./model-hooks.js";
+export * from "./utils/index.js";
 
 // Adapter creation
-export * from "./stream-accumulator"; // AdapterDelta, StreamAccumulator
-export * from "./adapter"; // createAdapter factory
-export * from "./adapter-helpers"; // Composable helpers for adapters
+export * from "./stream-accumulator.js"; // AdapterDelta, StreamAccumulator
+export * from "./adapter.js"; // createAdapter factory
+export * from "./adapter-helpers.js"; // Composable helpers for adapters
 
 // Embedding adapters
-export * from "./embedding";
+export * from "./embedding.js";

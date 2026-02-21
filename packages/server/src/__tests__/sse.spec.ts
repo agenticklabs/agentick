@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { createSSEWriter, streamToSSE, setSSEHeaders } from "../sse";
+import { createSSEWriter, streamToSSE, setSSEHeaders } from "../sse.js";
 
 // Mock writable stream
 function createMockStream(): {

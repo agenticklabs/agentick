@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomBytes } from "node:crypto";
 import type { Mount } from "@agentick/sandbox";
-import type { ResolvedMount } from "./executor/types";
+import type { ResolvedMount } from "./executor/types.js";
 
 /**
  * Create a workspace directory.

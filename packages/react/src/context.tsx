@@ -6,7 +6,7 @@
 
 import { createContext, useMemo, useEffect } from "react";
 import { createClient } from "@agentick/client";
-import type { AgentickProviderProps, AgentickContextValue } from "./types";
+import type { AgentickProviderProps, AgentickContextValue } from "./types.js";
 
 // ============================================================================
 // Context

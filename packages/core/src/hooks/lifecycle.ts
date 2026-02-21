@@ -6,8 +6,8 @@
  */
 
 import { useEffect, useRef, useDebugValue } from "react";
-import { useRuntimeStore } from "./runtime-context";
-import { useCom } from "./context";
+import { useRuntimeStore } from "./runtime-context.js";
+import { useCom } from "./context.js";
 import type {
   TickStartCallback,
   TickEndCallback,
@@ -15,7 +15,7 @@ import type {
   ExecutionEndCallback,
   MountCallback,
   UnmountCallback,
-} from "./types";
+} from "./types.js";
 
 /**
  * Register a callback to run when the component mounts.

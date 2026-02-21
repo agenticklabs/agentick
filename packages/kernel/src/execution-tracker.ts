@@ -1,10 +1,10 @@
-import { Context, type KernelContext } from "./context";
-import type { ProcedureNode } from "./procedure-graph";
-import { ProcedureGraph, type ProcedureStatus } from "./procedure-graph";
-import { Telemetry } from "./telemetry";
+import { Context, type KernelContext } from "./context.js";
+import type { ProcedureNode } from "./procedure-graph.js";
+import { ProcedureGraph, type ProcedureStatus } from "./procedure-graph.js";
+import { Telemetry } from "./telemetry.js";
 import { AbortError } from "@agentick/shared";
-import { isAsyncIterable } from "./stream";
-import { ExecutionHandleBrand } from "./execution-handle-brand";
+import { isAsyncIterable } from "./stream.js";
+import { ExecutionHandleBrand } from "./execution-handle-brand.js";
 
 // Re-export for backwards compat — external code imports this from execution-tracker
 export { ExecutionHandleBrand };

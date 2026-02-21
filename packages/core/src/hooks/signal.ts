@@ -40,14 +40,14 @@
 
 import { AsyncLocalStorage } from "node:async_hooks";
 import { useRef, useState, useEffect, useContext, useDebugValue } from "react";
-import { COMContext } from "./context";
+import { COMContext } from "./context.js";
 
 // Import for render phase detection
 import {
   isCompilerRendering,
   shouldSkipRecompile,
   getActiveCompiler,
-} from "../compiler/fiber-compiler";
+} from "../compiler/fiber-compiler.js";
 
 // ============================================================================
 // Signal Execution Context (Concurrency Safety)

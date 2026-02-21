@@ -6,11 +6,11 @@
 
 import { spawn } from "node:child_process";
 import type { ChildProcess } from "node:child_process";
-import type { CommandExecutor, SpawnOptions } from "./types";
-import type { SandboxStrategy } from "../platform/types";
-import { buildBwrapArgs } from "../linux/bwrap";
-import { buildUnshareArgs } from "../linux/unshare";
-import type { CgroupManager } from "../linux/cgroup";
+import type { CommandExecutor, SpawnOptions } from "./types.js";
+import type { SandboxStrategy } from "../platform/types.js";
+import { buildBwrapArgs } from "../linux/bwrap.js";
+import { buildUnshareArgs } from "../linux/unshare.js";
+import type { CgroupManager } from "../linux/cgroup.js";
 
 export class BwrapExecutor implements CommandExecutor {
   readonly strategy: SandboxStrategy = "bwrap";

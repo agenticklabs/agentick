@@ -4,7 +4,7 @@
 
 import { type ModelComponentProps, Model } from "@agentick/core/jsx";
 import { createElement } from "@agentick/core/jsx-runtime";
-import { createAiSdkModel, type AiSdkAdapterConfig } from "./adapter";
+import { createAiSdkModel, type AiSdkAdapterConfig } from "./adapter.js";
 
 /**
  * Props for AiSdkModel component.

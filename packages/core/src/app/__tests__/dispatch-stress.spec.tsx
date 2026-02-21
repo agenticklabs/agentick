@@ -14,13 +14,13 @@
 
 import { describe, it, expect } from "vitest";
 import React from "react";
-import { createApp } from "../../app";
-import { System } from "../../jsx/components/messages";
-import { Model } from "../../jsx/components/primitives";
-import { Timeline } from "../../jsx/components/timeline";
-import { createTestAdapter } from "../../testing";
-import { createTool } from "../../tool/tool";
-import { useState, useEffect } from "../../index";
+import { createApp } from "../../app.js";
+import { System } from "../../jsx/components/messages.js";
+import { Model } from "../../jsx/components/primitives.js";
+import { Timeline } from "../../jsx/components/timeline.js";
+import { createTestAdapter } from "../../testing/index.js";
+import { createTool } from "../../tool/tool.js";
+import { useState, useEffect } from "../../index.js";
 import { z } from "zod";
 
 function createMockModel(response = "Mock response") {

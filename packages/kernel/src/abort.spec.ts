@@ -1,4 +1,4 @@
-import { createProcedure } from "./procedure";
+import { createProcedure } from "./procedure.js";
 
 describe("Kernel Abort Handling", () => {
   it("should throw AbortError if signal is already aborted", async () => {

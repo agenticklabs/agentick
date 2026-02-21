@@ -1,4 +1,4 @@
-import { Context } from "./context";
+import { Context } from "./context.js";
 
 describe("Kernel Context (ALS)", () => {
   it("should propagate context to nested async calls", async () => {

@@ -41,8 +41,8 @@ import type {
   AudioMimeType,
   VideoMimeType,
   CodeLanguage,
-} from "./block-types";
-import type { ToolExecutor } from "./tools";
+} from "./block-types.js";
+import type { ToolExecutor } from "./tools.js";
 
 /**
  * Base properties shared by all content blocks.

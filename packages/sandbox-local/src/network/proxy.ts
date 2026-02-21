@@ -15,7 +15,7 @@ import * as net from "node:net";
 import type { Server, IncomingMessage, ServerResponse } from "node:http";
 import type { Socket } from "node:net";
 import type { NetworkRule, ProxiedRequest } from "@agentick/sandbox";
-import { matchRequest } from "./rules";
+import { matchRequest } from "./rules.js";
 
 export interface ProxyServerConfig {
   /** Port to bind. 0 = auto-assign. */

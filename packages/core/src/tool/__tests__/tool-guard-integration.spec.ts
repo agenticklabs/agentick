@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { z } from "zod";
-import { createTool } from "../tool";
+import { createTool } from "../tool.js";
 import { createGuard, type ProcedureEnvelope, GuardError, isGuardError } from "@agentick/kernel";
 
 describe("createTool + guard integration", () => {

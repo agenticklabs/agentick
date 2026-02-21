@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { TokenSummary } from "../../hooks/useDevToolsEvents";
+import type { TokenSummary } from "../../hooks/useDevToolsEvents.js";
 
 interface TokenSectionProps {
   tokenSummary: TokenSummary;

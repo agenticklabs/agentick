@@ -1,7 +1,7 @@
-import { ExecutionHandleImpl } from "./execution-handle";
-import { generatePid } from "./execution-types";
-import type { COMInput } from "../com/types";
-import type { StreamEvent } from "./engine-events";
+import { ExecutionHandleImpl } from "./execution-handle.js";
+import { generatePid } from "./execution-types.js";
+import type { COMInput } from "../com/types.js";
+import type { StreamEvent } from "./engine-events.js";
 
 describe("ExecutionHandleImpl", () => {
   let handle: ExecutionHandleImpl;

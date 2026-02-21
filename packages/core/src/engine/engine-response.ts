@@ -1,6 +1,6 @@
-import { type ToolCall, type ToolResult } from "../tool/tool";
-import type { COMSection, COMTimelineEntry } from "../com/types";
-import type { StopReasonInfo } from "../component/component";
+import { type ToolCall, type ToolResult } from "../tool/tool.js";
+import type { COMSection, COMTimelineEntry } from "../com/types.js";
+import type { StopReasonInfo } from "../component/component.js";
 import type { UsageStats } from "@agentick/shared";
 
 export type { COMSection, COMTimelineEntry }; // Re-export for convenience

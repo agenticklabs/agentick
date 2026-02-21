@@ -7,5 +7,5 @@
  * - Subscribes to devToolsEmitter for fiber snapshots and execution events
  */
 
-export { DevToolsServer, type DevToolsServerConfig } from "./server/devtools-server";
-export { startDevToolsServer } from "./server/start";
+export { DevToolsServer, type DevToolsServerConfig } from "./server/devtools-server.js";
+export { startDevToolsServer } from "./server/start.js";

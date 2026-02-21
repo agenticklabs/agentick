@@ -1,7 +1,7 @@
 import type { Middleware } from "@agentick/kernel";
-import type { COMInput } from "../com/types";
-import type { EngineResponse } from "../engine/engine-response";
-import { BaseHookRegistry } from "../hooks/base-hook-registry";
+import type { COMInput } from "../com/types.js";
+import type { EngineResponse } from "../engine/engine-response.js";
+import { BaseHookRegistry } from "../hooks/base-hook-registry.js";
 
 /**
  * Model operation names.

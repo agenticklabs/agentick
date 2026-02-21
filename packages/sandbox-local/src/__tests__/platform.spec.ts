@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach } from "vitest";
-import { detectCapabilities, resetCapabilitiesCache, selectStrategy } from "../platform/detect";
-import { createMockCapabilities } from "../testing";
+import { detectCapabilities, resetCapabilitiesCache, selectStrategy } from "../platform/detect.js";
+import { createMockCapabilities } from "../testing.js";
 
 describe("detectCapabilities", () => {
   afterEach(() => {

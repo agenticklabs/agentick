@@ -1,7 +1,7 @@
 import type { Mock } from "vitest";
-import { ChannelService, type ChannelTransport, type ChannelAdapter } from "./service";
-import { Context } from "../context";
-import type { EngineContext } from "../types";
+import { ChannelService, type ChannelTransport, type ChannelAdapter } from "./service.js";
+import { Context } from "../context/index.js";
+import type { EngineContext } from "../types.js";
 
 describe("ChannelService", () => {
   let service: ChannelService;

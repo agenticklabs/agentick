@@ -6,7 +6,7 @@ import {
   type ToolConfirmationState,
 } from "@agentick/client";
 import type { ToolConfirmationResponse } from "@agentick/client";
-import { useClient } from "./use-client";
+import { useClient } from "./use-client.js";
 
 export type UseToolConfirmationsOptions = ToolConfirmationsOptions;
 

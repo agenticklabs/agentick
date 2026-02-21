@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from "vitest";
-import { createWorkspace, destroyWorkspace, resolveMounts } from "../workspace";
+import { createWorkspace, destroyWorkspace, resolveMounts } from "../workspace.js";
 import { access, mkdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";

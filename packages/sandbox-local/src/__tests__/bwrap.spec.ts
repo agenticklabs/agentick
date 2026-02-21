@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { buildBwrapArgs } from "../linux/bwrap";
-import type { SpawnOptions } from "../executor/types";
+import { buildBwrapArgs } from "../linux/bwrap.js";
+import type { SpawnOptions } from "../executor/types.js";
 
 function makeOptions(overrides?: Partial<SpawnOptions>): SpawnOptions {
   return {

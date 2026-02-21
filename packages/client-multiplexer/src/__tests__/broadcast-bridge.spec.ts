@@ -3,7 +3,11 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { createBroadcastBridge, generateRequestId, type BridgeMessage } from "../broadcast-bridge";
+import {
+  createBroadcastBridge,
+  generateRequestId,
+  type BridgeMessage,
+} from "../broadcast-bridge.js";
 
 // Mock BroadcastChannel
 class MockBroadcastChannel {

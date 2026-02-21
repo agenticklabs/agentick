@@ -11,9 +11,9 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { COM } from "../object-model";
+import { COM } from "../object-model.js";
 import { z } from "zod";
-import type { ExecutableTool, ToolMetadata } from "../../tool/tool";
+import type { ExecutableTool, ToolMetadata } from "../../tool/tool.js";
 
 function makeTool(overrides: Partial<ToolMetadata> = {}): ExecutableTool {
   return {

@@ -16,10 +16,10 @@ import {
   flushSyncWork,
   type FiberRoot,
   type AgentickContainer,
-} from "../reconciler";
-import { collect } from "./collector";
-import type { CompiledStructure, CompileResult } from "./types";
-import { createEmptyCompiledStructure } from "./types";
+} from "../reconciler/index.js";
+import { collect } from "./collector.js";
+import type { CompiledStructure, CompileResult } from "./types.js";
+import { createEmptyCompiledStructure } from "./types.js";
 import {
   AgentickProvider,
   createRuntimeStore,
@@ -44,13 +44,13 @@ import {
   // Context info
   createContextInfoStore,
   type ContextInfoStore,
-} from "../hooks";
-import type { ExecutionMessage } from "../engine/execution-types";
-import type { Renderer } from "../renderers/types";
-import { markdownRenderer } from "../renderers";
-import type { COM } from "../com/object-model";
-import type { TickState } from "../component/component";
-import type { TickResult, TickStartCallback } from "../hooks/types";
+} from "../hooks/index.js";
+import type { ExecutionMessage } from "../engine/execution-types.js";
+import type { Renderer } from "../renderers/types.js";
+import { markdownRenderer } from "../renderers/index.js";
+import type { COM } from "../com/object-model.js";
+import type { TickState } from "../component/component.js";
+import type { TickResult, TickStartCallback } from "../hooks/types.js";
 
 export interface FiberCompilerConfig {
   dev?: boolean;

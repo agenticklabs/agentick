@@ -4,8 +4,8 @@
 
 import { type ModelComponentProps, Model } from "@agentick/core/jsx";
 import { createElement } from "@agentick/core/jsx-runtime";
-import { createGoogleModel } from "./google";
-import { type GoogleAdapterConfig } from "./types";
+import { createGoogleModel } from "./google.js";
+import { type GoogleAdapterConfig } from "./types.js";
 
 /**
  * Props for GoogleModel component.

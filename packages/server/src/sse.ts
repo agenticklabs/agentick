@@ -7,7 +7,7 @@
  * @module @agentick/server/sse
  */
 
-import type { SSEWriter, SSEWriterOptions } from "./types";
+import type { SSEWriter, SSEWriterOptions } from "./types.js";
 
 /**
  * Create an SSE writer for a response stream.

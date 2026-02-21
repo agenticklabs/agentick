@@ -4,8 +4,13 @@
  * Tests the data shape transformations between Agentick format and OpenAI format.
  */
 
-import { buildClientOptions, toOpenAIMessages, mapToolDefinition, mapOpenAIChunk } from "../openai";
-import { STOP_REASON_MAP } from "../types";
+import {
+  buildClientOptions,
+  toOpenAIMessages,
+  mapToolDefinition,
+  mapOpenAIChunk,
+} from "../openai.js";
+import { STOP_REASON_MAP } from "../types.js";
 import { StopReason } from "@agentick/shared";
 import type { AdapterDelta } from "@agentick/core/model";
 import type { Message, ImageBlock, ToolUseBlock, ToolResultBlock } from "@agentick/shared";

@@ -11,13 +11,13 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { createApp } from "../../app";
-import { createTestAdapter, type TestAdapterInstance } from "../../testing/test-adapter";
-import type { ModelInput } from "../../model/model";
-import { System, User } from "../../jsx/components/messages";
-import { Model, Section } from "../../jsx/components/primitives";
-import { Timeline } from "../../jsx/components/timeline";
-import { useState, useEffect, useSignal, useComState } from "../../hooks";
+import { createApp } from "../../app.js";
+import { createTestAdapter, type TestAdapterInstance } from "../../testing/test-adapter.js";
+import type { ModelInput } from "../../model/model.js";
+import { System, User } from "../../jsx/components/messages.js";
+import { Model, Section } from "../../jsx/components/primitives.js";
+import { Timeline } from "../../jsx/components/timeline.js";
+import { useState, useEffect, useSignal, useComState } from "../../hooks/index.js";
 
 // ============================================================================
 // Test Utilities

@@ -1,6 +1,6 @@
-import type { FiberNode, TokenSummary } from "../../hooks/useDevToolsEvents";
-import { useTreeContext } from "./TreeContext";
-import { formatTokens } from "../../utils/format";
+import type { FiberNode, TokenSummary } from "../../hooks/useDevToolsEvents.js";
+import { useTreeContext } from "./TreeContext.js";
+import { formatTokens } from "../../utils/format.js";
 
 interface TreeNodeProps {
   node: FiberNode;

@@ -12,7 +12,7 @@ import {
   useConnectionState,
   useEvents,
   useStreamingText,
-} from "../index";
+} from "../index.js";
 import type {
   AgentickClient,
   ConnectionState,

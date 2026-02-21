@@ -4,7 +4,7 @@ import {
   type Span,
   type Counter,
   type Histogram,
-} from "./telemetry";
+} from "./telemetry.js";
 
 class MockTelemetryProvider implements TelemetryProvider {
   spans: string[] = [];

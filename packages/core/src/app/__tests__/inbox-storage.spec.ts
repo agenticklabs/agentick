@@ -17,8 +17,8 @@
  */
 
 import { describe, it, expect, vi } from "vitest";
-import { MemoryInboxStorage } from "../inbox-storage";
-import type { InboxMessageInput } from "../types";
+import { MemoryInboxStorage } from "../inbox-storage.js";
+import type { InboxMessageInput } from "../types.js";
 
 function makeMessage(source = "test", type: "message" | "dispatch" = "message"): InboxMessageInput {
   if (type === "dispatch") {

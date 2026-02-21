@@ -37,7 +37,7 @@ import pino, {
   type TransportSingleOptions,
   type TransportMultiOptions,
 } from "pino";
-import { Context, type KernelContext } from "./context";
+import { Context, type KernelContext } from "./context.js";
 
 // =============================================================================
 // Types

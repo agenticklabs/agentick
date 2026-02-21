@@ -11,7 +11,7 @@ import {
   Context as KernelContext,
   type KernelContext as KernelContextType,
 } from "@agentick/kernel";
-import type { EngineContext } from "../types";
+import type { EngineContext } from "../types.js";
 
 /**
  * Context utilities for Engine.

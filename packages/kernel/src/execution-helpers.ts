@@ -8,9 +8,9 @@
  * execution hierarchy.
  */
 
-import { Context, type KernelContext } from "./context";
-import { ExecutionTracker } from "./execution-tracker";
-import type { ProcedureNode } from "./procedure-graph";
+import { Context, type KernelContext } from "./context.js";
+import { ExecutionTracker } from "./execution-tracker.js";
+import type { ProcedureNode } from "./procedure-graph.js";
 
 /**
  * Check if this is a standalone (root) execution or nested within another.

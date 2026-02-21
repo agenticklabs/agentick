@@ -1,3 +1,3 @@
-export * from "./streamable-http";
-export * from "./websocket";
-export * from "./socketio";
+export * from "./streamable-http.js";
+export * from "./websocket.js";
+export * from "./socketio.js";

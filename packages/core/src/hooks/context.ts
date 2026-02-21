@@ -5,11 +5,11 @@
  */
 
 import React, { useContext, useDebugValue, type ReactNode } from "react";
-import type { TickState } from "./types";
-import type { COM } from "../com/object-model";
-import { RuntimeProvider, type RuntimeStore } from "./runtime-context";
-import { ContextInfoProvider, type ContextInfoStore } from "./context-info";
-import { COMContext, TickStateContext } from "./context-internal";
+import type { TickState } from "./types.js";
+import type { COM } from "../com/object-model.js";
+import { RuntimeProvider, type RuntimeStore } from "./runtime-context.js";
+import { ContextInfoProvider, type ContextInfoStore } from "./context-info.js";
+import { COMContext, TickStateContext } from "./context-internal.js";
 
 // Helper for createElement
 const h = React.createElement;

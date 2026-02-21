@@ -1,7 +1,7 @@
-import { ComponentHookRegistry } from "./component-hooks";
-import { Component } from "./component";
-import { type TickState } from "./component";
-import type { COM } from "../com/object-model";
+import { ComponentHookRegistry } from "./component-hooks.js";
+import { Component } from "./component.js";
+import { type TickState } from "./component.js";
+import type { COM } from "../com/object-model.js";
 
 describe("ComponentHookRegistry", () => {
   let registry: ComponentHookRegistry;

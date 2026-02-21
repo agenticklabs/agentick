@@ -1,4 +1,4 @@
-import { HookRegistry } from "./hook-registry";
+import { HookRegistry } from "./hook-registry.js";
 
 /**
  * Base class for hook registries that provides common overloaded register methods.

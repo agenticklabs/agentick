@@ -4,10 +4,10 @@
  * Helpers for testing sandbox consumers and the local provider itself.
  */
 
-import { localProvider } from "./provider";
-import type { LocalProviderConfig } from "./provider";
+import { localProvider } from "./provider.js";
+import type { LocalProviderConfig } from "./provider.js";
 import type { SandboxProvider } from "@agentick/sandbox";
-import type { PlatformCapabilities } from "./platform/types";
+import type { PlatformCapabilities } from "./platform/types.js";
 
 /**
  * Create a test provider with unsandboxed executor by default.

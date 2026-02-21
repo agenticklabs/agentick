@@ -1,4 +1,4 @@
-import { type KernelContext } from "./context";
+import { type KernelContext } from "./context.js";
 
 /**
  * Helper functions for working with metrics.

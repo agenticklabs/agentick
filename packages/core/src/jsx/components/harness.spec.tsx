@@ -6,9 +6,9 @@
 
 import React from "react";
 import { describe, it, expect, vi } from "vitest";
-import { Harness, HarnessComponent, getHarnessContext } from "./harness";
-import { System } from "./messages";
-import { Timeline } from "./timeline";
+import { Harness, HarnessComponent, getHarnessContext } from "./harness.js";
+import { System } from "./messages.js";
+import { Timeline } from "./timeline.js";
 
 describe("Harness Component", () => {
   describe("Harness function", () => {

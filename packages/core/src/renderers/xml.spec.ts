@@ -5,8 +5,8 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { XMLRenderer } from "./xml";
-import type { SemanticContentBlock } from "./base";
+import { XMLRenderer } from "./xml.js";
+import type { SemanticContentBlock } from "./base.js";
 
 describe("XMLRenderer", () => {
   describe("collapsed blocks", () => {

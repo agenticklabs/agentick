@@ -8,9 +8,9 @@ import {
   normalizeContentInput,
   normalizeContentArray,
   normalizeMessageInput,
-} from "../input";
-import type { ContentBlock, TextBlock, ImageBlock } from "../blocks";
-import type { Message } from "../messages";
+} from "../input.js";
+import type { ContentBlock, TextBlock, ImageBlock } from "../blocks.js";
+import type { Message } from "../messages.js";
 
 describe("isContentBlock", () => {
   it("should return true for text block", () => {

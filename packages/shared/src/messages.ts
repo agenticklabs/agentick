@@ -24,8 +24,8 @@
  * @module
  */
 
-import type { MessageRoles } from "./block-types";
-import type { ContentBlock, EventAllowedBlock } from "./blocks";
+import type { MessageRoles } from "./block-types.js";
+import type { ContentBlock, EventAllowedBlock } from "./blocks.js";
 
 // ============================================================================
 // Message Source (augmentable registry)

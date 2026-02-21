@@ -7,11 +7,11 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { createApp } from "../../app";
-import { System, User } from "../../jsx/components/messages";
-import { Model, Tool } from "../../jsx/components/primitives";
-import { Timeline } from "../../jsx/components/timeline";
-import { createTestAdapter } from "../../testing";
+import { createApp } from "../../app.js";
+import { System, User } from "../../jsx/components/messages.js";
+import { Model, Tool } from "../../jsx/components/primitives.js";
+import { Timeline } from "../../jsx/components/timeline.js";
+import { createTestAdapter } from "../../testing/index.js";
 import type { StreamEvent, EntryCommittedEvent } from "@agentick/shared";
 import { z } from "zod";
 
@@ -59,7 +59,7 @@ describe("entry_committed", () => {
           name="ping"
           description="Ping"
           input={z.object({})}
-          handler={() => [{ type: "text" as const, text: "pong" }]}
+          handler={async () => [{ type: "text" as const, text: "pong" }]}
         />
       </>
     );
@@ -102,7 +102,7 @@ describe("entry_committed", () => {
           name="ping"
           description="Ping"
           input={z.object({})}
-          handler={() => [{ type: "text" as const, text: "pong" }]}
+          handler={async () => [{ type: "text" as const, text: "pong" }]}
         />
       </>
     );
@@ -211,7 +211,7 @@ describe("entry_committed", () => {
           name="ping"
           description="Ping"
           input={z.object({})}
-          handler={() => [{ type: "text" as const, text: "pong" }]}
+          handler={async () => [{ type: "text" as const, text: "pong" }]}
         />
       </>
     );
@@ -256,8 +256,8 @@ describe("entry_committed", () => {
     session.close();
 
     // Find the last entry_committed and the first tick_end
-    const lastCommittedIdx = events.findLastIndex((e) => e.type === "entry_committed");
-    const firstTickEndIdx = events.findIndex((e) => e.type === "tick_end");
+    const lastCommittedIdx = events.findLastIndex((e: StreamEvent) => e.type === "entry_committed");
+    const firstTickEndIdx = events.findIndex((e: StreamEvent) => e.type === "tick_end");
 
     expect(lastCommittedIdx).toBeGreaterThan(-1);
     expect(firstTickEndIdx).toBeGreaterThan(-1);

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { createMockExecutionHandle, createMockSession, createMockApp } from "../mock-app";
+import { createMockExecutionHandle, createMockSession, createMockApp } from "../mock-app.js";
 import { ExecutionHandleBrand, isProcedure } from "@agentick/kernel";
 
 // ============================================================================

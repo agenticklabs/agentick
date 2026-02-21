@@ -17,13 +17,13 @@ import React, {
   type ReactNode,
 } from "react";
 import type { JSX } from "react";
-import type { COMTimelineEntry } from "../../com/types";
-import type { ExecutionMessage } from "../../engine/execution-types";
-import { useTickState } from "../../hooks/context";
-import { compactEntries, type CompactionStrategy, type TokenBudgetInfo } from "./token-budget";
+import type { COMTimelineEntry } from "../../com/types.js";
+import type { ExecutionMessage } from "../../engine/execution-types.js";
+import { useTickState } from "../../hooks/context.js";
+import { compactEntries, type CompactionStrategy, type TokenBudgetInfo } from "./token-budget.js";
 import { Logger } from "@agentick/kernel";
-import { Entry } from "./primitives";
-import type { ContentBlock, MessageRoles } from "../../content";
+import { Entry } from "./primitives.js";
+import type { ContentBlock, MessageRoles } from "../../content/index.js";
 
 const log = Logger.for("Timeline");
 

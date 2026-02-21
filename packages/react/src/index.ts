@@ -73,7 +73,7 @@
  */
 
 // Provider
-export { AgentickProvider } from "./context";
+export { AgentickProvider } from "./context.js";
 
 // Hooks
 export {
@@ -110,7 +110,7 @@ export {
   type AttachmentInput,
   type UseLineEditorOptions,
   type LineEditorResult,
-} from "./hooks";
+} from "./hooks/index.js";
 
 // Types
 export type {

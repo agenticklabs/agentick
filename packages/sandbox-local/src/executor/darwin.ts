@@ -11,9 +11,9 @@ import { join } from "node:path";
 import { randomBytes } from "node:crypto";
 import { tmpdir } from "node:os";
 import type { ChildProcess } from "node:child_process";
-import type { CommandExecutor, SpawnOptions } from "./types";
-import type { SandboxStrategy } from "../platform/types";
-import { compileSeatbeltProfile } from "../seatbelt/profile";
+import type { CommandExecutor, SpawnOptions } from "./types.js";
+import type { SandboxStrategy } from "../platform/types.js";
+import { compileSeatbeltProfile } from "../seatbelt/profile.js";
 
 export class DarwinExecutor implements CommandExecutor {
   readonly strategy: SandboxStrategy = "seatbelt";

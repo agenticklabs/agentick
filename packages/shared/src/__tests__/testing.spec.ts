@@ -55,7 +55,7 @@ import {
   formatSSEEvent,
   createSpy,
   createMockSequence,
-} from "../testing";
+} from "../testing/index.js";
 import {
   StopReason,
   isModelStreamEvent,
@@ -63,8 +63,8 @@ import {
   isFinalEvent,
   isForkEvent,
   isSpawnEvent,
-} from "../streaming";
-import { BlockType } from "../block-types";
+} from "../streaming.js";
+import { BlockType } from "../block-types.js";
 
 describe("Fixtures", () => {
   beforeEach(() => {

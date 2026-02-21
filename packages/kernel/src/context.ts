@@ -1,10 +1,10 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { EventEmitter } from "node:events";
-import { type ChannelServiceInterface } from "./channel";
-import type { ProcedureGraph } from "./procedure-graph";
-import type { ProcedureNode } from "./procedure-graph";
+import { type ChannelServiceInterface } from "./channel.js";
+import type { ProcedureGraph } from "./procedure-graph.js";
+import type { ProcedureNode } from "./procedure-graph.js";
 import { ContextError } from "@agentick/shared";
-import type { Middleware } from "./procedure";
+import type { Middleware } from "./procedure.js";
 
 /**
  * User information associated with the current execution context.

@@ -5,13 +5,13 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { createApp } from "../../app";
-import { System, User } from "../../jsx/components/messages";
-import { Model, Tool } from "../../jsx/components/primitives";
-import { Timeline } from "../../jsx/components/timeline";
-import { createTestAdapter } from "../../testing";
-import { useContinuation, useOnTickEnd, useOnTickStart } from "../../hooks";
-import type { TickResult } from "../types";
+import { createApp } from "../../app.js";
+import { System, User } from "../../jsx/components/messages.js";
+import { Model, Tool } from "../../jsx/components/primitives.js";
+import { Timeline } from "../../jsx/components/timeline.js";
+import { createTestAdapter } from "../../testing/index.js";
+import { useContinuation, useOnTickEnd, useOnTickStart } from "../../hooks/index.js";
+import type { TickResult } from "../types.js";
 import { type ToolCall, StopReason } from "@agentick/shared";
 import { z } from "zod";
 

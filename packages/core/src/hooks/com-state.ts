@@ -16,9 +16,9 @@
  */
 
 import { useCallback, useMemo, useSyncExternalStore } from "react";
-import { useCom } from "./context";
-import { useRuntimeStore, type HookPersistenceOptions } from "./runtime-context";
-import type { Signal } from "./signal";
+import { useCom } from "./context.js";
+import { useRuntimeStore, type HookPersistenceOptions } from "./runtime-context.js";
+import type { Signal } from "./signal.js";
 
 /**
  * Options for {@link useComState}.

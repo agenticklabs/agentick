@@ -1,6 +1,6 @@
 import { createServer } from "node:http";
 import { describe, expect, it } from "vitest";
-import { DevToolsServer } from "../server/devtools-server";
+import { DevToolsServer } from "../server/devtools-server.js";
 
 describe("DevToolsServer", () => {
   it("does not crash when port is already in use", async () => {

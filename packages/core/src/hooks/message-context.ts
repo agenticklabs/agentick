@@ -19,10 +19,10 @@ import React, {
   useEffect,
   type ReactNode,
 } from "react";
-import type { ExecutionMessage } from "../engine/execution-types";
-import type { COM } from "../com/object-model";
-import type { TickState } from "../component/component";
-import { useTickState } from "./context";
+import type { ExecutionMessage } from "../engine/execution-types.js";
+import type { COM } from "../com/object-model.js";
+import type { TickState } from "../component/component.js";
+import { useTickState } from "./context.js";
 
 // Helper for createElement
 const h = React.createElement;

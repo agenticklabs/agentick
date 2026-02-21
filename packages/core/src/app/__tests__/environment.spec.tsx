@@ -11,16 +11,16 @@
 
 import { describe, it, expect } from "vitest";
 import { z } from "zod";
-import { createApp } from "../../app";
-import { createTestAdapter } from "../../testing/test-adapter";
-import { createTestRunner } from "../../testing/test-runner";
-import { createTool } from "../../tool";
-import { System, User } from "../../jsx/components/messages";
-import { Model } from "../../jsx/components/primitives";
-import { Timeline } from "../../jsx/components/timeline";
-import { MemorySessionStore } from "../session-store";
-import type { ExecutionRunner } from "../types";
-import type { ExecutableTool } from "../../tool/tool";
+import { createApp } from "../../app.js";
+import { createTestAdapter } from "../../testing/test-adapter.js";
+import { createTestRunner } from "../../testing/test-runner.js";
+import { createTool } from "../../tool/index.js";
+import { System, User } from "../../jsx/components/messages.js";
+import { Model } from "../../jsx/components/primitives.js";
+import { Timeline } from "../../jsx/components/timeline.js";
+import { MemorySessionStore } from "../session-store.js";
+import type { ExecutionRunner } from "../types.js";
+import type { ExecutableTool } from "../../tool/tool.js";
 
 // ============================================================================
 // Test Utilities

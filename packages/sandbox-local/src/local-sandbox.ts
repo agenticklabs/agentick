@@ -9,11 +9,11 @@ import type { ChildProcess } from "node:child_process";
 import type { SandboxHandle, ExecOptions, ExecResult, OutputChunk, Mount } from "@agentick/sandbox";
 import type { Edit, EditResult } from "@agentick/sandbox";
 import { applyEdits, SandboxAccessError } from "@agentick/sandbox";
-import type { CommandExecutor, ResolvedMount, ResolvedPermissions } from "./executor/types";
-import type { ResourceEnforcer } from "./resources";
-import { resolveSafePath, filterEnv } from "./paths";
-import { resolveMounts } from "./workspace";
-import type { NetworkProxyServer } from "./network/proxy";
+import type { CommandExecutor, ResolvedMount, ResolvedPermissions } from "./executor/types.js";
+import type { ResourceEnforcer } from "./resources.js";
+import { resolveSafePath, filterEnv } from "./paths.js";
+import { resolveMounts } from "./workspace.js";
+import type { NetworkProxyServer } from "./network/proxy.js";
 
 /** Maximum output per stream (stdout/stderr) — 10MB. */
 const MAX_OUTPUT_BYTES = 10 * 1024 * 1024;

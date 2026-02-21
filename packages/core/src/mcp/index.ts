@@ -40,20 +40,20 @@
  * @module agentick/mcp
  */
 
-export * from "./types";
-export * from "./client";
-export * from "./service";
-export * from "./tool";
-export { MCPToolComponent, MCPTool } from "./component";
+export * from "./types.js";
+export * from "./client.js";
+export * from "./service.js";
+export * from "./tool.js";
+export { MCPToolComponent, MCPTool } from "./component.js";
 export {
   createMCPTool,
   createMCPToolFromDefinition,
   discoverMCPTools,
   normalizeMCPConfig,
   mergeMCPConfig,
-} from "./create-mcp-tool";
+} from "./create-mcp-tool.js";
 export type {
   CreateMCPToolOptions,
   CreateMCPToolFromDefinitionOptions,
   DiscoverMCPToolsOptions,
-} from "./create-mcp-tool";
+} from "./create-mcp-tool.js";

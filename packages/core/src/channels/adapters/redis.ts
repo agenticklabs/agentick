@@ -1,4 +1,4 @@
-import type { ChannelAdapter, ChannelEvent } from "../service";
+import type { ChannelAdapter, ChannelEvent } from "../service.js";
 
 /**
  * Configuration for RedisChannelAdapter

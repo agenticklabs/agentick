@@ -43,10 +43,10 @@ import type {
   SendInput,
   InboxStorage,
   InboxMessageInput,
-} from "./app/types";
+} from "./app/types.js";
 import { randomUUID } from "node:crypto";
-import { SessionImpl } from "./app/session";
-import { MemoryInboxStorage } from "./app/inbox-storage";
+import { SessionImpl } from "./app/session.js";
+import { MemoryInboxStorage } from "./app/inbox-storage.js";
 
 /**
  * Key for middleware registration.
@@ -86,8 +86,8 @@ export interface MiddlewareRegistry {
 // Session Registry (App-managed sessions with auto-persist/restore)
 // ============================================================================
 
-import type { SessionStore, SessionSnapshot, SessionManagementOptions } from "./app/types";
-import { createSessionStore } from "./app/sqlite-session-store";
+import type { SessionStore, SessionSnapshot, SessionManagementOptions } from "./app/types.js";
+import { createSessionStore } from "./app/sqlite-session-store.js";
 
 interface SessionRegistryOptions<P> {
   // Session management options

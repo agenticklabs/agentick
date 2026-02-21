@@ -44,19 +44,24 @@
 // ============================================================================
 // Re-export createApp and run from @agentick/instance
 // ============================================================================
-import { createApp, Agentick, AgentickInstance, run } from "./agentick-instance";
+import { createApp, Agentick, AgentickInstance, run } from "./agentick-instance.js";
 export { createApp, Agentick, AgentickInstance, run };
 export type {
   MiddlewareKey,
   AgentickInstanceCreateOptions,
   MiddlewareRegistry,
-} from "./agentick-instance";
+} from "./agentick-instance.js";
 
 // ============================================================================
 // Convenience Functions
 // ============================================================================
 
-import type { RunInput, AppOptions, SessionExecutionHandle, ComponentFunction } from "./app/types";
+import type {
+  RunInput,
+  AppOptions,
+  SessionExecutionHandle,
+  ComponentFunction,
+} from "./app/types.js";
 
 /**
  * Execute a component with input (ephemeral session).
@@ -136,14 +141,14 @@ export type {
   InboxMessage,
   InboxMessageInput,
   DispatchPayload,
-} from "./app/types";
+} from "./app/types.js";
 
-export { SessionImpl } from "./app/session";
-export { MemorySessionStore } from "./app/session-store";
-export { MemoryInboxStorage } from "./app/inbox-storage";
+export { SessionImpl } from "./app/session.js";
+export { MemorySessionStore } from "./app/session-store.js";
+export { MemoryInboxStorage } from "./app/inbox-storage.js";
 export {
   SqliteSessionStore,
   createSessionStore,
   isSqliteAvailable,
   type SqliteSessionStoreConfig,
-} from "./app/sqlite-session-store";
+} from "./app/sqlite-session-store.js";

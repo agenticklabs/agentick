@@ -1,7 +1,7 @@
 import React from "react";
 import type { JSX } from "react";
-import { type ComponentBaseProps } from "../jsx-types";
-import type { ContentRenderer } from "../../renderers";
+import { type ComponentBaseProps } from "../jsx-types.js";
+import type { ContentRenderer } from "../../renderers/index.js";
 
 // Helper for createElement
 const h = React.createElement;

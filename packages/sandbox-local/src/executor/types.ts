@@ -3,7 +3,7 @@
  */
 
 import type { ChildProcess } from "node:child_process";
-import type { SandboxStrategy } from "../platform/types";
+import type { SandboxStrategy } from "../platform/types.js";
 import type { NetworkRule } from "@agentick/sandbox";
 
 export interface CommandExecutor {

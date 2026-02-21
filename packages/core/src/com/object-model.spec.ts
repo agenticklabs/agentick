@@ -1,8 +1,8 @@
-import { COM } from "./object-model";
-import type { Message } from "../content";
-import type { ExecutableTool } from "../tool/tool";
-import type { COMTimelineEntry, COMSection } from "./types";
-import { createTool } from "../tool/tool";
+import { COM } from "./object-model.js";
+import type { Message } from "../content/index.js";
+import type { ExecutableTool } from "../tool/tool.js";
+import type { COMTimelineEntry, COMSection } from "./types.js";
+import { createTool } from "../tool/tool.js";
 import { z } from "zod";
 
 describe("COM EventEmitter", () => {

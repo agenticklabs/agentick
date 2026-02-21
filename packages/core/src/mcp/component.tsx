@@ -6,13 +6,13 @@
  */
 
 import React, { useEffect, useRef } from "react";
-import type { EngineComponent } from "../component/component";
-import { MCPClient } from "./client";
-import { MCPService } from "./service";
-import type { MCPConfig, MCPServerConfig } from "./types";
-import type { JSX } from "../jsx/jsx-runtime";
-import type { ComponentBaseProps } from "../jsx/jsx-types";
-import { useCom } from "../hooks";
+import type { EngineComponent } from "../component/component.js";
+import { MCPClient } from "./client.js";
+import { MCPService } from "./service.js";
+import type { MCPConfig, MCPServerConfig } from "./types.js";
+import type { JSX } from "../jsx/jsx-runtime.js";
+import type { ComponentBaseProps } from "../jsx/jsx-types.js";
+import { useCom } from "../hooks/index.js";
 
 /**
  * Normalizes Cursor-style config to full MCPConfig

@@ -5,7 +5,7 @@ import {
   type MessageLogState,
   type ChatMessage,
 } from "@agentick/client";
-import { useClient } from "./use-client";
+import { useClient } from "./use-client.js";
 
 export type UseMessagesOptions = MessageLogOptions;
 

@@ -5,7 +5,7 @@
  */
 
 import { createContext, useContext } from "react";
-import type { Sandbox } from "./types";
+import type { Sandbox } from "./types.js";
 
 export const SandboxContext = createContext<Sandbox | null>(null);
 

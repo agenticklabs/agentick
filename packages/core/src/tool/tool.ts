@@ -11,10 +11,10 @@
  */
 
 import React, { useEffect, useRef } from "react";
-import { createEngineProcedure, isProcedure } from "../procedure";
-import { createToolProcedure } from "./tool-procedure";
+import { createEngineProcedure, isProcedure } from "../procedure/index.js";
+import { createToolProcedure } from "./tool-procedure.js";
 import type { ExtractArgs, Middleware, Procedure } from "@agentick/kernel";
-import type { ProviderToolOptions, LibraryToolOptions } from "../types";
+import type { ProviderToolOptions, LibraryToolOptions } from "../types.js";
 import {
   ToolExecutionType,
   ToolIntent,
@@ -22,14 +22,20 @@ import {
   type ToolDefinition as BaseToolDefinition,
 } from "@agentick/shared/tools";
 import type { ContentBlock } from "@agentick/shared/blocks";
-import { type RecoveryAction, type TickState } from "../component/component";
-import type { TickResult } from "../hooks/types";
-import type { COM } from "../com/object-model";
-import type { COMInput } from "../com/types";
-import type { JSX } from "../jsx/jsx-runtime";
-import type { ComponentBaseProps } from "../jsx/jsx-types";
-import type { CompiledStructure } from "../compiler/types";
-import { useCom, useTickState, useOnTickStart, useOnTickEnd, useAfterCompile } from "../hooks";
+import { type RecoveryAction, type TickState } from "../component/component.js";
+import type { TickResult } from "../hooks/types.js";
+import type { COM } from "../com/object-model.js";
+import type { COMInput } from "../com/types.js";
+import type { JSX } from "../jsx/jsx-runtime.js";
+import type { ComponentBaseProps } from "../jsx/jsx-types.js";
+import type { CompiledStructure } from "../compiler/types.js";
+import {
+  useCom,
+  useTickState,
+  useOnTickStart,
+  useOnTickEnd,
+  useAfterCompile,
+} from "../hooks/index.js";
 
 // Re-export for convenience
 export {

@@ -50,16 +50,16 @@
 
 import React from "react";
 import { Context } from "@agentick/kernel";
-import type { COMInput } from "../com/types";
-import type { EngineResponse } from "../engine/engine-response";
-import type { EngineModel, ModelInput, ModelOutput, ModelMetadata } from "./model";
-import { createEngineProcedure } from "../procedure";
+import type { COMInput } from "../com/types.js";
+import type { EngineResponse } from "../engine/engine-response.js";
+import type { EngineModel, ModelInput, ModelOutput, ModelMetadata } from "./model.js";
+import { createEngineProcedure } from "../procedure/index.js";
 import {
   StreamAccumulator,
   type AdapterDelta,
   type ChunkMapping,
   createChunkMapper,
-} from "./stream-accumulator";
+} from "./stream-accumulator.js";
 import type {
   StreamEvent,
   ContentMetadata,
@@ -67,25 +67,25 @@ import type {
   StreamEventBase,
 } from "@agentick/shared/streaming";
 import type { ContentBlock } from "@agentick/shared";
-import { fromEngineState, toEngineState } from "./utils/language-model";
-import type { LibraryGenerationOptions, ProviderGenerationOptions } from "../types";
+import { fromEngineState, toEngineState } from "./utils/language-model.js";
+import type { LibraryGenerationOptions, ProviderGenerationOptions } from "../types.js";
 import type { EmbedResult } from "@agentick/shared";
-import type { EmbedOptions } from "./embedding";
-import { Model } from "../jsx/components/model";
+import type { EmbedOptions } from "./embedding.js";
+import { Model } from "../jsx/components/model.js";
 
 // ============================================================================
 // Re-exports for adapter convenience
 // ============================================================================
 
 export { StopReason } from "@agentick/shared";
-export type { AdapterDelta, ChunkMapping } from "./stream-accumulator";
-export { createChunkMapper } from "./stream-accumulator";
+export type { AdapterDelta, ChunkMapping } from "./stream-accumulator.js";
+export { createChunkMapper } from "./stream-accumulator.js";
 
 // ============================================================================
 // ModelClass - Unified model type (component + adapter)
 // ============================================================================
 
-import type { COM } from "../com/object-model";
+import type { COM } from "../com/object-model.js";
 import type { ModelConfig as SharedModelConfig } from "@agentick/shared/models";
 
 /**

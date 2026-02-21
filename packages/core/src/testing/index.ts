@@ -42,7 +42,7 @@
  */
 
 // Act wrapper
-export { act, actSync, flushMicrotasks, flushAll } from "./act";
+export { act, actSync, flushMicrotasks, flushAll } from "./act.js";
 
 // Async helpers
 export {
@@ -52,25 +52,25 @@ export {
   captureAsyncGenerator,
   arrayToAsyncGenerator,
   createControllableGenerator,
-} from "./async-helpers";
+} from "./async-helpers.js";
 
 // Test adapter factory (uses createAdapter internally)
-export { createTestAdapter } from "./test-adapter";
+export { createTestAdapter } from "./test-adapter.js";
 export type {
   TestAdapterOptions,
   TestAdapterInstance,
   StreamingOptions,
   ResponseItem,
   ToolCallInput,
-} from "./test-adapter";
+} from "./test-adapter.js";
 
 // Agent rendering
-export { renderAgent, cleanup } from "./render-agent";
-export type { RenderAgentOptions, RenderAgentResult, AgentTestResult } from "./render-agent";
+export { renderAgent, cleanup } from "./render-agent.js";
+export type { RenderAgentOptions, RenderAgentResult, AgentTestResult } from "./render-agent.js";
 
 // Compilation testing
-export { compileAgent } from "./compile-agent";
-export type { CompileAgentOptions, CompileAgentResult } from "./compile-agent";
+export { compileAgent } from "./compile-agent.js";
+export type { CompileAgentOptions, CompileAgentResult } from "./compile-agent.js";
 
 // Test mocks
 export {
@@ -79,7 +79,7 @@ export {
   createMockTickResult,
   makeTimelineEntry,
   makeCOMInput,
-} from "./mocks";
+} from "./mocks.js";
 export type {
   MockComOptions,
   MockCom,
@@ -87,10 +87,10 @@ export type {
   MockTickState,
   MockTickResultOptions,
   MockTickResult,
-} from "./mocks";
+} from "./mocks.js";
 
 // App/Session/Handle mocks
-export { createMockExecutionHandle, createMockSession, createMockApp } from "./mock-app";
+export { createMockExecutionHandle, createMockSession, createMockApp } from "./mock-app.js";
 export type {
   MockExecutionHandleOptions,
   MockSessionExecutionHandle,
@@ -98,11 +98,11 @@ export type {
   MockSession,
   MockAppOptions,
   MockApp,
-} from "./mock-app";
+} from "./mock-app.js";
 
 // Test execution runner
-export { createTestRunner } from "./test-runner";
-export type { TestRunnerOptions, RunnerTracker, TestRunnerResult } from "./test-runner";
+export { createTestRunner } from "./test-runner.js";
+export type { TestRunnerOptions, RunnerTracker, TestRunnerResult } from "./test-runner.js";
 
 // Kernel testing primitives (re-exported for convenience)
 export { createTestProcedure } from "@agentick/kernel/testing";

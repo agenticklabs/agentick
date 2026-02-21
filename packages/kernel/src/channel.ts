@@ -1,7 +1,7 @@
 import { EventEmitter } from "node:events";
-import type { KernelContext } from "./context";
-import { Context } from "./context";
-import { Telemetry } from "./telemetry";
+import type { KernelContext } from "./context.js";
+import { Context } from "./context.js";
+import { Telemetry } from "./telemetry.js";
 
 /**
  * Target specification for event routing.

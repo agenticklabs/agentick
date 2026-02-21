@@ -9,8 +9,8 @@ import { Client } from "@modelcontextprotocol/sdk/client";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import { type MCPConfig, type MCPToolDefinition } from "./types";
-import { Logger } from "../index";
+import { type MCPConfig, type MCPToolDefinition } from "./types.js";
+import { Logger } from "../index.js";
 
 /**
  * Wrapper around official MCP SDK Client

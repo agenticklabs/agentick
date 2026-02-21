@@ -10,7 +10,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { AgentickClient } from "../client";
+import { AgentickClient } from "../client.js";
 import type { StreamEvent } from "@agentick/shared";
 
 // Helper to create SSE response text

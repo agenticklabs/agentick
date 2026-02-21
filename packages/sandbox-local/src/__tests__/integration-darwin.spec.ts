@@ -6,8 +6,8 @@
  */
 
 import { describe, it, expect, afterEach } from "vitest";
-import { localProvider } from "../provider";
-import { isDarwin } from "../testing";
+import { localProvider } from "../provider.js";
+import { isDarwin } from "../testing.js";
 import type { SandboxHandle } from "@agentick/sandbox";
 
 describe.skipIf(!isDarwin)("seatbelt enforcement", () => {

@@ -12,9 +12,9 @@ import type {
   HostContext,
   Props,
   AgentickTextNode,
-} from "./types";
-import { createNode, createTextNode } from "./types";
-import type { Renderer } from "../renderers/types";
+} from "./types.js";
+import { createNode, createTextNode } from "./types.js";
+import type { Renderer } from "../renderers/types.js";
 
 // Component types that switch renderer context
 const RENDERER_COMPONENTS = new Map<unknown, Renderer>();

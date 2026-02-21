@@ -24,10 +24,10 @@
  */
 
 // SSE utilities
-export { createSSEWriter, streamToSSE, setSSEHeaders } from "./sse";
+export { createSSEWriter, streamToSSE, setSSEHeaders } from "./sse.js";
 
 // Auth utilities
-export { extractToken, validateAuth, type AuthConfig, type AuthResult } from "./auth";
+export { extractToken, validateAuth, type AuthConfig, type AuthResult } from "./auth.js";
 
 // Types - re-exported from types.ts
 export type {
@@ -45,7 +45,7 @@ export type {
   // SSE
   SSEWriter,
   SSEWriterOptions,
-} from "./types";
+} from "./types.js";
 
 // Re-export constants
-export { FrameworkChannels, ErrorCodes } from "./types";
+export { FrameworkChannels, ErrorCodes } from "./types.js";

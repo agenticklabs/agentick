@@ -5,10 +5,10 @@
  * Falls back gracefully if SQLite is not available.
  */
 
-import type { SessionSnapshot, SessionStore, SqliteStoreConfig, StoreConfig } from "./types";
+import type { SessionSnapshot, SessionStore, SqliteStoreConfig, StoreConfig } from "./types.js";
 
 // Re-export the config type for convenience
-export type { SqliteStoreConfig as SqliteSessionStoreConfig } from "./types";
+export type { SqliteStoreConfig as SqliteSessionStoreConfig } from "./types.js";
 
 /**
  * SQLite-based session store using Node.js native SQLite.

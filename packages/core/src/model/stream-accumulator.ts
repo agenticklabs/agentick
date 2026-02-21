@@ -30,7 +30,7 @@ import type {
   ToolCallEvent,
   StreamErrorEvent,
 } from "@agentick/shared/streaming";
-import type { ModelOutput } from "./model";
+import type { ModelOutput } from "./model.js";
 
 // ============================================================================
 // AdapterDelta - Simple union type for normalized stream deltas

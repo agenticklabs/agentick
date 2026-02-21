@@ -71,7 +71,7 @@ export type FrameworkChannel = (typeof FrameworkChannels)[keyof typeof Framework
 // Framework Channel Payloads
 // ============================================================================
 
-import type { Message } from "./messages";
+import type { Message } from "./messages.js";
 
 /**
  * Input for sending to a session.

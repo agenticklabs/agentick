@@ -8,9 +8,9 @@
  * Backend extends these with providerOptions, libraryOptions, ephemeralConfig, etc.
  */
 
-import type { Message } from "./messages";
-import type { StopReason } from "./streaming";
-import type { ToolCall, ToolDefinition } from "./tools";
+import type { Message } from "./messages.js";
+import type { StopReason } from "./streaming.js";
+import type { ToolCall, ToolDefinition } from "./tools.js";
 
 // ============================================================================
 // Response Format

@@ -33,9 +33,12 @@ export default defineConfig({
     },
   },
   resolve: {
-    alias: {
-      "agentick/jsx-runtime": "./packages/core/src/jsx/jsx-runtime.ts",
-      "agentick/jsx-dev-runtime": "./packages/core/src/jsx/jsx-runtime.ts",
-    },
+    alias: [
+      // JSX runtime for agentick components
+      { find: "agentick/jsx-runtime", replacement: "./packages/core/src/jsx/jsx-runtime.ts" },
+      { find: "agentick/jsx-dev-runtime", replacement: "./packages/core/src/jsx/jsx-runtime.ts" },
+      // Strip .js from relative imports so vite resolves .ts source files
+      { find: /^(\.{1,2}\/.*)\.js$/, replacement: "$1" },
+    ],
   },
 });

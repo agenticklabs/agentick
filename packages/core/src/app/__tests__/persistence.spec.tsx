@@ -12,20 +12,24 @@
  */
 
 import { describe, it, expect, vi, beforeEach, beforeAll } from "vitest";
-import { createApp } from "../../app";
-import { createTestAdapter } from "../../testing/test-adapter";
-import { System, User } from "../../jsx/components/messages";
-import { Model, Section } from "../../jsx/components/primitives";
-import { MemorySessionStore } from "../session-store";
-import { SqliteSessionStore, isSqliteAvailable, createSessionStore } from "../sqlite-session-store";
-import type { ResolveContext, SessionSnapshot } from "../types";
-import { Timeline } from "../../jsx/components/timeline";
-import { useData } from "../../hooks/data";
-import { useComState } from "../../hooks/com-state";
-import { useTimeline } from "../../hooks/timeline";
-import { useResolved } from "../../hooks/resolved";
-import { useOnTickEnd } from "../../hooks/lifecycle";
-import type { COMTimelineEntry } from "../../com/types";
+import { createApp } from "../../app.js";
+import { createTestAdapter } from "../../testing/test-adapter.js";
+import { System, User } from "../../jsx/components/messages.js";
+import { Model, Section } from "../../jsx/components/primitives.js";
+import { MemorySessionStore } from "../session-store.js";
+import {
+  SqliteSessionStore,
+  isSqliteAvailable,
+  createSessionStore,
+} from "../sqlite-session-store.js";
+import type { ResolveContext, SessionSnapshot } from "../types.js";
+import { Timeline } from "../../jsx/components/timeline.js";
+import { useData } from "../../hooks/data.js";
+import { useComState } from "../../hooks/com-state.js";
+import { useTimeline } from "../../hooks/timeline.js";
+import { useResolved } from "../../hooks/resolved.js";
+import { useOnTickEnd } from "../../hooks/lifecycle.js";
+import type { COMTimelineEntry } from "../../com/types.js";
 
 // ============================================================================
 // Test Utilities

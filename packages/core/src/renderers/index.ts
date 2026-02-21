@@ -33,6 +33,6 @@ export {
   type SemanticContentBlock,
   type SemanticNode,
   type SemanticType,
-} from "./base";
-export { MarkdownRenderer, markdownRenderer } from "./markdown";
-export { XMLRenderer } from "./xml";
+} from "./base.js";
+export { MarkdownRenderer, markdownRenderer } from "./markdown.js";
+export { XMLRenderer } from "./xml.js";

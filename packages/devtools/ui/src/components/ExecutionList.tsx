@@ -1,4 +1,4 @@
-import type { Execution } from "../hooks/useDevToolsEvents";
+import type { Execution } from "../hooks/useDevToolsEvents.js";
 
 interface ExecutionListProps {
   executions: Execution[];

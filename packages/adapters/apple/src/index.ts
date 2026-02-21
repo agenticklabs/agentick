@@ -31,9 +31,9 @@
  *
  * @module @agentick/apple
  */
-export * from "./apple-model";
-export * from "./apple";
-export { appleEmbedding } from "./embedding";
+export * from "./apple-model.js";
+export * from "./apple.js";
+export { appleEmbedding } from "./embedding.js";
 export type {
   AppleAdapterConfig,
   AppleEmbeddingConfig,
@@ -41,4 +41,4 @@ export type {
   BridgeInput,
   BridgeOutput,
   BridgeChunk,
-} from "./types";
+} from "./types.js";

@@ -13,9 +13,9 @@
  */
 
 export * from "@agentick/shared/utils";
-export * from "./abort-utils";
-export * from "./registry";
-export * from "./normalization";
-export * from "./schema";
-export * from "./token-estimate";
-export * from "./classify-error";
+export * from "./abort-utils.js";
+export * from "./registry.js";
+export * from "./normalization.js";
+export * from "./schema.js";
+export * from "./token-estimate.js";
+export * from "./classify-error.js";

@@ -10,4 +10,4 @@ export {
   type SemanticContentBlock,
   type SemanticNode,
   type SemanticType,
-} from "./base";
+} from "./base.js";

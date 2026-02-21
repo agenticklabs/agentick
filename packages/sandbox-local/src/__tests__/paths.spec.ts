@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { resolveSafePath, filterEnv } from "../paths";
+import { resolveSafePath, filterEnv } from "../paths.js";
 import { SandboxAccessError } from "@agentick/sandbox";
 import { mkdir, rm, symlink, writeFile, realpath } from "node:fs/promises";
 import { join } from "node:path";

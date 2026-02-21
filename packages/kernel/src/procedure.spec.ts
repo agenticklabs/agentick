@@ -1,6 +1,6 @@
-import { createProcedure, createHook, createPipeline } from "./procedure";
-import type { Middleware } from "./procedure";
-import { Context } from "./context";
+import { createProcedure, createHook, createPipeline } from "./procedure.js";
+import type { Middleware } from "./procedure.js";
+import { Context } from "./context.js";
 
 describe("Kernel Procedure", () => {
   it("should execute a simple handler", async () => {

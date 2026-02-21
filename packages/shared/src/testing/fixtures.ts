@@ -13,11 +13,11 @@ import type {
   ToolResultBlock,
   ReasoningBlock,
   CodeBlock,
-} from "../blocks";
-import { BlockType } from "../block-types";
-import type { Message } from "../messages";
-import type { UsageStats } from "../models";
-import type { SessionResultPayload } from "../protocol";
+} from "../blocks.js";
+import { BlockType } from "../block-types.js";
+import type { Message } from "../messages.js";
+import type { UsageStats } from "../models.js";
+import type { SessionResultPayload } from "../protocol.js";
 import {
   StopReason,
   type StreamEventBase,
@@ -54,8 +54,8 @@ import {
   type SpawnEndEvent,
   type StreamEvent,
   type OrchestrationStreamEvent,
-} from "../streaming";
-import type { ToolDefinition, ToolCall, ToolResult, ToolExecutor } from "../tools";
+} from "../streaming.js";
+import type { ToolDefinition, ToolCall, ToolResult, ToolExecutor } from "../tools.js";
 
 // =============================================================================
 // ID Generation

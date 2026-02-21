@@ -18,9 +18,9 @@ import {
   type AdapterDelta,
   type ModelClass,
   type StopReason,
-} from "../model/adapter";
-import type { ModelInput, ModelOutput } from "../model/model";
-import { fromEngineState, toEngineState } from "../model/utils/language-model";
+} from "../model/adapter.js";
+import type { ModelInput, ModelOutput } from "../model/model.js";
+import { fromEngineState, toEngineState } from "../model/utils/language-model.js";
 import type { Message, ToolCall } from "@agentick/shared";
 import type { Mock } from "vitest";
 import { vi } from "vitest";

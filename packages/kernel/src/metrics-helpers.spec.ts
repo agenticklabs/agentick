@@ -1,12 +1,12 @@
-import type { KernelContext } from "./context";
-import { Context } from "./context";
+import type { KernelContext } from "./context.js";
+import { Context } from "./context.js";
 import {
   addMetric,
   setMetric,
   getMetric,
   addUsageMetrics,
   getUsageMetrics,
-} from "./metrics-helpers";
+} from "./metrics-helpers.js";
 
 describe("Metrics Helpers", () => {
   let ctx: KernelContext;

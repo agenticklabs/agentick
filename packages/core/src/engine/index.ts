@@ -14,10 +14,10 @@
  */
 
 // Execution Handle
-export * from "./execution-handle";
+export * from "./execution-handle.js";
 
 // Execution Types
-export * from "./execution-types";
+export * from "./execution-types.js";
 
 // Events
 export {
@@ -37,7 +37,7 @@ export {
   createToolConfirmationRequiredEvent,
   createToolConfirmationResultEvent,
   createEngineErrorEvent,
-} from "./engine-events";
+} from "./engine-events.js";
 export type {
   StreamEventBase,
   ModelStreamEvent,
@@ -47,10 +47,10 @@ export type {
   ModelRequestEvent,
   ModelResponseEvent,
   StreamEvent,
-} from "./engine-events";
+} from "./engine-events.js";
 
 // Response Types
-export type { EngineResponse, COMSection, COMTimelineEntry } from "./engine-response";
+export type { EngineResponse, COMSection, COMTimelineEntry } from "./engine-response.js";
 
 // Tool Executor
-export { ToolExecutor } from "./tool-executor";
+export { ToolExecutor } from "./tool-executor.js";

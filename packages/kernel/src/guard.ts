@@ -1,4 +1,4 @@
-import type { Middleware, ProcedureEnvelope } from "./procedure";
+import type { Middleware, ProcedureEnvelope } from "./procedure.js";
 import { GuardError } from "@agentick/shared";
 
 /**

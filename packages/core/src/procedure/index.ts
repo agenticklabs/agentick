@@ -7,7 +7,7 @@
  */
 
 import { applyRegistryMiddleware, wrapProcedure, isProcedure } from "@agentick/kernel";
-import { errorMiddleware } from "../middleware/defaults";
+import { errorMiddleware } from "../middleware/defaults.js";
 
 /**
  * Create an engine procedure with standard middleware.

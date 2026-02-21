@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from "vitest";
-import { localProvider } from "../provider";
+import { localProvider } from "../provider.js";
 import type { SandboxHandle as Sandbox } from "@agentick/sandbox";
 
 describe("localProvider", () => {

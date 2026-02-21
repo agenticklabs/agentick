@@ -9,17 +9,24 @@
  */
 
 import { describe, it, expect, vi } from "vitest";
-import { createApp } from "../../app";
-import { createTool, ToolIntent, ToolExecutionType } from "../../tool/tool";
-import { Model, Section } from "../../jsx/components/primitives";
-import { createTestAdapter, type TestAdapterInstance } from "../../testing";
-import type { ToolCall } from "@agentick/shared";
+import { createApp } from "../../app.js";
+import { createTool, ToolIntent, ToolExecutionType } from "../../tool/tool.js";
+import { Model, Section } from "../../jsx/components/primitives.js";
+import { createTestAdapter, type TestAdapterInstance } from "../../testing/index.js";
+import type { ToolCall, ToolDefinition } from "@agentick/shared";
 import { StopReason } from "@agentick/shared";
 import { z } from "zod";
 
 // ============================================================================
 // Test Utilities
 // ============================================================================
+
+/** Narrow a ModelToolReference to ToolDefinition by name. */
+function findTool(tools: unknown[], name: string): ToolDefinition {
+  const tool = tools.find((t: any) => t.name === name) as ToolDefinition | undefined;
+  if (!tool) throw new Error(`Tool "${name}" not found`);
+  return tool;
+}
 
 /**
  * Create a mock model using createTestAdapter.
@@ -311,9 +318,8 @@ describe("Tool Component", () => {
       const lastInput = capturedInputs[capturedInputs.length - 1];
       const receivedTools = lastInput.tools ?? [];
 
-      const tool = receivedTools.find((t: any) => t.name === "overridable_tool");
-      expect(tool).toBeDefined();
-      expect(tool!.description).toBe("Overridden description");
+      const tool = findTool(receivedTools, "overridable_tool");
+      expect(tool.description).toBe("Overridden description");
 
       session.close();
     });
@@ -384,9 +390,8 @@ describe("Tool Component", () => {
       const lastInput = capturedInputs[capturedInputs.length - 1];
       const receivedTools = lastInput.tools ?? [];
 
-      const tool = receivedTools.find((t: any) => t.name === "default_tool");
-      expect(tool).toBeDefined();
-      expect(tool!.description).toBe("Default description");
+      const tool = findTool(receivedTools, "default_tool");
+      expect(tool.description).toBe("Default description");
 
       session.close();
     });
@@ -438,7 +443,7 @@ describe("Tool Component", () => {
 
       // Handler should have been called — tool was found by overridden name
       expect(handler).toHaveBeenCalled();
-      const callArgs = handler.mock.calls[0];
+      const callArgs = handler.mock.calls[0] as unknown as [any, any];
       expect(callArgs[0]).toEqual({ v: "test" });
 
       session.close();
@@ -609,9 +614,8 @@ describe("Tool Component", () => {
       const receivedTools = lastInput.tools ?? [];
 
       // Only one tool with that name, and it should be the JSX version
-      const matchingTools = receivedTools.filter((t: any) => t.name === "shared_name");
-      expect(matchingTools).toHaveLength(1);
-      expect(matchingTools[0].description).toBe("JSX version");
+      const tool = findTool(receivedTools, "shared_name");
+      expect(tool.description).toBe("JSX version");
 
       session.close();
     });
@@ -804,9 +808,8 @@ describe("Tool Component", () => {
       // Both ticks should see the overridden description, not the default
       for (let i = 0; i < capturedInputs.length; i++) {
         const tools = capturedInputs[i].tools ?? [];
-        const editTool = tools.find((t: any) => t.name === "edit_file");
-        expect(editTool).toBeDefined();
-        expect(editTool!.description).toBe("Apply surgical edits with full context.");
+        const editTool = findTool(tools, "edit_file");
+        expect(editTool.description).toBe("Apply surgical edits with full context.");
       }
 
       session.close();
@@ -929,9 +932,8 @@ describe("Tool Component", () => {
       // JSX wins on both ticks (highest priority)
       for (let i = 0; i < capturedInputs.length; i++) {
         const tools = capturedInputs[i].tools ?? [];
-        const sharedTools = tools.filter((t: any) => t.name === "shared");
-        expect(sharedTools).toHaveLength(1);
-        expect(sharedTools[0].description).toBe("jsx-level");
+        const sharedTool = findTool(tools, "shared");
+        expect(sharedTool.description).toBe("jsx-level");
       }
 
       session.close();
@@ -974,10 +976,9 @@ describe("Tool Component", () => {
       // Verify metadata preserved on both ticks
       for (let i = 0; i < capturedInputs.length; i++) {
         const tools = capturedInputs[i].tools ?? [];
-        const typed = tools.find((t: any) => t.name === "typed_tool");
-        expect(typed).toBeDefined();
-        expect(typed!.intent).toBe(ToolIntent.ACTION);
-        expect(typed!.type).toBe(ToolExecutionType.SERVER);
+        const typed = findTool(tools, "typed_tool");
+        expect(typed.intent).toBe(ToolIntent.ACTION);
+        expect(typed.type).toBe(ToolExecutionType.SERVER);
       }
 
       session.close();

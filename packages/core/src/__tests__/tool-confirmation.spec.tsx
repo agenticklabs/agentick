@@ -8,10 +8,10 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { createApp } from "../app";
-import { createTool } from "../tool/tool";
-import { Model, Section } from "../jsx/components/primitives";
-import { createTestAdapter } from "../testing";
+import { createApp } from "../app.js";
+import { createTool } from "../tool/tool.js";
+import { Model, Section } from "../jsx/components/primitives.js";
+import { createTestAdapter } from "../testing/index.js";
 import { z } from "zod";
 import type {
   StreamEvent,

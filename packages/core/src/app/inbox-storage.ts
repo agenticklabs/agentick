@@ -9,7 +9,7 @@
  */
 
 import { randomUUID } from "node:crypto";
-import type { InboxStorage, InboxMessage, InboxMessageInput } from "./types";
+import type { InboxStorage, InboxMessage, InboxMessageInput } from "./types.js";
 
 export class MemoryInboxStorage implements InboxStorage {
   private pending_ = new Map<string, InboxMessage[]>();

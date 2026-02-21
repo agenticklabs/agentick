@@ -4,7 +4,7 @@
  * Lighter isolation than bubblewrap — uses Linux namespaces directly.
  */
 
-import type { SpawnOptions } from "../executor/types";
+import type { SpawnOptions } from "../executor/types.js";
 
 /**
  * Build unshare argument array for a given set of spawn options.

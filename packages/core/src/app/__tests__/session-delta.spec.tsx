@@ -6,11 +6,11 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { createApp } from "../../app";
-import { System } from "../../jsx/components/messages";
-import { Model } from "../../jsx/components/primitives";
-import { Timeline } from "../../jsx/components/timeline";
-import { createTestAdapter } from "../../testing";
+import { createApp } from "../../app.js";
+import { System } from "../../jsx/components/messages.js";
+import { Model } from "../../jsx/components/primitives.js";
+import { Timeline } from "../../jsx/components/timeline.js";
+import { createTestAdapter } from "../../testing/index.js";
 import type { StreamEvent as SharedStreamEvent } from "@agentick/shared";
 
 type ExecutionEndPayload = SharedStreamEvent & {

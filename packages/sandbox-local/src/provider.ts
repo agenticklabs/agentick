@@ -12,17 +12,17 @@ import type {
   SandboxSnapshot,
   NetworkRule,
 } from "@agentick/sandbox";
-import { detectCapabilities, selectStrategy } from "./platform/detect";
-import type { SandboxStrategy } from "./platform/types";
-import { selectExecutor } from "./executor/select";
-import type { ResolvedPermissions } from "./executor/types";
-import { createWorkspace, destroyWorkspace, resolveMounts } from "./workspace";
-import { filterEnv } from "./paths";
-import { ResourceEnforcer } from "./resources";
-import { CgroupManager } from "./linux/cgroup";
-import { LocalSandbox } from "./local-sandbox";
-import { NetworkProxyServer } from "./network/proxy";
-import type { ProxyServerConfig } from "./network/proxy";
+import { detectCapabilities, selectStrategy } from "./platform/detect.js";
+import type { SandboxStrategy } from "./platform/types.js";
+import { selectExecutor } from "./executor/select.js";
+import type { ResolvedPermissions } from "./executor/types.js";
+import { createWorkspace, destroyWorkspace, resolveMounts } from "./workspace.js";
+import { filterEnv } from "./paths.js";
+import { ResourceEnforcer } from "./resources.js";
+import { CgroupManager } from "./linux/cgroup.js";
+import { LocalSandbox } from "./local-sandbox.js";
+import { NetworkProxyServer } from "./network/proxy.js";
+import type { ProxyServerConfig } from "./network/proxy.js";
 
 export interface LocalProviderConfig {
   /** Sandbox strategy. "auto" detects the best available. Default: "auto". */

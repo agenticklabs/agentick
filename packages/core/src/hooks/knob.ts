@@ -14,9 +14,9 @@
  */
 
 import { useEffect, useMemo } from "react";
-import { useRuntimeStore } from "./runtime-context";
-import { useComState } from "./com-state";
-import type { ExecutionEndCallback } from "./types";
+import { useRuntimeStore } from "./runtime-context.js";
+import { useComState } from "./com-state.js";
+import type { ExecutionEndCallback } from "./types.js";
 
 // ============================================================================
 // Types — Primitives, Constraints, Options

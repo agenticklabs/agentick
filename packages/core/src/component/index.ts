@@ -43,5 +43,5 @@
  * @module agentick/component
  */
 
-export * from "./component";
-export * from "./component-hooks";
+export * from "./component.js";
+export * from "./component-hooks.js";

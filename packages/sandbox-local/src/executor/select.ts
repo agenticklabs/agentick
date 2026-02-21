@@ -2,12 +2,12 @@
  * Executor factory — select executor based on platform capabilities.
  */
 
-import type { SandboxStrategy } from "../platform/types";
-import type { CommandExecutor } from "./types";
-import { BaseExecutor } from "./base";
-import { DarwinExecutor } from "./darwin";
-import { BwrapExecutor, UnshareExecutor } from "./linux";
-import type { CgroupManager } from "../linux/cgroup";
+import type { SandboxStrategy } from "../platform/types.js";
+import type { CommandExecutor } from "./types.js";
+import { BaseExecutor } from "./base.js";
+import { DarwinExecutor } from "./darwin.js";
+import { BwrapExecutor, UnshareExecutor } from "./linux.js";
+import type { CgroupManager } from "../linux/cgroup.js";
 
 /**
  * Create a CommandExecutor for the given strategy.

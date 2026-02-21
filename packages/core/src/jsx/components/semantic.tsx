@@ -1,6 +1,6 @@
 import React from "react";
 import type { JSX } from "react";
-import type { ComponentBaseProps } from "../jsx-types";
+import type { ComponentBaseProps } from "../jsx-types.js";
 
 // Helper for createElement
 const h = React.createElement;

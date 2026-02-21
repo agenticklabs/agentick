@@ -11,11 +11,11 @@
 
 import React, { createContext, useContext, type ReactNode } from "react";
 import { z } from "zod";
-import { useRuntimeStore, type KnobRegistration } from "./runtime-context";
-import { useCom } from "./context";
-import { createTool } from "../tool/tool";
-import type { COM } from "../com/object-model";
-import { Section } from "../jsx";
+import { useRuntimeStore, type KnobRegistration } from "./runtime-context.js";
+import { useCom } from "./context.js";
+import { createTool } from "../tool/tool.js";
+import type { COM } from "../com/object-model.js";
+import { Section } from "../jsx/index.js";
 
 const h = React.createElement;
 

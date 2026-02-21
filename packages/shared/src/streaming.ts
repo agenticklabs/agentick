@@ -23,12 +23,12 @@
  * - Simple consumption: Listen for `content`, `reasoning`, `message`, `tool_call`
  */
 
-import type { ContentBlock } from "./blocks";
-import type { BlockType } from "./block-types";
-import type { Message } from "./messages";
-import type { UsageStats } from "./models";
-import type { ToolExecutor } from "./tools";
-import type { SessionResultPayload } from "./protocol";
+import type { ContentBlock } from "./blocks.js";
+import type { BlockType } from "./block-types.js";
+import type { Message } from "./messages.js";
+import type { UsageStats } from "./models.js";
+import type { ToolExecutor } from "./tools.js";
+import type { SessionResultPayload } from "./protocol.js";
 
 // ============================================================================
 // Content Metadata Types

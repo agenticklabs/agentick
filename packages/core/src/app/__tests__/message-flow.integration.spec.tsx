@@ -13,11 +13,11 @@
  */
 
 import { describe, it, expect, vi } from "vitest";
-import { createApp, Model, System, Timeline, Message } from "../../index";
-import { useConversationHistory, useQueuedMessages, useTickState } from "../../hooks";
-import type { COMTimelineEntry } from "../../com/types";
+import { createApp, Model, System, Timeline, Message } from "../../index.js";
+import { useConversationHistory, useQueuedMessages, useTickState } from "../../hooks/index.js";
+import type { COMTimelineEntry } from "../../com/types.js";
 import type { MessageRoles, ModelMessage } from "@agentick/shared";
-import { createTestAdapter } from "../../testing";
+import { createTestAdapter } from "../../testing/index.js";
 
 // Helper to create a mock model that captures input using the shared test utility
 function createMockModel() {

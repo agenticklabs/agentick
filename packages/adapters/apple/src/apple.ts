@@ -36,8 +36,8 @@ import type {
   BridgeSchemaProperty,
   EmbedBridgeInput,
   EmbedBridgeOutput,
-} from "./types";
-import { STOP_REASON_MAP } from "./types";
+} from "./types.js";
+import { STOP_REASON_MAP } from "./types.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_BRIDGE_PATH = join(__dirname, "..", "bin", "apple-fm-bridge");

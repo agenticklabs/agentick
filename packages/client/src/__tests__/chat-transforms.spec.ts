@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import type { ContentBlock, Message } from "@agentick/shared";
-import { extractToolCalls, timelineToMessages } from "../chat-transforms";
-import type { TimelineEntry } from "../chat-types";
+import { extractToolCalls, timelineToMessages } from "../chat-transforms.js";
+import type { TimelineEntry } from "../chat-types.js";
 
 function makeTimelineEntry(overrides: {
   role: "user" | "assistant" | "tool" | "event";

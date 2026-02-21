@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { matchPattern, evaluateRules, deny, allow } from "./policy";
+import { matchPattern, evaluateRules, deny, allow } from "./policy.js";
 
 describe("matchPattern", () => {
   it("exact match", () => {

@@ -1,5 +1,5 @@
-import { Context } from "./context";
-import { mergeStreams, type StreamTag } from "./stream";
+import { Context } from "./context.js";
+import { mergeStreams, type StreamTag } from "./stream.js";
 
 describe("Kernel Stream Merging", () => {
   // Helper to create a delayed stream

@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import type { StreamEvent, SessionStreamEvent } from "@agentick/client";
 import type { ContextInfo } from "@agentick/shared";
-import { useClient } from "./use-client";
+import { useClient } from "./use-client.js";
 
 // ============================================================================
 // useContextInfo

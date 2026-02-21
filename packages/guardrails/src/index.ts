@@ -1,6 +1,6 @@
-export { toolGuardrail } from "./tool";
-export { deny, allow } from "./policy";
-export { GuardrailDenied } from "./errors";
+export { toolGuardrail } from "./tool.js";
+export { deny, allow } from "./policy.js";
+export { GuardrailDenied } from "./errors.js";
 export type {
   GuardrailRule,
   GuardrailAction,
@@ -8,4 +8,4 @@ export type {
   GuardrailClassifier,
   ToolGuardrailConfig,
   ToolGuardrailCall,
-} from "./types";
+} from "./types.js";

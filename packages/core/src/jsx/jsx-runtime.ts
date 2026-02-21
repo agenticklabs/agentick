@@ -1,7 +1,7 @@
 import React from "react";
 import type z from "zod";
-import type { ComponentClass, ComponentFactory } from "../component/component";
-import type { ToolClass, ExecutableTool } from "../tool/tool";
+import type { ComponentClass, ComponentFactory } from "../component/component.js";
+import type { ToolClass, ExecutableTool } from "../tool/tool.js";
 import type { ContentBlock, MessageRoles, ToolExecutionType } from "@agentick/shared";
 
 // Use React's createElement for all element creation
@@ -124,8 +124,8 @@ export namespace JSX {
       input?: z.ZodSchema;
       schema?: unknown;
       executionType?: ToolExecutionType;
-      handler?: (input: any) => Promise<ContentBlock[]>;
-      metadata?: import("../tool/tool").ToolMetadata;
+      handler?: (input: any, ctx?: any) => Promise<ContentBlock[]>;
+      metadata?: import("../tool/tool.js").ToolMetadata;
     };
     // Content block primitives
     text: {

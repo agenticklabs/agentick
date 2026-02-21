@@ -4,9 +4,9 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { createTestAdapter } from "../test-adapter";
+import { createTestAdapter } from "../test-adapter.js";
 // Note: createTestModel has been replaced by createTestAdapter
-import type { ModelInput, ModelOutput } from "../../model/model";
+import type { ModelInput, ModelOutput } from "../../model/model.js";
 import type { ModelMessage, TextBlock } from "@agentick/shared";
 
 // Helper to create minimal ModelInput

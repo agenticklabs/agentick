@@ -6,10 +6,10 @@
  */
 
 import type { Client } from "@modelcontextprotocol/sdk/client";
-import type { MCPClient } from "./client";
-import { MCPTool } from "./tool";
-import type { MCPConfig, MCPToolDefinition } from "./types";
-import type { COM } from "../com/object-model";
+import type { MCPClient } from "./client.js";
+import { MCPTool } from "./tool.js";
+import type { MCPConfig, MCPToolDefinition } from "./types.js";
+import type { COM } from "../com/object-model.js";
 
 /**
  * MCP Service handles discovery and registration of MCP tools

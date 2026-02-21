@@ -5,14 +5,14 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { createApp } from "../../app";
-import { System, User } from "../../jsx/components/messages";
-import { Model } from "../../jsx/components/primitives";
-import { Timeline } from "../../jsx/components/timeline";
-import { createTestAdapter } from "../../testing";
-import { useOnTickStart } from "../../hooks";
-import { useOnExecutionStart } from "../execution-context";
-import type { TickState } from "../../component/component";
+import { createApp } from "../../app.js";
+import { System, User } from "../../jsx/components/messages.js";
+import { Model } from "../../jsx/components/primitives.js";
+import { Timeline } from "../../jsx/components/timeline.js";
+import { createTestAdapter } from "../../testing/index.js";
+import { useOnTickStart } from "../../hooks/index.js";
+import { useOnExecutionStart } from "../execution-context.js";
+import type { TickState } from "../../component/component.js";
 
 describe("executionId on TickState", () => {
   it("useOnTickStart receives executionId in tickState", async () => {

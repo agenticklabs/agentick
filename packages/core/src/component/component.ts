@@ -1,16 +1,16 @@
-import type { COMInput, COMOutput, COMTimelineEntry } from "../com/types";
-import type { COM } from "../com/object-model";
-import type { JSX } from "../jsx/jsx-runtime";
+import type { COMInput, COMOutput, COMTimelineEntry } from "../com/types.js";
+import type { COM } from "../com/object-model.js";
+import type { JSX } from "../jsx/jsx-runtime.js";
 import type { StopReason, UsageStats } from "@agentick/shared";
-import type { ExecutableTool } from "../tool/tool";
+import type { ExecutableTool } from "../tool/tool.js";
 import {
   type ComponentHookMiddleware,
   type ComponentHookName,
   ComponentHookRegistry,
-} from "./component-hooks";
-import type { ChannelService } from "../channels";
-import { type CompiledStructure } from "../compiler/types";
-import type { ExecutionMessage } from "../engine/execution-types";
+} from "./component-hooks.js";
+import type { ChannelService } from "../channels/index.js";
+import { type CompiledStructure } from "../compiler/types.js";
+import type { ExecutionMessage } from "../engine/execution-types.js";
 
 /**
  * Stop reason information for components to react to.

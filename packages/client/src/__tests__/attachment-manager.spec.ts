@@ -3,11 +3,11 @@ import {
   AttachmentManager,
   defaultAttachmentValidator,
   defaultAttachmentToBlock,
-} from "../attachment-manager";
-import { MessageSteering } from "../message-steering";
-import { ChatSession } from "../chat-session";
-import { createMockClient, makeEvent } from "../testing";
-import type { Attachment } from "../chat-types";
+} from "../attachment-manager.js";
+import { MessageSteering } from "../message-steering.js";
+import { ChatSession } from "../chat-session.js";
+import { createMockClient, makeEvent } from "../testing.js";
+import type { Attachment } from "../chat-types.js";
 import type { ContentBlock } from "@agentick/shared";
 
 describe("AttachmentManager", () => {
@@ -580,7 +580,7 @@ describe("ChatSession attachment integration", () => {
 describe("MessageLog pushUserMessage", () => {
   // We need to import MessageLog
   it("pushUserMessage with extraBlocks produces ContentBlock[] content", async () => {
-    const { MessageLog } = await import("../message-log");
+    const { MessageLog } = await import("../message-log.js");
     const client = createMockClient(vi.fn);
     const log = new MessageLog(client, { sessionId: "s1", renderMode: "block" });
 
@@ -606,7 +606,7 @@ describe("MessageLog pushUserMessage", () => {
   });
 
   it("pushUserMessage without extraBlocks produces string content", async () => {
-    const { MessageLog } = await import("../message-log");
+    const { MessageLog } = await import("../message-log.js");
     const client = createMockClient(vi.fn);
     const log = new MessageLog(client, { sessionId: "s1", renderMode: "block" });
 

@@ -8,7 +8,7 @@
 import { realpath } from "node:fs/promises";
 import { resolve, isAbsolute } from "node:path";
 import { SandboxAccessError } from "@agentick/sandbox";
-import type { ResolvedMount } from "./executor/types";
+import type { ResolvedMount } from "./executor/types.js";
 
 /** Environment variables that must never be inherited. */
 export const ENV_BLOCKLIST = new Set([

@@ -4,8 +4,8 @@
  * Types for the compiled output structure.
  */
 
-import type { Renderer, SemanticContentBlock } from "../renderers/types";
-import type { ExecutableTool } from "../tool/tool";
+import type { Renderer, SemanticContentBlock } from "../renderers/types.js";
+import type { ExecutableTool } from "../tool/tool.js";
 
 /**
  * The compiled structure output from traversing the tree.

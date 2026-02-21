@@ -6,7 +6,7 @@
  * implement SandboxProvider.
  */
 
-import type { Edit, EditResult } from "./edit";
+import type { Edit, EditResult } from "./edit.js";
 
 // ── Core Runtime Handle ─────────────────────────────────────────────────────
 

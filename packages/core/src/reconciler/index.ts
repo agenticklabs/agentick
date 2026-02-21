@@ -2,6 +2,6 @@
  * Reconciler Exports
  */
 
-export * from "./types";
-export * from "./reconciler";
-export { hostConfig, registerRendererComponent } from "./host-config";
+export * from "./types.js";
+export * from "./reconciler.js";
+export { hostConfig, registerRendererComponent } from "./host-config.js";

@@ -1,11 +1,16 @@
 import type { Middleware } from "@agentick/kernel";
-import type { EngineComponent, TickState, RecoveryAction, AfterCompileContext } from "./component";
-import type { COM } from "../com/object-model";
-import type { COMInput } from "../com/types";
-import type { JSX } from "../jsx/jsx-runtime";
-import { BaseHookRegistry } from "../hooks/base-hook-registry";
-import type { CompiledStructure } from "../compiler/types";
-import type { ExecutionMessage } from "../engine/execution-types";
+import type {
+  EngineComponent,
+  TickState,
+  RecoveryAction,
+  AfterCompileContext,
+} from "./component.js";
+import type { COM } from "../com/object-model.js";
+import type { COMInput } from "../com/types.js";
+import type { JSX } from "../jsx/jsx-runtime.js";
+import { BaseHookRegistry } from "../hooks/base-hook-registry.js";
+import type { CompiledStructure } from "../compiler/types.js";
+import type { ExecutionMessage } from "../engine/execution-types.js";
 
 /**
  * Component lifecycle method names.

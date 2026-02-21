@@ -11,7 +11,7 @@
 import { createTool, Context } from "@agentick/core";
 import { Section } from "@agentick/core";
 import { z } from "zod";
-import { TodoListService, type TodoItem } from "../services/todo-list.service";
+import { TodoListService, type TodoItem } from "../services/todo-list.service.js";
 
 /**
  * Channel name for todo list state synchronization.

@@ -2,14 +2,14 @@
  * Hook Types
  */
 
-import type { CompiledStructure } from "../compiler/types";
+import type { CompiledStructure } from "../compiler/types.js";
 import type { ContentBlock, ToolCall, ToolResult } from "@agentick/shared";
-import type { COMStopRequest, COMContinueRequest, COM as COMImpl } from "../com/object-model";
-import type { COMTimelineEntry } from "../com/types";
+import type { COMStopRequest, COMContinueRequest, COM as COMImpl } from "../com/object-model.js";
+import type { COMTimelineEntry } from "../com/types.js";
 
 // TickState - canonical definition in component/component.ts
 // Import for use in this file and re-export for consumers
-import type { TickState } from "../component/component";
+import type { TickState } from "../component/component.js";
 export type { TickState };
 
 /**

@@ -9,10 +9,10 @@ import React from "react";
 import { createApp, createTool, Model, Section } from "@agentick/core";
 import { createTestAdapter, type TestAdapterInstance } from "@agentick/core/testing";
 import { z } from "zod";
-import { useSandbox, SandboxContext } from "../context";
-import { Sandbox } from "../component";
-import { Shell, ReadFile, WriteFile, EditFile } from "../tools";
-import { createMockSandbox, createMockProvider } from "../testing";
+import { useSandbox, SandboxContext } from "../context.js";
+import { Sandbox } from "../component.js";
+import { Shell, ReadFile, WriteFile, EditFile } from "../tools.js";
+import { createMockSandbox, createMockProvider } from "../testing.js";
 
 // ============================================================================
 // Helpers

@@ -5,7 +5,7 @@
  * Automated tests would require Apple Intelligence and can't run in CI.
  */
 
-import { apple } from "./apple";
+import { apple } from "./apple.js";
 
 async function testSimpleGeneration() {
   console.log("🧪 Test: Simple text generation");

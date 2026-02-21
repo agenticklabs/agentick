@@ -5,10 +5,10 @@ import type {
   TimelineEntry as BaseTimelineEntry,
   ClientToolDefinition,
 } from "@agentick/shared";
-import type { ToolExecutionOptions } from "../types";
-import type { ModelConfig } from "../model/model";
-import type { ExecutableTool, ToolDefinition } from "../tool/tool";
-import type { SemanticContentBlock, Formatter } from "../renderers";
+import type { ToolExecutionOptions } from "../types.js";
+import type { ModelConfig } from "../model/model.js";
+import type { ExecutableTool, ToolDefinition } from "../tool/tool.js";
+import type { SemanticContentBlock, Formatter } from "../renderers/index.js";
 import type { ContentBlock } from "@agentick/shared";
 
 // ============================================================================

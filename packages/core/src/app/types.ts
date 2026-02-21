@@ -23,15 +23,15 @@ import type {
   SendInput as SharedSendInput,
   ContentBlock,
 } from "@agentick/shared";
-import type { COMInput, COMTimelineEntry } from "../com/types";
-import type { ExecutableTool } from "../tool/tool";
-import type { MCPConfig } from "../mcp";
-import type { EngineModel } from "../model/model";
+import type { COMInput, COMTimelineEntry } from "../com/types.js";
+import type { ExecutableTool } from "../tool/tool.js";
+import type { MCPConfig } from "../mcp/index.js";
+import type { EngineModel } from "../model/model.js";
 import type { ExecutionHandle, Channel, Procedure } from "@agentick/kernel";
-import type { JSX } from "../jsx/jsx-runtime";
+import type { JSX } from "../jsx/jsx-runtime.js";
 // Signal type removed - schedulerState now returns SchedulerState directly
-import type { SchedulerState } from "../compiler/scheduler";
-import type { SerializableCacheEntry } from "../hooks/runtime-context";
+import type { SchedulerState } from "../compiler/scheduler.js";
+import type { SerializableCacheEntry } from "../hooks/runtime-context.js";
 
 // ============================================================================
 // Lifecycle Callbacks

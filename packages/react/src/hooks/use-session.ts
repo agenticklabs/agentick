@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import type { SessionAccessor } from "@agentick/client";
-import { useClient } from "./use-client";
-import type { UseSessionOptions, UseSessionResult } from "../types";
+import { useClient } from "./use-client.js";
+import type { UseSessionOptions, UseSessionResult } from "../types.js";
 
 // ============================================================================
 // useSession

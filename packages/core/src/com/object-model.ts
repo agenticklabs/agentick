@@ -8,14 +8,14 @@ import type {
   EphemeralEntry,
   EphemeralPosition,
   TokenEstimator,
-} from "./types";
-import type { ToolDefinition, ExecutableTool } from "../tool/tool";
+} from "./types.js";
+import type { ToolDefinition, ExecutableTool } from "../tool/tool.js";
 import type { Message, ContentBlock } from "@agentick/shared";
-import type { ModelConfig, EngineModel } from "../model/model";
-import type { ChannelService } from "../channels";
+import type { ModelConfig, EngineModel } from "../model/model.js";
+import type { ChannelService } from "../channels/index.js";
 import { EventEmitter } from "node:events";
-import { toJSONSchema } from "../utils/schema";
-import type { ExecutionMessage } from "../engine/execution-types";
+import { toJSONSchema } from "../utils/schema.js";
+import type { ExecutionMessage } from "../engine/execution-types.js";
 /** Default token estimator: ~4 chars per token + overhead */
 function defaultEstimateTokens(text: string): number {
   return Math.ceil(text.length / 4) + 4;

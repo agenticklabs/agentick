@@ -6,7 +6,7 @@
  */
 
 import React, { createContext, useContext, type ReactNode } from "react";
-import type { CompiledStructure } from "../compiler/types";
+import type { CompiledStructure } from "../compiler/types.js";
 import type {
   TickStartCallback,
   TickEndCallback,
@@ -14,9 +14,9 @@ import type {
   ExecutionEndCallback,
   TickResult,
   TickState,
-} from "./types";
-import type { COM } from "../com/object-model";
-import type { COMTimelineEntry } from "../com/types";
+} from "./types.js";
+import type { COM } from "../com/object-model.js";
+import type { COMTimelineEntry } from "../com/types.js";
 
 // Helper for createElement
 const h = React.createElement;

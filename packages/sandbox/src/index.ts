@@ -21,24 +21,24 @@ export type {
   ResourceLimits,
   NetworkRule,
   ProxiedRequest,
-} from "./types";
+} from "./types.js";
 
 // ── Errors ──────────────────────────────────────────────────────────────────
-export { SandboxAccessError } from "./errors";
+export { SandboxAccessError } from "./errors.js";
 
 // ── Edit Types & Utilities ───────────────────────────────────────────────────
-export { applyEdits, editFile, EditError } from "./edit";
-export type { Edit, EditResult, EditChange } from "./edit";
+export { applyEdits, editFile, EditError } from "./edit.js";
+export type { Edit, EditResult, EditChange } from "./edit.js";
 
 // ── Context & Hook ───────────────────────────────────────────────────────────
-export { SandboxContext, useSandbox } from "./context";
+export { SandboxContext, useSandbox } from "./context.js";
 
 // ── Component ────────────────────────────────────────────────────────────────
-export { Sandbox } from "./component";
-export type { SandboxProps } from "./component";
+export { Sandbox } from "./component.js";
+export type { SandboxProps } from "./component.js";
 
 // ── Tools ────────────────────────────────────────────────────────────────────
-import { Shell, ReadFile, WriteFile, EditFile } from "./tools";
+import { Shell, ReadFile, WriteFile, EditFile } from "./tools.js";
 export { Shell, ReadFile, WriteFile, EditFile };
 
 // ── Testing ──────────────────────────────────────────────────────────────────

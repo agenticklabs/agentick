@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from "vitest";
-import { EphemeralCA } from "../network/ca";
+import { EphemeralCA } from "../network/ca.js";
 import { access } from "node:fs/promises";
 
 describe("EphemeralCA", () => {

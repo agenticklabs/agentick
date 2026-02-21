@@ -6,11 +6,11 @@
  */
 
 import { describe, it, expect, vi } from "vitest";
-import { ToolExecutor } from "./tool-executor";
-import type { ExecutableTool, ToolCall } from "../tool/tool";
-import { ToolExecutionType } from "../tool/tool";
-import type { COM } from "../com/object-model";
-import { createEngineProcedure } from "../procedure";
+import { ToolExecutor } from "./tool-executor.js";
+import type { ExecutableTool, ToolCall } from "../tool/tool.js";
+import { ToolExecutionType } from "../tool/tool.js";
+import type { COM } from "../com/object-model.js";
+import { createEngineProcedure } from "../procedure/index.js";
 import type { ContentBlock } from "@agentick/shared";
 import { z } from "zod";
 

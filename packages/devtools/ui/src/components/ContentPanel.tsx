@@ -1,6 +1,6 @@
 import { useState } from "react";
-import type { Execution, Session, FiberNode, TokenSummary } from "../hooks/useDevToolsEvents";
-import { Tree } from "./Tree";
+import type { Execution, Session, FiberNode, TokenSummary } from "../hooks/useDevToolsEvents.js";
+import { Tree } from "./Tree/index.js";
 import { getModelInfo, getContextUtilization, formatContextWindow } from "@agentick/shared";
 
 type ContentTab = "execution" | "context" | "fiber" | "tools";

@@ -14,7 +14,7 @@ import {
   mapAiSdkPartToContentBlock,
   mapToolResultContent,
   convertToolsToToolSet,
-} from "../adapter";
+} from "../adapter.js";
 import { ImageMimeType, StopReason } from "@agentick/shared";
 import type {
   Message,

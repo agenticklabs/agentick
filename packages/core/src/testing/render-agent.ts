@@ -5,13 +5,13 @@
  */
 
 import { createApp } from "../app.js";
-import type { AppOptions, SessionOptions, SendResult, ComponentFunction } from "../app/types";
-import type { Session } from "../app/types";
+import type { AppOptions, SessionOptions, SendResult, ComponentFunction } from "../app/types.js";
+import type { Session } from "../app/types.js";
 import type { Message } from "@agentick/shared";
 import { extractText } from "@agentick/shared";
-import type { TestAdapterInstance } from "./test-adapter";
-import { createTestAdapter } from "./test-adapter";
-import { flushMicrotasks } from "./act";
+import type { TestAdapterInstance } from "./test-adapter.js";
+import { createTestAdapter } from "./test-adapter.js";
+import { flushMicrotasks } from "./act.js";
 
 // ============================================================================
 // Types

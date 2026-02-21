@@ -53,7 +53,7 @@ export {
   type TimelineRenderFn,
   type TimelineProps,
   type TimelineBudgetOptions,
-} from "./jsx/components/index";
+} from "./jsx/components/index.js";
 
 // ============================================================================
 // React Hooks (re-exported from React)
@@ -120,31 +120,31 @@ export {
   ContextInfoProvider,
   type ContextInfo,
   type ContextInfoStore,
-} from "./hooks";
+} from "./hooks/index.js";
 
 // ============================================================================
 // Tools
 // ============================================================================
-export { createTool, useToolProcedure } from "./tool/index";
-export type { ToolClass, ToolDefinition, ToolMetadata, ToolPropOverrides } from "./tool/index";
+export { createTool, useToolProcedure } from "./tool/index.js";
+export type { ToolClass, ToolDefinition, ToolMetadata, ToolPropOverrides } from "./tool/index.js";
 
 // ============================================================================
 // Model
 // ============================================================================
-export { createAdapter } from "./model/adapter";
-export type { ModelClass } from "./model/adapter";
-export type { EngineModel, ModelMetadata } from "./model/model";
-export * from "./types";
+export { createAdapter } from "./model/adapter.js";
+export type { ModelClass } from "./model/adapter.js";
+export type { EngineModel, ModelMetadata } from "./model/model.js";
+export * from "./types.js";
 
 // ============================================================================
 // COM Types
 // ============================================================================
-export type { COMTimelineEntry, COMSection, COMInput, TokenEstimator } from "./com/types";
+export type { COMTimelineEntry, COMSection, COMInput, TokenEstimator } from "./com/types.js";
 
 // ============================================================================
 // Local Transport
 // ============================================================================
-export { createLocalTransport } from "./local-transport";
+export { createLocalTransport } from "./local-transport.js";
 
 // ============================================================================
 // DevTools
@@ -153,4 +153,4 @@ export {
   enableReactDevTools,
   isReactDevToolsConnected,
   disconnectReactDevTools,
-} from "./reconciler/reconciler";
+} from "./reconciler/reconciler.js";

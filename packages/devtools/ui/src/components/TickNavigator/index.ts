@@ -1,1 +1,1 @@
-export { TickNavigator } from "./TickNavigator";
+export { TickNavigator } from "./TickNavigator.js";

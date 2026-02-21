@@ -1,11 +1,11 @@
 import type { Middleware } from "@agentick/kernel";
 import type { ContentBlock } from "@agentick/shared";
-import { BaseHookRegistry } from "../hooks/base-hook-registry";
+import { BaseHookRegistry } from "../hooks/base-hook-registry.js";
 import type {
   ComponentHookArgs,
   ComponentHookName,
   ComponentHookReturn,
-} from "../component/component-hooks";
+} from "../component/component-hooks.js";
 
 /**
  * Tool operation names.

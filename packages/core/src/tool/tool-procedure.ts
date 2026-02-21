@@ -1,6 +1,6 @@
 import { useRef } from "react";
-import { createEngineProcedure, isProcedure } from "../procedure";
-import { useCom } from "../hooks";
+import { createEngineProcedure, isProcedure } from "../procedure/index.js";
+import { useCom } from "../hooks/index.js";
 import type { Middleware } from "@agentick/kernel";
 
 /**

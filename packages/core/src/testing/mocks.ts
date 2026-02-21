@@ -14,11 +14,11 @@
  * ```
  */
 
-import type { TickState } from "../component/component";
-import type { TickResult } from "../hooks/types";
-import type { COMStopRequest, COMContinueRequest } from "../com/object-model";
+import type { TickState } from "../component/component.js";
+import type { TickResult } from "../hooks/types.js";
+import type { COMStopRequest, COMContinueRequest } from "../com/object-model.js";
 import type { ContentBlock, ToolCall, ToolResult } from "@agentick/shared";
-import type { COMTimelineEntry, COMInput, TokenEstimator } from "../com/types";
+import type { COMTimelineEntry, COMInput, TokenEstimator } from "../com/types.js";
 
 // ============================================================================
 // Mock COM

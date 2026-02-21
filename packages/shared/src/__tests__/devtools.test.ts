@@ -6,7 +6,7 @@ import {
   type DTContentDeltaEvent,
   normalizeDevToolsConfig,
   DEVTOOLS_CHANNEL,
-} from "../devtools";
+} from "../devtools.js";
 
 describe("DevToolsEmitter", () => {
   beforeEach(() => {

@@ -1,5 +1,5 @@
-import type { ExecutableTool } from "../tool/tool";
-import type { EngineModel } from "../model/model";
+import type { ExecutableTool } from "../tool/tool.js";
+import type { EngineModel } from "../model/model.js";
 
 export class Registry<T> {
   private items = new Map<string, T>();

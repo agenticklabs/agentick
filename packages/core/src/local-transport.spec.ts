@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { createLocalTransport } from "./local-transport";
-import { createMockApp } from "./testing/mock-app";
+import { createLocalTransport } from "./local-transport.js";
+import { createMockApp } from "./testing/mock-app.js";
 
 describe("createLocalTransport", () => {
   it("starts disconnected", () => {

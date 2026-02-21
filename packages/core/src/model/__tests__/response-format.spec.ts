@@ -10,8 +10,8 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { normalizeModelInput } from "../../utils/normalization";
-import type { ModelInput, ModelConfig } from "../../model/model";
+import { normalizeModelInput } from "../../utils/normalization.js";
+import type { ModelInput, ModelConfig } from "../../model/model.js";
 import type { ResponseFormat } from "@agentick/shared";
 
 describe("ResponseFormat", () => {

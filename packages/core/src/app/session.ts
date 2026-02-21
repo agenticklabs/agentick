@@ -34,15 +34,15 @@ import {
   ReconciliationScheduler,
   type SerializedFiberNode,
   type FiberSummary,
-} from "../compiler";
-import { COM, type COMStopRequest, type COMContinueRequest } from "../com/object-model";
-import { MarkdownRenderer } from "../renderers/index";
-import { ToolExecutor } from "../engine/tool-executor";
-import { AbortError } from "../utils/abort-utils";
-import { jsx } from "../jsx/jsx-runtime";
-import type { JSX } from "../jsx/jsx-runtime";
-import type { COMInput, COMOutput, COMTimelineEntry, TimelineTag } from "../com/types";
-import type { EngineModel } from "../model/model";
+} from "../compiler/index.js";
+import { COM, type COMStopRequest, type COMContinueRequest } from "../com/object-model.js";
+import { MarkdownRenderer } from "../renderers/index.js";
+import { ToolExecutor } from "../engine/tool-executor.js";
+import { AbortError } from "../utils/abort-utils.js";
+import { jsx } from "../jsx/jsx-runtime.js";
+import type { JSX } from "../jsx/jsx-runtime.js";
+import type { COMInput, COMOutput, COMTimelineEntry, TimelineTag } from "../com/types.js";
+import type { EngineModel } from "../model/model.js";
 import type {
   ToolResult,
   ToolCall,
@@ -63,12 +63,12 @@ import {
   getEffectiveModelInfo,
   getContextUtilization,
 } from "@agentick/shared";
-import { computeTokenSummary } from "../utils/token-estimate";
-import type { CompiledStructure } from "../compiler/types";
-import type { ExecutableTool, ToolClass } from "../tool/tool";
-import type { TickState } from "../component/component";
-import type { TickResult } from "../hooks/types";
-import type { ExecutionMessage } from "../engine/execution-types";
+import { computeTokenSummary } from "../utils/token-estimate.js";
+import type { CompiledStructure } from "../compiler/types.js";
+import type { ExecutableTool, ToolClass } from "../tool/tool.js";
+import type { TickState } from "../component/component.js";
+import type { TickResult } from "../hooks/types.js";
+import type { ExecutionMessage } from "../engine/execution-types.js";
 import type {
   Session,
   SessionStatus,
@@ -90,7 +90,7 @@ import type {
   ResolveConfig,
   ResolveContext,
   InboxStorage,
-} from "./types";
+} from "./types.js";
 import React from "react";
 
 // ════════════════════════════════════════════════════════════════════════════

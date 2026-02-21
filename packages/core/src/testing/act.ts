@@ -8,7 +8,7 @@
  */
 
 import { act as reactAct } from "react";
-import { flushSyncWork } from "../reconciler/reconciler";
+import { flushSyncWork } from "../reconciler/reconciler.js";
 
 /**
  * Flush all pending microtasks.

@@ -11,7 +11,7 @@ import {
   type AttachmentInput,
 } from "@agentick/client";
 import type { ToolConfirmationResponse, Message, ClientExecutionHandle } from "@agentick/client";
-import { useClient } from "./use-client";
+import { useClient } from "./use-client.js";
 
 export type { ChatMode, ChatMessage, ToolConfirmationState, Attachment, AttachmentInput };
 export type UseChatOptions<TMode extends string = ChatMode> = ChatSessionOptions<TMode>;

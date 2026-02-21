@@ -1,6 +1,6 @@
 import { useContext } from "react";
 import type { AgentickClient } from "@agentick/client";
-import { AgentickContext } from "../context";
+import { AgentickContext } from "../context.js";
 
 // ============================================================================
 // useClient

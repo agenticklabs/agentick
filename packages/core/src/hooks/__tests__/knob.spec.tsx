@@ -15,14 +15,14 @@ import {
   Expandable,
   type KnobGroup,
   type KnobInfo,
-} from "../../hooks";
-import { createApp } from "../../app";
-import { Model } from "../../jsx/components/primitives";
-import { Section } from "../../jsx/components/primitives";
-import { Timeline } from "../../jsx/components/timeline";
-import { createTestAdapter } from "../../testing";
-import { compileAgent } from "../../testing";
-import { useContinuation } from "../../hooks";
+} from "../../hooks/index.js";
+import { createApp } from "../../app.js";
+import { Model } from "../../jsx/components/primitives.js";
+import { Section } from "../../jsx/components/primitives.js";
+import { Timeline } from "../../jsx/components/timeline.js";
+import { createTestAdapter } from "../../testing/index.js";
+import { compileAgent } from "../../testing/index.js";
+import { useContinuation } from "../../hooks/index.js";
 
 // ============================================================================
 // knob() Descriptor Tests

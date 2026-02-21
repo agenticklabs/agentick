@@ -1,7 +1,7 @@
 import { useSyncExternalStore, useCallback } from "react";
 import type { StreamingTextState } from "@agentick/client";
-import { useClient } from "./use-client";
-import type { UseStreamingTextOptions, UseStreamingTextResult } from "../types";
+import { useClient } from "./use-client.js";
+import type { UseStreamingTextOptions, UseStreamingTextResult } from "../types.js";
 
 // ============================================================================
 // useStreamingText

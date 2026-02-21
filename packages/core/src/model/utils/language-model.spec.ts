@@ -1,7 +1,7 @@
-import { fromEngineState, toEngineState } from "./language-model";
-import type { COMInput } from "../../com/types";
-import type { EventMessage, Message } from "../../content";
-import { type ModelOutput } from "../model";
+import { fromEngineState, toEngineState } from "./language-model.js";
+import type { COMInput } from "../../com/types.js";
+import type { EventMessage, Message } from "../../content/index.js";
+import { type ModelOutput } from "../model.js";
 import { StopReason } from "@agentick/shared";
 
 describe("language-model transformers", () => {

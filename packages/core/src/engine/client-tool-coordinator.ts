@@ -1,4 +1,4 @@
-import type { ToolResult } from "../tool/tool";
+import type { ToolResult } from "../tool/tool.js";
 
 /**
  * Deferred promise pattern for async coordination

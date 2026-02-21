@@ -10,7 +10,7 @@
  * - Batches multiple schedule() calls in the same microtask
  */
 
-import type { FiberCompiler } from "./fiber-compiler";
+import type { FiberCompiler } from "./fiber-compiler.js";
 
 // ============================================================================
 // Types

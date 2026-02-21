@@ -10,10 +10,10 @@
 
 import { describe, it, expect, vi } from "vitest";
 import React, { createContext, useContext } from "react";
-import { createApp } from "../../app";
-import { createTool } from "../../tool/tool";
-import { Model, Section } from "../../jsx/components/primitives";
-import { createTestAdapter, type TestAdapterInstance } from "../../testing";
+import { createApp } from "../../app.js";
+import { createTool } from "../../tool/tool.js";
+import { Model, Section } from "../../jsx/components/primitives.js";
+import { createTestAdapter, type TestAdapterInstance } from "../../testing/index.js";
 import { z } from "zod";
 
 // ============================================================================

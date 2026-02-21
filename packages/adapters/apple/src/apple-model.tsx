@@ -4,8 +4,8 @@
 
 import { type ModelComponentProps, Model } from "@agentick/core/jsx";
 import { createElement } from "@agentick/core/jsx-runtime";
-import { createAppleModel } from "./apple";
-import { type AppleAdapterConfig } from "./types";
+import { createAppleModel } from "./apple.js";
+import { type AppleAdapterConfig } from "./types.js";
 
 /**
  * Props for AppleModel component.

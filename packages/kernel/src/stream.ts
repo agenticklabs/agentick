@@ -1,4 +1,4 @@
-import { Context } from "./context";
+import { Context } from "./context.js";
 
 /**
  * Type guard to check if an object is an async iterable.
@@ -16,7 +16,7 @@ import { Context } from "./context";
  * }
  * ```
  */
-export { isAsyncIterable } from "./procedure";
+export { isAsyncIterable } from "./procedure.js";
 
 /**
  * Transform items in an async stream using a mapper function.

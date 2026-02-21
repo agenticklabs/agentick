@@ -10,16 +10,16 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import React from "react";
-import { FiberCompiler } from "../../../compiler/fiber-compiler";
+import { FiberCompiler } from "../../../compiler/fiber-compiler.js";
 import {
   createMockCom,
   createMockTickState,
   makeTimelineEntry,
   makeCOMInput,
-} from "../../../testing";
-import { Timeline } from "../timeline";
-import type { COMTimelineEntry } from "../../../com/types";
-import type { TokenBudgetInfo } from "../token-budget";
+} from "../../../testing/index.js";
+import { Timeline } from "../timeline.js";
+import type { COMTimelineEntry } from "../../../com/types.js";
+import type { TokenBudgetInfo } from "../token-budget.js";
 
 const h = React.createElement;
 

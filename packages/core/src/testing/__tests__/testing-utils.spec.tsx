@@ -6,9 +6,9 @@
 
 import { describe, it, expect, afterEach, vi } from "vitest";
 import React from "react";
-import { renderAgent, compileAgent, createTestAdapter, act, cleanup } from "../index";
-import { System, Timeline, Section, Model } from "../../jsx/components";
-import { useSignal, useEffect } from "../../index";
+import { renderAgent, compileAgent, createTestAdapter, act, cleanup } from "../index.js";
+import { System, Timeline, Section, Model } from "../../jsx/components/index.js";
+import { useSignal, useEffect } from "../../index.js";
 import type { Message } from "@agentick/shared";
 
 // Cleanup after each test

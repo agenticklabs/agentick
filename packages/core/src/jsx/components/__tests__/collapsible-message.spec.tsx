@@ -1,9 +1,9 @@
 import { describe, it, expect, afterEach } from "vitest";
 import type { Message as MessageType } from "@agentick/shared";
-import { compileAgent, createTestAdapter, renderAgent, cleanup } from "../../../testing";
-import { Message, Timeline } from "../primitives";
-import { Model } from "../model";
-import { Knobs } from "../../../hooks";
+import { compileAgent, createTestAdapter, renderAgent, cleanup } from "../../../testing/index.js";
+import { Message, Timeline } from "../primitives.js";
+import { Model } from "../model.js";
+import { Knobs } from "../../../hooks/index.js";
 import { extractText } from "@agentick/shared";
 
 afterEach(cleanup);

@@ -18,8 +18,8 @@
  * @module @agentick/kernel/testing
  */
 
-import { createProcedurePromise, PROCEDURE_SYMBOL } from "./procedure";
-import type { Procedure, ProcedurePromise } from "./procedure";
+import { createProcedurePromise, PROCEDURE_SYMBOL } from "./procedure.js";
+import type { Procedure, ProcedurePromise } from "./procedure.js";
 
 // ============================================================================
 // Types

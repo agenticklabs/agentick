@@ -6,12 +6,12 @@
  */
 
 import React from "react";
-import { FiberCompiler } from "../compiler/fiber-compiler";
-import type { CompiledStructure } from "../compiler/types";
-import type { ExecutableTool } from "../tool/tool";
-import type { ComponentFunction } from "../app/types";
+import { FiberCompiler } from "../compiler/fiber-compiler.js";
+import type { CompiledStructure } from "../compiler/types.js";
+import type { ExecutableTool } from "../tool/tool.js";
+import type { ComponentFunction } from "../app/types.js";
 import type { ContentBlock } from "@agentick/shared";
-import type { SemanticContentBlock, SemanticNode } from "../renderers/base";
+import type { SemanticContentBlock, SemanticNode } from "../renderers/base.js";
 
 // ============================================================================
 // Types
@@ -94,7 +94,7 @@ export interface CompileAgentResult {
 }
 
 // Use shared mocks
-import { createMockCom, createMockTickState } from "./mocks";
+import { createMockCom, createMockTickState } from "./mocks.js";
 
 // ============================================================================
 // Main API

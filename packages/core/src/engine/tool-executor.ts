@@ -4,16 +4,16 @@ import {
   type ExecutableTool,
   type ToolConfirmationResult,
   ToolExecutionType,
-} from "../tool/tool";
-import type { COM } from "../com/object-model";
+} from "../tool/tool.js";
+import type { COM } from "../com/object-model.js";
 import { type ContentBlock } from "@agentick/shared";
 import { type Middleware, type MiddlewarePipeline } from "@agentick/kernel";
-import type { ToolHookRegistry } from "../tool/tool-hooks";
-import { type ToolHookMiddleware, type ToolHookName } from "../tool/tool-hooks";
-import { applyRegistryMiddleware } from "../procedure";
-import { classifyError } from "../utils/classify-error";
-import { ClientToolCoordinator } from "./client-tool-coordinator";
-import { ToolConfirmationCoordinator } from "./tool-confirmation-coordinator";
+import type { ToolHookRegistry } from "../tool/tool-hooks.js";
+import { type ToolHookMiddleware, type ToolHookName } from "../tool/tool-hooks.js";
+import { applyRegistryMiddleware } from "../procedure/index.js";
+import { classifyError } from "../utils/classify-error.js";
+import { ClientToolCoordinator } from "./client-tool-coordinator.js";
+import { ToolConfirmationCoordinator } from "./tool-confirmation-coordinator.js";
 
 /**
  * Result of checking if a tool requires confirmation.

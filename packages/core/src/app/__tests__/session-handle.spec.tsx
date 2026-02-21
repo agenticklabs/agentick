@@ -9,15 +9,21 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { createApp } from "../../app";
-import type { ModelOutput } from "../../model/model";
-import { System, User } from "../../jsx/components/messages";
-import { Model } from "../../jsx/components/primitives";
+import { createApp } from "../../app.js";
+import type { ModelOutput } from "../../model/model.js";
+import { System, User } from "../../jsx/components/messages.js";
+import { Model } from "../../jsx/components/primitives.js";
 import { Context } from "@agentick/kernel";
 import { AbortError, type StreamEvent } from "@agentick/shared";
-import { useState, useRef, useOnMessage, useQueuedMessages, useContinuation } from "../../hooks";
-import { Timeline } from "../../jsx/components/timeline";
-import { createTestAdapter } from "../../testing";
+import {
+  useState,
+  useRef,
+  useOnMessage,
+  useQueuedMessages,
+  useContinuation,
+} from "../../hooks/index.js";
+import { Timeline } from "../../jsx/components/timeline.js";
+import { createTestAdapter } from "../../testing/index.js";
 
 // ============================================================================
 // Test Utilities
@@ -1692,8 +1698,8 @@ describe("tick snapshots", () => {
 // Standalone run() Function Tests
 // ============================================================================
 
-import { run } from "../../app";
-import { jsx } from "../../jsx/jsx-runtime";
+import { run } from "../../app.js";
+import { jsx } from "../../jsx/jsx-runtime.js";
 
 describe("standalone run() function", () => {
   it("should run a JSX element and return result", async () => {
@@ -1795,7 +1801,7 @@ describe("standalone run() function", () => {
       </>
     );
 
-    const { createTool } = await import("../../tool");
+    const { createTool } = await import("../../tool/index.js");
     const { z } = await import("zod");
 
     const ExtraTool = createTool({

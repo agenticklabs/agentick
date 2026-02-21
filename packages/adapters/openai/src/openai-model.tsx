@@ -4,8 +4,8 @@
 
 import { type ModelComponentProps, Model } from "@agentick/core/jsx";
 import { createElement } from "@agentick/core/jsx-runtime";
-import { createOpenAIModel } from "./openai";
-import { type OpenAIAdapterConfig } from "./types";
+import { createOpenAIModel } from "./openai.js";
+import { type OpenAIAdapterConfig } from "./types.js";
 
 /**
  * Props for OpenAIModel component.

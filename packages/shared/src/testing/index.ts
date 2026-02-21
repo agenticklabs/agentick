@@ -105,7 +105,7 @@ export {
   createSpawnEventSequence,
   // Utility fixtures
   createUsageStats,
-} from "./fixtures";
+} from "./fixtures.js";
 
 // Helpers - async utilities and test helpers
 export {
@@ -127,4 +127,4 @@ export {
   createSpy,
   createMock,
   createMockSequence,
-} from "./helpers";
+} from "./helpers.js";

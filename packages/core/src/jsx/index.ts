@@ -52,12 +52,12 @@
  */
 
 // JSX Runtime
-export * from "./jsx-runtime";
-export type { JSX } from "./jsx-runtime";
+export * from "./jsx-runtime.js";
+export type { JSX } from "./jsx-runtime.js";
 
 // Components
-export * from "./components";
+export * from "./components/index.js";
 
 // Harness (Mark II sub-agent execution)
-export { Harness, HarnessComponent, getHarnessContext } from "./components/harness";
-export type { HarnessProps, HarnessContext } from "./components/harness";
+export { Harness, HarnessComponent, getHarnessContext } from "./components/harness.js";
+export type { HarnessProps, HarnessContext } from "./components/harness.js";

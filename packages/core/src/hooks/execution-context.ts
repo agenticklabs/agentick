@@ -5,8 +5,8 @@
  */
 
 import { useRef } from "react";
-import { useOnTickStart } from "./lifecycle";
-import type { COM } from "../com/object-model";
+import { useOnTickStart } from "./lifecycle.js";
+import type { COM } from "../com/object-model.js";
 
 /**
  * Register a callback that fires once at the start of each execution.

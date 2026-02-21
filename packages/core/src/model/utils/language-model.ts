@@ -1,4 +1,4 @@
-import type { COMInput, EphemeralEntry, EphemeralPosition } from "../../com/types";
+import type { COMInput, EphemeralEntry, EphemeralPosition } from "../../com/types.js";
 import type {
   ContentBlock,
   Message,
@@ -8,9 +8,14 @@ import type {
   ToolCall,
 } from "@agentick/shared";
 import { isEventBlock, StopReason } from "@agentick/shared";
-import type { EngineResponse } from "../../engine/engine-response";
-import type { DelimiterConfig, EventBlockDelimiters } from "../../types";
-import type { ModelConfig, ModelInput, ModelOutput, MessageTransformationConfig } from "../model";
+import type { EngineResponse } from "../../engine/engine-response.js";
+import type { DelimiterConfig, EventBlockDelimiters } from "../../types.js";
+import type {
+  ModelConfig,
+  ModelInput,
+  ModelOutput,
+  MessageTransformationConfig,
+} from "../model.js";
 import { Logger } from "@agentick/kernel";
 
 const log = Logger.for("language-model");

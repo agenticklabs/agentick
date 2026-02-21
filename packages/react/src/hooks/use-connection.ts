@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import type { ConnectionState } from "@agentick/client";
-import { useClient } from "./use-client";
-import type { UseConnectionOptions, UseConnectionResult } from "../types";
+import { useClient } from "./use-client.js";
+import type { UseConnectionOptions, UseConnectionResult } from "../types.js";
 
 // ============================================================================
 // useConnectionState (alias for useConnection)

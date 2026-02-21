@@ -90,7 +90,7 @@ vi.mock("@agentick/client", () => ({
   createClient: vi.fn(() => mockClient),
 }));
 
-import { AgentickService } from "./agentick.service";
+import { AgentickService } from "./agentick.service.js";
 
 describe("AgentickService", () => {
   let service: AgentickService;

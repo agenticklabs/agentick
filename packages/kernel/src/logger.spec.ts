@@ -1,5 +1,5 @@
-import { Logger, composeContextFields, defaultContextFields } from "./logger";
-import { Context, type KernelContext } from "./context";
+import { Logger, composeContextFields, defaultContextFields } from "./logger.js";
+import { Context, type KernelContext } from "./context.js";
 import { EventEmitter } from "node:events";
 
 describe("Logger", () => {

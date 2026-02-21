@@ -6,16 +6,16 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { createApp } from "../../app";
-import { System } from "../../jsx/components/messages";
-import { Model, Tool } from "../../jsx/components/primitives";
-import { Timeline } from "../../jsx/components/timeline";
-import { createTestAdapter, compileAgent } from "../../testing";
-import { gate, useGate, Knobs, useContinuation } from "../../hooks";
-import type { GateState } from "../gate";
+import { createApp } from "../../app.js";
+import { System } from "../../jsx/components/messages.js";
+import { Model, Tool } from "../../jsx/components/primitives.js";
+import { Timeline } from "../../jsx/components/timeline.js";
+import { createTestAdapter, compileAgent } from "../../testing/index.js";
+import { gate, useGate, Knobs, useContinuation } from "../../hooks/index.js";
+import type { GateState } from "../gate.js";
 import { z } from "zod";
 import { StopReason } from "@agentick/shared";
-import type { JSX } from "../../jsx";
+import type { JSX } from "../../jsx/index.js";
 
 // ============================================================================
 // Helpers

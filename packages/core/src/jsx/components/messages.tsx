@@ -16,8 +16,8 @@
 import React, { useDebugValue } from "react";
 import type { JSX } from "react";
 import type { ContentBlock, EventAllowedBlock } from "@agentick/shared";
-import { Message as MessagePrimitive, type MessageProps } from "./primitives";
-import type { EphemeralPosition } from "../../com/types";
+import { Message as MessagePrimitive, type MessageProps } from "./primitives.js";
+import type { EphemeralPosition } from "../../com/types.js";
 
 // Helper for createElement
 const h = React.createElement;
@@ -304,7 +304,7 @@ export function StateChange(props: StateChangeProps): JSX.Element {
 // ============================================================================
 
 // Re-export EphemeralPosition from com/types for convenience
-export type { EphemeralPosition } from "../../com/types";
+export type { EphemeralPosition } from "../../com/types.js";
 
 export interface EphemeralProps {
   /**
@@ -447,4 +447,4 @@ export function Grounding(props: GroundingProps): JSX.Element {
 // Exports
 // ============================================================================
 
-export { Message } from "./primitives";
+export { Message } from "./primitives.js";

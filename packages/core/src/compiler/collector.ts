@@ -4,18 +4,18 @@
  * Traverses the AgentickNode tree and collects into CompiledStructure.
  */
 
-import type { AgentickNode, AgentickContainer, AgentickTextNode } from "../reconciler/types";
-import { isTextNode } from "../reconciler/types";
+import type { AgentickNode, AgentickContainer, AgentickTextNode } from "../reconciler/types.js";
+import { isTextNode } from "../reconciler/types.js";
 import type {
   CompiledStructure,
   CompiledSection,
   CompiledTimelineEntry,
   CompiledEphemeral,
-} from "./types";
-import type { ExecutableTool, ToolMetadata } from "../tool/tool";
-import { createEmptyCompiledStructure } from "./types";
-import type { SemanticContentBlock, SemanticNode, Renderer } from "../renderers/types";
-import type { TokenEstimator } from "../com/types";
+} from "./types.js";
+import type { ExecutableTool, ToolMetadata } from "../tool/tool.js";
+import { createEmptyCompiledStructure } from "./types.js";
+import type { SemanticContentBlock, SemanticNode, Renderer } from "../renderers/types.js";
+import type { TokenEstimator } from "../com/types.js";
 import { extractText as extractBlocksText } from "@agentick/shared";
 import { Logger } from "@agentick/kernel";
 

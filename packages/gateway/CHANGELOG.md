@@ -5,7 +5,6 @@
 ### Minor Changes
 
 - d3f9b8d: feat: embeddings, gateway plugins, unix socket transport
-
   - Shared: embeddings types (`EmbeddingProvider`), `splitMessage` utility
   - Core: embedding support on adapters and engine models, `entry_committed` event, `executionId` on TickState
   - Gateway: plugin system with lifecycle management, Unix socket transport with shared RPC factory

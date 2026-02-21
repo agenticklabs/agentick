@@ -67,7 +67,7 @@ export {
   AgentickController,
   TENTICKLE_GATEWAY,
   type AgentickModuleOptions,
-} from "./agentick.module";
+} from "./agentick.module.js";
 
 // Re-export gateway types for convenience
 export {

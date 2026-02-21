@@ -5,7 +5,7 @@
  * Used by both backend (@agentick/core) and frontend (@agentick/client).
  */
 
-import type { ContentBlock } from "./blocks";
+import type { ContentBlock } from "./blocks.js";
 
 /**
  * Tool execution type determines how and where the tool is CONFIGURED to execute.

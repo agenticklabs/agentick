@@ -11,8 +11,8 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { createApp, Model, System, Timeline } from "../../index";
-import { createTestAdapter } from "../../testing/test-adapter";
+import { createApp, Model, System, Timeline } from "../../index.js";
+import { createTestAdapter } from "../../testing/test-adapter.js";
 import type { Message, TextBlock } from "@agentick/shared";
 import { isTextBlock } from "@agentick/shared/blocks";
 

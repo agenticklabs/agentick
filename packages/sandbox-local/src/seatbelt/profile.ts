@@ -23,7 +23,7 @@
  * Write restrictions are always tight: only workspace, mounts, /tmp, /dev.
  */
 
-import type { SpawnOptions } from "../executor/types";
+import type { SpawnOptions } from "../executor/types.js";
 
 /**
  * Paths that sandboxed processes cannot read.

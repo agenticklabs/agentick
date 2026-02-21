@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { compileSeatbeltProfile } from "../seatbelt/profile";
-import type { SpawnOptions } from "../executor/types";
+import { compileSeatbeltProfile } from "../seatbelt/profile.js";
+import type { SpawnOptions } from "../executor/types.js";
 
 function makeOptions(overrides?: Partial<SpawnOptions>): SpawnOptions {
   return {

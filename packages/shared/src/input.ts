@@ -6,8 +6,8 @@
  * normalizing various input formats into standardized structures.
  */
 
-import type { ContentBlock } from "./blocks";
-import type { Message } from "./messages";
+import type { ContentBlock } from "./blocks.js";
+import type { Message } from "./messages.js";
 
 // ============================================================================
 // Input Types

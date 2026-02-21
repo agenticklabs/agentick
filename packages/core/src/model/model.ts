@@ -14,18 +14,18 @@ import type {
 } from "@agentick/shared/models";
 import type { StreamEvent } from "@agentick/shared/streaming";
 import type { Message } from "@agentick/shared/messages";
-import type { COMInput, TokenEstimator } from "../com/types";
-import type { EngineResponse } from "../engine/engine-response";
+import type { COMInput, TokenEstimator } from "../com/types.js";
+import type { EngineResponse } from "../engine/engine-response.js";
 import type { EventBlock, TextBlock, ContentBlock } from "@agentick/shared";
 import type {
   LibraryGenerationOptions,
   ProviderGenerationOptions,
   DelimiterConfig,
   EventBlockDelimiters,
-} from "../types";
+} from "../types.js";
 import type { EmbedResult } from "@agentick/shared";
-import type { EmbedOptions } from "./embedding";
-import type { ExecutableTool, ToolDefinition, ToolMetadata } from "../tool/tool";
+import type { EmbedOptions } from "./embedding.js";
+import type { ExecutableTool, ToolDefinition, ToolMetadata } from "../tool/tool.js";
 
 export type { BaseModelToolReference, BaseModelConfig, BaseModelInput, BaseModelOutput };
 

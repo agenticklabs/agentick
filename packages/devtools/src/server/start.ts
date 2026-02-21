@@ -1,7 +1,7 @@
 /**
  * Convenience function to start DevTools server
  */
-import { DevToolsServer, type DevToolsServerConfig } from "./devtools-server";
+import { DevToolsServer, type DevToolsServerConfig } from "./devtools-server.js";
 
 /**
  * Start a DevTools server.

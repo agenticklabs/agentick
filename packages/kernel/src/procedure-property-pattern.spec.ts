@@ -3,7 +3,7 @@
  * which provides full type support without coercion.
  */
 
-import { createProcedure, generatorProcedure } from "./procedure";
+import { createProcedure, generatorProcedure } from "./procedure.js";
 
 describe("Procedure v2 - Property Initializer Pattern", () => {
   it("should provide full type support for class properties", async () => {

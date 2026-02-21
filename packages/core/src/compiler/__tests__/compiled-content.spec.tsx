@@ -6,12 +6,12 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { FiberCompiler } from "../fiber-compiler";
-import { markdownRenderer } from "../../renderers";
-import type { CompiledStructure, CompiledSection } from "../types";
-import { createMockCom, createMockTickState } from "../../testing";
-import { Section, Message, Tool } from "../../jsx/components/primitives";
-import { Ephemeral } from "../../jsx/components/messages";
+import { FiberCompiler } from "../fiber-compiler.js";
+import { markdownRenderer } from "../../renderers/index.js";
+import type { CompiledStructure, CompiledSection } from "../types.js";
+import { createMockCom, createMockTickState } from "../../testing/index.js";
+import { Section, Message, Tool } from "../../jsx/components/primitives.js";
+import { Ephemeral } from "../../jsx/components/messages.js";
 import {
   Text as TextComponent,
   Code as CodeComponent,
@@ -20,7 +20,7 @@ import {
   // Audio as AudioComponent,
   // Video as VideoComponent,
   // Document as DocumentComponent,
-} from "../../jsx/components/content";
+} from "../../jsx/components/content.js";
 import {
   H1,
   H2,
@@ -32,8 +32,8 @@ import {
   Table,
   Row,
   Column,
-} from "../../jsx/components/semantic";
-import { Collapsed } from "../../jsx/components/collapsed";
+} from "../../jsx/components/semantic.js";
+import { Collapsed } from "../../jsx/components/collapsed.js";
 
 // Helper to get section by id
 function getSection(compiled: CompiledStructure, id: string): CompiledSection | undefined {

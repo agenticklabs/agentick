@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { AgentickClient } from "../client";
+import { AgentickClient } from "../client.js";
 
 function createMockEventSourceClass() {
   let instance: MockEventSourceInstance | null = null;

@@ -1,12 +1,12 @@
 import { useState, useMemo, useEffect, useCallback } from "react";
-import { useDevToolsEvents, type FiberNode, type TokenSummary } from "./hooks/useDevToolsEvents";
-import { ExecutionList } from "./components/ExecutionList";
-import { SessionList } from "./components/SessionList";
-import { ContentPanel } from "./components/ContentPanel";
-import { Inspector } from "./components/Inspector";
-import { TickNavigator } from "./components/TickNavigator";
-import { NetworkPanel } from "./components/NetworkPanel";
-import { Splitter } from "./components/Splitter";
+import { useDevToolsEvents, type FiberNode, type TokenSummary } from "./hooks/useDevToolsEvents.js";
+import { ExecutionList } from "./components/ExecutionList.js";
+import { SessionList } from "./components/SessionList.js";
+import { ContentPanel } from "./components/ContentPanel.js";
+import { Inspector } from "./components/Inspector/index.js";
+import { TickNavigator } from "./components/TickNavigator/index.js";
+import { NetworkPanel } from "./components/NetworkPanel.js";
+import { Splitter } from "./components/Splitter.js";
 
 type SidebarTab = "executions" | "sessions";
 type ContentTab = "execution" | "context" | "fiber" | "tools";

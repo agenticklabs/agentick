@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { HookState } from "../../hooks/useDevToolsEvents";
+import type { HookState } from "../../hooks/useDevToolsEvents.js";
 
 interface HooksSectionProps {
   hooks: HookState[];

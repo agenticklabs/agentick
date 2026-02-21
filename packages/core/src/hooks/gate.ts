@@ -9,10 +9,10 @@
 
 import { createElement, useRef, useCallback } from "react";
 import type { JSX } from "react";
-import { useOnTickEnd } from "./lifecycle";
-import { useKnob } from "./knob";
-import { Ephemeral } from "../jsx/components/messages";
-import type { TickResult } from "./types";
+import { useOnTickEnd } from "./lifecycle.js";
+import { useKnob } from "./knob.js";
+import { Ephemeral } from "../jsx/components/messages.js";
+import type { TickResult } from "./types.js";
 
 export type GateValue = "inactive" | "active" | "deferred";
 

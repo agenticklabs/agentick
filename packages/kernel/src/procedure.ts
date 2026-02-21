@@ -12,14 +12,14 @@
  */
 
 import type { EventEmitter } from "node:events";
-import { Context, type KernelContext, isKernelContext } from "./context";
-import { ExecutionTracker, type ExecutionBoundaryConfig } from "./execution-tracker";
-import { ExecutionHandleBrand } from "./execution-handle-brand";
+import { Context, type KernelContext, isKernelContext } from "./context.js";
+import { ExecutionTracker, type ExecutionBoundaryConfig } from "./execution-tracker.js";
+import { ExecutionHandleBrand } from "./execution-handle-brand.js";
 import { randomUUID } from "node:crypto";
-import type { ProcedureNode } from "./procedure-graph";
+import type { ProcedureNode } from "./procedure-graph.js";
 import { AbortError, ValidationError } from "@agentick/shared";
-import { EventBuffer, type TypedEvent } from "./event-buffer";
-import { parseSchema } from "./schema";
+import { EventBuffer, type TypedEvent } from "./event-buffer.js";
+import { parseSchema } from "./schema.js";
 
 // ============================================================================
 // ProcedurePromise - Enhanced Promise with .result chaining

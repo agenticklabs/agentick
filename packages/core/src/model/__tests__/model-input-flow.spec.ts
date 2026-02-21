@@ -6,10 +6,10 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { fromEngineState, toEngineState } from "../utils/language-model";
-import type { COMInput, COMTimelineEntry } from "../../com/types";
+import { fromEngineState, toEngineState } from "../utils/language-model.js";
+import type { COMInput, COMTimelineEntry } from "../../com/types.js";
 import type { Message, TextBlock, ToolResultBlock, ToolUseBlock } from "@agentick/shared";
-import type { ModelOutput } from "../model";
+import type { ModelOutput } from "../model.js";
 
 // Helper to create a COMTimelineEntry
 function createTimelineEntry(message: Message, kind: string = "message"): COMTimelineEntry {

@@ -1,4 +1,4 @@
-import type { Tick, TokenSummary } from "../../hooks/useDevToolsEvents";
+import type { Tick, TokenSummary } from "../../hooks/useDevToolsEvents.js";
 
 interface TickNavigatorProps {
   ticks: Tick[];

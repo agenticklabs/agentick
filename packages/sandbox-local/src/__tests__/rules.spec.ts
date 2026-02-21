@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { matchRequest } from "../network/rules";
+import { matchRequest } from "../network/rules.js";
 import type { NetworkRule } from "@agentick/sandbox";
 
 describe("matchRequest", () => {

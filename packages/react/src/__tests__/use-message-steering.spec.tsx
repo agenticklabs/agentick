@@ -8,8 +8,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook, act } from "@testing-library/react";
 import { type ReactNode } from "react";
-import { AgentickProvider } from "../context";
-import { useMessageSteering } from "../hooks/use-message-steering";
+import { AgentickProvider } from "../context.js";
+import { useMessageSteering } from "../hooks/use-message-steering.js";
 import type { AgentickClient, ConnectionState, StreamingTextState } from "@agentick/client";
 import { createMockClient as createBaseMockClient, makeEvent } from "@agentick/client/testing";
 

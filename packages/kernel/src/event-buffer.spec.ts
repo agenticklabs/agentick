@@ -1,4 +1,4 @@
-import { EventBuffer } from "./event-buffer";
+import { EventBuffer } from "./event-buffer.js";
 
 // Test event types
 type TestEvent =

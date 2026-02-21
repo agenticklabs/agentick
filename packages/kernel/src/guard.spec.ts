@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { createGuard } from "./guard";
-import { createProcedure, type ProcedureEnvelope } from "./procedure";
+import { createGuard } from "./guard.js";
+import { createProcedure, type ProcedureEnvelope } from "./procedure.js";
 import { GuardError, isGuardError } from "@agentick/shared";
 
 // =============================================================================

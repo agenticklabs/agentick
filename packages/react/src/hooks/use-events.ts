@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import type { StreamEvent, SessionStreamEvent } from "@agentick/client";
-import { useClient } from "./use-client";
-import type { UseEventsOptions, UseEventsResult } from "../types";
+import { useClient } from "./use-client.js";
+import type { UseEventsOptions, UseEventsResult } from "../types.js";
 
 // ============================================================================
 // useEvents

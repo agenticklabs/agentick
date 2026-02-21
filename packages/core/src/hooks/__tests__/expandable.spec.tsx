@@ -1,9 +1,9 @@
 import { describe, it, expect, afterEach } from "vitest";
-import { Expandable } from "../../hooks";
-import { Knobs } from "../../hooks";
-import { compileAgent, createTestAdapter, renderAgent, cleanup } from "../../testing";
-import { Message, Timeline } from "../../jsx/components/primitives";
-import { Collapsed } from "../../jsx/components/collapsed";
+import { Expandable } from "../../hooks/index.js";
+import { Knobs } from "../../hooks/index.js";
+import { compileAgent, createTestAdapter, renderAgent, cleanup } from "../../testing/index.js";
+import { Message, Timeline } from "../../jsx/components/primitives.js";
+import { Collapsed } from "../../jsx/components/collapsed.js";
 import { extractText } from "@agentick/shared";
 
 afterEach(cleanup);
@@ -116,7 +116,7 @@ describe("Expandable", () => {
     }
 
     // Need Model import
-    const { Model } = await import("../../jsx/components/model");
+    const { Model } = await import("../../jsx/components/model.js");
 
     const { send, unmount } = await renderAgent(Agent, {
       model,

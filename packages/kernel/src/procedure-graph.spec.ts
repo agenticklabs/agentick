@@ -1,4 +1,4 @@
-import { ProcedureGraph } from "./procedure-graph";
+import { ProcedureGraph } from "./procedure-graph.js";
 
 describe("ProcedureGraph", () => {
   let graph: ProcedureGraph;

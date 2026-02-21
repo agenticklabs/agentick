@@ -1,10 +1,10 @@
-import type { COM } from "../com/object-model";
-import type { COMInput, COMSection, COMTimelineEntry } from "../com/types";
+import type { COM } from "../com/object-model.js";
+import type { COMInput, COMSection, COMTimelineEntry } from "../com/types.js";
 import type { ContentBlock, TextBlock } from "@agentick/shared";
-import type { ContentRenderer } from "../renderers";
-import { type SemanticContentBlock, MarkdownRenderer } from "../renderers";
+import type { ContentRenderer } from "../renderers/index.js";
+import { type SemanticContentBlock, MarkdownRenderer } from "../renderers/index.js";
 import { Logger } from "@agentick/kernel";
-import type { CompiledStructure, CompiledSection, CompiledEphemeral } from "./types";
+import type { CompiledStructure, CompiledSection, CompiledEphemeral } from "./types.js";
 
 const log = Logger.for("StructureRenderer");
 

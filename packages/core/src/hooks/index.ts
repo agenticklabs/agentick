@@ -8,10 +8,16 @@
 export { useState, useEffect, useRef, useCallback, useMemo, useContext } from "react";
 
 // Context hooks
-export { useCom, useTickState, COMProvider, TickStateProvider, AgentickProvider } from "./context";
+export {
+  useCom,
+  useTickState,
+  COMProvider,
+  TickStateProvider,
+  AgentickProvider,
+} from "./context.js";
 
 // COM state hook
-export { useComState, type UseComStateOptions } from "./com-state";
+export { useComState, type UseComStateOptions } from "./com-state.js";
 
 // Runtime context (per-session state)
 export {
@@ -36,7 +42,7 @@ export {
   type SerializableCacheEntry,
   type KnobRegistration,
   type HookPersistenceOptions,
-} from "./runtime-context";
+} from "./runtime-context.js";
 
 // Knobs
 export {
@@ -47,7 +53,7 @@ export {
   type KnobOpts,
   type KnobPrimitive,
   type KnobConstraints,
-} from "./knob";
+} from "./knob.js";
 export {
   Knobs,
   useKnobsContext,
@@ -56,13 +62,13 @@ export {
   type KnobInfo,
   type KnobGroup,
   type KnobsRenderFn,
-} from "./knobs-component";
+} from "./knobs-component.js";
 
 // Gates
-export { gate, useGate, type GateDescriptor, type GateState, type GateValue } from "./gate";
+export { gate, useGate, type GateDescriptor, type GateState, type GateValue } from "./gate.js";
 
 // Expandable content
-export { Expandable, type ExpandableProps } from "./expandable";
+export { Expandable, type ExpandableProps } from "./expandable.js";
 
 // Lifecycle hooks
 export {
@@ -73,13 +79,13 @@ export {
   useAfterCompile,
   useOnExecutionEnd,
   useContinuation,
-} from "./lifecycle";
+} from "./lifecycle.js";
 
 // Execution context hooks
-export { useOnExecutionStart } from "./execution-context";
+export { useOnExecutionStart } from "./execution-context.js";
 
 // Data hook
-export { useData, useInvalidateData, type UseDataOptions } from "./data";
+export { useData, useInvalidateData, type UseDataOptions } from "./data.js";
 
 // Signal hooks and utilities
 export {
@@ -118,10 +124,14 @@ export {
   type ReadonlySignal,
   type EffectRef,
   type SignalOptions,
-} from "./signal";
+} from "./signal.js";
 
 // Formatter context
-export { FormatterBoundary, useFormatter, type FormatterContextValue } from "./formatter-context";
+export {
+  FormatterBoundary,
+  useFormatter,
+  type FormatterContextValue,
+} from "./formatter-context.js";
 
 // Message context
 export {
@@ -134,20 +144,20 @@ export {
   type MessageStore,
   type MessageHandler,
   type MessageContextValue,
-} from "./message-context";
+} from "./message-context.js";
 
 // Timeline hooks
-export { useTimeline } from "./timeline";
+export { useTimeline } from "./timeline.js";
 
 // Resolve hooks
-export { useResolved } from "./resolved";
+export { useResolved } from "./resolved.js";
 
 // Timeline hooks (re-exported from jsx/components/timeline for convenience)
 export {
   useTimelineContext,
   useTimelineContextOptional,
   useConversationHistory,
-} from "../jsx/components/timeline";
+} from "../jsx/components/timeline.js";
 
 // Context info hook (real-time context utilization)
 export {
@@ -157,7 +167,7 @@ export {
   ContextInfoProvider,
   type ContextInfo,
   type ContextInfoStore,
-} from "./context-info";
+} from "./context-info.js";
 
 // Types
-export * from "./types";
+export * from "./types.js";

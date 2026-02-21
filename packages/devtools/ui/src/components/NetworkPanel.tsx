@@ -1,6 +1,6 @@
 import { useState } from "react";
-import type { ClientInfo, GatewaySessionInfo, RequestInfo } from "../hooks/useDevToolsEvents";
-import { formatDuration } from "../utils/format";
+import type { ClientInfo, GatewaySessionInfo, RequestInfo } from "../hooks/useDevToolsEvents.js";
+import { formatDuration } from "../utils/format.js";
 
 type NetworkTab = "connections" | "sessions" | "requests";
 

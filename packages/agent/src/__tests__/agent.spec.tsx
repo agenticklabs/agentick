@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { Agent, createAgent } from "../index";
+import { Agent, createAgent } from "../index.js";
 import { compileAgent, createTestAdapter } from "@agentick/core/testing";
 import { knob, createTool } from "@agentick/core";
 import { z } from "zod";

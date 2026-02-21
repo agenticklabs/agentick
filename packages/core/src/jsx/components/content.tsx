@@ -2,10 +2,10 @@ import React from "react";
 import type { JSX } from "react";
 import type { ContentBlock as ContentBlockType, MediaSource } from "@agentick/shared";
 import type { CodeLanguage } from "@agentick/shared";
-import type { ComponentBaseProps } from "../jsx-types";
-import { Expandable } from "../../hooks/expandable";
-import { Collapsed } from "./collapsed";
-import { autoContentSummary } from "./auto-summary";
+import type { ComponentBaseProps } from "../jsx-types.js";
+import { Expandable } from "../../hooks/expandable.js";
+import { Collapsed } from "./collapsed.js";
+import { autoContentSummary } from "./auto-summary.js";
 
 // Helper for createElement
 const h = React.createElement;

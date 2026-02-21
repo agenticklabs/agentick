@@ -28,8 +28,8 @@
 
 import React, { useRef, useEffect } from "react";
 import type { JSX } from "react";
-import { useTickState } from "../../hooks/context";
-import { type ComponentBaseProps } from "../jsx-types";
+import { useTickState } from "../../hooks/context.js";
+import { type ComponentBaseProps } from "../jsx-types.js";
 
 /**
  * Props for Complete component

@@ -7,7 +7,7 @@
  * @module @agentick/shared/devtools
  */
 
-import type { UsageStats, Message, ToolDefinition } from "./index";
+import type { UsageStats, Message, ToolDefinition } from "./index.js";
 
 // ============================================================================
 // Constants

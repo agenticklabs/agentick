@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { z as zod3 } from "zod/v3";
-import { detectSchemaType, toJSONSchema } from "./schema";
+import { detectSchemaType, toJSONSchema } from "./schema.js";
 
 describe("schema utils", () => {
   it("detects Zod 4 schemas", () => {

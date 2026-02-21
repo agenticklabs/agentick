@@ -1,6 +1,6 @@
 import { type Middleware, Context, Telemetry } from "@agentick/kernel";
-import { type EngineError } from "../component/component";
-import { classifyError, isRecoverableError } from "../utils/classify-error";
+import { type EngineError } from "../component/component.js";
+import { classifyError, isRecoverableError } from "../utils/classify-error.js";
 
 /**
  * Error normalization middleware for engine procedures.

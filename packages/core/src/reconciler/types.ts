@@ -4,7 +4,7 @@
  * Core types for the react-reconciler host environment.
  */
 
-import type { Renderer } from "../renderers/types";
+import type { Renderer } from "../renderers/types.js";
 
 /**
  * A node in the Agentick tree built by react-reconciler.

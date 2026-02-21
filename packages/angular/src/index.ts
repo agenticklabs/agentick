@@ -127,7 +127,7 @@
  */
 
 // Service, token, and provider factory
-export { AgentickService, TENTICKLE_CONFIG, provideAgentick } from "./agentick.service";
+export { AgentickService, TENTICKLE_CONFIG, provideAgentick } from "./agentick.service.js";
 
 // Types
 export type {
@@ -140,7 +140,7 @@ export type {
   ClientExecutionHandle,
   StreamingTextState,
   ClientTransport,
-} from "./types";
+} from "./types.js";
 
 // Re-export createClient for advanced usage
 export { createClient } from "@agentick/client";

@@ -41,7 +41,7 @@
 // ============================================================================
 
 // Use ai-sdk models within our Engine
-export { createAiSdkModel, aiSdk, type AiSdkAdapterConfig } from "./adapter";
+export { createAiSdkModel, aiSdk, type AiSdkAdapterConfig } from "./adapter.js";
 
 // Conversion utilities (for advanced use cases)
 export {
@@ -60,4 +60,4 @@ export {
   toStopReason,
   // Types
   type ToolResultOutput,
-} from "./adapter";
+} from "./adapter.js";

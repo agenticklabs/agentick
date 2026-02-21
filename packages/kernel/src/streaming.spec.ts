@@ -1,5 +1,5 @@
-import { createProcedure } from "./procedure";
-import { Context } from "./context";
+import { createProcedure } from "./procedure.js";
+import { Context } from "./context.js";
 
 describe("Kernel Streaming", () => {
   it("should stream data via AsyncGenerator (pass-through mode)", async () => {

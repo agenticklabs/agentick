@@ -5,12 +5,12 @@
  */
 
 import React, { useEffect, useDebugValue } from "react";
-import { useCom } from "../../hooks/context";
-import type { ModelConfig, EngineModel } from "../../model/model";
-import type { ComponentBaseProps } from "../jsx-types";
-import type { ProviderGenerationOptions } from "../../types";
-import type { MessageTransformationConfig } from "../../model/model";
-import type { COM } from "../../com/object-model";
+import { useCom } from "../../hooks/context.js";
+import type { ModelConfig, EngineModel } from "../../model/model.js";
+import type { ComponentBaseProps } from "../jsx-types.js";
+import type { ProviderGenerationOptions } from "../../types.js";
+import type { MessageTransformationConfig } from "../../model/model.js";
+import type { COM } from "../../com/object-model.js";
 
 // Helper for createElement
 const h = React.createElement;

@@ -33,6 +33,6 @@
  * @module agentick/channels
  */
 
-export * from "./service";
-export * from "./transports";
-export * from "./adapters";
+export * from "./service.js";
+export * from "./transports/index.js";
+export * from "./adapters/index.js";

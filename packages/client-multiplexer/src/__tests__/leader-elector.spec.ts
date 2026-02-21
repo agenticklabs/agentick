@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { createLeaderElector } from "../leader-elector";
+import { createLeaderElector } from "../leader-elector.js";
 
 // Mock BroadcastChannel
 class MockBroadcastChannel {

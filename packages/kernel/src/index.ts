@@ -43,21 +43,21 @@
  * @module @agentick/kernel
  */
 
-export * from "./context";
-export * from "./telemetry";
-export * from "./otel-provider";
-export * from "./procedure-graph";
-export * from "./execution-tracker";
-export * from "./execution-helpers";
-export * from "./metrics-helpers";
-export * from "./stream";
-export * from "./channel";
-export * from "./channel-helpers";
-export * from "./procedure";
-export * from "./logger";
-export * from "./event-buffer";
-export * from "./schema";
-export * from "./guard";
+export * from "./context.js";
+export * from "./telemetry.js";
+export * from "./otel-provider.js";
+export * from "./procedure-graph.js";
+export * from "./execution-tracker.js";
+export * from "./execution-helpers.js";
+export * from "./metrics-helpers.js";
+export * from "./stream.js";
+export * from "./channel.js";
+export * from "./channel-helpers.js";
+export * from "./procedure.js";
+export * from "./logger.js";
+export * from "./event-buffer.js";
+export * from "./schema.js";
+export * from "./guard.js";
 
 // Re-export guard errors from shared (guards are a procedure concept)
 export { GuardError, isGuardError } from "@agentick/shared";

@@ -11,8 +11,8 @@ import {
   extractAdapterOptions,
   StopReason,
   type AdapterDelta,
-} from "./adapter";
-import type { ModelInput } from "./model";
+} from "./adapter.js";
+import type { ModelInput } from "./model.js";
 
 // ============================================================================
 // Options Merging Tests

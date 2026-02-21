@@ -7,7 +7,7 @@
  * @module @agentick/kernel/otel-provider
  */
 
-import type { TelemetryProvider, Span, Counter, Histogram } from "./telemetry";
+import type { TelemetryProvider, Span, Counter, Histogram } from "./telemetry.js";
 
 export interface OTelProviderOptions {
   /**

@@ -238,24 +238,14 @@ export async function toJSONSchema(
 
         // If this doesn't look like a Zod 4 instance, fall back to zod-to-json-schema.
         if (typeof (schemaAny._zod as Record<string, unknown> | undefined)?.def === "undefined") {
-          const zodToJsonSchemaModule = await import("zod-to-json-schema");
-          const zodToJsonSchema =
-            (
-              zodToJsonSchemaModule as {
-                zodToJsonSchema?: (
-                  schema: unknown,
-                  options?: Record<string, unknown>,
-                ) => Record<string, unknown>;
-              }
-            ).zodToJsonSchema ??
-            (
-              zodToJsonSchemaModule as {
-                default?: (
-                  schema: unknown,
-                  options?: Record<string, unknown>,
-                ) => Record<string, unknown>;
-              }
-            ).default;
+          const zodToJsonSchemaModule = (await import("zod-to-json-schema")) as unknown as Record<
+            string,
+            unknown
+          >;
+          const zodToJsonSchema = (zodToJsonSchemaModule.zodToJsonSchema ??
+            zodToJsonSchemaModule.default) as
+            | ((schema: unknown, options?: Record<string, unknown>) => Record<string, unknown>)
+            | undefined;
 
           if (typeof zodToJsonSchema === "function") {
             const targetKey = target ?? "draft-2020-12";
@@ -303,24 +293,14 @@ export async function toJSONSchema(
     case "zod3": {
       // Zod 3 schemas require zod-to-json-schema to avoid Zod 4 runtime mismatch.
       try {
-        const zodToJsonSchemaModule = await import("zod-to-json-schema");
-        const zodToJsonSchema =
-          (
-            zodToJsonSchemaModule as {
-              zodToJsonSchema?: (
-                schema: unknown,
-                options?: Record<string, unknown>,
-              ) => Record<string, unknown>;
-            }
-          ).zodToJsonSchema ??
-          (
-            zodToJsonSchemaModule as {
-              default?: (
-                schema: unknown,
-                options?: Record<string, unknown>,
-              ) => Record<string, unknown>;
-            }
-          ).default;
+        const zodToJsonSchemaModule = (await import("zod-to-json-schema")) as unknown as Record<
+          string,
+          unknown
+        >;
+        const zodToJsonSchema = (zodToJsonSchemaModule.zodToJsonSchema ??
+          zodToJsonSchemaModule.default) as
+          | ((schema: unknown, options?: Record<string, unknown>) => Record<string, unknown>)
+          | undefined;
 
         if (typeof zodToJsonSchema !== "function") {
           console.warn("[schema] zod-to-json-schema export not found");

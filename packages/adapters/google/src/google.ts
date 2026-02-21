@@ -26,7 +26,7 @@ import {
   AdapterError,
   ValidationError,
 } from "@agentick/shared";
-import { type GoogleAdapterConfig, STOP_REASON_MAP } from "./types";
+import { type GoogleAdapterConfig, STOP_REASON_MAP } from "./types.js";
 
 // const logger = Logger.for("GoogleAdapter");
 

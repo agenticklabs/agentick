@@ -9,9 +9,9 @@
  */
 
 import type z from "zod";
-import type { ToolClass, ExecutableTool } from "../tool/tool";
+import type { ToolClass, ExecutableTool } from "../tool/tool.js";
 import type { ContentBlock, MessageRoles, ToolExecutionType } from "@agentick/shared";
-import type { EntryKindMap } from "./components/primitives";
+import type { EntryKindMap } from "./components/primitives.js";
 
 declare global {
   namespace JSX {
@@ -62,7 +62,7 @@ declare global {
         schema?: unknown;
         executionType?: ToolExecutionType;
         handler?: (input: any) => Promise<import("@agentick/shared").ContentBlock[]>;
-        metadata?: import("../tool/tool").ToolMetadata;
+        metadata?: import("../tool/tool.js").ToolMetadata;
       };
 
       // Content block primitives

@@ -7,7 +7,7 @@
 
 import type React from "react";
 import { useData, useOnUnmount } from "@agentick/core";
-import { SandboxContext } from "./context";
+import { SandboxContext } from "./context.js";
 import type {
   SandboxProvider,
   SandboxCreateOptions,
@@ -15,7 +15,7 @@ import type {
   Permissions,
   ResourceLimits,
   Sandbox as SandboxHandle,
-} from "./types";
+} from "./types.js";
 
 export interface SandboxProps {
   /** The sandbox provider to use (e.g. localProvider()). */

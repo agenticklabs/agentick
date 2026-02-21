@@ -3,7 +3,7 @@ import type {
   ChannelEvent,
   ConnectionMetadata,
   ChannelTransportConfig,
-} from "../service";
+} from "../service.js";
 
 /**
  * Configuration for StreamableHTTPTransport

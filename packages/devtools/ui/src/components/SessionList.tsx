@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { Session, Execution } from "../hooks/useDevToolsEvents";
+import type { Session, Execution } from "../hooks/useDevToolsEvents.js";
 
 interface SessionListProps {
   sessions: Session[];

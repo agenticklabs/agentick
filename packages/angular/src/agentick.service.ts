@@ -26,7 +26,7 @@ import {
   type SessionAccessor,
   type ClientExecutionHandle,
 } from "@agentick/client";
-import type { AgentickConfig } from "./types";
+import type { AgentickConfig } from "./types.js";
 
 /**
  * Injection token for Agentick configuration.

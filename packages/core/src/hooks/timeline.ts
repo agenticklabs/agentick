@@ -1,5 +1,5 @@
-import type { COMTimelineEntry } from "../com/types";
-import { useRuntimeStore } from "./runtime-context";
+import type { COMTimelineEntry } from "../com/types.js";
+import { useRuntimeStore } from "./runtime-context.js";
 
 export function useTimeline() {
   const store = useRuntimeStore();

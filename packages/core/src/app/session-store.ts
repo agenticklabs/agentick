@@ -4,7 +4,7 @@
  * Provides storage adapters for session persistence.
  */
 
-import type { SessionSnapshot, SessionStore } from "./types";
+import type { SessionSnapshot, SessionStore } from "./types.js";
 
 /**
  * In-memory session store for testing and development.

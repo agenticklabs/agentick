@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from "vitest";
-import { NetworkProxyServer } from "../network/proxy";
+import { NetworkProxyServer } from "../network/proxy.js";
 import { request } from "node:http";
 import type { NetworkRule, ProxiedRequest } from "@agentick/sandbox";
 

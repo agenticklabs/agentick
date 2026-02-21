@@ -20,9 +20,9 @@
  * ```
  */
 
-import type { ExecutionRunner, SessionRef, SessionSnapshot } from "../app/types";
-import type { COMInput } from "../com/types";
-import type { ExecutableTool } from "../tool/tool";
+import type { ExecutionRunner, SessionRef, SessionSnapshot } from "../app/types.js";
+import type { COMInput } from "../com/types.js";
+import type { ExecutableTool } from "../tool/tool.js";
 import type { ToolCall, ToolResult } from "@agentick/shared";
 
 // ============================================================================

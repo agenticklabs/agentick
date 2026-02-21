@@ -5,8 +5,8 @@
  */
 
 import { vi } from "vitest";
-import type { Sandbox, SandboxProvider, ExecResult } from "./types";
-import type { EditResult } from "./edit";
+import type { Sandbox, SandboxProvider, ExecResult } from "./types.js";
+import type { EditResult } from "./edit.js";
 
 /**
  * Create a mock Sandbox with vi.fn() stubs and sensible defaults.

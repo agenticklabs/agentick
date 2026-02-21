@@ -1,4 +1,4 @@
-import { OpenAIModel } from "./openai-model";
+import { OpenAIModel } from "./openai-model.js";
 
 describe("OpenAIModel Component", () => {
   describe("OpenAIModel factory function", () => {

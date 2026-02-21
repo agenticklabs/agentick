@@ -9,7 +9,7 @@
  * separate timeline entries. This is consistent with how models output them.
  */
 
-import type { Message } from "./messages";
+import type { Message } from "./messages.js";
 
 // ============================================================================
 // Timeline Entry (Unified Format)

@@ -7,9 +7,9 @@ import {
   type ExecutionState,
   type SignalType,
   type SignalEvent,
-} from "./execution-types";
-import type { COMInput } from "../com/types";
-import type { StreamEvent } from "./engine-events";
+} from "./execution-types.js";
+import type { COMInput } from "../com/types.js";
+import type { StreamEvent } from "./engine-events.js";
 import { EventEmitter } from "node:events";
 import type { ProcedureGraph, ProcedureNode } from "@agentick/kernel";
 import {
@@ -19,7 +19,7 @@ import {
 } from "@agentick/kernel";
 import { Context } from "@agentick/kernel";
 import { AbortError, StateError } from "@agentick/shared";
-import type { COM } from "../com/object-model";
+import type { COM } from "../com/object-model.js";
 
 /**
  * Concrete implementation of ExecutionHandle

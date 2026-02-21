@@ -5,7 +5,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { createTestRunner } from "../test-runner";
+import { createTestRunner } from "../test-runner.js";
 
 describe("createTestRunner", () => {
   it("should create runner with default name", () => {

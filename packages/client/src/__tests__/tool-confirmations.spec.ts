@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { ToolConfirmations } from "../tool-confirmations";
-import { createMockClient } from "../testing";
+import { ToolConfirmations } from "../tool-confirmations.js";
+import { createMockClient } from "../testing.js";
 
 describe("ToolConfirmations", () => {
   let client: ReturnType<typeof createMockClient>;

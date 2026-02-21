@@ -8,8 +8,8 @@
 import { createTool } from "@agentick/core";
 import { z } from "zod";
 import { createTwoFilesPatch } from "diff";
-import { useSandbox } from "./context";
-import { applyEdits } from "./edit";
+import { useSandbox } from "./context.js";
+import { applyEdits } from "./edit.js";
 
 /**
  * Execute a shell command in the sandbox.

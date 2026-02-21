@@ -1,5 +1,5 @@
-import { createHook } from "./procedure";
-import { Context } from "./context";
+import { createHook } from "./procedure.js";
+import { Context } from "./context.js";
 
 describe("Kernel Hook", () => {
   it("should execute a simple handler", async () => {

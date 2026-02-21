@@ -8,8 +8,8 @@
  * @module @agentick/shared/transport
  */
 
-import type { SendInput, ChannelEvent, ToolConfirmationResponse } from "./protocol";
-import type { ContentBlock } from "./blocks";
+import type { SendInput, ChannelEvent, ToolConfirmationResponse } from "./protocol.js";
+import type { ContentBlock } from "./blocks.js";
 
 // ============================================================================
 // Transport Events

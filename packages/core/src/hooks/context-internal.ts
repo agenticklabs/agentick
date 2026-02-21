@@ -8,8 +8,8 @@
  */
 
 import { createContext } from "react";
-import type { TickState } from "./types";
-import type { COM } from "../com/object-model";
+import type { TickState } from "./types.js";
+import type { COM } from "../com/object-model.js";
 
 /**
  * Internal: COM Context object.

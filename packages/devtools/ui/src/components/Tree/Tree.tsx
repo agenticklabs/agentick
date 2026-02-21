@@ -1,9 +1,9 @@
 import { useState, useMemo, useCallback } from "react";
-import type { FiberNode, TokenSummary } from "../../hooks/useDevToolsEvents";
-import { TreeProvider, useTreeContext } from "./TreeContext";
-import { TreeNode } from "./TreeNode";
-import { TreeSearch } from "./TreeSearch";
-import { formatTokens } from "../../utils/format";
+import type { FiberNode, TokenSummary } from "../../hooks/useDevToolsEvents.js";
+import { TreeProvider, useTreeContext } from "./TreeContext.js";
+import { TreeNode } from "./TreeNode.js";
+import { TreeSearch } from "./TreeSearch.js";
+import { formatTokens } from "../../utils/format.js";
 
 interface TreeProps {
   fiberTree: FiberNode | null;

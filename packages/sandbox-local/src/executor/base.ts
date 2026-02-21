@@ -8,8 +8,8 @@
 
 import { spawn } from "node:child_process";
 import type { ChildProcess } from "node:child_process";
-import type { CommandExecutor, SpawnOptions } from "./types";
-import type { SandboxStrategy } from "../platform/types";
+import type { CommandExecutor, SpawnOptions } from "./types.js";
+import type { SandboxStrategy } from "../platform/types.js";
 
 export class BaseExecutor implements CommandExecutor {
   readonly strategy: SandboxStrategy = "none";

@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { LocalSandbox } from "../local-sandbox";
+import { LocalSandbox } from "../local-sandbox.js";
 import { SandboxAccessError } from "@agentick/sandbox";
-import { BaseExecutor } from "../executor/base";
-import { ResourceEnforcer } from "../resources";
+import { BaseExecutor } from "../executor/base.js";
+import { ResourceEnforcer } from "../resources.js";
 import { mkdir, rm, realpath, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";

@@ -30,7 +30,7 @@ import {
   StopReason,
   AdapterError,
 } from "@agentick/shared";
-import { type OpenAIAdapterConfig, STOP_REASON_MAP } from "./types";
+import { type OpenAIAdapterConfig, STOP_REASON_MAP } from "./types.js";
 
 // const logger = Logger.for("OpenAIAdapter");
 

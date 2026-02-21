@@ -23,7 +23,7 @@ import {
   isReactivityError,
   ensureError,
   wrapAsAgentickError,
-} from "../errors";
+} from "../errors.js";
 
 describe("AgentickError", () => {
   describe("constructor", () => {

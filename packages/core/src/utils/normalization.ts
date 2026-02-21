@@ -1,13 +1,13 @@
 import type { Message } from "@agentick/shared";
-import { toolRegistry } from "./registry";
+import { toolRegistry } from "./registry.js";
 import type {
   ModelConfig,
   ModelInput,
   ModelToolReference,
   NormalizedModelInput,
   NormalizedModelTool,
-} from "../model/model";
-import type { ExecutableTool, ToolMetadata } from "../tool/tool";
+} from "../model/model.js";
+import type { ExecutableTool, ToolMetadata } from "../tool/tool.js";
 
 export function normalizeModelInput<TConfig extends ModelConfig = ModelConfig>(
   input: ModelInput,

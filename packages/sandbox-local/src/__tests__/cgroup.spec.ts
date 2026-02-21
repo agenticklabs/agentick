@@ -1,5 +1,5 @@
 import { describe, it } from "vitest";
-import { CgroupManager } from "../linux/cgroup";
+import { CgroupManager } from "../linux/cgroup.js";
 
 describe("CgroupManager", () => {
   it("creates without error even when cgroups unavailable", async () => {

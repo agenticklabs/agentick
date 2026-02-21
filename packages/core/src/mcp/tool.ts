@@ -10,13 +10,13 @@ import {
   type ExecutableTool,
   type ToolHandler,
   ToolExecutionType,
-} from "../tool/tool";
+} from "../tool/tool.js";
 import type { ContentBlock } from "@agentick/shared";
-import type { MCPClient } from "./client";
-import type { MCPToolDefinition } from "./types";
+import type { MCPClient } from "./client.js";
+import type { MCPToolDefinition } from "./types.js";
 import { z } from "zod";
 import type { Procedure } from "@agentick/kernel";
-import { createEngineProcedure } from "../procedure";
+import { createEngineProcedure } from "../procedure/index.js";
 
 // ============================================================================
 // Schema Conversion

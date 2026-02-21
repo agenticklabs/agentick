@@ -9,8 +9,8 @@ import {
   mapGoogleFinishReason,
   convertBlocksToGoogleParts,
   mapToolDefinition,
-} from "../google";
-import { STOP_REASON_MAP } from "../types";
+} from "../google.js";
+import { STOP_REASON_MAP } from "../types.js";
 import { StopReason } from "@agentick/shared";
 import type { ContentBlock, ImageBlock, ToolUseBlock, ToolResultBlock } from "@agentick/shared";
 

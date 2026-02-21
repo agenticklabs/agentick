@@ -1,4 +1,4 @@
-export { Inspector } from "./Inspector";
-export { PropsSection } from "./PropsSection";
-export { HooksSection } from "./HooksSection";
-export { TokenSection } from "./TokenSection";
+export { Inspector } from "./Inspector.js";
+export { PropsSection } from "./PropsSection.js";
+export { HooksSection } from "./HooksSection.js";
+export { TokenSection } from "./TokenSection.js";

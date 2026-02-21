@@ -1,6 +1,6 @@
 import React, { useMemo } from "react";
 import type { JSX } from "react";
-import { useKnob } from "./knob";
+import { useKnob } from "./knob.js";
 
 const h = React.createElement;
 

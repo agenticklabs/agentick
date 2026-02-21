@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { buildUnshareArgs } from "../linux/unshare";
-import type { SpawnOptions } from "../executor/types";
+import { buildUnshareArgs } from "../linux/unshare.js";
+import type { SpawnOptions } from "../executor/types.js";
 
 function makeOptions(overrides?: Partial<SpawnOptions>): SpawnOptions {
   return {

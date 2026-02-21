@@ -4,7 +4,7 @@
  * Constructs the bwrap command-line arguments from SpawnOptions.
  */
 
-import type { SpawnOptions } from "../executor/types";
+import type { SpawnOptions } from "../executor/types.js";
 
 /** System directories to mount read-only into the sandbox. */
 const SYSTEM_RO_BINDS = ["/usr", "/lib", "/lib64", "/bin", "/sbin", "/etc"];

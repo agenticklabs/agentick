@@ -17,7 +17,7 @@ import type {
   ChannelEvent,
   ToolConfirmationResponse,
 } from "@agentick/shared";
-import type { App } from "./app/types";
+import type { App } from "./app/types.js";
 
 /**
  * Create a ClientTransport that bridges to an in-process App.

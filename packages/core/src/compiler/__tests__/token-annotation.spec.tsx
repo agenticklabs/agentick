@@ -6,19 +6,19 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { FiberCompiler } from "../fiber-compiler";
-import { collect } from "../collector";
-import { createEmptyCompiledStructure } from "../types";
-import { createMockCom, createMockTickState } from "../../testing";
-import type { TokenEstimator } from "../../com/types";
-import { Section, Message } from "../../jsx/components/primitives";
-import { Ephemeral } from "../../jsx/components/messages";
+import { FiberCompiler } from "../fiber-compiler.js";
+import { collect } from "../collector.js";
+import { createEmptyCompiledStructure } from "../types.js";
+import { createMockCom, createMockTickState } from "../../testing/index.js";
+import type { TokenEstimator } from "../../com/types.js";
+import { Section, Message } from "../../jsx/components/primitives.js";
+import { Ephemeral } from "../../jsx/components/messages.js";
 import {
   Text as TextComponent,
   Code as CodeComponent,
   Image as ImageComponent,
   Json as JsonComponent,
-} from "../../jsx/components/content";
+} from "../../jsx/components/content.js";
 
 describe("Token Annotation", () => {
   let ctx: ReturnType<typeof createMockCom>;

@@ -1,7 +1,7 @@
-import type { FiberNode, HookState, TokenSummary } from "../../hooks/useDevToolsEvents";
-import { PropsSection } from "./PropsSection";
-import { HooksSection } from "./HooksSection";
-import { TokenSection } from "./TokenSection";
+import type { FiberNode, HookState, TokenSummary } from "../../hooks/useDevToolsEvents.js";
+import { PropsSection } from "./PropsSection.js";
+import { HooksSection } from "./HooksSection.js";
+import { TokenSection } from "./TokenSection.js";
 
 interface InspectorProps {
   node: FiberNode | null;

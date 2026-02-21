@@ -26,5 +26,5 @@
  *
  * @module @agentick/google
  */
-export * from "./google";
-export * from "./google.model";
+export * from "./google.js";
+export * from "./google.model.js";

@@ -19,19 +19,19 @@ export {
   type SerializedHookState,
   type HookType,
   type FiberSummary,
-} from "./fiber-compiler";
+} from "./fiber-compiler.js";
 
 // ============================================================================
 // Collector
 // ============================================================================
 
-export { collect } from "./collector";
+export { collect } from "./collector.js";
 
 // ============================================================================
 // Structure Renderer
 // ============================================================================
 
-export { StructureRenderer } from "./structure-renderer";
+export { StructureRenderer } from "./structure-renderer.js";
 
 // ============================================================================
 // Scheduler
@@ -42,7 +42,7 @@ export {
   type ReconcileEvent,
   type ReconciliationSchedulerOptions,
   type SchedulerState,
-} from "./scheduler";
+} from "./scheduler.js";
 
 // ============================================================================
 // Types
@@ -54,16 +54,16 @@ export type {
   CompiledTimelineEntry,
   CompiledEphemeral,
   CompileResult,
-} from "./types";
+} from "./types.js";
 
-export { createEmptyCompiledStructure } from "./types";
+export { createEmptyCompiledStructure } from "./types.js";
 
 // ============================================================================
 // Hooks (re-exported from hooks directory)
 // ============================================================================
 
 // Context hooks
-export { useCom, useTickState, AgentickProvider } from "../hooks";
+export { useCom, useTickState, AgentickProvider } from "../hooks/index.js";
 
 // Lifecycle hooks
 export {
@@ -73,10 +73,10 @@ export {
   useOnTickEnd,
   useAfterCompile,
   useContinuation,
-} from "../hooks";
+} from "../hooks/index.js";
 
 // Data hook
-export { useData, useInvalidateData } from "../hooks";
+export { useData, useInvalidateData } from "../hooks/index.js";
 
 // Signal hooks and utilities
 export {
@@ -90,7 +90,7 @@ export {
   untracked,
   runWithSignalContext,
   runWithSignalContextAsync,
-} from "../hooks";
+} from "../hooks/index.js";
 
 // Standard React hooks are used directly from React
 // import { useState, useEffect, useMemo, useCallback, useRef, useReducer } from 'react';

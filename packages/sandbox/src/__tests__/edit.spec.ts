@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { applyEdits, editFile, EditError } from "../edit";
+import { applyEdits, editFile, EditError } from "../edit.js";
 import { writeFile, readFile, mkdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -815,7 +815,7 @@ describe("applyEdits", () => {
     it("adds a new import to a TS file", () => {
       const source = [
         'import { useState } from "react";',
-        'import { Button } from "./components";',
+        'import { Button } from "./components.js";',
         "",
         "export function App() {",
         "  return <Button />;",
@@ -824,13 +824,13 @@ describe("applyEdits", () => {
 
       const result = applyEdits(source, [
         {
-          old: 'import { Button } from "./components";',
+          old: 'import { Button } from "./components.js";',
           insert: "after",
-          content: 'import { Input } from "./components";',
+          content: 'import { Input } from "./components.js";',
         },
       ]);
 
-      expect(result.content).toContain('import { Input } from "./components";');
+      expect(result.content).toContain('import { Input } from "./components.js";');
       expect(result.content.indexOf("Input")).toBeGreaterThan(result.content.indexOf("Button"));
     });
 

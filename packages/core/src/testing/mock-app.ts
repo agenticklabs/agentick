@@ -51,8 +51,8 @@ import type {
   SessionRecording,
   RecordingMode,
   TickSnapshot,
-} from "../app/types";
-import type { COMInput } from "../com/types";
+} from "../app/types.js";
+import type { COMInput } from "../com/types.js";
 
 // ============================================================================
 // Mock Execution Handle

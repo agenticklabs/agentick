@@ -7,7 +7,7 @@ import {
   type MessageSteeringState,
 } from "@agentick/client";
 import type { ClientExecutionHandle, Message } from "@agentick/client";
-import { useClient } from "./use-client";
+import { useClient } from "./use-client.js";
 
 export type { SteeringMode, FlushMode, MessageSteeringState };
 export type UseMessageSteeringOptions = MessageSteeringOptions;

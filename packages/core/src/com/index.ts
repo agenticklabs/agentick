@@ -25,5 +25,5 @@
  * @module agentick/com
  */
 
-export * from "./object-model";
-export * from "./types";
+export * from "./object-model.js";
+export * from "./types.js";

@@ -19,9 +19,9 @@ import {
   useSignal,
   useComputed,
   createSignal,
-} from "../index";
-import { Section } from "../../jsx/components/primitives";
-import { createMockCom, createMockTickState, createMockTickResult } from "../../testing/mocks";
+} from "../index.js";
+import { Section } from "../../jsx/components/primitives.js";
+import { createMockCom, createMockTickState, createMockTickResult } from "../../testing/mocks.js";
 
 describe("FiberCompiler", () => {
   let ctx: ReturnType<typeof createMockCom>;

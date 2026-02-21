@@ -4,7 +4,7 @@ import {
   isEmbeddingModel,
   type EmbeddingModel,
   type EmbeddingMetadata,
-} from "../embedding";
+} from "../embedding.js";
 // import type { EmbedResult } from "@agentick/shared";
 
 // ============================================================================

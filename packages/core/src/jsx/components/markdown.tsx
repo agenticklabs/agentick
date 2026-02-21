@@ -1,8 +1,8 @@
 import React from "react";
 import type { JSX } from "react";
-import { type ComponentBaseProps } from "../jsx-types";
-import { MarkdownRenderer, type SemanticContentBlock } from "../../renderers";
-import { FormatterBoundary } from "../../hooks/formatter-context";
+import { type ComponentBaseProps } from "../jsx-types.js";
+import { MarkdownRenderer, type SemanticContentBlock } from "../../renderers/index.js";
+import { FormatterBoundary } from "../../hooks/formatter-context.js";
 
 // Helper for createElement
 const h = React.createElement;

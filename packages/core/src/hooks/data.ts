@@ -4,8 +4,8 @@
  * The useData hook for async data fetching with the resolve-then-render pattern.
  */
 
-import { useTickState } from "./context";
-import { useRuntimeStore, type HookPersistenceOptions } from "./runtime-context";
+import { useTickState } from "./context.js";
+import { useRuntimeStore, type HookPersistenceOptions } from "./runtime-context.js";
 
 /**
  * Options for {@link useData}.

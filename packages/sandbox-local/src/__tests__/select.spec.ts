@@ -1,8 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { selectExecutor } from "../executor/select";
-import { BaseExecutor } from "../executor/base";
-import { DarwinExecutor } from "../executor/darwin";
-import { BwrapExecutor, UnshareExecutor } from "../executor/linux";
+import { selectExecutor } from "../executor/select.js";
+import { BaseExecutor } from "../executor/base.js";
+import { DarwinExecutor } from "../executor/darwin.js";
+import { BwrapExecutor, UnshareExecutor } from "../executor/linux.js";
 
 describe("selectExecutor", () => {
   it("returns BaseExecutor for 'none'", () => {

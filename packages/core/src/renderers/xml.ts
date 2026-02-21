@@ -1,4 +1,4 @@
-import { Renderer, type SemanticContentBlock, type SemanticNode } from "./base";
+import { Renderer, type SemanticContentBlock, type SemanticNode } from "./base.js";
 import type { ContentBlock, TextBlock, CodeBlock } from "@agentick/shared";
 import { extractText } from "@agentick/shared";
 
