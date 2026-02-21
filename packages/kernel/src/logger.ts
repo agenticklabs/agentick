@@ -248,6 +248,16 @@ function getContextFields(config: LoggerConfig): Record<string, unknown> {
   return extractor(ctx);
 }
 
+/** Check if pino-pretty is available (optional peer dep). */
+function hasPinoPretty(): boolean {
+  try {
+    require.resolve("pino-pretty");
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Create pino logger options from config.
  */
@@ -273,7 +283,7 @@ function createPinoOptions(config: LoggerConfig): LoggerOptions {
   // Transport configuration
   if (config.transport) {
     options.transport = config.transport;
-  } else if (usePretty) {
+  } else if (usePretty && hasPinoPretty()) {
     options.transport = {
       target: "pino-pretty",
       options: {
