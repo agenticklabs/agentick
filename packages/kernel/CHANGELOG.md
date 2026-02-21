@@ -1,5 +1,12 @@
 # @agentick/kernel
 
+## 0.9.2
+
+### Patch Changes
+
+- 7b45b0d: Gracefully skip pino-pretty when not installed instead of crashing on logger initialization.
+  - @agentick/shared@0.9.2
+
 ## 0.9.1
 
 ### Patch Changes
