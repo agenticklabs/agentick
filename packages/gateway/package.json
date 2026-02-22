@@ -1,6 +1,6 @@
 {
   "name": "@agentick/gateway",
-  "version": "0.9.5",
+  "version": "0.9.6",
   "description": "Standalone daemon for multi-client, multi-agent access",
   "repository": {
     "type": "git",
@@ -19,7 +19,9 @@
   "types": "./dist/index.d.ts",
   "typesVersions": {
     "*": {
-      "testing": ["dist/testing.d.ts"]
+      "testing": [
+        "dist/testing.d.ts"
+      ]
     }
   },
   "exports": {

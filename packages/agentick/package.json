@@ -1,6 +1,6 @@
 {
   "name": "agentick",
-  "version": "0.9.5",
+  "version": "0.9.6",
   "description": "The component framework for AI.",
   "keywords": [
     "agent",
@@ -28,8 +28,12 @@
   },
   "typesVersions": {
     "*": {
-      "jsx-runtime": ["dist/jsx-runtime.d.ts"],
-      "jsx-dev-runtime": ["dist/jsx-runtime.d.ts"]
+      "jsx-runtime": [
+        "dist/jsx-runtime.d.ts"
+      ],
+      "jsx-dev-runtime": [
+        "dist/jsx-runtime.d.ts"
+      ]
     }
   },
   "publishConfig": {
