@@ -1,5 +1,12 @@
 # @agentick/express
 
+## 0.9.4
+
+### Patch Changes
+
+- Updated dependencies [e01f0e5]
+  - @agentick/gateway@0.9.4
+
 ## 0.9.3
 
 ### Patch Changes

@@ -1,5 +1,15 @@
 # @agentick/gateway
 
+## 0.9.4
+
+### Patch Changes
+
+- e01f0e5: Remove testing utility re-exports from main entrypoint to prevent vitest from being required at runtime. Testing utilities are available via `@agentick/gateway/testing` subpath import.
+  - @agentick/kernel@0.9.4
+  - @agentick/shared@0.9.4
+  - @agentick/core@0.9.4
+  - @agentick/server@0.9.4
+
 ## 0.9.3
 
 ### Patch Changes
