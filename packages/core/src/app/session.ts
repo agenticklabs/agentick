@@ -1150,6 +1150,10 @@ export class SessionImpl<P = Record<string, unknown>> extends EventEmitter imple
     };
   }
 
+  pushEvent(event: Record<string, unknown> & { type: string }): void {
+    this.emitEvent(event as StreamEventInput);
+  }
+
   private emitEvent(event: StreamEventInput): void {
     const executionId = this._currentExecutionId ?? Context.tryGet()?.executionId;
 

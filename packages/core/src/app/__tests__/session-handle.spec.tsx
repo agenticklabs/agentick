@@ -2058,3 +2058,85 @@ describe("message steering", () => {
     await session.close();
   });
 });
+
+// ============================================================================
+// session.pushEvent() Tests
+// ============================================================================
+
+describe("session.pushEvent()", () => {
+  it("should deliver pushed event to EventEmitter listeners", async () => {
+    const Agent = () => (
+      <>
+        <System>System.</System>
+        <Timeline />
+      </>
+    );
+
+    const app = createApp(Agent, { maxTicks: 1 });
+    const session = await app.session();
+
+    const received: any[] = [];
+    session.on("event", (e: any) => received.push(e));
+
+    session.pushEvent({ type: "tool_confirmation_required", callId: "test-1", name: "write_file" });
+
+    expect(received).toHaveLength(1);
+    expect(received[0].type).toBe("tool_confirmation_required");
+    expect(received[0].callId).toBe("test-1");
+    // Enrichment: id, timestamp, sequence should be auto-filled
+    expect(received[0].id).toBeDefined();
+    expect(received[0].timestamp).toBeDefined();
+    expect(received[0].sequence).toBeGreaterThan(0);
+
+    await session.close();
+  });
+
+  it("should deliver pushed event to onEvent callback", async () => {
+    const received: any[] = [];
+
+    const Agent = () => (
+      <>
+        <System>System.</System>
+        <Timeline />
+      </>
+    );
+
+    const app = createApp(Agent, {
+      maxTicks: 1,
+      onEvent: (e: any) => received.push(e),
+    });
+    const session = await app.session();
+
+    session.pushEvent({ type: "custom_event", data: "hello" });
+
+    expect(received).toHaveLength(1);
+    expect(received[0].type).toBe("custom_event");
+    expect(received[0].data).toBe("hello");
+
+    await session.close();
+  });
+
+  it("should not trigger lifecycle callbacks for pushed events with spawnPath", async () => {
+    let tickStartCount = 0;
+
+    const Agent = () => (
+      <>
+        <System>System.</System>
+        <Timeline />
+      </>
+    );
+
+    const app = createApp(Agent, {
+      maxTicks: 1,
+      onTickStart: () => tickStartCount++,
+    });
+    const session = await app.session();
+
+    // Push a tick_start with spawnPath — should NOT trigger onTickStart
+    session.pushEvent({ type: "tick_start", tick: 1, spawnPath: ["child-1"] });
+
+    expect(tickStartCount).toBe(0);
+
+    await session.close();
+  });
+});

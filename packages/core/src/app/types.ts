@@ -1783,6 +1783,18 @@ export interface Session<P = Record<string, unknown>> extends EventEmitter {
   channel(name: string): Channel;
 
   /**
+   * Push an event into this session's event stream.
+   *
+   * The event goes through the full enrichment pipeline (id, tick, timestamp,
+   * sequence, devtools forwarding) and is delivered to all consumers: onEvent
+   * callbacks, EventEmitter listeners, and AsyncIterable readers.
+   *
+   * Use this to inject external events (e.g. forwarding confirmations from
+   * child sessions that aren't connected via spawn).
+   */
+  pushEvent(event: Record<string, unknown> & { type: string }): void;
+
+  /**
    * Submit tool confirmation result out-of-band.
    * Used when client sends tool confirmation outside of execution handle.
    */

@@ -399,6 +399,10 @@ export function createMockSession(options: MockSessionOptions = {}): MockSession
       return new Channel(name);
     }
 
+    pushEvent(event: Record<string, unknown> & { type: string }) {
+      this.emit("event", event);
+    }
+
     submitToolResult() {}
 
     async close() {
