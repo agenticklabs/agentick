@@ -28,23 +28,8 @@ export {
   type UnixSocketClientConfig,
 } from "./unix-socket-client-transport.js";
 
-// Testing utilities
-export {
-  createTestGateway,
-  createMockApp,
-  createMockSession,
-  createMockExecutionHandle,
-  waitForGatewayEvent,
-  type TestGatewayOptions,
-  type TestGatewayClient,
-  type TestGatewayResult,
-  type MockAppOptions,
-  type MockSessionOptions,
-  type MockSession,
-  type MockApp,
-  type MockSessionExecutionHandle,
-  type MockExecutionHandleOptions,
-} from "./testing.js";
+// Testing utilities: import from "@agentick/gateway/testing" — not re-exported
+// here to avoid pulling vitest into production bundles.
 
 // Protocol types
 export {
