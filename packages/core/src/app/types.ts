@@ -605,10 +605,7 @@ export interface AppOptions extends LifecycleCallbacks {
    * Called before send is executed.
    * Return a modified input to override what is sent.
    */
-  onBeforeSend?: <P extends Record<string, unknown>>(
-    session: Session<P>,
-    input: SendInput<P>,
-  ) => void | SendInput<P>;
+  onBeforeSend?: <P>(session: Session<P>, input: SendInput<P>) => void | SendInput<P>;
 
   /**
    * Called after send completes successfully.
@@ -857,7 +854,7 @@ export interface SessionSnapshot {
  * });
  * ```
  */
-export interface SendInput<P = Record<string, unknown>> extends SharedSendInput<P> {
+export interface SendInput<P = {}> extends SharedSendInput<P> {
   /** Override maxTicks for this execution */
   maxTicks?: number;
   /** Per-execution abort signal (not serializable — local only) */
@@ -900,7 +897,7 @@ export interface SendInput<P = Record<string, unknown>> extends SharedSendInput<
  * });
  * ```
  */
-export interface RunInput<P = Record<string, unknown>> extends SendInput<P> {
+export interface RunInput<P = {}> extends SendInput<P> {
   /** Model instance (required for run(), optional for app.run()) */
   model?: EngineModel;
 
@@ -1491,7 +1488,7 @@ export interface SessionRecording {
  * await session.close();
  * ```
  */
-export interface Session<P = Record<string, unknown>> extends EventEmitter {
+export interface Session<P = {}> extends EventEmitter {
   /** Unique session ID */
   readonly id: string;
 
@@ -1817,7 +1814,7 @@ export interface Session<P = Record<string, unknown>> extends EventEmitter {
 /**
  * Component function type for createApp.
  */
-export type ComponentFunction<P = Record<string, unknown>> = (props: P) => JSX.Element;
+export type ComponentFunction<P = {}> = (props: P) => JSX.Element;
 
 /**
  * A reusable app instance created by createApp().
@@ -1859,7 +1856,7 @@ export type ComponentFunction<P = Record<string, unknown>> = (props: P) => JSX.E
  * const withOpts = app.session({ sessionId: 'conv-456', maxTicks: 5 });
  * ```
  */
-export interface App<P = Record<string, unknown>> {
+export interface App<P = {}> {
   /**
    * Run the app with input.
    *

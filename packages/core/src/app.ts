@@ -90,7 +90,7 @@ import type {
  * }
  * ```
  */
-export async function runComponent<P extends Record<string, unknown>>(
+export async function runComponent<P>(
   Component: ComponentFunction<P>,
   input: RunInput<P>,
   options: AppOptions = {},

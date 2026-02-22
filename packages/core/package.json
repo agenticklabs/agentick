@@ -73,6 +73,22 @@
       "import": "./dist/testing/index.js"
     }
   },
+  "typesVersions": {
+    "*": {
+      "jsx-runtime": ["dist/jsx/jsx-runtime.d.ts"],
+      "jsx-dev-runtime": ["dist/jsx/jsx-runtime.d.ts"],
+      "app": ["dist/app.d.ts"],
+      "model": ["dist/model/index.d.ts"],
+      "com": ["dist/com/index.d.ts"],
+      "jsx": ["dist/jsx/index.d.ts"],
+      "hooks": ["dist/compiler/index.d.ts"],
+      "compiler": ["dist/compiler/index.d.ts"],
+      "utils": ["dist/utils/index.d.ts"],
+      "tool": ["dist/tool/index.d.ts"],
+      "model/utils/language-model": ["dist/model/utils/language-model.d.ts"],
+      "testing": ["dist/testing/index.d.ts"]
+    }
+  },
   "publishConfig": {
     "access": "public",
     "exports": {

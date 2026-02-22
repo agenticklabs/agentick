@@ -35,6 +35,23 @@
     "./utils": "./src/utils/index.ts",
     "./transport": "./src/transport.ts"
   },
+  "typesVersions": {
+    "*": {
+      "blocks": ["dist/blocks.d.ts"],
+      "block-types": ["dist/block-types.d.ts"],
+      "tools": ["dist/tools.d.ts"],
+      "input": ["dist/input.d.ts"],
+      "messages": ["dist/messages.d.ts"],
+      "streaming": ["dist/streaming.d.ts"],
+      "models": ["dist/models.d.ts"],
+      "timeline": ["dist/timeline.d.ts"],
+      "errors": ["dist/errors.d.ts"],
+      "identity": ["dist/identity.d.ts"],
+      "testing": ["dist/testing/index.d.ts"],
+      "utils": ["dist/utils/index.d.ts"],
+      "transport": ["dist/transport.d.ts"]
+    }
+  },
   "publishConfig": {
     "access": "public",
     "exports": {

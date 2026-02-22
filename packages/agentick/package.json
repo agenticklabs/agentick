@@ -26,6 +26,12 @@
     "./jsx-runtime": "./src/jsx-runtime.ts",
     "./jsx-dev-runtime": "./src/jsx-runtime.ts"
   },
+  "typesVersions": {
+    "*": {
+      "jsx-runtime": ["dist/jsx-runtime.d.ts"],
+      "jsx-dev-runtime": ["dist/jsx-runtime.d.ts"]
+    }
+  },
   "publishConfig": {
     "access": "public",
     "exports": {

@@ -17,7 +17,7 @@ import { flushMicrotasks } from "./act.js";
 // Types
 // ============================================================================
 
-export interface RenderAgentOptions<P extends Record<string, unknown> = Record<string, unknown>> {
+export interface RenderAgentOptions<P = {}> {
   /**
    * Initial props for the agent component.
    */
@@ -45,7 +45,7 @@ export interface RenderAgentOptions<P extends Record<string, unknown> = Record<s
   autoTick?: boolean;
 }
 
-export interface RenderAgentResult<P extends Record<string, unknown> = Record<string, unknown>> {
+export interface RenderAgentResult<P = {}> {
   /**
    * The session instance.
    */
@@ -190,7 +190,7 @@ export async function cleanup(): Promise<void> {
  * });
  * ```
  */
-export async function renderAgent<P extends Record<string, unknown> = Record<string, unknown>>(
+export async function renderAgent<P = {}>(
   Agent: ComponentFunction<P>,
   options: RenderAgentOptions<P> = {},
 ): Promise<RenderAgentResult<P>> {

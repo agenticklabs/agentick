@@ -155,7 +155,7 @@ function tryDisplaySummary(
  * A session manages the execution lifecycle: compile JSX, call model, execute tools.
  * Component state (hooks, signals) persists across ticks within a session.
  */
-export class SessionImpl<P = Record<string, unknown>> extends EventEmitter implements Session<P> {
+export class SessionImpl<P = {}> extends EventEmitter implements Session<P> {
   readonly id: string;
   private readonly log = Logger.for("SessionImpl");
 

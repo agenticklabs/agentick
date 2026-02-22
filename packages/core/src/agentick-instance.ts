@@ -351,7 +351,7 @@ class SessionRegistry<P> {
 // App Implementation
 // ============================================================================
 
-class AppImpl<P extends Record<string, unknown>> implements App<P> {
+class AppImpl<P> implements App<P> {
   readonly run: Procedure<(input: RunInput<P>) => SessionExecutionHandle, true>;
 
   private readonly registry: SessionRegistry<P>;
@@ -462,7 +462,7 @@ class AppImpl<P extends Record<string, unknown>> implements App<P> {
     const handle = await session.send(maybeModified);
     handle.result
       .then((result) => {
-        this.options.onAfterSend?.(session, result);
+        this.options.onAfterSend?.(session as Session, result);
       })
       .catch(() => {
         // Errors are already surfaced via lifecycle callbacks
@@ -608,7 +608,7 @@ class AppImpl<P extends Record<string, unknown>> implements App<P> {
       this.registry.remove(session.id, false);
     });
 
-    this.options.onSessionCreate?.(session);
+    this.options.onSessionCreate?.(session as Session);
     for (const handler of this.sessionCreateHandlers) {
       handler(session);
     }
@@ -619,7 +619,7 @@ class AppImpl<P extends Record<string, unknown>> implements App<P> {
  * Handler type for the run procedure.
  * Generic P is the props type for the component.
  */
-type RunHandler = <P extends Record<string, unknown>>(
+type RunHandler = <P>(
   element: { type: ComponentFunction<P>; props: P; key: string | number | null },
   input?: RunInput<P>,
 ) => SessionExecutionHandle;
@@ -684,7 +684,7 @@ export class AgentickInstance implements MiddlewareRegistry {
     const instance = this;
     this.run = createProcedure(
       { name: "agentick:run", handleFactory: false },
-      async <P extends Record<string, unknown>>(
+      async <P>(
         element: { type: ComponentFunction<P>; props: P; key: string | number | null },
         input: RunInput<P> = {} as RunInput<P>,
       ): Promise<SessionExecutionHandle> => {
@@ -857,10 +857,7 @@ export class AgentickInstance implements MiddlewareRegistry {
    * const scopedApp = scoped.createApp(MyAgent, { model });
    * ```
    */
-  createApp<P extends Record<string, unknown>>(
-    Component: ComponentFunction<P>,
-    options: AppOptions = {},
-  ): App<P> {
+  createApp<P>(Component: ComponentFunction<P>, options: AppOptions = {}): App<P> {
     const optionsWithInstance = { ...options, _agentickInstance: this };
 
     return new AppImpl(Component, optionsWithInstance);

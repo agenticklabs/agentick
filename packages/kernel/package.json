@@ -22,6 +22,11 @@
     ".": "./src/index.ts",
     "./testing": "./src/testing.ts"
   },
+  "typesVersions": {
+    "*": {
+      "testing": ["dist/testing.d.ts"]
+    }
+  },
   "publishConfig": {
     "access": "public",
     "exports": {

@@ -17,7 +17,7 @@ import type { SemanticContentBlock, SemanticNode } from "../renderers/base.js";
 // Types
 // ============================================================================
 
-export interface CompileAgentOptions<P extends Record<string, unknown> = Record<string, unknown>> {
+export interface CompileAgentOptions<P = {}> {
   /**
    * Props to pass to the agent component.
    */
@@ -129,7 +129,7 @@ import { createMockCom, createMockTickState } from "./mocks.js";
  * expect(result.getTool('calculator')?.description).toBe('Perform math');
  * ```
  */
-export async function compileAgent<P extends Record<string, unknown> = Record<string, unknown>>(
+export async function compileAgent<P = {}>(
   Agent: ComponentFunction<P>,
   options: CompileAgentOptions<P> = {},
 ): Promise<CompileAgentResult> {
@@ -143,7 +143,7 @@ export async function compileAgent<P extends Record<string, unknown> = Record<st
   const tickState = createMockTickState(tick);
 
   // Create element with props
-  const element = React.createElement(Agent as any, props);
+  const element = React.createElement(Agent as any, props as any);
 
   // Compile until stable
   const { compiled, iterations, forcedStable, recompileReasons } =
