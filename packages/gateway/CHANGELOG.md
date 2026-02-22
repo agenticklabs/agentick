@@ -1,5 +1,16 @@
 # @agentick/gateway
 
+## 0.9.6
+
+### Patch Changes
+
+- 84752df: Add typesVersions fallback for legacy moduleResolution: node consumers. Relax generic prop constraint from `P extends Record<string, unknown>` to unconstrained `P` so TypeScript interfaces work as component props.
+- Updated dependencies [84752df]
+  - @agentick/core@0.9.6
+  - @agentick/kernel@0.9.6
+  - @agentick/shared@0.9.6
+  - @agentick/server@0.9.6
+
 ## 0.9.5
 
 ### Patch Changes

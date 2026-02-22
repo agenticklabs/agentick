@@ -1,6 +1,6 @@
 {
   "name": "@agentick/kernel",
-  "version": "0.9.5",
+  "version": "0.9.6",
   "description": "Kernel for Agentick",
   "keywords": [
     "agent",
@@ -24,7 +24,9 @@
   },
   "typesVersions": {
     "*": {
-      "testing": ["dist/testing.d.ts"]
+      "testing": [
+        "dist/testing.d.ts"
+      ]
     }
   },
   "publishConfig": {

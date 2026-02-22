@@ -1,5 +1,13 @@
 # @agentick/connector-imessage
 
+## 0.9.6
+
+### Patch Changes
+
+- Updated dependencies [84752df]
+  - @agentick/shared@0.9.6
+  - @agentick/connector@0.9.6
+
 ## 0.9.5
 
 ### Patch Changes
