@@ -1,5 +1,12 @@
 # @agentick/server
 
+## 0.9.4
+
+### Patch Changes
+
+- @agentick/kernel@0.9.4
+- @agentick/shared@0.9.4
+
 ## 0.9.3
 
 ### Patch Changes

@@ -1,6 +1,6 @@
 {
   "name": "@agentick/shared",
-  "version": "0.9.3",
+  "version": "0.9.4",
   "description": "Shared types and utilities for Agentick",
   "keywords": [
     "agent",
