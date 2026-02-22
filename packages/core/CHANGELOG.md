@@ -1,5 +1,13 @@
 # @agentick/core
 
+## 0.9.5
+
+### Patch Changes
+
+- dc26053: Add `session.pushEvent(event)` to the public Session interface. Injects an event into a session's event stream with full enrichment (id, tick, timestamp, sequence, devtools forwarding). Enables external event routing between sessions not connected via spawn.
+  - @agentick/kernel@0.9.5
+  - @agentick/shared@0.9.5
+
 ## 0.9.4
 
 ### Patch Changes
