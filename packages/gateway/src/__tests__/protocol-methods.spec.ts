@@ -25,7 +25,11 @@ const TEST_PORT = 19990;
 const TEST_HOST = "127.0.0.1";
 
 /** Send a WS request and wait for the matching response. */
-function rpc(client: WebSocket, method: string, params: Record<string, unknown> = {}): Promise<any> {
+function rpc(
+  client: WebSocket,
+  method: string,
+  params: Record<string, unknown> = {},
+): Promise<any> {
   const id = `req-${Date.now()}-${Math.random().toString(36).slice(2)}`;
   return new Promise((resolve, reject) => {
     const timeout = setTimeout(() => reject(new Error(`RPC timeout: ${method}`)), 5000);
@@ -43,10 +47,7 @@ function rpc(client: WebSocket, method: string, params: Record<string, unknown> 
 }
 
 /** Connect and authenticate a WS client. Returns [ws, connectedMessage]. */
-async function connectClient(
-  port: number,
-  clientId = "test-client",
-): Promise<[WebSocket, any]> {
+async function connectClient(port: number, clientId = "test-client"): Promise<[WebSocket, any]> {
   const ws = new WebSocket(`ws://${TEST_HOST}:${port}`);
   await new Promise<void>((r) => ws.on("open", () => r()));
 
@@ -308,7 +309,10 @@ describe("tool-catalog method", () => {
         {
           name: "write_file",
           description: "Write content to a file",
-          input: { type: "object", properties: { path: { type: "string" }, content: { type: "string" } } },
+          input: {
+            type: "object",
+            properties: { path: { type: "string" }, content: { type: "string" } },
+          },
           type: "function",
           intent: "mutation",
           audience: "all",
@@ -586,9 +590,7 @@ describe("protocol method edge cases", () => {
         });
       });
 
-      rawWs.send(
-        JSON.stringify({ type: "req", id: "unauth-1", method: "schema", params: {} }),
-      );
+      rawWs.send(JSON.stringify({ type: "req", id: "unauth-1", method: "schema", params: {} }));
 
       const error = await errorPromise;
       expect(error.code).toBe("UNAUTHORIZED");

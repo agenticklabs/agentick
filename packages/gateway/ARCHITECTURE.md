@@ -23,6 +23,7 @@ avoids that entirely.
 ### ConfigStore as read path, not a bag of values
 
 `store.get("connectors")` not `config.connectors`. This gives us:
+
 - Hot-reload: `onChange()` handlers are wired from day one (just not triggered yet)
 - Redaction: `store.redacted()` replaces secret-interpolated values with `"***"`
 - Isolation: `resolved()` returns a frozen deep clone. Mutations are impossible.
@@ -38,6 +39,7 @@ a debugging nightmare.
 
 The schema registry uses `ZodLikeSchema` (an object with `parse()` and
 `_output`). This avoids a hard dependency on Zod, which means:
+
 - No Zod version conflicts between consumers
 - Any validator that implements `parse()` works
 - The gateway package stays dependency-light
@@ -51,13 +53,13 @@ public property, which was ugly and invited misuse.
 
 ## File Map
 
-| File | Purpose |
-|------|---------|
-| `config.ts` | FileConfig, ConnectorConfigs, ProviderConfigs, ConfigStore, schema registry, global binding |
-| `config-loader.ts` | `loadConfig()`, `interpolateConfig()`, `ConfigValidationError`, `deepMerge` |
-| `types.ts` | `configStore?` + `configPath?` on GatewayConfig, `config` on PluginContext |
-| `method-schemas.ts` | `"config"` built-in method, `"config:changed"` event type |
-| `transport-protocol.ts` | `ConfigPayload`, `"config"` in BuiltInMethod union |
+| File                    | Purpose                                                                                     |
+| ----------------------- | ------------------------------------------------------------------------------------------- |
+| `config.ts`             | FileConfig, ConnectorConfigs, ProviderConfigs, ConfigStore, schema registry, global binding |
+| `config-loader.ts`      | `loadConfig()`, `interpolateConfig()`, `ConfigValidationError`, `deepMerge`                 |
+| `types.ts`              | `configStore?` + `configPath?` on GatewayConfig, `config` on PluginContext                  |
+| `method-schemas.ts`     | `"config"` built-in method, `"config:changed"` event type                                   |
+| `transport-protocol.ts` | `ConfigPayload`, `"config"` in BuiltInMethod union                                          |
 
 ## Config Flow
 

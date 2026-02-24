@@ -90,11 +90,14 @@ Plugins extend the gateway with additional methods and capabilities:
 const plugin: GatewayPlugin = {
   id: "my-plugin",
   async initialize(ctx) {
-    ctx.registerMethod("analyze", method({
-      schema: z.object({ text: z.string() }),
-      response: z.object({ sentiment: z.number() }),
-      handler: async (params) => ({ sentiment: 0.8 }),
-    }));
+    ctx.registerMethod(
+      "analyze",
+      method({
+        schema: z.object({ text: z.string() }),
+        response: z.object({ sentiment: z.number() }),
+        handler: async (params) => ({ sentiment: 0.8 }),
+      }),
+    );
 
     ctx.on("session:created", ({ sessionId }) => {
       console.log("New session:", sessionId);

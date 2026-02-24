@@ -58,9 +58,7 @@ export async function interpolateConfig(
         }
         const value = await secrets.get(keyName);
         if (value === null) {
-          throw new ConfigValidationError(
-            `Secret "${keyName}" not found (referenced at ${path})`,
-          );
+          throw new ConfigValidationError(`Secret "${keyName}" not found (referenced at ${path})`);
         }
         secretPaths.add(path);
         return value;

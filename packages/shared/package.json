@@ -19,22 +19,6 @@
   ],
   "type": "module",
   "main": "src/index.ts",
-  "exports": {
-    ".": "./src/index.ts",
-    "./blocks": "./src/blocks.ts",
-    "./block-types": "./src/block-types.ts",
-    "./tools": "./src/tools.ts",
-    "./input": "./src/input.ts",
-    "./messages": "./src/messages.ts",
-    "./streaming": "./src/streaming.ts",
-    "./models": "./src/models.ts",
-    "./timeline": "./src/timeline.ts",
-    "./errors": "./src/errors.ts",
-    "./identity": "./src/identity.ts",
-    "./testing": "./src/testing/index.ts",
-    "./utils": "./src/utils/index.ts",
-    "./transport": "./src/transport.ts"
-  },
   "typesVersions": {
     "*": {
       "blocks": [
@@ -77,6 +61,22 @@
         "dist/transport.d.ts"
       ]
     }
+  },
+  "exports": {
+    ".": "./src/index.ts",
+    "./blocks": "./src/blocks.ts",
+    "./block-types": "./src/block-types.ts",
+    "./tools": "./src/tools.ts",
+    "./input": "./src/input.ts",
+    "./messages": "./src/messages.ts",
+    "./streaming": "./src/streaming.ts",
+    "./models": "./src/models.ts",
+    "./timeline": "./src/timeline.ts",
+    "./errors": "./src/errors.ts",
+    "./identity": "./src/identity.ts",
+    "./testing": "./src/testing/index.ts",
+    "./utils": "./src/utils/index.ts",
+    "./transport": "./src/transport.ts"
   },
   "publishConfig": {
     "access": "public",

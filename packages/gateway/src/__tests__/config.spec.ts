@@ -17,11 +17,7 @@ import {
   resetConfigBinding,
   type FileConfig,
 } from "../config.js";
-import {
-  interpolateConfig,
-  loadConfig,
-  ConfigValidationError,
-} from "../config-loader.js";
+import { interpolateConfig, loadConfig, ConfigValidationError } from "../config-loader.js";
 import { BUILT_IN_METHOD_SCHEMAS, GATEWAY_EVENTS } from "../method-schemas.js";
 
 // ============================================================================
@@ -285,9 +281,9 @@ describe("interpolateConfig", () => {
   it("throws on missing env var", async () => {
     delete process.env.__MISSING_VAR;
 
-    await expect(
-      interpolateConfig({ key: "${env:__MISSING_VAR}" }),
-    ).rejects.toThrow('Environment variable "__MISSING_VAR" not set');
+    await expect(interpolateConfig({ key: "${env:__MISSING_VAR}" })).rejects.toThrow(
+      'Environment variable "__MISSING_VAR" not set',
+    );
   });
 
   it("resolves ${secret:KEY} from SecretStore", async () => {
@@ -320,15 +316,15 @@ describe("interpolateConfig", () => {
       backend: "mock",
     };
 
-    await expect(
-      interpolateConfig({ key: "${secret:MISSING}" }, secrets),
-    ).rejects.toThrow('Secret "MISSING" not found');
+    await expect(interpolateConfig({ key: "${secret:MISSING}" }, secrets)).rejects.toThrow(
+      'Secret "MISSING" not found',
+    );
   });
 
   it("throws when secret referenced but no SecretStore", async () => {
-    await expect(
-      interpolateConfig({ key: "${secret:KEY}" }),
-    ).rejects.toThrow("no SecretStore provided");
+    await expect(interpolateConfig({ key: "${secret:KEY}" })).rejects.toThrow(
+      "no SecretStore provided",
+    );
   });
 
   it("leaves non-interpolation strings untouched", async () => {
@@ -404,10 +400,7 @@ describe("ConfigStore.redacted()", () => {
   });
 
   it("handles missing intermediate paths gracefully", () => {
-    const store = createConfigStore(
-      {},
-      new Set(["connectors.telegram.token"]),
-    );
+    const store = createConfigStore({}, new Set(["connectors.telegram.token"]));
 
     // Should not throw
     const redacted = store.redacted();
@@ -509,10 +502,7 @@ describe("loadConfig", () => {
 
     process.env.__LOADER_TEST_PORT = "5000";
     const tmpFile = join(tmpdir(), `agentick-test-${Date.now()}.json`);
-    writeFileSync(
-      tmpFile,
-      JSON.stringify({ gateway: { host: "${env:__LOADER_TEST_PORT}" } }),
-    );
+    writeFileSync(tmpFile, JSON.stringify({ gateway: { host: "${env:__LOADER_TEST_PORT}" } }));
 
     try {
       const store = await loadConfig({ path: tmpFile });

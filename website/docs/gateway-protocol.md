@@ -44,7 +44,12 @@ Success responses:
 Error responses include a structured error code:
 
 ```json
-{ "type": "res", "id": "req-1", "ok": false, "error": { "code": "NOT_FOUND_RESOURCE", "message": "..." } }
+{
+  "type": "res",
+  "id": "req-1",
+  "ok": false,
+  "error": { "code": "NOT_FOUND_RESOURCE", "message": "..." }
+}
 ```
 
 ## Schema Discovery
@@ -106,14 +111,14 @@ error code with its description.
 
 Every method in the `methods` record has these fields:
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `description` | `string` | Human-readable purpose |
-| `builtin` | `boolean` | `true` for gateway-provided, `false` for custom/plugin |
-| `params` | `JSONSchema?` | Input parameters schema. Absent if method takes no params. |
-| `response` | `JSONSchema?` | Response payload schema. Absent if method returns void. |
-| `errors` | `string[]?` | Error codes this method can produce. References keys in `errors`. |
-| `roles` | `string[]?` | Required user roles. Absent if unrestricted. |
+| Field         | Type          | Description                                                       |
+| ------------- | ------------- | ----------------------------------------------------------------- |
+| `description` | `string`      | Human-readable purpose                                            |
+| `builtin`     | `boolean`     | `true` for gateway-provided, `false` for custom/plugin            |
+| `params`      | `JSONSchema?` | Input parameters schema. Absent if method takes no params.        |
+| `response`    | `JSONSchema?` | Response payload schema. Absent if method returns void.           |
+| `errors`      | `string[]?`   | Error codes this method can produce. References keys in `errors`. |
+| `roles`       | `string[]?`   | Required user roles. Absent if unrestricted.                      |
 
 Custom methods are registered via the `methods` config or plugin `registerMethod`.
 
@@ -122,12 +127,12 @@ Custom methods are registered via the `methods` config or plugin `registerMethod
 Events are pushed to subscribed clients via the event stream. Each event has a
 `type` (the discriminant you match on) and a `category`:
 
-| Category | Description | Examples |
-|----------|-------------|----------|
-| `model` | Model output (streaming content, tool calls) | `content_delta`, `tool_call_start`, `message` |
-| `orchestration` | Engine lifecycle (ticks, executions, tool results) | `execution_start`, `tick_end`, `tool_result` |
-| `result` | Final execution result | `result` |
-| `gateway` | Gateway-specific (channels, streaming methods) | `channel`, `method:chunk`, `method:end` |
+| Category        | Description                                        | Examples                                      |
+| --------------- | -------------------------------------------------- | --------------------------------------------- |
+| `model`         | Model output (streaming content, tool calls)       | `content_delta`, `tool_call_start`, `message` |
+| `orchestration` | Engine lifecycle (ticks, executions, tool results) | `execution_start`, `tick_end`, `tool_result`  |
+| `result`        | Final execution result                             | `result`                                      |
+| `gateway`       | Gateway-specific (channels, streaming methods)     | `channel`, `method:chunk`, `method:end`       |
 
 Categories enable efficient filtering. A streaming UI subscribes to `model`
 events. A persistence layer subscribes to `orchestration`. A simple
@@ -142,37 +147,37 @@ unhandled exceptions.
 
 Error codes come from the framework's error hierarchy (`@agentick/shared`):
 
-| Code | When |
-|------|------|
-| `NOT_FOUND_RESOURCE` | Session, method, or resource doesn't exist |
-| `NOT_FOUND_TOOL` | Tool name not found in session |
-| `VALIDATION_REQUIRED` | Required parameter missing |
-| `VALIDATION_TYPE` | Parameter type mismatch |
-| `GUARD_DENIED` | Role or custom guard rejected the call |
-| `STATE_ALREADY_COMPLETE` | Operation on a closed/terminal resource |
-| `METHOD_ERROR` | Unhandled error in a method handler |
-| `INTERNAL_ERROR` | Unexpected internal error |
+| Code                     | When                                       |
+| ------------------------ | ------------------------------------------ |
+| `NOT_FOUND_RESOURCE`     | Session, method, or resource doesn't exist |
+| `NOT_FOUND_TOOL`         | Tool name not found in session             |
+| `VALIDATION_REQUIRED`    | Required parameter missing                 |
+| `VALIDATION_TYPE`        | Parameter type mismatch                    |
+| `GUARD_DENIED`           | Role or custom guard rejected the call     |
+| `STATE_ALREADY_COMPLETE` | Operation on a closed/terminal resource    |
+| `METHOD_ERROR`           | Unhandled error in a method handler        |
+| `INTERNAL_ERROR`         | Unexpected internal error                  |
 
 ## Built-In Methods
 
-| Method | Params | Response | Description |
-|--------|--------|----------|-------------|
-| `send` | `sessionId`, `message`, `attachments?` | `{ messageId }` | Send user message |
-| `abort` | `sessionId` | — | Abort current execution |
-| `status` | `sessionId?` | `{ gateway, session? }` | Get status |
-| `history` | `sessionId`, `limit?`, `before?` | `{ messages, hasMore }` | Get history |
-| `reset` | `sessionId` | `{ ok }` | Reset session |
-| `close` | `sessionId` | `{ ok }` | Close session |
-| `apps` | — | `{ apps }` | List apps |
-| `sessions` | — | `{ sessions }` | List sessions |
-| `subscribe` | `sessionId` | `{ ok }` | Subscribe to events |
-| `unsubscribe` | `sessionId` | `{ ok }` | Unsubscribe |
-| `channel` | `sessionId`, `channel`, `payload?` | `{ ok }` | Publish to channel |
-| `channel-subscribe` | `sessionId`, `channel` | `{ ok }` | Subscribe to channel |
-| `schema` | — | `SchemaPayload` | Protocol discovery |
-| `tool-catalog` | `sessionId` | `{ tools }` | List session tools |
-| `tool-confirm` | `sessionId`, `callId`, `confirmed`, `reason?` | `{ ok }` | Respond to tool confirmation |
-| `tool-dispatch` | `sessionId`, `tool`, `input` | `{ content }` | Dispatch tool directly |
+| Method              | Params                                        | Response                | Description                  |
+| ------------------- | --------------------------------------------- | ----------------------- | ---------------------------- |
+| `send`              | `sessionId`, `message`, `attachments?`        | `{ messageId }`         | Send user message            |
+| `abort`             | `sessionId`                                   | —                       | Abort current execution      |
+| `status`            | `sessionId?`                                  | `{ gateway, session? }` | Get status                   |
+| `history`           | `sessionId`, `limit?`, `before?`              | `{ messages, hasMore }` | Get history                  |
+| `reset`             | `sessionId`                                   | `{ ok }`                | Reset session                |
+| `close`             | `sessionId`                                   | `{ ok }`                | Close session                |
+| `apps`              | —                                             | `{ apps }`              | List apps                    |
+| `sessions`          | —                                             | `{ sessions }`          | List sessions                |
+| `subscribe`         | `sessionId`                                   | `{ ok }`                | Subscribe to events          |
+| `unsubscribe`       | `sessionId`                                   | `{ ok }`                | Unsubscribe                  |
+| `channel`           | `sessionId`, `channel`, `payload?`            | `{ ok }`                | Publish to channel           |
+| `channel-subscribe` | `sessionId`, `channel`                        | `{ ok }`                | Subscribe to channel         |
+| `schema`            | —                                             | `SchemaPayload`         | Protocol discovery           |
+| `tool-catalog`      | `sessionId`                                   | `{ tools }`             | List session tools           |
+| `tool-confirm`      | `sessionId`, `callId`, `confirmed`, `reason?` | `{ ok }`                | Respond to tool confirmation |
+| `tool-dispatch`     | `sessionId`, `tool`, `input`                  | `{ content }`           | Dispatch tool directly       |
 
 ## Custom Methods
 
@@ -185,7 +190,7 @@ createGateway({
   apps: { myApp },
   defaultApp: "myApp",
   methods: {
-    "analyze": method({
+    analyze: method({
       description: "Analyze text",
       schema: z.object({ text: z.string() }),
       response: z.object({ sentiment: z.number() }),
@@ -199,11 +204,14 @@ createGateway({
 Or via plugin:
 
 ```typescript
-ctx.registerMethod("analyze", method({
-  schema: z.object({ text: z.string() }),
-  response: z.object({ sentiment: z.number() }),
-  handler: async (params) => ({ sentiment: 0.8 }),
-}));
+ctx.registerMethod(
+  "analyze",
+  method({
+    schema: z.object({ text: z.string() }),
+    response: z.object({ sentiment: z.number() }),
+    handler: async (params) => ({ sentiment: 0.8 }),
+  }),
+);
 ```
 
 Both `schema` (params) and `response` accept Zod 3, Zod 4, or any Standard

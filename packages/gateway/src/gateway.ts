@@ -90,11 +90,7 @@ import type {
   ToolDispatchParams,
 } from "./transport-protocol.js";
 import { PROTOCOL_VERSION } from "./transport-protocol.js";
-import {
-  BUILT_IN_METHOD_SCHEMAS,
-  GATEWAY_EVENTS,
-  PROTOCOL_ERROR_CODES,
-} from "./method-schemas.js";
+import { BUILT_IN_METHOD_SCHEMAS, GATEWAY_EVENTS, PROTOCOL_ERROR_CODES } from "./method-schemas.js";
 
 const DEFAULT_PORT = 18789;
 const DEFAULT_HOST = "127.0.0.1";

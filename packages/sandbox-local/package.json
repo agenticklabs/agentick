@@ -21,6 +21,13 @@
   ],
   "type": "module",
   "main": "src/index.ts",
+  "typesVersions": {
+    "*": {
+      "testing": [
+        "dist/testing.d.ts"
+      ]
+    }
+  },
   "exports": {
     ".": {
       "types": "./src/index.ts",
@@ -29,13 +36,6 @@
     "./testing": {
       "types": "./src/testing.ts",
       "import": "./dist/testing.js"
-    }
-  },
-  "typesVersions": {
-    "*": {
-      "testing": [
-        "dist/testing.d.ts"
-      ]
     }
   },
   "publishConfig": {

@@ -93,6 +93,7 @@ import type {
   InboxStorage,
   InboxMessageInput,
 } from "./types.js";
+import { toJSONSchema } from "../utils/schema.js";
 import React from "react";
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -1081,11 +1082,14 @@ export class SessionImpl<P = {}> extends EventEmitter implements Session<P> {
       if (existing) {
         definitions.push(existing);
       } else {
-        // User-only tools — build a definition on-the-fly
+        // User-only tools — convert schema on-the-fly
+        const input = tool.metadata.input
+          ? await toJSONSchema(tool.metadata.input, { stripMeta: true })
+          : {};
         definitions.push({
           name: tool.metadata.name,
           description: tool.metadata.description,
-          input: {} as Record<string, unknown>, // Schema not pre-converted for user-only tools
+          input,
           type: tool.metadata.type,
           intent: tool.metadata.intent,
           audience: tool.metadata.audience ?? "user",

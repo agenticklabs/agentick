@@ -52,10 +52,7 @@ export interface ConfigStore {
   onChange(handler: (config: Readonly<FileConfig>) => void): () => void;
 }
 
-export function createConfigStore(
-  resolved: FileConfig,
-  secretPaths?: Set<string>,
-): ConfigStore {
+export function createConfigStore(resolved: FileConfig, secretPaths?: Set<string>): ConfigStore {
   const frozen = Object.freeze(structuredClone(resolved));
   const secrets = secretPaths ?? new Set<string>();
   const handlers = new Set<(config: Readonly<FileConfig>) => void>();
@@ -84,10 +81,7 @@ export function createConfigStore(
 }
 
 /** Replace values at dot-paths with "***" */
-function redactPaths(
-  config: Readonly<FileConfig>,
-  secretPaths: Set<string>,
-): FileConfig {
+function redactPaths(config: Readonly<FileConfig>, secretPaths: Set<string>): FileConfig {
   const cloned = structuredClone(config) as Record<string, unknown>;
 
   for (const dotPath of secretPaths) {

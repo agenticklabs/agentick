@@ -2,12 +2,12 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { z } from "zod";
 import { createTestGateway, createMockApp } from "../testing.js";
 import type { TestGatewayResult } from "../testing.js";
-import { BUILT_IN_METHOD_SCHEMAS, GATEWAY_EVENTS, PROTOCOL_ERROR_CODES } from "../method-schemas.js";
 import {
-  MODEL_EVENT_TYPES,
-  ORCHESTRATION_EVENT_TYPES,
-  RESULT_EVENT_TYPES,
-} from "@agentick/shared";
+  BUILT_IN_METHOD_SCHEMAS,
+  GATEWAY_EVENTS,
+  PROTOCOL_ERROR_CODES,
+} from "../method-schemas.js";
+import { MODEL_EVENT_TYPES, ORCHESTRATION_EVENT_TYPES, RESULT_EVENT_TYPES } from "@agentick/shared";
 import { method } from "../types.js";
 
 const EchoParams = z.object({ text: z.string() });
@@ -201,10 +201,7 @@ describe("schema method", () => {
     const events = (res.payload as any).events;
 
     const expected =
-      MODEL_EVENT_TYPES.length +
-      ORCHESTRATION_EVENT_TYPES.length +
-      RESULT_EVENT_TYPES.length +
-      4; // channel, method:chunk, method:end, config:changed
+      MODEL_EVENT_TYPES.length + ORCHESTRATION_EVENT_TYPES.length + RESULT_EVENT_TYPES.length + 4; // channel, method:chunk, method:end, config:changed
     expect(events.length).toBe(expected);
   });
 

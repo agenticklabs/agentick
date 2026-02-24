@@ -8,11 +8,7 @@
  */
 
 import type { AgentickErrorCode } from "@agentick/shared";
-import {
-  MODEL_EVENT_TYPES,
-  ORCHESTRATION_EVENT_TYPES,
-  RESULT_EVENT_TYPES,
-} from "@agentick/shared";
+import { MODEL_EVENT_TYPES, ORCHESTRATION_EVENT_TYPES, RESULT_EVENT_TYPES } from "@agentick/shared";
 
 type JSONSchema = Record<string, unknown>;
 
@@ -406,7 +402,12 @@ export const PROTOCOL_ERROR_CODES: Record<string, string> = {
 // Event Catalog
 // ============================================================================
 
-export const GATEWAY_EVENT_TYPES = ["channel", "method:chunk", "method:end", "config:changed"] as const;
+export const GATEWAY_EVENT_TYPES = [
+  "channel",
+  "method:chunk",
+  "method:end",
+  "config:changed",
+] as const;
 
 type EventCategory = "model" | "orchestration" | "result" | "gateway";
 
