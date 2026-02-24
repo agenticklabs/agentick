@@ -204,7 +204,7 @@ describe("schema method", () => {
       MODEL_EVENT_TYPES.length +
       ORCHESTRATION_EVENT_TYPES.length +
       RESULT_EVENT_TYPES.length +
-      3; // channel, method:chunk, method:end
+      4; // channel, method:chunk, method:end, config:changed
     expect(events.length).toBe(expected);
   });
 
@@ -301,7 +301,7 @@ describe("schema method", () => {
     expect(modelCount).toBe(MODEL_EVENT_TYPES.length);
     expect(orchCount).toBe(ORCHESTRATION_EVENT_TYPES.length);
     expect(resultCount).toBe(RESULT_EVENT_TYPES.length);
-    expect(gwCount).toBe(3);
+    expect(gwCount).toBe(4);
   });
 
   it("custom method without response schema has no response in entry", async () => {

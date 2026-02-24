@@ -6,6 +6,7 @@ import type { App } from "@agentick/core";
 import type { SendInput, StreamEvent, ToolConfirmationResponse } from "@agentick/shared";
 import type { KernelContext, UserContext } from "@agentick/kernel";
 import type { AuthConfig } from "@agentick/server";
+import type { ConfigStore } from "./config.js";
 
 // Re-export auth types from server
 export type { AuthConfig, AuthResult } from "@agentick/server";
@@ -123,6 +124,17 @@ export interface GatewayConfig {
    * ctx param is optional - use Context.get() for idiomatic access.
    */
   methods?: MethodsConfig;
+
+  /**
+   * Pre-loaded config store. If provided, gateway skips file loading.
+   */
+  configStore?: ConfigStore;
+
+  /**
+   * Path to config file (used when configStore not provided).
+   * @default "./agentick.config.json"
+   */
+  configPath?: string;
 }
 
 // ============================================================================
@@ -207,6 +219,9 @@ export interface PluginContext {
 
   /** Unsubscribe from gateway events */
   off<K extends keyof GatewayEvents>(event: K, handler: (payload: GatewayEvents[K]) => void): void;
+
+  /** Gateway configuration store */
+  config: ConfigStore;
 
   /** Gateway ID for logging */
   gatewayId: string;

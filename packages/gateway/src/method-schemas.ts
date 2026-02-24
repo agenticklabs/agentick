@@ -367,6 +367,19 @@ export const BUILT_IN_METHOD_SCHEMAS = new Map<string, MethodSchema>([
       errors: ["NOT_FOUND_RESOURCE", "NOT_FOUND_TOOL"],
     },
   ],
+  [
+    "config",
+    {
+      description: "Get resolved configuration (secret values redacted)",
+      response: {
+        type: "object",
+        properties: {
+          config: { type: "object", additionalProperties: true },
+        },
+        required: ["config"],
+      },
+    },
+  ],
 ]);
 
 // ============================================================================
@@ -393,7 +406,7 @@ export const PROTOCOL_ERROR_CODES: Record<string, string> = {
 // Event Catalog
 // ============================================================================
 
-export const GATEWAY_EVENT_TYPES = ["channel", "method:chunk", "method:end"] as const;
+export const GATEWAY_EVENT_TYPES = ["channel", "method:chunk", "method:end", "config:changed"] as const;
 
 type EventCategory = "model" | "orchestration" | "result" | "gateway";
 

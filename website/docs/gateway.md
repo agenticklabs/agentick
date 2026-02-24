@@ -109,6 +109,151 @@ gateway.use(plugin);
 Plugin methods appear alongside built-in and config methods in the schema
 discovery response with `builtin: false`.
 
+## Configuration
+
+The gateway has a built-in configuration system. Config is loaded from a JSON
+file, validated, and made available to all plugins and application code.
+
+### Config File
+
+Create `agentick.config.json` in your project root:
+
+```json
+{
+  "gateway": {
+    "port": 8080,
+    "host": "0.0.0.0"
+  },
+  "connectors": {
+    "telegram": {
+      "token": "${env:TELEGRAM_BOT_TOKEN}",
+      "allowedUsers": [12345678]
+    }
+  }
+}
+```
+
+### Loading Config
+
+```typescript
+import { loadConfig, bindConfig, createGateway } from "@agentick/gateway";
+
+const configStore = await loadConfig({
+  path: "./agentick.config.json",
+  overrides: { gateway: { port: 9999 } }, // CLI flags, etc.
+});
+bindConfig(configStore);
+
+const gateway = createGateway({
+  apps: { myApp },
+  defaultApp: "myApp",
+  configStore, // pass to gateway
+});
+```
+
+`loadConfig` returns a `ConfigStore` — it does not have side effects.
+Call `bindConfig()` yourself to make it globally available.
+
+### Reading Config
+
+```typescript
+import { getConfig } from "@agentick/gateway";
+
+const port = getConfig().get("gateway")?.port; // typed
+const telegram = getConfig().get("connectors")?.telegram; // typed if augmented
+```
+
+### Extending Config Types
+
+Packages declare their config shape via module augmentation. This makes
+`store.get()` fully typed without the gateway knowing about every consumer:
+
+```typescript
+// In your package:
+declare module "@agentick/gateway" {
+  interface FileConfig {
+    myFeature?: {
+      enabled: boolean;
+      maxRetries?: number;
+    };
+  }
+}
+```
+
+Connector plugins augment `ConnectorConfigs`:
+
+```typescript
+declare module "@agentick/gateway" {
+  interface ConnectorConfigs {
+    telegram?: {
+      token: string;
+      allowedUsers?: number[];
+    };
+  }
+}
+```
+
+### Environment Variables and Secrets
+
+String values matching `${env:VAR_NAME}` resolve from `process.env`.
+String values matching `${secret:KEY}` resolve from a `SecretStore`.
+Both are resolved before validation. Missing values throw
+`ConfigValidationError`.
+
+```json
+{
+  "connectors": {
+    "telegram": {
+      "token": "${env:TELEGRAM_BOT_TOKEN}",
+      "apiKey": "${secret:MY_API_KEY}"
+    }
+  }
+}
+```
+
+Secret-interpolated values are tracked internally. The `config` RPC method
+returns a redacted version with secrets replaced by `"***"`.
+
+### Schema Validation
+
+Packages register schema fragments that validate their config section:
+
+```typescript
+import { registerConfigSchema } from "@agentick/gateway";
+
+registerConfigSchema("myFeature", {
+  parse: (data) => mySchema.parse(data),
+  _output: {} as MyFeatureConfig,
+});
+```
+
+Fragments are merged at startup. Keys without registered schemas pass through.
+
+### Plugin Access
+
+Plugins receive config via `PluginContext`:
+
+```typescript
+const plugin: GatewayPlugin = {
+  id: "my-plugin",
+  async initialize(ctx) {
+    const myConfig = ctx.config.get("myFeature");
+  },
+};
+```
+
+### Protocol
+
+The built-in `config` method returns the redacted configuration:
+
+```typescript
+// Client call:
+const response = await client.call("config");
+// { config: { gateway: { port: 8080 }, connectors: { telegram: { token: "***" } } } }
+```
+
+The `config:changed` event type is reserved for future hot-reload support.
+
 ## With Express
 
 ```typescript

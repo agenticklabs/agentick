@@ -105,6 +105,7 @@ export type BuiltInMethod =
   | "channel" // Publish to a channel
   | "channel-subscribe" // Subscribe to a channel
   | "schema" // Get protocol schema
+  | "config" // Get resolved configuration (redacted)
   | "tool-catalog" // Get tool definitions for session
   | "tool-confirm" // Respond to tool confirmation
   | "tool-dispatch"; // Dispatch tool by name
@@ -119,7 +120,12 @@ export type GatewayMethod = BuiltInMethod | (string & {});
 // Event Types
 // ============================================================================
 
-export type GatewayEventType = StreamEvent["type"] | "channel" | "method:chunk" | "method:end";
+export type GatewayEventType =
+  | StreamEvent["type"]
+  | "channel"
+  | "method:chunk"
+  | "method:end"
+  | "config:changed";
 
 // ============================================================================
 // Method Parameters
@@ -253,6 +259,10 @@ export interface SchemaPayload {
   methods: Record<string, MethodSchemaEntry>;
   events: Array<{ type: string; category: string }>;
   errors: Record<string, string>;
+}
+
+export interface ConfigPayload {
+  config: Record<string, unknown>;
 }
 
 export interface ToolCatalogPayload {

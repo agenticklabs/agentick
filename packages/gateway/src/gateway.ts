@@ -65,6 +65,9 @@ import type {
 } from "./types.js";
 import { isMethodDefinition } from "./types.js";
 import { toJSONSchema } from "@agentick/kernel";
+import type { ConfigStore } from "./config.js";
+import { createConfigStore, bindConfig, getConfigOrNull } from "./config.js";
+import { loadConfig } from "./config-loader.js";
 import type {
   RequestMessage,
   GatewayMethod,
@@ -80,6 +83,7 @@ import type {
   SessionsPayload,
   SchemaPayload,
   MethodSchemaEntry,
+  ConfigPayload,
   ToolCatalogPayload,
   ToolCatalogParams,
   ToolConfirmParams,
@@ -219,6 +223,9 @@ export class Gateway extends EventEmitter {
   /** Registered plugins: id -> { plugin, ctx } */
   private plugins = new Map<string, { plugin: GatewayPlugin; ctx: PluginContext }>();
 
+  /** Configuration store (always set in constructor — start() may replace with file-loaded) */
+  private configStore!: ConfigStore;
+
   /** Track which plugin owns which method: method path -> pluginId */
   private pluginMethodOwnership = new Map<string, string>();
 
@@ -247,6 +254,12 @@ export class Gateway extends EventEmitter {
     // Initialize components
     this.registry = new AppRegistry(config.apps, config.defaultApp);
     this.sessions = new SessionManager(this.registry, { gatewayId: this.config.id });
+
+    // Config store: use provided, or create empty (start() may replace with file-loaded)
+    this.configStore = config.configStore ?? createConfigStore({});
+    if (!getConfigOrNull()) {
+      bindConfig(this.configStore);
+    }
 
     // Initialize all methods as procedures
     if (config.methods) {
@@ -473,6 +486,12 @@ export class Gateway extends EventEmitter {
 
     if (this.isRunning) {
       throw new Error("Gateway is already running");
+    }
+
+    // Load config from file if no pre-loaded configStore was provided
+    if (!this.config.configStore) {
+      this.configStore = await loadConfig({ path: this.config.configPath });
+      bindConfig(this.configStore);
     }
 
     // Start all transports
@@ -1481,6 +1500,9 @@ export class Gateway extends EventEmitter {
       case "schema":
         return this.handleSchemaMethod();
 
+      case "config":
+        return this.handleConfigMethod();
+
       case "tool-catalog":
         return this.handleToolCatalogMethod(params as unknown as ToolCatalogParams);
 
@@ -1884,6 +1906,10 @@ export class Gateway extends EventEmitter {
     };
   }
 
+  private handleConfigMethod(): ConfigPayload {
+    return { config: this.configStore.redacted() as Record<string, unknown> };
+  }
+
   private async handleToolCatalogMethod(params: ToolCatalogParams): Promise<ToolCatalogPayload> {
     const { sessionId } = params;
     if (!sessionId) throw new Error("sessionId is required");
@@ -2006,6 +2032,7 @@ export class Gateway extends EventEmitter {
   private createPluginContext(pluginId: string): PluginContext {
     return {
       gatewayId: this.config.id,
+      config: this.configStore!,
 
       sendToSession: async (sessionKey: string, input: SendInput) => {
         return this.sendToSession(sessionKey, input);

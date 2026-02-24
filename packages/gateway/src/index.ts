@@ -56,6 +56,7 @@ export {
   type ToolCatalogParams,
   type ToolConfirmParams,
   type ToolDispatchParams,
+  type ConfigPayload,
   PROTOCOL_VERSION,
 } from "./transport-protocol.js";
 
@@ -98,3 +99,26 @@ export {
   // Schema type for Zod 3/4 compatibility
   type ZodLikeSchema,
 } from "./types.js";
+
+// Configuration system
+export {
+  type FileConfig,
+  type ConnectorConfigs,
+  type ProviderConfigs,
+  type ConfigStore,
+  createConfigStore,
+  registerConfigSchema,
+  buildConfigSchema,
+  resetConfigSchemaRegistry,
+  bindConfig,
+  getConfig,
+  getConfigOrNull,
+  resetConfigBinding,
+} from "./config.js";
+
+export {
+  loadConfig,
+  interpolateConfig,
+  ConfigValidationError,
+  type LoadConfigOptions,
+} from "./config-loader.js";

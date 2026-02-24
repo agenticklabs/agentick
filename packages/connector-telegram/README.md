@@ -90,8 +90,66 @@ For a long-running agent that reports results:
 }
 ```
 
+## Gateway Plugin
+
+`TelegramPlugin` connects a bot directly to the gateway without a separate
+connector process:
+
+```typescript
+import { createGateway } from "@agentick/gateway";
+import { TelegramPlugin } from "@agentick/connector-telegram";
+
+const gateway = createGateway({
+  apps: { myApp },
+  defaultApp: "myApp",
+  plugins: [
+    new TelegramPlugin({
+      token: process.env.TELEGRAM_BOT_TOKEN!,
+      allowedUsers: [12345678],
+    }),
+  ],
+});
+```
+
+The plugin receives messages from Telegram, routes them to sessions, and
+delivers responses back. Registers a `telegram:send` method for outbound
+messaging from tool handlers.
+
+### Gateway Config File
+
+With the gateway [config system](/docs/gateway#configuration), Telegram
+options live in `agentick.config.json`:
+
+```json
+{
+  "connectors": {
+    "telegram": {
+      "token": "${env:TELEGRAM_BOT_TOKEN}",
+      "allowedUsers": [12345678],
+      "chatId": 987654321
+    }
+  }
+}
+```
+
+Read it from the config store:
+
+```typescript
+import { getConfig } from "@agentick/gateway";
+
+const telegram = getConfig().get("connectors")?.telegram;
+if (telegram) {
+  gateway.use(new TelegramPlugin(telegram));
+}
+```
+
+Importing `@agentick/connector-telegram` augments the gateway's
+`ConnectorConfigs` type, so `get("connectors")?.telegram` is fully typed.
+
 ## Exports
 
 ```typescript
-export { TelegramPlatform, type TelegramConnectorOptions } from "./telegram-platform.js";
+export { TelegramPlugin, type TelegramPluginOptions } from "./telegram-plugin.js";
+export { escapeMarkdownV2 } from "./telegram-format.js";
+export { parseTextConfirmation, formatConfirmationMessage } from "./confirmation-utils.js";
 ```
