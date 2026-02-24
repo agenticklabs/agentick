@@ -6,6 +6,9 @@
 
 import type { StreamEvent } from "@agentick/shared";
 
+/** Current protocol version */
+export const PROTOCOL_VERSION = "1.0";
+
 // ============================================================================
 // Client → Gateway Messages
 // ============================================================================
@@ -14,6 +17,7 @@ export interface ConnectMessage {
   type: "connect";
   clientId: string;
   token?: string;
+  protocolVersion?: string;
   metadata?: Record<string, unknown>;
 }
 
@@ -38,6 +42,7 @@ export type ClientMessage = ConnectMessage | RequestMessage | PingMessage;
 export interface ConnectedMessage {
   type: "connected";
   gatewayId: string;
+  protocolVersion: string;
   apps: string[];
   sessions: string[];
 }
@@ -98,7 +103,11 @@ export type BuiltInMethod =
   | "subscribe" // Subscribe to session events
   | "unsubscribe" // Unsubscribe from events
   | "channel" // Publish to a channel
-  | "channel-subscribe"; // Subscribe to a channel
+  | "channel-subscribe" // Subscribe to a channel
+  | "schema" // Get protocol schema
+  | "tool-catalog" // Get tool definitions for session
+  | "tool-confirm" // Respond to tool confirmation
+  | "tool-dispatch"; // Dispatch tool by name
 
 /**
  * Gateway method - built-in methods or custom method strings.
@@ -157,6 +166,23 @@ export interface UnsubscribeParams {
   sessionId: string;
 }
 
+export interface ToolCatalogParams {
+  sessionId: string;
+}
+
+export interface ToolConfirmParams {
+  sessionId: string;
+  callId: string;
+  confirmed: boolean;
+  reason?: string;
+}
+
+export interface ToolDispatchParams {
+  sessionId: string;
+  tool: string;
+  input: Record<string, unknown>;
+}
+
 // ============================================================================
 // Response Payloads
 // ============================================================================
@@ -210,6 +236,33 @@ export interface SessionsPayload {
     createdAt: string;
     lastActivityAt: string;
     messageCount: number;
+  }>;
+}
+
+export interface MethodSchemaEntry {
+  description: string;
+  params?: Record<string, unknown>;
+  response?: Record<string, unknown>;
+  errors?: string[];
+  roles?: string[];
+  builtin: boolean;
+}
+
+export interface SchemaPayload {
+  protocolVersion: string;
+  methods: Record<string, MethodSchemaEntry>;
+  events: Array<{ type: string; category: string }>;
+  errors: Record<string, string>;
+}
+
+export interface ToolCatalogPayload {
+  tools: Array<{
+    name: string;
+    description: string;
+    input: Record<string, unknown>;
+    type?: string;
+    intent?: string;
+    audience?: string;
   }>;
 }
 

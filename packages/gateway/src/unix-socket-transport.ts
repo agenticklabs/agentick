@@ -233,5 +233,8 @@ export class UnixSocketTransport extends BaseTransport {
       client._setId(message.clientId);
       this.clients.set(message.clientId, client);
     }
+
+    // Notify gateway that auth succeeded — gateway sends ConnectedMessage
+    this.config.onAuthenticated?.(client);
   }
 }

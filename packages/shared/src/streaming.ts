@@ -797,6 +797,56 @@ export type ResultStreamEvent = {
 export type StreamEvent = ModelStreamEvent | OrchestrationStreamEvent | ResultStreamEvent;
 
 // ============================================================================
+// Event Type Arrays (authoritative, used by type guards and schema discovery)
+// ============================================================================
+
+export const MODEL_EVENT_TYPES = [
+  "content_start",
+  "content_delta",
+  "content_end",
+  "content",
+  "reasoning_start",
+  "reasoning_delta",
+  "reasoning_end",
+  "reasoning",
+  "message_start",
+  "message_end",
+  "message",
+  "tool_call_start",
+  "tool_call_delta",
+  "tool_call_end",
+  "tool_call",
+  "usage",
+  "error",
+] as const;
+
+export const ORCHESTRATION_EVENT_TYPES = [
+  "execution_start",
+  "execution_end",
+  "execution",
+  "tick_start",
+  "tick_end",
+  "tick",
+  "tool_result_start",
+  "tool_result",
+  "tool_confirmation_required",
+  "tool_confirmation_result",
+  "compiled",
+  "model_request",
+  "provider_request",
+  "model_response",
+  "context_update",
+  "fork_start",
+  "fork_end",
+  "spawn_start",
+  "spawn_end",
+  "entry_committed",
+  "engine_error",
+] as const;
+
+export const RESULT_EVENT_TYPES = ["result"] as const;
+
+// ============================================================================
 // Event Type Guards
 // ============================================================================
 
@@ -804,53 +854,14 @@ export type StreamEvent = ModelStreamEvent | OrchestrationStreamEvent | ResultSt
  * Check if event is a ModelStreamEvent (model output)
  */
 export function isModelStreamEvent(event: StreamEvent): event is ModelStreamEvent {
-  return [
-    "content_start",
-    "content_delta",
-    "content_end",
-    "content",
-    "reasoning_start",
-    "reasoning_delta",
-    "reasoning_end",
-    "reasoning",
-    "message_start",
-    "message_end",
-    "message",
-    "tool_call_start",
-    "tool_call_delta",
-    "tool_call_end",
-    "tool_call",
-    "usage",
-    "error",
-  ].includes(event.type);
+  return (MODEL_EVENT_TYPES as readonly string[]).includes(event.type);
 }
 
 /**
  * Check if event is an OrchestrationStreamEvent (orchestration)
  */
 export function isOrchestrationStreamEvent(event: StreamEvent): event is OrchestrationStreamEvent {
-  return [
-    "execution_start",
-    "execution_end",
-    "execution",
-    "tick_start",
-    "tick_end",
-    "tick",
-    "tool_result_start",
-    "tool_result",
-    "tool_confirmation_required",
-    "tool_confirmation_result",
-    "compiled",
-    "model_request",
-    "model_response",
-    "context_update",
-    "fork_start",
-    "fork_end",
-    "spawn_start",
-    "spawn_end",
-    "entry_committed",
-    "engine_error",
-  ].includes(event.type);
+  return (ORCHESTRATION_EVENT_TYPES as readonly string[]).includes(event.type);
 }
 
 /**

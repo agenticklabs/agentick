@@ -395,8 +395,19 @@ export function createMockSession(options: MockSessionOptions = {}): MockSession
       return null;
     }
 
+    private _channels = new Map<string, Channel>();
+
     channel(name: string) {
-      return new Channel(name);
+      let ch = this._channels.get(name);
+      if (!ch) {
+        ch = new Channel(name);
+        this._channels.set(name, ch);
+      }
+      return ch;
+    }
+
+    async getToolDefinitions() {
+      return [];
     }
 
     pushEvent(event: Record<string, unknown> & { type: string }) {

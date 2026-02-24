@@ -163,6 +163,13 @@ export interface ToolDefinition {
    */
   intent?: ToolIntent;
   /**
+   * Controls who sees this tool.
+   * - "model" (default): Sent to the model for tool_use
+   * - "user": User dispatch only (hidden from model)
+   * - "all": Both model and user dispatch
+   */
+  audience?: "model" | "user" | "all";
+  /**
    * Whether execution should wait for client response.
    * Only applicable for CLIENT type tools.
    * - true: Server pauses and waits for tool_result from client (e.g., forms)

@@ -59,6 +59,9 @@ export interface TransportEvents {
 export interface TransportConfig {
   /** Authentication configuration */
   auth?: AuthConfig;
+
+  /** Called after a client successfully authenticates. Gateway uses this to send ConnectedMessage. */
+  onAuthenticated?: (client: TransportClient) => void;
 }
 
 /**

@@ -46,6 +46,7 @@ import type { EngineModel } from "../model/model.js";
 import type {
   ToolResult,
   ToolCall,
+  ToolDefinition,
   Message,
   UsageStats,
   ContentBlock,
@@ -1054,6 +1055,32 @@ export class SessionImpl<P = {}> extends EventEmitter implements Session<P> {
       this._mountPromise = null; // Allow retry on failure
       throw e;
     }
+  }
+
+  async getToolDefinitions(): Promise<ToolDefinition[]> {
+    await this.mount();
+    // toolDefinitions only has model-visible tools. We also need user-only tools.
+    // Get ALL tools from COM, build definitions for each.
+    const allTools = this.ctx!.getTools();
+    const definitions: ToolDefinition[] = [];
+    for (const tool of allTools) {
+      // Model-visible tools already have cached definitions
+      const existing = this.ctx!.getToolDefinition(tool.metadata.name);
+      if (existing) {
+        definitions.push(existing);
+      } else {
+        // User-only tools — build a definition on-the-fly
+        definitions.push({
+          name: tool.metadata.name,
+          description: tool.metadata.description,
+          input: {} as Record<string, unknown>, // Schema not pre-converted for user-only tools
+          type: tool.metadata.type,
+          intent: tool.metadata.intent,
+          audience: tool.metadata.audience ?? "user",
+        });
+      }
+    }
+    return definitions;
   }
 
   private async _doMount(): Promise<void> {

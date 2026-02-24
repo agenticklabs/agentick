@@ -50,7 +50,25 @@ export {
   type StatusPayload,
   type AppsPayload,
   type SessionsPayload,
+  type SchemaPayload,
+  type MethodSchemaEntry,
+  type ToolCatalogPayload,
+  type ToolCatalogParams,
+  type ToolConfirmParams,
+  type ToolDispatchParams,
+  PROTOCOL_VERSION,
 } from "./transport-protocol.js";
+
+// Schema discovery
+export {
+  BUILT_IN_METHOD_SCHEMAS,
+  PROTOCOL_ERROR_CODES,
+  GATEWAY_EVENTS,
+  GATEWAY_EVENT_TYPES,
+  type MethodSchema,
+  type EventSchemaEntry,
+  type ProtocolErrorCode,
+} from "./method-schemas.js";
 
 // Configuration types
 export {

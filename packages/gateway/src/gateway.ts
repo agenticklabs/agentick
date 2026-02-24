@@ -10,7 +10,16 @@
 import { EventEmitter } from "events";
 import type { IncomingMessage as NodeRequest, ServerResponse as NodeResponse } from "http";
 import type { Message } from "@agentick/shared";
-import { GuardError, isGuardError, extractText } from "@agentick/shared";
+import {
+  GuardError,
+  isGuardError,
+  isNotFoundError,
+  isValidationError,
+  isStateError,
+  isAgentickError,
+  extractText,
+  NotFoundError,
+} from "@agentick/shared";
 import {
   devToolsEmitter,
   type DTClientConnectedEvent,
@@ -55,6 +64,7 @@ import type {
   SimpleMethodHandler,
 } from "./types.js";
 import { isMethodDefinition } from "./types.js";
+import { toJSONSchema } from "@agentick/kernel";
 import type {
   RequestMessage,
   GatewayMethod,
@@ -68,7 +78,19 @@ import type {
   StatusPayload,
   AppsPayload,
   SessionsPayload,
+  SchemaPayload,
+  MethodSchemaEntry,
+  ToolCatalogPayload,
+  ToolCatalogParams,
+  ToolConfirmParams,
+  ToolDispatchParams,
 } from "./transport-protocol.js";
+import { PROTOCOL_VERSION } from "./transport-protocol.js";
+import {
+  BUILT_IN_METHOD_SCHEMAS,
+  GATEWAY_EVENTS,
+  PROTOCOL_ERROR_CODES,
+} from "./method-schemas.js";
 
 const DEFAULT_PORT = 18789;
 const DEFAULT_HOST = "127.0.0.1";
@@ -147,19 +169,7 @@ function extractTextFromInput(input: SendInput): string {
   return texts.join(" ") || "[multimodal content]";
 }
 
-/** Built-in methods that cannot be overridden */
-const BUILT_IN_METHODS: Set<string> = new Set([
-  "send",
-  "abort",
-  "status",
-  "history",
-  "reset",
-  "close",
-  "apps",
-  "sessions",
-  "subscribe",
-  "unsubscribe",
-]);
+// Built-in method schemas imported from method-schemas.ts (BUILT_IN_METHOD_SCHEMAS)
 
 export class Gateway extends EventEmitter {
   private config: Required<
@@ -175,6 +185,15 @@ export class Gateway extends EventEmitter {
 
   /** Pre-compiled map of method paths to procedures */
   private methodProcedures = new Map<string, Procedure<any>>();
+
+  /** Stored schemas for custom methods (method path → raw schema) */
+  private methodSchemas = new Map<string, unknown>();
+
+  /** Stored response schemas for custom methods (method path → raw schema) */
+  private methodResponseSchemas = new Map<string, unknown>();
+
+  /** Stored metadata for custom methods (method path → { description, roles }) */
+  private methodMeta = new Map<string, { description?: string; roles?: string[] }>();
 
   /** SSE transport for embedded mode (initialized in constructor when embedded: true) */
   private sseTransport: EmbeddedSSETransport | null = null;
@@ -286,6 +305,20 @@ export class Gateway extends EventEmitter {
           middleware.push(createCustomGuardMiddleware(value.guard));
         }
 
+        // Store schema and metadata for discovery
+        if (value.schema) {
+          this.methodSchemas.set(methodName, value.schema);
+        }
+        if (value.response) {
+          this.methodResponseSchemas.set(methodName, value.response);
+        }
+        if (value.description || value.roles) {
+          this.methodMeta.set(methodName, {
+            description: value.description,
+            roles: value.roles,
+          });
+        }
+
         this.methodProcedures.set(
           methodName,
           createProcedure(
@@ -325,7 +358,12 @@ export class Gateway extends EventEmitter {
     const { transport, port, host, auth, httpPort } = this.config;
 
     if (transport === "websocket" || transport === "both") {
-      const wsTransport = new WSTransport({ port, host, auth });
+      const wsTransport = new WSTransport({
+        port,
+        host,
+        auth,
+        onAuthenticated: (client) => this.sendConnectedMessage(client),
+      });
       this.setupTransportHandlers(wsTransport);
       this.transports.push(wsTransport);
     }
@@ -350,6 +388,7 @@ export class Gateway extends EventEmitter {
       const unixTransport = new UnixSocketTransport({
         socketPath: this.config.socketPath,
         auth,
+        onAuthenticated: (client) => this.sendConnectedMessage(client),
       });
       this.setupTransportHandlers(unixTransport);
       this.transports.push(unixTransport);
@@ -935,6 +974,19 @@ export class Gateway extends EventEmitter {
       log.error({ method, error }, "handleInvoke: failed");
       const errorMessage = error instanceof Error ? error.message : String(error);
 
+      let errorCode = "METHOD_ERROR";
+      if (isNotFoundError(error)) {
+        errorCode = error.code;
+      } else if (isValidationError(error)) {
+        errorCode = error.code;
+      } else if (isGuardError(error)) {
+        errorCode = error.code;
+      } else if (isStateError(error)) {
+        errorCode = error.code;
+      } else if (isAgentickError(error)) {
+        errorCode = error.code;
+      }
+
       // Emit DevTools response event for error
       if (devToolsEmitter.hasSubscribers()) {
         devToolsEmitter.emitEvent({
@@ -943,16 +995,16 @@ export class Gateway extends EventEmitter {
           requestId,
           method,
           ok: false,
-          error: { code: "INVOKE_ERROR", message: errorMessage },
+          error: { code: errorCode, message: errorMessage },
           latencyMs: Date.now() - startTime,
           sequence: this.devToolsSequence++,
           timestamp: Date.now(),
         } as DTGatewayResponseEvent);
       }
 
-      const statusCode = isGuardError(error) ? 403 : 400;
+      const statusCode = isGuardError(error) ? 403 : isNotFoundError(error) ? 404 : 400;
       res.writeHead(statusCode, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: errorMessage }));
+      res.end(JSON.stringify({ error: errorMessage, code: errorCode }));
     }
   }
 
@@ -1317,7 +1369,20 @@ export class Gateway extends EventEmitter {
         } as DTGatewayResponseEvent);
       }
     } catch (error) {
-      const errorCode = "METHOD_ERROR";
+      let errorCode = "METHOD_ERROR";
+
+      if (isNotFoundError(error)) {
+        errorCode = error.code;
+      } else if (isValidationError(error)) {
+        errorCode = error.code;
+      } else if (isGuardError(error)) {
+        errorCode = error.code;
+      } else if (isStateError(error)) {
+        errorCode = error.code;
+      } else if (isAgentickError(error)) {
+        errorCode = error.code;
+      }
+
       const errorMessage = error instanceof Error ? error.message : String(error);
 
       client.send({
@@ -1412,6 +1477,18 @@ export class Gateway extends EventEmitter {
         await this.publishToChannel(sessionId, channel, payload);
         return { ok: true };
       }
+
+      case "schema":
+        return this.handleSchemaMethod();
+
+      case "tool-catalog":
+        return this.handleToolCatalogMethod(params as unknown as ToolCatalogParams);
+
+      case "tool-confirm":
+        return this.handleToolConfirmMethod(params as unknown as ToolConfirmParams);
+
+      case "tool-dispatch":
+        return this.handleToolDispatchMethod(params as unknown as ToolDispatchParams);
     }
 
     // Check custom methods
@@ -1420,7 +1497,7 @@ export class Gateway extends EventEmitter {
       return this.executeCustomMethod(transport, clientId, method, params);
     }
 
-    throw new Error(`Unknown method: ${method}`);
+    throw new NotFoundError("resource", method, `Unknown method: ${method}`);
   }
 
   /**
@@ -1454,7 +1531,7 @@ export class Gateway extends EventEmitter {
     // Get the procedure
     const procedure = this.getMethodProcedure(method);
     if (!procedure) {
-      throw new Error(`Unknown method: ${method}`);
+      throw new NotFoundError("resource", method, `Unknown method: ${method}`);
     }
 
     // Execute within context
@@ -1594,7 +1671,7 @@ export class Gateway extends EventEmitter {
   ): Promise<unknown> {
     const procedure = this.getMethodProcedure(method);
     if (!procedure) {
-      throw new Error(`Unknown method: ${method}`);
+      throw new NotFoundError("resource", method, `Unknown method: ${method}`);
     }
 
     const sessionId = params.sessionId as string | undefined;
@@ -1652,7 +1729,7 @@ export class Gateway extends EventEmitter {
   private async handleAbortMethod(params: { sessionId: string }): Promise<void> {
     const session = this.sessions.get(params.sessionId);
     if (!session) {
-      throw new Error(`Session not found: ${params.sessionId}`);
+      throw new NotFoundError("session", params.sessionId);
     }
   }
 
@@ -1744,6 +1821,121 @@ export class Gateway extends EventEmitter {
   }
 
   // ══════════════════════════════════════════════════════════════════════════
+  // Protocol Methods (schema, tool-catalog, tool-confirm, tool-dispatch)
+  // ══════════════════════════════════════════════════════════════════════════
+
+  /**
+   * Send ConnectedMessage to a client after auth succeeds.
+   * Called via onAuthenticated callback from WS/Unix transports.
+   */
+  private sendConnectedMessage(client: TransportClient): void {
+    client.send({
+      type: "connected",
+      gatewayId: this.config.id,
+      protocolVersion: PROTOCOL_VERSION,
+      apps: this.registry.ids(),
+      sessions: Array.from(client.state.subscriptions),
+    });
+  }
+
+  private async handleSchemaMethod(): Promise<SchemaPayload> {
+    const methods: Record<string, MethodSchemaEntry> = {};
+
+    // Built-in methods — raw JSON Schema, assign directly
+    for (const [name, schema] of BUILT_IN_METHOD_SCHEMAS) {
+      const entry: MethodSchemaEntry = {
+        description: schema.description,
+        builtin: true,
+      };
+      if (schema.params) entry.params = schema.params;
+      if (schema.response) entry.response = schema.response;
+      if (schema.errors) entry.errors = schema.errors;
+      methods[name] = entry;
+    }
+
+    // Custom methods — schemas may be Zod/Standard Schema, need toJSONSchema
+    for (const path of this.methodProcedures.keys()) {
+      if (BUILT_IN_METHOD_SCHEMAS.has(path)) continue;
+
+      const entry: MethodSchemaEntry = { description: "", builtin: false };
+
+      const rawSchema = this.methodSchemas.get(path);
+      if (rawSchema) {
+        entry.params = await toJSONSchema(rawSchema, { stripMeta: true });
+      }
+
+      const responseSchema = this.methodResponseSchemas.get(path);
+      if (responseSchema) {
+        entry.response = await toJSONSchema(responseSchema, { stripMeta: true });
+      }
+
+      const meta = this.methodMeta.get(path);
+      if (meta?.description) entry.description = meta.description;
+      if (meta?.roles) entry.roles = meta.roles;
+
+      methods[path] = entry;
+    }
+
+    return {
+      protocolVersion: PROTOCOL_VERSION,
+      methods,
+      events: GATEWAY_EVENTS,
+      errors: PROTOCOL_ERROR_CODES,
+    };
+  }
+
+  private async handleToolCatalogMethod(params: ToolCatalogParams): Promise<ToolCatalogPayload> {
+    const { sessionId } = params;
+    if (!sessionId) throw new Error("sessionId is required");
+
+    const session = await this.session(sessionId);
+    const definitions = await session.getToolDefinitions();
+
+    return {
+      tools: definitions.map((def) => ({
+        name: def.name,
+        description: def.description,
+        input: def.input,
+        type: def.type,
+        intent: def.intent,
+        audience: def.audience,
+      })),
+    };
+  }
+
+  private async handleToolConfirmMethod(params: ToolConfirmParams): Promise<{ ok: true }> {
+    const { sessionId, callId, confirmed, reason } = params;
+    if (!sessionId) throw new Error("sessionId is required");
+    if (!callId) throw new Error("callId is required");
+
+    // Publish directly to the session's channel — NOT through publishToChannel
+    // which double-wraps in { type: "message" }. The confirmation coordinator
+    // at session.ts:2808 expects { type: "response", id, payload }.
+    const session = await this.session(sessionId);
+    session.channel("tool_confirmation").publish({
+      type: "response",
+      channel: "tool_confirmation",
+      id: callId,
+      payload: { approved: confirmed, reason },
+    });
+
+    return { ok: true };
+  }
+
+  private async handleToolDispatchMethod(
+    params: ToolDispatchParams,
+  ): Promise<{ content: unknown[] }> {
+    const { sessionId, tool, input } = params;
+    if (!sessionId) throw new Error("sessionId is required");
+    if (!tool) throw new Error("tool is required");
+
+    const session = await this.session(sessionId);
+    const result = await session.dispatch.exec(tool, input ?? {}).result;
+
+    return { content: result };
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
   // Plugin System
   // ══════════════════════════════════════════════════════════════════════════
 
@@ -1764,6 +1956,9 @@ export class Gateway extends EventEmitter {
       for (const [path, owner] of this.pluginMethodOwnership.entries()) {
         if (owner === plugin.id) {
           this.methodProcedures.delete(path);
+          this.methodSchemas.delete(path);
+          this.methodResponseSchemas.delete(path);
+          this.methodMeta.delete(path);
           this.pluginMethodOwnership.delete(path);
         }
       }
@@ -1787,6 +1982,9 @@ export class Gateway extends EventEmitter {
     for (const [path, owner] of this.pluginMethodOwnership.entries()) {
       if (owner === pluginId) {
         this.methodProcedures.delete(path);
+        this.methodSchemas.delete(path);
+        this.methodResponseSchemas.delete(path);
+        this.methodMeta.delete(path);
         this.pluginMethodOwnership.delete(path);
       }
     }
@@ -1814,7 +2012,11 @@ export class Gateway extends EventEmitter {
       },
 
       respondToConfirmation: async (sessionKey: string, callId: string, response) => {
-        await this.publishToChannel(sessionKey, "tool_confirmation", {
+        // Publish directly to channel — NOT through publishToChannel which
+        // double-wraps in { type: "message" }. The confirmation coordinator
+        // expects { type: "response", id, payload }.
+        const session = await this.session(sessionKey);
+        session.channel("tool_confirmation").publish({
           type: "response",
           channel: "tool_confirmation",
           id: callId,
@@ -1823,7 +2025,7 @@ export class Gateway extends EventEmitter {
       },
 
       registerMethod: (path: string, handler: SimpleMethodHandler | MethodDefinition) => {
-        if (BUILT_IN_METHODS.has(path)) {
+        if (BUILT_IN_METHOD_SCHEMAS.has(path)) {
           throw new Error(`Cannot override built-in method: ${path}`);
         }
         if (this.methodProcedures.has(path)) {
@@ -1842,6 +2044,17 @@ export class Gateway extends EventEmitter {
           if (def.guard) {
             middleware.push(createCustomGuardMiddleware(def.guard));
           }
+          // Store raw schemas for discovery
+          if (def.schema) {
+            this.methodSchemas.set(path, def.schema);
+          }
+          if (def.response) {
+            this.methodResponseSchemas.set(path, def.response);
+          }
+          this.methodMeta.set(path, {
+            description: def.description,
+            roles: def.roles,
+          });
         }
 
         this.methodProcedures.set(
@@ -1869,6 +2082,9 @@ export class Gateway extends EventEmitter {
         // Only allow unregistering own methods
         if (this.pluginMethodOwnership.get(path) !== pluginId) return;
         this.methodProcedures.delete(path);
+        this.methodSchemas.delete(path);
+        this.methodResponseSchemas.delete(path);
+        this.methodMeta.delete(path);
         this.pluginMethodOwnership.delete(path);
       },
 

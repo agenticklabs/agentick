@@ -201,6 +201,7 @@ export default defineConfig({
           items: [
             { text: "Package Overview", link: "/docs/packages" },
             { text: "Gateway & Sessions", link: "/docs/gateway" },
+            { text: "Gateway Protocol", link: "/docs/gateway-protocol" },
             { text: "Client-Server", link: "/docs/client-server" },
             { text: "Connectors", link: "/docs/connectors" },
             { text: "DevTools", link: "/docs/devtools" },

@@ -149,7 +149,7 @@ describe("Unified execution state management", () => {
 
       const stream = transport.send(
         {
-          messages: [{ role: "user", content: "plain string content" }],
+          messages: [{ role: "user", content: [{ type: "text", text: "plain string content" }] }],
         },
         "main",
       );

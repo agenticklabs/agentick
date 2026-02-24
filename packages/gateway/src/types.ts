@@ -296,6 +296,8 @@ export type StreamingMethodHandler<TParams = Record<string, unknown>, TYield = u
 export interface MethodDefinitionInput<TSchema extends ZodLikeSchema = ZodLikeSchema> {
   /** Zod schema for params validation + TypeScript inference */
   schema?: TSchema;
+  /** Zod schema for response (used by schema discovery only) */
+  response?: ZodLikeSchema;
   /** Handler function - receives validated & typed params */
   handler: SimpleMethodHandler<TSchema["_output"]> | StreamingMethodHandler<TSchema["_output"]>;
   /** Required roles - checked before handler */

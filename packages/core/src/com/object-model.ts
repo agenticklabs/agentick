@@ -575,6 +575,7 @@ export class ContextObjectModel extends EventEmitter {
           output: outputJsonSchema as Record<string, unknown> | undefined,
           type: tool.metadata.type,
           intent: tool.metadata.intent,
+          audience: tool.metadata.audience,
           requiresResponse: tool.metadata.requiresResponse,
           timeout: tool.metadata.timeout,
           defaultResult: tool.metadata.defaultResult,

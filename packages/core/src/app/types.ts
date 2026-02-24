@@ -18,6 +18,7 @@ import type {
   StreamEvent as SharedStreamEvent,
   ToolCall,
   ToolResult,
+  ToolDefinition,
   UsageStats,
   TimelineEntry,
   SendInput as SharedSendInput,
@@ -1778,6 +1779,15 @@ export interface Session<P = {}> extends EventEmitter {
    * ```
    */
   channel(name: string): Channel;
+
+  /**
+   * Get tool definitions for all registered tools.
+   *
+   * Returns the provider-compatible ToolDefinition[] (with JSON Schema).
+   * Includes ALL tools (model + user + all audience), with audience field set.
+   * Mounts the component tree if not already mounted.
+   */
+  getToolDefinitions(): Promise<ToolDefinition[]>;
 
   /**
    * Push an event into this session's event stream.
