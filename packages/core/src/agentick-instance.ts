@@ -520,16 +520,26 @@ class AppImpl<P> implements App<P> {
     };
   }
 
-  async receive(message: InboxMessageInput): Promise<void> {
+  async receive(
+    sessionIdOrMessage: string | InboxMessageInput,
+    message?: InboxMessageInput,
+  ): Promise<void> {
+    if (typeof sessionIdOrMessage === "string") {
+      // Direct delivery by session ID — bypass resolver
+      await this.inboxStorage.write(sessionIdOrMessage, message!);
+      return;
+    }
+
+    // Original signature: route through resolver
     const resolver = this.options.sessionResolver;
     let sessionId: string | null = null;
     if (resolver) {
-      sessionId = await resolver(message);
+      sessionId = await resolver(sessionIdOrMessage);
     }
     if (!sessionId) {
       sessionId = randomUUID();
     }
-    await this.inboxStorage.write(sessionId, message);
+    await this.inboxStorage.write(sessionId, sessionIdOrMessage);
     // If session is active, subscriber fires immediately.
     // If not active, processInbox() or next session(id) call handles it.
   }

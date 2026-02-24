@@ -91,6 +91,7 @@ import type {
   ResolveConfig,
   ResolveContext,
   InboxStorage,
+  InboxMessageInput,
 } from "./types.js";
 import React from "react";
 
@@ -255,6 +256,7 @@ export class SessionImpl<P = {}> extends EventEmitter implements Session<P> {
 
   // Spawn hierarchy
   private _parent: Session | null = null;
+  private _parentSessionId: string | null = null;
   private _children: Session[] = [];
   private _spawnDepth = 0;
   private static readonly MAX_SPAWN_DEPTH = 10;
@@ -299,6 +301,11 @@ export class SessionImpl<P = {}> extends EventEmitter implements Session<P> {
     // Read maxTimelineEntries from appOptions
     this._maxTimelineEntries = appOptions.maxTimelineEntries;
 
+    // Parent session ID from options (for persistent parent-child relationships)
+    if (sessionOptions.parentSessionId) {
+      this._parentSessionId = sessionOptions.parentSessionId;
+    }
+
     // Note: snapshot/initialTimeline hydration now handled via _snapshotForResolve
     // set by App.createSessionFromSnapshot() — applied in ensureCompilationInfrastructure()
 
@@ -339,6 +346,10 @@ export class SessionImpl<P = {}> extends EventEmitter implements Session<P> {
 
   get parent(): Session | null {
     return this._parent;
+  }
+
+  get parentSessionId(): string | null {
+    return this._parentSessionId;
   }
 
   get children(): readonly Session[] {
@@ -601,6 +612,7 @@ export class SessionImpl<P = {}> extends EventEmitter implements Session<P> {
         };
         const child = new SessionImpl(Component, childAppOptions, childOptions);
         (child as any)._parent = this;
+        (child as any)._parentSessionId = this.id;
         (child as any)._spawnDepth = this._spawnDepth + 1;
         this._children.push(child as unknown as Session);
 
@@ -1264,6 +1276,7 @@ export class SessionImpl<P = {}> extends EventEmitter implements Session<P> {
       dataCache: this.compiler?.getSerializableDataCache() ?? {},
       usage: { ...this._totalUsage },
       timestamp: Date.now(),
+      parentSessionId: this._parentSessionId,
     };
   }
 
@@ -1351,6 +1364,10 @@ export class SessionImpl<P = {}> extends EventEmitter implements Session<P> {
    */
   setSnapshotForResolve(snapshot: SessionSnapshot): void {
     this._snapshotForResolve = snapshot;
+    // Eagerly restore parentSessionId — doesn't depend on compilation infra
+    if (snapshot.parentSessionId != null) {
+      this._parentSessionId = snapshot.parentSessionId;
+    }
   }
 
   inspect(): SessionInspection {
@@ -1806,6 +1823,20 @@ export class SessionImpl<P = {}> extends EventEmitter implements Session<P> {
     } catch {
       // Silently ignore serialization errors - DevTools is optional
     }
+  }
+
+  // ════════════════════════════════════════════════════════════════════════
+  // Parent Notification
+  // ════════════════════════════════════════════════════════════════════════
+
+  async notifyParent(message: InboxMessageInput): Promise<void> {
+    if (!this._parentSessionId) {
+      throw new Error("Cannot notifyParent: no parentSessionId set");
+    }
+    if (!this._inboxStorage) {
+      throw new Error("Cannot notifyParent: inbox storage unavailable (session closed?)");
+    }
+    await this._inboxStorage.write(this._parentSessionId, message);
   }
 
   // ════════════════════════════════════════════════════════════════════════

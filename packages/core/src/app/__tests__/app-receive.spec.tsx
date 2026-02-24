@@ -160,6 +160,71 @@ describe("app.receive()", () => {
   });
 });
 
+describe("app.receive(sessionId, message) — direct delivery", () => {
+  beforeEach(() => {
+    receivedDispatches.length = 0;
+  });
+
+  it("bypasses resolver and writes directly to target inbox", async () => {
+    const inbox = new MemoryInboxStorage();
+    const resolver = vi.fn(() => "wrong-session");
+
+    const app = createApp(TestAgent, { inbox, sessionResolver: resolver });
+
+    await app.receive("direct-target", {
+      source: "child",
+      type: "message",
+      payload: { role: "user", content: [{ type: "text", text: "direct" }] },
+    });
+
+    // Resolver should NOT be called
+    expect(resolver).not.toHaveBeenCalled();
+
+    // Message lands in the specified session's inbox
+    const pending = await inbox.pending("direct-target");
+    expect(pending).toHaveLength(1);
+    expect(pending[0].source).toBe("child");
+
+    // Wrong session should have nothing
+    const wrongPending = await inbox.pending("wrong-session");
+    expect(wrongPending).toHaveLength(0);
+  });
+
+  it("works with no resolver configured", async () => {
+    const inbox = new MemoryInboxStorage();
+    const app = createApp(TestAgent, { inbox });
+
+    await app.receive("target-no-resolver", {
+      source: "api",
+      type: "dispatch",
+      payload: { tool: "echo", input: { text: "direct-dispatch" } },
+    });
+
+    const pending = await inbox.pending("target-no-resolver");
+    expect(pending).toHaveLength(1);
+    expect(pending[0].type).toBe("dispatch");
+  });
+
+  it("triggers processing on active session", async () => {
+    const inbox = new MemoryInboxStorage();
+    const app = createApp(TestAgent, { inbox });
+
+    const session = await app.session("direct-active");
+    await session.mount();
+
+    await app.receive("direct-active", {
+      source: "ext",
+      type: "dispatch",
+      payload: { tool: "echo", input: { text: "direct-live" } },
+    });
+
+    await new Promise((r) => setTimeout(r, 200));
+
+    expect(receivedDispatches).toContain("echo:direct-live");
+    await session.close();
+  });
+});
+
 describe("app.processInbox()", () => {
   beforeEach(() => {
     receivedDispatches.length = 0;

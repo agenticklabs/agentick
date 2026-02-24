@@ -234,6 +234,8 @@ export interface MockSessionOptions {
   executionOptions?: MockExecutionHandleOptions;
   /** Parent session (default: null) */
   parent?: Session | null;
+  /** Parent session ID string (default: null) */
+  parentSessionId?: string | null;
   /** Children sessions (default: []) */
   children?: readonly Session[];
 }
@@ -274,6 +276,7 @@ export function createMockSession(options: MockSessionOptions = {}): MockSession
     status: initialStatus = "idle",
     executionOptions = {},
     parent = null,
+    parentSessionId = null,
     children = [],
   } = options;
 
@@ -300,6 +303,7 @@ export function createMockSession(options: MockSessionOptions = {}): MockSession
       return currentStatus === "closed";
     }
     readonly parent = parent;
+    readonly parentSessionId = parentSessionId;
     readonly children = children;
     readonly queuedMessages: Message[] = [];
     readonly schedulerState = null;
@@ -415,6 +419,10 @@ export function createMockSession(options: MockSessionOptions = {}): MockSession
     }
 
     submitToolResult() {}
+
+    async notifyParent() {
+      // No-op in mock
+    }
 
     async close() {
       currentStatus = "closed";
@@ -563,7 +571,7 @@ export function createMockApp(options: MockAppOptions = {}): MockApp {
       };
     },
 
-    async receive() {
+    async receive(_sessionIdOrMessage: any, _message?: any) {
       // No-op in mock
     },
 

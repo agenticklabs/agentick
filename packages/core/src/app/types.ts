@@ -725,6 +725,15 @@ export interface SessionOptions extends LifecycleCallbacks {
   sessionId?: string;
 
   /**
+   * Parent session ID for persistent parent-child relationships.
+   *
+   * Used for delegation: a persistent child session that outlives the
+   * parent's execution but still knows who created it. Enables
+   * `session.notifyParent()` for child-to-parent inbox delivery.
+   */
+  parentSessionId?: string;
+
+  /**
    * Additional tools for this session.
    * Merged with app-level tools (session tools take priority on name conflict).
    */
@@ -835,6 +844,8 @@ export interface SessionSnapshot {
   usage?: UsageStats;
   /** Timestamp of snapshot */
   timestamp: number;
+  /** Parent session ID (null if root session) */
+  parentSessionId?: string | null;
 }
 
 // ============================================================================
@@ -1508,6 +1519,14 @@ export interface Session<P = {}> extends EventEmitter {
   /** Parent session, or null for root sessions. */
   readonly parent: Session | null;
 
+  /**
+   * Parent session ID as a string. Survives persistence/restore.
+   *
+   * - Ephemeral spawn children have both `parent` (live ref) and `parentSessionId`.
+   * - Persistent children (delegation) have only `parentSessionId`.
+   */
+  readonly parentSessionId: string | null;
+
   /** Active child sessions (currently running spawns). */
   readonly children: readonly Session[];
 
@@ -1811,6 +1830,14 @@ export interface Session<P = {}> extends EventEmitter {
   ): void;
 
   /**
+   * Deliver a message to this session's parent inbox.
+   *
+   * Uses `parentSessionId` to write directly to the inbox storage.
+   * Throws if no `parentSessionId` is set or inbox storage is unavailable.
+   */
+  notifyParent(message: InboxMessageInput): Promise<void>;
+
+  /**
    * Close the session and release resources.
    * Awaits runner cleanup (onDestroy) and child session teardown.
    */
@@ -1972,6 +1999,14 @@ export interface App<P = {}> {
    * its subscriber fires immediately and drains.
    */
   receive(message: InboxMessageInput): Promise<void>;
+
+  /**
+   * Deliver a message directly to a specific session's inbox by ID.
+   *
+   * Bypasses the `sessionResolver` entirely — writes straight to inbox storage.
+   * Use this for session-to-session communication where the target is already known.
+   */
+  receive(sessionId: string, message: InboxMessageInput): Promise<void>;
 
   /**
    * Process all pending inbox messages across all sessions.
