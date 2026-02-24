@@ -1,5 +1,12 @@
 # @agentick/devtools
 
+## 0.10.0
+
+### Patch Changes
+
+- Updated dependencies [619c448]
+  - @agentick/shared@0.10.0
+
 ## 0.9.6
 
 ### Patch Changes
