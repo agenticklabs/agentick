@@ -1,5 +1,27 @@
 # @agentick/gateway
 
+## 0.10.1
+
+### Patch Changes
+
+- 84a0400: Pass full SendInput through WebSocket/Unix RPC transport
+
+  The RPC transport was silently dropping multi-modal content by extracting
+  plain text from SendInput before sending over the wire. Now the full
+  SendInput (messages with ContentBlock arrays) passes through untouched.
+
+  - SendParams accepts `input?: SendInput` (full multi-modal) alongside
+    `message?: string` (text-only convenience shorthand)
+  - Delete dead `attachments` field from SendParams
+  - Delete `extractSendMessage` and helpers from transport-utils
+  - Fix HistoryPayload.content type to `ContentBlock[] | string`
+
+- Updated dependencies [84a0400]
+  - @agentick/shared@0.10.1
+  - @agentick/core@0.10.1
+  - @agentick/kernel@0.10.1
+  - @agentick/server@0.10.1
+
 ## 0.10.0
 
 ### Minor Changes
