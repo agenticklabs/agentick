@@ -15,7 +15,7 @@ export class BaseExecutor implements CommandExecutor {
   readonly strategy: SandboxStrategy = "none";
 
   spawn(command: string, options: SpawnOptions): ChildProcess {
-    return spawn("sh", ["-c", command], {
+    return spawn("bash", ["-c", command], {
       cwd: options.cwd,
       env: options.env,
       stdio: ["pipe", "pipe", "pipe"],

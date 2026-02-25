@@ -12,11 +12,11 @@ import { useSandbox } from "./context.js";
 import { applyEdits } from "./edit.js";
 
 /**
- * Execute a shell command in the sandbox.
+ * Execute a bash command in the sandbox.
  */
-export const Shell = createTool({
-  name: "shell",
-  description: "Execute a shell command in the sandbox environment.",
+export const Bash = createTool({
+  name: "bash",
+  description: "Execute a bash command in the sandbox environment.",
   input: z.object({
     command: z.string().describe("The shell command to execute."),
   }),

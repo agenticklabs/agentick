@@ -17,7 +17,7 @@ export type ToolSummarizer = (name: string, input: Record<string, unknown>) => s
 const filePathSummary = (verb: string) => (i: Record<string, unknown>) =>
   `[${verb} ${i.path ?? i.file_path ?? "a file"}]`;
 
-const shellSummary = (i: Record<string, unknown>) => {
+const bashSummary = (i: Record<string, unknown>) => {
   const cmd = i.command;
   if (typeof cmd === "string") {
     const short = cmd.length > 50 ? cmd.slice(0, 50) + "..." : cmd;
@@ -43,7 +43,8 @@ const DEFAULT_SUMMARIES: Record<string, (input: Record<string, unknown>) => stri
   writefile: filePathSummary("Wrote"),
   edit_file: filePathSummary("Edited"),
   editfile: filePathSummary("Edited"),
-  shell: shellSummary,
+  bash: bashSummary,
+  shell: bashSummary,
 };
 
 /**

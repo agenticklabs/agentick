@@ -86,6 +86,7 @@ describe("buildContentFilter", () => {
         ["ReadFile", { path: "foo.ts" }, "Read foo.ts"],
         ["WriteFile", { path: "bar.ts" }, "Wrote bar.ts"],
         ["EditFile", { path: "baz.ts" }, "Edited baz.ts"],
+        ["bash", { command: "ls -la" }, "Ran: ls -la"],
         ["Shell", { command: "ls -la" }, "Ran: ls -la"],
         ["Grep", { pattern: "TODO" }, 'Searched for "TODO"'],
         ["unknown_tool", {}, "Used unknown_tool"],

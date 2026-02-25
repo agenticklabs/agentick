@@ -293,8 +293,8 @@ export interface CreateToolOptions<
    *
    * @example
    * ```typescript
-   * const Shell = createTool({
-   *   name: 'shell',
+   * const Bash = createTool({
+   *   name: 'bash',
    *   description: 'Execute a command in the sandbox',
    *   input: z.object({ command: z.string() }),
    *   use: () => ({ sandbox: useSandbox() }),

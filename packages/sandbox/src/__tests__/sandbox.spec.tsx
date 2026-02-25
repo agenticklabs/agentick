@@ -11,7 +11,7 @@ import { createTestAdapter, type TestAdapterInstance } from "@agentick/core/test
 import { z } from "zod";
 import { useSandbox, SandboxContext } from "../context.js";
 import { Sandbox } from "../component.js";
-import { Shell, ReadFile, WriteFile, EditFile } from "../tools.js";
+import { Bash, ReadFile, WriteFile, EditFile } from "../tools.js";
 import { createMockSandbox, createMockProvider } from "../testing.js";
 
 // ============================================================================
@@ -126,7 +126,7 @@ describe("<Sandbox> component", () => {
 // Tool Tests
 // ============================================================================
 
-describe("Shell tool", () => {
+describe("Bash tool", () => {
   it("calls sandbox.exec() with the command", async () => {
     const mockSandbox = createMockSandbox({
       exec: vi.fn().mockResolvedValue({ stdout: "file1.txt\nfile2.txt", stderr: "", exitCode: 0 }),
@@ -136,12 +136,12 @@ describe("Shell tool", () => {
     });
 
     const model = createModel();
-    model.respondWith([{ tool: { name: "shell", input: { command: "ls" } } }]);
+    model.respondWith([{ tool: { name: "bash", input: { command: "ls" } } }]);
 
     function Agent() {
       return (
         <Sandbox provider={provider}>
-          <Shell />
+          <Bash />
           <Section id="system" audience="model">
             Test
           </Section>

@@ -38,18 +38,14 @@ export { Sandbox } from "./component.js";
 export type { SandboxProps } from "./component.js";
 
 // ── Tools ────────────────────────────────────────────────────────────────────
-import { Shell, ReadFile, WriteFile, EditFile } from "./tools.js";
-export { Shell, ReadFile, WriteFile, EditFile };
-
-// ── Testing ──────────────────────────────────────────────────────────────────
-// Import from "@agentick/sandbox/testing" — not re-exported here to avoid
-// pulling vitest into production bundles.
+import { Bash, ReadFile, WriteFile, EditFile } from "./tools.js";
+export { Bash, ReadFile, WriteFile, EditFile };
 
 const h = React.createElement;
 
 export function SandboxTools() {
   return [
-    h(Shell, { key: "shell" }),
+    h(Bash, { key: "bash" }),
     h(ReadFile, { key: "read-file" }),
     h(WriteFile, { key: "write-file" }),
     h(EditFile, { key: "edit-file" }),

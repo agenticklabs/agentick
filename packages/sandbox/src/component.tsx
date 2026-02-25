@@ -51,7 +51,7 @@ export interface SandboxProps {
  * @example
  * ```tsx
  * <Sandbox provider={localProvider()}>
- *   <Shell />
+ *   <Bash />
  *   <ReadFile />
  *   <WriteFile />
  *   <EditFile />

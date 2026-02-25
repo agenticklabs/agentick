@@ -16,8 +16,8 @@ export const SandboxContext = createContext<Sandbox | null>(null);
  *
  * @example
  * ```tsx
- * const Shell = createTool({
- *   name: 'shell',
+ * const Bash = createTool({
+ *   name: 'bash',
  *   use: () => ({ sandbox: useSandbox() }),
  *   handler: async ({ command }, deps) => {
  *     const result = await deps!.sandbox.exec(command);
