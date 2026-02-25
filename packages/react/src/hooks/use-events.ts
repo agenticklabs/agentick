@@ -1,52 +1,30 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useRef } from "react";
 import type { StreamEvent, SessionStreamEvent } from "@agentick/client";
 import { useClient } from "./use-client.js";
 import type { UseEventsOptions, UseEventsResult } from "../types.js";
 
-// ============================================================================
-// useEvents
-// ============================================================================
+type EventType = StreamEvent | SessionStreamEvent;
+
+const EMPTY: EventType[] = [];
 
 /**
  * Subscribe to stream events.
  *
- * Returns the latest event (not accumulated). Use useStreamingText
- * for accumulated text from content_delta events.
+ * Returns a batched array of events. Events that fire synchronously
+ * (e.g. parallel tool results) are accumulated in a ref and flushed
+ * via a single microtask — one render per synchronous burst, zero
+ * events lost.
  *
  * @example
  * ```tsx
- * import { useEvents } from '@agentick/react';
- *
- * function EventLog() {
- *   const { event } = useEvents();
+ * function ToolTracker() {
+ *   const { events } = useEvents({ filter: ['tool_result'] });
  *
  *   useEffect(() => {
- *     if (event) {
- *       console.log('Event:', event.type, event);
+ *     for (const event of events) {
+ *       console.log('Tool result:', event);
  *     }
- *   }, [event]);
- *
- *   return <div>Latest: {event?.type}</div>;
- * }
- * ```
- *
- * @example With filter
- * ```tsx
- * function ToolCalls() {
- *   const { event } = useEvents({ filter: ['tool_call', 'tool_result'] });
- *
- *   if (!event) return null;
- *
- *   return <div>Tool: {event.type === 'tool_call' ? event.name : 'result'}</div>;
- * }
- * ```
- *
- * @example Session-specific events
- * ```tsx
- * function SessionEvents({ sessionId }: { sessionId: string }) {
- *   const { event } = useEvents({ sessionId });
- *   // Only receives events for this session
- *   return <div>{event?.type}</div>;
+ *   }, [events]);
  * }
  * ```
  */
@@ -54,37 +32,43 @@ export function useEvents(options: UseEventsOptions = {}): UseEventsResult {
   const { filter, sessionId, enabled = true } = options;
 
   const client = useClient();
-  const [event, setEvent] = useState<StreamEvent | SessionStreamEvent | undefined>();
+  const pendingRef = useRef<EventType[]>([]);
+  const flushScheduledRef = useRef(false);
+  const [events, setEvents] = useState<EventType[]>(EMPTY);
+
+  // Filter lives in a ref so the handler always reads the latest value
+  // without forcing effect re-subscription on every render.
+  const filterRef = useRef(filter);
+  filterRef.current = filter;
 
   useEffect(() => {
     if (!enabled) return;
 
-    // Use session-specific subscription if sessionId provided
-    if (sessionId) {
-      const accessor = client.session(sessionId);
-      const unsubscribe = accessor.onEvent((incoming) => {
-        if (filter && !filter.includes(incoming.type)) {
-          return;
-        }
-        setEvent(incoming);
-      });
-      return unsubscribe;
-    }
+    // Clear stale events from a previous subscription cycle.
+    pendingRef.current.length = 0;
+    flushScheduledRef.current = false;
 
-    // Global subscription
-    const unsubscribe = client.onEvent((incoming) => {
-      if (filter && !filter.includes(incoming.type)) {
-        return;
+    const handler = (incoming: EventType) => {
+      const f = filterRef.current;
+      if (f && !f.includes(incoming.type)) return;
+      pendingRef.current.push(incoming);
+
+      if (!flushScheduledRef.current) {
+        flushScheduledRef.current = true;
+        queueMicrotask(() => {
+          flushScheduledRef.current = false;
+          if (pendingRef.current.length > 0) {
+            setEvents(pendingRef.current.splice(0));
+          }
+        });
       }
-      setEvent(incoming);
-    });
+    };
 
-    return unsubscribe;
-  }, [client, sessionId, enabled, filter]);
+    if (sessionId) {
+      return client.session(sessionId).onEvent(handler);
+    }
+    return client.onEvent(handler);
+  }, [client, sessionId, enabled]);
 
-  const clear = useCallback(() => {
-    setEvent(undefined);
-  }, []);
-
-  return { event, clear };
+  return { events };
 }

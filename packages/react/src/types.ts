@@ -215,17 +215,13 @@ export interface UseEventsOptions {
 
 /**
  * Return value from useEvents hook.
+ *
+ * Events that fire within the same synchronous burst are batched
+ * into a single array. The array reference changes each batch,
+ * so `useEffect([events])` fires once per batch.
  */
 export interface UseEventsResult {
-  /**
-   * Latest event received.
-   */
-  event: StreamEvent | SessionStreamEvent | undefined;
-
-  /**
-   * Clear the current event.
-   */
-  clear: () => void;
+  events: (StreamEvent | SessionStreamEvent)[];
 }
 
 // ============================================================================

@@ -26,34 +26,34 @@ interface SpawnIndicatorProps {
 
 export function SpawnIndicator({ sessionId }: SpawnIndicatorProps) {
   const [spawns, setSpawns] = useState<ActiveSpawn[]>([]);
-  const { event } = useEvents({
+  const { events } = useEvents({
     sessionId,
     filter: ["spawn_start", "spawn_end"],
   });
 
   useEffect(() => {
-    if (!event) return;
+    for (const event of events) {
+      if (event.type === "spawn_start") {
+        const e = event as SpawnStartEvent;
+        const name = e.label ?? e.componentName ?? "agent";
+        setSpawns((prev) => {
+          if (prev.find((s) => s.spawnId === e.spawnId)) return prev;
+          return [...prev, { spawnId: e.spawnId, name, status: "running", startedAt: Date.now() }];
+        });
+      }
 
-    if (event.type === "spawn_start") {
-      const e = event as SpawnStartEvent;
-      const name = e.label ?? e.componentName ?? "agent";
-      setSpawns((prev) => {
-        if (prev.find((s) => s.spawnId === e.spawnId)) return prev;
-        return [...prev, { spawnId: e.spawnId, name, status: "running", startedAt: Date.now() }];
-      });
+      if (event.type === "spawn_end") {
+        const e = event as SpawnEndEvent;
+        setSpawns((prev) =>
+          prev.map((s) =>
+            s.spawnId === e.spawnId
+              ? { ...s, status: e.isError ? "error" : "done", duration: Date.now() - s.startedAt }
+              : s,
+          ),
+        );
+      }
     }
-
-    if (event.type === "spawn_end") {
-      const e = event as SpawnEndEvent;
-      setSpawns((prev) =>
-        prev.map((s) =>
-          s.spawnId === e.spawnId
-            ? { ...s, status: e.isError ? "error" : "done", duration: Date.now() - s.startedAt }
-            : s,
-        ),
-      );
-    }
-  }, [event]);
+  }, [events]);
 
   // Clean up completed spawns after a short delay
   useEffect(() => {

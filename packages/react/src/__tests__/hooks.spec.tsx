@@ -270,78 +270,160 @@ describe("useSession", () => {
 });
 
 describe("useEvents", () => {
-  it("receives events", () => {
+  it("receives events as a batched array", async () => {
     const mockClient = createMockClient();
     const wrapper = createWrapper(mockClient);
 
     const { result } = renderHook(() => useEvents(), { wrapper });
 
-    expect(result.current.event).toBeUndefined();
+    expect(result.current.events).toHaveLength(0);
 
-    act(() => {
+    await act(async () => {
       mockClient._emitEvent({ type: "tick_start", tick: 1 } as any);
     });
 
-    expect(result.current.event).toEqual({
+    expect(result.current.events).toHaveLength(1);
+    expect(result.current.events[0]).toEqual({
       type: "tick_start",
       tick: 1,
       sessionId: "test-session",
     });
   });
 
-  it("filters events by type", () => {
+  it("filters events by type", async () => {
     const mockClient = createMockClient();
     const wrapper = createWrapper(mockClient);
 
     const { result } = renderHook(() => useEvents({ filter: ["content_delta"] }), { wrapper });
 
-    act(() => {
+    await act(async () => {
       mockClient._emitEvent({ ...createEventBase(1), type: "tick_start", tick: 1 });
     });
 
-    expect(result.current.event).toBeUndefined();
+    expect(result.current.events).toHaveLength(0);
 
-    act(() => {
+    await act(async () => {
       mockClient._emitEvent({ type: "content_delta", delta: "Hello" } as any);
     });
 
-    expect(result.current.event).toEqual({
+    expect(result.current.events).toHaveLength(1);
+    expect(result.current.events[0]).toEqual({
       type: "content_delta",
       delta: "Hello",
       sessionId: "test-session",
     });
   });
 
-  it("clears event when clear() called", () => {
-    const mockClient = createMockClient();
-    const wrapper = createWrapper(mockClient);
-
-    const { result } = renderHook(() => useEvents(), { wrapper });
-
-    act(() => {
-      mockClient._emitEvent({ ...createEventBase(1), type: "tick_start", tick: 1 });
-    });
-
-    expect(result.current.event).toBeDefined();
-
-    act(() => {
-      result.current.clear();
-    });
-
-    expect(result.current.event).toBeUndefined();
-  });
-
-  it("does not receive events when disabled", () => {
+  it("does not receive events when disabled", async () => {
     const mockClient = createMockClient();
     const wrapper = createWrapper(mockClient);
 
     const { result } = renderHook(() => useEvents({ enabled: false }), { wrapper });
 
-    act(() => {
+    await act(async () => {
       mockClient._emitEvent({ ...createEventBase(1), type: "tick_start", tick: 1 });
     });
 
-    expect(result.current.event).toBeUndefined();
+    expect(result.current.events).toHaveLength(0);
+  });
+
+  it("delivers ALL events when multiple fire synchronously", async () => {
+    const mockClient = createMockClient();
+    const wrapper = createWrapper(mockClient);
+
+    const { result } = renderHook(
+      () => useEvents({ filter: ["tool_result"] }),
+      { wrapper },
+    );
+
+    await act(async () => {
+      for (let i = 0; i < 5; i++) {
+        mockClient._emitEvent({
+          type: "tool_result",
+          callId: `call-${i}`,
+          content: [],
+          isError: false,
+        } as any);
+      }
+    });
+
+    expect(result.current.events).toHaveLength(5);
+    expect(result.current.events.map((e) => (e as any).callId)).toEqual([
+      "call-0",
+      "call-1",
+      "call-2",
+      "call-3",
+      "call-4",
+    ]);
+  });
+
+  it("batches events across separate synchronous bursts", async () => {
+    const mockClient = createMockClient();
+    const wrapper = createWrapper(mockClient);
+
+    const { result } = renderHook(() => useEvents(), { wrapper });
+
+    // First burst
+    await act(async () => {
+      mockClient._emitEvent({ type: "tick_start", tick: 1 } as any);
+      mockClient._emitEvent({ type: "content_delta", delta: "a" } as any);
+    });
+
+    expect(result.current.events).toHaveLength(2);
+
+    // Second burst — replaces the first batch
+    await act(async () => {
+      mockClient._emitEvent({ type: "content_delta", delta: "b" } as any);
+    });
+
+    expect(result.current.events).toHaveLength(1);
+    expect(result.current.events[0]).toEqual(
+      expect.objectContaining({ type: "content_delta", delta: "b" }),
+    );
+  });
+
+  it("respects filter changes via ref without re-subscribing", async () => {
+    const mockClient = createMockClient();
+    const wrapper = createWrapper(mockClient);
+
+    // Start with tick_start filter, then switch to content_delta.
+    // Inline filter arrays create new references each render — the ref-based
+    // approach must handle this without re-subscribing.
+    let filterTypes: Array<StreamEvent["type"] | SessionStreamEvent["type"]> = ["tick_start"];
+
+    const { result, rerender } = renderHook(
+      () => useEvents({ filter: filterTypes }),
+      { wrapper },
+    );
+
+    await act(async () => {
+      mockClient._emitEvent({ type: "tick_start", tick: 1 } as any);
+    });
+
+    expect(result.current.events).toHaveLength(1);
+    const batchAfterFirst = result.current.events;
+
+    // Switch filter — tick_start should now be ignored by the handler
+    filterTypes = ["content_delta"];
+    rerender();
+
+    await act(async () => {
+      mockClient._emitEvent({ type: "tick_start", tick: 2 } as any);
+    });
+
+    // tick_start was filtered out, no new batch — events still holds previous batch
+    expect(result.current.events).toBe(batchAfterFirst);
+
+    // content_delta passes the new filter
+    await act(async () => {
+      mockClient._emitEvent({ type: "content_delta", delta: "hello" } as any);
+    });
+
+    // New batch contains ONLY the content_delta, not any tick_starts
+    expect(result.current.events).toHaveLength(1);
+    expect(result.current.events[0]).toEqual(
+      expect.objectContaining({ type: "content_delta", delta: "hello" }),
+    );
   });
 });
 
