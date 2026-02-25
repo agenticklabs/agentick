@@ -4,7 +4,7 @@
  * Defines the WebSocket message protocol between clients and the gateway.
  */
 
-import type { StreamEvent } from "@agentick/shared";
+import type { ContentBlock, SendInput, StreamEvent } from "@agentick/shared";
 
 /** Current protocol version */
 export const PROTOCOL_VERSION = "1.0";
@@ -133,13 +133,8 @@ export type GatewayEventType =
 
 export interface SendParams {
   sessionId: string;
-  message: string;
-  attachments?: Array<{
-    type: "image" | "file";
-    data: string;
-    mimeType: string;
-    name?: string;
-  }>;
+  input?: SendInput;
+  message?: string;
 }
 
 export interface AbortParams {
@@ -215,7 +210,7 @@ export interface HistoryPayload {
   messages: Array<{
     id: string;
     role: "user" | "assistant" | "system";
-    content: string;
+    content: ContentBlock[] | string;
     timestamp: string;
     toolCalls?: Array<{
       name: string;

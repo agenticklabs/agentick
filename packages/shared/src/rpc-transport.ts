@@ -19,7 +19,7 @@ import type {
   TransportState,
 } from "./transport.js";
 import type { SendInput, ChannelEvent, ToolConfirmationResponse } from "./protocol.js";
-import { unwrapEventMessage, extractSendMessage } from "./transport-utils.js";
+import { unwrapEventMessage } from "./transport-utils.js";
 
 // ============================================================================
 // Delegate Interface — wire-specific I/O
@@ -357,7 +357,7 @@ export function createRPCTransport(
       // Start the send request
       const sendPromise = sendRequest("send", {
         sessionId: sessionId ?? "main",
-        message: extractSendMessage(input),
+        input,
       });
 
       sendPromise

@@ -83,7 +83,8 @@ describe("schema method", () => {
     expect(send.params).toBeDefined();
     expect(send.params.properties.sessionId).toBeDefined();
     expect(send.params.required).toContain("sessionId");
-    expect(send.params.required).toContain("message");
+    expect(send.params.properties.input).toBeDefined();
+    expect(send.params.properties.message).toBeDefined();
   });
 
   it("methods.send has response with messageId", async () => {

@@ -36,22 +36,18 @@ const SendParams: JSONSchema = {
   type: "object",
   properties: {
     sessionId: { type: "string" },
-    message: { type: "string" },
-    attachments: {
-      type: "array",
-      items: {
-        type: "object",
-        properties: {
-          type: { type: "string", enum: ["image", "file"] },
-          data: { type: "string" },
-          mimeType: { type: "string" },
-          name: { type: "string" },
-        },
-        required: ["type", "data", "mimeType"],
+    input: {
+      type: "object",
+      description: "Full SendInput with messages, props, metadata",
+      properties: {
+        messages: { type: "array", items: { type: "object" } },
+        props: { type: "object", additionalProperties: true },
+        metadata: { type: "object", additionalProperties: true },
       },
     },
+    message: { type: "string", description: "Convenience shorthand for text-only sends" },
   },
-  required: ["sessionId", "message"],
+  required: ["sessionId"],
 };
 
 const StatusParams: JSONSchema = {

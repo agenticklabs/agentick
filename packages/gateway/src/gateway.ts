@@ -1591,7 +1591,7 @@ export class Gateway extends EventEmitter {
     clientId: string,
     params: SendParams,
   ): Promise<{ messageId: string }> {
-    const { sessionId, message } = params;
+    const { sessionId, input: rawInput, message } = params;
 
     // Auto-subscribe sender to session events (transport concern)
     const client = transport.getClient(clientId);
@@ -1600,8 +1600,8 @@ export class Gateway extends EventEmitter {
       await this.sessions.subscribe(sessionId, clientId);
     }
 
-    const input: SendInput = {
-      messages: [{ role: "user", content: [{ type: "text", text: message }] }],
+    const input: SendInput = rawInput ?? {
+      messages: [{ role: "user", content: [{ type: "text", text: message ?? "" }] }],
     };
 
     const messageId = `msg-${Date.now().toString(36)}`;
