@@ -1,5 +1,16 @@
 # @agentick/gateway
 
+## 0.11.1
+
+### Patch Changes
+
+- 336c439: Fix tool-confirm RPC: correct method name (`tool-response` → `tool-confirm`), map field names (`toolUseId` → `callId`, `approved` → `confirmed`), and forward `always` flag through gateway so "Always Allow" works for remote clients.
+- Updated dependencies [336c439]
+  - @agentick/shared@0.11.1
+  - @agentick/core@0.11.1
+  - @agentick/kernel@0.11.1
+  - @agentick/server@0.11.1
+
 ## 0.11.0
 
 ### Minor Changes
