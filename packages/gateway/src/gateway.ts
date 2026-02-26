@@ -648,9 +648,11 @@ export class Gateway extends EventEmitter {
     try {
       this.trackMessage(sessionKey, input, opts?.clientId);
       for await (const event of source) {
+        log.trace({ sessionId: sessionKey, eventType: event.type }, "event:stream");
         this.sendEventToSubscribers(sessionKey, event.type, event, opts?.excludeClientId);
         yield event;
       }
+      log.trace({ sessionId: sessionKey, eventType: "execution_end" }, "event:stream (synthetic)");
       this.sendEventToSubscribers(sessionKey, "execution_end", {}, opts?.excludeClientId);
     } finally {
       this.sessions.setActive(sessionKey, false);
@@ -1361,8 +1363,12 @@ export class Gateway extends EventEmitter {
       } as DTGatewayRequestEvent);
     }
 
+    log.debug({ method: request.method, requestId, sessionKey, clientId }, "RPC request");
+
     try {
       const result = await this.executeMethod(transport, clientId, request.method, request.params);
+
+      log.debug({ method: request.method, requestId }, "RPC response ok");
 
       client.send({
         type: "res",
@@ -1399,6 +1405,11 @@ export class Gateway extends EventEmitter {
       }
 
       const errorMessage = error instanceof Error ? error.message : String(error);
+
+      log.error(
+        { method: request.method, requestId, errorCode, errorMessage },
+        "RPC request failed",
+      );
 
       client.send({
         type: "res",
@@ -1593,6 +1604,16 @@ export class Gateway extends EventEmitter {
   ): Promise<{ messageId: string }> {
     const { sessionId, input: rawInput, message } = params;
 
+    log.debug(
+      {
+        sessionId,
+        hasInput: !!rawInput,
+        hasMessage: !!message,
+        messageCount: rawInput?.messages?.length,
+      },
+      "handleSendMethod: received",
+    );
+
     // Auto-subscribe sender to session events (transport concern)
     const client = transport.getClient(clientId);
     if (client) {
@@ -1604,6 +1625,11 @@ export class Gateway extends EventEmitter {
       messages: [{ role: "user", content: [{ type: "text", text: message ?? "" }] }],
     };
 
+    log.debug(
+      { sessionId, messageCount: input.messages?.length, firstRole: input.messages?.[0]?.role },
+      "handleSendMethod: dispatching to session",
+    );
+
     const messageId = `msg-${Date.now().toString(36)}`;
 
     // Execute in background — executeSession handles state management
@@ -1612,7 +1638,12 @@ export class Gateway extends EventEmitter {
       for await (const _ of gen) {
         /* drain */
       }
+      log.debug({ sessionId, messageId }, "handleSendMethod: execution complete");
     })().catch((error) => {
+      log.error(
+        { sessionId, messageId, error: error instanceof Error ? error.message : String(error) },
+        "handleSendMethod: execution error",
+      );
       this.sendEventToSubscribers(sessionId, "error", {
         message: error instanceof Error ? error.message : String(error),
       });
@@ -1653,6 +1684,8 @@ export class Gateway extends EventEmitter {
       sessionId,
       data,
     };
+
+    log.trace({ sessionId, eventType, subscriberCount: subscribers.size }, "event:fanout");
 
     for (const clientId of subscribers) {
       if (clientId === excludeClientId) continue;

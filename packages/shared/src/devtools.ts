@@ -446,6 +446,12 @@ export interface DTContextUpdateEvent extends DevToolsEventBase {
   totalTokens: number;
   /** Context utilization percentage (0-100) */
   utilization?: number;
+  /** Input tokens served from KV cache (provider-dependent) */
+  cachedInputTokens?: number;
+  /** Tokens written to KV cache this tick (provider-dependent) */
+  cacheCreationTokens?: number;
+  /** Ratio of cached to total input tokens (0-1) */
+  cacheHitRatio?: number;
   /** Max output tokens */
   maxOutputTokens?: number;
   /** Model capabilities */

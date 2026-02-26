@@ -23,6 +23,12 @@ export interface FileConfig {
     port?: number;
     host?: string;
     transport?: "websocket" | "http" | "both";
+    logging?: {
+      /** Log level (default: "info"). Set to "trace" for full event stream visibility. */
+      level?: "trace" | "debug" | "info" | "warn" | "error" | "fatal" | "silent";
+      /** Log output file path. When set, logs are written here instead of stdout. */
+      file?: string;
+    };
   };
   connectors?: ConnectorConfigs;
   providers?: ProviderConfigs;

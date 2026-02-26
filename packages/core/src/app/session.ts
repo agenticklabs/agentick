@@ -1646,6 +1646,10 @@ export class SessionImpl<P = {}> extends EventEmitter implements Session<P> {
     const inputTokens = tickUsage?.inputTokens ?? 0;
     const outputTokens = tickUsage?.outputTokens ?? 0;
     const totalTokens = tickUsage?.totalTokens ?? inputTokens + outputTokens;
+    const cachedInputTokens = tickUsage?.cachedInputTokens;
+    const cacheCreationTokens = tickUsage?.cacheCreationTokens;
+    const cacheHitRatio =
+      cachedInputTokens != null && inputTokens > 0 ? cachedInputTokens / inputTokens : undefined;
 
     // Calculate utilization if we have context window info
     const utilization = modelInfo?.contextWindow
@@ -1661,6 +1665,9 @@ export class SessionImpl<P = {}> extends EventEmitter implements Session<P> {
       outputTokens,
       totalTokens,
       utilization,
+      cachedInputTokens,
+      cacheCreationTokens,
+      cacheHitRatio,
       maxOutputTokens: modelInfo?.maxOutputTokens,
       supportsVision: modelInfo?.supportsVision,
       supportsToolUse: modelInfo?.supportsToolUse,
@@ -1704,6 +1711,9 @@ export class SessionImpl<P = {}> extends EventEmitter implements Session<P> {
         outputTokens: payload.outputTokens,
         totalTokens: payload.totalTokens,
         utilization: payload.utilization,
+        cachedInputTokens: payload.cachedInputTokens,
+        cacheCreationTokens: payload.cacheCreationTokens,
+        cacheHitRatio: payload.cacheHitRatio,
         maxOutputTokens: payload.maxOutputTokens,
         supportsVision: payload.supportsVision,
         supportsToolUse: payload.supportsToolUse,
@@ -1724,6 +1734,9 @@ export class SessionImpl<P = {}> extends EventEmitter implements Session<P> {
         outputTokens: payload.outputTokens,
         totalTokens: payload.totalTokens,
         utilization: payload.utilization,
+        cachedInputTokens: payload.cachedInputTokens,
+        cacheCreationTokens: payload.cacheCreationTokens,
+        cacheHitRatio: payload.cacheHitRatio,
         maxOutputTokens: payload.maxOutputTokens,
         supportsVision: payload.supportsVision,
         supportsToolUse: payload.supportsToolUse,
@@ -1745,6 +1758,9 @@ export class SessionImpl<P = {}> extends EventEmitter implements Session<P> {
       outputTokens: payload.outputTokens,
       totalTokens: payload.totalTokens,
       utilization: payload.utilization,
+      cachedInputTokens: payload.cachedInputTokens,
+      cacheCreationTokens: payload.cacheCreationTokens,
+      cacheHitRatio: payload.cacheHitRatio,
       maxOutputTokens: payload.maxOutputTokens,
       supportsVision: payload.supportsVision,
       supportsToolUse: payload.supportsToolUse,
@@ -2265,6 +2281,43 @@ export class SessionImpl<P = {}> extends EventEmitter implements Session<P> {
             content: modelOutput.message.content ?? [],
             stopReason: modelOutput.stopReason ?? "unknown",
           };
+        }
+
+        // Guard: empty model response — don't persist empty-content messages.
+        // Models sometimes return empty responses (no text, no tool calls),
+        // especially at high token counts. An empty assistant message in the
+        // timeline causes API errors on subsequent ticks because providers
+        // require at least one content element per message.
+        // Replace with a corrective event so the model gets feedback.
+        const hasResponseContent = response.newTimelineEntries?.some(
+          (e: COMTimelineEntry) =>
+            e.message?.content && Array.isArray(e.message.content) && e.message.content.length > 0,
+        );
+        if (!hasResponseContent && !response.toolCalls?.length) {
+          this.log.warn(
+            { tick: currentTick, stopReason: modelOutput?.stopReason },
+            "Empty model response — replacing with corrective event",
+          );
+          response.newTimelineEntries = [
+            {
+              kind: "message" as const,
+              message: {
+                role: "event" as const,
+                content: [
+                  {
+                    type: "system_event" as const,
+                    event:
+                      "Your previous response was empty — no content and no tool calls were produced. You must respond with either text content or tool calls.",
+                    source: "engine",
+                  } as ContentBlock,
+                ],
+              },
+              tags: ["empty_response"] as TimelineTag[],
+            },
+          ];
+          // Override shouldStop — the corrective event gives the model another
+          // chance. maxTicks prevents infinite empty-response loops.
+          response.shouldStop = false;
         }
 
         // Phase 3: Tools

@@ -8,6 +8,7 @@ import { ModelInfo } from "./ModelInfo.js";
 import { TokenCount } from "./TokenCount.js";
 import { TickCount } from "./TickCount.js";
 import { ContextUtilization } from "./ContextUtilization.js";
+import { CacheHealth } from "./CacheHealth.js";
 import { StateIndicator } from "./StateIndicator.js";
 import { KeyboardHints } from "./KeyboardHints.js";
 import { BrandLabel } from "./BrandLabel.js";
@@ -226,6 +227,81 @@ describe("ContextUtilization", () => {
     );
     await flush();
     expect(lastFrame()).toContain("72%");
+  });
+});
+
+describe("CacheHealth", () => {
+  it("shows cache percentage when ratio available", async () => {
+    const data = {
+      ...baseData,
+      contextInfo: { ...baseData.contextInfo!, cacheHitRatio: 0.85 },
+    };
+    const { lastFrame } = render(
+      <Wrapper data={data}>
+        <CacheHealth />
+      </Wrapper>,
+    );
+    await flush();
+    expect(lastFrame()).toContain("cache 85%");
+  });
+
+  it("returns null when no cache data", async () => {
+    const { lastFrame } = render(
+      <Wrapper data={baseData}>
+        <CacheHealth />
+      </Wrapper>,
+    );
+    await flush();
+    const frame = lastFrame() ?? "";
+    expect(frame.trim()).toBe("");
+  });
+
+  it("uses explicit ratio", async () => {
+    const { lastFrame } = render(
+      <Wrapper data={baseData}>
+        <CacheHealth ratio={0.42} />
+      </Wrapper>,
+    );
+    await flush();
+    expect(lastFrame()).toContain("cache 42%");
+  });
+
+  it("shows green at high ratio (>= 0.8)", async () => {
+    const data = {
+      ...baseData,
+      contextInfo: { ...baseData.contextInfo!, cacheHitRatio: 0.92 },
+    };
+    const { lastFrame } = render(
+      <Wrapper data={data}>
+        <CacheHealth />
+      </Wrapper>,
+    );
+    await flush();
+    expect(lastFrame()).toContain("cache 92%");
+  });
+
+  it("shows red at low ratio (< 0.5)", async () => {
+    const data = {
+      ...baseData,
+      contextInfo: { ...baseData.contextInfo!, cacheHitRatio: 0.2 },
+    };
+    const { lastFrame } = render(
+      <Wrapper data={data}>
+        <CacheHealth />
+      </Wrapper>,
+    );
+    await flush();
+    expect(lastFrame()).toContain("cache 20%");
+  });
+
+  it("rounds ratio to integer percentage", async () => {
+    const { lastFrame } = render(
+      <Wrapper data={baseData}>
+        <CacheHealth ratio={0.666} />
+      </Wrapper>,
+    );
+    await flush();
+    expect(lastFrame()).toContain("cache 67%");
   });
 });
 

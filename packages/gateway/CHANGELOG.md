@@ -29,7 +29,6 @@
 - 619c448: Formalize gateway protocol with full schema discovery
 
   Phase 1 — Protocol foundation:
-
   - Add `protocolVersion` to ConnectMessage/ConnectedMessage handshake
   - Send ConnectedMessage on WebSocket and Unix socket auth completion
   - New built-in methods: `schema`, `tool-catalog`, `tool-confirm`, `tool-dispatch`
@@ -37,7 +36,6 @@
   - Add `getToolDefinitions()` to Session interface (core)
 
   Phase 2 — Complete schema discovery:
-
   - `schema` method returns full protocol contract: every method with JSON Schema
     for params and response, every event type with category, every error code
   - Extract `MODEL_EVENT_TYPES`, `ORCHESTRATION_EVENT_TYPES`, `RESULT_EVENT_TYPES`

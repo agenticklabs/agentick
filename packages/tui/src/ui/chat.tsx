@@ -2,8 +2,7 @@
  * Chat — default TUI layout and single input orchestrator.
  *
  * Uses useChat with renderMode: "block" — content blocks appear as they
- * complete, while StreamingMessage shows token-by-token text for the
- * current block being streamed.
+ * complete. No streaming text display; MessageList renders complete blocks.
  *
  * State machine: idle → streaming → (confirming_tool → streaming) → idle
  * Ctrl+C behavior depends on state:
@@ -25,7 +24,6 @@ import { Box, useApp, useInput } from "ink";
 import { useChat } from "@agentick/react";
 import type { ChatMode } from "@agentick/client";
 import { MessageList } from "../components/MessageList.js";
-import { StreamingMessage } from "../components/StreamingMessage.js";
 import { ToolCallIndicator } from "../components/ToolCallIndicator.js";
 import { SpawnIndicator } from "../components/SpawnIndicator.js";
 import { ToolConfirmationPrompt } from "../components/ToolConfirmationPrompt.js";
@@ -77,9 +75,6 @@ export function Chat({ sessionId, statusBar }: ChatProps) {
     sessionId,
     renderMode: "block",
   });
-
-  // StreamingMessage still uses useStreamingText for live token display
-  // const { isStreaming } = useStreamingText();
 
   const [dismissedError, setDismissedError] = useState(false);
   // Track the error identity so dismissal resets on new errors
@@ -192,7 +187,6 @@ export function Chat({ sessionId, statusBar }: ChatProps) {
   return (
     <Box flexDirection="column" padding={1}>
       <MessageList messages={messages} isExecuting={isExecuting} />
-      <StreamingMessage />
       <ToolCallIndicator sessionId={sessionId} />
       <SpawnIndicator sessionId={sessionId} />
 

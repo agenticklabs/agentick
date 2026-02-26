@@ -19,6 +19,12 @@ export interface ContextInfo {
   totalTokens: number;
   /** Context utilization percentage (0-100) */
   utilization?: number;
+  /** Input tokens served from KV cache (provider-dependent) */
+  cachedInputTokens?: number;
+  /** Tokens written to KV cache this tick (provider-dependent) */
+  cacheCreationTokens?: number;
+  /** Ratio of cached to total input tokens (0-1). Undefined when no cache data. */
+  cacheHitRatio?: number;
   /** Max output tokens for this model */
   maxOutputTokens?: number;
   /** Model capabilities */

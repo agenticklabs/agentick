@@ -6,6 +6,7 @@ export {
   TokenCount,
   TickCount,
   ContextUtilization,
+  CacheHealth,
   StateIndicator,
   KeyboardHints,
   type KeyboardHint,

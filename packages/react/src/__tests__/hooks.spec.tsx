@@ -331,10 +331,7 @@ describe("useEvents", () => {
     const mockClient = createMockClient();
     const wrapper = createWrapper(mockClient);
 
-    const { result } = renderHook(
-      () => useEvents({ filter: ["tool_result"] }),
-      { wrapper },
-    );
+    const { result } = renderHook(() => useEvents({ filter: ["tool_result"] }), { wrapper });
 
     await act(async () => {
       for (let i = 0; i < 5; i++) {
@@ -391,10 +388,7 @@ describe("useEvents", () => {
     // approach must handle this without re-subscribing.
     let filterTypes: Array<StreamEvent["type"] | SessionStreamEvent["type"]> = ["tick_start"];
 
-    const { result, rerender } = renderHook(
-      () => useEvents({ filter: filterTypes }),
-      { wrapper },
-    );
+    const { result, rerender } = renderHook(() => useEvents({ filter: filterTypes }), { wrapper });
 
     await act(async () => {
       mockClient._emitEvent({ type: "tick_start", tick: 1 } as any);
