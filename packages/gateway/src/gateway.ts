@@ -1959,7 +1959,7 @@ export class Gateway extends EventEmitter {
   }
 
   private async handleToolConfirmMethod(params: ToolConfirmParams): Promise<{ ok: true }> {
-    const { sessionId, callId, confirmed, reason } = params;
+    const { sessionId, callId, confirmed, reason, always } = params;
     if (!sessionId) throw new Error("sessionId is required");
     if (!callId) throw new Error("callId is required");
 
@@ -1971,7 +1971,7 @@ export class Gateway extends EventEmitter {
       type: "response",
       channel: "tool_confirmation",
       id: callId,
-      payload: { approved: confirmed, reason },
+      payload: { approved: confirmed, reason, always },
     });
 
     return { ok: true };

@@ -97,6 +97,7 @@ const ToolConfirmParams: JSONSchema = {
     callId: { type: "string" },
     confirmed: { type: "boolean" },
     reason: { type: "string" },
+    always: { type: "boolean" },
   },
   required: ["sessionId", "callId", "confirmed"],
 };

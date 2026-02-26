@@ -444,7 +444,13 @@ export function createRPCTransport(
     },
 
     async submitToolResult(sessionId: string, toolUseId: string, result: ToolConfirmationResponse) {
-      await sendRequest("tool-response", { sessionId, toolUseId, result });
+      await sendRequest("tool-confirm", {
+        sessionId,
+        callId: toolUseId,
+        confirmed: result.approved,
+        reason: result.reason,
+        always: result.always,
+      });
     },
 
     async publishToChannel(sessionId: string, channel: string, event: ChannelEvent) {

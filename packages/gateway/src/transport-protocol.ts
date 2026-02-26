@@ -176,6 +176,7 @@ export interface ToolConfirmParams {
   callId: string;
   confirmed: boolean;
   reason?: string;
+  always?: boolean;
 }
 
 export interface ToolDispatchParams {
