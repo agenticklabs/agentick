@@ -219,17 +219,34 @@ export class LocalSandbox implements SandboxHandle {
   async addMount(mount: Mount): Promise<void> {
     this.assertAlive();
     const [resolved] = await resolveMounts([mount]);
-    // Consolidate: remove any existing mounts that are children of the new one
+
+    // Mode promotion: if exact path already mounted, upgrade to highest mode
+    const exactIdx = this.mounts.findIndex((m) => m.hostPath === resolved.hostPath);
+    if (exactIdx !== -1) {
+      const existing = this.mounts[exactIdx]!;
+      if (existing.mode === "rw" || resolved.mode === existing.mode) return;
+      this.mounts[exactIdx] = resolved;
+      return;
+    }
+
+    // Skip if already covered by a parent mount with same-or-better mode
+    const coveredByParent = this.mounts.some((m) => {
+      const isParent = resolved.hostPath.startsWith(m.hostPath + "/");
+      if (!isParent) return false;
+      return m.mode === "rw" || resolved.mode !== "rw";
+    });
+    if (coveredByParent) return;
+
+    // Consume children: only remove if new mount's mode >= child's mode
     for (let i = this.mounts.length - 1; i >= 0; i--) {
       const existing = this.mounts[i]!;
-      if (existing.hostPath.startsWith(resolved.hostPath + "/")) {
+      if (!existing.hostPath.startsWith(resolved.hostPath + "/")) continue;
+      if (resolved.mode === "rw" || existing.mode !== "rw") {
         this.mounts.splice(i, 1);
       }
     }
-    // Don't add if already mounted (exact match)
-    if (!this.mounts.some((m) => m.hostPath === resolved.hostPath)) {
-      this.mounts.push(resolved);
-    }
+
+    this.mounts.push(resolved);
   }
 
   removeMount(hostPath: string): void {

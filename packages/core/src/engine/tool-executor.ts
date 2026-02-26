@@ -11,6 +11,7 @@ import { type Middleware, type MiddlewarePipeline } from "@agentick/kernel";
 import type { ToolHookRegistry } from "../tool/tool-hooks.js";
 import { type ToolHookMiddleware, type ToolHookName } from "../tool/tool-hooks.js";
 import { applyRegistryMiddleware } from "../procedure/index.js";
+import { dirname } from "node:path";
 import { classifyError } from "../utils/classify-error.js";
 import { ClientToolCoordinator } from "./client-tool-coordinator.js";
 import { ToolConfirmationCoordinator } from "./tool-confirmation-coordinator.js";
@@ -470,13 +471,15 @@ export class ToolExecutor {
         );
       }
 
-      // Emit sandbox access confirmation
-      const message = `${call.name} wants to access ${error.requestedPath} (outside sandbox). Allow?`;
+      // Emit sandbox access confirmation — show the directory being mounted, not the file
+      const mountDir = dirname(error.resolvedPath);
+      const message = `${call.name} needs access to ${mountDir}/ (outside sandbox). Allow?`;
       if (callbacks.onConfirmationRequired) {
         await callbacks.onConfirmationRequired(call, message, {
           type: "sandbox_access",
           requestedPath: error.requestedPath,
           resolvedPath: error.resolvedPath,
+          mountDir,
           mode: error.mode,
         });
       }

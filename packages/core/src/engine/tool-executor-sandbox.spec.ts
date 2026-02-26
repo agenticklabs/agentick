@@ -111,12 +111,13 @@ describe("ToolExecutor sandbox access recovery", () => {
     expect(onConfirmationRequired).toHaveBeenCalledOnce();
     const [, message, metadata] = onConfirmationRequired.mock.calls[0]!;
     expect(message).toContain("read_file");
-    expect(message).toContain("/secret/file.txt");
+    expect(message).toContain("/real/secret/");
     expect(message).toContain("outside sandbox");
     expect(metadata).toMatchObject({
       type: "sandbox_access",
       requestedPath: "/secret/file.txt",
       resolvedPath: "/real/secret/file.txt",
+      mountDir: "/real/secret",
       mode: "read",
     });
 

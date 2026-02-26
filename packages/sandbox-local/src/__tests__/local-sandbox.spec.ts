@@ -120,6 +120,125 @@ describe("LocalSandbox", () => {
     expect(result.stdout.trim()).toBe("bar");
   });
 
+  describe("addMount consolidation", () => {
+    let mountRoot: string;
+
+    beforeEach(async () => {
+      const raw = join(tmpdir(), `mount-test-${randomBytes(4).toString("hex")}`);
+      await mkdir(join(raw, "foo", "bar"), { recursive: true });
+      await mkdir(join(raw, "foo", "a"), { recursive: true });
+      await mkdir(join(raw, "foo", "b"), { recursive: true });
+      await mkdir(join(raw, "foo", "c"), { recursive: true });
+      mountRoot = await realpath(raw);
+    });
+
+    afterEach(async () => {
+      await rm(mountRoot, { recursive: true, force: true });
+    });
+
+    const fooPath = () => join(mountRoot, "foo");
+    const barPath = () => join(mountRoot, "foo", "bar");
+    const aPath = () => join(mountRoot, "foo", "a");
+    const bPath = () => join(mountRoot, "foo", "b");
+    const cPath = () => join(mountRoot, "foo", "c");
+
+    it("rw parent consumes ro child", async () => {
+      await sandbox.addMount({ host: barPath(), sandbox: barPath(), mode: "ro" });
+      expect(sandbox.listMounts()).toHaveLength(1);
+
+      await sandbox.addMount({ host: fooPath(), sandbox: fooPath(), mode: "rw" });
+      const mounts = sandbox.listMounts();
+      expect(mounts).toHaveLength(1);
+      expect(mounts[0]!.host).toBe(fooPath());
+      expect(mounts[0]!.mode).toBe("rw");
+    });
+
+    it("rw parent consumes rw child", async () => {
+      await sandbox.addMount({ host: barPath(), sandbox: barPath(), mode: "rw" });
+      await sandbox.addMount({ host: fooPath(), sandbox: fooPath(), mode: "rw" });
+      const mounts = sandbox.listMounts();
+      expect(mounts).toHaveLength(1);
+      expect(mounts[0]!.host).toBe(fooPath());
+    });
+
+    it("ro parent does NOT consume rw child", async () => {
+      await sandbox.addMount({ host: barPath(), sandbox: barPath(), mode: "rw" });
+      await sandbox.addMount({ host: fooPath(), sandbox: fooPath(), mode: "ro" });
+      const mounts = sandbox.listMounts();
+      expect(mounts).toHaveLength(2);
+      expect(mounts.some((m) => m.host === barPath() && m.mode === "rw")).toBe(true);
+      expect(mounts.some((m) => m.host === fooPath() && m.mode === "ro")).toBe(true);
+    });
+
+    it("ro parent consumes ro child", async () => {
+      await sandbox.addMount({ host: barPath(), sandbox: barPath(), mode: "ro" });
+      await sandbox.addMount({ host: fooPath(), sandbox: fooPath(), mode: "ro" });
+      const mounts = sandbox.listMounts();
+      expect(mounts).toHaveLength(1);
+      expect(mounts[0]!.host).toBe(fooPath());
+      expect(mounts[0]!.mode).toBe("ro");
+    });
+
+    it("skips redundant child when rw parent exists", async () => {
+      await sandbox.addMount({ host: fooPath(), sandbox: fooPath(), mode: "rw" });
+      await sandbox.addMount({ host: barPath(), sandbox: barPath(), mode: "rw" });
+      const mounts = sandbox.listMounts();
+      expect(mounts).toHaveLength(1);
+      expect(mounts[0]!.host).toBe(fooPath());
+    });
+
+    it("allows rw child under ro parent", async () => {
+      await sandbox.addMount({ host: fooPath(), sandbox: fooPath(), mode: "ro" });
+      await sandbox.addMount({ host: barPath(), sandbox: barPath(), mode: "rw" });
+      const mounts = sandbox.listMounts();
+      expect(mounts).toHaveLength(2);
+    });
+
+    it("promotes mode on exact match (ro → rw)", async () => {
+      await sandbox.addMount({ host: fooPath(), sandbox: fooPath(), mode: "ro" });
+      await sandbox.addMount({ host: fooPath(), sandbox: fooPath(), mode: "rw" });
+      const mounts = sandbox.listMounts();
+      expect(mounts).toHaveLength(1);
+      expect(mounts[0]!.mode).toBe("rw");
+    });
+
+    it("no-op on exact match same mode", async () => {
+      await sandbox.addMount({ host: fooPath(), sandbox: fooPath(), mode: "rw" });
+      await sandbox.addMount({ host: fooPath(), sandbox: fooPath(), mode: "rw" });
+      const mounts = sandbox.listMounts();
+      expect(mounts).toHaveLength(1);
+    });
+
+    it("rw parent consumes multiple children at once", async () => {
+      await sandbox.addMount({ host: aPath(), sandbox: aPath(), mode: "rw" });
+      await sandbox.addMount({ host: bPath(), sandbox: bPath(), mode: "ro" });
+      await sandbox.addMount({ host: cPath(), sandbox: cPath(), mode: "rw" });
+      expect(sandbox.listMounts()).toHaveLength(3);
+
+      await sandbox.addMount({ host: fooPath(), sandbox: fooPath(), mode: "rw" });
+      const mounts = sandbox.listMounts();
+      expect(mounts).toHaveLength(1);
+      expect(mounts[0]!.host).toBe(fooPath());
+    });
+
+    it("ro parent consumes only ro children, keeps rw children", async () => {
+      await sandbox.addMount({ host: aPath(), sandbox: aPath(), mode: "rw" });
+      await sandbox.addMount({ host: bPath(), sandbox: bPath(), mode: "ro" });
+      await sandbox.addMount({ host: cPath(), sandbox: cPath(), mode: "rw" });
+      expect(sandbox.listMounts()).toHaveLength(3);
+
+      await sandbox.addMount({ host: fooPath(), sandbox: fooPath(), mode: "ro" });
+      const mounts = sandbox.listMounts();
+      // /foo/a (rw) and /foo/c (rw) survive, /foo/b (ro) consumed, /foo (ro) added
+      expect(mounts).toHaveLength(3);
+      expect(mounts.some((m) => m.host === aPath() && m.mode === "rw")).toBe(true);
+      expect(mounts.some((m) => m.host === cPath() && m.mode === "rw")).toBe(true);
+      expect(mounts.some((m) => m.host === fooPath() && m.mode === "ro")).toBe(true);
+      // /foo/b was consumed
+      expect(mounts.some((m) => m.host === bPath())).toBe(false);
+    });
+  });
+
   describe("sandbox access recovery", () => {
     let outsideDir: string;
     let outsideFile: string;
