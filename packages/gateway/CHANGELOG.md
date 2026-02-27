@@ -1,5 +1,29 @@
 # @agentick/gateway
 
+## 0.12.0
+
+### Minor Changes
+
+- 2435355: Add `broadcast(event, data)` to `PluginContext`. Plugins can push events to clients subscribed via synthetic `$plugin:{pluginId}` session keys. Subscribe/unsubscribe routing, disconnect cleanup, and plugin removal cleanup are all handled automatically.
+- 2435355: **Breaking**: `TransportEventData` no longer spreads `data` into the top level. Event payloads are now in a structured `data` field.
+
+  Before: `{ type: "content_delta", sessionId: "main", text: "hello", index: 0 }`
+  After: `{ type: "content_delta", sessionId: "main", data: { text: "hello", index: 0 } }`
+
+  The `[key: string]: unknown` index signature is removed. This prevents silent property collisions between envelope fields (`type`, `sessionId`) and payload properties, and makes `TransportEventData` a proper typed interface rather than a bag.
+
+  `unwrapEventMessage()` return type changed from `Record<string, unknown>` to `TransportEventData | Record<string, unknown>`.
+
+  **Migration**: Any code accessing payload properties directly on transport events (e.g., `event.delta`, `event.text`) must now access them through `event.data` (e.g., `(event.data as StreamEvent).delta`).
+
+### Patch Changes
+
+- Updated dependencies [2435355]
+  - @agentick/shared@0.12.0
+  - @agentick/core@0.12.0
+  - @agentick/kernel@0.12.0
+  - @agentick/server@0.12.0
+
 ## 0.11.2
 
 ### Patch Changes
