@@ -59,6 +59,12 @@ export type {
 export { createEmptyCompiledStructure } from "./types.js";
 
 // ============================================================================
+// Structural Input Merge
+// ============================================================================
+
+export { mergeStructuralInput, type StructuralInput } from "./merge-structural-input.js";
+
+// ============================================================================
 // Hooks (re-exported from hooks directory)
 // ============================================================================
 

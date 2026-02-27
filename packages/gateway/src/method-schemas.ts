@@ -38,11 +38,31 @@ const SendParams: JSONSchema = {
     sessionId: { type: "string" },
     input: {
       type: "object",
-      description: "Full SendInput with messages, props, metadata",
+      description: "Full SendInput with messages, props, metadata, and structural fields",
       properties: {
         messages: { type: "array", items: { type: "object" } },
         props: { type: "object", additionalProperties: true },
         metadata: { type: "object", additionalProperties: true },
+        system: {
+          type: "array",
+          items: { type: "string" },
+          description: "Additional system instructions",
+        },
+        grounding: {
+          type: "array",
+          items: { type: "object" },
+          description: "Grounding context entries",
+        },
+        sections: {
+          type: "array",
+          items: { type: "object" },
+          description: "Named sections (JSX wins on ID collision)",
+        },
+        ephemeral: {
+          type: "array",
+          items: { type: "object" },
+          description: "Ephemeral content entries",
+        },
       },
     },
     message: { type: "string", description: "Convenience shorthand for text-only sends" },

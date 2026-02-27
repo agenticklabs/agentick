@@ -2,7 +2,7 @@ import React from "react";
 import type z from "zod";
 import type { ComponentClass, ComponentFactory } from "../component/component.js";
 import type { ToolClass, ExecutableTool } from "../tool/tool.js";
-import type { ContentBlock, MessageRoles, ToolExecutionType } from "@agentick/shared";
+import type { ContentBlock, MessageRoles, ToolExecutionType, SectionInput } from "@agentick/shared";
 
 // Use React's createElement for all element creation
 // This ensures elements have proper $$typeof symbol
@@ -37,36 +37,12 @@ export namespace JSX {
     | { new (props: any): any };
 
   export interface IntrinsicElements {
-    section: {
-      /**
-       * Section ID - used for merging sections with same ID.
-       */
-      id?: string;
-      /**
-       * Audience for this section.
-       */
-      audience?: "user" | "model" | "all";
+    section: SectionInput & {
       /**
        * Section content - can be any type, or use children for ContentBlocks.
        * If children are provided, content prop is ignored.
        */
       content?: any;
-      /**
-       * Optional title.
-       */
-      title?: string;
-      /**
-       * Optional tags.
-       */
-      tags?: string[];
-      /**
-       * Visibility level.
-       */
-      visibility?: "model" | "observer" | "log";
-      /**
-       * Additional metadata.
-       */
-      metadata?: Record<string, unknown>;
       /**
        * Children - Content components (Text, Code, etc.) that become ContentBlocks.
        * More React-like API for composing section content.

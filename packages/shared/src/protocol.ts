@@ -72,12 +72,69 @@ export type FrameworkChannel = (typeof FrameworkChannels)[keyof typeof Framework
 // ============================================================================
 
 import type { Message } from "./messages.js";
+import type { ContentBlock } from "./blocks.js";
+
+// ============================================================================
+// Structural Input Types
+// ============================================================================
+
+/**
+ * Position for ephemeral content in the message stream.
+ * - 'start': At the beginning of messages (after system)
+ * - 'end': At the end of messages (before current user message)
+ * - 'before-user': Immediately before the last user message
+ * - 'after-system': Immediately after the system message
+ * - 'flow': In the flow of the timeline (treated as historical context)
+ */
+export type EphemeralPosition = "start" | "end" | "before-user" | "after-system" | "flow";
+
+/**
+ * Data-only ephemeral input — foundational for JSX EphemeralProps.
+ */
+export interface EphemeralInput {
+  type?: string;
+  content?: string | ContentBlock[];
+  position?: EphemeralPosition;
+  order?: number;
+  id?: string;
+  tags?: string[];
+  metadata?: Record<string, unknown>;
+}
+
+/**
+ * Data-only grounding input — foundational for JSX GroundingProps.
+ */
+export interface GroundingInput extends EphemeralInput {
+  title?: string;
+  audience?: "model" | "user" | "both";
+}
+
+/**
+ * Data-only section input — foundational for JSX section intrinsic.
+ */
+export interface SectionInput {
+  id?: string;
+  title?: string;
+  content?: string | ContentBlock[];
+  audience?: "user" | "model" | "all";
+  tags?: string[];
+  visibility?: "model" | "observer" | "log";
+  metadata?: Record<string, unknown>;
+}
+
+// ============================================================================
+// SendInput
+// ============================================================================
 
 /**
  * Input for sending to a session.
  *
  * This is the wire-safe base type shared between client and server.
  * Core extends this with local-only fields (maxTicks, signal).
+ *
+ * Structural fields (system, grounding, sections, ephemeral) are the
+ * programmatic escape hatch for injecting context without JSX. JSX is
+ * primary; these merge into the compiled structure after JSX compilation.
  */
 export interface SendInput<P = Record<string, unknown>> {
   /** Messages to deliver */
@@ -86,6 +143,14 @@ export interface SendInput<P = Record<string, unknown>> {
   props?: P;
   /** Metadata attached to messages */
   metadata?: Record<string, unknown>;
+  /** Additional system instructions (appended to compiled systemEntries) */
+  system?: string[];
+  /** Grounding context (ephemeral with _grounding metadata) */
+  grounding?: GroundingInput[];
+  /** Named sections (JSX wins on ID collision) */
+  sections?: SectionInput[];
+  /** Ephemeral content (appended to compiled ephemeral) */
+  ephemeral?: EphemeralInput[];
 }
 
 /**

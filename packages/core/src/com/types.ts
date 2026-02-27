@@ -4,12 +4,16 @@ import type {
   Message,
   TimelineEntry as BaseTimelineEntry,
   ClientToolDefinition,
+  EphemeralPosition,
 } from "@agentick/shared";
 import type { ToolExecutionOptions } from "../types.js";
 import type { ModelConfig } from "../model/model.js";
 import type { ExecutableTool, ToolDefinition } from "../tool/tool.js";
 import type { SemanticContentBlock, Formatter } from "../renderers/index.js";
 import type { ContentBlock } from "@agentick/shared";
+
+// Re-export from shared for backwards compatibility
+export type { EphemeralPosition } from "@agentick/shared";
 
 // ============================================================================
 // Token Estimation
@@ -21,20 +25,6 @@ export type TokenEstimator = (text: string) => number;
 // TimelineVisibility and TimelineTag are now exported from @agentick/shared
 export type TimelineVisibility = "model" | "observer" | "log";
 export type TimelineTag = string;
-
-// ============================================================================
-// Ephemeral Entries (NOT persisted, NOT Messages)
-// ============================================================================
-
-/**
- * Position for ephemeral content in the message stream.
- * - 'start': At the beginning of messages (after system)
- * - 'end': At the end of messages (before current user message)
- * - 'before-user': Immediately before the last user message
- * - 'after-system': Immediately after the system message
- * - 'flow': In the flow of the timeline (treated as historical context)
- */
-export type EphemeralPosition = "start" | "end" | "before-user" | "after-system" | "flow";
 
 /**
  * Ephemeral entry - transient content that is NOT persisted.

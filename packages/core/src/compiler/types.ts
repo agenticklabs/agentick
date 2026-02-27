@@ -4,6 +4,7 @@
  * Types for the compiled output structure.
  */
 
+import type { EphemeralPosition } from "@agentick/shared";
 import type { Renderer, SemanticContentBlock } from "../renderers/types.js";
 import type { ExecutableTool } from "../tool/tool.js";
 
@@ -65,17 +66,11 @@ export interface CompiledTimelineEntry {
 }
 
 /**
- * Compiled ephemeral content position.
- * Maps to COM EphemeralPosition values.
- */
-export type CompiledEphemeralPosition = "start" | "end" | "before-user" | "after-system" | "flow";
-
-/**
  * Compiled ephemeral content.
  */
 export interface CompiledEphemeral {
   content: SemanticContentBlock[];
-  position: CompiledEphemeralPosition;
+  position: EphemeralPosition;
   order: number;
   renderer: Renderer | null;
   metadata?: Record<string, unknown>;

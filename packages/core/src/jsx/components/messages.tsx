@@ -15,7 +15,12 @@
 
 import React, { useDebugValue } from "react";
 import type { JSX } from "react";
-import type { ContentBlock, EventAllowedBlock } from "@agentick/shared";
+import type {
+  ContentBlock,
+  EventAllowedBlock,
+  EphemeralInput,
+  GroundingInput,
+} from "@agentick/shared";
 import { Message as MessagePrimitive, type MessageProps } from "./primitives.js";
 import type { EphemeralPosition } from "../../com/types.js";
 
@@ -306,41 +311,9 @@ export function StateChange(props: StateChangeProps): JSX.Element {
 // Re-export EphemeralPosition from com/types for convenience
 export type { EphemeralPosition } from "../../com/types.js";
 
-export interface EphemeralProps {
-  /**
-   * Type/category of ephemeral content.
-   * Used for semantic categorization and can be used by model config
-   * to apply type-specific formatting (delimiters, etc.)
-   */
-  type?: string;
-
-  /** Ephemeral content - can be string, ContentBlock[], or JSX children */
-  content?: string | ContentBlock[];
-
+export interface EphemeralProps extends EphemeralInput {
   /** JSX children - will be collected into content */
   children?: any;
-
-  /**
-   * Position in the message list (CSS-inspired).
-   * @default 'end'
-   */
-  position?: EphemeralPosition;
-
-  /**
-   * Ordering within the position group.
-   * Lower numbers appear first.
-   * @default 0
-   */
-  order?: number;
-
-  /** Optional identifier for debugging/tracing */
-  id?: string;
-
-  /** Tags for categorization/filtering */
-  tags?: string[];
-
-  /** Additional metadata */
-  metadata?: Record<string, unknown>;
 }
 
 /**
@@ -371,17 +344,9 @@ export function Ephemeral(props: EphemeralProps): JSX.Element {
 // Grounding Component (Semantic wrapper for Ephemeral)
 // ============================================================================
 
-export interface GroundingProps extends EphemeralProps {
-  /**
-   * Optional title/heading for this grounding context.
-   * Rendered as a header before the content.
-   */
-  title?: string;
-  /**
-   * Intended audience for this context.
-   * @default 'model'
-   */
-  audience?: "model" | "user" | "both";
+export interface GroundingProps extends GroundingInput {
+  /** JSX children - will be collected into content */
+  children?: any;
 }
 
 /**
