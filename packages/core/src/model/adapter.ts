@@ -49,7 +49,6 @@
  */
 
 import React from "react";
-import { Context } from "@agentick/kernel";
 import type { COMInput } from "../com/types.js";
 import type { EngineResponse } from "../engine/engine-response.js";
 import type { EngineModel, ModelInput, ModelOutput, ModelMetadata } from "./model.js";
@@ -651,39 +650,24 @@ export function createAdapter<TProviderInput, TProviderOutput, TChunk>(
     },
     async (input: ModelInput) => {
       const providerInput = await prepareInput(input);
-
-      // Emit event with the provider-formatted input (for DevTools debugging)
-      Context.emit("model:provider_request", {
-        modelId: metadata.id,
-        provider: metadata.provider,
-        providerInput,
-      });
-
       const providerOutput = await execute(providerInput);
 
-      // Emit event with the raw provider response (for DevTools debugging)
-      Context.emit("model:provider_response", {
-        modelId: metadata.id,
-        provider: metadata.provider,
-        providerOutput,
-      });
-
       // Use processOutput if provided, otherwise we need streaming
-      if (processOutput) {
-        return processOutput(providerOutput);
-      }
+      const output: ModelOutput = processOutput
+        ? await processOutput(providerOutput)
+        : ({
+            model: metadata.id,
+            createdAt: new Date().toISOString(),
+            message: { role: "assistant", content: [] },
+            messages: [],
+            usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
+            stopReason: "unspecified",
+            raw: providerOutput,
+          } as ModelOutput);
 
-      // Fallback: convert provider output to ModelOutput
-      // This is a simplified fallback - adapters should provide processOutput
-      return {
-        model: metadata.id,
-        createdAt: new Date().toISOString(),
-        message: { role: "assistant", content: [] },
-        messages: [],
-        usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
-        stopReason: "unspecified",
-        raw: providerOutput,
-      } as ModelOutput;
+      // Attach provider input for DevTools (session emits provider_request)
+      (output as any)._providerInput = providerInput;
+      return output;
     },
   );
 
@@ -704,12 +688,15 @@ export function createAdapter<TProviderInput, TProviderOutput, TChunk>(
         async function* (input: ModelInput): AsyncIterable<StreamEvent> {
           const providerInput = await prepareInput(input);
 
-          // Emit event with the provider-formatted input (for DevTools debugging)
-          Context.emit("model:provider_request", {
+          // Yield provider_request as a proper stream event (DevTools picks it up
+          // via the session's event pipeline — no separate getProviderInput call needed)
+          yield {
+            ...createAdapterEventBase(),
+            type: "provider_request" as const,
             modelId: metadata.id,
             provider: metadata.provider,
             providerInput,
-          });
+          } satisfies StreamEvent;
 
           // Use StreamAccumulator for clean lifecycle management
           const accumulator = new StreamAccumulator({ modelId: metadata.id });
@@ -824,7 +811,6 @@ export function createAdapter<TProviderInput, TProviderOutput, TChunk>(
     toEngineState: options.toEngineState
       ? async (output: ModelOutput) => options.toEngineState!(output)
       : (output: ModelOutput) => toEngineState(output),
-    getProviderInput: async (input: ModelInput) => prepareInput(input),
     embed: options.embed,
   };
 
@@ -857,7 +843,6 @@ export function createAdapter<TProviderInput, TProviderOutput, TChunk>(
   (ModelComponent as any).stream = stream;
   (ModelComponent as any).fromEngineState = engineModel.fromEngineState;
   (ModelComponent as any).toEngineState = engineModel.toEngineState;
-  (ModelComponent as any).getProviderInput = engineModel.getProviderInput;
   if (options.embed) {
     (ModelComponent as any).embed = options.embed;
   }

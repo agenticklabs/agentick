@@ -66,9 +66,6 @@ export interface EngineModel<TModelInput = ModelInput, TModelOutput = ModelOutpu
   /** Convert model output to engine response */
   toEngineState?: (output: TModelOutput) => Promise<EngineResponse>;
 
-  /** Transform model input to provider-specific format (for DevTools visibility) */
-  getProviderInput?: (input: TModelInput) => Promise<unknown>;
-
   /** Generate embeddings (optional — only available on models with embedding support) */
   embed?: (texts: string[], options?: EmbedOptions) => Promise<EmbedResult>;
 }
