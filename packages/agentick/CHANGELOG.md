@@ -1,5 +1,14 @@
 # agentick
 
+## 0.11.2
+
+### Patch Changes
+
+- Updated dependencies [6d169a8]
+  - @agentick/core@0.11.2
+  - @agentick/agent@0.11.2
+  - @agentick/guardrails@0.11.2
+
 ## 0.11.1
 
 ### Patch Changes
