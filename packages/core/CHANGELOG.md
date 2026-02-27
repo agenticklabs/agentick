@@ -1,5 +1,13 @@
 # @agentick/core
 
+## 0.11.2
+
+### Patch Changes
+
+- 6d169a8: Expose `sessionId` on COM so tool handlers can access their owning session's ID via `ctx.sessionId`. Returns null in test contexts without session wiring.
+  - @agentick/kernel@0.11.2
+  - @agentick/shared@0.11.2
+
 ## 0.11.1
 
 ### Patch Changes
