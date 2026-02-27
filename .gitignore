@@ -43,3 +43,8 @@ coverage/
 example/express/data/
 
 *.tsbuildinfo
+
+CONTEXT.md
+WORKING_NOTES.md
+packages/tui/UI_IDEAS.md
+plans/
