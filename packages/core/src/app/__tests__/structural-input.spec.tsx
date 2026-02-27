@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { createApp, Model, System, Timeline } from "../../index.js";
+import { createApp, Model, Section, System, Timeline } from "../../index.js";
 import { createTestAdapter } from "../../testing/index.js";
 import { createTool } from "../../tool/tool.js";
 import { z } from "zod";
@@ -53,7 +53,7 @@ describe("Structural SendInput", () => {
     expect(inputs.length).toBeGreaterThanOrEqual(1);
 
     // System strings should appear in the model's system messages
-    const allText = messagesText(inputs[0]!);
+    const _allText = messagesText(inputs[0]!);
     const systemMessages = (inputs[0]!.messages as Message[]).filter(
       (m: any) => m.role === "system",
     );
@@ -200,9 +200,9 @@ describe("Structural SendInput", () => {
     const Agent = () => (
       <>
         <Model model={model} />
-        <section id="rules" audience="model">
+        <Section id="rules" audience="model">
           JSX rules content
-        </section>
+        </Section>
         <Timeline />
       </>
     );
