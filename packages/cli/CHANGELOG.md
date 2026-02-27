@@ -1,5 +1,13 @@
 # @agentick/cli
 
+## 0.12.0
+
+### Patch Changes
+
+- Updated dependencies [2435355]
+  - @agentick/shared@0.12.0
+  - @agentick/client@0.12.0
+
 ## 0.11.2
 
 ### Patch Changes
