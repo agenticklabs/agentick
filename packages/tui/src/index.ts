@@ -41,6 +41,12 @@ export { MessageList } from "./components/MessageList.js";
 export { StreamingMessage } from "./components/StreamingMessage.js";
 export { ToolCallIndicator } from "./components/ToolCallIndicator.js";
 export { SpawnIndicator } from "./components/SpawnIndicator.js";
+export { SessionTree } from "./components/SessionTree.js";
+export {
+  useSessionTree,
+  type SessionTreeState,
+  type SessionTreeNode,
+} from "./hooks/use-session-tree.js";
 export { ToolConfirmationPrompt } from "./components/ToolConfirmationPrompt.js";
 export { DiffView } from "./components/DiffView.js";
 export { ErrorDisplay, type ErrorDisplayProps } from "./components/ErrorDisplay.js";

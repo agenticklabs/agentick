@@ -154,6 +154,7 @@ All components are exported for building custom UIs.
 | `MessageList`            | Prop-driven message display (Static + in-progress)  |
 | `StreamingMessage`       | Live streaming response with cursor                 |
 | `ToolCallIndicator`      | Spinner during tool execution                       |
+| `SessionTree`            | Tree view of spawned agents with per-agent activity |
 | `ToolConfirmationPrompt` | Y/N/A prompt for tools with `requireConfirmation`   |
 | `DiffView`               | Side-by-side diff display for file changes          |
 | `ErrorDisplay`           | Error box with optional dismiss                     |
@@ -214,6 +215,31 @@ Returns `{ value, cursor, completion, completedRanges, handleInput, setValue, cl
 The `editor` property exposes the raw `LineEditor` instance for registering completion sources. The `completion` property is the current `CompletionState | null` — pass it to `CompletionPicker` to render the autocomplete picker.
 
 For framework-agnostic usage (web, Angular), use `LineEditor` from `@agentick/client` directly, or `useLineEditor` from `@agentick/react`.
+
+### SessionTree
+
+Tree view of spawned agents. Subscribes to the root session's events and routes tool activity to the correct spawn via `spawnPath`. Shows a compact tree with box-drawing characters, per-agent tool counts, and current tool activity.
+
+```typescript
+import { SessionTree } from "@agentick/tui";
+
+<SessionTree sessionId={sessionId} />
+```
+
+Automatically hides when no spawns exist. Completed spawns remain visible for 3 seconds, then the tree clears. Pair with `ToolCallIndicator` — SessionTree shows the spawn graph, ToolCallIndicator shows the root session's tools.
+
+### useSessionTree
+
+Hook that builds a `SessionTreeState` from stream events. Single subscription to the root session — child events are routed via `spawnPath[0]`.
+
+```typescript
+import { useSessionTree } from "@agentick/tui";
+
+const tree = useSessionTree(sessionId);
+// tree.spawns — SessionTreeNode[] with status, currentTool, toolCount
+// tree.hasActive — whether any spawn is still running
+// tree.rootTool — current tool on the root session
+```
 
 ### CompletionPicker
 
