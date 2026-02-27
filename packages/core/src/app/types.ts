@@ -716,6 +716,8 @@ export interface SpawnOptions {
   maxTicks?: number;
   /** Display label for this spawn (shown in UI) */
   label?: string;
+  /** Immutable identity labels for the child session */
+  metadata?: Record<string, unknown>;
 }
 
 export interface SessionOptions extends LifecycleCallbacks {
@@ -732,6 +734,15 @@ export interface SessionOptions extends LifecycleCallbacks {
    * `session.notifyParent()` for child-to-parent inbox delivery.
    */
   parentSessionId?: string;
+
+  /**
+   * Immutable identity labels for this session.
+   *
+   * Set at creation time, frozen, never mutated. Use for type/role/origin
+   * metadata that identifies what this session IS (e.g. worker, supervisor,
+   * shell). The session graph becomes the process table.
+   */
+  metadata?: Record<string, unknown>;
 
   /**
    * Additional tools for this session.
@@ -846,6 +857,8 @@ export interface SessionSnapshot {
   timestamp: number;
   /** Parent session ID (null if root session) */
   parentSessionId?: string | null;
+  /** Immutable identity labels (persists across hydration) */
+  metadata?: Record<string, unknown>;
 }
 
 // ============================================================================
@@ -1527,6 +1540,9 @@ export interface Session<P = {}> extends EventEmitter {
    */
   readonly parentSessionId: string | null;
 
+  /** Immutable identity labels set at creation time. */
+  readonly metadata: Readonly<Record<string, unknown>>;
+
   /** Active child sessions (currently running spawns). */
   readonly children: readonly Session[];
 
@@ -1980,6 +1996,14 @@ export interface App<P = {}> {
    * Check if a session exists (in memory).
    */
   has(sessionId: string): boolean;
+
+  /**
+   * Get a live session by ID. Returns undefined if not in memory.
+   *
+   * Unlike `session(id)` which creates-or-gets, this is read-only inspection.
+   * Does not hydrate from store or create a new session.
+   */
+  getSession(sessionId: string): Session<P> | undefined;
 
   /**
    * Register onSessionCreate handler.

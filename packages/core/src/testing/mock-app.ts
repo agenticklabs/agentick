@@ -304,6 +304,7 @@ export function createMockSession(options: MockSessionOptions = {}): MockSession
     }
     readonly parent = parent;
     readonly parentSessionId = parentSessionId;
+    readonly metadata: Readonly<Record<string, unknown>> = Object.freeze({});
     readonly children = children;
     readonly queuedMessages: Message[] = [];
     readonly schedulerState = null;
@@ -553,6 +554,10 @@ export function createMockApp(options: MockAppOptions = {}): MockApp {
 
     has(sessionId: string) {
       return sessionMap.has(sessionId);
+    },
+
+    getSession(sessionId: string) {
+      return sessionMap.get(sessionId);
     },
 
     onSessionCreate(handler: (session: Session) => void) {

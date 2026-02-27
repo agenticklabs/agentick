@@ -148,6 +148,11 @@ class SessionRegistry<P> {
     return session;
   }
 
+  /** Read-only lookup. Does NOT touch activity — won't prevent idle eviction. */
+  peek(sessionId: string): SessionImpl<P> | undefined {
+    return this.sessions.get(sessionId);
+  }
+
   /**
    * Try to get a session, hydrating from store if necessary.
    * Returns undefined if session doesn't exist anywhere.
@@ -506,6 +511,10 @@ class AppImpl<P> implements App<P> {
     return this.registry.has(sessionId);
   }
 
+  getSession(sessionId: string): Session<P> | undefined {
+    return this.registry.peek(sessionId);
+  }
+
   onSessionCreate(handler: (session: Session<P>) => void): () => void {
     this.sessionCreateHandlers.add(handler);
     return () => {
@@ -581,6 +590,7 @@ class AppImpl<P> implements App<P> {
     const sessionOptions: SessionOptions = {
       ...options,
       sessionId: snapshot.sessionId,
+      metadata: snapshot.metadata ?? options.metadata,
       devTools: options.devTools ?? this.options.devTools,
     };
     const session = new SessionImpl(this.Component, this.options, sessionOptions);

@@ -32,8 +32,10 @@ import {
   FiberCompiler,
   StructureRenderer,
   ReconciliationScheduler,
+  mergeStructuralInput,
   type SerializedFiberNode,
   type FiberSummary,
+  type StructuralInput,
 } from "../compiler/index.js";
 import { COM, type COMStopRequest, type COMContinueRequest } from "../com/object-model.js";
 import { MarkdownRenderer } from "../renderers/index.js";
@@ -241,6 +243,9 @@ export class SessionImpl<P = {}> extends EventEmitter implements Session<P> {
   // Channels for pub/sub communication
   private readonly _channels = new Map<string, Channel>();
 
+  // Structural input from SendInput (programmatic context injection)
+  private _structuralInput: StructuralInput | null = null;
+
   // Current execution handle (for concurrent send idempotency)
   private _currentHandle: SessionExecutionHandle | null = null;
   private _currentResultResolve: ((result: SendResult) => void) | null = null;
@@ -262,6 +267,9 @@ export class SessionImpl<P = {}> extends EventEmitter implements Session<P> {
   private _spawnDepth = 0;
   private static readonly MAX_SPAWN_DEPTH = 10;
 
+  // Immutable identity labels
+  private readonly _metadata: Readonly<Record<string, unknown>>;
+
   constructor(
     Component: ComponentFunction<P>,
     appOptions: AppOptions,
@@ -272,6 +280,7 @@ export class SessionImpl<P = {}> extends EventEmitter implements Session<P> {
     this.Component = Component;
     this.appOptions = appOptions;
     this.sessionOptions = sessionOptions;
+    this._metadata = Object.freeze({ ...(sessionOptions.metadata ?? {}) });
 
     // Capture ALS context at session creation time
     // Include Agentick middleware registry if available (for procedure middleware support)
@@ -351,6 +360,10 @@ export class SessionImpl<P = {}> extends EventEmitter implements Session<P> {
 
   get parentSessionId(): string | null {
     return this._parentSessionId;
+  }
+
+  get metadata(): Readonly<Record<string, unknown>> {
+    return this._metadata;
   }
 
   get children(): readonly Session[] {
@@ -459,7 +472,25 @@ export class SessionImpl<P = {}> extends EventEmitter implements Session<P> {
           throw new Error(this.terminalError);
         }
 
-        const { messages = [], props, metadata, maxTicks, signal, tools: executionTools } = input;
+        const {
+          messages = [],
+          props,
+          metadata,
+          maxTicks,
+          signal,
+          tools: executionTools,
+          system,
+          grounding,
+          sections,
+          ephemeral,
+        } = input;
+
+        // Store structural input for merge after compilation
+        if (system?.length || grounding?.length || sections?.length || ephemeral?.length) {
+          this._structuralInput = { system, grounding, sections, ephemeral };
+        } else {
+          this._structuralInput = null;
+        }
 
         // Apply metadata to messages
         const allMessages = messages.map((m) => (metadata ? { ...m, metadata } : m));
@@ -511,7 +542,7 @@ export class SessionImpl<P = {}> extends EventEmitter implements Session<P> {
         }
 
         // If idle and we have something to do, start tick
-        if ((allMessages.length > 0 || props) && this._status === "idle") {
+        if ((allMessages.length > 0 || props || this._structuralInput) && this._status === "idle") {
           // Use last known props if available, otherwise default to empty props.
           const tickProps = (this._lastProps ?? ({} as P)) as P;
           return await this.render(tickProps, executionOptions);
@@ -610,6 +641,7 @@ export class SessionImpl<P = {}> extends EventEmitter implements Session<P> {
         const childOptions: SessionOptions = {
           signal: AbortSignal.any(abortSignals),
           devTools: this.sessionOptions.devTools ?? this.appOptions.devTools,
+          metadata: spawnOptions?.metadata,
         };
         const child = new SessionImpl(Component, childAppOptions, childOptions);
         (child as any)._parent = this;
@@ -1281,6 +1313,7 @@ export class SessionImpl<P = {}> extends EventEmitter implements Session<P> {
       usage: { ...this._totalUsage },
       timestamp: Date.now(),
       parentSessionId: this._parentSessionId,
+      metadata: Object.keys(this._metadata).length > 0 ? { ...this._metadata } : undefined,
     };
   }
 
@@ -2165,19 +2198,6 @@ export class SessionImpl<P = {}> extends EventEmitter implements Session<P> {
           stage: "model_input",
         });
 
-        // Emit provider request to DevTools (Stage 4: what the SDK actually receives)
-        if (model.getProviderInput) {
-          const providerInput = await model.getProviderInput(modelInput);
-          this.emitEvent({
-            type: "provider_request",
-            tick: currentTick,
-            timestamp: timestamp(),
-            modelId: model?.metadata?.id ?? model?.metadata?.model,
-            provider: model?.metadata?.provider,
-            providerInput,
-          });
-        }
-
         // Stream model output if supported
         let modelOutput: any;
         let streamed = false;
@@ -2224,6 +2244,17 @@ export class SessionImpl<P = {}> extends EventEmitter implements Session<P> {
             generateResult && "result" in generateResult
               ? await generateResult.result
               : await generateResult;
+
+          // Emit provider_request for DevTools (stream path yields this as a StreamEvent)
+          if (modelOutput?._providerInput !== undefined) {
+            this.emitEvent({
+              type: "provider_request",
+              tick: currentTick,
+              modelId: model?.metadata?.id ?? model?.metadata?.model,
+              provider: model?.metadata?.provider,
+              providerInput: modelOutput._providerInput,
+            });
+          }
         }
 
         // Extract text from model output
@@ -2809,6 +2840,11 @@ export class SessionImpl<P = {}> extends EventEmitter implements Session<P> {
     } finally {
       // Exit tick mode - any pending reconciliations will now flush
       this.scheduler?.exitTick();
+    }
+
+    // Merge programmatic structural input (system, grounding, sections, ephemeral)
+    if (this._structuralInput) {
+      mergeStructuralInput(compiled, this._structuralInput);
     }
 
     // Apply compiled structure (sections, ephemeral, metadata — NOT tools or timeline)
