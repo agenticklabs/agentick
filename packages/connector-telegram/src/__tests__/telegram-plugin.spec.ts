@@ -10,6 +10,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { PluginContext } from "@agentick/gateway";
 import type { BlockType, StreamEvent } from "@agentick/shared";
 import { TelegramPlugin } from "../telegram-plugin.js";
+import { createConfigStore } from "../../../gateway/src/config.ts";
 
 // ============================================================================
 // Mock Infrastructure
@@ -116,6 +117,7 @@ function createMockPluginContext(overrides?: Partial<PluginContext>) {
 
   const ctx: PluginContext = {
     gatewayId: "test-gw",
+    config: createConfigStore({}),
     sendToSession: vi.fn(async () => createEventStream([])),
     respondToConfirmation: vi.fn(async () => {}),
     registerMethod: vi.fn((path: string, handler: any) => {
