@@ -32,6 +32,7 @@ export interface MockComOptions {
 
 export interface MockCom {
   id: string;
+  sessionId: string | null;
   timeline: COMTimelineEntry[];
   state: Map<string, unknown>;
   // Match real COM interface names
@@ -70,6 +71,7 @@ export function createMockCom(options: MockComOptions = {}): MockCom {
 
   return {
     id: options.id ?? "test-session",
+    sessionId: options.id ?? "test-session",
     timeline: options.timeline ?? [],
     state,
     getState<T>(key: string): T | undefined {

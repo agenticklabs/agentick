@@ -2631,6 +2631,7 @@ export class SessionImpl<P = {}> extends EventEmitter implements Session<P> {
     this.ctx = new COM({
       metadata: {},
     });
+    this.ctx.setSessionId(this.id);
 
     this.compiler = new FiberCompiler(this.ctx);
 

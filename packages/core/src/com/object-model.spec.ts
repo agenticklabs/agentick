@@ -474,4 +474,21 @@ describe("COM EventEmitter", () => {
       expect(handler3).toHaveBeenCalledTimes(1);
     });
   });
+
+  describe("sessionId", () => {
+    it("should be null by default", () => {
+      expect(ctx.sessionId).toBeNull();
+    });
+
+    it("should be set via setSessionId", () => {
+      ctx.setSessionId("session-123");
+      expect(ctx.sessionId).toBe("session-123");
+    });
+
+    it("should be overwritable (session reset)", () => {
+      ctx.setSessionId("first");
+      ctx.setSessionId("second");
+      expect(ctx.sessionId).toBe("second");
+    });
+  });
 });

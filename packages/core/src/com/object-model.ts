@@ -166,6 +166,9 @@ export class ContextObjectModel extends EventEmitter {
   private _shouldAbort = false;
   private _abortReason?: string;
 
+  // Session identity — set once by Session after construction
+  private _sessionId: string | null = null;
+
   // Spawn callback - delegates to session for child session creation
   private _spawnCallback: ((agent: any, input: any, options?: any) => any) | null = null;
 
@@ -1104,6 +1107,27 @@ export class ContextObjectModel extends EventEmitter {
   _resetRecompileRequest(): void {
     this._recompileRequested = false;
     this._recompileReasons = [];
+  }
+
+  // ============================================================================
+  // Session Identity
+  // ============================================================================
+
+  /**
+   * The session ID that owns this COM instance.
+   * Available in tool handlers via `ctx.sessionId`.
+   * Returns null if COM was created outside a session (e.g. tests without session wiring).
+   */
+  get sessionId(): string | null {
+    return this._sessionId;
+  }
+
+  /**
+   * Set the session ID. Called once by Session after construction.
+   * @internal
+   */
+  setSessionId(id: string): void {
+    this._sessionId = id;
   }
 
   // ============================================================================
