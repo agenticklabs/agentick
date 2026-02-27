@@ -5,22 +5,28 @@
  * Canonical home for wire-format normalization.
  */
 
+import type { TransportEventData } from "./transport.js";
+
 /**
- * Normalizes EventMessage wire format to flat event format.
+ * Normalizes EventMessage wire format to TransportEventData.
  *
  * EventMessage: { type: "event", event: "content_delta", sessionId, data: { ... } }
- * Flat:         { type: "content_delta", sessionId, ... }
+ * Result:       { type: "content_delta", sessionId, data: { ... } }
  *
- * Non-EventMessage data (e.g., connection, pong) passes through unchanged.
+ * Non-EventMessage data (e.g., connection, pong) passes through unchanged
+ * as a raw record — callers should handle protocol messages before casting
+ * the result to TransportEventData.
  */
-export function unwrapEventMessage(data: Record<string, unknown>): Record<string, unknown> {
-  if (data.type === "event" && typeof data.event === "string") {
-    return {
-      // Data fields spread first, then envelope fields overwrite to prevent collision
-      ...(data.data && typeof data.data === "object" ? (data.data as object) : {}),
-      type: data.event,
-      ...(data.sessionId != null && { sessionId: data.sessionId }),
+export function unwrapEventMessage(
+  raw: Record<string, unknown>,
+): TransportEventData | Record<string, unknown> {
+  if (raw.type === "event" && typeof raw.event === "string") {
+    const result: TransportEventData = {
+      type: raw.event,
+      data: raw.data,
     };
+    if (raw.sessionId != null) result.sessionId = raw.sessionId as string;
+    return result;
   }
-  return data;
+  return raw;
 }

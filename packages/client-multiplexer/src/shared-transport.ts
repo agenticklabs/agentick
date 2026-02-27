@@ -671,10 +671,14 @@ export class SharedTransport implements ClientTransport {
     const sessionId = event.sessionId;
     if (sessionId && !this.mySessionSubscriptions.has(sessionId)) {
       // Check if it's a channel event for a channel we're subscribed to
-      if (event.type === "channel" && event.channel) {
-        const channelKey = `${sessionId}:${event.channel}`;
-        if (!this.myChannelSubscriptions.has(channelKey)) {
-          return; // We don't care about this
+      if (event.type === "channel") {
+        const payload = event.data as Record<string, unknown> | undefined;
+        const channel = payload?.channel as string | undefined;
+        if (channel) {
+          const channelKey = `${sessionId}:${channel}`;
+          if (!this.myChannelSubscriptions.has(channelKey)) {
+            return; // We don't care about this
+          }
         }
       } else {
         return; // We don't care about this session

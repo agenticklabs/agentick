@@ -712,4 +712,205 @@ describe("Gateway Plugin System", () => {
       expect(invokeResult).toBe("yes");
     });
   });
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // Broadcast
+  // ══════════════════════════════════════════════════════════════════════════
+
+  describe("broadcast", () => {
+    it("sends events to subscribed clients", async () => {
+      const gw = createTestGateway();
+      const plugin = createTestPlugin("bcast");
+      await gw.use(plugin);
+
+      // Connect a client via local transport
+      const transport = gw.createLocalTransport();
+      await transport.connect();
+
+      // Subscribe to plugin events via synthetic session key
+      await transport.subscribeToSession("$plugin:bcast");
+
+      // Collect events
+      const events: any[] = [];
+      transport.onEvent((e) => events.push(e));
+
+      // Broadcast from plugin
+      plugin.ctx!.broadcast("test:event", { hello: "world" });
+
+      // Give the event buffer time to flush
+      await new Promise((r) => setTimeout(r, 50));
+
+      expect(events).toHaveLength(1);
+      expect(events[0].sessionId).toBe("$plugin:bcast");
+      expect(events[0].type).toBe("test:event");
+      expect(events[0].data).toEqual({ hello: "world" });
+
+      transport.disconnect();
+    });
+
+    it("is a no-op with no subscribers", async () => {
+      const gw = createTestGateway();
+      const plugin = createTestPlugin("lonely");
+      await gw.use(plugin);
+
+      // Should not throw
+      plugin.ctx!.broadcast("ghost:event", { data: 1 });
+    });
+
+    it("unsubscribe stops receiving broadcast events", async () => {
+      const gw = createTestGateway();
+      const plugin = createTestPlugin("unsub-bcast");
+      await gw.use(plugin);
+
+      const transport = gw.createLocalTransport();
+      await transport.connect();
+      await transport.subscribeToSession("$plugin:unsub-bcast");
+
+      const events: any[] = [];
+      transport.onEvent((e) => events.push(e));
+
+      plugin.ctx!.broadcast("first", {});
+      await new Promise((r) => setTimeout(r, 50));
+      expect(events).toHaveLength(1);
+
+      // Unsubscribe
+      await transport.unsubscribeFromSession("$plugin:unsub-bcast");
+
+      plugin.ctx!.broadcast("second", {});
+      await new Promise((r) => setTimeout(r, 50));
+
+      // Should still be just 1
+      expect(events).toHaveLength(1);
+
+      transport.disconnect();
+    });
+
+    it("client disconnect cleans up plugin subscriptions", async () => {
+      const gw = createTestGateway();
+      const plugin = createTestPlugin("dc-cleanup");
+      await gw.use(plugin);
+
+      const transport = gw.createLocalTransport();
+      await transport.connect();
+      await transport.subscribeToSession("$plugin:dc-cleanup");
+
+      // Disconnect the client
+      transport.disconnect();
+      await new Promise((r) => setTimeout(r, 50));
+
+      // Broadcast should not throw (subscriber set was cleaned up)
+      plugin.ctx!.broadcast("after:dc", {});
+    });
+
+    it("plugin removal clears subscriber set", async () => {
+      const gw = createTestGateway();
+      const plugin = createTestPlugin("removable");
+      await gw.use(plugin);
+
+      const transport = gw.createLocalTransport();
+      await transport.connect();
+      await transport.subscribeToSession("$plugin:removable");
+
+      const events: any[] = [];
+      transport.onEvent((e) => events.push(e));
+
+      // Remove the plugin
+      await gw.remove("removable");
+
+      // Re-register a new plugin with same id — fresh subscriber set
+      const plugin2 = createTestPlugin("removable");
+      await gw.use(plugin2);
+
+      plugin2.ctx!.broadcast("post:remove", {});
+      await new Promise((r) => setTimeout(r, 50));
+
+      // Original subscriber was cleared on remove, so no events
+      expect(events).toHaveLength(0);
+
+      transport.disconnect();
+    });
+
+    it("subscribe to $plugin: does not create a managed session", async () => {
+      const gw = createTestGateway();
+      const plugin = createTestPlugin("no-session");
+      await gw.use(plugin);
+
+      const transport = gw.createLocalTransport();
+      await transport.connect();
+      await transport.subscribeToSession("$plugin:no-session");
+
+      // Gateway should have 0 sessions (only sessions from actual apps)
+      expect(gw.status.sessions).toBe(0);
+
+      transport.disconnect();
+    });
+
+    it("two plugins broadcast independently", async () => {
+      const gw = createTestGateway();
+      const pluginA = createTestPlugin("alpha");
+      const pluginB = createTestPlugin("beta");
+      await gw.use(pluginA);
+      await gw.use(pluginB);
+
+      const transportA = gw.createLocalTransport();
+      const transportB = gw.createLocalTransport();
+      await transportA.connect();
+      await transportB.connect();
+
+      // A subscribes to alpha, B subscribes to beta
+      await transportA.subscribeToSession("$plugin:alpha");
+      await transportB.subscribeToSession("$plugin:beta");
+
+      const eventsA: any[] = [];
+      const eventsB: any[] = [];
+      transportA.onEvent((e) => eventsA.push(e));
+      transportB.onEvent((e) => eventsB.push(e));
+
+      pluginA.ctx!.broadcast("from:alpha", { src: "a" });
+      pluginB.ctx!.broadcast("from:beta", { src: "b" });
+      await new Promise((r) => setTimeout(r, 50));
+
+      // A only gets alpha events
+      expect(eventsA).toHaveLength(1);
+      expect(eventsA[0].type).toBe("from:alpha");
+      expect(eventsA[0].data).toEqual({ src: "a" });
+
+      // B only gets beta events
+      expect(eventsB).toHaveLength(1);
+      expect(eventsB[0].type).toBe("from:beta");
+      expect(eventsB[0].data).toEqual({ src: "b" });
+
+      transportA.disconnect();
+      transportB.disconnect();
+    });
+
+    it("broadcast delivers to multiple subscribers", async () => {
+      const gw = createTestGateway();
+      const plugin = createTestPlugin("multi");
+      await gw.use(plugin);
+
+      const t1 = gw.createLocalTransport();
+      const t2 = gw.createLocalTransport();
+      await t1.connect();
+      await t2.connect();
+      await t1.subscribeToSession("$plugin:multi");
+      await t2.subscribeToSession("$plugin:multi");
+
+      const events1: any[] = [];
+      const events2: any[] = [];
+      t1.onEvent((e) => events1.push(e));
+      t2.onEvent((e) => events2.push(e));
+
+      plugin.ctx!.broadcast("fan:out", { n: 42 });
+      await new Promise((r) => setTimeout(r, 50));
+
+      expect(events1).toHaveLength(1);
+      expect(events2).toHaveLength(1);
+      expect(events1[0].data).toEqual({ n: 42 });
+      expect(events2[0].data).toEqual({ n: 42 });
+
+      t1.disconnect();
+      t2.disconnect();
+    });
+  });
 });

@@ -620,7 +620,7 @@ describe("createUnixSocketClientTransport", () => {
     expect(events.length).toBeGreaterThanOrEqual(1);
     const evt = events[0] as Record<string, unknown>;
     expect(evt.type).toBe("test_event");
-    expect(evt.hello).toBe("world");
+    expect((evt.data as Record<string, unknown>).hello).toBe("world");
 
     transport.disconnect();
   });

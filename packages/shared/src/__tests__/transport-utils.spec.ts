@@ -9,7 +9,11 @@ describe("unwrapEventMessage", () => {
       sessionId: "s1",
       data: { text: "hello" },
     });
-    expect(result).toEqual({ type: "content_delta", sessionId: "s1", text: "hello" });
+    expect(result).toEqual({
+      type: "content_delta",
+      sessionId: "s1",
+      data: { text: "hello" },
+    });
   });
 
   it("passes through non-event messages", () => {

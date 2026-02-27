@@ -185,8 +185,8 @@ export function createRPCTransport(
       return;
     }
 
-    // All other messages — forward to event handlers
-    dispatchEvent(data as TransportEventData);
+    // All other messages — forward to event handlers as best-effort
+    dispatchEvent({ type, sessionId: data.sessionId as string | undefined, data });
   }
 
   function dispatchEvent(event: TransportEventData): void {

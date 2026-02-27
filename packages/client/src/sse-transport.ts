@@ -203,18 +203,21 @@ export class SSETransport implements ClientTransport {
 
         const onMessage = (event: MessageEvent) => {
           try {
-            const data = unwrapEventMessage(JSON.parse(event.data)) as TransportEventData;
-            this.handleIncomingEvent(data);
+            const raw = unwrapEventMessage(JSON.parse(event.data));
 
-            if (data.type === "connection" && data.connectionId) {
-              this._connectionId = data.connectionId as string;
-              if (data.subscriptions) {
-                for (const sessionId of data.subscriptions as string[]) {
+            if (raw.type === "connection") {
+              const conn = raw as Record<string, unknown>;
+              this._connectionId = conn.connectionId as string;
+              if (conn.subscriptions) {
+                for (const sessionId of conn.subscriptions as string[]) {
                   this.subscriptions.add(sessionId);
                 }
               }
               resolve();
+              return;
             }
+
+            this.handleIncomingEvent(raw as TransportEventData);
           } catch (error) {
             console.error("Failed to parse SSE event:", error);
           }
@@ -314,12 +317,13 @@ export class SSETransport implements ClientTransport {
             for (const line of lines) {
               if (!line.startsWith("data: ")) continue;
               try {
-                const data = unwrapEventMessage(JSON.parse(line.slice(6))) as TransportEventData;
-                if (data.type === "channel" || data.type === "connection") {
+                const raw = unwrapEventMessage(JSON.parse(line.slice(6)));
+                if (raw.type === "channel" || raw.type === "connection") {
                   continue;
                 }
-                self.handleIncomingEvent(data);
-                yield data;
+                const transportEvent = raw as TransportEventData;
+                self.handleIncomingEvent(transportEvent);
+                yield transportEvent;
               } catch (error) {
                 console.error("Failed to parse send event:", error);
               }

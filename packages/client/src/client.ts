@@ -36,7 +36,7 @@ import { AbortError } from "@agentick/shared";
 // Client Configuration
 // ============================================================================
 
-import type { ClientTransport } from "./transport.js";
+import type { ClientTransport, TransportEventData } from "./transport.js";
 import { unwrapEventMessage } from "./transport-utils.js";
 
 /**
@@ -800,7 +800,7 @@ export class AgentickClient {
 
     // Forward transport events to our handlers
     const cleanupEvent = this.customTransport.onEvent((event) => {
-      this.handleIncomingEvent(event as Record<string, unknown>);
+      this.handleIncomingEvent(event);
     });
 
     // Map transport state to connection state
@@ -911,18 +911,21 @@ export class AgentickClient {
 
         const onMessage = (event: MessageEvent) => {
           try {
-            const data = unwrapEventMessage(JSON.parse(event.data));
-            this.handleIncomingEvent(data);
+            const raw = unwrapEventMessage(JSON.parse(event.data));
 
-            if (data.type === "connection" && data.connectionId) {
-              this._connectionId = data.connectionId as string;
-              if (data.subscriptions) {
-                for (const sessionId of data.subscriptions as string[]) {
+            if (raw.type === "connection") {
+              const conn = raw as Record<string, unknown>;
+              this._connectionId = conn.connectionId as string;
+              if (conn.subscriptions) {
+                for (const sessionId of conn.subscriptions as string[]) {
                   this.subscriptions.add(sessionId);
                 }
               }
               resolve();
+              return;
             }
+
+            this.handleIncomingEvent(raw as TransportEventData);
           } catch (error) {
             console.error("Failed to parse SSE event:", error);
           }
@@ -1167,7 +1170,7 @@ export class AgentickClient {
             continue;
           }
           handle._handleEvent(event as unknown as SessionStreamEvent);
-          this.handleIncomingEvent(event as Record<string, unknown>);
+          this.handleIncomingEvent(event);
         }
 
         handle._complete();
@@ -1215,13 +1218,17 @@ export class AgentickClient {
         for (const line of lines) {
           if (!line.startsWith("data: ")) continue;
           try {
-            const data = unwrapEventMessage(JSON.parse(line.slice(6))) as Record<string, unknown>;
-            if (data.type === "channel" || data.type === "connection") {
+            const raw = unwrapEventMessage(JSON.parse(line.slice(6)));
+            if (raw.type === "channel" || raw.type === "connection") {
               continue;
             }
-            const event = data as unknown as SessionStreamEvent;
-            handle._handleEvent(event);
-            this.handleIncomingEvent(data);
+            const event = raw as TransportEventData;
+            const streamEvent = (event.data ?? event) as StreamEvent;
+            const sessionEvent = Object.assign(streamEvent, {
+              sessionId: event.sessionId as string,
+            }) as SessionStreamEvent;
+            handle._handleEvent(sessionEvent);
+            this.handleIncomingEvent(event);
           } catch (error) {
             console.error("Failed to parse send event:", error);
           }
@@ -1417,9 +1424,10 @@ export class AgentickClient {
     }
   }
 
-  private handleIncomingEvent(data: Record<string, unknown>): void {
+  private handleIncomingEvent(data: TransportEventData): void {
     const sessionId = data.sessionId as string | undefined;
     const type = data.type as string;
+    const payload = data.data as Record<string, unknown> | undefined;
 
     // Handle connection event
     if (type === "connection") {
@@ -1427,9 +1435,9 @@ export class AgentickClient {
     }
 
     // Handle channel events (from server → client)
-    if (type === "channel" && sessionId) {
-      const channelName = data.channel as string;
-      const channelEvent = data.event as ChannelEvent;
+    if (type === "channel" && sessionId && payload) {
+      const channelName = payload.channel as string;
+      const channelEvent = payload.event as ChannelEvent;
       if (channelName && channelEvent) {
         const accessor = this.sessions.get(sessionId);
         if (accessor) {
@@ -1439,8 +1447,8 @@ export class AgentickClient {
       return;
     }
 
-    // Route stream events
-    const streamEvent = data as unknown as StreamEvent;
+    // Route stream events — extract from structured data
+    const streamEvent = (payload ?? data) as unknown as StreamEvent;
     const eventId = (streamEvent as { id?: string }).id;
     if (eventId) {
       if (this.seenEventIds.has(eventId)) {
@@ -1461,7 +1469,7 @@ export class AgentickClient {
 
     // Notify global handlers
     if (sessionId) {
-      const sessionEvent = streamEvent as SessionStreamEvent;
+      const sessionEvent = Object.assign(streamEvent, { sessionId }) as SessionStreamEvent;
       for (const handler of this.eventHandlers) {
         try {
           handler(sessionEvent);
@@ -1480,18 +1488,18 @@ export class AgentickClient {
     }
 
     // Handle result events
-    if (type === "result" && "result" in data) {
+    if (type === "result" && streamEvent && "result" in streamEvent) {
       if (sessionId) {
         const accessor = this.sessions.get(sessionId);
         if (accessor) {
-          accessor._handleResult(data.result as SessionResultPayload);
+          accessor._handleResult((streamEvent as { result: SessionResultPayload }).result);
         }
       }
     }
 
     // Handle tool confirmation requests
     if (type === "tool_confirmation_required" && sessionId) {
-      const required = data as unknown as {
+      const required = streamEvent as unknown as {
         callId: string;
         name: string;
         input: Record<string, unknown>;
@@ -1665,10 +1673,11 @@ export class AgentickClient {
       for (const line of lines) {
         if (!line.startsWith("data: ")) continue;
         try {
-          const data = unwrapEventMessage(JSON.parse(line.slice(6))) as Record<string, unknown>;
-          if (data.type === "method:chunk") {
-            yield data.chunk as T;
-          } else if (data.type === "method:end") {
+          const raw = unwrapEventMessage(JSON.parse(line.slice(6)));
+          if (raw.type === "method:chunk") {
+            const payload = (raw as TransportEventData).data as Record<string, unknown> | undefined;
+            yield (payload?.chunk ?? (raw as Record<string, unknown>).chunk) as T;
+          } else if (raw.type === "method:end") {
             return;
           }
         } catch (error) {

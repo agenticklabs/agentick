@@ -220,6 +220,9 @@ export interface PluginContext {
   /** Unsubscribe from gateway events */
   off<K extends keyof GatewayEvents>(event: K, handler: (payload: GatewayEvents[K]) => void): void;
 
+  /** Broadcast an event to all clients subscribed to this plugin */
+  broadcast(event: string, data: unknown): void;
+
   /** Gateway configuration store */
   config: ConfigStore;
 

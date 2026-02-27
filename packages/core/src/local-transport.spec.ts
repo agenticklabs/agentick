@@ -76,8 +76,8 @@ describe("createLocalTransport", () => {
 
     const deltas = events.filter((e) => e.type === "content_delta");
     expect(deltas).toHaveLength(2);
-    expect(deltas[0].delta).toBe("Hello");
-    expect(deltas[1].delta).toBe(" World");
+    expect(deltas[0].data.delta).toBe("Hello");
+    expect(deltas[1].data.delta).toBe(" World");
   });
 
   it("send() defaults sessionId to main", async () => {

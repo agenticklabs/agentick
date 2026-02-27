@@ -335,6 +335,23 @@ The core transport interface. All transports implement this — SSE/HTTP, WebSoc
 | `onEvent(handler)`                               | Register event handler, returns unsubscribe function                        |
 | `onStateChange(handler)`                         | Register state change handler                                               |
 
+### TransportEventData
+
+All transport events share this structure:
+
+```typescript
+interface TransportEventData {
+  type: string;        // Event type (e.g., "content_delta", "execution_end")
+  sessionId?: string;  // Session this event belongs to
+  executionId?: string;
+  data?: unknown;      // Structured event payload
+}
+```
+
+The `data` field contains the original stream event payload. It is never spread into the top level — this prevents property collisions and makes the wire format predictable.
+
+**Wire format**: The gateway sends `EventMessage` envelopes (`{ type: "event", event: "<type>", sessionId, data }`). The `unwrapEventMessage()` utility normalizes these to `TransportEventData`, promoting `event` to `type` and preserving `data` as-is.
+
 ### TransportState
 
 `"disconnected" | "connecting" | "connected" | "error"`

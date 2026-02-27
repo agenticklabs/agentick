@@ -1,9 +1,9 @@
 /**
  * unwrapEventMessage Tests
  *
- * Validates the EventMessage → flat format normalization used by all
- * client-side transports. Tests both the new EventMessage format and
- * passthrough of legacy/non-EventMessage data.
+ * Validates the EventMessage → TransportEventData normalization used by all
+ * client-side transports. Data stays structured in the `data` field instead
+ * of being spread into the top level.
  */
 
 import { describe, it, expect } from "vitest";
@@ -14,7 +14,7 @@ describe("unwrapEventMessage", () => {
   // EventMessage unwrapping
   // ══════════════════════════════════════════════════════════════════════════
 
-  it("unwraps EventMessage to flat format", () => {
+  it("unwraps EventMessage to structured format", () => {
     const result = unwrapEventMessage({
       type: "event",
       event: "content_delta",
@@ -25,8 +25,7 @@ describe("unwrapEventMessage", () => {
     expect(result).toEqual({
       type: "content_delta",
       sessionId: "main",
-      text: "hello",
-      index: 0,
+      data: { text: "hello", index: 0 },
     });
   });
 
@@ -41,6 +40,7 @@ describe("unwrapEventMessage", () => {
     expect(result).toEqual({
       type: "execution_end",
       sessionId: "main",
+      data: {},
     });
   });
 
@@ -55,7 +55,7 @@ describe("unwrapEventMessage", () => {
     expect(result).toEqual({
       type: "error",
       sessionId: "main",
-      error: "something failed",
+      data: { error: "something failed" },
     });
   });
 
@@ -73,8 +73,10 @@ describe("unwrapEventMessage", () => {
     expect(result).toEqual({
       type: "channel",
       sessionId: "main",
-      channel: "updates",
-      event: { type: "message", payload: { text: "hi" } },
+      data: {
+        channel: "updates",
+        event: { type: "message", payload: { text: "hi" } },
+      },
     });
   });
 
@@ -89,8 +91,7 @@ describe("unwrapEventMessage", () => {
     expect(result).toEqual({
       type: "method:chunk",
       sessionId: "main",
-      method: "tasks:list",
-      chunk: { id: 1, title: "todo" },
+      data: { method: "tasks:list", chunk: { id: 1, title: "todo" } },
     });
   });
 
@@ -108,6 +109,7 @@ describe("unwrapEventMessage", () => {
     expect(result).toEqual({
       type: "execution_end",
       sessionId: "main",
+      data: undefined,
     });
   });
 
@@ -120,7 +122,7 @@ describe("unwrapEventMessage", () => {
 
     expect(result).toEqual({
       type: "content_delta",
-      text: "hello",
+      data: { text: "hello" },
     });
     expect(result).not.toHaveProperty("sessionId");
   });
@@ -136,6 +138,7 @@ describe("unwrapEventMessage", () => {
     expect(result).toEqual({
       type: "tick_start",
       sessionId: "main",
+      data: null,
     });
   });
 
@@ -150,6 +153,7 @@ describe("unwrapEventMessage", () => {
     expect(result).toEqual({
       type: "content_delta",
       sessionId: "main",
+      data: "not an object",
     });
   });
 
@@ -164,7 +168,7 @@ describe("unwrapEventMessage", () => {
     expect(result).toEqual({
       type: "content_delta",
       sessionId: 0,
-      text: "hello",
+      data: { text: "hello" },
     });
   });
 
@@ -218,12 +222,10 @@ describe("unwrapEventMessage", () => {
   });
 
   // ══════════════════════════════════════════════════════════════════════════
-  // Collision / adversarial
+  // No collision — structured data prevents namespace conflicts
   // ══════════════════════════════════════════════════════════════════════════
 
-  it("envelope fields survive collision with data properties", () => {
-    // If data contains { type: "evil", sessionId: "hacked" }, the unwrap
-    // must still use the outer event/sessionId — envelope wins over data.
+  it("data with conflicting type/sessionId stays isolated in data field", () => {
     const result = unwrapEventMessage({
       type: "event",
       event: "content_delta",
@@ -231,9 +233,14 @@ describe("unwrapEventMessage", () => {
       data: { type: "evil", sessionId: "hacked", text: "hello" },
     });
 
-    expect(result.type).toBe("content_delta"); // envelope event wins
-    expect(result.sessionId).toBe("main"); // envelope sessionId wins
-    expect(result.text).toBe("hello"); // data property preserved
+    // Envelope fields come from the outer message
+    expect(result.type).toBe("content_delta");
+    expect(result.sessionId).toBe("main");
+    // Data stays structured — no collision possible
+    const data = (result as { data: Record<string, unknown> }).data;
+    expect(data.type).toBe("evil");
+    expect(data.sessionId).toBe("hacked");
+    expect(data.text).toBe("hello");
   });
 
   it("handles deeply nested data objects", () => {
@@ -250,7 +257,8 @@ describe("unwrapEventMessage", () => {
     });
 
     expect(result.type).toBe("tool_result");
-    expect(result.callId).toBe("call-1");
-    expect(result.nested).toEqual({ a: { b: { c: true } } });
+    const data = (result as { data: Record<string, unknown> }).data;
+    expect(data.callId).toBe("call-1");
+    expect(data.nested).toEqual({ a: { b: { c: true } } });
   });
 });

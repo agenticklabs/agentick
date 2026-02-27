@@ -90,7 +90,11 @@ export function createLocalTransport(app: App): ClientTransport {
         // event via handleIncomingEvent, so we must NOT also call
         // emitToHandlers here (that would double-dispatch).
         for await (const event of handle) {
-          yield { ...event, sessionId: sid } as TransportEventData;
+          yield {
+            type: event.type,
+            sessionId: sid,
+            data: event,
+          };
         }
       })();
 

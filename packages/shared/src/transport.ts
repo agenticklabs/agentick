@@ -19,7 +19,8 @@ export interface TransportEventData {
   type: string;
   sessionId?: string;
   executionId?: string;
-  [key: string]: unknown;
+  /** Structured event payload. Stream events, channel events, plugin broadcasts. */
+  data?: unknown;
 }
 
 export type TransportEventHandler = (event: TransportEventData) => void;

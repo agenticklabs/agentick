@@ -78,7 +78,7 @@ class LocalTransportClient implements TransportClient {
     const transportEvent: TransportEventData = {
       type: event.event,
       sessionId: event.sessionId,
-      ...(event.data && typeof event.data === "object" ? (event.data as object) : {}),
+      data: event.data,
     };
 
     for (const handler of this._eventHandlers) {
@@ -231,7 +231,11 @@ function createLocalClientTransport(
         // Push events from other clients go through client.onEvent handlers
         // via sendEventToSubscribers in gateway.sendToSession().
         for await (const event of handle) {
-          yield { ...event, sessionId: sid } as TransportEventData;
+          yield {
+            type: event.type,
+            sessionId: sid,
+            data: event,
+          };
         }
       })();
 

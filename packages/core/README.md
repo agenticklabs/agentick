@@ -1111,7 +1111,7 @@ const transport = createLocalTransport(app);
 const client = createClient({ baseUrl: "local://", transport });
 ```
 
-The transport is always "connected" — there's no network. `send()` delegates to `app.send()` and streams `SessionExecutionHandle` events as `TransportEventData`. Used by `@agentick/tui` for local agent mode.
+The transport is always "connected" — there's no network. `send()` delegates to `app.send()` and wraps each `StreamEvent` as a `TransportEventData` with the original event in the `data` field. Used by `@agentick/tui` for local agent mode.
 
 See [`packages/shared/src/transport.ts`](../shared/src/transport.ts) for the `ClientTransport` interface.
 

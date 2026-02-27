@@ -225,6 +225,9 @@ export class Gateway extends EventEmitter {
   /** Track which plugin owns which method: method path -> pluginId */
   private pluginMethodOwnership = new Map<string, string>();
 
+  /** Plugin broadcast subscribers: pluginId -> Set<clientId> */
+  private pluginSubscribers = new Map<string, Set<string>>();
+
   constructor(config: GatewayConfig) {
     super();
 
@@ -436,6 +439,7 @@ export class Gateway extends EventEmitter {
       // Clean up subscriptions and buffer
       this.sessions.unsubscribeAll(clientId);
       this.cleanupClientChannelSubscriptions(clientId);
+      this.cleanupPluginSubscriptions(clientId);
       const buffer = this.clientBuffers.get(clientId);
       if (buffer) {
         buffer.clear();
@@ -575,15 +579,32 @@ export class Gateway extends EventEmitter {
 
   /**
    * Subscribe a client to session events.
+   * Synthetic keys like `$plugin:<id>` route to plugin broadcast subscribers.
    */
   async subscribe(sessionKey: string, clientId: string): Promise<void> {
+    if (sessionKey.startsWith("$plugin:")) {
+      const pluginId = sessionKey.slice("$plugin:".length);
+      let subs = this.pluginSubscribers.get(pluginId);
+      if (!subs) {
+        subs = new Set();
+        this.pluginSubscribers.set(pluginId, subs);
+      }
+      subs.add(clientId);
+      return;
+    }
     await this.sessions.subscribe(sessionKey, clientId);
   }
 
   /**
    * Unsubscribe a client from session events.
+   * Handles `$plugin:<id>` synthetic keys.
    */
   unsubscribe(sessionKey: string, clientId: string): void {
+    if (sessionKey.startsWith("$plugin:")) {
+      const pluginId = sessionKey.slice("$plugin:".length);
+      this.pluginSubscribers.get(pluginId)?.delete(clientId);
+      return;
+    }
     this.sessions.unsubscribe(sessionKey, clientId);
   }
 
@@ -830,6 +851,12 @@ export class Gateway extends EventEmitter {
           this.coreChannelUnsubscribes.delete(key);
         }
       }
+    }
+  }
+
+  private cleanupPluginSubscriptions(clientId: string): void {
+    for (const subs of this.pluginSubscribers.values()) {
+      subs.delete(clientId);
     }
   }
 
@@ -1855,7 +1882,7 @@ export class Gateway extends EventEmitter {
     const client = transport.getClient(clientId);
     if (client) {
       client.state.subscriptions.add(params.sessionId);
-      await this.sessions.subscribe(params.sessionId, clientId);
+      await this.subscribe(params.sessionId, clientId);
     }
   }
 
@@ -1867,7 +1894,7 @@ export class Gateway extends EventEmitter {
     const client = transport.getClient(clientId);
     if (client) {
       client.state.subscriptions.delete(params.sessionId);
-      this.sessions.unsubscribe(params.sessionId, clientId);
+      this.unsubscribe(params.sessionId, clientId);
     }
   }
 
@@ -2044,6 +2071,9 @@ export class Gateway extends EventEmitter {
       }
     }
 
+    // Remove plugin broadcast subscribers
+    this.pluginSubscribers.delete(pluginId);
+
     this.plugins.delete(pluginId);
     this.emit("plugin:removed", { pluginId });
   }
@@ -2146,6 +2176,20 @@ export class Gateway extends EventEmitter {
 
       invoke: (method: string, params: unknown) =>
         this.invokeMethod(method, params as Record<string, unknown>),
+
+      broadcast: (event: string, data: unknown) => {
+        const subscribers = this.pluginSubscribers.get(pluginId);
+        if (!subscribers?.size) return;
+        const message: EventMessage = {
+          type: "event",
+          event: event as GatewayEventType,
+          sessionId: `$plugin:${pluginId}`,
+          data,
+        };
+        for (const clientId of subscribers) {
+          this.deliverToClient(clientId, message);
+        }
+      },
 
       on: (event, handler) => this.on(event, handler),
       off: (event, handler) => this.off(event, handler),
