@@ -1,5 +1,15 @@
 # @agentick/gateway
 
+## 0.12.1
+
+### Patch Changes
+
+- 98d54d1: Add MCP server and OpenAI-compatible protocol plugins. `mcpServerPlugin` exposes session tools via standard MCP `tools/list` + `tools/call`. `openaiCompatPlugin` serves `/v1/chat/completions` and `/v1/models` for any OpenAI SDK client. Plugin route registration added to `PluginContext`. Built-in method dispatch deduplicated via `resolveBuiltInMethod`.
+  - @agentick/kernel@0.12.1
+  - @agentick/shared@0.12.1
+  - @agentick/core@0.12.1
+  - @agentick/server@0.12.1
+
 ## 0.12.0
 
 ### Minor Changes
