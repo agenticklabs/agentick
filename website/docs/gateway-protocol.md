@@ -223,7 +223,9 @@ In addition to the native agentick protocol described above, the gateway ships
 two plugins that expose sessions via standard interfaces:
 
 - **MCP Server** (`mcpServerPlugin`) — standard MCP `tools/list` + `tools/call`
-  via Streamable HTTP. See the [Gateway guide](/docs/gateway#built-in-protocol-plugins).
+  via Streamable HTTP. Supports per-session tool filtering via `toolFilter`
+  callback for multi-user deployments.
+  See the [Gateway guide](/docs/gateway#built-in-protocol-plugins).
 - **OpenAI-Compatible** (`openaiCompatPlugin`) — `POST /v1/chat/completions` +
   `GET /v1/models`. See the [Gateway guide](/docs/gateway#built-in-protocol-plugins).
 

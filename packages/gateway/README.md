@@ -345,6 +345,34 @@ gateway.use(mcpServerPlugin({
 Tools are discovered once at initialization. If session tools change, restart
 the plugin.
 
+#### Per-Session Tool Filtering
+
+By default, all MCP clients see the same tools. Use `toolFilter` to customize
+tools per client based on the incoming HTTP request (e.g., auth headers):
+
+```typescript
+gateway.use(mcpServerPlugin({
+  sessionId: "default",
+  path: "/mcp",
+  toolFilter: async (tools, req) => {
+    const token = req.headers.authorization?.replace("Bearer ", "");
+    const user = await verifyToken(token);
+
+    // Admin users see all tools, others get a restricted set
+    if (user.role === "admin") return tools;
+    return tools.filter(t => !t.name.startsWith("admin_"));
+  },
+}));
+```
+
+When `toolFilter` is set, each MCP client handshake creates its own `McpServer`
+with a filtered tool catalog. The filter receives the full pre-filtered catalog
+(after `include`/`exclude`) and the raw `IncomingMessage`, so you can extract
+auth however you want (Bearer token, API key header, cookie, etc.).
+
+Session lifecycle is automatic — sessions are tracked by `mcp-session-id` header
+and cleaned up on disconnect or plugin destroy.
+
 ### OpenAI-Compatible
 
 Serves `POST /v1/chat/completions` and `GET /v1/models`. Any OpenAI SDK client
@@ -591,6 +619,8 @@ import {
   method,
   mcpServerPlugin,
   openaiCompatPlugin,
+  type MCPServerPluginConfig,
+  type McpToolEntry,
 } from "@agentick/gateway";
 ```
 

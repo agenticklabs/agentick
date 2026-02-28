@@ -145,6 +145,24 @@ Discovers tools at init via `tool-catalog`, registers each on an MCP `McpServer`
 with `StreamableHTTPServerTransport`. Tool calls dispatch through the gateway's
 `tool-dispatch` method.
 
+For multi-user deployments, use `toolFilter` to customize tools per MCP client
+based on the incoming HTTP request:
+
+```typescript
+gateway.use(mcpServerPlugin({
+  sessionId: "default",
+  path: "/mcp",
+  toolFilter: async (tools, req) => {
+    const user = await authenticate(req);
+    return tools.filter(t => user.allowedTools.includes(t.name));
+  },
+}));
+```
+
+Each MCP client handshake creates its own `McpServer` with the filtered tool
+set. Sessions are tracked by `mcp-session-id` header and cleaned up
+automatically.
+
 **OpenAI-Compatible** — any OpenAI SDK client can send chat completions:
 
 ```typescript

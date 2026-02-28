@@ -124,5 +124,9 @@ export {
 } from "./config-loader.js";
 
 // Plugins
-export { mcpServerPlugin, type MCPServerPluginConfig } from "./plugins/mcp-server.js";
+export {
+  mcpServerPlugin,
+  type MCPServerPluginConfig,
+  type ToolEntry as McpToolEntry,
+} from "./plugins/mcp-server.js";
 export { openaiCompatPlugin, type OpenAICompatPluginConfig } from "./plugins/openai-compat.js";

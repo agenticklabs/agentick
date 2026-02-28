@@ -21,16 +21,40 @@ Plugin routes are cleaned up automatically on `gateway.remove(pluginId)`.
 
 ### MCP Server Plugin (`mcp-server.ts`)
 
-Exposes session tools as standard MCP `tools/list` + `tools/call`.
+Exposes session tools as standard MCP `tools/list` + `tools/call`. Two modes:
+
+**Static mode** (default — no `toolFilter`):
 
 ```typescript
 mcpServerPlugin({ sessionId: "default", path: "/mcp" })
 ```
 
 - Discovers tools once at init via `ctx.invoke("tool-catalog", ...)`
-- Registers each tool on an MCP `McpServer` with `StreamableHTTPServerTransport`
+- Registers each tool on a single `McpServer` with `StreamableHTTPServerTransport`
 - Transport runs stateless (no session ID generator) — all requests are independent
-- Tool dispatch goes through `ctx.invoke("tool-dispatch", ...)` → gateway → session
+- Tool dispatch goes through `ctx.invoke("tool-dispatch", ...")` → gateway → session
+
+**Per-session mode** (with `toolFilter`):
+
+```typescript
+mcpServerPlugin({
+  sessionId: "default",
+  path: "/mcp",
+  toolFilter: (tools, req) => {
+    // Filter based on auth headers, API keys, etc.
+    return tools.filter(t => isAllowed(t, req));
+  },
+})
+```
+
+- No shared `McpServer` — each MCP client handshake creates its own
+- Tool catalog discovered once at init (cached), then filtered per-session via
+  the `toolFilter` callback which receives `(ToolEntry[], IncomingMessage)`
+- Session registry maps `mcp-session-id` → `{ server, transport }` for routing
+- `onsessioninitialized` / `onsessionclosed` callbacks on `StreamableHTTPServerTransport`
+  manage the registry automatically
+- Requests with unknown `mcp-session-id` get a 404 JSON-RPC error
+- Plugin destroy closes all active sessions
 
 **Known limitation**: Tool catalog is frozen at init. If session tools change,
 the MCP server won't reflect it until plugin restart.

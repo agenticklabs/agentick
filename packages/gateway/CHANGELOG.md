@@ -1,14 +1,11 @@
 # @agentick/gateway
 
-## 0.12.1
+## Unreleased
 
-### Patch Changes
+### Minor Changes
 
-- 98d54d1: Add MCP server and OpenAI-compatible protocol plugins. `mcpServerPlugin` exposes session tools via standard MCP `tools/list` + `tools/call`. `openaiCompatPlugin` serves `/v1/chat/completions` and `/v1/models` for any OpenAI SDK client. Plugin route registration added to `PluginContext`. Built-in method dispatch deduplicated via `resolveBuiltInMethod`.
-  - @agentick/kernel@0.12.1
-  - @agentick/shared@0.12.1
-  - @agentick/core@0.12.1
-  - @agentick/server@0.12.1
+- Add `toolFilter` option to `mcpServerPlugin` for per-session MCP tool filtering. When set, each MCP client handshake creates its own `McpServer` with tools filtered by a user-provided callback that receives the tool catalog and the raw `IncomingMessage`. Enables multi-user deployments where different clients see different tool sets based on auth headers. Without `toolFilter`, behavior is unchanged (single stateless `McpServer`).
+- Export `ToolEntry` type (as `McpToolEntry`) and `filterTools` from the plugin module.
 
 ## 0.12.0
 
