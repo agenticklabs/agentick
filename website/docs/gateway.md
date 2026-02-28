@@ -84,12 +84,13 @@ specification.
 
 ## Plugins
 
-Plugins extend the gateway with additional methods and capabilities:
+Plugins extend the gateway with methods, HTTP routes, and event handlers:
 
 ```typescript
 const plugin: GatewayPlugin = {
   id: "my-plugin",
   async initialize(ctx) {
+    // Register RPC methods
     ctx.registerMethod(
       "analyze",
       method({
@@ -99,18 +100,65 @@ const plugin: GatewayPlugin = {
       }),
     );
 
+    // Mount HTTP routes
+    ctx.registerRoute("/webhook", async (req, res) => {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: true }));
+    });
+
     ctx.on("session:created", ({ sessionId }) => {
       console.log("New session:", sessionId);
     });
   },
-  async destroy() {},
+  async destroy() {
+    // Routes and methods are cleaned up automatically on plugin removal
+  },
 };
 
 gateway.use(plugin);
 ```
 
 Plugin methods appear alongside built-in and config methods in the schema
-discovery response with `builtin: false`.
+discovery response with `builtin: false`. Routes use longest-prefix matching —
+`/v1` catches `/v1/models`, `/v1/chat/completions`, etc.
+
+### Built-In Protocol Plugins
+
+The gateway ships two protocol plugins that expose sessions via standard
+interfaces:
+
+**MCP Server** — any MCP client (Claude Desktop, Cursor, etc.) can connect and
+use session tools:
+
+```typescript
+import { mcpServerPlugin } from "@agentick/gateway";
+
+gateway.use(mcpServerPlugin({
+  sessionId: "default",
+  path: "/mcp",
+  include: ["search", "read_file"],  // optional: only expose these tools
+  exclude: ["dangerous_tool"],       // optional: hide these tools
+}));
+```
+
+Discovers tools at init via `tool-catalog`, registers each on an MCP `McpServer`
+with `StreamableHTTPServerTransport`. Tool calls dispatch through the gateway's
+`tool-dispatch` method.
+
+**OpenAI-Compatible** — any OpenAI SDK client can send chat completions:
+
+```typescript
+import { openaiCompatPlugin } from "@agentick/gateway";
+
+gateway.use(openaiCompatPlugin({
+  pathPrefix: "/v1",
+  modelMapping: { "gpt-4o": "coding", "gpt-4": "research" },
+}));
+```
+
+Serves `POST /v1/chat/completions` (streaming + non-streaming) and
+`GET /v1/models`. Model names route to gateway apps via `modelMapping`.
+Unmatched names fall back to the gateway's default app.
 
 ## Configuration
 

@@ -223,6 +223,16 @@ export interface PluginContext {
   /** Broadcast an event to all clients subscribed to this plugin */
   broadcast(event: string, data: unknown): void;
 
+  /** Mount an HTTP route handler on the gateway's HTTP server.
+   *  Path is absolute (e.g., "/mcp"). Only works with HTTP transport or embedded mode. */
+  registerRoute(
+    path: string,
+    handler: (req: import("http").IncomingMessage, res: import("http").ServerResponse) => void | Promise<void>,
+  ): void;
+
+  /** Unmount a route this plugin registered */
+  unregisterRoute(path: string): void;
+
   /** Gateway configuration store */
   config: ConfigStore;
 

@@ -216,3 +216,17 @@ ctx.registerMethod(
 
 Both `schema` (params) and `response` accept Zod 3, Zod 4, or any Standard
 Schema. They are converted to JSON Schema in the `schema` method response.
+
+## Alternative Protocol Surfaces
+
+In addition to the native agentick protocol described above, the gateway ships
+two plugins that expose sessions via standard interfaces:
+
+- **MCP Server** (`mcpServerPlugin`) — standard MCP `tools/list` + `tools/call`
+  via Streamable HTTP. See the [Gateway guide](/docs/gateway#built-in-protocol-plugins).
+- **OpenAI-Compatible** (`openaiCompatPlugin`) — `POST /v1/chat/completions` +
+  `GET /v1/models`. See the [Gateway guide](/docs/gateway#built-in-protocol-plugins).
+
+These are thin translation layers — they delegate to the same session and tool
+dispatch machinery documented here. The native protocol remains the most
+capable surface (full event streaming, schema discovery, channels, etc.).

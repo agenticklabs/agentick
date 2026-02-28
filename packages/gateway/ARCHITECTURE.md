@@ -1,4 +1,81 @@
-# @agentick/gateway — Configuration System
+# @agentick/gateway — Architecture
+
+## Protocol Plugins
+
+The gateway serves three protocol surfaces from a single process:
+
+1. **Agentick protocol** — native WS + HTTP + Unix socket (always present)
+2. **MCP server** — `tools/list` + `tools/call` via Streamable HTTP
+3. **OpenAI-compatible** — `POST /v1/chat/completions` + `GET /v1/models`
+
+### Plugin HTTP Route Registration
+
+Plugins can mount HTTP routes via `PluginContext.registerRoute(path, handler)`.
+Routes use longest-prefix matching — `/v1` catches `/v1/models`, `/v1/chat/completions`, etc.
+
+Route dispatch happens in two places:
+- **Embedded mode**: `gateway.handleRequest()` checks plugin routes before built-in routes
+- **Standalone mode**: `HTTPTransport.handleRequest()` calls `onRouteMatch` callback
+
+Plugin routes are cleaned up automatically on `gateway.remove(pluginId)`.
+
+### MCP Server Plugin (`mcp-server.ts`)
+
+Exposes session tools as standard MCP `tools/list` + `tools/call`.
+
+```typescript
+mcpServerPlugin({ sessionId: "default", path: "/mcp" })
+```
+
+- Discovers tools once at init via `ctx.invoke("tool-catalog", ...)`
+- Registers each tool on an MCP `McpServer` with `StreamableHTTPServerTransport`
+- Transport runs stateless (no session ID generator) — all requests are independent
+- Tool dispatch goes through `ctx.invoke("tool-dispatch", ...)` → gateway → session
+
+**Known limitation**: Tool catalog is frozen at init. If session tools change,
+the MCP server won't reflect it until plugin restart.
+
+### OpenAI-Compatible Plugin (`openai-compat.ts`)
+
+Serves OpenAI Chat Completions API. Any OpenAI SDK client can connect.
+
+```typescript
+openaiCompatPlugin({ pathPrefix: "/v1", modelMapping: { "gpt-4o": "gpt-4" } })
+```
+
+- `GET /v1/models` → lists gateway apps as OpenAI models
+- `POST /v1/chat/completions` → converts messages, sends to session, streams response
+- Streaming: maps `StreamEvent` → SSE `data: {chunk}\n\n` + `data: [DONE]\n\n`
+- Non-streaming: accumulates all events, returns single `ChatCompletion` JSON
+- Model→app resolution: `modelMapping` config, falls back to model name as app ID
+- Session key: `x-session-id` header or auto-generated `{appId}:openai-{timestamp}`
+
+Message transforms (`openai-message-transform.ts`) are pure functions:
+- `fromOpenAIMessages()`: OpenAI → agentick `Message[]`
+- `toOpenAITools()`: agentick tool definitions → OpenAI function tools
+
+### Built-In Method Resolution
+
+`resolveBuiltInMethod()` is the single source of truth for context-free gateway
+methods (apps, status, history, tool-catalog, tool-dispatch, etc.). Both the
+transport request path (`executeMethod`) and the plugin invoke path
+(`invokeMethod`) delegate to it. Transport-dependent methods (send, subscribe,
+channel) are handled only in `executeMethod`.
+
+### Plugin Route File Map
+
+| File | Purpose |
+|------|---------|
+| `plugins/mcp-server.ts` | MCP server plugin |
+| `plugins/openai-compat.ts` | OpenAI-compatible inference plugin |
+| `plugins/openai-message-transform.ts` | Pure message/tool transforms |
+| `types.ts` | `registerRoute`/`unregisterRoute` on `PluginContext` |
+| `gateway.ts` | `pluginRoutes` map, `matchPluginRoute`, `resolveBuiltInMethod` |
+| `http-transport.ts` | `onRouteMatch` callback for standalone mode |
+
+---
+
+# Configuration System
 
 ## Design Decisions
 

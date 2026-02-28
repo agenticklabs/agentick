@@ -122,3 +122,7 @@ export {
   ConfigValidationError,
   type LoadConfigOptions,
 } from "./config-loader.js";
+
+// Plugins
+export { mcpServerPlugin, type MCPServerPluginConfig } from "./plugins/mcp-server.js";
+export { openaiCompatPlugin, type OpenAICompatPluginConfig } from "./plugins/openai-compat.js";

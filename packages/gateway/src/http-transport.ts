@@ -97,6 +97,14 @@ export interface HTTPTransportConfig extends NetworkTransportConfig {
     params: Record<string, unknown>,
     user?: UserContext,
   ) => Promise<unknown>;
+
+  /** Plugin route matcher — called before built-in routes.
+   *  Returns true if the route was handled. */
+  onRouteMatch?: (
+    path: string,
+    req: IncomingMessage,
+    res: ServerResponse,
+  ) => boolean | Promise<boolean>;
 }
 
 export class HTTPTransport extends BaseTransport {
@@ -174,6 +182,12 @@ export class HTTPTransport extends BaseTransport {
     const prefix = this.config.pathPrefix ?? "";
     const url = new URL(req.url ?? "/", `http://${req.headers.host}`);
     const path = url.pathname.replace(prefix, "");
+
+    // Plugin routes — checked before built-in routes
+    if (this.config.onRouteMatch) {
+      const handled = await this.config.onRouteMatch(path, req, res);
+      if (handled) return;
+    }
 
     // Route requests - exact matches first
     switch (path) {

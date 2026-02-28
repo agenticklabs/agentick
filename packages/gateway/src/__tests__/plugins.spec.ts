@@ -913,4 +913,244 @@ describe("Gateway Plugin System", () => {
       t2.disconnect();
     });
   });
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // Route Registration
+  // ══════════════════════════════════════════════════════════════════════════
+
+  describe("route registration", () => {
+    it("plugin registers a route and embedded handleRequest hits it", async () => {
+      const gw = createTestGateway();
+      const handler = vi.fn((_req, res) => {
+        res.writeHead(200, { "Content-Type": "text/plain" });
+        res.end("hello from plugin");
+      });
+      const plugin = createTestPlugin("router", {
+        onInit: (ctx) => ctx.registerRoute("/custom", handler),
+      });
+      await gw.use(plugin);
+
+      // Simulate HTTP request to embedded handleRequest
+      const { req, res, body } = createMockHTTPPair("/custom");
+      await gw.handleRequest(req, res);
+
+      expect(handler).toHaveBeenCalledOnce();
+      expect(body()).toBe("hello from plugin");
+    });
+
+    it("plugin route matches prefix paths", async () => {
+      const gw = createTestGateway();
+      const handler = vi.fn((_req, res) => {
+        res.writeHead(200);
+        res.end("ok");
+      });
+      const plugin = createTestPlugin("router", {
+        onInit: (ctx) => ctx.registerRoute("/mcp", handler),
+      });
+      await gw.use(plugin);
+
+      const { req, res } = createMockHTTPPair("/mcp/tools/list");
+      await gw.handleRequest(req, res);
+
+      expect(handler).toHaveBeenCalledOnce();
+    });
+
+    it("built-in routes still work alongside plugin routes", async () => {
+      const gw = createTestGateway();
+      const plugin = createTestPlugin("router", {
+        onInit: (ctx) => ctx.registerRoute("/custom", (_req, res) => {
+          res.writeHead(200);
+          res.end("plugin");
+        }),
+      });
+      await gw.use(plugin);
+
+      // /events is a built-in route — should NOT be intercepted
+      // Plugin route should not match /events
+      const { req, res, body } = createMockHTTPPair("/notfound");
+      await gw.handleRequest(req, res);
+
+      // 404 means built-in routing ran (plugin didn't catch it)
+      expect(res.statusCode).toBe(404);
+    });
+
+    it("routes cleaned up on plugin removal", async () => {
+      const gw = createTestGateway();
+      const handler = vi.fn((_req, res) => {
+        res.writeHead(200);
+        res.end("plugin");
+      });
+      const plugin = createTestPlugin("router", {
+        onInit: (ctx) => ctx.registerRoute("/custom", handler),
+      });
+      await gw.use(plugin);
+
+      // Route works
+      const { req: req1, res: res1 } = createMockHTTPPair("/custom");
+      await gw.handleRequest(req1, res1);
+      expect(handler).toHaveBeenCalledOnce();
+
+      // Remove plugin
+      await gw.remove("router");
+
+      // Route no longer works
+      const { req: req2, res: res2 } = createMockHTTPPair("/custom");
+      await gw.handleRequest(req2, res2);
+      expect(res2.statusCode).toBe(404);
+    });
+
+    it("plugin can only unregister its own routes", async () => {
+      const gw = createTestGateway();
+      let ctx2: PluginContext;
+
+      const plugin1 = createTestPlugin("p1", {
+        onInit: (ctx) => ctx.registerRoute("/p1-route", (_req, res) => {
+          res.writeHead(200);
+          res.end("p1");
+        }),
+      });
+      const plugin2 = createTestPlugin("p2", {
+        onInit: (ctx) => { ctx2 = ctx; },
+      });
+      await gw.use(plugin1);
+      await gw.use(plugin2);
+
+      // p2 tries to unregister p1's route — should be a no-op
+      ctx2!.unregisterRoute("/p1-route");
+
+      const { req, res, body } = createMockHTTPPair("/p1-route");
+      await gw.handleRequest(req, res);
+      expect(body()).toBe("p1");
+    });
+
+    it("throws on duplicate route registration", async () => {
+      const gw = createTestGateway();
+      const noop = (_req: any, res: any) => { res.end(); };
+
+      const plugin1 = createTestPlugin("p1", {
+        onInit: (ctx) => ctx.registerRoute("/shared", noop),
+      });
+      await gw.use(plugin1);
+
+      const plugin2 = createTestPlugin("p2", {
+        onInit: (ctx) => ctx.registerRoute("/shared", noop),
+      });
+      await expect(gw.use(plugin2)).rejects.toThrow('Route "/shared" is already registered');
+    });
+
+    it("routes cleaned up on partial init failure", async () => {
+      const gw = createTestGateway();
+
+      const plugin = createTestPlugin("failing", {
+        onInit: (ctx) => {
+          ctx.registerRoute("/will-die", (_req, res) => { res.end(); });
+          throw new Error("init failed");
+        },
+      });
+      await expect(gw.use(plugin)).rejects.toThrow("init failed");
+
+      // Route should have been cleaned up
+      const { req, res } = createMockHTTPPair("/will-die");
+      await gw.handleRequest(req, res);
+      expect(res.statusCode).toBe(404);
+    });
+
+    it("multiple plugins with non-overlapping routes", async () => {
+      const gw = createTestGateway();
+      const plugin1 = createTestPlugin("mcp", {
+        onInit: (ctx) => ctx.registerRoute("/mcp", (_req, res) => {
+          res.writeHead(200);
+          res.end("mcp");
+        }),
+      });
+      const plugin2 = createTestPlugin("openai", {
+        onInit: (ctx) => ctx.registerRoute("/v1", (_req, res) => {
+          res.writeHead(200);
+          res.end("openai");
+        }),
+      });
+      await gw.use(plugin1);
+      await gw.use(plugin2);
+
+      const { req: r1, res: s1, body: b1 } = createMockHTTPPair("/mcp");
+      await gw.handleRequest(r1, s1);
+      expect(b1()).toBe("mcp");
+
+      const { req: r2, res: s2, body: b2 } = createMockHTTPPair("/v1/chat/completions");
+      await gw.handleRequest(r2, s2);
+      expect(b2()).toBe("openai");
+    });
+
+    it("longest prefix wins when routes overlap", async () => {
+      const gw = createTestGateway();
+      const plugin = createTestPlugin("multi", {
+        onInit: (ctx) => {
+          ctx.registerRoute("/api", (_req, res) => {
+            res.writeHead(200);
+            res.end("short");
+          });
+          ctx.registerRoute("/api/v2", (_req, res) => {
+            res.writeHead(200);
+            res.end("long");
+          });
+        },
+      });
+      await gw.use(plugin);
+
+      const { req: r1, res: s1, body: b1 } = createMockHTTPPair("/api/v2/resource");
+      await gw.handleRequest(r1, s1);
+      expect(b1()).toBe("long");
+
+      const { req: r2, res: s2, body: b2 } = createMockHTTPPair("/api/other");
+      await gw.handleRequest(r2, s2);
+      expect(b2()).toBe("short");
+    });
+  });
 });
+
+// ============================================================================
+// Mock HTTP pair for embedded handleRequest testing
+// ============================================================================
+
+function createMockHTTPPair(path: string, method = "GET") {
+  const chunks: Buffer[] = [];
+  const req = {
+    method,
+    url: path,
+    headers: { host: "localhost" },
+    on: vi.fn(),
+  } as any;
+
+  const res = {
+    statusCode: 200,
+    headersSent: false,
+    _headers: {} as Record<string, string>,
+    setHeader(name: string, value: string) {
+      this._headers[name.toLowerCase()] = value;
+    },
+    writeHead(code: number, headers?: Record<string, string>) {
+      this.statusCode = code;
+      this.headersSent = true;
+      if (headers) {
+        for (const [k, v] of Object.entries(headers)) {
+          this._headers[k.toLowerCase()] = v;
+        }
+      }
+    },
+    write(chunk: string | Buffer) {
+      chunks.push(Buffer.from(chunk));
+      return true;
+    },
+    end(chunk?: string | Buffer) {
+      if (chunk) chunks.push(Buffer.from(chunk));
+      this.headersSent = true;
+    },
+    on: vi.fn(),
+  } as any;
+
+  return {
+    req,
+    res,
+    body: () => Buffer.concat(chunks).toString(),
+  };
+}

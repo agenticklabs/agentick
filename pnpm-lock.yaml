@@ -530,6 +530,9 @@ importers:
       '@agentick/shared':
         specifier: workspace:*
         version: link:../shared
+      '@modelcontextprotocol/sdk':
+        specifier: ^1.26.0
+        version: 1.26.0(zod@4.3.6)
       ws:
         specifier: ^8.16.0
         version: 8.19.0

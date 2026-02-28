@@ -228,6 +228,18 @@ export class Gateway extends EventEmitter {
   /** Plugin broadcast subscribers: pluginId -> Set<clientId> */
   private pluginSubscribers = new Map<string, Set<string>>();
 
+  /** Plugin HTTP routes: path → { pluginId, handler } */
+  private pluginRoutes = new Map<
+    string,
+    {
+      pluginId: string;
+      handler: (
+        req: import("http").IncomingMessage,
+        res: import("http").ServerResponse,
+      ) => void | Promise<void>;
+    }
+  >();
+
   constructor(config: GatewayConfig) {
     super();
 
@@ -390,6 +402,19 @@ export class Gateway extends EventEmitter {
         corsOrigin: this.config.httpCorsOrigin,
         onDirectSend: this.directSend.bind(this),
         onInvoke: this.invokeMethod.bind(this),
+        onRouteMatch: (path, req, res) => {
+          const route = this.matchPluginRoute(path);
+          if (!route) return false;
+          // Fire-and-forget the async handler, return true synchronously
+          Promise.resolve(route.handler(req, res)).catch((err) => {
+            console.error("Plugin route error:", err);
+            if (!res.headersSent) {
+              res.writeHead(500, { "Content-Type": "application/json" });
+              res.end(JSON.stringify({ error: "Internal server error" }));
+            }
+          });
+          return true;
+        },
       });
       this.setupTransportHandlers(httpTransportInstance);
       this.transports.push(httpTransportInstance);
@@ -777,6 +802,12 @@ export class Gateway extends EventEmitter {
     const path = url.pathname.replace(prefix, "") || "/";
 
     log.debug({ method: req.method, url: req.url, path }, "handleRequest");
+
+    // Plugin routes — checked before built-in routes, longest prefix first
+    const pluginRoute = this.matchPluginRoute(path);
+    if (pluginRoute) {
+      return pluginRoute.handler(req, res);
+    }
 
     // Route requests - all framework-level endpoints
     switch (path) {
@@ -1473,31 +1504,10 @@ export class Gateway extends EventEmitter {
     method: GatewayMethod,
     params: Record<string, unknown>,
   ): Promise<unknown> {
-    // Built-in methods first
+    // Transport-dependent methods (require transport/clientId context)
     switch (method) {
       case "send":
         return this.handleSendMethod(transport, clientId, params as unknown as SendParams);
-
-      case "abort":
-        return this.handleAbortMethod(params as unknown as { sessionId: string });
-
-      case "status":
-        return this.handleStatusMethod(params as unknown as StatusParams);
-
-      case "history":
-        return this.handleHistoryMethod(params as unknown as HistoryParams);
-
-      case "reset":
-        return this.handleResetMethod(params as unknown as { sessionId: string });
-
-      case "close":
-        return this.handleCloseMethod(params as unknown as { sessionId: string });
-
-      case "apps":
-        return this.handleAppsMethod();
-
-      case "sessions":
-        return this.handleSessionsMethod();
 
       case "subscribe":
         return this.handleSubscribeMethod(
@@ -1530,22 +1540,11 @@ export class Gateway extends EventEmitter {
         await this.publishToChannel(sessionId, channel, payload);
         return { ok: true };
       }
-
-      case "schema":
-        return this.handleSchemaMethod();
-
-      case "config":
-        return this.handleConfigMethod();
-
-      case "tool-catalog":
-        return this.handleToolCatalogMethod(params as unknown as ToolCatalogParams);
-
-      case "tool-confirm":
-        return this.handleToolConfirmMethod(params as unknown as ToolConfirmParams);
-
-      case "tool-dispatch":
-        return this.handleToolDispatchMethod(params as unknown as ToolDispatchParams);
     }
+
+    // Context-free built-in methods (shared with plugin invoke path)
+    const builtIn = this.resolveBuiltInMethod(method, params);
+    if (builtIn !== undefined) return builtIn;
 
     // Check custom methods
     const procedure = this.getMethodProcedure(method);
@@ -1747,6 +1746,11 @@ export class Gateway extends EventEmitter {
     params: Record<string, unknown>,
     user?: UserContext,
   ): Promise<unknown> {
+    // Handle built-in methods that don't require transport/client context.
+    // These are the methods plugins most commonly need.
+    const builtIn = this.resolveBuiltInMethod(method, params);
+    if (builtIn !== undefined) return builtIn;
+
     const procedure = this.getMethodProcedure(method);
     if (!procedure) {
       throw new NotFoundError("resource", method, `Unknown method: ${method}`);
@@ -1802,6 +1806,43 @@ export class Gateway extends EventEmitter {
     }
 
     return result;
+  }
+
+  /**
+   * Resolve built-in methods that don't need transport/client context.
+   * Returns undefined if the method is not a built-in.
+   */
+  private resolveBuiltInMethod(
+    method: string,
+    params: Record<string, unknown>,
+  ): Promise<unknown> | undefined {
+    switch (method) {
+      case "apps":
+        return Promise.resolve(this.handleAppsMethod());
+      case "sessions":
+        return Promise.resolve(this.handleSessionsMethod());
+      case "status":
+        return Promise.resolve(this.handleStatusMethod(params as unknown as StatusParams));
+      case "history":
+        return this.handleHistoryMethod(params as unknown as HistoryParams);
+      case "schema":
+        return Promise.resolve(this.handleSchemaMethod());
+      case "config":
+        return Promise.resolve(this.handleConfigMethod());
+      case "tool-catalog":
+        return this.handleToolCatalogMethod(params as unknown as ToolCatalogParams);
+      case "tool-confirm":
+        return this.handleToolConfirmMethod(params as unknown as ToolConfirmParams);
+      case "tool-dispatch":
+        return this.handleToolDispatchMethod(params as unknown as ToolDispatchParams);
+      case "abort":
+        return this.handleAbortMethod(params as unknown as { sessionId: string });
+      case "reset":
+        return this.handleResetMethod(params as unknown as { sessionId: string });
+      case "close":
+        return this.handleCloseMethod(params as unknown as { sessionId: string });
+    }
+    return undefined;
   }
 
   private async handleAbortMethod(params: { sessionId: string }): Promise<void> {
@@ -2034,16 +2075,8 @@ export class Gateway extends EventEmitter {
     try {
       await plugin.initialize(ctx);
     } catch (err) {
-      // Clean up any methods registered during partial init
-      for (const [path, owner] of this.pluginMethodOwnership.entries()) {
-        if (owner === plugin.id) {
-          this.methodProcedures.delete(path);
-          this.methodSchemas.delete(path);
-          this.methodResponseSchemas.delete(path);
-          this.methodMeta.delete(path);
-          this.pluginMethodOwnership.delete(path);
-        }
-      }
+      // Clean up any methods and routes registered during partial init
+      this.cleanupPluginRegistrations(plugin.id);
       throw err;
     }
     this.plugins.set(plugin.id, { plugin, ctx });
@@ -2060,16 +2093,8 @@ export class Gateway extends EventEmitter {
 
     await entry.plugin.destroy();
 
-    // Remove all methods this plugin registered
-    for (const [path, owner] of this.pluginMethodOwnership.entries()) {
-      if (owner === pluginId) {
-        this.methodProcedures.delete(path);
-        this.methodSchemas.delete(path);
-        this.methodResponseSchemas.delete(path);
-        this.methodMeta.delete(path);
-        this.pluginMethodOwnership.delete(path);
-      }
-    }
+    // Remove all methods and routes this plugin registered
+    this.cleanupPluginRegistrations(pluginId);
 
     // Remove plugin broadcast subscribers
     this.pluginSubscribers.delete(pluginId);
@@ -2083,6 +2108,24 @@ export class Gateway extends EventEmitter {
    */
   getPlugin<T extends GatewayPlugin = GatewayPlugin>(id: string): T | undefined {
     return this.plugins.get(id)?.plugin as T | undefined;
+  }
+
+  /** Remove all methods and routes owned by a plugin */
+  private cleanupPluginRegistrations(pluginId: string): void {
+    for (const [path, owner] of this.pluginMethodOwnership.entries()) {
+      if (owner === pluginId) {
+        this.methodProcedures.delete(path);
+        this.methodSchemas.delete(path);
+        this.methodResponseSchemas.delete(path);
+        this.methodMeta.delete(path);
+        this.pluginMethodOwnership.delete(path);
+      }
+    }
+    for (const [path, route] of this.pluginRoutes.entries()) {
+      if (route.pluginId === pluginId) {
+        this.pluginRoutes.delete(path);
+      }
+    }
   }
 
   /**
@@ -2191,9 +2234,39 @@ export class Gateway extends EventEmitter {
         }
       },
 
+      registerRoute: (path, handler) => {
+        if (this.pluginRoutes.has(path)) {
+          throw new Error(`Route "${path}" is already registered`);
+        }
+        this.pluginRoutes.set(path, { pluginId, handler });
+      },
+
+      unregisterRoute: (path) => {
+        const route = this.pluginRoutes.get(path);
+        if (route?.pluginId !== pluginId) return;
+        this.pluginRoutes.delete(path);
+      },
+
       on: (event, handler) => this.on(event, handler),
       off: (event, handler) => this.off(event, handler),
     };
+  }
+
+  /**
+   * Match a request path against plugin routes.
+   * Longest prefix wins. Returns undefined if no match.
+   */
+  private matchPluginRoute(path: string) {
+    // Sort by path length descending for longest-prefix match
+    const sorted = [...this.pluginRoutes.entries()].sort(
+      (a, b) => b[0].length - a[0].length,
+    );
+    for (const [routePath, route] of sorted) {
+      if (path === routePath || path.startsWith(routePath + "/")) {
+        return route;
+      }
+    }
+    return undefined;
   }
 }
 

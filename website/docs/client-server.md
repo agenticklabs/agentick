@@ -136,3 +136,55 @@ The client-server communication supports multiple transports:
 The transport is abstracted — the client API is the same regardless of the underlying transport. The TUI, React web apps, and custom Node.js clients all use the same `ClientTransport` interface.
 
 WebSocket and Unix socket transports are built on `createRPCTransport` (from `@agentick/shared`), a shared factory that provides all protocol machinery. Each transport is a thin delegate (~120 lines) providing wire-specific I/O.
+
+## Protocol Plugins
+
+In addition to agentick's native protocol, the gateway ships two plugins that
+expose sessions via standard interfaces. Any client that speaks MCP or OpenAI
+can connect — no agentick SDK required.
+
+### MCP Server
+
+Exposes session tools as standard MCP `tools/list` + `tools/call` via Streamable HTTP:
+
+```typescript
+import { mcpServerPlugin } from "@agentick/gateway";
+
+gateway.use(mcpServerPlugin({
+  sessionId: "default",
+  path: "/mcp",
+  include: ["search", "read_file"],  // optional filter
+}));
+```
+
+Any MCP client (Claude Desktop, Cursor, etc.) can connect at `http://host:port/mcp`.
+
+### OpenAI-Compatible
+
+Serves `POST /v1/chat/completions` and `GET /v1/models`. Any OpenAI SDK client
+can point at the gateway:
+
+```typescript
+import { openaiCompatPlugin } from "@agentick/gateway";
+
+gateway.use(openaiCompatPlugin({
+  pathPrefix: "/v1",
+  modelMapping: { "gpt-4o": "coding" },  // optional model→app routing
+}));
+```
+
+```python
+from openai import OpenAI
+
+client = OpenAI(base_url="http://localhost:18789/v1", api_key="test")
+for chunk in client.chat.completions.create(
+    model="default",
+    messages=[{"role": "user", "content": "hello"}],
+    stream=True,
+):
+    print(chunk.choices[0].delta.content or "", end="")
+```
+
+Both streaming and non-streaming responses are supported. Gateway apps appear
+as models in `/v1/models`. Sessions are keyed by the `x-session-id` header or
+auto-generated per request.

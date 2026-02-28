@@ -320,6 +320,65 @@ The Unix socket transport uses NDJSON (newline-delimited JSON) — the same mess
 
 The socket file inherits filesystem permissions. For daemon deployments, ensure the socket directory has restricted permissions (0o700) so only the owning user can connect.
 
+## Protocol Plugins
+
+The gateway ships two plugins that expose sessions via standard interfaces.
+Both are optional — import and `use()` them as needed.
+
+### MCP Server
+
+Exposes session tools as standard MCP `tools/list` + `tools/call` via Streamable
+HTTP. Any MCP client (Claude Desktop, Cursor, etc.) can connect.
+
+```typescript
+import { mcpServerPlugin } from "@agentick/gateway";
+
+gateway.use(mcpServerPlugin({
+  sessionId: "default",
+  path: "/mcp",            // default: "/mcp"
+  include: ["search"],     // optional: only expose these tools
+  exclude: ["shell"],      // optional: hide these tools
+}));
+// MCP clients connect at http://host:port/mcp
+```
+
+Tools are discovered once at initialization. If session tools change, restart
+the plugin.
+
+### OpenAI-Compatible
+
+Serves `POST /v1/chat/completions` and `GET /v1/models`. Any OpenAI SDK client
+can point at the gateway.
+
+```typescript
+import { openaiCompatPlugin } from "@agentick/gateway";
+
+gateway.use(openaiCompatPlugin({
+  pathPrefix: "/v1",       // default: "/v1"
+  modelMapping: {          // optional: map model names → app IDs
+    "gpt-4o": "coding",
+    "gpt-4": "research",
+  },
+}));
+```
+
+- `GET /v1/models` — lists gateway apps as OpenAI models
+- `POST /v1/chat/completions` — streaming (SSE) and non-streaming responses
+- Model→app routing via `modelMapping`, falls back to model name as app ID
+- Session keyed by `x-session-id` header or auto-generated
+
+```python
+from openai import OpenAI
+
+client = OpenAI(base_url="http://localhost:18789/v1", api_key="test")
+for chunk in client.chat.completions.create(
+    model="default",
+    messages=[{"role": "user", "content": "hello"}],
+    stream=True,
+):
+    print(chunk.choices[0].delta.content or "", end="")
+```
+
 ## HTTP Endpoints
 
 Gateway exposes these HTTP endpoints:
@@ -441,6 +500,19 @@ const newTask = await session.invoke("tasks:create", {
 │   │Client│ │Client│ │Client│  │  Client  │                   │
 │   └──────┘ └──────┘ └──────┘  └──────────┘                  │
 │                                                               │
+│  ┌──────────────────────┐   ┌──────────────────────────────┐ │
+│  │  MCP Server Plugin   │   │  OpenAI-Compatible Plugin    │ │
+│  │  /mcp (tools/call)   │   │  /v1/chat/completions       │ │
+│  └──────────┬───────────┘   └──────────────┬───────────────┘ │
+│             │                               │                 │
+│       ┌─────┘                       ┌───────┘                 │
+│       ▼                             ▼                         │
+│   ┌──────────┐                ┌──────────┐                   │
+│   │MCP Client│                │OpenAI SDK│                   │
+│   │(Cursor,  │                │(Python,  │                   │
+│   │ Claude)  │                │ JS, etc.)│                   │
+│   └──────────┘                └──────────┘                   │
+│                                                               │
 ├───────────────────────────────────────────────────────────────┤
 │                                                               │
 │   ┌─────────────────────────────────────────────────────┐    │
@@ -509,6 +581,19 @@ methods: {
 }
 ```
 
+## Exports
+
+The gateway exports the protocol plugin factories alongside the core API:
+
+```typescript
+import {
+  createGateway,
+  method,
+  mcpServerPlugin,
+  openaiCompatPlugin,
+} from "@agentick/gateway";
+```
+
 ## Related Packages
 
 - [`@agentick/express`](../express) - Express middleware (thin adapter)
@@ -516,6 +601,7 @@ methods: {
 - [`@agentick/core`](../core) - JSX runtime for apps
 - [`@agentick/client`](../client) - Client SDK
 - [`@agentick/server`](../server) - SSE utilities
+- [`@modelcontextprotocol/sdk`](https://github.com/modelcontextprotocol/typescript-sdk) - MCP SDK (peer dependency for MCP server plugin)
 
 ## License
 
