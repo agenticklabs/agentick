@@ -38,7 +38,7 @@ const PACKAGE_GROUPS: Array<{ label: string; packages: string[] }> = [
   },
   {
     label: "Sandbox",
-    packages: ["@agentick/sandbox", "@agentick/sandbox-local"],
+    packages: ["@agentick/sandbox", "@agentick/sandbox-local", "@agentick/sandbox-docker"],
   },
   {
     label: "Connectors",

@@ -302,8 +302,9 @@ Both return objects with `vi.fn()` stubs and sensible defaults. Override any met
 
 ## Providers
 
-| Package                                                    | Strategy                                      | Description                                                                                          |
-| ---------------------------------------------------------- | --------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
-| [`@agentick/sandbox-local`](/api/@agentick/sandbox-local/) | `seatbelt` (macOS), `bwrap`/`unshare` (Linux) | Host machine with OS-level sandbox. Safe by default — denies reads to home dirs, volumes, keychains. |
+| Package                                                      | Strategy                                      | Description                                                                                            |
+| ------------------------------------------------------------ | --------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| [`@agentick/sandbox-local`](/api/@agentick/sandbox-local/)   | `seatbelt` (macOS), `bwrap`/`unshare` (Linux) | Host machine with OS-level sandbox. Safe by default — denies reads to home dirs, volumes, keychains.   |
+| [`@agentick/sandbox-docker`](/api/@agentick/sandbox-docker/) | Docker containers                             | Full container isolation via Docker Engine API. One container per sandbox, commands via `docker exec`. |
 
 See each provider's README for platform requirements and security model details.

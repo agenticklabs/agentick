@@ -23,6 +23,7 @@
     "../packages/tui",
     "../packages/sandbox",
     "../packages/sandbox-local",
+    "../packages/sandbox-docker",
     "../packages/connector",
     "../packages/connector-imessage",
     "../packages/connector-telegram",
