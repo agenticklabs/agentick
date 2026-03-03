@@ -14,6 +14,7 @@ Plugins can mount HTTP routes via `PluginContext.registerRoute(path, handler)`.
 Routes use longest-prefix matching — `/v1` catches `/v1/models`, `/v1/chat/completions`, etc.
 
 Route dispatch happens in two places:
+
 - **Embedded mode**: `gateway.handleRequest()` checks plugin routes before built-in routes
 - **Standalone mode**: `HTTPTransport.handleRequest()` calls `onRouteMatch` callback
 
@@ -26,7 +27,7 @@ Exposes session tools as standard MCP `tools/list` + `tools/call`. Two modes:
 **Static mode** (default — no `toolFilter`):
 
 ```typescript
-mcpServerPlugin({ sessionId: "default", path: "/mcp" })
+mcpServerPlugin({ sessionId: "default", path: "/mcp" });
 ```
 
 - Discovers tools once at init via `ctx.invoke("tool-catalog", ...)`
@@ -42,9 +43,9 @@ mcpServerPlugin({
   path: "/mcp",
   toolFilter: (tools, req) => {
     // Filter based on auth headers, API keys, etc.
-    return tools.filter(t => isAllowed(t, req));
+    return tools.filter((t) => isAllowed(t, req));
   },
-})
+});
 ```
 
 - No shared `McpServer` — each MCP client handshake creates its own
@@ -64,7 +65,7 @@ the MCP server won't reflect it until plugin restart.
 Serves OpenAI Chat Completions API. Any OpenAI SDK client can connect.
 
 ```typescript
-openaiCompatPlugin({ pathPrefix: "/v1", modelMapping: { "gpt-4o": "gpt-4" } })
+openaiCompatPlugin({ pathPrefix: "/v1", modelMapping: { "gpt-4o": "gpt-4" } });
 ```
 
 - `GET /v1/models` → lists gateway apps as OpenAI models
@@ -75,6 +76,7 @@ openaiCompatPlugin({ pathPrefix: "/v1", modelMapping: { "gpt-4o": "gpt-4" } })
 - Session key: `x-session-id` header or auto-generated `{appId}:openai-{timestamp}`
 
 Message transforms (`openai-message-transform.ts`) are pure functions:
+
 - `fromOpenAIMessages()`: OpenAI → agentick `Message[]`
 - `toOpenAITools()`: agentick tool definitions → OpenAI function tools
 
@@ -88,14 +90,14 @@ channel) are handled only in `executeMethod`.
 
 ### Plugin Route File Map
 
-| File | Purpose |
-|------|---------|
-| `plugins/mcp-server.ts` | MCP server plugin |
-| `plugins/openai-compat.ts` | OpenAI-compatible inference plugin |
-| `plugins/openai-message-transform.ts` | Pure message/tool transforms |
-| `types.ts` | `registerRoute`/`unregisterRoute` on `PluginContext` |
-| `gateway.ts` | `pluginRoutes` map, `matchPluginRoute`, `resolveBuiltInMethod` |
-| `http-transport.ts` | `onRouteMatch` callback for standalone mode |
+| File                                  | Purpose                                                        |
+| ------------------------------------- | -------------------------------------------------------------- |
+| `plugins/mcp-server.ts`               | MCP server plugin                                              |
+| `plugins/openai-compat.ts`            | OpenAI-compatible inference plugin                             |
+| `plugins/openai-message-transform.ts` | Pure message/tool transforms                                   |
+| `types.ts`                            | `registerRoute`/`unregisterRoute` on `PluginContext`           |
+| `gateway.ts`                          | `pluginRoutes` map, `matchPluginRoute`, `resolveBuiltInMethod` |
+| `http-transport.ts`                   | `onRouteMatch` callback for standalone mode                    |
 
 ---
 

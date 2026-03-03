@@ -23,11 +23,7 @@ function createTestGateway() {
   });
 }
 
-function createMockHTTPPair(
-  path: string,
-  method = "GET",
-  headers?: Record<string, string>,
-) {
+function createMockHTTPPair(path: string, method = "GET", headers?: Record<string, string>) {
   const chunks: Buffer[] = [];
   const req = {
     method,
@@ -192,9 +188,7 @@ describe("MCP Server Plugin — per-session toolFilter", () => {
 
   it("toolFilter can restrict tool set", async () => {
     gateway = createTestGateway();
-    const filterSpy = vi.fn((tools: ToolEntry[]) =>
-      tools.filter((t) => t.name === "allowed-tool"),
-    );
+    const filterSpy = vi.fn((tools: ToolEntry[]) => tools.filter((t) => t.name === "allowed-tool"));
 
     const plugin = mcpServerPlugin({
       sessionId: "default",

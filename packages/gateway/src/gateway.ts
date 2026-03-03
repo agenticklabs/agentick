@@ -2258,9 +2258,7 @@ export class Gateway extends EventEmitter {
    */
   private matchPluginRoute(path: string) {
     // Sort by path length descending for longest-prefix match
-    const sorted = [...this.pluginRoutes.entries()].sort(
-      (a, b) => b[0].length - a[0].length,
-    );
+    const sorted = [...this.pluginRoutes.entries()].sort((a, b) => b[0].length - a[0].length);
     for (const [routePath, route] of sorted) {
       if (path === routePath || path.startsWith(routePath + "/")) {
         return route;

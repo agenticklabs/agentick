@@ -8,7 +8,11 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { Gateway, createGateway } from "../index.js";
 import { openaiCompatPlugin } from "../plugins/openai-compat.js";
-import { fromOpenAIMessages, toOpenAITools, type OpenAIMessage } from "../plugins/openai-message-transform.js";
+import {
+  fromOpenAIMessages,
+  toOpenAITools,
+  type OpenAIMessage,
+} from "../plugins/openai-message-transform.js";
 import { createMockApp } from "@agentick/core/testing";
 
 // ============================================================================
@@ -140,18 +144,14 @@ describe("fromOpenAIMessages — adversarial", () => {
   });
 
   it("handles assistant message with empty tool_calls array", () => {
-    const messages: OpenAIMessage[] = [
-      { role: "assistant", content: "Hello", tool_calls: [] },
-    ];
+    const messages: OpenAIMessage[] = [{ role: "assistant", content: "Hello", tool_calls: [] }];
     const result = fromOpenAIMessages(messages);
     expect(result[0].content).toHaveLength(1);
     expect(result[0].content[0]).toEqual({ type: "text", text: "Hello" });
   });
 
   it("handles tool message with missing tool_call_id", () => {
-    const messages: OpenAIMessage[] = [
-      { role: "tool", content: "result" },
-    ];
+    const messages: OpenAIMessage[] = [{ role: "tool", content: "result" }];
     const result = fromOpenAIMessages(messages);
     expect(result[0].content[0]).toMatchObject({
       type: "tool_result",
@@ -160,9 +160,7 @@ describe("fromOpenAIMessages — adversarial", () => {
   });
 
   it("handles tool message with missing name", () => {
-    const messages: OpenAIMessage[] = [
-      { role: "tool", tool_call_id: "call_1", content: "result" },
-    ];
+    const messages: OpenAIMessage[] = [{ role: "tool", tool_call_id: "call_1", content: "result" }];
     const result = fromOpenAIMessages(messages);
     expect(result[0].content[0]).toMatchObject({
       type: "tool_result",
@@ -210,9 +208,7 @@ describe("fromOpenAIMessages — adversarial", () => {
     const messages: OpenAIMessage[] = [
       {
         role: "user",
-        content: [
-          { type: "image_url" },
-        ] as any,
+        content: [{ type: "image_url" }] as any,
       },
     ];
     const result = fromOpenAIMessages(messages);
@@ -245,9 +241,7 @@ describe("fromOpenAIMessages — adversarial", () => {
     const messages: OpenAIMessage[] = [
       {
         role: "assistant",
-        tool_calls: [
-          { id: "c1", type: "function", function: { name: "noop", arguments: "" } },
-        ],
+        tool_calls: [{ id: "c1", type: "function", function: { name: "noop", arguments: "" } }],
       },
     ];
     const result = fromOpenAIMessages(messages);
@@ -383,11 +377,7 @@ describe("OpenAI Compat Plugin — adversarial", () => {
       gateway = createTestGateway();
       await gateway.use(openaiCompatPlugin());
 
-      const { req, res, error } = mockHTTPWithStreamBody(
-        "/v1/chat/completions",
-        "POST",
-        "",
-      );
+      const { req, res, error } = mockHTTPWithStreamBody("/v1/chat/completions", "POST", "");
       const p = gateway.handleRequest(req, res);
       error(new Error("connection reset"));
       await p;
@@ -404,9 +394,7 @@ describe("OpenAI Compat Plugin — adversarial", () => {
 
       const pairs = Array.from({ length: 10 }, () => mockHTTP("/v1/models", "GET"));
 
-      await Promise.all(
-        pairs.map(({ req, res }) => gateway.handleRequest(req, res)),
-      );
+      await Promise.all(pairs.map(({ req, res }) => gateway.handleRequest(req, res)));
 
       for (const { res, json } of pairs) {
         expect(res.statusCode).toBe(200);
@@ -448,9 +436,7 @@ describe("OpenAI Compat Plugin — adversarial", () => {
         mockHTTP("/v1/chat/completions", "DELETE"),
       ];
 
-      await Promise.all(
-        cases.map(({ req, res }) => gateway.handleRequest(req, res)),
-      );
+      await Promise.all(cases.map(({ req, res }) => gateway.handleRequest(req, res)));
 
       for (const { json } of cases) {
         const data = json();
@@ -477,9 +463,11 @@ describe("OpenAI Compat Plugin — adversarial", () => {
   describe("model mapping", () => {
     it("maps model names to app IDs via modelMapping config", async () => {
       gateway = createTestGateway();
-      await gateway.use(openaiCompatPlugin({
-        modelMapping: { "gpt-4o": "gpt-4" },
-      }));
+      await gateway.use(
+        openaiCompatPlugin({
+          modelMapping: { "gpt-4o": "gpt-4" },
+        }),
+      );
 
       // Verify the plugin is active and can handle requests
       const { req, res, json } = mockHTTP("/v1/models", "GET");

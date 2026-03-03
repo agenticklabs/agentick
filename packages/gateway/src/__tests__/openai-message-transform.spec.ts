@@ -14,9 +14,7 @@ import {
 
 describe("fromOpenAIMessages", () => {
   it("converts system message", () => {
-    const messages: OpenAIMessage[] = [
-      { role: "system", content: "You are a helpful assistant." },
-    ];
+    const messages: OpenAIMessage[] = [{ role: "system", content: "You are a helpful assistant." }];
     const result = fromOpenAIMessages(messages);
     expect(result).toHaveLength(1);
     expect(result[0].role).toBe("system");
@@ -53,9 +51,7 @@ describe("fromOpenAIMessages", () => {
   });
 
   it("converts assistant message with text content", () => {
-    const messages: OpenAIMessage[] = [
-      { role: "assistant", content: "Here's the answer." },
-    ];
+    const messages: OpenAIMessage[] = [{ role: "assistant", content: "Here's the answer." }];
     const result = fromOpenAIMessages(messages);
     expect(result).toHaveLength(1);
     expect(result[0].role).toBe("assistant");

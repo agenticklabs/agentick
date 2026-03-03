@@ -958,10 +958,11 @@ describe("Gateway Plugin System", () => {
     it("built-in routes still work alongside plugin routes", async () => {
       const gw = createTestGateway();
       const plugin = createTestPlugin("router", {
-        onInit: (ctx) => ctx.registerRoute("/custom", (_req, res) => {
-          res.writeHead(200);
-          res.end("plugin");
-        }),
+        onInit: (ctx) =>
+          ctx.registerRoute("/custom", (_req, res) => {
+            res.writeHead(200);
+            res.end("plugin");
+          }),
       });
       await gw.use(plugin);
 
@@ -1004,13 +1005,16 @@ describe("Gateway Plugin System", () => {
       let ctx2: PluginContext;
 
       const plugin1 = createTestPlugin("p1", {
-        onInit: (ctx) => ctx.registerRoute("/p1-route", (_req, res) => {
-          res.writeHead(200);
-          res.end("p1");
-        }),
+        onInit: (ctx) =>
+          ctx.registerRoute("/p1-route", (_req, res) => {
+            res.writeHead(200);
+            res.end("p1");
+          }),
       });
       const plugin2 = createTestPlugin("p2", {
-        onInit: (ctx) => { ctx2 = ctx; },
+        onInit: (ctx) => {
+          ctx2 = ctx;
+        },
       });
       await gw.use(plugin1);
       await gw.use(plugin2);
@@ -1025,7 +1029,9 @@ describe("Gateway Plugin System", () => {
 
     it("throws on duplicate route registration", async () => {
       const gw = createTestGateway();
-      const noop = (_req: any, res: any) => { res.end(); };
+      const noop = (_req: any, res: any) => {
+        res.end();
+      };
 
       const plugin1 = createTestPlugin("p1", {
         onInit: (ctx) => ctx.registerRoute("/shared", noop),
@@ -1043,7 +1049,9 @@ describe("Gateway Plugin System", () => {
 
       const plugin = createTestPlugin("failing", {
         onInit: (ctx) => {
-          ctx.registerRoute("/will-die", (_req, res) => { res.end(); });
+          ctx.registerRoute("/will-die", (_req, res) => {
+            res.end();
+          });
           throw new Error("init failed");
         },
       });
@@ -1058,16 +1066,18 @@ describe("Gateway Plugin System", () => {
     it("multiple plugins with non-overlapping routes", async () => {
       const gw = createTestGateway();
       const plugin1 = createTestPlugin("mcp", {
-        onInit: (ctx) => ctx.registerRoute("/mcp", (_req, res) => {
-          res.writeHead(200);
-          res.end("mcp");
-        }),
+        onInit: (ctx) =>
+          ctx.registerRoute("/mcp", (_req, res) => {
+            res.writeHead(200);
+            res.end("mcp");
+          }),
       });
       const plugin2 = createTestPlugin("openai", {
-        onInit: (ctx) => ctx.registerRoute("/v1", (_req, res) => {
-          res.writeHead(200);
-          res.end("openai");
-        }),
+        onInit: (ctx) =>
+          ctx.registerRoute("/v1", (_req, res) => {
+            res.writeHead(200);
+            res.end("openai");
+          }),
       });
       await gw.use(plugin1);
       await gw.use(plugin2);

@@ -87,14 +87,22 @@ function mockHTTPWithStreamBody(path: string, method: string, bodyStr: string) {
     statusCode: 200,
     headersSent: false,
     _headers: {} as Record<string, string>,
-    setHeader(name: string, value: string) { this._headers[name.toLowerCase()] = value; },
+    setHeader(name: string, value: string) {
+      this._headers[name.toLowerCase()] = value;
+    },
     writeHead(code: number, headers?: Record<string, string>) {
       this.statusCode = code;
       this.headersSent = true;
       if (headers) for (const [k, v] of Object.entries(headers)) this._headers[k.toLowerCase()] = v;
     },
-    write(chunk: string | Buffer) { chunks.push(Buffer.from(chunk)); return true; },
-    end(chunk?: string | Buffer) { if (chunk) chunks.push(Buffer.from(chunk)); this.headersSent = true; },
+    write(chunk: string | Buffer) {
+      chunks.push(Buffer.from(chunk));
+      return true;
+    },
+    end(chunk?: string | Buffer) {
+      if (chunk) chunks.push(Buffer.from(chunk));
+      this.headersSent = true;
+    },
     on: vi.fn(),
   } as any;
 

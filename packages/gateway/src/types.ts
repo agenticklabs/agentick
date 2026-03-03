@@ -227,7 +227,10 @@ export interface PluginContext {
    *  Path is absolute (e.g., "/mcp"). Only works with HTTP transport or embedded mode. */
   registerRoute(
     path: string,
-    handler: (req: import("http").IncomingMessage, res: import("http").ServerResponse) => void | Promise<void>,
+    handler: (
+      req: import("http").IncomingMessage,
+      res: import("http").ServerResponse,
+    ) => void | Promise<void>,
   ): void;
 
   /** Unmount a route this plugin registered */

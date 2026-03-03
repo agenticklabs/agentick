@@ -51,7 +51,12 @@ export function openaiCompatPlugin(config: OpenAICompatPluginConfig = {}): Gatew
           } else if (isValidationError(err)) {
             sendError(res, 400, "invalid_request_error", err.message);
           } else {
-            sendError(res, 500, "internal_error", err instanceof Error ? err.message : "Internal server error");
+            sendError(
+              res,
+              500,
+              "internal_error",
+              err instanceof Error ? err.message : "Internal server error",
+            );
           }
         }
       });
@@ -104,7 +109,12 @@ export function openaiCompatPlugin(config: OpenAICompatPluginConfig = {}): Gatew
 
     const request = body as unknown as ChatCompletionRequest;
     if (!Array.isArray(request.messages) || request.messages.length === 0) {
-      return sendError(res, 400, "invalid_request_error", "messages is required and must be a non-empty array");
+      return sendError(
+        res,
+        400,
+        "invalid_request_error",
+        "messages is required and must be a non-empty array",
+      );
     }
 
     // Resolve model → app (missing model defaults to "default" which the gateway maps to defaultApp)
@@ -113,8 +123,7 @@ export function openaiCompatPlugin(config: OpenAICompatPluginConfig = {}): Gatew
 
     // Session key: use header or generate
     const sessionId =
-      (req.headers["x-session-id"] as string) ??
-      `${appId}:openai-${Date.now().toString(36)}`;
+      (req.headers["x-session-id"] as string) ?? `${appId}:openai-${Date.now().toString(36)}`;
 
     // Convert messages
     const messages = fromOpenAIMessages(request.messages);
@@ -154,7 +163,14 @@ export function openaiCompatPlugin(config: OpenAICompatPluginConfig = {}): Gatew
     const toolCallIndices = new Map<string, number>();
 
     for await (const event of events) {
-      const chunks = streamEventToChunks(event, completionId, created, model, toolCallIndices, toolCallIndex);
+      const chunks = streamEventToChunks(
+        event,
+        completionId,
+        created,
+        model,
+        toolCallIndices,
+        toolCallIndex,
+      );
       for (const chunk of chunks) {
         res.write(`data: ${JSON.stringify(chunk)}\n\n`);
       }
@@ -353,7 +369,9 @@ function mapStopReason(reason: StopReason): string {
 // Utilities
 // ============================================================================
 
-function parseBody(req: IncomingMessage & { body?: unknown }): Promise<Record<string, unknown> | null> {
+function parseBody(
+  req: IncomingMessage & { body?: unknown },
+): Promise<Record<string, unknown> | null> {
   if (req.body && typeof req.body === "object") {
     return Promise.resolve(req.body as Record<string, unknown>);
   }
