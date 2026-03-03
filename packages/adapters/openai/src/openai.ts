@@ -29,8 +29,10 @@ import {
   type TextBlock,
   StopReason,
   AdapterError,
+  registerModel,
 } from "@agentick/shared";
 import { type OpenAIAdapterConfig, STOP_REASON_MAP } from "./types.js";
+import { ThinkTagParser } from "./think-tag-parser.js";
 
 // const logger = Logger.for("OpenAIAdapter");
 
@@ -90,6 +92,13 @@ export function mapOpenAIChunk(
     };
   }
 
+  // Reasoning content (vLLM: reasoning_content, LM Studio: reasoning)
+  // These are non-standard fields not in the OpenAI SDK types
+  const reasoning = (delta as any).reasoning_content ?? (delta as any).reasoning;
+  if (reasoning) {
+    return { type: "reasoning", delta: reasoning };
+  }
+
   // Text content - only emit if non-empty (empty deltas are noise)
   if (delta.content) {
     return { type: "text", delta: delta.content };
@@ -136,12 +145,45 @@ export function mapOpenAIChunk(
   return null;
 }
 
+/**
+ * Query the /v1/models endpoint and register discovered models.
+ * Handles non-standard fields from LM Studio, vLLM, ollama, etc.
+ */
+export async function discoverModels(client: OpenAI): Promise<void> {
+  const models = await client.models.list();
+  for await (const model of models) {
+    const ext = model as any;
+    const contextWindow = ext.loaded_context_length ?? ext.max_context_length;
+    if (contextWindow) {
+      registerModel(model.id, {
+        name: model.id,
+        provider: "openai",
+        contextWindow,
+        isReasoningModel: ext.type === "reasoning" || undefined,
+      });
+    }
+  }
+}
+
 export function createOpenAIModel(config: OpenAIAdapterConfig = {}): ModelClass {
   const client = config.client ?? new OpenAI(buildClientOptions(config));
 
   // Stateful tracking of tool call IDs by index (reset per stream)
   // OpenAI only sends the id on the first chunk, subsequent chunks only have index
   let toolCallIdByIndex = new Map<number, string>();
+  let thinkTagParser: ThinkTagParser | null = null;
+
+  // Lazy model discovery: runs once on first stream/execute when enabled
+  let discoveryDone = false;
+  const ensureDiscovery = async () => {
+    if (!config.discoverModels || discoveryDone) return;
+    discoveryDone = true;
+    try {
+      await discoverModels(client);
+    } catch {
+      // Discovery failure is non-fatal — local server may not support /v1/models
+    }
+  };
 
   return createAdapter<
     OpenAI.Chat.Completions.ChatCompletionCreateParams,
@@ -238,7 +280,25 @@ export function createOpenAIModel(config: OpenAIAdapterConfig = {}): ModelClass 
       return baseParams;
     },
 
-    mapChunk: (chunk: ChatCompletionChunk) => mapOpenAIChunk(chunk, toolCallIdByIndex),
+    mapChunk: (chunk: ChatCompletionChunk): AdapterDelta | AdapterDelta[] | null => {
+      const raw = mapOpenAIChunk(chunk, toolCallIdByIndex);
+      if (!config.parseThinkTags || !thinkTagParser) return raw;
+
+      const rawDeltas = raw === null ? [] : Array.isArray(raw) ? raw : [raw];
+      const result: AdapterDelta[] = [];
+
+      for (const d of rawDeltas) {
+        if (d.type === "message_end") {
+          // Flush parser before message_end
+          result.push(...thinkTagParser.flush());
+          result.push(d);
+        } else {
+          result.push(...thinkTagParser.process(d));
+        }
+      }
+
+      return result.length === 0 ? null : result.length === 1 ? result[0] : result;
+    },
 
     processOutput: async (output: ChatCompletion): Promise<ModelOutput> => {
       const choice = output.choices?.[0];
@@ -306,6 +366,7 @@ export function createOpenAIModel(config: OpenAIAdapterConfig = {}): ModelClass 
     },
 
     execute: async (params) => {
+      await ensureDiscovery();
       return await client.chat.completions.create({
         ...params,
         stream: false,
@@ -313,8 +374,10 @@ export function createOpenAIModel(config: OpenAIAdapterConfig = {}): ModelClass 
     },
 
     executeStream: async function* (params) {
-      // Reset tool call tracking for new stream
+      await ensureDiscovery();
+      // Reset per-stream state
       toolCallIdByIndex = new Map();
+      thinkTagParser = config.parseThinkTags ? new ThinkTagParser() : null;
 
       const stream = await client.chat.completions.create({
         ...params,

@@ -9,12 +9,14 @@ import {
   toOpenAIMessages,
   mapToolDefinition,
   mapOpenAIChunk,
+  discoverModels,
 } from "../openai.js";
 import { STOP_REASON_MAP } from "../types.js";
-import { StopReason } from "@agentick/shared";
+import { StopReason, clearRuntimeModels, getRuntimeModels } from "@agentick/shared";
 import type { AdapterDelta } from "@agentick/core/model";
 import type { Message, ImageBlock, ToolUseBlock, ToolResultBlock } from "@agentick/shared";
 import type { ChatCompletionChunk } from "openai/resources/chat/completions";
+import type { OpenAI } from "openai";
 
 // =============================================================================
 // Stop Reason Mapping
@@ -880,6 +882,80 @@ describe("mapOpenAIChunk", () => {
     });
   });
 
+  describe("reasoning content (non-standard fields)", () => {
+    it("should map delta.reasoning_content to reasoning delta (vLLM)", () => {
+      const chunk = makeChunk({
+        choices: [
+          {
+            index: 0,
+            delta: { reasoning_content: "Let me think about this..." },
+            finish_reason: null,
+          } as any,
+        ],
+      });
+      expect(mapOpenAIChunk(chunk, idMap)).toEqual({
+        type: "reasoning",
+        delta: "Let me think about this...",
+      });
+    });
+
+    it("should map delta.reasoning to reasoning delta (LM Studio)", () => {
+      const chunk = makeChunk({
+        choices: [
+          {
+            index: 0,
+            delta: { reasoning: "Step 1: analyze the problem" },
+            finish_reason: null,
+          } as any,
+        ],
+      });
+      expect(mapOpenAIChunk(chunk, idMap)).toEqual({
+        type: "reasoning",
+        delta: "Step 1: analyze the problem",
+      });
+    });
+
+    it("should prefer reasoning_content over reasoning when both present", () => {
+      const chunk = makeChunk({
+        choices: [
+          {
+            index: 0,
+            delta: {
+              reasoning_content: "from vllm",
+              reasoning: "from lm-studio",
+            },
+            finish_reason: null,
+          } as any,
+        ],
+      });
+      expect(mapOpenAIChunk(chunk, idMap)).toEqual({
+        type: "reasoning",
+        delta: "from vllm",
+      });
+    });
+
+    it("should fall through to content when neither reasoning field present", () => {
+      const chunk = makeChunk({
+        choices: [{ index: 0, delta: { content: "normal text" }, finish_reason: null } as any],
+      });
+      expect(mapOpenAIChunk(chunk, idMap)).toEqual({ type: "text", delta: "normal text" });
+    });
+
+    it("should not emit reasoning for empty string reasoning_content", () => {
+      const chunk = makeChunk({
+        choices: [
+          {
+            index: 0,
+            delta: { reasoning_content: "", content: "actual content" },
+            finish_reason: null,
+          } as any,
+        ],
+      });
+      // Empty string is falsy, should fall through to content
+      expect(mapOpenAIChunk(chunk, idMap)).toEqual({ type: "text", delta: "actual content" });
+    });
+  });
+
   describe("multiple tool calls in one chunk", () => {
     it("should only process first tool call (per existing behavior)", () => {
       const chunk = makeChunk({
@@ -900,5 +976,92 @@ describe("mapOpenAIChunk", () => {
       // Returns on first match
       expect(result).toEqual({ type: "tool_call_start", id: "call_1", name: "tool_a" });
     });
+  });
+});
+
+// =============================================================================
+// Model Discovery
+// =============================================================================
+
+describe("discoverModels", () => {
+  beforeEach(() => {
+    clearRuntimeModels();
+  });
+
+  afterEach(() => {
+    clearRuntimeModels();
+  });
+
+  function mockClient(models: any[]): OpenAI {
+    return {
+      models: {
+        list: () => ({
+          [Symbol.asyncIterator]: async function* () {
+            for (const m of models) yield m;
+          },
+        }),
+      },
+    } as any;
+  }
+
+  it("should register models with max_context_length", async () => {
+    const client = mockClient([{ id: "qwen3-14b", max_context_length: 32768 }]);
+    await discoverModels(client);
+
+    const registry = getRuntimeModels();
+    expect(registry.has("qwen3-14b")).toBe(true);
+    expect(registry.get("qwen3-14b")!.contextWindow).toBe(32768);
+    expect(registry.get("qwen3-14b")!.provider).toBe("openai");
+  });
+
+  it("should prefer loaded_context_length over max_context_length", async () => {
+    const client = mockClient([
+      { id: "model-x", max_context_length: 128000, loaded_context_length: 32768 },
+    ]);
+    await discoverModels(client);
+
+    const registry = getRuntimeModels();
+    expect(registry.get("model-x")!.contextWindow).toBe(32768);
+  });
+
+  it("should skip models without context length info", async () => {
+    const client = mockClient([{ id: "unknown-model" }]);
+    await discoverModels(client);
+
+    const registry = getRuntimeModels();
+    expect(registry.has("unknown-model")).toBe(false);
+  });
+
+  it("should set isReasoningModel for reasoning type", async () => {
+    const client = mockClient([
+      { id: "reasoning-model", max_context_length: 64000, type: "reasoning" },
+    ]);
+    await discoverModels(client);
+
+    const registry = getRuntimeModels();
+    expect(registry.get("reasoning-model")!.isReasoningModel).toBe(true);
+  });
+
+  it("should not set isReasoningModel for non-reasoning type", async () => {
+    const client = mockClient([{ id: "llm-model", max_context_length: 64000, type: "llm" }]);
+    await discoverModels(client);
+
+    const registry = getRuntimeModels();
+    expect(registry.get("llm-model")!.isReasoningModel).toBeUndefined();
+  });
+
+  it("should register multiple models", async () => {
+    const client = mockClient([
+      { id: "model-a", max_context_length: 32768 },
+      { id: "model-b", max_context_length: 128000 },
+      { id: "model-c" }, // no context length, should be skipped
+    ]);
+    await discoverModels(client);
+
+    const registry = getRuntimeModels();
+    expect(registry.size).toBe(2);
+    expect(registry.has("model-a")).toBe(true);
+    expect(registry.has("model-b")).toBe(true);
+    expect(registry.has("model-c")).toBe(false);
   });
 });

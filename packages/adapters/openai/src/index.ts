@@ -27,3 +27,4 @@
  */
 export * from "./openai-model.js";
 export * from "./openai.js";
+export * from "./think-tag-parser.js";

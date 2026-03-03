@@ -18,6 +18,10 @@ export interface OpenAIAdapterConfig extends ClientOptions {
   maxRetries?: number;
   client?: OpenAI;
   providerOptions?: ProviderClientOptions;
+  /** Parse `<think>...</think>` tags in content as reasoning blocks (for local models) */
+  parseThinkTags?: boolean;
+  /** Auto-discover models via `/v1/models` endpoint and register metadata */
+  discoverModels?: boolean;
   [key: string]: unknown;
 }
 
