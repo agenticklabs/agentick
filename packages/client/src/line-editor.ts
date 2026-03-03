@@ -156,6 +156,11 @@ export const actions: Record<
     };
   },
 
+  insertNewline: (s) => ({
+    value: s.value.slice(0, s.cursor) + "\n" + s.value.slice(s.cursor),
+    cursor: s.cursor + 1,
+  }),
+
   transpose: (s) => {
     if (s.value.length < 2) return {};
     if (s.cursor === 0) return {};

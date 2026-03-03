@@ -287,6 +287,36 @@ describe("actions", () => {
       expect(actions.transpose!(snap("a", 1), [])).toEqual({});
     });
   });
+
+  describe("insertNewline", () => {
+    it("inserts newline at cursor position", () => {
+      expect(actions.insertNewline!(snap("hello world", 5), [])).toEqual({
+        value: "hello\n world",
+        cursor: 6,
+      });
+    });
+
+    it("inserts newline at start", () => {
+      expect(actions.insertNewline!(snap("hello", 0), [])).toEqual({
+        value: "\nhello",
+        cursor: 1,
+      });
+    });
+
+    it("inserts newline at end", () => {
+      expect(actions.insertNewline!(snap("hello", 5), [])).toEqual({
+        value: "hello\n",
+        cursor: 6,
+      });
+    });
+
+    it("inserts into already multi-line content", () => {
+      expect(actions.insertNewline!(snap("a\nb", 3), [])).toEqual({
+        value: "a\nb\n",
+        cursor: 4,
+      });
+    });
+  });
 });
 
 // ── Kill ring accumulation ──────────────────────────────────────────────────
@@ -397,6 +427,33 @@ describe("LineEditor", () => {
 
     editor.handleInput("return", "");
     expect(onSubmit).not.toHaveBeenCalled();
+    editor.destroy();
+  });
+
+  it("submits multi-line value on return", () => {
+    const onSubmit = vi.fn();
+    const editor = new LineEditor({
+      onSubmit,
+      bindings: { ...DEFAULT_BINDINGS, "shift+return": "insertNewline" },
+    });
+
+    editor.handleInput(null, "line one");
+    editor.handleInput("shift+return", "");
+    editor.handleInput(null, "line two");
+    expect(editor.state.value).toBe("line one\nline two");
+
+    editor.handleInput("return", "");
+    expect(onSubmit).toHaveBeenCalledWith("line one\nline two");
+    expect(editor.state.value).toBe("");
+    editor.destroy();
+  });
+
+  it("handles pasted multi-line text", () => {
+    const editor = new LineEditor({ onSubmit: () => {} });
+
+    editor.handleInput(null, "first\nsecond\nthird");
+    expect(editor.state.value).toBe("first\nsecond\nthird");
+    expect(editor.state.cursor).toBe(18);
     editor.destroy();
   });
 

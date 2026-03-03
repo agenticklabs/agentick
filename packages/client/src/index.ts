@@ -96,6 +96,7 @@ export {
 export {
   LineEditor,
   EMPTY_SNAPSHOT,
+  DEFAULT_BINDINGS,
   type LineEditorOptions,
   type LineEditorSnapshot,
   type EditorUpdate,
