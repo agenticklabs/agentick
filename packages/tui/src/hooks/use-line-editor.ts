@@ -7,7 +7,7 @@
 
 import { useMemo, useEffect, useCallback, useRef, useSyncExternalStore } from "react";
 import type { Key } from "ink";
-import { LineEditor } from "@agentick/client";
+import { LineEditor, DEFAULT_BINDINGS } from "@agentick/client";
 import type { CompletionState, CompletedRange } from "@agentick/client";
 
 // ── Types ───────────────────────────────────────────────────────────────────
@@ -31,6 +31,7 @@ export interface LineEditorResult {
 // ── Ink key normalization ───────────────────────────────────────────────────
 
 export function normalizeInkKeystroke(input: string, key: Key): string | null {
+  if (key.return && (key.shift || key.meta)) return "shift+return";
   if (key.return) return "return";
   if (key.upArrow) return "up";
   if (key.downArrow) return "down";
@@ -52,7 +53,11 @@ export function useLineEditor({ onSubmit, bindings }: UseLineEditorOptions): Lin
   onSubmitRef.current = onSubmit;
 
   const editor = useMemo(
-    () => new LineEditor({ onSubmit: (v) => onSubmitRef.current(v), bindings }),
+    () =>
+      new LineEditor({
+        onSubmit: (v) => onSubmitRef.current(v),
+        bindings: { ...DEFAULT_BINDINGS, ...bindings, "shift+return": "insertNewline" },
+      }),
     [],
   );
 

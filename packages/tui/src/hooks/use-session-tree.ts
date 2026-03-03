@@ -6,7 +6,7 @@
  * Events without `spawnPath` belong to the root session.
  */
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useEvents } from "@agentick/react";
 import type {
   SpawnStartEvent,
@@ -14,6 +14,7 @@ import type {
   ToolCallStartEvent,
   ToolCallEvent,
   ToolResultEvent,
+  ContextUpdateEvent,
 } from "@agentick/shared";
 
 export interface SessionTreeNode {
@@ -24,6 +25,11 @@ export interface SessionTreeNode {
   toolCount: number;
   startedAt: number;
   duration?: number;
+  modelId?: string;
+  modelName?: string;
+  utilization?: number;
+  cacheHitRatio?: number;
+  tick?: number;
 }
 
 export interface SessionTreeState {
@@ -36,6 +42,11 @@ export interface SessionTreeState {
   hasActive: boolean;
 }
 
+export interface SessionTreeResult extends SessionTreeState {
+  /** Clear the tree. Call when the user submits a new message. */
+  clearTree: () => void;
+}
+
 const EMPTY_TREE: SessionTreeState = {
   rootTool: undefined,
   rootToolCount: 0,
@@ -43,12 +54,21 @@ const EMPTY_TREE: SessionTreeState = {
   hasActive: false,
 };
 
-export function useSessionTree(sessionId?: string): SessionTreeState {
+export function useSessionTree(sessionId?: string): SessionTreeResult {
   const [tree, setTree] = useState<SessionTreeState>(EMPTY_TREE);
+  const treeRef = useRef(tree);
+  treeRef.current = tree;
 
   const { events } = useEvents({
     sessionId,
-    filter: ["spawn_start", "spawn_end", "tool_call_start", "tool_call", "tool_result"],
+    filter: [
+      "spawn_start",
+      "spawn_end",
+      "tool_call_start",
+      "tool_call",
+      "tool_result",
+      "context_update",
+    ],
   });
 
   useEffect(() => {
@@ -146,20 +166,37 @@ export function useSessionTree(sessionId?: string): SessionTreeState {
           }
           continue;
         }
+
+        if (event.type === "context_update") {
+          // context_update events with spawnPath carry per-agent model info
+          if (!spawnId) continue;
+          const e = event as ContextUpdateEvent;
+          next = {
+            ...next,
+            spawns: next.spawns.map((s) =>
+              s.spawnId === spawnId
+                ? {
+                    ...s,
+                    modelId: e.modelId,
+                    modelName: e.modelName,
+                    utilization: e.utilization,
+                    cacheHitRatio: e.cacheHitRatio,
+                    tick: event.tick,
+                  }
+                : s,
+            ),
+          };
+          continue;
+        }
       }
 
       return next;
     });
   }, [events]);
 
-  // Clear completed spawns after all finish — same pattern as SpawnIndicator
-  useEffect(() => {
-    const allDone = tree.spawns.length > 0 && !tree.hasActive;
-    if (allDone) {
-      const timer = setTimeout(() => setTree(EMPTY_TREE), 3000);
-      return () => clearTimeout(timer);
-    }
-  }, [tree.hasActive, tree.spawns.length]);
+  const clearTree = useCallback(() => {
+    setTree(EMPTY_TREE);
+  }, []);
 
-  return tree;
+  return { ...tree, clearTree };
 }

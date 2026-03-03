@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render } from "ink-testing-library";
 import type { StreamEvent } from "@agentick/shared";
 import { flush } from "../testing.js";
@@ -129,6 +129,24 @@ function toolResult(name: string, callId: string, spawnPath?: string[]): StreamE
   } as StreamEvent;
 }
 
+function contextUpdate(
+  spawnPath: string[],
+  opts: { modelId?: string; modelName?: string; utilization?: number; cacheHitRatio?: number } = {},
+): StreamEvent {
+  return {
+    ...baseEvent(),
+    type: "context_update",
+    modelId: opts.modelId ?? "claude-3-5-sonnet-20241022",
+    modelName: opts.modelName,
+    inputTokens: 1000,
+    outputTokens: 200,
+    totalTokens: 1200,
+    utilization: opts.utilization,
+    cacheHitRatio: opts.cacheHitRatio,
+    spawnPath,
+  } as StreamEvent;
+}
+
 // ── Core Behavior ───────────────────────────────────────────────────────
 
 describe("SessionTree", () => {
@@ -253,73 +271,43 @@ describe("SessionTree", () => {
     expect(frame).not.toContain("Agent dupe");
   });
 
-  // ── Cleanup (fake timers) ─────────────────────────────────────────────
+  // ── Persistence ─────────────────────────────────────────────────────
+  // Tree persists completed spawns until clearTree() is called.
 
-  describe("cleanup timer", () => {
-    beforeEach(() => {
-      vi.useFakeTimers({ shouldAdvanceTime: true });
-    });
+  it("completed spawns persist (no auto-clear)", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    pushEvents(spawnStart("sp-1", "Agent"), spawnEnd("sp-1"));
+    const { lastFrame, rerender } = render(<SessionTree sessionId="s1" />);
+    await flush();
+    rerender(<SessionTree sessionId="s1" />);
+    await flush();
 
-    afterEach(() => {
-      vi.useRealTimers();
-    });
+    expect(lastFrame()!).toContain("✓");
 
-    it("clears tree 3s after all spawns complete", async () => {
-      pushEvents(spawnStart("sp-1", "Agent"), spawnEnd("sp-1"));
-      const { lastFrame, rerender } = render(<SessionTree sessionId="s1" />);
-      await flush();
-      rerender(<SessionTree sessionId="s1" />);
-      await flush();
+    // Even after 10s, completed spawns remain visible
+    vi.advanceTimersByTime(10000);
+    await flush();
+    rerender(<SessionTree sessionId="s1" />);
+    await flush();
 
-      expect(lastFrame()!).toContain("✓");
+    expect(lastFrame()!).toContain("Agent");
+    vi.useRealTimers();
+  });
 
-      vi.advanceTimersByTime(3100);
-      await flush();
-      rerender(<SessionTree sessionId="s1" />);
-      await flush();
+  it("new spawns appear alongside completed ones", async () => {
+    pushEvents(spawnStart("sp-1", "First"), spawnEnd("sp-1"));
+    const { lastFrame, rerender } = render(<SessionTree sessionId="s1" />);
+    await flush();
+    rerender(<SessionTree sessionId="s1" />);
+    await flush();
+    expect(lastFrame()!).toContain("✓");
 
-      expect(lastFrame() ?? "").toBe("");
-    });
+    // New spawn shows alongside the completed one
+    await sendEvents(rerender, spawnStart("sp-2", "Second"));
 
-    it("cancels cleanup timer if new spawn starts before timeout", async () => {
-      pushEvents(spawnStart("sp-1", "First"), spawnEnd("sp-1"));
-      const { lastFrame, rerender } = render(<SessionTree sessionId="s1" />);
-      await flush();
-      rerender(<SessionTree sessionId="s1" />);
-      await flush();
-      expect(lastFrame()!).toContain("✓");
-
-      // 2s in, new spawn starts (before 3s cleanup fires)
-      vi.advanceTimersByTime(2000);
-      await flush();
-      await sendEvents(rerender, spawnStart("sp-2", "Second"));
-
-      expect(lastFrame()!).toContain("Second");
-    });
-
-    it("rapid spawn cycling — old spawns cleared, new ones show", async () => {
-      // Round 1: spawn and complete
-      pushEvents(spawnStart("sp-1", "Round 1"), spawnEnd("sp-1"));
-      const { lastFrame, rerender } = render(<SessionTree sessionId="s1" />);
-      await flush();
-      rerender(<SessionTree sessionId="s1" />);
-      await flush();
-      expect(lastFrame()!).toContain("Round 1");
-
-      // Wait for cleanup
-      vi.advanceTimersByTime(3100);
-      await flush();
-      rerender(<SessionTree sessionId="s1" />);
-      await flush();
-      expect(lastFrame() ?? "").toBe("");
-
-      // Round 2: new spawn
-      await sendEvents(rerender, spawnStart("sp-2", "Round 2"));
-
-      const frame = lastFrame()!;
-      expect(frame).toContain("Round 2");
-      expect(frame).not.toContain("Round 1");
-    });
+    const frame = lastFrame()!;
+    expect(frame).toContain("First");
+    expect(frame).toContain("Second");
   });
 
   // ── Adversarial ───────────────────────────────────────────────────────
@@ -417,5 +405,53 @@ describe("SessionTree", () => {
     expect(frame).toContain("Worker");
     expect(frame).not.toContain("Planning...");
     expect(frame).not.toContain("think");
+  });
+
+  // ── context_update integration ─────────────────────────────────────────
+
+  it("context_update populates model info on matching spawn", async () => {
+    pushEvents(
+      spawnStart("sp-1", "researcher"),
+      contextUpdate(["sp-1"], { modelName: "Claude Sonnet", utilization: 45 }),
+    );
+    const { lastFrame, rerender } = render(<SessionTree sessionId="s1" />);
+    await flush();
+    rerender(<SessionTree sessionId="s1" />);
+    await flush();
+
+    const frame = lastFrame()!;
+    expect(frame).toContain("researcher");
+    expect(frame).toContain("[sonnet]");
+    expect(frame).toContain("ctx 45%");
+  });
+
+  it("context_update without spawnPath is ignored", async () => {
+    pushEvents(
+      spawnStart("sp-1", "Agent"),
+      // Root-level context update (no spawnPath) — should not affect spawn
+      { ...contextUpdate([]), spawnPath: undefined } as unknown as StreamEvent,
+    );
+    const { lastFrame, rerender } = render(<SessionTree sessionId="s1" />);
+    await flush();
+    rerender(<SessionTree sessionId="s1" />);
+    await flush();
+
+    const frame = lastFrame()!;
+    expect(frame).toContain("Agent");
+    expect(frame).not.toContain("ctx");
+  });
+
+  it("shows model ID when no modelName", async () => {
+    pushEvents(
+      spawnStart("sp-1", "worker"),
+      contextUpdate(["sp-1"], { modelId: "gpt-4o-2024-08-06" }),
+    );
+    const { lastFrame, rerender } = render(<SessionTree sessionId="s1" />);
+    await flush();
+    rerender(<SessionTree sessionId="s1" />);
+    await flush();
+
+    const frame = lastFrame()!;
+    expect(frame).toContain("[gpt-4o]");
   });
 });

@@ -196,8 +196,6 @@ export function Chat({ sessionId, statusBar }: ChatProps) {
 
       <ErrorDisplay error={displayError} showDismissHint={!!displayError && chatMode === "idle"} />
 
-      {editor.completion && <CompletionPicker completion={editor.completion} />}
-
       <Box marginTop={1}>
         <InputBar
           value={editor.value}
@@ -206,6 +204,8 @@ export function Chat({ sessionId, statusBar }: ChatProps) {
           placeholder={placeholder}
         />
       </Box>
+
+      {editor.completion && <CompletionPicker completion={editor.completion} />}
 
       {statusBarContent}
     </Box>

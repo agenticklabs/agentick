@@ -3,6 +3,7 @@ export { TokenCount } from "./TokenCount.js";
 export { TickCount } from "./TickCount.js";
 export { ContextUtilization } from "./ContextUtilization.js";
 export { CacheHealth } from "./CacheHealth.js";
+export { ContextHealthBar } from "./ContextHealthBar.js";
 export { StateIndicator } from "./StateIndicator.js";
 export { KeyboardHints, type KeyboardHint } from "./KeyboardHints.js";
 export { BrandLabel } from "./BrandLabel.js";

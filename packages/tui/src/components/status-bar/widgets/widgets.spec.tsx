@@ -9,6 +9,7 @@ import { TokenCount } from "./TokenCount.js";
 import { TickCount } from "./TickCount.js";
 import { ContextUtilization } from "./ContextUtilization.js";
 import { CacheHealth } from "./CacheHealth.js";
+import { ContextHealthBar } from "./ContextHealthBar.js";
 import { StateIndicator } from "./StateIndicator.js";
 import { KeyboardHints } from "./KeyboardHints.js";
 import { BrandLabel } from "./BrandLabel.js";
@@ -302,6 +303,106 @@ describe("CacheHealth", () => {
     );
     await flush();
     expect(lastFrame()).toContain("cache 67%");
+  });
+});
+
+describe("ContextHealthBar", () => {
+  it("renders bar with utilization percentage", async () => {
+    const data = {
+      ...baseData,
+      contextInfo: { ...baseData.contextInfo!, utilization: 52 },
+    };
+    const { lastFrame } = render(
+      <Wrapper data={data}>
+        <ContextHealthBar />
+      </Wrapper>,
+    );
+    await flush();
+    const frame = lastFrame()!;
+    expect(frame).toContain("52%");
+    // Bar chars: filled (█) and empty (░)
+    expect(frame).toContain("\u2588");
+    expect(frame).toContain("\u2591");
+  });
+
+  it("returns null when no utilization", async () => {
+    const data = {
+      ...baseData,
+      contextInfo: { ...baseData.contextInfo!, utilization: undefined },
+    };
+    const { lastFrame } = render(
+      <Wrapper data={data}>
+        <ContextHealthBar />
+      </Wrapper>,
+    );
+    await flush();
+    const frame = lastFrame() ?? "";
+    expect(frame.trim()).toBe("");
+  });
+
+  it("returns null when no context info", async () => {
+    const data = { ...baseData, contextInfo: null };
+    const { lastFrame } = render(
+      <Wrapper data={data}>
+        <ContextHealthBar />
+      </Wrapper>,
+    );
+    await flush();
+    const frame = lastFrame() ?? "";
+    expect(frame.trim()).toBe("");
+  });
+
+  it("shows cache percentage when available", async () => {
+    const data = {
+      ...baseData,
+      contextInfo: { ...baseData.contextInfo!, utilization: 30, cacheHitRatio: 0.87 },
+    };
+    const { lastFrame } = render(
+      <Wrapper data={data}>
+        <ContextHealthBar />
+      </Wrapper>,
+    );
+    await flush();
+    const frame = lastFrame()!;
+    expect(frame).toContain("30%");
+    expect(frame).toContain("cache 87%");
+  });
+
+  it("uses explicit utilization and cache ratio", async () => {
+    const { lastFrame } = render(
+      <Wrapper data={baseData}>
+        <ContextHealthBar utilization={75} cacheHitRatio={0.45} />
+      </Wrapper>,
+    );
+    await flush();
+    const frame = lastFrame()!;
+    expect(frame).toContain("75%");
+    expect(frame).toContain("cache 45%");
+  });
+
+  it("fills correct proportion of bar at 0%", async () => {
+    const { lastFrame } = render(
+      <Wrapper data={baseData}>
+        <ContextHealthBar utilization={0} barWidth={10} />
+      </Wrapper>,
+    );
+    await flush();
+    const frame = lastFrame()!;
+    // 0% → all empty
+    expect(frame).toContain("\u2591".repeat(10));
+    expect(frame).not.toContain("\u2588");
+  });
+
+  it("fills correct proportion of bar at 100%", async () => {
+    const { lastFrame } = render(
+      <Wrapper data={baseData}>
+        <ContextHealthBar utilization={100} barWidth={10} />
+      </Wrapper>,
+    );
+    await flush();
+    const frame = lastFrame()!;
+    // 100% → all filled
+    expect(frame).toContain("\u2588".repeat(10));
   });
 });
 

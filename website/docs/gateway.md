@@ -133,12 +133,14 @@ use session tools:
 ```typescript
 import { mcpServerPlugin } from "@agentick/gateway";
 
-gateway.use(mcpServerPlugin({
-  sessionId: "default",
-  path: "/mcp",
-  include: ["search", "read_file"],  // optional: only expose these tools
-  exclude: ["dangerous_tool"],       // optional: hide these tools
-}));
+gateway.use(
+  mcpServerPlugin({
+    sessionId: "default",
+    path: "/mcp",
+    include: ["search", "read_file"], // optional: only expose these tools
+    exclude: ["dangerous_tool"], // optional: hide these tools
+  }),
+);
 ```
 
 Discovers tools at init via `tool-catalog`, registers each on an MCP `McpServer`
@@ -149,14 +151,16 @@ For multi-user deployments, use `toolFilter` to customize tools per MCP client
 based on the incoming HTTP request:
 
 ```typescript
-gateway.use(mcpServerPlugin({
-  sessionId: "default",
-  path: "/mcp",
-  toolFilter: async (tools, req) => {
-    const user = await authenticate(req);
-    return tools.filter(t => user.allowedTools.includes(t.name));
-  },
-}));
+gateway.use(
+  mcpServerPlugin({
+    sessionId: "default",
+    path: "/mcp",
+    toolFilter: async (tools, req) => {
+      const user = await authenticate(req);
+      return tools.filter((t) => user.allowedTools.includes(t.name));
+    },
+  }),
+);
 ```
 
 Each MCP client handshake creates its own `McpServer` with the filtered tool
@@ -168,10 +172,12 @@ automatically.
 ```typescript
 import { openaiCompatPlugin } from "@agentick/gateway";
 
-gateway.use(openaiCompatPlugin({
-  pathPrefix: "/v1",
-  modelMapping: { "gpt-4o": "coding", "gpt-4": "research" },
-}));
+gateway.use(
+  openaiCompatPlugin({
+    pathPrefix: "/v1",
+    modelMapping: { "gpt-4o": "coding", "gpt-4": "research" },
+  }),
+);
 ```
 
 Serves `POST /v1/chat/completions` (streaming + non-streaming) and

@@ -46,6 +46,7 @@ export {
   useSessionTree,
   type SessionTreeState,
   type SessionTreeNode,
+  type SessionTreeResult,
 } from "./hooks/use-session-tree.js";
 export { ToolConfirmationPrompt } from "./components/ToolConfirmationPrompt.js";
 export { DiffView } from "./components/DiffView.js";
@@ -79,6 +80,7 @@ export {
   TickCount,
   ContextUtilization,
   CacheHealth,
+  ContextHealthBar,
   StateIndicator,
   KeyboardHints,
   type KeyboardHint,

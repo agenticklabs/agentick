@@ -150,11 +150,13 @@ Exposes session tools as standard MCP `tools/list` + `tools/call` via Streamable
 ```typescript
 import { mcpServerPlugin } from "@agentick/gateway";
 
-gateway.use(mcpServerPlugin({
-  sessionId: "default",
-  path: "/mcp",
-  include: ["search", "read_file"],  // optional filter
-}));
+gateway.use(
+  mcpServerPlugin({
+    sessionId: "default",
+    path: "/mcp",
+    include: ["search", "read_file"], // optional filter
+  }),
+);
 ```
 
 Any MCP client (Claude Desktop, Cursor, etc.) can connect at `http://host:port/mcp`.
@@ -167,10 +169,12 @@ can point at the gateway:
 ```typescript
 import { openaiCompatPlugin } from "@agentick/gateway";
 
-gateway.use(openaiCompatPlugin({
-  pathPrefix: "/v1",
-  modelMapping: { "gpt-4o": "coding" },  // optional model→app routing
-}));
+gateway.use(
+  openaiCompatPlugin({
+    pathPrefix: "/v1",
+    modelMapping: { "gpt-4o": "coding" }, // optional model→app routing
+  }),
+);
 ```
 
 ```python
