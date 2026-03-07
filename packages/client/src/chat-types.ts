@@ -15,8 +15,8 @@ export interface Attachment {
 }
 
 export type AttachmentSource =
-  | { readonly type: "base64"; readonly data: string }
-  | { readonly type: "url"; readonly url: string };
+  | { readonly type: "base64"; readonly data: string; readonly mimeType?: string }
+  | { readonly type: "url"; readonly url: string; readonly mimeType?: string };
 
 export interface AttachmentInput {
   name: string;

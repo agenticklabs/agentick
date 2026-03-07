@@ -28,10 +28,10 @@ function isUrl(value: string): boolean {
   return /^https?:\/\//.test(value) || /^data:/.test(value) || /^blob:/.test(value);
 }
 
-function normalizeSource(source: string | AttachmentSource): AttachmentSource {
+function normalizeSource(source: string | AttachmentSource, mimeType?: string): AttachmentSource {
   if (typeof source !== "string") return source;
-  if (isUrl(source)) return { type: "url", url: source };
-  return { type: "base64", data: source };
+  if (isUrl(source)) return { type: "url", url: source, mimeType };
+  return { type: "base64", data: source, mimeType };
 }
 
 export const defaultAttachmentValidator: AttachmentValidator = (input) => {
@@ -106,7 +106,7 @@ export class AttachmentManager {
       id: generateAttachmentId(),
       name: input.name,
       mimeType: input.mimeType,
-      source: normalizeSource(input.source),
+      source: normalizeSource(input.source, input.mimeType),
       size: input.size,
     };
 

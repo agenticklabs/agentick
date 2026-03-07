@@ -32,7 +32,7 @@ describe("AttachmentManager", () => {
       expect(att.id).toMatch(/^att_/);
       expect(att.name).toBe("photo.png");
       expect(att.mimeType).toBe("image/png");
-      expect(att.source).toEqual({ type: "base64", data: "iVBORw0KGgo=" });
+      expect(att.source).toEqual({ type: "base64", data: "iVBORw0KGgo=", mimeType: "image/png" });
       expect(mgr.count).toBe(1);
       expect(mgr.isEmpty).toBe(false);
     });
@@ -45,7 +45,11 @@ describe("AttachmentManager", () => {
         source: "https://example.com/image.jpg",
       });
 
-      expect(att.source).toEqual({ type: "url", url: "https://example.com/image.jpg" });
+      expect(att.source).toEqual({
+        type: "url",
+        url: "https://example.com/image.jpg",
+        mimeType: "image/jpeg",
+      });
     });
 
     it("adds with data: URL", () => {
@@ -56,7 +60,11 @@ describe("AttachmentManager", () => {
         source: "data:image/png;base64,abc123",
       });
 
-      expect(att.source).toEqual({ type: "url", url: "data:image/png;base64,abc123" });
+      expect(att.source).toEqual({
+        type: "url",
+        url: "data:image/png;base64,abc123",
+        mimeType: "image/png",
+      });
     });
 
     it("adds with blob: URL", () => {
@@ -67,7 +75,11 @@ describe("AttachmentManager", () => {
         source: "blob:https://example.com/abc-123",
       });
 
-      expect(att.source).toEqual({ type: "url", url: "blob:https://example.com/abc-123" });
+      expect(att.source).toEqual({
+        type: "url",
+        url: "blob:https://example.com/abc-123",
+        mimeType: "image/png",
+      });
     });
 
     it("adds with structured source (passthrough)", () => {

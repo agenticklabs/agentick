@@ -1185,6 +1185,11 @@ export class AgentickClient {
       if (options?.sessionId) {
         body.sessionId = options.sessionId;
       }
+      // Include connectionId so server can exclude us from SSE broadcast
+      // (we already get events via this streaming response)
+      if (this._connectionId) {
+        body.connectionId = this._connectionId;
+      }
 
       const response = await this.fetchFn(`${baseUrl}${sendPath}`, {
         method: "POST",
