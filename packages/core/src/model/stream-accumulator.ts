@@ -103,7 +103,18 @@ export type AdapterDelta =
   // Content metadata update (add metadata to current content block without text)
   | { type: "content_metadata"; metadata: ContentMetadata }
   // Reasoning metadata update (add metadata to current reasoning block without text)
-  | { type: "reasoning_metadata"; metadata: ContentMetadata };
+  | { type: "reasoning_metadata"; metadata: ContentMetadata }
+  // Custom block lifecycle (from StreamTagParser)
+  | { type: "custom_block_start"; tag: string; attrs: Record<string, string> }
+  | { type: "custom_block_delta"; tag: string; delta: string }
+  | { type: "custom_block_end"; tag: string }
+  | {
+      type: "custom_block";
+      tag: string;
+      content: string;
+      attrs: Record<string, string>;
+      selfClosing?: boolean;
+    };
 
 // ============================================================================
 // StreamAccumulator - Framework-provided accumulation
@@ -185,6 +196,9 @@ export class StreamAccumulator {
   // Metadata tracking (accumulated across deltas, emitted on end events)
   private contentMetadata?: ContentMetadata;
   private reasoningMetadata?: ContentMetadata;
+
+  // Ordered content blocks (for interleaving text + custom blocks)
+  private orderedContent: ContentBlock[] = [];
 
   // Lifecycle tracking
   private messageStarted = false;
@@ -339,6 +353,7 @@ export class StreamAccumulator {
             startedAt: this.currentBlockStartedAt || completedAt,
             completedAt,
           } as ContentEvent);
+          this.orderedContent.push({ type: "text", text: this.currentBlockText });
           this.textStarted = false;
           this.currentBlockText = "";
           this.currentBlockStartedAt = undefined;
@@ -495,6 +510,7 @@ export class StreamAccumulator {
             startedAt: this.currentBlockStartedAt || completedAt,
             completedAt,
           } as ContentEvent);
+          this.orderedContent.push({ type: "text", text: this.currentBlockText });
           this.textStarted = false;
           this.currentBlockText = "";
           this.currentBlockStartedAt = undefined;
@@ -587,6 +603,62 @@ export class StreamAccumulator {
         } as ContentDeltaEvent);
         break;
       }
+
+      case "custom_block_start":
+      case "custom_block_delta":
+      case "custom_block_end": {
+        // Stream lifecycle events — pass through for consumers
+        events.push({
+          ...delta,
+          ...createEventBase(tick),
+        } as StreamEvent);
+        break;
+      }
+
+      case "custom_block": {
+        // End active text block if any — custom block gets its own position
+        if (this.textStarted) {
+          const completedAt = new Date().toISOString();
+          events.push({
+            type: "content_end",
+            ...createEventBase(tick),
+            blockType: BlockType.TEXT,
+            blockIndex: this.blockIndex,
+            metadata: this.contentMetadata,
+          } as ContentEndEvent);
+          events.push({
+            type: "content",
+            ...createEventBase(tick),
+            blockIndex: this.blockIndex,
+            content: { type: "text", text: this.currentBlockText },
+            metadata: this.contentMetadata,
+            startedAt: this.currentBlockStartedAt || completedAt,
+            completedAt,
+          } as ContentEvent);
+          this.orderedContent.push({ type: "text", text: this.currentBlockText });
+          this.textStarted = false;
+          this.currentBlockText = "";
+          this.currentBlockStartedAt = undefined;
+          this.contentMetadata = undefined;
+          this.blockIndex++;
+        }
+
+        // Accumulate as content block (preserves temporal position)
+        this.orderedContent.push({
+          type: "custom" as const,
+          tag: delta.tag,
+          content: delta.content,
+          attrs: delta.attrs,
+          selfClosing: delta.selfClosing,
+        });
+        this.blockIndex++;
+
+        events.push({
+          ...delta,
+          ...createEventBase(tick),
+        } as StreamEvent);
+        break;
+      }
     }
 
     return events;
@@ -604,8 +676,11 @@ export class StreamAccumulator {
       content.push({ type: "reasoning", text: this.reasoning } as ContentBlock);
     }
 
-    // Add text content
-    if (this.text) {
+    // Add interleaved text + custom blocks (preserves temporal order)
+    if (this.orderedContent.length > 0) {
+      content.push(...this.orderedContent);
+    } else if (this.text) {
+      // Fallback for streams without custom blocks (no orderedContent tracking needed)
       content.push({ type: "text", text: this.text });
     }
 

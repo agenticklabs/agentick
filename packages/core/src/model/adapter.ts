@@ -65,12 +65,13 @@ import type {
   MessageEvent,
   StreamEventBase,
 } from "@agentick/shared/streaming";
-import type { ContentBlock } from "@agentick/shared";
+import type { ContentBlock, Message } from "@agentick/shared";
 import { fromEngineState, toEngineState } from "./utils/language-model.js";
 import type { LibraryGenerationOptions, ProviderGenerationOptions } from "../types.js";
 import type { EmbedResult } from "@agentick/shared";
 import type { EmbedOptions } from "./embedding.js";
 import { Model } from "../jsx/components/model.js";
+import { StreamTagParser, type StreamTagHandler } from "./stream-tag-parser.js";
 
 // ============================================================================
 // Re-exports for adapter convenience
@@ -439,7 +440,13 @@ export interface AdapterOptions<TProviderInput, TProviderOutput, TChunk> {
     text: string;
     reasoning: string;
     toolCalls: Array<{ id: string; name: string; input: Record<string, unknown> }>;
-    usage: { inputTokens: number; outputTokens: number; totalTokens: number };
+    usage: {
+      inputTokens: number;
+      outputTokens: number;
+      totalTokens: number;
+      reasoningTokens?: number;
+      cachedInputTokens?: number;
+    };
     stopReason: string;
     model: string;
     /** Raw chunks collected during streaming */
@@ -510,6 +517,369 @@ export interface AdapterOptions<TProviderInput, TProviderOutput, TChunk> {
    * This allows a single adapter to support both text generation and embedding.
    */
   embed?: (texts: string[], options?: EmbedOptions) => Promise<EmbedResult>;
+
+  /**
+   * Custom blocks to intercept from the model's text output.
+   *
+   * Keys are semantic names used in application code. Each definition
+   * specifies what XML tag to intercept and how to handle the block.
+   *
+   * Internally creates a StreamTagParser + CustomBlockTransform pipeline,
+   * composed before any user-provided deltaTransform.
+   *
+   * @example
+   * ```typescript
+   * createAdapter({
+   *   customBlocks: {
+   *     interpretation: {
+   *       transform(block) {
+   *         return [{ type: "text", delta: `[${block.content}]` }];
+   *       },
+   *     },
+   *     done: { transform() { return []; } },
+   *     "debug-info": {},
+   *   },
+   * });
+   * ```
+   */
+  customBlocks?: Record<string, CustomBlockDefinition>;
+
+  /**
+   * Adapter-internal delta transform(s), applied FIRST in the pipeline.
+   *
+   * Runs before custom blocks and before the user's deltaTransform. Use for
+   * provider-specific stream cleanup (e.g., ThinkTagParser strips `<think>`
+   * tags before custom blocks see the text).
+   *
+   * Pipeline order: adapterTransform → customBlocks → deltaTransform
+   *
+   * Accepts a single transform, an array, or a factory function.
+   */
+  adapterTransform?: DeltaTransformInput;
+
+  /**
+   * User-facing delta transform applied after custom blocks, before accumulation.
+   *
+   * Runs AFTER adapter transforms and custom blocks extraction. Use for
+   * arbitrary stream manipulation (markdown buffering, content rewriting, etc.).
+   *
+   * Accepts a single transform, an array, or a factory function that returns
+   * a fresh transform per stream call. Use a factory for stateful transforms
+   * (parsers with buffers) so each stream gets clean state.
+   *
+   * @example
+   * ```typescript
+   * // Stateless transform — single instance is fine
+   * createAdapter({ ...options, deltaTransform: myStatelessTransform });
+   *
+   * // Stateful transform — factory ensures fresh state per stream
+   * createAdapter({ ...options, deltaTransform: () => new ThinkTagParser() });
+   *
+   * // Pipeline
+   * createAdapter({
+   *   ...options,
+   *   deltaTransform: [transform1, transform2],
+   * });
+   * ```
+   */
+  deltaTransform?: DeltaTransformInput;
+}
+
+/**
+ * A stateful transform that processes AdapterDeltas in the streaming pipeline.
+ * Sits between mapChunk output and StreamAccumulator input.
+ *
+ * Transforms can be composed into pipelines via {@link composeDeltaTransforms}.
+ */
+export interface DeltaTransform {
+  /** Process a delta, returning zero or more transformed deltas. */
+  process(delta: AdapterDelta): AdapterDelta[];
+  /** Flush any buffered content at stream end. */
+  flush(): AdapterDelta[];
+}
+
+/** Factory that creates a fresh DeltaTransform per stream call. */
+export type DeltaTransformFactory = () => DeltaTransform;
+
+/** Accepted forms for the deltaTransform adapter option. */
+export type DeltaTransformInput = DeltaTransform | DeltaTransformFactory | DeltaTransform[];
+
+// ============================================================================
+// Custom Blocks — First-class adapter config
+// ============================================================================
+
+/**
+ * Input passed to a custom block's transform function.
+ */
+export interface CustomBlockInput {
+  tag: string;
+  content: string;
+  attrs: Record<string, string>;
+  selfClosing?: boolean;
+}
+
+/**
+ * Definition for a custom block type.
+ *
+ * Custom blocks are XML-like tags in the model's text output that get
+ * intercepted, stripped from text, and handled by the application.
+ *
+ * @example
+ * ```typescript
+ * createAdapter({
+ *   customBlocks: {
+ *     // Passthrough — accumulate as CustomContentBlock
+ *     citation: {},
+ *
+ *     // Transform — rewrite into a text block
+ *     interpretation: {
+ *       transform(block) {
+ *         return [{ type: "text", delta: `[${block.content}]` }];
+ *       },
+ *     },
+ *
+ *     // Suppress — consume as side effect only
+ *     done: {
+ *       transform() { setDone(true); return []; },
+ *     },
+ *
+ *     // Override XML tag name
+ *     debugInfo: {
+ *       tag: "debug-info",  // intercepts <debug-info>, key is "debugInfo"
+ *     },
+ *   },
+ * });
+ * ```
+ */
+export interface CustomBlockDefinition {
+  /**
+   * XML tag to intercept in the text stream.
+   * Defaults to the config key.
+   */
+  tag?: string;
+
+  /**
+   * Short description of what this block represents.
+   * Appears in the auto-generated tag listing in the system prompt.
+   *
+   * When provided (alone or with `instructions`), the adapter automatically
+   * appends block documentation to the system prompt.
+   *
+   * @example
+   * ```typescript
+   * customBlocks: {
+   *   citation: {
+   *     description: "A quoted passage from a source.",
+   *   },
+   * }
+   * ```
+   */
+  description?: string;
+
+  /**
+   * Detailed usage instructions for the model.
+   * Appended after the description in the system prompt.
+   * Use for elaboration on when to use the block, constraints,
+   * expected attributes, or examples.
+   *
+   * @example
+   * ```typescript
+   * customBlocks: {
+   *   interpretation: {
+   *     description: "Analytical insight derived from evidence.",
+   *     instructions: "Use when synthesizing information or drawing conclusions from multiple sources. Do not use for direct observations.",
+   *   },
+   *   done: {
+   *     description: "Signals task completion.",
+   *     instructions: "Output <done/> only when the task is fully complete and no further action is needed.",
+   *     transform() { return []; },
+   *   },
+   * }
+   * ```
+   */
+  instructions?: string;
+
+  /**
+   * Transform the complete block before it enters the content array.
+   *
+   * - Return `void` → passthrough as CustomContentBlock (default)
+   * - Return `AdapterDelta[]` → emit these instead (`[]` suppresses the block)
+   */
+  transform?(block: CustomBlockInput): AdapterDelta[] | void;
+
+  /**
+   * Called when the opening tag is found, before content arrives.
+   * Side-effect only — does not affect output.
+   */
+  onStart?(attrs: Record<string, string>): void;
+}
+
+/**
+ * DeltaTransform that applies per-tag transform functions from CustomBlockDefinitions.
+ * Intercepts `custom_block` deltas, runs the tag's transform if defined,
+ * and remaps the tag from XML name to semantic config key.
+ */
+class CustomBlockTransform implements DeltaTransform {
+  private readonly defs: Map<string, { key: string; def: CustomBlockDefinition }>;
+
+  constructor(config: Record<string, CustomBlockDefinition>) {
+    this.defs = new Map();
+    for (const [key, def] of Object.entries(config)) {
+      const xmlTag = def.tag ?? key;
+      this.defs.set(xmlTag, { key, def });
+    }
+  }
+
+  process(delta: AdapterDelta): AdapterDelta[] {
+    if (delta.type !== "custom_block") return [delta];
+
+    const entry = this.defs.get(delta.tag);
+    if (!entry) return [delta];
+
+    const { key, def } = entry;
+
+    // Remap tag from XML name to semantic config key
+    const block: CustomBlockInput = {
+      tag: key,
+      content: delta.content,
+      attrs: delta.attrs,
+      selfClosing: delta.selfClosing,
+    };
+
+    if (def.transform) {
+      const result = def.transform(block);
+      if (result !== undefined) return result;
+    }
+
+    // Default: passthrough with remapped tag
+    return [
+      {
+        ...delta,
+        tag: key,
+      },
+    ];
+  }
+
+  flush(): AdapterDelta[] {
+    return [];
+  }
+}
+
+/**
+ * Build StreamTagParser handlers from CustomBlockDefinitions.
+ */
+function buildTagHandlers(
+  config: Record<string, CustomBlockDefinition>,
+): Record<string, StreamTagHandler> {
+  const handlers: Record<string, StreamTagHandler> = {};
+  for (const [key, def] of Object.entries(config)) {
+    const xmlTag = def.tag ?? key;
+    handlers[xmlTag] = {
+      onStart: def.onStart,
+    };
+  }
+  return handlers;
+}
+
+/**
+ * Build system prompt text from custom block descriptions and instructions.
+ * Returns null if no blocks have description or instructions.
+ */
+function buildCustomBlockInstructions(
+  config: Record<string, CustomBlockDefinition> | undefined,
+): string | null {
+  if (!config) return null;
+
+  const lines: string[] = [];
+  for (const [key, def] of Object.entries(config)) {
+    if (!def.description && !def.instructions) continue;
+    const xmlTag = def.tag ?? key;
+
+    if (def.description && def.instructions) {
+      lines.push(`- <${xmlTag}>: ${def.description}\n  ${def.instructions}`);
+    } else {
+      lines.push(`- <${xmlTag}>: ${def.description ?? def.instructions}`);
+    }
+  }
+
+  if (lines.length === 0) return null;
+
+  return `You can use the following XML tags in your output:\n${lines.join("\n")}`;
+}
+
+/**
+ * Inject custom block instructions into the first system message.
+ * If no system message exists, prepend one. System prompt is always first.
+ * Mutates modelInput.messages in place.
+ */
+function injectCustomBlockInstructions(modelInput: ModelInput, instructions: string): void {
+  const instructionBlock = { type: "text" as const, text: instructions };
+
+  // Find the first system message
+  for (let i = 0; i < modelInput.messages.length; i++) {
+    if ((modelInput.messages[i] as Message).role === "system") {
+      (modelInput.messages[i] as Message) = {
+        ...(modelInput.messages[i] as Message),
+        content: [...(modelInput.messages[i] as Message).content, instructionBlock],
+      };
+      return;
+    }
+  }
+
+  // No system message — prepend one
+  (modelInput.messages as Message[]).unshift({
+    role: "system",
+    content: [instructionBlock],
+  });
+}
+
+/**
+ * Compose multiple DeltaTransforms into a single pipeline.
+ *
+ * Each transform's output feeds the next transform's input.
+ * On flush, each transform's buffered output cascades through
+ * subsequent transforms before they flush their own state.
+ *
+ * @example
+ * ```typescript
+ * const pipeline = composeDeltaTransforms(
+ *   thinkTagParser,     // strips <think> tags, emits reasoning
+ *   customTagParser,    // strips app-specific tags, emits custom blocks
+ *   markdownBufferer,   // coalesces text into render-friendly chunks
+ * );
+ *
+ * createAdapter({ ...opts, deltaTransform: pipeline });
+ * ```
+ */
+export function composeDeltaTransforms(...transforms: DeltaTransform[]): DeltaTransform {
+  if (transforms.length === 0) {
+    return { process: (d) => [d], flush: () => [] };
+  }
+  if (transforms.length === 1) return transforms[0];
+
+  return {
+    process(delta: AdapterDelta): AdapterDelta[] {
+      let deltas = [delta];
+      for (const t of transforms) {
+        const next: AdapterDelta[] = [];
+        for (const d of deltas) next.push(...t.process(d));
+        deltas = next;
+      }
+      return deltas;
+    },
+    flush(): AdapterDelta[] {
+      let pending: AdapterDelta[] = [];
+      for (const t of transforms) {
+        // Feed pending output from upstream flushes through this transform
+        const processed: AdapterDelta[] = [];
+        for (const d of pending) processed.push(...t.process(d));
+        // Then flush this transform's own buffered state
+        const flushed = t.flush();
+        pending = [...processed, ...flushed];
+      }
+      return pending;
+    },
+  };
 }
 
 /**
@@ -632,9 +1002,52 @@ export function createAdapter<TProviderInput, TProviderOutput, TChunk>(
     processOutput,
     extractMetadata,
     reconstructRaw,
+    adapterTransform: rawAdapterTransform,
+    deltaTransform: rawDeltaTransform,
+    customBlocks: customBlockConfig,
     onMount: adapterOnMount,
     onUnmount: adapterOnUnmount,
   } = options;
+
+  // Build a fresh delta transform pipeline per stream call.
+  // Pipeline order: adapterTransform → customBlocks → deltaTransform
+  // Transforms like StreamTagParser are stateful (buffers, mode) and must not
+  // be shared across streams. Factory ensures clean state each time.
+  const hasAdapterTransform = !!rawAdapterTransform;
+  const hasCustomBlocks = customBlockConfig && Object.keys(customBlockConfig).length > 0;
+  const hasDeltaTransform = !!rawDeltaTransform;
+
+  function isDeltaTransform(t: DeltaTransformInput): t is DeltaTransform {
+    return typeof t === "object" && !Array.isArray(t) && "process" in t;
+  }
+
+  function resolveTransformInput(input: DeltaTransformInput): DeltaTransform[] {
+    if (Array.isArray(input)) return input;
+    if (isDeltaTransform(input)) return [input];
+    return [input()]; // factory
+  }
+
+  function createDeltaTransform(): DeltaTransform | undefined {
+    const transforms: DeltaTransform[] = [];
+
+    // 1. Adapter-internal transforms (provider-specific cleanup)
+    if (hasAdapterTransform) {
+      transforms.push(...resolveTransformInput(rawAdapterTransform!));
+    }
+
+    // 2. Custom blocks extraction (StreamTagParser + CustomBlockTransform)
+    if (hasCustomBlocks) {
+      transforms.push(new StreamTagParser({ tags: buildTagHandlers(customBlockConfig!) }));
+      transforms.push(new CustomBlockTransform(customBlockConfig!));
+    }
+
+    // 3. User-provided delta transforms
+    if (hasDeltaTransform) {
+      transforms.push(...resolveTransformInput(rawDeltaTransform!));
+    }
+
+    return transforms.length > 0 ? composeDeltaTransforms(...transforms) : undefined;
+  }
 
   // Create generate procedure
   const generate = createEngineProcedure<(input: ModelInput) => Promise<ModelOutput>>(
@@ -698,7 +1111,8 @@ export function createAdapter<TProviderInput, TProviderOutput, TChunk>(
             providerInput,
           } satisfies StreamEvent;
 
-          // Use StreamAccumulator for clean lifecycle management
+          // Fresh transform + accumulator per stream call
+          const deltaTransform = createDeltaTransform();
           const accumulator = new StreamAccumulator({ modelId: metadata.id });
           const rawChunks: TChunk[] = [];
 
@@ -722,15 +1136,28 @@ export function createAdapter<TProviderInput, TProviderOutput, TChunk>(
               }
             }
 
-            // Map chunk to AdapterDelta(s) and push to accumulator
+            // Map chunk to AdapterDelta(s), optionally transform, then push to accumulator
             const delta = mapChunk(chunk);
             if (delta) {
-              const deltas = Array.isArray(delta) ? delta : [delta];
-              for (const d of deltas) {
-                const events = accumulator.push(d);
-                for (const event of events) {
-                  yield event;
+              const rawDeltas = Array.isArray(delta) ? delta : [delta];
+              for (const d of rawDeltas) {
+                const transformed = deltaTransform ? deltaTransform.process(d) : [d];
+                for (const td of transformed) {
+                  const events = accumulator.push(td);
+                  for (const event of events) {
+                    yield event;
+                  }
                 }
+              }
+            }
+          }
+
+          // Flush delta transform at stream end (e.g., partial tag buffers)
+          if (deltaTransform) {
+            for (const d of deltaTransform.flush()) {
+              const events = accumulator.push(d);
+              for (const event of events) {
+                yield event;
               }
             }
           }
@@ -794,10 +1221,19 @@ export function createAdapter<TProviderInput, TProviderOutput, TChunk>(
       )
     : undefined;
 
+  // Build custom block instructions for system prompt injection
+  const customBlockInstructions = buildCustomBlockInstructions(customBlockConfig);
+
   // Default fromEngineState using model metadata for transformation config
   const defaultFromEngineState = async (input: COMInput): Promise<ModelInput> => {
     const modelInstance = { metadata } as any;
-    return fromEngineState(input, undefined, modelInstance) as Promise<ModelInput>;
+    const modelInput = (await fromEngineState(input, undefined, modelInstance)) as ModelInput;
+
+    if (customBlockInstructions) {
+      injectCustomBlockInstructions(modelInput, customBlockInstructions);
+    }
+
+    return modelInput;
   };
 
   // Build the EngineModel properties

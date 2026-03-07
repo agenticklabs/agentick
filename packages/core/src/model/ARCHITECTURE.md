@@ -54,8 +54,12 @@ Agentick needs to work with multiple AI providers (OpenAI, Anthropic, Google, et
 ```
 model/
 ├── model.ts              # Core interfaces (EngineModel, ModelInput, ModelOutput)
-├── adapter.ts            # createAdapter() factory
+├── adapter.ts            # createAdapter() factory, DeltaTransform, CustomBlockDefinition
+├── stream-accumulator.ts # AdapterDelta, StreamAccumulator (delta → event conversion)
+├── stream-tag-parser.ts  # StreamTagParser (XML tag interception in text streams)
 ├── model-hooks.ts        # Hook registry for model operations
+├── adapter-helpers.ts    # Composable helpers for adapters
+├── embedding.ts          # Embedding adapter support
 ├── index.ts              # Public exports
 └── utils/
     ├── language-model.ts # fromEngineState/toEngineState transformers
@@ -499,6 +503,17 @@ sequenceDiagram
     deactivate Model
 ```
 
+### Streaming Pipeline (Detailed)
+
+The full streaming pipeline from provider chunk to session consumption:
+
+```
+provider chunk → mapChunk() → AdapterDelta[]
+  → deltaTransform.process() → AdapterDelta[] (custom blocks extracted, tags stripped)
+    → accumulator.push() → StreamEvent[] (with custom_block events)
+      → yield event → session consumes
+```
+
 ### Hook Execution Flow
 
 ```mermaid
@@ -518,6 +533,58 @@ graph LR
     IH -.-> |transform| OP
     OP -.-> |transform| Result
 ```
+
+---
+
+## Custom Blocks & Delta Transforms
+
+### Custom Blocks
+
+Custom blocks are XML-like tags in the model's text output that get intercepted by the adapter, stripped from text, and emitted as structured `CustomContentBlock`s in the message content array.
+
+**Architecture**: Custom blocks are built on two layered abstractions:
+
+1. **DeltaTransform** — Generic streaming middleware interface (`process`/`flush`) that sits between `mapChunk` and `StreamAccumulator` in the adapter pipeline
+2. **StreamTagParser** — A char-by-char state machine (8 states) that implements `DeltaTransform`, intercepts registered XML tags, and emits `custom_block` deltas
+3. **CustomBlockTransform** — Applies per-tag `transform` functions from `CustomBlockDefinition`, enabling block suppression, rewriting, and tag remapping
+
+**Pipeline composition** when `customBlocks` is defined on `createAdapter`:
+
+```
+mapChunk output
+  → StreamTagParser (intercepts tags, emits custom_block deltas)
+    → CustomBlockTransform (per-tag transform/suppress/remap)
+      → user deltaTransform[] (markdown buffering, etc.)
+        → StreamAccumulator
+```
+
+Transforms compose via `composeDeltaTransforms()`. On flush, upstream flush output cascades through downstream `process()` before each downstream flushes its own state.
+
+**Content interleaving**: `StreamAccumulator` tracks an `orderedContent: ContentBlock[]` array. When a `custom_block` delta arrives, the active text block is ended and pushed, then the custom block is pushed. `toModelOutput()` builds `message.content` from this interleaved array, preserving temporal position.
+
+### Delta Transform Interface
+
+```typescript
+interface DeltaTransform {
+  process(delta: AdapterDelta): AdapterDelta[];
+  flush(): AdapterDelta[];
+}
+```
+
+Stateful transforms that process deltas in the streaming pipeline. `process()` can return zero or more deltas (buffering returns `[]`, splitting returns multiple). `flush()` emits any buffered content at stream end.
+
+### AdapterDelta Custom Block Types
+
+Four new delta types support the custom block lifecycle:
+
+| Delta Type           | Fields                                    | Purpose                              |
+| -------------------- | ----------------------------------------- | ------------------------------------ |
+| `custom_block_start` | `tag`, `attrs`                            | Opening tag detected (streaming)     |
+| `custom_block_delta` | `tag`, `delta`                            | Content chunk within tag (streaming) |
+| `custom_block_end`   | `tag`                                     | Closing tag detected (streaming)     |
+| `custom_block`       | `tag`, `content`, `attrs`, `selfClosing?` | Complete block (accumulation)        |
+
+The lifecycle events (start/delta/end) are for real-time consumers. The complete `custom_block` delta triggers accumulation into the content array.
 
 ---
 

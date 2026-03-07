@@ -334,6 +334,26 @@ export interface StateChangeBlock extends BaseContentBlock {
   readonly text?: string;
 }
 
+/**
+ * Custom content block - Application-defined block extracted from model
+ * text output by StreamTagParser.
+ *
+ * The `tag` field identifies the block type (e.g., "interpretation",
+ * "debug-info", "done"). The framework is tag-agnostic — applications
+ * give meaning to specific tag values.
+ *
+ * Custom blocks preserve their temporal position in the content array,
+ * interleaved with text, tool_use, and other blocks exactly as the
+ * model emitted them.
+ */
+export interface CustomContentBlock extends BaseContentBlock {
+  readonly type: BlockType.CUSTOM | "custom";
+  readonly tag: string;
+  readonly content: string;
+  readonly attrs: Record<string, string>;
+  readonly selfClosing?: boolean;
+}
+
 // ============================================================================
 // Union Types
 // ============================================================================
@@ -376,7 +396,8 @@ export type ContentBlock =
   | CodeExecutionResultBlock
   | UserActionBlock
   | SystemEventBlock
-  | StateChangeBlock;
+  | StateChangeBlock
+  | CustomContentBlock;
 
 /** Union of media content blocks (image, document, audio, video) */
 export type MediaBlock = ImageBlock | DocumentBlock | AudioBlock | VideoBlock;
@@ -411,7 +432,8 @@ export type AssistantAllowedBlock =
   | GeneratedImageBlock
   | GeneratedFileBlock
   | ExecutableCodeBlock
-  | CodeExecutionResultBlock;
+  | CodeExecutionResultBlock
+  | CustomContentBlock;
 export type EventAllowedBlock = TextBlock | UserActionBlock | SystemEventBlock | StateChangeBlock;
 
 // ============================================================================
@@ -455,6 +477,10 @@ export function isSystemEventBlock(block: ContentBlock): block is SystemEventBlo
 
 export function isStateChangeBlock(block: ContentBlock): block is StateChangeBlock {
   return block.type === "state_change";
+}
+
+export function isCustomBlock(block: ContentBlock): block is CustomContentBlock {
+  return block.type === "custom";
 }
 
 /**

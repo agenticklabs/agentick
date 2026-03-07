@@ -39,6 +39,9 @@ export enum BlockType {
   USER_ACTION = "user_action",
   SYSTEM_EVENT = "system_event",
   STATE_CHANGE = "state_change",
+
+  // Application-defined custom blocks (from StreamTagParser)
+  CUSTOM = "custom",
 }
 
 export type BlockTypes =
@@ -61,7 +64,8 @@ export type BlockTypes =
   | "code_execution_result"
   | "user_action"
   | "system_event"
-  | "state_change";
+  | "state_change"
+  | "custom";
 
 export enum MessageRole {
   USER = "user",

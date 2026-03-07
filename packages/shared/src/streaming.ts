@@ -372,7 +372,41 @@ export type ModelStreamEvent =
   // Usage (standalone, for providers that send it separately)
   | UsageEvent
   // Errors
-  | StreamErrorEvent;
+  | StreamErrorEvent
+  // Custom blocks (from StreamTagParser)
+  | CustomBlockStartEvent
+  | CustomBlockDeltaEvent
+  | CustomBlockEndEvent
+  | CustomBlockEvent;
+
+// ============================================================================
+// Custom Block Events (application-level tags extracted from text stream)
+// ============================================================================
+
+export type CustomBlockStartEvent = {
+  type: "custom_block_start";
+  tag: string;
+  attrs: Record<string, string>;
+} & StreamEventBase;
+
+export type CustomBlockDeltaEvent = {
+  type: "custom_block_delta";
+  tag: string;
+  delta: string;
+} & StreamEventBase;
+
+export type CustomBlockEndEvent = {
+  type: "custom_block_end";
+  tag: string;
+} & StreamEventBase;
+
+export type CustomBlockEvent = {
+  type: "custom_block";
+  tag: string;
+  content: string;
+  attrs: Record<string, string>;
+  selfClosing?: boolean;
+} & StreamEventBase;
 
 // ============================================================================
 // OrchestrationStreamEvent (Orchestration)
@@ -824,6 +858,10 @@ export const MODEL_EVENT_TYPES = [
   "tool_call",
   "usage",
   "error",
+  "custom_block_start",
+  "custom_block_delta",
+  "custom_block_end",
+  "custom_block",
 ] as const;
 
 export const ORCHESTRATION_EVENT_TYPES = [

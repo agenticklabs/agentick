@@ -55,5 +55,8 @@ export * from "./stream-accumulator.js"; // AdapterDelta, StreamAccumulator
 export * from "./adapter.js"; // createAdapter factory
 export * from "./adapter-helpers.js"; // Composable helpers for adapters
 
+// Stream tag parsing
+export * from "./stream-tag-parser.js"; // StreamTagParser, StreamTagHandler
+
 // Embedding adapters
 export * from "./embedding.js";

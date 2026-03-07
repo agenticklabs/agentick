@@ -492,4 +492,263 @@ describe("StreamAccumulator", () => {
       expect((contentEvent as any).blockIndex).toBeDefined();
     });
   });
+
+  describe("custom block interleaving", () => {
+    it("should interleave custom blocks with text in orderedContent", () => {
+      const accumulator = new StreamAccumulator({ modelId: "test" });
+
+      accumulator.push({ type: "text", delta: "Before " });
+      accumulator.push({ type: "text", delta: "the block." });
+      accumulator.push({
+        type: "custom_block",
+        tag: "interpretation",
+        content: "This is an interpretation",
+        attrs: { confidence: "high" },
+      });
+      accumulator.push({ type: "text", delta: "After the block." });
+      accumulator.push({ type: "message_end", stopReason: StopReason.STOP });
+
+      const output = accumulator.toModelOutput();
+      const content = output.message.content;
+
+      // 3 content blocks: text, custom, text
+      expect(content).toHaveLength(3);
+      expect(content[0]).toEqual({ type: "text", text: "Before the block." });
+      expect(content[1]).toEqual({
+        type: "custom",
+        tag: "interpretation",
+        content: "This is an interpretation",
+        attrs: { confidence: "high" },
+        selfClosing: undefined,
+      });
+      expect(content[2]).toEqual({ type: "text", text: "After the block." });
+    });
+
+    it("should handle multiple custom blocks between text", () => {
+      const accumulator = new StreamAccumulator({ modelId: "test" });
+
+      accumulator.push({ type: "text", delta: "Intro." });
+      accumulator.push({
+        type: "custom_block",
+        tag: "interpretation",
+        content: "First",
+        attrs: {},
+      });
+      accumulator.push({
+        type: "custom_block",
+        tag: "debug-info",
+        content: "Debug data",
+        attrs: { level: "verbose" },
+      });
+      accumulator.push({ type: "text", delta: "Conclusion." });
+      accumulator.push({ type: "message_end", stopReason: StopReason.STOP });
+
+      const output = accumulator.toModelOutput();
+      const content = output.message.content;
+
+      expect(content).toHaveLength(4);
+      expect(content[0]).toEqual({ type: "text", text: "Intro." });
+      expect(content[1]).toMatchObject({ type: "custom", tag: "interpretation" });
+      expect(content[2]).toMatchObject({ type: "custom", tag: "debug-info" });
+      expect(content[3]).toEqual({ type: "text", text: "Conclusion." });
+    });
+
+    it("should handle self-closing custom blocks", () => {
+      const accumulator = new StreamAccumulator({ modelId: "test" });
+
+      accumulator.push({ type: "text", delta: "Almost done." });
+      accumulator.push({
+        type: "custom_block",
+        tag: "done",
+        content: "",
+        attrs: {},
+        selfClosing: true,
+      });
+      accumulator.push({ type: "message_end", stopReason: StopReason.STOP });
+
+      const output = accumulator.toModelOutput();
+      const content = output.message.content;
+
+      expect(content).toHaveLength(2);
+      expect(content[0]).toEqual({ type: "text", text: "Almost done." });
+      expect(content[1]).toMatchObject({ type: "custom", tag: "done", selfClosing: true });
+    });
+
+    it("should handle custom block at start of message (no preceding text)", () => {
+      const accumulator = new StreamAccumulator({ modelId: "test" });
+
+      accumulator.push({
+        type: "custom_block",
+        tag: "interpretation",
+        content: "Starting with custom",
+        attrs: {},
+      });
+      accumulator.push({ type: "text", delta: "Then text." });
+      accumulator.push({ type: "message_end", stopReason: StopReason.STOP });
+
+      const output = accumulator.toModelOutput();
+      const content = output.message.content;
+
+      expect(content).toHaveLength(2);
+      expect(content[0]).toMatchObject({ type: "custom", tag: "interpretation" });
+      expect(content[1]).toEqual({ type: "text", text: "Then text." });
+    });
+
+    it("should handle custom block at end of message (no trailing text)", () => {
+      const accumulator = new StreamAccumulator({ modelId: "test" });
+
+      accumulator.push({ type: "text", delta: "Text first." });
+      accumulator.push({
+        type: "custom_block",
+        tag: "done",
+        content: "",
+        attrs: {},
+        selfClosing: true,
+      });
+      accumulator.push({ type: "message_end", stopReason: StopReason.STOP });
+
+      const output = accumulator.toModelOutput();
+      const content = output.message.content;
+
+      expect(content).toHaveLength(2);
+      expect(content[0]).toEqual({ type: "text", text: "Text first." });
+      expect(content[1]).toMatchObject({ type: "custom", tag: "done" });
+    });
+
+    it("should preserve reasoning + interleaved content + tool calls", () => {
+      const accumulator = new StreamAccumulator({ modelId: "test" });
+
+      accumulator.push({ type: "reasoning", delta: "Let me think..." });
+      accumulator.push({ type: "text", delta: "I'll help you. " });
+      accumulator.push({
+        type: "custom_block",
+        tag: "interpretation",
+        content: "User needs file editing",
+        attrs: {},
+      });
+      accumulator.push({ type: "text", delta: "Let me edit that file." });
+      accumulator.push({
+        type: "tool_call",
+        id: "call_1",
+        name: "edit_file",
+        input: { path: "test.ts" },
+      });
+      accumulator.push({ type: "message_end", stopReason: StopReason.TOOL_USE });
+
+      const output = accumulator.toModelOutput();
+      const content = output.message.content;
+
+      // reasoning + text + custom + text + tool_use = 5
+      expect(content).toHaveLength(5);
+      expect(content[0]).toMatchObject({ type: "reasoning" });
+      expect(content[1]).toEqual({ type: "text", text: "I'll help you. " });
+      expect(content[2]).toMatchObject({ type: "custom", tag: "interpretation" });
+      expect(content[3]).toEqual({ type: "text", text: "Let me edit that file." });
+      expect(content[4]).toMatchObject({ type: "tool_use", name: "edit_file" });
+    });
+
+    it("should end active text block before custom block (events)", () => {
+      const accumulator = new StreamAccumulator({ modelId: "test" });
+
+      accumulator.push({ type: "text", delta: "Hello" });
+      const events = accumulator.push({
+        type: "custom_block",
+        tag: "test",
+        content: "custom",
+        attrs: {},
+      });
+
+      const eventTypes = events.map((e) => e.type);
+      expect(eventTypes).toContain("content_end");
+      expect(eventTypes).toContain("content");
+      expect(eventTypes).toContain("custom_block");
+
+      // content_end must come before custom_block
+      const endIdx = eventTypes.indexOf("content_end");
+      const customIdx = eventTypes.indexOf("custom_block");
+      expect(endIdx).toBeLessThan(customIdx);
+    });
+
+    it("should pass through custom_block_start/delta/end as stream events", () => {
+      const accumulator = new StreamAccumulator({ modelId: "test" });
+
+      const startEvents = accumulator.push({
+        type: "custom_block_start",
+        tag: "interpretation",
+        attrs: { confidence: "high" },
+      });
+      const deltaEvents = accumulator.push({
+        type: "custom_block_delta",
+        tag: "interpretation",
+        delta: "partial content",
+      });
+      const endEvents = accumulator.push({
+        type: "custom_block_end",
+        tag: "interpretation",
+      });
+
+      expect(startEvents).toHaveLength(1);
+      expect(startEvents[0].type).toBe("custom_block_start");
+      expect(deltaEvents).toHaveLength(1);
+      expect(deltaEvents[0].type).toBe("custom_block_delta");
+      expect(endEvents).toHaveLength(1);
+      expect(endEvents[0].type).toBe("custom_block_end");
+    });
+
+    it("should fallback to text-only content when no custom blocks present", () => {
+      const accumulator = new StreamAccumulator({ modelId: "test" });
+
+      accumulator.push({ type: "text", delta: "Plain text." });
+      accumulator.push({ type: "message_end", stopReason: StopReason.STOP });
+
+      const output = accumulator.toModelOutput();
+      expect(output.message.content).toHaveLength(1);
+      expect(output.message.content[0]).toEqual({ type: "text", text: "Plain text." });
+    });
+
+    it("should handle only custom blocks with no text", () => {
+      const accumulator = new StreamAccumulator({ modelId: "test" });
+
+      accumulator.push({
+        type: "custom_block",
+        tag: "done",
+        content: "",
+        attrs: {},
+        selfClosing: true,
+      });
+      accumulator.push({ type: "message_end", stopReason: StopReason.STOP });
+
+      const output = accumulator.toModelOutput();
+      expect(output.message.content).toHaveLength(1);
+      expect(output.message.content[0]).toMatchObject({ type: "custom", tag: "done" });
+    });
+
+    it("should handle rapid alternation between text and custom blocks", () => {
+      const accumulator = new StreamAccumulator({ modelId: "test" });
+
+      for (let i = 0; i < 10; i++) {
+        accumulator.push({ type: "text", delta: `text-${i}` });
+        accumulator.push({
+          type: "custom_block",
+          tag: "block",
+          content: `custom-${i}`,
+          attrs: { i: String(i) },
+        });
+      }
+      accumulator.push({ type: "message_end", stopReason: StopReason.STOP });
+
+      const output = accumulator.toModelOutput();
+      // 10 text blocks + 10 custom blocks = 20
+      expect(output.message.content).toHaveLength(20);
+
+      for (let i = 0; i < 10; i++) {
+        expect(output.message.content[i * 2]).toEqual({ type: "text", text: `text-${i}` });
+        expect(output.message.content[i * 2 + 1]).toMatchObject({
+          type: "custom",
+          tag: "block",
+          content: `custom-${i}`,
+        });
+      }
+    });
+  });
 });
