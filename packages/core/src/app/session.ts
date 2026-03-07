@@ -3097,9 +3097,12 @@ export class SessionImpl<P = {}> extends EventEmitter implements Session<P> {
       throw new Error("Compilation infrastructure not initialized");
     }
 
-    // Convert queued user messages to timeline entries BEFORE clearing
-    // This preserves the user message in the conversation history
-    const queuedMessages = this.ctx.getQueuedMessages();
+    // Snapshot and clear queued messages atomically. The queue must be
+    // cleared BEFORE the shouldContinue check at the end of this method,
+    // otherwise it sees already-processed messages as "pending" and
+    // incorrectly triggers another tick.
+    const queuedMessages = [...this.ctx.getQueuedMessages()];
+    this.ctx.clearQueuedMessages();
     const existingTimeline = this.ctx.getTimeline();
     const existingByMessage = new Map<Message, COMTimelineEntry>();
     for (const entry of existingTimeline) {

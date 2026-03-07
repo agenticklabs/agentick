@@ -21,6 +21,13 @@ import { Logger } from "@agentick/kernel";
 
 const log = Logger.for("Collector");
 
+/** Normalize string | Date to Date (Message.createdAt allows both). */
+function toDate(value: string | Date | undefined): Date | undefined {
+  if (value == null) return undefined;
+  if (value instanceof Date) return value;
+  return new Date(value);
+}
+
 // ============================================================
 // Component Type Constants
 // These are matched by string name since we're using host config
@@ -237,7 +244,7 @@ function collectTimelineEntry(node: AgentickNode, result: CompiledStructure): vo
       content?: unknown[];
       id?: string;
       metadata?: Record<string, unknown>;
-      createdAt?: Date;
+      createdAt?: string | Date;
     };
 
     // Determine content: prefer message.content, fallback to collecting from children
@@ -258,7 +265,7 @@ function collectTimelineEntry(node: AgentickNode, result: CompiledStructure): vo
       content,
       renderer: node.renderer,
       metadata: msg.metadata ?? (node.props.metadata as Record<string, unknown> | undefined),
-      createdAt: msg.createdAt ?? (node.props.createdAt as Date | undefined),
+      createdAt: toDate(msg.createdAt) ?? toDate(node.props.createdAt as string | Date | undefined),
     };
 
     // Route system entries separately (rebuilt each tick)
@@ -278,7 +285,7 @@ function collectTimelineEntry(node: AgentickNode, result: CompiledStructure): vo
     content: collectContent(node.children, node.renderer),
     renderer: node.renderer,
     metadata: node.props.metadata as Record<string, unknown> | undefined,
-    createdAt: node.props.createdAt as Date | undefined,
+    createdAt: toDate(node.props.createdAt as string | Date | undefined),
   };
 
   // Route system entries separately (rebuilt each tick)
