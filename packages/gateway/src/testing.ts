@@ -32,7 +32,15 @@
 import WebSocket from "ws";
 import type { Gateway } from "./gateway.js";
 import { createGateway } from "./gateway.js";
-import type { GatewayConfig, GatewayEvents } from "./types.js";
+import type {
+  GatewayConfig,
+  GatewayEvents,
+  PluginContext,
+  MethodDefinition,
+  SimpleMethodHandler,
+} from "./types.js";
+import { isMethodDefinition } from "./types.js";
+import type { ConfigStore } from "./config.js";
 
 // Re-export mock factories from core
 export {
@@ -49,6 +57,108 @@ export {
   type TestProcedure,
   type TestProcedureOptions,
 } from "@agentick/core/testing";
+
+// ============================================================================
+// Mock Plugin Context
+// ============================================================================
+
+export interface RegisteredMethod {
+  handler: Function;
+  roles?: string[];
+}
+
+export interface MockPluginContextResult {
+  ctx: PluginContext;
+  /** Methods registered via ctx.registerMethod */
+  methods: Map<string, RegisteredMethod>;
+  /** Event handlers registered via ctx.on */
+  events: Map<string, Function>;
+  /** All registerMethod calls as [path, handlerOrDef] */
+  _registerMethodCalls: Array<[string, unknown]>;
+  /** All invoke calls as [method, params] */
+  _invokeCalls: Array<[string, unknown]>;
+  /** All broadcast calls as [event, data] */
+  _broadcastCalls: Array<[string, unknown]>;
+  /** All registerRoute calls as [path, handler] */
+  _registerRouteCalls: Array<[string, Function]>;
+}
+
+export interface MockPluginContextOptions {
+  gatewayId?: string;
+  config?: Partial<ConfigStore>;
+}
+
+/**
+ * Create a mock PluginContext for testing gateway plugins.
+ *
+ * Framework-agnostic — no vitest/jest dependency. Tracks calls via arrays
+ * and populates methods/events maps for easy assertions.
+ */
+export function createMockPluginContext(
+  options: MockPluginContextOptions = {},
+): MockPluginContextResult {
+  const methods = new Map<string, RegisteredMethod>();
+  const events = new Map<string, Function>();
+  const _registerMethodCalls: Array<[string, unknown]> = [];
+  const _invokeCalls: Array<[string, unknown]> = [];
+  const _broadcastCalls: Array<[string, unknown]> = [];
+  const _registerRouteCalls: Array<[string, Function]> = [];
+
+  const config: ConfigStore = {
+    get: options.config?.get ?? (() => undefined as any),
+    resolved: options.config?.resolved ?? (() => ({}) as any),
+    redacted: options.config?.redacted ?? (() => ({}) as any),
+    onChange: options.config?.onChange ?? (() => () => {}),
+  };
+
+  const ctx: PluginContext = {
+    registerMethod(path: string, handlerOrDef: SimpleMethodHandler | MethodDefinition) {
+      _registerMethodCalls.push([path, handlerOrDef]);
+      if (isMethodDefinition(handlerOrDef)) {
+        methods.set(path, { handler: handlerOrDef.handler, roles: handlerOrDef.roles });
+      } else {
+        methods.set(path, { handler: handlerOrDef });
+      }
+    },
+    unregisterMethod(path: string) {
+      methods.delete(path);
+    },
+    async invoke(method: string, params: unknown) {
+      _invokeCalls.push([method, params]);
+      return undefined;
+    },
+    on(event: string, handler: any) {
+      events.set(event, handler);
+    },
+    off(event: string) {
+      events.delete(event);
+    },
+    broadcast(event: string, data: unknown) {
+      _broadcastCalls.push([event, data]);
+    },
+    registerRoute(path: string, handler: any) {
+      _registerRouteCalls.push([path, handler]);
+    },
+    unregisterRoute() {},
+    listPlugins: () => [],
+    async sendToSession() {
+      return (async function* () {})();
+    },
+    async respondToConfirmation() {},
+    config,
+    gatewayId: options.gatewayId ?? "test-gateway",
+  };
+
+  return {
+    ctx,
+    methods,
+    events,
+    _registerMethodCalls,
+    _invokeCalls,
+    _broadcastCalls,
+    _registerRouteCalls,
+  };
+}
 
 // ============================================================================
 // Test Gateway Factory
