@@ -42,13 +42,32 @@ import {
 import type { Session } from "@agentick/core";
 
 const log = Logger.for("Gateway");
+
+/**
+ * Event types that are internal to the framework and should never be
+ * broadcast to client subscribers. These contain full prompts, model
+ * context, and provider details. DevTools receives them via devToolsEmitter.
+ */
+const INTERNAL_EVENT_TYPES = new Set([
+  "compiled",
+  "model_request",
+  "model_response",
+  "provider_request",
+  "provider_response",
+]);
+
 import { extractToken, validateAuth, setSSEHeaders, type AuthResult } from "@agentick/server";
 import { AppRegistry } from "./app-registry.js";
 import { SessionManager } from "./session-manager.js";
 import { WSTransport } from "./ws-transport.js";
 import { HTTPTransport } from "./http-transport.js";
 import { EmbeddedSSETransport } from "./sse-transport.js";
-import type { ClientTransport, SendInput, StreamEvent } from "@agentick/shared";
+import type {
+  ClientTransport,
+  SendInput,
+  StreamEvent,
+  ToolConfirmationResponse,
+} from "@agentick/shared";
 import type { Transport, TransportClient } from "./transport.js";
 import { LocalGatewayTransport } from "./local-transport.js";
 import { UnixSocketTransport } from "./unix-socket-transport.js";
@@ -398,10 +417,14 @@ export class Gateway extends EventEmitter {
         port: httpTransportPort,
         host,
         auth,
+        onAuthenticated: (client) => this.sendConnectedMessage(client),
         pathPrefix: this.config.httpPathPrefix,
         corsOrigin: this.config.httpCorsOrigin,
         onDirectSend: this.directSend.bind(this),
         onInvoke: this.invokeMethod.bind(this),
+        onToolResponse: (sessionId, toolUseId, result) =>
+          this.respondToConfirmation(sessionId, toolUseId, result),
+        onAbort: (sessionId, reason) => this.abortSession(sessionId, reason),
         onRouteMatch: (path, req, res) => {
           const route = this.matchPluginRoute(path);
           if (!route) return false;
@@ -695,10 +718,17 @@ export class Gateway extends EventEmitter {
       this.trackMessage(sessionKey, input, opts?.clientId);
       for await (const event of source) {
         log.trace({ sessionId: sessionKey, eventType: event.type }, "event:stream");
-        this.sendEventToSubscribers(sessionKey, event.type, event, opts?.excludeClientId);
+        // Don't broadcast internal events to subscribers — these contain full prompts,
+        // model context, provider details. DevTools receives them separately.
+        if (!INTERNAL_EVENT_TYPES.has(event.type)) {
+          this.sendEventToSubscribers(sessionKey, event.type, event, opts?.excludeClientId);
+        }
         yield event;
       }
-      log.trace({ sessionId: sessionKey, eventType: "execution_end" }, "event:stream (synthetic)");
+      log.trace(
+        { sessionId: sessionKey },
+        "event:stream exhausted, sending synthetic execution_end",
+      );
       this.sendEventToSubscribers(sessionKey, "execution_end", {}, opts?.excludeClientId);
     } finally {
       this.sessions.setActive(sessionKey, false);
@@ -930,13 +960,11 @@ export class Gateway extends EventEmitter {
       return;
     }
 
-    // Use the first message for the directSend path (single-message execution)
-    const rawMessage = rawMessages[0] as any;
-    const message = {
-      role: rawMessage.role as "user" | "assistant" | "system" | "tool" | "event",
-      content: rawMessage.content,
-      ...(rawMessage.id && { id: rawMessage.id }),
-      ...(rawMessage.metadata && { metadata: rawMessage.metadata }),
+    // Pass full SendInput to directSend
+    const metadata = body.metadata as Record<string, unknown> | undefined;
+    const sendInput: SendInput = {
+      messages: rawMessages as Message[],
+      ...(metadata ? { metadata } : undefined),
     };
 
     // Setup streaming response
@@ -944,7 +972,7 @@ export class Gateway extends EventEmitter {
 
     try {
       log.debug({ sessionId }, "handleSend: calling directSend");
-      const events = this.directSend(sessionId, message as Message);
+      const events = this.directSend(sessionId, sendInput);
 
       for await (const event of events) {
         log.debug({ eventType: event.type }, "handleSend: got event from directSend");
@@ -1170,6 +1198,22 @@ export class Gateway extends EventEmitter {
       res.end(JSON.stringify({ error: "Invalid request body" }));
       return;
     }
+
+    const { sessionId, reason } = body as { sessionId?: string; reason?: string };
+    if (!sessionId) {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Missing sessionId" }));
+      return;
+    }
+
+    const managed = this.sessions.get(sessionId);
+    if (!managed?.coreSession) {
+      res.writeHead(404, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Session not found" }));
+      return;
+    }
+
+    managed.coreSession.interrupt(undefined, reason ?? "Aborted by client");
 
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ ok: true }));
@@ -1729,12 +1773,42 @@ export class Gateway extends EventEmitter {
    */
   private async *directSend(
     sessionId: string,
-    message: Message,
+    input: SendInput,
+    opts?: { excludeClientId?: string },
   ): AsyncGenerator<{ type: string; data?: unknown }> {
-    const input: SendInput = { messages: [message] };
-    for await (const event of this.executeSession(sessionId, input)) {
+    for await (const event of this.executeSession(sessionId, input, {
+      excludeClientId: opts?.excludeClientId,
+    })) {
       yield { type: event.type, data: event };
     }
+  }
+
+  /**
+   * Respond to a tool confirmation (for HTTP transport).
+   */
+  private async respondToConfirmation(
+    sessionId: string,
+    toolUseId: string,
+    result: ToolConfirmationResponse,
+  ): Promise<void> {
+    const session = await this.session(sessionId);
+    session.channel("tool_confirmation").publish({
+      type: "response",
+      channel: "tool_confirmation",
+      id: toolUseId,
+      payload: result,
+    });
+  }
+
+  /**
+   * Abort a session's current execution (for HTTP transport).
+   */
+  private async abortSession(sessionId: string, reason?: string): Promise<void> {
+    const managed = this.sessions.get(sessionId);
+    if (!managed?.coreSession) {
+      throw new Error(`Session not found: ${sessionId}`);
+    }
+    managed.coreSession.interrupt(undefined, reason ?? "Aborted by client");
   }
 
   /**
@@ -1845,11 +1919,15 @@ export class Gateway extends EventEmitter {
     return undefined;
   }
 
-  private async handleAbortMethod(params: { sessionId: string }): Promise<void> {
-    const session = this.sessions.get(params.sessionId);
-    if (!session) {
+  private async handleAbortMethod(params: { sessionId: string; reason?: string }): Promise<void> {
+    const managed = this.sessions.get(params.sessionId);
+    if (!managed) {
       throw new NotFoundError("session", params.sessionId);
     }
+    if (!managed.coreSession) {
+      throw new NotFoundError("session", params.sessionId);
+    }
+    managed.coreSession.interrupt(undefined, params.reason ?? "Aborted by client");
   }
 
   private handleStatusMethod(params: StatusParams): StatusPayload {
@@ -2110,6 +2188,21 @@ export class Gateway extends EventEmitter {
     return this.plugins.get(id)?.plugin as T | undefined;
   }
 
+  /**
+   * List all registered plugins with their registered methods.
+   */
+  listPlugins(): Array<{ id: string; methods: string[] }> {
+    const result: Array<{ id: string; methods: string[] }> = [];
+    for (const [id] of this.plugins) {
+      const methods: string[] = [];
+      for (const [method, owner] of this.pluginMethodOwnership) {
+        if (owner === id) methods.push(method);
+      }
+      result.push({ id, methods });
+    }
+    return result;
+  }
+
   /** Remove all methods and routes owned by a plugin */
   private cleanupPluginRegistrations(pluginId: string): void {
     for (const [path, owner] of this.pluginMethodOwnership.entries()) {
@@ -2246,6 +2339,8 @@ export class Gateway extends EventEmitter {
         if (route?.pluginId !== pluginId) return;
         this.pluginRoutes.delete(path);
       },
+
+      listPlugins: () => this.listPlugins(),
 
       on: (event, handler) => this.on(event, handler),
       off: (event, handler) => this.off(event, handler),

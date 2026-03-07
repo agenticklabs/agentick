@@ -50,6 +50,10 @@ class WSClientImpl implements TransportClient {
     return this.socket.bufferedAmount > 64 * 1024;
   }
 
+  onDrain(callback: () => void): void {
+    this.socket.on("drain", callback);
+  }
+
   /** @internal - Update client ID (for custom client IDs) */
   _setId(newId: string): void {
     (this as { id: string }).id = newId;

@@ -8,10 +8,13 @@
 
 import net from "node:net";
 import fs from "node:fs";
+import { Logger } from "@agentick/kernel";
 import type { ClientMessage, GatewayMessage, ConnectMessage } from "./transport-protocol.js";
 import type { ClientState } from "./types.js";
 import { BaseTransport, type TransportClient, type TransportConfig } from "./transport.js";
 import { LineBuffer } from "./ndjson.js";
+
+const log = Logger.for("UnixSocket");
 
 // ============================================================================
 // Configuration
@@ -43,8 +46,23 @@ class UnixSocketClientImpl implements TransportClient {
   }
 
   send(message: GatewayMessage): void {
-    if (!this.socket.destroyed && this.socket.writable) {
-      this.socket.write(JSON.stringify(message) + "\n");
+    if (this.socket.destroyed || !this.socket.writable) return;
+    try {
+      const json = JSON.stringify(message) + "\n";
+      const ok = this.socket.write(json);
+      if (!ok) {
+        const eventType =
+          message.type === "event"
+            ? (message as unknown as Record<string, unknown>).event
+            : message.type;
+        log.debug(
+          { eventType, bytes: json.length, writableLength: this.socket.writableLength },
+          "backpressure",
+        );
+      }
+    } catch {
+      // EPIPE / ECONNRESET — client disconnected between check and write
+      this.socket.destroy();
     }
   }
 
@@ -58,6 +76,10 @@ class UnixSocketClientImpl implements TransportClient {
 
   isPressured(): boolean {
     return this.socket.writableLength > 64 * 1024;
+  }
+
+  onDrain(callback: () => void): void {
+    this.socket.on("drain", callback);
   }
 
   /** @internal - Update client ID (for custom client IDs) */
@@ -167,8 +189,10 @@ export class UnixSocketTransport extends BaseTransport {
       this.handlers.disconnect?.(client.id);
     });
 
-    socket.on("error", (error) => {
-      this.handlers.error?.(error);
+    socket.on("error", () => {
+      // Client socket errors (EPIPE, ECONNRESET) are routine disconnects,
+      // not transport-level errors. Clean up — the "close" event follows.
+      if (!socket.destroyed) socket.destroy();
     });
 
     // Notify handler of new connection (before auth)

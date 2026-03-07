@@ -19,7 +19,9 @@ export class ClientEventBuffer {
     private client: TransportClient,
     private maxBuffer = 1000,
     private overflow: OverflowStrategy = "disconnect",
-  ) {}
+  ) {
+    client.onDrain?.(() => this.drain());
+  }
 
   push(message: GatewayMessage): void {
     if (!this.client.isConnected) return;

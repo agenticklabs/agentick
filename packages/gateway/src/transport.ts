@@ -34,6 +34,13 @@ export interface TransportClient {
 
   /** Check if the client is under write pressure (optional) */
   isPressured?(): boolean;
+
+  /**
+   * Register a callback for when write pressure clears (optional).
+   * Paired with isPressured — without onDrain, buffered events during
+   * backpressure have no way to flush after the last push.
+   */
+  onDrain?(callback: () => void): void;
 }
 
 /**

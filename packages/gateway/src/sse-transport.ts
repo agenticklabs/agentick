@@ -45,6 +45,10 @@ export class EmbeddedSSEClient implements TransportClient {
     return (this.res as any).writableNeedDrain ?? false;
   }
 
+  onDrain(callback: () => void): void {
+    this.res.on("drain", callback);
+  }
+
   get isConnected(): boolean {
     return !this.res.writableEnded;
   }

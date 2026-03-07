@@ -10,9 +10,12 @@
  */
 
 import net from "node:net";
+import { Logger } from "@agentick/kernel";
 import type { ClientTransport } from "@agentick/shared";
 import { createRPCTransport } from "@agentick/shared";
 import { LineBuffer } from "./ndjson.js";
+
+const log = Logger.for("UnixSocketClient");
 
 // ============================================================================
 // Configuration
@@ -96,9 +99,17 @@ export function createUnixSocketClientTransport(config: UnixSocketClientConfig):
             const lines = lineBuffer.feed(data.toString());
             for (const line of lines) {
               try {
-                callbacks.onMessage(JSON.parse(line));
+                const parsed = JSON.parse(line);
+                log.debug(
+                  {
+                    type: parsed.type === "event" ? parsed.event : parsed.type,
+                    bytes: line.length,
+                  },
+                  "recv",
+                );
+                callbacks.onMessage(parsed);
               } catch (error) {
-                console.error("Failed to parse Unix socket message:", error);
+                log.error({ bytes: line.length, error }, "failed to parse message");
               }
             }
           });

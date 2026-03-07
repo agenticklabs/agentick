@@ -2,22 +2,40 @@
  * HTTP/SSE Transport
  *
  * Implements the Transport interface using HTTP requests and Server-Sent Events.
- * This enables web browser clients to connect to the gateway without WebSocket support.
+ * Also handles WebSocket upgrades on the same port, so a single server can
+ * serve both browser clients (HTTP/SSE) and WS clients (TUI, native apps).
  */
 
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from "http";
+import type { Duplex } from "stream";
+import { WebSocketServer, WebSocket } from "ws";
 import { extractToken, validateAuth, setSSEHeaders, type AuthResult } from "@agentick/server";
 import { isGuardError } from "@agentick/shared";
 import type {
   GatewayMessage,
+  ClientMessage,
+  ConnectMessage,
   RequestMessage,
   EventMessage,
   GatewayEventType,
 } from "./transport-protocol.js";
 import type { ClientState } from "./types.js";
-import type { Message } from "@agentick/shared";
+import type { Message, ToolConfirmationResponse } from "@agentick/shared";
 import type { UserContext } from "./types.js";
 import { BaseTransport, type TransportClient, type NetworkTransportConfig } from "./transport.js";
+
+/**
+ * Event types that are internal to the framework and should never be sent
+ * to clients. These contain full prompts, model context, and provider details.
+ * DevTools receives these separately via devToolsEmitter.
+ */
+const INTERNAL_EVENT_TYPES = new Set([
+  "compiled",
+  "model_request",
+  "model_response",
+  "provider_request",
+  "provider_response",
+]);
 
 // ============================================================================
 // HTTP Client (SSE connection)
@@ -72,6 +90,60 @@ class HTTPClientImpl implements TransportClient {
   isPressured(): boolean {
     return this.response?.writableNeedDrain ?? false;
   }
+
+  onDrain(callback: () => void): void {
+    this.response?.on("drain", callback);
+  }
+}
+
+// ============================================================================
+// WebSocket Client (for WS connections on the HTTP server)
+// ============================================================================
+
+class WSClientInHTTP implements TransportClient {
+  readonly state: ClientState;
+  private socket: WebSocket;
+
+  constructor(
+    public id: string,
+    socket: WebSocket,
+  ) {
+    this.socket = socket;
+    this.state = {
+      id,
+      connectedAt: new Date(),
+      authenticated: false,
+      subscriptions: new Set(),
+    };
+  }
+
+  send(message: GatewayMessage): void {
+    if (this.socket.readyState === WebSocket.OPEN) {
+      this.socket.send(JSON.stringify(message));
+    }
+  }
+
+  close(code?: number, reason?: string): void {
+    this.socket.close(code, reason);
+  }
+
+  get isConnected(): boolean {
+    return this.socket.readyState === WebSocket.OPEN;
+  }
+
+  isPressured(): boolean {
+    return this.socket.bufferedAmount > 64 * 1024;
+  }
+
+  onDrain(callback: () => void): void {
+    this.socket.on("drain", callback);
+  }
+
+  /** @internal — update client ID (for custom client IDs from connect message) */
+  _setId(newId: string): void {
+    this.id = newId;
+    (this.state as { id: string }).id = newId;
+  }
 }
 
 // ============================================================================
@@ -85,10 +157,12 @@ export interface HTTPTransportConfig extends NetworkTransportConfig {
   /** Path prefix for all endpoints (default: "") */
   pathPrefix?: string;
 
-  /** Direct send handler for streaming response */
+  /** Direct send handler for streaming response.
+   *  Accepts SendInput (messages array) — the standard client format. */
   onDirectSend?: (
     sessionId: string,
-    message: Message,
+    input: { messages?: Message[]; metadata?: Record<string, unknown> },
+    opts?: { excludeClientId?: string },
   ) => AsyncIterable<{ type: string; data?: unknown }>;
 
   /** Method invocation handler */
@@ -97,6 +171,16 @@ export interface HTTPTransportConfig extends NetworkTransportConfig {
     params: Record<string, unknown>,
     user?: UserContext,
   ) => Promise<unknown>;
+
+  /** Tool confirmation response handler */
+  onToolResponse?: (
+    sessionId: string,
+    toolUseId: string,
+    result: ToolConfirmationResponse,
+  ) => Promise<void>;
+
+  /** Abort session handler */
+  onAbort?: (sessionId: string, reason?: string) => Promise<void>;
 
   /** Plugin route matcher — called before built-in routes.
    *  Returns true if the route was handled. */
@@ -110,6 +194,7 @@ export interface HTTPTransportConfig extends NetworkTransportConfig {
 export class HTTPTransport extends BaseTransport {
   readonly type = "http" as const;
   private server: Server | null = null;
+  private wss: WebSocketServer | null = null;
   protected override config: HTTPTransportConfig;
 
   constructor(config: HTTPTransportConfig) {
@@ -127,6 +212,14 @@ export class HTTPTransport extends BaseTransport {
               res.writeHead(500, { "Content-Type": "application/json" });
               res.end(JSON.stringify({ error: "Internal server error" }));
             }
+          });
+        });
+
+        // WebSocket upgrades on the same port
+        this.wss = new WebSocketServer({ noServer: true });
+        this.server.on("upgrade", (req: IncomingMessage, socket: Duplex, head: Buffer) => {
+          this.wss!.handleUpgrade(req, socket, head, (ws) => {
+            this.handleWSConnection(ws, req);
           });
         });
 
@@ -151,11 +244,17 @@ export class HTTPTransport extends BaseTransport {
         return;
       }
 
-      // Close all client connections
+      // Close all client connections (both HTTP/SSE and WebSocket)
       for (const client of this.clients.values()) {
         client.close(1001, "Server shutting down");
       }
       this.clients.clear();
+
+      // Close WebSocket server (does not close the HTTP server)
+      if (this.wss) {
+        this.wss.close();
+        this.wss = null;
+      }
 
       this.server.close(() => {
         this.server = null;
@@ -205,6 +304,8 @@ export class HTTPTransport extends BaseTransport {
         return this.handleClose(req, res);
       case "/channel":
         return this.handleChannel(req, res);
+      case "/tool-response":
+        return this.handleToolResponse(req, res);
     }
 
     res.writeHead(404, { "Content-Type": "application/json" });
@@ -301,48 +402,46 @@ export class HTTPTransport extends BaseTransport {
     }
 
     const sessionId = ((body as any).sessionId as string) ?? "main";
+
+    // Accept SendInput format: { messages: Message[], props?, metadata? }
+    // Also accept legacy single-message format: { message: { role, content } }
+    const rawMessages = (body as any).messages;
     const rawMessage = (body as any).message;
 
-    // Validate and sanitize the message to ensure it's a proper Message object
-    // This prevents any unexpected properties from being passed through
-    if (
-      !rawMessage ||
-      typeof rawMessage !== "object" ||
-      !rawMessage.role ||
-      !Array.isArray(rawMessage.content)
-    ) {
+    let input: { messages?: Message[]; props?: unknown; metadata?: Record<string, unknown> };
+
+    if (Array.isArray(rawMessages)) {
+      input = { messages: rawMessages, metadata: (body as any).metadata };
+    } else if (rawMessage && typeof rawMessage === "object" && rawMessage.role) {
+      input = { messages: [rawMessage] };
+    } else {
       res.writeHead(400, { "Content-Type": "application/json" });
       res.end(
         JSON.stringify({
-          error: "Invalid message format. Expected { role, content: ContentBlock[] }",
+          error: "Invalid send format. Expected { messages: Message[] } or { message: Message }",
         }),
       );
       return;
     }
 
-    // Create a clean Message object with only expected properties
-    const message = {
-      role: rawMessage.role as "user" | "assistant" | "system" | "tool" | "event",
-      content: rawMessage.content,
-      ...(rawMessage.id && { id: rawMessage.id }),
-      ...(rawMessage.metadata && { metadata: rawMessage.metadata }),
-    };
-
-    // Check if we have a direct send handler
     if (!this.config.onDirectSend) {
       res.writeHead(501, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: "Send not supported without onDirectSend handler" }));
       return;
     }
 
-    // Setup streaming response
     setSSEHeaders(res);
 
+    // Exclude sender's SSE connection from broadcast (they get events via this stream)
+    const connectionId = (body as any).connectionId as string | undefined;
+
     try {
-      // Use the direct send handler to stream events
-      const events = this.config.onDirectSend(sessionId, message);
+      const events = this.config.onDirectSend(sessionId, input, { excludeClientId: connectionId });
 
       for await (const event of events) {
+        // Skip internal events — these contain full prompts, tools, context
+        if (INTERNAL_EVENT_TYPES.has(event.type)) continue;
+
         const message: EventMessage = {
           type: "event",
           event: event.type as GatewayEventType,
@@ -351,11 +450,6 @@ export class HTTPTransport extends BaseTransport {
         };
         res.write(`data: ${JSON.stringify(message)}\n\n`);
       }
-
-      // Send execution_end
-      res.write(
-        `data: ${JSON.stringify({ type: "event", event: "execution_end", sessionId, data: {} } satisfies EventMessage)}\n\n`,
-      );
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       res.write(
@@ -524,23 +618,27 @@ export class HTTPTransport extends BaseTransport {
       return;
     }
 
-    // Forward as request message
-    const requestId = `req-${Date.now().toString(36)}`;
-    const requestMessage: RequestMessage = {
-      type: "req",
-      id: requestId,
-      method: "abort",
-      params: body as Record<string, unknown>,
-    };
-
-    // Find any authenticated client to use
-    const client = this.getAuthenticatedClients()[0];
-    if (client) {
-      this.handlers.message?.(client.id, requestMessage);
+    const { sessionId, reason } = body as { sessionId?: string; reason?: string };
+    if (!sessionId) {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Missing sessionId" }));
+      return;
     }
 
-    res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ ok: true }));
+    if (!this.config.onAbort) {
+      res.writeHead(501, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Abort not supported" }));
+      return;
+    }
+
+    try {
+      await this.config.onAbort(sessionId, reason);
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: true }));
+    } catch (error) {
+      res.writeHead(500, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: error instanceof Error ? error.message : "Unknown error" }));
+    }
   }
 
   /**
@@ -613,6 +711,145 @@ export class HTTPTransport extends BaseTransport {
 
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ ok: true }));
+  }
+
+  private async handleToolResponse(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    if (req.method !== "POST") {
+      res.writeHead(405, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Method not allowed" }));
+      return;
+    }
+
+    const token = extractToken(req);
+    const authResult = await validateAuth(token, this.config.auth);
+    if (!authResult.valid) {
+      res.writeHead(401, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Authentication failed" }));
+      return;
+    }
+
+    const body = await this.parseBody(req);
+    if (!body) {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Invalid request body" }));
+      return;
+    }
+
+    const { sessionId, toolUseId, result } = body as {
+      sessionId?: string;
+      toolUseId?: string;
+      result?: ToolConfirmationResponse;
+    };
+
+    if (!sessionId || !toolUseId || !result) {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Missing sessionId, toolUseId, or result" }));
+      return;
+    }
+
+    if (!this.config.onToolResponse) {
+      res.writeHead(501, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Tool response not supported" }));
+      return;
+    }
+
+    try {
+      await this.config.onToolResponse(sessionId, toolUseId, result);
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: true }));
+    } catch (error) {
+      res.writeHead(500, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: error instanceof Error ? error.message : "Unknown error" }));
+    }
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // WebSocket Handling (upgrades on the HTTP server)
+  // ══════════════════════════════════════════════════════════════════════════
+
+  private handleWSConnection(socket: WebSocket, _request: IncomingMessage): void {
+    const clientId = this.generateClientId();
+    const client = new WSClientInHTTP(clientId, socket);
+    this.clients.set(clientId, client);
+
+    socket.on("message", (data) => {
+      try {
+        const message = JSON.parse(data.toString()) as ClientMessage;
+        this.handleWSMessage(client, message);
+      } catch {
+        client.send({
+          type: "error",
+          code: "INVALID_MESSAGE",
+          message: "Failed to parse message",
+        });
+      }
+    });
+
+    socket.on("close", () => {
+      this.clients.delete(client.id);
+      this.handlers.disconnect?.(client.id);
+    });
+
+    socket.on("error", (error) => {
+      this.handlers.error?.(error);
+    });
+
+    // Notify handler of new connection (before auth)
+    this.handlers.connection?.(client);
+  }
+
+  private async handleWSMessage(client: WSClientInHTTP, message: ClientMessage): Promise<void> {
+    if (message.type === "connect") {
+      await this.handleWSConnect(client, message);
+      return;
+    }
+
+    if (message.type === "ping") {
+      client.send({ type: "pong", timestamp: message.timestamp });
+      return;
+    }
+
+    if (!client.state.authenticated) {
+      client.send({
+        type: "error",
+        code: "UNAUTHORIZED",
+        message: "Authentication required. Send connect message first.",
+      });
+      return;
+    }
+
+    this.handlers.message?.(client.id, message);
+  }
+
+  private async handleWSConnect(client: WSClientInHTTP, message: ConnectMessage): Promise<void> {
+    const authResult = await this.validateAuth(message.token);
+
+    if (!authResult.valid) {
+      client.send({
+        type: "error",
+        code: "AUTH_FAILED",
+        message: "Authentication failed",
+      });
+      client.close(4001, "Authentication failed");
+      return;
+    }
+
+    client.state.authenticated = true;
+    client.state.user = authResult.user;
+    client.state.metadata = {
+      ...client.state.metadata,
+      ...authResult.metadata,
+      ...message.metadata,
+    };
+
+    if (message.clientId) {
+      this.clients.delete(client.id);
+      client._setId(message.clientId);
+      this.clients.set(message.clientId, client);
+    }
+
+    // Gateway sends ConnectedMessage via this callback
+    this.config.onAuthenticated?.(client);
   }
 
   // ══════════════════════════════════════════════════════════════════════════
