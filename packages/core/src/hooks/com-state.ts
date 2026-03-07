@@ -65,10 +65,13 @@ export function useComState<T>(
   // Register persistence preference
   if (options?.persist === false) {
     store.comStatePersist.set(key, false);
-  }
-
-  // Initialize if needed
-  if (ctx.getState<T>(key) === undefined) {
+    // Transient keys reset to default when stale — prevents restored snapshots
+    // from overriding the current environment. Guard against same-value sets
+    // to avoid re-render loops (setState always emits state:changed).
+    if (ctx.getState<T>(key) !== initialValue) {
+      ctx.setState(key, initialValue);
+    }
+  } else if (ctx.getState<T>(key) === undefined) {
     ctx.setState(key, initialValue);
   }
 
