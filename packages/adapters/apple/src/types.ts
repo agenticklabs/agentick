@@ -2,6 +2,7 @@
  * Apple Foundation Models adapter configuration and types.
  */
 
+import type { CustomBlockDefinition, DeltaTransformInput } from "@agentick/core/model";
 import { StopReason } from "@agentick/shared";
 
 // ============================================================================
@@ -19,6 +20,10 @@ export interface AppleAdapterConfig {
   bridgePath?: string;
   /** Model identifier (default: "apple-foundation-3b") */
   model?: string;
+  /** Custom blocks to intercept from model output. Forwarded to createAdapter. */
+  customBlocks?: Record<string, CustomBlockDefinition>;
+  /** User-facing delta transform. Forwarded to createAdapter. */
+  deltaTransform?: DeltaTransformInput;
 }
 
 // ============================================================================

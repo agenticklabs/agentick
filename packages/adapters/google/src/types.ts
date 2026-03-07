@@ -1,6 +1,7 @@
 import type { GoogleGenAI } from "@google/genai";
 import { type GenerateContentParameters } from "@google/genai";
 import { type ProviderClientOptions } from "@agentick/core";
+import type { CustomBlockDefinition, DeltaTransformInput } from "@agentick/core/model";
 import { StopReason } from "@agentick/shared";
 
 /**
@@ -73,6 +74,10 @@ export interface GoogleAdapterConfig {
   model?: string; // Default model to use if not specified in ModelInput
   client?: GoogleGenAI;
   providerOptions?: ProviderClientOptions;
+  /** Custom blocks to intercept from model output. Forwarded to createAdapter. */
+  customBlocks?: Record<string, CustomBlockDefinition>;
+  /** User-facing delta transform. Forwarded to createAdapter. */
+  deltaTransform?: DeltaTransformInput;
 }
 
 /**

@@ -176,6 +176,9 @@ export function createAppleModel(config: AppleAdapterConfig = {}): ModelClass {
       const output = await runEmbedBridge(bridgePath, input);
       return { embeddings: output.embeddings, dimensions: output.dimensions, model: output.model };
     },
+
+    customBlocks: config.customBlocks,
+    deltaTransform: config.deltaTransform,
   });
 }
 

@@ -171,7 +171,6 @@ export function createOpenAIModel(config: OpenAIAdapterConfig = {}): ModelClass 
   // Stateful tracking of tool call IDs by index (reset per stream)
   // OpenAI only sends the id on the first chunk, subsequent chunks only have index
   let toolCallIdByIndex = new Map<number, string>();
-  let thinkTagParser: ThinkTagParser | null = null;
 
   // Lazy model discovery: runs once on first stream/execute when enabled
   let discoveryDone = false;
@@ -281,23 +280,7 @@ export function createOpenAIModel(config: OpenAIAdapterConfig = {}): ModelClass 
     },
 
     mapChunk: (chunk: ChatCompletionChunk): AdapterDelta | AdapterDelta[] | null => {
-      const raw = mapOpenAIChunk(chunk, toolCallIdByIndex);
-      if (!config.parseThinkTags || !thinkTagParser) return raw;
-
-      const rawDeltas = raw === null ? [] : Array.isArray(raw) ? raw : [raw];
-      const result: AdapterDelta[] = [];
-
-      for (const d of rawDeltas) {
-        if (d.type === "message_end") {
-          // Flush parser before message_end
-          result.push(...thinkTagParser.flush());
-          result.push(d);
-        } else {
-          result.push(...thinkTagParser.process(d));
-        }
-      }
-
-      return result.length === 0 ? null : result.length === 1 ? result[0] : result;
+      return mapOpenAIChunk(chunk, toolCallIdByIndex);
     },
 
     processOutput: async (output: ChatCompletion): Promise<ModelOutput> => {
@@ -375,9 +358,7 @@ export function createOpenAIModel(config: OpenAIAdapterConfig = {}): ModelClass 
 
     executeStream: async function* (params) {
       await ensureDiscovery();
-      // Reset per-stream state
       toolCallIdByIndex = new Map();
-      thinkTagParser = config.parseThinkTags ? new ThinkTagParser() : null;
 
       const stream = await client.chat.completions.create({
         ...params,
@@ -453,6 +434,17 @@ export function createOpenAIModel(config: OpenAIAdapterConfig = {}): ModelClass 
 
       return reconstructed;
     },
+
+    // ThinkTagParser as adapter-internal transform — handles <think> tags from
+    // OpenAI-compatible servers (LM Studio, ollama) that emit raw think tags
+    // in delta.content instead of extracting reasoning server-side.
+    // Runs before custom blocks so think content isn't parsed for XML tags.
+    // Factory form: fresh parser per stream call (stateful — has buffer + mode).
+    adapterTransform: config.parseThinkTags ? () => new ThinkTagParser() : undefined,
+
+    // Forward application-level options to createAdapter
+    customBlocks: config.customBlocks as OpenAIAdapterConfig["customBlocks"],
+    deltaTransform: config.deltaTransform as OpenAIAdapterConfig["deltaTransform"],
   });
 }
 
@@ -522,10 +514,11 @@ export function toOpenAIMessages(message: Message): ChatCompletionMessageParam[]
             image_url: { url: block.source.url },
           });
         } else if (block.source.type === "base64") {
+          const mime = block.source.mimeType ?? block.mimeType ?? "image/png";
           content.push({
             type: "image_url",
             image_url: {
-              url: `data:${block.source.mimeType};base64,${block.source.data}`,
+              url: `data:${mime};base64,${block.source.data}`,
             },
           });
         }

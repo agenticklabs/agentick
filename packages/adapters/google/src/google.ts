@@ -183,6 +183,8 @@ export function createGoogleModel(config: GoogleAdapterConfig = {}): ModelClass 
                   inputTokens: chunk.usageMetadata.promptTokenCount || 0,
                   outputTokens: chunk.usageMetadata.candidatesTokenCount || 0,
                   totalTokens: chunk.usageMetadata.totalTokenCount || 0,
+                  reasoningTokens: chunk.usageMetadata.thoughtsTokenCount || 0,
+                  cachedInputTokens: chunk.usageMetadata.cachedContentTokenCount || 0,
                 }
               : undefined,
           };
@@ -265,7 +267,6 @@ export function createGoogleModel(config: GoogleAdapterConfig = {}): ModelClass 
       executeStream: async function* (params) {
         const model = (params as any).model || "gemini-1.5-flash";
         const { model: _, ...requestParams } = params as any;
-
         const stream = await client.models.generateContentStream({ model, ...requestParams });
         for await (const chunk of stream) {
           yield chunk;
@@ -326,12 +327,18 @@ export function createGoogleModel(config: GoogleAdapterConfig = {}): ModelClass 
             promptTokenCount: accumulated.usage.inputTokens,
             candidatesTokenCount: accumulated.usage.outputTokens,
             totalTokenCount: accumulated.usage.totalTokens,
+            thoughtsTokenCount: accumulated.usage.reasoningTokens || 0,
+            cachedContentTokenCount: accumulated.usage.cachedInputTokens || 0,
           },
           modelVersion: accumulated.model || firstChunk?.modelVersion,
         } as GenerateContentResponse;
 
         return reconstructed;
       },
+
+      // Forward application-level options to createAdapter
+      customBlocks: config.customBlocks,
+      deltaTransform: config.deltaTransform,
     },
   );
 }

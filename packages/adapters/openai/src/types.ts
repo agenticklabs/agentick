@@ -1,6 +1,7 @@
 import type { OpenAI } from "openai";
 import { type ClientOptions } from "openai";
 import { type ProviderClientOptions } from "@agentick/core";
+import type { CustomBlockDefinition, DeltaTransformInput } from "@agentick/core/model";
 import { StopReason } from "@agentick/shared";
 
 /**
@@ -22,6 +23,10 @@ export interface OpenAIAdapterConfig extends ClientOptions {
   parseThinkTags?: boolean;
   /** Auto-discover models via `/v1/models` endpoint and register metadata */
   discoverModels?: boolean;
+  /** Custom blocks to intercept from model output. Forwarded to createAdapter. */
+  customBlocks?: Record<string, CustomBlockDefinition>;
+  /** User-facing delta transform. Forwarded to createAdapter. */
+  deltaTransform?: DeltaTransformInput;
   [key: string]: unknown;
 }
 
