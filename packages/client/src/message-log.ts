@@ -82,6 +82,8 @@ export class MessageLog {
   private _inProgressToolCalls = new Map<string, InProgressToolCall>();
   // Count of user messages added via pushUserMessage (for dedup at execution_end)
   private _pushedUserMessageCount = 0;
+  // Guard against double execution_end (events arrive via both /send and /events)
+  private _executionEndProcessed = false;
 
   private _snapshot: MessageLogState;
   private _listeners = new Set<() => void>();
@@ -150,7 +152,12 @@ export class MessageLog {
     }
 
     // Baseline: execution_end only
+    if (event.type === "execution_start") {
+      this._executionEndProcessed = false;
+    }
     if (event.type === "execution_end") {
+      if (this._executionEndProcessed) return;
+      this._executionEndProcessed = true;
       this._processExecutionEnd(event as ExecutionEndEvent);
       this._toolTimers.clear();
       this._toolDurations.clear();
@@ -167,6 +174,7 @@ export class MessageLog {
     this._inProgressBlock = null;
     this._inProgressToolCalls.clear();
     this._pushedUserMessageCount = 0;
+    this._executionEndProcessed = false;
     this._notify();
   }
 
@@ -391,18 +399,38 @@ export class MessageLog {
         break;
       }
 
-      // ---- message mode: full message ----
+      // ---- Phase 3: full message ----
       case "message": {
-        // All modes can receive this as a fallback (non-streaming responses)
         const e = event as MessageEvent;
-        // If we already have an in-progress message (from block/streaming events),
-        // finalize it instead of duplicating
-        if (this._inProgressMessage) {
-          this._finalizeInProgressMessage();
+
+        if (mode === "streaming" || mode === "block") {
+          // Reconcile: the Phase 3 message is the canonical version.
+          // Match against the last finalized assistant message (built
+          // progressively) and update its id + content to the authoritative
+          // version. If no progressive message exists (non-streaming
+          // response), add it as a new message.
+          const last = this._messages[this._messages.length - 1];
+          if (last && last.role === "assistant") {
+            last.id = e.message.id ?? last.id;
+            last.content = e.message.content;
+            this._notify();
+          } else {
+            // Fallback: no progressive message was built (e.g. cached/non-streaming response)
+            const msg: ChatMessage = {
+              id: e.message.id ?? generateMessageId(),
+              role: "assistant",
+              content: e.message.content,
+            };
+            this._messages = [...this._messages, msg];
+            this._messageCount++;
+            this._notify();
+          }
           break;
         }
+
+        // Message mode: add directly
         const msg: ChatMessage = {
-          id: generateMessageId(),
+          id: e.message.id ?? generateMessageId(),
           role: "assistant",
           content: e.message.content,
         };
@@ -412,8 +440,16 @@ export class MessageLog {
         break;
       }
 
+      // ---- execution_start: reset guard for new execution ----
+      case "execution_start": {
+        this._executionEndProcessed = false;
+        break;
+      }
+
       // ---- execution_end: extract user messages, skip already-rendered assistant messages ----
       case "execution_end": {
+        if (this._executionEndProcessed) break;
+        this._executionEndProcessed = true;
         this._processProgressiveExecutionEnd(event as ExecutionEndEvent);
         this._toolTimers.clear();
         this._toolDurations.clear();

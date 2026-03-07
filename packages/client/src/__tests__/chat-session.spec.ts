@@ -146,6 +146,9 @@ describe("ChatSession", () => {
       client._emitSessionEvent("s1", makeExecutionEndEvent({ newTimelineEntries: delta1 }));
       expect(session.messages).toHaveLength(2);
 
+      // Start new execution cycle (resets _executionEndProcessed guard)
+      client._emitSessionEvent("s1", makeEvent("execution_start"));
+
       // Second execution with full timeline
       const fullTimeline = [
         makeTimelineEntry({ role: "user", content: [textBlock("Hi")], id: "u1" }),

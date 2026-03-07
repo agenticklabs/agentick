@@ -118,6 +118,9 @@ describe("MessageLog", () => {
       client._emitSessionEvent("s1", makeExecutionEndEvent({ newTimelineEntries: delta1 }));
       expect(log.messages).toHaveLength(2);
 
+      // Start new execution cycle (resets _executionEndProcessed guard)
+      client._emitSessionEvent("s1", makeEvent("execution_start"));
+
       const fullTimeline = [
         makeTimelineEntry({ role: "user", content: [textBlock("Hi")], id: "u1" }),
         makeTimelineEntry({ role: "assistant", content: [textBlock("Hello!")], id: "a1" }),
@@ -177,6 +180,9 @@ describe("MessageLog", () => {
       ];
       client._emitSessionEvent("s1", makeExecutionEndEvent({ newTimelineEntries: delta1 }));
       expect(log.messages[0].toolCalls![0].duration).toBe(500);
+
+      // Start new execution cycle
+      client._emitSessionEvent("s1", makeEvent("execution_start"));
 
       // Execution 2: tool tc-2 takes 200ms — tc-1 duration should NOT leak
       nowSpy.mockReturnValue(2000);
