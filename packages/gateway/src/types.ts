@@ -236,6 +236,9 @@ export interface PluginContext {
   /** Unmount a route this plugin registered */
   unregisterRoute(path: string): void;
 
+  /** List all registered plugins with their methods */
+  listPlugins(): Array<{ id: string; methods: string[] }>;
+
   /** Gateway configuration store */
   config: ConfigStore;
 
@@ -364,9 +367,20 @@ export interface MethodDefinition<
  *   }
  * }
  */
+/** Schema-less method definition — handler receives Record<string, unknown> */
+interface MethodDefinitionInputNoSchema {
+  handler: SimpleMethodHandler | StreamingMethodHandler;
+  roles?: string[];
+  guard?: (ctx: KernelContext) => boolean | Promise<boolean>;
+  description?: string;
+  response?: ZodLikeSchema;
+}
+
+export function method(definition: MethodDefinitionInputNoSchema): MethodDefinition;
 export function method<TSchema extends ZodLikeSchema>(
   definition: MethodDefinitionInput<TSchema>,
-): MethodDefinition<TSchema> {
+): MethodDefinition<TSchema>;
+export function method(definition: MethodDefinitionInput<any>): MethodDefinition<any> {
   return {
     [METHOD_DEFINITION]: true,
     ...definition,

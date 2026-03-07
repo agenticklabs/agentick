@@ -41,7 +41,7 @@ export type AuthConfig =
   | ({ type: "jwt"; secret: string; issuer?: string } & AuthBaseOptions)
   | ({
       type: "custom";
-      validate: (token: string) => Promise<AuthResult>;
+      validate: (token: string | undefined) => Promise<AuthResult>;
     } & AuthBaseOptions);
 
 /**
@@ -70,8 +70,8 @@ export async function validateAuth(
     return { valid: true };
   }
 
-  // Token required but not provided
-  if (!token) {
+  // Token required but not provided (custom validators handle undefined themselves)
+  if (!token && config.type !== "custom") {
     return { valid: false };
   }
 

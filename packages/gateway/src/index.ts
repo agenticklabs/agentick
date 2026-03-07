@@ -123,6 +123,9 @@ export {
   type LoadConfigOptions,
 } from "./config-loader.js";
 
+// Static file serving
+export { serveStatic, type ServeStaticOptions } from "./serve-static.js";
+
 // Plugins
 export {
   mcpServerPlugin,

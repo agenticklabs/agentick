@@ -341,10 +341,10 @@ All transport events share this structure:
 
 ```typescript
 interface TransportEventData {
-  type: string;        // Event type (e.g., "content_delta", "execution_end")
-  sessionId?: string;  // Session this event belongs to
+  type: string; // Event type (e.g., "content_delta", "execution_end")
+  sessionId?: string; // Session this event belongs to
   executionId?: string;
-  data?: unknown;      // Structured event payload
+  data?: unknown; // Structured event payload
 }
 ```
 

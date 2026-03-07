@@ -333,12 +333,14 @@ HTTP. Any MCP client (Claude Desktop, Cursor, etc.) can connect.
 ```typescript
 import { mcpServerPlugin } from "@agentick/gateway";
 
-gateway.use(mcpServerPlugin({
-  sessionId: "default",
-  path: "/mcp",            // default: "/mcp"
-  include: ["search"],     // optional: only expose these tools
-  exclude: ["shell"],      // optional: hide these tools
-}));
+gateway.use(
+  mcpServerPlugin({
+    sessionId: "default",
+    path: "/mcp", // default: "/mcp"
+    include: ["search"], // optional: only expose these tools
+    exclude: ["shell"], // optional: hide these tools
+  }),
+);
 // MCP clients connect at http://host:port/mcp
 ```
 
@@ -351,18 +353,20 @@ By default, all MCP clients see the same tools. Use `toolFilter` to customize
 tools per client based on the incoming HTTP request (e.g., auth headers):
 
 ```typescript
-gateway.use(mcpServerPlugin({
-  sessionId: "default",
-  path: "/mcp",
-  toolFilter: async (tools, req) => {
-    const token = req.headers.authorization?.replace("Bearer ", "");
-    const user = await verifyToken(token);
+gateway.use(
+  mcpServerPlugin({
+    sessionId: "default",
+    path: "/mcp",
+    toolFilter: async (tools, req) => {
+      const token = req.headers.authorization?.replace("Bearer ", "");
+      const user = await verifyToken(token);
 
-    // Admin users see all tools, others get a restricted set
-    if (user.role === "admin") return tools;
-    return tools.filter(t => !t.name.startsWith("admin_"));
-  },
-}));
+      // Admin users see all tools, others get a restricted set
+      if (user.role === "admin") return tools;
+      return tools.filter((t) => !t.name.startsWith("admin_"));
+    },
+  }),
+);
 ```
 
 When `toolFilter` is set, each MCP client handshake creates its own `McpServer`
@@ -381,13 +385,16 @@ can point at the gateway.
 ```typescript
 import { openaiCompatPlugin } from "@agentick/gateway";
 
-gateway.use(openaiCompatPlugin({
-  pathPrefix: "/v1",       // default: "/v1"
-  modelMapping: {          // optional: map model names → app IDs
-    "gpt-4o": "coding",
-    "gpt-4": "research",
-  },
-}));
+gateway.use(
+  openaiCompatPlugin({
+    pathPrefix: "/v1", // default: "/v1"
+    modelMapping: {
+      // optional: map model names → app IDs
+      "gpt-4o": "coding",
+      "gpt-4": "research",
+    },
+  }),
+);
 ```
 
 - `GET /v1/models` — lists gateway apps as OpenAI models
