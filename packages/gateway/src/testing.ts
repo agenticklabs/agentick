@@ -136,10 +136,13 @@ export function createMockPluginContext(
     broadcast(event: string, data: unknown) {
       _broadcastCalls.push([event, data]);
     },
-    registerRoute(path: string, handler: any) {
+    registerRoute(path: string, handler: any, _options?: { auth?: boolean }) {
       _registerRouteCalls.push([path, handler]);
     },
     unregisterRoute() {},
+    async validateAuth() {
+      return { valid: true };
+    },
     listPlugins: () => [],
     async sendToSession() {
       return (async function* () {})();

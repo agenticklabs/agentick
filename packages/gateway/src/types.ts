@@ -224,17 +224,23 @@ export interface PluginContext {
   broadcast(event: string, data: unknown): void;
 
   /** Mount an HTTP route handler on the gateway's HTTP server.
-   *  Path is absolute (e.g., "/mcp"). Only works with HTTP transport or embedded mode. */
+   *  Path is absolute (e.g., "/mcp"). Only works with HTTP transport or embedded mode.
+   *  Routes enforce gateway auth by default. Pass `{ auth: false }` to skip. */
   registerRoute(
     path: string,
     handler: (
       req: import("http").IncomingMessage,
       res: import("http").ServerResponse,
     ) => void | Promise<void>,
+    options?: { auth?: boolean },
   ): void;
 
   /** Unmount a route this plugin registered */
   unregisterRoute(path: string): void;
+
+  /** Validate an auth token against the gateway's auth config.
+   *  Plugins can use this to enforce auth on their custom routes. */
+  validateAuth(token: string | undefined): Promise<import("@agentick/server").AuthResult>;
 
   /** List all registered plugins with their methods */
   listPlugins(): Array<{ id: string; methods: string[] }>;

@@ -252,6 +252,7 @@ export class Gateway extends EventEmitter {
     string,
     {
       pluginId: string;
+      auth: boolean;
       handler: (
         req: import("http").IncomingMessage,
         res: import("http").ServerResponse,
@@ -425,18 +426,8 @@ export class Gateway extends EventEmitter {
         onToolResponse: (sessionId, toolUseId, result) =>
           this.respondToConfirmation(sessionId, toolUseId, result),
         onAbort: (sessionId, reason) => this.abortSession(sessionId, reason),
-        onRouteMatch: (path, req, res) => {
-          const route = this.matchPluginRoute(path);
-          if (!route) return false;
-          // Fire-and-forget the async handler, return true synchronously
-          Promise.resolve(route.handler(req, res)).catch((err) => {
-            console.error("Plugin route error:", err);
-            if (!res.headersSent) {
-              res.writeHead(500, { "Content-Type": "application/json" });
-              res.end(JSON.stringify({ error: "Internal server error" }));
-            }
-          });
-          return true;
+        onRouteMatch: async (path, req, res) => {
+          return this.dispatchPluginRoute(path, req, res);
         },
       });
       this.setupTransportHandlers(httpTransportInstance);
@@ -834,10 +825,7 @@ export class Gateway extends EventEmitter {
     log.debug({ method: req.method, url: req.url, path }, "handleRequest");
 
     // Plugin routes — checked before built-in routes, longest prefix first
-    const pluginRoute = this.matchPluginRoute(path);
-    if (pluginRoute) {
-      return pluginRoute.handler(req, res);
-    }
+    if (await this.dispatchPluginRoute(path, req, res)) return;
 
     // Route requests - all framework-level endpoints
     switch (path) {
@@ -2327,11 +2315,11 @@ export class Gateway extends EventEmitter {
         }
       },
 
-      registerRoute: (path, handler) => {
+      registerRoute: (path, handler, options) => {
         if (this.pluginRoutes.has(path)) {
           throw new Error(`Route "${path}" is already registered`);
         }
-        this.pluginRoutes.set(path, { pluginId, handler });
+        this.pluginRoutes.set(path, { pluginId, auth: options?.auth !== false, handler });
       },
 
       unregisterRoute: (path) => {
@@ -2339,6 +2327,8 @@ export class Gateway extends EventEmitter {
         if (route?.pluginId !== pluginId) return;
         this.pluginRoutes.delete(path);
       },
+
+      validateAuth: (token) => validateAuth(token, this.config.auth),
 
       listPlugins: () => this.listPlugins(),
 
@@ -2360,6 +2350,33 @@ export class Gateway extends EventEmitter {
       }
     }
     return undefined;
+  }
+
+  /**
+   * Match, authenticate, and dispatch a plugin route.
+   * Single entry point used by both handleRequest (embedded) and HTTP transport.
+   * Returns true if the route was handled (even if auth failed — response already sent).
+   */
+  private async dispatchPluginRoute(
+    path: string,
+    req: import("http").IncomingMessage,
+    res: import("http").ServerResponse,
+  ): Promise<boolean> {
+    const route = this.matchPluginRoute(path);
+    if (!route) return false;
+
+    if (route.auth) {
+      const token = extractToken(req);
+      const authResult = await validateAuth(token, this.config.auth);
+      if (!authResult.valid) {
+        res.writeHead(401, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "Authentication failed" }));
+        return true;
+      }
+    }
+
+    await route.handler(req, res);
+    return true;
   }
 }
 
