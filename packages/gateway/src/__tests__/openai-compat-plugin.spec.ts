@@ -178,6 +178,8 @@ describe("OpenAI Compat Plugin", () => {
         "not json{",
       );
       const p = gateway.handleRequest(req, res);
+      // Let async dispatch (auth check) complete before delivering body
+      await new Promise((r) => setTimeout(r, 0));
       deliver();
       await p;
 

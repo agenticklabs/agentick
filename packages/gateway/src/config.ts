@@ -165,10 +165,9 @@ export function buildConfigSchema(): ZodLikeSchema {
 
       return result as FileConfig;
     },
-    _output: {} as FileConfig,
   };
 
-  return builtSchema;
+  return builtSchema!;
 }
 
 /** Reset schema registry (for testing only) */

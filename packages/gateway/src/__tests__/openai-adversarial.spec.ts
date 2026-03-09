@@ -367,6 +367,8 @@ describe("OpenAI Compat Plugin — adversarial", () => {
         '{"model": "chat", "messages": [{"role": "user',
       );
       const p = gateway.handleRequest(req, res);
+      // Let async dispatch (auth check) complete before delivering body
+      await new Promise((r) => setTimeout(r, 0));
       deliver();
       await p;
 
@@ -379,6 +381,7 @@ describe("OpenAI Compat Plugin — adversarial", () => {
 
       const { req, res, error } = mockHTTPWithStreamBody("/v1/chat/completions", "POST", "");
       const p = gateway.handleRequest(req, res);
+      await new Promise((r) => setTimeout(r, 0));
       error(new Error("connection reset"));
       await p;
 

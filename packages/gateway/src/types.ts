@@ -13,12 +13,15 @@ export type { AuthConfig, AuthResult } from "@agentick/server";
 
 /**
  * Schema type that works with both Zod 3 and Zod 4.
- * We only need parse() and type inference (_output).
+ * Infers output type from parse() return type — no reliance on internal
+ * Zod properties (_output in v3, _zod.output in v4).
  */
-export interface ZodLikeSchema<T = unknown> {
-  parse(data: unknown): T;
-  _output: T;
+export interface ZodLikeSchema {
+  parse(data: unknown): any;
 }
+
+/** Extract the output type from a schema's parse() method. */
+export type SchemaOutput<T extends ZodLikeSchema> = ReturnType<T["parse"]>;
 
 export type { UserContext } from "@agentick/kernel";
 
@@ -339,7 +342,7 @@ export interface MethodDefinitionInput<TSchema extends ZodLikeSchema = ZodLikeSc
   /** Zod schema for response (used by schema discovery only) */
   response?: ZodLikeSchema;
   /** Handler function - receives validated & typed params */
-  handler: SimpleMethodHandler<TSchema["_output"]> | StreamingMethodHandler<TSchema["_output"]>;
+  handler: SimpleMethodHandler<SchemaOutput<TSchema>> | StreamingMethodHandler<SchemaOutput<TSchema>>;
   /** Required roles - checked before handler */
   roles?: string[];
   /** Custom guard function */
@@ -382,10 +385,10 @@ interface MethodDefinitionInputNoSchema {
   response?: ZodLikeSchema;
 }
 
-export function method(definition: MethodDefinitionInputNoSchema): MethodDefinition;
 export function method<TSchema extends ZodLikeSchema>(
-  definition: MethodDefinitionInput<TSchema>,
+  definition: Omit<MethodDefinitionInput<TSchema>, "schema"> & { schema: TSchema },
 ): MethodDefinition<TSchema>;
+export function method(definition: MethodDefinitionInputNoSchema): MethodDefinition;
 export function method(definition: MethodDefinitionInput<any>): MethodDefinition<any> {
   return {
     [METHOD_DEFINITION]: true,
