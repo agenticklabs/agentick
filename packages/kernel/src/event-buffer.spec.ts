@@ -488,6 +488,50 @@ describe("EventBuffer", () => {
       ]);
     });
 
+    it("should support dual consumption with interleaved pushes (waiter path)", async () => {
+      const buffer = new EventBuffer<TestEvent>();
+
+      const received1: TestEvent[] = [];
+      const received2: TestEvent[] = [];
+
+      // Start both iterators BEFORE pushing events — they'll hit the waiter path
+      const iter1 = (async () => {
+        for await (const event of buffer) {
+          received1.push(event);
+        }
+      })();
+      const iter2 = (async () => {
+        for await (const event of buffer) {
+          received2.push(event);
+        }
+      })();
+
+      // Let iterators start and register waiters
+      await new Promise((r) => setTimeout(r, 10));
+
+      // Push events one at a time (interleaved with iterator processing)
+      buffer.push({ type: "delta", value: "a" });
+      await new Promise((r) => setTimeout(r, 10));
+      buffer.push({ type: "delta", value: "b" });
+      await new Promise((r) => setTimeout(r, 10));
+      buffer.push({ type: "delta", value: "c" });
+      await new Promise((r) => setTimeout(r, 10));
+      buffer.push({ type: "delta", value: "d" });
+      await new Promise((r) => setTimeout(r, 10));
+      buffer.close();
+
+      await Promise.all([iter1, iter2]);
+
+      const expected = [
+        { type: "delta", value: "a" },
+        { type: "delta", value: "b" },
+        { type: "delta", value: "c" },
+        { type: "delta", value: "d" },
+      ];
+      expect(received1).toEqual(expected);
+      expect(received2).toEqual(expected);
+    });
+
     it("should replay for late iterators", async () => {
       const buffer = new EventBuffer<TestEvent>();
 

@@ -40,8 +40,8 @@ export type Unsubscribe = () => void;
 /**
  * A waiter for async iteration.
  */
-interface Waiter<T> {
-  resolve: (event: T) => void;
+interface Waiter {
+  resolve: () => void;
   reject: (err: Error) => void;
 }
 
@@ -100,7 +100,7 @@ const WILDCARD = "*" as const;
 export class EventBuffer<T extends TypedEvent> {
   private buffer: T[] = [];
   private subscribers = new Map<string, Set<EventHandler<any>>>();
-  private waiters: Waiter<T>[] = [];
+  private waiters: Waiter[] = [];
   private _closed = false;
   private _error: Error | null = null;
 
@@ -133,10 +133,13 @@ export class EventBuffer<T extends TypedEvent> {
       }
     }
 
-    // Resolve first waiter (FIFO for async iteration)
+    // Wake ALL waiting iterators — each reads from buffer at its own index
     if (this.waiters.length > 0) {
-      const waiter = this.waiters.shift()!;
-      waiter.resolve(event);
+      const waiting = this.waiters;
+      this.waiters = [];
+      for (const waiter of waiting) {
+        waiter.resolve();
+      }
     }
   }
 
@@ -446,13 +449,14 @@ export class EventBuffer<T extends TypedEvent> {
         return;
       }
 
-      // Wait for next event
+      // Wait for wake-up signal (new event pushed or buffer closed).
+      // Don't read the event from the waiter — always read from buffer
+      // at our own index. This ensures multiple iterators each see all
+      // events independently without index desynchronization.
       try {
-        const event = await new Promise<T>((resolve, reject) => {
+        await new Promise<void>((resolve, reject) => {
           this.waiters.push({ resolve, reject });
         });
-        yield event;
-        index++;
       } catch {
         // Buffer closed or errored
         if (this._error) throw this._error;
