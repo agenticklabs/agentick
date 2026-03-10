@@ -1,6 +1,6 @@
 {
   "name": "@agentick/cli",
-  "version": "0.12.2",
+  "version": "0.12.3",
   "description": "Terminal client for Agentick agents",
   "repository": {
     "type": "git",

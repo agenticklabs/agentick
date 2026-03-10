@@ -1,6 +1,6 @@
 {
   "name": "@agentick/gateway",
-  "version": "0.12.2",
+  "version": "0.12.3",
   "description": "Standalone daemon for multi-client, multi-agent access",
   "repository": {
     "type": "git",
