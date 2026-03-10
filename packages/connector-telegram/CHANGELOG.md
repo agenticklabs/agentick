@@ -1,5 +1,13 @@
 # @agentick/connector-telegram
 
+## 0.13.0
+
+### Patch Changes
+
+- Updated dependencies [8e568d1]
+  - @agentick/shared@0.13.0
+  - @agentick/gateway@0.13.0
+
 ## 0.12.3
 
 ### Patch Changes
