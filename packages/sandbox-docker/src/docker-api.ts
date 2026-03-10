@@ -78,8 +78,54 @@ export class DockerAPI {
   }
 
   async createContainer(config: ContainerConfig): Promise<string> {
-    const body = await this.post<{ Id: string }>(`/${API_VERSION}/containers/create`, config);
-    return body.Id;
+    try {
+      const body = await this.post<{ Id: string }>(`/${API_VERSION}/containers/create`, config);
+      return body.Id;
+    } catch (err) {
+      if (
+        err instanceof DockerAPIError &&
+        err.statusCode === 404 &&
+        err.message.includes("No such image")
+      ) {
+        await this.pullImage(config.Image);
+        const body = await this.post<{ Id: string }>(`/${API_VERSION}/containers/create`, config);
+        return body.Id;
+      }
+      throw err;
+    }
+  }
+
+  async pullImage(image: string): Promise<void> {
+    const [repo, tag] = image.includes(":") ? image.split(":") : [image, "latest"];
+    const params = new URLSearchParams({ fromImage: repo!, tag: tag! });
+    const path = `/${API_VERSION}/images/create?${params}`;
+
+    return new Promise<void>((resolve, reject) => {
+      const req = http.request(
+        {
+          socketPath: this.socketPath,
+          path,
+          method: "POST",
+        },
+        (res) => {
+          if (res.statusCode && res.statusCode >= 400) {
+            const chunks: Buffer[] = [];
+            res.on("data", (c: Buffer) => chunks.push(c));
+            res.on("end", () => {
+              const msg = parseErrorMessage(Buffer.concat(chunks));
+              reject(new DockerAPIError(res.statusCode!, msg, path));
+            });
+            return;
+          }
+          // Docker streams JSON progress objects — consume and discard
+          res.on("data", () => {});
+          res.on("end", resolve);
+          res.on("error", reject);
+        },
+      );
+      req.on("error", reject);
+      req.end();
+    });
   }
 
   async startContainer(id: string): Promise<void> {
