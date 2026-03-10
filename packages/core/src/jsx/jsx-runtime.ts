@@ -44,27 +44,32 @@ export namespace JSX {
     | ((props: any) => Element | null | Promise<Element | null>)
     | { new (props: any): any };
 
+  /**
+   * Base props shared by all intrinsic elements.
+   * Includes `key` explicitly because TypeScript's jsxImportSource mode
+   * doesn't reliably merge IntrinsicAttributes into named element types.
+   */
+  interface BaseProps {
+    key?: string | number | null;
+    children?: any;
+  }
+
   export interface IntrinsicElements {
-    section: SectionInput & {
-      /**
-       * Section content - can be any type, or use children for ContentBlocks.
-       * If children are provided, content prop is ignored.
-       */
-      content?: any;
-      /**
-       * Children - Content components (Text, Code, etc.) that become ContentBlocks.
-       * More React-like API for composing section content.
-       */
-      children?: any;
-    };
-    timeline: {
+    section: SectionInput &
+      BaseProps & {
+        /**
+         * Section content - can be any type, or use children for ContentBlocks.
+         * If children are provided, content prop is ignored.
+         */
+        content?: any;
+      };
+    timeline: BaseProps & {
       /**
        * Timeline wrapper component.
        * Children are Message components that will be added to the timeline.
        */
-      children?: any;
     };
-    message: {
+    message: BaseProps & {
       /**
        * Message ID - used for merging/overwriting messages.
        */
@@ -91,17 +96,12 @@ export namespace JSX {
        * Additional metadata.
        */
       metadata?: Record<string, unknown>;
-      /**
-       * Children - Content components (Text, Image, etc.) or ContentBlock[].
-       * More React-like API for composing messages.
-       */
-      children?: any;
     };
     /**
      * @internal Intrinsic element for tool registration. Created by ToolComponent, not user-facing.
      * Use `<MyTool />` (from createTool) instead of raw `<tool>` elements.
      */
-    tool: {
+    tool: BaseProps & {
       definition?: ToolClass | ExecutableTool | string;
       name?: string;
       description?: string;
@@ -112,16 +112,15 @@ export namespace JSX {
       metadata?: import("../tool/tool.js").ToolMetadata;
     };
     // Content block primitives
-    text: {
+    text: BaseProps & {
       text?: string;
-      children?: any; // Allow JSX children for inline formatting
     };
-    image: {
+    image: BaseProps & {
       source: any; // MediaSource
       mimeType?: string;
       altText?: string;
     };
-    document: {
+    document: BaseProps & {
       source: any; // MediaSource
       mimeType?: string;
       title?: string;
@@ -129,142 +128,58 @@ export namespace JSX {
     // Note: audio and video are defined below as native HTML elements
     // Use capitalized components (Audio, Video) for structural content blocks
     // Note: Use <Code> component for structural code blocks, <code> for inline code
-    fragment: {};
+    fragment: BaseProps;
     // Renderer components
-    markdown: {
+    markdown: BaseProps & {
       flavor?: "github" | "commonmark" | "gfm";
-      children?: any;
     };
     // Semantic primitives
-    h1: {
-      children?: any;
-    };
-    h2: {
-      children?: any;
-    };
-    h3: {
-      children?: any;
-    };
-    header: {
-      level?: 1 | 2 | 3 | 4 | 5 | 6;
-      children?: any;
-    };
-    paragraph: {
-      children?: any;
-    };
-    list: {
-      ordered?: boolean;
-      children?: any;
-    };
-    listitem: {
-      children?: any;
-    };
-    table: {
-      children?: any;
-    };
-    row: {
-      header?: boolean;
-      children?: any;
-    };
-    column: {
-      children?: any;
-    };
+    h1: BaseProps;
+    h2: BaseProps;
+    h3: BaseProps;
+    header: BaseProps & { level?: 1 | 2 | 3 | 4 | 5 | 6 };
+    paragraph: BaseProps;
+    list: BaseProps & { ordered?: boolean };
+    listitem: BaseProps;
+    table: BaseProps;
+    row: BaseProps & { header?: boolean };
+    column: BaseProps;
     // Inline formatting elements
-    strong: {
-      children?: any;
-    };
-    b: {
-      children?: any;
-    };
-    em: {
-      children?: any;
-    };
-    i: {
-      children?: any;
-    };
-    inlineCode: {
-      children?: any;
-    };
-    code: {
-      children?: any;
-    };
-    mark: {
-      children?: any;
-    };
-    u: {
-      children?: any;
-    };
-    s: {
-      children?: any;
-    };
-    del: {
-      children?: any;
-    };
-    sub: {
-      children?: any;
-    };
-    sup: {
-      children?: any;
-    };
-    small: {
-      children?: any;
-    };
+    strong: BaseProps;
+    b: BaseProps;
+    em: BaseProps;
+    i: BaseProps;
+    inlineCode: BaseProps;
+    code: BaseProps;
+    mark: BaseProps;
+    u: BaseProps;
+    s: BaseProps;
+    del: BaseProps;
+    sub: BaseProps;
+    sup: BaseProps;
+    small: BaseProps;
     // Native HTML media elements (semantic - converted to inline markdown when nested in text)
-    img: {
-      src?: string;
-      alt?: string;
-    };
-    audio: {
-      src?: string;
-    };
-    video: {
-      src?: string;
-      controls?: boolean;
-    };
+    img: BaseProps & { src?: string; alt?: string };
+    audio: BaseProps & { src?: string };
+    video: BaseProps & { src?: string; controls?: boolean };
     // Block elements
-    p: {
-      children?: any;
-    };
-    ul: {
-      children?: any;
-    };
-    ol: {
-      children?: any;
-    };
-    li: {
-      children?: any;
-    };
-    blockquote: {
-      children?: any;
-    };
-    pre: {
-      children?: any;
-    };
-    br: {};
-    hr: {};
+    p: BaseProps;
+    ul: BaseProps;
+    ol: BaseProps;
+    li: BaseProps;
+    blockquote: BaseProps;
+    pre: BaseProps;
+    br: BaseProps;
+    hr: BaseProps;
     // Other useful elements
-    a: {
-      href?: string;
-      children?: any;
-    };
-    q: {
-      children?: any;
-    };
-    cite: {
-      children?: any;
-    };
-    kbd: {
-      children?: any;
-    };
-    var: {
-      children?: any;
-    };
+    a: BaseProps & { href?: string };
+    q: BaseProps;
+    cite: BaseProps;
+    kbd: BaseProps;
+    var: BaseProps;
     // Catch-all for custom XML tags
     // Allows any lowercase tag (e.g., <customTag>, <equation>, <metric>)
-    [tagName: string]: {
-      children?: any;
-      [prop: string]: any;
-    };
+    [tagName: string]: BaseProps & { [prop: string]: any };
   }
 }
 
