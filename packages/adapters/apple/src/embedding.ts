@@ -13,7 +13,7 @@
  * import { appleEmbedding } from '@agentick/apple';
  *
  * const embedder = appleEmbedding();
- * const result = await embedder.embed(["Hello world"]);
+ * const result = await embedder.embed({ input: ["Hello world"] });
  * // result.embeddings[0] → number[512]
  * ```
  */
@@ -37,7 +37,7 @@ const DEFAULT_BRIDGE_PATH = join(__dirname, "..", "bin", "apple-fm-bridge");
  * @example
  * ```typescript
  * const embedder = appleEmbedding({ script: "latin" });
- * const { embeddings } = await embedder.embed(["machine learning"]);
+ * const { embeddings } = await embedder.embed({ input: ["machine learning"] });
  * console.log(embeddings[0].length); // 512
  * ```
  */
@@ -53,9 +53,9 @@ export function appleEmbedding(config: AppleEmbeddingConfig = {}): EmbeddingMode
       model: "apple-contextual-embedding",
     },
 
-    prepareInput: (texts, _options) => ({
+    prepareInput: (input) => ({
       operation: "embed" as const,
-      texts,
+      texts: typeof input.input === "string" ? [input.input] : input.input,
       script,
       language: config.language,
     }),

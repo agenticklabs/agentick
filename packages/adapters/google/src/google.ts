@@ -22,6 +22,7 @@ import {
   type ContentBlock,
   type Message,
   type TextBlock,
+  type EmbedResult,
   StopReason,
   AdapterError,
   ValidationError,
@@ -339,6 +340,31 @@ export function createGoogleModel(config: GoogleAdapterConfig = {}): ModelClass 
       // Forward application-level options to createAdapter
       customBlocks: config.customBlocks,
       deltaTransform: config.deltaTransform,
+
+      // Embedding support — enabled when embeddingModel is configured
+      embed: config.embeddingModel
+        ? async (input): Promise<EmbedResult> => {
+            const texts = typeof input.input === "string" ? [input.input] : input.input;
+            const embedConfig: Record<string, unknown> = {};
+            if (input.dimensions) embedConfig.outputDimensionality = input.dimensions;
+            if (input.taskType) embedConfig.taskType = input.taskType;
+
+            const embeddingModel = input.model ?? config.embeddingModel!;
+            const response = await client.models.embedContent({
+              model: embeddingModel,
+              contents: texts.map((text) => ({ parts: [{ text }] })),
+              ...(Object.keys(embedConfig).length > 0 ? { config: embedConfig } : {}),
+            });
+
+            const embeddings = (response.embeddings ?? []).map((e) => e.values ?? []);
+
+            return {
+              embeddings,
+              dimensions: embeddings[0]?.length ?? input.dimensions ?? 0,
+              model: embeddingModel,
+            };
+          }
+        : undefined,
     },
   );
 }

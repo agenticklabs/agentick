@@ -67,7 +67,7 @@ describe("lazy pipeline initialization", () => {
 
   it("loads pipeline on first embed call", async () => {
     const model = huggingfaceEmbedding();
-    await model.embed(["hello"]);
+    await model.embed({ input: ["hello"] });
     expect(mockPipeline).toHaveBeenCalledOnce();
     expect(mockPipeline).toHaveBeenCalledWith("feature-extraction", "Xenova/all-MiniLM-L6-v2", {
       dtype: "fp32",
@@ -76,14 +76,14 @@ describe("lazy pipeline initialization", () => {
 
   it("reuses pipeline on subsequent calls", async () => {
     const model = huggingfaceEmbedding();
-    await model.embed(["first"]);
-    await model.embed(["second"]);
+    await model.embed({ input: ["first"] });
+    await model.embed({ input: ["second"] });
     expect(mockPipeline).toHaveBeenCalledOnce();
   });
 
   it("passes custom dtype to pipeline", async () => {
     const model = huggingfaceEmbedding({ dtype: "q8" });
-    await model.embed(["test"]);
+    await model.embed({ input: ["test"] });
     expect(mockPipeline).toHaveBeenCalledWith("feature-extraction", "Xenova/all-MiniLM-L6-v2", {
       dtype: "q8",
     });
@@ -91,14 +91,14 @@ describe("lazy pipeline initialization", () => {
 
   it("sets cacheDir on env when configured", async () => {
     const model = huggingfaceEmbedding({ cacheDir: "/tmp/my-cache" });
-    await model.embed(["test"]);
+    await model.embed({ input: ["test"] });
     expect(mockEnv.cacheDir).toBe("/tmp/my-cache");
   });
 
   it("does not set cacheDir when not configured", async () => {
     mockEnv.cacheDir = "original";
     const model = huggingfaceEmbedding();
-    await model.embed(["test"]);
+    await model.embed({ input: ["test"] });
     expect(mockEnv.cacheDir).toBe("original");
   });
 });
@@ -110,7 +110,7 @@ describe("lazy pipeline initialization", () => {
 describe("embed", () => {
   it("returns correct shape for single text", async () => {
     const model = huggingfaceEmbedding();
-    const result = await model.embed(["hello"]);
+    const result = await model.embed({ input: ["hello"] });
 
     expect(result.embeddings).toHaveLength(1);
     expect(result.embeddings[0]).toHaveLength(384);
@@ -120,7 +120,7 @@ describe("embed", () => {
 
   it("embeds multiple texts sequentially", async () => {
     const model = huggingfaceEmbedding();
-    const result = await model.embed(["hello", "world", "test"]);
+    const result = await model.embed({ input: ["hello", "world", "test"] });
 
     expect(result.embeddings).toHaveLength(3);
     expect(mockExtractor).toHaveBeenCalledTimes(3);
@@ -133,7 +133,7 @@ describe("embed", () => {
 
   it("returns empty array for empty input", async () => {
     const model = huggingfaceEmbedding();
-    const result = await model.embed([]);
+    const result = await model.embed({ input: [] });
 
     expect(result.embeddings).toHaveLength(0);
     expect(mockExtractor).not.toHaveBeenCalled();
@@ -146,7 +146,7 @@ describe("embed", () => {
     });
 
     const model = huggingfaceEmbedding({ dimensions: 3 });
-    const result = await model.embed(["test"]);
+    const result = await model.embed({ input: ["test"] });
 
     expect(result.embeddings[0]).toEqual([
       expect.closeTo(0.1, 5),
@@ -165,7 +165,7 @@ describe("warmup failure handling", () => {
     mockPipeline.mockRejectedValueOnce(new Error("ONNX runtime missing"));
 
     const model = huggingfaceEmbedding();
-    await expect(model.embed(["test"])).rejects.toThrow(
+    await expect(model.embed({ input: ["test"] })).rejects.toThrow(
       "HuggingFace model Xenova/all-MiniLM-L6-v2 failed to load",
     );
   });
@@ -175,11 +175,11 @@ describe("warmup failure handling", () => {
     mockPipeline.mockRejectedValueOnce(new Error("temporary failure"));
 
     const model = huggingfaceEmbedding();
-    await expect(model.embed(["test"])).rejects.toThrow("failed to load");
+    await expect(model.embed({ input: ["test"] })).rejects.toThrow("failed to load");
 
     // Second call succeeds — pipeline should be retried (loading was reset to null)
     mockPipeline.mockResolvedValueOnce(mockExtractor);
-    const result = await model.embed(["retry"]);
+    const result = await model.embed({ input: ["retry"] });
     expect(result.embeddings).toHaveLength(1);
     expect(mockPipeline).toHaveBeenCalledTimes(2);
   });
@@ -194,8 +194,8 @@ describe("instance isolation", () => {
     const model1 = huggingfaceEmbedding({ model: "model-a" });
     const model2 = huggingfaceEmbedding({ model: "model-b" });
 
-    await model1.embed(["test"]);
-    await model2.embed(["test"]);
+    await model1.embed({ input: ["test"] });
+    await model2.embed({ input: ["test"] });
 
     expect(mockPipeline).toHaveBeenCalledTimes(2);
     expect(mockPipeline).toHaveBeenNthCalledWith(1, "feature-extraction", "model-a", {
@@ -210,8 +210,8 @@ describe("instance isolation", () => {
     const fp32 = huggingfaceEmbedding({ dtype: "fp32" });
     const q8 = huggingfaceEmbedding({ dtype: "q8" });
 
-    await fp32.embed(["test"]);
-    await q8.embed(["test"]);
+    await fp32.embed({ input: ["test"] });
+    await q8.embed({ input: ["test"] });
 
     expect(mockPipeline).toHaveBeenCalledTimes(2);
     expect(mockPipeline).toHaveBeenNthCalledWith(
@@ -234,10 +234,10 @@ describe("instance isolation", () => {
     const broken = huggingfaceEmbedding();
     const healthy = huggingfaceEmbedding();
 
-    await expect(broken.embed(["test"])).rejects.toThrow("failed to load");
+    await expect(broken.embed({ input: ["test"] })).rejects.toThrow("failed to load");
 
     mockPipeline.mockResolvedValueOnce(mockExtractor);
-    const result = await healthy.embed(["test"]);
+    const result = await healthy.embed({ input: ["test"] });
     expect(result.embeddings).toHaveLength(1);
   });
 });
@@ -258,9 +258,9 @@ describe("concurrent warmup", () => {
     const model = huggingfaceEmbedding();
 
     // Fire 3 concurrent embed calls — all should share one warmup
-    const p1 = model.embed(["a"]);
-    const p2 = model.embed(["b"]);
-    const p3 = model.embed(["c"]);
+    const p1 = model.embed({ input: ["a"] });
+    const p2 = model.embed({ input: ["b"] });
+    const p3 = model.embed({ input: ["c"] });
 
     // Resolve the single warmup
     resolveWarmup(mockExtractor);

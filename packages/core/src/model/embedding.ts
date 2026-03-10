@@ -10,27 +10,16 @@
  *
  * const embedder = createEmbeddingAdapter({
  *   metadata: { id: 'my-embedder', provider: 'my-provider', dimensions: 384 },
- *   prepareInput: (texts) => ({ texts, model: 'my-model' }),
- *   execute: (input) => provider.embed(input),
+ *   prepareInput: (input) => ({ texts: normalizeInput(input.input), model: 'my-model' }),
+ *   execute: (prepared) => provider.embed(prepared),
  *   processOutput: (output) => ({ embeddings: output.data, dimensions: 384, model: 'my-model' }),
  * });
  *
- * const result = await embedder.embed(["Hello world"]);
+ * const result = await embedder.embed({ input: ["Hello world"] });
  * ```
  */
 
-import type { EmbedResult } from "@agentick/shared";
-import type { ProviderGenerationOptions, LibraryGenerationOptions } from "../types.js";
-
-// ============================================================================
-// Options
-// ============================================================================
-
-export interface EmbedOptions {
-  dimensions?: number;
-  providerOptions?: ProviderGenerationOptions;
-  libraryOptions?: LibraryGenerationOptions;
-}
+import type { EmbedInput, EmbedResult } from "@agentick/shared";
 
 // ============================================================================
 // Interface
@@ -46,7 +35,7 @@ export interface EmbeddingMetadata {
 
 export interface EmbeddingModel {
   metadata: EmbeddingMetadata;
-  embed(texts: string[], options?: EmbedOptions): Promise<EmbedResult>;
+  embed(input: EmbedInput): Promise<EmbedResult>;
 }
 
 export function isEmbeddingModel(value: unknown): value is EmbeddingModel {
@@ -66,11 +55,8 @@ export function isEmbeddingModel(value: unknown): value is EmbeddingModel {
 export interface EmbeddingAdapterOptions<TProviderInput, TProviderOutput> {
   metadata: EmbeddingMetadata;
 
-  /** Convert texts + options to provider-specific input (like createAdapter.prepareInput) */
-  prepareInput: (
-    texts: string[],
-    options?: EmbedOptions,
-  ) => TProviderInput | Promise<TProviderInput>;
+  /** Convert EmbedInput to provider-specific input (like createAdapter.prepareInput) */
+  prepareInput: (input: EmbedInput) => TProviderInput | Promise<TProviderInput>;
 
   /** Call the provider's embedding API (like createAdapter.execute) */
   execute: (input: TProviderInput) => Promise<TProviderOutput>;
@@ -89,9 +75,9 @@ export function createEmbeddingAdapter<TProviderInput, TProviderOutput>(
 ): EmbeddingModel {
   return {
     metadata: options.metadata,
-    embed: async (texts, opts) => {
-      const input = await options.prepareInput(texts, opts);
-      const output = await options.execute(input);
+    embed: async (input) => {
+      const prepared = await options.prepareInput(input);
+      const output = await options.execute(prepared);
       return options.processOutput(output);
     },
   };

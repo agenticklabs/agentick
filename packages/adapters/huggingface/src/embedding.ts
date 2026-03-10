@@ -22,7 +22,7 @@
  * import { huggingfaceEmbedding } from '@agentick/huggingface';
  *
  * const embedder = huggingfaceEmbedding();
- * const result = await embedder.embed(["Hello world"]);
+ * const result = await embedder.embed({ input: ["Hello world"] });
  * // result.embeddings[0] → number[384]
  * ```
  */
@@ -69,8 +69,8 @@ export function huggingfaceEmbedding(config: HuggingFaceEmbeddingConfig = {}): E
       model: modelId,
     },
 
-    prepareInput: (texts, _options) => ({
-      texts,
+    prepareInput: (input) => ({
+      texts: typeof input.input === "string" ? [input.input] : input.input,
       pooling: "mean",
       normalize: true,
     }),

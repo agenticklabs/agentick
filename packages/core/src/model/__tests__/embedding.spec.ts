@@ -5,7 +5,7 @@ import {
   type EmbeddingModel,
   type EmbeddingMetadata,
 } from "../embedding.js";
-// import type { EmbedResult } from "@agentick/shared";
+import type { EmbedInput } from "@agentick/shared";
 
 // ============================================================================
 // Helpers
@@ -23,9 +23,12 @@ function mockMetadata(overrides: Partial<EmbeddingMetadata> = {}): EmbeddingMeta
 function createMockAdapter(): EmbeddingModel {
   return createEmbeddingAdapter<{ texts: string[] }, { vecs: number[][] }>({
     metadata: mockMetadata(),
-    prepareInput: (texts) => ({ texts }),
-    execute: async (input) => ({
-      vecs: input.texts.map((t) =>
+    prepareInput: (input) => {
+      const texts = typeof input.input === "string" ? [input.input] : input.input;
+      return { texts };
+    },
+    execute: async (prepared) => ({
+      vecs: prepared.texts.map((t) =>
         Array.from({ length: 128 }, (_, i) => t.charCodeAt(i % t.length) / 255),
       ),
     }),
@@ -51,9 +54,9 @@ describe("createEmbeddingAdapter", () => {
     expect(typeof adapter.embed).toBe("function");
   });
 
-  it("embed produces correct embeddings", async () => {
+  it("embed produces correct embeddings from string array", async () => {
     const adapter = createMockAdapter();
-    const result = await adapter.embed(["hello", "world"]);
+    const result = await adapter.embed({ input: ["hello", "world"] });
 
     expect(result.embeddings).toHaveLength(2);
     expect(result.embeddings[0]).toHaveLength(128);
@@ -62,37 +65,37 @@ describe("createEmbeddingAdapter", () => {
     expect(result.model).toBe("test-model");
   });
 
-  it("embed with single text", async () => {
+  it("embed accepts a single string input", async () => {
     const adapter = createMockAdapter();
-    const result = await adapter.embed(["single"]);
+    const result = await adapter.embed({ input: "single" });
     expect(result.embeddings).toHaveLength(1);
   });
 
   it("embed with empty array", async () => {
     const adapter = createMockAdapter();
-    const result = await adapter.embed([]);
+    const result = await adapter.embed({ input: [] });
     expect(result.embeddings).toHaveLength(0);
   });
 
   it("async prepareInput is awaited", async () => {
     const adapter = createEmbeddingAdapter<string[], number[][]>({
       metadata: mockMetadata(),
-      prepareInput: async (texts) => {
+      prepareInput: async (input) => {
         await new Promise((r) => setTimeout(r, 1));
-        return texts;
+        return typeof input.input === "string" ? [input.input] : input.input;
       },
       execute: async (texts) => texts.map(() => [1, 2, 3]),
       processOutput: (vecs) => ({ embeddings: vecs, dimensions: 3, model: "async-test" }),
     });
 
-    const result = await adapter.embed(["test"]);
+    const result = await adapter.embed({ input: ["test"] });
     expect(result.embeddings).toEqual([[1, 2, 3]]);
   });
 
   it("async processOutput is awaited", async () => {
     const adapter = createEmbeddingAdapter<string[], number[][]>({
       metadata: mockMetadata(),
-      prepareInput: (texts) => texts,
+      prepareInput: (input) => (typeof input.input === "string" ? [input.input] : input.input),
       execute: async (texts) => texts.map(() => [4, 5, 6]),
       processOutput: async (vecs) => {
         await new Promise((r) => setTimeout(r, 1));
@@ -100,38 +103,42 @@ describe("createEmbeddingAdapter", () => {
       },
     });
 
-    const result = await adapter.embed(["test"]);
+    const result = await adapter.embed({ input: ["test"] });
     expect(result.embeddings).toEqual([[4, 5, 6]]);
   });
 
   it("execute errors propagate", async () => {
     const adapter = createEmbeddingAdapter<string[], never>({
       metadata: mockMetadata(),
-      prepareInput: (texts) => texts,
+      prepareInput: (input) => (typeof input.input === "string" ? [input.input] : input.input),
       execute: async () => {
         throw new Error("provider down");
       },
       processOutput: (output) => output,
     });
 
-    await expect(adapter.embed(["test"])).rejects.toThrow("provider down");
+    await expect(adapter.embed({ input: ["test"] })).rejects.toThrow("provider down");
   });
 
-  it("passes options through to prepareInput", async () => {
-    let receivedOpts: any;
+  it("passes dimensions and taskType through to prepareInput", async () => {
+    let receivedInput: EmbedInput | undefined;
 
     const adapter = createEmbeddingAdapter<{ texts: string[]; dims?: number }, number[][]>({
       metadata: mockMetadata(),
-      prepareInput: (texts, opts) => {
-        receivedOpts = opts;
-        return { texts, dims: opts?.dimensions };
+      prepareInput: (input) => {
+        receivedInput = input;
+        return {
+          texts: typeof input.input === "string" ? [input.input] : input.input,
+          dims: input.dimensions,
+        };
       },
-      execute: async (input) => input.texts.map(() => [1]),
+      execute: async (prepared) => prepared.texts.map(() => [1]),
       processOutput: (vecs) => ({ embeddings: vecs, dimensions: 1, model: "test" }),
     });
 
-    await adapter.embed(["test"], { dimensions: 256 });
-    expect(receivedOpts).toEqual({ dimensions: 256 });
+    await adapter.embed({ input: ["test"], dimensions: 256, taskType: "retrieval_query" });
+    expect(receivedInput?.dimensions).toBe(256);
+    expect(receivedInput?.taskType).toBe("retrieval_query");
   });
 });
 

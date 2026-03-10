@@ -27,6 +27,7 @@ import {
   type Message,
   type ContentBlock,
   type TextBlock,
+  type EmbedResult,
   StopReason,
   AdapterError,
   registerModel,
@@ -445,6 +446,29 @@ export function createOpenAIModel(config: OpenAIAdapterConfig = {}): ModelClass 
     // Forward application-level options to createAdapter
     customBlocks: config.customBlocks as OpenAIAdapterConfig["customBlocks"],
     deltaTransform: config.deltaTransform as OpenAIAdapterConfig["deltaTransform"],
+
+    // Embedding support — enabled when embeddingModel is configured
+    embed: config.embeddingModel
+      ? async (input): Promise<EmbedResult> => {
+          const texts = typeof input.input === "string" ? [input.input] : input.input;
+          const response = await client.embeddings.create({
+            model: input.model ?? config.embeddingModel!,
+            input: texts,
+            ...(input.dimensions ? { dimensions: input.dimensions } : {}),
+          });
+
+          const embeddings = response.data
+            .sort((a, b) => a.index - b.index)
+            .map((d) => d.embedding);
+
+          return {
+            embeddings,
+            dimensions: embeddings[0]?.length ?? input.dimensions ?? 0,
+            model: response.model,
+            usage: response.usage ? { totalTokens: response.usage.total_tokens } : undefined,
+          };
+        }
+      : undefined,
   });
 }
 

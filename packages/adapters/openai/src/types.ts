@@ -27,6 +27,8 @@ export interface OpenAIAdapterConfig extends ClientOptions {
   customBlocks?: Record<string, CustomBlockDefinition>;
   /** User-facing delta transform. Forwarded to createAdapter. */
   deltaTransform?: DeltaTransformInput;
+  /** Embedding model name (enables `.embed()` on the returned ModelClass) */
+  embeddingModel?: string;
   [key: string]: unknown;
 }
 

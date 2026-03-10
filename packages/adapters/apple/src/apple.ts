@@ -171,9 +171,10 @@ export function createAppleModel(config: AppleAdapterConfig = {}): ModelClass {
       yield* streamBridge(bridgePath, { ...input, stream: true });
     },
 
-    embed: async (texts) => {
-      const input: EmbedBridgeInput = { operation: "embed", texts, script: "latin" };
-      const output = await runEmbedBridge(bridgePath, input);
+    embed: async (input) => {
+      const texts = typeof input.input === "string" ? [input.input] : input.input;
+      const bridgeInput: EmbedBridgeInput = { operation: "embed", texts, script: "latin" };
+      const output = await runEmbedBridge(bridgePath, bridgeInput);
       return { embeddings: output.embeddings, dimensions: output.dimensions, model: output.model };
     },
 

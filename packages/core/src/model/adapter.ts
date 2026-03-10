@@ -68,8 +68,7 @@ import type {
 import type { ContentBlock, Message } from "@agentick/shared";
 import { fromEngineState, toEngineState } from "./utils/language-model.js";
 import type { LibraryGenerationOptions, ProviderGenerationOptions } from "../types.js";
-import type { EmbedResult } from "@agentick/shared";
-import type { EmbedOptions } from "./embedding.js";
+import type { EmbedInput, EmbedResult } from "@agentick/shared";
 import { Model } from "../jsx/components/model.js";
 import { StreamTagParser, type StreamTagHandler } from "./stream-tag-parser.js";
 
@@ -516,7 +515,7 @@ export interface AdapterOptions<TProviderInput, TProviderOutput, TChunk> {
    * When provided, the returned ModelClass will support `embed()` for generating embeddings.
    * This allows a single adapter to support both text generation and embedding.
    */
-  embed?: (texts: string[], options?: EmbedOptions) => Promise<EmbedResult>;
+  embed?: (input: EmbedInput) => Promise<EmbedResult>;
 
   /**
    * Custom blocks to intercept from the model's text output.
@@ -1236,6 +1235,20 @@ export function createAdapter<TProviderInput, TProviderOutput, TChunk>(
     return modelInput;
   };
 
+  // Create embed procedure if provided
+  const embed = options.embed
+    ? createEngineProcedure<(input: EmbedInput) => Promise<EmbedResult>>(
+        {
+          name: "model:embed",
+          metadata: {
+            model: metadata.model ?? metadata.id,
+            provider: metadata.provider,
+          },
+        },
+        async (input) => options.embed!(input),
+      )
+    : undefined;
+
   // Build the EngineModel properties
   const engineModel: EngineModel<ModelInput, ModelOutput> = {
     metadata,
@@ -1247,7 +1260,7 @@ export function createAdapter<TProviderInput, TProviderOutput, TChunk>(
     toEngineState: options.toEngineState
       ? async (output: ModelOutput) => options.toEngineState!(output)
       : (output: ModelOutput) => toEngineState(output),
-    embed: options.embed,
+    embed,
   };
 
   // Create functional component that wraps <Model>
@@ -1279,8 +1292,8 @@ export function createAdapter<TProviderInput, TProviderOutput, TChunk>(
   (ModelComponent as any).stream = stream;
   (ModelComponent as any).fromEngineState = engineModel.fromEngineState;
   (ModelComponent as any).toEngineState = engineModel.toEngineState;
-  if (options.embed) {
-    (ModelComponent as any).embed = options.embed;
+  if (embed) {
+    (ModelComponent as any).embed = embed;
   }
 
   return ModelComponent as unknown as ModelClass;

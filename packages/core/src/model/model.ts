@@ -23,8 +23,7 @@ import type {
   DelimiterConfig,
   EventBlockDelimiters,
 } from "../types.js";
-import type { EmbedResult } from "@agentick/shared";
-import type { EmbedOptions } from "./embedding.js";
+import type { EmbedInput, EmbedResult } from "@agentick/shared";
 import type { ExecutableTool, ToolDefinition, ToolMetadata } from "../tool/tool.js";
 
 export type { BaseModelToolReference, BaseModelConfig, BaseModelInput, BaseModelOutput };
@@ -67,7 +66,7 @@ export interface EngineModel<TModelInput = ModelInput, TModelOutput = ModelOutpu
   toEngineState?: (output: TModelOutput) => Promise<EngineResponse>;
 
   /** Generate embeddings (optional — only available on models with embedding support) */
-  embed?: (texts: string[], options?: EmbedOptions) => Promise<EmbedResult>;
+  embed?: Procedure<(input: EmbedInput) => Promise<EmbedResult>>;
 }
 
 // ============================================================================
