@@ -1,5 +1,24 @@
 # @agentick/core
 
+## 0.13.0
+
+### Minor Changes
+
+- 8e568d1: Unified EmbedInput API and embed support on adapters
+
+  - **EmbedInput**: New single-object input shape (`{ input, model?, dimensions?, taskType? }`) mirroring ModelInput style. Replaces previous `(texts, options)` positional params.
+  - **embed as Procedure**: `EngineModel.embed` is now a Procedure with middleware, ALS context, and telemetry support.
+  - **OpenAI adapter**: Added `embeddingModel` config option and `embed()` support via OpenAI embeddings API.
+  - **Google adapter**: Added `embeddingModel` config option and `embed()` support via Google embedContent API, including `dimensions` and `taskType` passthrough.
+  - **Per-request model override**: API adapters (OpenAI, Google) respect `input.model` to override the configured embedding model per-request.
+  - **Custom XML tag passthrough**: Collector and markdown renderer now pass through unrecognized XML tags as custom blocks.
+
+### Patch Changes
+
+- Updated dependencies [8e568d1]
+  - @agentick/shared@0.13.0
+  - @agentick/kernel@0.13.0
+
 ## 0.12.3
 
 ### Patch Changes
