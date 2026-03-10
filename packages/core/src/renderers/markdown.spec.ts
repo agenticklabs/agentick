@@ -508,4 +508,95 @@ describe("MarkdownRenderer", () => {
       expect(result).toBeNull();
     });
   });
+
+  describe("custom XML tag rendering", () => {
+    it("should render custom tag with content", () => {
+      const renderer = new MarkdownRenderer();
+      const node = {
+        semantic: "custom" as const,
+        props: { tagName: "user-metadata" },
+        children: [{ text: "type: chat" }],
+      };
+      expect(renderer.formatNode(node)).toBe("<user-metadata>type: chat</user-metadata>");
+    });
+
+    it("should render self-closing custom tag when no content", () => {
+      const renderer = new MarkdownRenderer();
+      const node = {
+        semantic: "custom" as const,
+        props: { tagName: "separator" },
+        children: [],
+      };
+      expect(renderer.formatNode(node)).toBe("<separator />");
+    });
+
+    it("should render custom tag with attributes", () => {
+      const renderer = new MarkdownRenderer();
+      const node = {
+        semantic: "custom" as const,
+        props: { tagName: "interaction", id: "abc", start: "2024-01-15" },
+        children: [{ text: "content" }],
+      };
+      const result = renderer.formatNode(node);
+      expect(result).toContain("<interaction");
+      expect(result).toContain('id="abc"');
+      expect(result).toContain('start="2024-01-15"');
+      expect(result).toContain(">content</interaction>");
+    });
+
+    it("should escape special characters in attribute values", () => {
+      const renderer = new MarkdownRenderer();
+      const node = {
+        semantic: "custom" as const,
+        props: { tagName: "tag", name: 'value "with" <special>' },
+        children: [{ text: "body" }],
+      };
+      const result = renderer.formatNode(node);
+      expect(result).toContain('name="value &quot;with&quot; &lt;special&gt;"');
+    });
+
+    it("should render nested custom tags via semantic tree", () => {
+      const renderer = new MarkdownRenderer();
+      const node = {
+        semantic: "custom" as const,
+        props: { tagName: "outer" },
+        children: [
+          { text: "before " },
+          {
+            semantic: "custom" as const,
+            props: { tagName: "inner" },
+            children: [{ text: "nested" }],
+          },
+          { text: " after" },
+        ],
+      };
+      expect(renderer.formatNode(node)).toBe("<outer>before <inner>nested</inner> after</outer>");
+    });
+
+    it("should render custom tags with inline formatting children", () => {
+      const renderer = new MarkdownRenderer();
+      const node = {
+        semantic: "custom" as const,
+        props: { tagName: "user-metadata" },
+        children: [
+          {
+            semantic: "strong" as const,
+            children: [{ text: "type:" }],
+          },
+          { text: " chat" },
+        ],
+      };
+      expect(renderer.formatNode(node)).toBe("<user-metadata>**type:** chat</user-metadata>");
+    });
+
+    it("should default to 'custom' tag name when tagName prop missing", () => {
+      const renderer = new MarkdownRenderer();
+      const node = {
+        semantic: "custom" as const,
+        props: {},
+        children: [{ text: "content" }],
+      };
+      expect(renderer.formatNode(node)).toBe("<custom>content</custom>");
+    });
+  });
 });

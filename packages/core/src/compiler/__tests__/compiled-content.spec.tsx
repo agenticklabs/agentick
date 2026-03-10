@@ -1025,6 +1025,174 @@ describe("Compiled Content", () => {
     });
   });
 
+  // ============================================================
+  // Custom XML Tags
+  // ============================================================
+
+  describe("custom XML tags", () => {
+    it("should compile unknown tags as XML wrappers in section content", async () => {
+      const App = () => (
+        <Section id="custom-tag">
+          <user-metadata>
+            <TextComponent text="type: chat" />
+          </user-metadata>
+        </Section>
+      );
+
+      const compiled = await compiler.compile(<App />, tickState);
+      const section = getSection(compiled, "custom-tag");
+      const rendered = renderSectionContent(section!);
+
+      expect(rendered).toBe("<user-metadata>type: chat</user-metadata>");
+    });
+
+    it("should compile nested custom tags with other custom tags", async () => {
+      const App = () => (
+        <Section id="nested-custom">
+          <outer-tag>
+            <inner-tag>nested content</inner-tag>
+          </outer-tag>
+        </Section>
+      );
+
+      const compiled = await compiler.compile(<App />, tickState);
+      const section = getSection(compiled, "nested-custom");
+      const rendered = renderSectionContent(section!);
+
+      expect(rendered).toBe("<outer-tag><inner-tag>nested content</inner-tag></outer-tag>");
+    });
+
+    it("should compile custom tags wrapping block-level content", async () => {
+      const App = () => (
+        <Section id="block-in-custom">
+          <user-metadata>
+            <TextComponent>type: chat</TextComponent>
+            <TextComponent>platform: web</TextComponent>
+          </user-metadata>
+        </Section>
+      );
+
+      const compiled = await compiler.compile(<App />, tickState);
+      const section = getSection(compiled, "block-in-custom");
+      const rendered = renderSectionContent(section!);
+
+      expect(rendered).toContain("<user-metadata>");
+      expect(rendered).toContain("</user-metadata>");
+      expect(rendered).toContain("type: chat");
+      expect(rendered).toContain("platform: web");
+    });
+
+    it("should compile custom tags with attributes", async () => {
+      const App = () => (
+        <Section id="custom-attrs">
+          <interaction id="abc-123" start="2024-01-15">
+            <TextComponent text="User asked about invoices" />
+          </interaction>
+        </Section>
+      );
+
+      const compiled = await compiler.compile(<App />, tickState);
+      const section = getSection(compiled, "custom-attrs");
+      const rendered = renderSectionContent(section!);
+
+      expect(rendered).toContain("<interaction");
+      expect(rendered).toContain('id="abc-123"');
+      expect(rendered).toContain('start="2024-01-15"');
+      expect(rendered).toContain("User asked about invoices");
+      expect(rendered).toContain("</interaction>");
+    });
+
+    it("should compile void custom tags (no children)", async () => {
+      const App = () => (
+        <Section id="void-custom">
+          <separator />
+        </Section>
+      );
+
+      const compiled = await compiler.compile(<App />, tickState);
+      const section = getSection(compiled, "void-custom");
+      const rendered = renderSectionContent(section!);
+
+      expect(rendered).toBe("<separator />");
+    });
+
+    it("should compile custom tags inside Text components", async () => {
+      const App = () => (
+        <Section id="inline-custom">
+          <TextComponent>
+            Before <user-context>active page: dashboard</user-context> after
+          </TextComponent>
+        </Section>
+      );
+
+      const compiled = await compiler.compile(<App />, tickState);
+      const section = getSection(compiled, "inline-custom");
+      const rendered = renderSectionContent(section!);
+
+      expect(rendered).toContain("Before");
+      expect(rendered).toContain("<user-context>");
+      expect(rendered).toContain("active page: dashboard");
+      expect(rendered).toContain("</user-context>");
+      expect(rendered).toContain("after");
+    });
+
+    it("should compile multiple sibling custom tags", async () => {
+      const App = () => (
+        <Section id="siblings">
+          <user-metadata>
+            <TextComponent text="type: chat" />
+          </user-metadata>
+          <user-metadata-updates>
+            <TextComponent text="platform: mobile" />
+          </user-metadata-updates>
+        </Section>
+      );
+
+      const compiled = await compiler.compile(<App />, tickState);
+      const section = getSection(compiled, "siblings");
+      const rendered = renderSectionContent(section!);
+
+      expect(rendered).toContain("<user-metadata>type: chat</user-metadata>");
+      expect(rendered).toContain("<user-metadata-updates>platform: mobile</user-metadata-updates>");
+    });
+
+    it("should escape attribute values in custom tags", async () => {
+      const App = () => (
+        <Section id="escape-test">
+          <tag name='value with "quotes"'>
+            <TextComponent text="content" />
+          </tag>
+        </Section>
+      );
+
+      const compiled = await compiler.compile(<App />, tickState);
+      const section = getSection(compiled, "escape-test");
+      const rendered = renderSectionContent(section!);
+
+      expect(rendered).toContain("&quot;quotes&quot;");
+    });
+
+    it("should not interfere with known semantic elements", async () => {
+      const App = () => (
+        <Section id="mixed">
+          <H2>Title</H2>
+          <custom-section>
+            <TextComponent text="Custom content" />
+          </custom-section>
+          <Paragraph>Normal paragraph</Paragraph>
+        </Section>
+      );
+
+      const compiled = await compiler.compile(<App />, tickState);
+      const section = getSection(compiled, "mixed");
+      const rendered = renderSectionContent(section!);
+
+      expect(rendered).toContain("## Title");
+      expect(rendered).toContain("<custom-section>Custom content</custom-section>");
+      expect(rendered).toContain("Normal paragraph");
+    });
+  });
+
   // TODO: Test <Event><UserAction>/<SystemEvent>/<StateChange></Event> → timeline entry pipeline.
   // The collector handles event block components as section children (tested above),
   // but the full <Event> parent → timeline entry flow with event block children is untested.

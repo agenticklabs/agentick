@@ -38,6 +38,21 @@ function createMockModel(options?: {
 // Helper to wait for microtasks to flush
 const flushMicrotasks = () => new Promise((r) => setTimeout(r, 10));
 
+// Helper to poll for a condition — handles multi-hop async chains
+// (signal → microtask → React re-render → reconciliation → effect)
+async function waitFor(
+  predicate: () => boolean,
+  { timeout = 2000, interval = 5 } = {},
+): Promise<void> {
+  const start = Date.now();
+  while (!predicate()) {
+    if (Date.now() - start > timeout) {
+      throw new Error(`waitFor timed out after ${timeout}ms`);
+    }
+    await new Promise((r) => setTimeout(r, interval));
+  }
+}
+
 // ============================================================================
 // Reactive System Integration Tests
 // ============================================================================
@@ -368,12 +383,10 @@ describe("Reactive Session Integration", () => {
       await flushMicrotasks();
       expect(effectLog).toContain(0);
 
-      // Change state
+      // Change state — triggers signal → microtask → React re-render →
+      // reconciliation → effect, a multi-hop async chain
       signalRef!.set(1);
-      await flushMicrotasks();
-
-      // Effect should have run with new value
-      expect(effectLog).toContain(1);
+      await waitFor(() => effectLog.includes(1));
 
       await session.close();
     });

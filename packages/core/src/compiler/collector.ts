@@ -14,7 +14,12 @@ import type {
 } from "./types.js";
 import type { ExecutableTool, ToolMetadata } from "../tool/tool.js";
 import { createEmptyCompiledStructure } from "./types.js";
-import type { SemanticContentBlock, SemanticNode, Renderer } from "../renderers/types.js";
+import type {
+  SemanticContentBlock,
+  SemanticNode,
+  SemanticType,
+  Renderer,
+} from "../renderers/types.js";
 import type { TokenEstimator } from "../com/types.js";
 import { extractText as extractBlocksText } from "@agentick/shared";
 import { Logger } from "@agentick/kernel";
@@ -84,6 +89,72 @@ const TOOL_USE = "ToolUse";
 const TOOL_USE_LOWER = "tooluse";
 const STATE_CHANGE = "StateChange";
 const STATE_CHANGE_LOWER = "state_change";
+
+/**
+ * Known agentick types that should NOT be treated as custom XML tags.
+ * These are structural/content types that the collector dispatches specifically.
+ * In buildSemanticTree, these fall back to text extraction instead of XML wrapping.
+ */
+const KNOWN_TYPES = new Set([
+  SECTION,
+  SECTION_LOWER,
+  ENTRY,
+  ENTRY_LOWER,
+  MESSAGE,
+  MESSAGE_LOWER,
+  TOOL,
+  TOOL_LOWER,
+  EPHEMERAL,
+  EPHEMERAL_LOWER,
+  TEXT,
+  TEXT_LOWER,
+  CODE,
+  CODE_LOWER,
+  IMAGE,
+  IMAGE_LOWER,
+  JSON_BLOCK,
+  JSON_LOWER,
+  DOCUMENT,
+  DOCUMENT_LOWER,
+  AUDIO,
+  AUDIO_LOWER,
+  VIDEO,
+  VIDEO_LOWER,
+  H1,
+  H2,
+  H3,
+  HEADER,
+  HEADER_LOWER,
+  PARAGRAPH,
+  PARAGRAPH_LOWER,
+  "p",
+  LIST,
+  LIST_LOWER,
+  "ul",
+  "ol",
+  LIST_ITEM,
+  LIST_ITEM_LOWER,
+  "li",
+  TABLE,
+  TABLE_LOWER,
+  ROW,
+  ROW_LOWER,
+  COLUMN,
+  COLUMN_LOWER,
+  COLLAPSED,
+  COLLAPSED_LOWER,
+  "pre",
+  "markdown",
+  "fragment",
+  USER_ACTION,
+  USER_ACTION_LOWER,
+  SYSTEM_EVENT,
+  SYSTEM_EVENT_LOWER,
+  STATE_CHANGE,
+  STATE_CHANGE_LOWER,
+  TOOL_USE,
+  TOOL_USE_LOWER,
+]);
 
 // Inline semantic element mapping: lowercase HTML intrinsics → SemanticNode types
 const INLINE_SEMANTIC_MAP: Record<string, string> = {
@@ -612,8 +683,23 @@ function collectContent(
           break;
         }
 
-        // Recurse for nested containers
-        if (child.children && child.children.length > 0) {
+        // Known types: recurse into children (original behavior)
+        if (KNOWN_TYPES.has(typeName)) {
+          if (child.children && child.children.length > 0) {
+            blocks.push(...collectContent(child.children, renderer));
+          }
+          break;
+        }
+
+        // Unknown tags: compile as XML wrapper around children content
+        const tree = buildSemanticTree([child]);
+        if (tree.length > 0) {
+          blocks.push({
+            type: "text",
+            text: extractText(child),
+            semanticNode: tree[0],
+          } as SemanticContentBlock);
+        } else if (child.children && child.children.length > 0) {
           blocks.push(...collectContent(child.children, renderer));
         }
       }
@@ -718,11 +804,23 @@ function buildSemanticTree(
       continue;
     }
 
-    // For all other elements, recurse into children to extract text
-    const text = extractText(child);
-    if (text) {
-      nodes.push({ text });
+    // Known agentick types: extract text (not custom XML)
+    if (KNOWN_TYPES.has(typeName)) {
+      const text = extractText(child);
+      if (text) {
+        nodes.push({ text });
+      }
+      continue;
     }
+
+    // Unknown tags: preserve as custom XML wrapper (e.g., <user-metadata>, <equation>)
+    const { children: _childProp, ...customAttrs } = child.props || {};
+    const childNodes = buildSemanticTree(child.children);
+    nodes.push({
+      semantic: "custom" as SemanticType,
+      props: { tagName: typeName, ...customAttrs },
+      children: childNodes,
+    });
   }
 
   return nodes;
@@ -736,19 +834,9 @@ function hasInlineSemantics(children: (AgentickNode | AgentickTextNode)[] | unde
   if (!children) return false;
   for (const child of children) {
     if (isTextNode(child)) continue;
-    const typeName = getTypeName(child.type);
-    if (
-      INLINE_SEMANTIC_MAP[typeName] ||
-      typeName === "img" ||
-      typeName === "br" ||
-      typeName === "hr"
-    ) {
-      return true;
-    }
-    // Check nested children (e.g., <Text> wrapping a <strong>)
-    if (child.children && hasInlineSemantics(child.children)) {
-      return true;
-    }
+    // Any non-text child node needs semantic tree treatment:
+    // known inline semantics, void elements, AND custom XML tags
+    return true;
   }
   return false;
 }

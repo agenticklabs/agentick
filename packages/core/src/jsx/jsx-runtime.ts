@@ -24,6 +24,14 @@ export namespace JSX {
   }
 
   /**
+   * Attributes available on all JSX elements (intrinsic and components).
+   * Mirrors React's IntrinsicAttributes — provides `key` without each element declaring it.
+   */
+  export interface IntrinsicAttributes {
+    key?: string | number | null;
+  }
+
+  /**
    * Tell TypeScript that async functions returning Promise<Element> are valid components.
    */
   export type LibraryManagedAttributes<_C, P> = P;
@@ -33,7 +41,7 @@ export namespace JSX {
    */
   export type ElementType =
     | keyof IntrinsicElements
-    | ((props: any) => Element | Promise<Element>)
+    | ((props: any) => Element | null | Promise<Element | null>)
     | { new (props: any): any };
 
   export interface IntrinsicElements {

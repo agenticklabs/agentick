@@ -122,11 +122,16 @@ export class MarkdownRenderer extends Renderer {
         case "variable":
           return `*${content}*`;
 
-        // Custom XML tags - pass through as-is in markdown
-        case "custom":
-          // For custom tags, just return the content (no special formatting)
-          // Alternatively, could wrap in HTML-like syntax if needed
-          return content;
+        // Custom XML tags — render as XML wrapper around content
+        case "custom": {
+          const tag = node.props?.tagName || "custom";
+          const { tagName: _tn, children: _ch, ...customAttrs } = node.props || {};
+          const attrStr = Object.entries(customAttrs)
+            .map(([k, v]) => ` ${k}="${escapeXml(String(v))}"`)
+            .join("");
+          if (!content) return `<${tag}${attrStr} />`;
+          return `<${tag}${attrStr}>${content}</${tag}>`;
+        }
 
         default:
           return content;
