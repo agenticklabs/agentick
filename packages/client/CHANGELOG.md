@@ -1,5 +1,12 @@
 # @agentick/client
 
+## 0.13.2
+
+### Patch Changes
+
+- a4464da: feat: add appendMessages() to MessageLog, ChatSession, and ChatSessionService
+  - @agentick/shared@0.13.2
+
 ## 0.13.1
 
 ### Patch Changes
