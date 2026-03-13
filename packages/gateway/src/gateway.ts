@@ -958,9 +958,15 @@ export class Gateway extends EventEmitter {
     // Setup streaming response
     setSSEHeaders(res);
 
+    // Run within ALS context so session store / tools see the authenticated user
+    const ctx = Context.create({
+      user: authResult.user,
+      metadata: { sessionId, gatewayId: this.config.id },
+    });
+
     try {
       log.debug({ sessionId }, "handleSend: calling directSend");
-      const events = this.directSend(sessionId, sendInput);
+      const events = Context.run(ctx, () => this.directSend(sessionId, sendInput));
 
       for await (const event of events) {
         log.debug({ eventType: event.type }, "handleSend: got event from directSend");
