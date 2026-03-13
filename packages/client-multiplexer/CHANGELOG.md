@@ -1,5 +1,12 @@
 # @agentick/client-multiplexer
 
+## 0.13.1
+
+### Patch Changes
+
+- Updated dependencies [7a414a0]
+  - @agentick/client@0.13.1
+
 ## 0.13.0
 
 ### Patch Changes
