@@ -1,5 +1,18 @@
 # @agentick/angular
 
+## 0.13.1
+
+### Patch Changes
+
+- 7a414a0: feat: paginated message history + Angular service cleanup
+
+  - Add `prependMessages()` to MessageLog, ChatSession, and ChatSessionService for loading older messages on scroll-back
+  - Rewrite AgentickService: remove `providedIn: "root"`, eliminate polling RxJS fallback, proper cleanup of client subscriptions, use `inject()` exclusively
+
+- Updated dependencies [7a414a0]
+  - @agentick/client@0.13.1
+  - @agentick/shared@0.13.1
+
 ## 0.13.0
 
 ### Patch Changes
