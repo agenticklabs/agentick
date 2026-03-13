@@ -29,7 +29,7 @@ jobs:
         run: pnpm build --filter '!agentick-website'
       - name: Build website (with API docs)
         run: pnpm --filter agentick-website run build
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/upload-pages-artifact@v4
         with:
           path: website/.vitepress/dist
 
