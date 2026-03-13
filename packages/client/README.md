@@ -297,6 +297,7 @@ chat.interrupt("Stop"); // Abort + send (drains attachments)
 chat.flush(); // Flush next queued message
 chat.respondToConfirmation({ approved: true });
 chat.clearMessages();
+chat.prependMessages(olderMessages); // Load older history on scroll-back
 
 // Subscribe
 const unsub = chat.onStateChange(() => {
@@ -434,6 +435,7 @@ const log = new MessageLog(client, {
 
 log.messages; // ChatMessage[]
 log.pushUserMessage("Hello"); // Immediate (progressive modes)
+log.prependMessages(olderMessages); // Paginated history (scroll-back)
 log.clear();
 log.destroy();
 ```

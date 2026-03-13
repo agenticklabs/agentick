@@ -1,6 +1,6 @@
 # @agentick/angular
 
-Angular integration for Agentick. Provides a signal-first service wrapper around `@agentick/client`.
+Angular integration for Agentick. Provides signal-first service wrappers around `@agentick/client`.
 
 ## Installation
 
@@ -8,7 +8,100 @@ Angular integration for Agentick. Provides a signal-first service wrapper around
 pnpm add @agentick/angular
 ```
 
-## Quick Start
+## Quick Start — ChatSessionService
+
+For chat UIs, use `ChatSessionService` with `provideChatSession()`. This wraps `ChatSession` from `@agentick/client` and exposes all state as Angular signals.
+
+```ts
+import { Component, inject } from "@angular/core";
+import { ChatSessionService, provideChatSession, provideAgentick } from "@agentick/angular";
+
+@Component({
+  selector: "app-chat",
+  standalone: true,
+  providers: [
+    provideAgentick({ baseUrl: "/api/v2", token: myJwt }),
+    provideChatSession({ renderMode: "streaming" }),
+  ],
+  template: `
+    @for (msg of chat.messages(); track msg.id) {
+      <div>{{ msg.role }}: {{ msg.content }}</div>
+    }
+    <input #input />
+    <button (click)="chat.submit(input.value); input.value = ''">Send</button>
+  `,
+})
+export class ChatComponent {
+  chat = inject(ChatSessionService);
+}
+```
+
+### ChatSessionService Signals
+
+```ts
+chat.messages()          // readonly ChatMessage[]
+chat.chatMode()          // "idle" | "streaming" | "confirming_tool"
+chat.isExecuting()       // boolean
+chat.toolConfirmation()  // ToolConfirmationState | null
+chat.lastSubmitted()     // string | null
+chat.queued()            // readonly Message[]
+chat.mode()              // "steer" | "queue"
+chat.error()             // { message, name } | null
+chat.attachments()       // readonly Attachment[]
+
+// Computed
+chat.isIdle()            // boolean
+chat.isStreaming()       // boolean
+chat.isConfirmingTool()  // boolean
+```
+
+### ChatSessionService Actions
+
+```ts
+chat.submit(text)                    // Send message
+chat.steer(text)                     // Force send immediately
+chat.queue(text)                     // Queue for next execution
+chat.interrupt(text)                 // Abort current + send
+chat.abort(reason?)                  // Abort current execution
+chat.flush()                         // Flush next queued message
+chat.respondToConfirmation(response) // Approve/deny tool
+chat.clearMessages()                 // Clear all messages
+chat.prependMessages(messages)       // Load older history (scroll-back)
+chat.setMode(mode)                   // Switch steer/queue mode
+
+// Attachments
+chat.addAttachment(input)            // Add file
+chat.removeAttachment(id)            // Remove file
+chat.clearAttachments()              // Clear all files
+```
+
+### Paginated History
+
+Load older messages as the user scrolls back:
+
+```ts
+async loadOlderMessages(cursor: string) {
+  const res = await fetch(`/api/messages?before=${cursor}&limit=20`);
+  const { messages } = await res.json();
+  this.chat.prependMessages(messages);
+}
+```
+
+### ChatSessionOptions
+
+```ts
+provideChatSession({
+  sessionId: "conv-123",          // Connect to existing session
+  initialMessages: [],            // Pre-loaded messages from DB
+  renderMode: "streaming",        // "streaming" | "block" | "message"
+  confirmationPolicy: undefined,  // Auto-approve/deny policy
+  autoSubscribe: true,            // Subscribe on construction (default)
+})
+```
+
+## AgentickService (Low-Level)
+
+For direct client access (sessions, channels, raw events), use `AgentickService`:
 
 ```ts
 import { Component, inject } from "@angular/core";
@@ -29,57 +122,70 @@ export class ChatComponent {
     this.agentick.subscribe("conv-123");
   }
 
-  async send(message: string) {
-    const handle = this.agentick.send(message);
-    await handle.result;
+  send(message: string) {
+    this.agentick.send(message);
   }
 }
 ```
 
-## Service API
+### AgentickService API
 
 ```ts
-service.session(sessionId)      // cold accessor
-service.subscribe(sessionId)    // hot accessor
-service.unsubscribe()           // drop current subscription
+// Session management
+service.session(sessionId)      // Cold accessor
+service.subscribe(sessionId)    // Hot accessor
+service.unsubscribe()           // Drop current subscription
 
-service.send(input)             // returns ClientExecutionHandle
+// Messaging
+service.send(input)             // Returns ClientExecutionHandle
 service.abort(reason?)
 service.close()
+service.clearStreamingText()
 
-service.channel(name)           // session-scoped channel
+// Channels
+service.channel(name)           // Session-scoped channel
+service.channel$(name)          // Channel as Observable
+service.eventsOfType(...types)  // Filtered event Observable
 ```
 
-Signals:
+### Signals
 
 ```ts
-service.connectionState();
-service.sessionId();
-service.streamingText();
-service.text();
-service.isStreaming();
+service.connectionState()  // "disconnected" | "connecting" | "connected" | "error"
+service.sessionId()        // string | undefined
+service.streamingText()    // { text, isStreaming }
+service.text()             // string (computed)
+service.isStreaming()       // boolean (computed)
+service.isConnected()      // boolean (computed)
+service.isConnecting()     // boolean (computed)
 ```
 
-## Chat Primitives
+### RxJS Observables
 
-The [Chat Primitives](../client/README.md#chat-primitives) from `@agentick/client` (`ChatSession`, `MessageLog`, `ToolConfirmations`, `MessageSteering`) are framework-agnostic and work directly in Angular. Use `ChatSession` with Angular signals for full chat state management:
+All signals are also available as observables via `toObservable()`:
 
 ```ts
-import { ChatSession } from "@agentick/client";
-
-// In a service or component
-const chat = new ChatSession(client, {
-  sessionId: "conv-123",
-  // autoSubscribe: true (default)
-});
-
-// Subscribe to state changes and update a signal
-const messages = signal(chat.messages);
-chat.onStateChange(() => {
-  messages.set(chat.messages);
-});
-
-chat.submit("Hello!");
+service.connectionState$
+service.isConnected$
+service.streamingText$
+service.text$
+service.isStreaming$
+service.events$
 ```
 
-Angular-specific signal wrappers for chat primitives are planned.
+## Provider Pattern
+
+Both services require `provideAgentick()` at the component level. Each provider creates an isolated instance with its own client and connection:
+
+```ts
+// Two independent chat agents in the same app
+@Component({
+  providers: [provideAgentick({ baseUrl: "/api/support" })],
+})
+export class SupportChat { ... }
+
+@Component({
+  providers: [provideAgentick({ baseUrl: "/api/sales" })],
+})
+export class SalesChat { ... }
+```
