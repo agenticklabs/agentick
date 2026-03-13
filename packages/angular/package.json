@@ -21,7 +21,7 @@
     }
   },
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
+    "build": "ngc -p tsconfig.build.json",
     "dev": "tsc --watch",
     "typecheck": "tsc --noEmit",
     "clean": "rm -rf dist tsconfig.build.tsbuildinfo",
@@ -33,14 +33,16 @@
     "@agentick/shared": "workspace:*"
   },
   "devDependencies": {
-    "@angular/core": "^19.0.0",
+    "@angular/compiler": "^20.0.0",
+    "@angular/compiler-cli": "^20.0.0",
+    "@angular/core": "^20.0.0",
     "@types/node": "^22.10.5",
     "rxjs": "^7.8.0",
     "typescript": "^5.7.3",
     "vitest": "^4.0.18"
   },
   "peerDependencies": {
-    "@angular/core": "^17.0.0 || ^18.0.0 || ^19.0.0",
+    "@angular/core": "^17.0.0 || ^18.0.0 || ^19.0.0 || ^20.0.0",
     "rxjs": "^7.0.0"
   }
 }

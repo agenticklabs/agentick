@@ -5,5 +5,8 @@
     "declarationMap": true,
     "sourceMap": true
   },
+  "angularCompilerOptions": {
+    "compilationMode": "partial"
+  },
   "exclude": ["node_modules", "dist", "**/*.spec.ts", "**/*.test.ts"]
 }
