@@ -958,42 +958,45 @@ export class Gateway extends EventEmitter {
     // Setup streaming response
     setSSEHeaders(res);
 
-    // Run within ALS context so session store / tools see the authenticated user
+    // Run entire send within ALS context so session store, tools, and
+    // the full async generator iteration see the authenticated user.
     const ctx = Context.create({
       user: authResult.user,
       metadata: { sessionId, gatewayId: this.config.id },
     });
 
-    try {
-      log.debug({ sessionId }, "handleSend: calling directSend");
-      const events = Context.run(ctx, () => this.directSend(sessionId, sendInput));
+    await Context.run(ctx, async () => {
+      try {
+        log.debug({ sessionId }, "handleSend: calling directSend");
+        const events = this.directSend(sessionId, sendInput);
 
-      for await (const event of events) {
-        log.debug({ eventType: event.type }, "handleSend: got event from directSend");
-        const message: EventMessage = {
-          type: "event",
-          event: event.type as GatewayEventType,
-          sessionId,
-          data: event.data,
-        };
-        res.write(`data: ${JSON.stringify(message)}\n\n`);
+        for await (const event of events) {
+          log.debug({ eventType: event.type }, "handleSend: got event from directSend");
+          const message: EventMessage = {
+            type: "event",
+            event: event.type as GatewayEventType,
+            sessionId,
+            data: event.data,
+          };
+          res.write(`data: ${JSON.stringify(message)}\n\n`);
+        }
+
+        log.debug({ sessionId }, "handleSend: directSend complete, sending execution_end");
+        res.write(
+          `data: ${JSON.stringify({ type: "event", event: "execution_end", sessionId, data: {} } satisfies EventMessage)}\n\n`,
+        );
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        const errorStack = error instanceof Error ? error.stack : undefined;
+        console.error("[Gateway handleSend ERROR]", errorMessage, "\n", errorStack);
+        log.error({ errorMessage, errorStack, sessionId }, "handleSend: ERROR in directSend");
+        res.write(
+          `data: ${JSON.stringify({ type: "event", event: "error", sessionId, data: { error: errorMessage } } satisfies EventMessage)}\n\n`,
+        );
+      } finally {
+        res.end();
       }
-
-      log.debug({ sessionId }, "handleSend: directSend complete, sending execution_end");
-      res.write(
-        `data: ${JSON.stringify({ type: "event", event: "execution_end", sessionId, data: {} } satisfies EventMessage)}\n\n`,
-      );
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      const errorStack = error instanceof Error ? error.stack : undefined;
-      console.error("[Gateway handleSend ERROR]", errorMessage, "\n", errorStack);
-      log.error({ errorMessage, errorStack, sessionId }, "handleSend: ERROR in directSend");
-      res.write(
-        `data: ${JSON.stringify({ type: "event", event: "error", sessionId, data: { error: errorMessage } } satisfies EventMessage)}\n\n`,
-      );
-    } finally {
-      res.end();
-    }
+    });
   }
 
   private async handleInvoke(req: NodeRequest, res: NodeResponse): Promise<void> {
