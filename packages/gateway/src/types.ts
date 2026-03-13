@@ -342,7 +342,9 @@ export interface MethodDefinitionInput<TSchema extends ZodLikeSchema = ZodLikeSc
   /** Zod schema for response (used by schema discovery only) */
   response?: ZodLikeSchema;
   /** Handler function - receives validated & typed params */
-  handler: SimpleMethodHandler<SchemaOutput<TSchema>> | StreamingMethodHandler<SchemaOutput<TSchema>>;
+  handler:
+    | SimpleMethodHandler<SchemaOutput<TSchema>>
+    | StreamingMethodHandler<SchemaOutput<TSchema>>;
   /** Required roles - checked before handler */
   roles?: string[];
   /** Custom guard function */

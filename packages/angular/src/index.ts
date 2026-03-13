@@ -129,6 +129,13 @@
 // Service, token, and provider factory
 export { AgentickService, TENTICKLE_CONFIG, provideAgentick } from "./agentick.service.js";
 
+// Chat session service
+export {
+  ChatSessionService,
+  CHAT_SESSION_OPTIONS,
+  provideChatSession,
+} from "./chat-session.service.js";
+
 // Types
 export type {
   AgentickConfig,
@@ -141,6 +148,20 @@ export type {
   StreamingTextState,
   ClientTransport,
 } from "./types.js";
+
+// Re-export chat types from client for convenience
+export type {
+  ChatMessage,
+  ChatMode,
+  ChatSessionState,
+  ChatSessionOptions,
+  ToolCallEntry,
+  ToolConfirmationState,
+  RenderMode,
+  SteeringMode,
+  Attachment,
+  AttachmentInput,
+} from "@agentick/client";
 
 // Re-export createClient for advanced usage
 export { createClient } from "@agentick/client";

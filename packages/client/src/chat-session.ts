@@ -6,6 +6,7 @@ import { MessageLog } from "./message-log.js";
 import { ToolConfirmations } from "./tool-confirmations.js";
 import { AttachmentManager } from "./attachment-manager.js";
 import type {
+  ChatMessage,
   ChatMode,
   ChatSessionState,
   ChatSessionOptions,
@@ -216,6 +217,18 @@ export class ChatSession<TMode extends string = ChatMode> {
   respondToConfirmation(response: ToolConfirmationResponse): void {
     if (!this._confirmations.pending) return;
     this._confirmations.respond(response);
+    this._notify();
+  }
+
+  /**
+   * Prepend older messages (e.g. fetched from DB on scroll-back).
+   * New messages appear at the start of the list; dedup counters
+   * are adjusted so streaming continues to work correctly.
+   */
+  prependMessages(messages: readonly ChatMessage[]): void {
+    this._messageLog.prependMessages(messages);
+    // _notify is already called by MessageLog's listener — but we
+    // re-snapshot here so ChatSession's state is immediately consistent.
     this._notify();
   }
 

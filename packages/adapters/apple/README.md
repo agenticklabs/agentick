@@ -61,11 +61,7 @@ console.log(embeddings[0].length); // 512
 
 // Batch
 const { embeddings } = await embedder.embed({
-  input: [
-    "machine learning and AI",
-    "deep neural networks",
-    "the cat sat on the mat",
-  ],
+  input: ["machine learning and AI", "deep neural networks", "the cat sat on the mat"],
 });
 // embeddings → number[3][512]
 ```
