@@ -1,5 +1,12 @@
 # @agentick/apple
 
+## 0.13.2
+
+### Patch Changes
+
+- @agentick/shared@0.13.2
+- @agentick/core@0.13.2
+
 ## 0.13.1
 
 ### Patch Changes
