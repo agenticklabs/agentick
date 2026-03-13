@@ -19,6 +19,7 @@ import {
 import {
   createClient,
   ChatSession,
+  type AgentickClient,
   type ChatSessionOptions,
   type ChatSessionState,
   type ChatMode,
@@ -69,6 +70,10 @@ export function provideChatSession(options: ChatSessionOptions = {}) {
  * ChatSession actions as methods. Automatically syncs on every
  * state change and cleans up on destroy.
  *
+ * Supports session switching via `switchSession()` — tears down the
+ * current session and creates a new one with the given sessionId,
+ * reusing the same underlying client connection.
+ *
  * @example
  * ```typescript
  * @Component({
@@ -91,8 +96,10 @@ export function provideChatSession(options: ChatSessionOptions = {}) {
  */
 @Injectable()
 export class ChatSessionService implements OnDestroy {
-  private readonly _chatSession: ChatSession;
-  private readonly _unsubscribe: () => void;
+  private readonly _client: AgentickClient;
+  private readonly _baseOptions: ChatSessionOptions;
+  private _chatSession: ChatSession;
+  private _unsubscribe: () => void;
 
   // ══════════════════════════════════════════════════════════════════════════
   // Signals — synced from ChatSessionState
@@ -108,6 +115,9 @@ export class ChatSessionService implements OnDestroy {
   readonly error = signal<{ message: string; name: string } | null>(null);
   readonly attachments = signal<readonly Attachment[]>([]);
 
+  /** The current session ID, or undefined if no session is connected. */
+  readonly sessionId = signal<string | undefined>(undefined);
+
   // ══════════════════════════════════════════════════════════════════════════
   // Computed signals
   // ══════════════════════════════════════════════════════════════════════════
@@ -122,11 +132,40 @@ export class ChatSessionService implements OnDestroy {
 
   constructor() {
     const config = inject(TENTICKLE_CONFIG);
-    const options = inject(CHAT_SESSION_OPTIONS, { optional: true }) ?? {};
+    this._baseOptions = inject(CHAT_SESSION_OPTIONS, { optional: true }) ?? {};
 
-    const client = createClient(config);
-    this._chatSession = new ChatSession(client, options);
+    this._client = createClient(config);
+    this._chatSession = new ChatSession(this._client, this._baseOptions);
     this._unsubscribe = this._chatSession.onStateChange(() => this._sync());
+    this.sessionId.set(this._baseOptions.sessionId);
+    this._sync();
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // Session Management
+  // ══════════════════════════════════════════════════════════════════════════
+
+  /**
+   * Switch to a different session. Tears down the current session,
+   * creates a new one with the given sessionId, and optionally
+   * pre-populates with initial messages.
+   *
+   * Reuses the same underlying client connection (SSE transport).
+   *
+   * @param sessionId — the new session to connect to
+   * @param initialMessages — messages to populate the message log with
+   */
+  switchSession(sessionId: string, initialMessages?: readonly ChatMessage[]): void {
+    this._unsubscribe();
+    this._chatSession.destroy();
+
+    this._chatSession = new ChatSession(this._client, {
+      ...this._baseOptions,
+      sessionId,
+      initialMessages: initialMessages ? [...initialMessages] : undefined,
+    });
+    this._unsubscribe = this._chatSession.onStateChange(() => this._sync());
+    this.sessionId.set(sessionId);
     this._sync();
   }
 
