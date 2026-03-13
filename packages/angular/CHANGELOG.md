@@ -1,5 +1,13 @@
 # @agentick/angular
 
+## 0.14.1
+
+### Patch Changes
+
+- ad8d3c5: Switch build from `tsc` to `ngc` (Angular compiler) with partial compilation mode. Fixes JIT compilation error when consuming the library in AOT apps. Also widen `@angular/core` peer dep to include Angular 20.
+  - @agentick/shared@0.14.1
+  - @agentick/client@0.14.1
+
 ## 0.14.0
 
 ### Minor Changes
