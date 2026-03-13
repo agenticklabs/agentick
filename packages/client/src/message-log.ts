@@ -176,6 +176,17 @@ export class MessageLog {
     this._notify();
   }
 
+  /**
+   * Append messages (e.g. initial load from DB, or external sources).
+   * Adjusts internal counters so dedup continues to work correctly.
+   */
+  appendMessages(messages: readonly ChatMessage[]): void {
+    if (messages.length === 0) return;
+    this._messages = [...this._messages, ...messages];
+    this._messageCount += messages.length;
+    this._notify();
+  }
+
   clear(): void {
     this._messages = [];
     this._messageCount = 0;

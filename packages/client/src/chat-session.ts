@@ -227,8 +227,14 @@ export class ChatSession<TMode extends string = ChatMode> {
    */
   prependMessages(messages: readonly ChatMessage[]): void {
     this._messageLog.prependMessages(messages);
-    // _notify is already called by MessageLog's listener — but we
-    // re-snapshot here so ChatSession's state is immediately consistent.
+    this._notify();
+  }
+
+  /**
+   * Append messages (e.g. initial load from DB, or external sources).
+   */
+  appendMessages(messages: readonly ChatMessage[]): void {
+    this._messageLog.appendMessages(messages);
     this._notify();
   }
 

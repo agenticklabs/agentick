@@ -67,6 +67,7 @@ chat.flush()                         // Flush next queued message
 chat.respondToConfirmation(response) // Approve/deny tool
 chat.clearMessages()                 // Clear all messages
 chat.prependMessages(messages)       // Load older history (scroll-back)
+chat.appendMessages(messages)        // Initial load or external sources
 chat.setMode(mode)                   // Switch steer/queue mode
 
 // Attachments

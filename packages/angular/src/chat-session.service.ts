@@ -182,6 +182,14 @@ export class ChatSessionService implements OnDestroy {
     this._chatSession.prependMessages(messages);
   }
 
+  /**
+   * Append messages (e.g. initial load from DB, or external sources).
+   * Messages appear at the end of the list.
+   */
+  appendMessages(messages: readonly ChatMessage[]): void {
+    this._chatSession.appendMessages(messages);
+  }
+
   clearMessages(): void {
     this._chatSession.clearMessages();
   }
