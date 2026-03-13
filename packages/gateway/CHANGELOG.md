@@ -1,5 +1,18 @@
 # @agentick/gateway
 
+## 0.14.2
+
+### Patch Changes
+
+- 4ee5ffe: fix: propagate authenticated user to ALS context in HTTP send handler
+
+  The `handleSend` SSE endpoint validated auth but never set `authResult.user` on the kernel Context, so session stores and tools saw `userId: "unknown"`. Now wraps `directSend` in `Context.run()` with the authenticated user, matching what `handleInvoke` already does.
+
+  - @agentick/kernel@0.14.2
+  - @agentick/shared@0.14.2
+  - @agentick/core@0.14.2
+  - @agentick/server@0.14.2
+
 ## 0.14.1
 
 ### Patch Changes

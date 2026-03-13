@@ -1,5 +1,12 @@
 # @agentick/openai
 
+## 0.14.2
+
+### Patch Changes
+
+- @agentick/shared@0.14.2
+- @agentick/core@0.14.2
+
 ## 0.14.1
 
 ### Patch Changes
