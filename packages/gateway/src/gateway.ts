@@ -1950,7 +1950,7 @@ export class Gateway extends EventEmitter {
   }
 
   private async handleHistoryMethod(
-    params: HistoryParams,
+    _params: HistoryParams,
   ): Promise<{ messages: unknown[]; hasMore: boolean }> {
     return { messages: [], hasMore: false };
   }
