@@ -597,12 +597,9 @@ export class Gateway extends EventEmitter {
         remove: (pluginId: string) => this.remove(pluginId),
       };
 
-      const ctx = Context.create({
-        metadata: { gateway: gatewayHandle },
-      });
-
-      managedSession.coreSession = await Context.run(ctx, () =>
-        managedSession.appInfo.app.session(managedSession.sessionName),
+      managedSession.coreSession = await Context.fork(
+        { metadata: { ...Context.tryGet()?.metadata, gateway: gatewayHandle } },
+        () => managedSession.appInfo.app.session(managedSession.sessionName),
       );
     }
     return managedSession.coreSession;
@@ -824,31 +821,53 @@ export class Gateway extends EventEmitter {
 
     log.debug({ method: req.method, url: req.url, path }, "handleRequest");
 
-    // Plugin routes — checked before built-in routes, longest prefix first
-    if (await this.dispatchPluginRoute(path, req, res)) return;
+    // Authenticate once at the request boundary. SSE connections may
+    // pass the token as a query param (EventSource can't set headers).
+    const token = extractToken(req) ?? url.searchParams.get("token") ?? undefined;
+    const authResult = await validateAuth(token, this.config.auth);
 
-    // Route requests - all framework-level endpoints
-    switch (path) {
-      case "/events":
-        return this.handleSSE(req, res);
-      case "/send":
-        return this.handleSend(req, res);
-      case "/invoke":
-        return this.handleInvoke(req, res);
-      case "/subscribe":
-        return this.handleSubscribe(req, res);
-      case "/abort":
-        return this.handleAbort(req, res);
-      case "/close":
-        return this.handleCloseEndpoint(req, res);
-      case "/channel":
-      case "/channel/subscribe":
-      case "/channel/publish":
-        return this.handleChannel(req, res);
-    }
+    // Set ALS context for the entire request lifetime. All downstream
+    // handlers, session creation, tool execution, and plugin routes
+    // inherit this context automatically.
+    const ctx = Context.create({
+      user: authResult.valid ? authResult.user : undefined,
+      metadata: { gatewayId: this.config.id },
+    });
 
-    res.writeHead(404, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ error: "Not found" }));
+    await Context.run(ctx, async () => {
+      // Plugin routes — checked before built-in routes, longest prefix first
+      if (await this.dispatchPluginRoute(path, req, res, authResult)) return;
+
+      // All built-in routes require auth
+      if (!authResult.valid) {
+        res.writeHead(401, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "Authentication failed" }));
+        return;
+      }
+
+      // Route requests - all framework-level endpoints
+      switch (path) {
+        case "/events":
+          return this.handleSSE(req, res);
+        case "/send":
+          return this.handleSend(req, res);
+        case "/invoke":
+          return this.handleInvoke(req, res);
+        case "/subscribe":
+          return this.handleSubscribe(req, res);
+        case "/abort":
+          return this.handleAbort(req, res);
+        case "/close":
+          return this.handleCloseEndpoint(req, res);
+        case "/channel":
+        case "/channel/subscribe":
+        case "/channel/publish":
+          return this.handleChannel(req, res);
+      }
+
+      res.writeHead(404, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Not found" }));
+    });
   }
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -857,14 +876,6 @@ export class Gateway extends EventEmitter {
 
   private async handleSSE(req: NodeRequest, res: NodeResponse): Promise<void> {
     const url = new URL(req.url ?? "/", `http://${req.headers.host}`);
-    const token = extractToken(req) ?? url.searchParams.get("token") ?? undefined;
-
-    const authResult = await validateAuth(token, this.config.auth);
-    if (!authResult.valid) {
-      res.writeHead(401, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "Authentication failed" }));
-      return;
-    }
 
     // Setup SSE response
     setSSEHeaders(res);
@@ -918,14 +929,6 @@ export class Gateway extends EventEmitter {
       return;
     }
 
-    const token = extractToken(req);
-    const authResult = await validateAuth(token, this.config.auth);
-    if (!authResult.valid) {
-      res.writeHead(401, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "Authentication failed" }));
-      return;
-    }
-
     const body = await this.parseBody(req);
     log.debug({ body }, "handleSend: parsed body");
     if (!body) {
@@ -958,59 +961,42 @@ export class Gateway extends EventEmitter {
     // Setup streaming response
     setSSEHeaders(res);
 
-    // Run entire send within ALS context so session store, tools, and
-    // the full async generator iteration see the authenticated user.
-    const ctx = Context.create({
-      user: authResult.user,
-      metadata: { sessionId, gatewayId: this.config.id },
-    });
+    try {
+      log.debug({ sessionId }, "handleSend: calling directSend");
+      const events = this.directSend(sessionId, sendInput);
 
-    await Context.run(ctx, async () => {
-      try {
-        log.debug({ sessionId }, "handleSend: calling directSend");
-        const events = this.directSend(sessionId, sendInput);
-
-        for await (const event of events) {
-          log.debug({ eventType: event.type }, "handleSend: got event from directSend");
-          const message: EventMessage = {
-            type: "event",
-            event: event.type as GatewayEventType,
-            sessionId,
-            data: event.data,
-          };
-          res.write(`data: ${JSON.stringify(message)}\n\n`);
-        }
-
-        log.debug({ sessionId }, "handleSend: directSend complete, sending execution_end");
-        res.write(
-          `data: ${JSON.stringify({ type: "event", event: "execution_end", sessionId, data: {} } satisfies EventMessage)}\n\n`,
-        );
-      } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : String(error);
-        const errorStack = error instanceof Error ? error.stack : undefined;
-        console.error("[Gateway handleSend ERROR]", errorMessage, "\n", errorStack);
-        log.error({ errorMessage, errorStack, sessionId }, "handleSend: ERROR in directSend");
-        res.write(
-          `data: ${JSON.stringify({ type: "event", event: "error", sessionId, data: { error: errorMessage } } satisfies EventMessage)}\n\n`,
-        );
-      } finally {
-        res.end();
+      for await (const event of events) {
+        log.debug({ eventType: event.type }, "handleSend: got event from directSend");
+        const message: EventMessage = {
+          type: "event",
+          event: event.type as GatewayEventType,
+          sessionId,
+          data: event.data,
+        };
+        res.write(`data: ${JSON.stringify(message)}\n\n`);
       }
-    });
+
+      log.debug({ sessionId }, "handleSend: directSend complete, sending execution_end");
+      res.write(
+        `data: ${JSON.stringify({ type: "event", event: "execution_end", sessionId, data: {} } satisfies EventMessage)}\n\n`,
+      );
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorStack = error instanceof Error ? error.stack : undefined;
+      console.error("[Gateway handleSend ERROR]", errorMessage, "\n", errorStack);
+      log.error({ errorMessage, errorStack, sessionId }, "handleSend: ERROR in directSend");
+      res.write(
+        `data: ${JSON.stringify({ type: "event", event: "error", sessionId, data: { error: errorMessage } } satisfies EventMessage)}\n\n`,
+      );
+    } finally {
+      res.end();
+    }
   }
 
   private async handleInvoke(req: NodeRequest, res: NodeResponse): Promise<void> {
     if (req.method !== "POST") {
       res.writeHead(405, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: "Method not allowed" }));
-      return;
-    }
-
-    const token = extractToken(req);
-    const authResult = await validateAuth(token, this.config.auth);
-    if (!authResult.valid) {
-      res.writeHead(401, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "Authentication failed" }));
       return;
     }
 
@@ -1051,7 +1037,7 @@ export class Gateway extends EventEmitter {
     }
 
     try {
-      const result = await this.invokeMethod(method, params, authResult.user);
+      const result = await this.invokeMethod(method, params, Context.tryGet()?.user);
       log.debug({ method, result }, "handleInvoke: completed");
 
       // Emit DevTools response event
@@ -1115,14 +1101,6 @@ export class Gateway extends EventEmitter {
       return;
     }
 
-    const token = extractToken(req);
-    const authResult = await validateAuth(token, this.config.auth);
-    if (!authResult.valid) {
-      res.writeHead(401, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "Authentication failed" }));
-      return;
-    }
-
     const body = await this.parseBody(req);
     if (!body) {
       res.writeHead(400, { "Content-Type": "application/json" });
@@ -1181,14 +1159,6 @@ export class Gateway extends EventEmitter {
       return;
     }
 
-    const token = extractToken(req);
-    const authResult = await validateAuth(token, this.config.auth);
-    if (!authResult.valid) {
-      res.writeHead(401, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "Authentication failed" }));
-      return;
-    }
-
     const body = await this.parseBody(req);
     if (!body) {
       res.writeHead(400, { "Content-Type": "application/json" });
@@ -1223,14 +1193,6 @@ export class Gateway extends EventEmitter {
       return;
     }
 
-    const token = extractToken(req);
-    const authResult = await validateAuth(token, this.config.auth);
-    if (!authResult.valid) {
-      res.writeHead(401, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "Authentication failed" }));
-      return;
-    }
-
     const body = await this.parseBody(req);
     if (!body?.sessionId) {
       res.writeHead(400, { "Content-Type": "application/json" });
@@ -1251,14 +1213,6 @@ export class Gateway extends EventEmitter {
     if (req.method !== "POST") {
       res.writeHead(405, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: "Method not allowed" }));
-      return;
-    }
-
-    const token = extractToken(req);
-    const authResult = await validateAuth(token, this.config.auth);
-    if (!authResult.valid) {
-      res.writeHead(401, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "Authentication failed" }));
       return;
     }
 
@@ -2365,19 +2319,25 @@ export class Gateway extends EventEmitter {
    * Match, authenticate, and dispatch a plugin route.
    * Single entry point used by both handleRequest (embedded) and HTTP transport.
    * Returns true if the route was handled (even if auth failed — response already sent).
+   *
+   * When called from handleRequest (embedded), authResult is pre-validated.
+   * When called from HTTP transport, authResult is not provided and auth is
+   * performed inline.
    */
   private async dispatchPluginRoute(
     path: string,
     req: import("http").IncomingMessage,
     res: import("http").ServerResponse,
+    authResult?: AuthResult,
   ): Promise<boolean> {
     const route = this.matchPluginRoute(path);
     if (!route) return false;
 
     if (route.auth) {
-      const token = extractToken(req);
-      const authResult = await validateAuth(token, this.config.auth);
-      if (!authResult.valid) {
+      // Use pre-validated result from handleRequest, or validate inline
+      // (HTTP transport calls this without a pre-validated result)
+      const result = authResult ?? await validateAuth(extractToken(req), this.config.auth);
+      if (!result.valid) {
         res.writeHead(401, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ error: "Authentication failed" }));
         return true;
