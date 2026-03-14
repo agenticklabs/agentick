@@ -457,6 +457,20 @@ export function createOpenAIModel(config: OpenAIAdapterConfig = {}): ModelClass 
             ...(input.dimensions ? { dimensions: input.dimensions } : {}),
           });
 
+          // @ts-ignore
+          if (response.error) {
+            throw new Error(
+              // @ts-ignore
+              `Embedding API returned an error: ${response.error.message ?? "Unknown error"} (model: ${input.model ?? config.embeddingModel!})`,
+            );
+          }
+
+          if (!response.data) {
+            throw new Error(
+              `Embedding API returned no data (model: ${input.model ?? config.embeddingModel!})`,
+            );
+          }
+
           const embeddings = response.data
             .sort((a, b) => a.index - b.index)
             .map((d) => d.embedding);
