@@ -1,5 +1,22 @@
 # @agentick/openai
 
+## 0.14.4
+
+### Patch Changes
+
+- 5024822: fix: guard response.data and response.error in embed function
+
+  OpenAI-compatible endpoints may return an error object in the response
+  body instead of throwing (e.g. when the model doesn't support embeddings).
+  Previously this caused a cryptic `.sort() of undefined` crash.
+
+  Now checks response.error first (with descriptive message), then guards
+  response.data before accessing it.
+
+- Updated dependencies [cc1ee21]
+  - @agentick/core@0.14.4
+  - @agentick/shared@0.14.4
+
 ## 0.14.3
 
 ### Patch Changes
