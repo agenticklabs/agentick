@@ -1,5 +1,15 @@
 # @agentick/tui
 
+## 0.14.4
+
+### Patch Changes
+
+- Updated dependencies [cc1ee21]
+  - @agentick/core@0.14.4
+  - @agentick/shared@0.14.4
+  - @agentick/client@0.14.4
+  - @agentick/react@0.14.4
+
 ## 0.14.3
 
 ### Patch Changes
