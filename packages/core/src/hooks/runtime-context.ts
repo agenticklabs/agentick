@@ -199,10 +199,14 @@ export function storeHasPendingData(store: RuntimeStore): boolean {
 
 /**
  * Wait for all pending data fetches in store.
+ *
+ * Uses `allSettled` so a single rejected fetch doesn't prevent other
+ * fetches from resolving. Rejected fetches are handled by useData's
+ * rejection handler (which caches the error and cleans up pendingFetches).
  */
 export async function storeResolvePendingData(store: RuntimeStore): Promise<void> {
   if (store.pendingFetches.size === 0) return;
-  await Promise.all(store.pendingFetches.values());
+  await Promise.allSettled(store.pendingFetches.values());
 }
 
 /**

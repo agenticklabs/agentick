@@ -12,6 +12,9 @@ import { useRuntimeStore, type HookPersistenceOptions } from "./runtime-context.
  */
 export interface UseDataOptions extends HookPersistenceOptions {}
 
+/** Sentinel value marking a cached fetch error. */
+const DATA_ERROR = Symbol("useData:error");
+
 /**
  * Fetch and cache async data.
  *
@@ -19,6 +22,11 @@ export interface UseDataOptions extends HookPersistenceOptions {}
  * 1. First render: throws a promise (signals need for data)
  * 2. Engine catches, resolves all pending fetches
  * 3. Second render: returns cached value
+ *
+ * If the fetcher rejects, the error is cached for the current deps.
+ * The error is re-thrown synchronously on the next render (not as a
+ * promise), so the compiler loop terminates cleanly. When deps change
+ * the cache invalidates and a fresh fetch is attempted.
  *
  * @example
  * ```tsx
@@ -63,6 +71,11 @@ export function useData<T>(
     const depsChanged = deps ? !cached.deps || !shallowEqual(cached.deps, deps) : false;
 
     if (!depsChanged) {
+      // Cached error — re-throw synchronously (not as promise) so the
+      // compiler loop sees storeHasPendingData → false and exits cleanly.
+      if (cached.value === DATA_ERROR) {
+        throw (cached as any).error;
+      }
       return cached.value as T;
     }
 
@@ -72,11 +85,28 @@ export function useData<T>(
 
   // Check if fetch already pending
   if (!store.pendingFetches.has(key)) {
-    const promise = fetcher().then((value) => {
-      store.dataCache.set(key, { value, tick, deps, persist: options?.persist });
-      store.pendingFetches.delete(key);
-      return value;
-    });
+    const promise = fetcher().then(
+      (value) => {
+        store.dataCache.set(key, { value, tick, deps, persist: options?.persist });
+        store.pendingFetches.delete(key);
+        return value;
+      },
+      (error) => {
+        // Cache the error so subsequent renders fail fast instead of
+        // leaving a stale rejected promise in pendingFetches forever.
+        store.dataCache.set(key, {
+          value: DATA_ERROR,
+          error,
+          tick,
+          deps,
+          persist: false,
+        } as any);
+        store.pendingFetches.delete(key);
+        // Don't re-throw: the promise resolves (to undefined), so
+        // storeResolvePendingData / Promise.all won't reject. The
+        // error surfaces on the next render via the cache check above.
+      },
+    );
     store.pendingFetches.set(key, promise);
   }
 

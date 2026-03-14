@@ -520,7 +520,7 @@ describe("FiberCompiler", () => {
       expect(fetchFn).toHaveBeenCalledTimes(2);
     });
 
-    it("should handle fetcher errors", async () => {
+    it("should handle fetcher errors gracefully (no render loop)", async () => {
       const error = new Error("Fetch failed");
       const fetchFn = vi.fn().mockRejectedValue(error);
 
@@ -531,9 +531,14 @@ describe("FiberCompiler", () => {
 
       const tickState = createMockTickState();
 
-      await expect(
-        compiler.compile(React.createElement(ErrorComponent), tickState),
-      ).rejects.toThrow("Fetch failed");
+      // Compile should complete without hanging. The failing useData
+      // caches the error and the component is skipped on re-render.
+      const compiled = await compiler.compile(React.createElement(ErrorComponent), tickState);
+
+      // Fetcher only called once — error is cached, not retried
+      expect(fetchFn).toHaveBeenCalledTimes(1);
+      // The failing component's Section should be absent from output
+      expect(compiled.sections.has("error")).toBe(false);
     });
 
     it("should handle multiple concurrent data fetches", async () => {
