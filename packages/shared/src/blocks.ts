@@ -92,9 +92,12 @@ export interface Base64Source extends BaseMediaSource {
   readonly data: string;
 }
 
-export interface FileIdSource extends BaseMediaSource {
-  readonly type: MediaSourceType.FILE_ID | "file_id";
+export interface FileReferenceSource extends BaseMediaSource {
+  readonly type: MediaSourceType.REFERENCE | "reference";
   readonly fileId: string;
+  readonly mimeType?: string;
+  readonly fileName?: string;
+  readonly size?: number;
 }
 
 export interface S3Source extends BaseMediaSource {

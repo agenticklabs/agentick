@@ -80,7 +80,7 @@ export type MessageRoles = "user" | "assistant" | "system" | "tool" | "event" | 
 export enum MediaSourceType {
   URL = "url",
   BASE64 = "base64",
-  FILE_ID = "file_id", // Reference to uploaded file
+  REFERENCE = "reference",
   S3 = "s3",
   GCS = "gcs",
 }
