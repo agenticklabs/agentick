@@ -114,7 +114,7 @@ export interface GCSSource extends BaseMediaSource {
   readonly project?: string;
 }
 
-export type MediaSource = UrlSource | Base64Source | FileIdSource | S3Source | GCSSource;
+export type MediaSource = UrlSource | Base64Source | FileReferenceSource | S3Source | GCSSource;
 
 // ============================================================================
 // Content Blocks
