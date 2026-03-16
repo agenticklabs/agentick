@@ -1,5 +1,11 @@
 # @agentick/shared
 
+## 0.14.5
+
+### Patch Changes
+
+- d0e35be: updated file reference type
+
 ## 0.14.4
 
 ## 0.14.3
