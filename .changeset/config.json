@@ -18,6 +18,7 @@
       "@agentick/tui",
       "@agentick/sandbox",
       "@agentick/sandbox-local",
+      "@agentick/sandbox-docker",
       "@agentick/agent",
       "@agentick/cli",
       "@agentick/devtools",
