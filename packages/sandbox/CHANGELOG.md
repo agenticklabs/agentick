@@ -1,5 +1,12 @@
 # @agentick/sandbox
 
+## 0.14.7
+
+### Patch Changes
+
+- 62c5e53: fix: SandboxTools returns a Fragment instead of an array so it can be used as a JSX component
+  - @agentick/core@0.14.7
+
 ## 0.14.6
 
 ### Patch Changes
