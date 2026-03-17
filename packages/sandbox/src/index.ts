@@ -44,10 +44,12 @@ export { Bash, ReadFile, WriteFile, EditFile };
 const h = React.createElement;
 
 export function SandboxTools() {
-  return [
+  return h(
+    React.Fragment,
+    null,
     h(Bash, { key: "bash" }),
     h(ReadFile, { key: "read-file" }),
     h(WriteFile, { key: "write-file" }),
     h(EditFile, { key: "edit-file" }),
-  ];
+  );
 }
