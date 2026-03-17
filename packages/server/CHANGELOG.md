@@ -1,5 +1,17 @@
 # @agentick/server
 
+## 0.14.6
+
+### Patch Changes
+
+- 6b72302: fix: add "default" export condition to publishConfig exports
+
+  Node's CJS resolver needs "default" or "require" in the exports map. Without it, require() throws ERR_PACKAGE_PATH_NOT_EXPORTED. Fixes intermittent crashes when nx's node executor loads packages via require().
+
+- Updated dependencies [6b72302]
+  - @agentick/kernel@0.14.6
+  - @agentick/shared@0.14.6
+
 ## 0.14.5
 
 ### Patch Changes

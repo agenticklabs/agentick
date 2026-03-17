@@ -1,5 +1,13 @@
 # @agentick/react
 
+## 0.14.6
+
+### Patch Changes
+
+- Updated dependencies [6b72302]
+  - @agentick/shared@0.14.6
+  - @agentick/client@0.14.6
+
 ## 0.14.5
 
 ### Patch Changes
