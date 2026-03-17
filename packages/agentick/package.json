@@ -41,15 +41,18 @@
     "exports": {
       ".": {
         "types": "./dist/index.d.ts",
-        "import": "./dist/index.js"
+        "import": "./dist/index.js",
+        "default": "./dist/index.js"
       },
       "./jsx-runtime": {
         "types": "./dist/jsx-runtime.d.ts",
-        "import": "./dist/jsx-runtime.js"
+        "import": "./dist/jsx-runtime.js",
+        "default": "./dist/jsx-runtime.js"
       },
       "./jsx-dev-runtime": {
         "types": "./dist/jsx-runtime.d.ts",
-        "import": "./dist/jsx-runtime.js"
+        "import": "./dist/jsx-runtime.js",
+        "default": "./dist/jsx-runtime.js"
       }
     },
     "main": "./dist/index.js",
