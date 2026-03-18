@@ -1,5 +1,13 @@
 # agentick
 
+## 0.14.8
+
+### Patch Changes
+
+- @agentick/core@0.14.8
+- @agentick/agent@0.14.8
+- @agentick/guardrails@0.14.8
+
 ## 0.14.7
 
 ### Patch Changes
