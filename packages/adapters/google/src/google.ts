@@ -462,14 +462,16 @@ export function convertBlocksToGoogleParts(blocks: ContentBlock[]): any[] {
       case "tool_result":
         const resultContent = block.content;
         const resultText =
-          typeof resultContent === "string"
-            ? resultContent
-            : Array.isArray(resultContent)
+          resultContent == null
+            ? undefined
+            : typeof resultContent === "string"
               ? resultContent
-                  .filter((c: any) => c.type === "text")
-                  .map((c: any) => c.text)
-                  .join("\n") || JSON.stringify(resultContent)
-              : JSON.stringify(resultContent ?? "");
+              : Array.isArray(resultContent)
+                ? resultContent
+                    .filter((c: any) => c.type === "text")
+                    .map((c: any) => c.text)
+                    .join("\n") || JSON.stringify(resultContent)
+                : JSON.stringify(resultContent);
 
         parts.push({
           functionResponse: {
