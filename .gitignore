@@ -51,3 +51,6 @@ plans/
 docs/
 
 !website/docs/
+
+# ignore MCP
+.mcp.json

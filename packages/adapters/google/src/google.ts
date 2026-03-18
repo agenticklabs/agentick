@@ -460,11 +460,16 @@ export function convertBlocksToGoogleParts(blocks: ContentBlock[]): any[] {
         break;
 
       case "tool_result":
+        const resultContent = block.content;
         const resultText =
-          block.content
-            ?.filter((c: any) => c.type === "text")
-            .map((c: any) => c.text)
-            .join("\n") || JSON.stringify(block.content);
+          typeof resultContent === "string"
+            ? resultContent
+            : Array.isArray(resultContent)
+              ? resultContent
+                  .filter((c: any) => c.type === "text")
+                  .map((c: any) => c.text)
+                  .join("\n") || JSON.stringify(resultContent)
+              : JSON.stringify(resultContent ?? "");
 
         parts.push({
           functionResponse: {
