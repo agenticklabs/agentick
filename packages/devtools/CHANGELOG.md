@@ -1,5 +1,12 @@
 # @agentick/devtools
 
+## 0.14.9
+
+### Patch Changes
+
+- c93b63d: add default export
+  - @agentick/shared@0.14.9
+
 ## 0.14.8
 
 ### Patch Changes
