@@ -55,7 +55,7 @@
   },
   "devDependencies": {
     "@types/node-cron": "^3.0.11",
-    "@types/react": "^19.0.0",
+    "@types/react": "^19.2.14",
     "react": "^19.0.0",
     "typescript": "^5.8.3"
   },
