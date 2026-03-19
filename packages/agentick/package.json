@@ -9,6 +9,7 @@
     "jsx",
     "react"
   ],
+  "homepage": "https://agenticklabs.github.io/agentick/",
   "license": "MIT",
   "author": "Ryan Lindgren",
   "repository": {
@@ -16,7 +17,6 @@
     "url": "git+https://github.com/agenticklabs/agentick.git",
     "directory": "packages/agentick"
   },
-  "homepage": "https://agenticklabs.github.io/agentick/",
   "files": [
     "dist"
   ],

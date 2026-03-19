@@ -2336,7 +2336,7 @@ export class Gateway extends EventEmitter {
     if (route.auth) {
       // Use pre-validated result from handleRequest, or validate inline
       // (HTTP transport calls this without a pre-validated result)
-      const result = authResult ?? await validateAuth(extractToken(req), this.config.auth);
+      const result = authResult ?? (await validateAuth(extractToken(req), this.config.auth));
       if (!result.valid) {
         res.writeHead(401, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ error: "Authentication failed" }));

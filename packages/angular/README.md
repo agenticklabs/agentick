@@ -39,20 +39,20 @@ export class ChatComponent {
 ### ChatSessionService Signals
 
 ```ts
-chat.messages()          // readonly ChatMessage[]
-chat.chatMode()          // "idle" | "streaming" | "confirming_tool"
-chat.isExecuting()       // boolean
-chat.toolConfirmation()  // ToolConfirmationState | null
-chat.lastSubmitted()     // string | null
-chat.queued()            // readonly Message[]
-chat.mode()              // "steer" | "queue"
-chat.error()             // { message, name } | null
-chat.attachments()       // readonly Attachment[]
+chat.messages(); // readonly ChatMessage[]
+chat.chatMode(); // "idle" | "streaming" | "confirming_tool"
+chat.isExecuting(); // boolean
+chat.toolConfirmation(); // ToolConfirmationState | null
+chat.lastSubmitted(); // string | null
+chat.queued(); // readonly Message[]
+chat.mode(); // "steer" | "queue"
+chat.error(); // { message, name } | null
+chat.attachments(); // readonly Attachment[]
 
 // Computed
-chat.isIdle()            // boolean
-chat.isStreaming()       // boolean
-chat.isConfirmingTool()  // boolean
+chat.isIdle(); // boolean
+chat.isStreaming(); // boolean
+chat.isConfirmingTool(); // boolean
 ```
 
 ### ChatSessionService Actions
@@ -92,12 +92,12 @@ async loadOlderMessages(cursor: string) {
 
 ```ts
 provideChatSession({
-  sessionId: "conv-123",          // Connect to existing session
-  initialMessages: [],            // Pre-loaded messages from DB
-  renderMode: "streaming",        // "streaming" | "block" | "message"
-  confirmationPolicy: undefined,  // Auto-approve/deny policy
-  autoSubscribe: true,            // Subscribe on construction (default)
-})
+  sessionId: "conv-123", // Connect to existing session
+  initialMessages: [], // Pre-loaded messages from DB
+  renderMode: "streaming", // "streaming" | "block" | "message"
+  confirmationPolicy: undefined, // Auto-approve/deny policy
+  autoSubscribe: true, // Subscribe on construction (default)
+});
 ```
 
 ## AgentickService (Low-Level)
@@ -152,13 +152,13 @@ service.eventsOfType(...types)  // Filtered event Observable
 ### Signals
 
 ```ts
-service.connectionState()  // "disconnected" | "connecting" | "connected" | "error"
-service.sessionId()        // string | undefined
-service.streamingText()    // { text, isStreaming }
-service.text()             // string (computed)
-service.isStreaming()       // boolean (computed)
-service.isConnected()      // boolean (computed)
-service.isConnecting()     // boolean (computed)
+service.connectionState(); // "disconnected" | "connecting" | "connected" | "error"
+service.sessionId(); // string | undefined
+service.streamingText(); // { text, isStreaming }
+service.text(); // string (computed)
+service.isStreaming(); // boolean (computed)
+service.isConnected(); // boolean (computed)
+service.isConnecting(); // boolean (computed)
 ```
 
 ### RxJS Observables
@@ -166,12 +166,12 @@ service.isConnecting()     // boolean (computed)
 All signals are also available as observables via `toObservable()`:
 
 ```ts
-service.connectionState$
-service.isConnected$
-service.streamingText$
-service.text$
-service.isStreaming$
-service.events$
+service.connectionState$;
+service.isConnected$;
+service.streamingText$;
+service.text$;
+service.isStreaming$;
+service.events$;
 ```
 
 ## Provider Pattern

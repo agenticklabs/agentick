@@ -24,6 +24,7 @@
     "../packages/sandbox",
     "../packages/sandbox-local",
     "../packages/sandbox-docker",
+    "../packages/sandbox-secure-exec",
     "../packages/connector",
     "../packages/connector-imessage",
     "../packages/connector-telegram",

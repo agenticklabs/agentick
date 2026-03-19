@@ -32,6 +32,7 @@
       "@agentick/connector-imessage",
       "@agentick/connector-telegram",
       "@agentick/huggingface",
+      "@agentick/sandbox-secure-exec",
       "@agentick/scheduler",
       "@agentick/secrets"
     ]
