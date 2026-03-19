@@ -1,5 +1,12 @@
 # @agentick/client
 
+## 0.14.10
+
+### Patch Changes
+
+- 7e117f3: scope message events to current session
+  - @agentick/shared@0.14.10
+
 ## 0.14.9
 
 ### Patch Changes
