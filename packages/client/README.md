@@ -298,7 +298,7 @@ chat.flush(); // Flush next queued message
 chat.respondToConfirmation({ approved: true });
 chat.clearMessages();
 chat.prependMessages(olderMessages); // Load older history on scroll-back
-chat.appendMessages(newMessages);    // Initial load or external sources
+chat.appendMessages(newMessages); // Initial load or external sources
 
 // Subscribe
 const unsub = chat.onStateChange(() => {
@@ -437,7 +437,7 @@ const log = new MessageLog(client, {
 log.messages; // ChatMessage[]
 log.pushUserMessage("Hello"); // Immediate (progressive modes)
 log.prependMessages(olderMessages); // Paginated history (scroll-back)
-log.appendMessages(newMessages);    // Initial load or external sources
+log.appendMessages(newMessages); // Initial load or external sources
 log.clear();
 log.destroy();
 ```

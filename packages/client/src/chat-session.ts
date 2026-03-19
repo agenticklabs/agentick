@@ -96,7 +96,18 @@ export class ChatSession<TMode extends string = ChatMode> {
       }
 
       this._unsubscribeEvents = accessor.onEvent((event) => {
+        // User callback receives ALL events (including child spawns)
+        // so it can build the live execution graph.
         this._onEvent?.(event);
+
+        // MessageLog, SteeringManager, and local state only process
+        // parent events. Child events (spawnPath set) are internal to
+        // sub-agent execution — they don't belong in the parent chat.
+        if (event.spawnPath?.length) {
+          this._notify();
+          return;
+        }
+
         this._steering.processEvent(event);
         this._messageLog.processEvent(event);
 
