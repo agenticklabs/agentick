@@ -54,9 +54,11 @@ describe.skipIf(!isCompatible)("secureExecProvider", () => {
       expect(result.exitCode).toBe(42);
     });
 
-    it("preserves state across exec calls (persistent runtime)", async () => {
-      await sandbox.exec("globalThis.__testCounter = 1");
-      const result = await sandbox.exec("console.log(globalThis.__testCounter)");
+    it("persists files across exec calls (state via VFS)", async () => {
+      await sandbox.exec("require('fs').writeFileSync('/workspace/counter.txt', '1')");
+      const result = await sandbox.exec(
+        "console.log(require('fs').readFileSync('/workspace/counter.txt', 'utf8'))",
+      );
       expect(result.stdout).toContain("1");
     });
 
