@@ -1,5 +1,13 @@
 # @agentick/google
 
+## 0.14.13
+
+### Patch Changes
+
+- 390175e: ensure google tool calls have unique ids
+  - @agentick/shared@0.14.13
+  - @agentick/core@0.14.13
+
 ## 0.14.12
 
 ### Patch Changes
