@@ -1,6 +1,6 @@
 {
   "name": "@agentick/react",
-  "version": "0.14.11",
+  "version": "0.14.12",
   "description": "React hooks and components for Agentick applications",
   "repository": {
     "type": "git",

@@ -1,5 +1,13 @@
 # @agentick/core
 
+## 0.14.12
+
+### Patch Changes
+
+- 04451f0: ensure all adapters emit streaming tool call events
+  - @agentick/kernel@0.14.12
+  - @agentick/shared@0.14.12
+
 ## 0.14.11
 
 ### Patch Changes
