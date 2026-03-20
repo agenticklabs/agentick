@@ -372,6 +372,7 @@ describe("convertBlocksToGoogleParts", () => {
       expect(result).toHaveLength(1);
       expect(result[0]).toEqual({
         functionCall: {
+          id: "call-123",
           name: "calculator",
           args: { expression: "2+2" },
         },
@@ -391,6 +392,7 @@ describe("convertBlocksToGoogleParts", () => {
 
       expect(result[0]).toEqual({
         functionCall: {
+          id: "call-456",
           name: "get_time",
           args: {},
         },

@@ -8,6 +8,7 @@
 import type { GenerateContentResponse } from "@google/genai";
 import { GoogleGenAI, type GenerateContentParameters, FinishReason } from "@google/genai";
 
+import { randomUUID } from "node:crypto";
 import {
   createAdapter,
   type AdapterDelta,
@@ -157,14 +158,16 @@ export function createGoogleModel(config: GoogleAdapterConfig = {}): ModelClass 
             return { type: "text", delta: part.text };
           }
 
-          // Function calls — use API's id when present so functionResponse correlates correctly
+          // Function calls — use API's id when present, generate UUID otherwise.
+          // Google doesn't always provide fc.id. Using fc.name as fallback
+          // causes correlation collisions when the same tool is called multiple times.
           if (part.functionCall) {
             const fc = part.functionCall as {
               name?: string;
               id?: string;
               args?: Record<string, unknown>;
             };
-            const id = fc.id ?? fc.name ?? "";
+            const id = fc.id || randomUUID();
             return {
               type: "tool_call",
               id,
@@ -453,6 +456,7 @@ export function convertBlocksToGoogleParts(blocks: ContentBlock[]): any[] {
       case "tool_use":
         parts.push({
           functionCall: {
+            id: block.toolUseId,
             name: block.name,
             args: block.input,
           },
