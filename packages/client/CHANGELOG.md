@@ -1,5 +1,12 @@
 # @agentick/client
 
+## 0.14.11
+
+### Patch Changes
+
+- c7d36d3: ensure token passed with /events as query param
+  - @agentick/shared@0.14.11
+
 ## 0.14.10
 
 ### Patch Changes

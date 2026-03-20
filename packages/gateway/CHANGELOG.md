@@ -1,5 +1,14 @@
 # @agentick/gateway
 
+## 0.14.11
+
+### Patch Changes
+
+- @agentick/kernel@0.14.11
+- @agentick/shared@0.14.11
+- @agentick/core@0.14.11
+- @agentick/server@0.14.11
+
 ## 0.14.10
 
 ### Patch Changes
