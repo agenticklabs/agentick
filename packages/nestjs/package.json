@@ -1,6 +1,6 @@
 {
   "name": "@agentick/nestjs",
-  "version": "0.14.12",
+  "version": "0.14.13",
   "description": "NestJS module for Agentick servers",
   "keywords": [
     "agent",
