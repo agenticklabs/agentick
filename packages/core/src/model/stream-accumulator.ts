@@ -450,11 +450,67 @@ export class StreamAccumulator {
       }
 
       case "tool_call": {
-        // Complete tool call in one event (non-streamed)
-        // Auto-start message if not started
+        // Complete tool call in one event (non-streamed adapters like Google).
+        // Emit the full start → end → tool_call sequence so downstream consumers
+        // get a consistent event stream regardless of adapter streaming behavior.
         if (!this.messageStarted) {
           events.push(...this.push({ type: "message_start" }));
         }
+
+        // End active text/reasoning blocks (same as tool_call_start does)
+        if (this.textStarted) {
+          const completedAt = new Date().toISOString();
+          events.push({
+            type: "content_end",
+            ...createEventBase(tick),
+            blockType: BlockType.TEXT,
+            blockIndex: this.blockIndex,
+            metadata: this.contentMetadata,
+          } as ContentEndEvent);
+          events.push({
+            type: "content",
+            ...createEventBase(tick),
+            blockIndex: this.blockIndex,
+            content: { type: "text", text: this.currentBlockText },
+            metadata: this.contentMetadata,
+            startedAt: this.currentBlockStartedAt || completedAt,
+            completedAt,
+          } as ContentEvent);
+          this.orderedContent.push({ type: "text", text: this.currentBlockText });
+          this.textStarted = false;
+          this.currentBlockText = "";
+          this.currentBlockStartedAt = undefined;
+          this.contentMetadata = undefined;
+          this.blockIndex++;
+        }
+
+        if (this.reasoningStarted) {
+          const completedAt = new Date().toISOString();
+          events.push({
+            type: "reasoning_end",
+            ...createEventBase(tick),
+            blockIndex: this.blockIndex,
+            metadata: this.reasoningMetadata,
+          } as ReasoningEndEvent);
+          events.push({
+            type: "reasoning",
+            ...createEventBase(tick),
+            blockIndex: this.blockIndex,
+            reasoning: this.currentReasoningText,
+            metadata: this.reasoningMetadata,
+            startedAt: this.currentReasoningStartedAt || completedAt,
+            completedAt,
+          } as ReasoningEvent);
+          this.reasoningStarted = false;
+          this.currentReasoningText = "";
+          this.currentReasoningStartedAt = undefined;
+          this.reasoningMetadata = undefined;
+          this.blockIndex++;
+        }
+
+        const blockIndex = this.blockIndex++;
+        const startedAt = this.messageStartedAt || new Date().toISOString();
+        const completedAt = new Date().toISOString();
 
         this.completedToolCalls.push({
           id: delta.id,
@@ -463,14 +519,29 @@ export class StreamAccumulator {
         });
 
         events.push({
+          type: "tool_call_start",
+          ...createEventBase(tick),
+          callId: delta.id,
+          name: delta.name,
+          blockIndex,
+        } as ToolCallStartEvent);
+
+        events.push({
+          type: "tool_call_end",
+          ...createEventBase(tick),
+          callId: delta.id,
+          blockIndex,
+        } as ToolCallEndEvent);
+
+        events.push({
           type: "tool_call",
           ...createEventBase(tick),
           callId: delta.id,
           name: delta.name,
           input: delta.input,
-          blockIndex: this.blockIndex++,
-          startedAt: this.messageStartedAt || new Date().toISOString(),
-          completedAt: new Date().toISOString(),
+          blockIndex,
+          startedAt,
+          completedAt,
         } as ToolCallEvent);
         break;
       }
