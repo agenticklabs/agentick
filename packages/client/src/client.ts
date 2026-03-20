@@ -901,7 +901,10 @@ export class AgentickClient {
 
     const baseUrl = this.config.baseUrl.replace(/\/$/, "");
     const eventsPath = this.config.paths?.events ?? "/events";
-    const url = `${baseUrl}${eventsPath}`;
+    // EventSource doesn't support custom headers — pass auth token as query param
+    const token = this.config.token;
+    const params = token ? `?token=${encodeURIComponent(token)}` : "";
+    const url = `${baseUrl}${eventsPath}${params}`;
 
     return new Promise((resolve, reject) => {
       try {
