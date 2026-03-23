@@ -863,6 +863,8 @@ export class Gateway extends EventEmitter {
         case "/channel/subscribe":
         case "/channel/publish":
           return this.handleChannel(req, res);
+        case "/tool-response":
+          return this.handleToolResponse(req, res);
       }
 
       res.writeHead(404, { "Content-Type": "application/json" });
@@ -938,6 +940,8 @@ export class Gateway extends EventEmitter {
     }
 
     const sessionId = (body.sessionId as string) ?? "main";
+    if (!await this.checkSessionAccess(sessionId, "send", res)) return;
+
     const rawMessages = body.messages;
     log.debug({ sessionId, hasMessages: !!rawMessages }, "handleSend: extracted params");
 
@@ -1169,9 +1173,10 @@ export class Gateway extends EventEmitter {
     const { sessionId, reason } = body as { sessionId?: string; reason?: string };
     if (!sessionId) {
       res.writeHead(400, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "Missing sessionId" }));
+      res.end(JSON.stringify({ error: "sessionId is required" }));
       return;
     }
+    if (!await this.checkSessionAccess(sessionId, "abort", res)) return;
 
     const managed = this.sessions.get(sessionId);
     if (!managed?.coreSession) {
@@ -1200,7 +1205,10 @@ export class Gateway extends EventEmitter {
       return;
     }
 
-    await this.sessions.close(body.sessionId as string);
+    const sessionId = body.sessionId as string;
+    if (!await this.checkSessionAccess(sessionId, "close", res)) return;
+
+    await this.sessions.close(sessionId);
 
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ ok: true }));
@@ -1249,6 +1257,48 @@ export class Gateway extends EventEmitter {
     } else {
       res.writeHead(404, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: "Unknown channel operation" }));
+    }
+  }
+
+  /**
+   * Tool confirmation response endpoint.
+   * Handles POST /tool-response with { sessionId, toolUseId, result }.
+   */
+  private async handleToolResponse(req: NodeRequest, res: NodeResponse): Promise<void> {
+    if (req.method !== "POST") {
+      res.writeHead(405, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Method not allowed" }));
+      return;
+    }
+
+    const body = await this.parseBody(req);
+    if (!body) {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Invalid request body" }));
+      return;
+    }
+
+    const { sessionId, toolUseId, result } = body as {
+      sessionId?: string;
+      toolUseId?: string;
+      result?: { approved: boolean; always?: boolean; reason?: string };
+    };
+
+    if (!sessionId || !toolUseId || !result) {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Missing sessionId, toolUseId, or result" }));
+      return;
+    }
+
+    if (!await this.checkSessionAccess(sessionId, "tool-response", res)) return;
+
+    try {
+      await this.respondToConfirmation(sessionId, toolUseId, result);
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: true }));
+    } catch (error) {
+      res.writeHead(500, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: error instanceof Error ? error.message : "Unknown error" }));
     }
   }
 
@@ -1356,6 +1406,36 @@ export class Gateway extends EventEmitter {
       channel: channelName,
       payload,
     });
+  }
+
+  /**
+   * Check session-level authorization. Returns true if authorized, false if denied (sends 403).
+   * If no authorizeSession callback is configured, always returns true.
+   */
+  private async checkSessionAccess(
+    sessionId: string,
+    action: "send" | "subscribe" | "tool-response" | "abort" | "close" | "channel",
+    res: NodeResponse,
+  ): Promise<boolean> {
+    const authorizeSession = this.config.auth && "authorizeSession" in this.config.auth
+      ? (this.config.auth as any).authorizeSession
+      : undefined;
+    if (!authorizeSession) return true;
+
+    const user = Context.get().user;
+    if (!user) {
+      res.writeHead(403, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Access denied" }));
+      return false;
+    }
+
+    const allowed = await authorizeSession(user, sessionId, action);
+    if (!allowed) {
+      res.writeHead(403, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Access denied to session" }));
+      return false;
+    }
+    return true;
   }
 
   private parseBody(
