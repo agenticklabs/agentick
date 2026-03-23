@@ -33,8 +33,11 @@ export interface SandboxProps {
   /** Environment variables. Functions are resolved at creation time. */
   env?: Record<string, string | (() => string)>;
 
-  /** Post-creation setup callback. */
+  /** Post-creation setup callback. Runs after sandbox creation, before tools are available. */
   setup?: (sandbox: SandboxHandle) => Promise<void>;
+
+  /** Pre-destroy teardown callback. Runs while sandbox is still alive — readFile, readDir, exec all work. */
+  teardown?: (sandbox: SandboxHandle) => Promise<void>;
 
   /** Resource constraints. */
   limits?: ResourceLimits;
@@ -66,6 +69,7 @@ export function Sandbox({
   allow,
   env,
   setup,
+  teardown,
   limits,
   children,
 }: SandboxProps): React.ReactElement {
@@ -90,8 +94,15 @@ export function Sandbox({
     return sb;
   });
 
-  useOnUnmount(() => {
-    sandbox.destroy();
+  useOnUnmount(async () => {
+    if (teardown) {
+      try {
+        await teardown(sandbox);
+      } catch {
+        // Best-effort teardown — don't block destroy
+      }
+    }
+    await sandbox.destroy();
   });
 
   return <SandboxContext.Provider value={sandbox}>{children}</SandboxContext.Provider>;
