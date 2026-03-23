@@ -1,5 +1,12 @@
 # @agentick/sandbox
 
+## 0.14.14
+
+### Patch Changes
+
+- 30a8174: auth and sandbox teardown
+  - @agentick/core@0.14.14
+
 ## 0.14.13
 
 ### Patch Changes

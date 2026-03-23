@@ -1,5 +1,13 @@
 # @agentick/server
 
+## 0.14.14
+
+### Patch Changes
+
+- 30a8174: auth and sandbox teardown
+  - @agentick/kernel@0.14.14
+  - @agentick/shared@0.14.14
+
 ## 0.14.13
 
 ### Patch Changes
