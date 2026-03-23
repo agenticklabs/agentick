@@ -30,6 +30,19 @@ interface AuthBaseOptions {
    * Return the complete UserContext that will be available in methods.
    */
   hydrateUser?: (authResult: AuthResult) => Promise<UserContext>;
+
+  /**
+   * Authorize access to a session after authentication.
+   * Called before any session-accessing operation (send, subscribe, tool-response, abort, close).
+   * Return true to allow, false to deny (403).
+   *
+   * If not provided, all authenticated users can access all sessions.
+   */
+  authorizeSession?: (
+    user: UserContext,
+    sessionId: string,
+    action: "send" | "subscribe" | "tool-response" | "abort" | "close" | "channel",
+  ) => Promise<boolean>;
 }
 
 /**
