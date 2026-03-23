@@ -25,5 +25,9 @@
     "🧪 Testing: Use @agentick/shared/testing utilities",
     "📦 Monorepo: pnpm + Turborepo, packages are in /packages",
     "⚙️ Local permissions: Add to .claude/settings.local.json (gitignored)"
-  ]
+  ],
+  "attribution": {
+    "commit": "",
+    "pr": ""
+  }
 }
