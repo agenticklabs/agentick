@@ -242,7 +242,7 @@ export class StreamAccumulator {
       case "message_start": {
         if (!this._messageStarted) {
           this._messageStarted = true;
-          this._messageStartedAt = new Date().toISOString();
+          this.messageStartedAt = new Date().toISOString();
           if (delta.model) this.modelId = delta.model;
           events.push({
             type: "message_start",
@@ -452,7 +452,7 @@ export class StreamAccumulator {
             name: tc.name,
             input,
             blockIndex: tc.blockIndex,
-            startedAt: this._messageStartedAt || new Date().toISOString(),
+            startedAt: this.messageStartedAt || new Date().toISOString(),
             completedAt: new Date().toISOString(),
           } as ToolCallEvent);
         }
@@ -519,7 +519,7 @@ export class StreamAccumulator {
         }
 
         const blockIndex = this.blockIndex++;
-        const startedAt = this._messageStartedAt || new Date().toISOString();
+        const startedAt = this.messageStartedAt || new Date().toISOString();
         const completedAt = new Date().toISOString();
 
         this.completedToolCalls.push({
@@ -640,7 +640,7 @@ export class StreamAccumulator {
             name: tc.name,
             input,
             blockIndex: tc.blockIndex,
-            startedAt: this._messageStartedAt || new Date().toISOString(),
+            startedAt: this.messageStartedAt || new Date().toISOString(),
             completedAt: new Date().toISOString(),
           } as ToolCallEvent);
         }
@@ -784,7 +784,7 @@ export class StreamAccumulator {
 
     return {
       model: this.modelId || this.options.modelId || "unknown",
-      createdAt: this._messageStartedAt || new Date().toISOString(),
+      createdAt: this.messageStartedAt || new Date().toISOString(),
       message,
       messages: [message],
       usage: this.usage,
