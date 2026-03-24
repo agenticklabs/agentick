@@ -1,5 +1,12 @@
 # @agentick/sandbox-local
 
+## 0.14.14
+
+### Patch Changes
+
+- Updated dependencies [30a8174]
+  - @agentick/sandbox@0.14.14
+
 ## 0.14.13
 
 ### Patch Changes
