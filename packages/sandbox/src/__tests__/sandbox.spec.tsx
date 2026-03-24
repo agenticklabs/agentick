@@ -120,6 +120,121 @@ describe("<Sandbox> component", () => {
 
     await session.close();
   });
+
+  it("calls setup after creation, before tools run", async () => {
+    const callOrder: string[] = [];
+    const mockSandbox = createMockSandbox({
+      writeFile: vi.fn().mockImplementation(async () => {
+        callOrder.push("writeFile");
+      }),
+    });
+    const provider = createMockProvider({
+      create: vi.fn().mockImplementation(async () => {
+        callOrder.push("create");
+        return mockSandbox;
+      }),
+    });
+
+    const setup = vi.fn().mockImplementation(async (sb: any) => {
+      callOrder.push("setup");
+      await sb.writeFile("/workspace/memory/test.md", "hello");
+    });
+
+    const model = createModel();
+
+    function Agent() {
+      return (
+        <Sandbox provider={provider} setup={setup}>
+          <Section id="system" audience="model">
+            Test
+          </Section>
+          <Model model={model} />
+        </Sandbox>
+      );
+    }
+
+    const app = createApp(Agent, { maxTicks: 1 });
+    const session = await app.session();
+    await session.render({}).result;
+
+    expect(setup).toHaveBeenCalledWith(mockSandbox);
+    expect(callOrder).toEqual(["create", "setup", "writeFile"]);
+
+    await session.close();
+  });
+
+  it("calls teardown before destroy on session close", async () => {
+    const callOrder: string[] = [];
+    const mockSandbox = createMockSandbox({
+      readFile: vi.fn().mockImplementation(async () => {
+        callOrder.push("readFile");
+        return "content";
+      }),
+      destroy: vi.fn().mockImplementation(async () => {
+        callOrder.push("destroy");
+      }),
+    });
+    const provider = createMockProvider({
+      create: vi.fn().mockResolvedValue(mockSandbox),
+    });
+
+    const teardown = vi.fn().mockImplementation(async (sb: any) => {
+      callOrder.push("teardown");
+      await sb.readFile("/workspace/memory/test.md");
+    });
+
+    const model = createModel();
+
+    function Agent() {
+      return (
+        <Sandbox provider={provider} teardown={teardown}>
+          <Section id="system" audience="model">
+            Test
+          </Section>
+          <Model model={model} />
+        </Sandbox>
+      );
+    }
+
+    const app = createApp(Agent, { maxTicks: 1 });
+    const session = await app.session();
+    await session.render({}).result;
+    await session.close();
+
+    expect(teardown).toHaveBeenCalledWith(mockSandbox);
+    expect(callOrder).toEqual(["teardown", "readFile", "destroy"]);
+  });
+
+  it("still destroys sandbox if teardown throws", async () => {
+    const mockSandbox = createMockSandbox({
+      destroy: vi.fn(),
+    });
+    const provider = createMockProvider({
+      create: vi.fn().mockResolvedValue(mockSandbox),
+    });
+
+    const teardown = vi.fn().mockRejectedValue(new Error("flush failed"));
+    const model = createModel();
+
+    function Agent() {
+      return (
+        <Sandbox provider={provider} teardown={teardown}>
+          <Section id="system" audience="model">
+            Test
+          </Section>
+          <Model model={model} />
+        </Sandbox>
+      );
+    }
+
+    const app = createApp(Agent, { maxTicks: 1 });
+    const session = await app.session();
+    await session.render({}).result;
+    await session.close();
+
+    expect(teardown).toHaveBeenCalled();
+    expect(mockSandbox.destroy).toHaveBeenCalled();
+  });
 });
 
 // ============================================================================

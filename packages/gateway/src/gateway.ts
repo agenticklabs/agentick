@@ -940,7 +940,7 @@ export class Gateway extends EventEmitter {
     }
 
     const sessionId = (body.sessionId as string) ?? "main";
-    if (!await this.checkSessionAccess(sessionId, "send", res)) return;
+    if (!(await this.checkSessionAccess(sessionId, "send", res))) return;
 
     const rawMessages = body.messages;
     log.debug({ sessionId, hasMessages: !!rawMessages }, "handleSend: extracted params");
@@ -966,8 +966,10 @@ export class Gateway extends EventEmitter {
     setSSEHeaders(res);
 
     try {
+      // Exclude sending client from SSE broadcast — they get events via this response.
+      const senderClientId = body.connectionId as string | undefined;
       log.debug({ sessionId }, "handleSend: calling directSend");
-      const events = this.directSend(sessionId, sendInput);
+      const events = this.directSend(sessionId, sendInput, { excludeClientId: senderClientId });
 
       for await (const event of events) {
         log.debug({ eventType: event.type }, "handleSend: got event from directSend");
@@ -1176,7 +1178,7 @@ export class Gateway extends EventEmitter {
       res.end(JSON.stringify({ error: "sessionId is required" }));
       return;
     }
-    if (!await this.checkSessionAccess(sessionId, "abort", res)) return;
+    if (!(await this.checkSessionAccess(sessionId, "abort", res))) return;
 
     const managed = this.sessions.get(sessionId);
     if (!managed?.coreSession) {
@@ -1206,7 +1208,7 @@ export class Gateway extends EventEmitter {
     }
 
     const sessionId = body.sessionId as string;
-    if (!await this.checkSessionAccess(sessionId, "close", res)) return;
+    if (!(await this.checkSessionAccess(sessionId, "close", res))) return;
 
     await this.sessions.close(sessionId);
 
@@ -1290,7 +1292,7 @@ export class Gateway extends EventEmitter {
       return;
     }
 
-    if (!await this.checkSessionAccess(sessionId, "tool-response", res)) return;
+    if (!(await this.checkSessionAccess(sessionId, "tool-response", res))) return;
 
     try {
       await this.respondToConfirmation(sessionId, toolUseId, result);
@@ -1417,9 +1419,10 @@ export class Gateway extends EventEmitter {
     action: "send" | "subscribe" | "tool-response" | "abort" | "close" | "channel",
     res: NodeResponse,
   ): Promise<boolean> {
-    const authorizeSession = this.config.auth && "authorizeSession" in this.config.auth
-      ? (this.config.auth as any).authorizeSession
-      : undefined;
+    const authorizeSession =
+      this.config.auth && "authorizeSession" in this.config.auth
+        ? (this.config.auth as any).authorizeSession
+        : undefined;
     if (!authorizeSession) return true;
 
     const user = Context.get().user;
