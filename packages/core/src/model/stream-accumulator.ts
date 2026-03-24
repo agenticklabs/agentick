@@ -201,8 +201,18 @@ export class StreamAccumulator {
   private orderedContent: ContentBlock[] = [];
 
   // Lifecycle tracking
-  private messageStarted = false;
+  private _messageStarted = false;
+  private _messageEnded = false;
   private messageStartedAt?: string;
+
+  /** Whether message_start has been emitted. */
+  get messageStarted(): boolean {
+    return this._messageStarted;
+  }
+  /** Whether message_end has been emitted. */
+  get messageEnded(): boolean {
+    return this._messageEnded;
+  }
   private textStarted = false;
   private reasoningStarted = false;
   private blockIndex = 0;
@@ -230,9 +240,9 @@ export class StreamAccumulator {
 
     switch (delta.type) {
       case "message_start": {
-        if (!this.messageStarted) {
-          this.messageStarted = true;
-          this.messageStartedAt = new Date().toISOString();
+        if (!this._messageStarted) {
+          this._messageStarted = true;
+          this._messageStartedAt = new Date().toISOString();
           if (delta.model) this.modelId = delta.model;
           events.push({
             type: "message_start",
@@ -246,7 +256,7 @@ export class StreamAccumulator {
 
       case "text": {
         // Auto-start message if not started
-        if (!this.messageStarted) {
+        if (!this._messageStarted) {
           events.push(...this.push({ type: "message_start" }));
         }
 
@@ -283,7 +293,7 @@ export class StreamAccumulator {
 
       case "reasoning": {
         // Auto-start message if not started
-        if (!this.messageStarted) {
+        if (!this._messageStarted) {
           events.push(...this.push({ type: "message_start" }));
         }
 
@@ -330,7 +340,7 @@ export class StreamAccumulator {
 
       case "tool_call_start": {
         // Auto-start message if not started
-        if (!this.messageStarted) {
+        if (!this._messageStarted) {
           events.push(...this.push({ type: "message_start" }));
         }
 
@@ -442,7 +452,7 @@ export class StreamAccumulator {
             name: tc.name,
             input,
             blockIndex: tc.blockIndex,
-            startedAt: this.messageStartedAt || new Date().toISOString(),
+            startedAt: this._messageStartedAt || new Date().toISOString(),
             completedAt: new Date().toISOString(),
           } as ToolCallEvent);
         }
@@ -453,7 +463,7 @@ export class StreamAccumulator {
         // Complete tool call in one event (non-streamed adapters like Google).
         // Emit the full start → end → tool_call sequence so downstream consumers
         // get a consistent event stream regardless of adapter streaming behavior.
-        if (!this.messageStarted) {
+        if (!this._messageStarted) {
           events.push(...this.push({ type: "message_start" }));
         }
 
@@ -509,7 +519,7 @@ export class StreamAccumulator {
         }
 
         const blockIndex = this.blockIndex++;
-        const startedAt = this.messageStartedAt || new Date().toISOString();
+        const startedAt = this._messageStartedAt || new Date().toISOString();
         const completedAt = new Date().toISOString();
 
         this.completedToolCalls.push({
@@ -543,6 +553,7 @@ export class StreamAccumulator {
           startedAt,
           completedAt,
         } as ToolCallEvent);
+
         break;
       }
 
@@ -629,7 +640,7 @@ export class StreamAccumulator {
             name: tc.name,
             input,
             blockIndex: tc.blockIndex,
-            startedAt: this.messageStartedAt || new Date().toISOString(),
+            startedAt: this._messageStartedAt || new Date().toISOString(),
             completedAt: new Date().toISOString(),
           } as ToolCallEvent);
         }
@@ -640,6 +651,7 @@ export class StreamAccumulator {
           this.push({ type: "usage", usage: delta.usage });
         }
 
+        this._messageEnded = true;
         events.push({
           type: "message_end",
           ...createEventBase(tick),
@@ -772,7 +784,7 @@ export class StreamAccumulator {
 
     return {
       model: this.modelId || this.options.modelId || "unknown",
-      createdAt: this.messageStartedAt || new Date().toISOString(),
+      createdAt: this._messageStartedAt || new Date().toISOString(),
       message,
       messages: [message],
       usage: this.usage,

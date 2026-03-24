@@ -7,6 +7,7 @@
 import {
   buildClientOptions,
   mapGoogleFinishReason,
+  mapGoogleChunk,
   convertBlocksToGoogleParts,
   mapToolDefinition,
 } from "../google.js";
@@ -742,6 +743,159 @@ describe("mapToolDefinition", () => {
         description: "Direct description",
         parameters: { type: "object" },
       });
+    });
+  });
+
+  // ===========================================================================
+  // mapGoogleChunk
+  // ===========================================================================
+
+  describe("mapGoogleChunk", () => {
+    it("should return text delta for text-only chunk", () => {
+      const result = mapGoogleChunk({
+        candidates: [
+          {
+            content: { role: "model", parts: [{ text: "Hello" }] },
+            index: 0,
+          },
+        ],
+      } as any);
+
+      expect(result).toEqual({ type: "text", delta: "Hello" });
+    });
+
+    it("should return tool_call for functionCall chunk", () => {
+      const result = mapGoogleChunk({
+        candidates: [
+          {
+            content: {
+              role: "model",
+              parts: [{ functionCall: { name: "bash", args: { command: "ls" } } }],
+            },
+            index: 0,
+          },
+        ],
+      } as any);
+
+      expect(result).toMatchObject({
+        type: "tool_call",
+        name: "bash",
+        input: { command: "ls" },
+      });
+      // Should have a generated UUID id
+      expect((result as any).id).toBeTruthy();
+    });
+
+    it("should return [tool_call, message_end] when functionCall + finishReason in same chunk", () => {
+      const result = mapGoogleChunk({
+        candidates: [
+          {
+            content: {
+              role: "model",
+              parts: [{ functionCall: { name: "bash", args: { command: "ls" } } }],
+            },
+            finishReason: "STOP",
+            index: 0,
+          },
+        ],
+        usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 5, totalTokenCount: 15 },
+      } as any);
+
+      expect(Array.isArray(result)).toBe(true);
+      const deltas = result as any[];
+      expect(deltas).toHaveLength(2);
+      expect(deltas[0]).toMatchObject({ type: "tool_call", name: "bash" });
+      expect(deltas[1]).toMatchObject({
+        type: "message_end",
+        usage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 },
+      });
+    });
+
+    it("should return multiple tool_calls for parallel function calls", () => {
+      const result = mapGoogleChunk({
+        candidates: [
+          {
+            content: {
+              role: "model",
+              parts: [
+                { functionCall: { name: "bash", args: { command: "ls" } } },
+                { functionCall: { name: "read_file", args: { path: "test.txt" } } },
+                { functionCall: { name: "bash", args: { command: "pwd" } } },
+              ],
+            },
+            finishReason: "STOP",
+            index: 0,
+          },
+        ],
+      } as any);
+
+      expect(Array.isArray(result)).toBe(true);
+      const deltas = result as any[];
+      expect(deltas).toHaveLength(4); // 3 tool_calls + 1 message_end
+      expect(deltas[0]).toMatchObject({
+        type: "tool_call",
+        name: "bash",
+        input: { command: "ls" },
+      });
+      expect(deltas[1]).toMatchObject({
+        type: "tool_call",
+        name: "read_file",
+        input: { path: "test.txt" },
+      });
+      expect(deltas[2]).toMatchObject({
+        type: "tool_call",
+        name: "bash",
+        input: { command: "pwd" },
+      });
+      expect(deltas[3]).toMatchObject({ type: "message_end" });
+
+      // Each tool_call should have a unique ID
+      const ids = deltas.filter((d: any) => d.type === "tool_call").map((d: any) => d.id);
+      expect(new Set(ids).size).toBe(3);
+    });
+
+    it("should handle text + functionCall in same chunk (mixed content)", () => {
+      const result = mapGoogleChunk({
+        candidates: [
+          {
+            content: {
+              role: "model",
+              parts: [
+                { text: "Let me check that for you.\n" },
+                { functionCall: { name: "bash", args: { command: "ls" } } },
+              ],
+            },
+            finishReason: "STOP",
+            index: 0,
+          },
+        ],
+      } as any);
+
+      expect(Array.isArray(result)).toBe(true);
+      const deltas = result as any[];
+      expect(deltas).toHaveLength(3); // text + tool_call + message_end
+      expect(deltas[0]).toEqual({ type: "text", delta: "Let me check that for you.\n" });
+      expect(deltas[1]).toMatchObject({ type: "tool_call", name: "bash" });
+      expect(deltas[2]).toMatchObject({ type: "message_end" });
+    });
+
+    it("should return message_end for finishReason-only chunk (no parts)", () => {
+      const result = mapGoogleChunk({
+        candidates: [
+          {
+            content: { role: "model", parts: [] },
+            finishReason: "STOP",
+            index: 0,
+          },
+        ],
+      } as any);
+
+      expect(result).toMatchObject({ type: "message_end" });
+    });
+
+    it("should return null for empty chunk", () => {
+      expect(mapGoogleChunk({ candidates: [] } as any)).toBeNull();
+      expect(mapGoogleChunk({} as any)).toBeNull();
     });
   });
 });

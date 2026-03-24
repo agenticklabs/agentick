@@ -146,56 +146,7 @@ export function createGoogleModel(config: GoogleAdapterConfig = {}): ModelClass 
         } as any;
       },
 
-      mapChunk: (chunk: GenerateContentResponse): AdapterDelta | null => {
-        const candidate = chunk.candidates?.[0];
-        if (!candidate) return null;
-
-        const parts = candidate.content?.parts || [];
-
-        // Text content
-        for (const part of parts) {
-          if (part.text) {
-            return { type: "text", delta: part.text };
-          }
-
-          // Function calls — use API's id when present, generate UUID otherwise.
-          // Google doesn't always provide fc.id. Using fc.name as fallback
-          // causes correlation collisions when the same tool is called multiple times.
-          if (part.functionCall) {
-            const fc = part.functionCall as {
-              name?: string;
-              id?: string;
-              args?: Record<string, unknown>;
-            };
-            const id = fc.id || randomUUID();
-            return {
-              type: "tool_call",
-              id,
-              name: fc.name || "",
-              input: fc.args || {},
-            };
-          }
-        }
-
-        // Finish reason
-        if (candidate.finishReason) {
-          return {
-            type: "message_end",
-            stopReason: mapGoogleFinishReason(candidate.finishReason),
-            usage: chunk.usageMetadata
-              ? {
-                  inputTokens: chunk.usageMetadata.promptTokenCount || 0,
-                  outputTokens: chunk.usageMetadata.candidatesTokenCount || 0,
-                  totalTokens: chunk.usageMetadata.totalTokenCount || 0,
-                  reasoningTokens: chunk.usageMetadata.thoughtsTokenCount || 0,
-                  cachedInputTokens: chunk.usageMetadata.cachedContentTokenCount || 0,
-                }
-              : undefined,
-          };
-        }
-
-        return null;
-      },
+      mapChunk: mapGoogleChunk,
 
       processOutput: async (output: GenerateContentResponse): Promise<ModelOutput> => {
         const candidate = output.candidates?.[0];
@@ -424,6 +375,59 @@ export function buildClientOptions(config: GoogleAdapterConfig): any {
 
 export function mapGoogleFinishReason(finishReason: FinishReason | undefined): StopReason {
   return finishReason ? STOP_REASON_MAP[finishReason] || StopReason.STOP : StopReason.STOP;
+}
+
+/**
+ * Map a Google GenerateContentResponse chunk to adapter deltas.
+ * Handles all part types (text, functionCall) and finishReason in a single pass.
+ * Returns an array when a chunk contains multiple parts (parallel tool calls,
+ * text + tool call, or parts + finishReason).
+ */
+export function mapGoogleChunk(
+  chunk: GenerateContentResponse,
+): AdapterDelta | AdapterDelta[] | null {
+  const candidate = chunk.candidates?.[0];
+  if (!candidate) return null;
+
+  const parts = candidate.content?.parts || [];
+  const deltas: AdapterDelta[] = [];
+
+  for (const part of parts) {
+    if (part.text) {
+      deltas.push({ type: "text", delta: part.text });
+    } else if (part.functionCall) {
+      const fc = part.functionCall as {
+        name?: string;
+        id?: string;
+        args?: Record<string, unknown>;
+      };
+      deltas.push({
+        type: "tool_call",
+        id: fc.id || randomUUID(),
+        name: fc.name || "",
+        input: fc.args || {},
+      });
+    }
+  }
+
+  if (candidate.finishReason) {
+    deltas.push({
+      type: "message_end",
+      stopReason: mapGoogleFinishReason(candidate.finishReason),
+      usage: chunk.usageMetadata
+        ? {
+            inputTokens: chunk.usageMetadata.promptTokenCount || 0,
+            outputTokens: chunk.usageMetadata.candidatesTokenCount || 0,
+            totalTokens: chunk.usageMetadata.totalTokenCount || 0,
+            reasoningTokens: chunk.usageMetadata.thoughtsTokenCount || 0,
+            cachedInputTokens: chunk.usageMetadata.cachedContentTokenCount || 0,
+          }
+        : undefined,
+    });
+  }
+
+  if (deltas.length === 0) return null;
+  return deltas.length === 1 ? deltas[0] : deltas;
 }
 
 export function convertBlocksToGoogleParts(blocks: ContentBlock[]): any[] {

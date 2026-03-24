@@ -1199,6 +1199,18 @@ export function createAdapter<TProviderInput, TProviderOutput, TChunk>(
             }
           }
 
+          // Ensure message_end was emitted — some adapters (Google) may not
+          // produce a separate message_end delta for tool-call-only responses.
+          // The protocol requires message_start → ... → message_end → message.
+          if (accumulator.messageStarted && !accumulator.messageEnded) {
+            yield {
+              type: "message_end",
+              ...createAdapterEventBase(),
+              stopReason: accumulatedOutput.stopReason,
+              usage: accumulatedOutput.usage,
+            } as any;
+          }
+
           // Yield final message event with all accumulated data
           const messageEvent: MessageEvent & { raw?: unknown } = {
             type: "message",

@@ -786,5 +786,112 @@ describe("MessageLog", () => {
       expect((content[0] as any).text).toBe("Partial");
       log.destroy();
     });
+
+    it("does not duplicate tool_use when message event arrives before message_end", () => {
+      // Non-streaming adapters (Google) emit: message_start → tool_call_start →
+      // tool_call_end → tool_call → message (Phase 3) → model_response
+      // WITHOUT a message_end between tool_call and message.
+      // This must produce ONE assistant message with ONE tool_use block.
+      const log = new MessageLog(client, {
+        sessionId: "s1",
+        renderMode: "streaming",
+        subscribe: false,
+      });
+
+      log.processEvent(makeEvent("execution_start") as any);
+      log.processEvent(makeEvent("message_start") as any);
+
+      // tool_call_start → tool_call_end → tool_call (stream accumulator sequence)
+      log.processEvent({
+        ...makeEvent("tool_call_start"),
+        callId: "tc-1",
+        name: "bash",
+        blockIndex: 0,
+      } as any);
+      log.processEvent({
+        ...makeEvent("tool_call_end"),
+        callId: "tc-1",
+        blockIndex: 0,
+      } as any);
+      log.processEvent({
+        ...makeEvent("tool_call"),
+        callId: "tc-1",
+        name: "bash",
+        input: { command: "ls" },
+        blockIndex: 0,
+        summary: "ls",
+      } as any);
+
+      // Phase 3 message arrives BEFORE message_end
+      log.processEvent({
+        ...makeEvent("message"),
+        message: {
+          id: "msg-canonical",
+          role: "assistant",
+          content: [
+            { type: "tool_use", toolUseId: "tc-1", name: "bash", input: { command: "ls" } },
+          ],
+        },
+      } as any);
+
+      // Should be ONE assistant message, not two
+      const assistantMsgs = log.messages.filter((m) => m.role === "assistant");
+      expect(assistantMsgs).toHaveLength(1);
+
+      // The message should have toolCalls preserved from tool_call_end
+      expect(assistantMsgs[0].toolCalls).toBeDefined();
+      expect(assistantMsgs[0].toolCalls).toHaveLength(1);
+      expect(assistantMsgs[0].toolCalls![0].name).toBe("bash");
+
+      // Content should be the canonical version
+      expect(assistantMsgs[0].id).toBe("msg-canonical");
+
+      log.destroy();
+    });
+
+    it("handles message event reconciliation when no in-progress message exists", () => {
+      // When message_end fires BEFORE the Phase 3 message event,
+      // the in-progress message is already finalized. The message event
+      // should reconcile with the last finalized assistant message.
+      const log = new MessageLog(client, {
+        sessionId: "s1",
+        renderMode: "streaming",
+        subscribe: false,
+      });
+
+      log.processEvent(makeEvent("execution_start") as any);
+      log.processEvent(makeEvent("message_start") as any);
+      log.processEvent({
+        ...makeEvent("content_start"),
+        blockIndex: 0,
+      } as any);
+      log.processEvent({
+        ...makeEvent("content_delta"),
+        delta: "Hello",
+        blockIndex: 0,
+      } as any);
+      log.processEvent({
+        ...makeEvent("content_end"),
+        blockIndex: 0,
+      } as any);
+      log.processEvent(makeEvent("message_end") as any);
+
+      // message_end already finalized. Phase 3 message arrives after.
+      log.processEvent({
+        ...makeEvent("message"),
+        message: {
+          id: "msg-canonical",
+          role: "assistant",
+          content: [{ type: "text", text: "Hello" }],
+        },
+      } as any);
+
+      // Should still be ONE assistant message
+      const assistantMsgs = log.messages.filter((m) => m.role === "assistant");
+      expect(assistantMsgs).toHaveLength(1);
+      expect(assistantMsgs[0].id).toBe("msg-canonical");
+
+      log.destroy();
+    });
   });
 });

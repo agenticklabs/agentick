@@ -426,6 +426,12 @@ export class MessageLog {
         const e = event as MessageEvent;
 
         if (mode === "streaming" || mode === "block") {
+          // Finalize any in-progress message first — the Phase 3 message
+          // may arrive before message_end (e.g., non-streaming adapters).
+          if (this._inProgressMessage) {
+            this._finalizeInProgressMessage();
+          }
+
           // Reconcile: the Phase 3 message is the canonical version.
           // Match against the last finalized assistant message (built
           // progressively) and update its id + content to the authoritative
@@ -435,6 +441,8 @@ export class MessageLog {
           if (last && last.role === "assistant") {
             last.id = e.message.id ?? last.id;
             last.content = e.message.content;
+            // Preserve toolCalls built by tool_call_end (not in the canonical message)
+            // The Phase 3 message only has content — toolCalls are built by streaming events.
             this._notify();
           } else {
             // Fallback: no progressive message was built (e.g. cached/non-streaming response)
