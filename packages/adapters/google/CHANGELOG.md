@@ -1,5 +1,14 @@
 # @agentick/google
 
+## 0.14.16
+
+### Patch Changes
+
+- 59a9281: fortify model stream events
+- Updated dependencies [59a9281]
+  - @agentick/core@0.14.16
+  - @agentick/shared@0.14.16
+
 ## 0.14.15
 
 ### Patch Changes
