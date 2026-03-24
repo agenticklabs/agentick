@@ -1,5 +1,15 @@
 # @agentick/gateway
 
+## 0.14.15
+
+### Patch Changes
+
+- d08f1fe: prevent duplicate event send
+  - @agentick/kernel@0.14.15
+  - @agentick/shared@0.14.15
+  - @agentick/core@0.14.15
+  - @agentick/server@0.14.15
+
 ## 0.14.14
 
 ### Patch Changes
