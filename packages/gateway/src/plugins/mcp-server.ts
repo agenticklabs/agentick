@@ -21,7 +21,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { ResourceTemplate } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
-import type { IncomingMessage, ServerResponse } from "node:http";
+import type { IncomingMessage } from "node:http";
 import type { GatewayPlugin, PluginContext } from "../types.js";
 
 // ============================================================================
@@ -86,19 +86,6 @@ export interface MCPServerPluginConfig {
    * Return the tools to expose for this session.
    */
   toolFilter?: (tools: ToolEntry[], req: IncomingMessage) => ToolEntry[] | Promise<ToolEntry[]>;
-  /**
-   * Authentication configuration. Controls how MCP requests are authenticated.
-   *
-   * - `true` — use gateway's built-in auth (ctx.validateAuth)
-   * - `{ verify }` — custom verification function (e.g., JWKS from an external OAuth server)
-   *
-   * When auth is enabled and a request has no valid token, returns 401 with
-   * WWW-Authenticate header, triggering the MCP client's OAuth discovery flow.
-   */
-  auth?: boolean | {
-    /** Custom token verification. Return true if valid, false to reject with 401. */
-    verify: (token: string) => boolean | Promise<boolean>;
-  };
   /** Static MCP resources to register. */
   resources?: MCPStaticResource[];
   /** Templated MCP resources to register. */
@@ -140,34 +127,6 @@ function toMCPResult(result: { content: unknown[] }): CallToolResult {
       return { type: "text" as const, text: JSON.stringify(block) };
     }),
   };
-}
-
-/**
- * Extract Bearer token from an HTTP request.
- * Returns undefined if no Authorization header or not Bearer scheme.
- */
-function extractBearerToken(req: IncomingMessage): string | undefined {
-  const auth = req.headers.authorization;
-  if (!auth || !auth.startsWith("Bearer ")) return undefined;
-  return auth.slice(7);
-}
-
-/**
- * Send a 401 JSON-RPC error with WWW-Authenticate header.
- * This triggers the MCP client's OAuth discovery flow.
- */
-function sendUnauthorized(res: ServerResponse, message = "Unauthorized"): void {
-  res.writeHead(401, {
-    "Content-Type": "application/json",
-    "WWW-Authenticate": "Bearer",
-  });
-  res.end(
-    JSON.stringify({
-      jsonrpc: "2.0",
-      error: { code: -32000, message },
-      id: null,
-    }),
-  );
 }
 
 // ============================================================================
@@ -304,10 +263,6 @@ interface McpSession {
 export function mcpServerPlugin(config: MCPServerPluginConfig): GatewayPlugin {
   const pluginId = config.id ?? "mcp-server";
   const routePath = config.path ?? "/mcp";
-  const authConfig = config.auth;
-  const requireAuth = !!authConfig;
-  const customVerify = typeof authConfig === "object" ? authConfig.verify : null;
-
   // Per-session mode state
   const sessions = new Map<string, McpSession>();
 
@@ -328,73 +283,44 @@ export function mcpServerPlugin(config: MCPServerPluginConfig): GatewayPlugin {
         allTools = filterTools(catalog.tools, config);
       }
 
-      // Auth middleware wrapper
-      const withAuth = async (
-        req: IncomingMessage,
-        res: ServerResponse,
-        handler: () => void | Promise<void>,
-      ): Promise<void> => {
-        if (!requireAuth) return handler();
-
-        const token = extractBearerToken(req);
-        if (!token) return sendUnauthorized(res);
-
-        try {
-          if (customVerify) {
-            // Custom verification (e.g., JWKS from external OAuth server)
-            const valid = await customVerify(token);
-            if (!valid) return sendUnauthorized(res, "Invalid or expired access token");
-          } else {
-            // Gateway's built-in auth
-            const result = await ctx.validateAuth(token);
-            if (!result.valid) return sendUnauthorized(res, "Invalid or expired access token");
-          }
-          return handler();
-        } catch {
-          return sendUnauthorized(res, "Authentication failed");
-        }
-      };
-
       if (config.toolFilter && config.sessionId) {
         // Per-session mode: route handler creates McpServer per client
         const toolFilter = config.toolFilter;
 
         ctx.registerRoute(routePath, async (req, res) => {
-          await withAuth(req, res, async () => {
-            const mcpSessionId = req.headers["mcp-session-id"] as string | undefined;
+          const mcpSessionId = req.headers["mcp-session-id"] as string | undefined;
 
-            if (mcpSessionId) {
-              const session = sessions.get(mcpSessionId);
-              if (!session) {
-                res.writeHead(404, { "Content-Type": "application/json" });
-                res.end(
-                  JSON.stringify({
-                    jsonrpc: "2.0",
-                    error: { code: -32001, message: "Session not found" },
-                  }),
-                );
-                return;
-              }
-              return session.transport.handleRequest(req, res);
+          if (mcpSessionId) {
+            const session = sessions.get(mcpSessionId);
+            if (!session) {
+              res.writeHead(404, { "Content-Type": "application/json" });
+              res.end(
+                JSON.stringify({
+                  jsonrpc: "2.0",
+                  error: { code: -32001, message: "Session not found" },
+                }),
+              );
+              return;
             }
+            return session.transport.handleRequest(req, res);
+          }
 
-            // New session — filter tools and create a dedicated McpServer
-            const filtered = await toolFilter(allTools, req);
-            const server = createMcpServer(config, filtered, ctx);
+          // New session — filter tools and create a dedicated McpServer
+          const filtered = await toolFilter(allTools, req);
+          const server = createMcpServer(config, filtered, ctx);
 
-            const transport = new StreamableHTTPServerTransport({
-              sessionIdGenerator: () => randomUUID(),
-              onsessioninitialized: (id) => {
-                sessions.set(id, { server, transport });
-              },
-              onsessionclosed: (id) => {
-                sessions.delete(id);
-              },
-            });
-
-            await server.connect(transport);
-            return transport.handleRequest(req, res);
+          const transport = new StreamableHTTPServerTransport({
+            sessionIdGenerator: () => randomUUID(),
+            onsessioninitialized: (id) => {
+              sessions.set(id, { server, transport });
+            },
+            onsessionclosed: (id) => {
+              sessions.delete(id);
+            },
           });
+
+          await server.connect(transport);
+          return transport.handleRequest(req, res);
         });
       } else {
         // Static mode: single McpServer
@@ -405,9 +331,9 @@ export function mcpServerPlugin(config: MCPServerPluginConfig): GatewayPlugin {
         });
         await server.connect(transport);
 
-        ctx.registerRoute(routePath, async (req, res) => {
-          await withAuth(req, res, () => transport.handleRequest(req, res));
-        });
+        ctx.registerRoute(routePath, (req, res) =>
+          transport.handleRequest(req, res),
+        );
       }
     },
 

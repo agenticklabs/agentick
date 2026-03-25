@@ -840,7 +840,10 @@ export class Gateway extends EventEmitter {
 
       // All built-in routes require auth
       if (!authResult.valid) {
-        res.writeHead(401, { "Content-Type": "application/json" });
+        res.writeHead(401, {
+          "Content-Type": "application/json",
+          "WWW-Authenticate": "Bearer",
+        });
         res.end(JSON.stringify({ error: "Authentication failed" }));
         return;
       }
@@ -2421,7 +2424,10 @@ export class Gateway extends EventEmitter {
       // (HTTP transport calls this without a pre-validated result)
       const result = authResult ?? (await validateAuth(extractToken(req), this.config.auth));
       if (!result.valid) {
-        res.writeHead(401, { "Content-Type": "application/json" });
+        res.writeHead(401, {
+          "Content-Type": "application/json",
+          "WWW-Authenticate": "Bearer",
+        });
         res.end(JSON.stringify({ error: "Authentication failed" }));
         return true;
       }
