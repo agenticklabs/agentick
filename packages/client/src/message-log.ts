@@ -397,13 +397,15 @@ export class MessageLog {
       case "tool_result": {
         if (mode === "message") break;
         const e = event as ToolResultEvent;
-        const duration = this._toolDurations.get(e.callId);
-        if (duration === undefined) break;
 
-        // tool_result arrives after message_end, so the tool call is likely
-        // in a finalized message, not the in-progress one. Search both.
-        const found = this._updateToolDuration(e.callId, duration);
-        if (found) this._notify();
+        // Extract result text and update the tool call entry.
+        // tool_result arrives after message_end, so search finalized messages too.
+        const duration = this._toolDurations.get(e.callId);
+        const resultText = this._extractResultText(e.result);
+        const isError = e.isError ?? false;
+
+        const updated = this._updateToolResult(e.callId, duration, resultText, isError);
+        if (updated) this._notify();
         break;
       }
 
@@ -496,6 +498,60 @@ export class MessageLog {
    * Tool results arrive after message_end (which finalizes the in-progress
    * message into _messages), so we search finalized messages in reverse.
    */
+  /**
+   * Update a tool call with result text, duration, and error status.
+   * Searches both in-progress and finalized messages.
+   */
+  private _updateToolResult(
+    callId: string,
+    duration: number | undefined,
+    result: string | undefined,
+    isError: boolean,
+  ): boolean {
+    const update = (tc: ToolCallEntry) => {
+      if (duration !== undefined) tc.duration = duration;
+      if (result !== undefined) (tc as any).result = result;
+      if (isError) (tc as any).error = result;
+    };
+
+    if (this._inProgressMessage) {
+      const tc = this._inProgressMessage.toolCalls.find((t) => t.id === callId);
+      if (tc) {
+        update(tc);
+        return true;
+      }
+    }
+    for (let i = this._messages.length - 1; i >= 0; i--) {
+      const msg = this._messages[i];
+      if (msg.role !== "assistant" || !msg.toolCalls) continue;
+      const tc = msg.toolCalls.find((t) => t.id === callId);
+      if (tc) {
+        update(tc);
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Extract text from a tool result payload.
+   */
+  private _extractResultText(result: unknown): string | undefined {
+    if (!result || typeof result !== "object") return undefined;
+    const r = result as Record<string, unknown>;
+    // ToolResult shape: { content: ContentBlock[] | string }
+    const content = r.content;
+    if (typeof content === "string") return content;
+    if (Array.isArray(content)) {
+      const texts = content
+        .filter((c: any) => typeof c === "string" || c?.type === "text")
+        .map((c: any) => (typeof c === "string" ? c : c.text))
+        .filter(Boolean);
+      return texts.length > 0 ? texts.join("\n") : undefined;
+    }
+    return undefined;
+  }
+
   private _updateToolDuration(callId: string, duration: number): boolean {
     // Check in-progress message first
     if (this._inProgressMessage) {
