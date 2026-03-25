@@ -1,5 +1,13 @@
 # @agentick/cli
 
+## 0.14.17
+
+### Patch Changes
+
+- Updated dependencies [f27c004]
+  - @agentick/client@0.14.17
+  - @agentick/shared@0.14.17
+
 ## 0.14.16
 
 ### Patch Changes

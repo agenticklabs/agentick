@@ -1,5 +1,12 @@
 # @agentick/huggingface
 
+## 0.14.17
+
+### Patch Changes
+
+- @agentick/shared@0.14.17
+- @agentick/core@0.14.17
+
 ## 0.14.16
 
 ### Patch Changes
