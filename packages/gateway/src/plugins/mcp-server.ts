@@ -204,6 +204,7 @@ function registerResources(server: McpServer, config: MCPServerPluginConfig): vo
           list: async () => ({
             resources: (await tmpl.list()).map((r) => ({
               uri: r.uri,
+              name: r.title ?? tmpl.name,
               title: r.title,
               description: r.description,
               mimeType: tmpl.mimeType ?? "text/markdown",
@@ -331,7 +332,7 @@ export function mcpServerPlugin(config: MCPServerPluginConfig): GatewayPlugin {
 
         try {
           const result = await ctx.validateAuth(token);
-          if (!result.authenticated) {
+          if (!result.valid) {
             return sendUnauthorized(res, "Invalid or expired access token");
           }
           return handler();
