@@ -130,6 +130,8 @@ export { serveStatic, type ServeStaticOptions } from "./serve-static.js";
 export {
   mcpServerPlugin,
   type MCPServerPluginConfig,
+  type MCPStaticResource,
+  type MCPResourceTemplate,
   type ToolEntry as McpToolEntry,
 } from "./plugins/mcp-server.js";
 export { openaiCompatPlugin, type OpenAICompatPluginConfig } from "./plugins/openai-compat.js";

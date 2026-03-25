@@ -54,8 +54,7 @@ function mockHTTP(
       this.statusCode = code;
       this.headersSent = true;
       if (headers) {
-        for (const [k, v] of Object.entries(headers))
-          this._headers[k.toLowerCase()] = v;
+        for (const [k, v] of Object.entries(headers)) this._headers[k.toLowerCase()] = v;
       }
     },
     write(chunk: string | Buffer) {
@@ -106,10 +105,8 @@ function createAuthGateway(opts?: {
       type: "custom",
       validate: async (token) => {
         if (!token) return { valid: false };
-        if (token === "user-a-token")
-          return { valid: true, user: { id: "user-a" } };
-        if (token === "user-b-token")
-          return { valid: true, user: { id: "user-b" } };
+        if (token === "user-a-token") return { valid: true, user: { id: "user-a" } };
+        if (token === "user-b-token") return { valid: true, user: { id: "user-b" } };
         return { valid: false };
       },
       hydrateUser: opts?.hydrateUser,
@@ -360,9 +357,7 @@ describe("handleRequest auth context propagation", () => {
   it("authenticates SSE connections via query param token", async () => {
     ({ gateway } = createAuthGateway());
 
-    const { req, res, sseEvents } = mockHTTP(
-      "/events?token=user-a-token&clientId=sse-1",
-    );
+    const { req, res, sseEvents } = mockHTTP("/events?token=user-a-token&clientId=sse-1");
 
     await gateway.handleRequest(req, res);
 
@@ -398,9 +393,7 @@ describe("handleRequest auth context propagation", () => {
       auth: {
         type: "custom",
         validate: async (token) =>
-          token === "valid"
-            ? { valid: true, user: { id: "plugin-user" } }
-            : { valid: false },
+          token === "valid" ? { valid: true, user: { id: "plugin-user" } } : { valid: false },
       },
       plugins: [
         {
@@ -440,9 +433,7 @@ describe("handleRequest auth context propagation", () => {
       auth: {
         type: "custom",
         validate: async (token) =>
-          token === "valid"
-            ? { valid: true, user: { id: "user" } }
-            : { valid: false },
+          token === "valid" ? { valid: true, user: { id: "user" } } : { valid: false },
       },
       plugins: [
         {
@@ -490,9 +481,7 @@ describe("handleRequest auth context propagation", () => {
       auth: {
         type: "custom",
         validate: async (token) =>
-          token === "valid"
-            ? { valid: true, user: { id: "creator-user" } }
-            : { valid: false },
+          token === "valid" ? { valid: true, user: { id: "creator-user" } } : { valid: false },
       },
     });
 
@@ -544,12 +533,7 @@ describe("handleRequest auth context propagation", () => {
   it("returns 404 for unknown routes with valid auth", async () => {
     ({ gateway } = createAuthGateway());
 
-    const { req, res } = mockHTTP(
-      "/nonexistent",
-      "GET",
-      undefined,
-      bearerHeader("user-a-token"),
-    );
+    const { req, res } = mockHTTP("/nonexistent", "GET", undefined, bearerHeader("user-a-token"));
     await gateway.handleRequest(req, res);
 
     expect(res.statusCode).toBe(404);
