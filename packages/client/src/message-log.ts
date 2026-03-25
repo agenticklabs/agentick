@@ -552,34 +552,10 @@ export class MessageLog {
     return undefined;
   }
 
-  private _updateToolDuration(callId: string, duration: number): boolean {
-    // Check in-progress message first
-    if (this._inProgressMessage) {
-      const tc = this._inProgressMessage.toolCalls.find((t) => t.id === callId);
-      if (tc) {
-        tc.duration = duration;
-        return true;
-      }
-    }
-
-    // Search finalized messages in reverse (most recent first)
-    for (let i = this._messages.length - 1; i >= 0; i--) {
-      const msg = this._messages[i];
-      if (msg.role !== "assistant" || !msg.toolCalls) continue;
-      const tc = msg.toolCalls.find((t) => t.id === callId);
-      if (tc) {
-        tc.duration = duration;
-        return true;
-      }
-    }
-
-    return false;
-  }
-
   /**
    * Merge a tool call's summary into an existing entry.
    * Returns true if the tool call was found (entry already exists).
-   * Like _updateToolDuration, searches both in-progress and finalized messages.
+   * Searches both in-progress and finalized messages.
    */
   private _mergeToolCallSummary(callId: string, summary: string | undefined): boolean {
     // Check in-progress message first
