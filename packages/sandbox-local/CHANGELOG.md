@@ -1,5 +1,11 @@
 # @agentick/sandbox-local
 
+## 0.14.19
+
+### Patch Changes
+
+- @agentick/sandbox@0.14.19
+
 ## 0.14.18
 
 ### Patch Changes
