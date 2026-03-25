@@ -1,5 +1,15 @@
 # @agentick/gateway
 
+## 0.14.19
+
+### Patch Changes
+
+- 8ad9d35: auth updates
+  - @agentick/kernel@0.14.19
+  - @agentick/shared@0.14.19
+  - @agentick/core@0.14.19
+  - @agentick/server@0.14.19
+
 ## 0.14.18
 
 ### Patch Changes
