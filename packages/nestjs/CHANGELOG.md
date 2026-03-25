@@ -1,5 +1,12 @@
 # @agentick/nestjs
 
+## 0.14.18
+
+### Patch Changes
+
+- Updated dependencies [36fac24]
+  - @agentick/gateway@0.14.18
+
 ## 0.14.17
 
 ### Patch Changes

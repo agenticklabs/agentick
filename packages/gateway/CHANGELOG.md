@@ -1,5 +1,15 @@
 # @agentick/gateway
 
+## 0.14.18
+
+### Patch Changes
+
+- 36fac24: feat: enhance mcp plugin auth
+  - @agentick/kernel@0.14.18
+  - @agentick/shared@0.14.18
+  - @agentick/core@0.14.18
+  - @agentick/server@0.14.18
+
 ## 0.14.17
 
 ### Patch Changes
