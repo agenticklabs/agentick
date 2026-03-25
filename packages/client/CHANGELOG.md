@@ -1,5 +1,12 @@
 # @agentick/client
 
+## 0.14.17
+
+### Patch Changes
+
+- f27c004: client - improve types; gateway - improve mcp plugin
+  - @agentick/shared@0.14.17
+
 ## 0.14.16
 
 ### Patch Changes
