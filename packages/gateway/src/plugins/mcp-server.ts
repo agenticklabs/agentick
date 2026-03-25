@@ -87,11 +87,18 @@ export interface MCPServerPluginConfig {
    */
   toolFilter?: (tools: ToolEntry[], req: IncomingMessage) => ToolEntry[] | Promise<ToolEntry[]>;
   /**
-   * Require authentication. When true, extracts Bearer token and validates
-   * via ctx.validateAuth(). Returns 401 with WWW-Authenticate header if
-   * invalid, triggering the MCP client's OAuth discovery flow.
+   * Authentication configuration. Controls how MCP requests are authenticated.
+   *
+   * - `true` — use gateway's built-in auth (ctx.validateAuth)
+   * - `{ verify }` — custom verification function (e.g., JWKS from an external OAuth server)
+   *
+   * When auth is enabled and a request has no valid token, returns 401 with
+   * WWW-Authenticate header, triggering the MCP client's OAuth discovery flow.
    */
-  auth?: boolean;
+  auth?: boolean | {
+    /** Custom token verification. Return true if valid, false to reject with 401. */
+    verify: (token: string) => boolean | Promise<boolean>;
+  };
   /** Static MCP resources to register. */
   resources?: MCPStaticResource[];
   /** Templated MCP resources to register. */
@@ -297,7 +304,9 @@ interface McpSession {
 export function mcpServerPlugin(config: MCPServerPluginConfig): GatewayPlugin {
   const pluginId = config.id ?? "mcp-server";
   const routePath = config.path ?? "/mcp";
-  const requireAuth = config.auth ?? false;
+  const authConfig = config.auth;
+  const requireAuth = !!authConfig;
+  const customVerify = typeof authConfig === "object" ? authConfig.verify : null;
 
   // Per-session mode state
   const sessions = new Map<string, McpSession>();
@@ -331,9 +340,14 @@ export function mcpServerPlugin(config: MCPServerPluginConfig): GatewayPlugin {
         if (!token) return sendUnauthorized(res);
 
         try {
-          const result = await ctx.validateAuth(token);
-          if (!result.valid) {
-            return sendUnauthorized(res, "Invalid or expired access token");
+          if (customVerify) {
+            // Custom verification (e.g., JWKS from external OAuth server)
+            const valid = await customVerify(token);
+            if (!valid) return sendUnauthorized(res, "Invalid or expired access token");
+          } else {
+            // Gateway's built-in auth
+            const result = await ctx.validateAuth(token);
+            if (!result.valid) return sendUnauthorized(res, "Invalid or expired access token");
           }
           return handler();
         } catch {
