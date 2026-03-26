@@ -1,5 +1,15 @@
 # @agentick/gateway
 
+## 0.14.20
+
+### Patch Changes
+
+- 152ac52: add logging middleware
+  - @agentick/kernel@0.14.20
+  - @agentick/shared@0.14.20
+  - @agentick/core@0.14.20
+  - @agentick/server@0.14.20
+
 ## 0.14.19
 
 ### Patch Changes
