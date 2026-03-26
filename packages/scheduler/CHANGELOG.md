@@ -1,5 +1,13 @@
 # @agentick/scheduler
 
+## 0.14.20
+
+### Patch Changes
+
+- @agentick/shared@0.14.20
+- @agentick/core@0.14.20
+- @agentick/client@0.14.20
+
 ## 0.14.19
 
 ### Patch Changes
