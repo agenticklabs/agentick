@@ -54,10 +54,11 @@ High-level `createAgent()` factory and `<Agent>` component for quick setup witho
 
 Multi-session management. Routes messages to sessions, manages lifecycle, provides a method-based API for external access. Supports HTTP/SSE, WebSocket, and Unix socket transports. Unix socket enables daemon mode — gateway as a background process, clients connect locally.
 
-Includes two protocol plugins that expose sessions via standard interfaces:
+Includes three plugins:
 
-- **MCP Server** — serves session tools as standard MCP `tools/list` + `tools/call` via Streamable HTTP. Any MCP client (Claude Desktop, Cursor, etc.) can connect.
+- **MCP Server** — serves tools and resources as a standard MCP server via Streamable HTTP. Supports resources-only mode, tool annotations, resource templates, and per-session tool filtering. Any MCP client (Claude Desktop, Cursor, Claude Code, etc.) can connect.
 - **OpenAI-Compatible** — serves `POST /v1/chat/completions` and `GET /v1/models`. Any OpenAI SDK client can point at the gateway and get streaming completions.
+- **Logging** — structured lifecycle event logging (connections, sessions, errors) using the kernel's Logger (pino).
 
 ### @agentick/client
 

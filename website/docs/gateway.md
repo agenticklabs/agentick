@@ -124,28 +124,53 @@ discovery response with `builtin: false`. Routes use longest-prefix matching —
 
 ### Built-In Protocol Plugins
 
-The gateway ships two protocol plugins that expose sessions via standard
-interfaces:
+The gateway ships three plugins that expose sessions via standard interfaces.
 
-**MCP Server** — any MCP client (Claude Desktop, Cursor, etc.) can connect and
-use session tools:
+**MCP Server** — any MCP client (Claude Desktop, Cursor, Claude Code, etc.) can
+connect and use session tools and resources:
 
 ```typescript
 import { mcpServerPlugin } from "@agentick/gateway";
 
 gateway.use(
   mcpServerPlugin({
-    sessionId: "default",
+    sessionId: "default",       // omit for resources-only mode
     path: "/mcp",
-    include: ["search", "read_file"], // optional: only expose these tools
-    exclude: ["dangerous_tool"], // optional: hide these tools
+    include: ["search", "read_file"],
+    exclude: ["dangerous_tool"],
+
+    // Static resources — domain knowledge, guides, etc.
+    resources: [
+      {
+        name: "guide",
+        uri: "myapp://guide/overview",
+        title: "Overview",
+        read: () => ({ text: "# Welcome\n\n..." }),
+      },
+    ],
+
+    // Resource templates — parameterized, with listing and autocomplete
+    resourceTemplates: [
+      {
+        name: "schema",
+        uriTemplate: "myapp://schema/{model}",
+        title: "Model Schema",
+        list: () => [{ uri: "myapp://schema/users", title: "Users" }],
+        read: (vars) => ({ text: `# ${vars.model}\n\n...` }),
+        complete: { model: (v) => ["users", "orders"].filter((m) => m.startsWith(v)) },
+      },
+    ],
   }),
 );
 ```
 
-Discovers tools at init via `tool-catalog`, registers each on an MCP `McpServer`
-with `StreamableHTTPServerTransport`. Tool calls dispatch through the gateway's
-`tool-dispatch` method.
+Three modes:
+- **Resources-only** — omit `sessionId` to serve MCP resources without tools
+- **Static tools** — set `sessionId` to discover and expose session tools
+- **Per-session tools** — add `toolFilter` to customize tools per client
+
+Tools support MCP annotations (`readOnlyHint`, `destructiveHint`) via the
+`annotations` field on `ToolEntry`. Tool calls dispatch through `tool-dispatch`.
 
 For multi-user deployments, use `toolFilter` to customize tools per MCP client
 based on the incoming HTTP request:
@@ -166,6 +191,18 @@ gateway.use(
 Each MCP client handshake creates its own `McpServer` with the filtered tool
 set. Sessions are tracked by `mcp-session-id` header and cleaned up
 automatically.
+
+When running behind Express or middleware that pre-parses request bodies,
+the plugin passes `req.body` to the transport automatically.
+
+**Logging** — structured event logging for gateway lifecycle:
+
+```typescript
+import { loggingPlugin } from "@agentick/gateway";
+
+gateway.use(loggingPlugin());
+// Logs: client connections, session create/close, plugin lifecycle, errors
+```
 
 **OpenAI-Compatible** — any OpenAI SDK client can send chat completions:
 

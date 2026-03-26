@@ -327,30 +327,86 @@ Both are optional — import and `use()` them as needed.
 
 ### MCP Server
 
-Exposes session tools as standard MCP `tools/list` + `tools/call` via Streamable
-HTTP. Any MCP client (Claude Desktop, Cursor, etc.) can connect.
+Exposes gateway capabilities as a standard MCP server via Streamable HTTP.
+Any MCP client (Claude Desktop, Cursor, Claude Code, etc.) can connect.
+
+Supports three modes:
+- **Resources-only** — serve MCP resources without tools (no `sessionId` needed)
+- **Static tools** — expose session tools, frozen at initialization
+- **Per-session tools** — filter tools per client via `toolFilter` callback
+
+#### Resources Only
+
+Serve domain knowledge, schemas, or documentation as MCP resources without
+exposing any tools:
 
 ```typescript
 import { mcpServerPlugin } from "@agentick/gateway";
+import type { MCPStaticResource, MCPResourceTemplate } from "@agentick/gateway";
 
 gateway.use(
   mcpServerPlugin({
-    sessionId: "default",
-    path: "/mcp", // default: "/mcp"
-    include: ["search"], // optional: only expose these tools
-    exclude: ["shell"], // optional: hide these tools
+    path: "/mcp",
+    serverName: "my-server",
+    serverVersion: "1.0.0",
+
+    // Static resources — fixed URI, returns content when read
+    resources: [
+      {
+        name: "guide",
+        uri: "myapp://guide/overview",
+        title: "Platform Overview",
+        description: "Key concepts and terminology.",
+        read: () => ({ text: "# Overview\n\nWelcome to..." }),
+      },
+    ],
+
+    // Resource templates — parameterized URI with listing and autocomplete
+    resourceTemplates: [
+      {
+        name: "schema",
+        uriTemplate: "myapp://schema/{model}",
+        title: "Model Schema",
+        description: "Field definitions and relationships.",
+        list: () => [
+          { uri: "myapp://schema/users", title: "Users Schema" },
+          { uri: "myapp://schema/orders", title: "Orders Schema" },
+        ],
+        read: (variables) => ({ text: `# ${variables.model}\n\n...` }),
+        complete: {
+          model: (value) => ["users", "orders"].filter((m) => m.startsWith(value)),
+        },
+      },
+    ],
   }),
 );
-// MCP clients connect at http://host:port/mcp
 ```
 
-Tools are discovered once at initialization. If session tools change, restart
-the plugin.
+#### Tools + Resources
+
+Expose session tools alongside resources. Tools are discovered from the
+session via `tool-catalog` and dispatched via `tool-dispatch`:
+
+```typescript
+gateway.use(
+  mcpServerPlugin({
+    sessionId: "default",
+    path: "/mcp",
+    include: ["search"], // optional: only expose these tools
+    exclude: ["shell"], // optional: hide these tools
+    resources: [/* ... */],
+    resourceTemplates: [/* ... */],
+  }),
+);
+```
+
+Tools support MCP annotations (`readOnlyHint`, `destructiveHint`, `openWorldHint`)
+via the `annotations` field on `ToolEntry`.
 
 #### Per-Session Tool Filtering
 
-By default, all MCP clients see the same tools. Use `toolFilter` to customize
-tools per client based on the incoming HTTP request (e.g., auth headers):
+Use `toolFilter` to customize tools per client based on the incoming HTTP
+request (e.g., auth headers):
 
 ```typescript
 gateway.use(
@@ -361,7 +417,6 @@ gateway.use(
       const token = req.headers.authorization?.replace("Bearer ", "");
       const user = await verifyToken(token);
 
-      // Admin users see all tools, others get a restricted set
       if (user.role === "admin") return tools;
       return tools.filter((t) => !t.name.startsWith("admin_"));
     },
@@ -371,11 +426,16 @@ gateway.use(
 
 When `toolFilter` is set, each MCP client handshake creates its own `McpServer`
 with a filtered tool catalog. The filter receives the full pre-filtered catalog
-(after `include`/`exclude`) and the raw `IncomingMessage`, so you can extract
-auth however you want (Bearer token, API key header, cookie, etc.).
+(after `include`/`exclude`) and the raw `IncomingMessage`.
 
 Session lifecycle is automatic — sessions are tracked by `mcp-session-id` header
 and cleaned up on disconnect or plugin destroy.
+
+#### Body Parsing Compatibility
+
+When the gateway runs behind Express or other middleware that pre-parses request
+bodies, the plugin automatically passes `req.body` to the MCP transport. This
+prevents issues where the stream is already consumed before the transport reads it.
 
 ### OpenAI-Compatible
 
@@ -401,6 +461,33 @@ gateway.use(
 - `POST /v1/chat/completions` — streaming (SSE) and non-streaming responses
 - Model→app routing via `modelMapping`, falls back to model name as app ID
 - Session keyed by `x-session-id` header or auto-generated
+
+### Logging
+
+Structured logging for gateway lifecycle events (connections, sessions, errors)
+using the kernel's `Logger` infrastructure (pino-based).
+
+```typescript
+import { loggingPlugin, loggingMiddleware } from "@agentick/gateway";
+
+// Plugin — logs gateway events (connect, disconnect, session create/close, errors)
+gateway.use(loggingPlugin());
+
+// Middleware — morgan-style HTTP request logging for embedded mode (Express)
+app.use(loggingMiddleware());
+```
+
+Configure logging level, transport, or provide a custom logger:
+
+```typescript
+import { Logger } from "@agentick/kernel";
+
+gateway.use(
+  loggingPlugin({
+    logger: Logger.create({ level: "debug" }),
+  }),
+);
+```
 
 ```python
 from openai import OpenAI
@@ -537,7 +624,7 @@ const newTask = await session.invoke("tasks:create", {
 │                                                               │
 │  ┌──────────────────────┐   ┌──────────────────────────────┐ │
 │  │  MCP Server Plugin   │   │  OpenAI-Compatible Plugin    │ │
-│  │  /mcp (tools/call)   │   │  /v1/chat/completions       │ │
+│  │  /mcp (tools+resources│   │  /v1/chat/completions       │ │
 │  └──────────┬───────────┘   └──────────────┬───────────────┘ │
 │             │                               │                 │
 │       ┌─────┘                       ┌───────┘                 │
@@ -626,8 +713,13 @@ import {
   method,
   mcpServerPlugin,
   openaiCompatPlugin,
+  loggingPlugin,
+  loggingMiddleware,
   type MCPServerPluginConfig,
+  type MCPStaticResource,
+  type MCPResourceTemplate,
   type McpToolEntry,
+  type LoggingPluginConfig,
 } from "@agentick/gateway";
 ```
 

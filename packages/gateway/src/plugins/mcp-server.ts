@@ -2,8 +2,8 @@
  * MCP Server Plugin
  *
  * Exposes gateway capabilities as a standard MCP server via Streamable HTTP.
- * Any MCP client (Claude Desktop, Cursor, etc.) can connect and use tools
- * and resources.
+ * Any MCP client (Claude Desktop, Cursor, Claude Code, etc.) can connect and
+ * use tools and resources.
  *
  * Three modes:
  * - Resources-only: No sessionId — serves MCP resources without tools.
@@ -11,9 +11,13 @@
  * - Per-session tools (with `toolFilter`): Each MCP client handshake creates its
  *   own McpServer with tools filtered by a user-provided callback.
  *
- * Auth:
- * - When `auth: true`, extracts Bearer token from requests and validates via
- *   `ctx.validateAuth()`. Returns 401 with `WWW-Authenticate: Bearer` if invalid.
+ * Auth is handled by the gateway — the plugin itself is auth-agnostic. The
+ * gateway's 401 response includes `WWW-Authenticate: Bearer` per RFC 6750,
+ * which triggers MCP clients' OAuth discovery flow.
+ *
+ * Body parsing: when running behind Express or middleware that pre-parses
+ * request bodies, `req.body` is passed to the MCP transport automatically.
+ * This prevents stream-already-consumed issues.
  */
 
 import { randomUUID } from "node:crypto";
@@ -302,7 +306,7 @@ export function mcpServerPlugin(config: MCPServerPluginConfig): GatewayPlugin {
               );
               return;
             }
-            return session.transport.handleRequest(req, res);
+            return session.transport.handleRequest(req, res, (req as any).body);
           }
 
           // New session — filter tools and create a dedicated McpServer
@@ -320,7 +324,7 @@ export function mcpServerPlugin(config: MCPServerPluginConfig): GatewayPlugin {
           });
 
           await server.connect(transport);
-          return transport.handleRequest(req, res);
+          return transport.handleRequest(req, res, (req as any).body);
         });
       } else {
         // Static mode: single McpServer
@@ -332,7 +336,9 @@ export function mcpServerPlugin(config: MCPServerPluginConfig): GatewayPlugin {
         await server.connect(transport);
 
         ctx.registerRoute(routePath, (req, res) =>
-          transport.handleRequest(req, res),
+          // Pass pre-parsed body — upstream middleware (Express body-parser)
+          // may have already consumed the request stream.
+          transport.handleRequest(req, res, (req as any).body),
         );
       }
     },

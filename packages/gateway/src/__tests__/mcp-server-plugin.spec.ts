@@ -7,8 +7,9 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { Gateway, createGateway } from "../index.js";
 import { mcpServerPlugin, filterTools } from "../plugins/mcp-server.js";
-import type { ToolEntry } from "../plugins/mcp-server.js";
+import type { ToolEntry, MCPStaticResource, MCPResourceTemplate } from "../plugins/mcp-server.js";
 import { createMockApp } from "@agentick/core/testing";
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 
 // ============================================================================
 // Test Helpers
@@ -326,5 +327,341 @@ describe("MCP Server Plugin — per-session toolFilter", () => {
 
     // Each request without session ID triggers toolFilter
     expect(filterSpy).toHaveBeenCalledTimes(3);
+  });
+});
+
+// ============================================================================
+// Resources-only mode (no sessionId)
+// ============================================================================
+
+describe("MCP Server Plugin — resources-only mode", () => {
+  let gateway: Gateway;
+
+  afterEach(async () => {
+    if (gateway) {
+      await gateway.stop().catch(() => {});
+    }
+  });
+
+  it("initializes without sessionId", async () => {
+    gateway = createTestGateway();
+    const plugin = mcpServerPlugin({ path: "/mcp-resources-only" });
+    // Should not throw — sessionId is optional
+    await gateway.use(plugin);
+    expect(plugin.id).toBe("mcp-server");
+  });
+
+  it("route is registered and responds (not 404)", async () => {
+    gateway = createTestGateway();
+    const plugin = mcpServerPlugin({ path: "/mcp-res-route" });
+    await gateway.use(plugin);
+
+    const { req, res } = createMockHTTPPair("/mcp-res-route", "POST");
+    await gateway.handleRequest(req, res);
+    expect(res.statusCode).not.toBe(404);
+  });
+
+  it("cleanup works after destroy", async () => {
+    gateway = createTestGateway();
+    const plugin = mcpServerPlugin({ id: "res-only", path: "/mcp-res-cleanup" });
+    await gateway.use(plugin);
+
+    // Route exists
+    const { req: r1, res: s1 } = createMockHTTPPair("/mcp-res-cleanup", "POST");
+    await gateway.handleRequest(r1, s1);
+    expect(s1.statusCode).not.toBe(404);
+
+    // Remove plugin
+    await gateway.remove("res-only");
+
+    // Route should be gone
+    const { req: r2, res: s2 } = createMockHTTPPair("/mcp-res-cleanup", "POST");
+    await gateway.handleRequest(r2, s2);
+    expect(s2.statusCode).toBe(404);
+  });
+});
+
+// ============================================================================
+// Static resources
+// ============================================================================
+
+describe("MCP Server Plugin — static resources", () => {
+  let gateway: Gateway;
+
+  afterEach(async () => {
+    if (gateway) {
+      await gateway.stop().catch(() => {});
+    }
+  });
+
+  it("registers static resources on the McpServer", async () => {
+    const registerResourceSpy = vi.spyOn(McpServer.prototype, "registerResource");
+
+    const resources: MCPStaticResource[] = [
+      {
+        name: "schema-doc",
+        uri: "docs://schema",
+        title: "Schema Documentation",
+        description: "The database schema",
+        read: () => ({ text: "# Schema\nUsers table..." }),
+      },
+    ];
+
+    gateway = createTestGateway();
+    const plugin = mcpServerPlugin({
+      path: "/mcp-static-res",
+      resources,
+    });
+    await gateway.use(plugin);
+
+    expect(registerResourceSpy).toHaveBeenCalled();
+    const call = registerResourceSpy.mock.calls.find(
+      (args) => args[0] === "schema-doc",
+    );
+    expect(call).toBeDefined();
+    // Second arg is the URI string for static resources
+    expect(call![1]).toBe("docs://schema");
+
+    registerResourceSpy.mockRestore();
+  });
+
+  it("route responds when only resources are configured", async () => {
+    const resources: MCPStaticResource[] = [
+      {
+        name: "readme",
+        uri: "docs://readme",
+        read: () => ({ text: "Hello" }),
+      },
+    ];
+
+    gateway = createTestGateway();
+    const plugin = mcpServerPlugin({
+      path: "/mcp-res-only-route",
+      resources,
+    });
+    await gateway.use(plugin);
+
+    const { req, res } = createMockHTTPPair("/mcp-res-only-route", "POST");
+    await gateway.handleRequest(req, res);
+    expect(res.statusCode).not.toBe(404);
+  });
+});
+
+// ============================================================================
+// Resource templates
+// ============================================================================
+
+describe("MCP Server Plugin — resource templates", () => {
+  let gateway: Gateway;
+
+  afterEach(async () => {
+    if (gateway) {
+      await gateway.stop().catch(() => {});
+    }
+  });
+
+  it("registers template resources with list/read/complete callbacks", async () => {
+    const registerResourceSpy = vi.spyOn(McpServer.prototype, "registerResource");
+
+    const resourceTemplates: MCPResourceTemplate[] = [
+      {
+        name: "project",
+        uriTemplate: "projects://{projectId}",
+        title: "Project Details",
+        description: "Fetch a project by ID",
+        list: () => [
+          { uri: "projects://1", title: "Project Alpha" },
+          { uri: "projects://2", title: "Project Beta" },
+        ],
+        read: (variables) => ({ text: `Project ${variables.projectId}` }),
+        complete: {
+          projectId: (value) => ["1", "2", "3"].filter((id) => id.startsWith(value)),
+        },
+      },
+    ];
+
+    gateway = createTestGateway();
+    const plugin = mcpServerPlugin({
+      path: "/mcp-templates",
+      resourceTemplates,
+    });
+    await gateway.use(plugin);
+
+    expect(registerResourceSpy).toHaveBeenCalled();
+    const call = registerResourceSpy.mock.calls.find(
+      (args) => args[0] === "project",
+    );
+    expect(call).toBeDefined();
+    // Second arg is a ResourceTemplate instance for template resources
+    expect(call![1]).toBeInstanceOf(Object);
+    expect(call![1]).not.toBeTypeOf("string");
+
+    registerResourceSpy.mockRestore();
+  });
+});
+
+// ============================================================================
+// Tool annotations
+// ============================================================================
+
+describe("MCP Server Plugin — tool annotations", () => {
+  let gateway: Gateway;
+
+  afterEach(async () => {
+    if (gateway) {
+      await gateway.stop().catch(() => {});
+    }
+  });
+
+  it("annotations are passed through to registerTool", async () => {
+    const registerToolSpy = vi.spyOn(McpServer.prototype, "registerTool");
+
+    gateway = createTestGateway();
+    const plugin = mcpServerPlugin({
+      sessionId: "default",
+      path: "/mcp-annotations",
+    });
+    await gateway.use(plugin);
+
+    // The mock app exposes tools through tool-catalog. Since the mock
+    // returns an empty catalog, we verify the spy was set up. For a more
+    // targeted test, we use filterTools + createMcpServer indirectly by
+    // checking that annotations in the tool entry reach registerTool.
+    // We need to destroy and recreate with a toolFilter that injects annotations.
+    await gateway.remove("mcp-server");
+    registerToolSpy.mockClear();
+
+    const annotatedPlugin = mcpServerPlugin({
+      sessionId: "default",
+      path: "/mcp-annotated",
+      toolFilter: () => [
+        {
+          name: "read-data",
+          description: "Read some data",
+          input: { type: "object", properties: {} },
+          annotations: {
+            readOnlyHint: true,
+            destructiveHint: false,
+            openWorldHint: false,
+          },
+        },
+      ],
+    });
+    await gateway.use(annotatedPlugin);
+
+    // Trigger a new session to invoke toolFilter → createMcpServer
+    const { req, res } = createMockHTTPPair("/mcp-annotated", "POST");
+    await gateway.handleRequest(req, res);
+
+    // Find the registerTool call for "read-data"
+    const toolCall = registerToolSpy.mock.calls.find(
+      (args) => args[0] === "read-data",
+    );
+    expect(toolCall).toBeDefined();
+    // Second arg is the tool config object
+    const toolConfig = toolCall![1] as Record<string, unknown>;
+    expect(toolConfig.annotations).toEqual({
+      readOnlyHint: true,
+      destructiveHint: false,
+      openWorldHint: false,
+    });
+
+    registerToolSpy.mockRestore();
+  });
+
+  it("tools without annotations do not include annotations key", async () => {
+    const registerToolSpy = vi.spyOn(McpServer.prototype, "registerTool");
+
+    gateway = createTestGateway();
+    const plugin = mcpServerPlugin({
+      sessionId: "default",
+      path: "/mcp-no-annotations",
+      toolFilter: () => [
+        {
+          name: "plain-tool",
+          description: "No annotations",
+          input: { type: "object", properties: {} },
+        },
+      ],
+    });
+    await gateway.use(plugin);
+
+    const { req, res } = createMockHTTPPair("/mcp-no-annotations", "POST");
+    await gateway.handleRequest(req, res);
+
+    const toolCall = registerToolSpy.mock.calls.find(
+      (args) => args[0] === "plain-tool",
+    );
+    expect(toolCall).toBeDefined();
+    const toolConfig = toolCall![1] as Record<string, unknown>;
+    expect(toolConfig.annotations).toBeUndefined();
+
+    registerToolSpy.mockRestore();
+  });
+});
+
+// ============================================================================
+// Parsed body passthrough
+// ============================================================================
+
+describe("MCP Server Plugin — parsed body passthrough", () => {
+  let gateway: Gateway;
+
+  afterEach(async () => {
+    if (gateway) {
+      await gateway.stop().catch(() => {});
+    }
+  });
+
+  it("passes (req as any).body to transport.handleRequest as third argument", async () => {
+    const handleRequestSpy = vi.spyOn(
+      (await import("@modelcontextprotocol/sdk/server/streamableHttp.js")).StreamableHTTPServerTransport.prototype,
+      "handleRequest",
+    );
+
+    gateway = createTestGateway();
+    const plugin = mcpServerPlugin({
+      sessionId: "default",
+      path: "/mcp-body",
+    });
+    await gateway.use(plugin);
+
+    const { req, res } = createMockHTTPPair("/mcp-body", "POST");
+    const parsedBody = { jsonrpc: "2.0", method: "initialize", id: 1 };
+    (req as any).body = parsedBody;
+
+    await gateway.handleRequest(req, res);
+
+    expect(handleRequestSpy).toHaveBeenCalled();
+    // Third argument to handleRequest should be the parsed body
+    const call = handleRequestSpy.mock.calls[0];
+    expect(call[2]).toBe(parsedBody);
+
+    handleRequestSpy.mockRestore();
+  });
+
+  it("passes undefined body when req.body is not set", async () => {
+    const handleRequestSpy = vi.spyOn(
+      (await import("@modelcontextprotocol/sdk/server/streamableHttp.js")).StreamableHTTPServerTransport.prototype,
+      "handleRequest",
+    );
+
+    gateway = createTestGateway();
+    const plugin = mcpServerPlugin({
+      sessionId: "default",
+      path: "/mcp-nobody",
+    });
+    await gateway.use(plugin);
+
+    const { req, res } = createMockHTTPPair("/mcp-nobody", "POST");
+    // Do not set req.body
+
+    await gateway.handleRequest(req, res);
+
+    expect(handleRequestSpy).toHaveBeenCalled();
+    const call = handleRequestSpy.mock.calls[0];
+    expect(call[2]).toBeUndefined();
+
+    handleRequestSpy.mockRestore();
   });
 });
