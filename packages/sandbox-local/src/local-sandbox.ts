@@ -137,18 +137,24 @@ export class LocalSandbox implements SandboxHandle {
     // Ensure parent directory exists
     await mkdir(dirname(resolved), { recursive: true });
 
-    // Atomic write: temp + rename
+    // Atomic write: temp + rename. Falls back to direct write for
+    // NFS/FUSE mounts where temp file creation or rename fails (EIO, ENOENT).
     const tmp = join(dirname(resolved), `.write-${randomBytes(6).toString("hex")}.tmp`);
     try {
       await writeFile(tmp, content, "utf-8");
       await rename(tmp, resolved);
-    } catch (err) {
+    } catch (err: any) {
       try {
         await unlink(tmp);
       } catch {
         // Ignore cleanup errors
       }
-      throw err;
+      // Fall back to direct write only for I/O errors typical of NFS/FUSE
+      if (err?.code === "EIO" || err?.code === "ENOENT" || err?.code === "EXDEV") {
+        await writeFile(resolved, content, "utf-8");
+      } else {
+        throw err;
+      }
     }
   }
 
