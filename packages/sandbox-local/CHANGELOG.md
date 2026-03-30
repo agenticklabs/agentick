@@ -1,5 +1,12 @@
 # @agentick/sandbox-local
 
+## 0.14.21
+
+### Patch Changes
+
+- 2aed830: improve write_file support for some NFS and network devices
+  - @agentick/sandbox@0.14.21
+
 ## 0.14.20
 
 ### Patch Changes
