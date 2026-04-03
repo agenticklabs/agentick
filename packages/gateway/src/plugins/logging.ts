@@ -199,8 +199,7 @@ export function loggingPlugin(config?: LoggingPluginConfig): GatewayPlugin {
       pluginCtx = ctx;
       const log = resolveLogger(pluginId, config);
 
-      const isExcluded = (category: string) =>
-        excludePrefixes.some((p) => category.startsWith(p));
+      const isExcluded = (category: string) => excludePrefixes.some((p) => category.startsWith(p));
 
       // Log lifecycle events that PluginContext exposes
       const onClientConnected = (payload: { clientId: string; ip?: string }) => {

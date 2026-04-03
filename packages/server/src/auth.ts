@@ -25,6 +25,14 @@ export interface AuthResult {
  */
 interface AuthBaseOptions {
   /**
+   * The protected resource URL (RFC 9728).
+   * Included in the `WWW-Authenticate: Bearer resource="..."` header on 401 responses,
+   * allowing MCP/OAuth clients to discover the authorization server via
+   * `/.well-known/oauth-protected-resource`.
+   */
+  resource?: string;
+
+  /**
    * Hydrate user context after validation.
    * Called with the auth result - fetch additional data from DB, etc.
    * Return the complete UserContext that will be available in methods.
@@ -74,6 +82,16 @@ export function extractToken(req: {
 /**
  * Validate an auth token against the configured auth method.
  */
+/**
+ * Build the WWW-Authenticate header value for 401 responses.
+ * Includes the `resource` parameter per RFC 9728 when configured,
+ * enabling MCP/OAuth clients to discover the authorization server.
+ */
+export function wwwAuthenticateHeader(config: AuthConfig | undefined): string {
+  const resource = config && "resource" in config ? config.resource : undefined;
+  return resource ? `Bearer resource="${resource}"` : "Bearer";
+}
+
 export async function validateAuth(
   token: string | undefined,
   config: AuthConfig | undefined,

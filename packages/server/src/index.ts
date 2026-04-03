@@ -27,7 +27,13 @@
 export { createSSEWriter, streamToSSE, setSSEHeaders } from "./sse.js";
 
 // Auth utilities
-export { extractToken, validateAuth, type AuthConfig, type AuthResult } from "./auth.js";
+export {
+  extractToken,
+  validateAuth,
+  wwwAuthenticateHeader,
+  type AuthConfig,
+  type AuthResult,
+} from "./auth.js";
 
 // Types - re-exported from types.ts
 export type {

@@ -331,6 +331,7 @@ Exposes gateway capabilities as a standard MCP server via Streamable HTTP.
 Any MCP client (Claude Desktop, Cursor, Claude Code, etc.) can connect.
 
 Supports three modes:
+
 - **Resources-only** — serve MCP resources without tools (no `sessionId` needed)
 - **Static tools** — expose session tools, frozen at initialization
 - **Per-session tools** — filter tools per client via `toolFilter` callback
@@ -394,8 +395,12 @@ gateway.use(
     path: "/mcp",
     include: ["search"], // optional: only expose these tools
     exclude: ["shell"], // optional: hide these tools
-    resources: [/* ... */],
-    resourceTemplates: [/* ... */],
+    resources: [
+      /* ... */
+    ],
+    resourceTemplates: [
+      /* ... */
+    ],
   }),
 );
 ```

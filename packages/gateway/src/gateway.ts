@@ -56,7 +56,13 @@ const INTERNAL_EVENT_TYPES = new Set([
   "provider_response",
 ]);
 
-import { extractToken, validateAuth, setSSEHeaders, type AuthResult } from "@agentick/server";
+import {
+  extractToken,
+  validateAuth,
+  wwwAuthenticateHeader,
+  setSSEHeaders,
+  type AuthResult,
+} from "@agentick/server";
 import { AppRegistry } from "./app-registry.js";
 import { SessionManager } from "./session-manager.js";
 import { WSTransport } from "./ws-transport.js";
@@ -842,7 +848,7 @@ export class Gateway extends EventEmitter {
       if (!authResult.valid) {
         res.writeHead(401, {
           "Content-Type": "application/json",
-          "WWW-Authenticate": "Bearer",
+          "WWW-Authenticate": wwwAuthenticateHeader(this.config.auth),
         });
         res.end(JSON.stringify({ error: "Authentication failed" }));
         return;
@@ -2426,7 +2432,7 @@ export class Gateway extends EventEmitter {
       if (!result.valid) {
         res.writeHead(401, {
           "Content-Type": "application/json",
-          "WWW-Authenticate": "Bearer",
+          "WWW-Authenticate": wwwAuthenticateHeader(this.config.auth),
         });
         res.end(JSON.stringify({ error: "Authentication failed" }));
         return true;

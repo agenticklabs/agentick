@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { extractToken, validateAuth, type AuthConfig } from "../auth.js";
+import { extractToken, validateAuth, wwwAuthenticateHeader, type AuthConfig } from "../auth.js";
 
 describe("extractToken", () => {
   it("extracts Bearer token from Authorization header", () => {
@@ -133,5 +133,47 @@ describe("validateAuth", () => {
       expect(result.valid).toBe(false);
       expect(called).toBe(false);
     });
+  });
+});
+
+describe("wwwAuthenticateHeader", () => {
+  it("returns bare Bearer when no config", () => {
+    expect(wwwAuthenticateHeader(undefined)).toBe("Bearer");
+  });
+
+  it("returns bare Bearer when no resource configured", () => {
+    const config: AuthConfig = { type: "token", token: "secret" };
+    expect(wwwAuthenticateHeader(config)).toBe("Bearer");
+  });
+
+  it("includes resource parameter when configured", () => {
+    const config: AuthConfig = {
+      type: "token",
+      token: "secret",
+      resource: "https://example.com/api/v2/mcp",
+    };
+    expect(wwwAuthenticateHeader(config)).toBe('Bearer resource="https://example.com/api/v2/mcp"');
+  });
+
+  it("works with custom auth type", () => {
+    const config: AuthConfig = {
+      type: "custom",
+      validate: async () => ({ valid: true }),
+      resource: "https://mcp.knowify.com/api",
+    };
+    expect(wwwAuthenticateHeader(config)).toBe('Bearer resource="https://mcp.knowify.com/api"');
+  });
+
+  it("returns bare Bearer for type: none with no resource", () => {
+    const config: AuthConfig = { type: "none" };
+    expect(wwwAuthenticateHeader(config)).toBe("Bearer");
+  });
+
+  it("includes resource even for type: none", () => {
+    const config: AuthConfig = {
+      type: "none",
+      resource: "https://example.com/mcp",
+    };
+    expect(wwwAuthenticateHeader(config)).toBe('Bearer resource="https://example.com/mcp"');
   });
 });

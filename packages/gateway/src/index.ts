@@ -135,8 +135,4 @@ export {
   type ToolEntry as McpToolEntry,
 } from "./plugins/mcp-server.js";
 export { openaiCompatPlugin, type OpenAICompatPluginConfig } from "./plugins/openai-compat.js";
-export {
-  loggingPlugin,
-  loggingMiddleware,
-  type LoggingPluginConfig,
-} from "./plugins/logging.js";
+export { loggingPlugin, loggingMiddleware, type LoggingPluginConfig } from "./plugins/logging.js";

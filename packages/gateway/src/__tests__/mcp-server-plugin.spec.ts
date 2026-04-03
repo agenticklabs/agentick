@@ -415,9 +415,7 @@ describe("MCP Server Plugin — static resources", () => {
     await gateway.use(plugin);
 
     expect(registerResourceSpy).toHaveBeenCalled();
-    const call = registerResourceSpy.mock.calls.find(
-      (args) => args[0] === "schema-doc",
-    );
+    const call = registerResourceSpy.mock.calls.find((args) => args[0] === "schema-doc");
     expect(call).toBeDefined();
     // Second arg is the URI string for static resources
     expect(call![1]).toBe("docs://schema");
@@ -488,9 +486,7 @@ describe("MCP Server Plugin — resource templates", () => {
     await gateway.use(plugin);
 
     expect(registerResourceSpy).toHaveBeenCalled();
-    const call = registerResourceSpy.mock.calls.find(
-      (args) => args[0] === "project",
-    );
+    const call = registerResourceSpy.mock.calls.find((args) => args[0] === "project");
     expect(call).toBeDefined();
     // Second arg is a ResourceTemplate instance for template resources
     expect(call![1]).toBeInstanceOf(Object);
@@ -554,9 +550,7 @@ describe("MCP Server Plugin — tool annotations", () => {
     await gateway.handleRequest(req, res);
 
     // Find the registerTool call for "read-data"
-    const toolCall = registerToolSpy.mock.calls.find(
-      (args) => args[0] === "read-data",
-    );
+    const toolCall = registerToolSpy.mock.calls.find((args) => args[0] === "read-data");
     expect(toolCall).toBeDefined();
     // Second arg is the tool config object
     const toolConfig = toolCall![1] as Record<string, unknown>;
@@ -589,9 +583,7 @@ describe("MCP Server Plugin — tool annotations", () => {
     const { req, res } = createMockHTTPPair("/mcp-no-annotations", "POST");
     await gateway.handleRequest(req, res);
 
-    const toolCall = registerToolSpy.mock.calls.find(
-      (args) => args[0] === "plain-tool",
-    );
+    const toolCall = registerToolSpy.mock.calls.find((args) => args[0] === "plain-tool");
     expect(toolCall).toBeDefined();
     const toolConfig = toolCall![1] as Record<string, unknown>;
     expect(toolConfig.annotations).toBeUndefined();
@@ -615,7 +607,8 @@ describe("MCP Server Plugin — parsed body passthrough", () => {
 
   it("passes (req as any).body to transport.handleRequest as third argument", async () => {
     const handleRequestSpy = vi.spyOn(
-      (await import("@modelcontextprotocol/sdk/server/streamableHttp.js")).StreamableHTTPServerTransport.prototype,
+      (await import("@modelcontextprotocol/sdk/server/streamableHttp.js"))
+        .StreamableHTTPServerTransport.prototype,
       "handleRequest",
     );
 
@@ -642,7 +635,8 @@ describe("MCP Server Plugin — parsed body passthrough", () => {
 
   it("passes undefined body when req.body is not set", async () => {
     const handleRequestSpy = vi.spyOn(
-      (await import("@modelcontextprotocol/sdk/server/streamableHttp.js")).StreamableHTTPServerTransport.prototype,
+      (await import("@modelcontextprotocol/sdk/server/streamableHttp.js"))
+        .StreamableHTTPServerTransport.prototype,
       "handleRequest",
     );
 

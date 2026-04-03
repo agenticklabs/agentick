@@ -134,7 +134,7 @@ import { mcpServerPlugin } from "@agentick/gateway";
 
 gateway.use(
   mcpServerPlugin({
-    sessionId: "default",       // omit for resources-only mode
+    sessionId: "default", // omit for resources-only mode
     path: "/mcp",
     include: ["search", "read_file"],
     exclude: ["dangerous_tool"],
@@ -165,6 +165,7 @@ gateway.use(
 ```
 
 Three modes:
+
 - **Resources-only** — omit `sessionId` to serve MCP resources without tools
 - **Static tools** — set `sessionId` to discover and expose session tools
 - **Per-session tools** — add `toolFilter` to customize tools per client
