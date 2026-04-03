@@ -1,5 +1,13 @@
 # @agentick/server
 
+## 0.14.22
+
+### Patch Changes
+
+- 9cd37df: add support for protected resource discovery in mcp plugin
+  - @agentick/kernel@0.14.22
+  - @agentick/shared@0.14.22
+
 ## 0.14.21
 
 ### Patch Changes
