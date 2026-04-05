@@ -539,6 +539,10 @@ describe("MCP Server Plugin — static resources", () => {
     });
     await gateway.use(plugin);
 
+    // Resources are registered when a client connects (per-request server creation)
+    const { req, res } = createMockHTTPPair("/mcp-static-res", "POST");
+    await gateway.handleRequest(req, res);
+
     expect(registerResourceSpy).toHaveBeenCalled();
     const call = registerResourceSpy.mock.calls.find((args) => args[0] === "schema-doc");
     expect(call).toBeDefined();
@@ -609,6 +613,10 @@ describe("MCP Server Plugin — resource templates", () => {
       resourceTemplates,
     });
     await gateway.use(plugin);
+
+    // Resources are registered when a client connects (per-request server creation)
+    const { req, res } = createMockHTTPPair("/mcp-templates", "POST");
+    await gateway.handleRequest(req, res);
 
     expect(registerResourceSpy).toHaveBeenCalled();
     const call = registerResourceSpy.mock.calls.find((args) => args[0] === "project");
