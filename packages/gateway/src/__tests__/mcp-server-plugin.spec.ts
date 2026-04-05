@@ -8,6 +8,7 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import { Gateway, createGateway } from "../index.js";
 import { mcpServerPlugin, filterTools } from "../plugins/mcp-server.js";
 import type { ToolEntry, MCPStaticResource, MCPResourceTemplate } from "../plugins/mcp-server.js";
+import type { GatewayPlugin } from "../types.js";
 import { createMockApp } from "@agentick/core/testing";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 
@@ -378,6 +379,130 @@ describe("MCP Server Plugin — resources-only mode", () => {
     const { req: r2, res: s2 } = createMockHTTPPair("/mcp-res-cleanup", "POST");
     await gateway.handleRequest(r2, s2);
     expect(s2.statusCode).toBe(404);
+  });
+});
+
+// ============================================================================
+// Static mode — multi-client session management
+// ============================================================================
+
+describe("MCP Server Plugin — static mode multi-client", () => {
+  let gateway: Gateway;
+  let server: import("http").Server;
+  let port: number;
+
+  afterEach(async () => {
+    if (server) await new Promise<void>((r) => server.close(() => r()));
+    if (gateway) await gateway.stop().catch(() => {});
+  });
+
+  async function startGatewayServer(plugin: GatewayPlugin) {
+    const http = await import("http");
+    gateway = createTestGateway();
+    await gateway.use(plugin);
+
+    server = http.createServer(async (req, res) => {
+      try {
+        await gateway.handleRequest(req, res);
+      } catch {
+        if (!res.headersSent) res.writeHead(500).end();
+      }
+    });
+
+    await new Promise<void>((resolve) => {
+      server.listen(0, () => {
+        port = (server.address() as any).port;
+        resolve();
+      });
+    });
+  }
+
+  const mcpInitBody = {
+    jsonrpc: "2.0",
+    id: 1,
+    method: "initialize",
+    params: {
+      protocolVersion: "2025-03-26",
+      capabilities: {},
+      clientInfo: { name: "test-client", version: "1.0.0" },
+    },
+  };
+
+  async function mcpInit(path: string) {
+    const res = await fetch(`http://localhost:${port}${path}`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json, text/event-stream",
+      },
+      body: JSON.stringify(mcpInitBody),
+    });
+    const body = await res.text();
+    return { status: res.status, body, headers: res.headers };
+  }
+
+  it("multiple clients can initialize without 400 'already initialized'", async () => {
+    await startGatewayServer(mcpServerPlugin({ path: "/mcp" }));
+
+    // First client initializes
+    const r1 = await mcpInit("/mcp");
+    expect(r1.status).not.toBe(400);
+
+    // Second client initializes — should NOT get 400 "already initialized"
+    const r2 = await mcpInit("/mcp");
+    expect(r2.status).not.toBe(400);
+
+    // Third for good measure
+    const r3 = await mcpInit("/mcp");
+    expect(r3.status).not.toBe(400);
+  });
+
+  it("each client gets a unique session ID", async () => {
+    await startGatewayServer(mcpServerPlugin({ path: "/mcp" }));
+
+    const r1 = await mcpInit("/mcp");
+    const r2 = await mcpInit("/mcp");
+
+    const s1 = r1.headers.get("mcp-session-id");
+    const s2 = r2.headers.get("mcp-session-id");
+
+    expect(s1).toBeTruthy();
+    expect(s2).toBeTruthy();
+    expect(s1).not.toBe(s2);
+  });
+
+  it("returns 404 for unknown session ID in static mode", async () => {
+    await startGatewayServer(mcpServerPlugin({ path: "/mcp" }));
+
+    const res = await fetch(`http://localhost:${port}/mcp`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Mcp-Session-Id": "nonexistent-session-id",
+      },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
+    });
+
+    expect(res.status).toBe(404);
+    const body = await res.json();
+    expect(body.error.code).toBe(-32001);
+  });
+
+  it("resources-only mode supports multiple clients", async () => {
+    await startGatewayServer(
+      mcpServerPlugin({
+        path: "/mcp",
+        resources: [
+          { name: "test", uri: "test://doc", read: () => ({ text: "hello" }) },
+        ],
+      }),
+    );
+
+    const r1 = await mcpInit("/mcp");
+    expect(r1.status).not.toBe(400);
+
+    const r2 = await mcpInit("/mcp");
+    expect(r2.status).not.toBe(400);
   });
 });
 

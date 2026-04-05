@@ -327,19 +327,44 @@ export function mcpServerPlugin(config: MCPServerPluginConfig): GatewayPlugin {
           return transport.handleRequest(req, res, (req as any).body);
         });
       } else {
-        // Static mode: single McpServer
-        const server = createMcpServer(config, allTools, ctx);
+        // Static mode: session management for multiple concurrent clients.
+        // Each MCP client initialize creates its own transport+server pair,
+        // because StreamableHTTPServerTransport rejects re-initialization
+        // ("Server already initialized") on a single transport instance.
+        ctx.registerRoute(routePath, async (req, res) => {
+          const mcpSessionId = req.headers["mcp-session-id"] as string | undefined;
 
-        const transport = new StreamableHTTPServerTransport({
-          sessionIdGenerator: () => randomUUID(),
+          if (mcpSessionId) {
+            const session = sessions.get(mcpSessionId);
+            if (!session) {
+              res.writeHead(404, { "Content-Type": "application/json" });
+              res.end(
+                JSON.stringify({
+                  jsonrpc: "2.0",
+                  error: { code: -32001, message: "Session not found" },
+                }),
+              );
+              return;
+            }
+            return session.transport.handleRequest(req, res, (req as any).body);
+          }
+
+          // No session ID — new client initializing. Create a fresh transport + server.
+          const server = createMcpServer(config, allTools, ctx);
+
+          const transport = new StreamableHTTPServerTransport({
+            sessionIdGenerator: () => randomUUID(),
+            onsessioninitialized: (id) => {
+              sessions.set(id, { server, transport });
+            },
+            onsessionclosed: (id) => {
+              sessions.delete(id);
+            },
+          });
+
+          await server.connect(transport);
+          return transport.handleRequest(req, res, (req as any).body);
         });
-        await server.connect(transport);
-
-        ctx.registerRoute(routePath, (req, res) =>
-          // Pass pre-parsed body — upstream middleware (Express body-parser)
-          // may have already consumed the request stream.
-          transport.handleRequest(req, res, (req as any).body),
-        );
       }
     },
 
