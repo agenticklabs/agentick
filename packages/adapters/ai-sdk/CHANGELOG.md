@@ -1,5 +1,12 @@
 # @agentick/ai-sdk
 
+## 0.14.23
+
+### Patch Changes
+
+- @agentick/shared@0.14.23
+- @agentick/core@0.14.23
+
 ## 0.14.22
 
 ### Patch Changes
