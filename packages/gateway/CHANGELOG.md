@@ -1,5 +1,15 @@
 # @agentick/gateway
 
+## 0.14.23
+
+### Patch Changes
+
+- c191c6b: fix multiple mcp clients bug
+  - @agentick/kernel@0.14.23
+  - @agentick/shared@0.14.23
+  - @agentick/core@0.14.23
+  - @agentick/server@0.14.23
+
 ## 0.14.22
 
 ### Patch Changes
