@@ -133,6 +133,7 @@ export {
   type MCPStaticResource,
   type MCPResourceTemplate,
   type ToolEntry as McpToolEntry,
+  type MCPStandaloneTool,
 } from "./plugins/mcp-server.js";
 export { openaiCompatPlugin, type OpenAICompatPluginConfig } from "./plugins/openai-compat.js";
 export { loggingPlugin, loggingMiddleware, type LoggingPluginConfig } from "./plugins/logging.js";

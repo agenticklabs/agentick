@@ -40,6 +40,18 @@ export interface ToolEntry {
   annotations?: Record<string, unknown>;
 }
 
+/** Standalone MCP tool — self-contained handler, no session required. */
+export interface MCPStandaloneTool {
+  name: string;
+  description: string;
+  /** JSON Schema for tool input */
+  input: Record<string, unknown>;
+  /** MCP tool annotations (readOnlyHint, destructiveHint, openWorldHint) */
+  annotations?: Record<string, unknown>;
+  /** Handler called when the tool is invoked. Receives parsed input args. */
+  handler: (args: Record<string, unknown>, req?: IncomingMessage) => Promise<CallToolResult> | CallToolResult;
+}
+
 /** Static MCP resource — fixed URI, returns content when read. */
 export interface MCPStaticResource {
   name: string;
@@ -90,6 +102,11 @@ export interface MCPServerPluginConfig {
    * Return the tools to expose for this session.
    */
   toolFilter?: (tools: ToolEntry[], req: IncomingMessage) => ToolEntry[] | Promise<ToolEntry[]>;
+  /**
+   * Standalone tools to expose via MCP, independent of any session.
+   * Each entry provides its own handler — no session dispatch needed.
+   */
+  tools?: MCPStandaloneTool[];
   /** Static MCP resources to register. */
   resources?: MCPStaticResource[];
   /** Templated MCP resources to register. */
@@ -228,8 +245,9 @@ function createMcpServer(
   tools: ToolEntry[],
   ctx: PluginContext,
 ): McpServer {
+  const hasTools = tools.length > 0 || (config.tools?.length ?? 0) > 0;
   const capabilities: Record<string, Record<string, unknown>> = {};
-  if (tools.length > 0) capabilities.tools = {};
+  if (hasTools) capabilities.tools = {};
   if (config.resources?.length || config.resourceTemplates?.length) {
     capabilities.resources = {};
   }
@@ -259,6 +277,23 @@ function createMcpServer(
             input: args,
           });
           return toMCPResult(result as { content: unknown[] });
+        },
+      );
+    }
+  }
+
+  // Register standalone tools (no session required)
+  if (config.tools) {
+    for (const tool of config.tools) {
+      server.registerTool(
+        tool.name,
+        {
+          description: tool.description,
+          inputSchema: tool.input as any,
+          ...(tool.annotations ? { annotations: tool.annotations } : {}),
+        },
+        async (args: Record<string, unknown>) => {
+          return tool.handler(args);
         },
       );
     }
