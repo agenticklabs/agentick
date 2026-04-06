@@ -1,5 +1,15 @@
 # @agentick/gateway
 
+## 0.14.24
+
+### Patch Changes
+
+- 092d470: better mcp oauth support
+  - @agentick/kernel@0.14.24
+  - @agentick/shared@0.14.24
+  - @agentick/core@0.14.24
+  - @agentick/server@0.14.24
+
 ## 0.14.23
 
 ### Patch Changes
