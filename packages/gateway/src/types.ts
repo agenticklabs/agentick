@@ -227,7 +227,9 @@ export interface PluginContext {
   broadcast(event: string, data: unknown): void;
 
   /** Mount an HTTP route handler on the gateway's HTTP server.
-   *  Path is absolute (e.g., "/mcp"). Only works with HTTP transport or embedded mode.
+   *  Path is relative to the gateway's httpPathPrefix by default (e.g., "mcp" → "{prefix}/mcp").
+   *  Pass `{ absolute: true }` for paths that must be at the domain root regardless of prefix
+   *  (e.g., `/.well-known/oauth-authorization-server`).
    *  Routes enforce gateway auth by default. Pass `{ auth: false }` to skip. */
   registerRoute(
     path: string,
@@ -235,7 +237,7 @@ export interface PluginContext {
       req: import("http").IncomingMessage,
       res: import("http").ServerResponse,
     ) => void | Promise<void>,
-    options?: { auth?: boolean },
+    options?: { auth?: boolean; absolute?: boolean },
   ): void;
 
   /** Unmount a route this plugin registered */

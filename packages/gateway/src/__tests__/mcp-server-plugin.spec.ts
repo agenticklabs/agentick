@@ -792,3 +792,273 @@ describe("MCP Server Plugin — parsed body passthrough", () => {
     handleRequestSpy.mockRestore();
   });
 });
+
+// ============================================================================
+// OAuth Metadata Discovery
+// ============================================================================
+
+describe("OAuth metadata discovery", () => {
+  let gateway: Gateway;
+
+  afterEach(async () => {
+    if (gateway) {
+      await gateway.stop().catch(() => {});
+    }
+  });
+
+  it("serves static metadata at /.well-known/oauth-authorization-server", async () => {
+    const metadata = {
+      issuer: "https://auth.example.com",
+      authorization_endpoint: "https://auth.example.com/oauth/authorize",
+      token_endpoint: "https://auth.example.com/oauth/token",
+      response_types_supported: ["code"],
+      code_challenge_methods_supported: ["S256"],
+    };
+
+    gateway = createTestGateway();
+    const plugin = mcpServerPlugin({
+      oauthMetadata: { metadata },
+    });
+    await gateway.use(plugin);
+
+    const { req, res, body } = createMockHTTPPair(
+      "/.well-known/oauth-authorization-server",
+    );
+    await gateway.handleRequest(req, res);
+
+    expect(res.statusCode).toBe(200);
+    expect(res._headers["content-type"]).toBe("application/json");
+    const parsed = JSON.parse(body());
+    expect(parsed.issuer).toBe("https://auth.example.com");
+    expect(parsed.authorization_endpoint).toBe("https://auth.example.com/oauth/authorize");
+    expect(parsed.token_endpoint).toBe("https://auth.example.com/oauth/token");
+  });
+
+  it("serves metadata without requiring authentication", async () => {
+    gateway = createGateway({
+      apps: { chat: createMockApp() },
+      defaultApp: "chat",
+      embedded: true,
+      auth: { type: "token", token: "secret-token" },
+    });
+
+    const plugin = mcpServerPlugin({
+      oauthMetadata: {
+        metadata: {
+          issuer: "https://auth.example.com",
+          authorization_endpoint: "https://auth.example.com/authorize",
+          token_endpoint: "https://auth.example.com/token",
+        },
+      },
+    });
+    await gateway.use(plugin);
+
+    // Request WITHOUT any auth token
+    const { req, res, body } = createMockHTTPPair(
+      "/.well-known/oauth-authorization-server",
+    );
+    await gateway.handleRequest(req, res);
+
+    // Should succeed even without auth
+    expect(res.statusCode).toBe(200);
+    const parsed = JSON.parse(body());
+    expect(parsed.issuer).toBe("https://auth.example.com");
+  });
+
+  it("serves metadata at domain root even with httpPathPrefix", async () => {
+    gateway = createGateway({
+      apps: { chat: createMockApp() },
+      defaultApp: "chat",
+      embedded: true,
+      httpPathPrefix: "/api/v2",
+    });
+
+    const plugin = mcpServerPlugin({
+      path: "/mcp",
+      oauthMetadata: {
+        metadata: {
+          issuer: "https://auth.example.com",
+          authorization_endpoint: "https://auth.example.com/authorize",
+          token_endpoint: "https://auth.example.com/token",
+        },
+      },
+    });
+    await gateway.use(plugin);
+
+    // .well-known at domain root, NOT under /api/v2
+    const { req, res, body } = createMockHTTPPair(
+      "/.well-known/oauth-authorization-server",
+    );
+    await gateway.handleRequest(req, res);
+
+    expect(res.statusCode).toBe(200);
+    const parsed = JSON.parse(body());
+    expect(parsed.issuer).toBe("https://auth.example.com");
+  });
+
+  it("proxies metadata from issuer URL", async () => {
+    const mockMetadata = {
+      issuer: "https://auth.example.com",
+      authorization_endpoint: "https://auth.example.com/oauth/authorize",
+      token_endpoint: "https://auth.example.com/oauth/token",
+      registration_endpoint: "https://auth.example.com/oauth/register",
+    };
+
+    // Mock global fetch
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify(mockMetadata), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+
+    gateway = createTestGateway();
+    const plugin = mcpServerPlugin({
+      oauthMetadata: { issuer: "https://auth.example.com" },
+    });
+    await gateway.use(plugin);
+
+    const { req, res, body } = createMockHTTPPair(
+      "/.well-known/oauth-authorization-server",
+    );
+    await gateway.handleRequest(req, res);
+
+    expect(res.statusCode).toBe(200);
+    expect(fetchSpy).toHaveBeenCalledWith(
+      "https://auth.example.com/.well-known/oauth-authorization-server",
+      expect.objectContaining({ headers: { Accept: "application/json" } }),
+    );
+    const parsed = JSON.parse(body());
+    expect(parsed.issuer).toBe("https://auth.example.com");
+    expect(parsed.registration_endpoint).toBe("https://auth.example.com/oauth/register");
+
+    fetchSpy.mockRestore();
+  });
+
+  it("caches proxied metadata", async () => {
+    const mockMetadata = { issuer: "https://auth.example.com" };
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify(mockMetadata), { status: 200 }),
+    );
+
+    gateway = createTestGateway();
+    const plugin = mcpServerPlugin({
+      oauthMetadata: { issuer: "https://auth.example.com", cacheTtl: 60 },
+    });
+    await gateway.use(plugin);
+
+    // First request — fetches
+    const r1 = createMockHTTPPair("/.well-known/oauth-authorization-server");
+    await gateway.handleRequest(r1.req, r1.res);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+
+    // Second request — uses cache
+    const r2 = createMockHTTPPair("/.well-known/oauth-authorization-server");
+    await gateway.handleRequest(r2.req, r2.res);
+    expect(fetchSpy).toHaveBeenCalledTimes(1); // NOT called again
+
+    fetchSpy.mockRestore();
+  });
+
+  it("returns 502 when issuer is unreachable in proxy mode", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockRejectedValue(
+      new Error("ECONNREFUSED"),
+    );
+
+    gateway = createTestGateway();
+    const plugin = mcpServerPlugin({
+      oauthMetadata: { issuer: "https://unreachable.example.com" },
+    });
+    await gateway.use(plugin);
+
+    const { req, res, body } = createMockHTTPPair(
+      "/.well-known/oauth-authorization-server",
+    );
+    await gateway.handleRequest(req, res);
+
+    expect(res.statusCode).toBe(502);
+    const parsed = JSON.parse(body());
+    expect(parsed.error).toContain("Failed to fetch OAuth metadata");
+
+    fetchSpy.mockRestore();
+  });
+
+  it("does not register .well-known when oauthMetadata is not configured", async () => {
+    gateway = createTestGateway();
+    const plugin = mcpServerPlugin({});
+    await gateway.use(plugin);
+
+    const { req, res } = createMockHTTPPair(
+      "/.well-known/oauth-authorization-server",
+    );
+    await gateway.handleRequest(req, res);
+
+    // Should 404 — no .well-known route registered
+    expect(res.statusCode).toBe(404);
+  });
+});
+
+// ============================================================================
+// Absolute Routes
+// ============================================================================
+
+describe("absolute route registration", () => {
+  let gateway: Gateway;
+
+  afterEach(async () => {
+    if (gateway) {
+      await gateway.stop().catch(() => {});
+    }
+  });
+
+  it("absolute route matches at domain root despite httpPathPrefix", async () => {
+    gateway = createGateway({
+      apps: { chat: createMockApp() },
+      defaultApp: "chat",
+      embedded: true,
+      httpPathPrefix: "/api/v2",
+    });
+
+    // Register a relative route (should be under prefix)
+    const relativePlugin: GatewayPlugin = {
+      id: "relative",
+      async initialize(ctx) {
+        ctx.registerRoute("/hello", async (_req, res) => {
+          res.writeHead(200, { "Content-Type": "text/plain" });
+          res.end("relative");
+        });
+      },
+    };
+
+    // Register an absolute route (should be at domain root)
+    const absolutePlugin: GatewayPlugin = {
+      id: "absolute",
+      async initialize(ctx) {
+        ctx.registerRoute("/.well-known/test", async (_req, res) => {
+          res.writeHead(200, { "Content-Type": "text/plain" });
+          res.end("absolute");
+        }, { auth: false, absolute: true });
+      },
+    };
+
+    await gateway.use(relativePlugin);
+    await gateway.use(absolutePlugin);
+
+    // Relative route: /api/v2/hello → 200
+    const r1 = createMockHTTPPair("/api/v2/hello");
+    await gateway.handleRequest(r1.req, r1.res);
+    expect(r1.res.statusCode).toBe(200);
+    expect(r1.body()).toBe("relative");
+
+    // Absolute route at root: /.well-known/test → 200
+    const r2 = createMockHTTPPair("/.well-known/test");
+    await gateway.handleRequest(r2.req, r2.res);
+    expect(r2.res.statusCode).toBe(200);
+    expect(r2.body()).toBe("absolute");
+
+    // Absolute route under prefix should NOT match: /api/v2/.well-known/test → 404
+    const r3 = createMockHTTPPair("/api/v2/.well-known/test");
+    await gateway.handleRequest(r3.req, r3.res);
+    expect(r3.res.statusCode).toBe(404);
+  });
+});

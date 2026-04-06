@@ -94,6 +94,21 @@ export interface MCPServerPluginConfig {
   resources?: MCPStaticResource[];
   /** Templated MCP resources to register. */
   resourceTemplates?: MCPResourceTemplate[];
+  /**
+   * OAuth 2.0 Authorization Server Metadata (RFC 8414) for MCP client discovery.
+   *
+   * When set, registers `/.well-known/oauth-authorization-server` (unauthenticated)
+   * so MCP clients (Cursor, Claude Desktop, etc.) can discover OAuth endpoints.
+   *
+   * Two modes:
+   * - **Proxy:** `{ issuer: "https://auth.example.com" }` — fetches and caches
+   *   metadata from the OAuth server's own `.well-known` endpoint. Always in sync.
+   * - **Static:** `{ metadata: { issuer, authorization_endpoint, ... } }` — serves
+   *   the provided metadata directly.
+   */
+  oauthMetadata?:
+    | { issuer: string; cacheTtl?: number }
+    | { metadata: Record<string, unknown> };
 }
 
 // ============================================================================
@@ -278,6 +293,58 @@ export function mcpServerPlugin(config: MCPServerPluginConfig): GatewayPlugin {
     async initialize(pluginCtx) {
       ctx = pluginCtx;
 
+      // ── OAuth metadata discovery ──────────────────────────────────────
+      // Register /.well-known/oauth-authorization-server (unauthenticated)
+      // so MCP clients can discover OAuth endpoints before authenticating.
+      if (config.oauthMetadata) {
+        let metadataCache: { data: Record<string, unknown>; expires: number } | null = null;
+
+        ctx.registerRoute("/.well-known/oauth-authorization-server", async (_req, res) => {
+          const oauthConfig = config.oauthMetadata!;
+          let metadata: Record<string, unknown>;
+
+          if ("metadata" in oauthConfig) {
+            // Static mode
+            metadata = oauthConfig.metadata;
+          } else {
+            // Proxy mode — fetch from OAuth server and cache
+            const now = Date.now();
+            const ttl = (oauthConfig.cacheTtl ?? 300) * 1000;
+
+            if (metadataCache && metadataCache.expires > now) {
+              metadata = metadataCache.data;
+            } else {
+              try {
+                const wellKnownUrl = `${oauthConfig.issuer.replace(/\/$/, "")}/.well-known/oauth-authorization-server`;
+                const response = await fetch(wellKnownUrl, {
+                  headers: { Accept: "application/json" },
+                  signal: AbortSignal.timeout(5000),
+                });
+                if (!response.ok) {
+                  res.writeHead(502, { "Content-Type": "application/json" });
+                  res.end(JSON.stringify({ error: "Failed to fetch OAuth metadata" }));
+                  return;
+                }
+                metadata = await response.json() as Record<string, unknown>;
+                metadataCache = { data: metadata, expires: now + ttl };
+              } catch {
+                res.writeHead(502, { "Content-Type": "application/json" });
+                res.end(JSON.stringify({ error: "Failed to fetch OAuth metadata" }));
+                return;
+              }
+            }
+          }
+
+          res.writeHead(200, {
+            "Content-Type": "application/json",
+            "Cache-Control": "public, max-age=300",
+            "Access-Control-Allow-Origin": "*",
+          });
+          res.end(JSON.stringify(metadata));
+        }, { auth: false, absolute: true });
+      }
+
+      // ── Tool discovery ────────────────────────────────────────────────
       // Discover tools from the configured session (if any)
       let allTools: ToolEntry[] = [];
       if (config.sessionId) {
@@ -370,6 +437,9 @@ export function mcpServerPlugin(config: MCPServerPluginConfig): GatewayPlugin {
 
     async destroy() {
       ctx.unregisterRoute(routePath);
+      if (config.oauthMetadata) {
+        ctx.unregisterRoute("/.well-known/oauth-authorization-server");
+      }
 
       const closePromises = [...sessions.values()].map((s) => s.server.close());
       await Promise.all(closePromises);

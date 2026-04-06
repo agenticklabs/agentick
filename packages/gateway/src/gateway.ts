@@ -259,6 +259,7 @@ export class Gateway extends EventEmitter {
     {
       pluginId: string;
       auth: boolean;
+      absolute: boolean;
       handler: (
         req: import("http").IncomingMessage,
         res: import("http").ServerResponse,
@@ -884,6 +885,8 @@ export class Gateway extends EventEmitter {
   // ══════════════════════════════════════════════════════════════════════════
   // HTTP Handlers (used by both handleRequest and HTTPTransport)
   // ══════════════════════════════════════════════════════════════════════════
+
+  // ── SSE ──────────────────────────────────────────────────────────────────
 
   private async handleSSE(req: NodeRequest, res: NodeResponse): Promise<void> {
     const url = new URL(req.url ?? "/", `http://${req.headers.host}`);
@@ -2374,7 +2377,12 @@ export class Gateway extends EventEmitter {
         if (this.pluginRoutes.has(path)) {
           throw new Error(`Route "${path}" is already registered`);
         }
-        this.pluginRoutes.set(path, { pluginId, auth: options?.auth !== false, handler });
+        this.pluginRoutes.set(path, {
+          pluginId,
+          auth: options?.auth !== false,
+          absolute: options?.absolute ?? false,
+          handler,
+        });
       },
 
       unregisterRoute: (path) => {
@@ -2395,12 +2403,17 @@ export class Gateway extends EventEmitter {
   /**
    * Match a request path against plugin routes.
    * Longest prefix wins. Returns undefined if no match.
+   *
+   * @param strippedPath - Path with httpPathPrefix removed (for relative routes)
+   * @param originalPath - Original URL pathname (for absolute routes)
    */
-  private matchPluginRoute(path: string) {
+  private matchPluginRoute(strippedPath: string, originalPath: string) {
     // Sort by path length descending for longest-prefix match
     const sorted = [...this.pluginRoutes.entries()].sort((a, b) => b[0].length - a[0].length);
     for (const [routePath, route] of sorted) {
-      if (path === routePath || path.startsWith(routePath + "/")) {
+      // Absolute routes match against the original URL pathname
+      const matchPath = route.absolute ? originalPath : strippedPath;
+      if (matchPath === routePath || matchPath.startsWith(routePath + "/")) {
         return route;
       }
     }
@@ -2422,7 +2435,8 @@ export class Gateway extends EventEmitter {
     res: import("http").ServerResponse,
     authResult?: AuthResult,
   ): Promise<boolean> {
-    const route = this.matchPluginRoute(path);
+    const url = new URL(req.url ?? "/", `http://${req.headers.host}`);
+    const route = this.matchPluginRoute(path, url.pathname);
     if (!route) return false;
 
     if (route.auth) {

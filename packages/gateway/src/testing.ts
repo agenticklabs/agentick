@@ -136,7 +136,7 @@ export function createMockPluginContext(
     broadcast(event: string, data: unknown) {
       _broadcastCalls.push([event, data]);
     },
-    registerRoute(path: string, handler: any, _options?: { auth?: boolean }) {
+    registerRoute(path: string, handler: any, _options?: { auth?: boolean; absolute?: boolean }) {
       _registerRouteCalls.push([path, handler]);
     },
     unregisterRoute() {},
