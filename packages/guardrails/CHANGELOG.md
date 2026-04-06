@@ -1,5 +1,12 @@
 # @agentick/guardrails
 
+## 0.14.24
+
+### Patch Changes
+
+- @agentick/kernel@0.14.24
+- @agentick/shared@0.14.24
+
 ## 0.14.23
 
 ### Patch Changes

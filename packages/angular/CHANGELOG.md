@@ -1,5 +1,12 @@
 # @agentick/angular
 
+## 0.14.24
+
+### Patch Changes
+
+- @agentick/shared@0.14.24
+- @agentick/client@0.14.24
+
 ## 0.14.23
 
 ### Patch Changes
