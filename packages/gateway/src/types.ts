@@ -191,7 +191,7 @@ export interface GatewayPlugin {
   /** Called when the plugin is registered via gateway.use() */
   initialize(ctx: PluginContext): Promise<void>;
   /** Called when the plugin is removed or the gateway stops */
-  destroy(): Promise<void>;
+  destroy?(): Promise<void>;
 }
 
 export interface PluginContext {

@@ -562,7 +562,7 @@ export class Gateway extends EventEmitter {
     const entries = [...this.plugins.values()].reverse();
     for (const { plugin } of entries) {
       await plugin
-        .destroy()
+        .destroy?.()
         .catch((err) => console.error(`Plugin ${plugin.id} destroy failed:`, err));
     }
     this.plugins.clear();
@@ -2215,7 +2215,7 @@ export class Gateway extends EventEmitter {
     const entry = this.plugins.get(pluginId);
     if (!entry) return;
 
-    await entry.plugin.destroy();
+    await entry.plugin.destroy?.();
 
     // Remove all methods and routes this plugin registered
     this.cleanupPluginRegistrations(pluginId);

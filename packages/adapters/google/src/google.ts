@@ -500,6 +500,82 @@ export function convertBlocksToGoogleParts(blocks: ContentBlock[]): any[] {
   return parts;
 }
 
+/**
+ * Sanitize a JSON Schema for Gemini's function declaration format.
+ * Gemini supports a strict subset of JSON Schema. This recursively strips
+ * unsupported features while preserving the schema's intent.
+ *
+ * Removed: $ref, additionalItems, additionalProperties (empty object),
+ *          tuple-style items (array of schemas), $defs/$definitions.
+ * Simplified: anyOf/oneOf with mixed types → first valid option or any.
+ */
+export function sanitizeSchemaForGemini(schema: any, depth = 0): any {
+  if (!schema || typeof schema !== "object" || depth > 15) return schema;
+
+  // Handle arrays (e.g., items: [{...}, {...}] tuple form)
+  if (Array.isArray(schema)) {
+    return schema.map((item) => sanitizeSchemaForGemini(item, depth + 1));
+  }
+
+  const result: any = {};
+
+  for (const [key, value] of Object.entries(schema)) {
+    // Skip unsupported keywords entirely
+    if (key === "$ref" || key === "$defs" || key === "$definitions" || key === "additionalItems") {
+      continue;
+    }
+
+    // additionalProperties: {} (empty schema) → remove
+    if (key === "additionalProperties") {
+      if (value && typeof value === "object" && Object.keys(value).length === 0) {
+        continue;
+      }
+      // additionalProperties: false is fine for Gemini
+      if (value === false) {
+        result[key] = value;
+        continue;
+      }
+      // additionalProperties: {schema} → skip (Gemini doesn't support it well)
+      continue;
+    }
+
+    // items: when it's an array (tuple validation) → use first item's schema or string
+    if (key === "items" && Array.isArray(value)) {
+      // Tuple items: [{ type: "string" }, { type: "string" }] → { type: "string" }
+      const first = value[0];
+      result[key] = first ? sanitizeSchemaForGemini(first, depth + 1) : { type: "string" };
+      continue;
+    }
+
+    // anyOf/oneOf with $ref entries → filter them out
+    if ((key === "anyOf" || key === "oneOf") && Array.isArray(value)) {
+      const cleaned = value
+        .filter((v: any) => !v?.$ref)
+        .map((v: any) => sanitizeSchemaForGemini(v, depth + 1));
+
+      if (cleaned.length === 0) {
+        // All options had $ref → fall back to any
+        result.type = "object";
+      } else if (cleaned.length === 1) {
+        // Single option → inline it
+        Object.assign(result, cleaned[0]);
+      } else {
+        result[key] = cleaned;
+      }
+      continue;
+    }
+
+    // Recurse into objects
+    if (value && typeof value === "object" && !Array.isArray(value)) {
+      result[key] = sanitizeSchemaForGemini(value, depth + 1);
+    } else {
+      result[key] = value;
+    }
+  }
+
+  return result;
+}
+
 export function mapToolDefinition(tool: any): any {
   if (typeof tool === "string") {
     return {
@@ -514,7 +590,7 @@ export function mapToolDefinition(tool: any): any {
         {
           name: toolDef.name,
           description: toolDef.description || "",
-          parameters: toolDef.input || {},
+          parameters: sanitizeSchemaForGemini(toolDef.input) || {},
         },
       ],
     };
@@ -537,7 +613,7 @@ export function mapToolDefinition(tool: any): any {
       {
         name: metadata?.id || metadata?.name || "unknown",
         description: metadata?.description || "",
-        parameters: metadata?.inputSchema || {},
+        parameters: sanitizeSchemaForGemini(metadata?.inputSchema) || {},
       },
     ],
   };

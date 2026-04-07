@@ -132,6 +132,10 @@ export interface MCPServerPluginConfig {
 // Helpers
 // ============================================================================
 
+function tryParseJson(str: string): any {
+  try { return JSON.parse(str); } catch { return null; }
+}
+
 export function filterTools(
   tools: ToolEntry[],
   config: Pick<MCPServerPluginConfig, "include" | "exclude">,
@@ -314,6 +318,7 @@ interface McpSession {
   transport: StreamableHTTPServerTransport;
 }
 
+
 export function mcpServerPlugin(config: MCPServerPluginConfig): GatewayPlugin {
   const pluginId = config.id ?? "mcp-server";
   const routePath = config.path ?? "/mcp";
@@ -398,7 +403,14 @@ export function mcpServerPlugin(config: MCPServerPluginConfig): GatewayPlugin {
 
           if (mcpSessionId) {
             const session = sessions.get(mcpSessionId);
-            if (!session) {
+            if (session) {
+              return session.transport.handleRequest(req, res, (req as any).body);
+            }
+            // Stale session ID + initialize → treat as new connection.
+            // Clients (Cursor, etc.) may cache session IDs across server restarts.
+            const body = (req as any).body;
+            const parsed = typeof body === "string" ? tryParseJson(body) : body;
+            if (!parsed || parsed.method !== "initialize") {
               res.writeHead(404, { "Content-Type": "application/json" });
               res.end(
                 JSON.stringify({
@@ -408,7 +420,7 @@ export function mcpServerPlugin(config: MCPServerPluginConfig): GatewayPlugin {
               );
               return;
             }
-            return session.transport.handleRequest(req, res, (req as any).body);
+            // Fall through to create a new session
           }
 
           // New session — filter tools and create a dedicated McpServer
@@ -438,7 +450,13 @@ export function mcpServerPlugin(config: MCPServerPluginConfig): GatewayPlugin {
 
           if (mcpSessionId) {
             const session = sessions.get(mcpSessionId);
-            if (!session) {
+            if (session) {
+              return session.transport.handleRequest(req, res, (req as any).body);
+            }
+            // Stale session ID + initialize → treat as new connection.
+            const body = (req as any).body;
+            const parsed = typeof body === "string" ? tryParseJson(body) : body;
+            if (!parsed || parsed.method !== "initialize") {
               res.writeHead(404, { "Content-Type": "application/json" });
               res.end(
                 JSON.stringify({
@@ -448,10 +466,10 @@ export function mcpServerPlugin(config: MCPServerPluginConfig): GatewayPlugin {
               );
               return;
             }
-            return session.transport.handleRequest(req, res, (req as any).body);
+            // Fall through to create a new session
           }
 
-          // No session ID — new client initializing. Create a fresh transport + server.
+          // New client initializing. Create a fresh transport + server.
           const server = createMcpServer(config, allTools, ctx);
 
           const transport = new StreamableHTTPServerTransport({

@@ -899,3 +899,155 @@ describe("mapToolDefinition", () => {
     });
   });
 });
+
+// =============================================================================
+// Schema Sanitization for Gemini
+// =============================================================================
+
+import { sanitizeSchemaForGemini } from "../google.js";
+
+describe("sanitizeSchemaForGemini", () => {
+  it("passes through simple schemas unchanged", () => {
+    const schema = {
+      type: "object",
+      properties: {
+        name: { type: "string" },
+        count: { type: "number" },
+      },
+      required: ["name"],
+    };
+    expect(sanitizeSchemaForGemini(schema)).toEqual(schema);
+  });
+
+  it("removes $ref", () => {
+    const schema = {
+      type: "object",
+      properties: {
+        nested: { $ref: "#/properties/items" },
+      },
+    };
+    const result = sanitizeSchemaForGemini(schema);
+    expect(result.properties.nested).toEqual({});
+  });
+
+  it("removes additionalItems", () => {
+    const schema = {
+      type: "array",
+      items: { type: "string" },
+      additionalItems: {},
+    };
+    const result = sanitizeSchemaForGemini(schema);
+    expect(result.additionalItems).toBeUndefined();
+    expect(result.items).toEqual({ type: "string" });
+  });
+
+  it("removes empty additionalProperties", () => {
+    const schema = {
+      type: "object",
+      properties: { name: { type: "string" } },
+      additionalProperties: {},
+    };
+    const result = sanitizeSchemaForGemini(schema);
+    expect(result.additionalProperties).toBeUndefined();
+  });
+
+  it("keeps additionalProperties: false", () => {
+    const schema = {
+      type: "object",
+      properties: { name: { type: "string" } },
+      additionalProperties: false,
+    };
+    const result = sanitizeSchemaForGemini(schema);
+    expect(result.additionalProperties).toBe(false);
+  });
+
+  it("converts tuple-style items array to single schema", () => {
+    const schema = {
+      type: "array",
+      items: [{ type: "string" }, { type: "number" }],
+    };
+    const result = sanitizeSchemaForGemini(schema);
+    expect(result.items).toEqual({ type: "string" });
+  });
+
+  it("filters $ref from anyOf entries", () => {
+    const schema = {
+      anyOf: [
+        { type: "string" },
+        { $ref: "#/definitions/Foo" },
+        { type: "object", properties: { x: { type: "number" } } },
+      ],
+    };
+    const result = sanitizeSchemaForGemini(schema);
+    expect(result.anyOf).toHaveLength(2);
+    expect(result.anyOf[0]).toEqual({ type: "string" });
+    expect(result.anyOf[1].properties.x).toEqual({ type: "number" });
+  });
+
+  it("inlines single remaining anyOf option", () => {
+    const schema = {
+      anyOf: [{ $ref: "#/definitions/Foo" }, { type: "string", description: "A name" }],
+    };
+    const result = sanitizeSchemaForGemini(schema);
+    expect(result.anyOf).toBeUndefined();
+    expect(result.type).toBe("string");
+    expect(result.description).toBe("A name");
+  });
+
+  it("falls back to object when all anyOf options are $ref", () => {
+    const schema = {
+      anyOf: [{ $ref: "#/definitions/Foo" }, { $ref: "#/definitions/Bar" }],
+    };
+    const result = sanitizeSchemaForGemini(schema);
+    expect(result.anyOf).toBeUndefined();
+    expect(result.type).toBe("object");
+  });
+
+  it("removes $defs and $definitions", () => {
+    const schema = {
+      type: "object",
+      $defs: { Foo: { type: "string" } },
+      $definitions: { Bar: { type: "number" } },
+      properties: { name: { type: "string" } },
+    };
+    const result = sanitizeSchemaForGemini(schema);
+    expect(result.$defs).toBeUndefined();
+    expect(result.$definitions).toBeUndefined();
+    expect(result.properties.name).toEqual({ type: "string" });
+  });
+
+  it("handles deeply nested schemas", () => {
+    const schema = {
+      type: "object",
+      properties: {
+        items: {
+          type: "array",
+          items: {
+            anyOf: [
+              { type: "string" },
+              {
+                type: "array",
+                items: [{ type: "string" }, {}],
+                additionalItems: {},
+              },
+              { $ref: "#/properties/items" },
+            ],
+          },
+        },
+      },
+    };
+    const result = sanitizeSchemaForGemini(schema);
+    const itemsAnyOf = result.properties.items.items.anyOf;
+    expect(itemsAnyOf).toHaveLength(2);
+    expect(itemsAnyOf[0]).toEqual({ type: "string" });
+    // Tuple items converted, additionalItems removed
+    expect(itemsAnyOf[1].items).toEqual({ type: "string" });
+    expect(itemsAnyOf[1].additionalItems).toBeUndefined();
+  });
+
+  it("handles null and undefined gracefully", () => {
+    expect(sanitizeSchemaForGemini(null)).toBeNull();
+    expect(sanitizeSchemaForGemini(undefined)).toBeUndefined();
+    expect(sanitizeSchemaForGemini({})).toEqual({});
+  });
+});

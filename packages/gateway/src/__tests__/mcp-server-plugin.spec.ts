@@ -485,7 +485,7 @@ describe("MCP Server Plugin — static mode multi-client", () => {
     });
 
     expect(res.status).toBe(404);
-    const body = await res.json();
+    const body = await res.json() as { error: { code: number } };
     expect(body.error.code).toBe(-32001);
   });
 
