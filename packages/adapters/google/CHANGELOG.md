@@ -1,5 +1,16 @@
 # @agentick/google
 
+## 0.14.26
+
+### Patch Changes
+
+- 3a15780: fix(google): sanitize tool schemas for Gemini compatibility
+
+  Gemini supports a strict subset of JSON Schema in function declarations. `sanitizeSchemaForGemini` now recursively strips unsupported features (`$ref`, `additionalItems`, tuple-style `items`, `$defs`/`$definitions`) and simplifies `anyOf`/`oneOf` with `$ref` entries before passing tool definitions to the API.
+
+  - @agentick/shared@0.14.26
+  - @agentick/core@0.14.26
+
 ## 0.14.25
 
 ### Patch Changes

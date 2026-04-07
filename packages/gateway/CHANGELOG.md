@@ -1,5 +1,18 @@
 # @agentick/gateway
 
+## 0.14.26
+
+### Patch Changes
+
+- 3a15780: fix(gateway): handle stale MCP session IDs gracefully
+
+  MCP clients (Cursor, etc.) may cache session IDs across server restarts. The MCP server plugin now detects stale session IDs paired with an `initialize` request and falls through to create a new session instead of returning 404. Also makes `GatewayPlugin.destroy()` optional.
+
+  - @agentick/kernel@0.14.26
+  - @agentick/shared@0.14.26
+  - @agentick/core@0.14.26
+  - @agentick/server@0.14.26
+
 ## 0.14.25
 
 ### Patch Changes

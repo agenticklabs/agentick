@@ -1,6 +1,6 @@
 {
   "name": "@agentick/tui",
-  "version": "0.14.25",
+  "version": "0.14.26",
   "description": "Terminal UI for Agentick agents using Ink",
   "keywords": [
     "agent",
