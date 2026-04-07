@@ -1,50 +1,61 @@
 /**
  * # Agentick MCP (Model Context Protocol)
  *
- * Integration with MCP servers for external tool execution.
- * MCP allows agents to use tools provided by external servers.
+ * Connect to MCP servers for external tools and resources.
  *
- * ## Features
+ * ## Usage
  *
- * - **MCPClient** - Connect to MCP servers
- * - **MCPService** - Manage multiple MCP connections
- * - **Tool Discovery** - Auto-discover tools from MCP servers
- * - **Tool Components** - Use MCP tools as JSX components
+ * ```tsx
+ * import { MCP } from "agentick";
  *
- * ## Quick Start
- *
- * ```typescript
- * import { discoverMCPTools } from 'agentick/mcp';
- *
- * // Discover tools from an MCP server
- * const tools = await discoverMCPTools({
- *   server: {
- *     command: 'npx',
- *     args: ['-y', '@modelcontextprotocol/server-filesystem'],
- *   },
- * });
- *
- * // Use in an agent
- * const MyAgent = () => (
- *   <>
- *     <System>You can read and write files.</System>
- *     {tools.map(tool => <Tool key={tool.name} tool={tool} />)}
- *   </>
- * );
+ * function MyAgent() {
+ *   return (
+ *     <>
+ *       <MCP servers={{
+ *         postgres: { command: "npx", args: ["-y", "@modelcontextprotocol/server-postgres", connStr] },
+ *         filesystem: { command: "npx", args: ["-y", "@modelcontextprotocol/server-filesystem", "/data"] },
+ *       }} />
+ *       <System>You can query databases and read files.</System>
+ *       <Timeline />
+ *     </>
+ *   );
+ * }
  * ```
  *
- * @see {@link MCPClient} - MCP server client
- * @see {@link MCPService} - MCP connection manager
- * @see {@link discoverMCPTools} - Tool discovery
+ * Tools from each server are registered individually.
+ * Resources are unified under `list_resources` and `read_resource` tools
+ * for progressive discovery across all servers.
  *
  * @module agentick/mcp
  */
 
-export * from "./types.js";
-export * from "./client.js";
-export * from "./service.js";
-export * from "./tool.js";
+// ── Public API ────────────────────────────────────────────────────────
+export { MCP, MCPComponent } from "./mcp-component.js";
+export type { MCPComponentProps } from "./mcp-component.js";
+
+// ── Types ─────────────────────────────────────────────────────────────
+export type {
+  MCPConfig,
+  MCPServerConfig,
+  MCPTransport,
+  MCPToolDefinition,
+  MCPResource,
+  MCPResourceTemplate,
+  MCPResourceContent,
+} from "./types.js";
+
+// ── Client (for advanced usage / sharing) ─────────────────────────────
+export { MCPClient, uriMatchesTemplate } from "./client.js";
+export { MCPService } from "./service.js";
+
+// ── Low-level components (implementation details, rarely needed) ──────
 export { MCPToolComponent, MCPTool } from "./component.js";
+export { MCPResourceComponent, MCPResources } from "./resource-component.js";
+export type { MCPResourceComponentProps, MCPServerEntry } from "./resource-component.js";
+
+// ── Tool utilities ────────────────────────────────────────────────────
+export { MCPTool as MCPToolClass, mcpSchemaToZod, normalizeResult } from "./tool.js";
+export type { MCPToolConfig } from "./tool.js";
 export {
   createMCPTool,
   createMCPToolFromDefinition,

@@ -2439,6 +2439,7 @@ export class Gateway extends EventEmitter {
     const route = this.matchPluginRoute(path, url.pathname);
     if (!route) return false;
 
+    let user: UserContext | undefined;
     if (route.auth) {
       // Use pre-validated result from handleRequest, or validate inline
       // (HTTP transport calls this without a pre-validated result)
@@ -2451,9 +2452,22 @@ export class Gateway extends EventEmitter {
         res.end(JSON.stringify({ error: "Authentication failed" }));
         return true;
       }
+      user = result.user;
     }
 
-    await route.handler(req, res);
+    // Ensure ALS context is set for the handler. On the standalone path
+    // this may already be inside a Context.run() — tryGet() avoids
+    // creating a redundant context. On the embedded path (NestJS HTTP
+    // transport) no context exists yet, so we create one.
+    if (Context.tryGet()?.user) {
+      await route.handler(req, res);
+    } else {
+      const ctx = Context.create({
+        user,
+        metadata: { gatewayId: this.config.id },
+      });
+      await Context.run(ctx, async () => { await route.handler(req, res); });
+    }
     return true;
   }
 }

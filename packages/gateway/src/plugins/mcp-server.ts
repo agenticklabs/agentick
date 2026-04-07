@@ -44,12 +44,12 @@ export interface ToolEntry {
 export interface MCPStandaloneTool {
   name: string;
   description: string;
-  /** JSON Schema for tool input */
-  input: Record<string, unknown>;
+  /** Zod schema for tool input (MCP SDK validates inputs against this) */
+  inputSchema: unknown;
   /** MCP tool annotations (readOnlyHint, destructiveHint, openWorldHint) */
   annotations?: Record<string, unknown>;
   /** Handler called when the tool is invoked. Receives parsed input args. */
-  handler: (args: Record<string, unknown>, req?: IncomingMessage) => Promise<CallToolResult> | CallToolResult;
+  handler: (args: Record<string, unknown>) => Promise<CallToolResult> | CallToolResult;
 }
 
 /** Static MCP resource — fixed URI, returns content when read. */
@@ -289,7 +289,7 @@ function createMcpServer(
         tool.name,
         {
           description: tool.description,
-          inputSchema: tool.input as any,
+          inputSchema: tool.inputSchema as any,
           ...(tool.annotations ? { annotations: tool.annotations } : {}),
         },
         async (args: Record<string, unknown>) => {

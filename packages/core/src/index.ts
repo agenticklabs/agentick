@@ -147,6 +147,14 @@ export type { COMTimelineEntry, COMSection, COMInput, TokenEstimator } from "./c
 export { createLocalTransport } from "./local-transport.js";
 
 // ============================================================================
+// MCP (Model Context Protocol)
+// ============================================================================
+export { MCP } from "./mcp/index.js";
+export type { MCPComponentProps } from "./mcp/index.js";
+export { MCPClient } from "./mcp/index.js";
+export type { MCPConfig, MCPServerConfig, MCPResource, MCPResourceTemplate } from "./mcp/index.js";
+
+// ============================================================================
 // DevTools
 // ============================================================================
 export {

@@ -43,6 +43,7 @@ The framework provides **building blocks**, not opinions.
 | `useTimeline()`          | Direct read/write access to session timeline                         |
 | `useResolved()`          | Access resolve data on session restore (Layer 2)                     |
 | `use()` on tools         | Bridge render-time context (React Context, hooks) into tool handlers |
+| `<MCP>`                  | Connect to MCP servers (tools + progressive resource discovery)      |
 | `<Sandbox>`              | Sandboxed execution (provider-backed, tree-scoped tools)             |
 | ExecutionRunner          | Controls how compiled context reaches model and how tools execute    |
 | `audience: "user"` tools | Visibility flag: tool hidden from model, only reachable via dispatch |

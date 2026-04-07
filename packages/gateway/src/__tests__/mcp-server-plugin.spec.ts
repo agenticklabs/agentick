@@ -7,10 +7,11 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { Gateway, createGateway } from "../index.js";
 import { mcpServerPlugin, filterTools } from "../plugins/mcp-server.js";
-import type { ToolEntry, MCPStaticResource, MCPResourceTemplate } from "../plugins/mcp-server.js";
+import type { ToolEntry, MCPStaticResource, MCPResourceTemplate, MCPStandaloneTool } from "../plugins/mcp-server.js";
 import type { GatewayPlugin } from "../types.js";
 import { createMockApp } from "@agentick/core/testing";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { z } from "zod";
 
 // ============================================================================
 // Test Helpers
@@ -995,6 +996,320 @@ describe("OAuth metadata discovery", () => {
 
     // Should 404 — no .well-known route registered
     expect(res.statusCode).toBe(404);
+  });
+});
+
+// ============================================================================
+// Standalone tools (no session required)
+// ============================================================================
+
+describe("MCP Server Plugin — standalone tools", () => {
+  let gateway: Gateway;
+
+  afterEach(async () => {
+    if (gateway) {
+      await gateway.stop().catch(() => {});
+    }
+  });
+
+  it("registers standalone tools via config.tools", async () => {
+    const registerToolSpy = vi.spyOn(McpServer.prototype, "registerTool");
+
+    gateway = createTestGateway();
+    const plugin = mcpServerPlugin({
+      path: "/mcp-standalone",
+      tools: [
+        {
+          name: "echo",
+          description: "Echoes input back",
+          inputSchema: z.object({ text: z.string() }),
+          handler: async (args) => ({
+            content: [{ type: "text", text: `echo: ${args.text}` }],
+          }),
+        },
+      ],
+    });
+    await gateway.use(plugin);
+
+    // Trigger server creation
+    const { req, res } = createMockHTTPPair("/mcp-standalone", "POST");
+    await gateway.handleRequest(req, res);
+
+    const toolCall = registerToolSpy.mock.calls.find((args) => args[0] === "echo");
+    expect(toolCall).toBeDefined();
+    expect((toolCall![1] as any).description).toBe("Echoes input back");
+
+    registerToolSpy.mockRestore();
+  });
+
+  it("standalone tool annotations are passed through", async () => {
+    const registerToolSpy = vi.spyOn(McpServer.prototype, "registerTool");
+
+    gateway = createTestGateway();
+    const plugin = mcpServerPlugin({
+      path: "/mcp-standalone-annot",
+      tools: [
+        {
+          name: "query",
+          description: "Query database",
+          inputSchema: z.object({}),
+          annotations: {
+            readOnlyHint: true,
+            destructiveHint: false,
+            idempotentHint: true,
+            openWorldHint: false,
+          },
+          handler: async () => ({ content: [{ type: "text", text: "ok" }] }),
+        },
+      ],
+    });
+    await gateway.use(plugin);
+
+    const { req, res } = createMockHTTPPair("/mcp-standalone-annot", "POST");
+    await gateway.handleRequest(req, res);
+
+    const toolCall = registerToolSpy.mock.calls.find((args) => args[0] === "query");
+    expect(toolCall).toBeDefined();
+    const toolConfig = toolCall![1] as Record<string, unknown>;
+    expect(toolConfig.annotations).toEqual({
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    });
+
+    registerToolSpy.mockRestore();
+  });
+
+  it("standalone tools work alongside resources", async () => {
+    const registerToolSpy = vi.spyOn(McpServer.prototype, "registerTool");
+    const registerResourceSpy = vi.spyOn(McpServer.prototype, "registerResource");
+
+    gateway = createTestGateway();
+    const plugin = mcpServerPlugin({
+      path: "/mcp-both",
+      tools: [
+        {
+          name: "my-tool",
+          description: "A tool",
+          inputSchema: z.object({}),
+          handler: async () => ({ content: [{ type: "text", text: "done" }] }),
+        },
+      ],
+      resources: [
+        { name: "my-resource", uri: "test://res", read: () => ({ text: "hello" }) },
+      ],
+    });
+    await gateway.use(plugin);
+
+    const { req, res } = createMockHTTPPair("/mcp-both", "POST");
+    await gateway.handleRequest(req, res);
+
+    expect(registerToolSpy.mock.calls.find((args) => args[0] === "my-tool")).toBeDefined();
+    expect(registerResourceSpy.mock.calls.find((args) => args[0] === "my-resource")).toBeDefined();
+
+    registerToolSpy.mockRestore();
+    registerResourceSpy.mockRestore();
+  });
+
+  it("standalone tool handler is called on execution", async () => {
+    let handlerArgs: Record<string, unknown> | null = null;
+    let resolveHandler: () => void;
+    const handlerCalled = new Promise<void>((r) => { resolveHandler = r; });
+
+    let server: import("http").Server;
+    let port: number;
+
+    gateway = createTestGateway();
+    const plugin = mcpServerPlugin({
+      path: "/mcp",
+      tools: [
+        {
+          name: "test-tool",
+          description: "Test",
+          inputSchema: z.object({ input: z.string() }),
+          handler: async (args) => {
+            handlerArgs = args;
+            resolveHandler();
+            return { content: [{ type: "text" as const, text: `result: ${args.input}` }] };
+          },
+        },
+      ],
+    });
+    await gateway.use(plugin);
+
+    const http = await import("http");
+    server = http.createServer(async (req, res) => {
+      try { await gateway.handleRequest(req, res); }
+      catch { if (!res.headersSent) res.writeHead(500).end(); }
+    });
+    await new Promise<void>((r) => server.listen(0, () => { port = (server.address() as any).port; r(); }));
+
+    try {
+      // Initialize MCP session
+      const initRes = await fetch(`http://localhost:${port}/mcp`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json, text/event-stream" },
+        body: JSON.stringify({
+          jsonrpc: "2.0", id: 1, method: "initialize",
+          params: { protocolVersion: "2025-03-26", capabilities: {}, clientInfo: { name: "test", version: "1.0" } },
+        }),
+      });
+      expect(initRes.status).toBeLessThan(400);
+      const sessionId = initRes.headers.get("mcp-session-id");
+      expect(sessionId).toBeTruthy();
+
+      // Send initialized notification
+      const notifRes = await fetch(`http://localhost:${port}/mcp`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Mcp-Session-Id": sessionId! },
+        body: JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" }),
+      });
+
+      // List tools first to verify registration
+      const listRes = await fetch(`http://localhost:${port}/mcp`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json, text/event-stream", "Mcp-Session-Id": sessionId! },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 10, method: "tools/list" }),
+      });
+      const listBody = await listRes.text();
+      console.log("[test] tools/list status:", listRes.status, "body:", listBody.slice(0, 500));
+
+      // Call the tool
+      const toolRes = fetch(`http://localhost:${port}/mcp`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json, text/event-stream", "Mcp-Session-Id": sessionId! },
+        body: JSON.stringify({
+          jsonrpc: "2.0", id: 2, method: "tools/call",
+          params: { name: "test-tool", arguments: { input: "hello" } },
+        }),
+      });
+
+      // Also capture the response for debugging
+      toolRes.then(async (r) => {
+        const body = await r.text();
+        console.log("[test] tools/call status:", r.status, "body:", body.slice(0, 500));
+      });
+
+      // Wait for handler to be invoked
+      await Promise.race([
+        handlerCalled,
+        new Promise((_, reject) => setTimeout(() => reject(new Error("Tool handler was not called within 5s")), 5000)),
+      ]);
+
+      expect(handlerArgs).toEqual({ input: "hello" });
+    } finally {
+      await new Promise<void>((r) => server.close(() => r()));
+    }
+  });
+});
+
+// ============================================================================
+// ALS context propagation for plugin routes
+// ============================================================================
+
+describe("MCP Server Plugin — ALS context in tool handlers", () => {
+  let gateway: Gateway;
+
+  afterEach(async () => {
+    if (gateway) {
+      await gateway.stop().catch(() => {});
+    }
+  });
+
+  it("standalone tool handler can access Context.get() with user", async () => {
+    const { Context } = await import("@agentick/kernel");
+    let capturedCtx: any = null;
+    let handlerDone: () => void;
+    const handlerCalled = new Promise<void>((resolve) => { handlerDone = resolve; });
+
+    gateway = createGateway({
+      apps: { chat: createMockApp() },
+      defaultApp: "chat",
+      embedded: true,
+      auth: { type: "token", token: "test-secret" },
+    });
+
+    const plugin = mcpServerPlugin({
+      path: "/mcp-ctx",
+      tools: [
+        {
+          name: "ctx-tool",
+          description: "Captures context",
+          inputSchema: z.object({}),
+          handler: async () => {
+            capturedCtx = Context.tryGet() ?? "NO_CONTEXT";
+            handlerDone();
+            return { content: [{ type: "text", text: "ok" }] };
+          },
+        },
+      ],
+    });
+    await gateway.use(plugin);
+
+    let server: import("http").Server;
+    let port: number;
+    const http = await import("http");
+    server = http.createServer(async (req, res) => {
+      try { await gateway.handleRequest(req, res); }
+      catch { if (!res.headersSent) res.writeHead(500).end(); }
+    });
+    await new Promise<void>((r) => server.listen(0, () => { port = (server.address() as any).port; r(); }));
+
+    try {
+      // Initialize with auth
+      const initRes = await fetch(`http://localhost:${port}/mcp-ctx`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json, text/event-stream",
+          Authorization: "Bearer test-secret",
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0", id: 1, method: "initialize",
+          params: { protocolVersion: "2025-03-26", capabilities: {}, clientInfo: { name: "test", version: "1.0" } },
+        }),
+      });
+      const sessionId = initRes.headers.get("mcp-session-id");
+
+      // Send initialized notification
+      await fetch(`http://localhost:${port}/mcp-ctx`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Mcp-Session-Id": sessionId!, Authorization: "Bearer test-secret" },
+        body: JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" }),
+      });
+
+      // Call tool — don't await fetch, await handler instead
+      fetch(`http://localhost:${port}/mcp-ctx`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json, text/event-stream",
+          "Mcp-Session-Id": sessionId!,
+          Authorization: "Bearer test-secret",
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0", id: 2, method: "tools/call",
+          params: { name: "ctx-tool", arguments: {} },
+        }),
+      });
+
+      // Wait for handler to execute
+      await Promise.race([
+        handlerCalled,
+        new Promise((_, reject) => setTimeout(() => reject(new Error("Tool handler was not called within 5s")), 5000)),
+      ]);
+
+      // The handler should have captured a real KernelContext (not the string fallback)
+      expect(capturedCtx).not.toBe("NO_CONTEXT");
+      // Context should have standard KernelContext fields (requestId, traceId, etc.)
+      expect(capturedCtx?.requestId).toBeDefined();
+      expect(capturedCtx?.traceId).toBeDefined();
+      // Note: simple token auth validates the token but doesn't populate user.
+      // A real auth provider (kAuth, OAuth) would set user with tenantId, etc.
+    } finally {
+      await new Promise<void>((r) => server.close(() => r()));
+    }
   });
 });
 

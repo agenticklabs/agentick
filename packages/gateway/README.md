@@ -330,11 +330,12 @@ Both are optional — import and `use()` them as needed.
 Exposes gateway capabilities as a standard MCP server via Streamable HTTP.
 Any MCP client (Claude Desktop, Cursor, Claude Code, etc.) can connect.
 
-Supports three modes:
+Supports four modes:
 
 - **Resources-only** — serve MCP resources without tools (no `sessionId` needed)
-- **Static tools** — expose session tools, frozen at initialization
-- **Per-session tools** — filter tools per client via `toolFilter` callback
+- **Standalone tools** — register tools with their own handlers, no session required
+- **Session tools** — expose tools from a running agent session, frozen at initialization
+- **Per-session tools** — filter session tools per client via `toolFilter` callback
 
 #### Resources Only
 
@@ -383,7 +384,63 @@ gateway.use(
 );
 ```
 
-#### Tools + Resources
+#### Standalone Tools
+
+Register tools with their own handlers — no agent session required. Ideal for
+database queries, API proxies, or any tool that manages its own execution context:
+
+```typescript
+import { mcpServerPlugin } from "@agentick/gateway";
+import type { MCPStandaloneTool } from "@agentick/gateway";
+import { z } from "zod";
+
+gateway.use(
+  mcpServerPlugin({
+    path: "/mcp",
+    tools: [
+      {
+        name: "query",
+        description: "Query the database",
+        inputSchema: z.object({
+          table: z.string(),
+          where: z.record(z.any()).optional(),
+          limit: z.number().optional(),
+        }),
+        annotations: {
+          readOnlyHint: true,
+          destructiveHint: false,
+          idempotentHint: true,
+          openWorldHint: false,
+        },
+        handler: async (args) => {
+          const results = await db.query(args);
+          return {
+            content: [{ type: "text", text: JSON.stringify(results) }],
+          };
+        },
+      },
+    ],
+    resources: [/* ... */],
+  }),
+);
+```
+
+Standalone tools are registered directly on the MCP server — they appear in
+`tools/list` and are callable via `tools/call` without any session.
+
+The handler receives parsed input arguments and returns a `CallToolResult`.
+Auth context is available via `Context.get()` (the gateway sets ALS context
+for all plugin route handlers).
+
+Tool annotations (`readOnlyHint`, `destructiveHint`, `idempotentHint`,
+`openWorldHint`) inform MCP clients about tool behavior for permission
+handling and auto-approval decisions.
+
+> **Note:** The MCP SDK requires `inputSchema` to be a **Zod schema**, not
+> raw JSON Schema. The SDK validates tool inputs against this schema before
+> calling the handler.
+
+#### Session Tools + Resources
 
 Expose session tools alongside resources. Tools are discovered from the
 session via `tool-catalog` and dispatched via `tool-dispatch`:

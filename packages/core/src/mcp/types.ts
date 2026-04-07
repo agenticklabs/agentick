@@ -78,3 +78,41 @@ export interface MCPToolDefinition {
     required?: string[];
   };
 }
+
+// ============================================================================
+// Resource Types
+// ============================================================================
+
+/**
+ * An MCP resource discovered from a server.
+ * Enriched with serverName so the routing layer knows where it came from.
+ */
+export interface MCPResource {
+  uri: string;
+  name: string;
+  description?: string;
+  mimeType?: string;
+  serverName: string;
+}
+
+/**
+ * An MCP resource template discovered from a server.
+ * Templates have parameterized URIs like `db://schema/{table}`.
+ */
+export interface MCPResourceTemplate {
+  uriTemplate: string;
+  name: string;
+  description?: string;
+  mimeType?: string;
+  serverName: string;
+}
+
+/**
+ * Content returned by reading a resource.
+ */
+export interface MCPResourceContent {
+  uri: string;
+  text?: string;
+  blob?: string;
+  mimeType?: string;
+}
