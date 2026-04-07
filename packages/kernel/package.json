@@ -1,6 +1,6 @@
 {
   "name": "@agentick/kernel",
-  "version": "0.14.24",
+  "version": "0.14.25",
   "description": "Kernel for Agentick",
   "keywords": [
     "agent",
