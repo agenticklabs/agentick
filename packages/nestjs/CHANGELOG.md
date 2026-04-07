@@ -1,5 +1,11 @@
 # @agentick/nestjs
 
+## 0.14.27
+
+### Patch Changes
+
+- @agentick/gateway@0.14.27
+
 ## 0.14.26
 
 ### Patch Changes
