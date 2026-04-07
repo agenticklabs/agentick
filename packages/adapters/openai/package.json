@@ -1,6 +1,6 @@
 {
   "name": "@agentick/openai",
-  "version": "0.14.24",
+  "version": "0.14.25",
   "description": "OpenAI adapter for Agentick",
   "keywords": [
     "adapter",
