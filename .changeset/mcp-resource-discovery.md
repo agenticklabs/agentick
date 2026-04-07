@@ -1,7 +1,7 @@
 ---
-"@agentick/core": minor
+"@agentick/core": patch
 "@agentick/gateway": patch
-"agentick": minor
+"agentick": patch
 ---
 
 feat(mcp): unified `<MCP>` component with progressive resource discovery
