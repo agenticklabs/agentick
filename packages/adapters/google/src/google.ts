@@ -521,7 +521,13 @@ export function sanitizeSchemaForGemini(schema: any, depth = 0): any {
 
   for (const [key, value] of Object.entries(schema)) {
     // Skip unsupported keywords entirely
-    if (key === "$ref" || key === "$defs" || key === "$definitions" || key === "additionalItems") {
+    if (
+      key === "$ref" ||
+      key === "$defs" ||
+      key === "$definitions" ||
+      key === "additionalItems" ||
+      key === "propertyNames"
+    ) {
       continue;
     }
 
