@@ -1,6 +1,6 @@
 {
   "name": "@agentick/scheduler",
-  "version": "0.14.26",
+  "version": "0.14.27",
   "description": "Scheduled jobs, heartbeat, and cron triggers for Agentick agents",
   "keywords": [
     "agent",
