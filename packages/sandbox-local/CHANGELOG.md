@@ -1,5 +1,12 @@
 # @agentick/sandbox-local
 
+## 0.14.28
+
+### Patch Changes
+
+- 9d45d28: auto symlink mounts where mount path differs from host path
+  - @agentick/sandbox@0.14.28
+
 ## 0.14.27
 
 ### Patch Changes
