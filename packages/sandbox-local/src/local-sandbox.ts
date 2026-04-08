@@ -2,8 +2,8 @@
  * LocalSandbox — implements the Sandbox contract using local OS primitives.
  */
 
-import { readFile, writeFile, rename, unlink, mkdir } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { readFile, writeFile, rename, unlink, mkdir, symlink, lstat } from "node:fs/promises";
+import { dirname, join, isAbsolute } from "node:path";
 import { randomBytes } from "node:crypto";
 import type { ChildProcess } from "node:child_process";
 import type { SandboxHandle, ExecOptions, ExecResult, OutputChunk, Mount } from "@agentick/sandbox";
@@ -253,6 +253,27 @@ export class LocalSandbox implements SandboxHandle {
     }
 
     this.mounts.push(resolved);
+
+    // If the sandbox path differs from the host path and is relative (or
+    // different from the host), create a symlink in the workspace so the
+    // agent can access the mount at a clean path (e.g., "memory/" instead
+    // of "/tmp/agent-memory/32728/memory/").
+    if (mount.sandbox !== mount.host) {
+      const linkPath = isAbsolute(mount.sandbox)
+        ? mount.sandbox
+        : join(this.workspacePath, mount.sandbox);
+
+      try {
+        // Check if symlink already exists
+        const stat = await lstat(linkPath).catch(() => null);
+        if (!stat) {
+          await mkdir(dirname(linkPath), { recursive: true });
+          await symlink(resolved.hostPath, linkPath);
+        }
+      } catch {
+        // Symlink creation failed — mount still works via host path
+      }
+    }
   }
 
   removeMount(hostPath: string): void {

@@ -3,7 +3,7 @@ import { LocalSandbox } from "../local-sandbox.js";
 import { SandboxAccessError } from "@agentick/sandbox";
 import { BaseExecutor } from "../executor/base.js";
 import { ResourceEnforcer } from "../resources.js";
-import { mkdir, rm, realpath, writeFile } from "node:fs/promises";
+import { mkdir, rm, realpath, writeFile, lstat, readlink } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { randomBytes } from "node:crypto";
@@ -236,6 +236,68 @@ describe("LocalSandbox", () => {
       expect(mounts.some((m) => m.host === fooPath() && m.mode === "ro")).toBe(true);
       // /foo/b was consumed
       expect(mounts.some((m) => m.host === bPath())).toBe(false);
+    });
+  });
+
+  describe("addMount symlink creation", () => {
+    it("creates symlink when sandbox path differs from host path", async () => {
+      // Create a real directory to mount
+      const hostDir = join(tmpdir(), `mount-symlink-${randomBytes(4).toString("hex")}`);
+      await mkdir(hostDir, { recursive: true });
+      await writeFile(join(hostDir, "test.txt"), "hello");
+      const realHostDir = await realpath(hostDir);
+
+      // addMount with a relative sandbox path
+      await sandbox.addMount({ host: realHostDir, sandbox: "my-data", mode: "rw" });
+
+      // Symlink should exist in workspace
+      const linkPath = join(sandbox.workspacePath, "my-data");
+      const stat = await lstat(linkPath);
+      expect(stat.isSymbolicLink()).toBe(true);
+
+      // Symlink should point to the host dir
+      const target = await readlink(linkPath);
+      expect(target).toBe(realHostDir);
+
+      // Agent should be able to read through it
+      const result = await sandbox.exec("cat my-data/test.txt");
+      expect(result.stdout.trim()).toBe("hello");
+
+      await rm(hostDir, { recursive: true, force: true });
+    });
+
+    it("does NOT create symlink when sandbox path equals host path", async () => {
+      const hostDir = join(tmpdir(), `mount-nosymlink-${randomBytes(4).toString("hex")}`);
+      await mkdir(hostDir, { recursive: true });
+      const realHostDir = await realpath(hostDir);
+
+      // Same host and sandbox path — no symlink needed
+      await sandbox.addMount({ host: realHostDir, sandbox: realHostDir, mode: "rw" });
+
+      // No symlink in workspace (the mount is accessed via its real path)
+      const linkPath = join(sandbox.workspacePath, realHostDir.split("/").pop()!);
+      const stat = await lstat(linkPath).catch(() => null);
+      expect(stat).toBeNull();
+
+      await rm(hostDir, { recursive: true, force: true });
+    });
+
+    it("handles nested sandbox path", async () => {
+      const hostDir = join(tmpdir(), `mount-nested-${randomBytes(4).toString("hex")}`);
+      await mkdir(hostDir, { recursive: true });
+      await writeFile(join(hostDir, "file.md"), "content");
+      const realHostDir = await realpath(hostDir);
+
+      await sandbox.addMount({ host: realHostDir, sandbox: "workspace/deep/mount", mode: "rw" });
+
+      const linkPath = join(sandbox.workspacePath, "workspace", "deep", "mount");
+      const stat = await lstat(linkPath);
+      expect(stat.isSymbolicLink()).toBe(true);
+
+      const result = await sandbox.exec("cat workspace/deep/mount/file.md");
+      expect(result.stdout.trim()).toBe("content");
+
+      await rm(hostDir, { recursive: true, force: true });
     });
   });
 
