@@ -50,13 +50,13 @@
   },
   "dependencies": {
     "@agentick/sandbox": "workspace:*",
-    "react": "^19.0.0",
-    "secure-exec": "^0.1.0"
+    "react": "^19.2.5",
+    "secure-exec": "^0.2.1"
   },
   "devDependencies": {
-    "@types/react": "^19.2.13",
+    "@types/react": "^19.2.14",
     "typescript": "^5.7.3",
-    "vitest": "^4.0.18"
+    "vitest": "^4.1.3"
   },
   "peerDependencies": {
     "@agentick/core": "workspace:*",
