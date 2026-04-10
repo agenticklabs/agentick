@@ -1,7 +1,7 @@
 ---
-"@agentick/mcp": minor
-"@agentick/core": minor
-"@agentick/gateway": minor
+"@agentick/mcp": patch
+"@agentick/core": patch
+"@agentick/gateway": patch
 ---
 
 Introduce standalone `@agentick/mcp` package and migrate core + gateway to use it.
