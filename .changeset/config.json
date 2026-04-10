@@ -34,7 +34,8 @@
       "@agentick/huggingface",
       "@agentick/sandbox-secure-exec",
       "@agentick/scheduler",
-      "@agentick/secrets"
+      "@agentick/secrets",
+      "@agentick/mcp"
     ]
   ],
   "linked": [],

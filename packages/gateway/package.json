@@ -46,9 +46,10 @@
   "dependencies": {
     "@agentick/core": "workspace:*",
     "@agentick/kernel": "workspace:*",
+    "@agentick/mcp": "workspace:*",
     "@agentick/server": "workspace:*",
     "@agentick/shared": "workspace:*",
-    "@modelcontextprotocol/sdk": "^1.26.0",
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "ws": "^8.16.0"
   },
   "devDependencies": {

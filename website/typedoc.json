@@ -30,7 +30,8 @@
     "../packages/connector-telegram",
     "../packages/secrets",
     "../packages/scheduler",
-    "../packages/adapters/apple"
+    "../packages/adapters/apple",
+    "../packages/mcp"
   ],
   "out": "api",
   "plugin": ["typedoc-plugin-markdown", "typedoc-vitepress-theme"],

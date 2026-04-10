@@ -5,20 +5,20 @@
  * Uses the official @modelcontextprotocol/sdk Client.
  */
 
-import type { Client } from "@modelcontextprotocol/sdk/client";
 import type { MCPClient } from "./client.js";
 import { MCPTool } from "./tool.js";
 import type { MCPConfig, MCPToolDefinition } from "./types.js";
 import type { COM } from "../com/object-model.js";
 
 /**
- * MCP Service handles discovery and registration of MCP tools
+ * MCP Service handles discovery and registration of MCP tools.
+ * Thin coordination layer over MCPClient.
  */
 export class MCPService {
   constructor(private mcpClient: MCPClient) {}
 
-  async connect(config: MCPConfig): Promise<Client> {
-    return await this.mcpClient.connect(config);
+  async connect(config: MCPConfig): Promise<void> {
+    await this.mcpClient.connect(config);
   }
 
   async disconnect(serverName: string): Promise<void> {

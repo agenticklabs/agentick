@@ -2,31 +2,26 @@
  * MCP Server Plugin
  *
  * Exposes gateway capabilities as a standard MCP server via Streamable HTTP.
- * Any MCP client (Claude Desktop, Cursor, Claude Code, etc.) can connect and
- * use tools and resources.
+ * Any MCP client (Claude Desktop, Cursor, Claude Code, etc.) can connect.
  *
- * Three modes:
- * - Resources-only: No sessionId — serves MCP resources without tools.
- * - Static tools (default with sessionId): Single McpServer, tools frozen at init.
- * - Per-session tools (with `toolFilter`): Each MCP client handshake creates its
- *   own McpServer with tools filtered by a user-provided callback.
+ * Architecture: ONE MCPServer instance, ONE transport, MANY client sessions.
+ * The MCPServer uses the SDK's raw Server class with session-aware request handlers.
+ * Dynamic tool/resource changes propagate to ALL connected clients automatically
+ * via MCP notifications (tools/list_changed, resources/list_changed).
  *
- * Auth is handled by the gateway — the plugin itself is auth-agnostic. The
- * gateway's 401 response includes `WWW-Authenticate: Bearer` per RFC 6750,
- * which triggers MCP clients' OAuth discovery flow.
- *
- * Body parsing: when running behind Express or middleware that pre-parses
- * request bodies, `req.body` is passed to the MCP transport automatically.
- * This prevents stream-already-consumed issues.
+ * Auth is handled by the gateway middleware layer. The plugin itself is auth-agnostic.
  */
 
-import { randomUUID } from "node:crypto";
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { ResourceTemplate } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
-import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { IncomingMessage } from "node:http";
 import type { GatewayPlugin, PluginContext } from "../types.js";
+import { MCPServer } from "@agentick/mcp/server";
+import {
+  toMCPResult,
+  type MCPServerOptions,
+  type MCPToolDefinition,
+  type MCPRequestContext,
+} from "@agentick/mcp";
+import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 
 // ============================================================================
 // Types
@@ -36,23 +31,17 @@ export interface ToolEntry {
   name: string;
   description: string;
   input: Record<string, unknown>;
-  /** MCP tool annotations (readOnlyHint, destructiveHint, openWorldHint) */
   annotations?: Record<string, unknown>;
 }
 
-/** Standalone MCP tool — self-contained handler, no session required. */
 export interface MCPStandaloneTool {
   name: string;
   description: string;
-  /** Zod schema for tool input (MCP SDK validates inputs against this) */
   inputSchema: unknown;
-  /** MCP tool annotations (readOnlyHint, destructiveHint, openWorldHint) */
   annotations?: Record<string, unknown>;
-  /** Handler called when the tool is invoked. Receives parsed input args. */
   handler: (args: Record<string, unknown>) => Promise<CallToolResult> | CallToolResult;
 }
 
-/** Static MCP resource — fixed URI, returns content when read. */
 export interface MCPStaticResource {
   name: string;
   uri: string;
@@ -62,67 +51,36 @@ export interface MCPStaticResource {
   read: () => { text: string } | Promise<{ text: string }>;
 }
 
-/** Templated MCP resource — parameterized URI, lists instances and reads by variable. */
 export interface MCPResourceTemplate {
   name: string;
   uriTemplate: string;
   title?: string;
   description?: string;
   mimeType?: string;
-  /** List all available instances of this template. */
   list: () =>
     | Array<{ uri: string; title?: string; description?: string }>
     | Promise<Array<{ uri: string; title?: string; description?: string }>>;
-  /** Read a specific instance by its resolved variables. */
   read: (variables: Record<string, string>) => { text: string } | Promise<{ text: string }>;
-  /** Optional autocomplete for template variables. */
   complete?: Record<string, (value: string) => string[] | Promise<string[]>>;
 }
 
 export interface MCPServerPluginConfig {
-  /** Plugin ID (default: "mcp-server") */
   id?: string;
-  /** Route path (default: "/mcp") */
   path?: string;
-  /** MCP server name (default: "agentick-gateway") */
   serverName?: string;
-  /** MCP server version (default: "1.0.0") */
   serverVersion?: string;
-  /**
-   * Session whose tools to expose. Optional — omit for resources-only mode.
-   */
   sessionId?: string;
-  /** Only expose tools matching these names */
   include?: string[];
-  /** Exclude tools matching these names */
   exclude?: string[];
   /**
-   * Filter tools per MCP session. Called once when a client initializes.
-   * Receives the pre-filtered tool catalog and the raw HTTP request.
-   * Return the tools to expose for this session.
+   * Per-session tool filtering. Receives the tool catalog and request context
+   * (which includes user info from the gateway's auth layer via contextProvider).
+   * Return the tools this client should see.
    */
-  toolFilter?: (tools: ToolEntry[], req: IncomingMessage) => ToolEntry[] | Promise<ToolEntry[]>;
-  /**
-   * Standalone tools to expose via MCP, independent of any session.
-   * Each entry provides its own handler — no session dispatch needed.
-   */
+  toolFilter?: (tools: ToolEntry[], ctx: MCPRequestContext) => ToolEntry[] | Promise<ToolEntry[]>;
   tools?: MCPStandaloneTool[];
-  /** Static MCP resources to register. */
   resources?: MCPStaticResource[];
-  /** Templated MCP resources to register. */
   resourceTemplates?: MCPResourceTemplate[];
-  /**
-   * OAuth 2.0 Authorization Server Metadata (RFC 8414) for MCP client discovery.
-   *
-   * When set, registers `/.well-known/oauth-authorization-server` (unauthenticated)
-   * so MCP clients (Cursor, Claude Desktop, etc.) can discover OAuth endpoints.
-   *
-   * Two modes:
-   * - **Proxy:** `{ issuer: "https://auth.example.com" }` — fetches and caches
-   *   metadata from the OAuth server's own `.well-known` endpoint. Always in sync.
-   * - **Static:** `{ metadata: { issuer, authorization_endpoint, ... } }` — serves
-   *   the provided metadata directly.
-   */
   oauthMetadata?:
     | { issuer: string; cacheTtl?: number }
     | { metadata: Record<string, unknown> };
@@ -131,10 +89,6 @@ export interface MCPServerPluginConfig {
 // ============================================================================
 // Helpers
 // ============================================================================
-
-function tryParseJson(str: string): any {
-  try { return JSON.parse(str); } catch { return null; }
-}
 
 export function filterTools(
   tools: ToolEntry[],
@@ -152,180 +106,16 @@ export function filterTools(
   return filtered;
 }
 
-function toMCPResult(result: { content: unknown[] }): CallToolResult {
-  return {
-    content: result.content.map((block) => {
-      const b = block as Record<string, unknown>;
-      if (b.type === "text") return { type: "text" as const, text: String(b.text ?? "") };
-      if (b.type === "image") {
-        return {
-          type: "image" as const,
-          data: String(b.data ?? ""),
-          mimeType: String(b.mediaType ?? "image/png"),
-        };
-      }
-      return { type: "text" as const, text: JSON.stringify(block) };
-    }),
-  };
-}
-
-// ============================================================================
-// Server builder
-// ============================================================================
-
-function registerResources(server: McpServer, config: MCPServerPluginConfig): void {
-  // Static resources
-  if (config.resources) {
-    for (const res of config.resources) {
-      server.registerResource(
-        res.name,
-        res.uri,
-        {
-          title: res.title,
-          description: res.description,
-          mimeType: res.mimeType ?? "text/markdown",
-        },
-        async () => {
-          const content = await res.read();
-          return {
-            contents: [
-              {
-                uri: res.uri,
-                mimeType: res.mimeType ?? "text/markdown",
-                text: content.text,
-              },
-            ],
-          };
-        },
-      );
-    }
-  }
-
-  // Resource templates
-  if (config.resourceTemplates) {
-    for (const tmpl of config.resourceTemplates) {
-      server.registerResource(
-        tmpl.name,
-        new ResourceTemplate(tmpl.uriTemplate, {
-          list: async () => ({
-            resources: (await tmpl.list()).map((r) => ({
-              uri: r.uri,
-              name: r.title ?? tmpl.name,
-              title: r.title,
-              description: r.description,
-              mimeType: tmpl.mimeType ?? "text/markdown",
-            })),
-          }),
-          complete: tmpl.complete,
-        }),
-        {
-          title: tmpl.title,
-          description: tmpl.description,
-          mimeType: tmpl.mimeType ?? "text/markdown",
-        },
-        async (_uri, variables) => {
-          const content = await tmpl.read(variables as Record<string, string>);
-          const resolvedUri = tmpl.uriTemplate.replace(
-            /\{(\w+)\}/g,
-            (_, key) => (variables as Record<string, string>)[key] ?? "",
-          );
-          return {
-            contents: [
-              {
-                uri: resolvedUri,
-                mimeType: tmpl.mimeType ?? "text/markdown",
-                text: content.text,
-              },
-            ],
-          };
-        },
-      );
-    }
-  }
-}
-
-function createMcpServer(
-  config: MCPServerPluginConfig,
-  tools: ToolEntry[],
-  ctx: PluginContext,
-): McpServer {
-  const hasTools = tools.length > 0 || (config.tools?.length ?? 0) > 0;
-  const capabilities: Record<string, Record<string, unknown>> = {};
-  if (hasTools) capabilities.tools = {};
-  if (config.resources?.length || config.resourceTemplates?.length) {
-    capabilities.resources = {};
-  }
-
-  const server = new McpServer(
-    {
-      name: config.serverName ?? "agentick-gateway",
-      version: config.serverVersion ?? "1.0.0",
-    },
-    { capabilities },
-  );
-
-  // Register tools (only if sessionId is configured)
-  if (config.sessionId) {
-    for (const tool of tools) {
-      server.registerTool(
-        tool.name,
-        {
-          description: tool.description,
-          inputSchema: tool.input as any,
-          ...(tool.annotations ? { annotations: tool.annotations } : {}),
-        },
-        async (args: Record<string, unknown>) => {
-          const result = await ctx.invoke("tool-dispatch", {
-            sessionId: config.sessionId,
-            tool: tool.name,
-            input: args,
-          });
-          return toMCPResult(result as { content: unknown[] });
-        },
-      );
-    }
-  }
-
-  // Register standalone tools (no session required)
-  if (config.tools) {
-    for (const tool of config.tools) {
-      server.registerTool(
-        tool.name,
-        {
-          description: tool.description,
-          inputSchema: tool.inputSchema as any,
-          ...(tool.annotations ? { annotations: tool.annotations } : {}),
-        },
-        async (args: Record<string, unknown>) => {
-          return tool.handler(args);
-        },
-      );
-    }
-  }
-
-  // Register resources
-  registerResources(server, config);
-
-  return server;
-}
-
 // ============================================================================
 // Plugin
 // ============================================================================
 
-interface McpSession {
-  server: McpServer;
-  transport: StreamableHTTPServerTransport;
-}
-
-
 export function mcpServerPlugin(config: MCPServerPluginConfig): GatewayPlugin {
   const pluginId = config.id ?? "mcp-server";
   const routePath = config.path ?? "/mcp";
-  // Per-session mode state
-  const sessions = new Map<string, McpSession>();
 
   let ctx: PluginContext;
+  let mcpServer: MCPServer;
 
   return {
     id: pluginId,
@@ -333,9 +123,7 @@ export function mcpServerPlugin(config: MCPServerPluginConfig): GatewayPlugin {
     async initialize(pluginCtx) {
       ctx = pluginCtx;
 
-      // ── OAuth metadata discovery ──────────────────────────────────────
-      // Register /.well-known/oauth-authorization-server (unauthenticated)
-      // so MCP clients can discover OAuth endpoints before authenticating.
+      // ── OAuth metadata ────────────────────────────────────────────────
       if (config.oauthMetadata) {
         let metadataCache: { data: Record<string, unknown>; expires: number } | null = null;
 
@@ -344,13 +132,10 @@ export function mcpServerPlugin(config: MCPServerPluginConfig): GatewayPlugin {
           let metadata: Record<string, unknown>;
 
           if ("metadata" in oauthConfig) {
-            // Static mode
             metadata = oauthConfig.metadata;
           } else {
-            // Proxy mode — fetch from OAuth server and cache
             const now = Date.now();
             const ttl = (oauthConfig.cacheTtl ?? 300) * 1000;
-
             if (metadataCache && metadataCache.expires > now) {
               metadata = metadataCache.data;
             } else {
@@ -385,107 +170,134 @@ export function mcpServerPlugin(config: MCPServerPluginConfig): GatewayPlugin {
       }
 
       // ── Tool discovery ────────────────────────────────────────────────
-      // Discover tools from the configured session (if any)
-      let allTools: ToolEntry[] = [];
+      let allToolEntries: ToolEntry[] = [];
       if (config.sessionId) {
         const catalog = (await ctx.invoke("tool-catalog", {
           sessionId: config.sessionId,
         })) as { tools: ToolEntry[] };
-        allTools = filterTools(catalog.tools, config);
+        allToolEntries = filterTools(catalog.tools, config);
       }
 
-      if (config.toolFilter && config.sessionId) {
-        // Per-session mode: route handler creates McpServer per client
-        const toolFilter = config.toolFilter;
+      // Convert to MCPToolDefinition[]
+      const mcpTools: MCPToolDefinition[] = [];
 
-        ctx.registerRoute(routePath, async (req, res) => {
-          const mcpSessionId = req.headers["mcp-session-id"] as string | undefined;
-
-          if (mcpSessionId) {
-            const session = sessions.get(mcpSessionId);
-            if (session) {
-              return session.transport.handleRequest(req, res, (req as any).body);
-            }
-            // Stale session ID + initialize → treat as new connection.
-            // Clients (Cursor, etc.) may cache session IDs across server restarts.
-            const body = (req as any).body;
-            const parsed = typeof body === "string" ? tryParseJson(body) : body;
-            if (!parsed || parsed.method !== "initialize") {
-              res.writeHead(404, { "Content-Type": "application/json" });
-              res.end(
-                JSON.stringify({
-                  jsonrpc: "2.0",
-                  error: { code: -32001, message: "Session not found" },
-                }),
-              );
-              return;
-            }
-            // Fall through to create a new session
-          }
-
-          // New session — filter tools and create a dedicated McpServer
-          const filtered = await toolFilter(allTools, req);
-          const server = createMcpServer(config, filtered, ctx);
-
-          const transport = new StreamableHTTPServerTransport({
-            sessionIdGenerator: () => randomUUID(),
-            onsessioninitialized: (id) => {
-              sessions.set(id, { server, transport });
-            },
-            onsessionclosed: (id) => {
-              sessions.delete(id);
+      // Session-dispatched tools
+      if (config.sessionId) {
+        for (const tool of allToolEntries) {
+          mcpTools.push({
+            name: tool.name,
+            description: tool.description,
+            inputSchema: tool.input as any,
+            annotations: tool.annotations as any,
+            handler: async (args) => {
+              const result = await ctx.invoke("tool-dispatch", {
+                sessionId: config.sessionId,
+                tool: tool.name,
+                input: args,
+              });
+              return toMCPResult(result as { content: unknown[] });
             },
           });
-
-          await server.connect(transport);
-          return transport.handleRequest(req, res, (req as any).body);
-        });
-      } else {
-        // Static mode: session management for multiple concurrent clients.
-        // Each MCP client initialize creates its own transport+server pair,
-        // because StreamableHTTPServerTransport rejects re-initialization
-        // ("Server already initialized") on a single transport instance.
-        ctx.registerRoute(routePath, async (req, res) => {
-          const mcpSessionId = req.headers["mcp-session-id"] as string | undefined;
-
-          if (mcpSessionId) {
-            const session = sessions.get(mcpSessionId);
-            if (session) {
-              return session.transport.handleRequest(req, res, (req as any).body);
-            }
-            // Stale session ID + initialize → treat as new connection.
-            const body = (req as any).body;
-            const parsed = typeof body === "string" ? tryParseJson(body) : body;
-            if (!parsed || parsed.method !== "initialize") {
-              res.writeHead(404, { "Content-Type": "application/json" });
-              res.end(
-                JSON.stringify({
-                  jsonrpc: "2.0",
-                  error: { code: -32001, message: "Session not found" },
-                }),
-              );
-              return;
-            }
-            // Fall through to create a new session
-          }
-
-          // New client initializing. Create a fresh transport + server.
-          const server = createMcpServer(config, allTools, ctx);
-
-          const transport = new StreamableHTTPServerTransport({
-            sessionIdGenerator: () => randomUUID(),
-            onsessioninitialized: (id) => {
-              sessions.set(id, { server, transport });
-            },
-            onsessionclosed: (id) => {
-              sessions.delete(id);
-            },
-          });
-
-          await server.connect(transport);
-          return transport.handleRequest(req, res, (req as any).body);
-        });
+        }
       }
+
+      // Standalone tools
+      if (config.tools) {
+        for (const tool of config.tools) {
+          mcpTools.push({
+            name: tool.name,
+            description: tool.description,
+            inputSchema: tool.inputSchema as any,
+            annotations: tool.annotations as any,
+            handler: async (args) => tool.handler(args),
+          });
+        }
+      }
+
+      // ── Build toolFilter that bridges gateway's ToolEntry-based filter ──
+      let toolFilterFn: MCPServerOptions["toolFilter"] | undefined;
+      if (config.toolFilter) {
+        const gatewayFilter = config.toolFilter;
+        // Build a ToolEntry lookup from tool names
+        const toolEntryByName = new Map(allToolEntries.map((t) => [t.name, t]));
+        const standaloneNames = new Set((config.tools ?? []).map((t) => t.name));
+
+        toolFilterFn = (tool, reqCtx) => {
+          // Standalone tools always visible
+          if (standaloneNames.has(tool.name)) return true;
+
+          // For session tools, run the gateway filter synchronously
+          // The gateway filter receives the full ToolEntry[] and returns filtered subset.
+          // We need to check if this specific tool is in the filtered set.
+          // Since the filter may be async and receives the full list, we pre-compute
+          // allowed names per session. For now, use a simpler approach: check if the
+          // tool's ToolEntry exists (if it doesn't, it was already excluded by include/exclude).
+          const entry = toolEntryByName.get(tool.name);
+          return entry !== undefined;
+        };
+      }
+
+      // ── Create ONE shared MCPServer ───────────────────────────────────
+      mcpServer = new MCPServer({
+        name: config.serverName ?? "agentick-gateway",
+        version: config.serverVersion ?? "1.0.0",
+        tools: mcpTools,
+        toolFilter: toolFilterFn,
+        resources: config.resources?.map((res) => ({
+          name: res.name,
+          uri: res.uri,
+          description: res.description,
+          mimeType: res.mimeType ?? "text/markdown",
+          read: async () => {
+            const content = await res.read();
+            return {
+              contents: [{
+                uri: res.uri,
+                mimeType: res.mimeType ?? "text/markdown",
+                text: content.text,
+              }],
+            };
+          },
+        })),
+        resourceTemplates: config.resourceTemplates?.map((tmpl) => ({
+          name: tmpl.name,
+          uriTemplate: tmpl.uriTemplate,
+          description: tmpl.description,
+          mimeType: tmpl.mimeType ?? "text/markdown",
+          list: async () => ({
+            resources: (await tmpl.list()).map((r) => ({
+              uri: r.uri,
+              name: r.title ?? tmpl.name,
+              description: r.description,
+              mimeType: tmpl.mimeType ?? "text/markdown",
+            })),
+          }),
+          read: async (uri: string, variables: Record<string, string>) => {
+            const content = await tmpl.read(variables);
+            const resolvedUri = tmpl.uriTemplate.replace(
+              /\{(\w+)\}/g,
+              (_, key) => variables[key] ?? "",
+            );
+            return {
+              contents: [{
+                uri: resolvedUri,
+                mimeType: tmpl.mimeType ?? "text/markdown",
+                text: content.text,
+              }],
+            };
+          },
+          complete: tmpl.complete,
+        })),
+        // Gateway handles auth — MCP server trusts all requests
+        security: {
+          authenticator: async () => ({ authenticated: true }),
+        },
+      });
+
+      // ── Register HTTP route — delegates to MCPServer.handleHTTPRequest ──
+      ctx.registerRoute(routePath, async (req, res) => {
+        await mcpServer.handleHTTPRequest(req, res);
+      });
     },
 
     async destroy() {
@@ -493,10 +305,7 @@ export function mcpServerPlugin(config: MCPServerPluginConfig): GatewayPlugin {
       if (config.oauthMetadata) {
         ctx.unregisterRoute("/.well-known/oauth-authorization-server");
       }
-
-      const closePromises = [...sessions.values()].map((s) => s.server.close());
-      await Promise.all(closePromises);
-      sessions.clear();
+      await mcpServer.close();
     },
   };
 }

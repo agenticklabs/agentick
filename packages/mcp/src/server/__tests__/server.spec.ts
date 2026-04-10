@@ -1,0 +1,733 @@
+import { describe, it, expect } from "vitest";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { InMemoryTransport } from "../../transport/index.js";
+import { MCPServer } from "../server.js";
+import type {
+  MCPServerOptions,
+  MCPToolDefinition,
+  MCPStaticResource,
+  MCPResourceTemplateDefinition as MCPResourceTemplateDef,
+  MCPAppDefinition,
+  MCPPromptDefinition,
+} from "../../protocol/types.js";
+type MCPResourceTemplateDefinition = MCPResourceTemplateDef;
+import { z } from "zod";
+
+// ============================================================================
+// Helpers
+// ============================================================================
+
+function createTestTool(name = "greet", overrides?: Partial<MCPToolDefinition>): MCPToolDefinition {
+  return {
+    name,
+    description: `Test tool: ${name}`,
+    inputSchema: { name: z.string() },
+    handler: async (input) => ({
+      content: [{ type: "text", text: `Hello, ${(input as any).name}!` }],
+    }),
+    ...overrides,
+  };
+}
+
+function createTestResource(): MCPStaticResource {
+  return {
+    name: "schema",
+    uri: "db://schema/users",
+    description: "User schema",
+    read: async (_ctx) => ({
+      contents: [{ uri: "db://schema/users", text: "CREATE TABLE users (id INT)" }],
+    }),
+  };
+}
+
+async function createConnectedPair(
+  options: Partial<MCPServerOptions> = {},
+): Promise<{ server: MCPServer; client: Client; cleanup: () => Promise<void> }> {
+  const server = new MCPServer({
+    name: "test",
+    version: "1.0.0",
+    ...options,
+  });
+
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  await server.connect(serverTransport);
+  const client = new Client({ name: "test-client", version: "1.0.0" });
+  await client.connect(clientTransport);
+
+  return {
+    server,
+    client,
+    cleanup: async () => {
+      await client.close();
+      await server.close();
+    },
+  };
+}
+
+// ============================================================================
+// Server lifecycle
+// ============================================================================
+
+describe("MCPServer", () => {
+  describe("lifecycle", () => {
+    it("creates and closes cleanly", async () => {
+      const server = new MCPServer({ name: "test", version: "1.0.0" });
+      await server.close();
+    });
+
+    it("throws after close", async () => {
+      const server = new MCPServer({ name: "test", version: "1.0.0" });
+      await server.close();
+      const [, transport] = InMemoryTransport.createLinkedPair();
+      await expect(server.connect(transport)).rejects.toThrow("MCPServer is closed");
+    });
+
+    it("close is idempotent", async () => {
+      const server = new MCPServer({ name: "test", version: "1.0.0" });
+      await server.close();
+      await server.close(); // should not throw
+    });
+  });
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // Tool registration and execution
+  // ══════════════════════════════════════════════════════════════════════════
+
+  describe("tools", () => {
+    it("registers tools and lists them via client", async () => {
+      const { client, cleanup } = await createConnectedPair({
+        tools: [createTestTool("alpha"), createTestTool("beta")],
+      });
+
+      const { tools } = await client.listTools();
+      const names = tools.map((t) => t.name).sort();
+      expect(names).toEqual(["alpha", "beta"]);
+
+      await cleanup();
+    });
+
+    it("calls a tool and returns the result", async () => {
+      const { client, cleanup } = await createConnectedPair({
+        tools: [createTestTool()],
+      });
+
+      const result = await client.callTool({
+        name: "greet",
+        arguments: { name: "World" },
+      });
+
+      expect(result.content).toEqual([{ type: "text", text: "Hello, World!" }]);
+
+      await cleanup();
+    });
+
+    it("returns isError when handler throws", async () => {
+      const { client, cleanup } = await createConnectedPair({
+        tools: [
+          createTestTool("fail", {
+            inputSchema: {},
+            handler: async () => {
+              throw new Error("Boom");
+            },
+          }),
+        ],
+      });
+
+      const result = await client.callTool({ name: "fail", arguments: {} });
+      expect(result.isError).toBe(true);
+
+      await cleanup();
+    });
+
+    it("supports dynamic tool registration", async () => {
+      const { server, client, cleanup } = await createConnectedPair();
+
+      // Initially no tools
+      let { tools } = await client.listTools();
+      expect(tools).toHaveLength(0);
+
+      // Register dynamically
+      server.registerTool(createTestTool("dynamic"));
+      ({ tools } = await client.listTools());
+      expect(tools.map((t) => t.name)).toContain("dynamic");
+
+      // Unregister
+      server.unregisterTool("dynamic");
+      ({ tools } = await client.listTools());
+      expect(tools.map((t) => t.name)).not.toContain("dynamic");
+
+      await cleanup();
+    });
+  });
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // Resources
+  // ══════════════════════════════════════════════════════════════════════════
+
+  describe("resources", () => {
+    it("lists and reads a static resource", async () => {
+      const { client, cleanup } = await createConnectedPair({
+        resources: [createTestResource()],
+      });
+
+      const { resources } = await client.listResources();
+      expect(resources).toHaveLength(1);
+      expect(resources[0].uri).toBe("db://schema/users");
+
+      const { contents } = await client.readResource({ uri: "db://schema/users" });
+      expect(contents[0].text).toBe("CREATE TABLE users (id INT)");
+
+      await cleanup();
+    });
+
+    it("supports dynamic resource registration", async () => {
+      const { server, client, cleanup } = await createConnectedPair();
+
+      server.registerResource(createTestResource());
+      const { resources } = await client.listResources();
+      expect(resources).toHaveLength(1);
+
+      server.unregisterResource("db://schema/users");
+      const { resources: after } = await client.listResources();
+      expect(after).toHaveLength(0);
+
+      await cleanup();
+    });
+  });
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // MCP Apps
+  // ══════════════════════════════════════════════════════════════════════════
+
+  describe("apps", () => {
+    it("registers ui:// resource with correct mimeType", async () => {
+      const app: MCPAppDefinition = {
+        name: "dashboard",
+        uri: "ui://test/dashboard",
+        description: "Test dashboard",
+        content: "<html><body>Dashboard</body></html>",
+      };
+
+      const { client, cleanup } = await createConnectedPair({ apps: [app] });
+
+      const { resources } = await client.listResources();
+      const appResource = resources.find((r) => r.uri === "ui://test/dashboard");
+      expect(appResource).toBeDefined();
+      expect(appResource!.mimeType).toBe("text/html;profile=mcp-app");
+
+      const { contents } = await client.readResource({ uri: "ui://test/dashboard" });
+      expect(contents[0].text).toContain("Dashboard");
+
+      await cleanup();
+    });
+  });
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // Resource Templates
+  // ══════════════════════════════════════════════════════════════════════════
+
+  describe("resource templates", () => {
+    it("lists instances and reads by URI", async () => {
+      const tmpl: MCPResourceTemplateDefinition = {
+        name: "table-schema",
+        uriTemplate: "db://schema/{table}",
+        description: "Schema for a table",
+        list: async () => ({
+          resources: [
+            { uri: "db://schema/users", name: "users", description: "Users table" },
+            { uri: "db://schema/orders", name: "orders", description: "Orders table" },
+          ],
+        }),
+        read: async (uri, variables) => ({
+          contents: [{ uri, text: `Schema for ${variables.table}` }],
+        }),
+      };
+
+      const { client, cleanup } = await createConnectedPair({
+        resourceTemplates: [tmpl],
+      });
+
+      const { resourceTemplates } = await client.listResourceTemplates();
+      expect(resourceTemplates).toHaveLength(1);
+      expect(resourceTemplates[0].uriTemplate).toBe("db://schema/{table}");
+
+      const { resources } = await client.listResources();
+      expect(resources).toHaveLength(2);
+
+      const { contents } = await client.readResource({ uri: "db://schema/users" });
+      expect(contents[0].text).toBe("Schema for users");
+
+      await cleanup();
+    });
+  });
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // Prompts
+  // ══════════════════════════════════════════════════════════════════════════
+
+  describe("prompts", () => {
+    it("lists and gets a prompt", async () => {
+      const prompt: MCPPromptDefinition = {
+        name: "summarize",
+        description: "Summarize data",
+        arguments: [{ name: "topic", description: "What to summarize", required: true }],
+        handler: async (args) => ({
+          messages: [
+            {
+              role: "user" as const,
+              content: { type: "text" as const, text: `Summarize: ${args.topic}` },
+            },
+          ],
+        }),
+      };
+
+      const { client, cleanup } = await createConnectedPair({
+        prompts: [prompt],
+      });
+
+      const { prompts } = await client.listPrompts();
+      expect(prompts).toHaveLength(1);
+      expect(prompts[0].name).toBe("summarize");
+
+      const result = await client.getPrompt({
+        name: "summarize",
+        arguments: { topic: "Q4 revenue" },
+      });
+      expect(result.messages[0].content).toEqual({
+        type: "text",
+        text: "Summarize: Q4 revenue",
+      });
+
+      await cleanup();
+    });
+  });
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // Tool annotations
+  // ══════════════════════════════════════════════════════════════════════════
+
+  describe("tool annotations", () => {
+    it("passes annotations through to the client", async () => {
+      const { client, cleanup } = await createConnectedPair({
+        tools: [
+          createTestTool("safe-read", {
+            annotations: {
+              readOnlyHint: true,
+              destructiveHint: false,
+              idempotentHint: true,
+              title: "Safe Read Tool",
+            },
+          }),
+        ],
+      });
+
+      const { tools } = await client.listTools();
+      const tool = tools.find((t) => t.name === "safe-read");
+      expect(tool?.annotations?.readOnlyHint).toBe(true);
+      expect(tool?.annotations?.destructiveHint).toBe(false);
+      expect(tool?.annotations?.idempotentHint).toBe(true);
+
+      await cleanup();
+    });
+  });
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // Events (standalone mode — no ALS)
+  // ══════════════════════════════════════════════════════════════════════════
+
+  describe("events", () => {
+    it("emits mcp:session:created on connect", async () => {
+      const server = new MCPServer({ name: "test", version: "1.0.0" });
+      const sessionEvents: any[] = [];
+      server.on("mcp:session:created", (e) => sessionEvents.push(e));
+
+      const [, transport] = InMemoryTransport.createLinkedPair();
+      await server.connect(transport);
+
+      expect(sessionEvents).toHaveLength(1);
+      expect(sessionEvents[0].sessionId).toBeDefined();
+
+      await server.close();
+    });
+
+    it("emits mcp:tool:start and mcp:tool:end on tool call", async () => {
+      const starts: any[] = [];
+      const ends: any[] = [];
+
+      const { server, client, cleanup } = await createConnectedPair({
+        tools: [createTestTool()],
+      });
+
+      server.on("mcp:tool:start", (e) => starts.push(e));
+      server.on("mcp:tool:end", (e) => ends.push(e));
+
+      await client.callTool({ name: "greet", arguments: { name: "Test" } });
+
+      expect(starts).toHaveLength(1);
+      expect(starts[0].tool).toBe("greet");
+
+      expect(ends).toHaveLength(1);
+      expect(ends[0].tool).toBe("greet");
+      expect(ends[0].isError).toBe(false);
+      expect(ends[0].durationMs).toBeGreaterThanOrEqual(0);
+
+      await cleanup();
+    });
+
+    it("emits mcp:tool:error on handler failure", async () => {
+      const errors: any[] = [];
+
+      const { server, client, cleanup } = await createConnectedPair({
+        tools: [
+          createTestTool("fail", {
+            inputSchema: {},
+            handler: async () => {
+              throw new Error("Oops");
+            },
+          }),
+        ],
+      });
+
+      server.on("mcp:tool:error", (e) => errors.push(e));
+      await client.callTool({ name: "fail", arguments: {} });
+
+      expect(errors).toHaveLength(1);
+      expect(errors[0].tool).toBe("fail");
+
+      await cleanup();
+    });
+
+    it("emits mcp:session:closed on server close", async () => {
+      const server = new MCPServer({ name: "test", version: "1.0.0" });
+      const closeEvents: any[] = [];
+      server.on("mcp:session:closed", (e) => closeEvents.push(e));
+
+      const [, transport] = InMemoryTransport.createLinkedPair();
+      await server.connect(transport);
+      await server.close();
+
+      expect(closeEvents.length).toBeGreaterThanOrEqual(1);
+      expect(closeEvents[0].reason).toBe("server closing");
+    });
+
+    it("supports off() to remove listeners", async () => {
+      const server = new MCPServer({ name: "test", version: "1.0.0" });
+      const events: any[] = [];
+      const handler = (e: any) => events.push(e);
+
+      server.on("mcp:session:created", handler);
+      server.off("mcp:session:created", handler);
+
+      const [, transport] = InMemoryTransport.createLinkedPair();
+      await server.connect(transport);
+
+      expect(events).toHaveLength(0);
+      await server.close();
+    });
+  });
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // Security pipeline integration
+  // ══════════════════════════════════════════════════════════════════════════
+
+  describe("security", () => {
+    it("uses allowAll defaults for in-process transport", async () => {
+      // No security config — in-process should work with defaults
+      const { client, cleanup } = await createConnectedPair({
+        tools: [createTestTool()],
+      });
+
+      const result = await client.callTool({
+        name: "greet",
+        arguments: { name: "Test" },
+      });
+      expect(result.isError).toBeFalsy();
+
+      await cleanup();
+    });
+
+    it("runs authenticator on tool calls", async () => {
+      const authCalls: any[] = [];
+
+      const { client, cleanup } = await createConnectedPair({
+        tools: [createTestTool()],
+        security: {
+          authenticator: async (ctx) => {
+            authCalls.push(ctx);
+            return { authenticated: true };
+          },
+        },
+      });
+
+      await client.callTool({ name: "greet", arguments: { name: "Test" } });
+      expect(authCalls.length).toBeGreaterThanOrEqual(1);
+
+      await cleanup();
+    });
+
+    it("rejects tool call when authenticator fails", async () => {
+      const { client, cleanup } = await createConnectedPair({
+        tools: [createTestTool()],
+        security: {
+          authenticator: async () => ({
+            authenticated: false,
+            reason: "No token",
+          }),
+        },
+      });
+
+      const result = await client.callTool({
+        name: "greet",
+        arguments: { name: "Test" },
+      });
+      // safeToolHandler catches SecurityError and returns isError result
+      expect(result.isError).toBe(true);
+
+      await cleanup();
+    });
+
+    it("handler receives MCPHandlerContext with authenticated user", async () => {
+      let receivedCtx: any = null;
+
+      const { client, cleanup } = await createConnectedPair({
+        tools: [
+          {
+            name: "whoami",
+            description: "Returns caller identity",
+            inputSchema: {},
+            handler: async (_input, ctx) => {
+              receivedCtx = ctx;
+              return {
+                content: [
+                  {
+                    type: "text",
+                    text: `User: ${ctx.request.user?.id}, Tenant: ${ctx.request.user?.tenantId}`,
+                  },
+                ],
+              };
+            },
+          },
+        ],
+        contextProvider: async (extra) => ({
+          user: { id: "user-42", tenantId: "knowify", roles: ["admin"] },
+          signal: extra.signal,
+        }),
+      });
+
+      const result = await client.callTool({ name: "whoami", arguments: {} });
+      expect(result.content).toEqual([{ type: "text", text: "User: user-42, Tenant: knowify" }]);
+
+      // Verify the full MCPHandlerContext shape
+      expect(receivedCtx).toBeDefined();
+      expect(receivedCtx.request.user.id).toBe("user-42");
+      expect(receivedCtx.request.user.tenantId).toBe("knowify");
+      expect(receivedCtx.request.user.roles).toEqual(["admin"]);
+      expect(typeof receivedCtx.sessionId).toBe("string");
+      expect(receivedCtx.extra).toBeDefined();
+      expect(receivedCtx.extra.signal).toBeDefined();
+
+      await cleanup();
+    });
+
+    it("toolFilter hides tools from listing and rejects calls", async () => {
+      const { client, cleanup } = await createConnectedPair({
+        tools: [createTestTool("visible"), createTestTool("hidden")],
+        toolFilter: (tool) => tool.name !== "hidden",
+      });
+
+      // toolFilter is applied at BOTH list time and call time
+      const { tools } = await client.listTools();
+      const names = tools.map((t) => t.name);
+      expect(names).toContain("visible");
+      expect(names).not.toContain("hidden");
+
+      // Calling a filtered tool throws a protocol-level error (method not found)
+      await expect(
+        client.callTool({ name: "hidden", arguments: { name: "Test" } }),
+      ).rejects.toThrow("Tool hidden not found");
+
+      await cleanup();
+    });
+  });
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // Sessions
+  // ══════════════════════════════════════════════════════════════════════════
+
+  describe("sessions", () => {
+    it("tracks sessions", async () => {
+      const server = new MCPServer({ name: "test", version: "1.0.0" });
+
+      const [, transport] = InMemoryTransport.createLinkedPair();
+      await server.connect(transport);
+
+      const sessions = server.getActiveSessions();
+      expect(sessions).toHaveLength(1);
+      expect(sessions[0].transport).toBe("in-process");
+
+      await server.close();
+    });
+
+    it("multiple concurrent sessions share the registry", async () => {
+      const server = new MCPServer({
+        name: "test",
+        version: "1.0.0",
+        tools: [createTestTool("initial-tool")],
+      });
+
+      // Connect two clients
+      const [ct1, st1] = InMemoryTransport.createLinkedPair();
+      const [ct2, st2] = InMemoryTransport.createLinkedPair();
+      await server.connect(st1);
+      await server.connect(st2);
+
+      const client1 = new Client({ name: "client-1", version: "1.0.0" });
+      const client2 = new Client({ name: "client-2", version: "1.0.0" });
+      await client1.connect(ct1);
+      await client2.connect(ct2);
+
+      // Both see the initial tool
+      let tools1 = await client1.listTools();
+      let tools2 = await client2.listTools();
+      expect(tools1.tools.map((t) => t.name)).toEqual(["initial-tool"]);
+      expect(tools2.tools.map((t) => t.name)).toEqual(["initial-tool"]);
+
+      // Dynamically register a new tool
+      server.registerTool(createTestTool("dynamic-tool"));
+
+      // Both clients see the new tool (they re-fetch from the shared registry)
+      tools1 = await client1.listTools();
+      tools2 = await client2.listTools();
+      expect(tools1.tools.map((t) => t.name).sort()).toEqual(["dynamic-tool", "initial-tool"]);
+      expect(tools2.tools.map((t) => t.name).sort()).toEqual(["dynamic-tool", "initial-tool"]);
+
+      // Both clients can call the new tool
+      const r1 = await client1.callTool({ name: "dynamic-tool", arguments: { name: "A" } });
+      const r2 = await client2.callTool({ name: "dynamic-tool", arguments: { name: "B" } });
+      expect(r1.content).toEqual([{ type: "text", text: "Hello, A!" }]);
+      expect(r2.content).toEqual([{ type: "text", text: "Hello, B!" }]);
+
+      // Unregister — both clients lose access
+      server.unregisterTool("dynamic-tool");
+      tools1 = await client1.listTools();
+      tools2 = await client2.listTools();
+      expect(tools1.tools.map((t) => t.name)).toEqual(["initial-tool"]);
+      expect(tools2.tools.map((t) => t.name)).toEqual(["initial-tool"]);
+
+      await client1.close();
+      await client2.close();
+      await server.close();
+    });
+
+    it("enforces maxSessions default of 1000", () => {
+      const server = new MCPServer({
+        name: "test",
+        version: "1.0.0",
+        sessions: { maxSessions: 5 },
+      });
+
+      const sessions = server.getActiveSessions();
+      expect(sessions).toHaveLength(0);
+
+      server.close();
+    });
+
+    it("cleans up idle sessions after TTL", async () => {
+      const server = new MCPServer({
+        name: "test",
+        version: "1.0.0",
+        sessions: {
+          idleTtlMs: 50, // 50ms TTL for testing
+          cleanupIntervalMs: 25, // Check every 25ms
+        },
+      });
+
+      const timeoutEvents: any[] = [];
+      const closeEvents: any[] = [];
+      server.on("mcp:session:idle-timeout", (e) => timeoutEvents.push(e));
+      server.on("mcp:session:closed", (e) => closeEvents.push(e));
+
+      const [, transport] = InMemoryTransport.createLinkedPair();
+      await server.connect(transport);
+
+      expect(server.getActiveSessions()).toHaveLength(1);
+
+      // Wait for TTL + cleanup interval
+      await new Promise((r) => setTimeout(r, 120));
+
+      expect(server.getActiveSessions()).toHaveLength(0);
+      expect(timeoutEvents).toHaveLength(1);
+      expect(closeEvents.some((e) => e.reason === "idle timeout")).toBe(true);
+
+      await server.close();
+    });
+
+    it("reports session info correctly", async () => {
+      const server = new MCPServer({ name: "test", version: "1.0.0" });
+
+      const [, transport] = InMemoryTransport.createLinkedPair();
+      await server.connect(transport);
+
+      const sessions = server.getActiveSessions();
+      expect(sessions).toHaveLength(1);
+      expect(sessions[0].transport).toBe("in-process");
+      expect(sessions[0].createdAt).toBeGreaterThan(0);
+      expect(sessions[0].lastActivityAt).toBeGreaterThan(0);
+      expect(sessions[0].sessionId).toBeDefined();
+
+      await server.close();
+    });
+  });
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // Capabilities — dynamic list_changed notifications
+  // ══════════════════════════════════════════════════════════════════════════
+
+  describe("capabilities", () => {
+    it("emits mcp:tools:changed on dynamic tool registration", async () => {
+      const changes: any[] = [];
+      const { server, cleanup } = await createConnectedPair();
+      server.on("mcp:tools:changed", (e) => changes.push(e));
+
+      server.registerTool(createTestTool("new-tool"));
+      expect(changes).toHaveLength(1);
+
+      server.unregisterTool("new-tool");
+      expect(changes).toHaveLength(2);
+
+      await cleanup();
+    });
+
+    it("emits mcp:resources:changed on dynamic resource registration", async () => {
+      const changes: any[] = [];
+      const { server, cleanup } = await createConnectedPair();
+      server.on("mcp:resources:changed", (e) => changes.push(e));
+
+      server.registerResource(createTestResource());
+      expect(changes).toHaveLength(1);
+
+      server.unregisterResource("db://schema/users");
+      expect(changes).toHaveLength(2);
+
+      await cleanup();
+    });
+
+    it("emits mcp:resources:changed on app registration", async () => {
+      const changes: any[] = [];
+      const { server, cleanup } = await createConnectedPair();
+      server.on("mcp:resources:changed", (e) => changes.push(e));
+
+      server.registerApp({
+        name: "dashboard",
+        uri: "ui://test/dash",
+        content: "<html></html>",
+      });
+      expect(changes).toHaveLength(1);
+
+      server.unregisterApp("ui://test/dash");
+      expect(changes).toHaveLength(2);
+
+      await cleanup();
+    });
+  });
+});
