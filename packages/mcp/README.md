@@ -1,0 +1,834 @@
+# @agentick/mcp
+
+Standalone, world-class [Model Context Protocol](https://modelcontextprotocol.io) server and client. Depends only on `@agentick/kernel` and `@agentick/shared` — no core, no gateway, no framework coupling. Drop it into any Node runtime.
+
+> **Note:** If you're building a web/chat agent that already uses `@agentick/gateway`, the gateway's `mcpServerPlugin` wraps this package for you. You can still use this package directly to build standalone MCP servers (stdio for Claude Desktop, HTTP for web clients, in-process for tests).
+
+## Installation
+
+```bash
+pnpm add @agentick/mcp
+```
+
+Peer dependencies are resolved automatically via the workspace. For external consumers, `@modelcontextprotocol/sdk` and `zod` are required runtime deps and come along with the install.
+
+## What you get
+
+- **`MCPServer`** — a per-session SDK `Server` pool with a shared registry, dynamic tool/resource/prompt registration, notification fan-out (`tools/list_changed`, `resources/list_changed`), structured error sanitization, and a fully pluggable security pipeline.
+- **`MCPClient`** — a multi-server connection pool with tool, resource, and prompt caching; automatic cache invalidation on server-side list-changed notifications; progress callbacks; sampling, roots, logging, completions, and cancellation support.
+- **Security pipeline** — `ConnectionGuard → contextProvider → Authenticator → Authorizer → RateLimiter → InputSanitizer`, fully pluggable with safe transport-aware defaults.
+- **MCP Apps (local variant)** — `createMCPApp` wraps `@modelcontextprotocol/ext-apps`'s `AppBridge` + `PostMessageTransport`, enforces tool visibility from `_meta.ui.visibility`, and ships helpers for the iframe sandbox (`buildAllowAttribute`, `isToolVisibleToApps`, `getToolAppUri`).
+- **158 tests** covering the server, client, security, protocol, transport integration, and full HTTP lifecycle.
+
+## Quick Start — Server
+
+### Stdio server (Claude Desktop / Cursor / Claude Code)
+
+```typescript
+import { MCPServer, toolResult } from "@agentick/mcp";
+import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { z } from "zod";
+
+const server = new MCPServer({
+  name: "my-server",
+  version: "1.0.0",
+  tools: [
+    {
+      name: "greet",
+      description: "Greet a user by name",
+      inputSchema: z.object({ name: z.string() }),
+      handler: async (input) => toolResult(`Hello, ${input.name}!`),
+    },
+  ],
+});
+
+await server.connect(new StdioServerTransport());
+```
+
+### HTTP server (web clients, Ernesto, external MCP clients)
+
+```typescript
+import http from "node:http";
+import { MCPServer } from "@agentick/mcp";
+
+const server = new MCPServer({
+  name: "my-http-server",
+  version: "1.0.0",
+  tools: [ /* ... */ ],
+  security: {
+    authenticator: async (ctx) =>
+      ctx.user?.id ? { authenticated: true } : { authenticated: false, reason: "missing user" },
+  },
+  contextProvider: async (extra) => {
+    const token = extra.requestInfo?.headers?.authorization?.replace("Bearer ", "");
+    const user = token ? await verifyJwt(token) : undefined;
+    return { user };
+  },
+});
+
+http
+  .createServer(async (req, res) => {
+    if (req.url === "/mcp") {
+      await server.handleHTTPRequest(req, res);
+    } else {
+      res.writeHead(404).end();
+    }
+  })
+  .listen(3000);
+```
+
+`handleHTTPRequest` is fully [Streamable HTTP transport](https://modelcontextprotocol.io/specification/2025-03-26/basic/transports#streamable-http) compatible — it handles session initialization, event streaming, and reconnection using `mcp-session-id` headers.
+
+### In-process server (for tests, embedded agents)
+
+```typescript
+import { MCPServer, MCPClient, InMemoryTransport } from "@agentick/mcp";
+
+const server = new MCPServer({ name: "test", version: "1.0.0", tools: [...] });
+const client = new MCPClient();
+
+const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+await server.connect(serverTransport);
+await client.connect({
+  serverName: "test",
+  transport: "in-process",
+  connection: { transport: clientTransport },
+});
+```
+
+## Server API
+
+### Tools
+
+```typescript
+import { MCPServer, toolResult, toolError } from "@agentick/mcp";
+import { z } from "zod";
+
+const server = new MCPServer({
+  name: "search-server",
+  version: "1.0.0",
+  tools: [
+    {
+      name: "search",
+      description: "Full-text search the knowledge base",
+      inputSchema: z.object({
+        query: z.string(),
+        limit: z.number().optional().default(10),
+      }),
+      annotations: {
+        title: "Search",
+        readOnlyHint: true,
+        idempotentHint: true,
+      },
+      handler: async (input, ctx) => {
+        const results = await db.search(input.query, input.limit);
+        if (results.length === 0) {
+          return toolError("No matches");
+        }
+        return toolResult(JSON.stringify(results, null, 2));
+      },
+    },
+  ],
+});
+```
+
+**Input schema** accepts either a Zod schema or a raw JSON Schema object. Zod is converted via the SDK's `toJsonSchemaCompat`, which handles Zod v4 natively.
+
+**Handler signature:**
+
+```typescript
+type MCPToolHandler = (
+  input: Record<string, unknown>,
+  ctx: MCPHandlerContext,
+) => CallToolResult | Promise<CallToolResult>;
+
+interface MCPHandlerContext {
+  request: MCPRequestContext;   // from contextProvider — user, metadata
+  extra: MCPHandlerExtra;        // raw SDK extra — sessionId, signal, authInfo
+  sessionId: string;             // shortcut for extra.sessionId
+}
+```
+
+**Result helpers:**
+
+```typescript
+import { toolResult, toolError, toMCPResult } from "@agentick/mcp";
+
+toolResult("plain text")                              // single text content block
+toolError("something went wrong")                     // { isError: true } tool result
+toMCPResult({ content: [{ type: "text", text: "..." }] })  // normalize loose shapes into CallToolResult
+```
+
+For multi-block or non-text content, build `CallToolResult` directly:
+
+```typescript
+return {
+  content: [
+    { type: "text", text: "Here's the image:" },
+    { type: "image", data: base64, mimeType: "image/png" },
+  ],
+};
+```
+
+### Static resources
+
+```typescript
+const server = new MCPServer({
+  name: "docs-server",
+  version: "1.0.0",
+  resources: [
+    {
+      name: "readme",
+      uri: "docs://readme",
+      description: "Project README",
+      mimeType: "text/markdown",
+      read: async (ctx) => ({
+        contents: [
+          {
+            uri: "docs://readme",
+            mimeType: "text/markdown",
+            text: await fs.readFile("./README.md", "utf8"),
+          },
+        ],
+      }),
+    },
+  ],
+});
+```
+
+### Resource templates (parameterized URIs)
+
+```typescript
+const server = new MCPServer({
+  name: "db-explorer",
+  version: "1.0.0",
+  resourceTemplates: [
+    {
+      name: "table-schema",
+      uriTemplate: "db://schema/{table}",
+      description: "Schema definition for a database table",
+      mimeType: "application/json",
+      list: async (ctx) => ({
+        resources: (await db.listTables()).map((name) => ({
+          uri: `db://schema/${name}`,
+          name: `${name} schema`,
+          mimeType: "application/json",
+        })),
+      }),
+      read: async (uri, variables, ctx) => {
+        const schema = await db.describeTable(variables.table);
+        return {
+          contents: [{ uri, mimeType: "application/json", text: JSON.stringify(schema) }],
+        };
+      },
+      complete: {
+        table: async (prefix) => (await db.listTables()).filter((t) => t.startsWith(prefix)),
+      },
+    },
+  ],
+});
+```
+
+`complete` provides argument autocomplete for clients that support it — the MCP client surfaces `database-schema?table=<completion>` hints to the user.
+
+### Prompts
+
+```typescript
+const server = new MCPServer({
+  name: "reports",
+  version: "1.0.0",
+  prompts: [
+    {
+      name: "summarize",
+      description: "Summarize a document",
+      arguments: [
+        { name: "document_id", description: "ID of the document", required: true },
+        { name: "length", description: "Target length in words" },
+      ],
+      handler: async (args, ctx) => {
+        const doc = await getDocument(args.document_id);
+        return {
+          description: `Summary prompt for ${doc.title}`,
+          messages: [
+            {
+              role: "user",
+              content: { type: "text", text: `Summarize in ${args.length ?? 200} words:\n\n${doc.text}` },
+            },
+          ],
+        };
+      },
+    },
+  ],
+});
+```
+
+### MCP Apps (ui:// resources)
+
+```typescript
+const server = new MCPServer({
+  name: "dashboard",
+  version: "1.0.0",
+  apps: [
+    {
+      name: "project-dashboard",
+      uri: "ui://project-dashboard",
+      description: "Interactive project dashboard",
+      content: () => fs.readFile("./dashboards/project.html", "utf8"),
+      csp: {
+        connectDomains: ["https://api.example.com"],
+        resourceDomains: ["https://cdn.example.com"],
+      },
+      permissions: ["clipboardWrite"],
+      prefersBorder: true,
+    },
+  ],
+  tools: [
+    {
+      name: "render_dashboard",
+      description: "Show the project dashboard UI",
+      inputSchema: z.object({ projectId: z.string() }),
+      // Link this tool to the ui:// resource — clients that support MCP Apps
+      // will render the iframe when this tool is called.
+      ui: { resourceUri: "ui://project-dashboard", visibility: ["app"] },
+      handler: async () => toolResult("Dashboard rendered"),
+    },
+  ],
+});
+```
+
+Tool `visibility` controls which caller can invoke the tool:
+
+- `["model"]` — only the LLM can call (default behavior — hidden from apps)
+- `["app"]` — only the iframe can call (e.g., button clicks)
+- `["model", "app"]` — both
+- unset — visible to any caller
+
+### Security pipeline
+
+Every MCP request flows through a fixed pipeline:
+
+```
+ConnectionGuard → contextProvider → Authenticator → Authorizer → RateLimiter → InputSanitizer → handler
+```
+
+Each stage is independently pluggable. The `security` option in `MCPServerOptions` configures them:
+
+```typescript
+import {
+  MCPServer,
+  type ConnectionGuard,
+  type Authenticator,
+  type Authorizer,
+  type RateLimiter,
+  type InputSanitizer,
+} from "@agentick/mcp";
+
+const connectionGuard: ConnectionGuard = async (info) => {
+  // Evaluated once per HTTP connection. Return false to reject.
+  return info.remoteAddress === "127.0.0.1";
+};
+
+const authenticator: Authenticator = async (ctx) => {
+  if (!ctx.user?.id) return { authenticated: false, reason: "No user" };
+  return { authenticated: true };
+};
+
+const authorizer: Authorizer = async (ctx, op) => {
+  // op.type: "tool_call" | "resource_read" | "resource_list" | "prompt_get" | "session_create"
+  // op.name: the tool/resource/prompt name
+  if (op.type === "tool_call" && op.name === "admin_reset") {
+    const allowed = ctx.user?.roles?.includes("admin") ?? false;
+    return allowed ? { allowed: true } : { allowed: false, reason: "admin only" };
+  }
+  return { allowed: true };
+};
+
+const rateLimiter: RateLimiter = async (ctx, op) => {
+  const key = `${ctx.user?.id ?? "anon"}:${op.type}`;
+  const allowed = await redis.incr(key, { ttl: 60 }) < 100;
+  return allowed ? { allowed: true } : { allowed: false, retryAfterMs: 60_000 };
+};
+
+const inputSanitizer: InputSanitizer = async (ctx, toolName, input) => {
+  if (toolName === "read_file" && typeof input.path === "string") {
+    // Strip traversal attempts
+    input.path = input.path.replace(/\.\.\//g, "");
+  }
+  return input;
+};
+
+const server = new MCPServer({
+  name: "hardened",
+  version: "1.0.0",
+  tools: [ /* ... */ ],
+  security: { connectionGuard, authenticator, authorizer, rateLimiter, inputSanitizer },
+  contextProvider: async (extra) => ({ user: extractUser(extra) }),
+});
+```
+
+Defaults are transport-aware — safe out of the box:
+
+| Transport | connectionGuard | authenticator |
+|---|---|---|
+| `streamable-http` / `sse` | `localOnlyGuard` | `rejectAllAuth` |
+| `stdio` / `in-process` | (skipped — trusted) | `allowAllAuth` |
+
+**This means an HTTP server with no configured security will reject all requests until you provide an authenticator.** This is intentional.
+
+Stage rejection throws `SecurityError` with an HTTP-style status code (`401` / `403` / `429`), which `MCPServer` converts into an appropriate JSON-RPC error or HTTP response.
+
+### Request context
+
+`contextProvider` is user-supplied; it runs before the security pipeline and shapes `MCPRequestContext`:
+
+```typescript
+const server = new MCPServer({
+  ...,
+  contextProvider: async (extra) => ({
+    user: {
+      id: extra.authInfo?.clientId ?? "anon",
+      roles: extra.authInfo?.scopes ?? [],
+    },
+    metadata: {
+      sessionId: extra.sessionId,
+      requestId: extra.requestId,
+    },
+    signal: extra.signal,
+  }),
+});
+```
+
+Every handler (tool, resource, prompt) receives the enriched context via `ctx.request`:
+
+```typescript
+handler: async (input, ctx) => {
+  const userId = ctx.request.user?.id;
+  const sessionId = ctx.sessionId;
+  // ... use userId, sessionId
+}
+```
+
+### Dynamic registration
+
+Tools, resources, and prompts can be added or removed at runtime. All connected clients receive `tools/list_changed` / `resources/list_changed` / `prompts/list_changed` notifications automatically.
+
+```typescript
+// Add a tool
+server.addTool({
+  name: "new_tool",
+  description: "Added at runtime",
+  inputSchema: z.object({ input: z.string() }),
+  handler: async (input) => toolResult(`Got: ${input.input}`),
+});
+
+// Remove
+server.removeTool("new_tool");
+
+// Resources and prompts follow the same pattern
+server.addResource({ ... });
+server.removeResource(uri);
+server.addPrompt({ ... });
+server.removePrompt(name);
+```
+
+### Session management
+
+Each connected MCP client gets its own SDK `Server` instance internally. Sessions are tracked by session ID with idle TTL:
+
+```typescript
+const server = new MCPServer({
+  name: "my-server",
+  version: "1.0.0",
+  sessions: {
+    idleTtlMs: 30 * 60_000,     // evict after 30 min idle
+    maxSessions: 1000,           // hard cap
+    cleanupIntervalMs: 60_000,   // sweep interval
+  },
+});
+```
+
+Idle sweeps happen automatically. Active sessions are extended on every request. Eviction closes the SDK `Server` for that session gracefully.
+
+### Lifecycle
+
+```typescript
+const server = new MCPServer({ /* ... */ });
+
+// For stdio / in-process — one Transport:
+await server.connect(transport);
+
+// For HTTP — no connect() call; routes pipe into handleHTTPRequest:
+http.createServer((req, res) => server.handleHTTPRequest(req, res)).listen(3000);
+
+// Events
+server.on("session:created", (e) => console.log("new session", e.sessionId));
+server.on("session:closed", (e) => console.log("session closed", e.sessionId));
+server.on("tool:called", (e) => metrics.inc("tool.called", { tool: e.toolName }));
+server.on("security:rejected", (e) => log.warn("rejected", e));
+
+// Shutdown
+await server.close();
+```
+
+## Quick Start — Client
+
+```typescript
+import { MCPClient } from "@agentick/mcp";
+
+const client = new MCPClient({
+  name: "my-agent",
+  version: "1.0.0",
+});
+
+await client.connect({
+  serverName: "search",
+  transport: "streamable-http",
+  connection: { url: "https://mcp.example.com/mcp" },
+  auth: { type: "bearer", token: process.env.MCP_TOKEN },
+});
+
+const tools = await client.listTools("search");
+const result = await client.callTool("search", "search", { query: "ankane" });
+```
+
+## Client API
+
+### Connection management
+
+```typescript
+// Single server
+await client.connect({
+  serverName: "github",
+  transport: "streamable-http",   // or "sse" | "stdio" | "in-process"
+  connection: { url: "https://mcp.github.com/mcp" },
+  auth: { type: "bearer", token: "..." },
+});
+
+// Multiple servers — the client maintains a pool
+await client.connect({ serverName: "linear", ... });
+await client.connect({ serverName: "knowify", ... });
+
+// Per-server health
+client.getHealth("github");
+// → { serverName, state: "connected", lastConnectedAt, lastErrorAt?, lastError? }
+
+// Disconnect
+await client.disconnect("github");
+await client.disconnectAll();
+```
+
+**Automatic reconnection** — when a non-local connection drops unexpectedly, the client schedules a reconnect with exponential backoff. Reconnection state is observable via events:
+
+```typescript
+client.on("connection:state", ({ serverName, state }) => {
+  // state: "connected" | "disconnected" | "reconnecting" | "degraded"
+});
+```
+
+Stdio and in-process transports are NOT auto-reconnected (the process is gone or the transport is bound to a specific lifetime).
+
+### Tools
+
+```typescript
+// Discover
+const tools = await client.listTools("github");
+// → DiscoveredTool[] — { name, description, inputSchema, annotations, serverName }
+
+// Call with cancellation
+const controller = new AbortController();
+const result = await client.callTool("github", "create_issue", {
+  owner: "agenticklabs",
+  repo: "agentick",
+  title: "feat: something",
+}, { signal: controller.signal });
+
+// Call with progress
+const result = await client.callTool("slow-server", "long_tool", input, {
+  onProgress: (info) => console.log(`${info.progress}/${info.total}`, info.message),
+});
+```
+
+The tool list cache is invalidated automatically when the server sends `notifications/tools/list_changed`. The `tools:changed` event fires:
+
+```typescript
+client.on("tools:changed", ({ serverName }) => {
+  console.log(`${serverName} updated its tool list`);
+});
+```
+
+### Resources
+
+```typescript
+// List
+const resources = await client.listResources("knowify");
+const templates = await client.listResourceTemplates("knowify");
+const allResources = await client.listAllResources();                  // every server
+const allTemplates = await client.listAllResourceTemplates();
+
+// Read
+const contents = await client.readResource("knowify", "db://schema/projects");
+// → ResourceContent[] — { uri, text?, blob?, mimeType? }
+
+// Read by URI — picks the right server automatically
+const contents = await client.readResourceByURI("db://schema/projects");
+
+// Invalidate cache manually
+client.invalidateResources("knowify");
+client.invalidateResources();   // all servers
+
+// Event when server sends resources/list_changed
+client.on("resources:changed", ({ serverName }) => { /* ... */ });
+```
+
+### Prompts
+
+```typescript
+const prompts = await client.listPrompts("reports");
+// → DiscoveredPrompt[] — { name, description, arguments, serverName }
+
+const result = await client.getPrompt("reports", "summarize", {
+  document_id: "doc-123",
+  length: "150",
+});
+// → { description, messages: [...] }
+
+client.invalidatePrompts("reports");
+client.on("prompts:changed", ({ serverName }) => { /* ... */ });
+```
+
+### Completions
+
+```typescript
+// Prompt argument completion
+const values = await client.completePromptArgument(
+  "reports",
+  "summarize",
+  "document_id",
+  "doc-1",
+);
+
+// Resource template variable completion
+const values = await client.completeResourceArgument(
+  "knowify",
+  "db://schema/{table}",
+  "table",
+  "proj",
+);
+```
+
+### Sampling (server asks client's model to generate)
+
+If the server uses `sampling/createMessage`, the client routes it to a handler you provide:
+
+```typescript
+import { MCPClient, type SamplingHandler } from "@agentick/mcp";
+
+const samplingHandler: SamplingHandler = async (request) => {
+  // request: { messages, modelPreferences?, systemPrompt?, temperature?, maxTokens, ... }
+  const response = await myModel.generate(request);
+  return {
+    role: "assistant",
+    content: { type: "text", text: response.text },
+    model: "gpt-4o",
+    stopReason: response.stopReason,
+  };
+};
+
+const client = new MCPClient({ samplingHandler });
+```
+
+The `sampling` capability is automatically advertised during initialization when a handler is provided.
+
+### Roots
+
+```typescript
+const client = new MCPClient({
+  roots: [
+    { uri: "file:///workspace/project", name: "project" },
+    { uri: "file:///tmp/scratch" },
+  ],
+});
+
+// Notify servers when roots change
+await client.sendRootsChanged("some-server");
+```
+
+### Logging
+
+```typescript
+const client = new MCPClient({
+  logHandler: (message, serverName) => {
+    console.log(`[${serverName}] ${message.level}: ${message.data}`);
+  },
+});
+
+// Change server's log level
+await client.setLogLevel("some-server", "debug");
+```
+
+### Other events
+
+```typescript
+client.on("connection:state", ({ serverName, state }) => { /* ... */ });
+client.on("tools:changed", ({ serverName }) => { /* ... */ });
+client.on("resources:changed", ({ serverName }) => { /* ... */ });
+client.on("prompts:changed", ({ serverName }) => { /* ... */ });
+client.on("error", (err) => { /* ... */ });
+```
+
+## MCP Apps (local variant)
+
+`createMCPApp` wires a sandboxed iframe to a running `MCPClient` via [ext-apps](https://github.com/modelcontextprotocol/ext-apps)'s `AppBridge` + `PostMessageTransport`.
+
+```typescript
+import {
+  createMCPApp,
+  buildAllowAttribute,
+  isToolVisibleToApps,
+  getToolAppUri,
+} from "@agentick/mcp/client";
+
+// 1. Read the ui:// resource HTML from the server
+const contents = await mcpClient.readResource("knowify", "ui://dashboard");
+const html = contents[0].text;
+
+// 2. Create the iframe with a sandbox
+const iframe = document.createElement("iframe");
+iframe.sandbox.add("allow-scripts");
+iframe.allow = buildAllowAttribute({ clipboardWrite: true });
+iframe.srcdoc = html;
+document.getElementById("chat-log").appendChild(iframe);
+await new Promise((r) => (iframe.onload = r));
+
+// 3. Wire up the bridge
+const app = await createMCPApp({
+  mcpClient,
+  serverName: "knowify",
+  iframe,
+  hostCapabilities: { displayMode: { supported: ["inline", "modal"] } },
+  hostInfo: { name: "knowify-portal", version: "1.0.0" },
+  enforceVisibility: true,
+});
+
+// 4. Clean up when the iframe is removed
+await app.close();
+```
+
+Visibility enforcement is defense-in-depth — the bridge caches the server's tool list and rejects calls to tools whose `_meta.ui.visibility` doesn't include `"app"` before they hit the wire. The authoritative check still happens server-side in the `Authorizer`.
+
+**This variant requires the `MCPClient` and the iframe to live in the same process** — it's suitable for Claude Desktop, Cursor, Electron apps, and browser extensions where the MCP connection and the UI are co-located. For cloud-agent + remote-browser topologies, a relay variant is planned (see [Deferred](#deferred) below).
+
+## Gateway integration
+
+`@agentick/gateway`'s `mcpServerPlugin` wraps `@agentick/mcp`'s `MCPServer` and exposes gateway tools, resources, and templates over an MCP HTTP endpoint. The plugin handles auth via gateway middleware — the embedded MCP server trusts the request context the plugin provides.
+
+```typescript
+import { createGateway, mcpServerPlugin } from "@agentick/gateway";
+
+const gateway = createGateway({
+  apps: { assistant: myAgent },
+  defaultApp: "assistant",
+  plugins: [
+    mcpServerPlugin({
+      path: "/mcp",
+      serverName: "my-gateway",
+      sessionId: "assistant:main",
+      tools: [
+        {
+          name: "echo",
+          description: "Echo input",
+          inputSchema: { type: "object", properties: { text: { type: "string" } } },
+          handler: async (args) => ({
+            content: [{ type: "text", text: String(args.text) }],
+          }),
+        },
+      ],
+      resources: [ /* MCPStaticResource[] */ ],
+      resourceTemplates: [ /* MCPResourceTemplate[] */ ],
+      toolFilter: (tool, ctx) => !tool.name.startsWith("admin_") || isAdmin(ctx),
+    }),
+  ],
+});
+```
+
+See `@agentick/gateway`'s README for the full plugin surface.
+
+## Core integration
+
+`@agentick/core` ships a thin adapter (`packages/core/src/mcp/client.ts`) that wraps `@agentick/mcp`'s `MCPClient` and preserves the existing core API surface (`MCPClient`, `MCPService`, `MCPTool`, `MCPResourceComponent`). Core consumers don't need to know `@agentick/mcp` exists:
+
+```typescript
+import { MCPClient, MCPService } from "@agentick/core/mcp";
+
+const service = new MCPService(new MCPClient());
+await service.discoverAndRegister(
+  { serverName: "github", transport: "streamable-http", connection: { url: "..." } },
+  componentContext,
+);
+```
+
+Internally the core `MCPClient` is a type-mapping layer over `@agentick/mcp/client`. Same behavior, existing API, no migration needed.
+
+## Transports
+
+```typescript
+import { InMemoryTransport } from "@agentick/mcp/transport";
+// or directly from the SDK for stdio / HTTP:
+import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+```
+
+| Transport | Server | Client | Use case |
+|---|---|---|---|
+| `in-process` | `InMemoryTransport` | `transport: "in-process"` | Tests, embedded agents |
+| `stdio` | `StdioServerTransport` (from SDK) | `transport: "stdio"` | Claude Desktop, Cursor, local CLI tools |
+| `streamable-http` | `MCPServer.handleHTTPRequest` | `transport: "streamable-http"` | Web clients, cloud agents |
+| `sse` | (legacy SDK transport) | `transport: "sse"` | Legacy MCP clients |
+
+## Error handling
+
+Errors are never leaked to clients verbatim. `MCPServer` wraps uncaught handler errors in sanitized `McpError` responses with generic messages like "Resource unavailable" or "Tool execution failed". Stack traces and internal paths stay in server logs.
+
+For explicit error results inside tool handlers:
+
+```typescript
+import { toolError } from "@agentick/mcp";
+
+handler: async (input) => {
+  if (!input.valid) return toolError("Invalid input");
+  // ... happy path
+}
+```
+
+Security pipeline rejections throw `SecurityError`:
+
+```typescript
+import { SecurityError } from "@agentick/mcp";
+
+try {
+  await server.handleHTTPRequest(req, res);
+} catch (err) {
+  if (err instanceof SecurityError) {
+    res.writeHead(err.code, {
+      ...(err.retryAfterMs && { "Retry-After": String(Math.ceil(err.retryAfterMs / 1000)) }),
+    });
+    res.end(err.message);
+  }
+}
+```
+
+`MCPServer.handleHTTPRequest` does this translation for you — direct error handling is only needed if you're invoking security stages manually.
+
+## Deferred
+
+The following are planned but not yet shipped. Nothing existing is removed — these are additive enhancements:
+
+- **`createMCPAppRelay`** — a server-side variant of `createMCPApp` that routes iframe↔MCPClient traffic over a remote chat channel, for cloud agent + browser UI topologies (Ernesto + Knowify portal). Depends on the bidirectional channel architecture work (see `docs/channels-current-state.md` in the monorepo).
+- **`MCPAuthProvider`** — a pluggable OAuth 2.1 / Dynamic Client Registration / token refresh interface for `MCPClient.connect()`. The SDK ships the underlying helpers (`@modelcontextprotocol/sdk/client/auth.js`); this package will wrap them into a clean provider interface.
+- **Kernel-level `RequestPipeline` primitive** — lifting the MCP security pipeline into `@agentick/kernel` so `@agentick/gateway` can consume the same stages. Will let you write `bearerTokenAuth`, `roleBasedAuthz`, `slidingWindowLimiter` once and reuse them across any stateful server.
+
+## Further reading
+
+- [Model Context Protocol specification](https://modelcontextprotocol.io/specification)
+- [MCP Apps extension](https://github.com/modelcontextprotocol/ext-apps)
+- `docs/channels-current-state.md` in the monorepo — background on the architecture constraints affecting the relay variant

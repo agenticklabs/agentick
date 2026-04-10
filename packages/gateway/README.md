@@ -330,6 +330,13 @@ Both are optional — import and `use()` them as needed.
 Exposes gateway capabilities as a standard MCP server via Streamable HTTP.
 Any MCP client (Claude Desktop, Cursor, Claude Code, etc.) can connect.
 
+> **Internals:** this plugin wraps [`@agentick/mcp`](../mcp/README.md)'s
+> `MCPServer`. Auth is handled by gateway middleware — the plugin passes
+> the authenticated request context through to the MCP server via
+> `contextProvider`, so the MCP server itself trusts every request. If
+> you need a standalone MCP server outside a gateway (stdio, custom HTTP
+> framework, embedded), use `@agentick/mcp` directly.
+
 Supports four modes:
 
 - **Resources-only** — serve MCP resources without tools (no `sessionId` needed)
