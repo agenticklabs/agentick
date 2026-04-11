@@ -1,6 +1,6 @@
 export { MCPServer } from "./server.js";
 
-// Security — function types re-exported from protocol, defaults and pipeline from security module
+// Security — defaults
 export {
   localOnlyGuard,
   rejectAllAuth,
@@ -13,3 +13,17 @@ export {
 } from "./security/index.js";
 
 export { SecurityError } from "./security/index.js";
+
+// Security — production stages
+export {
+  bearerTokenAuth,
+  roleBasedAuthz,
+  slidingWindowLimiter,
+  allowListGuard,
+  pathTraversalSanitizer,
+  type BearerTokenAuthOptions,
+  type RoleBasedAuthzOptions,
+  type SlidingWindowLimiterOptions,
+  type AllowListGuardOptions,
+  type PathTraversalSanitizerOptions,
+} from "./security/index.js";

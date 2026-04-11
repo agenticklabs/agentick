@@ -377,6 +377,133 @@ Defaults are transport-aware — safe out of the box:
 
 Stage rejection throws `SecurityError` with an HTTP-style status code (`401` / `403` / `429`), which `MCPServer` converts into an appropriate JSON-RPC error or HTTP response.
 
+### Production security stages
+
+The package ships five ready-to-use stage factories that cover the 80% case. Each returns a plain function with the corresponding type signature — drop it into `security.*` and you're done.
+
+#### `bearerTokenAuth`
+
+```typescript
+import { bearerTokenAuth } from "@agentick/mcp";
+
+// Static tokens (dev / internal tools)
+security: {
+  authenticator: bearerTokenAuth({
+    tokens: {
+      "dev-token-123": { id: "alice", roles: ["user"] },
+    },
+  }),
+},
+
+// JWT verification (production)
+security: {
+  authenticator: bearerTokenAuth({
+    verify: async (token) => {
+      const claims = await verifyJwt(token);
+      return { id: claims.sub, roles: claims.roles };
+    },
+  }),
+},
+```
+
+Reads the Authorization header from `ctx.metadata.headers` (case-insensitive) by default. Override via `extract` for non-HTTP transports. Requires your `contextProvider` to put headers on `ctx.metadata`.
+
+#### `roleBasedAuthz`
+
+```typescript
+import { roleBasedAuthz } from "@agentick/mcp";
+
+security: {
+  authorizer: roleBasedAuthz({
+    rules: {
+      "tool_call:admin_reset": ["admin"],     // specific tool
+      "tool_call:*": ["user", "admin"],       // any other tool
+      "resource_read:*": [],                   // any authenticated user
+      "session_create": [],                    // any authenticated user
+    },
+  }),
+},
+```
+
+Specificity: `tool_call:name` beats `tool_call:*` beats `*`. Missing rule = implicit deny. Empty `roles: []` = any authenticated user. Override `getRoles` to source roles from somewhere other than `ctx.user.roles`.
+
+#### `slidingWindowLimiter`
+
+```typescript
+import { slidingWindowLimiter } from "@agentick/mcp";
+
+security: {
+  rateLimiter: slidingWindowLimiter({
+    windowMs: 60_000,
+    max: 100,
+    keyFn: (ctx, op) => `${ctx.user?.id ?? "anon"}:${op.name ?? op.type}`,
+    onReject: (key, retryAfterMs) => metrics.inc("rate_limit.rejected", { key }),
+  }),
+},
+```
+
+In-memory sliding window. Tracks timestamps per key, rejects when the window count exceeds `max`. Returns `retryAfterMs` when rejected. For distributed rate limiting across multiple instances, replace with a Redis-backed limiter that implements the same `RateLimiter` signature.
+
+#### `allowListGuard`
+
+```typescript
+import { allowListGuard } from "@agentick/mcp";
+
+security: {
+  connectionGuard: allowListGuard({
+    origins: ["https://app.example.com", "https://*.example.com"],
+    remoteAddresses: ["10.0.0.0/8", "127.0.0.1", "::1"],
+    // requireBoth: true,  // uncomment to require BOTH origin AND IP match
+  }),
+},
+```
+
+Supports exact matches, glob wildcards for origins, and CIDR ranges for IPv4/IPv6. IPv4-mapped IPv6 addresses (`::ffff:127.0.0.1`) are normalized. Either/or matching by default — set `requireBoth: true` to require both checks to pass.
+
+#### `pathTraversalSanitizer`
+
+```typescript
+import { pathTraversalSanitizer } from "@agentick/mcp";
+
+security: {
+  inputSanitizer: pathTraversalSanitizer({
+    fields: ["path", "filename"],             // optional — auto-detected by name if omitted
+    allowedRoots: ["/workspace/", "/tmp/"],   // optional — reject paths outside these roots
+    mode: "reject",                            // "reject" (default) or "strip"
+  }),
+},
+```
+
+Detects and rejects:
+
+- Literal `..` path segments (`../etc/passwd`)
+- URL-encoded traversal (`%2e%2e/etc/passwd`)
+- Double-URL-encoded traversal (`%252e%252e/etc/passwd`)
+- Backslash-style Windows traversal (`..\\..\\etc\\passwd`)
+- Null-byte truncation (`safe.txt\0.exe`)
+
+Auto-detects path-like fields by key name (anything containing `path`, `file`, `filename`, `dir`, or `directory` — case-insensitive). Set `fields` explicitly to override.
+
+> **Note:** Path sanitization is defense-in-depth, not a substitute for real sandboxing. Use `@agentick/sandbox` or OS-level isolation (chroot, namespaces, containers) for hard boundaries.
+
+### Composing stages
+
+Each factory returns a function — you can wrap, compose, or chain them yourself:
+
+```typescript
+// Multiple authenticators in sequence — try JWT first, fall back to API key
+const jwtAuth = bearerTokenAuth({ verify: verifyJwt });
+const apiKeyAuth = bearerTokenAuth({ tokens: staticKeys });
+
+security: {
+  authenticator: async (ctx) => {
+    const jwt = await jwtAuth(ctx);
+    if (jwt.authenticated) return jwt;
+    return apiKeyAuth(ctx);
+  },
+},
+```
+
 ### Request context
 
 `contextProvider` is user-supplied; it runs before the security pipeline and shapes `MCPRequestContext`:
@@ -825,7 +952,7 @@ The following are planned but not yet shipped. Nothing existing is removed — t
 
 - **`createMCPAppRelay`** — a server-side variant of `createMCPApp` that routes iframe↔MCPClient traffic over a remote chat channel, for cloud agent + browser UI topologies (Ernesto + Knowify portal). Depends on the bidirectional channel architecture work (see `docs/channels-current-state.md` in the monorepo).
 - **`MCPAuthProvider`** — a pluggable OAuth 2.1 / Dynamic Client Registration / token refresh interface for `MCPClient.connect()`. The SDK ships the underlying helpers (`@modelcontextprotocol/sdk/client/auth.js`); this package will wrap them into a clean provider interface.
-- **Kernel-level `RequestPipeline` primitive** — lifting the MCP security pipeline into `@agentick/kernel` so `@agentick/gateway` can consume the same stages. Will let you write `bearerTokenAuth`, `roleBasedAuthz`, `slidingWindowLimiter` once and reuse them across any stateful server.
+- **Kernel-level `RequestPipeline` primitive** — lifting the MCP security pipeline into `@agentick/kernel` so `@agentick/gateway` can consume the same stage factories (`bearerTokenAuth`, `roleBasedAuthz`, etc.). The stages already work standalone against the MCP pipeline today — this is about letting the gateway reuse them without reimplementing its own auth path.
 
 ## Further reading
 
