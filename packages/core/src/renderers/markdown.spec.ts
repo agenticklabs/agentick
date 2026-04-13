@@ -441,9 +441,10 @@ describe("MarkdownRenderer", () => {
         },
       ];
       const result = renderer.format(blocks);
-      expect(result).toHaveLength(2);
-      expect((result[0] as any).text).toBe("visible question");
-      expect((result[1] as any).text).toBe('<collapsed name="img:1">[screenshot]</collapsed>');
+      // Adjacent text blocks are consolidated — visible text + collapsed marker merge
+      expect(result).toHaveLength(1);
+      expect((result[0] as any).text).toContain("visible question");
+      expect((result[0] as any).text).toContain('<collapsed name="img:1">[screenshot]</collapsed>');
     });
 
     it("handles empty name gracefully", () => {
