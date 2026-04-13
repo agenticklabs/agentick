@@ -93,12 +93,9 @@ describe("XMLRenderer", () => {
         },
       ];
       const result = renderer.format(blocks);
-      // Adjacent text blocks are consolidated — visible text + collapsed marker merge
-      expect(result).toHaveLength(1);
-      expect((result[0] as any).text).toContain("visible text");
-      expect((result[0] as any).text).toContain(
-        '<collapsed name="code:0">[code: python]</collapsed>',
-      );
+      expect(result).toHaveLength(2);
+      expect((result[0] as any).text).toBe("visible text");
+      expect((result[1] as any).text).toBe('<collapsed name="code:0">[code: python]</collapsed>');
     });
 
     it("handles missing group attribute", () => {

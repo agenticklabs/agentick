@@ -182,7 +182,7 @@ export class StructureRenderer {
     // Format compiled system entries (rebuilt each tick)
     const compiledSystem = this._lastCompiled?.systemEntries ?? [];
     const formattedSystem: COMTimelineEntry[] = compiledSystem.map((compiled) => {
-      const formattedContent = this.formatSemanticBlocks(compiled.content);
+      const formattedContent = consolidateTextBlocks(this.formatSemanticBlocks(compiled.content));
       return {
         kind: "message" as const,
         message: {

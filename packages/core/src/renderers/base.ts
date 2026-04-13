@@ -201,55 +201,7 @@ export abstract class Renderer {
       }
     }
 
-    return this.consolidateTextBlocks(formatted);
-  }
-
-  /**
-   * Merge consecutive text blocks into one to reduce content block count.
-   *
-   * Models receive each ContentBlock as a separate chunk. Semantic rendering
-   * often produces many adjacent text blocks (each heading, list item, or
-   * inline element becomes its own block). This merges them into single
-   * blocks separated by double newlines, producing cleaner prompts.
-   *
-   * Non-text blocks (code, image, json, etc.) act as barriers — text blocks
-   * on either side of a non-text block are NOT merged across it.
-   */
-  protected consolidateTextBlocks(blocks: ContentBlock[]): ContentBlock[] {
-    if (blocks.length <= 1) return blocks;
-
-    const consolidated: ContentBlock[] = [];
-    let pendingTexts: string[] = [];
-
-    const flushText = () => {
-      if (pendingTexts.length > 0) {
-        consolidated.push({
-          type: "text",
-          text: pendingTexts.join("\n\n"),
-        } as TextBlock);
-        pendingTexts = [];
-      }
-    };
-
-    for (const block of blocks) {
-      // Only merge plain text blocks — no semantic metadata, no special types
-      const isPlainText =
-        block.type === "text" && !(block as any).semantic && !(block as any).semanticNode;
-
-      if (isPlainText) {
-        const text = (block as TextBlock).text;
-        if (text && text.trim()) {
-          pendingTexts.push(text);
-        }
-      } else {
-        // Non-plain block (code, image, collapsed, semantic) — flush then pass through
-        flushText();
-        consolidated.push(block);
-      }
-    }
-
-    flushText();
-    return consolidated;
+    return formatted;
   }
 
   /**
