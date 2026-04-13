@@ -1,6 +1,6 @@
 {
   "name": "@agentick/connector",
-  "version": "0.14.29",
+  "version": "0.14.30",
   "description": "Bridge external platforms to Agentick sessions",
   "keywords": [
     "agent",
