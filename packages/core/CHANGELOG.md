@@ -1,5 +1,15 @@
 # @agentick/core
 
+## 0.14.30
+
+### Patch Changes
+
+- 29ddb7a: Renderer fix
+- Updated dependencies [3ad42aa]
+  - @agentick/mcp@0.14.30
+  - @agentick/kernel@0.14.30
+  - @agentick/shared@0.14.30
+
 ## 0.14.29
 
 ### Patch Changes

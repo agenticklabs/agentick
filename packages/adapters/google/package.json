@@ -1,6 +1,6 @@
 {
   "name": "@agentick/google",
-  "version": "0.14.29",
+  "version": "0.14.30",
   "description": "Google AI adapter for Agentick",
   "keywords": [
     "adapter",
