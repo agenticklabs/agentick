@@ -1,5 +1,16 @@
 # @agentick/gateway
 
+## 0.14.31
+
+### Patch Changes
+
+- 8d96448: Close all active sessions on gateway shutdown, ensuring component unmount and sandbox teardown.
+  - @agentick/kernel@0.14.31
+  - @agentick/shared@0.14.31
+  - @agentick/core@0.14.31
+  - @agentick/server@0.14.31
+  - @agentick/mcp@0.14.31
+
 ## 0.14.30
 
 ### Patch Changes
