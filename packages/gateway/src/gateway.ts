@@ -558,6 +558,9 @@ export class Gateway extends EventEmitter {
   async stop(): Promise<void> {
     if (!this.isRunning && !this.embedded) return;
 
+    // Close all active sessions — triggers component unmount, sandbox teardown, etc.
+    await this.sessions.closeAll();
+
     // Destroy plugins in reverse registration order
     const entries = [...this.plugins.values()].reverse();
     for (const { plugin } of entries) {

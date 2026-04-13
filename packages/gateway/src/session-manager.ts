@@ -155,6 +155,15 @@ export class SessionManager {
   }
 
   /**
+   * Close all active sessions. Called during gateway shutdown to ensure
+   * component trees unmount and sandbox teardown runs (kills TigerFS, etc.).
+   */
+  async closeAll(): Promise<void> {
+    const keys = [...this.sessions.keys()];
+    await Promise.allSettled(keys.map((key) => this.close(key)));
+  }
+
+  /**
    * Reset a session (clear history but keep session)
    */
   async reset(sessionKey: string): Promise<void> {
