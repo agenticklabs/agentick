@@ -99,6 +99,14 @@ export interface MCPServerOptions {
   name: string;
   version: string;
 
+  /**
+   * Instructions describing how to use the server and its features.
+   * Sent to MCP clients in the initialize response and injected into
+   * the LLM's context to improve understanding of available tools,
+   * resources, and workflows.
+   */
+  instructions?: string;
+
   tools?: MCPToolDefinition[];
   resources?: MCPStaticResource[];
   resourceTemplates?: MCPResourceTemplateDefinition[];

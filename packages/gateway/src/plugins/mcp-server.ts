@@ -81,6 +81,13 @@ export interface MCPServerPluginConfig {
   tools?: MCPStandaloneTool[];
   resources?: MCPStaticResource[];
   resourceTemplates?: MCPResourceTemplate[];
+  /**
+   * Instructions describing how to use the server and its features.
+   * Sent to MCP clients in the initialize response. Clients inject this
+   * into the LLM's context to improve understanding of available tools
+   * and resources.
+   */
+  instructions?: string;
   oauthMetadata?:
     | { issuer: string; cacheTtl?: number }
     | { metadata: Record<string, unknown> };
@@ -241,6 +248,7 @@ export function mcpServerPlugin(config: MCPServerPluginConfig): GatewayPlugin {
       mcpServer = new MCPServer({
         name: config.serverName ?? "agentick-gateway",
         version: config.serverVersion ?? "1.0.0",
+        ...(config.instructions && { instructions: config.instructions }),
         tools: mcpTools,
         toolFilter: toolFilterFn,
         resources: config.resources?.map((res) => ({

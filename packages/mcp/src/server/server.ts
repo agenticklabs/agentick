@@ -374,6 +374,7 @@ export class MCPServer {
           prompts: { listChanged: true },
           logging: {},
         },
+        ...(this.options.instructions && { instructions: this.options.instructions }),
       },
     );
 
