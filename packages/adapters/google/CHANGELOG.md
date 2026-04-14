@@ -1,5 +1,12 @@
 # @agentick/google
 
+## 0.14.32
+
+### Patch Changes
+
+- @agentick/core@0.14.32
+- @agentick/shared@0.14.32
+
 ## 0.14.31
 
 ### Patch Changes

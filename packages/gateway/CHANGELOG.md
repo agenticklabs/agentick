@@ -1,5 +1,16 @@
 # @agentick/gateway
 
+## 0.14.32
+
+### Patch Changes
+
+- Updated dependencies [ba21889]
+  - @agentick/mcp@0.14.32
+  - @agentick/server@0.14.32
+  - @agentick/core@0.14.32
+  - @agentick/kernel@0.14.32
+  - @agentick/shared@0.14.32
+
 ## 0.14.31
 
 ### Patch Changes

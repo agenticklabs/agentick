@@ -1,5 +1,13 @@
 # @agentick/mcp
 
+## 0.14.32
+
+### Patch Changes
+
+- ba21889: support mcp server instructions
+  - @agentick/kernel@0.14.32
+  - @agentick/shared@0.14.32
+
 ## 0.14.31
 
 ### Patch Changes
