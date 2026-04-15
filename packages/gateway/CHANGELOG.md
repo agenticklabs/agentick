@@ -1,5 +1,16 @@
 # @agentick/gateway
 
+## 0.14.33
+
+### Patch Changes
+
+- 2270099: support mcp apps in mcp server plugin
+  - @agentick/kernel@0.14.33
+  - @agentick/shared@0.14.33
+  - @agentick/core@0.14.33
+  - @agentick/server@0.14.33
+  - @agentick/mcp@0.14.33
+
 ## 0.14.32
 
 ### Patch Changes
