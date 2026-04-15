@@ -164,14 +164,54 @@ gateway.use(
 );
 ```
 
-Three modes:
+Five modes:
 
+- **Pre-built server** — pass a fully configured `MCPServer` instance via `server`; the plugin just bridges it to HTTP
 - **Resources-only** — omit `sessionId` to serve MCP resources without tools
-- **Static tools** — set `sessionId` to discover and expose session tools
+- **Standalone tools** — register tools with their own handlers via `tools`, no session required
+- **Session tools** — set `sessionId` to discover and expose agent session tools
 - **Per-session tools** — add `toolFilter` to customize tools per client
 
+**Pre-built server** — bring your own `MCPServer` from `@agentick/mcp`. The
+plugin skips all construction and just registers the HTTP route:
+
+```typescript
+import { MCPServer } from "@agentick/mcp/server";
+
+const server = new MCPServer({
+  name: "my-server",
+  version: "1.0.0",
+  tools: [/* ... */],
+  resources: [/* ... */],
+  apps: [/* MCP Apps (ui:// resources) */],
+  security: { authenticator: async () => ({ authenticated: true }) },
+});
+
+gateway.use(mcpServerPlugin({ server, path: "/mcp" }));
+```
+
+**MCP Apps** — serve interactive HTML micro-applications as `ui://` resources.
+Apps render in the MCP client's sandboxed iframe and communicate back via
+the ext-apps bridge:
+
+```typescript
+gateway.use(
+  mcpServerPlugin({
+    path: "/mcp",
+    apps: [
+      {
+        name: "dashboard",
+        uri: "ui://my-server/dashboard",
+        content: () => readFileSync("dist/dashboard.html", "utf-8"),
+        csp: { resourceDomains: ["esm.sh"] },
+      },
+    ],
+  }),
+);
+```
+
 Tools support MCP annotations (`readOnlyHint`, `destructiveHint`) via the
-`annotations` field on `ToolEntry`. Tool calls dispatch through `tool-dispatch`.
+`annotations` field. Tool calls dispatch through `tool-dispatch`.
 
 For multi-user deployments, use `toolFilter` to customize tools per MCP client
 based on the incoming HTTP request:
@@ -189,9 +229,7 @@ gateway.use(
 );
 ```
 
-Each MCP client handshake creates its own `McpServer` with the filtered tool
-set. Sessions are tracked by `mcp-session-id` header and cleaned up
-automatically.
+Sessions are tracked by `mcp-session-id` header and cleaned up automatically.
 
 When running behind Express or middleware that pre-parses request bodies,
 the plugin passes `req.body` to the transport automatically.

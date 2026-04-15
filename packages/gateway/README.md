@@ -337,12 +337,64 @@ Any MCP client (Claude Desktop, Cursor, Claude Code, etc.) can connect.
 > you need a standalone MCP server outside a gateway (stdio, custom HTTP
 > framework, embedded), use `@agentick/mcp` directly.
 
-Supports four modes:
+Supports five modes:
 
+- **Pre-built server** — bring your own `MCPServer` instance; the plugin just bridges it to HTTP
 - **Resources-only** — serve MCP resources without tools (no `sessionId` needed)
 - **Standalone tools** — register tools with their own handlers, no session required
 - **Session tools** — expose tools from a running agent session, frozen at initialization
 - **Per-session tools** — filter session tools per client via `toolFilter` callback
+
+#### Pre-built Server
+
+Pass a fully configured `MCPServer` instance. The plugin skips all construction
+and just registers the HTTP route. The server's security pipeline, tools,
+resources, and apps are all owned by the caller:
+
+```typescript
+import { mcpServerPlugin } from "@agentick/gateway";
+import { MCPServer } from "@agentick/mcp/server";
+import { z } from "zod";
+
+const server = new MCPServer({
+  name: "my-server",
+  version: "1.0.0",
+  tools: [
+    {
+      name: "query",
+      description: "Query the database",
+      inputSchema: z.object({ table: z.string() }),
+      handler: async (args) => ({
+        content: [{ type: "text", text: JSON.stringify(await db.query(args.table)) }],
+      }),
+    },
+  ],
+  apps: [
+    {
+      name: "dashboard",
+      uri: "ui://my-server/dashboard",
+      content: "<html>...</html>",
+    },
+  ],
+  security: {
+    authenticator: async (ctx) => {
+      // Validate JWT, API key, etc.
+      return { authenticated: true };
+    },
+  },
+});
+
+gateway.use(
+  mcpServerPlugin({
+    server,
+    path: "/mcp",
+  }),
+);
+```
+
+This is ideal when the MCP server is defined in a separate library (e.g., a
+shared `@myorg/mcp` package) and multiple consumers need to host it with
+different transports.
 
 #### Resources Only
 
@@ -448,6 +500,46 @@ handling and auto-approval decisions.
 > **Note:** The MCP SDK requires `inputSchema` to be a **Zod schema**, not
 > raw JSON Schema. The SDK validates tool inputs against this schema before
 > calling the handler.
+
+#### MCP Apps
+
+Serve interactive HTML micro-applications via MCP's `ui://` resource protocol.
+Apps are rendered by the MCP client in sandboxed iframes and communicate back
+through the ext-apps bridge:
+
+```typescript
+gateway.use(
+  mcpServerPlugin({
+    path: "/mcp",
+    apps: [
+      {
+        name: "dashboard",
+        uri: "ui://my-server/dashboard",
+        description: "Project dashboard",
+        content: () => readFileSync("dist/apps/dashboard.html", "utf-8"),
+        csp: { resourceDomains: ["esm.sh"] },
+        prefersBorder: true,
+      },
+    ],
+    tools: [
+      {
+        name: "open_dashboard",
+        description: "Show the project dashboard",
+        inputSchema: z.object({ projectId: z.number() }),
+        annotations: {
+          _meta: { ui: { resourceUri: "ui://my-server/dashboard" } },
+        },
+        handler: async (args) => ({
+          content: [{ type: "text", text: `Opening dashboard for project ${args.projectId}` }],
+        }),
+      },
+    ],
+  }),
+);
+```
+
+Apps appear in `resources/list` with MIME type `text/html;profile=mcp-app`.
+The `content` field can be a static HTML string or an async function for lazy loading.
 
 #### Session Tools + Resources
 
@@ -789,6 +881,7 @@ import {
   type MCPServerPluginConfig,
   type MCPStaticResource,
   type MCPResourceTemplate,
+  type MCPAppDefinition,
   type McpToolEntry,
   type LoggingPluginConfig,
 } from "@agentick/gateway";
