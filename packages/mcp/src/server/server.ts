@@ -684,6 +684,8 @@ export class MCPServer {
   private async parsedBody(req: IncomingMessage): Promise<any> {
     // Pre-parsed by Express/middleware
     if ((req as any).body !== undefined) return (req as any).body;
+    // Only read the stream if req is actually a readable stream
+    if (!req.readable) return undefined;
     // Raw HTTP — read and parse the stream (cache on req for re-reads)
     return new Promise((resolve) => {
       const chunks: Buffer[] = [];

@@ -279,7 +279,7 @@ describe("MCP Server Plugin — per-session toolFilter", () => {
     );
     await gateway.handleRequest(req, res);
 
-    expect(res.statusCode).toBe(400);
+    expect(res.statusCode).toBe(404);
   });
 
   it("does not call toolFilter for requests with known session ID", async () => {
