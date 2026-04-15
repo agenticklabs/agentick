@@ -264,6 +264,11 @@ export interface CreateToolOptions<
     [key: string]: any;
   };
 
+  ui?: {
+    resourceUri?: string;
+    visibility?: Array<"model" | "app">;
+  };
+
   // === Audience Configuration ===
 
   /** Controls who sees this tool. "model" (default) = model only, "user" = user dispatch only, "all" = both. */
@@ -478,6 +483,7 @@ export function createTool<TInput = any, TOutput extends ContentBlock[] = Conten
     mcpConfig: options.mcpConfig,
     audience: options.audience,
     aliases: options.aliases,
+    ui: options.ui,
   };
 
   // Procedure options shared between static run and instance run
@@ -778,6 +784,15 @@ export interface ToolMetadata<TInput = any, TOutput = any> {
 
   /** Alternative names for user dispatch (e.g. ["mount"] for "add-dir"). */
   aliases?: string[];
+
+  /**
+   * MCP App UI metadata. When present, tool calls emit `ui` on the
+   * `tool_result_start` event, signaling the host to mount an app iframe.
+   */
+  ui?: {
+    resourceUri?: string;
+    visibility?: Array<"model" | "app">;
+  };
 }
 
 export interface ExecutableTool<

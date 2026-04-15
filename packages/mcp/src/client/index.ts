@@ -22,7 +22,7 @@ export type {
   LogHandler,
 } from "./types.js";
 
-// MCP Apps client-side
+// MCP Apps — client/host side
 export {
   createMCPApp,
   isToolVisibleToApps,
@@ -40,3 +40,7 @@ export type {
   McpUiHostCapabilities,
   McpUiResourcePermissions,
 } from "./apps.js";
+
+// MCP Apps — relay transport for server-side AppBridge
+export { RelayTransport } from "./relay-transport.js";
+export type { RelayTransportOptions } from "./relay-transport.js";

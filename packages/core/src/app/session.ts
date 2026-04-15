@@ -2986,15 +2986,29 @@ export class SessionImpl<P = {}> extends EventEmitter implements Session<P> {
         const startedAt = timestamp();
         this._currentToolCallId = call.id;
 
-        // Signal tool execution beginning (fills the gap between tool_call and tool_result)
+        // Resolve tool metadata
+        const tool = executableTools.find((t) => t.metadata?.name === call.name);
+
+        // Attach UI metadata if tool has a resourceUri — signals the host to mount an app.
+        // Generated here (single source of truth) and carried on both the call object
+        // and the tool_result_start event. The host resolves the URI to HTML content
+        // before delivering to the client.
+        if (tool?.metadata?.ui?.resourceUri && !call.ui) {
+          call.ui = {
+            resourceUri: tool.metadata.ui.resourceUri,
+            appSessionId: randomUUID(),
+          };
+        }
+
+        // Signal tool execution beginning — client uses this to mount the app iframe
+        // (if ui is present) while the tool executes in parallel.
         this.emitEvent({
           type: "tool_result_start",
           callId: call.id,
           name: call.name,
+          ...(call.ui && { ui: call.ui }),
         });
 
-        // Check if OUTPUT tool
-        const tool = executableTools.find((t) => t.metadata?.name === call.name);
         const isOutputTool = tool && tool.metadata?.type === "output";
 
         if (isOutputTool) {

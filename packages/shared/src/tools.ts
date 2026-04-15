@@ -103,6 +103,22 @@ export interface ToolCall {
   input: Record<string, unknown>;
   /** Result of tool execution (present after execution) */
   result?: ToolResult;
+  /**
+   * MCP App UI metadata — present when this tool call should mount an app.
+   * Populated by the host/session when the tool's definition has `ui.resourceUri`.
+   *
+   * The `content` field contains the resolved app HTML (fetched from the MCP
+   * server's resources). The `appSessionId` is a unique identifier for routing
+   * bidirectional messages between the app and the server-side AppBridge.
+   */
+  ui?: {
+    /** The ui:// resource URI */
+    resourceUri: string;
+    /** Unique session ID for this app instance (routing key for bridge messages) */
+    appSessionId: string;
+    /** Resolved app HTML content (self-contained, ready for iframe srcdoc) */
+    content?: string;
+  };
 }
 
 /**
@@ -189,6 +205,26 @@ export interface ToolDefinition {
    * Default: [{ type: 'text', text: '[{name} rendered on client]' }]
    */
   defaultResult?: ContentBlock[];
+  /**
+   * MCP App UI metadata. When present, the host should mount an interactive
+   * app (iframe) alongside the tool execution. The tool still executes normally
+   * and returns a result — the app is a VIEW of that execution.
+   *
+   * Per the MCP Apps spec, each tool call with a resourceUri creates a new
+   * View instance. The host sends tool-input (arguments) and tool-result
+   * (execution output) to the app via the ext-apps bridge protocol.
+   */
+  ui?: {
+    /** URI of the MCP App resource to mount (e.g., "ui://knowify/dashboard") */
+    resourceUri?: string;
+    /**
+     * Controls who can call this tool.
+     * - "model": callable by the LLM (included in tools/list to model)
+     * - "app": callable by apps from the same MCP server (hidden from model)
+     * Default: ["model", "app"]
+     */
+    visibility?: Array<"model" | "app">;
+  };
 }
 
 /**
