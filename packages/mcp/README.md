@@ -54,7 +54,9 @@ import { MCPServer } from "@agentick/mcp";
 const server = new MCPServer({
   name: "my-http-server",
   version: "1.0.0",
-  tools: [ /* ... */ ],
+  tools: [
+    /* ... */
+  ],
   security: {
     authenticator: async (ctx) =>
       ctx.user?.id ? { authenticated: true } : { authenticated: false, reason: "missing user" },
@@ -143,9 +145,9 @@ type MCPToolHandler = (
 ) => CallToolResult | Promise<CallToolResult>;
 
 interface MCPHandlerContext {
-  request: MCPRequestContext;   // from contextProvider — user, metadata
-  extra: MCPHandlerExtra;        // raw SDK extra — sessionId, signal, authInfo
-  sessionId: string;             // shortcut for extra.sessionId
+  request: MCPRequestContext; // from contextProvider — user, metadata
+  extra: MCPHandlerExtra; // raw SDK extra — sessionId, signal, authInfo
+  sessionId: string; // shortcut for extra.sessionId
 }
 ```
 
@@ -154,9 +156,9 @@ interface MCPHandlerContext {
 ```typescript
 import { toolResult, toolError, toMCPResult } from "@agentick/mcp";
 
-toolResult("plain text")                              // single text content block
-toolError("something went wrong")                     // { isError: true } tool result
-toMCPResult({ content: [{ type: "text", text: "..." }] })  // normalize loose shapes into CallToolResult
+toolResult("plain text"); // single text content block
+toolError("something went wrong"); // { isError: true } tool result
+toMCPResult({ content: [{ type: "text", text: "..." }] }); // normalize loose shapes into CallToolResult
 ```
 
 For multi-block or non-text content, build `CallToolResult` directly:
@@ -252,7 +254,10 @@ const server = new MCPServer({
           messages: [
             {
               role: "user",
-              content: { type: "text", text: `Summarize in ${args.length ?? 200} words:\n\n${doc.text}` },
+              content: {
+                type: "text",
+                text: `Summarize in ${args.length ?? 200} words:\n\n${doc.text}`,
+              },
             },
           ],
         };
@@ -345,7 +350,7 @@ const authorizer: Authorizer = async (ctx, op) => {
 
 const rateLimiter: RateLimiter = async (ctx, op) => {
   const key = `${ctx.user?.id ?? "anon"}:${op.type}`;
-  const allowed = await redis.incr(key, { ttl: 60 }) < 100;
+  const allowed = (await redis.incr(key, { ttl: 60 })) < 100;
   return allowed ? { allowed: true } : { allowed: false, retryAfterMs: 60_000 };
 };
 
@@ -360,7 +365,9 @@ const inputSanitizer: InputSanitizer = async (ctx, toolName, input) => {
 const server = new MCPServer({
   name: "hardened",
   version: "1.0.0",
-  tools: [ /* ... */ ],
+  tools: [
+    /* ... */
+  ],
   security: { connectionGuard, authenticator, authorizer, rateLimiter, inputSanitizer },
   contextProvider: async (extra) => ({ user: extractUser(extra) }),
 });
@@ -368,10 +375,10 @@ const server = new MCPServer({
 
 Defaults are transport-aware — safe out of the box:
 
-| Transport | connectionGuard | authenticator |
-|---|---|---|
-| `streamable-http` / `sse` | `localOnlyGuard` | `rejectAllAuth` |
-| `stdio` / `in-process` | (skipped — trusted) | `allowAllAuth` |
+| Transport                 | connectionGuard     | authenticator   |
+| ------------------------- | ------------------- | --------------- |
+| `streamable-http` / `sse` | `localOnlyGuard`    | `rejectAllAuth` |
+| `stdio` / `in-process`    | (skipped — trusted) | `allowAllAuth`  |
 
 **This means an HTTP server with no configured security will reject all requests until you provide an authenticator.** This is intentional.
 
@@ -532,7 +539,7 @@ handler: async (input, ctx) => {
   const userId = ctx.request.user?.id;
   const sessionId = ctx.sessionId;
   // ... use userId, sessionId
-}
+};
 ```
 
 ### Dynamic registration
@@ -567,9 +574,9 @@ const server = new MCPServer({
   name: "my-server",
   version: "1.0.0",
   sessions: {
-    idleTtlMs: 30 * 60_000,     // evict after 30 min idle
-    maxSessions: 1000,           // hard cap
-    cleanupIntervalMs: 60_000,   // sweep interval
+    idleTtlMs: 30 * 60_000, // evict after 30 min idle
+    maxSessions: 1000, // hard cap
+    cleanupIntervalMs: 60_000, // sweep interval
   },
 });
 ```
@@ -579,7 +586,9 @@ Idle sweeps happen automatically. Active sessions are extended on every request.
 ### Lifecycle
 
 ```typescript
-const server = new MCPServer({ /* ... */ });
+const server = new MCPServer({
+  /* ... */
+});
 
 // For stdio / in-process — one Transport:
 await server.connect(transport);
@@ -663,11 +672,16 @@ const tools = await client.listTools("github");
 
 // Call with cancellation
 const controller = new AbortController();
-const result = await client.callTool("github", "create_issue", {
-  owner: "agenticklabs",
-  repo: "agentick",
-  title: "feat: something",
-}, { signal: controller.signal });
+const result = await client.callTool(
+  "github",
+  "create_issue",
+  {
+    owner: "agenticklabs",
+    repo: "agentick",
+    title: "feat: something",
+  },
+  { signal: controller.signal },
+);
 
 // Call with progress
 const result = await client.callTool("slow-server", "long_tool", input, {
@@ -689,7 +703,7 @@ client.on("tools:changed", ({ serverName }) => {
 // List
 const resources = await client.listResources("knowify");
 const templates = await client.listResourceTemplates("knowify");
-const allResources = await client.listAllResources();                  // every server
+const allResources = await client.listAllResources(); // every server
 const allTemplates = await client.listAllResourceTemplates();
 
 // Read
@@ -701,10 +715,12 @@ const contents = await client.readResourceByURI("db://schema/projects");
 
 // Invalidate cache manually
 client.invalidateResources("knowify");
-client.invalidateResources();   // all servers
+client.invalidateResources(); // all servers
 
 // Event when server sends resources/list_changed
-client.on("resources:changed", ({ serverName }) => { /* ... */ });
+client.on("resources:changed", ({ serverName }) => {
+  /* ... */
+});
 ```
 
 ### Prompts
@@ -720,19 +736,16 @@ const result = await client.getPrompt("reports", "summarize", {
 // → { description, messages: [...] }
 
 client.invalidatePrompts("reports");
-client.on("prompts:changed", ({ serverName }) => { /* ... */ });
+client.on("prompts:changed", ({ serverName }) => {
+  /* ... */
+});
 ```
 
 ### Completions
 
 ```typescript
 // Prompt argument completion
-const values = await client.completePromptArgument(
-  "reports",
-  "summarize",
-  "document_id",
-  "doc-1",
-);
+const values = await client.completePromptArgument("reports", "summarize", "document_id", "doc-1");
 
 // Resource template variable completion
 const values = await client.completeResourceArgument(
@@ -770,10 +783,7 @@ The `sampling` capability is automatically advertised during initialization when
 
 ```typescript
 const client = new MCPClient({
-  roots: [
-    { uri: "file:///workspace/project", name: "project" },
-    { uri: "file:///tmp/scratch" },
-  ],
+  roots: [{ uri: "file:///workspace/project", name: "project" }, { uri: "file:///tmp/scratch" }],
 });
 
 // Notify servers when roots change
@@ -796,11 +806,21 @@ await client.setLogLevel("some-server", "debug");
 ### Other events
 
 ```typescript
-client.on("connection:state", ({ serverName, state }) => { /* ... */ });
-client.on("tools:changed", ({ serverName }) => { /* ... */ });
-client.on("resources:changed", ({ serverName }) => { /* ... */ });
-client.on("prompts:changed", ({ serverName }) => { /* ... */ });
-client.on("error", (err) => { /* ... */ });
+client.on("connection:state", ({ serverName, state }) => {
+  /* ... */
+});
+client.on("tools:changed", ({ serverName }) => {
+  /* ... */
+});
+client.on("resources:changed", ({ serverName }) => {
+  /* ... */
+});
+client.on("prompts:changed", ({ serverName }) => {
+  /* ... */
+});
+client.on("error", (err) => {
+  /* ... */
+});
 ```
 
 ## MCP Apps (local variant)
@@ -870,8 +890,12 @@ const gateway = createGateway({
           }),
         },
       ],
-      resources: [ /* MCPStaticResource[] */ ],
-      resourceTemplates: [ /* MCPResourceTemplate[] */ ],
+      resources: [
+        /* MCPStaticResource[] */
+      ],
+      resourceTemplates: [
+        /* MCPResourceTemplate[] */
+      ],
       toolFilter: (tool, ctx) => !tool.name.startsWith("admin_") || isAdmin(ctx),
     }),
   ],
@@ -905,12 +929,12 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 ```
 
-| Transport | Server | Client | Use case |
-|---|---|---|---|
-| `in-process` | `InMemoryTransport` | `transport: "in-process"` | Tests, embedded agents |
-| `stdio` | `StdioServerTransport` (from SDK) | `transport: "stdio"` | Claude Desktop, Cursor, local CLI tools |
-| `streamable-http` | `MCPServer.handleHTTPRequest` | `transport: "streamable-http"` | Web clients, cloud agents |
-| `sse` | (legacy SDK transport) | `transport: "sse"` | Legacy MCP clients |
+| Transport         | Server                            | Client                         | Use case                                |
+| ----------------- | --------------------------------- | ------------------------------ | --------------------------------------- |
+| `in-process`      | `InMemoryTransport`               | `transport: "in-process"`      | Tests, embedded agents                  |
+| `stdio`           | `StdioServerTransport` (from SDK) | `transport: "stdio"`           | Claude Desktop, Cursor, local CLI tools |
+| `streamable-http` | `MCPServer.handleHTTPRequest`     | `transport: "streamable-http"` | Web clients, cloud agents               |
+| `sse`             | (legacy SDK transport)            | `transport: "sse"`             | Legacy MCP clients                      |
 
 ## Error handling
 
@@ -924,7 +948,7 @@ import { toolError } from "@agentick/mcp";
 handler: async (input) => {
   if (!input.valid) return toolError("Invalid input");
   // ... happy path
-}
+};
 ```
 
 Security pipeline rejections throw `SecurityError`:

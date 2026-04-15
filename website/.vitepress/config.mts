@@ -23,7 +23,13 @@ const PACKAGE_GROUPS: Array<{ label: string; packages: string[] }> = [
   },
   {
     label: "Server",
-    packages: ["@agentick/gateway", "@agentick/server", "@agentick/express", "@agentick/nestjs", "@agentick/mcp"],
+    packages: [
+      "@agentick/gateway",
+      "@agentick/server",
+      "@agentick/express",
+      "@agentick/nestjs",
+      "@agentick/mcp",
+    ],
   },
   {
     label: "Client",

@@ -210,11 +210,11 @@ describe("handleHTTPRequest — full lifecycle", () => {
     expect(getData.result.messages[0].content.text).toBe("Summarize: AI");
   });
 
-  it("returns 400 for unknown session ID with non-initialize request", async () => {
+  it("returns 404 for unknown session ID with non-initialize request", async () => {
     await startServer({ name: "test", version: "1.0.0" });
 
     const res = await mcpRequest("tools/list", {}, "nonexistent-session-id", 1);
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(404);
   });
 
   it("stale session ID + initialize → creates new session", async () => {
@@ -242,7 +242,7 @@ describe("handleHTTPRequest — full lifecycle", () => {
       }),
     });
 
-    // Should succeed with a new session, not 400
+    // Should succeed with a new session, not 404
     expect(res.status).toBe(200);
     expect(res.headers.get("mcp-session-id")).toBeTruthy();
   });
@@ -944,5 +944,148 @@ describe("handleHTTPRequest — toolFilter", () => {
     const tools = listRes.json().result.tools;
     expect(tools.map((t: any) => t.name)).toEqual(["public"]);
     expect(tools.map((t: any) => t.name)).not.toContain("admin-only");
+  });
+});
+
+// ============================================================================
+// Stale session recovery
+// ============================================================================
+
+describe("handleHTTPRequest — stale session handling", () => {
+  it("returns 404 (not 400) for tool call with stale session ID", async () => {
+    await startServer({
+      name: "test",
+      version: "1.0.0",
+      tools: [
+        {
+          name: "greet",
+          description: "Greets someone",
+          inputSchema: { name: z.string() },
+          handler: async (input) => ({
+            content: [{ type: "text", text: `Hello, ${(input as any).name}!` }],
+          }),
+        },
+      ],
+    });
+
+    // Tool call with a made-up session ID → should be 404
+    const res = await mcpRequest(
+      "tools/call",
+      { name: "greet", arguments: { name: "World" } },
+      "stale-session-id-that-does-not-exist",
+      1,
+    );
+    expect(res.status).toBe(404);
+    const body = res.json();
+    expect(body.error.code).toBe(-32001);
+    expect(body.error.message).toContain("Session not found");
+  });
+
+  it("returns 404 for tools/list with stale session ID", async () => {
+    await startServer({ name: "test", version: "1.0.0" });
+
+    const res = await mcpRequest("tools/list", {}, "dead-session", 1);
+    expect(res.status).toBe(404);
+    expect(res.json().error.message).toContain("Session not found");
+  });
+
+  it("allows re-initialize with a stale session ID", async () => {
+    await startServer({
+      name: "test",
+      version: "1.0.0",
+      tools: [
+        {
+          name: "greet",
+          description: "Greets someone",
+          inputSchema: { name: z.string() },
+          handler: async (input) => ({
+            content: [{ type: "text", text: `Hello, ${(input as any).name}!` }],
+          }),
+        },
+      ],
+    });
+
+    // Initialize normally
+    const sessionId = await initSession();
+    expect(sessionId).toBeTruthy();
+
+    // Simulate server restart: close and recreate (sessions lost)
+    await server!.close();
+    server = new MCPServer({
+      name: "test",
+      version: "1.0.0",
+      security: {
+        authenticator: async () => ({ authenticated: true }),
+      },
+      tools: [
+        {
+          name: "greet",
+          description: "Greets someone",
+          inputSchema: { name: z.string() },
+          handler: async (input) => ({
+            content: [{ type: "text", text: `Hello, ${(input as any).name}!` }],
+          }),
+        },
+      ],
+    });
+
+    // Rewire the HTTP server to the new MCPServer
+    httpServer!.removeAllListeners("request");
+    httpServer!.on("request", async (req, res) => {
+      await server!.handleHTTPRequest(req, res);
+    });
+
+    // Old session ID should get 404
+    const staleRes = await mcpRequest("tools/list", {}, sessionId, 2);
+    expect(staleRes.status).toBe(404);
+
+    // Re-initialize WITH the stale session ID should succeed (creates new session)
+    const reinitRes = await mcpRequest(
+      "initialize",
+      {
+        protocolVersion: "2025-03-26",
+        capabilities: {},
+        clientInfo: { name: "test", version: "1.0.0" },
+      },
+      sessionId, // sending stale session ID
+      3,
+    );
+    expect(reinitRes.status).toBe(200);
+    const newSessionId = reinitRes.sessionId;
+    expect(newSessionId).toBeTruthy();
+    expect(newSessionId).not.toBe(sessionId);
+
+    // New session should work
+    await mcpRequest("notifications/initialized", undefined, newSessionId!, -1);
+    const listRes = await mcpRequest("tools/list", {}, newSessionId!, 4);
+    expect(listRes.status).toBe(200);
+    expect(listRes.json().result.tools).toHaveLength(1);
+  });
+
+  it("returns 404 for GET (SSE) with stale session ID", async () => {
+    await startServer({ name: "test", version: "1.0.0" });
+
+    const res = await fetch(`http://localhost:${port}/mcp`, {
+      method: "GET",
+      headers: {
+        Accept: "text/event-stream",
+        "Mcp-Session-Id": "nonexistent-session",
+      },
+    });
+    expect(res.status).toBe(404);
+    const body = await res.json();
+    expect(body.error.message).toContain("Session not found");
+  });
+
+  it("emits mcp:session:stale event for stale requests", async () => {
+    await startServer({ name: "test", version: "1.0.0" });
+
+    const staleEvents: Array<{ sessionId: string | null; method?: string }> = [];
+    server!.on("mcp:session:stale", (e) => staleEvents.push(e));
+
+    await mcpRequest("tools/list", {}, "ghost-session", 1);
+
+    expect(staleEvents).toHaveLength(1);
+    expect(staleEvents[0].sessionId).toBe("ghost-session");
   });
 });

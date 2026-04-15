@@ -269,9 +269,14 @@ describe("MCP Server Plugin — per-session toolFilter", () => {
     await gateway.use(plugin);
 
     // Non-initialize request with unknown session ID → 400
-    const { req, res, body } = createMockHTTPPair("/mcp-session", "POST", {
-      "mcp-session-id": "nonexistent-session-id",
-    }, JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }));
+    const { req, res, body } = createMockHTTPPair(
+      "/mcp-session",
+      "POST",
+      {
+        "mcp-session-id": "nonexistent-session-id",
+      },
+      JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
+    );
     await gateway.handleRequest(req, res);
 
     expect(res.statusCode).toBe(400);
@@ -289,9 +294,14 @@ describe("MCP Server Plugin — per-session toolFilter", () => {
     await gateway.use(plugin);
 
     // Request WITH unknown session ID — routes to handleHTTPRequest which rejects
-    const { req, res } = createMockHTTPPair("/mcp-nofilter", "POST", {
-      "mcp-session-id": "some-session-id",
-    }, JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }));
+    const { req, res } = createMockHTTPPair(
+      "/mcp-nofilter",
+      "POST",
+      {
+        "mcp-session-id": "some-session-id",
+      },
+      JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
+    );
     await gateway.handleRequest(req, res);
 
     // toolFilter not called — the request tried to route to a non-existent session
@@ -503,9 +513,7 @@ describe("MCP Server Plugin — static mode multi-client", () => {
     await startGatewayServer(
       mcpServerPlugin({
         path: "/mcp",
-        resources: [
-          { name: "test", uri: "test://doc", read: () => ({ text: "hello" }) },
-        ],
+        resources: [{ name: "test", uri: "test://doc", read: () => ({ text: "hello" }) }],
       }),
     );
 
@@ -731,10 +739,7 @@ describe("MCP Server Plugin — OAuth metadata", () => {
     });
     await gateway.use(plugin);
 
-    const { req, res, body } = createMockHTTPPair(
-      "/.well-known/oauth-authorization-server",
-      "GET",
-    );
+    const { req, res, body } = createMockHTTPPair("/.well-known/oauth-authorization-server", "GET");
     await gateway.handleRequest(req, res);
 
     expect(res.statusCode).toBe(200);
@@ -750,10 +755,7 @@ describe("MCP Server Plugin — OAuth metadata", () => {
     });
     await gateway.use(plugin);
 
-    const { req, res } = createMockHTTPPair(
-      "/.well-known/oauth-authorization-server",
-      "GET",
-    );
+    const { req, res } = createMockHTTPPair("/.well-known/oauth-authorization-server", "GET");
     await gateway.handleRequest(req, res);
     expect(res.statusCode).toBe(200);
   });
@@ -772,10 +774,7 @@ describe("MCP Server Plugin — OAuth metadata", () => {
     await gateway.use(plugin);
 
     // .well-known is at the domain root, not under the prefix
-    const { req, res } = createMockHTTPPair(
-      "/.well-known/oauth-authorization-server",
-      "GET",
-    );
+    const { req, res } = createMockHTTPPair("/.well-known/oauth-authorization-server", "GET");
     await gateway.handleRequest(req, res);
     expect(res.statusCode).toBe(200);
   });
@@ -797,10 +796,7 @@ describe("MCP Server Plugin — OAuth metadata", () => {
     });
     await gateway.use(plugin);
 
-    const { req, res, body } = createMockHTTPPair(
-      "/.well-known/oauth-authorization-server",
-      "GET",
-    );
+    const { req, res, body } = createMockHTTPPair("/.well-known/oauth-authorization-server", "GET");
     await gateway.handleRequest(req, res);
 
     expect(res.statusCode).toBe(200);
@@ -826,11 +822,17 @@ describe("MCP Server Plugin — OAuth metadata", () => {
     await gateway.use(plugin);
 
     // First request — fetches
-    const { req: r1, res: s1 } = createMockHTTPPair("/.well-known/oauth-authorization-server", "GET");
+    const { req: r1, res: s1 } = createMockHTTPPair(
+      "/.well-known/oauth-authorization-server",
+      "GET",
+    );
     await gateway.handleRequest(r1, s1);
 
     // Second request — cached
-    const { req: r2, res: s2 } = createMockHTTPPair("/.well-known/oauth-authorization-server", "GET");
+    const { req: r2, res: s2 } = createMockHTTPPair(
+      "/.well-known/oauth-authorization-server",
+      "GET",
+    );
     await gateway.handleRequest(r2, s2);
 
     expect(mockFetch).toHaveBeenCalledOnce();
@@ -960,9 +962,7 @@ describe("MCP Server Plugin — standalone tools", () => {
           handler: async () => ({ content: [{ type: "text" as const, text: "result" }] }),
         },
       ],
-      resources: [
-        { name: "schema", uri: "db://schema", read: () => ({ text: "schema" }) },
-      ],
+      resources: [{ name: "schema", uri: "db://schema", read: () => ({ text: "schema" }) }],
     });
     await gateway.use(plugin);
 
@@ -993,10 +993,19 @@ describe("MCP Server Plugin — standalone tools", () => {
     // Initialize
     const initRes = await fetch(`http://localhost:${port}/mcp`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", Accept: "application/json, text/event-stream" },
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json, text/event-stream",
+      },
       body: JSON.stringify({
-        jsonrpc: "2.0", id: 1, method: "initialize",
-        params: { protocolVersion: "2025-03-26", capabilities: {}, clientInfo: { name: "t", version: "1" } },
+        jsonrpc: "2.0",
+        id: 1,
+        method: "initialize",
+        params: {
+          protocolVersion: "2025-03-26",
+          capabilities: {},
+          clientInfo: { name: "t", version: "1" },
+        },
       }),
     });
     const sessionId = initRes.headers.get("mcp-session-id");
@@ -1034,7 +1043,9 @@ describe("MCP Server Plugin — standalone tools", () => {
         "Mcp-Session-Id": sessionId!,
       },
       body: JSON.stringify({
-        jsonrpc: "2.0", id: 2, method: "tools/call",
+        jsonrpc: "2.0",
+        id: 2,
+        method: "tools/call",
         params: { name: "test-tool", arguments: { input: "hello" } },
       }),
     });
@@ -1060,7 +1071,9 @@ describe("MCP Server Plugin — standalone tools", () => {
                 const { Context } = await import("@agentick/kernel");
                 const ctx = Context.tryGet();
                 capturedUser = ctx?.user ?? null;
-              } catch { /* no context in standalone */ }
+              } catch {
+                /* no context in standalone */
+              }
               return { content: [{ type: "text" as const, text: "ok" }] };
             },
           },
@@ -1071,10 +1084,19 @@ describe("MCP Server Plugin — standalone tools", () => {
     // Initialize + call
     const initRes = await fetch(`http://localhost:${port}/mcp`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", Accept: "application/json, text/event-stream" },
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json, text/event-stream",
+      },
       body: JSON.stringify({
-        jsonrpc: "2.0", id: 1, method: "initialize",
-        params: { protocolVersion: "2025-03-26", capabilities: {}, clientInfo: { name: "t", version: "1" } },
+        jsonrpc: "2.0",
+        id: 1,
+        method: "initialize",
+        params: {
+          protocolVersion: "2025-03-26",
+          capabilities: {},
+          clientInfo: { name: "t", version: "1" },
+        },
       }),
     });
     const sessionId = initRes.headers.get("mcp-session-id");
@@ -1093,7 +1115,9 @@ describe("MCP Server Plugin — standalone tools", () => {
         "Mcp-Session-Id": sessionId!,
       },
       body: JSON.stringify({
-        jsonrpc: "2.0", id: 2, method: "tools/call",
+        jsonrpc: "2.0",
+        id: 2,
+        method: "tools/call",
         params: { name: "whoami", arguments: {} },
       }),
     });
@@ -1122,12 +1146,18 @@ describe("MCP Server Plugin — resources e2e", () => {
     await gateway.use(plugin);
 
     server = http.createServer(async (req, res) => {
-      try { await gateway.handleRequest(req, res); }
-      catch { if (!res.headersSent) res.writeHead(500).end(); }
+      try {
+        await gateway.handleRequest(req, res);
+      } catch {
+        if (!res.headersSent) res.writeHead(500).end();
+      }
     });
 
     await new Promise<void>((resolve) => {
-      server.listen(0, () => { port = (server.address() as any).port; resolve(); });
+      server.listen(0, () => {
+        port = (server.address() as any).port;
+        resolve();
+      });
     });
   }
 
@@ -1149,10 +1179,19 @@ describe("MCP Server Plugin — resources e2e", () => {
   async function initSession(): Promise<string> {
     const res = await fetch(`http://localhost:${port}/mcp`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", Accept: "application/json, text/event-stream" },
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json, text/event-stream",
+      },
       body: JSON.stringify({
-        jsonrpc: "2.0", id: 1, method: "initialize",
-        params: { protocolVersion: "2025-03-26", capabilities: {}, clientInfo: { name: "t", version: "1" } },
+        jsonrpc: "2.0",
+        id: 1,
+        method: "initialize",
+        params: {
+          protocolVersion: "2025-03-26",
+          capabilities: {},
+          clientInfo: { name: "t", version: "1" },
+        },
       }),
     });
     const sessionId = res.headers.get("mcp-session-id")!;
@@ -1165,13 +1204,19 @@ describe("MCP Server Plugin — resources e2e", () => {
   }
 
   it("lists and reads static resources via MCP protocol", async () => {
-    await startGatewayServer(mcpServerPlugin({
-      path: "/mcp",
-      resources: [
-        { name: "schema", uri: "db://schema", description: "DB schema",
-          read: () => ({ text: "CREATE TABLE users (id INT)" }) },
-      ],
-    }));
+    await startGatewayServer(
+      mcpServerPlugin({
+        path: "/mcp",
+        resources: [
+          {
+            name: "schema",
+            uri: "db://schema",
+            description: "DB schema",
+            read: () => ({ text: "CREATE TABLE users (id INT)" }),
+          },
+        ],
+      }),
+    );
 
     const sessionId = await initSession();
 
@@ -1184,18 +1229,22 @@ describe("MCP Server Plugin — resources e2e", () => {
   });
 
   it("lists and reads template resources via MCP protocol", async () => {
-    await startGatewayServer(mcpServerPlugin({
-      path: "/mcp",
-      resourceTemplates: [{
-        name: "project",
-        uriTemplate: "projects://{id}",
-        list: () => [
-          { uri: "projects://1", title: "Alpha" },
-          { uri: "projects://2", title: "Beta" },
+    await startGatewayServer(
+      mcpServerPlugin({
+        path: "/mcp",
+        resourceTemplates: [
+          {
+            name: "project",
+            uriTemplate: "projects://{id}",
+            list: () => [
+              { uri: "projects://1", title: "Alpha" },
+              { uri: "projects://2", title: "Beta" },
+            ],
+            read: (vars) => ({ text: `Project ${vars.id}` }),
+          },
         ],
-        read: (vars) => ({ text: `Project ${vars.id}` }),
-      }],
-    }));
+      }),
+    );
 
     const sessionId = await initSession();
 

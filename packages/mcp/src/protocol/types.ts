@@ -315,6 +315,8 @@ export interface MCPServerEvents {
   "mcp:resource:read": { sessionId: string; uri: string };
   "mcp:resource:list": { sessionId: string };
 
+  "mcp:session:stale": { sessionId: string | null; method?: string };
+
   "mcp:security:connection-rejected": { origin?: string; transport: string; reason: string };
   "mcp:security:auth-failed": { sessionId?: string; reason: string };
   "mcp:security:authz-denied": { sessionId: string; tool?: string; reason: string };

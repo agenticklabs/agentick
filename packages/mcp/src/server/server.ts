@@ -153,23 +153,29 @@ export class MCPServer {
         return;
       }
 
-      // Stale/unknown session ID — check if it's an initialize request.
-      // If body is pre-parsed (Express), check directly. Otherwise, let
-      // the new transport handle it — it will accept initialize and reject others.
-      const body = await this.parsedBody(req);
-      if (body && !this.isInitializeRequest(body)) {
-        res.writeHead(400, { "Content-Type": "application/json" });
+      // Stale/unknown session ID — the server restarted or the session expired.
+      // GET requests (SSE streams) with stale sessions always get 404.
+      // POST requests: check if it's an initialize — if so, create new session.
+      // Otherwise, 404 per MCP spec so the client re-initializes.
+      const body = req.method === "GET" ? null : await this.parsedBody(req);
+      const isInit = body != null && this.isInitializeRequest(body);
+
+      if (!isInit) {
+        this.emit("mcp:session:stale", { sessionId, method: req.method });
+        res.writeHead(404, { "Content-Type": "application/json" });
         res.end(
           JSON.stringify({
             jsonrpc: "2.0",
-            error: { code: -32000, message: "Bad Request: No valid session ID provided" },
-            id: null,
+            error: {
+              code: -32001,
+              message: "Session not found. The server may have restarted. Please re-initialize.",
+            },
+            id: (body as any)?.id ?? null,
           }),
         );
         return;
       }
-      // Fall through to create new session (either initialize request, or
-      // body not pre-parsed — let the transport validate)
+      // Fall through to create new session (initialize request)
     }
 
     // ── Connection guard ──
@@ -676,8 +682,27 @@ export class MCPServer {
   }
 
   private async parsedBody(req: IncomingMessage): Promise<any> {
+    // Pre-parsed by Express/middleware
     if ((req as any).body !== undefined) return (req as any).body;
-    return undefined;
+    // Raw HTTP — read and parse the stream (cache on req for re-reads)
+    return new Promise((resolve) => {
+      const chunks: Buffer[] = [];
+      req.on("data", (chunk: Buffer) => chunks.push(chunk));
+      req.on("end", () => {
+        if (chunks.length === 0) {
+          resolve(undefined);
+          return;
+        }
+        try {
+          const parsed = JSON.parse(Buffer.concat(chunks).toString());
+          (req as any).body = parsed; // cache for subsequent reads
+          resolve(parsed);
+        } catch {
+          resolve(undefined);
+        }
+      });
+      req.on("error", () => resolve(undefined));
+    });
   }
 
   private emitSecurityEvent(err: SecurityError, sessionId: string, toolName?: string): void {

@@ -427,7 +427,9 @@ gateway.use(
         },
       },
     ],
-    resources: [/* ... */],
+    resources: [
+      /* ... */
+    ],
   }),
 );
 ```

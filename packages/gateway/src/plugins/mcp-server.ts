@@ -90,9 +90,7 @@ export interface MCPServerPluginConfig {
    */
   instructions?: string;
   apps?: MCPAppDefinition[];
-  oauthMetadata?:
-    | { issuer: string; cacheTtl?: number }
-    | { metadata: Record<string, unknown> };
+  oauthMetadata?: { issuer: string; cacheTtl?: number } | { metadata: Record<string, unknown> };
 }
 
 // ============================================================================
@@ -136,46 +134,50 @@ export function mcpServerPlugin(config: MCPServerPluginConfig): GatewayPlugin {
       if (config.oauthMetadata) {
         let metadataCache: { data: Record<string, unknown>; expires: number } | null = null;
 
-        ctx.registerRoute("/.well-known/oauth-authorization-server", async (_req, res) => {
-          const oauthConfig = config.oauthMetadata!;
-          let metadata: Record<string, unknown>;
+        ctx.registerRoute(
+          "/.well-known/oauth-authorization-server",
+          async (_req, res) => {
+            const oauthConfig = config.oauthMetadata!;
+            let metadata: Record<string, unknown>;
 
-          if ("metadata" in oauthConfig) {
-            metadata = oauthConfig.metadata;
-          } else {
-            const now = Date.now();
-            const ttl = (oauthConfig.cacheTtl ?? 300) * 1000;
-            if (metadataCache && metadataCache.expires > now) {
-              metadata = metadataCache.data;
+            if ("metadata" in oauthConfig) {
+              metadata = oauthConfig.metadata;
             } else {
-              try {
-                const wellKnownUrl = `${oauthConfig.issuer.replace(/\/$/, "")}/.well-known/oauth-authorization-server`;
-                const response = await fetch(wellKnownUrl, {
-                  headers: { Accept: "application/json" },
-                  signal: AbortSignal.timeout(5000),
-                });
-                if (!response.ok) {
+              const now = Date.now();
+              const ttl = (oauthConfig.cacheTtl ?? 300) * 1000;
+              if (metadataCache && metadataCache.expires > now) {
+                metadata = metadataCache.data;
+              } else {
+                try {
+                  const wellKnownUrl = `${oauthConfig.issuer.replace(/\/$/, "")}/.well-known/oauth-authorization-server`;
+                  const response = await fetch(wellKnownUrl, {
+                    headers: { Accept: "application/json" },
+                    signal: AbortSignal.timeout(5000),
+                  });
+                  if (!response.ok) {
+                    res.writeHead(502, { "Content-Type": "application/json" });
+                    res.end(JSON.stringify({ error: "Failed to fetch OAuth metadata" }));
+                    return;
+                  }
+                  metadata = (await response.json()) as Record<string, unknown>;
+                  metadataCache = { data: metadata, expires: now + ttl };
+                } catch {
                   res.writeHead(502, { "Content-Type": "application/json" });
                   res.end(JSON.stringify({ error: "Failed to fetch OAuth metadata" }));
                   return;
                 }
-                metadata = await response.json() as Record<string, unknown>;
-                metadataCache = { data: metadata, expires: now + ttl };
-              } catch {
-                res.writeHead(502, { "Content-Type": "application/json" });
-                res.end(JSON.stringify({ error: "Failed to fetch OAuth metadata" }));
-                return;
               }
             }
-          }
 
-          res.writeHead(200, {
-            "Content-Type": "application/json",
-            "Cache-Control": "public, max-age=300",
-            "Access-Control-Allow-Origin": "*",
-          });
-          res.end(JSON.stringify(metadata));
-        }, { auth: false, absolute: true });
+            res.writeHead(200, {
+              "Content-Type": "application/json",
+              "Cache-Control": "public, max-age=300",
+              "Access-Control-Allow-Origin": "*",
+            });
+            res.end(JSON.stringify(metadata));
+          },
+          { auth: false, absolute: true },
+        );
       }
 
       // ── Tool discovery ────────────────────────────────────────────────
@@ -262,11 +264,13 @@ export function mcpServerPlugin(config: MCPServerPluginConfig): GatewayPlugin {
           read: async () => {
             const content = await res.read();
             return {
-              contents: [{
-                uri: res.uri,
-                mimeType: res.mimeType ?? "text/markdown",
-                text: content.text,
-              }],
+              contents: [
+                {
+                  uri: res.uri,
+                  mimeType: res.mimeType ?? "text/markdown",
+                  text: content.text,
+                },
+              ],
             };
           },
         })),
@@ -290,11 +294,13 @@ export function mcpServerPlugin(config: MCPServerPluginConfig): GatewayPlugin {
               (_, key) => variables[key] ?? "",
             );
             return {
-              contents: [{
-                uri: resolvedUri,
-                mimeType: tmpl.mimeType ?? "text/markdown",
-                text: content.text,
-              }],
+              contents: [
+                {
+                  uri: resolvedUri,
+                  mimeType: tmpl.mimeType ?? "text/markdown",
+                  text: content.text,
+                },
+              ],
             };
           },
           complete: tmpl.complete,

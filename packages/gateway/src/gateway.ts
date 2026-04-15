@@ -2469,7 +2469,9 @@ export class Gateway extends EventEmitter {
         user,
         metadata: { gatewayId: this.config.id },
       });
-      await Context.run(ctx, async () => { await route.handler(req, res); });
+      await Context.run(ctx, async () => {
+        await route.handler(req, res);
+      });
     }
     return true;
   }
