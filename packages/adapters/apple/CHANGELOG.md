@@ -279,7 +279,6 @@
 ### Minor Changes
 
 - 8e568d1: Unified EmbedInput API and embed support on adapters
-
   - **EmbedInput**: New single-object input shape (`{ input, model?, dimensions?, taskType? }`) mirroring ModelInput style. Replaces previous `(texts, options)` positional params.
   - **embed as Procedure**: `EngineModel.embed` is now a Procedure with middleware, ALS context, and telemetry support.
   - **OpenAI adapter**: Added `embeddingModel` config option and `embed()` support via OpenAI embeddings API.

@@ -65,7 +65,6 @@
 - f32db13: fix(google): strip `propertyNames` from tool schemas sent to Gemini
 
   Gemini rejects `propertyNames` in function declaration schemas with a 400 error. Add it to the unsupported keyword list in `sanitizeSchemaForGemini`.
-
   - @agentick/shared@0.14.27
   - @agentick/core@0.14.27
 
@@ -76,7 +75,6 @@
 - 3a15780: fix(google): sanitize tool schemas for Gemini compatibility
 
   Gemini supports a strict subset of JSON Schema in function declarations. `sanitizeSchemaForGemini` now recursively strips unsupported features (`$ref`, `additionalItems`, tuple-style `items`, `$defs`/`$definitions`) and simplifies `anyOf`/`oneOf` with `$ref` entries before passing tool definitions to the API.
-
   - @agentick/shared@0.14.26
   - @agentick/core@0.14.26
 
@@ -290,7 +288,6 @@
 ### Minor Changes
 
 - 8e568d1: Unified EmbedInput API and embed support on adapters
-
   - **EmbedInput**: New single-object input shape (`{ input, model?, dimensions?, taskType? }`) mirroring ModelInput style. Replaces previous `(texts, options)` positional params.
   - **embed as Procedure**: `EngineModel.embed` is now a Procedure with middleware, ALS context, and telemetry support.
   - **OpenAI adapter**: Added `embeddingModel` config option and `embed()` support via OpenAI embeddings API.

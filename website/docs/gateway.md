@@ -181,9 +181,15 @@ import { MCPServer } from "@agentick/mcp/server";
 const server = new MCPServer({
   name: "my-server",
   version: "1.0.0",
-  tools: [/* ... */],
-  resources: [/* ... */],
-  apps: [/* MCP Apps (ui:// resources) */],
+  tools: [
+    /* ... */
+  ],
+  resources: [
+    /* ... */
+  ],
+  apps: [
+    /* MCP Apps (ui:// resources) */
+  ],
   security: { authenticator: async () => ({ authenticated: true }) },
 });
 

@@ -58,7 +58,6 @@
   All stages are pure, test-covered (58 new tests), and documented in the package README with concrete usage examples. Tests exercise happy paths, rejection paths, edge cases, and composition patterns. Total package tests: 158 → 219.
 
   No runtime behavior changes to existing code paths — these are additive factory functions that consumers opt into. The existing safe defaults (`localOnlyGuard`, `rejectAllAuth`, `allowAllAuth`, etc.) remain unchanged.
-
   - @agentick/kernel@0.14.30
   - @agentick/shared@0.14.30
 
@@ -71,7 +70,6 @@
   **New package: `@agentick/mcp`**
 
   A standalone MCP (Model Context Protocol) server and client library that depends only on `@agentick/kernel` and `@agentick/shared`. Drop it into any project — no core, no gateway, no framework coupling.
-
   - `MCPServer` — per-session SDK `Server` pool, shared registry, dynamic tool/resource/prompt registration with notification fan-out (`tools/list_changed`, `resources/list_changed`), structured error sanitization, request-level security pipeline
   - `MCPClient` — multi-server connection pool, tool/resource/prompt caching, automatic cache invalidation on notifications, progress callbacks, sampling and roots support, logging, completions, cancellation
   - Security pipeline — `ConnectionGuard → contextProvider → Authenticator → Authorizer → RateLimiter → InputSanitizer`, fully pluggable with safe defaults
@@ -91,7 +89,6 @@
   `@modelcontextprotocol/sdk` bumped `^1.26.0 → ^1.29.0` in `@agentick/core` and `@agentick/gateway`. Required by `@modelcontextprotocol/ext-apps@1.5.0`, which `@agentick/mcp` uses for the MCP Apps bridge.
 
   **Deferred**
-
   - `createMCPAppRelay` — server-side AppBridge variant for bridging an iframe over a remote chat channel. Required for cloud-agent + browser-UI topology. Blocked on agentick's bidirectional channel architecture resolving (see `docs/channels-current-state.md`). The local `createMCPApp` variant ships today and covers in-process and desktop-local use cases.
   - `MCPAuthProvider` — pluggable OAuth 2.1 / DCR / token refresh. Phase 5 work item; not architecturally blocked.
   - @agentick/kernel@0.14.29
