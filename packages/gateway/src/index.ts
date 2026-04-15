@@ -135,5 +135,6 @@ export {
   type ToolEntry as McpToolEntry,
   type MCPStandaloneTool,
 } from "./plugins/mcp-server.js";
+export type { MCPAppDefinition } from "@agentick/mcp";
 export { openaiCompatPlugin, type OpenAICompatPluginConfig } from "./plugins/openai-compat.js";
 export { loggingPlugin, loggingMiddleware, type LoggingPluginConfig } from "./plugins/logging.js";

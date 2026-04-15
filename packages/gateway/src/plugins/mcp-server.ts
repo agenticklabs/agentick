@@ -20,6 +20,7 @@ import {
   type MCPServerOptions,
   type MCPToolDefinition,
   type MCPRequestContext,
+  type MCPAppDefinition,
 } from "@agentick/mcp";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 
@@ -88,6 +89,7 @@ export interface MCPServerPluginConfig {
    * and resources.
    */
   instructions?: string;
+  apps?: MCPAppDefinition[];
   oauthMetadata?:
     | { issuer: string; cacheTtl?: number }
     | { metadata: Record<string, unknown> };
@@ -251,6 +253,7 @@ export function mcpServerPlugin(config: MCPServerPluginConfig): GatewayPlugin {
         ...(config.instructions && { instructions: config.instructions }),
         tools: mcpTools,
         toolFilter: toolFilterFn,
+        apps: config.apps,
         resources: config.resources?.map((res) => ({
           name: res.name,
           uri: res.uri,
@@ -298,6 +301,7 @@ export function mcpServerPlugin(config: MCPServerPluginConfig): GatewayPlugin {
         })),
         // Gateway handles auth — MCP server trusts all requests
         security: {
+          connectionGuard: async () => true,
           authenticator: async () => ({ authenticated: true }),
         },
       });
