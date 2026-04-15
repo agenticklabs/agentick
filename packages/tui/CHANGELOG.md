@@ -1,5 +1,14 @@
 # @agentick/tui
 
+## 0.14.34
+
+### Patch Changes
+
+- @agentick/core@0.14.34
+- @agentick/shared@0.14.34
+- @agentick/client@0.14.34
+- @agentick/react@0.14.34
+
 ## 0.14.33
 
 ### Patch Changes
