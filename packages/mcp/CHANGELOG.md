@@ -1,5 +1,13 @@
 # @agentick/mcp
 
+## 0.14.34
+
+### Patch Changes
+
+- 89d704c: spec compliance: stale session id
+  - @agentick/kernel@0.14.34
+  - @agentick/shared@0.14.34
+
 ## 0.14.33
 
 ### Patch Changes
