@@ -74,7 +74,7 @@ export interface EngineContextMetrics extends ContextMetrics {
  * Note: We cannot override executionHandle (it's EventEmitter in Kernel),
  * but in Engine code we know it's always ExecutionHandleImpl and use type guards/assertions.
  */
-declare module "@agentick/core" {
+declare module "@agentick/kernel" {
   interface KernelContext {
     // Note: executionType, executionId, and parentExecutionId are now first-class
     // fields in KernelContext (Phase 3). We only augment with Engine-specific fields.
