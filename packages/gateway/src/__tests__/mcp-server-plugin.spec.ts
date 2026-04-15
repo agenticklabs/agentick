@@ -161,6 +161,89 @@ describe("MCP Server Plugin", () => {
 });
 
 // ============================================================================
+// Pre-built server instance
+// ============================================================================
+
+describe("MCP Server Plugin — pre-built server", () => {
+  let gateway: Gateway;
+
+  afterEach(async () => {
+    if (gateway) {
+      await gateway.stop().catch(() => {});
+    }
+  });
+
+  it("uses provided server instance instead of constructing one", async () => {
+    // Import MCPServer directly to create a pre-built instance
+    const { MCPServer } = await import("@agentick/mcp/server");
+
+    const toolHandler = vi.fn(async () => ({
+      content: [{ type: "text" as const, text: "hello from pre-built" }],
+    }));
+
+    const server = new MCPServer({
+      name: "pre-built-test",
+      version: "1.0.0",
+      tools: [
+        {
+          name: "test_tool",
+          description: "A tool from the pre-built server",
+          inputSchema: z.object({ msg: z.string() }),
+          handler: toolHandler,
+        },
+      ],
+      security: {
+        authenticator: async () => ({ authenticated: true }),
+      },
+    });
+
+    gateway = createTestGateway();
+    const plugin = mcpServerPlugin({
+      server,
+      path: "/pre-built-mcp",
+    });
+    await gateway.use(plugin);
+
+    // Route should be registered
+    const { req, res } = createInitRequest("/pre-built-mcp");
+    await gateway.handleRequest(req, res);
+    expect(res.statusCode).not.toBe(404);
+  });
+
+  it("cleans up pre-built server route on destroy", async () => {
+    const { MCPServer } = await import("@agentick/mcp/server");
+
+    const server = new MCPServer({
+      name: "cleanup-test",
+      version: "1.0.0",
+      security: {
+        authenticator: async () => ({ authenticated: true }),
+      },
+    });
+
+    gateway = createTestGateway();
+    const plugin = mcpServerPlugin({
+      server,
+      path: "/pre-built-cleanup",
+    });
+    await gateway.use(plugin);
+
+    // Route exists
+    const { req: r1, res: s1 } = createInitRequest("/pre-built-cleanup");
+    await gateway.handleRequest(r1, s1);
+    expect(s1.statusCode).not.toBe(404);
+
+    // Remove plugin
+    await gateway.remove("mcp-server");
+
+    // Route gone
+    const { req: r2, res: s2 } = createInitRequest("/pre-built-cleanup");
+    await gateway.handleRequest(r2, s2);
+    expect(s2.statusCode).toBe(404);
+  });
+});
+
+// ============================================================================
 // filterTools unit tests
 // ============================================================================
 

@@ -68,6 +68,15 @@ export interface MCPResourceTemplate {
 export interface MCPServerPluginConfig {
   id?: string;
   path?: string;
+  /**
+   * Pre-built MCPServer instance. When provided, the plugin uses this server
+   * directly instead of constructing one from tools/resources/apps config.
+   * The server's security pipeline, tools, resources, and apps are all owned
+   * by the caller — the plugin just bridges it to HTTP.
+   *
+   * Mutually exclusive with tools/resources/resourceTemplates/apps/instructions.
+   */
+  server?: MCPServer;
   serverName?: string;
   serverVersion?: string;
   sessionId?: string;
@@ -114,6 +123,61 @@ export function filterTools(
 }
 
 // ============================================================================
+// OAuth metadata route (shared by both server-provided and constructed paths)
+// ============================================================================
+
+function registerOAuthRoute(
+  ctx: PluginContext,
+  oauthConfig: NonNullable<MCPServerPluginConfig["oauthMetadata"]>,
+): void {
+  let metadataCache: { data: Record<string, unknown>; expires: number } | null = null;
+
+  ctx.registerRoute(
+    "/.well-known/oauth-authorization-server",
+    async (_req, res) => {
+      let metadata: Record<string, unknown>;
+
+      if ("metadata" in oauthConfig) {
+        metadata = oauthConfig.metadata;
+      } else {
+        const now = Date.now();
+        const ttl = (oauthConfig.cacheTtl ?? 300) * 1000;
+        if (metadataCache && metadataCache.expires > now) {
+          metadata = metadataCache.data;
+        } else {
+          try {
+            const wellKnownUrl = `${oauthConfig.issuer.replace(/\/$/, "")}/.well-known/oauth-authorization-server`;
+            const response = await fetch(wellKnownUrl, {
+              headers: { Accept: "application/json" },
+              signal: AbortSignal.timeout(5000),
+            });
+            if (!response.ok) {
+              res.writeHead(502, { "Content-Type": "application/json" });
+              res.end(JSON.stringify({ error: "Failed to fetch OAuth metadata" }));
+              return;
+            }
+            metadata = (await response.json()) as Record<string, unknown>;
+            metadataCache = { data: metadata, expires: now + ttl };
+          } catch {
+            res.writeHead(502, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ error: "Failed to fetch OAuth metadata" }));
+            return;
+          }
+        }
+      }
+
+      res.writeHead(200, {
+        "Content-Type": "application/json",
+        "Cache-Control": "public, max-age=300",
+        "Access-Control-Allow-Origin": "*",
+      });
+      res.end(JSON.stringify(metadata));
+    },
+    { auth: false, absolute: true },
+  );
+}
+
+// ============================================================================
 // Plugin
 // ============================================================================
 
@@ -130,54 +194,18 @@ export function mcpServerPlugin(config: MCPServerPluginConfig): GatewayPlugin {
     async initialize(pluginCtx) {
       ctx = pluginCtx;
 
+      // ── Pre-built server — skip all construction, just register the route ──
+      if (config.server) {
+        mcpServer = config.server;
+        ctx.registerRoute(routePath, async (req, res) => {
+          await mcpServer.handleHTTPRequest(req, res);
+        });
+        return;
+      }
+
       // ── OAuth metadata ────────────────────────────────────────────────
       if (config.oauthMetadata) {
-        let metadataCache: { data: Record<string, unknown>; expires: number } | null = null;
-
-        ctx.registerRoute(
-          "/.well-known/oauth-authorization-server",
-          async (_req, res) => {
-            const oauthConfig = config.oauthMetadata!;
-            let metadata: Record<string, unknown>;
-
-            if ("metadata" in oauthConfig) {
-              metadata = oauthConfig.metadata;
-            } else {
-              const now = Date.now();
-              const ttl = (oauthConfig.cacheTtl ?? 300) * 1000;
-              if (metadataCache && metadataCache.expires > now) {
-                metadata = metadataCache.data;
-              } else {
-                try {
-                  const wellKnownUrl = `${oauthConfig.issuer.replace(/\/$/, "")}/.well-known/oauth-authorization-server`;
-                  const response = await fetch(wellKnownUrl, {
-                    headers: { Accept: "application/json" },
-                    signal: AbortSignal.timeout(5000),
-                  });
-                  if (!response.ok) {
-                    res.writeHead(502, { "Content-Type": "application/json" });
-                    res.end(JSON.stringify({ error: "Failed to fetch OAuth metadata" }));
-                    return;
-                  }
-                  metadata = (await response.json()) as Record<string, unknown>;
-                  metadataCache = { data: metadata, expires: now + ttl };
-                } catch {
-                  res.writeHead(502, { "Content-Type": "application/json" });
-                  res.end(JSON.stringify({ error: "Failed to fetch OAuth metadata" }));
-                  return;
-                }
-              }
-            }
-
-            res.writeHead(200, {
-              "Content-Type": "application/json",
-              "Cache-Control": "public, max-age=300",
-              "Access-Control-Allow-Origin": "*",
-            });
-            res.end(JSON.stringify(metadata));
-          },
-          { auth: false, absolute: true },
-        );
+        registerOAuthRoute(ctx, config.oauthMetadata);
       }
 
       // ── Tool discovery ────────────────────────────────────────────────
