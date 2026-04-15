@@ -1,5 +1,16 @@
 # @agentick/gateway
 
+## 0.14.35
+
+### Patch Changes
+
+- 540d308: mcp server plugin accepts an mcp server
+  - @agentick/kernel@0.14.35
+  - @agentick/shared@0.14.35
+  - @agentick/core@0.14.35
+  - @agentick/server@0.14.35
+  - @agentick/mcp@0.14.35
+
 ## 0.14.34
 
 ### Patch Changes

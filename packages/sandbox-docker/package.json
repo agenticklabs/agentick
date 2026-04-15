@@ -1,6 +1,6 @@
 {
   "name": "@agentick/sandbox-docker",
-  "version": "0.14.34",
+  "version": "0.14.35",
   "description": "Docker sandbox provider for Agentick — container-based process isolation via Docker Engine API",
   "keywords": [
     "agent",
