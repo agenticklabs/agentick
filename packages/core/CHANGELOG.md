@@ -1,5 +1,14 @@
 # @agentick/core
 
+## 0.14.38
+
+### Patch Changes
+
+- Updated dependencies [462f1d3]
+  - @agentick/mcp@0.14.38
+  - @agentick/kernel@0.14.38
+  - @agentick/shared@0.14.38
+
 ## 0.14.37
 
 ### Patch Changes
@@ -80,6 +89,7 @@
   **New package: `@agentick/mcp`**
 
   A standalone MCP (Model Context Protocol) server and client library that depends only on `@agentick/kernel` and `@agentick/shared`. Drop it into any project — no core, no gateway, no framework coupling.
+
   - `MCPServer` — per-session SDK `Server` pool, shared registry, dynamic tool/resource/prompt registration with notification fan-out (`tools/list_changed`, `resources/list_changed`), structured error sanitization, request-level security pipeline
   - `MCPClient` — multi-server connection pool, tool/resource/prompt caching, automatic cache invalidation on notifications, progress callbacks, sampling and roots support, logging, completions, cancellation
   - Security pipeline — `ConnectionGuard → contextProvider → Authenticator → Authorizer → RateLimiter → InputSanitizer`, fully pluggable with safe defaults
@@ -99,6 +109,7 @@
   `@modelcontextprotocol/sdk` bumped `^1.26.0 → ^1.29.0` in `@agentick/core` and `@agentick/gateway`. Required by `@modelcontextprotocol/ext-apps@1.5.0`, which `@agentick/mcp` uses for the MCP Apps bridge.
 
   **Deferred**
+
   - `createMCPAppRelay` — server-side AppBridge variant for bridging an iframe over a remote chat channel. Required for cloud-agent + browser-UI topology. Blocked on agentick's bidirectional channel architecture resolving (see `docs/channels-current-state.md`). The local `createMCPApp` variant ships today and covers in-process and desktop-local use cases.
   - `MCPAuthProvider` — pluggable OAuth 2.1 / DCR / token refresh. Phase 5 work item; not architecturally blocked.
 
@@ -135,6 +146,7 @@
 - b602b9b: feat(mcp): unified `<MCP>` component with progressive resource discovery
 
   New `<MCP>` component connects to MCP servers and provides both tools and resources. Tools are registered per-server. Resources are unified under `list_resources` and `read_resource` tools across all servers.
+
   - `MCPClient`: resource discovery (`listResources`, `readResource`, `listResourceTemplates`), URI routing (`readResourceByURI`), cache invalidation
   - `MCPResourceComponent`: terrain map in context + progressive resource tools
   - `MCPComponent` (`<MCP>`): single component for tools + resources with shared client
@@ -308,6 +320,7 @@
 
   Also changed storeResolvePendingData to use Promise.allSettled so one
   failing fetch doesn't block other concurrent fetches from resolving.
+
   - @agentick/kernel@0.14.4
   - @agentick/shared@0.14.4
 
@@ -435,26 +448,32 @@
 ### Minor Changes
 
 - 10023a7: ### Cache metrics & CacheHealth widget
+
   - Surface `cachedInputTokens`, `cacheCreationTokens`, and `cacheHitRatio` through ContextInfo, protocol payloads, streaming events, and devtools
   - New `CacheHealth` status bar widget with configurable color thresholds
 
   ### Shell → Bash rename
+
   - Rename Shell tool to Bash across sandbox packages
   - Fix base executor to use `bash -c` instead of `sh -c` (enables brace expansion)
 
   ### Mode-aware mount consolidation
+
   - `addMount()` now respects mount modes: rw parents consume all children, ro parents only consume ro children
   - Redundant child mounts skipped when parent already covers them
   - Mode promotion (ro → rw) on exact path match
   - Confirmation messages show the directory being mounted, not the individual file
 
   ### useEvents batching fix
+
   - Replace single-event useState with microtask-batched queue to prevent React state batching from dropping events
 
   ### Empty response guard
+
   - Detect empty model responses and replace with corrective event instead of persisting empty assistant messages
 
   ### Gateway logging
+
   - Debug/trace logging for RPC requests, event streaming, and send method flow
   - Logging config (level, file) in gateway FileConfig
 
@@ -479,6 +498,7 @@
 - 619c448: Formalize gateway protocol with full schema discovery
 
   Phase 1 — Protocol foundation:
+
   - Add `protocolVersion` to ConnectMessage/ConnectedMessage handshake
   - Send ConnectedMessage on WebSocket and Unix socket auth completion
   - New built-in methods: `schema`, `tool-catalog`, `tool-confirm`, `tool-dispatch`
@@ -486,6 +506,7 @@
   - Add `getToolDefinitions()` to Session interface (core)
 
   Phase 2 — Complete schema discovery:
+
   - `schema` method returns full protocol contract: every method with JSON Schema
     for params and response, every event type with category, every error code
   - Extract `MODEL_EVENT_TYPES`, `ORCHESTRATION_EVENT_TYPES`, `RESULT_EVENT_TYPES`
