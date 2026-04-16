@@ -1,6 +1,6 @@
 {
   "name": "@agentick/ai-sdk",
-  "version": "0.14.38",
+  "version": "0.14.39",
   "description": "Vercel AI SDK adapter for Agentick",
   "keywords": [
     "adapter",
