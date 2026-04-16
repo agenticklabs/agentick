@@ -1,5 +1,13 @@
 # @agentick/google
 
+## 0.14.36
+
+### Patch Changes
+
+- Updated dependencies [e4aa633]
+  - @agentick/core@0.14.36
+  - @agentick/shared@0.14.36
+
 ## 0.14.35
 
 ### Patch Changes
@@ -65,6 +73,7 @@
 - f32db13: fix(google): strip `propertyNames` from tool schemas sent to Gemini
 
   Gemini rejects `propertyNames` in function declaration schemas with a 400 error. Add it to the unsupported keyword list in `sanitizeSchemaForGemini`.
+
   - @agentick/shared@0.14.27
   - @agentick/core@0.14.27
 
@@ -75,6 +84,7 @@
 - 3a15780: fix(google): sanitize tool schemas for Gemini compatibility
 
   Gemini supports a strict subset of JSON Schema in function declarations. `sanitizeSchemaForGemini` now recursively strips unsupported features (`$ref`, `additionalItems`, tuple-style `items`, `$defs`/`$definitions`) and simplifies `anyOf`/`oneOf` with `$ref` entries before passing tool definitions to the API.
+
   - @agentick/shared@0.14.26
   - @agentick/core@0.14.26
 

@@ -1,5 +1,14 @@
 # agentick
 
+## 0.14.36
+
+### Patch Changes
+
+- Updated dependencies [e4aa633]
+  - @agentick/core@0.14.36
+  - @agentick/agent@0.14.36
+  - @agentick/guardrails@0.14.36
+
 ## 0.14.35
 
 ### Patch Changes
@@ -89,6 +98,7 @@
 - b602b9b: feat(mcp): unified `<MCP>` component with progressive resource discovery
 
   New `<MCP>` component connects to MCP servers and provides both tools and resources. Tools are registered per-server. Resources are unified under `list_resources` and `read_resource` tools across all servers.
+
   - `MCPClient`: resource discovery (`listResources`, `readResource`, `listResourceTemplates`), URI routing (`readResourceByURI`), cache invalidation
   - `MCPResourceComponent`: terrain map in context + progressive resource tools
   - `MCPComponent` (`<MCP>`): single component for tools + resources with shared client
