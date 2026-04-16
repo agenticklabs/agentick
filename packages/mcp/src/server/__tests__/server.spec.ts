@@ -220,6 +220,182 @@ describe("MCPServer", () => {
 
       await cleanup();
     });
+
+    it("emits _meta.ui (csp, permissions, prefersBorder, domain) on resources/list", async () => {
+      const app: MCPAppDefinition = {
+        name: "dashboard",
+        uri: "ui://test/dashboard",
+        content: "<html></html>",
+        csp: {
+          connectDomains: ["https://api.example.com"],
+          resourceDomains: ["https://cdn.example.com"],
+        },
+        permissions: ["camera", "clipboardWrite"],
+        prefersBorder: true,
+        domain: "abc123.claudemcpcontent.com",
+      };
+
+      const { client, cleanup } = await createConnectedPair({ apps: [app] });
+
+      const { resources } = await client.listResources();
+      const entry = resources.find((r) => r.uri === "ui://test/dashboard") as any;
+
+      expect(entry._meta).toBeDefined();
+      expect(entry._meta.ui.csp).toEqual({
+        connectDomains: ["https://api.example.com"],
+        resourceDomains: ["https://cdn.example.com"],
+      });
+      // Permissions: array form on the server API, object form on the wire.
+      expect(entry._meta.ui.permissions).toEqual({
+        camera: {},
+        clipboardWrite: {},
+      });
+      expect(entry._meta.ui.prefersBorder).toBe(true);
+      expect(entry._meta.ui.domain).toBe("abc123.claudemcpcontent.com");
+
+      await cleanup();
+    });
+
+    it("emits _meta.ui (csp, permissions, prefersBorder, domain) on resources/read content", async () => {
+      const app: MCPAppDefinition = {
+        name: "dashboard",
+        uri: "ui://test/dashboard",
+        content: "<html></html>",
+        csp: { resourceDomains: ["https://cdn.example.com"] },
+        permissions: ["microphone"],
+        prefersBorder: false,
+        domain: "dash.example.com",
+      };
+
+      const { client, cleanup } = await createConnectedPair({ apps: [app] });
+      const { contents } = await client.readResource({ uri: "ui://test/dashboard" });
+      const item = contents[0] as any;
+
+      expect(item.mimeType).toBe("text/html;profile=mcp-app");
+      expect(item._meta).toBeDefined();
+      expect(item._meta.ui.csp).toEqual({ resourceDomains: ["https://cdn.example.com"] });
+      expect(item._meta.ui.permissions).toEqual({ microphone: {} });
+      expect(item._meta.ui.prefersBorder).toBe(false);
+      expect(item._meta.ui.domain).toBe("dash.example.com");
+
+      await cleanup();
+    });
+
+    it("omits _meta on resources/list and /read when the app declares no UI metadata", async () => {
+      const app: MCPAppDefinition = {
+        name: "bare",
+        uri: "ui://test/bare",
+        content: "<html></html>",
+      };
+
+      const { client, cleanup } = await createConnectedPair({ apps: [app] });
+
+      const { resources } = await client.listResources();
+      const entry = resources.find((r) => r.uri === "ui://test/bare") as any;
+      expect(entry._meta).toBeUndefined();
+
+      const { contents } = await client.readResource({ uri: "ui://test/bare" });
+      expect((contents[0] as any)._meta).toBeUndefined();
+
+      await cleanup();
+    });
+  });
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // MCP Apps — tool-side metadata
+  // ══════════════════════════════════════════════════════════════════════════
+
+  describe("apps — tool metadata", () => {
+    it('emits both _meta.ui.resourceUri and legacy _meta["ui/resourceUri"] on tools/list', async () => {
+      const tool = createTestTool("show_dashboard", {
+        ui: { resourceUri: "ui://test/dashboard", visibility: ["model", "app"] },
+      });
+
+      const { client, cleanup } = await createConnectedPair({ tools: [tool] });
+      const { tools } = await client.listTools();
+      const entry = tools.find((t) => t.name === "show_dashboard") as any;
+
+      expect(entry._meta.ui).toEqual({
+        resourceUri: "ui://test/dashboard",
+        visibility: ["model", "app"],
+      });
+      // Legacy key must equal the modern value, not be dropped.
+      expect(entry._meta["ui/resourceUri"]).toBe("ui://test/dashboard");
+
+      await cleanup();
+    });
+
+    it('hydrates ui.resourceUri from legacy _meta["ui/resourceUri"] on registration', async () => {
+      const tool: MCPToolDefinition = {
+        name: "show_cart",
+        description: "Legacy registration",
+        inputSchema: { type: "object" },
+        _meta: { "ui/resourceUri": "ui://shop/cart.html" },
+        handler: async () => ({ content: [{ type: "text", text: "ok" }] }),
+      };
+
+      const { client, cleanup } = await createConnectedPair({ tools: [tool] });
+      const { tools } = await client.listTools();
+      const entry = tools.find((t) => t.name === "show_cart") as any;
+
+      // Normalization: the canonical ui.resourceUri should be populated from
+      // the legacy key so both the modern and legacy fields appear on the wire.
+      expect(entry._meta.ui.resourceUri).toBe("ui://shop/cart.html");
+      expect(entry._meta["ui/resourceUri"]).toBe("ui://shop/cart.html");
+
+      await cleanup();
+    });
+
+    it("prefers ui.resourceUri when both modern and legacy keys are provided", async () => {
+      const tool: MCPToolDefinition = {
+        name: "conflict",
+        description: "Conflict case",
+        inputSchema: { type: "object" },
+        ui: { resourceUri: "ui://modern/view" },
+        _meta: { "ui/resourceUri": "ui://legacy/view" },
+        handler: async () => ({ content: [{ type: "text", text: "ok" }] }),
+      };
+
+      const { client, cleanup } = await createConnectedPair({ tools: [tool] });
+      const { tools } = await client.listTools();
+      const entry = tools.find((t) => t.name === "conflict") as any;
+
+      // Modern wins and is broadcast under both keys.
+      expect(entry._meta.ui.resourceUri).toBe("ui://modern/view");
+      expect(entry._meta["ui/resourceUri"]).toBe("ui://modern/view");
+
+      await cleanup();
+    });
+
+    it("omits _meta on tools with no UI metadata", async () => {
+      const tool = createTestTool("plain");
+      const { client, cleanup } = await createConnectedPair({ tools: [tool] });
+      const { tools } = await client.listTools();
+      const entry = tools.find((t) => t.name === "plain") as any;
+      expect(entry._meta).toBeUndefined();
+      await cleanup();
+    });
+
+    it("passes through additional caller-supplied _meta keys on tools/list", async () => {
+      const tool: MCPToolDefinition = {
+        name: "extra_meta",
+        description: "Tool with extra _meta",
+        inputSchema: { type: "object" },
+        ui: { resourceUri: "ui://test/view" },
+        _meta: { "x-custom-key": "custom-value" },
+        handler: async () => ({ content: [{ type: "text", text: "ok" }] }),
+      };
+
+      const { client, cleanup } = await createConnectedPair({ tools: [tool] });
+      const { tools } = await client.listTools();
+      const entry = tools.find((t) => t.name === "extra_meta") as any;
+
+      expect(entry._meta["x-custom-key"]).toBe("custom-value");
+      expect(entry._meta.ui.resourceUri).toBe("ui://test/view");
+      expect(entry._meta["ui/resourceUri"]).toBe("ui://test/view");
+
+      await cleanup();
+    });
   });
 
   // ══════════════════════════════════════════════════════════════════════════

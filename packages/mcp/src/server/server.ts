@@ -68,6 +68,85 @@ interface RegisteredTemplate {
 }
 
 // ============================================================================
+// MCP Apps — metadata helpers
+// ============================================================================
+
+/**
+ * Legacy `_meta` key for a tool's UI resource URI.
+ *
+ * Pre-spec hosts look for `_meta["ui/resourceUri"]`; spec-compliant hosts use
+ * `_meta.ui.resourceUri`. We emit both on `tools/list` so the server works
+ * across the full range of client versions in the wild.
+ *
+ * See @modelcontextprotocol/ext-apps for the official reference implementation
+ * which also emits both.
+ */
+const LEGACY_UI_RESOURCE_URI_KEY = "ui/resourceUri";
+
+/**
+ * Build the `_meta.ui` block for an MCP App, per the MCP Apps spec (2026-01-26).
+ *
+ * Included on both `resources/list` entries and `resources/read` content items
+ * for `ui://` resources. Returns `undefined` when the app declares no UI
+ * metadata — in that case, callers should omit `_meta` entirely rather than
+ * emit an empty object.
+ *
+ * Permissions are converted from our array shape (`["camera", "microphone"]`)
+ * to the spec's object shape (`{ camera: {}, microphone: {} }`).
+ */
+function buildAppResourceMeta(app: MCPAppDefinition):
+  | {
+      ui: {
+        csp?: MCPAppDefinition["csp"];
+        permissions?: Record<string, Record<string, never>>;
+        prefersBorder?: boolean;
+        domain?: string;
+      };
+    }
+  | undefined {
+  const ui: {
+    csp?: MCPAppDefinition["csp"];
+    permissions?: Record<string, Record<string, never>>;
+    prefersBorder?: boolean;
+    domain?: string;
+  } = {};
+
+  if (app.csp) ui.csp = app.csp;
+  if (app.permissions?.length) {
+    ui.permissions = app.permissions.reduce(
+      (acc, perm) => ({ ...acc, [perm]: {} }),
+      {} as Record<string, Record<string, never>>,
+    );
+  }
+  if (app.prefersBorder !== undefined) ui.prefersBorder = app.prefersBorder;
+  if (app.domain) ui.domain = app.domain;
+
+  return Object.keys(ui).length > 0 ? { ui } : undefined;
+}
+
+/**
+ * Normalize a tool definition against the legacy MCP Apps `_meta` shape.
+ *
+ * If the caller supplied `_meta["ui/resourceUri"]` (pre-spec form) but no
+ * `ui.resourceUri`, hydrate the canonical field so downstream code only has
+ * to look in one place. Leaves the original `_meta` intact — extra keys are
+ * preserved and re-emitted on `tools/list` verbatim.
+ *
+ * Pure function; always returns a new object when normalization applies so
+ * callers cannot observe internal mutation of the input.
+ */
+function normalizeLegacyToolUi(tool: MCPToolDefinition): MCPToolDefinition {
+  const legacyUri = tool._meta?.[LEGACY_UI_RESOURCE_URI_KEY];
+  if (typeof legacyUri !== "string") return tool;
+  if (tool.ui?.resourceUri) return tool;
+
+  return {
+    ...tool,
+    ui: { ...(tool.ui ?? {}), resourceUri: legacyUri },
+  };
+}
+
+// ============================================================================
 // MCPServer
 // ============================================================================
 
@@ -396,13 +475,29 @@ export class MCPServer {
       }
 
       return {
-        tools: visibleTools.map((t) => ({
-          name: t.definition.name,
-          description: t.definition.description,
-          inputSchema: t.jsonSchema,
-          annotations: t.definition.annotations,
-          ...(t.definition.ui ? { _meta: { ui: t.definition.ui } } : {}),
-        })),
+        tools: visibleTools.map((t) => {
+          const ui = t.definition.ui;
+          // Emit both the modern (_meta.ui.resourceUri) and legacy
+          // (_meta["ui/resourceUri"]) keys when a resourceUri is set, matching
+          // the reference ext-apps implementation so older hosts still resolve
+          // the UI resource. Pass through any other caller-supplied _meta keys
+          // verbatim (e.g. experimental host-specific metadata).
+          const passthroughMeta = { ...(t.definition._meta ?? {}) };
+          delete passthroughMeta.ui;
+          delete passthroughMeta[LEGACY_UI_RESOURCE_URI_KEY];
+
+          const meta: Record<string, unknown> = { ...passthroughMeta };
+          if (ui) meta.ui = ui;
+          if (ui?.resourceUri) meta[LEGACY_UI_RESOURCE_URI_KEY] = ui.resourceUri;
+
+          return {
+            name: t.definition.name,
+            description: t.definition.description,
+            inputSchema: t.jsonSchema,
+            annotations: t.definition.annotations,
+            ...(Object.keys(meta).length > 0 ? { _meta: meta } : {}),
+          };
+        }),
       };
     });
 
@@ -486,12 +581,18 @@ export class MCPServer {
           description: r.description,
           mimeType: r.mimeType,
         })),
-        ...Array.from(this.apps.values()).map((a) => ({
-          uri: a.uri,
-          name: a.name,
-          description: a.description,
-          mimeType: "text/html;profile=mcp-app" as string,
-        })),
+        ...Array.from(this.apps.values()).map((a) => {
+          const meta = buildAppResourceMeta(a);
+          return {
+            uri: a.uri,
+            name: a.name,
+            description: a.description,
+            mimeType: "text/html;profile=mcp-app" as string,
+            // _meta.ui on list entries is a fallback for hosts that pre-fetch
+            // UI metadata at connection time; read-side metadata overrides.
+            ...(meta ? { _meta: meta } : {}),
+          };
+        }),
       ];
 
       for (const tmpl of this.templates.values()) {
@@ -530,7 +631,21 @@ export class MCPServer {
         const app = this.apps.get(uri);
         if (app) {
           const content = typeof app.content === "function" ? await app.content() : app.content;
-          return { contents: [{ uri, text: content, mimeType: "text/html;profile=mcp-app" }] };
+          const meta = buildAppResourceMeta(app);
+          return {
+            contents: [
+              {
+                uri,
+                text: content,
+                mimeType: "text/html;profile=mcp-app",
+                // CSP, permissions, prefersBorder, domain — required by the
+                // host to configure the iframe sandbox. Without _meta.ui the
+                // host applies secure defaults (deny-all) and the view stays
+                // blank even though the HTML loaded.
+                ...(meta ? { _meta: meta } : {}),
+              },
+            ],
+          };
         }
 
         for (const tmpl of this.templates.values()) {
@@ -596,7 +711,11 @@ export class MCPServer {
     } else {
       jsonSchema = { type: "object" };
     }
-    this.tools.set(tool.name, { definition: tool, jsonSchema });
+    // Hydrate ui.resourceUri from the legacy _meta["ui/resourceUri"] key so
+    // tools authored against the pre-spec MCP Apps shape route through the
+    // canonical code paths (visibility filtering, tool→app resolution, etc.).
+    const definition = normalizeLegacyToolUi(tool);
+    this.tools.set(definition.name, { definition, jsonSchema });
   }
 
   // ══════════════════════════════════════════════════════════════════════════

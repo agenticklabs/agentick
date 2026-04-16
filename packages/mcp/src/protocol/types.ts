@@ -167,6 +167,14 @@ export interface MCPToolDefinition {
     resourceUri?: string;
     visibility?: Array<"model" | "app">;
   };
+  /**
+   * Raw `_meta` passthrough for interop with hosts or SDKs that author tools
+   * against the legacy MCP Apps spec. On registration, if
+   * `_meta["ui/resourceUri"]` is set but `ui.resourceUri` isn't, the canonical
+   * `ui.resourceUri` is hydrated from it. Any extra keys on `_meta` are
+   * preserved verbatim on `tools/list`.
+   */
+  _meta?: Record<string, unknown>;
   handler: MCPToolHandler;
 }
 
@@ -257,6 +265,12 @@ export interface MCPAppDefinition {
   /** Iframe permissions to request. */
   permissions?: Array<"camera" | "microphone" | "geolocation" | "clipboardWrite">;
   prefersBorder?: boolean;
+  /**
+   * Dedicated origin for the view sandbox. Useful when the app needs a stable
+   * origin for OAuth callbacks, CORS allowlists, or API-key restrictions.
+   * The format is host-defined (e.g. `{hash}.claudemcpcontent.com`).
+   */
+  domain?: string;
 }
 
 // ============================================================================
