@@ -1,5 +1,13 @@
 # @agentick/server
 
+## 0.14.37
+
+### Patch Changes
+
+- f919c8b: extended and legacy support for mcp-apps
+  - @agentick/kernel@0.14.37
+  - @agentick/shared@0.14.37
+
 ## 0.14.36
 
 ### Patch Changes
