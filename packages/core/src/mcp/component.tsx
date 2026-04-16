@@ -13,6 +13,7 @@ import type { MCPConfig, MCPServerConfig } from "./types.js";
 import type { JSX } from "../jsx/jsx-runtime.js";
 import type { ComponentBaseProps } from "../jsx/jsx-types.js";
 import { useCom } from "../hooks/index.js";
+import { isToolVisibleToModel } from "@agentick/mcp/client";
 
 /**
  * Normalizes Cursor-style config to full MCPConfig
@@ -181,6 +182,11 @@ export function MCPToolComponent(props: MCPToolComponentProps): React.ReactEleme
           // Blacklist: exclude specified tools
           filteredTools = tools.filter((t) => !props.exclude!.includes(t.name));
         }
+
+        // MCP Apps spec: skip tools that are only visible to apps (not the model).
+        // App-only tools are callable by iframes via the AppBridge but hidden from
+        // the LLM. Tools without visibility metadata default to visible-to-model.
+        filteredTools = filteredTools.filter((t) => isToolVisibleToModel(t as any));
 
         // Register each filtered tool
         for (const mcpToolDef of filteredTools) {

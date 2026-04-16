@@ -133,6 +133,38 @@ export class MCPTool<
     // Convert MCP schema to Zod
     const zodSchema = mcpSchemaToZod(mcpToolDefinition.inputSchema);
 
+    // Extract MCP App UI metadata from `_meta.ui` per the MCP Apps spec.
+    // This makes the session emit `ui` on tool_result_start so the host
+    // knows to mount an app iframe alongside the tool execution.
+    const uiMeta = (
+      mcpToolDefinition._meta as
+        | { ui?: { resourceUri?: string; visibility?: Array<"model" | "app"> } }
+        | undefined
+    )?.ui;
+
+    // If the tool has a UI resource, populate a resolver so the session can
+    // enrich tool_result_start events with the app HTML content.
+    const uiWithResolver = uiMeta?.resourceUri
+      ? {
+          ...uiMeta,
+          resolveContent: async () => {
+            try {
+              const contents = await this.mcpClient.readResource(
+                this.serverName,
+                uiMeta.resourceUri!,
+              );
+              return contents?.[0]?.text;
+            } catch (err) {
+              console.warn(
+                `[MCPTool] Failed to resolve UI content for ${uiMeta.resourceUri}:`,
+                err instanceof Error ? err.message : err,
+              );
+              return undefined;
+            }
+          },
+        }
+      : uiMeta;
+
     // Build metadata
     this.metadata = {
       name: mcpToolDefinition.name,
@@ -140,6 +172,7 @@ export class MCPTool<
       input: zodSchema,
       type: ToolExecutionType.MCP,
       mcpConfig: mcpConfig,
+      ...(uiWithResolver && { ui: uiWithResolver }),
     };
 
     // Create procedure that forwards to MCP server

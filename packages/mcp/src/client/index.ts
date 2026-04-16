@@ -26,6 +26,7 @@ export type {
 export {
   createMCPApp,
   isToolVisibleToApps,
+  isToolVisibleToModel,
   getToolAppUri,
   AppBridge,
   PostMessageTransport,
@@ -44,3 +45,13 @@ export type {
 // MCP Apps — relay transport for server-side AppBridge
 export { RelayTransport } from "./relay-transport.js";
 export type { RelayTransportOptions } from "./relay-transport.js";
+
+// MCP Apps — browser-side multi-app host manager (framework-agnostic)
+export { BrowserMCPAppHost } from "./browser-app-host.js";
+export type {
+  BrowserMCPAppHostOptions,
+  AppHostTransport,
+  AppHostChannelEvent,
+  MountAppOptions,
+  MountedApp,
+} from "./browser-app-host.js";

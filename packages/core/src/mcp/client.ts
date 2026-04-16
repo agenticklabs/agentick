@@ -106,6 +106,7 @@ function toCoreTool(tool: DiscoveredTool): MCPToolDefinition {
     name: tool.name,
     description: tool.description ?? "",
     inputSchema: tool.inputSchema as MCPToolDefinition["inputSchema"],
+    _meta: tool._meta,
   };
 }
 

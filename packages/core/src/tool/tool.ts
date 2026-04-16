@@ -267,6 +267,16 @@ export interface CreateToolOptions<
   ui?: {
     resourceUri?: string;
     visibility?: Array<"model" | "app">;
+    /**
+     * Optional resolver for the app HTML content. When present, the session
+     * calls this before emitting `tool_result_start` and attaches the result
+     * to `ui.content`. This lets the browser render the iframe in one round-trip
+     * instead of fetching the HTML separately.
+     *
+     * MCPTool populates this automatically using its MCPClient. Custom tools
+     * can provide their own resolver.
+     */
+    resolveContent?: () => Promise<string | undefined>;
   };
 
   // === Audience Configuration ===
@@ -792,6 +802,8 @@ export interface ToolMetadata<TInput = any, TOutput = any> {
   ui?: {
     resourceUri?: string;
     visibility?: Array<"model" | "app">;
+    /** Optional resolver for app HTML content — see ToolMetadata.ui.resolveContent */
+    resolveContent?: () => Promise<string | undefined>;
   };
 }
 

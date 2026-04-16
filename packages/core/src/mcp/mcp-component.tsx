@@ -19,6 +19,7 @@ import React, { useRef } from "react";
 import { MCPClient } from "./client.js";
 import { MCPToolComponent } from "./component.js";
 import { MCPResourceComponent } from "./resource-component.js";
+import { MCPAppHost } from "./app-host.js";
 import type { MCPConfig, MCPServerConfig } from "./types.js";
 import type { JSX } from "../jsx/jsx-runtime.js";
 import type { ComponentBaseProps } from "../jsx/jsx-types.js";
@@ -93,6 +94,7 @@ export function MCPComponent(props: MCPComponentProps): JSX.Element {
         listToolName={props.listResourcesToolName}
         readToolName={props.readResourceToolName}
       />
+      <MCPAppHost key="mcp-app-host" mcpClient={mcpClient} />
     </>
   ) as unknown as JSX.Element;
 }

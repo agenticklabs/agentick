@@ -219,6 +219,7 @@ export class MCPClient {
       description: tool.description,
       inputSchema: tool.inputSchema as Record<string, unknown>,
       annotations: tool.annotations as Record<string, unknown> | undefined,
+      _meta: (tool as any)._meta as Record<string, unknown> | undefined,
       serverName,
     }));
 

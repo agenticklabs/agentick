@@ -42,6 +42,12 @@ export interface DiscoveredTool {
   description?: string;
   inputSchema: Record<string, unknown>;
   annotations?: Record<string, unknown>;
+  /**
+   * Tool metadata per MCP spec — carries `_meta.ui` for MCP Apps
+   * (resourceUri + visibility). Hosts use this to determine whether
+   * to expose the tool to the model and/or to apps.
+   */
+  _meta?: Record<string, unknown>;
   serverName: string;
 }
 

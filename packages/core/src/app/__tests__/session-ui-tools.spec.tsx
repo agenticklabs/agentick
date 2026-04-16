@@ -158,6 +158,90 @@ describe("Session — UI tool metadata", () => {
     expect((toolResult as any).result.content[0].text).toBe("Dashboard for project 99");
   });
 
+  it("resolveContent is called and result is attached to ui.content", async () => {
+    const ResolvedTool = createTool({
+      name: "resolved_app",
+      description: "Tool with a resolveContent hook",
+      input: z.object({}),
+      ui: {
+        resourceUri: "ui://test/resolved",
+        resolveContent: async () => "<!DOCTYPE html><html><body>Resolved!</body></html>",
+      },
+      handler: async () => [{ type: "text" as const, text: "ok" }],
+    });
+
+    const model = createTestAdapter();
+    model.respondWith([{ tool: { name: "resolved_app", input: {} } }]);
+
+    const Agent = () => (
+      <>
+        <Model model={model} />
+        <System>test</System>
+        <ResolvedTool />
+        <User>show app</User>
+        <Timeline />
+      </>
+    );
+
+    const app = createApp(Agent, { maxTicks: 2 });
+    const session = await app.session();
+    const handle = await session.render({} as any);
+    const events = await collectEvents(handle);
+
+    const toolResultStart = events.find(
+      (e) => e.type === "tool_result_start" && (e as any).name === "resolved_app",
+    );
+
+    expect(toolResultStart).toBeDefined();
+    expect((toolResultStart as any).ui).toBeDefined();
+    expect((toolResultStart as any).ui.content).toBe(
+      "<!DOCTYPE html><html><body>Resolved!</body></html>",
+    );
+  });
+
+  it("resolveContent failure is non-fatal — event still emits without content", async () => {
+    const FailingTool = createTool({
+      name: "failing_app",
+      description: "Tool whose resolver throws",
+      input: z.object({}),
+      ui: {
+        resourceUri: "ui://test/failing",
+        resolveContent: async () => {
+          throw new Error("resolver failed");
+        },
+      },
+      handler: async () => [{ type: "text" as const, text: "ok" }],
+    });
+
+    const model = createTestAdapter();
+    model.respondWith([{ tool: { name: "failing_app", input: {} } }]);
+
+    const Agent = () => (
+      <>
+        <Model model={model} />
+        <System>test</System>
+        <FailingTool />
+        <User>show app</User>
+        <Timeline />
+      </>
+    );
+
+    const app = createApp(Agent, { maxTicks: 2 });
+    const session = await app.session();
+    const handle = await session.render({} as any);
+    const events = await collectEvents(handle);
+
+    const toolResultStart = events.find(
+      (e) => e.type === "tool_result_start" && (e as any).name === "failing_app",
+    );
+
+    // Event still emits with ui metadata (resourceUri, appSessionId) but no content
+    expect(toolResultStart).toBeDefined();
+    expect((toolResultStart as any).ui).toBeDefined();
+    expect((toolResultStart as any).ui.resourceUri).toBe("ui://test/failing");
+    expect((toolResultStart as any).ui.content).toBeUndefined();
+  });
+
   it("each UI tool call gets a unique appSessionId", async () => {
     const model = createTestAdapter();
     // Two tool calls in sequence

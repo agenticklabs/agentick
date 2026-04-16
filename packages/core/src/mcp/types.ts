@@ -77,6 +77,11 @@ export interface MCPToolDefinition {
     properties: Record<string, any>;
     required?: string[];
   };
+  /**
+   * Tool metadata per MCP spec — carries `_meta.ui` for MCP Apps
+   * (resourceUri + visibility).
+   */
+  _meta?: Record<string, unknown>;
 }
 
 // ============================================================================

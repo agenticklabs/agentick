@@ -2991,13 +2991,29 @@ export class SessionImpl<P = {}> extends EventEmitter implements Session<P> {
 
         // Attach UI metadata if tool has a resourceUri — signals the host to mount an app.
         // Generated here (single source of truth) and carried on both the call object
-        // and the tool_result_start event. The host resolves the URI to HTML content
-        // before delivering to the client.
+        // and the tool_result_start event. If the tool provides a resolveContent hook
+        // (e.g., MCPTool), we resolve the HTML here and include it in the event so the
+        // browser can render the iframe in one round-trip.
         if (tool?.metadata?.ui?.resourceUri && !call.ui) {
           call.ui = {
             resourceUri: tool.metadata.ui.resourceUri,
             appSessionId: randomUUID(),
           };
+
+          const resolver = tool.metadata.ui.resolveContent;
+          if (resolver) {
+            try {
+              const content = await resolver();
+              if (content) {
+                call.ui.content = content;
+              }
+            } catch (err) {
+              this.log.warn(
+                { err, resourceUri: call.ui.resourceUri },
+                "Failed to resolve UI content — event will omit html",
+              );
+            }
+          }
         }
 
         // Signal tool execution beginning — client uses this to mount the app iframe

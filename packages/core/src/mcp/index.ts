@@ -52,6 +52,8 @@ export { MCPService } from "./service.js";
 export { MCPToolComponent, MCPTool } from "./component.js";
 export { MCPResourceComponent, MCPResources } from "./resource-component.js";
 export type { MCPResourceComponentProps, MCPServerEntry } from "./resource-component.js";
+export { MCPAppHost } from "./app-host.js";
+export type { MCPAppHostProps } from "./app-host.js";
 
 // ── Tool utilities ────────────────────────────────────────────────────
 export { MCPTool as MCPToolClass, mcpSchemaToZod, normalizeResult } from "./tool.js";

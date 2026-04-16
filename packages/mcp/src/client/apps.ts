@@ -205,12 +205,28 @@ export async function createMCPApp(options: CreateMCPAppOptions): Promise<MCPApp
 /**
  * Check if a discovered tool is visible to apps (i.e., can be called from a ui:// iframe).
  * Returns true if the tool's _meta.ui.visibility includes "app", or if visibility is unset
- * (default visibility is ["model"], which means apps cannot call it).
+ * (default visibility is ["model", "app"], which means apps can call it).
  */
 export function isToolVisibleToApps(
   tool: { annotations?: Record<string, unknown> } & Partial<Tool>,
 ): boolean {
   return !isToolVisibilityModelOnly(tool as Partial<Tool>);
+}
+
+/**
+ * Check if a discovered tool is visible to the model (i.e., should appear in tools/list to the LLM).
+ * Returns true if the tool's _meta.ui.visibility includes "model", or if visibility is unset
+ * (default visibility is ["model", "app"], which means the model can call it).
+ *
+ * Hosts MUST filter app-only tools (visibility: ["app"]) from the model's tool list.
+ */
+export function isToolVisibleToModel(
+  tool: { _meta?: Record<string, unknown> } & Partial<Tool>,
+): boolean {
+  const meta = tool._meta as { ui?: { visibility?: Array<"model" | "app"> } } | undefined;
+  const visibility = meta?.ui?.visibility;
+  if (!visibility || visibility.length === 0) return true; // default: visible to model
+  return visibility.includes("model");
 }
 
 /**
