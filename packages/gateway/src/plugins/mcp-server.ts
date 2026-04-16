@@ -40,6 +40,18 @@ export interface MCPStandaloneTool {
   description: string;
   inputSchema: unknown;
   annotations?: Record<string, unknown>;
+  /**
+   * MCP Apps linkage — set when this tool renders a `ui://` resource. The
+   * plugin forwards this to the underlying MCPServer so `tools/list` emits
+   * `_meta.ui.resourceUri` and spec-compliant hosts render the view.
+   */
+  ui?: MCPToolDefinition["ui"];
+  /**
+   * Pass-through metadata for interop with hosts or SDKs that author tools
+   * against the legacy MCP Apps `_meta["ui/resourceUri"]` shape. The
+   * MCPServer normalizes this into canonical `ui.resourceUri` on registration.
+   */
+  _meta?: Record<string, unknown>;
   handler: (args: Record<string, unknown>) => Promise<CallToolResult> | CallToolResult;
 }
 
@@ -248,6 +260,13 @@ export function mcpServerPlugin(config: MCPServerPluginConfig): GatewayPlugin {
             description: tool.description,
             inputSchema: tool.inputSchema as any,
             annotations: tool.annotations as any,
+            // MCP Apps metadata — preserve the tool↔view linkage so
+            // `tools/list` emits `_meta.ui.resourceUri`. Dropping these here
+            // silently broke rendering for HTTP-mode consumers (stdio mode
+            // bypasses this plugin and worked fine, which made it look like
+            // a transport bug).
+            ...(tool.ui ? { ui: tool.ui } : {}),
+            ...(tool._meta ? { _meta: tool._meta } : {}),
             handler: async (args) => tool.handler(args),
           });
         }

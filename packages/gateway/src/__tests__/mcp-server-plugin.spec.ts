@@ -1207,6 +1207,159 @@ describe("MCP Server Plugin — standalone tools", () => {
     const body = await callRes.text();
     expect(body).toContain("ok");
   });
+
+  // ════════════════════════════════════════════════════════════════════════
+  // MCP Apps tool metadata — regression guard for a bug that silently broke
+  // rendering in HTTP mode. The plugin used to reconstruct tool definitions
+  // without copying the `ui` / `_meta` fields, so `tools/list` arrived at
+  // Claude Desktop with no UI linkage. Stdio worked (bypasses the plugin),
+  // HTTP did not. These tests assert the plugin preserves UI metadata end-
+  // to-end over a real HTTP initialize+tools/list round-trip.
+  // ════════════════════════════════════════════════════════════════════════
+
+  it("preserves ui.resourceUri on standalone tools through tools/list over HTTP", async () => {
+    await startGatewayServer(
+      mcpServerPlugin({
+        path: "/mcp-ui-passthrough",
+        tools: [
+          {
+            name: "show_dashboard",
+            description: "Open the dashboard",
+            inputSchema: { type: "object" },
+            ui: {
+              resourceUri: "ui://demo/dashboard",
+              visibility: ["model", "app"],
+            },
+            handler: async () => ({
+              content: [{ type: "text" as const, text: "ok" }],
+            }),
+          },
+        ],
+        apps: [
+          {
+            name: "dashboard",
+            uri: "ui://demo/dashboard",
+            content: "<html></html>",
+          },
+        ],
+      }),
+    );
+
+    const initRes = await fetch(`http://localhost:${port}/mcp-ui-passthrough`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json, text/event-stream",
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "initialize",
+        params: {
+          protocolVersion: "2025-03-26",
+          capabilities: {
+            extensions: {
+              "io.modelcontextprotocol/ui": {
+                mimeTypes: ["text/html;profile=mcp-app"],
+              },
+            },
+          },
+          clientInfo: { name: "t", version: "1" },
+        },
+      }),
+    });
+    const sessionId = initRes.headers.get("mcp-session-id")!;
+    const initBody = await initRes.text();
+
+    // Server MUST advertise the UI extension when apps are registered — this
+    // is what tells conformant hosts to attempt iframe rendering.
+    expect(initBody).toContain("io.modelcontextprotocol/ui");
+    expect(initBody).toContain("text/html;profile=mcp-app");
+
+    await fetch(`http://localhost:${port}/mcp-ui-passthrough`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Mcp-Session-Id": sessionId },
+      body: JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" }),
+    });
+
+    const listRes = await fetch(`http://localhost:${port}/mcp-ui-passthrough`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json, text/event-stream",
+        "Mcp-Session-Id": sessionId,
+      },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/list" }),
+    });
+    const listBody = await listRes.text();
+
+    // Both modern and legacy _meta keys must appear on the wire.
+    expect(listBody).toContain('"resourceUri":"ui://demo/dashboard"');
+    expect(listBody).toContain('"ui/resourceUri":"ui://demo/dashboard"');
+    expect(listBody).toMatch(/"visibility":\s*\[\s*"model",\s*"app"\s*\]/);
+  });
+
+  it("preserves raw _meta passthrough on standalone tools (legacy shape)", async () => {
+    await startGatewayServer(
+      mcpServerPlugin({
+        path: "/mcp-legacy-meta",
+        tools: [
+          {
+            name: "legacy_tool",
+            description: "Registered with legacy _meta shape",
+            inputSchema: { type: "object" },
+            _meta: { "ui/resourceUri": "ui://legacy/view" },
+            handler: async () => ({
+              content: [{ type: "text" as const, text: "ok" }],
+            }),
+          },
+        ],
+        apps: [
+          { name: "legacy", uri: "ui://legacy/view", content: "<html></html>" },
+        ],
+      }),
+    );
+
+    const initRes = await fetch(`http://localhost:${port}/mcp-legacy-meta`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json, text/event-stream",
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "initialize",
+        params: {
+          protocolVersion: "2025-03-26",
+          capabilities: {},
+          clientInfo: { name: "t", version: "1" },
+        },
+      }),
+    });
+    const sessionId = initRes.headers.get("mcp-session-id")!;
+
+    await fetch(`http://localhost:${port}/mcp-legacy-meta`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Mcp-Session-Id": sessionId },
+      body: JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" }),
+    });
+
+    const listRes = await fetch(`http://localhost:${port}/mcp-legacy-meta`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json, text/event-stream",
+        "Mcp-Session-Id": sessionId,
+      },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/list" }),
+    });
+    const listBody = await listRes.text();
+
+    // Legacy _meta should hydrate ui.resourceUri, and both keys should be emitted.
+    expect(listBody).toContain('"resourceUri":"ui://legacy/view"');
+    expect(listBody).toContain('"ui/resourceUri":"ui://legacy/view"');
+  });
 });
 
 // ============================================================================
