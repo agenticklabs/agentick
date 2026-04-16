@@ -84,6 +84,20 @@ interface RegisteredTemplate {
 const LEGACY_UI_RESOURCE_URI_KEY = "ui/resourceUri";
 
 /**
+ * MIME type for MCP App HTML resources, per the MCP Apps spec (2026-01-26).
+ * Hosts use this to distinguish UI resources from regular `text/html`.
+ */
+const MCP_APP_MIME_TYPE = "text/html;profile=mcp-app";
+
+/**
+ * Extension identifier for MCP Apps capability negotiation.
+ * Servers advertise this under `capabilities.extensions` when apps are present;
+ * conformant hosts (Claude Desktop) will not render `ui://` resources unless
+ * the server declares this capability.
+ */
+const MCP_APPS_EXTENSION_ID = "io.modelcontextprotocol/ui";
+
+/**
  * Build the `_meta.ui` block for an MCP App, per the MCP Apps spec (2026-01-26).
  *
  * Included on both `resources/list` entries and `resources/read` content items
@@ -450,6 +464,23 @@ export class MCPServer {
   // ══════════════════════════════════════════════════════════════════════════
 
   private createSDKServer(): Server {
+    // Advertise the MCP Apps extension only when at least one app is registered.
+    // Per the spec (2026-01-26), MCP Apps is an optional extension that MUST be
+    // explicitly negotiated — conformant hosts (e.g. Claude Desktop) will refuse
+    // to render `ui://` resources unless the server declares support here, even
+    // if the tool metadata and resource mimeTypes are otherwise correct.
+    // See: specification/2026-01-26/apps.mdx → "Client<>Server Capability Negotiation".
+    const uiExtension =
+      this.apps.size > 0
+        ? {
+            extensions: {
+              [MCP_APPS_EXTENSION_ID]: {
+                mimeTypes: [MCP_APP_MIME_TYPE],
+              },
+            },
+          }
+        : {};
+
     const sdkServer = new Server(
       { name: this.options.name, version: this.options.version },
       {
@@ -458,6 +489,7 @@ export class MCPServer {
           resources: { listChanged: true },
           prompts: { listChanged: true },
           logging: {},
+          ...uiExtension,
         },
         ...(this.options.instructions && { instructions: this.options.instructions }),
       },
@@ -587,7 +619,7 @@ export class MCPServer {
             uri: a.uri,
             name: a.name,
             description: a.description,
-            mimeType: "text/html;profile=mcp-app" as string,
+            mimeType: MCP_APP_MIME_TYPE as string,
             // _meta.ui on list entries is a fallback for hosts that pre-fetch
             // UI metadata at connection time; read-side metadata overrides.
             ...(meta ? { _meta: meta } : {}),
@@ -637,7 +669,7 @@ export class MCPServer {
               {
                 uri,
                 text: content,
-                mimeType: "text/html;profile=mcp-app",
+                mimeType: MCP_APP_MIME_TYPE,
                 // CSP, permissions, prefersBorder, domain — required by the
                 // host to configure the iframe sandbox. Without _meta.ui the
                 // host applies secure defaults (deny-all) and the view stays

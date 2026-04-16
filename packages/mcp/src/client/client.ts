@@ -110,6 +110,20 @@ export class MCPClient {
     if (this.options.samplingHandler) capabilities.sampling = {};
     if (this.options.roots) capabilities.roots = { listChanged: true };
 
+    // MCP Apps extension — advertise support so spec-compliant servers emit
+    // UI metadata (tools with `_meta.ui.resourceUri`, resources with
+    // `text/html;profile=mcp-app` mimeType). Per the 2026-01-26 spec, servers
+    // SHOULD check this capability via `getUiCapability()` before registering
+    // UI-enabled tools; without it, strict servers downgrade to text-only.
+    // Declared by default — opt out by setting `mcpApps: false` in options.
+    if (this.options.mcpApps !== false) {
+      capabilities.extensions = {
+        "io.modelcontextprotocol/ui": {
+          mimeTypes: ["text/html;profile=mcp-app"],
+        },
+      };
+    }
+
     const client = new Client(
       {
         name: this.options.name ?? "@agentick/mcp-client",
@@ -202,6 +216,38 @@ export class MCPClient {
     return Array.from(this.connections.keys())
       .map((name) => this.getHealth(name)!)
       .filter(Boolean);
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // Capability introspection
+  // ══════════════════════════════════════════════════════════════════════════
+
+  /**
+   * Returns the MCP Apps capability declared by a connected server, or `undefined`
+   * if the server didn't advertise the extension. The returned object lists the
+   * MIME types the server supports for UI resources (typically
+   * `["text/html;profile=mcp-app"]`).
+   *
+   * Host code should check this before mounting iframes — a server with no apps
+   * (or a server whose host declines to serve UI resources) won't declare the
+   * capability, and the host should render tool results as plain content.
+   */
+  getMcpAppsCapability(serverName: string): { mimeTypes: string[] } | undefined {
+    const conn = this.connections.get(serverName);
+    if (!conn) return undefined;
+    const caps = conn.client.getServerCapabilities() as any;
+    const ext = caps?.extensions?.["io.modelcontextprotocol/ui"];
+    if (!ext || !Array.isArray(ext.mimeTypes)) return undefined;
+    return { mimeTypes: ext.mimeTypes };
+  }
+
+  /**
+   * Convenience: does the connected server support MCP Apps rendering for at
+   * least the standard `text/html;profile=mcp-app` MIME type?
+   */
+  supportsMcpApps(serverName: string): boolean {
+    const cap = this.getMcpAppsCapability(serverName);
+    return !!cap?.mimeTypes.includes("text/html;profile=mcp-app");
   }
 
   // ══════════════════════════════════════════════════════════════════════════

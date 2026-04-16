@@ -192,6 +192,13 @@ export interface MCPClientOptions {
   roots?: Root[];
   /** Handler for server log messages. */
   logHandler?: LogHandler;
+  /**
+   * Advertise the `io.modelcontextprotocol/ui` extension during initialization
+   * so spec-compliant servers emit MCP Apps metadata. Default: `true`. Set to
+   * `false` for headless clients that will never render `ui://` resources —
+   * strict servers may then downgrade to text-only tool registration.
+   */
+  mcpApps?: boolean;
 }
 
 // ============================================================================

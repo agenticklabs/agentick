@@ -399,6 +399,71 @@ describe("MCPServer", () => {
   });
 
   // ══════════════════════════════════════════════════════════════════════════
+  // MCP Apps — capability negotiation
+  //
+  // Per the MCP Apps spec (2026-01-26), the server MUST advertise the
+  // `io.modelcontextprotocol/ui` extension in its initialize response when it
+  // serves any `ui://` resources. Without this, conformant hosts (Claude Desktop,
+  // etc.) will refuse to render the apps even though tool/resource metadata is
+  // otherwise correct. See: specification/2026-01-26/apps.mdx.
+  // ══════════════════════════════════════════════════════════════════════════
+
+  describe("apps — capability negotiation", () => {
+    it("advertises io.modelcontextprotocol/ui capability when apps are registered", async () => {
+      const app: MCPAppDefinition = {
+        name: "dashboard",
+        uri: "ui://test/dashboard",
+        content: "<html></html>",
+      };
+
+      const { client, cleanup } = await createConnectedPair({ apps: [app] });
+      const caps = client.getServerCapabilities() as any;
+
+      expect(caps?.extensions).toBeDefined();
+      expect(caps.extensions["io.modelcontextprotocol/ui"]).toEqual({
+        mimeTypes: ["text/html;profile=mcp-app"],
+      });
+
+      await cleanup();
+    });
+
+    it("omits extensions capability when no apps are registered", async () => {
+      const { client, cleanup } = await createConnectedPair({
+        tools: [createTestTool("plain")],
+      });
+      const caps = client.getServerCapabilities() as any;
+
+      // Either extensions is absent entirely, or it doesn't include the UI ext.
+      // Both are spec-valid — a server with no apps shouldn't claim UI support.
+      if (caps?.extensions) {
+        expect(caps.extensions["io.modelcontextprotocol/ui"]).toBeUndefined();
+      }
+
+      await cleanup();
+    });
+
+    it("advertises UI capability alongside standard capabilities (not replacing them)", async () => {
+      const app: MCPAppDefinition = {
+        name: "dashboard",
+        uri: "ui://test/dashboard",
+        content: "<html></html>",
+      };
+
+      const { client, cleanup } = await createConnectedPair({ apps: [app] });
+      const caps = client.getServerCapabilities() as any;
+
+      // Standard capabilities must still be present — extensions is additive.
+      expect(caps.tools).toBeDefined();
+      expect(caps.resources).toBeDefined();
+      expect(caps.prompts).toBeDefined();
+      expect(caps.logging).toBeDefined();
+      expect(caps.extensions["io.modelcontextprotocol/ui"]).toBeDefined();
+
+      await cleanup();
+    });
+  });
+
+  // ══════════════════════════════════════════════════════════════════════════
   // Resource Templates
   // ══════════════════════════════════════════════════════════════════════════
 
