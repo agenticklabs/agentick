@@ -26,7 +26,7 @@
 
 import React, { useRef } from "react";
 import type { MCPClient } from "./client.js";
-import { useOnMount } from "../hooks/index.js";
+import { useOnMount, useOnUnmount } from "../hooks/index.js";
 import { Context } from "@agentick/kernel";
 import type { ChannelEvent } from "@agentick/kernel";
 import { AppBridge, RelayTransport } from "@agentick/mcp/client";
@@ -57,6 +57,8 @@ interface AppInstance {
 export function MCPAppHost(props: MCPAppHostProps): JSX.Element | null {
   // Map<appSessionId, AppInstance> — persists across renders
   const bridgesRef = useRef<Map<string, AppInstance>>(new Map());
+  // Channel unsubscribes — set in useOnMount, called in useOnUnmount
+  const unsubsRef = useRef<Array<() => void>>([]);
 
   useOnMount(() => {
     const ctx = Context.tryGet();
@@ -102,12 +104,13 @@ export function MCPAppHost(props: MCPAppHostProps): JSX.Element | null {
       // Create per-app channel for bidirectional relay
       const appChannelName = `mcp-app:${appSessionId}`;
 
-      // RelayTransport: bridge's send → publish to channel as "to-app"
+      // RelayTransport: bridge's send → publish to channel as "to-app".
+      // Note: ChannelServiceInterface.publish takes channel name as a
+      // separate arg and excludes it from the event object.
       const relay = new RelayTransport({
         send: (msg) => {
           channels.publish(ctx, appChannelName, {
             type: "to-app",
-            channel: appChannelName,
             payload: msg,
           });
         },
@@ -163,18 +166,21 @@ export function MCPAppHost(props: MCPAppHostProps): JSX.Element | null {
     const unsubMount = channels.subscribe(ctx, "mcp-app:mount", handleMount);
     const unsubUnmount = channels.subscribe(ctx, "mcp-app:unmount", handleUnmount);
 
-    // ── Cleanup on component unmount ─────────────────────────────────────
+    // Store unsubs for the unmount callback
+    unsubsRef.current = [unsubMount, unsubUnmount];
+  });
 
-    return () => {
-      unsubMount();
-      unsubUnmount();
-      // Close all remaining bridges
-      for (const instance of bridges.values()) {
-        instance.unsubChannel();
-        instance.relay.close().catch(() => {});
-      }
-      bridges.clear();
-    };
+  // ── Cleanup on component unmount ───────────────────────────────────────
+
+  useOnUnmount(() => {
+    for (const unsub of unsubsRef.current) unsub();
+    unsubsRef.current = [];
+    // Close all remaining bridges
+    for (const instance of bridgesRef.current.values()) {
+      instance.unsubChannel();
+      instance.relay.close().catch(() => {});
+    }
+    bridgesRef.current.clear();
   });
 
   return null;
