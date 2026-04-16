@@ -1,6 +1,6 @@
 {
   "name": "@agentick/sandbox-secure-exec",
-  "version": "0.14.36",
+  "version": "0.14.37",
   "description": "V8 isolate sandbox provider for Agentick — lightweight code execution via secure-exec",
   "keywords": [
     "agent",
