@@ -1,5 +1,16 @@
 # @agentick/gateway
 
+## 0.14.39
+
+### Patch Changes
+
+- e2c073b: passthrough mcp tool and capability info
+  - @agentick/kernel@0.14.39
+  - @agentick/shared@0.14.39
+  - @agentick/core@0.14.39
+  - @agentick/server@0.14.39
+  - @agentick/mcp@0.14.39
+
 ## 0.14.38
 
 ### Patch Changes
