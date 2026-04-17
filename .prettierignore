@@ -1,0 +1,4 @@
+CHANGELOG.md
+packages/*/CHANGELOG.md
+packages/adapters/*/CHANGELOG.md
+website/CHANGELOG.md
