@@ -374,11 +374,12 @@ function collectTimelineEntry(node: AgentickNode, result: CompiledStructure): vo
  * Falls back to individual props for raw <tool> elements.
  */
 function collectTool(node: AgentickNode, result: CompiledStructure): void {
-  // Prefer full metadata (from createTool-based components), fallback to individual props
+  // Prefer full metadata (from createTool-based components), fallback to individual props.
+  // `input` is the standard prop (Zod schema), `schema` is the legacy alias.
   const metadata: ToolMetadata = (node.props.metadata as ToolMetadata) ?? {
     name: node.props.name as string,
     description: (node.props.description as string) ?? "",
-    input: node.props.schema,
+    input: node.props.input ?? node.props.schema,
   };
 
   // Both ToolComponent (createTool) and <Tool> (primitives.ts) create <tool>

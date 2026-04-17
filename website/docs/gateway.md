@@ -164,6 +164,22 @@ gateway.use(
 );
 ```
 
+**Plugin configuration** supports `name`, `version`, and `description` for the
+MCP server identity (sent in the initialize response). The older `serverName`
+and `serverVersion` fields still work but are deprecated:
+
+```typescript
+gateway.use(
+  mcpServerPlugin({
+    name: "my-server", // replaces serverName (deprecated)
+    version: "2.0.0", // replaces serverVersion (deprecated)
+    description: "My MCP server for data tooling",
+    path: "/mcp",
+    // ...
+  }),
+);
+```
+
 Five modes:
 
 - **Pre-built server** — pass a fully configured `MCPServer` instance via `server`; the plugin just bridges it to HTTP
@@ -216,8 +232,30 @@ gateway.use(
 );
 ```
 
-Tools support MCP annotations (`readOnlyHint`, `destructiveHint`) via the
-`annotations` field. Tool calls dispatch through `tool-dispatch`.
+**Standalone tools** support MCP annotations (`readOnlyHint`, `destructiveHint`)
+via the `annotations` field, plus MCP Apps metadata via `ui` and `_meta` fields.
+When `ui` or `_meta` are set, the plugin forwards them to the underlying
+`MCPServer` so `tools/list` emits `_meta.ui.resourceUri` and spec-compliant
+hosts render the associated view:
+
+```typescript
+gateway.use(
+  mcpServerPlugin({
+    path: "/mcp",
+    tools: [
+      {
+        name: "show_dashboard",
+        description: "Display an interactive dashboard",
+        inputSchema: { type: "object", properties: { projectId: { type: "string" } } },
+        ui: { resourceUri: "ui://my-server/dashboard" },
+        handler: async (args) => ({ content: [{ type: "text", text: "Dashboard rendered" }] }),
+      },
+    ],
+  }),
+);
+```
+
+Tool calls dispatch through `tool-dispatch`.
 
 For multi-user deployments, use `toolFilter` to customize tools per MCP client
 based on the incoming HTTP request:

@@ -250,6 +250,32 @@ export class MCPClient {
     return !!cap?.mimeTypes.includes("text/html;profile=mcp-app");
   }
 
+  /**
+   * Get server info (name, version, description) from a connected server.
+   * Available after initialize handshake completes.
+   */
+  getServerInfo(
+    serverName: string,
+  ): { name: string; version: string; description?: string } | undefined {
+    const conn = this.connections.get(serverName);
+    if (!conn) return undefined;
+    // SDK Client stores serverInfo as "serverVersion" (legacy naming)
+    const info = conn.client.getServerVersion() as any;
+    if (!info) return undefined;
+    return { name: info.name, version: info.version, description: info.description };
+  }
+
+  /**
+   * Get instructions from a connected server.
+   * Instructions describe how to use the server's tools and resources —
+   * intended for injection into the LLM's system prompt.
+   */
+  getInstructions(serverName: string): string | undefined {
+    const conn = this.connections.get(serverName);
+    if (!conn) return undefined;
+    return conn.client.getInstructions?.();
+  }
+
   // ══════════════════════════════════════════════════════════════════════════
   // Tools
   // ══════════════════════════════════════════════════════════════════════════

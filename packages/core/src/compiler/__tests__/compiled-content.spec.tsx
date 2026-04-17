@@ -6,6 +6,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { z } from "zod";
 import { FiberCompiler } from "../fiber-compiler.js";
 import { markdownRenderer } from "../../renderers/index.js";
 import type { CompiledStructure, CompiledSection } from "../types.js";
@@ -511,6 +512,54 @@ describe("Compiled Content", () => {
       const compiled = await compiler.compile(<App />, tickState);
 
       expect(compiled.tools[0].metadata.input).toEqual(schema);
+    });
+
+    it("should collect tool schema from `input` prop (not just `schema`)", async () => {
+      const zodSchema = z.object({
+        server: z.string().optional(),
+        pattern: z.string().optional(),
+      });
+
+      const App = () => <Tool name="list_resources" input={zodSchema} handler={() => {}} />;
+
+      const compiled = await compiler.compile(<App />, tickState);
+
+      // The `input` prop should be read by the collector — this was broken
+      // when only `schema` was checked (collector.ts line 381).
+      expect(compiled.tools[0].metadata.input).toBe(zodSchema);
+      expect(compiled.tools[0].metadata.input).toBeDefined();
+    });
+
+    it("should preserve `input` prop tools across multiple compile passes (multi-tick)", async () => {
+      const zodSchema = z.object({
+        uri: z.string().describe("Resource URI"),
+      });
+
+      const App = () => <Tool name="read_resource" input={zodSchema} handler={() => {}} />;
+
+      // First compile (tick 1)
+      const compiled1 = await compiler.compile(<App />, tickState);
+      expect(compiled1.tools[0].metadata.input).toBe(zodSchema);
+
+      // Second compile (tick 2) — same component, different tick
+      const tick2 = { ...tickState, tick: 2 };
+      const compiled2 = await compiler.compile(<App />, tick2);
+      expect(compiled2.tools[0].metadata.input).toBe(zodSchema);
+      expect(compiled2.tools[0].metadata.name).toBe("read_resource");
+    });
+
+    it("should prefer `input` over `schema` when both are set", async () => {
+      const inputSchema = z.object({ query: z.string() });
+      const legacySchema = { type: "object" };
+
+      const App = () => (
+        <Tool name="search" input={inputSchema} schema={legacySchema} handler={() => {}} />
+      );
+
+      const compiled = await compiler.compile(<App />, tickState);
+
+      // `input` takes precedence over `schema`
+      expect(compiled.tools[0].metadata.input).toBe(inputSchema);
     });
 
     it("should collect multiple tools", async () => {

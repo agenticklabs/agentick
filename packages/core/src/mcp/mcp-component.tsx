@@ -19,6 +19,7 @@ import React, { useRef } from "react";
 import { MCPClient } from "./client.js";
 import { MCPToolComponent } from "./component.js";
 import { MCPResourceComponent } from "./resource-component.js";
+import { MCPServerInfoSection } from "./server-info-section.js";
 import { MCPAppHost } from "./app-host.js";
 import type { MCPConfig, MCPServerConfig } from "./types.js";
 import type { JSX } from "../jsx/jsx-runtime.js";
@@ -87,6 +88,7 @@ export function MCPComponent(props: MCPComponentProps): JSX.Element {
           />
         );
       })}
+      <MCPServerInfoSection key="mcp-server-info" servers={props.servers} mcpClient={mcpClient} />
       <MCPResourceComponent
         key="mcp-resources"
         servers={props.servers}

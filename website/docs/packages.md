@@ -15,7 +15,8 @@ Agentick is organized as a monorepo with layered packages. Each layer depends on
 │   @agentick/core      @agentick/gateway      @agentick/client       │
 │   @agentick/express   @agentick/devtools     @agentick/agent        │
 │   @agentick/tui       @agentick/react        @agentick/sandbox      │
-│   @agentick/connector  @agentick/secrets    @agentick/scheduler       │
+│   @agentick/mcp       @agentick/connector    @agentick/secrets      │
+│   @agentick/scheduler                                               │
 └──────────────────────────────┬──────────────────────────────────────┘
                                │
 ┌──────────────────────────────┴──────────────────────────────────────┐
@@ -83,6 +84,18 @@ Terminal UI for Agentick agents. Uses Ink (React for CLIs) with `@agentick/react
 ### @agentick/devtools
 
 Fiber tree inspector, timeline viewer, execution debugger. Connect to running agents for real-time inspection.
+
+### @agentick/mcp
+
+Standalone MCP server and client implementation. Sits in the Framework Layer alongside core and gateway but depends only on kernel + shared (foundation). Can be installed alone for a fully functional MCP server without the gateway or reconciler.
+
+**Server** (`@agentick/mcp/server`) — per-session SDK `Server` pool with shared registry, dynamic tool/resource/prompt/app registration, `handleHTTPRequest` for HTTP, `connect` for in-process/stdio, security pipeline, session lifecycle (TTL, idle cleanup, max sessions), dual-path events.
+
+**Client** (`@agentick/mcp/client`) — multi-server connection pool with caching, auto-invalidation on change notifications, URI routing, reconnection with exponential backoff, progress callbacks, sampling, roots, logging, completions, and cancellation support. Includes `getServerInfo()`, `getInstructions()`, `supportsMcpApps()`, and `getMcpAppsCapability()` for server metadata introspection.
+
+**Transport** (`@agentick/mcp/transport`) — exports `InMemoryTransport` (own implementation with deferred delivery via `queueMicrotask`, fixing a race condition in the SDK's synchronous version) and the SDK's `Transport` type.
+
+**Protocol** (`@agentick/mcp`) — types, error utilities (`toMCPResult`, `safeToolHandler`, `sanitizeErrorMessage`), and JSON-RPC error codes.
 
 ### @agentick/sandbox
 

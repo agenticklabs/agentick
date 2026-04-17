@@ -86,6 +86,29 @@ export class MCPClient {
   invalidateResources(serverName?: string): void {
     this.inner.invalidateResources(serverName);
   }
+
+  /**
+   * Get server info (name, version, description) for a connected server.
+   */
+  getServerInfo(
+    serverName: string,
+  ): { name: string; version: string; description?: string } | undefined {
+    return this.inner.getServerInfo(serverName);
+  }
+
+  /**
+   * Get instructions from a connected server.
+   */
+  getInstructions(serverName: string): string | undefined {
+    return this.inner.getInstructions(serverName);
+  }
+
+  /**
+   * Check if a connected server supports MCP Apps rendering.
+   */
+  supportsMcpApps(serverName: string): boolean {
+    return this.inner.supportsMcpApps(serverName);
+  }
 }
 
 // ============================================================================

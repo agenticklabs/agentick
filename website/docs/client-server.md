@@ -161,6 +161,55 @@ gateway.use(
 
 Any MCP client (Claude Desktop, Cursor, etc.) can connect at `http://host:port/mcp`.
 
+### MCPClient (Framework)
+
+`@agentick/mcp` provides `MCPClient` for connecting to one or more MCP servers
+from within an agent. It handles multi-server routing, caching, change
+notifications, and reconnection.
+
+```typescript
+import { MCPClient } from "@agentick/mcp/client";
+import { InMemoryTransport } from "@agentick/mcp/transport";
+
+const client = new MCPClient();
+
+// Connect to a server (in-process, stdio, or HTTP)
+const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+await server.connect(serverTransport);
+await client.connect({
+  serverName: "my-server",
+  transport: "in-process",
+  connection: { transport: clientTransport },
+});
+```
+
+**Server metadata** — after connecting, query the server's identity and instructions:
+
+```typescript
+// Server info from the initialize handshake
+const info = client.getServerInfo("my-server");
+// → { name: "my-server", version: "1.0.0", description: "My MCP server" }
+
+// Server-provided instructions (intended for LLM system prompt injection)
+const instructions = client.getInstructions("my-server");
+// → "Use the query tool to search data. Always specify a limit."
+```
+
+**MCP Apps capability detection:**
+
+```typescript
+// Check if the server supports MCP Apps (ui:// resources)
+client.supportsMcpApps("my-server"); // → true/false
+
+// Get the raw capability object
+client.getMcpAppsCapability("my-server");
+// → { mimeTypes: ["text/html;profile=mcp-app"] }
+```
+
+The client advertises `io.modelcontextprotocol/ui` capability by default so
+spec-compliant servers emit UI metadata. Opt out via `mcpApps: false` in client
+options.
+
 ### OpenAI-Compatible
 
 Serves `POST /v1/chat/completions` and `GET /v1/models`. Any OpenAI SDK client

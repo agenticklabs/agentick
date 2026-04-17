@@ -51,7 +51,8 @@ console.log(SearchTool.metadata.description); // "Search the web..."
 
 ## Inline Tools
 
-For simple tools, define them inline with `<Tool>`:
+For simple tools, define them inline with `<Tool>`. Both `input` and the
+legacy `schema` prop are supported for the Zod schema:
 
 ```tsx
 <Tool
@@ -275,6 +276,21 @@ const result = await accessor.dispatch("add-dir", { path: "/tmp/data" });
 // Dispatch a regular (model-visible) tool from user code — also works
 const result = await accessor.dispatch("shell", { command: "ls" });
 ```
+
+## Schema Normalization
+
+Tool schemas are normalized to JSON Schema before being sent to adapters. The
+normalization pipeline (`normalizeModelInput` / `resolveTools`) is async and
+handles multiple schema formats:
+
+- **Zod schemas** (v3 and v4) are converted to JSON Schema via kernel's `toJSONSchema`
+- **Plain JSON Schema** objects are detected via `detectSchemaType` and passed through
+- **Standard Schema** implementations are converted via `toJSONSchema`
+
+After normalization, every tool's metadata carries both `metadata.input` (the
+original Zod/schema object) and `metadata.inputSchema` (JSON Schema). Adapters
+read `inputSchema` for provider-specific conversion (e.g., Gemini's schema
+sanitization) and fall back to `input` when `inputSchema` is not present.
 
 ### Spawned Sessions
 

@@ -482,7 +482,11 @@ export class MCPServer {
         : {};
 
     const sdkServer = new Server(
-      { name: this.options.name, version: this.options.version },
+      {
+        name: this.options.name,
+        version: this.options.version,
+        ...(this.options.description && { description: this.options.description }),
+      },
       {
         capabilities: {
           tools: { listChanged: true },

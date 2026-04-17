@@ -89,7 +89,15 @@ export interface MCPServerPluginConfig {
    * Mutually exclusive with tools/resources/resourceTemplates/apps/instructions.
    */
   server?: MCPServer;
+  /** Server name for the MCP initialize response. */
+  name?: string;
+  /** Server version for the MCP initialize response. */
+  version?: string;
+  /** Human-readable server description for the MCP initialize response. */
+  description?: string;
+  /** @deprecated Use `name` instead. */
   serverName?: string;
+  /** @deprecated Use `version` instead. */
   serverVersion?: string;
   sessionId?: string;
   include?: string[];
@@ -297,8 +305,9 @@ export function mcpServerPlugin(config: MCPServerPluginConfig): GatewayPlugin {
 
       // ── Create ONE shared MCPServer ───────────────────────────────────
       mcpServer = new MCPServer({
-        name: config.serverName ?? "agentick-gateway",
-        version: config.serverVersion ?? "1.0.0",
+        name: config.name ?? config.serverName ?? "agentick-gateway",
+        version: config.version ?? config.serverVersion ?? "1.0.0",
+        ...(config.description && { description: config.description }),
         ...(config.instructions && { instructions: config.instructions }),
         tools: mcpTools,
         toolFilter: toolFilterFn,

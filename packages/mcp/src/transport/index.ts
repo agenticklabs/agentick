@@ -1,12 +1,14 @@
 /**
- * Transport re-exports from the MCP SDK.
+ * Transport exports.
  *
- * We don't wrap these — the SDK's transports are the protocol layer.
- * Consumers can also import directly from @modelcontextprotocol/sdk if they prefer.
+ * InMemoryTransport is our own implementation with deferred delivery
+ * semantics (queueMicrotask), fixing a race condition in the SDK's version
+ * where synchronous delivery causes "unknown message ID" errors.
+ *
+ * See: transport/in-memory.ts for details.
  */
 
-// In-process transport — zero overhead, linked pair for client ↔ server
-export { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+export { InMemoryTransport } from "./in-memory.js";
 
 // The SDK Transport interface (for typing custom transports)
 export type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";

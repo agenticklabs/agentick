@@ -100,6 +100,12 @@ export interface MCPServerOptions {
   version: string;
 
   /**
+   * Human-readable description of the server's purpose.
+   * Sent to clients in the initialize response as part of serverInfo.
+   */
+  description?: string;
+
+  /**
    * Instructions describing how to use the server and its features.
    * Sent to MCP clients in the initialize response and injected into
    * the LLM's context to improve understanding of available tools,

@@ -52,6 +52,8 @@ export { MCPService } from "./service.js";
 export { MCPToolComponent, MCPTool } from "./component.js";
 export { MCPResourceComponent, MCPResources } from "./resource-component.js";
 export type { MCPResourceComponentProps, MCPServerEntry } from "./resource-component.js";
+export { MCPServerInfoSection } from "./server-info-section.js";
+export type { MCPServerInfoSectionProps } from "./server-info-section.js";
 export { MCPAppHost } from "./app-host.js";
 export type { MCPAppHostProps } from "./app-host.js";
 
