@@ -1,5 +1,12 @@
 # @agentick/agent
 
+## 0.14.40
+
+### Patch Changes
+
+- @agentick/core@0.14.40
+- @agentick/shared@0.14.40
+
 ## 0.14.39
 
 ### Patch Changes
