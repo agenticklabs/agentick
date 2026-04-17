@@ -582,10 +582,20 @@ export function sanitizeSchemaForGemini(schema: any, depth = 0): any {
   return result;
 }
 
+/**
+ * Ensure the parameters object is a valid Gemini function declaration schema.
+ * Gemini requires `type: "object"` — empty `{}` or missing `type` is rejected.
+ */
+function ensureObjectSchema(params: any): any {
+  if (!params || typeof params !== "object") return { type: "object" };
+  if (!params.type) return { ...params, type: "object" };
+  return params;
+}
+
 export function mapToolDefinition(tool: any): any {
   if (typeof tool === "string") {
     return {
-      functionDeclarations: [{ name: tool, description: "", parameters: {} }],
+      functionDeclarations: [{ name: tool, description: "", parameters: { type: "object" } }],
     };
   }
 
@@ -596,7 +606,7 @@ export function mapToolDefinition(tool: any): any {
         {
           name: toolDef.name,
           description: toolDef.description || "",
-          parameters: sanitizeSchemaForGemini(toolDef.input) || {},
+          parameters: ensureObjectSchema(sanitizeSchemaForGemini(toolDef.input)),
         },
       ],
     };
@@ -614,12 +624,15 @@ export function mapToolDefinition(tool: any): any {
   }
 
   const metadata = (tool as any).metadata || tool;
+  // Read inputSchema (JSON Schema, set by enrichMetadata) or input (Zod/raw),
+  // then fall back to empty object schema.
+  const rawSchema = metadata?.inputSchema ?? metadata?.input;
   return {
     functionDeclarations: [
       {
         name: metadata?.id || metadata?.name || "unknown",
         description: metadata?.description || "",
-        parameters: sanitizeSchemaForGemini(metadata?.inputSchema) || {},
+        parameters: ensureObjectSchema(sanitizeSchemaForGemini(rawSchema)),
       },
     ],
   };

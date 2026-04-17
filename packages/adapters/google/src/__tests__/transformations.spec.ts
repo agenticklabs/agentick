@@ -563,7 +563,7 @@ describe("mapToolDefinition", () => {
           {
             name: "simple_tool",
             description: "",
-            parameters: {},
+            parameters: { type: "object" },
           },
         ],
       });
@@ -617,7 +617,7 @@ describe("mapToolDefinition", () => {
       };
       const result = mapToolDefinition(tool);
 
-      expect(result.functionDeclarations[0].parameters).toEqual({});
+      expect(result.functionDeclarations[0].parameters).toEqual({ type: "object" });
     });
 
     it("should merge providerOptions.google config", () => {
@@ -724,7 +724,7 @@ describe("mapToolDefinition", () => {
       expect(result.functionDeclarations[0]).toEqual({
         name: "unknown",
         description: "",
-        parameters: {},
+        parameters: { type: "object" },
       });
     });
   });
