@@ -1,6 +1,6 @@
 {
   "name": "@agentick/agent",
-  "version": "0.14.39",
+  "version": "0.14.40",
   "description": "Opinionated agent composition for Agentick",
   "keywords": [
     "agent",

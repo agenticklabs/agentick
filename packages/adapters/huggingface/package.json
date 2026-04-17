@@ -1,6 +1,6 @@
 {
   "name": "@agentick/huggingface",
-  "version": "0.14.39",
+  "version": "0.14.40",
   "description": "HuggingFace adapter for Agentick — local embeddings via transformers.js",
   "keywords": [
     "adapter",
