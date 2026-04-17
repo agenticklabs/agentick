@@ -1,5 +1,13 @@
 # @agentick/google
 
+## 0.14.42
+
+### Patch Changes
+
+- 0ddafea: ensure object schema
+  - @agentick/shared@0.14.42
+  - @agentick/core@0.14.42
+
 ## 0.14.41
 
 ### Patch Changes
