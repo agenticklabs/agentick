@@ -1,5 +1,15 @@
 # @agentick/core
 
+## 0.14.43
+
+### Patch Changes
+
+- dcf946a: client enhancements
+- Updated dependencies [dcf946a]
+  - @agentick/mcp@0.14.43
+  - @agentick/kernel@0.14.43
+  - @agentick/shared@0.14.43
+
 ## 0.14.42
 
 ### Patch Changes
