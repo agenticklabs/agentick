@@ -72,7 +72,7 @@ export function createGoogleModel(config: GoogleAdapterConfig = {}): ModelClass 
       },
 
       prepareInput: async (input: ModelInput) => {
-        const normalizedInput = normalizeModelInput(input, config);
+        const normalizedInput = await normalizeModelInput(input, config);
         const contents: any[] = [];
         let systemInstruction: string | undefined;
 

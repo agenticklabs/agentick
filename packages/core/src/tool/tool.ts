@@ -260,7 +260,7 @@ export interface CreateToolOptions<
   mcpConfig?: {
     serverUrl?: string;
     serverName?: string;
-    transport?: "stdio" | "sse" | "websocket";
+    transport?: "stdio" | "sse" | "websocket" | "in-process";
     [key: string]: any;
   };
 
@@ -697,7 +697,7 @@ export interface ToolDefinition extends BaseToolDefinition {
   mcpConfig?: {
     serverUrl?: string;
     serverName?: string;
-    transport?: "stdio" | "sse" | "websocket";
+    transport?: "stdio" | "sse" | "websocket" | "in-process";
     [key: string]: any;
   };
 }
@@ -785,7 +785,7 @@ export interface ToolMetadata<TInput = any, TOutput = any> {
   mcpConfig?: {
     serverUrl?: string;
     serverName?: string;
-    transport?: "stdio" | "sse" | "websocket";
+    transport?: "stdio" | "sse" | "websocket" | "in-process";
     [key: string]: any;
   };
 

@@ -1314,9 +1314,7 @@ describe("MCP Server Plugin — standalone tools", () => {
             }),
           },
         ],
-        apps: [
-          { name: "legacy", uri: "ui://legacy/view", content: "<html></html>" },
-        ],
+        apps: [{ name: "legacy", uri: "ui://legacy/view", content: "<html></html>" }],
       }),
     );
 

@@ -17,8 +17,9 @@ export interface MCPServerConfig {
 /**
  * MCP transport types
  * Note: 'websocket' maps to StreamableHTTP in the SDK
+ * 'in-process' uses a pre-created Transport object (e.g. InMemoryTransport)
  */
-export type MCPTransport = "stdio" | "sse" | "websocket";
+export type MCPTransport = "stdio" | "sse" | "websocket" | "in-process";
 
 /**
  * MCP server configuration

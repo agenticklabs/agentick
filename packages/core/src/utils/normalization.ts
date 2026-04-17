@@ -1,4 +1,5 @@
 import type { Message } from "@agentick/shared";
+import { toJSONSchema } from "@agentick/kernel";
 import { toolRegistry } from "./registry.js";
 import type {
   ModelConfig,
@@ -9,10 +10,10 @@ import type {
 } from "../model/model.js";
 import type { ExecutableTool, ToolMetadata } from "../tool/tool.js";
 
-export function normalizeModelInput<TConfig extends ModelConfig = ModelConfig>(
+export async function normalizeModelInput<TConfig extends ModelConfig = ModelConfig>(
   input: ModelInput,
   config: TConfig,
-): NormalizedModelInput {
+): Promise<NormalizedModelInput> {
   const defaults: Partial<ModelInput> = {
     model: config.model,
     temperature: config.temperature,
@@ -51,13 +52,15 @@ export function normalizeModelInput<TConfig extends ModelConfig = ModelConfig>(
     ...(rest as Omit<ModelInput, "messages" | "tools">),
     model: resolvedModel,
     messages: normalizedMessages,
-    tools: resolveTools(toolReferences),
+    tools: await resolveTools(toolReferences),
   };
 
   return normalized;
 }
 
-export function resolveTools(toolReferences: ModelToolReference[]): NormalizedModelTool[] {
+export async function resolveTools(
+  toolReferences: ModelToolReference[],
+): Promise<NormalizedModelTool[]> {
   const resolved: NormalizedModelTool[] = [];
 
   for (const ref of toolReferences) {
@@ -65,7 +68,7 @@ export function resolveTools(toolReferences: ModelToolReference[]): NormalizedMo
     if (isExecutableTool(ref)) {
       resolved.push({
         id: ref.metadata.name,
-        metadata: ref.metadata,
+        metadata: await enrichMetadata(ref.metadata),
       });
       continue;
     }
@@ -75,12 +78,9 @@ export function resolveTools(toolReferences: ModelToolReference[]): NormalizedMo
       if (tool) {
         resolved.push({
           id: tool.metadata.name,
-          metadata: tool.metadata,
+          metadata: await enrichMetadata(tool.metadata),
         });
       } else {
-        // If not found in registry, we can't resolve it here.
-        // It might be resolved later or ignored.
-        // For now, we warn.
         console.warn(`Tool reference '${ref}' not found in registry during normalization.`);
       }
       continue;
@@ -90,12 +90,32 @@ export function resolveTools(toolReferences: ModelToolReference[]): NormalizedMo
     if (isToolMetadata(ref)) {
       resolved.push({
         id: ref.name,
-        metadata: ref,
+        metadata: await enrichMetadata(ref),
       });
       continue;
     }
   }
   return resolved;
+}
+
+/**
+ * Enrich tool metadata with a pre-computed `inputSchema` (JSON Schema).
+ * Uses kernel's `toJSONSchema` which handles Zod v3/v4, Standard Schema,
+ * and plain JSON Schema. Adapters read `metadata.inputSchema` for
+ * provider-specific conversion (e.g., Gemini schema sanitization).
+ */
+async function enrichMetadata(metadata: ToolMetadata): Promise<ToolMetadata> {
+  if ((metadata as any).inputSchema) return metadata;
+  if (!metadata.input) return metadata;
+  try {
+    const inputSchema = await toJSONSchema(metadata.input);
+    if (inputSchema && Object.keys(inputSchema).length > 0) {
+      return { ...metadata, inputSchema } as any;
+    }
+  } catch {
+    // Schema conversion failed — adapter will handle raw input
+  }
+  return metadata;
 }
 
 function isExecutableTool(obj: any): obj is ExecutableTool {

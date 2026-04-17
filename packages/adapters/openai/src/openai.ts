@@ -221,7 +221,7 @@ export function createOpenAIModel(config: OpenAIAdapterConfig = {}): ModelClass 
     },
 
     prepareInput: async (input: ModelInput) => {
-      const normalizedInput = normalizeModelInput(input, config);
+      const normalizedInput = await normalizeModelInput(input, config);
 
       const messages: ChatCompletionMessageParam[] = [];
       for (const message of normalizedInput.messages) {

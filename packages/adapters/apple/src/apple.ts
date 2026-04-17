@@ -84,8 +84,8 @@ export function createAppleModel(config: AppleAdapterConfig = {}): ModelClass {
       supportsStructuredOutput: true,
     },
 
-    prepareInput: (input: ModelInput) => {
-      const normalized = normalizeModelInput(input, { model: modelId });
+    prepareInput: async (input: ModelInput) => {
+      const normalized = await normalizeModelInput(input, { model: modelId });
 
       // Extract system prompt from system-role messages or system field
       const systemMessages = normalized.messages.filter((m) => m.role === "system");

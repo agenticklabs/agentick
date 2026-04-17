@@ -97,7 +97,7 @@ export function normalizeResult(result: any): ContentBlock[] {
 export interface MCPToolConfig {
   serverUrl?: string;
   serverName?: string;
-  transport?: "stdio" | "sse" | "websocket";
+  transport?: "stdio" | "sse" | "websocket" | "in-process";
   [key: string]: any;
 }
 
