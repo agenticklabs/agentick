@@ -1,5 +1,5 @@
 import type { Message } from "@agentick/shared";
-import { toJSONSchema } from "@agentick/kernel";
+import { toJSONSchema, detectSchemaType } from "@agentick/kernel";
 import { toolRegistry } from "./registry.js";
 import type {
   ModelConfig,
@@ -100,20 +100,35 @@ export async function resolveTools(
 
 /**
  * Enrich tool metadata with a pre-computed `inputSchema` (JSON Schema).
- * Uses kernel's `toJSONSchema` which handles Zod v3/v4, Standard Schema,
- * and plain JSON Schema. Adapters read `metadata.inputSchema` for
- * provider-specific conversion (e.g., Gemini schema sanitization).
+ *
+ * Uses kernel's `detectSchemaType` to determine the input format:
+ * - "json-schema" → pass through directly (common for MCP-discovered tools)
+ * - "zod3"/"zod4"/"standard-*" → convert via kernel's `toJSONSchema`
+ *
+ * Adapters read `metadata.inputSchema` for provider-specific conversion
+ * (e.g., Gemini schema sanitization).
  */
 async function enrichMetadata(metadata: ToolMetadata): Promise<ToolMetadata> {
   if ((metadata as any).inputSchema) return metadata;
   if (!metadata.input) return metadata;
-  try {
-    const inputSchema = await toJSONSchema(metadata.input);
-    if (inputSchema && Object.keys(inputSchema).length > 0) {
-      return { ...metadata, inputSchema } as any;
+
+  let inputSchema: Record<string, unknown> | undefined;
+  const schemaType = detectSchemaType(metadata.input);
+
+  if (schemaType === "json-schema") {
+    // Already JSON Schema — no conversion needed
+    inputSchema = metadata.input as unknown as Record<string, unknown>;
+  } else if (schemaType !== "unknown") {
+    // Zod, Standard Schema, etc. — convert via kernel
+    try {
+      inputSchema = await toJSONSchema(metadata.input);
+    } catch {
+      // Schema conversion failed — adapter will handle raw input
     }
-  } catch {
-    // Schema conversion failed — adapter will handle raw input
+  }
+
+  if (inputSchema && Object.keys(inputSchema).length > 0) {
+    return { ...metadata, inputSchema } as any;
   }
   return metadata;
 }
