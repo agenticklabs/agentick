@@ -1,6 +1,6 @@
 {
   "name": "@agentick/express",
-  "version": "0.14.41",
+  "version": "0.14.42",
   "description": "Express middleware and router for Agentick applications",
   "repository": {
     "type": "git",
