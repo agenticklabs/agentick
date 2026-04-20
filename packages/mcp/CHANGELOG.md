@@ -1,5 +1,13 @@
 # @agentick/mcp
 
+## 0.14.44
+
+### Patch Changes
+
+- 61c0735: mcp client aligns with oauth connection spec and flow, fix mcp tools
+  - @agentick/kernel@0.14.44
+  - @agentick/shared@0.14.44
+
 ## 0.14.43
 
 ### Patch Changes
