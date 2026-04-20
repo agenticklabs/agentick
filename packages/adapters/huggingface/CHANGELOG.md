@@ -1,5 +1,13 @@
 # @agentick/huggingface
 
+## 0.14.44
+
+### Patch Changes
+
+- Updated dependencies [61c0735]
+  - @agentick/core@0.14.44
+  - @agentick/shared@0.14.44
+
 ## 0.14.43
 
 ### Patch Changes
