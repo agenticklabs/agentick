@@ -1,5 +1,14 @@
 # @agentick/core
 
+## 0.14.46
+
+### Patch Changes
+
+- bfa93be: mcp component to connect to mcp client in useData not useEffect
+  - @agentick/kernel@0.14.46
+  - @agentick/shared@0.14.46
+  - @agentick/mcp@0.14.46
+
 ## 0.14.45
 
 ### Patch Changes
