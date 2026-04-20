@@ -90,12 +90,12 @@
   "dependencies": {
     "@agentick/kernel": "workspace:*",
     "@agentick/shared": "workspace:*",
-    "@modelcontextprotocol/ext-apps": "^1.5.0",
+    "@modelcontextprotocol/ext-apps": "^1.6.0",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "zod": "^4.3.6"
   },
   "devDependencies": {
     "typescript": "^5.7.3",
-    "vitest": "^4.0.18"
+    "vitest": "^4.1.4"
   }
 }
