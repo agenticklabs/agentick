@@ -5,15 +5,18 @@
  * Supports runtime configuration (auth tokens, etc.) and tool filtering.
  */
 
-import React, { useEffect, useRef } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import type { EngineComponent } from "../component/component.js";
 import { MCPClient } from "./client.js";
 import { MCPService } from "./service.js";
+import { MCPExecutableTool, type MCPToolConfig } from "./tool.js";
 import type { MCPConfig, MCPServerConfig } from "./types.js";
+import type { ExecutableTool } from "../tool/tool.js";
 import type { JSX } from "../jsx/jsx-runtime.js";
 import type { ComponentBaseProps } from "../jsx/jsx-types.js";
 import { useCom } from "../hooks/index.js";
 import { isToolVisibleToModel } from "@agentick/mcp/client";
+import { createElement } from "../jsx/jsx-runtime.js";
 
 /**
  * Normalizes Cursor-style config to full MCPConfig
@@ -146,8 +149,12 @@ export function MCPToolComponent(props: MCPToolComponentProps): React.ReactEleme
   // Refs for managing state across renders
   const mcpClientRef = useRef<MCPClient | null>(null);
   const mcpServiceRef = useRef<MCPService | null>(null);
-  const registeredToolNamesRef = useRef<string[]>([]);
   const hasInitializedRef = useRef(false);
+
+  // Discovered ExecutableTools — stashed in state so that updating them
+  // triggers a re-render. The render phase emits <tool> elements, which
+  // the collector picks up every tick (surviving COM.clear()).
+  const [tools, setTools] = useState<ExecutableTool[]>([]);
 
   // Initialize refs on first render
   if (!mcpClientRef.current) {
@@ -155,7 +162,7 @@ export function MCPToolComponent(props: MCPToolComponentProps): React.ReactEleme
     mcpServiceRef.current = new MCPService(mcpClientRef.current);
   }
 
-  // Mount/unmount effect
+  // ── One-time async discovery (useEffect) ──────────────────────────────
   useEffect(() => {
     if (hasInitializedRef.current) {
       return;
@@ -167,51 +174,46 @@ export function MCPToolComponent(props: MCPToolComponentProps): React.ReactEleme
     const mcpClient = mcpClientRef.current!;
     const mcpService = mcpServiceRef.current!;
 
+    const mcpConfig: MCPToolConfig = {
+      serverName: effectiveConfig.serverName,
+      serverUrl: effectiveConfig.connection.url,
+      transport: effectiveConfig.transport,
+    };
+
     const initMCP = async () => {
       try {
         // Discover tools from MCP server
-        const tools = await mcpService.connectAndDiscover(effectiveConfig);
+        let defs = await mcpService.connectAndDiscover(effectiveConfig);
 
         // Filter tools based on include/exclude
-        let filteredTools = tools;
-
         if (props.include && props.include.length > 0) {
-          // Whitelist: only include specified tools
-          filteredTools = tools.filter((t) => props.include!.includes(t.name));
+          defs = defs.filter((t) => props.include!.includes(t.name));
         } else if (props.exclude && props.exclude.length > 0) {
-          // Blacklist: exclude specified tools
-          filteredTools = tools.filter((t) => !props.exclude!.includes(t.name));
+          defs = defs.filter((t) => !props.exclude!.includes(t.name));
         }
 
         // MCP Apps spec: skip tools that are only visible to apps (not the model).
-        // App-only tools are callable by iframes via the AppBridge but hidden from
-        // the LLM. Tools without visibility metadata default to visible-to-model.
-        filteredTools = filteredTools.filter((t) => isToolVisibleToModel(t as any));
+        defs = defs.filter((t) => isToolVisibleToModel(t as any));
 
-        // Register each filtered tool
-        for (const mcpToolDef of filteredTools) {
-          // Apply tool prefix if specified
-          const toolName = props.toolPrefix
-            ? `${props.toolPrefix}${mcpToolDef.name}`
-            : mcpToolDef.name;
+        // Apply tool prefix and create ExecutableTools
+        const executableTools = defs.map((def) => {
+          const name = props.toolPrefix ? `${props.toolPrefix}${def.name}` : def.name;
+          return new MCPExecutableTool(
+            mcpClient,
+            effectiveConfig.serverName,
+            { ...def, name },
+            mcpConfig,
+          );
+        });
 
-          // Create tool with prefixed name
-          const toolDef = {
-            ...mcpToolDef,
-            name: toolName,
-          };
+        // Setting state triggers re-render → render phase emits <tool> elements
+        setTools(executableTools);
 
-          mcpService.registerMCPTool(effectiveConfig, toolDef, ctx);
-          registeredToolNamesRef.current.push(toolName);
-        }
-
-        // Call onMount callback if provided
         if (props.onMount) {
           await props.onMount(ctx);
         }
       } catch (error) {
         console.error(`Failed to initialize MCP server "${props.server}":`, error);
-        // Call onMount even on error (for error handling)
         if (props.onMount) {
           await props.onMount(ctx);
         }
@@ -222,18 +224,11 @@ export function MCPToolComponent(props: MCPToolComponentProps): React.ReactEleme
 
     // Cleanup on unmount
     return () => {
-      // Remove registered tools
-      for (const toolName of registeredToolNamesRef.current) {
-        ctx.removeTool(toolName);
-      }
-      registeredToolNamesRef.current = [];
-
       // Disconnect MCP client if we created it (not shared)
       if (!props.mcpClient && mcpClient) {
         mcpClient.disconnect(baseConfig.serverName);
       }
 
-      // Call onUnmount callback if provided
       if (props.onUnmount) {
         props.onUnmount(ctx);
       }
@@ -251,8 +246,27 @@ export function MCPToolComponent(props: MCPToolComponentProps): React.ReactEleme
     props.onUnmount,
   ]);
 
-  // MCP components don't render anything
-  return null;
+  // ── Render <tool> elements ────────────────────────────────────────────
+  // Emitted every tick. The collector picks these up and adds them to the
+  // compiled structure, just like the <Tool> primitive. This means MCP
+  // tools survive COM.clear() — they're re-collected on each compilation.
+  if (tools.length === 0) return null;
+
+  return (
+    <>
+      {tools.map((tool) =>
+        createElement("tool", {
+          key: tool.metadata.name,
+          name: tool.metadata.name,
+          description: tool.metadata.description,
+          metadata: tool.metadata,
+          // Procedure type doesn't match the strict handler signature, but the
+          // collector just assigns it to ExecutableTool.run via cast — safe.
+          handler: tool.run as any,
+        }),
+      )}
+    </>
+  ) as unknown as React.ReactElement;
 }
 
 /**

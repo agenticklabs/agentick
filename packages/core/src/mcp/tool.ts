@@ -118,7 +118,7 @@ export interface MCPToolConfig {
  * const result = await tool.run({ path: '/file.txt' });
  * ```
  */
-export class MCPTool<
+export class MCPExecutableTool<
   THandler extends ToolHandler = ToolHandler,
 > implements ExecutableTool<THandler> {
   public readonly metadata: ToolMetadata<Parameters<THandler>[0]>;

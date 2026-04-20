@@ -58,7 +58,7 @@ export { MCPAppHost } from "./app-host.js";
 export type { MCPAppHostProps } from "./app-host.js";
 
 // ── Tool utilities ────────────────────────────────────────────────────
-export { MCPTool as MCPToolClass, mcpSchemaToZod, normalizeResult } from "./tool.js";
+export { MCPExecutableTool as MCPToolClass, mcpSchemaToZod, normalizeResult } from "./tool.js";
 export type { MCPToolConfig } from "./tool.js";
 export {
   createMCPTool,

@@ -155,7 +155,7 @@ describe("MCPTool — resolveContent for UI tools", () => {
       const { MCPService } = await import("../service.js");
       const service = new MCPService(client);
       const tools = await service.listTools(serverName);
-      const { MCPTool: MCPToolClass } = await import("../tool.js");
+      const { MCPExecutableTool: MCPToolClass } = await import("../tool.js");
       const tool = new MCPToolClass(client, serverName, tools[0]);
 
       // Verify resolveContent was populated
