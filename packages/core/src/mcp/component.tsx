@@ -5,7 +5,7 @@
  * Supports runtime configuration (auth tokens, etc.) and tool filtering.
  */
 
-import React, { useEffect, useRef, useState } from "react";
+import React, { useRef } from "react";
 import type { EngineComponent } from "../component/component.js";
 import { MCPClient } from "./client.js";
 import { MCPService } from "./service.js";
@@ -14,7 +14,7 @@ import type { MCPConfig, MCPServerConfig } from "./types.js";
 import type { ExecutableTool } from "../tool/tool.js";
 import type { JSX } from "../jsx/jsx-runtime.js";
 import type { ComponentBaseProps } from "../jsx/jsx-types.js";
-import { useCom } from "../hooks/index.js";
+import { useData, useOnUnmount } from "../hooks/index.js";
 import { isToolVisibleToModel } from "@agentick/mcp/client";
 import { createElement } from "../jsx/jsx-runtime.js";
 
@@ -144,113 +144,76 @@ export interface MCPToolComponentProps extends ComponentBaseProps, Partial<Engin
  * ```
  */
 export function MCPToolComponent(props: MCPToolComponentProps): React.ReactElement | null {
-  const ctx = useCom();
-
-  // Refs for managing state across renders
+  // Refs for persistent state across renders
   const mcpClientRef = useRef<MCPClient | null>(null);
   const mcpServiceRef = useRef<MCPService | null>(null);
-  const hasInitializedRef = useRef(false);
 
-  // Discovered ExecutableTools — stashed in state so that updating them
-  // triggers a re-render. The render phase emits <tool> elements, which
-  // the collector picks up every tick (surviving COM.clear()).
-  const [tools, setTools] = useState<ExecutableTool[]>([]);
-
-  // Initialize refs on first render
   if (!mcpClientRef.current) {
     mcpClientRef.current = props.mcpClient || new MCPClient();
     mcpServiceRef.current = new MCPService(mcpClientRef.current);
   }
 
-  // ── One-time async discovery (useEffect) ──────────────────────────────
-  useEffect(() => {
-    if (hasInitializedRef.current) {
-      return;
+  const mcpClient = mcpClientRef.current;
+  const mcpService = mcpServiceRef.current!;
+
+  const baseConfig = normalizeMCPConfig(props.server, props.config);
+  const effectiveConfig = mergeMCPConfig(baseConfig, props.runtimeConfig);
+
+  // ── useData blocks compilation until discovery completes ──────────────
+  // On the first render, useData throws the pending promise (suspension).
+  // The engine catches it, waits for resolution, then re-renders.
+  // On subsequent ticks, useData returns the cached tools synchronously.
+  const tools = useData<ExecutableTool[]>(
+    `mcp-tools:${props.server}`,
+    async () => {
+      const mcpConfig: MCPToolConfig = {
+        serverName: effectiveConfig.serverName,
+        serverUrl: effectiveConfig.connection.url,
+        transport: effectiveConfig.transport,
+      };
+
+      let defs = await mcpService.connectAndDiscover(effectiveConfig);
+
+      // Filter: include/exclude
+      if (props.include && props.include.length > 0) {
+        defs = defs.filter((t) => props.include!.includes(t.name));
+      } else if (props.exclude && props.exclude.length > 0) {
+        defs = defs.filter((t) => !props.exclude!.includes(t.name));
+      }
+
+      // MCP Apps spec: skip tools only visible to apps (not the model)
+      defs = defs.filter((t) => isToolVisibleToModel(t as any));
+
+      // Apply prefix, create ExecutableTools
+      return defs.map((def) => {
+        const name = props.toolPrefix ? `${props.toolPrefix}${def.name}` : def.name;
+        return new MCPExecutableTool(
+          mcpClient,
+          effectiveConfig.serverName,
+          { ...def, name },
+          mcpConfig,
+        );
+      });
+    },
+    [props.server, props.include?.join(","), props.exclude?.join(","), props.toolPrefix],
+  );
+
+  // ── Cleanup on unmount ────────────────────────────────────────────────
+  useOnUnmount(() => {
+    if (!props.mcpClient && mcpClient) {
+      mcpClient.disconnect(baseConfig.serverName);
     }
-    hasInitializedRef.current = true;
-
-    const baseConfig = normalizeMCPConfig(props.server, props.config);
-    const effectiveConfig = mergeMCPConfig(baseConfig, props.runtimeConfig);
-    const mcpClient = mcpClientRef.current!;
-    const mcpService = mcpServiceRef.current!;
-
-    const mcpConfig: MCPToolConfig = {
-      serverName: effectiveConfig.serverName,
-      serverUrl: effectiveConfig.connection.url,
-      transport: effectiveConfig.transport,
-    };
-
-    const initMCP = async () => {
-      try {
-        // Discover tools from MCP server
-        let defs = await mcpService.connectAndDiscover(effectiveConfig);
-
-        // Filter tools based on include/exclude
-        if (props.include && props.include.length > 0) {
-          defs = defs.filter((t) => props.include!.includes(t.name));
-        } else if (props.exclude && props.exclude.length > 0) {
-          defs = defs.filter((t) => !props.exclude!.includes(t.name));
-        }
-
-        // MCP Apps spec: skip tools that are only visible to apps (not the model).
-        defs = defs.filter((t) => isToolVisibleToModel(t as any));
-
-        // Apply tool prefix and create ExecutableTools
-        const executableTools = defs.map((def) => {
-          const name = props.toolPrefix ? `${props.toolPrefix}${def.name}` : def.name;
-          return new MCPExecutableTool(
-            mcpClient,
-            effectiveConfig.serverName,
-            { ...def, name },
-            mcpConfig,
-          );
-        });
-
-        // Setting state triggers re-render → render phase emits <tool> elements
-        setTools(executableTools);
-
-        if (props.onMount) {
-          await props.onMount(ctx);
-        }
-      } catch (error) {
-        console.error(`Failed to initialize MCP server "${props.server}":`, error);
-        if (props.onMount) {
-          await props.onMount(ctx);
-        }
-      }
-    };
-
-    initMCP();
-
-    // Cleanup on unmount
-    return () => {
-      // Disconnect MCP client if we created it (not shared)
-      if (!props.mcpClient && mcpClient) {
-        mcpClient.disconnect(baseConfig.serverName);
-      }
-
-      if (props.onUnmount) {
-        props.onUnmount(ctx);
-      }
-    };
-  }, [
-    ctx,
-    props.server,
-    props.config,
-    props.runtimeConfig,
-    props.include,
-    props.exclude,
-    props.toolPrefix,
-    props.mcpClient,
-    props.onMount,
-    props.onUnmount,
-  ]);
+    if (props.onUnmount) {
+      // @ts-expect-error — onUnmount expects COM but we don't have useCom here
+      props.onUnmount(undefined);
+    }
+  });
 
   // ── Render <tool> elements ────────────────────────────────────────────
-  // Emitted every tick. The collector picks these up and adds them to the
-  // compiled structure, just like the <Tool> primitive. This means MCP
-  // tools survive COM.clear() — they're re-collected on each compilation.
-  if (tools.length === 0) return null;
+  // Emitted every tick. The collector picks these up into compiled.tools,
+  // just like the <Tool> primitive. Tools survive COM.clear() because
+  // they're re-collected on each compilation pass.
+  if (!tools || tools.length === 0) return null;
 
   return (
     <>
@@ -260,8 +223,6 @@ export function MCPToolComponent(props: MCPToolComponentProps): React.ReactEleme
           name: tool.metadata.name,
           description: tool.metadata.description,
           metadata: tool.metadata,
-          // Procedure type doesn't match the strict handler signature, but the
-          // collector just assigns it to ExecutableTool.run via cast — safe.
           handler: tool.run as any,
         }),
       )}
