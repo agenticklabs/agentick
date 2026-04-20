@@ -22,6 +22,20 @@ export type {
   LogHandler,
 } from "./types.js";
 
+// OAuth
+export { createSDKProvider, DefaultOAuthProvider } from "./oauth.js";
+export type {
+  OAuthProvider,
+  DefaultOAuthProviderOptions,
+  OAuthClientMetadata,
+  OAuthTokens,
+  OAuthClientInformationMixed,
+  OAuthDiscoveryState,
+} from "./oauth.js";
+
+export { OAuthCallbackServer } from "./oauth-callback-server.js";
+export type { OAuthCallbackServerOptions } from "./oauth-callback-server.js";
+
 // MCP Apps — client/host side
 export {
   createMCPApp,

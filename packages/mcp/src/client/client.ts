@@ -30,7 +30,11 @@ import {
   CreateMessageRequestSchema,
   ListRootsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
+import { UnauthorizedError } from "@modelcontextprotocol/sdk/client/auth.js";
+import type { OAuthClientProvider as SDKOAuthClientProvider } from "@modelcontextprotocol/sdk/client/auth.js";
 import { Logger } from "@agentick/kernel";
+import { createSDKProvider, DefaultOAuthProvider } from "./oauth.js";
+import type { OAuthProvider } from "./oauth.js";
 import type {
   MCPConnectionConfig,
   MCPClientOptions,
@@ -101,21 +105,44 @@ export class MCPClient {
   // Connection Management
   // ══════════════════════════════════════════════════════════════════════════
 
+  // Track in-progress connections to prevent concurrent connect() calls
+  // from creating duplicate SDK Client instances on the same transport.
+  private readonly _connectingPromises = new Map<string, Promise<void>>();
+
   async connect(config: MCPConnectionConfig): Promise<void> {
     const { serverName } = config;
     const existing = this.connections.get(serverName);
-    if (existing?.state === "connected") return;
+    if (existing?.state === "connected") {
+      log.debug({ serverName }, "MCPClient.connect: already connected, skipping");
+      return;
+    }
 
+    // If a connect is already in progress for this server, wait for it
+    // instead of creating a second parallel connection.
+    const inflight = this._connectingPromises.get(serverName);
+    if (inflight) {
+      log.debug({ serverName }, "MCPClient.connect: connection in progress, waiting");
+      return inflight;
+    }
+
+    log.info(
+      { serverName, existingState: existing?.state },
+      "MCPClient.connect: initiating new connection",
+    );
+    const connectPromise = this._doConnect(config, serverName);
+    this._connectingPromises.set(serverName, connectPromise);
+    try {
+      await connectPromise;
+    } finally {
+      this._connectingPromises.delete(serverName);
+    }
+  }
+
+  private async _doConnect(config: MCPConnectionConfig, serverName: string): Promise<void> {
     const capabilities: Record<string, unknown> = {};
     if (this.options.samplingHandler) capabilities.sampling = {};
     if (this.options.roots) capabilities.roots = { listChanged: true };
 
-    // MCP Apps extension — advertise support so spec-compliant servers emit
-    // UI metadata (tools with `_meta.ui.resourceUri`, resources with
-    // `text/html;profile=mcp-app` mimeType). Per the 2026-01-26 spec, servers
-    // SHOULD check this capability via `getUiCapability()` before registering
-    // UI-enabled tools; without it, strict servers downgrade to text-only.
-    // Declared by default — opt out by setting `mcpApps: false` in options.
     if (this.options.mcpApps !== false) {
       capabilities.extensions = {
         "io.modelcontextprotocol/ui": {
@@ -135,8 +162,34 @@ export class MCPClient {
     this.setupNotificationHandlers(client, serverName);
     this.setupRequestHandlers(client, serverName);
 
-    const transport = this.createTransport(config);
-    await client.connect(transport);
+    const { transport, oauthProvider } = this.createTransport(config);
+
+    try {
+      await client.connect(transport);
+    } catch (err) {
+      // OAuth flow: transport threw UnauthorizedError after redirecting
+      // the user to authorize. Wait for the code, finish auth, and retry.
+      if (err instanceof UnauthorizedError && oauthProvider) {
+        log.info({ serverName }, "Authorization required, waiting for auth code");
+        this.emitter.emit("auth:required", { serverName });
+
+        const code = await oauthProvider.waitForAuthorizationCode();
+        if (!code) {
+          throw new Error(`Authorization cancelled for ${serverName}`);
+        }
+
+        log.info({ serverName }, "Auth code received, completing OAuth flow");
+        // finishAuth exists on SSE and StreamableHTTP transports
+        const authTransport = transport as Transport & { finishAuth(code: string): Promise<void> };
+        await authTransport.finishAuth(code);
+
+        // Retry the connection — tokens are now stored via the provider
+        await client.connect(transport);
+        this.emitter.emit("auth:complete", { serverName });
+      } else {
+        throw err;
+      }
+    }
 
     client.onclose = () => {
       const conn = this.connections.get(serverName);
@@ -145,7 +198,6 @@ export class MCPClient {
         this.emitter.emit("connection:state", { serverName, state: "disconnected" });
         log.warn({ serverName }, "MCP client disconnected");
 
-        // Auto-reconnect for non-in-process transports
         if (config.transport !== "in-process" && config.transport !== "stdio") {
           this.scheduleReconnect(config);
         }
@@ -153,6 +205,20 @@ export class MCPClient {
     };
 
     client.onerror = (error) => {
+      // Mid-session reauth: if the session expires and the transport throws
+      // UnauthorizedError, trigger the full auth flow again via reconnect.
+      if (error instanceof UnauthorizedError && oauthProvider) {
+        log.info({ serverName }, "Session expired, triggering reauth via reconnect");
+        const conn = this.connections.get(serverName);
+        if (conn) {
+          conn.state = "disconnected";
+          this.emitter.emit("connection:state", { serverName, state: "disconnected" });
+          this.emitter.emit("auth:expired", { serverName });
+          this.scheduleReconnect(config);
+        }
+        return;
+      }
+
       const conn = this.connections.get(serverName);
       if (conn) {
         conn.state = "degraded";
@@ -687,24 +753,81 @@ export class MCPClient {
     this.promptCache.delete(serverName);
   }
 
-  private createTransport(config: MCPConnectionConfig): Transport {
+  /**
+   * Resolve the OAuth provider for a connection config.
+   *
+   * Resolution order:
+   * 1. `auth.type === "oauth"` → use the provided custom provider
+   * 2. `auth.type === "bearer"/"api_key"/"none"/"custom"` → no OAuth
+   * 3. `auth` omitted + HTTP transport → default OAuth provider (auto-auth on 401)
+   * 4. `auth` omitted + stdio/in-process → no OAuth (trusted transports)
+   *
+   * Returns both the SDK-compatible provider (for the transport) and the
+   * agentick provider (for the waitForAuthorizationCode bridge).
+   */
+  private resolveAuthProvider(config: MCPConnectionConfig): {
+    sdkProvider?: SDKOAuthClientProvider;
+    oauthProvider?: OAuthProvider;
+  } {
+    if (config.auth) {
+      if (config.auth.type === "oauth") {
+        log.debug("Using custom OAuth provider for %s", config.serverName);
+        const provider = config.auth.provider;
+        return { sdkProvider: createSDKProvider(provider), oauthProvider: provider };
+      }
+      // bearer, api_key, none, custom — no OAuth flow
+      return {};
+    }
+
+    // No auth config — HTTP transports get automatic OAuth
+    const isHTTP = config.transport === "sse" || config.transport === "streamable-http";
+    if (isHTTP && config.connection.url) {
+      log.debug("Using default OAuth provider for %s (auto-auth on 401)", config.serverName);
+      const provider = new DefaultOAuthProvider({
+        serverName: config.serverName,
+        serverUrl: config.connection.url,
+      });
+      return { sdkProvider: createSDKProvider(provider), oauthProvider: provider };
+    }
+
+    return {};
+  }
+
+  private createTransport(config: MCPConnectionConfig): {
+    transport: Transport;
+    oauthProvider?: OAuthProvider;
+  } {
+    const { sdkProvider, oauthProvider } = this.resolveAuthProvider(config);
+
     switch (config.transport) {
       case "stdio":
         if (!config.connection.command) throw new Error("Stdio transport requires command");
-        return new StdioClientTransport({
-          command: config.connection.command,
-          args: config.connection.args ?? [],
-        });
+        return {
+          transport: new StdioClientTransport({
+            command: config.connection.command,
+            args: config.connection.args ?? [],
+          }),
+        };
       case "sse":
         if (!config.connection.url) throw new Error("SSE transport requires url");
-        return new SSEClientTransport(new URL(config.connection.url));
+        return {
+          transport: new SSEClientTransport(new URL(config.connection.url), {
+            authProvider: sdkProvider,
+          }),
+          oauthProvider,
+        };
       case "streamable-http":
         if (!config.connection.url) throw new Error("Streamable HTTP transport requires url");
-        return new StreamableHTTPClientTransport(new URL(config.connection.url));
+        return {
+          transport: new StreamableHTTPClientTransport(new URL(config.connection.url), {
+            authProvider: sdkProvider,
+          }),
+          oauthProvider,
+        };
       case "in-process":
         if (!config.connection.transport)
           throw new Error("In-process transport requires transport");
-        return config.connection.transport;
+        return { transport: config.connection.transport };
       default:
         throw new Error(`Unsupported MCP transport: ${config.transport}`);
     }

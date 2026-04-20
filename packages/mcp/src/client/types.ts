@@ -25,11 +25,21 @@ export interface MCPConnectionConfig {
     transport?: import("@modelcontextprotocol/sdk/shared/transport.js").Transport;
     [key: string]: any;
   };
-  auth?: {
-    type: "bearer" | "api_key" | "custom";
-    token?: string;
-    [key: string]: any;
-  };
+  /**
+   * Authentication configuration.
+   *
+   * - `bearer` / `api_key`: static token, no OAuth flow
+   * - `oauth`: custom OAuthProvider for full control over persistence and UX
+   * - `none`: explicitly disable auth (no 401 retry)
+   * - **omitted**: HTTP transports get automatic OAuth via DefaultOAuthProvider;
+   *   stdio/in-process get no auth (trusted transports)
+   */
+  auth?:
+    | { type: "bearer"; token: string }
+    | { type: "api_key"; token: string }
+    | { type: "oauth"; provider: import("./oauth.js").OAuthProvider }
+    | { type: "none" }
+    | { type: "custom"; [key: string]: any };
 }
 
 // ============================================================================

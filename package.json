@@ -38,7 +38,8 @@
     "changeset": "changeset",
     "version-packages": "changeset version",
     "publish-packages": "turbo run test build && changeset publish",
-    "tui": "tsx --tsconfig packages/tui/tsconfig.json packages/tui/src/bin.ts"
+    "tui": "tsx --tsconfig packages/tui/tsconfig.json packages/tui/src/bin.ts",
+    "local-publish": "pnpm -r publish --registry http://localhost:4873/ --no-git-checks"
   },
   "devDependencies": {
     "@changesets/cli": "^2.0.0",
