@@ -1,5 +1,11 @@
 # @agentick/client
 
+## 0.14.45
+
+### Patch Changes
+
+- @agentick/shared@0.14.45
+
 ## 0.14.44
 
 ### Patch Changes
