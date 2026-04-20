@@ -1,5 +1,13 @@
 # @agentick/ai-sdk
 
+## 0.14.45
+
+### Patch Changes
+
+- Updated dependencies [fbeae6c]
+  - @agentick/core@0.14.45
+  - @agentick/shared@0.14.45
+
 ## 0.14.44
 
 ### Patch Changes

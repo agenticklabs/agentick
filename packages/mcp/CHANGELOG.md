@@ -1,5 +1,13 @@
 # @agentick/mcp
 
+## 0.14.45
+
+### Patch Changes
+
+- fbeae6c: client fixes
+  - @agentick/kernel@0.14.45
+  - @agentick/shared@0.14.45
+
 ## 0.14.44
 
 ### Patch Changes
