@@ -31,8 +31,7 @@ async function createPair(
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   await server.connect(serverTransport);
 
-  const innerClient = (client as any).inner;
-  await innerClient.connect({
+  await client.connect({
     serverName,
     transport: "in-process",
     connection: { transport: clientTransport },
@@ -43,7 +42,7 @@ async function createPair(
     client,
     serverName,
     cleanup: async () => {
-      await innerClient.disconnectAll();
+      await client.disconnectAll();
       await server.close();
     },
   };

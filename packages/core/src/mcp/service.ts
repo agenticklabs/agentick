@@ -6,9 +6,18 @@
  */
 
 import type { MCPClient } from "./client.js";
+import type { MCPConnectionConfig } from "@agentick/mcp/client";
 import { MCPExecutableTool as MCPTool } from "./tool.js";
 import type { MCPConfig, MCPToolDefinition } from "./types.js";
 import type { COM } from "../com/object-model.js";
+
+/** Map core's MCPConfig to the mcp package's MCPConnectionConfig. */
+function toConnectionConfig(config: MCPConfig): MCPConnectionConfig {
+  return {
+    ...config,
+    transport: config.transport === "websocket" ? "streamable-http" : config.transport,
+  };
+}
 
 /**
  * MCP Service handles discovery and registration of MCP tools.
@@ -18,7 +27,7 @@ export class MCPService {
   constructor(private mcpClient: MCPClient) {}
 
   async connect(config: MCPConfig): Promise<void> {
-    await this.mcpClient.connect(config);
+    await this.mcpClient.connect(toConnectionConfig(config));
   }
 
   async disconnect(serverName: string): Promise<void> {
@@ -56,7 +65,13 @@ export class MCPService {
   }
 
   async listTools(serverName: string): Promise<MCPToolDefinition[]> {
-    return await this.mcpClient.listTools(serverName);
+    const tools = await this.mcpClient.listTools(serverName);
+    return tools.map((t) => ({
+      name: t.name,
+      description: t.description ?? "",
+      inputSchema: t.inputSchema as MCPToolDefinition["inputSchema"],
+      _meta: t._meta,
+    }));
   }
 
   /**

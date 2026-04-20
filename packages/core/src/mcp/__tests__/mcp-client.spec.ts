@@ -41,17 +41,9 @@ async function createPair(
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   await server.connect(serverTransport);
 
-  // Use a mock MCPConfig that exercises the adapter's normalization
-  // The adapter maps "websocket" → "streamable-http", but for InMemoryTransport
-  // we need to pass the transport directly. Let's use the config + manual connect.
-  // Actually — the adapter's connect() calls inner.connect() which uses createTransport().
-  // For "in-process", it expects connection.transport. But core's MCPConfig doesn't have
-  // "in-process" transport type. We need to access the inner client directly.
-  //
-  // For these tests, we bypass the adapter's connect() and connect the inner client
-  // directly with InMemoryTransport, then verify all other methods work through the adapter.
-  const innerClient = (client as any).inner;
-  await innerClient.connect({
+  // MCPClient is now the real @agentick/mcp client (no wrapper).
+  // Connect directly with in-process transport.
+  await client.connect({
     serverName,
     transport: "in-process",
     connection: { transport: clientTransport },
@@ -312,7 +304,7 @@ describe("MCPClient adapter — resources", () => {
     });
 
     const client = new MCPClient();
-    const inner = (client as any).inner;
+    const inner = client;
 
     const [ct1, st1] = InMemoryTransport.createLinkedPair();
     const [ct2, st2] = InMemoryTransport.createLinkedPair();
@@ -482,7 +474,7 @@ describe("MCPClient adapter — lifecycle", () => {
     const server2 = new MCPServer({ name: "s2", version: "1.0.0" });
 
     const client = new MCPClient();
-    const inner = (client as any).inner;
+    const inner = client;
 
     const [ct1, st1] = InMemoryTransport.createLinkedPair();
     const [ct2, st2] = InMemoryTransport.createLinkedPair();
@@ -513,73 +505,13 @@ describe("MCPClient adapter — lifecycle", () => {
 // Adapter connect() — config normalization
 // ============================================================================
 
-describe("MCPClient adapter — connect() path", () => {
-  it("maps MCPConfig.transport 'websocket' → 'streamable-http' on inner.connect()", async () => {
+describe("MCPClient — connect() path", () => {
+  // Transport mapping (websocket → streamable-http) now lives in MCPService,
+  // not in MCPClient. MCPClient is the real @agentick/mcp client — no wrapper.
+
+  it("forwards auth config through to connect()", async () => {
     const client = new MCPClient();
-    const inner = (client as any).inner as { connect: (config: unknown) => Promise<void> };
-
-    const spy = vi.spyOn(inner, "connect").mockResolvedValue(undefined);
-
-    await client.connect({
-      serverName: "ws-server",
-      transport: "websocket",
-      connection: { url: "ws://localhost:1234" },
-    });
-
-    expect(spy).toHaveBeenCalledTimes(1);
-    const calledWith = spy.mock.calls[0]![0] as {
-      serverName: string;
-      transport: string;
-      connection: { url: string };
-    };
-    expect(calledWith.serverName).toBe("ws-server");
-    expect(calledWith.transport).toBe("streamable-http");
-    expect(calledWith.connection.url).toBe("ws://localhost:1234");
-
-    spy.mockRestore();
-  });
-
-  it("passes through 'sse' transport unchanged", async () => {
-    const client = new MCPClient();
-    const inner = (client as any).inner as { connect: (config: unknown) => Promise<void> };
-    const spy = vi.spyOn(inner, "connect").mockResolvedValue(undefined);
-
-    await client.connect({
-      serverName: "sse-server",
-      transport: "sse",
-      connection: { url: "https://example.com/sse" },
-    });
-
-    const calledWith = spy.mock.calls[0]![0] as { transport: string };
-    expect(calledWith.transport).toBe("sse");
-    spy.mockRestore();
-  });
-
-  it("passes through 'stdio' transport unchanged", async () => {
-    const client = new MCPClient();
-    const inner = (client as any).inner as { connect: (config: unknown) => Promise<void> };
-    const spy = vi.spyOn(inner, "connect").mockResolvedValue(undefined);
-
-    await client.connect({
-      serverName: "stdio-server",
-      transport: "stdio",
-      connection: { command: "node", args: ["server.js"] },
-    });
-
-    const calledWith = spy.mock.calls[0]![0] as {
-      transport: string;
-      connection: { command: string; args: string[] };
-    };
-    expect(calledWith.transport).toBe("stdio");
-    expect(calledWith.connection.command).toBe("node");
-    expect(calledWith.connection.args).toEqual(["server.js"]);
-    spy.mockRestore();
-  });
-
-  it("forwards auth config through to inner.connect()", async () => {
-    const client = new MCPClient();
-    const inner = (client as any).inner as { connect: (config: unknown) => Promise<void> };
-    const spy = vi.spyOn(inner, "connect").mockResolvedValue(undefined);
+    const spy = vi.spyOn(client, "connect").mockResolvedValue(undefined);
 
     await client.connect({
       serverName: "auth-server",
@@ -621,7 +553,7 @@ describe("MCPClient adapter — connect() path", () => {
     // Inject via inner.connect() because the adapter's public connect() doesn't
     // expose "in-process" (it only accepts websocket/sse/stdio). This verifies
     // that the adapter and inner client share state correctly.
-    const innerClient = (client as any).inner;
+    const innerClient = client;
     await innerClient.connect({
       serverName: "adapter-connect-test",
       transport: "in-process",

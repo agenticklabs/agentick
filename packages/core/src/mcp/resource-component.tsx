@@ -98,7 +98,11 @@ export function MCPResourceComponent(props: MCPResourceComponentProps): JSX.Elem
         entries.map(async ([name, rawConfig]) => {
           const { config, runtimeConfig } = normalizeServerEntry(name, rawConfig);
           const effective = mergeMCPConfig(config, runtimeConfig);
-          await mcpClient.connect(effective);
+          await mcpClient.connect({
+            ...effective,
+            transport:
+              effective.transport === "websocket" ? "streamable-http" : effective.transport,
+          });
         }),
       );
 

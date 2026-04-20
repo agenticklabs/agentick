@@ -53,24 +53,19 @@ function mockSDKClient(overrides: {
 
 function createMockMCPClient(servers: Record<string, Partial<Client>>): MCPClient {
   const client = new MCPClient();
-  // The core MCPClient is a thin adapter over @agentick/mcp's MCPClient.
-  // Reach into `inner.connections` to inject mock SDK clients as connected.
-  // This mirrors how the old core MCPClient's private `clients` map was seeded,
-  // just against the new internal shape. `requireClient(serverName)` reads
-  // `conn.client` from this map, so the mock's vi.fn()s flow through unchanged.
-  const inner = (client as any).inner as {
-    connections: Map<
-      string,
-      {
-        client: Client;
-        config: Record<string, unknown>;
-        state: string;
-        reconnectAttempts: number;
-      }
-    >;
-  };
+  // MCPClient is now the real @agentick/mcp client (no wrapper).
+  // Reach into `connections` to inject mock SDK clients as connected.
+  const connections = (client as any).connections as Map<
+    string,
+    {
+      client: Client;
+      config: Record<string, unknown>;
+      state: string;
+      reconnectAttempts: number;
+    }
+  >;
   for (const [name, mock] of Object.entries(servers)) {
-    inner.connections.set(name, {
+    connections.set(name, {
       client: mock as Client,
       config: { serverName: name, transport: "sse", connection: { url: "http://mock" } },
       state: "connected",

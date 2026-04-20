@@ -110,13 +110,12 @@ describe("MCPAppHost — bridge lifecycle via session channels", () => {
 
     // ── Connect MCPClient to the server ──
     const mcpClient = new MCPClient();
-    const innerClient = (mcpClient as any).inner;
-    await innerClient.connect({
+    await mcpClient.connect({
       serverName: "test-mcp",
       transport: "in-process",
       connection: { transport: clientTransport },
     });
-    cleanups.push(() => innerClient.disconnectAll());
+    cleanups.push(() => mcpClient.disconnectAll());
 
     // ── Run session with MCPAppHost ──
     const { channels, ctx } = await setupSessionWithAppHost(mcpClient);
@@ -216,13 +215,12 @@ describe("MCPAppHost — bridge lifecycle via session channels", () => {
     cleanups.push(() => mcpServer.close());
 
     const mcpClient = new MCPClient();
-    const innerClient = (mcpClient as any).inner;
-    await innerClient.connect({
+    await mcpClient.connect({
       serverName: "test-mcp",
       transport: "in-process",
       connection: { transport: clientTransport },
     });
-    cleanups.push(() => innerClient.disconnectAll());
+    cleanups.push(() => mcpClient.disconnectAll());
 
     const { channels, ctx } = await setupSessionWithAppHost(mcpClient);
     const appSessionId = "app-teardown-1";
@@ -351,13 +349,12 @@ describe("MCPAppHost — bridge lifecycle via session channels", () => {
     cleanups.push(() => mcpServer.close());
 
     const mcpClient = new MCPClient();
-    const innerClient = (mcpClient as any).inner;
-    await innerClient.connect({
+    await mcpClient.connect({
       serverName: "test-mcp",
       transport: "in-process",
       connection: { transport: clientTransport },
     });
-    cleanups.push(() => innerClient.disconnectAll());
+    cleanups.push(() => mcpClient.disconnectAll());
 
     const { channels, ctx } = await setupSessionWithAppHost(mcpClient);
     const appSessionId = "dup-app";

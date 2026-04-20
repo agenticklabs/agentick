@@ -205,6 +205,21 @@ export class MCPClient {
     };
 
     client.onerror = (error) => {
+      // Ignore "unknown message ID" errors — these are harmless noise from the
+      // SDK's Protocol.connect() chaining onmessage when a second MCPClient
+      // connects to the same in-process transport. The stale handler fires
+      // first and errors, the real handler fires second and succeeds.
+      if (
+        error instanceof Error &&
+        error.message.startsWith("Received a response for an unknown message ID")
+      ) {
+        log.debug(
+          { serverName },
+          "Ignoring stale handler error (transport shared between MCPClient instances)",
+        );
+        return;
+      }
+
       // Mid-session reauth: if the session expires and the transport throws
       // UnauthorizedError, trigger the full auth flow again via reconnect.
       if (error instanceof UnauthorizedError && oauthProvider) {

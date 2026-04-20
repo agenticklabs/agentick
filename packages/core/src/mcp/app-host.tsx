@@ -91,9 +91,8 @@ export function MCPAppHost(props: MCPAppHostProps): JSX.Element | null {
         return;
       }
 
-      // Get the SDK Client for this server
-      const inner = (props.mcpClient as any).inner;
-      const sdkClient = inner?.connections?.get(serverName)?.client;
+      // Get the SDK Client for this server from the connections map
+      const sdkClient = (props.mcpClient as any).connections?.get(serverName)?.client;
       if (!sdkClient) {
         console.warn(
           `[mcp-app-host] No MCP client connection for server "${serverName}" — cannot mount app ${appSessionId}`,

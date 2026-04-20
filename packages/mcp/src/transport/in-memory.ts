@@ -47,10 +47,22 @@ export class InMemoryTransport implements Transport {
   }
 
   async start(): Promise<void> {
+    // Drain any messages that arrived before start() was called
     while (this._messageQueue.length > 0) {
       const queued = this._messageQueue.shift()!;
       this.onmessage?.(queued.message, queued.extra);
     }
+  }
+
+  /**
+   * Reset the transport for reuse — clears onmessage/onclose/onerror handlers.
+   * Call this before connecting a new SDK Client to the same transport to
+   * prevent stale handler chaining.
+   */
+  reset(): void {
+    this.onmessage = undefined;
+    this.onclose = undefined;
+    this.onerror = undefined;
   }
 
   async close(): Promise<void> {
