@@ -1,8 +1,12 @@
 /**
  * MCP (Model Context Protocol) Types
  *
- * Configuration types for MCP integration using @modelcontextprotocol/sdk
+ * Configuration types for MCP integration using @modelcontextprotocol/sdk.
+ * Auth and connection types are inherited from @agentick/mcp — this module
+ * adds Cursor-style shorthand and the 'websocket' transport alias.
  */
+
+import type { MCPConnectionConfig } from "@agentick/mcp/client";
 
 /**
  * Cursor-style MCP server configuration (simplified format)
@@ -22,48 +26,14 @@ export interface MCPServerConfig {
 export type MCPTransport = "stdio" | "sse" | "websocket" | "in-process";
 
 /**
- * MCP server configuration
+ * MCP server configuration.
+ *
+ * Extends @agentick/mcp's MCPConnectionConfig with the 'websocket' transport
+ * alias and a broader transport union. Auth types are inherited — see
+ * MCPConnectionConfig.auth for bearer, api_key, oauth, none options.
  */
-export interface MCPConfig {
-  /**
-   * Unique identifier for this MCP server connection
-   */
-  serverName: string;
-
-  /**
-   * Transport type for MCP communication
-   */
+export interface MCPConfig extends Omit<MCPConnectionConfig, "transport"> {
   transport: MCPTransport;
-
-  /**
-   * Connection details (transport-specific)
-   */
-  connection: {
-    /**
-     * For stdio: command and args to spawn
-     */
-    command?: string;
-    args?: string[];
-
-    /**
-     * For SSE/StreamableHTTP: server URL
-     */
-    url?: string;
-
-    /**
-     * Additional transport-specific options
-     */
-    [key: string]: any;
-  };
-
-  /**
-   * Optional authentication
-   */
-  auth?: {
-    type: "bearer" | "api_key" | "custom";
-    token?: string;
-    [key: string]: any;
-  };
 }
 
 /**

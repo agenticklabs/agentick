@@ -17,7 +17,7 @@ import { MCPClient } from "./client.js";
 import { MCPService } from "./service.js";
 import type { MCPConfig, MCPServerConfig, MCPToolDefinition } from "./types.js";
 import type { ExecutableTool } from "../tool/tool.js";
-import { MCPTool, type MCPToolConfig } from "./tool.js";
+import { MCPExecutableTool as MCPTool, type MCPToolConfig } from "./tool.js";
 import { MCPToolComponent, type MCPToolComponentProps } from "./component.js";
 
 // ============================================================================

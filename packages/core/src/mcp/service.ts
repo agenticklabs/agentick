@@ -6,7 +6,7 @@
  */
 
 import type { MCPClient } from "./client.js";
-import { MCPTool } from "./tool.js";
+import { MCPExecutableTool as MCPTool } from "./tool.js";
 import type { MCPConfig, MCPToolDefinition } from "./types.js";
 import type { COM } from "../com/object-model.js";
 
