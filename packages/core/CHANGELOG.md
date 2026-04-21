@@ -1,5 +1,14 @@
 # @agentick/core
 
+## 0.14.48
+
+### Patch Changes
+
+- 472821b: append sections to system
+  - @agentick/kernel@0.14.48
+  - @agentick/shared@0.14.48
+  - @agentick/mcp@0.14.48
+
 ## 0.14.47
 
 ### Patch Changes
