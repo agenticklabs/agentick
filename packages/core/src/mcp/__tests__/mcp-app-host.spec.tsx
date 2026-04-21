@@ -125,7 +125,6 @@ describe("MCPAppHost — bridge lifecycle via session channels", () => {
 
     channels.publish(ctx, "mcp-app:mount", {
       type: "mount",
-      channel: "mcp-app:mount",
       payload: {
         appSessionId,
         resourceUri: "ui://test/app",
@@ -149,7 +148,6 @@ describe("MCPAppHost — bridge lifecycle via session channels", () => {
     // First: initialize handshake (required by AppBridge before it accepts requests)
     channels.publish(ctx, channelName, {
       type: "to-server",
-      channel: channelName,
       payload: {
         jsonrpc: "2.0",
         id: 1,
@@ -172,7 +170,6 @@ describe("MCPAppHost — bridge lifecycle via session channels", () => {
     // Send the initialized notification
     channels.publish(ctx, channelName, {
       type: "to-server",
-      channel: channelName,
       payload: {
         jsonrpc: "2.0",
         method: "ui/notifications/initialized",
@@ -185,7 +182,6 @@ describe("MCPAppHost — bridge lifecycle via session channels", () => {
     // Now call the tool
     channels.publish(ctx, channelName, {
       type: "to-server",
-      channel: channelName,
       payload: {
         jsonrpc: "2.0",
         id: 2,
@@ -229,7 +225,6 @@ describe("MCPAppHost — bridge lifecycle via session channels", () => {
     // Mount
     channels.publish(ctx, "mcp-app:mount", {
       type: "mount",
-      channel: "mcp-app:mount",
       payload: { appSessionId, resourceUri: "ui://test/app", serverName: "test-mcp" },
     });
     await new Promise((r) => setTimeout(r, 50));
@@ -242,7 +237,6 @@ describe("MCPAppHost — bridge lifecycle via session channels", () => {
 
     channels.publish(ctx, channelName, {
       type: "to-server",
-      channel: channelName,
       payload: {
         jsonrpc: "2.0",
         id: 1,
@@ -262,7 +256,6 @@ describe("MCPAppHost — bridge lifecycle via session channels", () => {
     // Unmount
     channels.publish(ctx, "mcp-app:unmount", {
       type: "unmount",
-      channel: "mcp-app:unmount",
       payload: { appSessionId },
     });
     await new Promise((r) => setTimeout(r, 50));
@@ -275,7 +268,6 @@ describe("MCPAppHost — bridge lifecycle via session channels", () => {
 
     channels.publish(ctx, channelName, {
       type: "to-server",
-      channel: channelName,
       payload: {
         jsonrpc: "2.0",
         id: 2,
@@ -299,7 +291,6 @@ describe("MCPAppHost — bridge lifecycle via session channels", () => {
     // Mount a ghost server — should log warning, not crash, not create bridge
     channels.publish(ctx, "mcp-app:mount", {
       type: "mount",
-      channel: "mcp-app:mount",
       payload: {
         appSessionId: "ghost-app",
         resourceUri: "ui://nowhere/app",
@@ -318,7 +309,6 @@ describe("MCPAppHost — bridge lifecycle via session channels", () => {
 
     channels.publish(ctx, channelName, {
       type: "to-server",
-      channel: channelName,
       payload: {
         jsonrpc: "2.0",
         id: 1,
@@ -363,7 +353,6 @@ describe("MCPAppHost — bridge lifecycle via session channels", () => {
     for (let i = 0; i < 2; i++) {
       channels.publish(ctx, "mcp-app:mount", {
         type: "mount",
-        channel: "mcp-app:mount",
         payload: { appSessionId, resourceUri: "ui://test/app", serverName: "test-mcp" },
       });
       await new Promise((r) => setTimeout(r, 50));
@@ -378,7 +367,6 @@ describe("MCPAppHost — bridge lifecycle via session channels", () => {
 
     channels.publish(ctx, channelName, {
       type: "to-server",
-      channel: channelName,
       payload: {
         jsonrpc: "2.0",
         id: 1,
@@ -452,7 +440,6 @@ describe("MCPAppHost — bridge lifecycle via session channels", () => {
 
     channels.publish(ctx, "mcp-app:mount", {
       type: "mount",
-      channel: "mcp-app:mount",
       payload: { appSessionId, resourceUri: "ui://test/app", serverName: "test-mcp" },
     });
     await new Promise((r) => setTimeout(r, 50));
@@ -460,7 +447,6 @@ describe("MCPAppHost — bridge lifecycle via session channels", () => {
     // Initialize handshake
     channels.publish(ctx, channelName, {
       type: "to-server",
-      channel: channelName,
       payload: {
         jsonrpc: "2.0",
         id: 1,
@@ -476,7 +462,6 @@ describe("MCPAppHost — bridge lifecycle via session channels", () => {
 
     channels.publish(ctx, channelName, {
       type: "to-server",
-      channel: channelName,
       payload: { jsonrpc: "2.0", method: "ui/notifications/initialized", params: {} },
     });
     await new Promise((r) => setTimeout(r, 20));
@@ -484,7 +469,6 @@ describe("MCPAppHost — bridge lifecycle via session channels", () => {
     // Call the tool
     channels.publish(ctx, channelName, {
       type: "to-server",
-      channel: channelName,
       payload: {
         jsonrpc: "2.0",
         id: 2,
