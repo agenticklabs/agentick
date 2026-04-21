@@ -1,5 +1,11 @@
 # @agentick/secrets
 
+## 0.14.48
+
+### Patch Changes
+
+- @agentick/shared@0.14.48
+
 ## 0.14.47
 
 ### Patch Changes
