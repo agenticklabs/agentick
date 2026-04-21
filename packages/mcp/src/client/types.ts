@@ -209,6 +209,34 @@ export interface MCPClientOptions {
    * strict servers may then downgrade to text-only tool registration.
    */
   mcpApps?: boolean;
+  /** Default timeout in milliseconds for tool calls. Default: 60000 (60s). */
+  toolCallTimeoutMs?: number;
+  /** Circuit breaker for consistently failing servers. */
+  circuitBreaker?: {
+    /** Consecutive failures before opening the circuit. Default: 5. */
+    failureThreshold?: number;
+    /** Time in ms to keep circuit open before allowing a probe. Default: 30000. */
+    resetTimeoutMs?: number;
+  };
+}
+
+// ============================================================================
+// Client Errors
+// ============================================================================
+
+export interface MCPToolCallError {
+  type: "timeout" | "server_error" | "circuit_open" | "connection_lost" | "unknown";
+  message: string;
+  serverName: string;
+  toolName: string;
+  cause?: Error;
+}
+
+export class MCPClientError extends Error {
+  constructor(public readonly detail: MCPToolCallError) {
+    super(detail.message);
+    this.name = "MCPClientError";
+  }
 }
 
 // ============================================================================

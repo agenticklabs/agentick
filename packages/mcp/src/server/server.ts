@@ -15,7 +15,7 @@ import {
   McpError,
 } from "@modelcontextprotocol/sdk/types.js";
 import { UriTemplate } from "@modelcontextprotocol/sdk/shared/uriTemplate.js";
-import { Context, createProcedure } from "@agentick/kernel";
+import { Context, createProcedure, Logger } from "@agentick/kernel";
 import type {
   MCPServerOptions,
   MCPServerEvents,
@@ -38,6 +38,8 @@ import {
   buildRequestContext,
 } from "./security/pipeline.js";
 import { toolError } from "../protocol/errors.js";
+
+const log = Logger.for("mcp:server");
 // Use the SDK's own Zod → JSON Schema conversion (handles Zod v4)
 import { toJsonSchemaCompat } from "@modelcontextprotocol/sdk/server/zod-json-schema-compat.js";
 import { normalizeObjectSchema } from "@modelcontextprotocol/sdk/server/zod-compat.js";
@@ -222,6 +224,7 @@ export class MCPServer {
       transportType,
     });
 
+    log.info({ sessionId, transport: transportType }, "Session created");
     this.emit("mcp:session:created", { sessionId });
   }
 
@@ -254,6 +257,7 @@ export class MCPServer {
       const isInit = body != null && this.isInitializeRequest(body);
 
       if (!isInit) {
+        log.warn({ sessionId, method: req.method }, "Stale session request rejected");
         this.emit("mcp:session:stale", { sessionId, method: req.method });
         res.writeHead(404, { "Content-Type": "application/json" });
         res.end(
@@ -285,6 +289,10 @@ export class MCPServer {
       await evaluateConnectionGuard(security, connectionInfo);
     } catch (err) {
       if (err instanceof SecurityError) {
+        log.warn(
+          { origin: connectionInfo.origin, transport: "streamable-http", reason: err.message },
+          "Connection rejected",
+        );
         this.emit("mcp:security:connection-rejected", {
           origin: connectionInfo.origin,
           transport: "streamable-http",
@@ -310,6 +318,7 @@ export class MCPServer {
           lastActivityAt: Date.now(),
           transportType: "streamable-http",
         });
+        log.info({ sessionId: newSessionId, transport: "streamable-http" }, "Session created");
         this.emit("mcp:session:created", { sessionId: newSessionId });
       },
     });
@@ -422,6 +431,7 @@ export class MCPServer {
   async close(): Promise<void> {
     if (this.closed) return;
     this.closed = true;
+    log.info({ activeSessions: this.sessions.size }, "MCPServer closing");
 
     if (this.cleanupTimer) {
       clearInterval(this.cleanupTimer);
@@ -495,7 +505,12 @@ export class MCPServer {
           logging: {},
           ...uiExtension,
         },
-        ...(this.options.instructions && { instructions: this.options.instructions }),
+        ...(this.options.instructions && {
+          instructions:
+            typeof this.options.instructions === "function"
+              ? this.options.instructions()
+              : this.options.instructions,
+        }),
       },
     );
 
@@ -556,6 +571,7 @@ export class MCPServer {
 
       const sessionId = handlerCtx.sessionId;
       const requestId = String(extra.requestId ?? "");
+      log.debug({ sessionId, tool: toolName, requestId }, "Tool dispatch started");
       this.emit("mcp:tool:start", { sessionId, tool: toolName, requestId });
       const startTime = Date.now();
 
@@ -582,6 +598,10 @@ export class MCPServer {
           .result;
         const durationMs = Date.now() - startTime;
 
+        log.info(
+          { sessionId, tool: toolName, requestId, durationMs, isError: result.isError ?? false },
+          "Tool dispatch completed",
+        );
         this.emit("mcp:tool:end", {
           sessionId,
           tool: toolName,
@@ -592,7 +612,26 @@ export class MCPServer {
         return result;
       } catch (err) {
         const durationMs = Date.now() - startTime;
+
+        // Cancellation: the SDK aborts the signal when the client sends notifications/cancelled
+        if (err instanceof DOMException && err.name === "AbortError") {
+          log.info({ sessionId, tool: toolName, requestId, durationMs }, "Tool call cancelled");
+          this.emit("mcp:tool:cancelled", { sessionId, tool: toolName, requestId, durationMs });
+          this.emit("mcp:tool:end", {
+            sessionId,
+            tool: toolName,
+            requestId,
+            durationMs,
+            isError: true,
+          });
+          return toolError("Tool call was cancelled");
+        }
+
         const message = err instanceof Error ? err.message : String(err);
+        log.warn(
+          { sessionId, tool: toolName, requestId, durationMs, error: message },
+          "Tool dispatch failed",
+        );
         this.emit("mcp:tool:error", { sessionId, tool: toolName, requestId, error: message });
         this.emit("mcp:tool:end", {
           sessionId,
@@ -658,6 +697,7 @@ export class MCPServer {
     sdkServer.setRequestHandler(ReadResourceRequestSchema, async (request, extra): Promise<any> => {
       const uri = request.params.uri;
       const handlerCtx = await this.buildHandlerContext(extra);
+      log.debug({ sessionId: handlerCtx.sessionId, uri }, "Resource read");
       this.emit("mcp:resource:read", { sessionId: handlerCtx.sessionId, uri });
 
       try {
@@ -760,7 +800,26 @@ export class MCPServer {
 
   private async buildHandlerContext(extra: MCPHandlerExtra): Promise<MCPHandlerContext> {
     const request = await buildRequestContext(extra, this.options.contextProvider);
-    return { request, extra, sessionId: extra.sessionId ?? "unknown" };
+
+    const ctx: MCPHandlerContext = {
+      request,
+      extra,
+      sessionId: extra.sessionId ?? "unknown",
+      signal: extra.signal,
+    };
+
+    // Progress: if the client sent a progressToken, build a sendProgress callback
+    const progressToken = (extra as any)._meta?.progressToken;
+    if (progressToken !== undefined) {
+      ctx.sendProgress = async (progress: number, total?: number, message?: string) => {
+        await extra.sendNotification({
+          method: "notifications/progress",
+          params: { progressToken, progress, total, ...(message ? { message } : {}) },
+        } as any);
+      };
+    }
+
+    return ctx;
   }
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -777,6 +836,10 @@ export class MCPServer {
         if (now - session.lastActivityAt > ttlMs) {
           this.sessions.delete(sessionId);
           session.sdkServer.close().catch(() => {});
+          log.info(
+            { sessionId, idleMs: now - session.lastActivityAt },
+            "Session evicted (idle timeout)",
+          );
           this.emit("mcp:session:idle-timeout", {
             sessionId,
             idleMs: now - session.lastActivityAt,

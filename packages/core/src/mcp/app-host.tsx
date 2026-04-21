@@ -122,11 +122,45 @@ export function MCPAppHost(props: MCPAppHostProps): JSX.Element | null {
         }
       });
 
-      // Create AppBridge with the SDK Client
+      // Create AppBridge with SDK Client for auto-forwarding of resources,
+      // prompts, etc. We override oncalltool AFTER connect to intercept
+      // tool calls and pipe progress notifications back to the app.
       const bridge = new AppBridge(sdkClient, { name: "agentick-app-host", version: "1.0.0" }, {});
 
       try {
         await bridge.connect(relay as Transport);
+
+        // Override oncalltool AFTER connect — replaces auto-forward with
+        // our version that adds progress relay.
+        bridge.oncalltool = async (params: any) => {
+          return props.mcpClient.callTool(
+            serverName,
+            params.name,
+            (params.arguments ?? {}) as Record<string, unknown>,
+            {
+              onProgress: (info) => {
+                // Relay progress back to the app via the channel.
+                // Deferred to avoid reentrant channel publish during
+                // synchronous SDK message processing.
+                queueMicrotask(() => {
+                  channels.publish(ctx, appChannelName, {
+                    type: "to-app",
+                    payload: {
+                      jsonrpc: "2.0",
+                      method: "notifications/progress",
+                      params: {
+                        progressToken: params._meta?.progressToken ?? params.name,
+                        progress: info.progress,
+                        total: info.total,
+                        message: info.message,
+                      },
+                    },
+                  });
+                });
+              },
+            },
+          );
+        };
         bridges.set(appSessionId, {
           appSessionId,
           serverName,

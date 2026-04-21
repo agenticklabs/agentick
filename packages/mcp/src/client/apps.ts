@@ -169,11 +169,29 @@ export async function createMCPApp(options: CreateMCPAppOptions): Promise<MCPApp
         throw new Error(`Tool "${toolName}" is model-only and cannot be called from an app`);
       }
 
-      // Allowed — forward to MCPClient
+      // Allowed — forward to MCPClient with progress relay
       return mcpClient.callTool(
         serverName,
         toolName,
         (params.arguments ?? {}) as Record<string, unknown>,
+        {
+          onProgress: (info) => {
+            // Relay progress back to the app via the bridge's transport
+            try {
+              (bridge as any)._server?.notification({
+                method: "notifications/progress",
+                params: {
+                  progressToken: (params as any)._meta?.progressToken ?? toolName,
+                  progress: info.progress,
+                  total: info.total,
+                  message: info.message,
+                },
+              });
+            } catch {
+              // Best-effort — bridge may not support raw notifications
+            }
+          },
+        },
       );
     };
   }

@@ -26,7 +26,7 @@ import {
   ResourceListChangedNotificationSchema,
   PromptListChangedNotificationSchema,
   LoggingMessageNotificationSchema,
-  ProgressNotificationSchema,
+  // ProgressNotificationSchema,
   CreateMessageRequestSchema,
   ListRootsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
@@ -35,19 +35,21 @@ import type { OAuthClientProvider as SDKOAuthClientProvider } from "@modelcontex
 import { Logger } from "@agentick/kernel";
 import { createSDKProvider, DefaultOAuthProvider } from "./oauth.js";
 import type { OAuthProvider } from "./oauth.js";
-import type {
-  MCPConnectionConfig,
-  MCPClientOptions,
-  DiscoveredTool,
-  DiscoveredResource,
-  DiscoveredResourceTemplate,
-  DiscoveredPrompt,
-  ResourceContent,
-  PromptResult,
-  ConnectionState,
-  ServerHealth,
-  ProgressCallback,
-  LogMessage,
+import {
+  MCPClientError,
+  type MCPConnectionConfig,
+  type MCPClientOptions,
+  type DiscoveredTool,
+  type DiscoveredResource,
+  type DiscoveredResourceTemplate,
+  type DiscoveredPrompt,
+  type ResourceContent,
+  type PromptResult,
+  type ConnectionState,
+  type ServerHealth,
+  type ProgressCallback,
+  type LogMessage,
+  type MCPToolCallError,
 } from "./types.js";
 
 const log = Logger.for("mcp:client");
@@ -81,6 +83,8 @@ interface ManagedConnection {
   lastErrorAt?: number;
   lastError?: string;
   reconnectAttempts: number;
+  consecutiveFailures: number;
+  circuitOpenUntil?: number;
   reconnectTimer?: ReturnType<typeof setTimeout>;
 }
 
@@ -95,7 +99,6 @@ export class MCPClient {
   private readonly promptCache = new Map<string, DiscoveredPrompt[]>();
 
   // Progress callbacks keyed by progressToken
-  private readonly progressCallbacks = new Map<string | number, ProgressCallback>();
 
   constructor(options?: MCPClientOptions) {
     this.options = options ?? {};
@@ -250,6 +253,7 @@ export class MCPClient {
       state: "connected",
       lastConnectedAt: Date.now(),
       reconnectAttempts: 0,
+      consecutiveFailures: 0,
     });
 
     this.emitter.emit("connection:state", { serverName, state: "connected" });
@@ -384,30 +388,104 @@ export class MCPClient {
     serverName: string,
     toolName: string,
     input: Record<string, unknown>,
-    options?: { onProgress?: ProgressCallback; signal?: AbortSignal },
+    options?: { onProgress?: ProgressCallback; signal?: AbortSignal; timeoutMs?: number },
   ): Promise<any> {
-    const client = this.requireClient(serverName);
+    const conn = this.connections.get(serverName);
+    if (!conn || conn.state !== "connected") {
+      throw new MCPClientError({
+        type: "connection_lost",
+        message: `MCP server "${serverName}" is not connected`,
+        serverName,
+        toolName,
+      });
+    }
+
+    // Circuit breaker check
+    const cbConfig = this.options.circuitBreaker;
+    if (cbConfig && conn.circuitOpenUntil) {
+      if (Date.now() < conn.circuitOpenUntil) {
+        throw new MCPClientError({
+          type: "circuit_open",
+          message: `Circuit breaker open for "${serverName}" — server is consistently failing`,
+          serverName,
+          toolName,
+        });
+      }
+      // Half-open: allow one probe request
+      conn.circuitOpenUntil = undefined;
+    }
+
+    // Timeout: compose with caller's signal if both exist
+    const timeoutMs = options?.timeoutMs ?? this.options.toolCallTimeoutMs;
+    let signal = options?.signal;
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+
+    if (timeoutMs && !signal) {
+      const ac = new AbortController();
+      signal = ac.signal;
+      timeoutId = setTimeout(() => ac.abort(new Error("Tool call timeout")), timeoutMs);
+    }
 
     const params: any = { name: toolName, arguments: input };
 
-    // Progress support — register callback before call
+    // Progress: use the SDK's built-in onprogress option which sends
+    // progressToken = requestId (numeric). The SDK Client handles matching
+    // progress notifications to the correct callback internally.
+    const sdkOptions: any = { signal };
     if (options?.onProgress) {
-      const token = crypto.randomUUID();
-      params._meta = { progressToken: token };
-      this.progressCallbacks.set(token, options.onProgress);
-
-      try {
-        return await client.callTool(params, undefined, {
-          signal: options?.signal,
+      const cb = options.onProgress;
+      sdkOptions.onprogress = (params: any) => {
+        cb({
+          progress: params.progress,
+          total: params.total,
+          message: params.message,
         });
-      } finally {
-        this.progressCallbacks.delete(token);
-      }
+      };
     }
 
-    return client.callTool(params, undefined, {
-      signal: options?.signal,
-    });
+    try {
+      const result = await conn.client.callTool(params, undefined, sdkOptions);
+      conn.consecutiveFailures = 0;
+      return result;
+    } catch (err) {
+      this.recordFailure(conn, serverName, toolName, err);
+      throw this.classifyError(err, serverName, toolName);
+    } finally {
+      if (timeoutId) clearTimeout(timeoutId);
+    }
+  }
+
+  private recordFailure(
+    conn: ManagedConnection,
+    serverName: string,
+    toolName: string,
+    err: unknown,
+  ): void {
+    conn.consecutiveFailures++;
+    const cbConfig = this.options.circuitBreaker;
+    const threshold = cbConfig?.failureThreshold ?? 5;
+    if (cbConfig && conn.consecutiveFailures >= threshold) {
+      conn.circuitOpenUntil = Date.now() + (cbConfig.resetTimeoutMs ?? 30000);
+      log.warn(
+        { serverName, consecutiveFailures: conn.consecutiveFailures },
+        "Circuit breaker opened",
+      );
+    }
+    log.warn(
+      { serverName, toolName, error: err instanceof Error ? err.message : String(err) },
+      "Tool call failed",
+    );
+  }
+
+  private classifyError(err: unknown, serverName: string, toolName: string): MCPClientError {
+    if (err instanceof MCPClientError) return err;
+    const error = err instanceof Error ? err : new Error(String(err));
+    let type: MCPToolCallError["type"] = "unknown";
+    if (error.name === "AbortError" || error.message.includes("timeout")) type = "timeout";
+    else if (error.message.includes("not connected") || error.message.includes("closed"))
+      type = "connection_lost";
+    else type = "server_error";
+    return new MCPClientError({ type, message: error.message, serverName, toolName, cause: error });
   }
 
   invalidateTools(serverName?: string): void {
@@ -655,22 +733,10 @@ export class MCPClient {
       this.options.logHandler?.(msg, serverName);
     });
 
-    client.setNotificationHandler(ProgressNotificationSchema, async (notification) => {
-      const token = notification.params.progressToken;
-      const callback = this.progressCallbacks.get(token);
-      if (callback) {
-        callback({
-          progress: notification.params.progress,
-          total: notification.params.total,
-        });
-      }
-      this.emitter.emit("progress", {
-        serverName,
-        token,
-        progress: notification.params.progress,
-        total: notification.params.total,
-      });
-    });
+    // NOTE: We intentionally do NOT register a ProgressNotificationSchema handler.
+    // The SDK's Protocol constructor registers its own that routes to _progressHandlers
+    // (keyed by request messageId). This is what makes the `onprogress` option in
+    // callTool/request work. Overriding it would break the SDK's progress plumbing.
   }
 
   // ══════════════════════════════════════════════════════════════════════════

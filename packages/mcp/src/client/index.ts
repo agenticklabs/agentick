@@ -20,7 +20,9 @@ export type {
   LogLevel,
   LogMessage,
   LogHandler,
+  MCPClientError,
 } from "./types.js";
+export type { MCPToolCallError } from "./types.js";
 
 // OAuth
 export { createSDKProvider, DefaultOAuthProvider } from "./oauth.js";

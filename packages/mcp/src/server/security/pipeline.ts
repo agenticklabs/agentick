@@ -6,6 +6,9 @@ import type {
 } from "../../protocol/types.js";
 import { sanitizeErrorMessage } from "../../protocol/errors.js";
 import type { ResolvedSecurity } from "./defaults.js";
+import { Logger } from "@agentick/kernel";
+
+const log = Logger.for("mcp:security");
 
 // ============================================================================
 // Pipeline Error Types
@@ -86,18 +89,30 @@ export async function evaluateRequestPipeline(
   // 1. Authenticate
   const authn = await security.authenticator(ctx);
   if (!authn.authenticated) {
+    log.warn(
+      { reason: authn.reason, operation: operation.type, name: operation.name },
+      "Authentication failed",
+    );
     throw new SecurityError(401, sanitizeErrorMessage(authn.reason, "Authentication failed"));
   }
 
   // 2. Authorize
   const authz = await security.authorizer(ctx, operation);
   if (!authz.allowed) {
+    log.warn(
+      { reason: authz.reason, operation: operation.type, name: operation.name },
+      "Authorization denied",
+    );
     throw new SecurityError(403, sanitizeErrorMessage(authz.reason, "Forbidden"));
   }
 
   // 3. Rate limit
   const rateLimit = await security.rateLimiter(ctx, operation);
   if (!rateLimit.allowed) {
+    log.warn(
+      { operation: operation.type, name: operation.name, retryAfterMs: rateLimit.retryAfterMs },
+      "Rate limit exceeded",
+    );
     throw new SecurityError(429, "Rate limit exceeded", rateLimit.retryAfterMs);
   }
 

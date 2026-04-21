@@ -110,8 +110,13 @@ export interface MCPServerOptions {
    * Sent to MCP clients in the initialize response and injected into
    * the LLM's context to improve understanding of available tools,
    * resources, and workflows.
+   *
+   * Can be a function for per-session dynamic instructions (e.g., injecting
+   * authenticated user context). The function is called when each new client
+   * session initializes — `Context.tryGet()?.user` is available at that point
+   * for HTTP sessions authenticated via the gateway.
    */
-  instructions?: string;
+  instructions?: string | (() => string);
 
   tools?: MCPToolDefinition[];
   resources?: MCPStaticResource[];
@@ -196,6 +201,17 @@ export interface MCPHandlerContext {
   extra: MCPHandlerExtra;
   /** Shortcut: the session ID for this request. */
   sessionId: string;
+  /** AbortSignal — aborted when the client sends notifications/cancelled. */
+  signal: AbortSignal;
+  /**
+   * Send a progress notification to the client. Only available when the
+   * client supplied a progressToken in _meta. Undefined otherwise.
+   *
+   * @param progress - Current progress value
+   * @param total - Total progress value (optional)
+   * @param message - Human-readable progress message (optional)
+   */
+  sendProgress?: (progress: number, total?: number, message?: string) => Promise<void>;
 }
 
 export type MCPToolHandler = (
@@ -331,6 +347,7 @@ export interface MCPServerEvents {
     isError: boolean;
   };
   "mcp:tool:error": { sessionId: string; tool: string; requestId: string; error: string };
+  "mcp:tool:cancelled": { sessionId: string; tool: string; requestId: string; durationMs: number };
 
   "mcp:resource:read": { sessionId: string; uri: string };
   "mcp:resource:list": { sessionId: string };

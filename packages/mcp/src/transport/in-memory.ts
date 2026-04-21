@@ -1,16 +1,17 @@
 /**
- * In-Memory Transport with correct async delivery semantics.
+ * In-Memory Transport for MCP client/server testing and in-process use.
  *
- * The MCP SDK's InMemoryTransport delivers messages synchronously in
- * `send()`, which causes responses to arrive before the sender has
- * registered its response handler ("unknown message ID" errors).
+ * Delivers messages synchronously — same as the SDK's InMemoryTransport.
+ * This is correct because the SDK's Protocol.request() registers the
+ * response handler BEFORE calling transport.send(), so responses arriving
+ * synchronously will always find their handler.
  *
- * This implementation uses `queueMicrotask` to defer delivery, ensuring
- * the sender's call stack completes before the recipient processes the
- * message. This matches the behavior of real transports (stdio, HTTP)
- * where delivery is inherently asynchronous.
- *
- * Implements the MCP SDK's Transport interface directly.
+ * The previous queueMicrotask-based deferral was a workaround for a
+ * different bug (duplicate MCPClient instances connecting to the same
+ * transport). That bug was fixed by consolidating to a single MCPClient
+ * class. Synchronous delivery is now safe and preserves message ordering
+ * (progress notifications arrive before the tool result, matching real
+ * transport behavior).
  */
 
 import type {
@@ -47,22 +48,10 @@ export class InMemoryTransport implements Transport {
   }
 
   async start(): Promise<void> {
-    // Drain any messages that arrived before start() was called
     while (this._messageQueue.length > 0) {
       const queued = this._messageQueue.shift()!;
       this.onmessage?.(queued.message, queued.extra);
     }
-  }
-
-  /**
-   * Reset the transport for reuse — clears onmessage/onclose/onerror handlers.
-   * Call this before connecting a new SDK Client to the same transport to
-   * prevent stale handler chaining.
-   */
-  reset(): void {
-    this.onmessage = undefined;
-    this.onclose = undefined;
-    this.onerror = undefined;
   }
 
   async close(): Promise<void> {
@@ -80,9 +69,7 @@ export class InMemoryTransport implements Transport {
     const other = this._otherTransport;
 
     if (other.onmessage) {
-      // Defer delivery via microtask so the sender's call stack completes
-      // before the recipient processes the message.
-      queueMicrotask(() => other.onmessage?.(message));
+      other.onmessage(message);
     } else {
       other._messageQueue.push({ message });
     }
