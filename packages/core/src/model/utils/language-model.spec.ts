@@ -136,8 +136,9 @@ describe("language-model transformers", () => {
 
         const result = await fromEngineState(input);
 
-        // No system message should be created
-        expect(result.messages.length).toBe(0);
+        // Only the noAudience section should render (audience: "user" is excluded)
+        expect(result.messages.length).toBe(1);
+        expect((result.messages[0].content[0] as any).text).toContain("No audience set");
       });
 
       it("should combine multiple model-audience sections", async () => {
