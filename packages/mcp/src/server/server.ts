@@ -525,6 +525,17 @@ export class MCPServer {
         );
       }
 
+      // Apply per-session tool transforms (e.g., inject user context into descriptions)
+      if (this.options.toolTransform) {
+        visibleTools = visibleTools
+          .map((t) => {
+            const transformed = this.options.toolTransform!(t.definition, handlerCtx.request);
+            if (!transformed) return null;
+            return transformed === t.definition ? t : { ...t, definition: transformed };
+          })
+          .filter((t): t is RegisteredTool => t !== null);
+      }
+
       return {
         tools: visibleTools.map((t) => {
           const ui = t.definition.ui;

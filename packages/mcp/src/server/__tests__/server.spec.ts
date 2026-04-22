@@ -789,6 +789,39 @@ describe("MCPServer", () => {
 
       await cleanup();
     });
+
+    it("toolTransform modifies tool descriptions per session", async () => {
+      const { client, cleanup } = await createConnectedPair({
+        tools: [createTestTool("query"), createTestTool("other")],
+        toolTransform: (tool) => {
+          if (tool.name === "query") {
+            return { ...tool, description: `${tool.description}\n\nUser: Alice at Acme Corp.` };
+          }
+          return tool;
+        },
+      });
+
+      const { tools } = await client.listTools();
+      const query = tools.find((t) => t.name === "query");
+      const other = tools.find((t) => t.name === "other");
+      expect(query?.description).toContain("User: Alice at Acme Corp.");
+      expect(other?.description).not.toContain("Alice");
+
+      await cleanup();
+    });
+
+    it("toolTransform returning null removes tool from listing", async () => {
+      const { client, cleanup } = await createConnectedPair({
+        tools: [createTestTool("keep"), createTestTool("remove")],
+        toolTransform: (tool) => (tool.name === "remove" ? null : tool),
+      });
+
+      const { tools } = await client.listTools();
+      expect(tools.map((t) => t.name)).toContain("keep");
+      expect(tools.map((t) => t.name)).not.toContain("remove");
+
+      await cleanup();
+    });
   });
 
   // ══════════════════════════════════════════════════════════════════════════

@@ -131,6 +131,14 @@ export interface MCPServerOptions {
   toolFilter?: (tool: MCPToolDefinition, ctx: MCPRequestContext) => boolean;
 
   /**
+   * Transform tool definitions per session before tools/list response.
+   * Called for each tool with the request context. Return a modified definition
+   * to inject per-session context (e.g., user info into description), or return
+   * the original unchanged. Return null to remove the tool from the list.
+   */
+  toolTransform?: (tool: MCPToolDefinition, ctx: MCPRequestContext) => MCPToolDefinition | null;
+
+  /**
    * Security — all function types, transport-aware defaults.
    * HTTP: localOnlyGuard + rejectAllAuth. In-process/stdio: allowAll.
    */
