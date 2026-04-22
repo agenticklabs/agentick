@@ -40,8 +40,8 @@ import {
 import { toolError } from "../protocol/errors.js";
 
 const log = Logger.for("mcp:server");
-// Use the SDK's own Zod → JSON Schema conversion (handles Zod v4)
-import { toJsonSchemaCompat } from "@modelcontextprotocol/sdk/server/zod-json-schema-compat.js";
+// Schema conversion
+import { toJSONSchemaSync, isJSONSchema } from "@agentick/kernel";
 import { normalizeObjectSchema } from "@modelcontextprotocol/sdk/server/zod-compat.js";
 
 // ============================================================================
@@ -773,24 +773,27 @@ export class MCPServer {
   // ══════════════════════════════════════════════════════════════════════════
 
   private addToolToRegistry(tool: MCPToolDefinition): void {
+    const definition = normalizeLegacyToolUi(tool);
+
     let jsonSchema: Record<string, unknown>;
-    // Use the same Zod → JSON Schema conversion the SDK's McpServer uses internally
-    const normalized = normalizeObjectSchema(tool.inputSchema as any);
-    if (normalized) {
-      jsonSchema = toJsonSchemaCompat(normalized, {
-        strictUnions: true,
-        pipeStrategy: "input",
-      }) as Record<string, unknown>;
-    } else if (typeof tool.inputSchema === "object" && "type" in tool.inputSchema) {
-      // Already JSON Schema
+    if (isJSONSchema(tool.inputSchema)) {
       jsonSchema = tool.inputSchema as Record<string, unknown>;
     } else {
-      jsonSchema = { type: "object" };
+      const normalized = normalizeObjectSchema(tool.inputSchema as any) ?? tool.inputSchema;
+      jsonSchema = toJSONSchemaSync(normalized, { target: "draft-07", stripMeta: false });
     }
-    // Hydrate ui.resourceUri from the legacy _meta["ui/resourceUri"] key so
-    // tools authored against the pre-spec MCP Apps shape route through the
-    // canonical code paths (visibility filtering, tool→app resolution, etc.).
-    const definition = normalizeLegacyToolUi(tool);
+
+    // MCP spec: tool inputSchema must be type "object".
+    // Also add additionalProperties: false when absent — zod objects are
+    // strict by default, and some MCP clients (e.g., Claude Code) use this
+    // to decide whether to send typed values or stringify arguments.
+    if (!jsonSchema.type) {
+      jsonSchema = { type: "object", ...jsonSchema };
+    }
+    if (jsonSchema.type === "object" && !("additionalProperties" in jsonSchema)) {
+      jsonSchema.additionalProperties = false;
+    }
+
     this.tools.set(definition.name, { definition, jsonSchema });
   }
 

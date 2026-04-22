@@ -146,6 +146,12 @@ export function isStandardJSONSchema(value: unknown): boolean {
 export function isJSONSchema(value: unknown): boolean {
   if (value == null || typeof value !== "object") return false;
   const obj = value as Record<string, unknown>;
+
+  // Exclude zod schemas — they have .type as a string (e.g., "ZodObject")
+  // but are NOT JSON Schema. Check for zod markers first.
+  if (obj._def !== undefined || obj._zod !== undefined) return false;
+  if ("~standard" in obj) return false;
+
   // JSON Schema typically has "type" or "$schema" or "properties"
   return (
     typeof obj.type === "string" ||
@@ -360,6 +366,93 @@ export async function toJSONSchema(
   }
 
   // Strip meta properties if requested
+  if (stripMeta && result) {
+    delete result["$schema"];
+    delete result["additionalProperties"];
+  }
+
+  return result;
+}
+
+/**
+ * Synchronous version of toJSONSchema. Handles Zod 4 (via Standard JSON Schema
+ * interface), Standard JSON Schema, JSON Schema passthrough, and Zod 3 (via
+ * zod-to-json-schema if available synchronously — falls back to empty schema).
+ *
+ * Use this when async dynamic import is not acceptable (e.g., MCP tool
+ * registration at server startup).
+ */
+export function toJSONSchemaSync(
+  schema: unknown,
+  options: ToJSONSchemaOptions = {},
+): Record<string, unknown> {
+  const { target = "draft-2020-12", stripMeta = true } = options;
+
+  if (schema == null) return {};
+
+  const schemaType = detectSchemaType(schema);
+  let result: Record<string, unknown>;
+
+  switch (schemaType) {
+    case "zod4": {
+      // Zod 4 implements Standard JSON Schema — sync call.
+      // JSON round-trip strips lazy getters/proxies from zod 4 internals
+      // (e.g. `required` as a getter instead of a plain array).
+      const standard = (schema as Record<string, unknown>)["~standard"] as
+        | Record<string, unknown>
+        | undefined;
+      if (
+        standard?.jsonSchema &&
+        typeof (standard.jsonSchema as Record<string, unknown>).input === "function"
+      ) {
+        const raw = (
+          standard.jsonSchema as { input: (opts: { target: string }) => Record<string, unknown> }
+        ).input({ target });
+        result = JSON.parse(JSON.stringify(raw));
+      } else {
+        result = {};
+      }
+      break;
+    }
+
+    case "zod3": {
+      // Zod 3 needs zod-to-json-schema — try sync require, skip if unavailable.
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const mod = require("zod-to-json-schema") as Record<string, unknown>;
+        const zodToJsonSchema = (mod.zodToJsonSchema ?? mod.default) as
+          | ((s: unknown, o?: Record<string, unknown>) => Record<string, unknown>)
+          | undefined;
+        if (typeof zodToJsonSchema === "function") {
+          result = zodToJsonSchema(schema, { target: "jsonSchema7" });
+        } else {
+          result = {};
+        }
+      } catch {
+        result = {};
+      }
+      break;
+    }
+
+    case "standard-json-schema": {
+      const standard = (schema as Record<string, unknown>)[
+        "~standard"
+      ] as StandardJSONSchemaV1Props;
+      const raw = standard.jsonSchema.input({ target });
+      result = JSON.parse(JSON.stringify(raw));
+      break;
+    }
+
+    case "json-schema": {
+      result = { ...(schema as Record<string, unknown>) };
+      break;
+    }
+
+    default: {
+      result = typeof schema === "object" ? { ...(schema as Record<string, unknown>) } : {};
+    }
+  }
+
   if (stripMeta && result) {
     delete result["$schema"];
     delete result["additionalProperties"];
