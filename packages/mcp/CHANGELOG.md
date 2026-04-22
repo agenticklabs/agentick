@@ -1,5 +1,13 @@
 # @agentick/mcp
 
+## 0.14.50
+
+### Patch Changes
+
+- 6e231ac: add toolTransform callback
+  - @agentick/kernel@0.14.50
+  - @agentick/shared@0.14.50
+
 ## 0.14.49
 
 ### Patch Changes
