@@ -1,5 +1,12 @@
 # @agentick/kernel
 
+## 0.14.49
+
+### Patch Changes
+
+- 0bba30e: schema support
+  - @agentick/shared@0.14.49
+
 ## 0.14.48
 
 ### Patch Changes
