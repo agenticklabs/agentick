@@ -108,6 +108,12 @@ export interface MCPServerPluginConfig {
    * Return the tools this client should see.
    */
   toolFilter?: (tools: ToolEntry[], ctx: MCPRequestContext) => ToolEntry[] | Promise<ToolEntry[]>;
+  /**
+   * Transform tool definitions per session before tools/list response.
+   * Passed directly to MCPServer — use to inject per-session context
+   * (e.g., user info into tool descriptions).
+   */
+  toolTransform?: MCPServerOptions["toolTransform"];
   tools?: MCPStandaloneTool[];
   resources?: MCPStaticResource[];
   resourceTemplates?: MCPResourceTemplate[];
@@ -311,6 +317,7 @@ export function mcpServerPlugin(config: MCPServerPluginConfig): GatewayPlugin {
         ...(config.instructions && { instructions: config.instructions }),
         tools: mcpTools,
         toolFilter: toolFilterFn,
+        toolTransform: config.toolTransform,
         apps: config.apps,
         resources: config.resources?.map((res) => ({
           name: res.name,
