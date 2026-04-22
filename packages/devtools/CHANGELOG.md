@@ -1,5 +1,11 @@
 # @agentick/devtools
 
+## 0.14.49
+
+### Patch Changes
+
+- @agentick/shared@0.14.49
+
 ## 0.14.48
 
 ### Patch Changes
