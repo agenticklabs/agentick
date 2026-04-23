@@ -62,55 +62,68 @@
   "exports": {
     ".": {
       "types": "./src/index.ts",
-      "import": "./dist/index.js"
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
     },
     "./jsx-runtime": {
       "types": "./src/jsx/jsx-runtime.ts",
-      "import": "./dist/jsx/jsx-runtime.js"
+      "import": "./dist/jsx/jsx-runtime.js",
+      "default": "./dist/jsx/jsx-runtime.js"
     },
     "./jsx-dev-runtime": {
       "types": "./src/jsx/jsx-runtime.ts",
-      "import": "./dist/jsx/jsx-runtime.js"
+      "import": "./dist/jsx/jsx-runtime.js",
+      "default": "./dist/jsx/jsx-runtime.js"
     },
     "./app": {
       "types": "./src/app.ts",
-      "import": "./dist/app.js"
+      "import": "./dist/app.js",
+      "default": "./dist/app.js"
     },
     "./model": {
       "types": "./src/model/index.ts",
-      "import": "./dist/model/index.js"
+      "import": "./dist/model/index.js",
+      "default": "./dist/model/index.js"
     },
     "./com": {
       "types": "./src/com/index.ts",
-      "import": "./dist/com/index.js"
+      "import": "./dist/com/index.js",
+      "default": "./dist/com/index.js"
     },
     "./jsx": {
       "types": "./src/jsx/index.ts",
-      "import": "./dist/jsx/index.js"
+      "import": "./dist/jsx/index.js",
+      "default": "./dist/jsx/index.js"
     },
     "./hooks": {
       "types": "./src/compiler/index.ts",
-      "import": "./dist/compiler/index.js"
+      "import": "./dist/compiler/index.js",
+      "default": "./dist/compiler/index.js"
     },
     "./compiler": {
       "types": "./src/compiler/index.ts",
-      "import": "./dist/compiler/index.js"
+      "import": "./dist/compiler/index.js",
+      "default": "./dist/compiler/index.js"
     },
     "./utils": {
       "types": "./src/utils/index.ts",
-      "import": "./dist/utils/index.js"
+      "import": "./dist/utils/index.js",
+      "default": "./dist/utils/index.js"
     },
     "./tool": {
       "types": "./src/tool/index.ts",
-      "import": "./dist/tool/index.js"
+      "import": "./dist/tool/index.js",
+      "default": "./dist/tool/index.js"
     },
     "./model/utils/language-model": {
       "types": "./src/model/utils/language-model.ts",
-      "import": "./dist/model/utils/language-model.js"
+      "import": "./dist/model/utils/language-model.js",
+      "default": "./dist/model/utils/language-model.js"
     },
     "./testing": {
       "types": "./src/testing/index.ts",
-      "import": "./dist/testing/index.js"
+      "import": "./dist/testing/index.js",
+      "default": "./dist/testing/index.js"
     }
   },
   "publishConfig": {

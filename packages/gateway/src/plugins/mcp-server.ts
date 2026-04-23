@@ -117,14 +117,15 @@ export interface MCPServerPluginConfig {
   tools?: MCPStandaloneTool[];
   resources?: MCPStaticResource[];
   resourceTemplates?: MCPResourceTemplate[];
-  /**
-   * Instructions describing how to use the server and its features.
-   * Sent to MCP clients in the initialize response. Clients inject this
-   * into the LLM's context to improve understanding of available tools
-   * and resources.
-   */
-  instructions?: string;
+  /** Instructions for MCP clients. Supports per-session dynamic form (function). */
+  instructions?: MCPServerOptions["instructions"];
   apps?: MCPAppDefinition[];
+  /** Security config passed to MCPServer. Default: allow-all (gateway handles auth). */
+  security?: MCPServerOptions["security"];
+  /** Build MCPRequestContext from each request. */
+  contextProvider?: MCPServerOptions["contextProvider"];
+  /** Session management config. */
+  sessions?: MCPServerOptions["sessions"];
   oauthMetadata?: { issuer: string; cacheTtl?: number } | { metadata: Record<string, unknown> };
 }
 
@@ -368,11 +369,14 @@ export function mcpServerPlugin(config: MCPServerPluginConfig): GatewayPlugin {
           },
           complete: tmpl.complete,
         })),
-        // Gateway handles auth — MCP server trusts all requests
-        security: {
+        // Default: gateway handles auth — MCP server trusts all requests.
+        // Consumers can override via config.security.
+        security: config.security ?? {
           connectionGuard: async () => true,
           authenticator: async () => ({ authenticated: true }),
         },
+        contextProvider: config.contextProvider,
+        sessions: config.sessions,
       });
 
       // ── Register HTTP route — delegates to MCPServer.handleHTTPRequest ──
