@@ -1,5 +1,11 @@
 # @agentick/shared
 
+## 0.14.51
+
+### Patch Changes
+
+- 152943e: fix package exports for default imports
+
 ## 0.14.50
 
 ## 0.14.49
