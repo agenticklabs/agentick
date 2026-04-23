@@ -1,5 +1,15 @@
 # agentick
 
+## 0.14.51
+
+### Patch Changes
+
+- 152943e: fix package exports for default imports
+- Updated dependencies [152943e]
+  - @agentick/agent@0.14.51
+  - @agentick/core@0.14.51
+  - @agentick/guardrails@0.14.51
+
 ## 0.14.50
 
 ### Patch Changes

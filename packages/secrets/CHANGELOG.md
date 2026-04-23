@@ -1,5 +1,13 @@
 # @agentick/secrets
 
+## 0.14.51
+
+### Patch Changes
+
+- 152943e: fix package exports for default imports
+- Updated dependencies [152943e]
+  - @agentick/shared@0.14.51
+
 ## 0.14.50
 
 ### Patch Changes

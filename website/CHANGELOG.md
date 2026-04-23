@@ -1,5 +1,11 @@
 # agentick-website
 
+## 1.0.2
+
+### Patch Changes
+
+- 152943e: fix package exports for default imports
+
 ## 1.1.0
 
 ### @agentick/mcp
