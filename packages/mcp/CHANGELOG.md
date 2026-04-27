@@ -1,5 +1,13 @@
 # @agentick/mcp
 
+## 0.14.52
+
+### Patch Changes
+
+- 999d640: feat(mcp): add securitySchemes, clientInfo, and clientCapabilities to MCP
+  - @agentick/kernel@0.14.52
+  - @agentick/shared@0.14.52
+
 ## 0.14.51
 
 ### Patch Changes
