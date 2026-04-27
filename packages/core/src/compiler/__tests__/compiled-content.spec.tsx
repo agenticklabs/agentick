@@ -295,6 +295,119 @@ describe("Compiled Content", () => {
       expect(section!.content[1].type).toBe("code");
       expect(section!.content[2].type).toBe("text");
     });
+
+    it("should merge adjacent text nodes from JSX interpolation into a single block", async () => {
+      const name = "Ernesto";
+      const industry = "contracting";
+      const App = () => (
+        <Section id="inline-text">
+          You are {name}, an AI assistant for {industry} businesses.
+        </Section>
+      );
+
+      const compiled = await compiler.compile(<App />, tickState);
+      const section = getSection(compiled, "inline-text");
+
+      // Should be a single text block, not 5 separate ones
+      expect(section!.content.length).toBe(1);
+      expect(section!.content[0].type).toBe("text");
+      expect(section!.content[0].text).toBe(
+        "You are Ernesto, an AI assistant for contracting businesses.",
+      );
+    });
+
+    it("should keep text blocks separate when split by non-text elements", async () => {
+      const App = () => (
+        <Section id="split-text">
+          Before the code
+          <CodeComponent text="x = 1" language="python" />
+          After the code
+        </Section>
+      );
+
+      const compiled = await compiler.compile(<App />, tickState);
+      const section = getSection(compiled, "split-text");
+
+      // 3 blocks: text, code, text — the code element breaks the text run
+      expect(section!.content.length).toBe(3);
+      expect(section!.content[0].type).toBe("text");
+      expect(section!.content[0].text).toBe("Before the code");
+      expect(section!.content[1].type).toBe("code");
+      expect(section!.content[2].type).toBe("text");
+      expect(section!.content[2].text).toBe("After the code");
+    });
+  });
+
+  // ============================================================
+  // Inline text merging — end-to-end through renderer
+  // ============================================================
+
+  describe("inline text merging", () => {
+    it("should render interpolated JSX as a single inline string", async () => {
+      const name = "Ernesto";
+      const industry = "contracting";
+      const App = () => (
+        <Section id="e2e-inline">
+          You are {name}, an AI assistant for {industry} businesses.
+        </Section>
+      );
+
+      const compiled = await compiler.compile(<App />, tickState);
+      const rendered = renderSectionContent(getSection(compiled, "e2e-inline")!);
+
+      // No \n\n between interpolated values
+      expect(rendered).toBe("You are Ernesto, an AI assistant for contracting businesses.");
+    });
+
+    it("should separate semantic blocks with \\n\\n but not inline text", async () => {
+      const name = "Ernesto";
+      const App = () => (
+        <Section id="e2e-mixed">
+          <H1>Welcome</H1>
+          Hello {name}, how can I help?
+        </Section>
+      );
+
+      const compiled = await compiler.compile(<App />, tickState);
+      const rendered = renderSectionContent(getSection(compiled, "e2e-mixed")!);
+
+      // Heading separated from text, but interpolation within text is inline
+      expect(rendered).toBe("# Welcome\n\nHello Ernesto, how can I help?");
+    });
+
+    it("should separate consecutive paragraphs with \\n\\n", async () => {
+      const App = () => (
+        <Section id="e2e-paragraphs">
+          <Paragraph>First paragraph.</Paragraph>
+          <Paragraph>Second paragraph.</Paragraph>
+          <Paragraph>Third paragraph.</Paragraph>
+        </Section>
+      );
+
+      const compiled = await compiler.compile(<App />, tickState);
+      const rendered = renderSectionContent(getSection(compiled, "e2e-paragraphs")!);
+
+      expect(rendered).toBe("First paragraph.\n\nSecond paragraph.\n\nThird paragraph.");
+    });
+
+    it("should handle paragraphs with inline interpolation correctly", async () => {
+      const user = "Ryan";
+      const count = 5;
+      const App = () => (
+        <Section id="e2e-para-inline">
+          <Paragraph>
+            Hello {user}, you have {count} projects.
+          </Paragraph>
+          <Paragraph>Let me know how I can help.</Paragraph>
+        </Section>
+      );
+
+      const compiled = await compiler.compile(<App />, tickState);
+      const rendered = renderSectionContent(getSection(compiled, "e2e-para-inline")!);
+
+      // Inline interpolation within paragraphs, \n\n between paragraphs
+      expect(rendered).toBe("Hello Ryan, you have 5 projects.\n\nLet me know how I can help.");
+    });
   });
 
   // ============================================================

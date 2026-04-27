@@ -419,17 +419,29 @@ function collectContent(
     return blocks;
   }
 
+  // Buffer for merging adjacent text nodes into a single text block.
+  // JSX expressions like `Hello {name}, welcome` produce 3 separate text
+  // nodes that should render as one inline string, not 3 paragraphs.
+  let textBuffer = "";
+
+  const flushTextBuffer = () => {
+    if (textBuffer) {
+      blocks.push({ type: "text", text: textBuffer });
+      textBuffer = "";
+    }
+  };
+
   for (const child of children) {
-    // Handle text nodes - convert to text block
+    // Handle text nodes — buffer adjacent ones for inline concatenation
     if (isTextNode(child)) {
       if (child.text) {
-        blocks.push({
-          type: "text",
-          text: child.text,
-        });
+        textBuffer += child.text;
       }
       continue;
     }
+
+    // Non-text node: flush any buffered text first
+    flushTextBuffer();
 
     const typeName = getTypeName(child.type);
     const renderer = child.renderer ?? parentRenderer;
@@ -706,6 +718,9 @@ function collectContent(
       }
     }
   }
+
+  // Flush any trailing buffered text
+  flushTextBuffer();
 
   return blocks;
 }
