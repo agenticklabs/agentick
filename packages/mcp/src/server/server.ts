@@ -516,7 +516,7 @@ export class MCPServer {
 
     // ── tools/list — reads from shared registry, applies toolFilter ──
     sdkServer.setRequestHandler(ListToolsRequestSchema, async (_request, extra) => {
-      const handlerCtx = await this.buildHandlerContext(extra);
+      const handlerCtx = await this.buildHandlerContext(extra, sdkServer);
       let visibleTools = Array.from(this.tools.values());
 
       if (this.options.toolFilter) {
@@ -551,6 +551,16 @@ export class MCPServer {
           const meta: Record<string, unknown> = { ...passthroughMeta };
           if (ui) meta.ui = ui;
           if (ui?.resourceUri) meta[LEGACY_UI_RESOURCE_URI_KEY] = ui.resourceUri;
+          // Apply server-level securitySchemes, deriving per-tool scopes from
+          // annotations when the scheme doesn't specify explicit scopes.
+          if (this.options.securitySchemes && !meta.securitySchemes) {
+            const annotations = t.definition.annotations as Record<string, unknown> | undefined;
+            const derivedScopes = annotations?.readOnlyHint === true ? ["read"] : ["read", "write"];
+            meta.securitySchemes = this.options.securitySchemes.map((s) => ({
+              ...s,
+              scopes: s.scopes ?? derivedScopes,
+            }));
+          }
 
           return {
             name: t.definition.name,
@@ -571,7 +581,7 @@ export class MCPServer {
         throw new McpError(ErrorCode.MethodNotFound, `Tool ${toolName} not found`);
       }
 
-      const handlerCtx = await this.buildHandlerContext(extra);
+      const handlerCtx = await this.buildHandlerContext(extra, sdkServer);
 
       if (
         this.options.toolFilter &&
@@ -659,7 +669,7 @@ export class MCPServer {
 
     // ── resources/list ──
     sdkServer.setRequestHandler(ListResourcesRequestSchema, async (_request, extra) => {
-      const handlerCtx = await this.buildHandlerContext(extra);
+      const handlerCtx = await this.buildHandlerContext(extra, sdkServer);
       const resources = [
         ...Array.from(this.resources.values()).map((r) => ({
           uri: r.uri,
@@ -707,7 +717,7 @@ export class MCPServer {
     // ── resources/read ──
     sdkServer.setRequestHandler(ReadResourceRequestSchema, async (request, extra): Promise<any> => {
       const uri = request.params.uri;
-      const handlerCtx = await this.buildHandlerContext(extra);
+      const handlerCtx = await this.buildHandlerContext(extra, sdkServer);
       log.debug({ sessionId: handlerCtx.sessionId, uri }, "Resource read");
       this.emit("mcp:resource:read", { sessionId: handlerCtx.sessionId, uri });
 
@@ -767,7 +777,7 @@ export class MCPServer {
       const prompt = this.prompts.get(request.params.name);
       if (!prompt)
         throw new McpError(ErrorCode.InvalidParams, `Prompt not found: ${request.params.name}`);
-      const handlerCtx = await this.buildHandlerContext(extra);
+      const handlerCtx = await this.buildHandlerContext(extra, sdkServer);
       try {
         return await prompt.handler(request.params.arguments ?? {}, handlerCtx);
       } catch (err) {
@@ -812,8 +822,25 @@ export class MCPServer {
   // Internal: Context Building
   // ══════════════════════════════════════════════════════════════════════════
 
-  private async buildHandlerContext(extra: MCPHandlerExtra): Promise<MCPHandlerContext> {
+  private async buildHandlerContext(
+    extra: MCPHandlerExtra,
+    sdkServer?: Server,
+  ): Promise<MCPHandlerContext> {
     const request = await buildRequestContext(extra, this.options.contextProvider);
+
+    // Populate client identity and capabilities from the SDK Server's
+    // initialize handshake. Passed directly from the request handler closure —
+    // more reliable than session lookup (in-memory transports may not set sessionId).
+    if (sdkServer) {
+      if (!request.clientInfo) {
+        const cv = sdkServer.getClientVersion();
+        if (cv) request.clientInfo = { name: cv.name, version: cv.version };
+      }
+      if (!request.clientCapabilities) {
+        const caps = sdkServer.getClientCapabilities();
+        if (caps) request.clientCapabilities = caps as Record<string, unknown>;
+      }
+    }
 
     const ctx: MCPHandlerContext = {
       request,

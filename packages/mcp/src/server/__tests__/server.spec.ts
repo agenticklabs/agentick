@@ -399,6 +399,107 @@ describe("MCPServer", () => {
   });
 
   // ══════════════════════════════════════════════════════════════════════════
+  // securitySchemes — server-level default with per-tool scope derivation
+  // ══════════════════════════════════════════════════════════════════════════
+
+  describe("securitySchemes", () => {
+    it("derives read scope from readOnlyHint annotation", async () => {
+      const tool = createTestTool("reader", {
+        annotations: { readOnlyHint: true },
+      });
+
+      const { client, cleanup } = await createConnectedPair({
+        tools: [tool],
+        securitySchemes: [{ type: "oauth2" }],
+      });
+      const { tools } = await client.listTools();
+      const entry = tools.find((t) => t.name === "reader") as any;
+
+      expect(entry._meta.securitySchemes).toEqual([{ type: "oauth2", scopes: ["read"] }]);
+      await cleanup();
+    });
+
+    it("derives read+write scopes when readOnlyHint is false", async () => {
+      const tool = createTestTool("writer", {
+        annotations: { readOnlyHint: false, destructiveHint: false },
+      });
+
+      const { client, cleanup } = await createConnectedPair({
+        tools: [tool],
+        securitySchemes: [{ type: "oauth2" }],
+      });
+      const { tools } = await client.listTools();
+      const entry = tools.find((t) => t.name === "writer") as any;
+
+      expect(entry._meta.securitySchemes).toEqual([{ type: "oauth2", scopes: ["read", "write"] }]);
+      await cleanup();
+    });
+
+    it("derives read+write scopes when no annotations set", async () => {
+      const tool = createTestTool("no_hints");
+
+      const { client, cleanup } = await createConnectedPair({
+        tools: [tool],
+        securitySchemes: [{ type: "oauth2" }],
+      });
+      const { tools } = await client.listTools();
+      const entry = tools.find((t) => t.name === "no_hints") as any;
+
+      expect(entry._meta.securitySchemes).toEqual([{ type: "oauth2", scopes: ["read", "write"] }]);
+      await cleanup();
+    });
+
+    it("uses explicit scopes from server config when provided", async () => {
+      const tool = createTestTool("explicit", {
+        annotations: { readOnlyHint: true },
+      });
+
+      const { client, cleanup } = await createConnectedPair({
+        tools: [tool],
+        securitySchemes: [{ type: "oauth2", scopes: ["admin"] }],
+      });
+      const { tools } = await client.listTools();
+      const entry = tools.find((t) => t.name === "explicit") as any;
+
+      // Explicit scopes on the scheme take precedence over annotation derivation
+      expect(entry._meta.securitySchemes).toEqual([{ type: "oauth2", scopes: ["admin"] }]);
+      await cleanup();
+    });
+
+    it("does not override tool-level _meta.securitySchemes", async () => {
+      const tool: MCPToolDefinition = {
+        name: "custom_auth",
+        description: "Tool with own securitySchemes",
+        inputSchema: { type: "object" },
+        _meta: { securitySchemes: [{ type: "noauth" }] },
+        handler: async () => ({ content: [{ type: "text", text: "ok" }] }),
+      };
+
+      const { client, cleanup } = await createConnectedPair({
+        tools: [tool],
+        securitySchemes: [{ type: "oauth2" }],
+      });
+      const { tools } = await client.listTools();
+      const entry = tools.find((t) => t.name === "custom_auth") as any;
+
+      // Tool-level wins
+      expect(entry._meta.securitySchemes).toEqual([{ type: "noauth" }]);
+      await cleanup();
+    });
+
+    it("omits securitySchemes when server does not configure them", async () => {
+      const tool = createTestTool("no_schemes");
+
+      const { client, cleanup } = await createConnectedPair({ tools: [tool] });
+      const { tools } = await client.listTools();
+      const entry = tools.find((t) => t.name === "no_schemes") as any;
+
+      expect(entry._meta).toBeUndefined();
+      await cleanup();
+    });
+  });
+
+  // ══════════════════════════════════════════════════════════════════════════
   // MCP Apps — capability negotiation
   //
   // Per the MCP Apps spec (2026-01-26), the server MUST advertise the
@@ -768,6 +869,77 @@ describe("MCPServer", () => {
       expect(receivedCtx.extra.signal).toBeDefined();
 
       await cleanup();
+    });
+
+    it("populates clientInfo and clientCapabilities from initialize handshake", async () => {
+      let receivedCtx: any = null;
+
+      const server = new MCPServer({
+        name: "test",
+        version: "1.0.0",
+        tools: [
+          {
+            name: "probe",
+            description: "Captures context",
+            inputSchema: {},
+            handler: async (_input, ctx) => {
+              receivedCtx = ctx;
+              return { content: [{ type: "text", text: "ok" }] };
+            },
+          },
+        ],
+      });
+
+      const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+      await server.connect(serverTransport);
+      const client = new Client(
+        { name: "cursor", version: "0.50.0" },
+        { capabilities: { sampling: {} } },
+      );
+      await client.connect(clientTransport);
+
+      await client.callTool({ name: "probe", arguments: {} });
+
+      expect(receivedCtx.request.clientInfo).toEqual({ name: "cursor", version: "0.50.0" });
+      expect(receivedCtx.request.clientCapabilities).toBeDefined();
+      expect(receivedCtx.request.clientCapabilities.sampling).toBeDefined();
+
+      await client.close();
+      await server.close();
+    });
+
+    it("clientInfo is available in toolFilter and toolTransform", async () => {
+      const filterClients: string[] = [];
+      const transformClients: string[] = [];
+
+      const server = new MCPServer({
+        name: "test",
+        version: "1.0.0",
+        tools: [createTestTool("alpha"), createTestTool("beta")],
+        toolFilter: (tool, ctx) => {
+          if (ctx.clientInfo) filterClients.push(ctx.clientInfo.name);
+          return true;
+        },
+        toolTransform: (tool, ctx) => {
+          if (ctx.clientInfo) transformClients.push(ctx.clientInfo.name);
+          return tool;
+        },
+      });
+
+      const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+      await server.connect(serverTransport);
+      const client = new Client({ name: "claude-desktop", version: "1.0.0" });
+      await client.connect(clientTransport);
+
+      await client.listTools();
+
+      expect(filterClients.length).toBeGreaterThan(0);
+      expect(filterClients[0]).toBe("claude-desktop");
+      expect(transformClients.length).toBeGreaterThan(0);
+      expect(transformClients[0]).toBe("claude-desktop");
+
+      await client.close();
+      await server.close();
     });
 
     it("toolFilter hides tools from listing and rejects calls", async () => {

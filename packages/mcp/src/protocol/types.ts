@@ -83,6 +83,22 @@ export interface MCPRequestContext {
   metadata?: Record<string, any>;
   /** Abort signal for cancellation */
   signal?: AbortSignal;
+  /**
+   * MCP client identity from the initialize handshake.
+   * Populated automatically by the server from the SDK's clientInfo.
+   * Available in toolFilter, toolTransform, and tool handlers.
+   *
+   * Examples: `{ name: "claude-desktop", version: "1.2.0" }`,
+   * `{ name: "cursor", version: "0.50.0" }`, `{ name: "chatgpt", ... }`
+   */
+  clientInfo?: { name: string; version?: string };
+  /**
+   * MCP client capabilities from the initialize handshake.
+   * Tells the server what features the client supports (sampling,
+   * elicitation, roots, apps, etc.). Useful in toolFilter to hide
+   * tools the client can't render (e.g., app tools for non-UI clients).
+   */
+  clientCapabilities?: Record<string, unknown>;
 }
 
 // ============================================================================
@@ -137,6 +153,21 @@ export interface MCPServerOptions {
    * the original unchanged. Return null to remove the tool from the list.
    */
   toolTransform?: (tool: MCPToolDefinition, ctx: MCPRequestContext) => MCPToolDefinition | null;
+
+  /**
+   * Default security schemes applied to all tools on `tools/list`.
+   * Emitted as `_meta.securitySchemes` per the MCP spec, so hosts
+   * (ChatGPT, Claude, etc.) know which tools require authentication.
+   *
+   * Individual tools can override by setting `_meta.securitySchemes`
+   * on their own definition.
+   *
+   * @example
+   * ```ts
+   * securitySchemes: [{ type: "oauth2", scopes: ["read"] }]
+   * ```
+   */
+  securitySchemes?: Array<{ type: string; scopes?: string[] }>;
 
   /**
    * Security — all function types, transport-aware defaults.
