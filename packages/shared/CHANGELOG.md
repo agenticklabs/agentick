@@ -1,5 +1,11 @@
 # @agentick/shared
 
+## 0.14.53
+
+### Patch Changes
+
+- d665fd6: support thought signatures
+
 ## 0.14.52
 
 ## 0.14.51

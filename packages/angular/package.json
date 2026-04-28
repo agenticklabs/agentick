@@ -1,6 +1,6 @@
 {
   "name": "@agentick/angular",
-  "version": "0.14.52",
+  "version": "0.14.53",
   "description": "Angular services and utilities for Agentick applications",
   "repository": {
     "type": "git",
