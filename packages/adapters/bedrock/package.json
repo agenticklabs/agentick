@@ -1,0 +1,50 @@
+{
+  "name": "@agentick/bedrock",
+  "version": "0.14.52",
+  "description": "AWS Bedrock adapter for Agentick",
+  "keywords": [
+    "adapter",
+    "agent",
+    "ai",
+    "aws",
+    "bedrock"
+  ],
+  "homepage": "https://github.com/agenticklabs/agentick#readme",
+  "bugs": {
+    "url": "https://github.com/agenticklabs/agentick/issues"
+  },
+  "license": "MIT",
+  "author": "Ryan Lindgren",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/agenticklabs/agentick.git",
+    "directory": "packages/adapters/bedrock"
+  },
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "main": "src/index.ts",
+  "publishConfig": {
+    "access": "public",
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "test": "echo \"Tests run from workspace root\"",
+    "typecheck": "tsc -p tsconfig.build.json --noEmit",
+    "lint": "oxlint src/",
+    "format:check": "oxfmt --check src/",
+    "clean": "rm -rf dist tsconfig.build.tsbuildinfo",
+    "prepublishOnly": "pnpm build",
+    "dev": "tsc --watch"
+  },
+  "dependencies": {
+    "@agentick/core": "workspace:*",
+    "@agentick/shared": "workspace:*"
+  },
+  "peerDependencies": {
+    "@aws-sdk/client-bedrock-runtime": "^3.0.0"
+  }
+}
