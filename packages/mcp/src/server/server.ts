@@ -872,7 +872,7 @@ export class MCPServer {
     // The contextProvider gets first say — these are fallbacks so the
     // application always has access to what the SDK knows.
     if (!request.authInfo && extra.authInfo) {
-      request.authInfo = extra.authInfo as Record<string, unknown>;
+      request.authInfo = extra.authInfo as unknown as Record<string, unknown>;
     }
     if (request.requestId === undefined && extra.requestId !== undefined) {
       request.requestId = extra.requestId;
