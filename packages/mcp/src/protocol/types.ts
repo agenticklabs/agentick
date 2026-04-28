@@ -1,3 +1,16 @@
+/**
+ * MCP protocol types — request context, server configuration, tool/resource
+ * definitions, security function signatures, and handler context.
+ *
+ * These types form the contract between the MCPServer, its security pipeline,
+ * and application-level handlers (tools, resources, prompts). The
+ * {@link MCPRequestContext} is the central type — it flows through every stage
+ * of the pipeline and carries user identity, client info, session metadata,
+ * and SDK passthrough fields.
+ *
+ * @module @agentick/mcp/protocol
+ */
+
 import type { UserContext } from "@agentick/kernel";
 import type {
   CallToolResult,
@@ -79,15 +92,12 @@ export type InputSanitizer = (
 export interface MCPRequestContext {
   /** Authenticated user — references kernel's UserContext (single source of truth). */
   user?: UserContext;
-  /** Request metadata (tracing, gateway ID, etc.) */
-  metadata?: Record<string, any>;
   /** Abort signal for cancellation */
   signal?: AbortSignal;
+
+  // ── Client identity (from SDK initialize handshake) ─────────────────
   /**
-   * MCP client identity from the initialize handshake.
-   * Populated automatically by the server from the SDK's clientInfo.
-   * Available in toolFilter, toolTransform, and tool handlers.
-   *
+   * MCP client identity. Populated automatically from the SDK's clientInfo.
    * Examples: `{ name: "claude-desktop", version: "1.2.0" }`,
    * `{ name: "cursor", version: "0.50.0" }`, `{ name: "chatgpt", ... }`
    */
@@ -99,19 +109,38 @@ export interface MCPRequestContext {
    * tools the client can't render (e.g., app tools for non-UI clients).
    */
   clientCapabilities?: Record<string, unknown>;
+
+  // ── Session (from server session registry) ──────────────────────────
   /**
-   * Session metadata populated by the server from the active session.
-   * Includes transport type, session ID, and timing information.
-   * Useful in toolFilter to distinguish in-process agents from HTTP clients.
+   * Session metadata from the active session. Includes transport type,
+   * session ID, and timing. Useful in toolFilter to distinguish
+   * in-process agents from HTTP clients.
    */
   session?: {
-    /** Unique session identifier */
     sessionId: string;
-    /** Transport type: "in-process" for agents, "streamable-http" for HTTP clients, "stdio" for CLI */
-    transportType: string;
-    /** When the session was created (epoch ms) */
+    transportType: ConnectionInfo["transport"];
     createdAt: number;
   };
+
+  // ── SDK passthrough ─────────────────────────────────────────────────
+  /**
+   * Auth info from the MCP SDK's built-in auth layer (RFC 9728 / OAuth).
+   * Present when the SDK transport provides validated token claims.
+   * Distinct from `user` (populated by the server's contextProvider).
+   */
+  authInfo?: Record<string, unknown>;
+  /** JSON-RPC request ID — tracing/correlation across client ↔ server. */
+  requestId?: string | number;
+  /** Request-level metadata from the JSON-RPC `_meta` field. */
+  _meta?: Record<string, unknown>;
+  /** SDK task ID for long-running operations. */
+  taskId?: string;
+  /** Original HTTP request info (headers, URL, etc.) when transport is HTTP. */
+  requestInfo?: unknown;
+
+  // ── Application-level ───────────────────────────────────────────────
+  /** Arbitrary application metadata (tracing, gateway ID, provenance, etc.) */
+  metadata?: Record<string, any>;
 }
 
 // ============================================================================

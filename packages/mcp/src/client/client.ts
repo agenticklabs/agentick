@@ -13,6 +13,8 @@
  * - Completions: argument completions for tools and resource templates
  * - Cancellation: abort in-progress requests via AbortSignal
  * - Reconnection: auto-reconnect with exponential backoff
+ *
+ * @module @agentick/mcp/client
  */
 
 import { EventEmitter } from "node:events";

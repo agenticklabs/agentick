@@ -210,6 +210,21 @@ The client advertises `io.modelcontextprotocol/ui` capability by default so
 spec-compliant servers emit UI metadata. Opt out via `mcpApps: false` in client
 options.
 
+**OAuth support** — the client supports OAuth 2.1 with Dynamic Client Registration
+for connecting to authenticated MCP servers:
+
+```typescript
+await client.connect({
+  serverName: "knowify",
+  transport: "streamable-http",
+  connection: { url: "https://mcp.example.com/mcp" },
+  auth: { type: "oauth" },
+});
+```
+
+The client handles the OAuth flow (authorization, token exchange, refresh) and
+persists tokens for subsequent connections.
+
 ### OpenAI-Compatible
 
 Serves `POST /v1/chat/completions` and `GET /v1/models`. Any OpenAI SDK client

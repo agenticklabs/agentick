@@ -1,3 +1,16 @@
+/**
+ * MCPServer — per-session SDK Server pool with shared tool/resource registry,
+ * pluggable security pipeline, session lifecycle management, and multi-transport
+ * support (HTTP, stdio, in-process).
+ *
+ * Request context ({@link MCPRequestContext}) flows through every stage of the
+ * pipeline and is enriched with session metadata, client identity, and SDK
+ * passthrough fields automatically. Use `toolFilter` and `toolTransform` for
+ * per-session tool visibility and customization.
+ *
+ * @module @agentick/mcp/server
+ */
+
 import { EventEmitter } from "node:events";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
@@ -853,6 +866,25 @@ export class MCPServer {
           createdAt: session.createdAt,
         };
       }
+    }
+
+    // Forward SDK extra fields if not already set by contextProvider.
+    // The contextProvider gets first say — these are fallbacks so the
+    // application always has access to what the SDK knows.
+    if (!request.authInfo && extra.authInfo) {
+      request.authInfo = extra.authInfo as Record<string, unknown>;
+    }
+    if (request.requestId === undefined && extra.requestId !== undefined) {
+      request.requestId = extra.requestId;
+    }
+    if (!request._meta && (extra as any)._meta) {
+      request._meta = (extra as any)._meta;
+    }
+    if (!request.taskId && extra.taskId) {
+      request.taskId = extra.taskId;
+    }
+    if (!request.requestInfo && (extra as any).requestInfo) {
+      request.requestInfo = (extra as any).requestInfo;
     }
 
     const ctx: MCPHandlerContext = {

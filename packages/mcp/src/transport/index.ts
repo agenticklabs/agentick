@@ -6,6 +6,8 @@
  * where synchronous delivery causes "unknown message ID" errors.
  *
  * See: transport/in-memory.ts for details.
+ *
+ * @module @agentick/mcp/transport
  */
 
 export { InMemoryTransport } from "./in-memory.js";

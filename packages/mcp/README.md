@@ -145,9 +145,11 @@ type MCPToolHandler = (
 ) => CallToolResult | Promise<CallToolResult>;
 
 interface MCPHandlerContext {
-  request: MCPRequestContext; // from contextProvider — user, metadata
-  extra: MCPHandlerExtra; // raw SDK extra — sessionId, signal, authInfo
-  sessionId: string; // shortcut for extra.sessionId
+  request: MCPRequestContext; // enriched context — user, session, client info
+  extra: MCPHandlerExtra;    // raw SDK extra — for low-level needs
+  sessionId: string;         // shortcut for request.session.sessionId
+  signal: AbortSignal;       // aborted on client cancellation
+  sendProgress?: (progress: number, total?: number, message?: string) => Promise<void>;
 }
 ```
 
@@ -413,7 +415,7 @@ security: {
 },
 ```
 
-Reads the Authorization header from `ctx.metadata.headers` (case-insensitive) by default. Override via `extract` for non-HTTP transports. Requires your `contextProvider` to put headers on `ctx.metadata`.
+Reads the Authorization header from `ctx.requestInfo?.headers` (populated automatically for HTTP transports) by default. Override via `extract` for non-HTTP transports or custom header locations.
 
 #### `roleBasedAuthz`
 
@@ -493,6 +495,19 @@ Auto-detects path-like fields by key name (anything containing `path`, `file`, `
 
 > **Note:** Path sanitization is defense-in-depth, not a substitute for real sandboxing. Use `@agentick/sandbox` or OS-level isolation (chroot, namespaces, containers) for hard boundaries.
 
+### Security schemes (OAuth metadata)
+
+Advertise authentication requirements to MCP hosts so they can trigger their OAuth UI:
+
+```typescript
+const server = new MCPServer({
+  ...,
+  securitySchemes: [{ type: "oauth2", scopes: ["read", "write"] }],
+});
+```
+
+This emits `_meta.securitySchemes` on every tool in the `tools/list` response. Individual tools can override with their own `_meta.securitySchemes`. MCP hosts like ChatGPT and Claude use this to know which tools require authentication.
+
 ### Composing stages
 
 Each factory returns a function — you can wrap, compose, or chain them yourself:
@@ -513,7 +528,7 @@ security: {
 
 ### Request context
 
-`contextProvider` is user-supplied; it runs before the security pipeline and shapes `MCPRequestContext`:
+`contextProvider` is user-supplied; it runs before the security pipeline and shapes `MCPRequestContext`. After `contextProvider` runs, the server automatically enriches the context with session metadata, client identity, and SDK passthrough fields.
 
 ```typescript
 const server = new MCPServer({
@@ -523,24 +538,94 @@ const server = new MCPServer({
       id: extra.authInfo?.clientId ?? "anon",
       roles: extra.authInfo?.scopes ?? [],
     },
-    metadata: {
-      sessionId: extra.sessionId,
-      requestId: extra.requestId,
-    },
+    metadata: { gatewayId: "prod-1" },
     signal: extra.signal,
   }),
 });
 ```
+
+**`MCPRequestContext` — the full shape:**
+
+```typescript
+interface MCPRequestContext {
+  // Application-level (from contextProvider)
+  user?: UserContext;             // authenticated user identity
+  metadata?: Record<string, any>; // arbitrary app metadata (tracing, provenance)
+  signal?: AbortSignal;           // cancellation
+
+  // Client identity (auto-populated from SDK initialize handshake)
+  clientInfo?: { name: string; version?: string };  // e.g. { name: "claude-desktop" }
+  clientCapabilities?: Record<string, unknown>;      // sampling, apps, etc.
+
+  // Session (auto-populated from server session registry)
+  session?: {
+    sessionId: string;
+    transportType: "in-process" | "streamable-http" | "sse" | "stdio";
+    createdAt: number;
+  };
+
+  // SDK passthrough (auto-populated from RequestHandlerExtra)
+  authInfo?: Record<string, unknown>;   // OAuth/RFC 9728 token claims
+  requestId?: string | number;          // JSON-RPC request ID
+  _meta?: Record<string, unknown>;      // request-level metadata
+  taskId?: string;                      // SDK task ID (long-running ops)
+  requestInfo?: unknown;                // original HTTP request info
+}
+```
+
+The `contextProvider` has first say on all fields. The server fills in anything the provider didn't set — `session` from the session registry, `clientInfo`/`clientCapabilities` from the SDK handshake, and `authInfo`/`requestId`/`_meta`/`taskId`/`requestInfo` from the SDK's request extras.
 
 Every handler (tool, resource, prompt) receives the enriched context via `ctx.request`:
 
 ```typescript
 handler: async (input, ctx) => {
   const userId = ctx.request.user?.id;
-  const sessionId = ctx.sessionId;
-  // ... use userId, sessionId
+  const transport = ctx.request.session?.transportType; // "in-process" | "streamable-http" | ...
+  const client = ctx.request.clientInfo?.name;          // "claude-desktop" | "cursor" | ...
 };
 ```
+
+### Tool filtering and transformation
+
+`toolFilter` and `toolTransform` run per-request with the full `MCPRequestContext`, enabling per-session tool visibility and customization.
+
+**`toolFilter`** — return `false` to hide a tool from a specific client or session:
+
+```typescript
+const server = new MCPServer({
+  ...,
+  toolFilter: (tool, ctx) => {
+    // In-process agents (e.g., ernesto) never see the ask tool (prevents recursion)
+    if (ctx.session?.transportType === "in-process") {
+      return tool.name !== "ask_agent";
+    }
+    // Non-enterprise external clients don't get the premium tool
+    if (!ctx.user?.isEnterprise) {
+      return tool.name !== "ask_agent";
+    }
+    return true;
+  },
+});
+```
+
+`toolFilter` is also enforced at `tools/call` time — a client cannot invoke a tool that was filtered from its `tools/list`.
+
+**`toolTransform`** — modify tool definitions per-session (e.g., inject user context into descriptions):
+
+```typescript
+const server = new MCPServer({
+  ...,
+  toolTransform: (tool, ctx) => {
+    if (tool.name !== "query") return tool;
+    return {
+      ...tool,
+      description: `${tool.description}\n\nCurrent user: ${ctx.user?.name}`,
+    };
+  },
+});
+```
+
+Return `null` from `toolTransform` to remove a tool from the list (alternative to `toolFilter`).
 
 ### Dynamic registration
 
@@ -975,8 +1060,8 @@ try {
 The following are planned but not yet shipped. Nothing existing is removed — these are additive enhancements:
 
 - **`createMCPAppRelay`** — a server-side variant of `createMCPApp` that routes iframe↔MCPClient traffic over a remote chat channel, for cloud agent + browser UI topologies (Ernesto + Knowify portal). Depends on the bidirectional channel architecture work (see `docs/channels-current-state.md` in the monorepo).
-- **`MCPAuthProvider`** — a pluggable OAuth 2.1 / Dynamic Client Registration / token refresh interface for `MCPClient.connect()`. The SDK ships the underlying helpers (`@modelcontextprotocol/sdk/client/auth.js`); this package will wrap them into a clean provider interface.
 - **Kernel-level `RequestPipeline` primitive** — lifting the MCP security pipeline into `@agentick/kernel` so `@agentick/gateway` can consume the same stage factories (`bearerTokenAuth`, `roleBasedAuthz`, etc.). The stages already work standalone against the MCP pipeline today — this is about letting the gateway reuse them without reimplementing its own auth path.
+- **JSX resources** — render agentick JSX components as MCP resources and instructions, compiled with `@agentick/core`'s compiler. This would let tool descriptions, server instructions, and resource content share composable components with agent identity prompts.
 
 ## Further reading
 

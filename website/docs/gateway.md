@@ -182,7 +182,7 @@ gateway.use(
 
 Five modes:
 
-- **Pre-built server** — pass a fully configured `MCPServer` instance via `server`; the plugin just bridges it to HTTP
+- **Pre-built server** — pass a fully configured `MCPServer` instance via `server`; the plugin just bridges it to HTTP. The server's `toolFilter` and `toolTransform` control per-session visibility using `MCPRequestContext` (transport type, client info, user identity).
 - **Resources-only** — omit `sessionId` to serve MCP resources without tools
 - **Standalone tools** — register tools with their own handlers via `tools`, no session required
 - **Session tools** — set `sessionId` to discover and expose agent session tools
@@ -207,6 +207,14 @@ const server = new MCPServer({
     /* MCP Apps (ui:// resources) */
   ],
   security: { authenticator: async () => ({ authenticated: true }) },
+  // Per-session tool visibility — filter based on transport, client, or user
+  toolFilter: (tool, ctx) => {
+    // Hide admin tools from non-admin users
+    if (tool.name.startsWith("admin_") && !ctx.user?.roles?.includes("admin")) return false;
+    // Hide recursive tools from in-process agents
+    if (ctx.session?.transportType === "in-process" && tool.name === "ask") return false;
+    return true;
+  },
 });
 
 gateway.use(mcpServerPlugin({ server, path: "/mcp" }));

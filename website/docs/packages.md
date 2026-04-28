@@ -89,13 +89,15 @@ Fiber tree inspector, timeline viewer, execution debugger. Connect to running ag
 
 Standalone MCP server and client implementation. Sits in the Framework Layer alongside core and gateway but depends only on kernel + shared (foundation). Can be installed alone for a fully functional MCP server without the gateway or reconciler.
 
-**Server** (`@agentick/mcp/server`) — per-session SDK `Server` pool with shared registry, dynamic tool/resource/prompt/app registration, `handleHTTPRequest` for HTTP, `connect` for in-process/stdio, security pipeline, session lifecycle (TTL, idle cleanup, max sessions), dual-path events.
+**Server** (`@agentick/mcp/server`) — per-session SDK `Server` pool with shared registry, dynamic tool/resource/prompt/app registration, `handleHTTPRequest` for HTTP, `connect` for in-process/stdio, security pipeline (`ConnectionGuard → contextProvider → Authenticator → Authorizer → RateLimiter → InputSanitizer`), session lifecycle (TTL, idle cleanup, max sessions), dual-path events, `toolFilter` for per-session tool visibility, `toolTransform` for per-session tool customization, and `securitySchemes` for OAuth metadata.
 
-**Client** (`@agentick/mcp/client`) — multi-server connection pool with caching, auto-invalidation on change notifications, URI routing, reconnection with exponential backoff, progress callbacks, sampling, roots, logging, completions, and cancellation support. Includes `getServerInfo()`, `getInstructions()`, `supportsMcpApps()`, and `getMcpAppsCapability()` for server metadata introspection.
+The `MCPRequestContext` — flowing through every pipeline stage and into handlers — carries user identity, client info (name, version, capabilities from the initialize handshake), session metadata (transport type, session ID, age from the session registry), SDK passthrough fields (authInfo, requestId, _meta, taskId, requestInfo), and arbitrary application metadata. The `contextProvider` has first say; the server enriches anything it didn't set.
+
+**Client** (`@agentick/mcp/client`) — multi-server connection pool with caching, auto-invalidation on change notifications, URI routing, reconnection with exponential backoff, progress callbacks, sampling, roots, logging, completions, cancellation, and OAuth support. Includes `getServerInfo()`, `getInstructions()`, `supportsMcpApps()`, and `getMcpAppsCapability()` for server metadata introspection.
 
 **Transport** (`@agentick/mcp/transport`) — exports `InMemoryTransport` (own implementation with deferred delivery via `queueMicrotask`, fixing a race condition in the SDK's synchronous version) and the SDK's `Transport` type.
 
-**Protocol** (`@agentick/mcp`) — types, error utilities (`toMCPResult`, `safeToolHandler`, `sanitizeErrorMessage`), and JSON-RPC error codes.
+**Protocol** (`@agentick/mcp`) — types (`MCPRequestContext`, `MCPHandlerContext`, `MCPServerOptions`, `MCPToolDefinition`, security function signatures), error utilities (`toMCPResult`, `safeToolHandler`, `sanitizeErrorMessage`), and JSON-RPC error codes.
 
 ### @agentick/sandbox
 
