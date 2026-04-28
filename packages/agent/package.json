@@ -37,10 +37,10 @@
   "dependencies": {
     "@agentick/core": "workspace:*",
     "@agentick/shared": "workspace:*",
-    "react": "^19.2.4"
+    "react": "^19.2.5"
   },
   "devDependencies": {
-    "@types/react": "^19.2.13",
+    "@types/react": "^19.2.14",
     "zod": "^4.3.6"
   }
 }

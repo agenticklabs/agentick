@@ -213,13 +213,13 @@
     "@agentick/mcp": "workspace:*",
     "@agentick/shared": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.29.0",
-    "react": "^19.2.4",
+    "react": "^19.2.5",
     "react-reconciler": "^0.33.0",
     "zod": "^4.3.6",
-    "zod-to-json-schema": "^3.25.1"
+    "zod-to-json-schema": "^3.25.2"
   },
   "devDependencies": {
-    "@types/react": "^19.2.13",
+    "@types/react": "^19.2.14",
     "@types/react-reconciler": "0.33.0"
   }
 }
