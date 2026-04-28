@@ -1,5 +1,15 @@
 # @agentick/core
 
+## 0.14.53
+
+### Patch Changes
+
+- d665fd6: support thought signatures
+- Updated dependencies [d665fd6]
+  - @agentick/shared@0.14.53
+  - @agentick/kernel@0.14.53
+  - @agentick/mcp@0.14.53
+
 ## 0.14.52
 
 ### Patch Changes
