@@ -41,7 +41,12 @@
  * ```
  */
 
-import { type Message, type ContentBlock, type GeneratedImageBlock } from "@agentick/shared";
+import {
+  type Message,
+  type ContentBlock,
+  type GeneratedImageBlock,
+  type UsageStats,
+} from "@agentick/shared";
 import type { Procedure, UserContext } from "@agentick/kernel";
 import type { ProcedureGraph, ProcedureNode } from "@agentick/kernel";
 import type { ChannelService } from "./channels/service.js";
@@ -56,12 +61,7 @@ import type { ContextMetadata, ContextMetrics } from "@agentick/kernel";
 export interface EngineContextMetadata extends ContextMetadata {}
 
 export interface EngineContextMetrics extends ContextMetrics {
-  usage: {
-    inputTokens: number;
-    outputTokens: number;
-    reasoningTokens: number;
-    totalTokens: number;
-    cachedInputTokens: number;
+  usage: UsageStats & {
     [key: string]: number;
   };
 }
