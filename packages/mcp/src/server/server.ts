@@ -851,7 +851,7 @@ export class MCPServer {
       }
       if (!request.clientCapabilities) {
         const caps = sdkServer.getClientCapabilities();
-        if (caps) request.clientCapabilities = caps as Record<string, unknown>;
+        if (caps) request.clientCapabilities = caps as unknown as Record<string, unknown>;
       }
     }
 
