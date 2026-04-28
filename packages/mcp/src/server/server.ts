@@ -842,10 +842,23 @@ export class MCPServer {
       }
     }
 
+    // Populate session metadata from the active session registry.
+    const sessionId = extra.sessionId ?? "unknown";
+    if (!request.session && sessionId !== "unknown") {
+      const session = this.sessions.get(sessionId);
+      if (session) {
+        request.session = {
+          sessionId: session.sessionId,
+          transportType: session.transportType,
+          createdAt: session.createdAt,
+        };
+      }
+    }
+
     const ctx: MCPHandlerContext = {
       request,
       extra,
-      sessionId: extra.sessionId ?? "unknown",
+      sessionId,
       signal: extra.signal,
     };
 

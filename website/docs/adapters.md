@@ -4,11 +4,13 @@ Agentick is model-agnostic. Adapters translate between the framework's compiled 
 
 ## Available Adapters
 
-| Package            | Provider      | Models                      |
-| ------------------ | ------------- | --------------------------- |
-| `@agentick/openai` | OpenAI        | GPT-4o, GPT-4, o1, o3       |
-| `@agentick/google` | Google        | Gemini Pro, Gemini Flash    |
-| `@agentick/ai-sdk` | Vercel AI SDK | Any AI SDK-compatible model |
+| Package               | Provider      | Models                          |
+| --------------------- | ------------- | ------------------------------- |
+| `@agentick/openai`    | OpenAI        | GPT-4o, GPT-4, o1, o3          |
+| `@agentick/google`    | Google        | Gemini Pro, Flash (API + Vertex) |
+| `@agentick/anthropic` | Anthropic     | Claude Opus 4, Sonnet 4, Haiku  |
+| `@agentick/bedrock`   | AWS Bedrock   | Claude, Nova, Llama via Bedrock |
+| `@agentick/ai-sdk`    | Vercel AI SDK | Any AI SDK-compatible model     |
 
 ## Usage as JSX Components
 
@@ -17,11 +19,15 @@ The recommended way — declare the model in your component tree:
 ```tsx
 import { OpenAIModel } from "@agentick/openai";
 import { GoogleModel } from "@agentick/google";
+import { AnthropicModel } from "@agentick/anthropic";
+import { BedrockModel } from "@agentick/bedrock";
 
 function MyAgent() {
   return (
     <>
       <OpenAIModel model="gpt-4o" temperature={0.7} />
+      {/* or: <AnthropicModel model="claude-sonnet-4-20250514" /> */}
+      {/* or: <BedrockModel model="us.anthropic.claude-sonnet-4-20250514-v1:0" /> */}
       <System>You are helpful.</System>
       <Timeline />
     </>
@@ -50,9 +56,13 @@ For config objects (e.g. `createAgent`), use the lowercase factory:
 ```tsx
 import { openai } from "@agentick/openai";
 import { google } from "@agentick/google";
+import { anthropic } from "@agentick/anthropic";
+import { bedrock } from "@agentick/bedrock";
 
 // Returns a ModelClass
 const model = openai({ model: "gpt-4o", temperature: 0.7 });
+// or: anthropic({ model: "claude-sonnet-4-20250514" })
+// or: bedrock({ model: "us.anthropic.claude-sonnet-4-20250514-v1:0", region: "us-east-1" })
 
 // Use with createAgent
 const agent = createAgent({

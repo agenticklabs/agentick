@@ -99,6 +99,19 @@ export interface MCPRequestContext {
    * tools the client can't render (e.g., app tools for non-UI clients).
    */
   clientCapabilities?: Record<string, unknown>;
+  /**
+   * Session metadata populated by the server from the active session.
+   * Includes transport type, session ID, and timing information.
+   * Useful in toolFilter to distinguish in-process agents from HTTP clients.
+   */
+  session?: {
+    /** Unique session identifier */
+    sessionId: string;
+    /** Transport type: "in-process" for agents, "streamable-http" for HTTP clients, "stdio" for CLI */
+    transportType: string;
+    /** When the session was created (epoch ms) */
+    createdAt: number;
+  };
 }
 
 // ============================================================================
