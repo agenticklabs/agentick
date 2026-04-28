@@ -1,5 +1,12 @@
 # @agentick/mcp
 
+## 0.14.54
+
+### Patch Changes
+
+- @agentick/kernel@0.14.54
+- @agentick/shared@0.14.54
+
 ## 0.14.53
 
 ### Patch Changes

@@ -1,5 +1,11 @@
 # agentick-website
 
+## 1.0.3
+
+### Patch Changes
+
+- 169967a: docs
+
 ## 1.0.2
 
 ### Patch Changes
