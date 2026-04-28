@@ -25,6 +25,8 @@
       "@agentick/guardrails",
       "@agentick/client-multiplexer",
       "@agentick/openai",
+      "@agentick/anthropic",
+      "@agentick/bedrock",
       "@agentick/google",
       "@agentick/ai-sdk",
       "@agentick/apple",
