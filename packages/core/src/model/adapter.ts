@@ -85,7 +85,7 @@ export { createChunkMapper } from "./stream-accumulator.js";
 // ============================================================================
 
 import type { COM } from "../com/object-model.js";
-import type { ModelConfig as SharedModelConfig } from "@agentick/shared/models";
+import type { ModelConfig as SharedModelConfig, UsageStats } from "@agentick/shared/models";
 
 /**
  * Props for ModelClass when used as a JSX component.
@@ -438,14 +438,13 @@ export interface AdapterOptions<TProviderInput, TProviderOutput, TChunk> {
   reconstructRaw?: (accumulated: {
     text: string;
     reasoning: string;
-    toolCalls: Array<{ id: string; name: string; input: Record<string, unknown> }>;
-    usage: {
-      inputTokens: number;
-      outputTokens: number;
-      totalTokens: number;
-      reasoningTokens?: number;
-      cachedInputTokens?: number;
-    };
+    toolCalls: Array<{
+      id: string;
+      name: string;
+      input: Record<string, unknown>;
+      providerMetadata?: Record<string, Record<string, unknown>>;
+    }>;
+    usage: UsageStats;
     stopReason: string;
     model: string;
     /** Raw chunks collected during streaming */

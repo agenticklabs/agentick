@@ -181,6 +181,14 @@ export interface ToolUseBlock extends BaseContentBlock {
   readonly name: string;
   readonly input: Record<string, any>;
   readonly toolResult?: ToolResultBlock;
+  /**
+   * Provider-specific metadata that must round-trip through the pipeline.
+   * Keyed by provider name (e.g., "google", "anthropic", "openai").
+   *
+   * Used for opaque data the provider requires on subsequent requests,
+   * such as Gemini's `thoughtSignature` on function call parts.
+   */
+  readonly providerMetadata?: Record<string, Record<string, unknown>>;
 }
 
 /**

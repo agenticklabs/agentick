@@ -171,6 +171,15 @@ export function createGoogleModel(config: GoogleAdapterConfig = {}): ModelClass 
               toolUseId,
               name: fc.name || "",
               input: fc.args || {},
+              // Gemini 3+ thinking models attach thoughtSignature to functionCall
+              // parts. Must be preserved and sent back in subsequent requests.
+              ...((part as any).thoughtSignature
+                ? {
+                    providerMetadata: {
+                      google: { thoughtSignature: (part as any).thoughtSignature },
+                    },
+                  }
+                : {}),
             });
           }
         }
@@ -406,6 +415,10 @@ export function mapGoogleChunk(
         id: fc.id || randomUUID(),
         name: fc.name || "",
         input: fc.args || {},
+        // Gemini 3+ thinking: thoughtSignature is a sibling of functionCall on the part
+        ...((part as any).thoughtSignature
+          ? { providerMetadata: { google: { thoughtSignature: (part as any).thoughtSignature } } }
+          : {}),
       });
     }
   }
@@ -464,6 +477,10 @@ export function convertBlocksToGoogleParts(blocks: ContentBlock[]): any[] {
             name: block.name,
             args: block.input,
           },
+          // Gemini 3+ thinking: thoughtSignature must round-trip on functionCall parts
+          ...((block as any).providerMetadata?.google?.thoughtSignature
+            ? { thoughtSignature: (block as any).providerMetadata.google.thoughtSignature }
+            : {}),
         });
         break;
 

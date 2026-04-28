@@ -14,6 +14,7 @@ import {
 import { STOP_REASON_MAP } from "../types.js";
 import { StopReason } from "@agentick/shared";
 import type { ContentBlock, ImageBlock, ToolUseBlock, ToolResultBlock } from "@agentick/shared";
+import { StreamAccumulator } from "@agentick/core/model";
 
 // =============================================================================
 // Stop Reason Mapping
@@ -420,6 +421,95 @@ describe("convertBlocksToGoogleParts", () => {
         filters: { type: "article", date: "2024-01-01" },
         limit: 10,
       });
+    });
+  });
+
+  describe("thoughtSignature round-trip", () => {
+    it("should preserve thoughtSignature through parse → serialize", () => {
+      // Fixture: Gemini 3 response with thoughtSignature on functionCall
+      const googleResponse = {
+        candidates: [
+          {
+            content: {
+              role: "model",
+              parts: [
+                {
+                  functionCall: { name: "platform_knowledge", args: { uri: "schema/projects" } },
+                  thoughtSignature: "sig_abc123",
+                },
+              ],
+            },
+            finishReason: "STOP",
+          },
+        ],
+      };
+
+      // Parse: mapGoogleChunk → AdapterDelta with providerMetadata
+      const deltas = mapGoogleChunk(googleResponse as any);
+      const toolDelta = Array.isArray(deltas)
+        ? deltas.find((d: any) => d.type === "tool_call")
+        : deltas?.type === "tool_call"
+          ? deltas
+          : null;
+
+      expect(toolDelta).toBeDefined();
+      expect((toolDelta as any).providerMetadata).toEqual({
+        google: { thoughtSignature: "sig_abc123" },
+      });
+
+      // Serialize: convertBlocksToGoogleParts → Google part with thoughtSignature
+      const toolUseBlock: ToolUseBlock = {
+        type: "tool_use",
+        toolUseId: "call-1",
+        name: "platform_knowledge",
+        input: { uri: "schema/projects" },
+        providerMetadata: { google: { thoughtSignature: "sig_abc123" } },
+      };
+      const parts = convertBlocksToGoogleParts([toolUseBlock as ContentBlock]);
+
+      expect(parts[0].functionCall.name).toBe("platform_knowledge");
+      expect(parts[0].thoughtSignature).toBe("sig_abc123");
+    });
+
+    it("should not emit thoughtSignature when not present", () => {
+      const blocks: ContentBlock[] = [
+        {
+          type: "tool_use",
+          toolUseId: "call-1",
+          name: "query",
+          input: { table: "Projects" },
+        } as ToolUseBlock,
+      ];
+      const parts = convertBlocksToGoogleParts(blocks);
+
+      expect(parts[0].thoughtSignature).toBeUndefined();
+    });
+
+    it("should round-trip through StreamAccumulator", () => {
+      const accumulator = new StreamAccumulator({ modelId: "gemini-3-flash" });
+
+      // Push a tool_call delta with providerMetadata (Google's non-streamed pattern)
+      accumulator.push({ type: "message_start" });
+      accumulator.push({
+        type: "tool_call",
+        id: "call-1",
+        name: "query",
+        input: { table: "Projects" },
+        providerMetadata: { google: { thoughtSignature: "sig_xyz" } },
+      });
+      accumulator.push({ type: "message_end", stopReason: StopReason.TOOL_USE });
+
+      const output = accumulator.toModelOutput();
+      const toolBlock = output.message.content.find((b: any) => b.type === "tool_use") as any;
+
+      expect(toolBlock).toBeDefined();
+      expect(toolBlock.providerMetadata).toEqual({
+        google: { thoughtSignature: "sig_xyz" },
+      });
+
+      // Serialize back to Google format
+      const parts = convertBlocksToGoogleParts([toolBlock]);
+      expect(parts[0].thoughtSignature).toBe("sig_xyz");
     });
   });
 

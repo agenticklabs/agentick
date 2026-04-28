@@ -86,11 +86,22 @@ export type AdapterDelta =
   // Reasoning/thinking content (Claude, o1) - can also have citations
   | { type: "reasoning"; delta: string; metadata?: ContentMetadata }
   // Tool calls (streamed in parts)
-  | { type: "tool_call_start"; id: string; name: string }
+  | {
+      type: "tool_call_start";
+      id: string;
+      name: string;
+      providerMetadata?: Record<string, Record<string, unknown>>;
+    }
   | { type: "tool_call_delta"; id: string; delta: string }
   | { type: "tool_call_end"; id: string; input: unknown }
   // Complete tool call (non-streamed, some providers send complete)
-  | { type: "tool_call"; id: string; name: string; input: unknown }
+  | {
+      type: "tool_call";
+      id: string;
+      name: string;
+      input: unknown;
+      providerMetadata?: Record<string, Record<string, unknown>>;
+    }
   // Message lifecycle
   | { type: "message_start"; model?: string }
   | { type: "message_end"; stopReason: StopReason; usage?: UsageStats }
@@ -143,6 +154,7 @@ interface AccumulatingToolCall {
   name: string;
   inputJson: string;
   blockIndex: number;
+  providerMetadata?: Record<string, Record<string, unknown>>;
 }
 
 /**
@@ -188,7 +200,12 @@ export class StreamAccumulator {
   private text = "";
   private reasoning = "";
   private toolCalls = new Map<string, AccumulatingToolCall>();
-  private completedToolCalls: Array<{ id: string; name: string; input: unknown }> = [];
+  private completedToolCalls: Array<{
+    id: string;
+    name: string;
+    input: unknown;
+    providerMetadata?: Record<string, Record<string, unknown>>;
+  }> = [];
   private usage: UsageStats = { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
   private stopReason: StopReason = StopReason.UNSPECIFIED;
   private modelId?: string;
@@ -401,6 +418,7 @@ export class StreamAccumulator {
           name: delta.name,
           inputJson: "",
           blockIndex: this.blockIndex,
+          providerMetadata: delta.providerMetadata,
         });
 
         events.push({
@@ -433,7 +451,12 @@ export class StreamAccumulator {
         if (tc) {
           // Parse accumulated JSON or use provided input
           const input = delta.input ?? this.parseToolInput(tc.inputJson);
-          this.completedToolCalls.push({ id: tc.id, name: tc.name, input });
+          this.completedToolCalls.push({
+            id: tc.id,
+            name: tc.name,
+            input,
+            providerMetadata: tc.providerMetadata,
+          });
           this.toolCalls.delete(delta.id);
           this.blockIndex++;
 
@@ -526,6 +549,7 @@ export class StreamAccumulator {
           id: delta.id,
           name: delta.name,
           input: delta.input,
+          providerMetadata: delta.providerMetadata,
         });
 
         events.push({
@@ -774,6 +798,7 @@ export class StreamAccumulator {
         toolUseId: tc.id,
         name: tc.name,
         input: tc.input as Record<string, unknown>,
+        ...(tc.providerMetadata ? { providerMetadata: tc.providerMetadata } : {}),
       } as ContentBlock);
     }
 
