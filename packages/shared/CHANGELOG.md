@@ -1,5 +1,11 @@
 # @agentick/shared
 
+## 0.14.55
+
+### Patch Changes
+
+- 9a7d6ff: docs update
+
 ## 0.14.54
 
 ## 0.14.53
