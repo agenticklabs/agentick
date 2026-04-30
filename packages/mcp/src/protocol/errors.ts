@@ -1,4 +1,5 @@
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
+import { McpError } from "@modelcontextprotocol/sdk/types.js";
 
 // ============================================================================
 // JSON-RPC Error Codes
@@ -104,4 +105,59 @@ export function safeToolHandler<T extends (...args: any[]) => Promise<CallToolRe
       return toolError(message);
     }
   }) as T;
+}
+
+// ============================================================================
+// Protocol Errors
+// ============================================================================
+
+/**
+ * Throw-shape for JSON-RPC protocol errors emitted from server handlers.
+ *
+ * SDK quirk: `new McpError(code, message)` calls `super("MCP error <code>: <message>")`,
+ * meaning `error.message` carries a prefix at construction time. The SDK
+ * serialization layer then ships `error.message` verbatim, and the receiving
+ * client SDK reconstructs an `McpError` adding ANOTHER prefix — yielding a
+ * doubled "MCP error -32601: MCP error -32601: ..." in the client's caught
+ * error.
+ *
+ * `protocolError` sidesteps this by throwing a plain `Error` with `code`
+ * and `data` properties on it. The SDK's error serialization at
+ * `shared/protocol.js` reads `error['code']` and `error.message` directly
+ * (no instanceof check on McpError), so the client receives a clean message
+ * and the client SDK adds exactly one prefix.
+ */
+export function protocolError(code: number, message: string, data?: unknown): never {
+  const err = new Error(message) as Error & { code: number; data?: unknown };
+  err.code = code;
+  if (data !== undefined) err.data = data;
+  throw err;
+}
+
+/**
+ * Strip the SDK's "MCP error <code>: " prefix from a message if present.
+ * Used to defensively handle handler-thrown McpError values so they don't
+ * inflict the double-prefix on the client either.
+ */
+export function stripMcpErrorPrefix(message: string): string {
+  return message.replace(/^MCP error -?\d+:\s*/, "");
+}
+
+/**
+ * Re-throw a caller-supplied error as a clean protocol error if it is
+ * shaped like one (has `code`). Strips the McpError prefix so the client
+ * receives a single prefix on round-trip.
+ *
+ * Returns false if the error is not protocol-shaped — caller should treat
+ * it as an execution error or other failure.
+ */
+export function rethrowAsProtocolError(err: unknown): boolean {
+  if (err instanceof McpError) {
+    protocolError(err.code, stripMcpErrorPrefix(err.message), err.data);
+  }
+  if (err instanceof Error && typeof (err as Error & { code?: unknown }).code === "number") {
+    // Already protocol-shaped (plain Error with .code) — let it propagate as-is.
+    throw err;
+  }
+  return false;
 }

@@ -247,7 +247,7 @@ describe("Cancellation (S8)", () => {
 
     // Normal call — signal should be present and not aborted
     const result = await client.callTool({ name: "cancellable", arguments: {} });
-    expect(result.content[0].text).toBe("done");
+    expect((result.content as any[])[0].text).toBe("done");
     expect(handlerSignal).toBeDefined();
     expect(handlerSignal!.aborted).toBe(false);
 

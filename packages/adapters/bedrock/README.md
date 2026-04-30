@@ -56,16 +56,16 @@ function MyAgent() {
 
 ## Configuration
 
-| Option            | Type                    | Description                                          |
-| ----------------- | ----------------------- | ---------------------------------------------------- |
-| `model`           | `string`                | Model ID (e.g., `us.anthropic.claude-sonnet-4-20250514-v1:0`) |
-| `region`          | `string?`               | AWS region (env: `AWS_REGION`)                        |
-| `credentials`     | `object?`               | Explicit `{ accessKeyId, secretAccessKey, sessionToken? }` |
-| `profile`         | `string?`               | AWS profile name for credential chain                 |
-| `client`          | `BedrockRuntimeClient?` | Pre-configured client instance                        |
-| `maxTokens`       | `number?`               | Maximum tokens to generate                            |
-| `customBlocks`    | `object?`               | Custom block definitions to intercept from output     |
-| `deltaTransform`  | `function?`             | User-facing delta transform                           |
+| Option           | Type                    | Description                                                   |
+| ---------------- | ----------------------- | ------------------------------------------------------------- |
+| `model`          | `string`                | Model ID (e.g., `us.anthropic.claude-sonnet-4-20250514-v1:0`) |
+| `region`         | `string?`               | AWS region (env: `AWS_REGION`)                                |
+| `credentials`    | `object?`               | Explicit `{ accessKeyId, secretAccessKey, sessionToken? }`    |
+| `profile`        | `string?`               | AWS profile name for credential chain                         |
+| `client`         | `BedrockRuntimeClient?` | Pre-configured client instance                                |
+| `maxTokens`      | `number?`               | Maximum tokens to generate                                    |
+| `customBlocks`   | `object?`               | Custom block definitions to intercept from output             |
+| `deltaTransform` | `function?`             | User-facing delta transform                                   |
 
 ### Guardrails
 
@@ -87,23 +87,23 @@ const model = bedrock({
 
 The adapter uses the standard AWS credential chain. Configure via any of:
 
-| Method            | Description                           |
-| ----------------- | ------------------------------------- |
-| Environment vars  | `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN` |
-| AWS profile       | `profile` option or `AWS_PROFILE` env var |
-| IAM role          | EC2/ECS/Lambda instance role          |
-| Explicit          | `credentials` config option           |
+| Method           | Description                                                       |
+| ---------------- | ----------------------------------------------------------------- |
+| Environment vars | `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN` |
+| AWS profile      | `profile` option or `AWS_PROFILE` env var                         |
+| IAM role         | EC2/ECS/Lambda instance role                                      |
+| Explicit         | `credentials` config option                                       |
 
 ## Environment Variables
 
-| Variable                  | Description              |
-| ------------------------- | ------------------------ |
-| `AWS_REGION`              | AWS region               |
-| `AWS_DEFAULT_REGION`      | Fallback region          |
-| `AWS_ACCESS_KEY_ID`       | AWS access key           |
-| `AWS_SECRET_ACCESS_KEY`   | AWS secret key           |
-| `AWS_SESSION_TOKEN`       | Session token (optional) |
-| `AWS_PROFILE`             | Named profile            |
+| Variable                | Description              |
+| ----------------------- | ------------------------ |
+| `AWS_REGION`            | AWS region               |
+| `AWS_DEFAULT_REGION`    | Fallback region          |
+| `AWS_ACCESS_KEY_ID`     | AWS access key           |
+| `AWS_SECRET_ACCESS_KEY` | AWS secret key           |
+| `AWS_SESSION_TOKEN`     | Session token (optional) |
+| `AWS_PROFILE`           | Named profile            |
 
 ## Model IDs
 

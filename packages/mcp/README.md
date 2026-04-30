@@ -79,7 +79,7 @@ http
   .listen(3000);
 ```
 
-`handleHTTPRequest` is fully [Streamable HTTP transport](https://modelcontextprotocol.io/specification/2025-03-26/basic/transports#streamable-http) compatible — it handles session initialization, event streaming, and reconnection using `mcp-session-id` headers.
+`handleHTTPRequest` is fully [Streamable HTTP transport](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports#streamable-http) compatible — it handles session initialization, event streaming, and reconnection using `mcp-session-id` headers.
 
 ### In-process server (for tests, embedded agents)
 
@@ -146,9 +146,9 @@ type MCPToolHandler = (
 
 interface MCPHandlerContext {
   request: MCPRequestContext; // enriched context — user, session, client info
-  extra: MCPHandlerExtra;    // raw SDK extra — for low-level needs
-  sessionId: string;         // shortcut for request.session.sessionId
-  signal: AbortSignal;       // aborted on client cancellation
+  extra: MCPHandlerExtra; // raw SDK extra — for low-level needs
+  sessionId: string; // shortcut for request.session.sessionId
+  signal: AbortSignal; // aborted on client cancellation
   sendProgress?: (progress: number, total?: number, message?: string) => Promise<void>;
 }
 ```
@@ -549,13 +549,13 @@ const server = new MCPServer({
 ```typescript
 interface MCPRequestContext {
   // Application-level (from contextProvider)
-  user?: UserContext;             // authenticated user identity
+  user?: UserContext; // authenticated user identity
   metadata?: Record<string, any>; // arbitrary app metadata (tracing, provenance)
-  signal?: AbortSignal;           // cancellation
+  signal?: AbortSignal; // cancellation
 
   // Client identity (auto-populated from SDK initialize handshake)
-  clientInfo?: { name: string; version?: string };  // e.g. { name: "claude-desktop" }
-  clientCapabilities?: Record<string, unknown>;      // sampling, apps, etc.
+  clientInfo?: { name: string; version?: string }; // e.g. { name: "claude-desktop" }
+  clientCapabilities?: Record<string, unknown>; // sampling, apps, etc.
 
   // Session (auto-populated from server session registry)
   session?: {
@@ -565,11 +565,11 @@ interface MCPRequestContext {
   };
 
   // SDK passthrough (auto-populated from RequestHandlerExtra)
-  authInfo?: Record<string, unknown>;   // OAuth/RFC 9728 token claims
-  requestId?: string | number;          // JSON-RPC request ID
-  _meta?: Record<string, unknown>;      // request-level metadata
-  taskId?: string;                      // SDK task ID (long-running ops)
-  requestInfo?: unknown;                // original HTTP request info
+  authInfo?: Record<string, unknown>; // OAuth/RFC 9728 token claims
+  requestId?: string | number; // JSON-RPC request ID
+  _meta?: Record<string, unknown>; // request-level metadata
+  taskId?: string; // SDK task ID (long-running ops)
+  requestInfo?: unknown; // original HTTP request info
 }
 ```
 
@@ -581,7 +581,7 @@ Every handler (tool, resource, prompt) receives the enriched context via `ctx.re
 handler: async (input, ctx) => {
   const userId = ctx.request.user?.id;
   const transport = ctx.request.session?.transportType; // "in-process" | "streamable-http" | ...
-  const client = ctx.request.clientInfo?.name;          // "claude-desktop" | "cursor" | ...
+  const client = ctx.request.clientInfo?.name; // "claude-desktop" | "cursor" | ...
 };
 ```
 

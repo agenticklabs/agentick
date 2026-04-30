@@ -50,7 +50,7 @@ import {
   evaluateRequestPipeline,
   buildRequestContext,
 } from "./security/pipeline.js";
-import { toolError } from "../protocol/errors.js";
+import { toolError, protocolError, stripMcpErrorPrefix } from "../protocol/errors.js";
 
 const log = Logger.for("mcp:server");
 // Schema conversion
@@ -591,7 +591,7 @@ export class MCPServer {
       const toolName = request.params.name;
       const toolEntry = this.tools.get(toolName);
       if (!toolEntry) {
-        throw new McpError(ErrorCode.MethodNotFound, `Tool ${toolName} not found`);
+        protocolError(ErrorCode.MethodNotFound, `Tool ${toolName} not found`);
       }
 
       const handlerCtx = await this.buildHandlerContext(extra, sdkServer);
@@ -600,7 +600,7 @@ export class MCPServer {
         this.options.toolFilter &&
         !this.options.toolFilter(toolEntry.definition, handlerCtx.request)
       ) {
-        throw new McpError(ErrorCode.MethodNotFound, `Tool ${toolName} not found`);
+        protocolError(ErrorCode.MethodNotFound, `Tool ${toolName} not found`);
       }
 
       const sessionId = handlerCtx.sessionId;
@@ -675,7 +675,11 @@ export class MCPServer {
           isError: true,
         });
         if (err instanceof SecurityError) this.emitSecurityEvent(err, sessionId, toolName);
-        if (err instanceof McpError) throw err;
+        // Defensively re-throw McpError as a clean protocol error so the
+        // SDK round-trip doesn't double the "MCP error <code>:" prefix.
+        if (err instanceof McpError) {
+          protocolError(err.code, stripMcpErrorPrefix(err.message), err.data);
+        }
         return toolError(message);
       }
     });
@@ -764,12 +768,14 @@ export class MCPServer {
             return await tmpl.definition.read(uri, match as Record<string, string>, handlerCtx);
         }
       } catch (err) {
-        if (err instanceof McpError) throw err;
+        if (err instanceof McpError) {
+          protocolError(err.code, stripMcpErrorPrefix(err.message), err.data);
+        }
         // Never leak handler error details to the client
-        throw new McpError(ErrorCode.InternalError, "Resource read failed");
+        protocolError(ErrorCode.InternalError, "Resource read failed");
       }
 
-      throw new McpError(ErrorCode.InvalidParams, `Resource not found: ${uri}`);
+      protocolError(ErrorCode.InvalidParams, `Resource not found: ${uri}`);
     });
 
     // ── prompts/list ──
@@ -789,13 +795,15 @@ export class MCPServer {
     sdkServer.setRequestHandler(GetPromptRequestSchema, async (request, extra): Promise<any> => {
       const prompt = this.prompts.get(request.params.name);
       if (!prompt)
-        throw new McpError(ErrorCode.InvalidParams, `Prompt not found: ${request.params.name}`);
+        protocolError(ErrorCode.InvalidParams, `Prompt not found: ${request.params.name}`);
       const handlerCtx = await this.buildHandlerContext(extra, sdkServer);
       try {
         return await prompt.handler(request.params.arguments ?? {}, handlerCtx);
       } catch (err) {
-        if (err instanceof McpError) throw err;
-        throw new McpError(ErrorCode.InternalError, "Prompt execution failed");
+        if (err instanceof McpError) {
+          protocolError(err.code, stripMcpErrorPrefix(err.message), err.data);
+        }
+        protocolError(ErrorCode.InternalError, "Prompt execution failed");
       }
     });
 

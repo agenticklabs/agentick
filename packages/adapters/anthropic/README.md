@@ -57,25 +57,25 @@ function MyAgent() {
 
 ## Configuration
 
-| Option            | Type       | Description                                         |
-| ----------------- | ---------- | --------------------------------------------------- |
-| `model`           | `string`   | Model name (e.g., `claude-sonnet-4-20250514`)       |
-| `apiKey`          | `string?`  | API key (env: `ANTHROPIC_API_KEY`)                   |
-| `baseURL`         | `string?`  | Custom API endpoint (env: `ANTHROPIC_BASE_URL`)      |
-| `maxTokens`       | `number?`  | Maximum tokens to generate                           |
-| `headers`         | `object?`  | Additional request headers                           |
-| `timeout`         | `number?`  | Request timeout in milliseconds                      |
-| `maxRetries`      | `number?`  | Maximum retry attempts                               |
-| `client`          | `Anthropic?` | Pre-configured Anthropic SDK client instance       |
-| `customBlocks`    | `object?`  | Custom block definitions to intercept from output    |
-| `deltaTransform`  | `function?`| User-facing delta transform                          |
+| Option           | Type         | Description                                       |
+| ---------------- | ------------ | ------------------------------------------------- |
+| `model`          | `string`     | Model name (e.g., `claude-sonnet-4-20250514`)     |
+| `apiKey`         | `string?`    | API key (env: `ANTHROPIC_API_KEY`)                |
+| `baseURL`        | `string?`    | Custom API endpoint (env: `ANTHROPIC_BASE_URL`)   |
+| `maxTokens`      | `number?`    | Maximum tokens to generate                        |
+| `headers`        | `object?`    | Additional request headers                        |
+| `timeout`        | `number?`    | Request timeout in milliseconds                   |
+| `maxRetries`     | `number?`    | Maximum retry attempts                            |
+| `client`         | `Anthropic?` | Pre-configured Anthropic SDK client instance      |
+| `customBlocks`   | `object?`    | Custom block definitions to intercept from output |
+| `deltaTransform` | `function?`  | User-facing delta transform                       |
 
 ## Environment Variables
 
-| Variable              | Description          |
-| --------------------- | -------------------- |
-| `ANTHROPIC_API_KEY`   | Anthropic API key    |
-| `ANTHROPIC_BASE_URL`  | Custom API endpoint  |
+| Variable             | Description         |
+| -------------------- | ------------------- |
+| `ANTHROPIC_API_KEY`  | Anthropic API key   |
+| `ANTHROPIC_BASE_URL` | Custom API endpoint |
 
 ## Models
 

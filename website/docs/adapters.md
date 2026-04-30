@@ -4,13 +4,13 @@ Agentick is model-agnostic. Adapters translate between the framework's compiled 
 
 ## Available Adapters
 
-| Package               | Provider      | Models                          |
-| --------------------- | ------------- | ------------------------------- |
-| `@agentick/openai`    | OpenAI        | GPT-4o, GPT-4, o1, o3          |
+| Package               | Provider      | Models                           |
+| --------------------- | ------------- | -------------------------------- |
+| `@agentick/openai`    | OpenAI        | GPT-4o, GPT-4, o1, o3            |
 | `@agentick/google`    | Google        | Gemini Pro, Flash (API + Vertex) |
-| `@agentick/anthropic` | Anthropic     | Claude Opus 4, Sonnet 4, Haiku  |
-| `@agentick/bedrock`   | AWS Bedrock   | Claude, Nova, Llama via Bedrock |
-| `@agentick/ai-sdk`    | Vercel AI SDK | Any AI SDK-compatible model     |
+| `@agentick/anthropic` | Anthropic     | Claude Opus 4, Sonnet 4, Haiku   |
+| `@agentick/bedrock`   | AWS Bedrock   | Claude, Nova, Llama via Bedrock  |
+| `@agentick/ai-sdk`    | Vercel AI SDK | Any AI SDK-compatible model      |
 
 ## Usage as JSX Components
 

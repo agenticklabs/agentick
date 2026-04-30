@@ -185,6 +185,94 @@ export function detectSchemaType(value: unknown): SchemaType {
 }
 
 // ============================================================================
+// Dialect upgrade (draft-7 / 2019-09 → 2020-12)
+// ============================================================================
+
+const DRAFT_2020_12_URI = "https://json-schema.org/draft/2020-12/schema";
+
+let warnedZod3Once = false;
+function warnZod3DialectOnce(): void {
+  if (warnedZod3Once) return;
+  warnedZod3Once = true;
+  console.warn(
+    "[schema] Zod 3 schema converted via zod-to-json-schema (draft-7); " +
+      "post-processed to draft-2020-12. Prefer Zod 4 or a hand-written JSON Schema for full fidelity.",
+  );
+}
+
+/**
+ * Upgrade a draft-7 / 2019-09 JSON Schema to draft-2020-12.
+ *
+ * Mechanical fixes:
+ * - Replace `$schema` URI with the 2020-12 URI (when present).
+ * - Tuples: convert `{ type: "array", items: [s1, s2], additionalItems: ... }`
+ *   to `{ type: "array", prefixItems: [s1, s2], items: ... }`.
+ * - Recurse into `properties`, `definitions`, `$defs`, `anyOf`, `oneOf`,
+ *   `allOf`, `not`, `items`, `prefixItems`, `additionalProperties`,
+ *   `propertyNames`.
+ *
+ * Idempotent — running this on a 2020-12 schema is a no-op.
+ */
+export function upgradeToJsonSchema2020(input: unknown): Record<string, unknown> {
+  if (input == null || typeof input !== "object") return {};
+  const out = upgradeNode(input as Record<string, unknown>);
+  if (typeof (out as Record<string, unknown>).$schema === "string") {
+    (out as Record<string, unknown>).$schema = DRAFT_2020_12_URI;
+  }
+  return out as Record<string, unknown>;
+}
+
+function upgradeNode(node: unknown): unknown {
+  if (node == null) return node;
+  if (Array.isArray(node)) return node.map(upgradeNode);
+  if (typeof node !== "object") return node;
+
+  const src = node as Record<string, unknown>;
+  const out: Record<string, unknown> = {};
+
+  for (const [key, value] of Object.entries(src)) {
+    out[key] = value;
+  }
+
+  // Tuple conversion: items as array → prefixItems; additionalItems → items
+  if (out["type"] === "array" && Array.isArray(out["items"])) {
+    out["prefixItems"] = (out["items"] as unknown[]).map(upgradeNode);
+    if ("additionalItems" in out) {
+      out["items"] = upgradeNode(out["additionalItems"]);
+      delete out["additionalItems"];
+    } else {
+      delete out["items"];
+    }
+  } else if ("items" in out) {
+    out["items"] = upgradeNode(out["items"]);
+  }
+
+  // Recurse into common nested locations
+  for (const key of ["properties", "patternProperties", "definitions", "$defs"] as const) {
+    const v = out[key];
+    if (v && typeof v === "object" && !Array.isArray(v)) {
+      const upgraded: Record<string, unknown> = {};
+      for (const [k, sub] of Object.entries(v as Record<string, unknown>)) {
+        upgraded[k] = upgradeNode(sub);
+      }
+      out[key] = upgraded;
+    }
+  }
+  for (const key of ["anyOf", "oneOf", "allOf", "prefixItems"] as const) {
+    if (Array.isArray(out[key])) {
+      out[key] = (out[key] as unknown[]).map(upgradeNode);
+    }
+  }
+  for (const key of ["not", "additionalProperties", "propertyNames", "contains"] as const) {
+    if (out[key] && typeof out[key] === "object") {
+      out[key] = upgradeNode(out[key]);
+    }
+  }
+
+  return out;
+}
+
+// ============================================================================
 // Conversion
 // ============================================================================
 
@@ -260,7 +348,8 @@ export async function toJSONSchema(
               "draft-07": "jsonSchema7",
               "openapi-3.0": "openApi3",
             };
-            result = zodToJsonSchema(schema, { target: targetMap[targetKey] });
+            const raw = zodToJsonSchema(schema, { target: targetMap[targetKey] });
+            result = targetKey === "draft-2020-12" ? upgradeToJsonSchema2020(raw) : raw;
             break;
           }
         }
@@ -298,6 +387,7 @@ export async function toJSONSchema(
 
     case "zod3": {
       // Zod 3 schemas require zod-to-json-schema to avoid Zod 4 runtime mismatch.
+      // The library only emits draft-7. We post-process to 2020-12 when requested.
       try {
         const zodToJsonSchemaModule = (await import("zod-to-json-schema")) as unknown as Record<
           string,
@@ -321,7 +411,13 @@ export async function toJSONSchema(
           "openapi-3.0": "openApi3",
         };
 
-        result = zodToJsonSchema(schema, { target: targetMap[targetKey] });
+        const raw = zodToJsonSchema(schema, { target: targetMap[targetKey] });
+        if (targetKey === "draft-2020-12") {
+          warnZod3DialectOnce();
+          result = upgradeToJsonSchema2020(raw);
+        } else {
+          result = raw;
+        }
       } catch (err) {
         console.error("[schema] Failed to convert Zod 3 schema to JSON Schema:", err);
         const def = (schema as Record<string, unknown>)._def as Record<string, unknown> | undefined;
@@ -350,8 +446,9 @@ export async function toJSONSchema(
     }
 
     case "json-schema": {
-      // Already JSON Schema - pass through
-      result = { ...(schema as Record<string, unknown>) };
+      // Already JSON Schema — upgrade to target dialect when requested.
+      const raw = { ...(schema as Record<string, unknown>) };
+      result = target === "draft-2020-12" ? upgradeToJsonSchema2020(raw) : raw;
       break;
     }
 
@@ -424,7 +521,13 @@ export function toJSONSchemaSync(
           | ((s: unknown, o?: Record<string, unknown>) => Record<string, unknown>)
           | undefined;
         if (typeof zodToJsonSchema === "function") {
-          result = zodToJsonSchema(schema, { target: "jsonSchema7" });
+          const raw = zodToJsonSchema(schema, { target: "jsonSchema7" });
+          if (target === "draft-2020-12") {
+            warnZod3DialectOnce();
+            result = upgradeToJsonSchema2020(raw);
+          } else {
+            result = raw;
+          }
         } else {
           result = {};
         }
@@ -444,7 +547,8 @@ export function toJSONSchemaSync(
     }
 
     case "json-schema": {
-      result = { ...(schema as Record<string, unknown>) };
+      const raw = { ...(schema as Record<string, unknown>) };
+      result = target === "draft-2020-12" ? upgradeToJsonSchema2020(raw) : raw;
       break;
     }
 

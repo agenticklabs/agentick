@@ -41,7 +41,7 @@ const initializeBody = JSON.stringify({
   id: 1,
   method: "initialize",
   params: {
-    protocolVersion: "2025-03-26",
+    protocolVersion: "2025-11-25",
     capabilities: {},
     clientInfo: { name: "test-client", version: "1.0.0" },
   },
@@ -529,7 +529,7 @@ describe("MCP Server Plugin — static mode multi-client", () => {
     id: 1,
     method: "initialize",
     params: {
-      protocolVersion: "2025-03-26",
+      protocolVersion: "2025-11-25",
       capabilities: {},
       clientInfo: { name: "test-client", version: "1.0.0" },
     },
@@ -1085,7 +1085,7 @@ describe("MCP Server Plugin — standalone tools", () => {
         id: 1,
         method: "initialize",
         params: {
-          protocolVersion: "2025-03-26",
+          protocolVersion: "2025-11-25",
           capabilities: {},
           clientInfo: { name: "t", version: "1" },
         },
@@ -1176,7 +1176,7 @@ describe("MCP Server Plugin — standalone tools", () => {
         id: 1,
         method: "initialize",
         params: {
-          protocolVersion: "2025-03-26",
+          protocolVersion: "2025-11-25",
           capabilities: {},
           clientInfo: { name: "t", version: "1" },
         },
@@ -1256,7 +1256,7 @@ describe("MCP Server Plugin — standalone tools", () => {
         id: 1,
         method: "initialize",
         params: {
-          protocolVersion: "2025-03-26",
+          protocolVersion: "2025-11-25",
           capabilities: {
             extensions: {
               "io.modelcontextprotocol/ui": {
@@ -1329,7 +1329,7 @@ describe("MCP Server Plugin — standalone tools", () => {
         id: 1,
         method: "initialize",
         params: {
-          protocolVersion: "2025-03-26",
+          protocolVersion: "2025-11-25",
           capabilities: {},
           clientInfo: { name: "t", version: "1" },
         },
@@ -1422,7 +1422,7 @@ describe("MCP Server Plugin — resources e2e", () => {
         id: 1,
         method: "initialize",
         params: {
-          protocolVersion: "2025-03-26",
+          protocolVersion: "2025-11-25",
           capabilities: {},
           clientInfo: { name: "t", version: "1" },
         },

@@ -139,6 +139,220 @@ describe("MCPServer", () => {
       await cleanup();
     });
 
+    // ── SEP-1303 Tool Execution Error semantics (2025-11-25) ──────────────
+    //
+    // Per SEP-1303, tool **execution** errors (including input validation
+    // failures from inside the handler) MUST surface as `isError: true`
+    // content blocks so the model can self-correct. Protocol errors
+    // (-32xxx JSON-RPC errors) are reserved for genuinely fatal conditions
+    // (method not found, server misconfigured, transport broken).
+
+    describe("tool execution errors (SEP-1303)", () => {
+      it("plain Error becomes Tool Execution Error, not protocol error", async () => {
+        const { client, cleanup } = await createConnectedPair({
+          tools: [
+            createTestTool("oops", {
+              inputSchema: {},
+              handler: async () => {
+                throw new Error("plain JS error");
+              },
+            }),
+          ],
+        });
+
+        const result = await client.callTool({ name: "oops", arguments: {} });
+        expect(result.isError).toBe(true);
+        expect(Array.isArray(result.content)).toBe(true);
+        // Should NOT have raised a JSON-RPC protocol error.
+        // (If it had, callTool would have rejected.)
+        await cleanup();
+      });
+
+      it("Zod validation throw inside handler becomes Tool Execution Error", async () => {
+        const Inner = z.object({ count: z.number().int().positive() });
+        const { client, cleanup } = await createConnectedPair({
+          tools: [
+            createTestTool("validate-inside", {
+              inputSchema: { value: z.unknown() },
+              handler: async (input) => {
+                // Simulate handler doing its own validation
+                Inner.parse((input as { value: unknown }).value);
+                return { content: [{ type: "text", text: "ok" }] };
+              },
+            }),
+          ],
+        });
+
+        const result = await client.callTool({
+          name: "validate-inside",
+          arguments: { value: { count: -1 } },
+        });
+        expect(result.isError).toBe(true);
+        await cleanup();
+      });
+
+      it("error message preserved in content (does not leak stack)", async () => {
+        const { client, cleanup } = await createConnectedPair({
+          tools: [
+            createTestTool("descriptive-fail", {
+              inputSchema: {},
+              handler: async () => {
+                throw new Error("Database connection lost (host=internal-db.local)");
+              },
+            }),
+          ],
+        });
+
+        const result = await client.callTool({ name: "descriptive-fail", arguments: {} });
+        expect(result.isError).toBe(true);
+        const text = (result.content as Array<{ type: string; text?: string }>)[0]?.text ?? "";
+        // Error message preserved so the model can reason about it...
+        expect(text.toLowerCase()).toMatch(/database/);
+        // ...but the result is shaped as content, not a protocol error.
+        expect(typeof text).toBe("string");
+        await cleanup();
+      });
+
+      it("tool not found is a protocol error (genuinely fatal)", async () => {
+        const { client, cleanup } = await createConnectedPair({
+          tools: [createTestTool("only-real-tool")],
+        });
+
+        // Call a tool that doesn't exist — this IS a protocol error.
+        // The error message should have a SINGLE "MCP error -32601:" prefix,
+        // not the doubled prefix the SDK's McpError-throwing path produces.
+        await expect(client.callTool({ name: "ghost-tool", arguments: {} })).rejects.toThrow(
+          "MCP error -32601: Tool ghost-tool not found",
+        );
+
+        await cleanup();
+      });
+
+      it("protocol error message is not double-prefixed by SDK round-trip", async () => {
+        // SDK quirk: `throw new McpError(code, msg)` puts "MCP error <code>:"
+        // into .message at construction; SDK serialization sends .message
+        // verbatim; client SDK reconstructs adding another prefix. We must
+        // throw plain Errors with .code/.data so only one prefix appears.
+        const { client, cleanup } = await createConnectedPair({
+          tools: [createTestTool("only-real-tool")],
+        });
+
+        let capturedMessage = "";
+        try {
+          await client.callTool({ name: "ghost-tool", arguments: {} });
+        } catch (err) {
+          capturedMessage = (err as Error).message;
+        }
+
+        expect(capturedMessage).toContain("Tool ghost-tool not found");
+        const prefixCount = (capturedMessage.match(/MCP error -?\d+:/g) ?? []).length;
+        expect(prefixCount).toBe(1);
+
+        await cleanup();
+      });
+
+      it("handler returning isError: true is preserved (not double-wrapped)", async () => {
+        const { client, cleanup } = await createConnectedPair({
+          tools: [
+            createTestTool("self-flagged", {
+              inputSchema: {},
+              handler: async () => ({
+                content: [{ type: "text", text: "I declare this an error" }],
+                isError: true,
+              }),
+            }),
+          ],
+        });
+
+        const result = await client.callTool({ name: "self-flagged", arguments: {} });
+        expect(result.isError).toBe(true);
+        const text = (result.content as Array<{ type: string; text?: string }>)[0]?.text;
+        expect(text).toBe("I declare this an error");
+        await cleanup();
+      });
+
+      it("handler returning content without isError is not flagged as error", async () => {
+        const { client, cleanup } = await createConnectedPair({
+          tools: [
+            createTestTool("happy-path", {
+              inputSchema: {},
+              handler: async () => ({
+                content: [{ type: "text", text: "all good" }],
+              }),
+            }),
+          ],
+        });
+
+        const result = await client.callTool({ name: "happy-path", arguments: {} });
+        expect(result.isError).toBeFalsy();
+        await cleanup();
+      });
+
+      it("recovers cleanly — failing call doesn't poison subsequent calls", async () => {
+        let counter = 0;
+        const { client, cleanup } = await createConnectedPair({
+          tools: [
+            createTestTool("flaky", {
+              inputSchema: {},
+              handler: async () => {
+                counter++;
+                if (counter === 1) throw new Error("first call fails");
+                return { content: [{ type: "text", text: `call ${counter}` }] };
+              },
+            }),
+          ],
+        });
+
+        const first = await client.callTool({ name: "flaky", arguments: {} });
+        expect(first.isError).toBe(true);
+
+        const second = await client.callTool({ name: "flaky", arguments: {} });
+        expect(second.isError).toBeFalsy();
+        const text = (second.content as Array<{ type: string; text?: string }>)[0]?.text;
+        expect(text).toBe("call 2");
+
+        await cleanup();
+      });
+
+      it("non-Error throw (string) becomes Tool Execution Error", async () => {
+        const { client, cleanup } = await createConnectedPair({
+          tools: [
+            createTestTool("string-throw", {
+              inputSchema: {},
+              handler: async () => {
+                // Yes, people do this. Test for it.
+                // eslint-disable-next-line @typescript-eslint/only-throw-error
+                throw "raw string error";
+              },
+            }),
+          ],
+        });
+
+        const result = await client.callTool({ name: "string-throw", arguments: {} });
+        expect(result.isError).toBe(true);
+        await cleanup();
+      });
+
+      it("synchronous throw inside async handler becomes Tool Execution Error", async () => {
+        const { client, cleanup } = await createConnectedPair({
+          tools: [
+            createTestTool("sync-throw", {
+              inputSchema: {},
+              handler: async () => {
+                // Throw synchronously even though handler is async
+                if (true as boolean) throw new Error("sync from async");
+                return { content: [] };
+              },
+            }),
+          ],
+        });
+
+        const result = await client.callTool({ name: "sync-throw", arguments: {} });
+        expect(result.isError).toBe(true);
+        await cleanup();
+      });
+    });
+
     it("supports dynamic tool registration", async () => {
       const { server, client, cleanup } = await createConnectedPair();
 
@@ -175,7 +389,7 @@ describe("MCPServer", () => {
       expect(resources[0].uri).toBe("db://schema/users");
 
       const { contents } = await client.readResource({ uri: "db://schema/users" });
-      expect(contents[0].text).toBe("CREATE TABLE users (id INT)");
+      expect((contents[0] as any).text).toBe("CREATE TABLE users (id INT)");
 
       await cleanup();
     });
@@ -216,7 +430,7 @@ describe("MCPServer", () => {
       expect(appResource!.mimeType).toBe("text/html;profile=mcp-app");
 
       const { contents } = await client.readResource({ uri: "ui://test/dashboard" });
-      expect(contents[0].text).toContain("Dashboard");
+      expect((contents[0] as any).text).toContain("Dashboard");
 
       await cleanup();
     });
@@ -597,7 +811,7 @@ describe("MCPServer", () => {
       expect(resources).toHaveLength(2);
 
       const { contents } = await client.readResource({ uri: "db://schema/users" });
-      expect(contents[0].text).toBe("Schema for users");
+      expect((contents[0] as any).text).toBe("Schema for users");
 
       await cleanup();
     });
