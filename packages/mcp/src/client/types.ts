@@ -127,34 +127,30 @@ export type ProgressCallback = (info: ProgressInfo) => void;
 // ============================================================================
 // Sampling (Bidirectional — server asks client's model to generate)
 // ============================================================================
+//
+// Re-export the canonical types from `@agentick/mcp/protocol`. The
+// protocol versions are strict supersets — they include the new
+// 2025-11-25 content blocks (audio, tool_use, tool_result) while
+// remaining compatible with handlers that only emit text/image.
 
-export type SamplingHandler = (request: SamplingRequest) => Promise<SamplingResult>;
+import type {
+  SamplingParams,
+  SamplingResult as ProtocolSamplingResult,
+} from "../protocol/types.js";
 
-export interface SamplingRequest {
-  messages: Array<{
-    role: "user" | "assistant";
-    content: any;
-  }>;
-  modelPreferences?: {
-    hints?: Array<{ name?: string }>;
-    costPriority?: number;
-    speedPriority?: number;
-    intelligencePriority?: number;
-  };
-  systemPrompt?: string;
-  includeContext?: "none" | "thisServer" | "allServers";
-  temperature?: number;
-  maxTokens: number;
-  stopSequences?: string[];
-  metadata?: Record<string, unknown>;
-}
+/**
+ * Server → client sampling request. Typed against the full
+ * 2025-11-25 spec (supports audio + tool-use blocks). Handlers can
+ * narrow to text/image when they don't need the new modalities.
+ */
+export type SamplingRequest = SamplingParams;
 
-export interface SamplingResult {
-  role: "user" | "assistant";
-  content: { type: "text"; text: string } | { type: "image"; data: string; mimeType: string };
-  model: string;
-  stopReason?: string;
-}
+// `SamplingResult` is canonically defined in `@agentick/mcp/protocol/types`
+// and re-exported there. Don't re-export here — that creates an ambiguous
+// export at the package barrel. Consumers should import from the package
+// root (`@agentick/mcp`).
+
+export type SamplingHandler = (request: SamplingRequest) => Promise<ProtocolSamplingResult>;
 
 // ============================================================================
 // Roots (Client provides filesystem roots to server)

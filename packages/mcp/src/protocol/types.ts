@@ -304,6 +304,14 @@ export interface MCPHandlerContext {
    * schemes are filtered out defensively.
    */
   roots: RootsAPI;
+
+  /**
+   * Sugar surface for `sampling/createMessage` — ask the client to run
+   * an LLM completion on the server's behalf. Undefined when the client
+   * did not advertise the `sampling` capability. Use `ctx.sample?.text(...)`
+   * or guard explicitly: `if (!ctx.sample) throw ...`.
+   */
+  sample?: SampleAPI;
 }
 
 export type MCPToolHandler = (
@@ -534,6 +542,154 @@ export interface MCPPromptResult {
           resource: { uri: string; text?: string; blob?: string; mimeType?: string };
         };
   }>;
+}
+
+// ============================================================================
+// Sampling
+// ============================================================================
+
+/**
+ * MCP content block types per spec 2025-11-25 — used in both
+ * `sampling/createMessage` request messages and the response. Tool
+ * use/result blocks are only valid in tool-enabled sampling
+ * (capability `sampling.tools: {}`).
+ */
+export type SamplingContentBlock =
+  | { type: "text"; text: string }
+  | { type: "image"; data: string; mimeType: string }
+  | { type: "audio"; data: string; mimeType: string }
+  | { type: "tool_use"; id: string; name: string; input: Record<string, unknown> }
+  | {
+      type: "tool_result";
+      toolUseId: string;
+      content: SamplingContentBlock[] | string;
+      isError?: boolean;
+    };
+
+export interface ModelHint {
+  name: string;
+}
+
+export interface ModelPreferences {
+  hints?: ModelHint[];
+  costPriority?: number;
+  speedPriority?: number;
+  intelligencePriority?: number;
+}
+
+export interface SamplingMessage {
+  role: "user" | "assistant";
+  content: SamplingContentBlock | SamplingContentBlock[];
+}
+
+export interface SamplingToolDefinition {
+  name: string;
+  description?: string;
+  inputSchema: Record<string, unknown>;
+}
+
+export interface SamplingParams {
+  messages: SamplingMessage[];
+  systemPrompt?: string;
+  modelPreferences?: ModelPreferences;
+  /**
+   * Whether to include MCP context. Soft-deprecated in 2025-11-25 —
+   * gated behind `sampling.context` sub-capability. Auto-scrubbed by
+   * the sugar layer when the client did not advertise it.
+   */
+  includeContext?: "none" | "thisServer" | "allServers";
+  temperature?: number;
+  maxTokens: number;
+  stopSequences?: string[];
+  metadata?: Record<string, unknown>;
+  /** New in 2025-11-25 — gated behind `sampling.tools` sub-capability. */
+  tools?: SamplingToolDefinition[];
+  toolChoice?: { mode: "auto" | "required" | "none" };
+}
+
+export interface SamplingResult {
+  role: "assistant";
+  content: SamplingContentBlock | SamplingContentBlock[];
+  model: string;
+  /**
+   * 2025-11-25 names `endTurn` and `toolUse` explicitly; older spec
+   * revisions also used `maxTokens` and `stopSequence`. Treat as an
+   * open string for tolerance.
+   */
+  stopReason?: "endTurn" | "toolUse" | "maxTokens" | "stopSequence" | string;
+}
+
+/**
+ * Sugar surface exposed at `MCPHandlerContext.sample` (undefined when
+ * the client did not advertise `sampling`). Wraps
+ * `MCPServer.requestSampling()` with typed shortcuts and capability
+ * gating.
+ */
+export interface SampleAPI {
+  /** Simplest: prompt in, text out. Single-turn. */
+  text(prompt: string, opts?: SamplingTextOpts): Promise<string>;
+
+  /** Multi-turn with full control. Returns the raw `SamplingResult`. */
+  message(params: SamplingParams): Promise<SamplingResult>;
+
+  /**
+   * Structured output via Zod schema. Re-prompts on JSON parse / Zod
+   * validation failure up to `maxRetries` (default 2).
+   */
+  structured<T>(
+    prompt: string,
+    opts: { schema: import("zod").ZodType<T>; maxRetries?: number } & SamplingTextOpts,
+  ): Promise<T>;
+
+  /** Image generation hint. Throws if response has no image content block. */
+  image(opts: {
+    prompt: string;
+    size?: "256x256" | "512x512" | "1024x1024";
+    style?: string;
+  }): Promise<{ data: string; mimeType: string }>;
+
+  /** Audio generation hint. Throws if response has no audio content block. */
+  audio(opts: { prompt: string; voice?: string }): Promise<{ data: string; mimeType: string }>;
+
+  /**
+   * Tool-use sampling — runs the spec-defined loop: model emits
+   * `tool_use` blocks → server invokes registered handlers → packages
+   * `tool_result` blocks (tool-results-only message constraint per
+   * spec) → feeds back. Bounded by `maxIterations` (default 8).
+   *
+   * Throws when client did not advertise `sampling.tools`.
+   */
+  withTools<T = unknown>(opts: {
+    prompt: string;
+    tools: Array<{
+      name: string;
+      description?: string;
+      input: import("zod").ZodType<T>;
+      handler: (input: unknown) => unknown | Promise<unknown>;
+    }>;
+    toolChoice?: "auto" | "required" | "none";
+    maxIterations?: number;
+    systemPrompt?: string;
+    maxTokens?: number;
+    modelPreferences?: ModelPreferences;
+  }): Promise<{
+    finalText: string;
+    toolCalls: Array<{ name: string; input: unknown; output: unknown }>;
+  }>;
+
+  /** Capability probes. */
+  canUseTools(): boolean;
+  canSampleAudio(): boolean;
+  canIncludeContext(): boolean;
+}
+
+export interface SamplingTextOpts {
+  systemPrompt?: string;
+  maxTokens?: number;
+  temperature?: number;
+  stopSequences?: string[];
+  modelPreferences?: ModelPreferences;
+  includeContext?: "none" | "thisServer" | "allServers";
 }
 
 // ============================================================================

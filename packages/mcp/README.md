@@ -877,6 +877,142 @@ Both `isWithin` and `assertWithin` accept POSIX paths and `file://` URIs
 interchangeably and honor URI percent-encoding. Sibling-name false
 matches (`/workspace` vs `/workspace-other`) are rejected.
 
+### Sampling — ask the client's model to generate
+
+`MCPServer.requestSampling(sessionId, params, opts?)` issues
+`sampling/createMessage` to a connected client whose host model handles
+the inference. The bottom-layer primitive; sugar at `ctx.sample.*`
+gates by capability and applies safe defaults.
+
+```typescript
+const result = await server.requestSampling(sessionId, {
+  messages: [{ role: "user", content: { type: "text", text: "Summarize this..." } }],
+  maxTokens: 200,
+  systemPrompt: "You are a concise summarizer.",
+});
+// → { role: "assistant", content: { type: "text", text: "..." }, model: "...", stopReason: "endTurn" }
+```
+
+**Sugar — `ctx.sample.*`** is `undefined` when the client did not
+advertise the `sampling` capability. Use optional chaining or guard
+explicitly.
+
+```typescript
+import { MCPServer, toolResult } from "@agentick/mcp";
+import { z } from "zod";
+
+const server = new MCPServer({
+  name: "knowify-assistant",
+  version: "1.0.0",
+  tools: [
+    // ── Simplest: prompt in, text out
+    {
+      name: "summarize",
+      inputSchema: z.object({ records: z.array(z.unknown()) }),
+      handler: async (input, ctx) => {
+        if (!ctx.sample) throw new Error("This tool requires a sampling-capable client");
+        const text = await ctx.sample.text(
+          `Summarize concisely: ${JSON.stringify(input.records)}`,
+          { maxTokens: 200 },
+        );
+        return toolResult(text);
+      },
+    },
+
+    // ── Structured JSON output — Zod-validated, auto-retried on parse/validation failure
+    {
+      name: "analyze_invoices",
+      inputSchema: z.object({ since: z.string() }),
+      handler: async (input, ctx) => {
+        const Report = z.object({
+          totalOpen: z.number(),
+          totalOverdue: z.number(),
+          topClients: z.array(z.string()).max(5),
+        });
+        const report = await ctx.sample!.structured(
+          `Analyze invoices since ${input.since}. Return JSON.`,
+          { schema: Report, maxTokens: 500, maxRetries: 2 },
+        );
+        return toolResult(JSON.stringify(report, null, 2));
+      },
+    },
+
+    // ── Tool-use loop: spec-defined toolUse loop with handler dispatch
+    {
+      name: "research",
+      inputSchema: z.object({ topic: z.string() }),
+      handler: async (input, ctx) => {
+        if (!ctx.sample?.canUseTools()) {
+          throw new Error("Tool-use sampling not supported by this client");
+        }
+        const { finalText, toolCalls } = await ctx.sample.withTools({
+          prompt: `Research the topic: ${input.topic}`,
+          tools: [
+            {
+              name: "search",
+              description: "Web search",
+              input: z.object({ q: z.string() }),
+              handler: async ({ q }) => await db.search(q),
+            },
+            {
+              name: "fetch",
+              description: "Fetch a URL",
+              input: z.object({ url: z.string() }),
+              handler: async ({ url }) => await fetch(url).then((r) => r.text()),
+            },
+          ],
+          maxIterations: 5,
+        });
+        return toolResult(`${finalText}\n\nMade ${toolCalls.length} tool calls.`);
+      },
+    },
+
+    // ── Image generation
+    {
+      name: "render",
+      inputSchema: z.object({ description: z.string() }),
+      handler: async (input, ctx) => {
+        const img = await ctx.sample!.image({
+          prompt: input.description,
+          size: "1024x1024",
+        });
+        return { content: [{ type: "image", data: img.data, mimeType: img.mimeType }] };
+      },
+    },
+  ],
+});
+```
+
+**`ctx.sample` API:**
+
+| Method                              | Purpose                                                                 |
+| ----------------------------------- | ----------------------------------------------------------------------- |
+| `text(prompt, opts?)`               | Single-turn prompt → string. Sensible defaults for `maxTokens`.         |
+| `message(params)`                   | Multi-turn with full control. Returns raw `SamplingResult`.             |
+| `structured(prompt, { schema })`    | Zod-validated JSON output. Retries on parse/validation failure.         |
+| `image({ prompt, size?, style? })`  | Image content block. Throws if response has no image.                   |
+| `audio({ prompt, voice? })`         | Audio content block. Throws if response has no audio.                   |
+| `withTools({ prompt, tools, ... })` | Spec-defined tool-use loop. Throws when `sampling.tools` not supported. |
+| `canUseTools()`                     | True only when client advertised `sampling.tools: {}`.                  |
+| `canSampleAudio()`                  | Audio modality probe.                                                   |
+| `canIncludeContext()`               | True when client advertised `sampling.context: {}`.                     |
+
+**Behavior:**
+
+- **`includeContext`** is auto-scrubbed to `none` when the client lacks
+  `sampling.context` — sugar never sends an option the client didn't opt
+  into.
+- **`withTools`** runs the full spec-defined loop: receives `tool_use`
+  blocks, invokes registered handlers, packages `tool_result` blocks
+  per the spec's "tool-results-only message" constraint, feeds back,
+  repeats until `stopReason !== "toolUse"`.
+- Unknown tool names and handler errors surface as `tool_result` blocks
+  with `isError: true` so the model can self-correct rather than
+  crashing the loop.
+- **`structured()`** re-prompts on JSON parse / Zod validation failure
+  with the validation error inlined into the next user turn. Up to
+  `maxRetries` (default 2). Handles fenced ` ```json...``` ` blocks.
+
 ### Server-to-client requests
 
 `MCPServer.request<T>(sessionId, method, params, opts?)` lets the server

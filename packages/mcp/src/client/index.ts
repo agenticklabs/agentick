@@ -15,7 +15,6 @@ export type {
   ProgressInfo,
   SamplingHandler,
   SamplingRequest,
-  SamplingResult,
   Root,
   LogLevel,
   LogMessage,

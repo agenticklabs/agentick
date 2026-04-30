@@ -27,6 +27,7 @@ import {
   CompleteRequestSchema,
   ListRootsResultSchema,
   RootsListChangedNotificationSchema,
+  CreateMessageResultWithToolsSchema,
   ErrorCode,
   McpError,
 } from "@modelcontextprotocol/sdk/types.js";
@@ -49,9 +50,13 @@ import type {
   MCPCompletionContext,
   Root,
   RootsAPI,
+  SampleAPI,
+  SamplingParams,
+  SamplingResult,
 } from "../protocol/types.js";
 import { normalizeCompletionResult } from "../protocol/completions.js";
 import { RootsAPIImpl, isValidRootUri } from "./roots.js";
+import { SampleAPIImpl, inspectSamplingCapabilities } from "./sampling.js";
 import { resolveSecurityDefaults, type ResolvedSecurity } from "./security/defaults.js";
 import {
   SecurityError,
@@ -679,6 +684,44 @@ export class MCPServer {
   }
 
   // ══════════════════════════════════════════════════════════════════════════
+  // Sampling — issue `sampling/createMessage` to the connected client.
+  //
+  // Throws `SessionNotFoundError` for unknown sessions. The client must
+  // have advertised the `sampling` capability; otherwise the request
+  // round-trips to a `MethodNotFound` error from the client side.
+  //
+  // Sugar layer (`ctx.sample.*`) gates by capability and applies safe
+  // defaults (e.g. scrubs `includeContext` when `sampling.context` is
+  // absent).
+  // ══════════════════════════════════════════════════════════════════════════
+
+  async requestSampling(
+    sessionId: string,
+    params: SamplingParams,
+    opts?: { timeoutMs?: number; signal?: AbortSignal },
+  ): Promise<SamplingResult> {
+    if (this.closed) throw new Error("MCPServer is closed");
+
+    const session = this.sessions.get(sessionId);
+    if (!session) throw new SessionNotFoundError(sessionId);
+
+    const requestOptions: { timeout?: number; signal?: AbortSignal } = {};
+    if (opts?.timeoutMs !== undefined) requestOptions.timeout = opts.timeoutMs;
+    if (opts?.signal !== undefined) requestOptions.signal = opts.signal;
+
+    // Use the with-tools schema unconditionally — it's a strict superset
+    // of CreateMessageResultSchema (single block OR array; adds toolUse
+    // stop reason). Lets the same primitive serve both `text()` and
+    // `withTools()` paths.
+    const result = await session.sdkServer.request(
+      { method: "sampling/createMessage", params: params as unknown as Record<string, unknown> },
+      CreateMessageResultWithToolsSchema,
+      requestOptions,
+    );
+    return result as SamplingResult;
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
   // Internal: Create a fresh SDK Server for a new session
   //
   // Each client session gets its own Server instance with request handlers
@@ -1109,6 +1152,26 @@ export class MCPServer {
   // ══════════════════════════════════════════════════════════════════════════
 
   /**
+   * Build a `SampleAPI` for the given session, or undefined when the
+   * client did not advertise the `sampling` capability. Capability
+   * snapshot is read once from the session's SDK Server.
+   */
+  private buildSampleAPI(sessionId: string): SampleAPI | undefined {
+    const session = this.sessions.get(sessionId);
+    if (!session) return undefined;
+    const clientCaps = session.sdkServer.getClientCapabilities?.() as
+      | Record<string, unknown>
+      | undefined;
+    const caps = inspectSamplingCapabilities(clientCaps);
+    if (!caps.sampling) return undefined;
+
+    return new SampleAPIImpl({
+      capabilities: caps,
+      request: (params) => this.requestSampling(sessionId, params),
+    });
+  }
+
+  /**
    * Build a `RootsAPI` instance bound to the given session. Lazy-creates
    * the per-session cache entry the first time a handler subscribes,
    * so subscribers added before any `list()` call still receive updates.
@@ -1182,12 +1245,14 @@ export class MCPServer {
       request.requestInfo = (extra as any).requestInfo;
     }
 
+    const sampleAPI = this.buildSampleAPI(sessionId);
     const ctx: MCPHandlerContext = {
       request,
       extra,
       sessionId,
       signal: extra.signal,
       roots: this.buildRootsAPI(sessionId),
+      ...(sampleAPI ? { sample: sampleAPI } : {}),
     };
 
     // Progress: if the client sent a progressToken, build a sendProgress callback
