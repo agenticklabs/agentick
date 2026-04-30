@@ -1,5 +1,13 @@
 # @agentick/mcp
 
+## 0.14.57
+
+### Patch Changes
+
+- a6558cd: add support for icons and title
+  - @agentick/kernel@0.14.57
+  - @agentick/shared@0.14.57
+
 ## 0.14.56
 
 ### Patch Changes
