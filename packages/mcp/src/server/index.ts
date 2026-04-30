@@ -1,4 +1,4 @@
-export { MCPServer } from "./server.js";
+export { MCPServer, SessionNotFoundError } from "./server.js";
 
 // Security — defaults
 export {

@@ -51,11 +51,33 @@ import {
   buildRequestContext,
 } from "./security/pipeline.js";
 import { toolError, protocolError, stripMcpErrorPrefix } from "../protocol/errors.js";
+import { z } from "zod";
 
 const log = Logger.for("mcp:server");
 // Schema conversion
 import { toJSONSchemaSync, isJSONSchema } from "@agentick/kernel";
 import { normalizeObjectSchema } from "@modelcontextprotocol/sdk/server/zod-compat.js";
+
+// ============================================================================
+// Errors
+// ============================================================================
+
+/**
+ * Thrown when an outbound `MCPServer.request()` targets a sessionId that is
+ * not currently connected (was never connected, or was closed/evicted).
+ *
+ * Distinct from JSON-RPC protocol errors — this is a server-side lookup
+ * failure that never makes it onto the wire.
+ */
+export class SessionNotFoundError extends Error {
+  readonly sessionId: string;
+
+  constructor(sessionId: string) {
+    super(`No active session: ${sessionId}`);
+    this.name = "SessionNotFoundError";
+    this.sessionId = sessionId;
+  }
+}
 
 // ============================================================================
 // Internal State
@@ -475,6 +497,61 @@ export class MCPServer {
 
   getRegisteredTools(): MCPToolDefinition[] {
     return Array.from(this.tools.values()).map((t) => t.definition);
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // Server → Client request primitive
+  //
+  // The bottom-layer plumbing for every bidirectional MCP feature: sampling,
+  // elicitation, roots, ping, etc. Looks up the session's SDK Server and
+  // calls its underlying `request()` to issue a JSON-RPC request to the
+  // connected client, awaiting the response.
+  //
+  // Sugar layers (ctx.sample.*, ctx.elicit.*, ctx.roots.*) build on this.
+  // ══════════════════════════════════════════════════════════════════════════
+
+  /**
+   * Issue a request to the client connected at `sessionId` and await the
+   * response. The request is routed through the session's underlying SDK
+   * Server, so capability negotiation, transport, and serialization all
+   * use the same path the client established at initialize time.
+   *
+   * @throws {SessionNotFoundError} if `sessionId` is not a known session
+   * @throws if the server has been closed
+   * @throws on timeout, abort, schema validation failure, or client error
+   */
+  async request<T = unknown>(
+    sessionId: string,
+    method: string,
+    params: unknown,
+    opts?: {
+      /** Zod schema for response validation. Defaults to passthrough (returns unknown). */
+      resultSchema?: z.ZodType<T>;
+      /** Hard timeout in milliseconds. */
+      timeoutMs?: number;
+      /** Abort signal — rejects with an abort error if signaled. */
+      signal?: AbortSignal;
+    },
+  ): Promise<T> {
+    if (this.closed) {
+      throw new Error("MCPServer is closed");
+    }
+
+    const session = this.sessions.get(sessionId);
+    if (!session) {
+      throw new SessionNotFoundError(sessionId);
+    }
+
+    const resultSchema = (opts?.resultSchema ?? z.unknown()) as z.ZodType<T>;
+    const requestOptions: { timeout?: number; signal?: AbortSignal } = {};
+    if (opts?.timeoutMs !== undefined) requestOptions.timeout = opts.timeoutMs;
+    if (opts?.signal !== undefined) requestOptions.signal = opts.signal;
+
+    return session.sdkServer.request(
+      { method, params: params as Record<string, unknown> },
+      resultSchema as never,
+      requestOptions,
+    ) as Promise<T>;
   }
 
   // ══════════════════════════════════════════════════════════════════════════
