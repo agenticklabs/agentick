@@ -160,10 +160,11 @@ export interface SamplingResult {
 // Roots (Client provides filesystem roots to server)
 // ============================================================================
 
-export interface Root {
-  uri: string;
-  name?: string;
-}
+// Re-export the canonical `Root` type from protocol so client and server
+// reference the same shape. Avoids the ambiguous-export TS2308 from a
+// duplicate definition.
+import type { Root } from "../protocol/types.js";
+export type { Root };
 
 // ============================================================================
 // Logging (Server → Client log messages)

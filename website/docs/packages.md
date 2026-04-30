@@ -99,6 +99,8 @@ The `MCPRequestContext` — flowing through every pipeline stage and into handle
 
 **Argument completions** — both `MCPPromptDefinition` and `MCPResourceTemplateDefinition` accept a `complete?: Record<string, CompletionHandler>` map. Sugar builders (`completeFromList`, `completeFromEnum`, `completePrefixMatch`, `completeDependent`, `completeFromAsync`) auto-enforce the spec's 100-value cap, set `hasMore` on truncation, and surface sibling args via `ctx.resolvedArguments`. The `completions: {}` capability is conditionally advertised only when at least one handler exists.
 
+**Roots (filesystem boundaries)** — `MCPServer.listRoots(sessionId)` fetches the client's declared `file://` roots with per-session caching, auto-invalidated by `notifications/roots/list_changed`. Sugar surface on `ctx.roots`: `list()`, `isWithin(path)`, `assertWithin(path)`, `rootContaining(path)`, `resolveRelative(rel, { name? })`, `subscribe(listener)`. Permissive defaults (assertions pass when no roots are declared); accepts both POSIX paths and `file://` URIs; rejects sibling-name false matches.
+
 **Client** (`@agentick/mcp/client`) — multi-server connection pool with caching, auto-invalidation on change notifications, URI routing, reconnection with exponential backoff, progress callbacks, sampling, roots, logging, completions, cancellation, and OAuth support. Includes `getServerInfo()`, `getInstructions()`, `supportsMcpApps()`, and `getMcpAppsCapability()` for server metadata introspection.
 
 **Transport** (`@agentick/mcp/transport`) — exports `InMemoryTransport` (own implementation with deferred delivery via `queueMicrotask`, fixing a race condition in the SDK's synchronous version) and the SDK's `Transport` type.

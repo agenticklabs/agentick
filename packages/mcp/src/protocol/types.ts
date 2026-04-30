@@ -293,6 +293,17 @@ export interface MCPHandlerContext {
    * @param message - Human-readable progress message (optional)
    */
   sendProgress?: (progress: number, total?: number, message?: string) => Promise<void>;
+  /**
+   * Sugar surface for `roots/list` — fetch the client's declared
+   * filesystem roots and check whether paths are within them. Always
+   * present; returns an empty list when the client did not advertise
+   * the `roots` capability. Permissive defaults: `assertWithin` and
+   * `isWithin` no-op (pass) when no roots are declared.
+   *
+   * Per MCP spec 2025-11-25, root URIs MUST be `file://`. Non-file
+   * schemes are filtered out defensively.
+   */
+  roots: RootsAPI;
 }
 
 export type MCPToolHandler = (
@@ -444,6 +455,65 @@ export interface MCPCompletionContext extends MCPHandlerContext {
    * Empty object when the request omits `context.arguments`.
    */
   resolvedArguments: Record<string, string>;
+}
+
+// ============================================================================
+// Roots
+// ============================================================================
+
+/**
+ * A filesystem boundary declared by the client. Per MCP spec 2025-11-25,
+ * `uri` MUST be a `file://` URI; other schemes are filtered out by the
+ * server's defensive parser.
+ */
+export interface Root {
+  /** `file://` URI of the root directory. */
+  uri: string;
+  /** Optional human-readable display name. */
+  name?: string;
+}
+
+/**
+ * Sugar surface for `roots/list` exposed on `MCPHandlerContext.roots`.
+ * Always present — returns empty list (and treats `assertWithin`/`isWithin`
+ * permissively) when the client did not advertise the `roots` capability.
+ */
+export interface RootsAPI {
+  /** Returns the connected client's roots, fetched once and cached. */
+  list(): Promise<Root[]>;
+
+  /**
+   * Returns true if `path` (a POSIX path or `file://` URI) is within
+   * any declared root. Returns true when no roots are declared
+   * (permissive default — no constraints).
+   */
+  isWithin(path: string): Promise<boolean>;
+
+  /**
+   * Throws if `path` is outside all declared roots. No-op when no
+   * roots are declared.
+   */
+  assertWithin(path: string): Promise<void>;
+
+  /**
+   * Returns the matching root for `path`, or null if none contains it.
+   * When multiple roots match, returns the most specific (longest-prefix).
+   */
+  rootContaining(path: string): Promise<Root | null>;
+
+  /**
+   * Joins a relative path against the first declared root, or against
+   * a root identified by `name` when supplied. Throws if no roots are
+   * declared, or if the named root cannot be found.
+   */
+  resolveRelative(relativePath: string, opts?: { name?: string }): Promise<string>;
+
+  /**
+   * Subscribe to changes — fires when the client emits
+   * `notifications/roots/list_changed` and the cache is refreshed.
+   * Returns an `unsubscribe` function.
+   */
+  subscribe(listener: (roots: Root[]) => void): () => void;
 }
 
 export interface MCPPromptArgument {

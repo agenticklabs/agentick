@@ -25,6 +25,8 @@ import {
   ListPromptsRequestSchema,
   GetPromptRequestSchema,
   CompleteRequestSchema,
+  ListRootsResultSchema,
+  RootsListChangedNotificationSchema,
   ErrorCode,
   McpError,
 } from "@modelcontextprotocol/sdk/types.js";
@@ -45,8 +47,11 @@ import type {
   MCPHandlerContext,
   CompletionHandler,
   MCPCompletionContext,
+  Root,
+  RootsAPI,
 } from "../protocol/types.js";
 import { normalizeCompletionResult } from "../protocol/completions.js";
+import { RootsAPIImpl, isValidRootUri } from "./roots.js";
 import { resolveSecurityDefaults, type ResolvedSecurity } from "./security/defaults.js";
 import {
   SecurityError,
@@ -254,6 +259,12 @@ export class MCPServer {
     await sdkServer.connect(transport);
 
     const sessionId = transport.sessionId ?? crypto.randomUUID();
+    // Propagate the generated session id back to the transport so per-request
+    // `extra.sessionId` matches the registered session — required for outbound
+    // operations like `MCPServer.listRoots(sessionId)` invoked from handlers.
+    if (!transport.sessionId) {
+      transport.sessionId = sessionId;
+    }
     this.sessions.set(sessionId, {
       sessionId,
       sdkServer,
@@ -263,8 +274,21 @@ export class MCPServer {
       transportType,
     });
 
+    this.installRootsListChangedHandler(sdkServer, sessionId);
+
     log.info({ sessionId, transport: transportType }, "Session created");
     this.emit("mcp:session:created", { sessionId });
+  }
+
+  /**
+   * Register the per-session `notifications/roots/list_changed` handler.
+   * Called once per session right after it's added to the registry so
+   * cache invalidation routes to the correct session.
+   */
+  private installRootsListChangedHandler(sdkServer: Server, sessionId: string): void {
+    sdkServer.setNotificationHandler(RootsListChangedNotificationSchema, async () => {
+      await this.refreshRootsForSession(sessionId);
+    });
   }
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -357,6 +381,7 @@ export class MCPServer {
           lastActivityAt: Date.now(),
           transportType: "streamable-http",
         });
+        this.installRootsListChangedHandler(sdkServer, newSessionId);
         log.info({ sessionId: newSessionId, transport: "streamable-http" }, "Session created");
         this.emit("mcp:session:created", { sessionId: newSessionId });
       },
@@ -366,6 +391,7 @@ export class MCPServer {
       const sid = transport.sessionId;
       if (sid) {
         this.sessions.delete(sid);
+        this.rootsCache.delete(sid);
         this.emit("mcp:session:closed", { sessionId: sid, reason: "transport closed" });
       }
     };
@@ -484,11 +510,25 @@ export class MCPServer {
     }
     await Promise.all(closePromises);
     this.sessions.clear();
+    this.rootsCache.clear();
   }
 
   // ══════════════════════════════════════════════════════════════════════════
   // Introspection
   // ══════════════════════════════════════════════════════════════════════════
+
+  // ── Roots cache — per session ──────────────────────────────────────────────
+  //
+  // Roots are fetched lazily on first read and cached until the client emits
+  // `notifications/roots/list_changed`. Subscribers fire on every refresh.
+  // Cleared in `closeSession` to prevent stale cache hits across reconnects.
+  private readonly rootsCache = new Map<
+    string,
+    {
+      cached?: Root[];
+      listeners: Set<(roots: Root[]) => void>;
+    }
+  >();
 
   getActiveSessions(): MCPSessionInfo[] {
     return Array.from(this.sessions.values()).map((s) => ({
@@ -556,6 +596,86 @@ export class MCPServer {
       resultSchema as never,
       requestOptions,
     ) as Promise<T>;
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // Roots — fetch and cache the connected client's declared filesystem roots.
+  //
+  // Returns `[]` when the client did not advertise the `roots` capability,
+  // or supplied an empty list. Non-`file://` URIs are filtered out
+  // defensively (per spec 2025-11-25, root URIs MUST be file://).
+  //
+  // Caches per session; invalidated by `notifications/roots/list_changed`
+  // (handler registered in `createSDKServer`). Pass `{ force: true }` to
+  // bypass the cache.
+  // ══════════════════════════════════════════════════════════════════════════
+
+  async listRoots(
+    sessionId: string,
+    opts?: { force?: boolean; timeoutMs?: number; signal?: AbortSignal },
+  ): Promise<Root[]> {
+    if (this.closed) throw new Error("MCPServer is closed");
+
+    const session = this.sessions.get(sessionId);
+    if (!session) throw new SessionNotFoundError(sessionId);
+
+    // Capability check — if the client never advertised roots, the
+    // request would round-trip and return `MethodNotFound`. Skip it.
+    const caps = session.sdkServer.getClientCapabilities?.() ?? {};
+    if (!("roots" in caps) || !caps.roots) return [];
+
+    let entry = this.rootsCache.get(sessionId);
+    if (!entry) {
+      entry = { listeners: new Set() };
+      this.rootsCache.set(sessionId, entry);
+    }
+
+    if (entry.cached && !opts?.force) return entry.cached;
+
+    const requestOpts: { timeout?: number; signal?: AbortSignal } = {};
+    if (opts?.timeoutMs !== undefined) requestOpts.timeout = opts.timeoutMs;
+    if (opts?.signal !== undefined) requestOpts.signal = opts.signal;
+
+    const result = await session.sdkServer.request(
+      { method: "roots/list" },
+      ListRootsResultSchema,
+      requestOpts,
+    );
+
+    const filtered: Root[] = [];
+    for (const r of result.roots ?? []) {
+      if (isValidRootUri(r.uri)) {
+        const root: Root = { uri: r.uri };
+        if (typeof r.name === "string") root.name = r.name;
+        filtered.push(root);
+      }
+    }
+
+    entry.cached = filtered;
+    return filtered;
+  }
+
+  /**
+   * Internal — invalidates the cached roots for a session and notifies
+   * subscribers with the freshly-fetched list. Called by the per-session
+   * `notifications/roots/list_changed` handler.
+   */
+  private async refreshRootsForSession(sessionId: string): Promise<void> {
+    const entry = this.rootsCache.get(sessionId);
+    if (!entry) return;
+    entry.cached = undefined;
+    try {
+      const fresh = await this.listRoots(sessionId);
+      for (const listener of entry.listeners) {
+        try {
+          listener(fresh);
+        } catch (err) {
+          log.warn({ err, sessionId }, "roots subscriber threw");
+        }
+      }
+    } catch (err) {
+      log.warn({ err, sessionId }, "Failed to refresh roots after list_changed");
+    }
   }
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -988,6 +1108,28 @@ export class MCPServer {
   // Internal: Context Building
   // ══════════════════════════════════════════════════════════════════════════
 
+  /**
+   * Build a `RootsAPI` instance bound to the given session. Lazy-creates
+   * the per-session cache entry the first time a handler subscribes,
+   * so subscribers added before any `list()` call still receive updates.
+   */
+  private buildRootsAPI(sessionId: string): RootsAPI {
+    return new RootsAPIImpl({
+      fetchRoots: () => this.listRoots(sessionId),
+      onRootsChanged: (listener) => {
+        let entry = this.rootsCache.get(sessionId);
+        if (!entry) {
+          entry = { listeners: new Set() };
+          this.rootsCache.set(sessionId, entry);
+        }
+        entry.listeners.add(listener);
+        return () => {
+          entry!.listeners.delete(listener);
+        };
+      },
+    });
+  }
+
   private async buildHandlerContext(
     extra: MCPHandlerExtra,
     sdkServer?: Server,
@@ -1045,6 +1187,7 @@ export class MCPServer {
       extra,
       sessionId,
       signal: extra.signal,
+      roots: this.buildRootsAPI(sessionId),
     };
 
     // Progress: if the client sent a progressToken, build a sendProgress callback
@@ -1074,6 +1217,7 @@ export class MCPServer {
       for (const [sessionId, session] of this.sessions) {
         if (now - session.lastActivityAt > ttlMs) {
           this.sessions.delete(sessionId);
+          this.rootsCache.delete(sessionId);
           session.sdkServer.close().catch(() => {});
           log.info(
             { sessionId, idleMs: now - session.lastActivityAt },

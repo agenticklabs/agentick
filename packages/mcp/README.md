@@ -777,6 +777,106 @@ server.on("security:rejected", (e) => log.warn("rejected", e));
 await server.close();
 ```
 
+### Roots — query the client's filesystem boundaries
+
+`MCPServer.listRoots(sessionId, opts?)` fetches the client's declared
+roots and caches the result per session. The cache is invalidated
+automatically when the client emits `notifications/roots/list_changed`.
+
+```typescript
+import { MCPServer } from "@agentick/mcp";
+
+const server = new MCPServer({
+  /* ... */
+});
+
+// Fetch roots from a connected client
+const roots = await server.listRoots(sessionId);
+// → [{ uri: "file:///workspace/project-a", name: "project-a" }, ...]
+
+// Force refresh (bypass cache)
+const fresh = await server.listRoots(sessionId, { force: true });
+```
+
+**Behavior:**
+
+- Returns `[]` when the client did not advertise the `roots` capability
+  (no round-trip).
+- Caches per session; subsequent calls within a session hit memory.
+- Invalidated by `notifications/roots/list_changed`. Subscribers fire on
+  every refresh.
+- Per spec 2025-11-25, root URIs MUST be `file://`. The SDK rejects
+  non-file URIs at parse time; our defensive filter (`isValidRootUri`)
+  is exposed for direct callers of the type system.
+
+**Sugar — `ctx.roots.*`** is always present on `MCPHandlerContext`.
+Permissive default: with no roots declared, `assertWithin` and `isWithin`
+pass. With roots declared, they enforce containment.
+
+```typescript
+import { MCPServer, toolResult } from "@agentick/mcp";
+import { z } from "zod";
+
+const server = new MCPServer({
+  name: "fs",
+  version: "1.0.0",
+  tools: [
+    {
+      name: "read_file",
+      inputSchema: z.object({ path: z.string() }),
+      handler: async (input, ctx) => {
+        // Reject paths outside the client's declared roots.
+        await ctx.roots.assertWithin(input.path);
+        const content = await fs.readFile(input.path, "utf8");
+        return toolResult(content);
+      },
+    },
+    {
+      name: "scan_workspace",
+      inputSchema: z.object({ pattern: z.string() }),
+      handler: async (input, ctx) => {
+        const roots = await ctx.roots.list();
+        const matches = (await Promise.all(roots.map((r) => scan(r, input.pattern)))).flat();
+        return toolResult(JSON.stringify(matches, null, 2));
+      },
+    },
+    {
+      name: "find_root",
+      inputSchema: z.object({ path: z.string() }),
+      handler: async (input, ctx) => {
+        const root = await ctx.roots.rootContaining(input.path);
+        return toolResult(root ? `belongs to ${root.name ?? root.uri}` : "outside roots");
+      },
+    },
+    {
+      name: "open_relative",
+      inputSchema: z.object({ rel: z.string(), root: z.string().optional() }),
+      handler: async (input, ctx) => {
+        // Resolves against the first root by default; pass `name` for a
+        // specific root.
+        const abs = await ctx.roots.resolveRelative(input.rel, { name: input.root });
+        return toolResult(`absolute path: ${abs}`);
+      },
+    },
+  ],
+});
+```
+
+**`ctx.roots` API:**
+
+| Method                        | Purpose                                                         |
+| ----------------------------- | --------------------------------------------------------------- |
+| `list()`                      | Cached `Root[]`; `[]` when client lacks capability.             |
+| `isWithin(path)`              | Boolean. Permissive (true) when no roots declared.              |
+| `assertWithin(path)`          | Throws if path is outside all roots. No-op when none declared.  |
+| `rootContaining(path)`        | Returns matching root (longest-prefix wins) or `null`.          |
+| `resolveRelative(rel, opts?)` | Joins against first root (or named root). Throws when no roots. |
+| `subscribe(listener)`         | Fires on `roots/list_changed`. Returns `unsubscribe`.           |
+
+Both `isWithin` and `assertWithin` accept POSIX paths and `file://` URIs
+interchangeably and honor URI percent-encoding. Sibling-name false
+matches (`/workspace` vs `/workspace-other`) are rejected.
+
 ### Server-to-client requests
 
 `MCPServer.request<T>(sessionId, method, params, opts?)` lets the server
