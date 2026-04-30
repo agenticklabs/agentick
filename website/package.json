@@ -12,11 +12,11 @@
     "docs:api:watch": "typedoc --watch"
   },
   "dependencies": {
-    "vue": "^3.4.38"
+    "vue": "^3.5.33"
   },
   "devDependencies": {
-    "typedoc": "^0.28.15",
-    "typedoc-plugin-markdown": "^4.9.0",
+    "typedoc": "^0.28.19",
+    "typedoc-plugin-markdown": "^4.11.0",
     "typedoc-vitepress-theme": "^1.1.2",
     "typescript": "^5.9.3",
     "vitepress": "^1.4.5"
