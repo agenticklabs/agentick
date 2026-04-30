@@ -24,6 +24,7 @@ import {
   ReadResourceRequestSchema,
   ListPromptsRequestSchema,
   GetPromptRequestSchema,
+  CompleteRequestSchema,
   ErrorCode,
   McpError,
 } from "@modelcontextprotocol/sdk/types.js";
@@ -42,7 +43,10 @@ import type {
   OperationInfo,
   MCPHandlerExtra,
   MCPHandlerContext,
+  CompletionHandler,
+  MCPCompletionContext,
 } from "../protocol/types.js";
+import { normalizeCompletionResult } from "../protocol/completions.js";
 import { resolveSecurityDefaults, type ResolvedSecurity } from "./security/defaults.js";
 import {
   SecurityError,
@@ -593,6 +597,7 @@ export class MCPServer {
           resources: { listChanged: true },
           prompts: { listChanged: true },
           logging: {},
+          ...(this.hasCompletionHandlers() ? { completions: {} } : {}),
           ...uiExtension,
         },
         ...(this.options.instructions && {
@@ -884,7 +889,70 @@ export class MCPServer {
       }
     });
 
+    // ── completion/complete ──
+    // Per MCP spec 2025-11-25: server returns up to 100 values; sugar
+    // builders enforce the cap. Unknown refs / arguments resolve to an
+    // empty `{ values: [] }` rather than a protocol error so clients can
+    // probe without retry penalties.
+    //
+    // Only registered when at least one prompt or template carries a
+    // `complete` map. The SDK refuses to register this handler unless
+    // the matching `completions: {}` capability is advertised.
+    if (this.hasCompletionHandlers())
+      sdkServer.setRequestHandler(CompleteRequestSchema, async (request, extra): Promise<any> => {
+        const { ref, argument } = request.params;
+        const resolvedArguments = (request.params.context?.arguments ?? {}) as Record<
+          string,
+          string
+        >;
+
+        let handler: CompletionHandler | undefined;
+
+        if (ref.type === "ref/prompt") {
+          const prompt = this.prompts.get(ref.name);
+          handler = prompt?.complete?.[argument.name];
+        } else if (ref.type === "ref/resource") {
+          const tmpl = this.templates.get(ref.uri);
+          handler = tmpl?.definition.complete?.[argument.name];
+        }
+
+        if (!handler) {
+          return { completion: { values: [] } };
+        }
+
+        const baseCtx = await this.buildHandlerContext(extra, sdkServer);
+        const ctx: MCPCompletionContext = { ...baseCtx, resolvedArguments };
+
+        try {
+          const raw = await handler(argument.value, ctx);
+          return { completion: normalizeCompletionResult(raw) };
+        } catch (err) {
+          if (err instanceof McpError) {
+            protocolError(err.code, stripMcpErrorPrefix(err.message), err.data);
+          }
+          const message = err instanceof Error ? err.message : String(err);
+          protocolError(ErrorCode.InternalError, message);
+        }
+      });
+
     return sdkServer;
+  }
+
+  /**
+   * Returns true if any registered prompt or resource template carries a
+   * `complete` map. Drives whether the server advertises the
+   * `completions: {}` capability on initialize.
+   */
+  private hasCompletionHandlers(): boolean {
+    for (const prompt of this.prompts.values()) {
+      if (prompt.complete && Object.keys(prompt.complete).length > 0) return true;
+    }
+    for (const tmpl of this.templates.values()) {
+      if (tmpl.definition.complete && Object.keys(tmpl.definition.complete).length > 0) {
+        return true;
+      }
+    }
+    return false;
   }
 
   // ══════════════════════════════════════════════════════════════════════════

@@ -269,6 +269,92 @@ const server = new MCPServer({
 });
 ```
 
+### Argument completion (server-side)
+
+Both prompts and resource templates accept a `complete` map keyed by
+argument name. When the client calls `completion/complete` while the
+user is typing, the matching handler returns suggestions. Per MCP spec
+2025-11-25, responses are capped at 100 values — the sugar builders
+enforce this automatically and set `hasMore: true` when truncated.
+
+```typescript
+import {
+  completeFromList,
+  completeFromEnum,
+  completePrefixMatch,
+  completeDependent,
+  completeFromAsync,
+} from "@agentick/mcp";
+import { z } from "zod";
+
+const Status = z.enum(["open", "closed", "in_progress", "on_hold"]);
+
+const server = new MCPServer({
+  name: "knowify",
+  version: "1.0.0",
+  prompts: [
+    {
+      name: "brief-me-on-project",
+      description: "Generate a project briefing prompt",
+      arguments: [
+        { name: "tenant", required: true },
+        { name: "projectId", required: true },
+        { name: "status" },
+      ],
+      complete: {
+        // Static list — prefix-filtered as the user types.
+        status: completeFromEnum(Status),
+
+        // Lazy loader — fetches every time, sugar prefix-matches.
+        tenant: completePrefixMatch(async () => {
+          const tenants = await db.tenants.list();
+          return tenants.map((t) => t.id);
+        }),
+
+        // Depends on `tenant` having been entered first; sugar returns
+        // empty values without invoking the loader if it isn't.
+        projectId: completeDependent({ requires: ["tenant"] }, async (typed, { tenant }) => {
+          const projects = await db.projects.find({ tenantId: tenant });
+          return projects.map((p) => p.id);
+        }),
+      },
+      handler: async (args) => ({
+        messages: [{ role: "user", content: { type: "text", text: `brief ${args.projectId}` } }],
+      }),
+    },
+  ],
+  resourceTemplates: [
+    {
+      name: "table-schema",
+      uriTemplate: "db://schema/{table}",
+      complete: {
+        // Static list of valid tables.
+        table: completeFromList(["users", "projects", "invoices", "time_entries"]),
+      },
+      read: async (uri, vars) => ({
+        contents: [{ uri, text: await db.describe(vars.table) }],
+      }),
+    },
+  ],
+});
+```
+
+**Sugar builders:**
+
+| Builder                               | When to use                                                                                                        |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `completeFromList(values)`            | Static array, prefix-filtered case-sensitively.                                                                    |
+| `completeFromEnum(zodEnum)`           | Same, but extract from a Zod enum (or any `{ options }` shape).                                                    |
+| `completePrefixMatch(loader)`         | Lazy loader returns full set; sugar prefix-matches.                                                                |
+| `completeDependent({ requires }, fn)` | Loader needs sibling args; sugar gates on their presence and surfaces them as the second argument.                 |
+| `completeFromAsync(fn)`               | Escape hatch — full control over `values`/`total`/`hasMore`. Receives `(value, ctx)` with `ctx.resolvedArguments`. |
+
+The server only advertises the `completions: {}` capability when at
+least one prompt or template carries a `complete` map. Without
+handlers, the capability is omitted and `completion/complete` requests
+hit `MethodNotFound`, signaling to clients that they shouldn't
+auto-complete in this server's UI.
+
 ### MCP Apps (ui:// resources)
 
 ```typescript
@@ -690,6 +776,67 @@ server.on("security:rejected", (e) => log.warn("rejected", e));
 // Shutdown
 await server.close();
 ```
+
+### Server-to-client requests
+
+`MCPServer.request<T>(sessionId, method, params, opts?)` lets the server
+issue a JSON-RPC request to a connected client and await its response.
+This is the load-bearing primitive that powers sampling, elicitation,
+roots, and any other bidirectional MCP feature.
+
+```typescript
+import { MCPServer, SessionNotFoundError } from "@agentick/mcp";
+import { ListRootsResultSchema } from "@modelcontextprotocol/sdk/types.js";
+
+// Inside a tool handler — `ctx.sessionId` identifies the calling client.
+const server = new MCPServer({
+  /* ... */
+});
+
+const tool = {
+  name: "scan_workspace",
+  inputSchema: z.object({ pattern: z.string() }),
+  handler: async (input, ctx) => {
+    // Ask the client which roots it has declared
+    const { roots } = await server.request(
+      ctx.sessionId,
+      "roots/list",
+      {},
+      {
+        resultSchema: ListRootsResultSchema,
+        timeoutMs: 5_000,
+      },
+    );
+
+    const matches = await scan(roots, input.pattern);
+    return toolResult(JSON.stringify(matches, null, 2));
+  },
+};
+```
+
+**Options:**
+
+| Option         | Default           | Purpose                                                                               |
+| -------------- | ----------------- | ------------------------------------------------------------------------------------- |
+| `resultSchema` | `z.unknown()`     | Zod schema validating (and typing) the response. Without it, the result is `unknown`. |
+| `timeoutMs`    | SDK default (60s) | Hard timeout. Rejects with `RequestTimeout`.                                          |
+| `signal`       | none              | `AbortSignal` for explicit cancellation. Pre-aborted signals reject immediately.      |
+
+**Errors:**
+
+- `SessionNotFoundError` — the requested `sessionId` is not currently
+  connected. Distinct from JSON-RPC errors; never makes it onto the
+  wire. Carries `.sessionId`.
+- Timeout / abort errors propagate from the SDK with their original
+  shape.
+- Client-side handler errors are mapped to the JSON-RPC error response
+  and surfaced as a clean (single-prefix) `MCP error <code>: <msg>`.
+
+The Phase 4 (sampling) and Phase 5 (elicitation) sugar surfaces — the
+forthcoming `ctx.sample.*` and `ctx.elicit.*` APIs — wrap this primitive
+with typed shortcuts (`ctx.sample.text(prompt)`, `ctx.elicit.confirm(...)`,
+etc.) and capability gating. Use `MCPServer.request` directly for any
+bidirectional method not yet covered by sugar.
 
 ## Quick Start — Client
 

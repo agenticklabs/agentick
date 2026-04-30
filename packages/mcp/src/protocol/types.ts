@@ -325,7 +325,15 @@ export interface MCPResourceTemplateDefinition {
     variables: Record<string, string>,
     ctx: MCPHandlerContext,
   ) => MCPResourceReadResult | Promise<MCPResourceReadResult>;
-  complete?: Record<string, (value: string) => string[] | Promise<string[]>>;
+  /**
+   * Per-variable completion handlers for `completion/complete` requests
+   * targeting this template. Sugar builders from `@agentick/mcp/completions`
+   * are recommended.
+   *
+   * Legacy shape `(value) => string[]` is still accepted for
+   * backwards compatibility — coerced to `{ values: [...] }` at dispatch.
+   */
+  complete?: Record<string, CompletionHandler>;
 }
 
 export interface MCPResourceReadResult {
@@ -388,6 +396,54 @@ export interface MCPPromptDefinition {
     args: Record<string, string>,
     ctx: MCPHandlerContext,
   ) => MCPPromptResult | Promise<MCPPromptResult>;
+  /**
+   * Per-argument completion handlers. When the client requests
+   * `completion/complete` for one of this prompt's arguments, the
+   * matching handler is invoked with the typed value and a context
+   * carrying any already-resolved sibling arguments.
+   *
+   * Use sugar builders from `@agentick/mcp/completions`:
+   * `completeFromList`, `completeFromEnum`, `completePrefixMatch`,
+   * `completeDependent`, `completeFromAsync`.
+   */
+  complete?: Record<string, CompletionHandler>;
+}
+
+/**
+ * Result shape for a `completion/complete` response, per MCP spec
+ * 2025-11-25. Servers MUST cap `values` at 100 entries; sugar builders
+ * enforce this automatically.
+ */
+export interface CompletionResult {
+  values: string[];
+  total?: number;
+  hasMore?: boolean;
+}
+
+/**
+ * Handler signature for argument completion. Receives the partial
+ * value the user has typed so far and a context with already-resolved
+ * sibling arguments (`ctx.resolvedArguments`). Returns either a typed
+ * `CompletionResult` or a plain `string[]` (legacy shape, coerced to
+ * `{ values: [...] }`).
+ */
+export type CompletionHandler = (
+  value: string,
+  ctx: MCPCompletionContext,
+) => CompletionResult | string[] | Promise<CompletionResult | string[]>;
+
+/**
+ * Extended handler context for completion calls. Adds
+ * `resolvedArguments` carrying the values of any sibling arguments the
+ * user has already entered. Surfaced from the protocol's
+ * `context.arguments` field.
+ */
+export interface MCPCompletionContext extends MCPHandlerContext {
+  /**
+   * Already-resolved sibling arguments for the same prompt or template.
+   * Empty object when the request omits `context.arguments`.
+   */
+  resolvedArguments: Record<string, string>;
 }
 
 export interface MCPPromptArgument {

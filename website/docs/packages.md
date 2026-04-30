@@ -89,15 +89,21 @@ Fiber tree inspector, timeline viewer, execution debugger. Connect to running ag
 
 Standalone MCP server and client implementation. Sits in the Framework Layer alongside core and gateway but depends only on kernel + shared (foundation). Can be installed alone for a fully functional MCP server without the gateway or reconciler.
 
+Targets MCP specification **2025-11-25** (latest).
+
 **Server** (`@agentick/mcp/server`) — per-session SDK `Server` pool with shared registry, dynamic tool/resource/prompt/app registration, `handleHTTPRequest` for HTTP, `connect` for in-process/stdio, security pipeline (`ConnectionGuard → contextProvider → Authenticator → Authorizer → RateLimiter → InputSanitizer`), session lifecycle (TTL, idle cleanup, max sessions), dual-path events, `toolFilter` for per-session tool visibility, `toolTransform` for per-session tool customization, and `securitySchemes` for OAuth metadata.
 
 The `MCPRequestContext` — flowing through every pipeline stage and into handlers — carries user identity, client info (name, version, capabilities from the initialize handshake), session metadata (transport type, session ID, age from the session registry), SDK passthrough fields (authInfo, requestId, \_meta, taskId, requestInfo), and arbitrary application metadata. The `contextProvider` has first say; the server enriches anything it didn't set.
+
+**Server-to-client requests** — `MCPServer.request<T>(sessionId, method, params, opts?)` issues a JSON-RPC request to the connected client and awaits the response. The bottom-layer primitive every bidirectional MCP feature builds on (sampling, elicitation, roots). Supports Zod result schemas, `timeoutMs`, and `AbortSignal`. Throws typed `SessionNotFoundError` for unknown sessions.
+
+**Argument completions** — both `MCPPromptDefinition` and `MCPResourceTemplateDefinition` accept a `complete?: Record<string, CompletionHandler>` map. Sugar builders (`completeFromList`, `completeFromEnum`, `completePrefixMatch`, `completeDependent`, `completeFromAsync`) auto-enforce the spec's 100-value cap, set `hasMore` on truncation, and surface sibling args via `ctx.resolvedArguments`. The `completions: {}` capability is conditionally advertised only when at least one handler exists.
 
 **Client** (`@agentick/mcp/client`) — multi-server connection pool with caching, auto-invalidation on change notifications, URI routing, reconnection with exponential backoff, progress callbacks, sampling, roots, logging, completions, cancellation, and OAuth support. Includes `getServerInfo()`, `getInstructions()`, `supportsMcpApps()`, and `getMcpAppsCapability()` for server metadata introspection.
 
 **Transport** (`@agentick/mcp/transport`) — exports `InMemoryTransport` (own implementation with deferred delivery via `queueMicrotask`, fixing a race condition in the SDK's synchronous version) and the SDK's `Transport` type.
 
-**Protocol** (`@agentick/mcp`) — types (`MCPRequestContext`, `MCPHandlerContext`, `MCPServerOptions`, `MCPToolDefinition`, security function signatures), error utilities (`toMCPResult`, `safeToolHandler`, `sanitizeErrorMessage`), and JSON-RPC error codes.
+**Protocol** (`@agentick/mcp`) — types (`MCPRequestContext`, `MCPHandlerContext`, `MCPCompletionContext`, `MCPServerOptions`, `MCPToolDefinition`, `CompletionHandler`, security function signatures), error utilities (`toMCPResult`, `safeToolHandler`, `sanitizeErrorMessage`, `protocolError` for clean single-prefix JSON-RPC errors), JSON-RPC error codes, and JSON Schema 2020-12 dialect support via `kernel/schema.ts` (`upgradeToJsonSchema2020`).
 
 ### @agentick/sandbox
 
