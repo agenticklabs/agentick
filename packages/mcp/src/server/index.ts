@@ -1,5 +1,14 @@
 export { MCPServer, SessionNotFoundError } from "./server.js";
 
+// Elicitation — sugar errors and capability helpers
+export {
+  ElicitationDeclined,
+  ElicitationCancelled,
+  ElicitationModeNotSupported,
+  inspectElicitationCapabilities,
+  validateFormSchemaFlatness,
+} from "./elicitation.js";
+
 // Security — defaults
 export {
   localOnlyGuard,

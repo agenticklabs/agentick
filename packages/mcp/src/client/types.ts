@@ -153,6 +153,55 @@ export type SamplingRequest = SamplingParams;
 export type SamplingHandler = (request: SamplingRequest) => Promise<ProtocolSamplingResult>;
 
 // ============================================================================
+// Elicitation (Bidirectional — server pauses to ask the user)
+// ============================================================================
+
+import type {
+  ElicitationFormSchema,
+  ElicitationResponse,
+  UrlElicitationResponse,
+} from "../protocol/types.js";
+
+/**
+ * Form-mode elicitation request received from the server. The handler
+ * presents `requestedSchema` as a form to the user and resolves with
+ * the user's response (or decline/cancel).
+ */
+export interface ElicitationFormRequest {
+  mode: "form";
+  message: string;
+  requestedSchema: ElicitationFormSchema;
+}
+
+/**
+ * URL-mode elicitation request received from the server. The handler
+ * navigates the user to `url` and resolves with the action when the
+ * flow completes (or is dismissed).
+ */
+export interface ElicitationUrlRequest {
+  mode: "url";
+  message: string;
+  url: string;
+  elicitationId: string;
+}
+
+export type ElicitationRequest = ElicitationFormRequest | ElicitationUrlRequest;
+
+/**
+ * Handler for server-initiated `elicitation/create` requests. Receives
+ * a discriminated form/URL request and returns the user's response.
+ *
+ * Form mode: return `{ action: "accept", content: {...} }` (matching
+ * the requested schema) or `{ action: "decline" | "cancel" }`.
+ *
+ * URL mode: return `{ action: "accept" | "decline" | "cancel" }` —
+ * content is omitted per spec.
+ */
+export type ElicitationHandler = (
+  request: ElicitationRequest,
+) => Promise<ElicitationResponse | UrlElicitationResponse>;
+
+// ============================================================================
 // Roots (Client provides filesystem roots to server)
 // ============================================================================
 
@@ -195,6 +244,21 @@ export interface MCPClientOptions {
   version?: string;
   /** Handler for server-initiated sampling (createMessage) requests. */
   samplingHandler?: SamplingHandler;
+  /**
+   * Handler for server-initiated elicitation requests (form mode and URL
+   * mode per MCP spec 2025-11-25). Returning `{ action: "accept", content }`
+   * delivers the user's input back to the server; `decline` and `cancel`
+   * are propagated as distinct outcomes. Omit either mode in
+   * `elicitationModes` to opt out of advertising the corresponding
+   * sub-capability.
+   */
+  elicitationHandler?: ElicitationHandler;
+  /**
+   * Which elicitation modes to advertise. Default: `["form", "url"]` when
+   * `elicitationHandler` is set; ignored otherwise. Set to a subset to
+   * opt out of one mode.
+   */
+  elicitationModes?: Array<"form" | "url">;
   /** Filesystem roots to provide to servers on request. */
   roots?: Root[];
   /** Handler for server log messages. */

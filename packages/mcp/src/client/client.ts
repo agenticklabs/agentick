@@ -31,6 +31,7 @@ import {
   // ProgressNotificationSchema,
   CreateMessageRequestSchema,
   ListRootsRequestSchema,
+  ElicitRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { UnauthorizedError } from "@modelcontextprotocol/sdk/client/auth.js";
 import type { OAuthClientProvider as SDKOAuthClientProvider } from "@modelcontextprotocol/sdk/client/auth.js";
@@ -147,6 +148,13 @@ export class MCPClient {
     const capabilities: Record<string, unknown> = {};
     if (this.options.samplingHandler) capabilities.sampling = {};
     if (this.options.roots) capabilities.roots = { listChanged: true };
+    if (this.options.elicitationHandler) {
+      const modes = this.options.elicitationModes ?? ["form", "url"];
+      const elicitation: Record<string, object> = {};
+      if (modes.includes("form")) elicitation.form = {};
+      if (modes.includes("url")) elicitation.url = {};
+      capabilities.elicitation = elicitation;
+    }
 
     if (this.options.mcpApps !== false) {
       capabilities.extensions = {
@@ -770,6 +778,36 @@ export class MCPClient {
       client.setRequestHandler(ListRootsRequestSchema, async () => ({
         roots: roots.map((r) => ({ uri: r.uri, name: r.name })),
       }));
+    }
+
+    // Elicitation — server pauses to ask the user (form mode or URL mode)
+    if (this.options.elicitationHandler) {
+      const handler = this.options.elicitationHandler;
+      client.setRequestHandler(ElicitRequestSchema, async (request) => {
+        const params = request.params as Record<string, unknown>;
+        const mode = (params.mode ?? "form") as "form" | "url";
+
+        if (mode === "url") {
+          const result = await handler({
+            mode: "url",
+            message: params.message as string,
+            url: params.url as string,
+            elicitationId: params.elicitationId as string,
+          });
+          // URL mode: content omitted per spec
+          return { action: result.action };
+        }
+
+        // Form mode (default)
+        const result = await handler({
+          mode: "form",
+          message: params.message as string,
+          requestedSchema: params.requestedSchema as never,
+        });
+        return result.action === "accept"
+          ? { action: "accept", content: (result as { content?: unknown }).content as never }
+          : { action: result.action };
+      });
     }
   }
 

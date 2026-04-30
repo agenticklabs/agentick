@@ -312,6 +312,14 @@ export interface MCPHandlerContext {
    * or guard explicitly: `if (!ctx.sample) throw ...`.
    */
   sample?: SampleAPI;
+
+  /**
+   * Sugar surface for `elicitation/create` — pause mid-tool to ask
+   * the user for structured input (form mode) or to walk an external
+   * URL flow (URL mode). Undefined when the client did not advertise
+   * any `elicitation` sub-capability.
+   */
+  elicit?: ElicitAPI;
 }
 
 export type MCPToolHandler = (
@@ -690,6 +698,204 @@ export interface SamplingTextOpts {
   stopSequences?: string[];
   modelPreferences?: ModelPreferences;
   includeContext?: "none" | "thisServer" | "allServers";
+}
+
+// ============================================================================
+// Elicitation
+// ============================================================================
+
+/**
+ * URI for an elicitation/create form-mode request, restricted per
+ * MCP spec 2025-11-25 to a flat object with primitive properties.
+ */
+export interface ElicitationFormSchema {
+  type: "object";
+  properties: Record<string, ElicitationPrimitiveSchema>;
+  required?: string[];
+}
+
+/** A primitive property type allowed in form-mode elicitation schemas. */
+export type ElicitationPrimitiveSchema =
+  | ElicitationStringSchema
+  | ElicitationNumberSchema
+  | ElicitationBooleanSchema
+  | ElicitationEnumSchema
+  | ElicitationMultiSelectSchema;
+
+export interface ElicitationStringSchema {
+  type: "string";
+  title?: string;
+  description?: string;
+  minLength?: number;
+  maxLength?: number;
+  format?: "email" | "uri" | "date" | "date-time";
+  default?: string;
+}
+
+export interface ElicitationNumberSchema {
+  type: "number" | "integer";
+  title?: string;
+  description?: string;
+  minimum?: number;
+  maximum?: number;
+  default?: number;
+}
+
+export interface ElicitationBooleanSchema {
+  type: "boolean";
+  title?: string;
+  description?: string;
+  default?: boolean;
+}
+
+/** Single-select enum — flat array (untitled) or oneOf+const+title (titled). */
+export type ElicitationEnumSchema =
+  | {
+      type: "string";
+      title?: string;
+      description?: string;
+      enum: string[];
+      default?: string;
+    }
+  | {
+      type: "string";
+      title?: string;
+      description?: string;
+      oneOf: Array<{ const: string; title: string }>;
+      default?: string;
+    };
+
+/** Multi-select — array of enum strings or array of titled options. */
+export type ElicitationMultiSelectSchema =
+  | {
+      type: "array";
+      title?: string;
+      description?: string;
+      minItems?: number;
+      maxItems?: number;
+      items: { type: "string"; enum: string[] };
+      default?: string[];
+    }
+  | {
+      type: "array";
+      title?: string;
+      description?: string;
+      minItems?: number;
+      maxItems?: number;
+      items: { anyOf: Array<{ const: string; title: string }> };
+      default?: string[];
+    };
+
+/** Three-action discriminated outcome. */
+export type ElicitationResponse =
+  | {
+      action: "accept";
+      content: Record<string, string | number | boolean | string[]>;
+    }
+  | { action: "decline" }
+  | { action: "cancel" };
+
+/** URL-mode response (no content even on accept per spec). */
+export type UrlElicitationResponse =
+  | { action: "accept" }
+  | { action: "decline" }
+  | { action: "cancel" };
+
+/** Discriminated outcome for `tryX` sugar variants — single-value form-mode. */
+export type ElicitOutcome<T> =
+  | { status: "accept"; value: T }
+  | { status: "decline" }
+  | { status: "cancel" };
+
+/** Discriminated outcome for `tryUrl` — URL mode never carries a value. */
+export type UrlElicitOutcome = { status: "accept" } | { status: "decline" } | { status: "cancel" };
+
+/**
+ * Sugar surface exposed at `MCPHandlerContext.elicit` (undefined when
+ * the client did not advertise any `elicitation` sub-capability).
+ */
+export interface ElicitAPI {
+  // ── Form mode — single-value sugar ─────────────────────────────────
+
+  text(
+    message: string,
+    opts?: {
+      default?: string;
+      pattern?: string;
+      format?: "email" | "uri" | "date" | "date-time";
+      minLength?: number;
+      maxLength?: number;
+    },
+  ): Promise<string>;
+
+  select<const T extends readonly string[]>(
+    message: string,
+    options: T,
+    opts?: { default?: T[number]; labels?: Partial<Record<T[number], string>> },
+  ): Promise<T[number]>;
+
+  multiSelect<const T extends readonly string[]>(
+    message: string,
+    options: T,
+    opts?: {
+      default?: Array<T[number]>;
+      min?: number;
+      max?: number;
+      labels?: Partial<Record<T[number], string>>;
+    },
+  ): Promise<Array<T[number]>>;
+
+  confirm(message: string, opts?: { default?: boolean }): Promise<boolean>;
+
+  number(
+    message: string,
+    opts?: { min?: number; max?: number; integer?: boolean; default?: number },
+  ): Promise<number>;
+
+  /**
+   * Arbitrary structured input via Zod schema. Validated for spec
+   * flatness (no nested objects, no arrays of objects beyond enums)
+   * BEFORE dispatching to the client — fail fast on the server side.
+   */
+  object<T>(message: string, schema: import("zod").ZodType<T>): Promise<T>;
+
+  // ── URL mode ───────────────────────────────────────────────────────
+
+  url(opts: { message: string; url: string }): Promise<UrlElicitOutcome>;
+
+  /**
+   * Throws a `URLElicitationRequiredError` (-32042 protocol error)
+   * containing one or more URL-mode elicitation specs the client
+   * should walk before retrying. Used for OAuth-style deferred-auth
+   * flows. Never returns.
+   */
+  requireUrls(elicitations: Array<{ message: string; url: string }>): never;
+
+  // ── tryX variants — discriminated unions instead of throwing ───────
+
+  tryText(message: string, opts?: Parameters<ElicitAPI["text"]>[1]): Promise<ElicitOutcome<string>>;
+  trySelect<const T extends readonly string[]>(
+    message: string,
+    options: T,
+    opts?: Parameters<ElicitAPI["select"]>[2],
+  ): Promise<ElicitOutcome<T[number]>>;
+  tryMultiSelect<const T extends readonly string[]>(
+    message: string,
+    options: T,
+    opts?: Parameters<ElicitAPI["multiSelect"]>[2],
+  ): Promise<ElicitOutcome<Array<T[number]>>>;
+  tryConfirm(message: string, opts?: { default?: boolean }): Promise<ElicitOutcome<boolean>>;
+  tryNumber(
+    message: string,
+    opts?: Parameters<ElicitAPI["number"]>[1],
+  ): Promise<ElicitOutcome<number>>;
+  tryObject<T>(message: string, schema: import("zod").ZodType<T>): Promise<ElicitOutcome<T>>;
+  tryUrl(opts: { message: string; url: string }): Promise<UrlElicitOutcome>;
+
+  // ── Capability probes ──────────────────────────────────────────────
+
+  canDoForm(): boolean;
+  canDoUrl(): boolean;
 }
 
 // ============================================================================

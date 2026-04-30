@@ -1013,6 +1013,187 @@ const server = new MCPServer({
   with the validation error inlined into the next user turn. Up to
   `maxRetries` (default 2). Handles fenced ` ```json...``` ` blocks.
 
+### Elicitation — pause to ask the user
+
+Tools can pause mid-execution to ask the user for structured input
+(form mode) or to walk an external URL flow (URL mode). Per MCP spec
+2025-11-25, both modes are gated by sub-capabilities
+(`elicitation.form`, `elicitation.url`).
+
+`MCPServer.requestElicitation(sessionId, params)` and
+`MCPServer.requestUrlElicitation(sessionId, params)` are the bottom-layer
+primitives. Sugar at `ctx.elicit.*` wraps them with typed shortcuts
+plus the **three-action distinction** (`accept` / `decline` / `cancel`)
+and `tryX` variants returning discriminated union outcomes.
+
+```typescript
+import { MCPServer, toolResult } from "@agentick/mcp";
+import { ElicitationDeclined, ElicitationCancelled } from "@agentick/mcp";
+import { z } from "zod";
+
+const server = new MCPServer({
+  name: "deploy",
+  version: "1.0.0",
+  tools: [
+    {
+      name: "deploy",
+      inputSchema: z.object({ version: z.string() }),
+      handler: async (input, ctx) => {
+        if (!ctx.elicit) throw new Error("Deploy requires elicitation-capable client");
+
+        // Single choice — typed as "staging" | "production"
+        const env = await ctx.elicit.select(
+          "Which environment?",
+          ["staging", "production"] as const,
+          { labels: { staging: "Staging (safe)", production: "Production (live!)" } },
+        );
+
+        // Confirmation — throws ElicitationDeclined if user clicks decline
+        const confirmed = await ctx.elicit.confirm(`Deploy ${input.version} to ${env}?`, {
+          default: false,
+        });
+        if (!confirmed) return toolResult("Cancelled by user");
+
+        // Number with bounds
+        const replicas = await ctx.elicit.number("How many replicas?", {
+          min: 1,
+          max: 20,
+          integer: true,
+          default: 3,
+        });
+
+        // Multi-select
+        const tags = await ctx.elicit.multiSelect("Apply tags?", [
+          "urgent",
+          "blocked",
+          "review",
+          "ready",
+        ] as const);
+
+        // Arbitrary structured input via Zod — validated for spec
+        // flatness BEFORE dispatching.
+        const config = await ctx.elicit.object(
+          "Configure deployment",
+          z.object({
+            autoscale: z.boolean(),
+            cooldownSeconds: z.number().int().min(30).max(3600),
+            region: z.enum(["us-east-1", "eu-west-1"]),
+          }),
+        );
+
+        await deploy(input.version, env, replicas, tags, config);
+        return toolResult(`Deployed ${input.version} to ${env}`);
+      },
+    },
+
+    // Discriminated outcome variants — `tryX` for explicit branching
+    {
+      name: "soft_confirm",
+      inputSchema: z.object({}),
+      handler: async (_input, ctx) => {
+        const r = await ctx.elicit!.tryConfirm("Proceed with the irreversible action?");
+        if (r.status === "decline") return toolResult("User declined");
+        if (r.status === "cancel") return toolResult("User dismissed the dialog");
+        // r.status === "accept", r.value is true
+        return toolResult("Proceeding...");
+      },
+    },
+
+    // URL mode — OAuth-style external flow
+    {
+      name: "connect_github",
+      inputSchema: z.object({}),
+      handler: async (_input, ctx) => {
+        if (!ctx.elicit?.canDoUrl()) throw new Error("URL elicitation not supported");
+        const r = await ctx.elicit.url({
+          message: "Authorize GitHub access",
+          url: "https://github.com/login/oauth/authorize?...",
+        });
+        return r.status === "accept"
+          ? toolResult("Connected!")
+          : toolResult("Authorization not completed");
+      },
+    },
+
+    // requireUrls — escapes via URLElicitationRequiredError -32042 so the
+    // client walks the URL flow before retrying. Useful when an op cannot
+    // proceed without external auth.
+    {
+      name: "fetch_private_repo",
+      inputSchema: z.object({ repo: z.string() }),
+      handler: async (input, ctx) => {
+        const token = await getStoredToken();
+        if (!token) {
+          // Throws -32042 protocol error with structured `data.elicitations`.
+          ctx.elicit!.requireUrls([
+            { message: "Connect GitHub", url: "https://github.com/login/oauth/authorize?..." },
+          ]);
+        }
+        return toolResult(await fetchRepo(input.repo, token));
+      },
+    },
+  ],
+});
+```
+
+**`ctx.elicit` API:**
+
+| Method                                 | Purpose                                                                             |
+| -------------------------------------- | ----------------------------------------------------------------------------------- |
+| `text(message, opts?)`                 | Single-line input. `format`/`minLength`/`maxLength`/`default`.                      |
+| `select(message, options, opts?)`      | Single choice. `labels` produces titled-enum `oneOf+const+title`.                   |
+| `multiSelect(message, options, opts?)` | Array of options. `min`/`max` count bounds, optional labels.                        |
+| `confirm(message, opts?)`              | Boolean. Throws `ElicitationDeclined` on decline (NOT returns false).               |
+| `number(message, opts?)`               | Number or integer. `min`/`max`/`default`.                                           |
+| `object(message, schema)`              | Arbitrary structured input via Zod. Schema flatness validated upfront.              |
+| `url({ message, url })`                | URL-mode flow. Returns `UrlElicitOutcome` discriminated union.                      |
+| `requireUrls(elicitations)`            | Throws `URLElicitationRequiredError -32042` for deferred auth.                      |
+| `tryX(...)`                            | Same as each above but returns `{ status: "accept"\|"decline"\|"cancel", value? }`. |
+| `canDoForm() / canDoUrl()`             | Capability probes.                                                                  |
+
+**Behavior:**
+
+- **Throw-by-default** — `text/select/multiSelect/confirm/number/object`
+  throw `ElicitationDeclined` or `ElicitationCancelled` on non-accept.
+  Use `tryX` variants to branch explicitly on the three actions.
+- **Schema flatness** — `object()` runs `validateFormSchemaFlatness()`
+  on the generated JSON Schema before dispatching. Nested objects and
+  free-form arrays (without enum) are rejected upfront with a clear
+  error rather than failing at the SDK boundary.
+- **Mode gating** — `text/select/etc` throw `ElicitationModeNotSupported`
+  when the client lacks `elicitation.form`. `url()` similarly gates on
+  `elicitation.url`.
+- **Legacy `elicitation: {}`** capability is treated as form-only.
+- **`requireUrls()`** uses `protocolError(-32042, ...)` to ship a clean
+  single-prefix error with `data.elicitations` carrying the URL specs.
+
+**Client-side handler** — the connecting client supplies an
+`elicitationHandler` to handle server-initiated requests:
+
+```typescript
+import { MCPClient } from "@agentick/mcp";
+
+const client = new MCPClient({
+  elicitationHandler: async (request) => {
+    if (request.mode === "url") {
+      // Open browser, await user completion (UI specific)
+      const success = await openUrlAndWait(request.url);
+      return { action: success ? "accept" : "cancel" };
+    }
+    // Form mode — render `request.requestedSchema` as a UI form
+    const formData = await renderFormDialog(request.message, request.requestedSchema);
+    if (formData === null) return { action: "cancel" };
+    if (formData === false) return { action: "decline" };
+    return { action: "accept", content: formData };
+  },
+  elicitationModes: ["form", "url"], // both by default; subset to opt out
+});
+```
+
+The client advertises the appropriate sub-caps (`form` and/or `url`)
+based on `elicitationModes` (or both by default when `elicitationHandler`
+is set).
+
 ### Server-to-client requests
 
 `MCPServer.request<T>(sessionId, method, params, opts?)` lets the server

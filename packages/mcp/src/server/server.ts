@@ -28,6 +28,7 @@ import {
   ListRootsResultSchema,
   RootsListChangedNotificationSchema,
   CreateMessageResultWithToolsSchema,
+  ElicitResultSchema,
   ErrorCode,
   McpError,
 } from "@modelcontextprotocol/sdk/types.js";
@@ -53,10 +54,15 @@ import type {
   SampleAPI,
   SamplingParams,
   SamplingResult,
+  ElicitAPI,
+  ElicitationFormSchema,
+  ElicitationResponse,
+  UrlElicitationResponse,
 } from "../protocol/types.js";
 import { normalizeCompletionResult } from "../protocol/completions.js";
 import { RootsAPIImpl, isValidRootUri } from "./roots.js";
 import { SampleAPIImpl, inspectSamplingCapabilities } from "./sampling.js";
+import { ElicitAPIImpl, inspectElicitationCapabilities } from "./elicitation.js";
 import { resolveSecurityDefaults, type ResolvedSecurity } from "./security/defaults.js";
 import {
   SecurityError,
@@ -722,6 +728,65 @@ export class MCPServer {
   }
 
   // ══════════════════════════════════════════════════════════════════════════
+  // Elicitation — issue `elicitation/create` (form or URL mode) to the
+  // connected client. Form mode requests structured input via JSON Schema;
+  // URL mode redirects the user to an external URL (OAuth-style flows).
+  //
+  // Sugar at `ctx.elicit.*` wraps these with typed shortcuts plus the
+  // three-action distinction (accept/decline/cancel) and `tryX` variants
+  // returning discriminated union outcomes.
+  // ══════════════════════════════════════════════════════════════════════════
+
+  async requestElicitation(
+    sessionId: string,
+    params: { mode?: "form"; message: string; requestedSchema: ElicitationFormSchema },
+    opts?: { timeoutMs?: number; signal?: AbortSignal },
+  ): Promise<ElicitationResponse> {
+    if (this.closed) throw new Error("MCPServer is closed");
+    const session = this.sessions.get(sessionId);
+    if (!session) throw new SessionNotFoundError(sessionId);
+
+    const requestOptions: { timeout?: number; signal?: AbortSignal } = {};
+    if (opts?.timeoutMs !== undefined) requestOptions.timeout = opts.timeoutMs;
+    if (opts?.signal !== undefined) requestOptions.signal = opts.signal;
+
+    const result = await session.sdkServer.request(
+      {
+        method: "elicitation/create",
+        params: { mode: "form", ...params } as unknown as Record<string, unknown>,
+      },
+      ElicitResultSchema,
+      requestOptions,
+    );
+    return result as ElicitationResponse;
+  }
+
+  async requestUrlElicitation(
+    sessionId: string,
+    params: { mode: "url"; message: string; url: string; elicitationId: string },
+    opts?: { timeoutMs?: number; signal?: AbortSignal },
+  ): Promise<UrlElicitationResponse> {
+    if (this.closed) throw new Error("MCPServer is closed");
+    const session = this.sessions.get(sessionId);
+    if (!session) throw new SessionNotFoundError(sessionId);
+
+    const requestOptions: { timeout?: number; signal?: AbortSignal } = {};
+    if (opts?.timeoutMs !== undefined) requestOptions.timeout = opts.timeoutMs;
+    if (opts?.signal !== undefined) requestOptions.signal = opts.signal;
+
+    const result = await session.sdkServer.request(
+      {
+        method: "elicitation/create",
+        params: params as unknown as Record<string, unknown>,
+      },
+      ElicitResultSchema,
+      requestOptions,
+    );
+    // URL-mode result has only `action` (content omitted per spec)
+    return { action: (result as ElicitationResponse).action } as UrlElicitationResponse;
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
   // Internal: Create a fresh SDK Server for a new session
   //
   // Each client session gets its own Server instance with request handlers
@@ -1152,6 +1217,26 @@ export class MCPServer {
   // ══════════════════════════════════════════════════════════════════════════
 
   /**
+   * Build an `ElicitAPI` for the given session, or undefined when the
+   * client did not advertise any `elicitation` sub-capability.
+   */
+  private buildElicitAPI(sessionId: string): ElicitAPI | undefined {
+    const session = this.sessions.get(sessionId);
+    if (!session) return undefined;
+    const clientCaps = session.sdkServer.getClientCapabilities?.() as
+      | Record<string, unknown>
+      | undefined;
+    const caps = inspectElicitationCapabilities(clientCaps);
+    if (!caps.any) return undefined;
+
+    return new ElicitAPIImpl({
+      capabilities: caps,
+      request: (params) => this.requestElicitation(sessionId, params),
+      requestUrl: (params) => this.requestUrlElicitation(sessionId, { mode: "url", ...params }),
+    });
+  }
+
+  /**
    * Build a `SampleAPI` for the given session, or undefined when the
    * client did not advertise the `sampling` capability. Capability
    * snapshot is read once from the session's SDK Server.
@@ -1246,6 +1331,7 @@ export class MCPServer {
     }
 
     const sampleAPI = this.buildSampleAPI(sessionId);
+    const elicitAPI = this.buildElicitAPI(sessionId);
     const ctx: MCPHandlerContext = {
       request,
       extra,
@@ -1253,6 +1339,7 @@ export class MCPServer {
       signal: extra.signal,
       roots: this.buildRootsAPI(sessionId),
       ...(sampleAPI ? { sample: sampleAPI } : {}),
+      ...(elicitAPI ? { elicit: elicitAPI } : {}),
     };
 
     // Progress: if the client sent a progressToken, build a sendProgress callback
