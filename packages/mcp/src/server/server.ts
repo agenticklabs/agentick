@@ -986,7 +986,7 @@ export class MCPServer {
         });
         if (err instanceof SecurityError) this.emitSecurityEvent(err, sessionId, toolName);
         // Defensively re-throw McpError as a clean protocol error so the
-        // SDK round-trip doesn't double the "MCP error <code>:" prefix.
+        // SDK round-trip doesn't double the "MCP error {code}:" prefix.
         if (err instanceof McpError) {
           protocolError(err.code, stripMcpErrorPrefix(err.message), err.data);
         }

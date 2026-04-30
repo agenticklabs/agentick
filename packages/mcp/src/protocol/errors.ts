@@ -114,7 +114,7 @@ export function safeToolHandler<T extends (...args: any[]) => Promise<CallToolRe
 /**
  * Throw-shape for JSON-RPC protocol errors emitted from server handlers.
  *
- * SDK quirk: `new McpError(code, message)` calls `super("MCP error <code>: <message>")`,
+ * SDK quirk: `new McpError(code, message)` calls `super("MCP error {code}: {message}")`,
  * meaning `error.message` carries a prefix at construction time. The SDK
  * serialization layer then ships `error.message` verbatim, and the receiving
  * client SDK reconstructs an `McpError` adding ANOTHER prefix — yielding a
@@ -135,7 +135,7 @@ export function protocolError(code: number, message: string, data?: unknown): ne
 }
 
 /**
- * Strip the SDK's "MCP error <code>: " prefix from a message if present.
+ * Strip the SDK's "MCP error {code}: " prefix from a message if present.
  * Used to defensively handle handler-thrown McpError values so they don't
  * inflict the double-prefix on the client either.
  */
