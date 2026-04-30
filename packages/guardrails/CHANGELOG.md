@@ -1,5 +1,13 @@
 # @agentick/guardrails
 
+## 0.14.56
+
+### Patch Changes
+
+- Updated dependencies [bc975a2]
+  - @agentick/kernel@0.14.56
+  - @agentick/shared@0.14.56
+
 ## 0.14.55
 
 ### Patch Changes

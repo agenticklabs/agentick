@@ -1,5 +1,12 @@
 # @agentick/kernel
 
+## 0.14.56
+
+### Patch Changes
+
+- bc975a2: enhanced mcp support for completions, elicitations, roots, prompts and sampling
+  - @agentick/shared@0.14.56
+
 ## 0.14.55
 
 ### Patch Changes

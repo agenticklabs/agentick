@@ -1,5 +1,7 @@
 # @agentick/shared
 
+## 0.14.56
+
 ## 0.14.55
 
 ### Patch Changes
