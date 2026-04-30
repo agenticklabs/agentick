@@ -1,5 +1,12 @@
 # @agentick/bedrock
 
+## 0.14.57
+
+### Patch Changes
+
+- @agentick/core@0.14.57
+- @agentick/shared@0.14.57
+
 ## 0.14.56
 
 ### Patch Changes
