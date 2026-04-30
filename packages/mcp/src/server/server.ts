@@ -887,9 +887,13 @@ export class MCPServer {
 
           return {
             name: t.definition.name,
+            ...(t.definition.title !== undefined && { title: t.definition.title }),
             description: t.definition.description,
             inputSchema: t.jsonSchema,
             annotations: t.definition.annotations,
+            ...(t.definition.icons && t.definition.icons.length > 0
+              ? { icons: t.definition.icons }
+              : {}),
             ...(Object.keys(meta).length > 0 ? { _meta: meta } : {}),
           };
         }),
@@ -1001,8 +1005,10 @@ export class MCPServer {
         ...Array.from(this.resources.values()).map((r) => ({
           uri: r.uri,
           name: r.name,
+          ...(r.title !== undefined && { title: r.title }),
           description: r.description,
           mimeType: r.mimeType,
+          ...(r.icons && r.icons.length > 0 ? { icons: r.icons } : {}),
         })),
         ...Array.from(this.apps.values()).map((a) => {
           const meta = buildAppResourceMeta(a);
@@ -1036,8 +1042,12 @@ export class MCPServer {
       resourceTemplates: Array.from(this.templates.values()).map((t) => ({
         uriTemplate: t.definition.uriTemplate,
         name: t.definition.name,
+        ...(t.definition.title !== undefined && { title: t.definition.title }),
         description: t.definition.description,
         mimeType: t.definition.mimeType,
+        ...(t.definition.icons && t.definition.icons.length > 0
+          ? { icons: t.definition.icons }
+          : {}),
       })),
     }));
 
@@ -1092,7 +1102,9 @@ export class MCPServer {
     sdkServer.setRequestHandler(ListPromptsRequestSchema, async () => ({
       prompts: Array.from(this.prompts.values()).map((p) => ({
         name: p.name,
+        ...(p.title !== undefined && { title: p.title }),
         description: p.description,
+        ...(p.icons && p.icons.length > 0 ? { icons: p.icons } : {}),
         arguments: p.arguments?.map((a) => ({
           name: a.name,
           description: a.description,

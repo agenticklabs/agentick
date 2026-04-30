@@ -269,6 +269,83 @@ const server = new MCPServer({
 });
 ```
 
+### Display metadata (`title` + `icons`)
+
+Per MCP spec 2025-11-25 (`BaseMetadataSchema` + `IconsSchema`), every
+tool, prompt, resource, and resource template can carry an optional
+human-readable `title` and an `icons` array for UI rendering. Both are
+optional — clients fall back to `name` when `title` is omitted.
+
+```typescript
+const server = new MCPServer({
+  name: "knowify",
+  version: "1.0.0",
+  tools: [
+    {
+      name: "search_invoices",
+      title: "Search Invoices", // human-friendly display
+      description: "Find invoices matching criteria",
+      inputSchema: z.object({ status: z.string() }),
+      icons: [
+        { src: "https://example.com/icons/search-16.png", mimeType: "image/png", sizes: ["16x16"] },
+        { src: "https://example.com/icons/search-32.png", mimeType: "image/png", sizes: ["32x32"] },
+        { src: "https://example.com/icons/search.svg", mimeType: "image/svg+xml", sizes: ["any"] },
+      ],
+      handler: async () => toolResult("..."),
+    },
+  ],
+  prompts: [
+    {
+      name: "brief-me-on-project",
+      title: "Brief Me on a Project",
+      icons: [
+        { src: "data:image/svg+xml;base64,PHN2Zy8+", mimeType: "image/svg+xml", theme: "light" },
+      ],
+      handler: async () => ({
+        messages: [
+          /* ... */
+        ],
+      }),
+    },
+  ],
+  resources: [
+    {
+      name: "schema",
+      title: "Database Schema",
+      uri: "db://schema",
+      icons: [{ src: "...", mimeType: "image/png" }],
+      read: async () => ({
+        contents: [
+          /* ... */
+        ],
+      }),
+    },
+  ],
+});
+```
+
+**`Icon` shape:**
+
+| Field      | Required | Purpose                                                  |
+| ---------- | -------- | -------------------------------------------------------- |
+| `src`      | yes      | URL or `data:` URI                                       |
+| `mimeType` | no       | `image/png`, `image/jpeg`, `image/svg+xml`, `image/webp` |
+| `sizes`    | no       | Array of `"WxH"` strings or `"any"` for scalable formats |
+| `theme`    | no       | `"light"` or `"dark"` — ship multi-icon sets for both    |
+
+**Behavior:**
+
+- **`title` is optional.** If omitted, clients display `name` (except
+  for tools, where `annotations.title` takes precedence).
+- **`icons` is optional and array-shaped.** Multiple sizes/themes can
+  be supplied; the client picks the best fit.
+- Both are stripped from the wire when undefined or empty — no `title: ""`
+  or `icons: []` noise.
+- Round-trips through `tools/list`, `prompts/list`, `resources/list`,
+  and `resources/templates/list`. Per spec, clients MUST support
+  `image/png` + `image/jpeg`; SHOULD support `image/svg+xml` +
+  `image/webp`.
+
 ### Argument completion (server-side)
 
 Both prompts and resource templates accept a `complete` map keyed by

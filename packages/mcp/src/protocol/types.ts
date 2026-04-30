@@ -241,6 +241,33 @@ export interface MCPServerOptions {
 }
 
 // ============================================================================
+// Spec metadata — BaseMetadataSchema + IconsSchema (2025-11-25)
+// ============================================================================
+
+/**
+ * Optional icon metadata that clients may render in their UI. Per spec,
+ * clients MUST support `image/png` and `image/jpeg`; SHOULD support
+ * `image/svg+xml` and `image/webp`. The `theme` discriminator allows
+ * shipping light/dark variants.
+ */
+export interface Icon {
+  /** URL or data URI for the icon. */
+  src: string;
+  /** Optional MIME type (e.g. "image/png", "image/svg+xml"). */
+  mimeType?: string;
+  /**
+   * Optional sizes in `WxH` format (e.g. `"48x48"`) or `"any"` for
+   * scalable formats. If omitted, the client may use the icon at any size.
+   */
+  sizes?: string[];
+  /**
+   * Optional theme variant — `"light"` for use against light backgrounds,
+   * `"dark"` for dark. If omitted, usable with any theme.
+   */
+  theme?: "light" | "dark";
+}
+
+// ============================================================================
 // Tool Definitions (Server-Side)
 // ============================================================================
 
@@ -250,10 +277,21 @@ export interface MCPServerOptions {
  */
 export interface MCPToolDefinition {
   name: string;
+  /**
+   * Human-readable display name (per spec BaseMetadataSchema). Optional.
+   * If omitted, clients use `name` for display, except where
+   * `annotations.title` takes precedence.
+   */
+  title?: string;
   description?: string;
   inputSchema: z.ZodType | Record<string, unknown>;
   outputSchema?: z.ZodType | Record<string, unknown>;
   annotations?: ToolAnnotations;
+  /**
+   * Optional icons for client UI rendering (per spec IconsSchema).
+   * Multiple sizes/themes can be provided; clients pick the best fit.
+   */
+  icons?: Icon[];
   /** MCP Apps metadata — links this tool to a ui:// resource. */
   ui?: {
     resourceUri?: string;
@@ -334,18 +372,26 @@ export type MCPToolHandler = (
 /** A fixed-URI resource served by the MCP server. */
 export interface MCPStaticResource {
   name: string;
+  /** Human-readable display name (BaseMetadataSchema). Optional. */
+  title?: string;
   uri: string;
   description?: string;
   mimeType?: string;
+  /** Optional icons for client UI rendering (IconsSchema). */
+  icons?: Icon[];
   read: (ctx: MCPHandlerContext) => MCPResourceReadResult | Promise<MCPResourceReadResult>;
 }
 
 /** A parameterized URI resource (RFC 6570 template). */
 export interface MCPResourceTemplateDefinition {
   name: string;
+  /** Human-readable display name (BaseMetadataSchema). Optional. */
+  title?: string;
   uriTemplate: string;
   description?: string;
   mimeType?: string;
+  /** Optional icons for client UI rendering (IconsSchema). */
+  icons?: Icon[];
   list?: (ctx: MCPHandlerContext) => MCPResourceListResult | Promise<MCPResourceListResult>;
   read: (
     uri: string,
@@ -417,7 +463,11 @@ export interface MCPAppDefinition {
 
 export interface MCPPromptDefinition {
   name: string;
+  /** Human-readable display name (BaseMetadataSchema). Optional. */
+  title?: string;
   description?: string;
+  /** Optional icons for client UI rendering (IconsSchema). */
+  icons?: Icon[];
   arguments?: MCPPromptArgument[];
   handler: (
     args: Record<string, string>,
