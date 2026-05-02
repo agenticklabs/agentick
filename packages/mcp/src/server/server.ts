@@ -63,6 +63,12 @@ import { normalizeCompletionResult } from "../protocol/completions.js";
 import { RootsAPIImpl, isValidRootUri } from "./roots.js";
 import { SampleAPIImpl, inspectSamplingCapabilities } from "./sampling.js";
 import { ElicitAPIImpl, inspectElicitationCapabilities } from "./elicitation.js";
+import {
+  resolveTimeout,
+  ELICITATION_FORM_DEFAULT_MS,
+  ELICITATION_URL_DEFAULT_MS,
+  type TimeoutOption,
+} from "./timeouts.js";
 import { resolveSecurityDefaults, type ResolvedSecurity } from "./security/defaults.js";
 import {
   SecurityError,
@@ -740,14 +746,17 @@ export class MCPServer {
   async requestElicitation(
     sessionId: string,
     params: { mode?: "form"; message: string; requestedSchema: ElicitationFormSchema },
-    opts?: { timeoutMs?: number; signal?: AbortSignal },
+    opts?: { timeoutMs?: TimeoutOption; signal?: AbortSignal },
   ): Promise<ElicitationResponse> {
     if (this.closed) throw new Error("MCPServer is closed");
     const session = this.sessions.get(sessionId);
     if (!session) throw new SessionNotFoundError(sessionId);
 
     const requestOptions: { timeout?: number; signal?: AbortSignal } = {};
-    if (opts?.timeoutMs !== undefined) requestOptions.timeout = opts.timeoutMs;
+    // Spec-friendly default for user-loop: 5 min (vs SDK's 60s default).
+    // Caller may pass "never" to disable auto-cancel entirely.
+    const resolved = resolveTimeout(opts?.timeoutMs);
+    requestOptions.timeout = resolved ?? ELICITATION_FORM_DEFAULT_MS;
     if (opts?.signal !== undefined) requestOptions.signal = opts.signal;
 
     const result = await session.sdkServer.request(
@@ -764,14 +773,16 @@ export class MCPServer {
   async requestUrlElicitation(
     sessionId: string,
     params: { mode: "url"; message: string; url: string; elicitationId: string },
-    opts?: { timeoutMs?: number; signal?: AbortSignal },
+    opts?: { timeoutMs?: TimeoutOption; signal?: AbortSignal },
   ): Promise<UrlElicitationResponse> {
     if (this.closed) throw new Error("MCPServer is closed");
     const session = this.sessions.get(sessionId);
     if (!session) throw new SessionNotFoundError(sessionId);
 
     const requestOptions: { timeout?: number; signal?: AbortSignal } = {};
-    if (opts?.timeoutMs !== undefined) requestOptions.timeout = opts.timeoutMs;
+    // URL flows (OAuth consent) need much longer than form mode by default.
+    const resolved = resolveTimeout(opts?.timeoutMs);
+    requestOptions.timeout = resolved ?? ELICITATION_URL_DEFAULT_MS;
     if (opts?.signal !== undefined) requestOptions.signal = opts.signal;
 
     const result = await session.sdkServer.request(
@@ -1091,7 +1102,7 @@ export class MCPServer {
         if (err instanceof McpError) {
           protocolError(err.code, stripMcpErrorPrefix(err.message), err.data);
         }
-        // Never leak handler error details to the client
+        // Never leak handler error details to the client.
         protocolError(ErrorCode.InternalError, "Resource read failed");
       }
 
@@ -1125,6 +1136,12 @@ export class MCPServer {
         if (err instanceof McpError) {
           protocolError(err.code, stripMcpErrorPrefix(err.message), err.data);
         }
+        // Default to a generic message — never leak handler internals to
+        // the client. Authors who want to communicate "can't proceed" to
+        // the model should return a successful prompt result with a
+        // descriptive `messages` array (the model receives it as the
+        // prompt input and naturally engages the user). For diagnostics,
+        // emit `notifications/message` via the logging channel.
         protocolError(ErrorCode.InternalError, "Prompt execution failed");
       }
     });
@@ -1243,8 +1260,9 @@ export class MCPServer {
 
     return new ElicitAPIImpl({
       capabilities: caps,
-      request: (params) => this.requestElicitation(sessionId, params),
-      requestUrl: (params) => this.requestUrlElicitation(sessionId, { mode: "url", ...params }),
+      request: (params, opts) => this.requestElicitation(sessionId, params, opts),
+      requestUrl: (params, opts) =>
+        this.requestUrlElicitation(sessionId, { mode: "url", ...params }, opts),
     });
   }
 

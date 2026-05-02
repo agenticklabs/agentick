@@ -91,6 +91,33 @@ interface ManagedConnection {
   reconnectTimer?: ReturnType<typeof setTimeout>;
 }
 
+/** Node's `setTimeout` upper bound (~24.8 days) — used for `timeoutMs: "never"`. */
+const MAX_TIMEOUT_MS = 2_147_483_647;
+
+/**
+ * Translate `{ timeoutMs?: number | "never"; signal? }` to the SDK's
+ * `RequestOptions` shape. Returns `undefined` when no opts are supplied
+ * so callers can pass through to SDK defaults cleanly.
+ *
+ * Both `0` and `"never"` are treated as "no timeout" — they resolve to
+ * `MAX_TIMEOUT_MS`. `0` follows the axios/XHR/socket convention;
+ * `"never"` is the self-documenting explicit form.
+ */
+function buildRequestOpts(opts?: {
+  timeoutMs?: number | "never";
+  signal?: AbortSignal;
+}): { timeout?: number; signal?: AbortSignal } | undefined {
+  if (!opts) return undefined;
+  const out: { timeout?: number; signal?: AbortSignal } = {};
+  if (opts.timeoutMs === "never") {
+    out.timeout = MAX_TIMEOUT_MS;
+  } else if (opts.timeoutMs !== undefined) {
+    out.timeout = opts.timeoutMs <= 0 ? MAX_TIMEOUT_MS : opts.timeoutMs;
+  }
+  if (opts.signal) out.signal = opts.signal;
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
 export class MCPClient {
   private readonly options: MCPClientOptions;
   private readonly emitter = new EventEmitter();
@@ -601,12 +628,15 @@ export class MCPClient {
   // Prompts
   // ══════════════════════════════════════════════════════════════════════════
 
-  async listPrompts(serverName: string): Promise<DiscoveredPrompt[]> {
+  async listPrompts(
+    serverName: string,
+    opts?: { timeoutMs?: number | "never"; signal?: AbortSignal },
+  ): Promise<DiscoveredPrompt[]> {
     const cached = this.promptCache.get(serverName);
     if (cached) return cached;
 
     const client = this.requireClient(serverName);
-    const response = await client.listPrompts();
+    const response = await client.listPrompts(undefined, buildRequestOpts(opts));
     const prompts: DiscoveredPrompt[] = response.prompts.map((p) => ({
       name: p.name,
       description: p.description,
@@ -622,13 +652,19 @@ export class MCPClient {
     return prompts;
   }
 
+  /**
+   * Get a prompt by name with optional arguments. Pass
+   * `opts.timeoutMs: "never"` for slow handlers (~24.8 days, effectively
+   * indefinite). Defaults to the SDK's 60s when omitted.
+   */
   async getPrompt(
     serverName: string,
     name: string,
     args?: Record<string, string>,
+    opts?: { timeoutMs?: number | "never"; signal?: AbortSignal },
   ): Promise<PromptResult> {
     const client = this.requireClient(serverName);
-    const response = await client.getPrompt({ name, arguments: args });
+    const response = await client.getPrompt({ name, arguments: args }, buildRequestOpts(opts));
     return {
       description: response.description,
       messages: response.messages.map((m) => ({

@@ -861,6 +861,14 @@ export type ElicitOutcome<T> =
 export type UrlElicitOutcome = { status: "accept" } | { status: "decline" } | { status: "cancel" };
 
 /**
+ * Common timeout option for user-loop sugar. `number` is milliseconds;
+ * `"never"` disables the auto-cancel timeout (resolves to Node's
+ * setTimeout max ~24.8 days). When omitted, the sugar applies a
+ * spec-friendly default (5 min for form-mode, 30 min for URL-mode).
+ */
+export type ElicitTimeoutOption = number | "never";
+
+/**
  * Sugar surface exposed at `MCPHandlerContext.elicit` (undefined when
  * the client did not advertise any `elicitation` sub-capability).
  */
@@ -875,13 +883,18 @@ export interface ElicitAPI {
       format?: "email" | "uri" | "date" | "date-time";
       minLength?: number;
       maxLength?: number;
+      timeoutMs?: ElicitTimeoutOption;
     },
   ): Promise<string>;
 
   select<const T extends readonly string[]>(
     message: string,
     options: T,
-    opts?: { default?: T[number]; labels?: Partial<Record<T[number], string>> },
+    opts?: {
+      default?: T[number];
+      labels?: Partial<Record<T[number], string>>;
+      timeoutMs?: ElicitTimeoutOption;
+    },
   ): Promise<T[number]>;
 
   multiSelect<const T extends readonly string[]>(
@@ -892,14 +905,24 @@ export interface ElicitAPI {
       min?: number;
       max?: number;
       labels?: Partial<Record<T[number], string>>;
+      timeoutMs?: ElicitTimeoutOption;
     },
   ): Promise<Array<T[number]>>;
 
-  confirm(message: string, opts?: { default?: boolean }): Promise<boolean>;
+  confirm(
+    message: string,
+    opts?: { default?: boolean; timeoutMs?: ElicitTimeoutOption },
+  ): Promise<boolean>;
 
   number(
     message: string,
-    opts?: { min?: number; max?: number; integer?: boolean; default?: number },
+    opts?: {
+      min?: number;
+      max?: number;
+      integer?: boolean;
+      default?: number;
+      timeoutMs?: ElicitTimeoutOption;
+    },
   ): Promise<number>;
 
   /**
@@ -907,11 +930,19 @@ export interface ElicitAPI {
    * flatness (no nested objects, no arrays of objects beyond enums)
    * BEFORE dispatching to the client — fail fast on the server side.
    */
-  object<T>(message: string, schema: import("zod").ZodType<T>): Promise<T>;
+  object<T>(
+    message: string,
+    schema: import("zod").ZodType<T>,
+    opts?: { timeoutMs?: ElicitTimeoutOption },
+  ): Promise<T>;
 
   // ── URL mode ───────────────────────────────────────────────────────
 
-  url(opts: { message: string; url: string }): Promise<UrlElicitOutcome>;
+  url(opts: {
+    message: string;
+    url: string;
+    timeoutMs?: ElicitTimeoutOption;
+  }): Promise<UrlElicitOutcome>;
 
   /**
    * Throws a `URLElicitationRequiredError` (-32042 protocol error)
@@ -934,13 +965,24 @@ export interface ElicitAPI {
     options: T,
     opts?: Parameters<ElicitAPI["multiSelect"]>[2],
   ): Promise<ElicitOutcome<Array<T[number]>>>;
-  tryConfirm(message: string, opts?: { default?: boolean }): Promise<ElicitOutcome<boolean>>;
+  tryConfirm(
+    message: string,
+    opts?: { default?: boolean; timeoutMs?: ElicitTimeoutOption },
+  ): Promise<ElicitOutcome<boolean>>;
   tryNumber(
     message: string,
     opts?: Parameters<ElicitAPI["number"]>[1],
   ): Promise<ElicitOutcome<number>>;
-  tryObject<T>(message: string, schema: import("zod").ZodType<T>): Promise<ElicitOutcome<T>>;
-  tryUrl(opts: { message: string; url: string }): Promise<UrlElicitOutcome>;
+  tryObject<T>(
+    message: string,
+    schema: import("zod").ZodType<T>,
+    opts?: { timeoutMs?: ElicitTimeoutOption },
+  ): Promise<ElicitOutcome<T>>;
+  tryUrl(opts: {
+    message: string;
+    url: string;
+    timeoutMs?: ElicitTimeoutOption;
+  }): Promise<UrlElicitOutcome>;
 
   // ── Capability probes ──────────────────────────────────────────────
 

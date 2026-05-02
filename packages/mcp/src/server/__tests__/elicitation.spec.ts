@@ -299,6 +299,193 @@ describe("ctx.elicit.text", () => {
 // ctx.elicit.select / multiSelect
 // ============================================================================
 
+describe("ctx.elicit.select — `default` (currently-selected value)", () => {
+  it("default flows through to the requestedSchema (untitled enum)", async () => {
+    let received: any = null;
+    await captureElicitAPI(
+      {
+        elicitationHandler: async (params) => {
+          received = params;
+          return { action: "accept", content: { value: "production" } };
+        },
+      },
+      async (api) =>
+        api!.select("Env?", ["staging", "production"] as const, {
+          default: "production",
+        }),
+    );
+    expect(received.requestedSchema.properties.value.default).toBe("production");
+    expect(received.requestedSchema.properties.value.enum).toEqual(["staging", "production"]);
+  });
+
+  it("default + labels — titled oneOf shape preserves the default", async () => {
+    let received: any = null;
+    await captureElicitAPI(
+      {
+        elicitationHandler: async (params) => {
+          received = params;
+          return { action: "accept", content: { value: "prod" } };
+        },
+      },
+      async (api) =>
+        api!.select("Env?", ["staging", "prod"] as const, {
+          default: "prod",
+          labels: { staging: "Staging", prod: "Production (live)" },
+        }),
+    );
+    expect(received.requestedSchema.properties.value.default).toBe("prod");
+    expect(received.requestedSchema.properties.value.oneOf).toBeDefined();
+  });
+
+  it("multiSelect default flows through as an array", async () => {
+    let received: any = null;
+    await captureElicitAPI(
+      {
+        elicitationHandler: async (params) => {
+          received = params;
+          return { action: "accept", content: { value: ["a"] } };
+        },
+      },
+      async (api) =>
+        api!.multiSelect("Tags?", ["a", "b", "c"] as const, {
+          default: ["a", "b"],
+        }),
+    );
+    expect(received.requestedSchema.properties.value.default).toEqual(["a", "b"]);
+  });
+
+  it("number default flows through", async () => {
+    let received: any = null;
+    await captureElicitAPI(
+      {
+        elicitationHandler: async (params) => {
+          received = params;
+          return { action: "accept", content: { value: 7 } };
+        },
+      },
+      async (api) => api!.number("Replicas?", { min: 1, max: 20, integer: true, default: 3 }),
+    );
+    expect(received.requestedSchema.properties.value.default).toBe(3);
+    expect(received.requestedSchema.properties.value.type).toBe("integer");
+  });
+
+  it("text default flows through", async () => {
+    let received: any = null;
+    await captureElicitAPI(
+      {
+        elicitationHandler: async (params) => {
+          received = params;
+          return { action: "accept", content: { value: "current" } };
+        },
+      },
+      async (api) => api!.text("Name?", { default: "current" }),
+    );
+    expect(received.requestedSchema.properties.value.default).toBe("current");
+  });
+});
+
+describe("ctx.elicit.select — wire-format coercion (spec requires strings)", () => {
+  // Per MCP spec 2025-11-25, enum options MUST be strings on the wire.
+  // Sugar coerces non-strings via String(x) rather than throwing —
+  // matches HTML form semantics. Callers parse back with Number(x).
+
+  it("coerces numeric options to strings on the wire", async () => {
+    let received: any = null;
+    await captureElicitAPI(
+      {
+        elicitationHandler: async (params) => {
+          received = params;
+          return { action: "accept", content: { value: "101" } };
+        },
+      },
+      async (api) =>
+        api!.select(
+          "Pick",
+          [101, 102, 103] as never,
+          {
+            default: 101 as never,
+          } as never,
+        ),
+    );
+    expect(received.requestedSchema.properties.value.enum).toEqual(["101", "102", "103"]);
+    expect(received.requestedSchema.properties.value.default).toBe("101");
+  });
+
+  it("returns the coerced string — caller parses back with Number()", async () => {
+    const out = await captureElicitAPI(
+      {
+        elicitationHandler: async () => ({ action: "accept", content: { value: "42" } }),
+      },
+      async (api) => api!.select("Pick", [40, 41, 42] as never, {} as never),
+    );
+    // String return (caller does `Number(out)` to get back to 42)
+    expect(out).toBe("42");
+    expect(Number(out)).toBe(42);
+  });
+
+  it("coerces with labels — keys under the coerced wire form", async () => {
+    let received: any = null;
+    await captureElicitAPI(
+      {
+        elicitationHandler: async (params) => {
+          received = params;
+          return { action: "accept", content: { value: "1" } };
+        },
+      },
+      async (api) =>
+        api!.select(
+          "Pick",
+          [1, 2, 3] as never,
+          {
+            labels: { "1": "First", "2": "Second", "3": "Third" },
+          } as never,
+        ),
+    );
+    const oneOf = received.requestedSchema.properties.value.oneOf;
+    expect(oneOf).toEqual([
+      { const: "1", title: "First" },
+      { const: "2", title: "Second" },
+      { const: "3", title: "Third" },
+    ]);
+  });
+
+  it("multiSelect coerces numeric options + default array", async () => {
+    let received: any = null;
+    await captureElicitAPI(
+      {
+        elicitationHandler: async (params) => {
+          received = params;
+          return { action: "accept", content: { value: ["1", "3"] } };
+        },
+      },
+      async (api) =>
+        api!.multiSelect(
+          "Pick",
+          [1, 2, 3] as never,
+          {
+            default: [1, 3] as never,
+          } as never,
+        ),
+    );
+    expect(received.requestedSchema.properties.value.items.enum).toEqual(["1", "2", "3"]);
+    expect(received.requestedSchema.properties.value.default).toEqual(["1", "3"]);
+  });
+
+  it("string options pass through unchanged (no double-stringification)", async () => {
+    let received: any = null;
+    await captureElicitAPI(
+      {
+        elicitationHandler: async (params) => {
+          received = params;
+          return { action: "accept", content: { value: "a" } };
+        },
+      },
+      async (api) => api!.select("Pick", ["a", "b", "c"] as const, {}),
+    );
+    expect(received.requestedSchema.properties.value.enum).toEqual(["a", "b", "c"]);
+  });
+});
+
 describe("ctx.elicit.select", () => {
   it("returns typed value matching one of the options", async () => {
     const out = await captureElicitAPI(

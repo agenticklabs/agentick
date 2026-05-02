@@ -100,17 +100,23 @@ export interface ElicitationSource {
    * Form-mode primitive — issues `elicitation/create` with a JSON Schema
    * and resolves with the user's response.
    */
-  request(params: {
-    message: string;
-    requestedSchema: ElicitationFormSchema;
-  }): Promise<ElicitationResponse>;
+  request(
+    params: {
+      message: string;
+      requestedSchema: ElicitationFormSchema;
+    },
+    opts?: { timeoutMs?: number | "never" },
+  ): Promise<ElicitationResponse>;
 
   /** URL-mode primitive — issues `elicitation/create` with `mode: "url"`. */
-  requestUrl(params: {
-    message: string;
-    url: string;
-    elicitationId: string;
-  }): Promise<UrlElicitationResponse>;
+  requestUrl(
+    params: {
+      message: string;
+      url: string;
+      elicitationId: string;
+    },
+    opts?: { timeoutMs?: number | "never" },
+  ): Promise<UrlElicitationResponse>;
 
   capabilities: ElicitationCapabilities;
 }
@@ -195,6 +201,29 @@ export function validateFormSchemaFlatness(schema: Record<string, unknown>): str
 // ElicitAPI implementation
 // ============================================================================
 
+/**
+ * Coerce values for the wire. Per MCP spec 2025-11-25, elicitation
+ * enum options and multi-select arrays MUST be strings. We coerce
+ * non-strings (numbers, booleans, etc.) via `String(x)` rather than
+ * throwing — matches HTML form semantics where everything-on-the-wire
+ * is a string. Callers passing numeric IDs (the common case) get a
+ * `string` return and parse back with `Number(x)`.
+ *
+ * Note that the API's return type is `string` regardless of input —
+ * round-trip type preservation isn't possible because the spec leaves
+ * no place on the wire to encode the original type.
+ */
+function toWireString(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (value === null || value === undefined) return String(value);
+  if (typeof value === "object") return JSON.stringify(value);
+  return String(value);
+}
+
+function toWireStringArray(arr: readonly unknown[]): string[] {
+  return arr.map(toWireString);
+}
+
 /** Internal — sugar wraps a single property named `value`. */
 const VALUE_KEY = "value";
 
@@ -233,11 +262,15 @@ export class ElicitAPIImpl implements ElicitAPI {
   private async dispatchForm(
     message: string,
     requestedSchema: ElicitationFormSchema,
+    timeoutMs?: number | "never",
   ): Promise<ElicitationResponse> {
     if (!this.source.capabilities.form) {
       throw new ElicitationModeNotSupported("form");
     }
-    return this.source.request({ message, requestedSchema });
+    return this.source.request(
+      { message, requestedSchema },
+      timeoutMs !== undefined ? { timeoutMs } : undefined,
+    );
   }
 
   // ── text ───────────────────────────────────────────────────────────
@@ -246,6 +279,7 @@ export class ElicitAPIImpl implements ElicitAPI {
     const result = await this.dispatchForm(
       message,
       buildSingleValueSchema(this.buildStringSchema(opts)),
+      opts.timeoutMs,
     );
     if (result.action === "accept") return unwrapSingleValue<string>(result.content);
     throwForAction(result.action);
@@ -258,6 +292,7 @@ export class ElicitAPIImpl implements ElicitAPI {
     const result = await this.dispatchForm(
       message,
       buildSingleValueSchema(this.buildStringSchema(opts)),
+      opts.timeoutMs,
     );
     if (result.action === "accept") {
       return { status: "accept", value: unwrapSingleValue<string>(result.content) };
@@ -280,35 +315,47 @@ export class ElicitAPIImpl implements ElicitAPI {
   // ── select ─────────────────────────────────────────────────────────
 
   private buildSelectSchema(
-    options: readonly string[],
-    opts: { default?: string; labels?: Record<string, string> } = {},
+    options: readonly unknown[],
+    opts: { default?: unknown; labels?: Record<string, string> } = {},
   ): ElicitationPrimitiveSchema {
+    // Per MCP spec 2025-11-25, elicitation enum options MUST be strings
+    // on the wire. We coerce non-strings via String(x) rather than
+    // throwing — matches HTML form semantics. Callers passing numeric
+    // IDs get a `string` return and parse back with `Number(x)`.
+    const wireOptions = toWireStringArray(options);
+    const wireDefault = opts.default !== undefined ? toWireString(opts.default) : undefined;
+
     if (opts.labels && Object.keys(opts.labels).length > 0) {
-      // Titled (oneOf+const+title)
-      const oneOf = options.map((value) => ({
+      // Titled (oneOf+const+title) — labels keyed by the WIRE string
+      // (so callers can write `labels: { [String(id)]: name }`).
+      const oneOf = wireOptions.map((value) => ({
         const: value,
         title: opts.labels?.[value] ?? value,
       }));
       const s: Record<string, unknown> = { type: "string", oneOf };
-      if (opts.default !== undefined) s.default = opts.default;
+      if (wireDefault !== undefined) s.default = wireDefault;
       return s as ElicitationPrimitiveSchema;
     }
     // Plain enum
-    const s: Record<string, unknown> = { type: "string", enum: [...options] };
-    if (opts.default !== undefined) s.default = opts.default;
+    const s: Record<string, unknown> = { type: "string", enum: wireOptions };
+    if (wireDefault !== undefined) s.default = wireDefault;
     return s as ElicitationPrimitiveSchema;
   }
 
   async select<const T extends readonly string[]>(
     message: string,
     options: T,
-    opts?: { default?: T[number]; labels?: Partial<Record<T[number], string>> },
+    opts?: Parameters<ElicitAPI["select"]>[2],
   ): Promise<T[number]> {
     const schema = this.buildSelectSchema(
       options,
       opts as { default?: string; labels?: Record<string, string> },
     );
-    const result = await this.dispatchForm(message, buildSingleValueSchema(schema));
+    const result = await this.dispatchForm(
+      message,
+      buildSingleValueSchema(schema),
+      opts?.timeoutMs,
+    );
     if (result.action === "accept") return unwrapSingleValue<T[number]>(result.content);
     throwForAction(result.action);
   }
@@ -316,13 +363,17 @@ export class ElicitAPIImpl implements ElicitAPI {
   async trySelect<const T extends readonly string[]>(
     message: string,
     options: T,
-    opts?: { default?: T[number]; labels?: Partial<Record<T[number], string>> },
+    opts?: Parameters<ElicitAPI["select"]>[2],
   ): Promise<ElicitOutcome<T[number]>> {
     const schema = this.buildSelectSchema(
       options,
       opts as { default?: string; labels?: Record<string, string> },
     );
-    const result = await this.dispatchForm(message, buildSingleValueSchema(schema));
+    const result = await this.dispatchForm(
+      message,
+      buildSingleValueSchema(schema),
+      opts?.timeoutMs,
+    );
     if (result.action === "accept") {
       return { status: "accept", value: unwrapSingleValue<T[number]>(result.content) };
     }
@@ -332,9 +383,9 @@ export class ElicitAPIImpl implements ElicitAPI {
   // ── multiSelect ────────────────────────────────────────────────────
 
   private buildMultiSelectSchema(
-    options: readonly string[],
+    options: readonly unknown[],
     opts: {
-      default?: string[];
+      default?: readonly unknown[];
       min?: number;
       max?: number;
       labels?: Record<string, string>;
@@ -343,18 +394,22 @@ export class ElicitAPIImpl implements ElicitAPI {
     if (opts.min !== undefined && opts.max !== undefined && opts.min > opts.max) {
       throw new Error(`multiSelect: min (${opts.min}) cannot exceed max (${opts.max})`);
     }
+    // Coerce options + default to strings for the wire (spec requires it).
+    const wireOptions = toWireStringArray(options);
+    const wireDefault = opts.default !== undefined ? toWireStringArray(opts.default) : undefined;
+
     const items = opts.labels
       ? {
-          anyOf: options.map((value) => ({
+          anyOf: wireOptions.map((value) => ({
             const: value,
             title: opts.labels?.[value] ?? value,
           })),
         }
-      : { type: "string" as const, enum: [...options] };
+      : { type: "string" as const, enum: wireOptions };
     const s: Record<string, unknown> = { type: "array", items };
     if (opts.min !== undefined) s.minItems = opts.min;
     if (opts.max !== undefined) s.maxItems = opts.max;
-    if (opts.default !== undefined) s.default = opts.default;
+    if (wireDefault !== undefined) s.default = wireDefault;
     return s as ElicitationPrimitiveSchema;
   }
 
@@ -372,7 +427,11 @@ export class ElicitAPIImpl implements ElicitAPI {
         labels?: Record<string, string>;
       },
     );
-    const result = await this.dispatchForm(message, buildSingleValueSchema(schema));
+    const result = await this.dispatchForm(
+      message,
+      buildSingleValueSchema(schema),
+      opts?.timeoutMs,
+    );
     if (result.action === "accept") return unwrapSingleValue<Array<T[number]>>(result.content);
     throwForAction(result.action);
   }
@@ -391,7 +450,11 @@ export class ElicitAPIImpl implements ElicitAPI {
         labels?: Record<string, string>;
       },
     );
-    const result = await this.dispatchForm(message, buildSingleValueSchema(schema));
+    const result = await this.dispatchForm(
+      message,
+      buildSingleValueSchema(schema),
+      opts?.timeoutMs,
+    );
     if (result.action === "accept") {
       return {
         status: "accept",
@@ -403,12 +466,13 @@ export class ElicitAPIImpl implements ElicitAPI {
 
   // ── confirm ────────────────────────────────────────────────────────
 
-  async confirm(message: string, opts: { default?: boolean } = {}): Promise<boolean> {
+  async confirm(message: string, opts: Parameters<ElicitAPI["confirm"]>[1] = {}): Promise<boolean> {
     const schema: Record<string, unknown> = { type: "boolean" };
     if (opts.default !== undefined) schema.default = opts.default;
     const result = await this.dispatchForm(
       message,
       buildSingleValueSchema(schema as ElicitationPrimitiveSchema),
+      opts.timeoutMs,
     );
     if (result.action === "accept") return unwrapSingleValue<boolean>(result.content);
     throwForAction(result.action);
@@ -416,13 +480,14 @@ export class ElicitAPIImpl implements ElicitAPI {
 
   async tryConfirm(
     message: string,
-    opts: { default?: boolean } = {},
+    opts: Parameters<ElicitAPI["tryConfirm"]>[1] = {},
   ): Promise<ElicitOutcome<boolean>> {
     const schema: Record<string, unknown> = { type: "boolean" };
     if (opts.default !== undefined) schema.default = opts.default;
     const result = await this.dispatchForm(
       message,
       buildSingleValueSchema(schema as ElicitationPrimitiveSchema),
+      opts.timeoutMs,
     );
     if (result.action === "accept") {
       return { status: "accept", value: unwrapSingleValue<boolean>(result.content) };
@@ -447,7 +512,11 @@ export class ElicitAPIImpl implements ElicitAPI {
 
   async number(message: string, opts?: Parameters<ElicitAPI["number"]>[1]): Promise<number> {
     const schema = this.buildNumberSchema(opts);
-    const result = await this.dispatchForm(message, buildSingleValueSchema(schema));
+    const result = await this.dispatchForm(
+      message,
+      buildSingleValueSchema(schema),
+      opts?.timeoutMs,
+    );
     if (result.action === "accept") return unwrapSingleValue<number>(result.content);
     throwForAction(result.action);
   }
@@ -457,7 +526,11 @@ export class ElicitAPIImpl implements ElicitAPI {
     opts?: Parameters<ElicitAPI["number"]>[1],
   ): Promise<ElicitOutcome<number>> {
     const schema = this.buildNumberSchema(opts);
-    const result = await this.dispatchForm(message, buildSingleValueSchema(schema));
+    const result = await this.dispatchForm(
+      message,
+      buildSingleValueSchema(schema),
+      opts?.timeoutMs,
+    );
     if (result.action === "accept") {
       return { status: "accept", value: unwrapSingleValue<number>(result.content) };
     }
@@ -475,16 +548,24 @@ export class ElicitAPIImpl implements ElicitAPI {
     return json as unknown as ElicitationFormSchema;
   }
 
-  async object<T>(message: string, schema: ZodType<T>): Promise<T> {
+  async object<T>(
+    message: string,
+    schema: ZodType<T>,
+    opts?: { timeoutMs?: number | "never" },
+  ): Promise<T> {
     const formSchema = this.buildObjectSchema(schema);
-    const result = await this.dispatchForm(message, formSchema);
+    const result = await this.dispatchForm(message, formSchema, opts?.timeoutMs);
     if (result.action === "accept") return result.content as unknown as T;
     throwForAction(result.action);
   }
 
-  async tryObject<T>(message: string, schema: ZodType<T>): Promise<ElicitOutcome<T>> {
+  async tryObject<T>(
+    message: string,
+    schema: ZodType<T>,
+    opts?: { timeoutMs?: number | "never" },
+  ): Promise<ElicitOutcome<T>> {
     const formSchema = this.buildObjectSchema(schema);
-    const result = await this.dispatchForm(message, formSchema);
+    const result = await this.dispatchForm(message, formSchema, opts?.timeoutMs);
     if (result.action === "accept") {
       return { status: "accept", value: result.content as unknown as T };
     }
@@ -493,20 +574,31 @@ export class ElicitAPIImpl implements ElicitAPI {
 
   // ── url ────────────────────────────────────────────────────────────
 
-  async url(opts: { message: string; url: string }): Promise<UrlElicitOutcome> {
+  async url(opts: {
+    message: string;
+    url: string;
+    timeoutMs?: number | "never";
+  }): Promise<UrlElicitOutcome> {
     if (!this.source.capabilities.url) {
       throw new ElicitationModeNotSupported("url");
     }
     const elicitationId = `el-${Math.random().toString(36).slice(2, 12)}`;
-    const result = await this.source.requestUrl({
-      message: opts.message,
-      url: opts.url,
-      elicitationId,
-    });
+    const result = await this.source.requestUrl(
+      {
+        message: opts.message,
+        url: opts.url,
+        elicitationId,
+      },
+      opts.timeoutMs !== undefined ? { timeoutMs: opts.timeoutMs } : undefined,
+    );
     return { status: result.action } as UrlElicitOutcome;
   }
 
-  async tryUrl(opts: { message: string; url: string }): Promise<UrlElicitOutcome> {
+  async tryUrl(opts: {
+    message: string;
+    url: string;
+    timeoutMs?: number | "never";
+  }): Promise<UrlElicitOutcome> {
     return this.url(opts);
   }
 

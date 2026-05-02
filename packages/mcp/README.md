@@ -1243,6 +1243,33 @@ const server = new MCPServer({
 - **Legacy `elicitation: {}`** capability is treated as form-only.
 - **`requireUrls()`** uses `protocolError(-32042, ...)` to ship a clean
   single-prefix error with `data.elicitations` carrying the URL specs.
+- **Timeouts** — the MCP spec does not mandate timeouts; the framework
+  picks defaults. Every sugar method accepts `opts.timeoutMs`. Defaults
+  are tuned for user-loop interaction: **5 minutes for form mode,
+  30 minutes for URL mode** (vs the SDK's 60s default which is too
+  short when a human has to read, decide, or fill out a form).
+
+  **Both `0` and `"never"` mean "no timeout"** — `0` follows the
+  axios/XHR/socket convention, `"never"` is the self-documenting
+  explicit form. Either resolves to Node's `setTimeout` max
+  (~24.8 days, effectively indefinite). Pass an `AbortSignal` for
+  explicit cancellation.
+
+  ```ts
+  // Default 5 min
+  const env = await ctx.elicit.select("Env?", ["staging", "prod"] as const);
+
+  // Wait as long as the user takes — both forms equivalent
+  const config = await ctx.elicit.object("Configure", Schema, { timeoutMs: 0 });
+  const config2 = await ctx.elicit.object("Configure", Schema, { timeoutMs: "never" });
+
+  // Custom 10-min window for an OAuth flow
+  const r = await ctx.elicit.url({
+    message: "Sign in",
+    url: "https://auth...",
+    timeoutMs: 10 * 60_000,
+  });
+  ```
 
 **Client-side handler** — the connecting client supplies an
 `elicitationHandler` to handle server-initiated requests:
@@ -1460,6 +1487,24 @@ const result = await client.getPrompt("reports", "summarize", {
   length: "150",
 });
 // → { description, messages: [...] }
+
+// Slow prompt handlers — pass `timeoutMs: 0` (axios convention) or
+// `timeoutMs: "never"` to disable the SDK's 60s default. Both resolve
+// to Node's setTimeout max (~24.8 days, effectively indefinite).
+const slow = await client.getPrompt(
+  "reports",
+  "deep-analysis",
+  { period: "Q4-2025" },
+  { timeoutMs: 0 }, // or `"never"` — equivalent
+);
+
+// Or supply a numeric custom timeout / AbortSignal
+const ac = new AbortController();
+setTimeout(() => ac.abort(), 90_000);
+const bounded = await client.getPrompt("reports", "expensive", undefined, {
+  timeoutMs: 120_000,
+  signal: ac.signal,
+});
 
 client.invalidatePrompts("reports");
 client.on("prompts:changed", ({ serverName }) => {
