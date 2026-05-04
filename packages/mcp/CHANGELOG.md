@@ -1,5 +1,15 @@
 # @agentick/mcp
 
+## 0.14.58
+
+### Patch Changes
+
+- 550d441: elicitation and prompt enhancements
+  otel enhancements
+- Updated dependencies [550d441]
+  - @agentick/kernel@0.14.58
+  - @agentick/shared@0.14.58
+
 ## 0.14.57
 
 ### Patch Changes
