@@ -236,6 +236,10 @@ export class ExecutionTracker {
         procedureNode: node,
         origin,
         metrics: metricsProxy as Record<string, number>,
+        // Expose the procedure's telemetry span via context so middleware,
+        // hooks, and procedure bodies can read/enrich it via
+        // `Context.get().activeSpan` without a separate ALS.
+        activeSpan: span,
         // Execution context (Phase 3): set if boundary, otherwise inherit from parent context
         ...(isExecutionBoundary
           ? {

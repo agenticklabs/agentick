@@ -216,6 +216,7 @@ export default defineConfig({
             { text: "Gateway Protocol", link: "/docs/gateway-protocol" },
             { text: "Client-Server", link: "/docs/client-server" },
             { text: "Connectors", link: "/docs/connectors" },
+            { text: "Observability", link: "/docs/observability" },
             { text: "DevTools", link: "/docs/devtools" },
           ],
         },

@@ -7,7 +7,14 @@
  * @module @agentick/kernel/otel-provider
  */
 
-import type { TelemetryProvider, Span, Counter, Histogram } from "./telemetry.js";
+import type {
+  TelemetryProvider,
+  Span,
+  Counter,
+  Histogram,
+  AttributeValue,
+  SpanStatus,
+} from "./telemetry.js";
 
 export interface OTelProviderOptions {
   /**
@@ -91,14 +98,60 @@ export function createOTelProvider(options: OTelProviderOptions = {}): Telemetry
       const parentContext = otel.context.active();
       const span = tracer.startSpan(name, undefined, parentContext);
 
-      return {
-        end: () => span.end(),
-        setAttribute: (key: string, value: any) => span.setAttribute(key, value),
-        recordError: (error: any) => {
+      // OTel SDK doesn't expose attribute readback; mirror locally so the
+      // optional `getAttribute`/`getAttributes` API has something to return.
+      const attrs: Record<string, AttributeValue> = {};
+      let ended = false;
+      const spanContext = span.spanContext();
+
+      const wrapped: Span = {
+        traceId: spanContext.traceId,
+        spanId: spanContext.spanId,
+        end(endTime?: number) {
+          ended = true;
+          if (endTime !== undefined) span.end(endTime);
+          else span.end();
+        },
+        setAttribute(key: string, value: any) {
+          attrs[key] = value as AttributeValue;
+          span.setAttribute(key, value);
+        },
+        setAttributes(next: Record<string, AttributeValue>) {
+          for (const [k, v] of Object.entries(next)) {
+            attrs[k] = v;
+          }
+          span.setAttributes(next);
+        },
+        getAttribute(key: string) {
+          return attrs[key];
+        },
+        getAttributes() {
+          return Object.freeze({ ...attrs });
+        },
+        addEvent(eventName: string, attributes?, timestamp?) {
+          span.addEvent(eventName, attributes, timestamp);
+        },
+        setStatus(status: SpanStatus) {
+          const code =
+            status.code === "ok"
+              ? otel.SpanStatusCode.OK
+              : status.code === "error"
+                ? otel.SpanStatusCode.ERROR
+                : otel.SpanStatusCode.UNSET;
+          span.setStatus({ code, message: status.message });
+        },
+        updateName(newName: string) {
+          span.updateName(newName);
+        },
+        isRecording() {
+          return !ended && span.isRecording();
+        },
+        recordError(error: any) {
           span.recordException(error);
           span.setStatus({ code: otel.SpanStatusCode.ERROR, message: error?.message });
         },
       };
+      return wrapped;
     },
 
     recordError(error: any): void {

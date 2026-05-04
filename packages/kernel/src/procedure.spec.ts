@@ -1070,3 +1070,112 @@ describe("ExecutionHandle - auto-drain async iterables", () => {
     }
   });
 });
+
+describe("Kernel Procedure — activeSpan via Context", () => {
+  it("exposes the procedure's telemetry span on Context.activeSpan", async () => {
+    // Import lazily to avoid hoisting issues with the shared Telemetry singleton.
+    const { Telemetry } = await import("./telemetry.js");
+    const { default: createMockProvider } = {
+      default: () => {
+        const seen: any[] = [];
+        const provider = {
+          startTrace: () => "trace",
+          startSpan: (name: string) => {
+            const attrs: Record<string, any> = {};
+            const span = {
+              traceId: "trace",
+              spanId: `span-${name}-${seen.length}`,
+              end: () => {},
+              setAttribute: (k: string, v: any) => {
+                attrs[k] = v;
+              },
+              getAttribute: (k: string) => attrs[k],
+              recordError: () => {},
+            };
+            seen.push({ name, span, attrs });
+            return span;
+          },
+          recordError: () => {},
+          endTrace: () => {},
+          getCounter: () => ({ add: () => {} }),
+          getHistogram: () => ({ record: () => {} }),
+        };
+        return { provider, seen };
+      },
+    };
+
+    const { provider, seen } = createMockProvider();
+    Telemetry.setProvider(provider as any);
+    try {
+      let observedFromBody: any;
+      const proc = createProcedure({ name: "with-span" }, async () => {
+        const ctx = Context.get();
+        observedFromBody = ctx.activeSpan;
+        // Middleware-style enrichment via Context.activeSpan should reach
+        // the same Span instance the engine started.
+        ctx.activeSpan?.setAttribute("body.touched", true);
+        return "ok";
+      });
+
+      await proc().result;
+
+      expect(observedFromBody).toBeDefined();
+      // The span observed in the procedure body is the same one the engine
+      // started for that procedure.
+      expect(seen).toHaveLength(1);
+      expect(observedFromBody).toBe(seen[0].span);
+      expect(seen[0].attrs["body.touched"]).toBe(true);
+      // Engine-stamped attributes coexist with body-set ones.
+      expect(seen[0].attrs["procedure.pid"]).toBeDefined();
+    } finally {
+      Telemetry.resetProvider();
+    }
+  });
+
+  it("each nested procedure sees its own activeSpan", async () => {
+    const { Telemetry } = await import("./telemetry.js");
+    const seen: { name: string; spanId: string }[] = [];
+    Telemetry.setProvider({
+      startTrace: () => "trace",
+      startSpan: (name: string) => {
+        const spanId = `span-${name}-${seen.length}`;
+        const span: any = {
+          traceId: "trace",
+          spanId,
+          end: () => {},
+          setAttribute: () => {},
+          recordError: () => {},
+        };
+        return span;
+      },
+      recordError: () => {},
+      endTrace: () => {},
+      getCounter: () => ({ add: () => {} }),
+      getHistogram: () => ({ record: () => {} }),
+    } as any);
+
+    try {
+      const inner = createProcedure({ name: "inner" }, async () => {
+        const span = Context.get().activeSpan;
+        seen.push({ name: "inner", spanId: span?.spanId ?? "<none>" });
+        return 1;
+      });
+
+      const outer = createProcedure({ name: "outer" }, async () => {
+        const span = Context.get().activeSpan;
+        seen.push({ name: "outer", spanId: span?.spanId ?? "<none>" });
+        return await inner().result;
+      });
+
+      await outer().result;
+
+      // Outer sees its own span; inner sees a different one.
+      expect(seen).toHaveLength(2);
+      expect(seen[0].name).toBe("outer");
+      expect(seen[1].name).toBe("inner");
+      expect(seen[0].spanId).not.toBe(seen[1].spanId);
+    } finally {
+      Telemetry.resetProvider();
+    }
+  });
+});

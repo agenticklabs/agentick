@@ -1,6 +1,44 @@
 /**
+ * Allowed values for span and metric attributes.
+ *
+ * Aligned with OpenTelemetry's AttributeValue so providers that wrap OTel
+ * (or other observability backends) can pass values through unchanged.
+ */
+export type AttributeValue = string | number | boolean | string[] | number[] | boolean[] | null;
+
+/**
+ * Status of a span — overrides the implicit "ok or error" inferred from
+ * `recordError`. Useful when a procedure wants to report success despite a
+ * non-fatal soft error, or mark itself errored without throwing.
+ */
+export interface SpanStatus {
+  /** `unset` is the default; `ok` is explicit success; `error` marks failure. */
+  code: "unset" | "ok" | "error";
+  /** Optional human-readable message — typically used with `error`. */
+  message?: string;
+}
+
+/**
+ * A point-in-time event recorded within a span. Useful for sub-step timing
+ * inside long-running procedures (e.g., "model_request_sent" then
+ * "model_response_received") without spawning nested spans.
+ */
+export interface SpanEvent {
+  name: string;
+  attributes?: Record<string, AttributeValue>;
+  /** Milliseconds since epoch. Defaults to "now" when omitted. */
+  timestamp?: number;
+}
+
+/**
  * A span represents a unit of work or operation within a trace.
  * Spans track timing, attributes, and errors for observability.
+ *
+ * The core methods (`end`, `setAttribute`, `recordError`) are required.
+ * The remaining methods are optional so that older `TelemetryProvider`
+ * implementations remain valid; callers should invoke them with `?.()` and
+ * tolerate `undefined` returns. New providers should implement all of them
+ * for full feature support.
  *
  * @example
  * ```typescript
@@ -9,6 +47,7 @@
  *   span.setAttribute('query', 'SELECT * FROM users');
  *   const result = await db.query(...);
  *   span.setAttribute('rowCount', result.length);
+ *   span.setStatus?.({ code: 'ok' });
  * } catch (error) {
  *   span.recordError(error);
  *   throw error;
@@ -16,14 +55,77 @@
  *   span.end();
  * }
  * ```
+ *
+ * @example Middleware enrichment via `getAttribute`
+ * ```typescript
+ * // Don't clobber whatever the engine set; only add what's missing.
+ * if (span.getAttribute?.('tool.name') === undefined) {
+ *   span.setAttribute('tool.name', resolvedName);
+ * }
+ * ```
+ *
+ * @example Sub-step events
+ * ```typescript
+ * span.addEvent?.('llm_request_sent', { model: 'gpt-4' });
+ * const response = await llm.invoke(...);
+ * span.addEvent?.('llm_response_received', { tokens: response.usage.total });
+ * ```
  */
 export interface Span {
+  // ── Core (required) ───────────────────────────────────────────────────
   /** End the span, recording its duration. */
-  end(): void;
+  end(endTime?: number): void;
   /** Set an attribute on the span for filtering/analysis. */
   setAttribute(key: string, value: any): void;
   /** Record an error that occurred during this span. */
   recordError(error: any): void;
+
+  // ── Identity (optional) ────────────────────────────────────────────────
+  /** Trace ID this span belongs to. Used for cross-system log correlation. */
+  readonly traceId?: string;
+  /** Unique ID for this span. Used for cross-system log correlation. */
+  readonly spanId?: string;
+
+  // ── Lifecycle introspection (optional) ─────────────────────────────────
+  /**
+   * Whether the span is still recording. Returns `false` after `end()`,
+   * when the provider sampled the span out, or when the provider is a no-op.
+   * Useful for short-circuiting expensive attribute computation.
+   */
+  isRecording?(): boolean;
+
+  // ── Naming (optional) ──────────────────────────────────────────────────
+  /**
+   * Refine the span's name. Useful when an initial name is generic (e.g.,
+   * `http.request`) and a more specific one is known later (e.g.,
+   * `POST /v1/query`).
+   */
+  updateName?(name: string): void;
+
+  // ── Attributes (optional convenience + read) ───────────────────────────
+  /** Set multiple attributes in a single call. */
+  setAttributes?(attrs: Record<string, AttributeValue>): void;
+  /**
+   * Read back a previously-set attribute. Lets middleware enrich the span
+   * without clobbering values stamped by the engine or other middleware.
+   */
+  getAttribute?(key: string): AttributeValue | undefined;
+  /** Read-only snapshot of all attributes set on this span. */
+  getAttributes?(): Readonly<Record<string, AttributeValue>>;
+
+  // ── Sub-step events (optional) ─────────────────────────────────────────
+  /**
+   * Record a point-in-time event within this span. Cheaper than spawning a
+   * nested span when only the moment matters, not a duration.
+   */
+  addEvent?(name: string, attributes?: Record<string, AttributeValue>, timestamp?: number): void;
+
+  // ── Status (optional) ──────────────────────────────────────────────────
+  /**
+   * Explicitly set the span's status. Overrides the implicit status from
+   * `recordError`. Standard OTel pattern.
+   */
+  setStatus?(status: SpanStatus): void;
 }
 
 /**
@@ -104,10 +206,22 @@ class NoOpProvider implements TelemetryProvider {
     return `trace-${crypto.randomUUID()}`;
   }
   startSpan(_name: string): Span {
+    // Return an inert span that satisfies the full interface so callers
+    // that use the optional methods don't have to null-check `?.()`.
+    const empty: Readonly<Record<string, AttributeValue>> = Object.freeze({});
     return {
+      traceId: undefined,
+      spanId: undefined,
       end: () => {},
       setAttribute: () => {},
       recordError: () => {},
+      isRecording: () => false,
+      updateName: () => {},
+      setAttributes: () => {},
+      getAttribute: () => undefined,
+      getAttributes: () => empty,
+      addEvent: () => {},
+      setStatus: () => {},
     };
   }
   recordError(_error: any): void {}

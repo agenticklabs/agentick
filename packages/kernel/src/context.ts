@@ -5,6 +5,7 @@ import type { ProcedureGraph } from "./procedure-graph.js";
 import type { ProcedureNode } from "./procedure-graph.js";
 import { ContextError } from "@agentick/shared";
 import type { Middleware } from "./procedure.js";
+import type { Span } from "./telemetry.js";
 
 /**
  * User information associated with the current execution context.
@@ -253,6 +254,19 @@ export interface KernelContext {
   middleware?: {
     getMiddlewareFor(procedureName: string): Middleware[];
   };
+
+  /**
+   * Active telemetry span for the currently-executing procedure.
+   *
+   * Set by `ExecutionTracker` when forking the per-procedure context. Inside
+   * a procedure body (or any middleware/hook running within it), reading
+   * `Context.get().activeSpan` returns the span the engine started for that
+   * procedure — letting middleware enrich it with `setAttribute`, `addEvent`,
+   * etc., without needing a parallel ALS or a `getActiveSpan()` accessor.
+   *
+   * Undefined outside of any procedure execution.
+   */
+  activeSpan?: Span;
 
   /**
    * Type brand for context detection
