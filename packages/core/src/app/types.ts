@@ -751,6 +751,14 @@ export interface SessionOptions extends LifecycleCallbacks {
   tools?: ExecutableTool[];
 
   /**
+   * Skill registry for this session — used to resolve `session.skill(name, ...)`
+   * lookups by string name. Normally populated by the App when creating a
+   * session. Pass-through here for tests / advanced use.
+   * @internal
+   */
+  skillRegistry?: import("../skill/registry.js").SkillRegistry;
+
+  /**
    * Maximum number of ticks for this session.
    * Overrides AppOptions.maxTicks.
    */
@@ -1513,6 +1521,27 @@ export interface SessionRecording {
  * await session.close();
  * ```
  */
+/**
+ * Proxy surface for `session.tools.<name>(input)`.
+ *
+ * Each property access composes a dot-path that becomes the dispatched tool
+ * name. Calling the proxy with an input object dispatches that tool through
+ * the session and resolves with `ContentBlock[]`. Typed loosely on purpose —
+ * static knowledge of the tool registry is not available at the session level.
+ */
+export type SessionToolsProxy = {
+  [name: string]: SessionToolNamespace;
+};
+
+/**
+ * A node in the {@link SessionToolsProxy} tree. Both callable (dispatches the
+ * tool at this dot-path) and indexable (descends into a child namespace).
+ */
+export interface SessionToolNamespace {
+  (input?: Record<string, unknown>): Promise<ContentBlock[]>;
+  [name: string]: SessionToolNamespace;
+}
+
 export interface Session<P = {}> extends EventEmitter {
   /** Unique session ID */
   readonly id: string;
@@ -1690,6 +1719,143 @@ export interface Session<P = {}> extends EventEmitter {
     (name: string, input: Record<string, unknown>) => Promise<ContentBlock[]>,
     true
   >;
+
+  /**
+   * Append a timeline entry directly to the session timeline.
+   *
+   * The primitive timeline write — bypasses the next-tick queue (`queue`)
+   * entirely. The entry lands in the timeline immediately, components
+   * reading the timeline see it, and the model sees it on the next compile.
+   * Emits `entry_committed`.
+   *
+   * Use this for "ambient context" (events, observations, system facts)
+   * that should be part of the conversation history without being treated
+   * as a pending user turn.
+   *
+   * @param entry - The timeline entry to append. An `id` is auto-assigned
+   *   when missing.
+   * @param opts.trigger - When true, runs a tick after appending so the
+   *   model can act on the new entry. Defaults to false.
+   * @returns A `SessionExecutionHandle` when `trigger: true`, otherwise void.
+   *
+   * @example
+   * ```typescript
+   * // Direct event entry, no execution
+   * await session.append({
+   *   kind: "message",
+   *   message: { role: "event", eventType: "file_opened", content: [...] },
+   * });
+   * ```
+   */
+  append: Procedure<
+    (
+      entry: import("@agentick/shared").TimelineEntry,
+      opts?: { trigger?: boolean },
+    ) => Promise<SessionExecutionHandle | void>,
+    true
+  >;
+
+  /**
+   * Run a skill — a scoped sub-agent invocation with caller-typed results.
+   *
+   * The skill defines the workflow (instructions + input contract + allowed
+   * tools); the *caller* decides what shape to extract via `opts.result`.
+   * When `result` is given, a transient `submit` tool is registered whose
+   * input schema IS `result`; the agent is instructed to call it. When
+   * `result` is omitted, the skill returns the model's final assistant text.
+   *
+   * @example Typed result
+   * ```typescript
+   * const Triage = defineSkill({
+   *   name: "triage",
+   *   instructions: "Investigate, decide on action, submit.",
+   *   input: z.object({ issueNumber: z.number() }),
+   *   tools: ["search", "read_file"],
+   * });
+   *
+   * const t = await session.skill(Triage, {
+   *   args: { issueNumber: 42 },
+   *   result: z.object({ fixApplied: z.boolean() }),
+   * });
+   * // t is typed as { fixApplied: boolean }
+   * ```
+   *
+   * @example Free-form result (no result schema)
+   * ```typescript
+   * const text = await session.skill(Summarize, { args: { content } });
+   * // text is string — the final assistant response
+   * ```
+   *
+   * Throws when `result` is given and the model does not call `submit`
+   * within `maxTicks` (defaults to 10).
+   */
+  skill: Procedure<
+    <TInput, TResult = string>(
+      skill: import("../skill/skill.js").SkillDef<TInput> | string,
+      opts: {
+        args: TInput;
+        result?: import("../tool/tool.js").ZodSchema<TResult>;
+        maxTicks?: number;
+      },
+    ) => Promise<TResult>,
+    true
+  >;
+
+  /**
+   * Append an event entry (message with `role: "event"`) to the timeline as
+   * ambient context. Sugar over {@link Session.append}.
+   *
+   * The event becomes part of the conversation history without triggering a
+   * tick. Use for facts the agent should know but that aren't a user turn —
+   * file_opened, mcp_resource_changed, user_idle, etc.
+   *
+   * @example
+   * ```typescript
+   * session.observe({ type: "file_opened", content: "/foo.ts" });
+   * ```
+   */
+  observe(input: {
+    type: string;
+    content: ContentBlock[] | string;
+    metadata?: Record<string, unknown>;
+  }): Promise<void>;
+
+  /**
+   * Run a shell command in the agent's sandbox. Output is the joined text
+   * of all text blocks the `<Bash>` tool emits — including any
+   * `[stderr]` / `[exit code: N]` annotations on failure. Callers needing
+   * structured stdout/stderr/exitCode should dispatch `bash` directly.
+   *
+   * @see Session.shell — JSDoc on the implementation has the full output
+   *   shape contract.
+   *
+   * Sugar over `dispatch("bash", { command })`. Returns the joined text from
+   * the resulting content blocks. Requires a `<Bash>` tool (or any tool
+   * registered as `bash` accepting `{ command: string }`) to be mounted.
+   *
+   * @example
+   * ```typescript
+   * const out = await session.shell("ls -la");
+   * ```
+   */
+  shell(command: string): Promise<string>;
+
+  /**
+   * Programmatic tool dispatch surface.
+   *
+   * `session.tools.<name>(input)` is sugar for `session.dispatch(name, input)`.
+   * Property access composes dot-paths, so `session.tools.knowify.search(args)`
+   * dispatches the tool registered as `"knowify.search"`.
+   *
+   * Returns `ContentBlock[]` from the tool handler.
+   *
+   * @example
+   * ```typescript
+   * const blocks = await session.tools.bash({ command: "pwd" });
+   * const hits = await session.tools.knowify.search({ q: "ledger" });
+   * ```
+   */
+  readonly tools: SessionToolsProxy;
 
   /**
    * Convert EventEmitter to AsyncIterable for the current/next execution.
@@ -1910,6 +2076,30 @@ export type ComponentFunction<P = {}> = (props: P) => JSX.Element;
  * ```
  */
 export interface App<P = {}> {
+  /**
+   * App-level skill registry — discovery and retrieval surface for the
+   * skills available across sessions of this app.
+   *
+   * Skills registered here are:
+   *   - Resolvable by name from `session.skill(name, { args })`
+   *   - Exposed to the model via the implicit `skill` tool (when the
+   *     registry is non-empty, the tool is auto-added to sessions and its
+   *     description dynamically lists available skills)
+   *
+   * @example
+   * ```typescript
+   * const Triage = await loadSkill("./skills/triage");
+   * app.skills.register(Triage);
+   *
+   * // Or load a whole directory of skills
+   * await app.skills.loadDir("./skills");
+   *
+   * // Search by metadata or text
+   * const found = app.skills.search({ query: "issue", metadata: { author: "x" } });
+   * ```
+   */
+  readonly skills: import("../skill/registry.js").SkillRegistry;
+
   /**
    * Run the app with input.
    *

@@ -141,6 +141,38 @@ function ensureMessageId(message: Message): Message {
   return { ...message, id: randomUUID() };
 }
 
+/**
+ * Build a Proxy node for `session.tools.<dot.path>(input)`. Each property
+ * access composes the dot-path; calling dispatches the tool through the
+ * session. `then`/`catch`/`finally` are stripped so the proxy itself is not
+ * mistaken for a thenable when accidentally awaited.
+ */
+function makeToolNamespace(
+  session: { dispatch: (name: string, input: Record<string, unknown>) => Promise<ContentBlock[]> },
+  path: string[],
+): (input?: Record<string, unknown>) => Promise<ContentBlock[]> {
+  const callable = (input: Record<string, unknown> = {}) => session.dispatch(path.join("."), input);
+  return new Proxy(callable, {
+    get(target, prop, receiver) {
+      if (typeof prop !== "string") return Reflect.get(target, prop, receiver);
+      if (prop === "then" || prop === "catch" || prop === "finally") return undefined;
+      return makeToolNamespace(session, [...path, prop]);
+    },
+  }) as (input?: Record<string, unknown>) => Promise<ContentBlock[]>;
+}
+
+/** Render skill args for the spec's `ARGUMENTS: <value>` appendix. */
+function argsAsText(args: unknown): string {
+  if (args == null) return "";
+  if (typeof args === "string") return args;
+  if (typeof args === "number" || typeof args === "boolean") return String(args);
+  try {
+    return JSON.stringify(args);
+  } catch {
+    return String(args);
+  }
+}
+
 function tryDisplaySummary(
   tool: ExecutableTool | undefined,
   input: Record<string, unknown>,
@@ -414,6 +446,24 @@ export class SessionImpl<P = {}> extends EventEmitter implements Session<P> {
   >;
   dispatch!: Procedure<
     (name: string, input: Record<string, unknown>) => Promise<ContentBlock[]>,
+    true
+  >;
+  append!: Procedure<
+    (
+      entry: import("@agentick/shared").TimelineEntry | COMTimelineEntry,
+      opts?: { trigger?: boolean },
+    ) => Promise<SessionExecutionHandle | void>,
+    true
+  >;
+  skill!: Procedure<
+    <TInput, TResult = string>(
+      skill: import("../skill/skill.js").SkillDef<TInput> | string,
+      opts: {
+        args: TInput;
+        result?: import("../tool/tool.js").ZodSchema<TResult>;
+        maxTicks?: number;
+      },
+    ) => Promise<TResult>,
     true
   >;
 
@@ -740,6 +790,52 @@ export class SessionImpl<P = {}> extends EventEmitter implements Session<P> {
       },
     );
 
+    // Append procedure - direct timeline write (the primitive). Emits
+    // entry_committed, fires useOnEntry handlers, optionally runs a tick
+    // when opts.trigger is set.
+    this.append = createProcedure(
+      {
+        name: "session:append",
+        metadata: { operation: "append" },
+        handleFactory: false,
+        executionBoundary: false,
+      },
+      async (
+        entry: import("@agentick/shared").TimelineEntry | COMTimelineEntry,
+        opts?: { trigger?: boolean },
+      ): Promise<SessionExecutionHandle | void> => {
+        if (this.isTerminal) throw new Error(this.terminalError);
+        await this.mount();
+
+        const committed = entry as COMTimelineEntry;
+        if (!committed.id) committed.id = randomUUID();
+
+        this.ctx!.addTimelineEntry(committed);
+        this._timeline.push(committed);
+
+        this.emitEvent({
+          type: "entry_committed",
+          entry: committed,
+          timelineIndex: this._timeline.length - 1,
+        });
+
+        if (committed.kind === "message") {
+          this.channel("messages").publish({
+            type: "message_appended",
+            channel: "messages",
+            payload: committed.message,
+          });
+        }
+
+        // Fire useOnEntry / useOnEvent handlers
+        this.notifyEntryCommitted(committed);
+
+        if (opts?.trigger) {
+          return await this.render(this._lastProps ?? ({} as P));
+        }
+      },
+    );
+
     // Dispatch procedure - dispatches tools by name/alias from the user side
     this.dispatch = createProcedure(
       {
@@ -767,6 +863,202 @@ export class SessionImpl<P = {}> extends EventEmitter implements Session<P> {
         throw new Error(
           `Unexpected tool result type: ${typeof result}. Expected ContentBlock[] or string.`,
         );
+      },
+    );
+
+    // Skill procedure — runs a workflow with caller-typed structured output.
+    //
+    // The skill defines the workflow (instructions + input contract + allowed
+    // tools). The CALLER decides what shape they want back via `opts.result`.
+    // When `result` is given, a transient `submit` tool is registered whose
+    // input schema IS `result`; the model is told to call it. When `result`
+    // is omitted, the skill returns the model's final assistant text.
+    this.skill = createProcedure(
+      {
+        name: "session:skill",
+        metadata: { operation: "skill" },
+        handleFactory: false,
+        executionBoundary: false,
+      },
+      async <TInput, TResult = string>(
+        skillOrName: import("../skill/skill.js").SkillDef<TInput> | string,
+        opts: {
+          args: TInput;
+          result?: import("../tool/tool.js").ZodSchema<TResult>;
+          maxTicks?: number;
+        },
+      ): Promise<TResult> => {
+        if (this.isTerminal) throw new Error(this.terminalError);
+        await this.mount();
+
+        // Resolve string name via the app's skill registry
+        let skillDef: import("../skill/skill.js").SkillDef<TInput>;
+        if (typeof skillOrName === "string") {
+          const registry = this.sessionOptions.skillRegistry;
+          if (!registry) {
+            throw new Error(
+              `session.skill: cannot resolve skill name "${skillOrName}" — no app.skills registry available on this session.`,
+            );
+          }
+          const found = registry.get(skillOrName);
+          if (!found) {
+            throw new Error(
+              `session.skill: skill "${skillOrName}" not found in app.skills registry.`,
+            );
+          }
+          skillDef = found as import("../skill/skill.js").SkillDef<TInput>;
+        } else {
+          skillDef = skillOrName;
+        }
+
+        const { args, result: resultSchema, maxTicks } = opts;
+
+        // Validate args against skill.input if provided
+        const validatedArgs = skillDef.input
+          ? await parseSchema<TInput>(skillDef.input as any, args)
+          : args;
+
+        const { createTool: makeTool } = await import("../tool/tool.js");
+
+        // Resolve string tool refs against the session's tool registry
+        const resolvedTools: import("../tool/tool.js").ExecutableTool[] = [];
+        for (const t of skillDef.allowedTools ?? []) {
+          if (typeof t === "string") {
+            const found = this.ctx!.getTool(t) ?? this.ctx!.getToolByAlias(t);
+            if (!found) {
+              throw new Error(
+                `Skill "${skillDef.name}" references tool "${t}" but no such tool is registered on the session.`,
+              );
+            }
+            resolvedTools.push(found);
+          } else {
+            resolvedTools.push(t);
+          }
+        }
+
+        // Apply $ substitutions ($ARGUMENTS, $N, $name, ${VARS}) to the
+        // skill body before sending. Follows the Agent Skills spec.
+        const { substituteSkillVars, templateUsesArguments } =
+          await import("../skill/substitute.js");
+        const substituted = substituteSkillVars(skillDef.instructions, {
+          args: validatedArgs,
+          argumentNames: skillDef.argumentNames,
+          vars: {
+            AGENTICK_SESSION_ID: this.id,
+            ...(skillDef.skillDir ? { AGENTICK_SKILL_DIR: skillDef.skillDir } : {}),
+          },
+        });
+
+        // Apply shell injections (`!`<cmd>` ` and ```!\ncmd\n``` blocks).
+        // Runs through session.shell so the skill shares the agent's
+        // sandbox — same blast radius, same isolation.
+        const { applyShellInjections } = await import("../skill/shell-injection.js");
+        const renderedInstructions = await applyShellInjections(substituted, (cmd) =>
+          this.shell(cmd),
+        );
+
+        // Spec behavior: when $ARGUMENTS / $N forms aren't present in the
+        // body but args were passed, append `ARGUMENTS: <value>` so the
+        // model still sees what was sent.
+        const argsAppendix =
+          !templateUsesArguments(skillDef.instructions) && validatedArgs !== undefined
+            ? `\n\nARGUMENTS: ${argsAsText(validatedArgs)}`
+            : "";
+
+        const submitInstruction = resultSchema
+          ? `\n\nWhen you have the final answer, call \`submit\` with the typed result. ` +
+            `Do not narrate the answer — only the tool call carries the result.`
+          : "";
+
+        const userMsg: Message = {
+          role: "user",
+          content: [
+            {
+              type: "text",
+              text:
+                `Run skill: ${skillDef.name}\n\n` +
+                `${renderedInstructions}` +
+                argsAppendix +
+                submitInstruction,
+            },
+          ],
+        };
+
+        const effectiveMaxTicks = maxTicks ?? skillDef.maxTicks ?? 10;
+
+        // Two paths: structured (with submit tool) or free-form (final text)
+        if (resultSchema) {
+          // Result-capture promise — resolves when the model calls submit
+          let resolveResult!: (value: TResult) => void;
+          let rejectResult!: (err: Error) => void;
+          const resultPromise = new Promise<TResult>((res, rej) => {
+            resolveResult = res;
+            rejectResult = rej;
+          });
+          resultPromise.catch(() => {}); // avoid unhandled rejection
+
+          const submitTool = makeTool({
+            name: "submit",
+            description: `Submit the final result for skill "${skillDef.name}". Call once with the typed answer; do not call other tools after.`,
+            input: resultSchema as any,
+            handler: async (submittedArgs: any) => {
+              try {
+                const validated = await parseSchema<TResult>(resultSchema as any, submittedArgs);
+                resolveResult(validated);
+                return [{ type: "text" as const, text: "Submitted." }];
+              } catch (err) {
+                const e = err instanceof Error ? err : new Error(String(err));
+                rejectResult(e);
+                throw e;
+              }
+            },
+          });
+
+          const sendHandle = await this.send.exec({
+            messages: [userMsg],
+            tools: [submitTool, ...resolvedTools],
+            maxTicks: effectiveMaxTicks,
+          } as any);
+
+          const SENTINEL = Symbol("skill:no-submit");
+          const winner = await Promise.race([
+            resultPromise,
+            sendHandle.result.then(() => SENTINEL as any),
+          ]);
+
+          if (winner === (SENTINEL as any)) {
+            throw new Error(
+              `Skill "${skillDef.name}" did not call submit within max ticks (${effectiveMaxTicks}).`,
+            );
+          }
+
+          // Don't abort — let send finish naturally. We have our result; any
+          // remaining ticks just consume budget. Aborting works but the
+          // post-abort cleanup races with subsequent skill calls and surfaces
+          // the AbortError in the wrong place. Awaiting natural completion
+          // (with a catch in case it errors) keeps state consistent.
+          await sendHandle.result.catch(() => undefined);
+
+          return winner as TResult;
+        }
+
+        // Free-form path: no result schema, return final assistant text.
+        // When the model didn't text-respond but produced OUTPUT-tool data,
+        // surface that as a JSON string so the caller isn't handed back a
+        // silent empty string.
+        const sendHandle = await this.send.exec({
+          messages: [userMsg],
+          tools: resolvedTools,
+          maxTicks: effectiveMaxTicks,
+        } as any);
+        const sendResult = await sendHandle.result;
+        const text = sendResult.response ?? "";
+        if (text) return text as unknown as TResult;
+        const outputs = sendResult.outputs ?? {};
+        if (Object.keys(outputs).length > 0) {
+          return JSON.stringify(outputs) as unknown as TResult;
+        }
+        return "" as unknown as TResult;
       },
     );
   }
@@ -1102,6 +1394,96 @@ export class SessionImpl<P = {}> extends EventEmitter implements Session<P> {
     }
   }
 
+  /**
+   * Append an event entry (message with `role: "event"`) to the timeline as
+   * ambient context. Sugar over {@link Session.append}.
+   *
+   * Use for facts the agent should know but that aren't a user turn:
+   * file_opened, mcp_resource_changed, user_idle, etc.
+   *
+   * @example
+   * ```typescript
+   * session.observe({ type: "file_opened", content: [{ type: "text", text: "/foo.ts" }] });
+   * ```
+   */
+  async observe(input: {
+    type: string;
+    content: ContentBlock[] | string;
+    metadata?: Record<string, unknown>;
+  }): Promise<void> {
+    const content =
+      typeof input.content === "string"
+        ? [{ type: "text" as const, text: input.content }]
+        : input.content;
+    await this.append.exec({
+      kind: "message",
+      message: {
+        role: "event",
+        content: content as any,
+        eventType: input.type,
+        metadata: input.metadata,
+      } as any,
+    });
+  }
+
+  /**
+   * Run a shell command via the registered `bash` tool.
+   *
+   * Sugar over `dispatch("bash", { command })`. Joins text-typed content
+   * blocks with newlines and returns the resulting string.
+   *
+   * **Output shape:** the bundled `<Bash>` tool emits stdout, stderr, and
+   * exit-code annotations as a single text block when the command fails:
+   *
+   *   stdout content
+   *   [stderr]
+   *   stderr content
+   *   [exit code: 1]
+   *
+   * The full string is returned as-is — no parsing or stripping. Callers
+   * that need structured stdout/stderr/exitCode should `dispatch("bash",
+   * ...)` directly and inspect the content blocks, or wait for the typed
+   * shell-result variant on a future phase.
+   */
+  async shell(command: string): Promise<string> {
+    let blocks: ContentBlock[];
+    try {
+      blocks = await this.dispatch("bash", { command });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (/^Unknown command: bash\b/.test(msg)) {
+        throw new Error(
+          "session.shell() requires a <Bash> tool to be mounted. " +
+            "Add it to your tree:\n" +
+            '  import { Bash, Sandbox, localProvider } from "@agentick/sandbox";\n' +
+            "  <Sandbox provider={localProvider()}><Bash />...</Sandbox>",
+        );
+      }
+      throw err;
+    }
+    return blocks
+      .filter((b): b is Extract<ContentBlock, { type: "text" }> => b.type === "text")
+      .map((b) => b.text)
+      .join("\n");
+  }
+
+  /**
+   * Programmatic dispatch surface — `session.tools.<name>(input)`. See
+   * {@link Session.tools} for the full contract.
+   */
+  get tools(): import("./types.js").SessionToolsProxy {
+    return new Proxy(
+      {},
+      {
+        get: (_target, prop) => {
+          if (typeof prop !== "string") return undefined;
+          if (prop === "then" || prop === "catch" || prop === "finally") return undefined;
+          return makeToolNamespace(this, [prop]);
+        },
+      },
+    ) as import("./types.js").SessionToolsProxy;
+  }
+
   async getToolDefinitions(): Promise<ToolDefinition[]> {
     await this.mount();
     // toolDefinitions only has model-visible tools. We also need user-only tools.
@@ -1146,9 +1528,24 @@ export class SessionImpl<P = {}> extends EventEmitter implements Session<P> {
 
     const compiled = await this.compiler!.compile(rootElement as React.ReactNode, tickState);
 
+    // Implicit `skill` tool — auto-mounted when app.skills has any registrations.
+    // Mounted at mount() time too (not just compileTick) so dispatch("skill", ...)
+    // works before the first model call.
+    const implicitTools: ExecutableTool[] = [];
+    const skillRegistry = this.sessionOptions.skillRegistry;
+    if (skillRegistry && skillRegistry.size > 0) {
+      const { buildImplicitSkillTool } = await import("../skill/implicit-tool.js");
+      implicitTools.push(
+        buildImplicitSkillTool(skillRegistry, { AGENTICK_SESSION_ID: this.id }, (cmd) =>
+          this.shell(cmd),
+        ),
+      );
+    }
+
     // Register collected tools so they're available for dispatch
     const mergedTools = this.mergeTools(
       this.appOptions.tools ?? [],
+      implicitTools,
       this.sessionOptions.tools ?? [],
       [],
       compiled.tools,
@@ -1227,6 +1624,28 @@ export class SessionImpl<P = {}> extends EventEmitter implements Session<P> {
 
   pushEvent(event: Record<string, unknown> & { type: string }): void {
     this.emitEvent(event as StreamEventInput);
+  }
+
+  /**
+   * Fire `useOnEntry` (and sugar `useOnEvent`) handlers for a freshly
+   * committed timeline entry. Called from every commit site — `append`,
+   * and the `executeTick` paths that commit user / assistant / tool entries.
+   *
+   * Fire-and-forget: errors in handlers don't abort the commit. The entry
+   * is in the timeline regardless.
+   */
+  private notifyEntryCommitted(entry: COMTimelineEntry): void {
+    if (!this.compiler) return;
+    const tickState: TickState = {
+      tick: this._tick,
+      timeline: this._timeline,
+      queuedMessages: [],
+      stop: () => {},
+      executionId: this._currentExecutionId ?? undefined,
+    };
+    this.compiler.notifyOnEntry(entry, tickState).catch((err) => {
+      this.log.warn({ err }, "useOnEntry handler threw");
+    });
   }
 
   private emitEvent(event: StreamEventInput): void {
@@ -2851,13 +3270,33 @@ export class SessionImpl<P = {}> extends EventEmitter implements Session<P> {
     // Apply compiled structure (sections, ephemeral, metadata — NOT tools or timeline)
     await this.structureRenderer.apply(compiled);
 
+    // Build the implicit `skill` tool when the app's skill registry has
+    // anything in it. Description and listing are rebuilt fresh on every
+    // tick so newly-registered skills appear without needing a remount.
+    const implicitTools: ExecutableTool[] = [];
+    const skillRegistry = this.sessionOptions.skillRegistry;
+    if (skillRegistry && skillRegistry.size > 0) {
+      const { buildImplicitSkillTool } = await import("../skill/implicit-tool.js");
+      implicitTools.push(
+        buildImplicitSkillTool(skillRegistry, { AGENTICK_SESSION_ID: this.id }, (cmd) =>
+          this.shell(cmd),
+        ),
+      );
+    }
+
     // Merge tools from all sources (lowest → highest priority):
     // 1. App-level tools (appOptions.tools)
-    // 2. Session-level tools (sessionOptions.tools)
-    // 3. Per-execution tools (SendInput.tools)
-    // 4. JSX-reconciled tools (compiled.tools) — highest priority
+    // 2. Implicit (skill registry) tools
+    // 3. Session-level tools (sessionOptions.tools)
+    // 4. Per-execution tools (SendInput.tools)
+    // 5. JSX-reconciled tools (compiled.tools) — highest priority
+    //
+    // The implicit `skill` tool sits low — JSX-defined or explicitly-passed
+    // tools with the same name win, which lets advanced users override the
+    // default skill-loading behavior.
     const mergedTools = this.mergeTools(
       this.appOptions.tools ?? [],
+      implicitTools,
       this.sessionOptions.tools ?? [],
       executionTools,
       compiled.tools,
@@ -3202,6 +3641,7 @@ export class SessionImpl<P = {}> extends EventEmitter implements Session<P> {
         executionId: this._currentExecutionId!,
         timelineIndex: this._timeline.length - 1,
       });
+      this.notifyEntryCommitted(entry);
     }
 
     if (response.newTimelineEntries) {
@@ -3215,6 +3655,7 @@ export class SessionImpl<P = {}> extends EventEmitter implements Session<P> {
           executionId: this._currentExecutionId!,
           timelineIndex: this._timeline.length - 1,
         });
+        this.notifyEntryCommitted(entry);
       }
     }
 
@@ -3242,6 +3683,7 @@ export class SessionImpl<P = {}> extends EventEmitter implements Session<P> {
         executionId: this._currentExecutionId!,
         timelineIndex: this._timeline.length - 1,
       });
+      this.notifyEntryCommitted(toolResultEntry);
     }
 
     // Apply maxTimelineEntries trim

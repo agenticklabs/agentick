@@ -47,6 +47,7 @@ import type {
 import { randomUUID } from "node:crypto";
 import { SessionImpl } from "./app/session.js";
 import { MemoryInboxStorage } from "./app/inbox-storage.js";
+import { SkillRegistry } from "./skill/registry.js";
 
 /**
  * Key for middleware registration.
@@ -359,6 +360,14 @@ class SessionRegistry<P> {
 class AppImpl<P> implements App<P> {
   readonly run: Procedure<(input: RunInput<P>) => SessionExecutionHandle, true>;
 
+  /**
+   * App-level skill registry. Sessions consult this to resolve skill
+   * lookups by name (`session.skill("triage", { args })`) and to expose
+   * the implicit `skill` tool to the model (auto-registered when the
+   * registry is non-empty).
+   */
+  readonly skills: import("./skill/registry.js").SkillRegistry;
+
   private readonly registry: SessionRegistry<P>;
   private readonly sessionCreateHandlers = new Set<(session: Session<P>) => void>();
   private readonly sessionCloseHandlers = new Set<(sessionId: string) => void>();
@@ -369,6 +378,8 @@ class AppImpl<P> implements App<P> {
     private readonly options: AppOptions,
   ) {
     this.inboxStorage = options.inbox ?? new MemoryInboxStorage();
+
+    this.skills = new SkillRegistry();
 
     this.registry = new SessionRegistry<P>({
       sessions: options.sessions,
@@ -570,6 +581,7 @@ class AppImpl<P> implements App<P> {
       ...options,
       sessionId,
       devTools: options.devTools ?? this.options.devTools,
+      skillRegistry: options.skillRegistry ?? this.skills,
     };
     const session = new SessionImpl(this.Component, this.options, sessionOptions);
 
@@ -592,6 +604,7 @@ class AppImpl<P> implements App<P> {
       sessionId: snapshot.sessionId,
       metadata: snapshot.metadata ?? options.metadata,
       devTools: options.devTools ?? this.options.devTools,
+      skillRegistry: options.skillRegistry ?? this.skills,
     };
     const session = new SessionImpl(this.Component, this.options, sessionOptions);
 

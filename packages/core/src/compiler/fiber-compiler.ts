@@ -41,10 +41,16 @@ import {
   createMessageStore,
   MessageProvider,
   type MessageStore,
+  // Entry context (the primitive supersedes MessageStore's handler half)
+  createEntryStore,
+  EntryProvider,
+  dispatchEntry,
+  type EntryStore,
   // Context info
   createContextInfoStore,
   type ContextInfoStore,
 } from "../hooks/index.js";
+import type { COMTimelineEntry } from "../com/types.js";
 import type { ExecutionMessage } from "../engine/execution-types.js";
 import type { Renderer } from "../renderers/types.js";
 import { markdownRenderer } from "../renderers/index.js";
@@ -134,8 +140,23 @@ export class FiberCompiler {
   // Per-session runtime store (isolated state)
   private runtimeStore: RuntimeStore;
 
-  // Message store for useOnMessage/useQueuedMessages
+  // Message store for useOnMessage/useQueuedMessages.
+  // TODO(entry-store-collapse): MessageStore today bundles two concerns —
+  //   (a) handler dispatch on queue (useOnMessage), and
+  //   (b) the queue + drain semantics (useQueuedMessages, drainQueue).
+  // Concern (a) is supplanted by EntryStore (commit-time, kind/role/type
+  // filtered) which is the more meaningful semantic. Concern (b) is
+  // message-specific and stays. Future work: either retire useOnMessage
+  // by collapsing it into useOnEntry({kind:"message"}) (note: this changes
+  // timing from queue-time to commit-time — a behavior change), or split
+  // into useOnQueuedMessage (pre-commit, current behavior) and a sugar
+  // useOnMessage that delegates to useOnEntry. See entry-context.ts.
   private messageStore: MessageStore;
+
+  // Entry store for useOnEntry — the primitive timeline notification bus.
+  // Fires when entries are committed to the timeline (append, observe, the
+  // tick-execution commit path). See entry-context.ts.
+  private entryStore: EntryStore;
 
   // Context info store for useContextInfo
   private _contextInfoStore: ContextInfoStore;
@@ -175,6 +196,9 @@ export class FiberCompiler {
 
     // Create message store for useOnMessage/useQueuedMessages
     this.messageStore = createMessageStore();
+
+    // Create entry store for useOnEntry (commit-time timeline notifications)
+    this.entryStore = createEntryStore();
 
     // Create context info store for useContextInfo
     this._contextInfoStore = createContextInfoStore();
@@ -253,7 +277,8 @@ export class FiberCompiler {
         attempts++;
         try {
           // Render with React
-          // Wrap with MessageProvider for useOnMessage/useQueuedMessages
+          // Wrap with MessageProvider (queue-time message bus, message-specific) and
+          // EntryProvider (commit-time entry bus, the primitive — see entry-context.ts).
           // Render synchronously and flush all work + passive effects (useEffect).
           // react-reconciler 0.33: updateContainer queues sync, flushSyncWork processes all.
           updateContainer(
@@ -261,14 +286,18 @@ export class FiberCompiler {
               MessageProvider,
               { store: this.messageStore },
               h(
-                AgentickProvider,
-                {
-                  ctx: this.ctx as any,
-                  tickState: this.tickState as any, // Different TickState types are compatible
-                  runtimeStore: this.runtimeStore,
-                  contextInfoStore: this._contextInfoStore,
-                },
-                reactElement,
+                EntryProvider,
+                { store: this.entryStore },
+                h(
+                  AgentickProvider,
+                  {
+                    ctx: this.ctx as any,
+                    tickState: this.tickState as any, // Different TickState types are compatible
+                    runtimeStore: this.runtimeStore,
+                    contextInfoStore: this._contextInfoStore,
+                  },
+                  reactElement,
+                ),
               ),
             ),
             this.root,
@@ -461,6 +490,20 @@ export class FiberCompiler {
     for (const handler of this.messageStore.handlers) {
       await handler(message, ctx as any, state);
     }
+  }
+
+  /**
+   * Notify entry handlers that a timeline entry was just committed.
+   *
+   * Called by the session whenever an entry lands in the timeline:
+   * - `session.append()` and `session.observe()` (direct writes)
+   * - The tick-execution commit path (user/assistant/tool messages)
+   *
+   * This is the primitive notification path — `useOnEntry` and its sugar
+   * (`useOnEvent`) subscribe through here.
+   */
+  async notifyOnEntry(entry: COMTimelineEntry, state: TickState): Promise<void> {
+    await dispatchEntry(this.entryStore, entry, this.ctx as any, state);
   }
 
   // ============================================================

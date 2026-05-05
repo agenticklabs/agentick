@@ -146,14 +146,17 @@ function DefaultMessage({
 
   if (!content || content.length === 0) return h(React.Fragment, null);
 
-  if (role === "user" || role === "assistant" || role === "tool") {
+  if (role === "user" || role === "assistant" || role === "tool" || role === "event") {
     return h(Entry, {
       kind: "message",
       message: {
         role,
         content,
         id: entry.message.id,
-      },
+        ...(role === "event" && (entry.message as any).eventType
+          ? { eventType: (entry.message as any).eventType }
+          : {}),
+      } as any,
     });
   }
 

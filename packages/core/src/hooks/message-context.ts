@@ -1,14 +1,42 @@
 /**
  * Message Context
  *
- * Provides message handling capabilities to components.
- * This enables components to react to incoming messages and queue outgoing messages.
+ * Provides message handling capabilities to components — specifically the
+ * pending-message queue and the queue-time handler bus (`useOnMessage` fires
+ * when a message is queued, BEFORE it commits to the timeline).
  *
  * Architecture:
  * - The React tree stays mounted across ticks (persistent)
  * - Components can register message handlers that are called when messages arrive
  * - Components can queue messages for the next tick
  * - The runtime drains the queue when entering a tick
+ *
+ * ──────────────────────────────────────────────────────────────────────────
+ * TODO(entry-store-collapse): MessageStore today bundles two concerns:
+ *
+ *   (a) Handler dispatch on queue (`useOnMessage`, MessageStore.handlers).
+ *       Fires when a message is QUEUED (pre-commit). Most consumers actually
+ *       want commit-time semantics ("this is now part of the conversation"),
+ *       which is what `useOnEntry` provides. The queue-time semantic is
+ *       useful but specialized.
+ *
+ *   (b) The pending queue + drain-on-tick logic (`useQueuedMessages`,
+ *       `drainQueue`, `MessageStore.queue`). This is message-specific —
+ *       events/observations don't queue; they commit immediately via
+ *       `session.append()`. This concern doesn't generalize to other kinds.
+ *
+ * Concern (a) is supplanted by `EntryStore` (see `entry-context.ts`), which
+ * is the primitive timeline notification bus. Concern (b) is genuinely
+ * message-specific and stays.
+ *
+ * Future work (separate PR):
+ *   1. Decide on `useOnMessage` semantics. Two options:
+ *      - Rename to `useOnQueuedMessage` (current behavior, pre-commit).
+ *      - Reshape to delegate to `useOnEntry({ kind: "message" }, ...)`,
+ *        becoming commit-time. This is a behavior change.
+ *   2. Collapse `MessageStore.queue` into session state (it already
+ *      duplicates `session._queuedMessages` to some degree).
+ * ──────────────────────────────────────────────────────────────────────────
  */
 
 import React, {

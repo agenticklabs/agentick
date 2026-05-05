@@ -90,6 +90,31 @@ Key behaviors:
 
 This is how TUI slash commands, client-side actions, and external triggers invoke tools without model involvement. The most common pattern is dispatching `audience: "user"` tools (which the model can't see), but regular tools are equally dispatchable.
 
+## Programmatic harness
+
+Sessions expose more than `send` and `dispatch`. There's a full host-side API for invoking tools by name, running shell commands, writing to the timeline, and invoking skills with typed results — all without going through the model.
+
+```tsx
+// Run shell directly (sugar over dispatch("bash", ...))
+const out = await session.shell("git diff --stat");
+
+// Invoke any tool through the typed proxy
+const blocks = await session.tools.bash({ command: "ls" });
+const hits = await session.tools.knowify.search({ q: "ledger" });
+
+// Write to timeline as ambient context (no agent turn)
+await session.observe({ type: "file_opened", content: "/src/x.ts" });
+
+// Run a skill with a caller-typed result
+const triage = await session.skill("triage", {
+  args: { issueNumber: 42 },
+  result: z.object({ fixApplied: z.boolean() }),
+});
+// triage: { fixApplied: boolean }
+```
+
+These pair with the JSX surface — the model invokes tools through its loop, host code invokes them through these methods, and they share one timeline, one tool registry, one execution path. See [Agent Harness](/docs/agent-harness) for the full surface and [Skills](/docs/skills) for the skill-specific details.
+
 ## Stateless Execution
 
 For one-off calls without session management, use `run()`:

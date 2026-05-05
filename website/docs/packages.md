@@ -45,7 +45,32 @@ Wire-safe types, content blocks, messages, streaming types, tool definitions, ti
 
 ### @agentick/core
 
-The heart of agentick. Reconciler, fiber tree, compiler, hooks, JSX runtime, component model, app factory, sessions, tool system, knobs.
+The heart of agentick. Reconciler, fiber tree, compiler, hooks, JSX runtime, component model, app factory, sessions, tool system, knobs, skills, agent harness.
+
+**Agent harness** — the host-facing programmatic surface on `Session`. Beyond `send` / `render` / `dispatch`, sessions expose:
+
+- `session.shell(cmd)` — run a shell command via the registered `<Bash>` tool. Sugar over `dispatch("bash", { command })`. Throws when no Bash is mounted.
+- `session.tools.<name>(input)` — typed proxy over `dispatch`. Property access composes dot-paths (`session.tools.knowify.search(args)` → `dispatch("knowify.search", args)`).
+- `session.append(entry, opts?)` — primitive timeline write. Bypasses the queue. Optional `{ trigger: true }` runs a tick after.
+- `session.observe({ type, content })` — sugar over `append` for event-role messages. "Facts the agent should know" without queueing as a turn.
+- `useOnEntry(filter, handler)` — primitive component-tree hook for any committed timeline entry. Filter shape: `{ kind?, role?, type? }`.
+- `useOnEvent(type?, handler)` — sugar over `useOnEntry` for event-role entries.
+- `session.skill(name | def, opts)` — sub-execution with caller-typed result. See `@agentick/core/skill`.
+
+See the [Agent Harness](/docs/agent-harness) docs for the full design.
+
+**Skills** (`@agentick/core/skill`) — full implementation of the [Agent Skills](https://agentskills.io) open spec plus the Claude Code substitution and shell-injection extensions.
+
+- `defineSkill({...})` — programmatic skill factory with strict spec validation (name format, description ≤1024, metadata string-string, etc.)
+- `loadSkill(path)` — async loader. Folder mode (`<dir>/SKILL.md`) is strict spec validation; flat-file mode (`.md`) is a lenient Agentick convenience for tests / single-file skills.
+- `parseSkill(source)` — parse from in-memory markdown.
+- `app.skills` — `SkillRegistry` exposed on every app: `register`, `replace`, `get`, `has`, `list`, `unregister`, `clear`, `search({ query?, metadata?, limit? })`, `subscribe(listener)`, `loadDir(path)`.
+- Implicit `skill` tool — auto-mounted on sessions when `app.skills` is non-empty. Tool description dynamically lists registered skills (truncated at ~8KB). Handler renders the skill body (with `$` substitution + `!` shell injection) and returns it as the tool result — the spec's "load into context" model.
+- `session.skill(name | def, { args, result?, maxTicks? })` — programmatic sub-execution. Caller's `result` schema becomes the input schema of a transient `submit` tool the model fills with the typed answer.
+- `$ARGUMENTS` / `$N` / `$ARGUMENTS[N]` / `$name` / `${VARS}` substitution — full Claude Code spec.
+- `` !`<command>` `` and ` `! ```block shell injection — runs through`session.shell` so injections share the agent's sandbox.
+
+See [Skills](/docs/skills) for the full guide.
 
 ### @agentick/agent
 

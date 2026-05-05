@@ -133,7 +133,10 @@ export {
   type FormatterContextValue,
 } from "./formatter-context.js";
 
-// Message context
+// Message context — message-specific queue concerns + queue-time handler bus.
+// TODO(entry-store-collapse): Most consumers should reach for `useOnEntry` /
+// `useOnEvent` (entry-context) instead of `useOnMessage`. See entry-context.ts
+// for the migration plan.
 export {
   createMessageStore,
   MessageProvider,
@@ -145,6 +148,23 @@ export {
   type MessageHandler,
   type MessageContextValue,
 } from "./message-context.js";
+
+// Entry context — the primitive timeline notification bus. Fires whenever an
+// entry is committed to the timeline (append, observe, tick-execution path).
+// `useOnMessage` (queue-time, message-specific) is its older sibling; see
+// entry-context.ts for the relationship and migration plan.
+export {
+  createEntryStore,
+  EntryProvider,
+  dispatchEntry,
+  useOnEntry,
+  useOnEvent,
+  matchesEntryFilter,
+  type EntryStore,
+  type EntryHandler,
+  type EntryFilter,
+  type EntryContextValue,
+} from "./entry-context.js";
 
 // Timeline hooks
 export { useTimeline } from "./timeline.js";

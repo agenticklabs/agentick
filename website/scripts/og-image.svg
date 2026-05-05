@@ -1,0 +1,84 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0a0f1c"/>
+      <stop offset="100%" stop-color="#0f1f2a"/>
+    </linearGradient>
+    <linearGradient id="brand" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#10b981"/>
+      <stop offset="100%" stop-color="#06b6d4"/>
+    </linearGradient>
+    <linearGradient id="textGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="100%" stop-color="#a7f3d0"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#10b981" stop-opacity="0.35"/>
+      <stop offset="100%" stop-color="#10b981" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="soft" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="40"/>
+    </filter>
+  </defs>
+
+  <!-- Background -->
+  <rect width="1200" height="630" fill="url(#bg)"/>
+
+  <!-- Ambient glow blobs -->
+  <circle cx="180" cy="180" r="260" fill="url(#glow)" filter="url(#soft)"/>
+  <circle cx="1050" cy="500" r="280" fill="url(#glow)" filter="url(#soft)"/>
+
+  <!-- Subtle grid -->
+  <g stroke="#ffffff" stroke-opacity="0.04" stroke-width="1">
+    <path d="M0 105 H1200 M0 210 H1200 M0 315 H1200 M0 420 H1200 M0 525 H1200"/>
+    <path d="M120 0 V630 M240 0 V630 M360 0 V630 M480 0 V630 M600 0 V630 M720 0 V630 M840 0 V630 M960 0 V630 M1080 0 V630"/>
+  </g>
+
+  <!-- Logo tile -->
+  <g transform="translate(80, 80)">
+    <rect width="160" height="160" rx="36" fill="url(#brand)"/>
+    <text x="80" y="118" text-anchor="middle"
+          font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif"
+          font-weight="800" font-size="104" fill="#ffffff">a</text>
+  </g>
+
+  <!-- Wordmark -->
+  <text x="270" y="180"
+        font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif"
+        font-weight="800" font-size="120" fill="url(#textGrad)" letter-spacing="-4">agentick</text>
+
+  <!-- Tagline -->
+  <text x="80" y="370"
+        font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif"
+        font-weight="700" font-size="64" fill="#ffffff" letter-spacing="-1">The component framework for AI.</text>
+
+  <!-- Subline -->
+  <text x="80" y="445"
+        font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif"
+        font-weight="400" font-size="32" fill="#94a3b8">React, but the render target is model context instead of DOM.</text>
+
+  <!-- Code-style chips -->
+  <g font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="22" font-weight="600">
+    <g transform="translate(80, 510)">
+      <rect width="180" height="56" rx="14" fill="#10b98122" stroke="#10b98166" stroke-width="1"/>
+      <text x="90" y="36" text-anchor="middle" fill="#6ee7b7">&lt;Tool /&gt;</text>
+    </g>
+    <g transform="translate(280, 510)">
+      <rect width="200" height="56" rx="14" fill="#06b6d422" stroke="#06b6d466" stroke-width="1"/>
+      <text x="100" y="36" text-anchor="middle" fill="#67e8f9">&lt;Section /&gt;</text>
+    </g>
+    <g transform="translate(500, 510)">
+      <rect width="220" height="56" rx="14" fill="#a78bfa22" stroke="#a78bfa66" stroke-width="1"/>
+      <text x="110" y="36" text-anchor="middle" fill="#c4b5fd">&lt;Timeline /&gt;</text>
+    </g>
+    <g transform="translate(740, 510)">
+      <rect width="220" height="56" rx="14" fill="#f472b622" stroke="#f472b666" stroke-width="1"/>
+      <text x="110" y="36" text-anchor="middle" fill="#f9a8d4">useKnob()</text>
+    </g>
+  </g>
+
+  <!-- URL -->
+  <text x="1120" y="600" text-anchor="end"
+        font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace"
+        font-size="20" fill="#64748b">agenticklabs.github.io/agentick</text>
+</svg>

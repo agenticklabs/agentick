@@ -34,6 +34,7 @@
 import { EventEmitter } from "node:events";
 import { EventBuffer, ExecutionHandleBrand, Channel } from "@agentick/kernel";
 import { createTestProcedure } from "@agentick/kernel/testing";
+import { SkillRegistry } from "../skill/registry.js";
 import type { StreamEvent, UsageStats, Message } from "@agentick/shared";
 import type {
   Session,
@@ -353,6 +354,51 @@ export function createMockSession(options: MockSessionOptions = {}): MockSession
       },
     }) as any;
 
+    async shell(_command: string): Promise<string> {
+      return "mock";
+    }
+
+    append = createTestProcedure({
+      handler: async (_entry: any, _opts?: { trigger?: boolean }) => {
+        return undefined;
+      },
+    }) as any;
+
+    skill = createTestProcedure({
+      handler: async (_skill: any, _input: any) => {
+        return {} as any;
+      },
+    }) as any;
+
+    async observe(_input: { type: string; content: any; metadata?: any }): Promise<void> {
+      return undefined;
+    }
+
+    get tools(): any {
+      const dispatch = this.dispatch;
+      const make = (path: string[]): any => {
+        const callable = (input: Record<string, unknown> = {}) =>
+          dispatch.exec(path.join("."), input);
+        return new Proxy(callable, {
+          get(target, prop, receiver) {
+            if (typeof prop !== "string") return Reflect.get(target, prop, receiver);
+            if (prop === "then" || prop === "catch" || prop === "finally") return undefined;
+            return make([...path, prop]);
+          },
+        });
+      };
+      return new Proxy(
+        {},
+        {
+          get(_t, prop) {
+            if (typeof prop !== "string") return undefined;
+            if (prop === "then" || prop === "catch" || prop === "finally") return undefined;
+            return make([prop]);
+          },
+        },
+      );
+    }
+
     interrupt() {}
     clearAbort() {}
     async mount() {}
@@ -513,6 +559,8 @@ export function createMockApp(options: MockAppOptions = {}): MockApp {
   }
 
   const app: MockApp = {
+    skills: new SkillRegistry(),
+
     run: createTestProcedure({
       handler: (_input: RunInput) => {
         const id = `ephemeral-${++sessionCounter}`;

@@ -133,21 +133,56 @@ export default defineConfig({
   head: [
     ["link", { rel: "icon", type: "image/svg+xml", href: "/agentick/logo.svg" }],
     ["meta", { property: "og:type", content: "website" }],
-    ["meta", { property: "og:title", content: "agentick" }],
+    ["meta", { property: "og:site_name", content: "agentick" }],
+    ["meta", { property: "og:title", content: "agentick — the component framework for AI" }],
     [
       "meta",
       {
         property: "og:description",
-        content: "The component framework for AI.",
+        content:
+          "React, but the render target is model context instead of DOM. Build AI applications with the tools you already know.",
+      },
+    ],
+    ["meta", { property: "og:url", content: "https://agenticklabs.github.io/agentick/" }],
+    [
+      "meta",
+      {
+        property: "og:image",
+        content: "https://agenticklabs.github.io/agentick/og-image.png",
+      },
+    ],
+    ["meta", { property: "og:image:type", content: "image/png" }],
+    ["meta", { property: "og:image:width", content: "1200" }],
+    ["meta", { property: "og:image:height", content: "630" }],
+    [
+      "meta",
+      {
+        property: "og:image:alt",
+        content: "agentick — the component framework for AI",
       },
     ],
     ["meta", { name: "twitter:card", content: "summary_large_image" }],
-    ["meta", { name: "twitter:title", content: "agentick" }],
+    ["meta", { name: "twitter:title", content: "agentick — the component framework for AI" }],
     [
       "meta",
       {
         name: "twitter:description",
-        content: "The component framework for AI.",
+        content:
+          "React, but the render target is model context instead of DOM. Build AI applications with the tools you already know.",
+      },
+    ],
+    [
+      "meta",
+      {
+        name: "twitter:image",
+        content: "https://agenticklabs.github.io/agentick/og-image.png",
+      },
+    ],
+    [
+      "meta",
+      {
+        name: "twitter:image:alt",
+        content: "agentick — the component framework for AI",
       },
     ],
   ],
@@ -181,10 +216,12 @@ export default defineConfig({
               text: "Sessions & Execution",
               link: "/docs/sessions-and-execution",
             },
+            { text: "Agent Harness", link: "/docs/agent-harness" },
             { text: "The Reconciler", link: "/docs/reconciler" },
             { text: "Components & JSX", link: "/docs/components" },
             { text: "Hooks", link: "/docs/hooks" },
             { text: "Tools", link: "/docs/tools" },
+            { text: "Skills", link: "/docs/skills" },
             { text: "Timeline", link: "/docs/timeline" },
             { text: "Procedures", link: "/docs/procedures" },
           ],

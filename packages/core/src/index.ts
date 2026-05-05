@@ -129,6 +129,29 @@ export { createTool, useToolProcedure } from "./tool/index.js";
 export type { ToolClass, ToolDefinition, ToolMetadata, ToolPropOverrides } from "./tool/index.js";
 
 // ============================================================================
+// Skills
+// ============================================================================
+export {
+  defineSkill,
+  loadSkill,
+  parseSkill,
+  parseFrontmatter,
+  SkillRegistry,
+  validateSkillName,
+  SKILL_NAME_REGEX,
+  SKILL_NAME_MAX,
+  SKILL_DESCRIPTION_MAX,
+  SKILL_COMPATIBILITY_MAX,
+  substituteSkillVars,
+  templateUsesArguments,
+  type SkillDef,
+  type LoadSkillOptions,
+  type ParsedFrontmatter,
+  type SkillSearchQuery,
+  type SubstituteOptions,
+} from "./skill/index.js";
+
+// ============================================================================
 // Model
 // ============================================================================
 export { createAdapter } from "./model/adapter.js";

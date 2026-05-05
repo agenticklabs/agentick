@@ -5,9 +5,10 @@
   "type": "module",
   "scripts": {
     "dev": "vitepress dev",
-    "build": "pnpm run docs:api && vitepress build",
-    "build:no-api": "vitepress build",
+    "build": "pnpm run generate:og && pnpm run docs:api && vitepress build",
+    "build:no-api": "pnpm run generate:og && vitepress build",
     "preview": "vitepress preview",
+    "generate:og": "node scripts/generate-og.js",
     "docs:api": "typedoc && node scripts/fix-api-docs.js",
     "docs:api:watch": "typedoc --watch"
   },
@@ -15,6 +16,7 @@
     "vue": "^3.4.38"
   },
   "devDependencies": {
+    "@resvg/resvg-js": "^2.6.2",
     "typedoc": "^0.28.15",
     "typedoc-plugin-markdown": "^4.9.0",
     "typedoc-vitepress-theme": "^1.1.2",
