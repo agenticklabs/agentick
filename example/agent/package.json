@@ -14,11 +14,11 @@
     "@agentick/shared": "workspace:*",
     "@agentick/tui": "workspace:*",
     "dotenv": "^16.4.7",
-    "react": "^19.2.4",
-    "zod": "^4.3.6"
+    "react": "^19.2.6",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
-    "@types/react": "^19.2.13",
+    "@types/react": "^19.2.14",
     "tsx": "^4.19.2",
     "typescript": "^5.7.3"
   }

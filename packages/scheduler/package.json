@@ -51,15 +51,15 @@
     "@agentick/core": "workspace:*",
     "@agentick/shared": "workspace:*",
     "node-cron": "^3.0.3",
-    "zod": "^4.3.6"
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/node-cron": "^3.0.11",
-    "@types/react": "^19.0.0",
-    "react": "^19.0.0",
+    "@types/react": "^19.2.14",
+    "react": "^19.2.6",
     "typescript": "^5.8.3"
   },
   "peerDependencies": {
-    "react": "^19.0.0"
+    "react": "^19.2.6"
   }
 }
