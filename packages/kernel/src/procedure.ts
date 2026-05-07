@@ -1066,7 +1066,15 @@ class ProcedureImpl<
 
         if (index < allMiddleware.length) {
           const middleware = allMiddleware[index++];
-          const result = await middleware(currentInput, context, runMiddleware);
+          // Pass the *current* ALS context, not the closure-captured one.
+          // ExecutionTracker.track wraps this pipeline in Context.fork() that
+          // adds `activeSpan` (and other per-procedure fields) to the
+          // context. The closure variable `context` was captured pre-fork,
+          // so reading Context.tryGet() at call time gives middleware the
+          // post-fork context — letting it observe `activeSpan`,
+          // `procedurePid`, etc. via `envelope.context`.
+          const liveContext = Context.tryGet() ?? context;
+          const result = await middleware(currentInput, liveContext, runMiddleware);
           // Check Abort Signal after middleware execution (middleware might have aborted)
           if (context?.signal?.aborted) {
             throw new AbortError();
