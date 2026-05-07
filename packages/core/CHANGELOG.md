@@ -1,5 +1,14 @@
 # @agentick/core
 
+## 0.14.61
+
+### Patch Changes
+
+- Updated dependencies [02afae6]
+  - @agentick/kernel@0.14.61
+  - @agentick/mcp@0.14.61
+  - @agentick/shared@0.14.61
+
 ## 0.14.60
 
 ### Patch Changes

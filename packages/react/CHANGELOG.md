@@ -1,5 +1,12 @@
 # @agentick/react
 
+## 0.14.61
+
+### Patch Changes
+
+- @agentick/shared@0.14.61
+- @agentick/client@0.14.61
+
 ## 0.14.60
 
 ### Patch Changes

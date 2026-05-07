@@ -1,6 +1,6 @@
 {
   "name": "@agentick/connector-telegram",
-  "version": "0.14.60",
+  "version": "0.14.61",
   "description": "Telegram plugin for Agentick gateway — bridge Telegram bots to agent sessions",
   "keywords": [
     "agent",

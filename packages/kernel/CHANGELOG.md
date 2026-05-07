@@ -1,5 +1,12 @@
 # @agentick/kernel
 
+## 0.14.61
+
+### Patch Changes
+
+- 02afae6: fix for context passing
+  - @agentick/shared@0.14.61
+
 ## 0.14.60
 
 ### Patch Changes

@@ -1,6 +1,6 @@
 {
   "name": "@agentick/core",
-  "version": "0.14.60",
+  "version": "0.14.61",
   "description": "Core engine for Agentick",
   "keywords": [
     "agent",
