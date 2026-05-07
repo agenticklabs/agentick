@@ -1,6 +1,6 @@
 {
   "name": "@agentick/mcp",
-  "version": "0.14.59",
+  "version": "0.14.60",
   "description": "MCP server and client for Agentick — standalone, pluggable, world-class",
   "keywords": [
     "agent",
