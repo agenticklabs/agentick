@@ -1,6 +1,6 @@
 {
   "name": "@agentick/connector-imessage",
-  "version": "0.14.60",
+  "version": "0.14.61",
   "description": "iMessage connector for Agentick — bridge iMessage to agent sessions (macOS only)",
   "keywords": [
     "agent",

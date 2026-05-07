@@ -1,6 +1,6 @@
 {
   "name": "@agentick/server",
-  "version": "0.14.60",
+  "version": "0.14.61",
   "description": "Server SDK for Agentick - channel routing, session handling, transport adapters",
   "keywords": [
     "agent",
