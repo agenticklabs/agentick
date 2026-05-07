@@ -238,6 +238,24 @@ export interface MCPServerOptions {
    * Runs BEFORE the security pipeline.
    */
   contextProvider?: (extra: MCPHandlerExtra) => MCPRequestContext | Promise<MCPRequestContext>;
+
+  /**
+   * Middleware registry — typically the Agentick instance — consulted by
+   * the kernel when dispatching tool-call procedures. Without this, tool
+   * dispatches run with no `context.middleware` set (because the on-the-fly
+   * procedure created per call inherits its kernel context from
+   * `Context.tryGet()`, which is empty unless an enclosing Session set it).
+   *
+   * Pass an `AgentickInstance` here so globally-registered middleware
+   * (`Agentick.use("*", mw)`) actually fires for tool-call procedures —
+   * otherwise consumers see procedure-internal attributes (`procedure.pid`,
+   * etc.) but nothing their own middleware would have stamped.
+   *
+   * Structural typing: any object with `getMiddlewareFor(name)` works.
+   */
+  middlewareRegistry?: {
+    getMiddlewareFor(procedureName: string): unknown[];
+  };
 }
 
 // ============================================================================

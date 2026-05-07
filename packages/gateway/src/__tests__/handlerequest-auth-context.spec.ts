@@ -538,4 +538,123 @@ describe("handleRequest auth context propagation", () => {
 
     expect(res.statusCode).toBe(404);
   });
+
+  // --------------------------------------------------------------------------
+  // Outer ALS context preservation (Context.child vs Context.create)
+  //
+  // Embedders (NestJS, Express, custom transports) often wrap handleRequest
+  // in their own Context.run() to inject things like a middleware registry.
+  // Before the gateway switched its request-entry sites from Context.create
+  // to Context.child, that injection was silently wiped out: the gateway
+  // built a fresh kernel context that ignored anything the outer caller had
+  // established.
+  //
+  // These tests pin the new behavior so a future revert to Context.create
+  // would visibly fail.
+  // --------------------------------------------------------------------------
+
+  it("preserves outer ALS middleware into the request scope", async () => {
+    let capturedMiddleware: unknown;
+
+    ({ gateway } = createAuthGateway({
+      methods: {
+        readMiddleware: method({
+          handler: async () => {
+            capturedMiddleware = (Context.tryGet() as any)?.middleware;
+            return {};
+          },
+        }),
+      },
+    }));
+
+    // Fake registry shaped like AgentickInstance — any object with
+    // getMiddlewareFor satisfies the structural KernelContext.middleware type.
+    const fakeRegistry = { getMiddlewareFor: () => [] };
+
+    const { req, res } = mockHTTP(
+      "/invoke",
+      "POST",
+      { method: "readMiddleware", params: {} },
+      bearerHeader("user-a-token"),
+    );
+
+    // Embedder pattern: wrap handleRequest in an outer Context.run that
+    // injects middleware. With the Context.create→Context.child fix in
+    // place, this should survive into the request scope. Without it, the
+    // gateway's internal Context.create would drop the field.
+    await Context.run(
+      { ...(Context.tryGet() ?? {}), middleware: fakeRegistry },
+      () => gateway.handleRequest(req, res),
+    );
+
+    expect(res.statusCode).toBe(200);
+    expect(capturedMiddleware).toBe(fakeRegistry);
+  });
+
+  it("preserves outer ALS metadata while layering gateway metadata on top", async () => {
+    let capturedMetadata: Record<string, unknown> | undefined;
+
+    ({ gateway } = createAuthGateway({
+      methods: {
+        readMetadata: method({
+          handler: async () => {
+            capturedMetadata = Context.tryGet()?.metadata;
+            return {};
+          },
+        }),
+      },
+    }));
+
+    const { req, res } = mockHTTP(
+      "/invoke",
+      "POST",
+      { method: "readMetadata", params: {} },
+      bearerHeader("user-a-token"),
+    );
+
+    await Context.run(
+      {
+        ...(Context.tryGet() ?? {}),
+        metadata: { embedderTag: "outer-value" },
+      },
+      () => gateway.handleRequest(req, res),
+    );
+
+    expect(res.statusCode).toBe(200);
+    // Outer metadata field survives + gateway adds its own gatewayId.
+    expect(capturedMetadata?.embedderTag).toBe("outer-value");
+    expect(capturedMetadata?.gatewayId).toBeDefined();
+  });
+
+  it("falls back to Context.create when no outer ALS context exists", async () => {
+    let capturedTraceId: string | undefined;
+    let capturedUserId: string | undefined;
+
+    ({ gateway } = createAuthGateway({
+      methods: {
+        readContext: method({
+          handler: async () => {
+            const ctx = Context.tryGet();
+            capturedTraceId = ctx?.traceId;
+            capturedUserId = ctx?.user?.id;
+            return {};
+          },
+        }),
+      },
+    }));
+
+    const { req, res } = mockHTTP(
+      "/invoke",
+      "POST",
+      { method: "readContext", params: {} },
+      bearerHeader("user-a-token"),
+    );
+
+    // No outer Context.run — pre-fix and post-fix behavior must match.
+    await gateway.handleRequest(req, res);
+
+    expect(res.statusCode).toBe(200);
+    expect(capturedTraceId).toBeDefined();
+    expect(capturedUserId).toBe("user-a");
+  });
 });

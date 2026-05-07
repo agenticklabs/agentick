@@ -839,9 +839,16 @@ export class Gateway extends EventEmitter {
     // Set ALS context for the entire request lifetime. All downstream
     // handlers, session creation, tool execution, and plugin routes
     // inherit this context automatically.
-    const ctx = Context.create({
+    //
+    // Use Context.child (not Context.create) so that anything an outer
+    // caller put on the ALS context — most importantly the Agentick
+    // instance set as `middleware` — survives into this request scope.
+    // Without this, embedders that wrap handleRequest() in their own
+    // Context.run({ middleware }) silently lose middleware here, and
+    // every downstream procedure dispatch runs without it.
+    const ctx = Context.child({
       user: authResult.valid ? authResult.user : undefined,
-      metadata: { gatewayId: this.config.id },
+      metadata: { ...Context.tryGet()?.metadata, gatewayId: this.config.id },
     });
 
     await Context.run(ctx, async () => {
@@ -1670,10 +1677,12 @@ export class Gateway extends EventEmitter {
       ...(params.metadata as Record<string, unknown> | undefined),
     };
 
-    // Create kernel context
-    const ctx = Context.create({
+    // Create kernel context — Context.child preserves any outer ALS
+    // context (e.g. middleware injected by an embedder) while layering
+    // request-level user/metadata on top.
+    const ctx = Context.child({
       user: client?.state.user,
-      metadata,
+      metadata: { ...Context.tryGet()?.metadata, ...metadata },
     });
 
     // Get the procedure
@@ -1902,10 +1911,12 @@ export class Gateway extends EventEmitter {
       ...(params.metadata as Record<string, unknown> | undefined),
     };
 
-    // Create kernel context with channels for pub/sub
-    const ctx = Context.create({
+    // Create kernel context with channels for pub/sub. Context.child
+    // preserves outer ALS state (notably `middleware`) while layering
+    // user/metadata/channels on top.
+    const ctx = Context.child({
       user,
-      metadata,
+      metadata: { ...Context.tryGet()?.metadata, ...metadata },
       channels,
     });
 
@@ -2459,20 +2470,16 @@ export class Gateway extends EventEmitter {
     }
 
     // Ensure ALS context is set for the handler. On the standalone path
-    // this may already be inside a Context.run() — tryGet() avoids
-    // creating a redundant context. On the embedded path (NestJS HTTP
-    // transport) no context exists yet, so we create one.
-    if (Context.tryGet()?.user) {
+    // this may already be inside a Context.run() — Context.child
+    // preserves whatever the outer caller set up (middleware, user,
+    // traceId, etc.) and layers our request-level fields on top.
+    const ctx = Context.child({
+      user: Context.tryGet()?.user ?? user,
+      metadata: { ...Context.tryGet()?.metadata, gatewayId: this.config.id },
+    });
+    await Context.run(ctx, async () => {
       await route.handler(req, res);
-    } else {
-      const ctx = Context.create({
-        user,
-        metadata: { gatewayId: this.config.id },
-      });
-      await Context.run(ctx, async () => {
-        await route.handler(req, res);
-      });
-    }
+    });
     return true;
   }
 }

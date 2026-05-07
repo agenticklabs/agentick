@@ -953,8 +953,25 @@ export class MCPServer {
             toolEntry.definition.handler(input, ctx),
         );
 
-        const result = await toolProc(sanitizedInput ?? request.params.arguments ?? {}, handlerCtx)
-          .result;
+        // Ensure the on-the-fly tool procedure runs in a kernel context that
+        // has `middleware` set, so `runMiddlewarePipeline` can resolve
+        // globally-registered middleware via `context.middleware.getMiddlewareFor`.
+        // Without this wrap, the procedure inherits whatever ambient ALS
+        // context exists at dispatch time — which is typically empty for
+        // HTTP-driven MCP requests — and Context.create() inside the
+        // procedure produces a context with no middleware. Result:
+        // `Agentick.use("*", mw)` registrations silently never fire for
+        // tool calls.
+        const ambient = Context.tryGet();
+        const resolvedMiddleware = ambient?.middleware ?? this.options.middlewareRegistry;
+        const dispatch = () =>
+          toolProc(sanitizedInput ?? request.params.arguments ?? {}, handlerCtx).result;
+        const result = resolvedMiddleware
+          ? await Context.run(
+              { ...(ambient ?? {}), middleware: resolvedMiddleware as any },
+              dispatch,
+            )
+          : await dispatch();
         const durationMs = Date.now() - startTime;
 
         log.info(
