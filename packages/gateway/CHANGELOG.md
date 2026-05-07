@@ -1,5 +1,17 @@
 # @agentick/gateway
 
+## 0.14.60
+
+### Patch Changes
+
+- c23d3d1: add dispatchProcedure for one off dispatch of function as procedure and refactor Context.create to Context.child
+- Updated dependencies [c23d3d1]
+  - @agentick/core@0.14.60
+  - @agentick/kernel@0.14.60
+  - @agentick/mcp@0.14.60
+  - @agentick/server@0.14.60
+  - @agentick/shared@0.14.60
+
 ## 0.14.59
 
 ### Patch Changes
