@@ -1,6 +1,6 @@
 {
   "name": "@agentick/bedrock",
-  "version": "0.14.61",
+  "version": "0.14.62",
   "description": "AWS Bedrock adapter for Agentick",
   "keywords": [
     "adapter",
