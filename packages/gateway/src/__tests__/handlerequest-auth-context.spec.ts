@@ -582,9 +582,8 @@ describe("handleRequest auth context propagation", () => {
     // injects middleware. With the Context.create→Context.child fix in
     // place, this should survive into the request scope. Without it, the
     // gateway's internal Context.create would drop the field.
-    await Context.run(
-      { ...(Context.tryGet() ?? {}), middleware: fakeRegistry },
-      () => gateway.handleRequest(req, res),
+    await Context.run({ ...(Context.tryGet() ?? {}), middleware: fakeRegistry }, () =>
+      gateway.handleRequest(req, res),
     );
 
     expect(res.statusCode).toBe(200);

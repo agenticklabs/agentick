@@ -1652,6 +1652,68 @@ export function createProcedure<THandler extends (...args: any[]) => any>(
   return createProcedureFromImpl<ExtractArgs<THandler>, THandler>(options, handler) as any;
 }
 
+// ============================================================================
+// dispatchProcedure — one-shot procedure dispatch
+// ============================================================================
+
+/**
+ * Create a procedure on-the-fly and run it once. Use this for operations
+ * whose procedure identity (name, metadata) isn't known until request time —
+ * e.g., MCP tool dispatches like `mcp:tool:call:<toolName>`, RPC handlers
+ * named after the incoming message, dynamically-registered plugin endpoints.
+ *
+ * For statically-named operations (tools, models, hooks the framework
+ * declares at design time) prefer `createProcedure(...)` and reuse the
+ * callable. Use this helper only when the procedure's identity is
+ * request-shaped.
+ *
+ * The optional `contextOverrides` are merged with the ambient kernel
+ * context via `Context.run`, letting callers inject per-dispatch context
+ * (most importantly `middleware`) without requiring an outer Session or
+ * caller-managed wrap. When `contextOverrides` is omitted, the procedure
+ * runs in whatever ambient ALS context exists.
+ *
+ * @example
+ * ```typescript
+ * // Dispatch a request-named operation through middleware:
+ * const result = await dispatchProcedure(
+ *   { name: `mcp:tool:call:${toolName}`, metadata: { tool: toolName } },
+ *   async (input, ctx) => userTool.handler(input, ctx),
+ *   [input, handlerCtx],
+ *   { middleware: agentickInstance },
+ * );
+ * ```
+ */
+export async function dispatchProcedure<TArgs extends any[], TResult>(
+  options: ProcedureOptions,
+  handler: (...args: TArgs) => Promise<TResult>,
+  args: TArgs,
+  contextOverrides?: Partial<KernelContext>,
+): Promise<TResult> {
+  const proc = createProcedure(options, handler);
+  const dispatch = () => (proc as any)(...args).result as Promise<TResult>;
+
+  if (!contextOverrides || Object.keys(contextOverrides).length === 0) {
+    return dispatch();
+  }
+
+  const ambient = Context.tryGet();
+  return Context.run({ ...(ambient ?? {}), ...contextOverrides }, dispatch);
+}
+
+/**
+ * Namespace object for `Procedure`-related helpers, enabling
+ * `Procedure.dispatch(...)` calling style alongside the functional
+ * `dispatchProcedure(...)`. Both forms point to the same implementation.
+ *
+ * `Procedure` is also a generic interface (the callable shape of an
+ * authored procedure). TypeScript declaration merging permits a value
+ * and a type to share a name; both are independently importable.
+ */
+export const Procedure = {
+  dispatch: dispatchProcedure,
+} as const;
+
 /**
  * Pipe multiple procedures together, passing the output of each to the next.
  *

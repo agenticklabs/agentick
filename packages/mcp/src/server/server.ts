@@ -33,7 +33,7 @@ import {
   McpError,
 } from "@modelcontextprotocol/sdk/types.js";
 import { UriTemplate } from "@modelcontextprotocol/sdk/shared/uriTemplate.js";
-import { Context, createProcedure, Logger } from "@agentick/kernel";
+import { Context, dispatchProcedure, Logger } from "@agentick/kernel";
 import type {
   MCPServerOptions,
   MCPServerEvents,
@@ -506,6 +506,35 @@ export class MCPServer {
     }
   }
 
+  /**
+   * Dispatch an MCP operation as a procedure with middleware resolution.
+   * Thin wrapper around the kernel's `dispatchProcedure` that supplies an
+   * MCP-specific fallback: if the ambient kernel context has no `middleware`
+   * registry, fall back to the `middlewareRegistry` configured on the
+   * MCPServerOptions. This lets embedders inject a registry once at server
+   * construction without having to wrap every request in their own
+   * Context.run.
+   *
+   * Used by every MCP operation dispatch (tool calls, resource reads,
+   * prompt invocations, completion handlers) so middleware coverage is
+   * uniform across the surface.
+   */
+  private async runAsProcedure<TArgs extends any[], TResult>(
+    name: string,
+    metadata: Record<string, unknown>,
+    handler: (...args: TArgs) => Promise<TResult>,
+    args: TArgs,
+  ): Promise<TResult> {
+    const ambient = Context.tryGet();
+    const middleware = ambient?.middleware ?? this.options.middlewareRegistry;
+    return dispatchProcedure(
+      { name, metadata: { ...metadata, server: this.options.name } },
+      handler,
+      args,
+      middleware ? ({ middleware } as any) : undefined,
+    );
+  }
+
   // ══════════════════════════════════════════════════════════════════════════
   // Lifecycle
   // ══════════════════════════════════════════════════════════════════════════
@@ -944,34 +973,13 @@ export class MCPServer {
           request.params.arguments ?? {},
         );
 
-        const toolProc = createProcedure(
-          {
-            name: `mcp:tool:call:${toolName}`,
-            metadata: { tool: toolName, server: this.options.name },
-          },
+        const result = await this.runAsProcedure(
+          `mcp:tool:call:${toolName}`,
+          { tool: toolName },
           async (input: Record<string, unknown>, ctx: MCPHandlerContext) =>
             toolEntry.definition.handler(input, ctx),
+          [sanitizedInput ?? request.params.arguments ?? {}, handlerCtx],
         );
-
-        // Ensure the on-the-fly tool procedure runs in a kernel context that
-        // has `middleware` set, so `runMiddlewarePipeline` can resolve
-        // globally-registered middleware via `context.middleware.getMiddlewareFor`.
-        // Without this wrap, the procedure inherits whatever ambient ALS
-        // context exists at dispatch time — which is typically empty for
-        // HTTP-driven MCP requests — and Context.create() inside the
-        // procedure produces a context with no middleware. Result:
-        // `Agentick.use("*", mw)` registrations silently never fire for
-        // tool calls.
-        const ambient = Context.tryGet();
-        const resolvedMiddleware = ambient?.middleware ?? this.options.middlewareRegistry;
-        const dispatch = () =>
-          toolProc(sanitizedInput ?? request.params.arguments ?? {}, handlerCtx).result;
-        const result = resolvedMiddleware
-          ? await Context.run(
-              { ...(ambient ?? {}), middleware: resolvedMiddleware as any },
-              dispatch,
-            )
-          : await dispatch();
         const durationMs = Date.now() - startTime;
 
         log.info(
@@ -1088,32 +1096,51 @@ export class MCPServer {
 
       try {
         const resource = this.resources.get(uri);
-        if (resource) return await resource.read(handlerCtx);
+        if (resource)
+          return await this.runAsProcedure(
+            `mcp:resource:read`,
+            { uri, kind: "resource" },
+            async (ctx: MCPHandlerContext) => resource.read(ctx),
+            [handlerCtx],
+          );
 
         const app = this.apps.get(uri);
         if (app) {
-          const content = typeof app.content === "function" ? await app.content() : app.content;
-          const meta = buildAppResourceMeta(app);
-          return {
-            contents: [
-              {
-                uri,
-                text: content,
-                mimeType: MCP_APP_MIME_TYPE,
-                // CSP, permissions, prefersBorder, domain — required by the
-                // host to configure the iframe sandbox. Without _meta.ui the
-                // host applies secure defaults (deny-all) and the view stays
-                // blank even though the HTML loaded.
-                ...(meta ? { _meta: meta } : {}),
-              },
-            ],
-          };
+          return await this.runAsProcedure(
+            `mcp:resource:read`,
+            { uri, kind: "app" },
+            async () => {
+              const content = typeof app.content === "function" ? await app.content() : app.content;
+              const meta = buildAppResourceMeta(app);
+              return {
+                contents: [
+                  {
+                    uri,
+                    text: content,
+                    mimeType: MCP_APP_MIME_TYPE,
+                    // CSP, permissions, prefersBorder, domain — required by the
+                    // host to configure the iframe sandbox. Without _meta.ui the
+                    // host applies secure defaults (deny-all) and the view stays
+                    // blank even though the HTML loaded.
+                    ...(meta ? { _meta: meta } : {}),
+                  },
+                ],
+              };
+            },
+            [],
+          );
         }
 
         for (const tmpl of this.templates.values()) {
           const match = tmpl.uriTemplate.match(uri);
           if (match)
-            return await tmpl.definition.read(uri, match as Record<string, string>, handlerCtx);
+            return await this.runAsProcedure(
+              `mcp:resource:template:read`,
+              { uri, template: tmpl.uriTemplate.toString() },
+              async (u: string, m: Record<string, string>, ctx: MCPHandlerContext) =>
+                tmpl.definition.read(u, m, ctx),
+              [uri, match as Record<string, string>, handlerCtx],
+            );
         }
       } catch (err) {
         if (err instanceof McpError) {
@@ -1148,7 +1175,12 @@ export class MCPServer {
         protocolError(ErrorCode.InvalidParams, `Prompt not found: ${request.params.name}`);
       const handlerCtx = await this.buildHandlerContext(extra, sdkServer);
       try {
-        return await prompt.handler(request.params.arguments ?? {}, handlerCtx);
+        return await this.runAsProcedure(
+          `mcp:prompt:get:${prompt.name}`,
+          { prompt: prompt.name },
+          async (args: Record<string, string>, ctx: MCPHandlerContext) => prompt.handler(args, ctx),
+          [(request.params.arguments ?? {}) as Record<string, string>, handlerCtx],
+        );
       } catch (err) {
         if (err instanceof McpError) {
           protocolError(err.code, stripMcpErrorPrefix(err.message), err.data);
@@ -1198,7 +1230,16 @@ export class MCPServer {
         const ctx: MCPCompletionContext = { ...baseCtx, resolvedArguments };
 
         try {
-          const raw = await handler(argument.value, ctx);
+          const raw = await this.runAsProcedure(
+            `mcp:completion`,
+            {
+              refType: ref.type,
+              refName: ref.type === "ref/prompt" ? ref.name : ref.uri,
+              argument: argument.name,
+            },
+            async (value: string, c: MCPCompletionContext) => handler!(value, c),
+            [argument.value, ctx],
+          );
           return { completion: normalizeCompletionResult(raw) };
         } catch (err) {
           if (err instanceof McpError) {
