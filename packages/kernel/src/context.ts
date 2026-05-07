@@ -5,7 +5,7 @@ import type { ProcedureGraph } from "./procedure-graph.js";
 import type { ProcedureNode } from "./procedure-graph.js";
 import { ContextError } from "@agentick/shared";
 import type { Middleware } from "./procedure.js";
-import type { Span } from "./telemetry.js";
+import type { AttributeValue, Span } from "./telemetry.js";
 
 /**
  * User information associated with the current execution context.
@@ -269,6 +269,30 @@ export interface KernelContext {
   activeSpan?: Span;
 
   /**
+   * Ambient attributes auto-stamped onto every span started within this
+   * context's lifetime. Conceptually equivalent to OpenTelemetry baggage:
+   * key-value pairs that propagate through the execution context and end up
+   * on each span automatically, without callers needing to set them.
+   *
+   * Set via `Context.withBaggage(attrs, fn)` (key-level merge with parent)
+   * or `proc.withBaggage(attrs)` (procedure variant). `Telemetry.startSpan`
+   * reads this field and applies the keys via `setAttributes` before
+   * returning the span.
+   *
+   * Child contexts inherit baggage and can override individual keys without
+   * affecting the parent — last writer wins per key.
+   *
+   * @example
+   * ```typescript
+   * await Context.withBaggage({ "app.location": "ernesto" }, async () => {
+   *   // every span started here (and downstream) carries app.location=ernesto
+   *   await runAgent();
+   * });
+   * ```
+   */
+  baggage?: Record<string, AttributeValue>;
+
+  /**
    * Type brand for context detection
    */
   [KERNEL_CONTEXT_SYMBOL]?: boolean;
@@ -352,6 +376,8 @@ export class Context {
       executionId: overrides.executionId,
       executionType: overrides.executionType,
       parentExecutionId: overrides.parentExecutionId,
+      // Ambient span attributes (OTel-style baggage)
+      baggage: overrides.baggage,
     });
   }
 
@@ -430,6 +456,39 @@ export class Context {
   static fork<T>(overrides: Partial<KernelContext>, fn: () => Promise<T>): Promise<T> {
     const childCtx = Context.child(overrides);
     return Context.run(childCtx, fn);
+  }
+
+  /**
+   * Merge `attrs` onto the current ALS context's baggage. If no baggage is
+   * set yet, this initializes it. Mutates via reassignment of the `baggage`
+   * slot, not in-place mutation of the existing object — siblings or
+   * parents that captured a prior reference are unaffected.
+   *
+   * Scoping is the ALS layer's responsibility: any `Context.fork` /
+   * `Context.run` you're already inside bounds the mutation. To get scoped
+   * baggage that restores on exit, fork first:
+   *
+   * ```typescript
+   * await Context.fork({}, async () => {
+   *   Context.withBaggage({ "app.location": "ernesto" });
+   *   await runAgent();
+   * });
+   * // outside the fork, baggage is whatever it was before
+   * ```
+   *
+   * Inside the same context (no fork), repeated calls layer — last writer
+   * wins per key. No-op when called outside any context.
+   *
+   * Naming follows the `with*` convention used by procedures
+   * (`proc.withBaggage`, `proc.withMetadata`, `proc.withContext`). Both
+   * surfaces describe the same action: "for this scope, apply these values."
+   *
+   * @param attrs - Baggage keys to merge onto the current context
+   */
+  static withBaggage(attrs: Record<string, AttributeValue>): void {
+    const ctx = Context.tryGet();
+    if (!ctx) return;
+    ctx.baggage = { ...(ctx.baggage ?? {}), ...attrs };
   }
 
   /**

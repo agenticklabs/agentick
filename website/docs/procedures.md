@@ -117,16 +117,20 @@ const enhanced = greet
   .use(loggingMiddleware)
   .withContext({ user: "ryan" })
   .withTimeout(5000)
-  .withMetadata({ operation: "greeting" });
+  .withMetadata({ operation: "greeting" })
+  .withBaggage({ "app.location": "ernesto" });
 ```
 
-| Method                | Purpose                         |
-| --------------------- | ------------------------------- |
-| `.use(middleware)`    | Add middleware                  |
-| `.withContext(ctx)`   | Merge AsyncLocalStorage context |
-| `.withTimeout(ms)`    | Abort after timeout             |
-| `.withMetadata(meta)` | Add telemetry metadata          |
-| `.pipe(nextProc)`     | Chain output → input            |
+| Method                  | Purpose                                                |
+| ----------------------- | ------------------------------------------------------ |
+| `.use(middleware)`      | Add middleware                                         |
+| `.withContext(ctx)`     | Merge AsyncLocalStorage context                        |
+| `.withTimeout(ms)`      | Abort after timeout                                    |
+| `.withMetadata(meta)`   | Add telemetry metadata                                 |
+| `.withBaggage(attrs)`   | Auto-stamp attrs onto every span emitted while running |
+| `.pipe(nextProc)`       | Chain output → input                                   |
+
+`.withBaggage` is the procedure form of [`Context.withBaggage`](/docs/observability#baggage-ambient-span-attributes) — see the observability docs for what baggage is, when to reach for it, and how it composes.
 
 ## Middleware
 

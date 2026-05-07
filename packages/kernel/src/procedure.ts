@@ -20,6 +20,7 @@ import type { ProcedureNode } from "./procedure-graph.js";
 import { AbortError, ValidationError } from "@agentick/shared";
 import { EventBuffer, type TypedEvent } from "./event-buffer.js";
 import { parseSchema } from "./schema.js";
+import type { AttributeValue } from "./telemetry.js";
 
 // ============================================================================
 // ProcedurePromise - Enhanced Promise with .result chaining
@@ -612,6 +613,27 @@ export interface Procedure<
    * @param ctx - Partial context to merge with the current context
    */
   withContext(ctx: Partial<KernelContext>): Procedure<THandler, TPassThrough>;
+
+  /**
+   * Create a procedure variant that runs inside a child context with the
+   * given baggage applied. Baggage propagates onto every span started during
+   * the procedure's execution (and any sub-procedures it invokes) via
+   * `Telemetry.startSpan`.
+   *
+   * Merge semantics: the supplied keys are layered on top of any baggage
+   * already present in the calling context. Keys not mentioned are
+   * inherited from the parent.
+   *
+   * @param baggage - Baggage keys to apply for the duration of this procedure
+   *
+   * @example
+   * ```typescript
+   * // Tag every span emitted by ernesto with app.location=ernesto
+   * const ernestoTagged = ernesto.withBaggage({ "app.location": "ernesto" });
+   * await ernestoTagged.exec(input);
+   * ```
+   */
+  withBaggage(baggage: Record<string, AttributeValue>): Procedure<THandler, TPassThrough>;
 
   /**
    * Add a single middleware. Returns a new Procedure.
@@ -1479,6 +1501,45 @@ class ProcedureImpl<
   }
 
   /**
+   * Create a procedure variant that runs inside a child context with the
+   * given baggage merged onto the parent's. Mirror of `withContext` but
+   * scoped to baggage propagation rather than full context override.
+   *
+   * Like `withContext`, this returns a transparent wrapper procedure that
+   * delegates to the original — middleware on the original still runs in
+   * `proc.execute()`, and the wrapper itself skips its own tracking to
+   * avoid double-counting.
+   *
+   * Forks before applying so the caller's context is unaffected; the
+   * procedure's own execution fork inherits the merged baggage from the
+   * fork created here.
+   */
+  withBaggage(baggage: Record<string, AttributeValue>): Procedure<THandler> {
+    const proc = this;
+    const wrappedHandler = (async (...args: TArgs) => {
+      return Context.fork({}, async () => {
+        Context.withBaggage(baggage);
+        return proc.execute(args);
+      });
+    }) as THandler;
+
+    return createProcedureFromImpl<TArgs, THandler>(
+      {
+        name: this.procedureName,
+        schema: this.schema,
+        middleware: [],
+        handleFactory: this.handleFactory,
+        sourceType: this.sourceType,
+        sourceId: this.sourceId,
+        metadata: this.metadata,
+        skipTracking: true,
+        streamEventType: this.streamEventType,
+      },
+      wrappedHandler,
+    );
+  }
+
+  /**
    * Pipe the output of this procedure to another procedure.
    * Creates a new procedure that runs this procedure, then passes its result to the next.
    */
@@ -1549,6 +1610,7 @@ function createProcedureFromImpl<TArgs extends any[], THandler extends (...args:
   // Attach methods - same for both Procedure with handle return and Pass-through return Procedure
   (proc as any).use = impl.use.bind(impl);
   (proc as any).withContext = impl.withContext.bind(impl);
+  (proc as any).withBaggage = impl.withBaggage.bind(impl);
   (proc as any).withMiddleware = impl.withMiddleware.bind(impl);
   (proc as any).withTimeout = impl.withTimeout.bind(impl);
   (proc as any).withMetadata = impl.withMetadata.bind(impl);

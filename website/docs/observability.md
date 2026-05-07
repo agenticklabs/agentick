@@ -111,6 +111,80 @@ if (span?.isRecording?.()) {
 }
 ```
 
+## Baggage: ambient span attributes
+
+Sometimes you want an attribute stamped on _every_ span produced by a region of work — a tenant id, an agent name, a feature flag, a request region — without threading it through every call site or every procedure definition. agentick exposes this via **baggage**, modelled on [OpenTelemetry baggage](https://opentelemetry.io/docs/concepts/signals/baggage/): key-value pairs that ride on the execution context and get auto-applied to every span started inside their scope.
+
+### Why baggage and not just `setAttribute`
+
+`setAttribute` writes to one span. Baggage writes to every span, current and future, that runs in the surrounding region — including spans spawned by sub-procedures and sub-agents you didn't author. It's the right tool when:
+
+- A caller wants to label _whose work this is_ (Location, agent name, app name) for downstream observability dashboards, but the callee shouldn't have to know.
+- The same procedure runs in multiple contexts and the dimension you care about depends on _who's calling it right now_, not on the procedure itself.
+- You want a tenant id, request region, or experiment flag on every span without sprinkling reads through the call graph.
+
+If you only need to enrich the currently-executing span, use `Context.tryGet()?.activeSpan?.setAttribute(...)` — that's a span-local concern. Baggage is a propagation primitive.
+
+### Setting baggage
+
+`Context.withBaggage(attrs)` merges `attrs` onto the current ALS context's baggage — initializes it if unset, last writer wins per key. Scoping is the ALS layer's job: a `Context.fork` / `Context.run` you're already inside bounds the mutation, and parent context's baggage is restored automatically when the fork unwinds.
+
+```ts
+import { Context } from "@agentick/core";
+
+await Context.fork({}, async () => {
+  Context.withBaggage({ "app.location": "ernesto" });
+  // every span started in this fork carries app.location=ernesto
+  await runAgent();
+
+  await Context.fork({}, async () => {
+    Context.withBaggage({ "app.location": "subagent" });
+    // spans here see app.location=subagent (override); other parent keys still apply
+    await runSubAgent();
+  });
+  // back in the outer fork — app.location=ernesto
+});
+// outside both forks — baggage is whatever it was before
+```
+
+Procedures get the same shape via `.withBaggage(attrs)` — a procedure variant that forks before applying baggage, so the caller's context is untouched:
+
+```ts
+const taggedAgent = ernestoAgent.withBaggage({ "app.location": "ernesto" });
+await taggedAgent.exec(input);
+// every span emitted while taggedAgent runs is auto-stamped; caller unaffected
+```
+
+Sibling forks don't leak — parallel branches each see their own baggage. Reassignment (vs. in-place mutation) of the `baggage` slot keeps captured references on parent contexts isolated from child writes.
+
+### How it reaches the span
+
+`Telemetry.startSpan(name)` reads `Context.tryGet()?.baggage` and calls `setAttributes` on the new span before returning it. This means **every provider** — the no-op default, the OTel adapter, your custom backend — automatically sees baggage as ordinary span attributes. No provider-side changes are required to opt in.
+
+If a provider's `Span` doesn't implement `setAttributes`, the kernel falls back to per-key `setAttribute` calls.
+
+### Reading baggage at runtime
+
+Baggage lives at `Context.tryGet()?.baggage`. Middleware and procedures can read it like any other context field:
+
+```ts
+const middleware: Middleware = async (args, envelope, next) => {
+  const location = Context.tryGet()?.baggage?.["app.location"];
+  if (location) log.info({ location }, "starting work");
+  return next();
+};
+```
+
+It is **not** automatically mirrored into request logs. If you want correlated logs, extend the kernel logger via `composeContextFields`:
+
+```ts
+Logger.configure({
+  contextFields: composeContextFields(defaultContextFields, (ctx) => ({
+    app_location: ctx.baggage?.["app.location"],
+  })),
+});
+```
+
 ## Sub-step timing with `addEvent`
 
 When a span covers a multi-phase operation, mark phases with events instead of nesting spans:

@@ -4,6 +4,12 @@
  * Aligned with OpenTelemetry's AttributeValue so providers that wrap OTel
  * (or other observability backends) can pass values through unchanged.
  */
+// `Context` is imported as a runtime value for `Telemetry.startSpan` to read
+// baggage off the active execution context. There's a small kernel cycle:
+// telemetry → context (runtime) → telemetry (type-only via `Span`). The
+// type-only side doesn't materialize at runtime, so the cycle is safe.
+import { Context } from "./context.js";
+
 export type AttributeValue = string | number | boolean | string[] | number[] | boolean[] | null;
 
 /**
@@ -299,11 +305,31 @@ export class Telemetry {
 
   /**
    * Start a new span within the current trace.
+   *
+   * If the active `KernelContext` carries `baggage`, every key/value is
+   * applied to the new span via `setAttributes` before returning. This is
+   * how `Context.withBaggage(...)` and `proc.withBaggage(...)` propagate
+   * ambient attributes onto every span in their scope without callers
+   * having to pass anything through.
+   *
    * @param name - Name of the span (e.g., 'model-call', 'tool-execution')
    * @returns A Span object to track the operation
    */
   static startSpan(name: string): Span {
-    return this.provider.startSpan(name);
+    const span = this.provider.startSpan(name);
+    const baggage = Context.tryGet()?.baggage;
+    if (baggage) {
+      // `setAttributes` is optional on the Span interface; older providers
+      // may only implement `setAttribute`. Fall back to per-key calls.
+      if (span.setAttributes) {
+        span.setAttributes(baggage);
+      } else {
+        for (const [key, value] of Object.entries(baggage)) {
+          span.setAttribute(key, value);
+        }
+      }
+    }
+    return span;
   }
 
   /**
