@@ -1,6 +1,6 @@
 {
   "name": "@agentick/client",
-  "version": "0.14.62",
+  "version": "0.14.63",
   "description": "Client SDK for Agentick - multiplexed sessions over SSE",
   "keywords": [
     "agent",
