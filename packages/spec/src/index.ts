@@ -9,7 +9,5 @@
 
 export { SPEC_VERSION, type SpecVersion } from "./version.js";
 
-// Subpath exports populated as Phase 1 progresses
-// export * from "./data/index.js";
-// export * from "./protocol/index.js";
-// export * from "./guards/index.js";
+export * from "./data/index.js";
+export * from "./protocol/index.js";

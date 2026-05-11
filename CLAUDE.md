@@ -1,5 +1,22 @@
 # Agentick - Claude Code Guidelines
 
+## v2 work in progress
+
+The repository is mid-rewrite on the `feat/v2` branch. **Before doing
+any work that might touch v2 concerns, read these in order:**
+
+1. [`docs/proposals/v2/STATUS.md`](docs/proposals/v2/STATUS.md) —
+   running progress log, decisions made, environment quirks, pending
+   items. **Update this when you finish work.**
+2. [`docs/proposals/v2/IMPLEMENTATION-PLAN.md`](docs/proposals/v2/IMPLEMENTATION-PLAN.md) —
+   the phased rollout plan.
+3. [`docs/proposals/v2/blueprint/`](docs/proposals/v2/blueprint/) —
+   architectural contracts (23 docs; start with `00-overview.md`,
+   `01-harness-principle.md`, `19-foundation.md`).
+
+Until v2.0 is cut, `main` remains v1 stable; v2 work happens on
+`feat/v2`. Don't merge v2 changes to `main`.
+
 ## Philosophy
 
 **No backwards compatibility, no deprecations, no legacy code paths.**
