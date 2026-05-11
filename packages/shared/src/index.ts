@@ -68,13 +68,19 @@ export function uuidv7(opts?: Version7Options, offset?: number): string {
   try {
     return v7(opts, void 0, offset);
   } catch (error) {
-    // Monotonic UUIDv7 (fall back): cross-platform, close to reference
-    // Support opts?: {random, msecs, seq, rng} and offset as best as possible.
+    return uuidv7Fallback(opts, offset);
+  }
+}
 
-    // State to support monotonicity within this module
-    let _lastTS: number | undefined = undefined;
-    let _lastSeq: number = 0;
+export const uuidv7Fallback = (() => {
+  // Monotonic UUIDv7 (fall back): cross-platform, close to reference
+  // Support opts?: {random, msecs, seq, rng} and offset as best as possible.
 
+  // State to support monotonicity within this module
+  let _lastTS: number | undefined = undefined;
+  let _lastSeq: number = 0;
+
+  return function (opts?: Version7Options, offset?: number): string {
     // Use best available random source
     function getRandomBytes(n: number, opts?: Version7Options): Uint8Array {
       if (opts?.random && opts.random.length >= n) return opts.random.slice(0, n);
@@ -160,5 +166,5 @@ export function uuidv7(opts?: Version7Options, offset?: number): string {
       hex.slice(16, 20),
       hex.slice(20),
     ].join("-");
-  }
-}
+  };
+})();
