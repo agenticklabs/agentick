@@ -5,6 +5,7 @@
   "fixed": [
     [
       "agentick",
+      "@agentick/spec",
       "@agentick/kernel",
       "@agentick/shared",
       "@agentick/core",
