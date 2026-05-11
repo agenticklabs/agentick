@@ -14,7 +14,6 @@
  */
 
 import { EventEmitter } from "node:events";
-import { randomUUID } from "node:crypto";
 import {
   Context,
   createProcedure,
@@ -65,6 +64,7 @@ import {
   type SessionContextPayload,
   getEffectiveModelInfo,
   getContextUtilization,
+  uuidv7,
 } from "@agentick/shared";
 import { computeTokenSummary } from "../utils/token-estimate.js";
 import type { CompiledStructure } from "../compiler/types.js";
@@ -138,7 +138,7 @@ function getSessionContext(): SessionContext {
  */
 function ensureMessageId(message: Message): Message {
   if (message.id) return message;
-  return { ...message, id: randomUUID() };
+  return { ...message, id: uuidv7() };
 }
 
 /**
@@ -308,7 +308,7 @@ export class SessionImpl<P = {}> extends EventEmitter implements Session<P> {
     sessionOptions: SessionOptions = {},
   ) {
     super();
-    this.id = sessionOptions.sessionId ?? randomUUID();
+    this.id = sessionOptions.sessionId ?? uuidv7();
     this.Component = Component;
     this.appOptions = appOptions;
     this.sessionOptions = sessionOptions;
@@ -493,7 +493,7 @@ export class SessionImpl<P = {}> extends EventEmitter implements Session<P> {
         // Notify components via useOnMessage hooks if compiler exists
         if (this.compiler) {
           const executionMessage: ExecutionMessage = {
-            id: randomUUID(),
+            id: uuidv7(),
             type: "message",
             content: message,
             timestamp: Date.now(),
@@ -563,7 +563,7 @@ export class SessionImpl<P = {}> extends EventEmitter implements Session<P> {
           // Notify components via useOnMessage hooks if compiler exists
           if (this.compiler) {
             const executionMessage: ExecutionMessage = {
-              id: randomUUID(),
+              id: uuidv7(),
               type: "message",
               content: msgWithId,
               timestamp: Date.now(),
@@ -706,7 +706,7 @@ export class SessionImpl<P = {}> extends EventEmitter implements Session<P> {
         });
 
         // 4. Spawn lifecycle events & child event forwarding
-        const spawnId = randomUUID();
+        const spawnId = uuidv7();
 
         this.emitEvent({
           type: "spawn_start",
@@ -808,7 +808,7 @@ export class SessionImpl<P = {}> extends EventEmitter implements Session<P> {
         await this.mount();
 
         const committed = entry as COMTimelineEntry;
-        if (!committed.id) committed.id = randomUUID();
+        if (!committed.id) committed.id = uuidv7();
 
         this.ctx!.addTimelineEntry(committed);
         this._timeline.push(committed);
@@ -1074,7 +1074,7 @@ export class SessionImpl<P = {}> extends EventEmitter implements Session<P> {
   private createSessionHandle(props: P, options?: ExecutionOptions): SessionExecutionHandle {
     const session = this;
     const events = new EventEmitter();
-    const traceId = randomUUID();
+    const traceId = uuidv7();
 
     // Create the result promise
     let resolveResult: (result: SendResult) => void;
@@ -1264,7 +1264,7 @@ export class SessionImpl<P = {}> extends EventEmitter implements Session<P> {
         return "completed" as const;
       },
       get traceId() {
-        return randomUUID();
+        return uuidv7();
       },
       get events() {
         return emptyEventBuffer;
@@ -1657,7 +1657,7 @@ export class SessionImpl<P = {}> extends EventEmitter implements Session<P> {
       executionId && !("executionId" in event) ? { ...event, executionId } : event;
 
     if (!("id" in event)) {
-      enrichedEvent = { ...enrichedEvent, id: randomUUID() };
+      enrichedEvent = { ...enrichedEvent, id: uuidv7() };
     }
 
     if (!("timestamp" in event)) {
@@ -2446,7 +2446,7 @@ export class SessionImpl<P = {}> extends EventEmitter implements Session<P> {
     // from being included in useConversationHistory() via state.current
     this._currentOutput = null;
 
-    const executionId = Context.tryGet()?.executionId || randomUUID();
+    const executionId = Context.tryGet()?.executionId || uuidv7();
     this._currentExecutionId = executionId;
     const maxTicks =
       options?.maxTicks ?? this.sessionOptions.maxTicks ?? this.appOptions.maxTicks ?? 10;
@@ -2464,7 +2464,7 @@ export class SessionImpl<P = {}> extends EventEmitter implements Session<P> {
       for (const msg of this._queuedMessages) {
         this.log.debug({ role: msg.role }, "Queuing message to COM");
         this.ctx.queueMessage({
-          id: randomUUID(),
+          id: uuidv7(),
           type: "message",
           content: msg,
         } as any);
@@ -3436,7 +3436,7 @@ export class SessionImpl<P = {}> extends EventEmitter implements Session<P> {
         if (tool?.metadata?.ui?.resourceUri && !call.ui) {
           call.ui = {
             resourceUri: tool.metadata.ui.resourceUri,
-            appSessionId: randomUUID(),
+            appSessionId: uuidv7(),
           };
 
           const resolver = tool.metadata.ui.resolveContent;
@@ -3521,7 +3521,7 @@ export class SessionImpl<P = {}> extends EventEmitter implements Session<P> {
           });
         } catch (error) {
           const errorResult: ToolResult = {
-            id: randomUUID(),
+            id: uuidv7(),
             toolUseId: call.id,
             name: call.name,
             success: false,
@@ -3632,7 +3632,7 @@ export class SessionImpl<P = {}> extends EventEmitter implements Session<P> {
 
     // Add entries to COM and session timeline - user entries first, then assistant response
     for (const entry of newUserEntries) {
-      if (!entry.id) entry.id = randomUUID();
+      if (!entry.id) entry.id = uuidv7();
       this.ctx.addTimelineEntry(entry);
       this._timeline.push(entry);
       this.emitEvent({
@@ -3646,7 +3646,7 @@ export class SessionImpl<P = {}> extends EventEmitter implements Session<P> {
 
     if (response.newTimelineEntries) {
       for (const entry of response.newTimelineEntries) {
-        if (!entry.id) entry.id = randomUUID();
+        if (!entry.id) entry.id = uuidv7();
         this.ctx.addTimelineEntry(entry);
         this._timeline.push(entry);
         this.emitEvent({
@@ -3661,7 +3661,7 @@ export class SessionImpl<P = {}> extends EventEmitter implements Session<P> {
 
     if (toolResults.length > 0) {
       const toolResultEntry: COMTimelineEntry = {
-        id: randomUUID(),
+        id: uuidv7(),
         kind: "message",
         message: {
           role: "tool" as const,

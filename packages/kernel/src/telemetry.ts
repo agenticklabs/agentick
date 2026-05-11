@@ -8,6 +8,7 @@
 // baggage off the active execution context. There's a small kernel cycle:
 // telemetry → context (runtime) → telemetry (type-only via `Span`). The
 // type-only side doesn't materialize at runtime, so the cycle is safe.
+import { uuidv7 } from "@agentick/shared";
 import { Context } from "./context.js";
 
 export type AttributeValue = string | number | boolean | string[] | number[] | boolean[] | null;
@@ -209,7 +210,7 @@ export interface TelemetryProvider {
 
 class NoOpProvider implements TelemetryProvider {
   startTrace(_name: string): string {
-    return `trace-${crypto.randomUUID()}`;
+    return `trace-${uuidv7()}`;
   }
   startSpan(_name: string): Span {
     // Return an inert span that satisfies the full interface so callers

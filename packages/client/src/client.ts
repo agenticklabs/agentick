@@ -30,7 +30,7 @@ import type {
   ClientExecutionHandle,
 } from "./types.js";
 import type { ContentBlock, Message, ExecutionEndEvent } from "@agentick/shared";
-import { AbortError } from "@agentick/shared";
+import { AbortError, uuidv7 as generateId } from "@agentick/shared";
 
 // ============================================================================
 // Client Configuration
@@ -693,21 +693,6 @@ class SessionAccessorImpl implements SessionAccessor {
     }
     this.channels.clear();
   }
-}
-
-// ============================================================================
-// Utilities
-// ============================================================================
-
-function generateId(): string {
-  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
-    return crypto.randomUUID();
-  }
-  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
-    const r = (Math.random() * 16) | 0;
-    const v = c === "x" ? r : (r & 0x3) | 0x8;
-    return v.toString(16);
-  });
 }
 
 // ============================================================================

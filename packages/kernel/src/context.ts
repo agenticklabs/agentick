@@ -3,7 +3,7 @@ import { EventEmitter } from "node:events";
 import { type ChannelServiceInterface } from "./channel.js";
 import type { ProcedureGraph } from "./procedure-graph.js";
 import type { ProcedureNode } from "./procedure-graph.js";
-import { ContextError } from "@agentick/shared";
+import { ContextError, uuidv7 } from "@agentick/shared";
 import type { Middleware } from "./procedure.js";
 import type { AttributeValue, Span } from "./telemetry.js";
 
@@ -360,8 +360,8 @@ export class Context {
    */
   static create(overrides: Partial<Omit<KernelContext, "events">> = {}): KernelContext {
     return this.brand({
-      requestId: overrides.requestId ?? crypto.randomUUID(),
-      traceId: overrides.traceId ?? crypto.randomUUID(),
+      requestId: overrides.requestId ?? uuidv7(),
+      traceId: overrides.traceId ?? uuidv7(),
       metadata: overrides.metadata ?? {},
       metrics: {},
       events: new EventEmitter(),

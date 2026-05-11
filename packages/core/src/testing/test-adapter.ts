@@ -24,7 +24,7 @@ import { fromEngineState, toEngineState } from "../model/utils/language-model.js
 import type { Message, ToolCall } from "@agentick/shared";
 import type { Mock } from "vitest";
 import { vi } from "vitest";
-import { randomUUID } from "crypto";
+import { uuidv7 } from "@agentick/shared";
 
 // ============================================================================
 // Types
@@ -182,7 +182,7 @@ export interface TestAdapterInstance extends ModelClass {
 function normalizeToolCalls(toolCalls: ToolCall[]): ToolCall[] {
   return toolCalls.map((tc, idx) => ({
     ...tc,
-    id: tc.id || `toolu_test_${randomUUID().slice(0, 8)}_${idx}`,
+    id: tc.id || `toolu_test_${uuidv7().slice(0, 8)}_${idx}`,
   }));
 }
 
@@ -204,7 +204,7 @@ function normalizeResponse(items: ResponseItem[]): NormalizedResponse {
     if ("tool" in item) {
       const tools = Array.isArray(item.tool) ? item.tool : [item.tool];
       for (const t of tools) {
-        const id = t.id || `toolu_test_${randomUUID().slice(0, 8)}_${toolCalls.length}`;
+        const id = t.id || `toolu_test_${uuidv7().slice(0, 8)}_${toolCalls.length}`;
         toolCalls.push({ id, name: t.name, input: t.input });
         content.push({ type: "tool_use", id, name: t.name, input: t.input });
       }

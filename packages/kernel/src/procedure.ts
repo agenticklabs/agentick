@@ -15,9 +15,8 @@ import type { EventEmitter } from "node:events";
 import { Context, type KernelContext, isKernelContext } from "./context.js";
 import { ExecutionTracker, type ExecutionBoundaryConfig } from "./execution-tracker.js";
 import { ExecutionHandleBrand } from "./execution-handle-brand.js";
-import { randomUUID } from "node:crypto";
 import type { ProcedureNode } from "./procedure-graph.js";
-import { AbortError, ValidationError } from "@agentick/shared";
+import { AbortError, uuidv7, ValidationError } from "@agentick/shared";
 import { EventBuffer, type TypedEvent } from "./event-buffer.js";
 import { parseSchema } from "./schema.js";
 import type { AttributeValue } from "./telemetry.js";
@@ -1198,7 +1197,7 @@ class ProcedureImpl<
     // Create handle if handleFactory is provided and handle doesn't exist
     if (this.handleFactory && !context.executionHandle) {
       const events = new EventBuffer<any>();
-      const traceId = context.traceId || randomUUID();
+      const traceId = context.traceId || uuidv7();
       const resultPromise = Promise.resolve() as Promise<any>;
       // Only call handleFactory if it's a function, otherwise use default implementation
       const handle =
@@ -1339,7 +1338,7 @@ class ProcedureImpl<
    */
   private createHandle(args: TArgs): ExecutionHandle<ExtractReturn<THandler>> {
     const events = new EventBuffer<any>();
-    const traceId = Context.tryGet()?.traceId || randomUUID();
+    const traceId = Context.tryGet()?.traceId || uuidv7();
     const abortController = new AbortController();
 
     // Create the result promise that will resolve when execution completes

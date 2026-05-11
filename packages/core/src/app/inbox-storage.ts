@@ -8,7 +8,7 @@
  * (Postgres with LISTEN/NOTIFY, Redis Streams, etc.).
  */
 
-import { randomUUID } from "node:crypto";
+import { uuidv7 } from "@agentick/shared";
 import type { InboxStorage, InboxMessage, InboxMessageInput } from "./types.js";
 
 export class MemoryInboxStorage implements InboxStorage {
@@ -16,7 +16,7 @@ export class MemoryInboxStorage implements InboxStorage {
   private subscribers = new Map<string, Set<() => void>>();
 
   async write(sessionId: string, message: InboxMessageInput): Promise<string> {
-    const id = randomUUID();
+    const id = uuidv7();
     const entry: InboxMessage = {
       ...message,
       id,

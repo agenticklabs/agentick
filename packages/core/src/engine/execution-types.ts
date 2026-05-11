@@ -1,8 +1,8 @@
-import { randomUUID } from "crypto";
 import type { EventEmitter } from "node:events";
 import type { EngineInput, COMInput } from "../com/types.js";
 import type { ComponentDefinition } from "../component/component.js";
 import type { ProcedureGraph } from "@agentick/kernel";
+import { uuidv7 } from "@agentick/shared";
 
 /**
  * Signal types for execution and engine signals
@@ -295,10 +295,5 @@ export interface EngineMetrics {
  * @param _prefix - Deprecated, ignored. Kept for backwards compatibility.
  */
 export function generatePid(_prefix?: string): string {
-  try {
-    return randomUUID();
-  } catch {
-    // Fallback if crypto.randomUUID is not available
-    return `${Date.now().toString(36)}_${Math.random().toString(36).slice(2)}`;
-  }
+  return uuidv7();
 }

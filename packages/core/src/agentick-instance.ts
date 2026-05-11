@@ -44,7 +44,7 @@ import type {
   InboxStorage,
   InboxMessageInput,
 } from "./app/types.js";
-import { randomUUID } from "node:crypto";
+import { uuidv7 } from "@agentick/shared";
 import { SessionImpl } from "./app/session.js";
 import { MemoryInboxStorage } from "./app/inbox-storage.js";
 import { SkillRegistry } from "./skill/registry.js";
@@ -557,7 +557,7 @@ class AppImpl<P> implements App<P> {
       sessionId = await resolver(sessionIdOrMessage);
     }
     if (!sessionId) {
-      sessionId = randomUUID();
+      sessionId = uuidv7();
     }
     await this.inboxStorage.write(sessionId, sessionIdOrMessage);
     // If session is active, subscriber fires immediately.

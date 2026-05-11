@@ -164,5 +164,8 @@
     "clean": "rm -rf dist tsconfig.build.tsbuildinfo",
     "prepublishOnly": "pnpm build",
     "dev": "tsc --watch"
+  },
+  "dependencies": {
+    "uuid": "^14.0.0"
   }
 }
