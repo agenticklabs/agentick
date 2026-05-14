@@ -1,5 +1,13 @@
 # @agentick/anthropic
 
+## 0.14.64
+
+### Patch Changes
+
+- Updated dependencies [71ce3e0]
+  - @agentick/core@0.14.64
+  - @agentick/shared@0.14.64
+
 ## 0.14.63
 
 ### Patch Changes
