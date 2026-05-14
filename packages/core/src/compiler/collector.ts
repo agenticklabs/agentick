@@ -298,13 +298,15 @@ function collectSection(node: AgentickNode, result: CompiledStructure): void {
   //   <Section id="x"><A /><B /></Section>
   // — not declare <Section id="x"> twice.
   //
-  // Duplicate ids in the same collect pass emit a warning so authoring
-  // mistakes and render-loop bugs both surface immediately instead of
-  // producing puzzling concatenated output.
-  if (result.sections.has(id)) {
-    log.warn(
-      { sectionId: id },
-      `Duplicate <Section id="${id}"> in render — last definition wins. ` +
+  // Dev-only warning: same shape as React's internal warning gate —
+  // plain `console.warn` so it surfaces in test/dev output without
+  // polluting structured production logs, and bundler dead-code
+  // elimination can strip it from production builds. The yoda-style
+  // `"production" !==` guard matches React verbatim (see
+  // react-reconciler.development.js).
+  if (result.sections.has(id) && "production" !== process.env.NODE_ENV) {
+    console.warn(
+      `Warning: Duplicate <Section id="${id}"> in render — last definition wins. ` +
         `Section ids must be unique. If you intended to compose multi-part content, ` +
         `pass it as children to a single <Section>.`,
     );
