@@ -109,6 +109,12 @@ export class ReconcilerHarness
 {
   private readonly mounts = new Map<string, MountState>();
   private readonly registry: ContributorRegistry;
+  /**
+   * Mount IDs that have already produced a Suspense heuristic warning.
+   * One warning per mount — rerendering with the same Suspense tree
+   * shouldn't flood stderr.
+   */
+  private readonly suspenseWarnedMounts = new Set<string>();
 
   constructor(
     scopeId: string,
@@ -153,6 +159,7 @@ export class ReconcilerHarness
       state.element = i.element as ReactNode;
       if (i.elementVersion !== undefined) state.elementVersion = i.elementVersion;
       this.renderOnce(state);
+      this.maybeWarnSuspense(i.element);
     });
   }
 
@@ -194,6 +201,7 @@ export class ReconcilerHarness
     state.lifecycle.clear();
     state.container.children.length = 0;
     this.mounts.delete(input.mountId);
+    this.suspenseWarnedMounts.delete(input.mountId);
   }
 
   async snapshot(input: SnapshotInput): Promise<ReconcilerSnapshot> {
@@ -318,6 +326,13 @@ export class ReconcilerHarness
     // commit. With a restored snapshot, useData hits cached values
     // immediately (no fetch starts on first render).
     this.renderOnce(state);
+
+    // Suspense heuristic — warn the FIRST time we see a `<Suspense>`
+    // boundary in the input element tree. The DataBridge contract is
+    // explicitly no-Suspense (`docs/proposals/v2/blueprint/03`), so a
+    // user-authored Suspense boundary will render its fallback into the
+    // IR with no way for us to clean that up. Warn loudly once.
+    this.maybeWarnSuspense(input.element);
 
     return { mountId: input.mountId, restoredFromSnapshot };
   }
@@ -523,6 +538,38 @@ export class ReconcilerHarness
     return state;
   }
 
+  /**
+   * Emit a one-shot warning if the input element tree statically contains
+   * a `<Suspense>` boundary. The DataBridge contract is no-Suspense — any
+   * fallback rendered into the IR is silently wrong from the model's
+   * perspective. We warn rather than throw because some apps legitimately
+   * want to wrap third-party React code that uses Suspense; they need to
+   * know what's getting into context.
+   *
+   * Static — Suspense returned from a function component is not caught.
+   * The mount-time scan covers the common case (user wraps their JSX in
+   * `<Suspense>`); dynamic Suspense remains a documented gap.
+   */
+  private maybeWarnSuspense(element: unknown): void {
+    // Walk every mount that hasn't warned yet — `element` may be from
+    // mount or rerender, and we key off whichever mount the call site
+    // belongs to.
+    for (const [mountId, state] of this.mounts) {
+      if (state.element !== element) continue;
+      if (this.suspenseWarnedMounts.has(mountId)) return;
+      if (!elementTreeContainsSuspense(element)) return;
+      this.suspenseWarnedMounts.add(mountId);
+      // eslint-disable-next-line no-console
+      console.warn(
+        `[@agentick/reconciler-react] mount "${mountId}" contains a <Suspense> boundary. ` +
+          `The DataBridge contract is no-Suspense — useData throws + the render-until-stable ` +
+          `loop awaits. A user-placed <Suspense> will render its fallback into the IR. ` +
+          `Remove the boundary or accept the fallback in model context.`,
+      );
+      return;
+    }
+  }
+
   private handleInvalidate(payload: Extract<ReconcilerInboxMessage, { type: "invalidate" }>): void {
     const state = this.mounts.get(payload.mountId);
     if (!state) return;
@@ -571,6 +618,36 @@ function isThenable(value: unknown): value is PromiseLike<unknown> {
     (typeof value === "object" || typeof value === "function") &&
     typeof (value as { then?: unknown }).then === "function"
   );
+}
+
+/**
+ * Heuristic scan of a React element tree for `<Suspense>` boundaries.
+ * Returns `true` if any descendant element's `type` is `React.Suspense`.
+ *
+ * Static — only sees Suspense boundaries present in the input element
+ * tree. Suspense returned from a function component's output is invisible
+ * until render. We accept that gap: this is a *warning* heuristic, not a
+ * correctness contract.
+ *
+ * Traversal stops at function components — we can't render them without
+ * the reconciler. The common case (a user wraps their tree in
+ * `<Suspense>` at the root, or inside a top-level layout) is caught.
+ */
+function elementTreeContainsSuspense(node: unknown): boolean {
+  if (node === null || node === undefined || typeof node === "boolean") return false;
+  if (typeof node === "string" || typeof node === "number") return false;
+  if (Array.isArray(node)) {
+    for (const child of node) if (elementTreeContainsSuspense(child)) return true;
+    return false;
+  }
+  if (typeof node !== "object") return false;
+  const el = node as { type?: unknown; props?: { children?: unknown } };
+  if (el.type === React.Suspense) return true;
+  // Walk children of intrinsics + fragments. Function components are
+  // opaque — we don't invoke them.
+  const children = el.props?.children;
+  if (children !== undefined && elementTreeContainsSuspense(children)) return true;
+  return false;
 }
 
 // ============================================================================

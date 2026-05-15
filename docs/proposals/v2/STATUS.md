@@ -86,12 +86,23 @@ up the right one.
   static element-tree scan (misses dynamic Suspense), and
   outer-Suspense sentinel (detection works but inner user-Suspense's
   unwrap-on-resolve doesn't fire with LegacyRoot, leaving fallback
-  stuck in IR). Removed from spec; documented "if you use `<Suspense>`,
-  fallbacks may appear in IR — verify with tests."
+  stuck in IR). Removed from spec.
+- ✓ **Suspense warning heuristic** added 2026-05-15.
+  `ReconcilerHarness.maybeWarnSuspense` scans the input element tree
+  for `React.Suspense` at mount + rerender; emits a one-shot
+  `console.warn` per mount. Static scan — Suspense returned from a
+  function component is still invisible. Catches the common case
+  (user wraps their JSX in `<Suspense>`) and gives a clear pointer to
+  the "no-Suspense DataBridge contract" rather than silently rendering
+  fallbacks into the model context. Tests in
+  `boundary-diagnostics.spec.tsx`.
 - ✓ **ErrorBoundary detection** — `error-boundary-active` info
   diagnostic emits via host config `onCaughtError`. Landed 2026-05-15.
-- **Custom lifecycle event dispatch** — `LifecycleCustom` shape exists
-  in spec; `LifecycleStore.dispatch` silently ignores unknown kinds.
+- ✓ **Custom lifecycle event dispatch** — `LifecycleStore.registerCustom`
+  + `useOnLifecycleCustom(kind, handler)` hook land 2026-05-15. Dispatching
+  a custom kind with no registered handler emits a one-shot
+  `console.warn` per kind so typos surface instead of being silently
+  dropped. Tests in `lifecycle.spec.tsx`.
 
 ### Spec gaps
 - **`@agentick/spec/guards`** — directory exists, stubs only. Type guards
@@ -129,14 +140,24 @@ up the right one.
   console-warning side effects. `react-devtools-core` is loaded via
   dynamic import (not a declared peer dep — install yourself when
   needed). Landed 2026-05-15.
-- **Content-block intrinsics** — `<text>`, `<image>`, `<code>`, `<json>`,
-  `<document>`, `<audio>`, `<video>` not yet contributors. They'd fold
-  into parent `MessageEntry.content` / `SectionEntry.content`.
+- ✓ **Content-block intrinsics** — all 14 content-block contributors
+  (`text`/`image`/`code`/`json`/`document`/`audio`/`video`/`reasoning`/
+  `csv`/`html`/`xml`/`user_action`/`system_event`/`state_change`/
+  `custom`) are registered in `createBuiltInRegistry()`.
+  `messageContributor` folds them into `MessageEntry.content` via
+  `ctx.collectContentBlocks()`; 15 tests in `content-blocks.spec.tsx`.
+  Landed 2026-05-15 (the line that used to live here was stale).
 - **Semantic HTML intrinsics** — `<strong>`, `<em>`, `<ul>`, etc. v1 has
   them; v2 design says they're a formatter concern (formatter harness
   consumes SemanticNode tree). Not wired.
-- **`format` JSX intrinsic typing** — using `<format formatter={...}>`
-  directly hits a TS error. `<FormatScope>` is the typed escape hatch.
+- ✓ **`format` JSX intrinsic typing** — confirmed as intentional. The
+  `format` intrinsic is INTERNAL; `<FormatScope>` / `<Markdown>` /
+  `<XML>` / `<PlainText>` are the only typed entry points and they all
+  funnel through one `internalIntrinsic()` helper that owns the unavoidable
+  cast. Wider IntrinsicElements augmentation for `<section>` /
+  `<message>` / `<text>` / etc. is a Phase-4-or-later concern — v2
+  test code uses `React.createElement(...)` for intrinsics by design.
+  Updated 2026-05-15.
 - **Long-lived primitives** (`<Cron>` / `<Webhook>` / `<EventListener>`)
   — declared via SubscriptionIntent in the snapshot; no JSX components
   yet.

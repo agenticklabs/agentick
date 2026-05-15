@@ -68,6 +68,21 @@ export class LifecycleStore {
   };
 
   /**
+   * Custom lifecycle kinds — `LifecycleCustom` events whose `kind` is a
+   * namespaced application-defined string. Keyed by exact kind match.
+   *
+   * Wired via `registerCustom(kind, handler)` (and the public
+   * `useOnLifecycleCustom` hook).
+   */
+  private readonly customHandlers = new Map<string, Set<AnyHandler>>();
+
+  /**
+   * Track which custom kinds have already produced an "unhandled" warning
+   * so a chatty dispatcher doesn't flood stderr.
+   */
+  private readonly warnedUnhandledKinds = new Set<string>();
+
+  /**
    * Currently-active tick-start event (set on dispatch, cleared on
    * tick-end). Used to catch up handlers registered mid-tick.
    */
@@ -106,6 +121,31 @@ export class LifecycleStore {
       this.handlers[kind].delete(wrapped);
       this.firedForTickStart.delete(wrapped);
       this.firedForExecutionStart.delete(wrapped);
+    };
+  }
+
+  /**
+   * Register a handler for an application-defined `LifecycleCustom`
+   * kind (namespaced string, e.g. `"app:my-app:phase-x"`). Returns an
+   * unsubscribe. Catch-up is NOT applied to custom kinds — application
+   * code owns the replay semantics if it needs them.
+   */
+  registerCustom(
+    kind: string,
+    handler: (event: LifecycleEvent) => void | Promise<void>,
+  ): () => void {
+    let bucket = this.customHandlers.get(kind);
+    if (!bucket) {
+      bucket = new Set();
+      this.customHandlers.set(kind, bucket);
+    }
+    const wrapped = handler as AnyHandler;
+    bucket.add(wrapped);
+    return () => {
+      const b = this.customHandlers.get(kind);
+      if (!b) return;
+      b.delete(wrapped);
+      if (b.size === 0) this.customHandlers.delete(kind);
     };
   }
 
@@ -153,11 +193,29 @@ export class LifecycleStore {
         for (const h of [...this.handlers.error]) await h(event);
         return;
       }
-      default:
-        // Custom event kinds — silently ignored. Custom dispatch is a
-        // future feature (the spec already documents `LifecycleCustom`
-        // for application-defined kinds).
+      default: {
+        // `LifecycleCustom` — application-defined kinds. The spec
+        // requires the kind to be namespaced (`"app:…"`). Dispatch to
+        // any handlers registered via `registerCustom(kind, …)`. If
+        // nothing is listening, log a one-shot warning so typos surface
+        // instead of silently dropping events.
+        const kind = event.kind;
+        const bucket = this.customHandlers.get(kind);
+        if (bucket && bucket.size > 0) {
+          for (const h of [...bucket]) await h(event);
+          return;
+        }
+        if (!this.warnedUnhandledKinds.has(kind)) {
+          this.warnedUnhandledKinds.add(kind);
+          // eslint-disable-next-line no-console
+          console.warn(
+            `[@agentick/reconciler-react] LifecycleEvent kind "${kind}" dispatched ` +
+              `with no registered handlers. Register one via ` +
+              `useOnLifecycleCustom("${kind}", handler).`,
+          );
+        }
         return;
+      }
     }
   }
 
@@ -175,6 +233,8 @@ export class LifecycleStore {
   /** Reset all state. Used on unmount. */
   clear(): void {
     for (const set of Object.values(this.handlers)) set.clear();
+    this.customHandlers.clear();
+    this.warnedUnhandledKinds.clear();
     this.activeTickStart = null;
     this.activeExecutionStart = null;
     this.firedForTickStart.clear();

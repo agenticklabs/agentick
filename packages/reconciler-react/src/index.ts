@@ -127,6 +127,7 @@ export {
   useOnError,
   useOnMount,
   useOnUnmount,
+  useOnLifecycleCustom,
 } from "./react/hooks/index.js";
 
 // Components

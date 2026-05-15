@@ -16,11 +16,32 @@
  * when sections should render as markdown but free-root content as XML,
  * for example.
  *
+ * The `format` intrinsic is INTERNAL — there is no JSX namespace
+ * declaration for it (`<format />` is intentionally a TS error). All
+ * authoring goes through `FormatScope` / `Markdown` / `XML` /
+ * `PlainText`. v2's wider IntrinsicElements augmentation is deferred
+ * to a later phase; see STATUS.md "Integration gaps" for the broader
+ * intrinsic-typing story.
+ *
  * @see docs/proposals/v2/blueprint/21-reconciler-implementation.md §Layer A (HostScope)
  */
 
 import React, { type ReactNode } from "react";
 import type { FormatPurpose, FormatterRef } from "@agentick/spec";
+
+/**
+ * Internal helper — emit a JSX intrinsic that v2 hasn't declared in the
+ * global IntrinsicElements namespace. Centralizes the unavoidable type
+ * cast so individual call sites stay readable.
+ */
+function internalIntrinsic(
+  type: string,
+  props: Readonly<Record<string, unknown>>,
+  children?: ReactNode,
+): React.ReactElement {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return React.createElement(type as any, props, children);
+}
 
 export interface FormatScopeProps {
   /**
@@ -40,8 +61,8 @@ export interface FormatScopeProps {
  * want descendants to use.
  */
 export function FormatScope({ formatter, purpose, children }: FormatScopeProps): React.ReactElement {
-  return React.createElement(
-    "format" as unknown as React.JSXElementConstructor<unknown>,
+  return internalIntrinsic(
+    "format",
     purpose ? { formatter, purpose } : { formatter },
     children,
   );

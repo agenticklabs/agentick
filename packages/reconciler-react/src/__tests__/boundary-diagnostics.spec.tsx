@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import React from "react";
 import type { ReactNode } from "react";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
@@ -139,5 +139,98 @@ describe("error-boundary-active diagnostic", () => {
     });
     const ebDiags = diagnostics.filter((d) => d.code === "error-boundary-active");
     expect(ebDiags).toHaveLength(1);
+  });
+});
+
+describe("Suspense warning heuristic", () => {
+  it("warns once at mount when the element tree contains <Suspense>", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const harness = await makeHarness();
+      await harness.mount({
+        mountId: "m_susp",
+        sessionId: "s",
+        element: React.createElement(
+          React.Suspense,
+          { fallback: React.createElement("message", { role: "system" }, "loading") },
+          React.createElement("message", { role: "user" }, "child"),
+        ),
+        bridges: stubBridges(),
+      });
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn.mock.calls[0]?.[0]).toContain("Suspense");
+      expect(warn.mock.calls[0]?.[0]).toContain("m_susp");
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("warns only once per mount even after rerender", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const harness = await makeHarness();
+      const el = React.createElement(
+        React.Suspense,
+        { fallback: React.createElement("message", { role: "system" }, "loading") },
+        React.createElement("message", { role: "user" }, "first"),
+      );
+      await harness.mount({
+        mountId: "m_susp_rr",
+        sessionId: "s",
+        element: el,
+        bridges: stubBridges(),
+      });
+      await harness.rerender({
+        mountId: "m_susp_rr",
+        element: React.createElement(
+          React.Suspense,
+          { fallback: React.createElement("message", { role: "system" }, "loading") },
+          React.createElement("message", { role: "user" }, "second"),
+        ),
+      });
+      expect(warn).toHaveBeenCalledTimes(1);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("does not warn when there is no Suspense in the tree", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const harness = await makeHarness();
+      await harness.mount({
+        mountId: "m_nosusp",
+        sessionId: "s",
+        element: React.createElement("message", { role: "user" }, "hi"),
+        bridges: stubBridges(),
+      });
+      expect(warn).not.toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("detects Suspense nested inside an intrinsic wrapper", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const harness = await makeHarness();
+      await harness.mount({
+        mountId: "m_nested",
+        sessionId: "s",
+        element: React.createElement(
+          "section",
+          { id: "outer" },
+          React.createElement(
+            React.Suspense,
+            { fallback: React.createElement("message", { role: "system" }, "wait") },
+            React.createElement("message", { role: "user" }, "deep"),
+          ),
+        ),
+        bridges: stubBridges(),
+      });
+      expect(warn).toHaveBeenCalledTimes(1);
+    } finally {
+      warn.mockRestore();
+    }
   });
 });

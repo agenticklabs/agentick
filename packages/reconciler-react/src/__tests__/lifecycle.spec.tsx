@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import React, { useState } from "react";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
 import { ReconcilerHarness } from "../harness/reconciler-harness.js";
@@ -128,6 +128,60 @@ describe("LifecycleStore — dispatch + catch-up unit tests", () => {
       "execution-end": 0,
       error: 1,
     });
+  });
+
+  it("custom kinds: registerCustom + dispatch invoke matching handlers", async () => {
+    const store = new LifecycleStore();
+    const seen: unknown[] = [];
+    store.registerCustom("app:demo:phase-x", (ev) => {
+      seen.push(ev);
+    });
+    await store.dispatch({ kind: "app:demo:phase-x", payload: 42 });
+    expect(seen).toEqual([{ kind: "app:demo:phase-x", payload: 42 }]);
+  });
+
+  it("custom kinds: unsubscribe stops further dispatches", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const store = new LifecycleStore();
+      const seen: unknown[] = [];
+      const off = store.registerCustom("app:demo:phase-x", (ev) => {
+        seen.push(ev);
+      });
+      await store.dispatch({ kind: "app:demo:phase-x" });
+      off();
+      await store.dispatch({ kind: "app:demo:phase-x" });
+      expect(seen).toHaveLength(1);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("custom kinds: unknown kind with no handler warns once per kind", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const store = new LifecycleStore();
+      await store.dispatch({ kind: "app:unknown:event-1" });
+      await store.dispatch({ kind: "app:unknown:event-1" });
+      await store.dispatch({ kind: "app:unknown:event-2" });
+      expect(warn).toHaveBeenCalledTimes(2);
+      expect(warn.mock.calls[0]?.[0]).toContain("app:unknown:event-1");
+      expect(warn.mock.calls[1]?.[0]).toContain("app:unknown:event-2");
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("custom kinds: registered handler suppresses the unhandled warning", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const store = new LifecycleStore();
+      store.registerCustom("app:handled:kind", () => {});
+      await store.dispatch({ kind: "app:handled:kind" });
+      expect(warn).not.toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+    }
   });
 });
 
@@ -331,6 +385,46 @@ describe("Lifecycle hooks — integration through ReconcilerHarness", () => {
       event: { kind: "execution-end", executionId: "e1", outcome: "succeeded" },
     });
     expect(events).toEqual(["e1:succeeded"]);
+  });
+
+  it("useOnLifecycleCustom fires for matching namespaced kinds", async () => {
+    const { useOnLifecycleCustom } = await import("../react/hooks/use-on-lifecycle-custom.js");
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const harness = await makeHarness();
+      const seen: unknown[] = [];
+
+      function App() {
+        useOnLifecycleCustom("app:demo:phase-x", (ev) => {
+          seen.push(ev);
+        });
+        return React.createElement("message", { role: "user" }, "ok");
+      }
+
+      await harness.mount({
+        mountId: "m_custom",
+        sessionId: "s",
+        element: React.createElement(App),
+        bridges: stubBridges(),
+      });
+      await flush();
+
+      await harness.notifyLifecycle({
+        mountId: "m_custom",
+        event: { kind: "app:demo:phase-x", payload: { n: 1 } },
+      });
+      // Non-matching kind: handler must not fire; harness warns once.
+      await harness.notifyLifecycle({
+        mountId: "m_custom",
+        event: { kind: "app:demo:other-kind" },
+      });
+
+      expect(seen).toEqual([{ kind: "app:demo:phase-x", payload: { n: 1 } }]);
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn.mock.calls[0]?.[0]).toContain("app:demo:other-kind");
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   it("unmount clears the lifecycle store; later dispatch is a no-op", async () => {

@@ -9,3 +9,4 @@ export { useOnExecutionStart } from "./use-on-execution-start.js";
 export { useOnExecutionEnd } from "./use-on-execution-end.js";
 export { useOnError } from "./use-on-error.js";
 export { useOnMount, useOnUnmount } from "./use-on-mount.js";
+export { useOnLifecycleCustom } from "./use-on-lifecycle-custom.js";
