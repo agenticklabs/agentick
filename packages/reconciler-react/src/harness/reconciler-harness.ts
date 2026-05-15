@@ -18,7 +18,8 @@
  * @see docs/proposals/v2/blueprint/21-reconciler-implementation.md
  */
 
-import type { ReactNode } from "react";
+import React, { type ReactNode } from "react";
+import { ulid } from "@agentick/runtime";
 import type {
   EventBus,
   HookBridges,
@@ -29,6 +30,7 @@ import type {
   OperationJournal,
   Operation,
   MessageInbox,
+  ReconcileDiagnostic,
   ReconcilerInboxMessage,
   ReconcilerProtocol,
   ReconcilerSnapshot,
@@ -54,6 +56,8 @@ import { collect } from "../collect/collect.js";
 import { ContributorRegistry } from "../collect/registry.js";
 import { createBuiltInRegistry } from "../collect/contributors/built-ins.js";
 import type { Contributor } from "../collect/contributor.js";
+import { BridgeContext } from "../react/bridge-context.js";
+import { InMemoryDataBridge } from "../bridges/in-memory-data-bridge.js";
 
 interface MountState {
   readonly mountId: string;
@@ -66,12 +70,26 @@ interface MountState {
   readonly registry: ContributorRegistry;
   readonly rootScope: HostScope;
   strictNoSuspense: boolean;
+  /**
+   * Captures the first render error surfaced via the host config's
+   * `onUncaughtError` callback. Cleared at the start of each render
+   * iteration. Set when a component throws a non-Promise error (real
+   * bugs, missing-bridge errors, etc.).
+   */
+  renderError: unknown;
 }
 
 export interface ReconcilerHarnessOptions {
   /** Override the built-in contributor set with caller-supplied registry. */
   readonly registry?: ContributorRegistry;
 }
+
+/**
+ * Default cap on render-until-stable iterations. Exceeding this means a
+ * component is requesting data that can't settle (probably a bug —
+ * e.g., `useData` calls that depend on each other unboundedly).
+ */
+const DEFAULT_MAX_ITERATIONS = 10;
 
 export class ReconcilerHarness
   extends BaseHarness<"reconciler">
@@ -122,14 +140,17 @@ export class ReconcilerHarness
       const state = this.mountState(i.mountId);
       state.element = i.element as ReactNode;
       if (i.elementVersion !== undefined) state.elementVersion = i.elementVersion;
-      state.reconciler.render(state.element, state.root);
+      this.renderOnce(state);
     });
   }
 
   async renderTree(input: RenderTreeInput): Promise<RenderTreeResult> {
     const state = this.mountState(input.mountId);
     const op: Operation<RenderTreeInput, RenderTreeResult> = {
-      opId: input.opId ?? `reconciler:render:${input.mountId}:${Date.now()}`,
+      // Each renderTree call must get a unique opId — Date.now() at
+      // millisecond precision collides for back-to-back calls. ULID is
+      // monotonic + collision-safe.
+      opId: input.opId ?? `reconciler:render:${input.mountId}:${ulid()}`,
       surface: "reconciler",
       name: "reconciler:command:render-tree",
       scope: { sessionId: state.bridges.session.id, executionId: input.executionId },
@@ -240,28 +261,54 @@ export class ReconcilerHarness
       path: [`mount:${input.mountId}`],
     });
     const container = createContainer({ mountId: input.mountId, rootScope });
-    const reconciler = createReconciler({ container, idPrefix: input.mountId });
-    const root = reconciler.createRoot();
+    // We need a mutable handle to the future MountState so the
+    // host-config error callbacks can write `renderError` on it. The
+    // state object is constructed first, then the reconciler is
+    // attached.
     const state: MountState = {
       mountId: input.mountId,
       element: input.element as ReactNode,
       ...(input.elementVersion !== undefined ? { elementVersion: input.elementVersion } : {}),
       bridges: input.bridges,
       container,
-      reconciler,
-      root,
+      reconciler: null as unknown as Reconciler,
+      root: null as unknown as FiberRoot,
       registry: this.registry,
       rootScope,
       strictNoSuspense: input.strictNoSuspense ?? false,
+      renderError: null,
     };
+    const reconciler = createReconciler({
+      container,
+      idPrefix: input.mountId,
+      onUncaughtError: (err) => {
+        // Only retain the first render error per iteration; subsequent
+        // errors during the same render are typically cascades.
+        if (state.renderError === null) state.renderError = err;
+      },
+      onCaughtError: () => {
+        // Errors caught by an in-tree <ErrorBoundary> are handled by
+        // user code; the framework surfaces them as info diagnostics
+        // via the host config rather than blocking the render.
+      },
+      onRecoverableError: () => {
+        // React 19 emits these for non-fatal issues (hydration mismatch,
+        // missing keys, etc.). No-op here — they're advisory.
+      },
+    });
+    (state as { reconciler: Reconciler }).reconciler = reconciler;
+    (state as { root: FiberRoot }).root = reconciler.createRoot();
     this.mounts.set(input.mountId, state);
 
-    // Initial render so the host tree is populated.
-    state.reconciler.render(state.element, state.root);
+    // First render is part of mount so the host tree exists and any
+    // synchronous components (no useData blocking) populate the tree
+    // before renderTree is ever called.
+    this.renderOnce(state);
 
     const restoredFromSnapshot = input.snapshot !== undefined;
     if (restoredFromSnapshot) {
-      // Phase 3.10+: apply snapshot before first renderTree.
+      // Phase 3.10+: apply snapshot.hookStates before the first
+      // renderTree. Stored on state for now; restore() is a no-op.
       void input.snapshot;
     }
 
@@ -269,27 +316,107 @@ export class ReconcilerHarness
   }
 
   private async renderTreeBody(
-    _input: RenderTreeInput,
+    input: RenderTreeInput,
     state: MountState,
   ): Promise<RenderTreeResult> {
-    // Synchronous render (no useData loop yet — Phase 3.10).
-    state.reconciler.render(state.element, state.root);
-    const result = collect({
+    const maxIterations = input.maxIterations ?? DEFAULT_MAX_ITERATIONS;
+    const diagnostics: ReconcileDiagnostic[] = [];
+    let iterations = 0;
+    let hitMax = false;
+
+    // Render-until-stable. The DataBridge tracks in-flight Promises
+    // independently of whether React caught the throw — so the loop's
+    // termination condition is "bridge has no pending fetches",
+    // regardless of React's error handling for thrown Promises.
+    for (iterations = 0; iterations < maxIterations; iterations++) {
+      state.renderError = null;
+      this.renderOnce(state);
+
+      const dataBridge = state.bridges.data;
+      const pending =
+        dataBridge instanceof InMemoryDataBridge ? dataBridge.pending() : null;
+
+      // If the render produced a real error AND no pending data
+      // explains it, terminate with RenderFailed.
+      if (state.renderError !== null && (pending === null || pending.length === 0)) {
+        throw {
+          _tag: "RenderFailed",
+          cause: state.renderError,
+        };
+      }
+
+      if (pending === null) {
+        // Custom DataBridge implementation without pending-tracking —
+        // single-pass render. Future work: add `hasPending` to the
+        // protocol so any bridge can drive the loop.
+        break;
+      }
+      if (pending.length === 0) break;
+
+      // Await every in-flight fetch (allSettled — failures cache as
+      // rejected entries; the next render throws them synchronously
+      // and the loop will see no pending and terminate).
+      await Promise.allSettled(pending);
+    }
+
+    if (iterations >= maxIterations) {
+      hitMax = true;
+      diagnostics.push({
+        severity: "warning",
+        code: "max-iterations",
+        message: `render-until-stable exceeded ${maxIterations} iterations`,
+      });
+    }
+
+    // One last collect against the now-stable host tree.
+    const collected = collect({
       roots: state.container.children,
       registry: state.registry,
       rootScope: state.rootScope,
     });
-    return {
-      tree: result.tree,
-      diagnostics: result.diagnostics.map((d) => ({
+    for (const d of collected.diagnostics) {
+      diagnostics.push({
         severity: d.severity,
         code: d.code ?? "diagnostic",
         message: d.message,
         ...(d.path !== undefined ? { path: d.path } : {}),
         ...(d.metadata !== undefined ? { metadata: d.metadata } : {}),
-      })),
-      iterations: 1,
+      });
+    }
+
+    return {
+      tree: collected.tree,
+      diagnostics,
+      iterations: hitMax ? maxIterations : iterations + 1,
     };
+  }
+
+  /**
+   * Render the mount once with the BridgeProvider wrap.
+   *
+   * Errors thrown during render (including the Promises that `useData`
+   * uses for the no-Suspense blocking primitive) are caught at the
+   * render() call site, NOT via the host-config's onUncaughtError. This
+   * matches the v1 pattern and is necessary because react-reconciler
+   * 0.33's onUncaughtError can fire during a retry that React performs
+   * for thrown Promises — which would cascade into runaway re-renders.
+   * The try/catch here short-circuits that retry.
+   */
+  private renderOnce(state: MountState): void {
+    const wrapped = React.createElement(
+      BridgeContext.Provider,
+      { value: state.bridges },
+      state.element,
+    );
+    try {
+      state.reconciler.render(wrapped, state.root);
+    } catch (err) {
+      // Promises from useData are tracked via the bridge; the loop
+      // detects them via hasPending(). Plain errors are real failures.
+      if (!isThenable(err)) {
+        if (state.renderError === null) state.renderError = err;
+      }
+    }
   }
 
   private mountState(mountId: string): MountState {
@@ -314,4 +441,12 @@ function collectKnobs(bridges: HookBridges): Readonly<Record<string, unknown>> {
   const out: Record<string, unknown> = {};
   for (const k of bridges.knobs.list()) out[k.id] = k.value;
   return out;
+}
+
+function isThenable(value: unknown): value is PromiseLike<unknown> {
+  return (
+    value !== null &&
+    (typeof value === "object" || typeof value === "function") &&
+    typeof (value as { then?: unknown }).then === "function"
+  );
 }

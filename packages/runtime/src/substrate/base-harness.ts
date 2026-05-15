@@ -246,9 +246,13 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface> {
       const result = await composed(op.input);
       return this.terminate<R>(op, scope, "succeeded", { result });
     } catch (err) {
-      const wrapped = err instanceof OperationOutcomeError ? err : undefined;
-      if (wrapped) throw err;
-      await this.terminate<R>(op, scope, "failed", { error: this.normalizeError(err) });
+      if (err instanceof OperationOutcomeError) throw err;
+      // Publish the terminal:failed envelope but re-throw the ORIGINAL
+      // error (typically a tagged-union value the caller wants to
+      // pattern-match). `terminate` would wrap into OperationOutcomeError
+      // via replayTerminal; the publish-only helper keeps the original
+      // shape visible at the call site.
+      await this.publishTerminal(op, scope, "failed", { error: this.normalizeError(err) });
       throw err;
     }
   }
@@ -334,11 +338,26 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface> {
     outcome: CommandOutcome,
     payload: Record<string, unknown>,
   ): Promise<R> {
+    await this.publishTerminal(op, scope, outcome, payload);
+    return this.replayTerminal<R>(this.payloadToTerminal(outcome, payload));
+  }
+
+  /**
+   * Publish-only terminal — emits the `terminal` envelope but does not
+   * throw / return a typed result. Used on the failure path where the
+   * caller wants to re-throw the original error after journaling the
+   * terminal record.
+   */
+  private async publishTerminal(
+    op: Operation<unknown, unknown, unknown>,
+    scope: EventScope,
+    outcome: CommandOutcome,
+    payload: Record<string, unknown>,
+  ): Promise<void> {
     const error =
       outcome === "failed" ? (payload.error as ProtocolEvent["error"]) : undefined;
     const envelope = this.makeEvent(op, "terminal", scope, { payload, outcome, error });
     await this.publish(envelope);
-    return this.replayTerminal<R>(this.payloadToTerminal(outcome, payload));
   }
 
   private payloadToTerminal(

@@ -51,10 +51,27 @@ export interface InMemoryDataBridgeOptions {
 
 export class InMemoryDataBridge implements DataBridge {
   private readonly cache = new Map<string, Entry>();
+  private readonly pendingPromises = new Set<Promise<unknown>>();
   private readonly options: InMemoryDataBridgeOptions;
 
   constructor(options: InMemoryDataBridgeOptions = {}) {
     this.options = options;
+  }
+
+  /**
+   * Are any fetches in flight? Used by the reconciler's
+   * render-until-stable loop to decide whether to await + retry.
+   */
+  hasPending(): boolean {
+    return this.pendingPromises.size > 0;
+  }
+
+  /**
+   * Snapshot of in-flight Promises. The render-until-stable loop awaits
+   * `Promise.allSettled(pending())` before retrying.
+   */
+  pending(): readonly Promise<unknown>[] {
+    return [...this.pendingPromises];
   }
 
   resolve<T>(key: string, fetcher: () => Promise<T>, options: DataResolveOptions = {}): T {
@@ -74,10 +91,15 @@ export class InMemoryDataBridge implements DataBridge {
     }
 
     // Cache miss: start the fetch, throw the in-flight Promise. The
-    // reconciler's render-until-stable loop is expected to catch it.
-    const promise = (async () => {
-      try {
-        const value = await fetcher();
+    // reconciler's render-until-stable loop tracks pending state via
+    // hasPending() + pending() — it does NOT need to catch the thrown
+    // value to know a wait is required.
+    let resolveSettled!: () => void;
+    const settled = new Promise<void>((r) => {
+      resolveSettled = r;
+    });
+    void fetcher().then(
+      (value) => {
         this.cache.set(key, {
           status: "fulfilled",
           value,
@@ -85,22 +107,28 @@ export class InMemoryDataBridge implements DataBridge {
           ...(options.ttl !== undefined ? { ttl: options.ttl } : {}),
           ...(options.tag !== undefined ? { tag: options.tag } : {}),
         });
-      } catch (err) {
+        this.pendingPromises.delete(settled);
+        this.options.onSettled?.(key);
+        resolveSettled();
+      },
+      (err) => {
         this.cache.set(key, {
           status: "rejected",
           error: err,
           ...(options.tag !== undefined ? { tag: options.tag } : {}),
         });
-      } finally {
+        this.pendingPromises.delete(settled);
         this.options.onSettled?.(key);
-      }
-    })();
+        resolveSettled();
+      },
+    );
+    this.pendingPromises.add(settled);
     this.cache.set(key, {
       status: "pending",
-      promise,
+      promise: settled,
       ...(options.tag !== undefined ? { tag: options.tag } : {}),
     });
-    throw promise;
+    throw settled;
   }
 
   invalidate(key: string): void {

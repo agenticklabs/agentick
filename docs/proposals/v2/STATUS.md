@@ -50,12 +50,13 @@ Phase 3  ■ in progress — RECONCILER HARNESS
          ✓ 3.8 Built-in contributors (section/message/tool/resource/
                output/mcp/model)
          ✓ 3.9 collect walker + foldFragments → RenderedTree
-         ✓ 3.10a ReconcilerHarness BaseHarness subclass (sync render
-                 path — useData async loop is the next layer)
+         ✓ 3.10a ReconcilerHarness BaseHarness subclass
          ✓ 3.10b InMemoryDataBridge + stub bridges
-         ✗ 3.10c render-until-stable loop (useData async resolution)
-         ✗ 3.11+ Hook bridges (useData/useKnob/useTimeline/useLoopControl)
+         ✓ 3.10c render-until-stable loop (no-Suspense useData async path)
+         ✓ 3.11  BridgeContext + 4 hooks (useData/useKnob/useTimeline/
+                 useLoopControl/useSession)
          ✗ 3.12+ <Markdown>/<XML> formatter provider components
+         ✗ 3.15+ Snapshot/restore concrete impls (hook state capture)
          ✗ 3.16+ runReconcilerConformance + bridge conformance
 Phase 4  □ Tool executor (was Phase 3) + other harnesses
 Phase 5  □ Adapters, cluster, gateway

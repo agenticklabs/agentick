@@ -69,6 +69,21 @@ export {
 } from "./bridges/stub-bridges.js";
 export type { StubBridgesOptions } from "./bridges/stub-bridges.js";
 
+// Bridge context + hooks
+export {
+  BridgeContext,
+  BridgeProvider,
+  useBridges,
+} from "./react/bridge-context.js";
+export type { BridgeProviderProps } from "./react/bridge-context.js";
+export {
+  useData,
+  useKnob,
+  useTimeline,
+  useLoopControl,
+  useSession,
+} from "./react/hooks/index.js";
+
 // Layer C — Harness
 export { ReconcilerHarness } from "./harness/reconciler-harness.js";
 export type { ReconcilerHarnessOptions } from "./harness/reconciler-harness.js";
