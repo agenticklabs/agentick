@@ -23,5 +23,8 @@
   },
   "dependencies": {
     "@agentick/spec": "workspace:*"
+  },
+  "peerDependencies": {
+    "vitest": "^4.0.0"
   }
 }

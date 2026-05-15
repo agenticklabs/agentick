@@ -713,6 +713,16 @@ importers:
         specifier: ^4.0.18
         version: 4.0.18(@opentelemetry/api@1.9.0)(@types/node@22.19.7)(happy-dom@17.6.3)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.4)
 
+  packages/runtime:
+    dependencies:
+      '@agentick/spec':
+        specifier: workspace:*
+        version: link:../spec
+    devDependencies:
+      '@agentick/spec-conformance':
+        specifier: workspace:*
+        version: link:../spec-conformance
+
   packages/sandbox:
     dependencies:
       '@agentick/core':
@@ -862,6 +872,9 @@ importers:
       '@agentick/spec':
         specifier: workspace:*
         version: link:../spec
+      vitest:
+        specifier: ^4.0.0
+        version: 4.0.18(@opentelemetry/api@1.9.0)(@types/node@25.0.9)(happy-dom@17.6.3)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.4)
 
   packages/tui:
     dependencies:

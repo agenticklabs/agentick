@@ -1,0 +1,51 @@
+{
+  "name": "@agentick/runtime",
+  "version": "0.0.0",
+  "description": "In-process substrate (MemoryJournal, LocalEventBus, LocalInbox, BaseHarness) for Agentick v2. The default implementation of the @agentick/spec protocol interfaces.",
+  "keywords": [
+    "agent",
+    "ai",
+    "agentick",
+    "runtime",
+    "substrate",
+    "harness"
+  ],
+  "license": "MIT",
+  "author": "Ryan Lindgren",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/agenticklabs/agentick.git",
+    "directory": "packages/runtime"
+  },
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "main": "src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "publishConfig": {
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "import": "./dist/index.js",
+        "default": "./dist/index.js"
+      }
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.build.json --noEmit"
+  },
+  "dependencies": {
+    "@agentick/spec": "workspace:*"
+  },
+  "devDependencies": {
+    "@agentick/spec-conformance": "workspace:*"
+  }
+}

@@ -1,7 +1,7 @@
 # Agentick v2 — Implementation Status
 
 **Branch:** `feat/v2`
-**Last updated:** 2026-05-15 (later session)
+**Last updated:** 2026-05-15 (Phase 2 substrate landed)
 
 This is the **running progress log** for v2 implementation. Update it
 every session. New contributors / sessions read this first.
@@ -35,9 +35,12 @@ Phase 1  ■ in progress — spec package type population
   ✗ Channels, Timeline, Knobs, ReconcilerSnapshot, SessionRecord
     (later phases)
 
-Phase 2  □ ready to start once memory substrate is needed
+Phase 2  ✓ in-memory substrate — MemoryJournal, LocalEventBus,
+         LocalInbox, BaseHarness implemented in @agentick/runtime.
+         Conformance suites populated for journal + inbox; 82/82 tests
+         green; full workspace typecheck clean.
 Phase 3  □ RECONCILER HARNESS (was tool executor; reprioritized 2026-05-14)
-         ready to start once Phase 1 reconciler types + Phase 2 substrate land
+         unblocked — Phase 1c types + Phase 2 substrate both landed.
 Phase 4  □ Tool executor (was Phase 3) + other harnesses
 Phase 5  □ Adapters, cluster, gateway
 Phase 6  □ v1 sunset
@@ -100,6 +103,86 @@ packages/spec-conformance/                              ✓ scaffolded (private:
 
 .changeset/config.json                                  ✓ @agentick/spec in fixed group
 ```
+
+### Code (Phase 2 in-memory substrate, 2026-05-15)
+
+```
+packages/runtime/                                       ✓ new package
+  package.json                                          deps: @agentick/spec
+                                                        devDeps: @agentick/spec-conformance
+  tsconfig.json + tsconfig.build.json
+  README.md
+  src/index.ts                                          public exports
+  src/substrate/
+    ulid.ts                                             lex-sortable id gen
+    query.ts                                            EventQuery matcher
+                                                        (exact|prefix|segments|wildcard)
+    memory-journal.ts                                   MemoryJournal
+                                                        (ring buffer, idempotency map,
+                                                         tail subscribers, findOrphaned,
+                                                         bounded retention)
+    local-event-bus.ts                                  LocalEventBus
+                                                        (per-subscriber bounded buffer,
+                                                         lazy fan-out, 3 overflow strategies)
+    local-inbox.ts                                      LocalInbox
+                                                        (address registry, messageId
+                                                         idempotency cache w/ TTL,
+                                                         tell + ask + timeout)
+    base-harness.ts                                     BaseHarness, HandlerRegistry,
+                                                        MiddlewareChain, mergeVerdict,
+                                                        OperationOutcomeError
+                                                        (5 surfaces wired; phase contract;
+                                                         idempotent replay; verdict merge
+                                                         veto > replace > defer > proceed;
+                                                         JournalingPolicy honored;
+                                                         override map with longest-prefix)
+  src/__tests__/
+    memory-journal.spec.ts                              conformance + capacity tests
+    local-event-bus.spec.ts                             pub/sub + buffer + abort
+    local-inbox.spec.ts                                 conformance
+    base-harness.spec.ts                                phase contract, idempotency,
+                                                        verdict merge, middleware
+                                                        composition, inbox dispatch
+
+packages/spec-conformance/                              ✓ bodies populated
+  src/journal.ts                                        runJournalConformance
+                                                        (append/read, idempotency, tail,
+                                                         crash recovery)
+  src/inbox.ts                                          runInboxConformance
+                                                        (registration, tell, ask, timeout,
+                                                         handler error, idempotency)
+  src/harness.ts                                        DEFERRED to Phase 3
+                                                        (needs a concrete harness driver)
+  src/renderer.ts                                       DEFERRED to Phase 3
+```
+
+**Decisions baked in this session:**
+
+- **Promise/AsyncIterable end-to-end.** No Effect in runtime yet. The
+  blueprint reserves Effect for higher layers (Scope/Span integration);
+  the in-memory substrate doesn't need it. If a real case demands
+  cancellable Effects, we layer them in then.
+- **Idempotency dedup is per `(opId, phase)`, not per envelope id.** Same
+  operation replaying the same phase is a no-op. Same opId in different
+  phases is normal (requested → terminal).
+- **`emit` returns Promise<void>** so concrete harnesses can await
+  delivery. Discrete events still skip the `before` handler/middleware
+  chain — they're light-path only.
+- **`OperationOutcomeError`** is the runtime's signal for non-success
+  terminals (failed | canceled | vetoed | deferred). `succeeded` and
+  `replaced` return the result directly via the call.
+- **Journaling override map** supports exact name OR longest-prefix
+  matching. Lets harnesses tag noisy event families ("session:stream:")
+  as `bus-only` without enumerating every leaf.
+- **`runHarnessConformance` deferred to Phase 3.** It needs a concrete
+  harness to drive; the runtime tests cover the BaseHarness contract in
+  the meantime.
+
+**Status check:**
+- `pnpm vitest run packages/runtime packages/spec` — 82/82 green
+  (24 prior spec + 23 phase-1c spec + 12 journal + 9 inbox + 4 bus + 9 base-harness + 1 version)
+- `pnpm -r typecheck` — all packages green
+- v1 packages unaffected
 
 ### Code (Phase 1c reconciler-facing wire types, 2026-05-15)
 

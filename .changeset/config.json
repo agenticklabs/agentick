@@ -6,6 +6,7 @@
     [
       "agentick",
       "@agentick/spec",
+      "@agentick/runtime",
       "@agentick/kernel",
       "@agentick/shared",
       "@agentick/core",
