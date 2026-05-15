@@ -43,7 +43,10 @@ Phase 3  ■ in progress — RECONCILER HARNESS
          ✓ 3.1 ReconcilerProtocol + I/O + errors + inbox messages
          ✓ 3.2 ReconcilerSnapshot + diagnostics
          ✓ 3.3 HookBridges (DataBridge no-Suspense contract)
-         ✗ 3.4+ packages/reconciler-react implementation
+         ✓ 3.4 @agentick/reconciler-react package scaffold
+         ✓ 3.5 host layer (HostInstance / HostScope / Container)
+         ✓ 3.6 host-config + react-reconciler init (React 19)
+         ✗ 3.7+ Contributor protocol + collect + harness wrap
 Phase 4  □ Tool executor (was Phase 3) + other harnesses
 Phase 5  □ Adapters, cluster, gateway
 Phase 6  □ v1 sunset
