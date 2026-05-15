@@ -14,8 +14,6 @@ import type {
   ReconcilerInboxMessage,
   ReconcilerProtocol,
   ReconcilerSnapshot,
-  RenderResourceInput,
-  RenderResourceResult,
   RenderTreeInput,
   RenderTreeResult,
   RenderToStringInput,
@@ -73,7 +71,7 @@ describe("@agentick/spec — reconciler protocol", () => {
     });
   });
 
-  describe("RenderToString / RenderResource", () => {
+  describe("RenderToString", () => {
     it("RenderToStringInput requires a query", () => {
       const input: RenderToStringInput = {
         mountId: "m_1",
@@ -90,20 +88,6 @@ describe("@agentick/spec — reconciler protocol", () => {
       };
       const payload: RenderToStringPayload = result.payload;
       expect(payload.text).toBe("# Hi");
-    });
-
-    it("RenderResourceInput identifies by resourceId", () => {
-      const input: RenderResourceInput = {
-        mountId: "m_1",
-        resourceId: "res.cv",
-      };
-      const result: RenderResourceResult = {
-        content: [{ type: "text", text: "ok" }],
-        diagnostics: [],
-        iterations: 1,
-      };
-      expect(input.resourceId).toBe("res.cv");
-      expect(result.content).toHaveLength(1);
     });
   });
 
@@ -198,9 +182,8 @@ describe("@agentick/spec — reconciler protocol", () => {
         { _tag: "SnapshotIncompatible", specVersion: "2025-01-01" },
         { _tag: "BridgeUnavailable", bridge: "mcp", hook: "useMCP" },
         { _tag: "FormatterFailed", cause: "missing renderer" },
-        { _tag: "ResourceNotFound", resourceId: "res.x" },
       ];
-      expect(errs).toHaveLength(11);
+      expect(errs).toHaveLength(10);
     });
   });
 
@@ -363,13 +346,12 @@ describe("@agentick/spec — reconciler protocol", () => {
         "rerender",
         "renderTree",
         "renderToString",
-        "renderResource",
         "notifyLifecycle",
         "unmount",
         "snapshot",
         "restore",
       ];
-      expect(required).toHaveLength(9);
+      expect(required).toHaveLength(8);
     });
   });
 });

@@ -1,8 +1,10 @@
 /**
  * Resource contributor — `<resource>` intrinsic.
  *
- * Produces a `ResourceDeclaration`. Resource content is rendered on
- * demand via `renderResource`, not eagerly folded into context.
+ * Produces a `ResourceDeclaration`. Resource content is resolved by
+ * the runtime on demand via `handlerRef` (same pattern as tool
+ * handlers) — not eagerly folded into context, and not the reconciler's
+ * concern.
  */
 
 import type { ResourceDeclaration } from "@agentick/spec";

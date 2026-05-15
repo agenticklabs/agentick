@@ -73,9 +73,10 @@ Most are addressed later — none of them gate the next priority
 up the right one.
 
 ### Stubs / placeholders to flesh out
-- **renderToString / renderResource** return spec-shaped empty payloads
-  with `*-not-implemented` warning diagnostics. Need real impls before
-  free-root rendering ships.
+- ~~renderToString / renderResource return spec-shaped empty payloads~~
+  ✓ renderToString implemented 2026-05-15 with default markdown/xml/text
+  serializer. renderResource dropped — over-specified; resource content
+  resolution is the runtime/MCP layer's concern via `handlerRef`.
 - **Snapshot/restore hook-state capture**. `ReconcilerSnapshot.hookStates`
   is always empty, `dataCache` always empty. Hibernate-and-resume is
   shape-conformant but doesn't preserve component state yet.

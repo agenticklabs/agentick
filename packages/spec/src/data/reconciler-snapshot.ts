@@ -163,7 +163,7 @@ export interface ReconcileDiagnostic {
 }
 
 // ============================================================================
-// Free-root render output (renderToString / renderResource)
+// Free-root render output (renderToString)
 // ============================================================================
 
 /**

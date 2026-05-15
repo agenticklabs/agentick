@@ -34,8 +34,6 @@ import type {
   ReconcilerInboxMessage,
   ReconcilerProtocol,
   ReconcilerSnapshot,
-  RenderResourceInput,
-  RenderResourceResult,
   RenderTreeInput,
   RenderTreeResult,
   RenderToStringInput,
@@ -163,37 +161,15 @@ export class ReconcilerHarness
   }
 
   async renderToString(input: RenderToStringInput): Promise<RenderToStringResult> {
-    // Free-root rendering — Phase 3.10+. Stub returns spec-conformant
-    // empty payload + a diagnostic explaining what's not yet wired.
-    const _state = this.mountState(input.mountId);
-    void _state;
-    return {
-      payload: { text: "", mimeType: "text/plain" },
-      diagnostics: [
-        {
-          severity: "warning",
-          code: "render-to-string-not-implemented",
-          message: "renderToString is not yet implemented; returning empty payload",
-        },
-      ],
-      iterations: 0,
+    const state = this.mountState(input.mountId);
+    const op: Operation<RenderToStringInput, RenderToStringResult> = {
+      opId: input.opId ?? `reconciler:render-to-string:${input.mountId}:${ulid()}`,
+      surface: "reconciler",
+      name: "reconciler:command:render-to-string",
+      scope: { sessionId: state.bridges.session.id },
+      input,
     };
-  }
-
-  async renderResource(input: RenderResourceInput): Promise<RenderResourceResult> {
-    const _state = this.mountState(input.mountId);
-    void _state;
-    return {
-      content: [],
-      diagnostics: [
-        {
-          severity: "warning",
-          code: "render-resource-not-implemented",
-          message: "renderResource is not yet implemented; returning empty content",
-        },
-      ],
-      iterations: 0,
-    };
+    return this.runOperation(op, async (i) => this.renderToStringBody(i, state));
   }
 
   async notifyLifecycle(input: NotifyLifecycleInput): Promise<void> {
@@ -410,6 +386,57 @@ export class ReconcilerHarness
   }
 
   /**
+   * Render-to-string body.
+   *
+   * Drives renderTreeBody internally to produce a stable `RenderedTree`,
+   * then flattens to a string via a default serializer that respects
+   * the in-scope `FormatterRef.format` (markdown / xml / text / …).
+   *
+   * The formatter harness (Phase 4a) will replace the default serializer
+   * with proper formatter dispatch. Today the serializer is a pragmatic
+   * markdown-flavored flatten that covers the common authoring cases:
+   * sections render as `## title\n\nbody`, messages render as
+   * `**{role}:** body`, free-root content concatenates as text.
+   *
+   * Application-level query interpretation (e.g., "render the subtree
+   * with id X") is also handled here — when `input.query` is set, the
+   * serializer filters to entries matching the query.
+   */
+  private async renderToStringBody(
+    input: RenderToStringInput,
+    state: MountState,
+  ): Promise<RenderToStringResult> {
+    const tree = await this.renderTreeBody(
+      {
+        mountId: input.mountId,
+        sessionId: state.bridges.session.id,
+        ...(input.maxIterations !== undefined ? { maxIterations: input.maxIterations } : {}),
+      },
+      state,
+    );
+
+    // Two modes:
+    //  - Explicit caller override (`input.formatter`): apply to every
+    //    entry regardless of its `renderedWith`. The caller wants a
+    //    specific output format.
+    //  - No override: honor per-entry `renderedWith` (set by JSX scope
+    //    providers like <XML>/<Markdown>). Falls back to the root
+    //    scope's default when an entry doesn't pin one.
+    const fallback = state.rootScope.formatters.default;
+    const effective = input.formatter ?? fallback;
+    const text = serializeTreeToString(tree.tree, effective, input.query, {
+      respectEntryFormatter: input.formatter === undefined,
+    });
+    const mimeType = mimeForFormatter(effective);
+
+    return {
+      payload: { text, mimeType },
+      diagnostics: tree.diagnostics,
+      iterations: tree.iterations,
+    };
+  }
+
+  /**
    * Render the mount once with the BridgeProvider wrap.
    *
    * Errors thrown during render (including the Promises that `useData`
@@ -499,4 +526,225 @@ function isThenable(value: unknown): value is PromiseLike<unknown> {
     (typeof value === "object" || typeof value === "function") &&
     typeof (value as { then?: unknown }).then === "function"
   );
+}
+
+// ============================================================================
+// Default tree-to-string serializer (until formatter harness lands)
+// ============================================================================
+
+/**
+ * Pragmatic flatten of a `RenderedTree` to a string. Honors the
+ * formatter's `format` hint when known (markdown, xml, text). The
+ * formatter harness (Phase 4a) will replace this with real formatter
+ * dispatch.
+ *
+ * Query filtering:
+ *   - `query` is empty / undefined → serialize the whole tree
+ *   - `query` is `"id:X"` → serialize only the entry with that id
+ *   - `query` is `"section:X"` / `"message:X"` → kind-narrowed lookup
+ *   - any other query → application-defined; passed through as a free
+ *     pseudo-section header so consumers see what was asked
+ */
+function serializeTreeToString(
+  tree: import("@agentick/spec").RenderedTree,
+  requestedFormatter: import("@agentick/spec").FormatterRef,
+  query: string,
+  options: { readonly respectEntryFormatter: boolean },
+): string {
+  const requestedFormat = requestedFormatter.format ?? "markdown";
+  const matcher = parseQuery(query);
+  const parts: string[] = [];
+
+  const entries = tree.context.entries.filter((e) => matcher(e));
+  for (const entry of entries) {
+    const entryFormat = options.respectEntryFormatter
+      ? (entry.renderedWith?.format ?? requestedFormat)
+      : requestedFormat;
+    if (entry.kind === "section") {
+      parts.push(serializeSection(entry, entryFormat));
+    } else {
+      parts.push(serializeMessage(entry, entryFormat));
+    }
+  }
+
+  if (matcher.everything && tree.content && tree.content.length > 0) {
+    const freeRootFormat = options.respectEntryFormatter
+      ? (tree.renderedWith?.format ?? requestedFormat)
+      : requestedFormat;
+    parts.push(serializeContentBlocks(tree.content, freeRootFormat));
+  }
+
+  return parts.filter((p) => p.length > 0).join("\n\n");
+}
+
+interface QueryMatcher {
+  (entry: import("@agentick/spec").ContextEntry): boolean;
+  readonly everything: boolean;
+}
+
+function parseQuery(query: string): QueryMatcher {
+  const trimmed = query.trim();
+  if (trimmed.length === 0) {
+    const m: QueryMatcher = Object.assign(() => true, { everything: true });
+    return m;
+  }
+  // id:X
+  if (trimmed.startsWith("id:")) {
+    const id = trimmed.slice(3);
+    const m: QueryMatcher = Object.assign(
+      (e: import("@agentick/spec").ContextEntry) =>
+        (e.kind === "section" && e.id === id) || (e.kind === "message" && e.id === id),
+      { everything: false },
+    );
+    return m;
+  }
+  // section:X
+  if (trimmed.startsWith("section:")) {
+    const id = trimmed.slice("section:".length);
+    const m: QueryMatcher = Object.assign(
+      (e: import("@agentick/spec").ContextEntry) => e.kind === "section" && e.id === id,
+      { everything: false },
+    );
+    return m;
+  }
+  // message:X
+  if (trimmed.startsWith("message:")) {
+    const id = trimmed.slice("message:".length);
+    const m: QueryMatcher = Object.assign(
+      (e: import("@agentick/spec").ContextEntry) => e.kind === "message" && e.id === id,
+      { everything: false },
+    );
+    return m;
+  }
+  // Unknown query — serialize nothing matching; the caller may want to
+  // hook a custom resolver in a later phase.
+  const m: QueryMatcher = Object.assign(() => false, { everything: false });
+  return m;
+}
+
+function serializeSection(
+  entry: import("@agentick/spec").SectionEntry,
+  format: string,
+): string {
+  const body = serializeContentBlocks(entry.content, format);
+  if (format === "xml") {
+    const title = entry.title ? ` title="${escapeXml(entry.title)}"` : "";
+    return `<section id="${escapeXml(entry.id)}"${title}>\n${body}\n</section>`;
+  }
+  if (format === "text") {
+    const head = entry.title ? `${entry.title}\n` : "";
+    return `${head}${body}`;
+  }
+  // markdown default
+  const head = entry.title ? `## ${entry.title}\n\n` : "";
+  return `${head}${body}`;
+}
+
+function serializeMessage(
+  entry: import("@agentick/spec").MessageEntry,
+  format: string,
+): string {
+  const body = serializeContentBlocks(entry.content, format);
+  if (format === "xml") {
+    return `<message role="${escapeXml(entry.role)}">\n${body}\n</message>`;
+  }
+  if (format === "text") {
+    return `${entry.role}: ${body}`;
+  }
+  // markdown default
+  return `**${entry.role}:** ${body}`;
+}
+
+function serializeContentBlocks(
+  blocks: readonly import("@agentick/spec").ContentBlock[],
+  format: string,
+): string {
+  return blocks.map((b) => serializeContentBlock(b, format)).join("\n\n");
+}
+
+function serializeContentBlock(
+  block: import("@agentick/spec").ContentBlock,
+  format: string,
+): string {
+  switch (block.type) {
+    case "text":
+      return block.text;
+    case "reasoning":
+      if (format === "xml") return `<reasoning>${escapeXml(block.text)}</reasoning>`;
+      return `_(reasoning)_ ${block.text}`;
+    case "code": {
+      if (format === "xml")
+        return `<code language="${escapeXml(block.language)}">${escapeXml(block.text)}</code>`;
+      if (format === "text") return block.text;
+      return `\`\`\`${block.language}\n${block.text}\n\`\`\``;
+    }
+    case "json": {
+      const text = block.text ?? (block.data !== undefined ? JSON.stringify(block.data) : "");
+      if (format === "xml") return `<json>${escapeXml(text)}</json>`;
+      if (format === "text") return text;
+      return `\`\`\`json\n${text}\n\`\`\``;
+    }
+    case "xml":
+    case "csv":
+    case "html":
+      return block.text ?? "";
+    case "image": {
+      const src = block.source.type === "url" ? block.source.url : "[binary]";
+      if (format === "xml")
+        return `<image src="${escapeXml(src)}"${block.altText ? ` alt="${escapeXml(block.altText)}"` : ""}/>`;
+      return `![${block.altText ?? ""}](${src})`;
+    }
+    case "document":
+    case "audio":
+    case "video": {
+      const src = block.source.type === "url" ? block.source.url : "[binary]";
+      if (format === "xml") return `<${block.type} src="${escapeXml(src)}"/>`;
+      return `[${block.type}](${src})`;
+    }
+    case "tool_use":
+      if (format === "xml")
+        return `<tool_use name="${escapeXml(block.name)}">${escapeXml(JSON.stringify(block.input))}</tool_use>`;
+      return `[tool_use ${block.name}] ${JSON.stringify(block.input)}`;
+    case "tool_result":
+      // tool_result.content is itself a ContentBlock[] — recurse.
+      return serializeContentBlocks(block.content, format);
+    case "user_action":
+    case "system_event":
+    case "state_change":
+      return block.text ?? "";
+    case "custom":
+      if (format === "xml") {
+        const attrs = Object.entries(block.attrs)
+          .map(([k, v]) => ` ${k}="${escapeXml(v)}"`)
+          .join("");
+        return `<${block.tag}${attrs}>${escapeXml(block.content)}</${block.tag}>`;
+      }
+      return block.content;
+    case "generated_image":
+      return `![generated image](data:${block.mimeType};base64,${block.data.slice(0, 16)}…)`;
+    case "generated_file":
+      return `[generated file](${block.uri})`;
+    case "executable_code":
+      return `\`\`\`${block.language ?? ""}\n${block.code}\n\`\`\``;
+    case "code_execution_result":
+      return `\`\`\`\n${block.output}\n\`\`\``;
+    default:
+      return "";
+  }
+}
+
+function escapeXml(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function mimeForFormatter(formatter: import("@agentick/spec").FormatterRef): string {
+  const format = formatter.format ?? "markdown";
+  if (format === "markdown") return "text/markdown";
+  if (format === "xml") return "application/xml";
+  if (format === "json") return "application/json";
+  return "text/plain";
 }

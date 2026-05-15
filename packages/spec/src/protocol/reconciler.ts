@@ -57,7 +57,7 @@
  * @see docs/proposals/v2/blueprint/21-reconciler-implementation.md
  */
 
-import type { ContentBlock, FormatterRef, RenderedTree } from "../data/index.js";
+import type { FormatterRef, RenderedTree } from "../data/index.js";
 import type {
   ReconcileDiagnostic,
   ReconcilerSnapshot,
@@ -215,26 +215,6 @@ export interface RenderToStringResult {
 }
 
 // ============================================================================
-// renderResource — free-root rendering of a declared resource
-// ============================================================================
-
-export interface RenderResourceInput extends MountScopedInput {
-  /** Resource id matching a `ResourceDeclaration.id` in the tree. */
-  readonly resourceId: string;
-  readonly formatter?: FormatterRef;
-  readonly maxIterations?: number;
-  readonly metadata?: Readonly<Record<string, unknown>>;
-}
-
-export interface RenderResourceResult {
-  readonly content: readonly ContentBlock[];
-  readonly text?: string;
-  readonly mimeType?: string;
-  readonly diagnostics: readonly ReconcileDiagnostic[];
-  readonly iterations: number;
-}
-
-// ============================================================================
 // notifyLifecycle
 // ============================================================================
 
@@ -367,8 +347,7 @@ export type ReconcileError =
   | { readonly _tag: "InvalidElement"; readonly reason: string }
   | { readonly _tag: "SnapshotIncompatible"; readonly specVersion: string; readonly reason?: string }
   | { readonly _tag: "BridgeUnavailable"; readonly bridge: string; readonly hook: string }
-  | { readonly _tag: "FormatterFailed"; readonly cause: unknown }
-  | { readonly _tag: "ResourceNotFound"; readonly resourceId: string };
+  | { readonly _tag: "FormatterFailed"; readonly cause: unknown };
 
 // ============================================================================
 // Inbox messages
@@ -432,11 +411,6 @@ export interface ReconcilerProtocol {
    * full execution).
    */
   renderToString(input: RenderToStringInput): Promise<RenderToStringResult>;
-
-  /**
-   * Free-root render of a declared resource by id.
-   */
-  renderResource(input: RenderResourceInput): Promise<RenderResourceResult>;
 
   /**
    * Lifecycle pass-through. Direct method-based coupling for events
