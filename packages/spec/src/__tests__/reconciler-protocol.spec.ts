@@ -72,12 +72,17 @@ describe("@agentick/spec — reconciler protocol", () => {
   });
 
   describe("RenderToString", () => {
-    it("RenderToStringInput requires a query", () => {
+    it("RenderToStringInput is mountId-only by default", () => {
+      const input: RenderToStringInput = { mountId: "m_1" };
+      expect(input.mountId).toBe("m_1");
+    });
+
+    it("RenderToStringInput accepts a formatter override", () => {
       const input: RenderToStringInput = {
         mountId: "m_1",
-        query: "weekly-report",
+        formatter: { id: "xml", format: "xml" },
       };
-      expect(input.query).toBe("weekly-report");
+      expect(input.formatter?.id).toBe("xml");
     });
 
     it("RenderToStringResult carries a string payload + mime", () => {

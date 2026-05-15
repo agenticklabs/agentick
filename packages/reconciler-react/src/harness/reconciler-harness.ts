@@ -398,9 +398,9 @@ export class ReconcilerHarness
    * sections render as `## title\n\nbody`, messages render as
    * `**{role}:** body`, free-root content concatenates as text.
    *
-   * Application-level query interpretation (e.g., "render the subtree
-   * with id X") is also handled here — when `input.query` is set, the
-   * serializer filters to entries matching the query.
+   * Subtree extraction is the caller's job — use renderTree + filter
+   * the entries you want + your own serializer. No selector grammar
+   * is baked in.
    */
   private async renderToStringBody(
     input: RenderToStringInput,
@@ -424,7 +424,7 @@ export class ReconcilerHarness
     //    scope's default when an entry doesn't pin one.
     const fallback = state.rootScope.formatters.default;
     const effective = input.formatter ?? fallback;
-    const text = serializeTreeToString(tree.tree, effective, input.query, {
+    const text = serializeTreeToString(tree.tree, effective, {
       respectEntryFormatter: input.formatter === undefined,
     });
     const mimeType = mimeForFormatter(effective);
@@ -538,25 +538,20 @@ function isThenable(value: unknown): value is PromiseLike<unknown> {
  * formatter harness (Phase 4a) will replace this with real formatter
  * dispatch.
  *
- * Query filtering:
- *   - `query` is empty / undefined → serialize the whole tree
- *   - `query` is `"id:X"` → serialize only the entry with that id
- *   - `query` is `"section:X"` / `"message:X"` → kind-narrowed lookup
- *   - any other query → application-defined; passed through as a free
- *     pseudo-section header so consumers see what was asked
+ * Renders the WHOLE mount in declaration order: every context entry
+ * (sections + messages), plus free-root content when present. Subtree
+ * extraction is the caller's job — use renderTree + filter + custom
+ * serialize.
  */
 function serializeTreeToString(
   tree: import("@agentick/spec").RenderedTree,
   requestedFormatter: import("@agentick/spec").FormatterRef,
-  query: string,
   options: { readonly respectEntryFormatter: boolean },
 ): string {
   const requestedFormat = requestedFormatter.format ?? "markdown";
-  const matcher = parseQuery(query);
   const parts: string[] = [];
 
-  const entries = tree.context.entries.filter((e) => matcher(e));
-  for (const entry of entries) {
+  for (const entry of tree.context.entries) {
     const entryFormat = options.respectEntryFormatter
       ? (entry.renderedWith?.format ?? requestedFormat)
       : requestedFormat;
@@ -567,7 +562,7 @@ function serializeTreeToString(
     }
   }
 
-  if (matcher.everything && tree.content && tree.content.length > 0) {
+  if (tree.content && tree.content.length > 0) {
     const freeRootFormat = options.respectEntryFormatter
       ? (tree.renderedWith?.format ?? requestedFormat)
       : requestedFormat;
@@ -575,51 +570,6 @@ function serializeTreeToString(
   }
 
   return parts.filter((p) => p.length > 0).join("\n\n");
-}
-
-interface QueryMatcher {
-  (entry: import("@agentick/spec").ContextEntry): boolean;
-  readonly everything: boolean;
-}
-
-function parseQuery(query: string): QueryMatcher {
-  const trimmed = query.trim();
-  if (trimmed.length === 0) {
-    const m: QueryMatcher = Object.assign(() => true, { everything: true });
-    return m;
-  }
-  // id:X
-  if (trimmed.startsWith("id:")) {
-    const id = trimmed.slice(3);
-    const m: QueryMatcher = Object.assign(
-      (e: import("@agentick/spec").ContextEntry) =>
-        (e.kind === "section" && e.id === id) || (e.kind === "message" && e.id === id),
-      { everything: false },
-    );
-    return m;
-  }
-  // section:X
-  if (trimmed.startsWith("section:")) {
-    const id = trimmed.slice("section:".length);
-    const m: QueryMatcher = Object.assign(
-      (e: import("@agentick/spec").ContextEntry) => e.kind === "section" && e.id === id,
-      { everything: false },
-    );
-    return m;
-  }
-  // message:X
-  if (trimmed.startsWith("message:")) {
-    const id = trimmed.slice("message:".length);
-    const m: QueryMatcher = Object.assign(
-      (e: import("@agentick/spec").ContextEntry) => e.kind === "message" && e.id === id,
-      { everything: false },
-    );
-    return m;
-  }
-  // Unknown query — serialize nothing matching; the caller may want to
-  // hook a custom resolver in a later phase.
-  const m: QueryMatcher = Object.assign(() => false, { everything: false });
-  return m;
 }
 
 function serializeSection(

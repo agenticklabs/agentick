@@ -196,13 +196,33 @@ export interface RenderTreeResult {
 }
 
 // ============================================================================
-// renderToString — free-root rendering to a string
+// renderToString — render the mount to a string
 // ============================================================================
 
+/**
+ * Renders the mount and returns the formatted result as a string.
+ *
+ * Conceptually a thin wrapper:
+ *   renderTree → ensure tree.text is populated → return tree.text
+ *
+ * Phase 3 placeholder: the reference impl synthesizes a default
+ * markdown/xml/text serialization from the entire context (sections +
+ * messages + free-root) because the formatter harness (Phase 4a) is
+ * not yet wired. When the formatter harness lands, the reconciler
+ * populates `tree.text` from `tree.content` via the formatter, and
+ * `renderToString` reduces to returning that string.
+ *
+ * Subtree extraction is the caller's job — use `renderTree` + filter
+ * the entries you want + serialize them yourself. No selector grammar
+ * is baked into the spec.
+ */
 export interface RenderToStringInput extends MountScopedInput {
-  /** Query string the application uses to select what to render. */
-  readonly query: string;
-  /** Override the in-scope formatter for this render. */
+  /**
+   * Override the in-scope formatter for this render. When set, applies
+   * to every entry regardless of any `renderedWith` declared via JSX
+   * scope providers (`<Markdown>` / `<XML>`). When omitted, per-entry
+   * `renderedWith` is honored.
+   */
   readonly formatter?: FormatterRef;
   readonly maxIterations?: number;
   readonly metadata?: Readonly<Record<string, unknown>>;

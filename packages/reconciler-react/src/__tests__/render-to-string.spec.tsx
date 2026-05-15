@@ -32,7 +32,6 @@ describe("renderToString — basic markdown serialization", () => {
     });
     const { payload, diagnostics } = await harness.renderToString({
       mountId: "m1",
-      query: "",
     });
     expect(diagnostics).toEqual([]);
     expect(payload.mimeType).toBe("text/markdown");
@@ -49,7 +48,7 @@ describe("renderToString — basic markdown serialization", () => {
       bridges: stubBridges(),
       defaultFormatter: { id: "markdown", format: "markdown" },
     });
-    const { payload } = await harness.renderToString({ mountId: "m2", query: "" });
+    const { payload } = await harness.renderToString({ mountId: "m2" });
     expect(payload.text).toContain("**user:** Hello");
   });
 
@@ -67,7 +66,7 @@ describe("renderToString — basic markdown serialization", () => {
       bridges: stubBridges(),
       defaultFormatter: { id: "markdown", format: "markdown" },
     });
-    const { payload } = await harness.renderToString({ mountId: "m3", query: "" });
+    const { payload } = await harness.renderToString({ mountId: "m3" });
     expect(payload.text).toContain("**system:** You help.");
     expect(payload.text).toContain("## Tools");
     expect(payload.text).toContain("echo");
@@ -88,7 +87,7 @@ describe("renderToString — XML format", () => {
       bridges: stubBridges(),
       defaultFormatter: { id: "markdown", format: "markdown" },
     });
-    const { payload } = await harness.renderToString({ mountId: "m_xml", query: "" });
+    const { payload } = await harness.renderToString({ mountId: "m_xml" });
     expect(payload.text).toContain('<section id="s" title="T">');
     expect(payload.text).toContain("</section>");
   });
@@ -112,7 +111,6 @@ describe("renderToString — XML format", () => {
     });
     const { payload } = await harness.renderToString({
       mountId: "m_xml_esc",
-      query: "",
     });
     expect(payload.text).toContain('id="s.&lt;&gt;&amp;"');
     expect(payload.text).toContain('title="A&amp;B&quot;"');
@@ -129,7 +127,6 @@ describe("renderToString — XML format", () => {
     });
     const { payload } = await harness.renderToString({
       mountId: "m_override",
-      query: "",
       formatter: { id: "xml", format: "xml" },
     });
     expect(payload.text).toContain('<section id="s">');
@@ -151,7 +148,7 @@ describe("renderToString — content-block serialization", () => {
       bridges: stubBridges(),
       defaultFormatter: { id: "markdown", format: "markdown" },
     });
-    const { payload } = await harness.renderToString({ mountId: "m_code", query: "" });
+    const { payload } = await harness.renderToString({ mountId: "m_code" });
     expect(payload.text).toContain("```typescript");
     expect(payload.text).toContain("const x = 1;");
     expect(payload.text).toContain("```");
@@ -173,7 +170,7 @@ describe("renderToString — content-block serialization", () => {
       bridges: stubBridges(),
       defaultFormatter: { id: "markdown", format: "markdown" },
     });
-    const { payload } = await harness.renderToString({ mountId: "m_img", query: "" });
+    const { payload } = await harness.renderToString({ mountId: "m_img" });
     expect(payload.text).toContain("![alt text](https://x.test/a.png)");
   });
 
@@ -190,106 +187,37 @@ describe("renderToString — content-block serialization", () => {
       bridges: stubBridges(),
       defaultFormatter: { id: "markdown", format: "markdown" },
     });
-    const { payload } = await harness.renderToString({ mountId: "m_json", query: "" });
+    const { payload } = await harness.renderToString({ mountId: "m_json" });
     expect(payload.text).toContain("```json");
     expect(payload.text).toContain('{"ok":true}');
   });
 });
 
-describe("renderToString — query filtering", () => {
-  function buildTree() {
-    return React.createElement(
-      React.Fragment,
-      null,
-      React.createElement("section", { id: "intro", title: "Intro" }, "Welcome."),
-      React.createElement("section", { id: "rules", title: "Rules" }, "Be kind."),
-      React.createElement("message", { role: "user", id: "m1" }, "Hello"),
-    );
-  }
-
-  it('empty query → renders the whole tree', async () => {
+describe("renderToString — whole-mount rendering", () => {
+  it("renders every context entry in declaration order", async () => {
     const harness = await makeHarness();
     await harness.mount({
-      mountId: "q_all",
+      mountId: "m_whole",
       sessionId: "s",
-      element: buildTree(),
+      element: React.createElement(
+        React.Fragment,
+        null,
+        React.createElement("section", { id: "intro", title: "Intro" }, "Welcome."),
+        React.createElement("section", { id: "rules", title: "Rules" }, "Be kind."),
+        React.createElement("message", { role: "user", id: "m1" }, "Hello"),
+      ),
       bridges: stubBridges(),
       defaultFormatter: { id: "markdown", format: "markdown" },
     });
-    const { payload } = await harness.renderToString({ mountId: "q_all", query: "" });
-    expect(payload.text).toContain("Intro");
-    expect(payload.text).toContain("Rules");
-    expect(payload.text).toContain("**user:** Hello");
-  });
-
-  it('"id:X" filters to a single entry', async () => {
-    const harness = await makeHarness();
-    await harness.mount({
-      mountId: "q_id",
-      sessionId: "s",
-      element: buildTree(),
-      bridges: stubBridges(),
-      defaultFormatter: { id: "markdown", format: "markdown" },
-    });
-    const { payload } = await harness.renderToString({
-      mountId: "q_id",
-      query: "id:rules",
-    });
-    expect(payload.text).toContain("Rules");
-    expect(payload.text).toContain("Be kind.");
-    expect(payload.text).not.toContain("Intro");
-    expect(payload.text).not.toContain("Welcome.");
-    expect(payload.text).not.toContain("**user:**");
-  });
-
-  it('"section:X" narrows by entry kind', async () => {
-    const harness = await makeHarness();
-    await harness.mount({
-      mountId: "q_section",
-      sessionId: "s",
-      element: buildTree(),
-      bridges: stubBridges(),
-      defaultFormatter: { id: "markdown", format: "markdown" },
-    });
-    const { payload } = await harness.renderToString({
-      mountId: "q_section",
-      query: "section:intro",
-    });
+    const { payload } = await harness.renderToString({ mountId: "m_whole" });
+    expect(payload.text).toContain("## Intro");
     expect(payload.text).toContain("Welcome.");
-    expect(payload.text).not.toContain("Hello");
-  });
-
-  it('"message:X" narrows by entry kind', async () => {
-    const harness = await makeHarness();
-    await harness.mount({
-      mountId: "q_message",
-      sessionId: "s",
-      element: buildTree(),
-      bridges: stubBridges(),
-      defaultFormatter: { id: "markdown", format: "markdown" },
-    });
-    const { payload } = await harness.renderToString({
-      mountId: "q_message",
-      query: "message:m1",
-    });
+    expect(payload.text).toContain("## Rules");
+    expect(payload.text).toContain("Be kind.");
     expect(payload.text).toContain("**user:** Hello");
-    expect(payload.text).not.toContain("Intro");
-  });
-
-  it("unknown query yields empty output (no matching entries)", async () => {
-    const harness = await makeHarness();
-    await harness.mount({
-      mountId: "q_unknown",
-      sessionId: "s",
-      element: buildTree(),
-      bridges: stubBridges(),
-      defaultFormatter: { id: "markdown", format: "markdown" },
-    });
-    const { payload } = await harness.renderToString({
-      mountId: "q_unknown",
-      query: "weird-app-query",
-    });
-    expect(payload.text).toBe("");
+    // Declaration order preserved.
+    expect(payload.text.indexOf("Intro")).toBeLessThan(payload.text.indexOf("Rules"));
+    expect(payload.text.indexOf("Rules")).toBeLessThan(payload.text.indexOf("Hello"));
   });
 });
 
@@ -304,7 +232,7 @@ describe("renderToString — operation lifecycle", () => {
       element: React.createElement("section", { id: "s" }, "x"),
       bridges: stubBridges(),
     });
-    await harness.renderToString({ mountId: "m_lc", query: "" });
+    await harness.renderToString({ mountId: "m_lc" });
     const names = new Set<string>();
     for await (const ev of journal.read({}, "beginning")) names.add(`${ev.name}.${ev.phase}`);
     expect(names.has("reconciler:command:render-to-string.requested")).toBe(true);
@@ -314,7 +242,7 @@ describe("renderToString — operation lifecycle", () => {
   it("rejects with NotMounted for an unknown mountId", async () => {
     const harness = await makeHarness();
     await expect(
-      harness.renderToString({ mountId: "ghost", query: "" }),
+      harness.renderToString({ mountId: "ghost" }),
     ).rejects.toMatchObject({ _tag: "NotMounted" });
   });
 });
@@ -333,7 +261,7 @@ describe("renderToString — JSON firewall", () => {
       bridges: stubBridges(),
       defaultFormatter: { id: "markdown", format: "markdown" },
     });
-    const result = await harness.renderToString({ mountId: "m_json_safe", query: "" });
+    const result = await harness.renderToString({ mountId: "m_json_safe" });
     const round = JSON.parse(JSON.stringify(result));
     expect(round).toEqual(result);
   });
