@@ -41,6 +41,8 @@ and the rest of the blueprint sits on top of it.
 17-open-questions.md              deduped across all source docs
 18-traceability.md                blueprint section → source proposal map
 20-pluggability-charter.md        protocol-first principle in engineering terms
+21-reconciler-implementation.md   low-level shape of @agentick/reconciler-react
+                                  (host config, contributors, hook bridges)
 ```
 
 ## Annotation conventions
