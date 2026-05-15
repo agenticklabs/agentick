@@ -57,7 +57,9 @@ import { ContributorRegistry } from "../collect/registry.js";
 import { createBuiltInRegistry } from "../collect/contributors/built-ins.js";
 import type { Contributor } from "../collect/contributor.js";
 import { BridgeContext } from "../react/bridge-context.js";
+import { LifecycleContext } from "../react/lifecycle-context.js";
 import { InMemoryDataBridge } from "../bridges/in-memory-data-bridge.js";
+import { LifecycleStore } from "./lifecycle-store.js";
 
 interface MountState {
   readonly mountId: string;
@@ -69,6 +71,7 @@ interface MountState {
   readonly root: FiberRoot;
   readonly registry: ContributorRegistry;
   readonly rootScope: HostScope;
+  readonly lifecycle: LifecycleStore;
   strictNoSuspense: boolean;
   /**
    * Captures the first render error surfaced via the host config's
@@ -194,15 +197,14 @@ export class ReconcilerHarness
   }
 
   async notifyLifecycle(input: NotifyLifecycleInput): Promise<void> {
-    // Phase 3.10+: dispatch event.kind to registered useOnTickStart /
-    // useOnTickEnd / useOnExecutionEnd / useOnError hooks. For now,
-    // store on bridges.session-adjacent state if needed and re-render.
-    void input;
+    const state = this.mountState(input.mountId);
+    await state.lifecycle.dispatch(input.event);
   }
 
   async unmount(input: UnmountInput): Promise<void> {
     const state = this.mounts.get(input.mountId);
     if (!state) return;
+    state.lifecycle.clear();
     state.container.children.length = 0;
     this.mounts.delete(input.mountId);
   }
@@ -275,6 +277,7 @@ export class ReconcilerHarness
       root: null as unknown as FiberRoot,
       registry: this.registry,
       rootScope,
+      lifecycle: new LifecycleStore(),
       strictNoSuspense: input.strictNoSuspense ?? false,
       renderError: null,
     };
@@ -403,10 +406,18 @@ export class ReconcilerHarness
    * The try/catch here short-circuits that retry.
    */
   private renderOnce(state: MountState): void {
+    // Wrap with both BridgeContext (runtime bridges) and LifecycleContext
+    // (per-mount handler registry). User hooks consume the appropriate
+    // context. The two contexts are siblings, not nested in meaning —
+    // nesting order is arbitrary.
     const wrapped = React.createElement(
       BridgeContext.Provider,
       { value: state.bridges },
-      state.element,
+      React.createElement(
+        LifecycleContext.Provider,
+        { value: state.lifecycle },
+        state.element,
+      ),
     );
     try {
       state.reconciler.render(wrapped, state.root);

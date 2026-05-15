@@ -77,13 +77,28 @@ export {
 } from "./react/bridge-context.js";
 export type { BridgeProviderProps } from "./react/bridge-context.js";
 export {
+  LifecycleContext,
+  LifecycleProvider,
+  useLifecycleStore,
+} from "./react/lifecycle-context.js";
+export type { LifecycleProviderProps } from "./react/lifecycle-context.js";
+export {
   useData,
   useKnob,
   useTimeline,
   useLoopControl,
   useSession,
+  useOnTickStart,
+  useOnTickEnd,
+  useOnExecutionStart,
+  useOnExecutionEnd,
+  useOnError,
+  useOnMount,
+  useOnUnmount,
 } from "./react/hooks/index.js";
 
 // Layer C — Harness
 export { ReconcilerHarness } from "./harness/reconciler-harness.js";
 export type { ReconcilerHarnessOptions } from "./harness/reconciler-harness.js";
+export { LifecycleStore } from "./harness/lifecycle-store.js";
+export type { LifecycleHandlerKind } from "./harness/lifecycle-store.js";
