@@ -2,7 +2,7 @@ import { Context, type KernelContext } from "./context.js";
 import type { ProcedureNode } from "./procedure-graph.js";
 import { ProcedureGraph, type ProcedureStatus } from "./procedure-graph.js";
 import { Telemetry } from "./telemetry.js";
-import { AbortError } from "@agentick/shared";
+import { AbortError, uuidv7 } from "@agentick/shared";
 import { isAsyncIterable } from "./stream.js";
 import { ExecutionHandleBrand } from "./execution-handle-brand.js";
 
@@ -73,7 +73,7 @@ export class ExecutionTracker {
       ctx.procedureGraph = new ProcedureGraph();
     }
 
-    const procedurePid = crypto.randomUUID();
+    const procedurePid = uuidv7();
     const parentPid = options.parentPid || ctx.procedurePid;
     const effectiveName = options.name || "anonymous";
 

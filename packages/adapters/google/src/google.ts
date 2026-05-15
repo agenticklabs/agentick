@@ -8,7 +8,7 @@
 import type { GenerateContentResponse } from "@google/genai";
 import { GoogleGenAI, type GenerateContentParameters, FinishReason } from "@google/genai";
 
-import { randomUUID } from "node:crypto";
+import { uuidv7 } from "@agentick/shared";
 import {
   createAdapter,
   type AdapterDelta,
@@ -412,7 +412,7 @@ export function mapGoogleChunk(
       };
       deltas.push({
         type: "tool_call",
-        id: fc.id || randomUUID(),
+        id: fc.id || uuidv7(),
         name: fc.name || "",
         input: fc.args || {},
         // Gemini 3+ thinking: thoughtSignature is a sibling of functionCall on the part

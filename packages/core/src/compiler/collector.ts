@@ -285,13 +285,33 @@ function collectSection(node: AgentickNode, result: CompiledStructure): void {
     metadata: node.props.metadata as Record<string, unknown> | undefined,
   };
 
-  // Merge if section with same id exists
-  const existing = result.sections.get(id);
-  if (existing) {
-    existing.content.push(...section.content);
-  } else {
-    result.sections.set(id, section);
+  // Section ids must be unique within a single render. The previous
+  // behavior was to merge content from same-id sections via append, which
+  // looked convenient for "split a long section across components" but
+  // turned every render-time duplicate (intentional or not) into silent
+  // accumulation. Worse, render-loop retries (see fiber-compiler) that
+  // partially commit before suspending could produce N copies of the same
+  // section, all of which got merged into one bloated output.
+  //
+  // New behavior: last-write-wins. Authors who want to compose content
+  // for one section across components should pass children:
+  //   <Section id="x"><A /><B /></Section>
+  // — not declare <Section id="x"> twice.
+  //
+  // Dev-only warning: same shape as React's internal warning gate —
+  // plain `console.warn` so it surfaces in test/dev output without
+  // polluting structured production logs, and bundler dead-code
+  // elimination can strip it from production builds. The yoda-style
+  // `"production" !==` guard matches React verbatim (see
+  // react-reconciler.development.js).
+  if (result.sections.has(id) && "production" !== process.env.NODE_ENV) {
+    console.warn(
+      `Warning: Duplicate <Section id="${id}"> in render — last definition wins. ` +
+        `Section ids must be unique. If you intended to compose multi-part content, ` +
+        `pass it as children to a single <Section>.`,
+    );
   }
+  result.sections.set(id, section);
 }
 
 /**

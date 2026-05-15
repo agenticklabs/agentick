@@ -161,7 +161,12 @@ describe("Compiled Content", () => {
       expect(section!.metadata).toEqual({ priority: 1, source: "user" });
     });
 
-    it("should merge sections with same id", async () => {
+    it("should keep only the last <Section> when ids collide (last-write-wins)", async () => {
+      // Section ids must be unique within a render. The previous
+      // behavior — append-merge content from duplicate ids — turned
+      // render-loop retries and authoring mistakes into silent
+      // accumulation. New semantic: only the last wins, and the
+      // collector emits a warning to surface the duplication.
       const App = () => (
         <>
           <Section id="merged">
@@ -177,7 +182,10 @@ describe("Compiled Content", () => {
 
       expect(compiled.sections.size).toBe(1);
       const section = getSection(compiled, "merged");
-      expect(section!.content.length).toBe(2);
+      expect(section!.content.length).toBe(1);
+      // Last-write-wins: only "Second part" survives.
+      expect(JSON.stringify(section!.content)).toContain("Second part");
+      expect(JSON.stringify(section!.content)).not.toContain("First part");
     });
 
     it("should collect multiple distinct sections", async () => {

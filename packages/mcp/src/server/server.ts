@@ -83,6 +83,7 @@ const log = Logger.for("mcp:server");
 // Schema conversion
 import { toJSONSchemaSync, isJSONSchema } from "@agentick/kernel";
 import { normalizeObjectSchema } from "@modelcontextprotocol/sdk/server/zod-compat.js";
+import { uuidv7 } from "@agentick/shared";
 
 // ============================================================================
 // Errors
@@ -275,7 +276,7 @@ export class MCPServer {
     const sdkServer = this.createSDKServer();
     await sdkServer.connect(transport);
 
-    const sessionId = transport.sessionId ?? crypto.randomUUID();
+    const sessionId = transport.sessionId ?? uuidv7();
     // Propagate the generated session id back to the transport so per-request
     // `extra.sessionId` matches the registered session — required for outbound
     // operations like `MCPServer.listRoots(sessionId)` invoked from handlers.
@@ -388,7 +389,7 @@ export class MCPServer {
     // ── New session — create SDK Server + Transport (one per client) ──
     const sdkServer = this.createSDKServer();
     const transport = new StreamableHTTPServerTransport({
-      sessionIdGenerator: () => crypto.randomUUID(),
+      sessionIdGenerator: () => uuidv7(),
       onsessioninitialized: (newSessionId) => {
         this.sessions.set(newSessionId, {
           sessionId: newSessionId,

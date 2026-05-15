@@ -1,5 +1,13 @@
 # @agentick/shared
 
+## 0.14.64
+
+## 0.14.63
+
+### Patch Changes
+
+- 009aa12: v7 uuid instad of v4
+
 ## 0.14.62
 
 ## 0.14.61

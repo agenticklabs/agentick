@@ -1,6 +1,6 @@
 {
   "name": "@agentick/shared",
-  "version": "0.14.62",
+  "version": "0.14.64",
   "description": "Shared types and utilities for Agentick",
   "keywords": [
     "agent",
@@ -164,5 +164,8 @@
     "clean": "rm -rf dist tsconfig.build.tsbuildinfo",
     "prepublishOnly": "pnpm build",
     "dev": "tsc --watch"
+  },
+  "dependencies": {
+    "uuid": "^14.0.0"
   }
 }
