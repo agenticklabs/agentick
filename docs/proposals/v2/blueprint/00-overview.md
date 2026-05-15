@@ -40,6 +40,7 @@ and the rest of the blueprint sits on top of it.
 16-glossary.md                    every v2 term in one place
 17-open-questions.md              deduped across all source docs
 18-traceability.md                blueprint section → source proposal map
+20-pluggability-charter.md        protocol-first principle in engineering terms
 ```
 
 ## Annotation conventions
