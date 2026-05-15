@@ -63,6 +63,14 @@ const PACKAGE_GROUPS: Array<{ label: string; packages: string[] }> = [
     label: "DevTools",
     packages: ["@agentick/devtools"],
   },
+  {
+    label: "v2 (work in progress)",
+    packages: [
+      "@agentick/runtime",
+      "@agentick/reconciler-react",
+      "@agentick/tool-executor",
+    ],
+  },
 ];
 
 // Load TypeDoc-generated sidebar if it exists

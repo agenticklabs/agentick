@@ -8,6 +8,7 @@
       "@agentick/spec",
       "@agentick/runtime",
       "@agentick/reconciler-react",
+      "@agentick/tool-executor",
       "@agentick/kernel",
       "@agentick/shared",
       "@agentick/core",

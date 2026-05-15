@@ -1,7 +1,7 @@
 # Agentick v2 — Implementation Status
 
 **Branch:** `feat/v2`
-**Last updated:** 2026-05-15 (Phase 3.1–3.3 spec contracts landed)
+**Last updated:** 2026-05-15 (Phase 4a.1–4a.3 — tool executor spec + conformance + package scaffold landed)
 
 This is the **running progress log** for v2 implementation. Update it
 every session. New contributors / sessions read this first.
@@ -60,7 +60,19 @@ Phase 3  ■ in progress — RECONCILER HARNESS
          ✓ 3.13 Formatter scope providers (FormatScope + Markdown/XML/PlainText)
          ✓ 3.14 runReconcilerConformance + bridge conformance suites
          ✗ 3.15 Snapshot/restore concrete impls (hook state capture)
-Phase 4  □ Tool executor (was Phase 3) + other harnesses
+Phase 4  ■ in progress — REMAINING HARNESSES
+         ✓ 4a.1 ToolExecutorProtocol + I/O + errors + inbox + lifecycle (spec)
+         ✓ 4a.2 runToolExecutorConformance + FixtureToolSpec
+         ✓ 4a.3 @agentick/tool-executor package scaffold
+         ✗ 4a.4 Harness skeleton + dispatch happy path
+         ✗ 4a.5 Confirmation flow + framework channel
+         ✗ 4a.6 Middleware + lifecycle handler hooks
+         ✗ 4a.7 Inbox dispatcher (abort + confirmation-response)
+         ✗ 4a.8 v1 tool tests port + parity sweep
+         ✗ 4b   Executor harness
+         ✗ 4c   Loop executor
+         ✗ 4d   Session harness
+         ✗ 4e   App harness
 Phase 5  □ Adapters, cluster, gateway
 Phase 6  □ v1 sunset
 ```

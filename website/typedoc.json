@@ -4,6 +4,7 @@
   "entryPoints": [
     "../packages/runtime",
     "../packages/reconciler-react",
+    "../packages/tool-executor",
     "../packages/core",
     "../packages/kernel",
     "../packages/shared",

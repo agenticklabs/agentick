@@ -28,3 +28,10 @@ export { runLoopBridgeConformance } from "./loop-bridge.js";
 
 // Renderer / formatter protocols (Phase 4a — formatter harness)
 export { runRendererConformance } from "./renderer.js";
+
+// Tool executor (Phase 4a.2)
+export {
+  runToolExecutorConformance,
+  type ToolExecutorConformanceFactory,
+  type FixtureToolSpec,
+} from "./tool-executor.js";
