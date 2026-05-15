@@ -1,0 +1,409 @@
+# Agentick v2 — Implementation Status
+
+**Branch:** `feat/v2`
+**Last updated:** 2026-05-15
+
+This is the **running progress log** for v2 implementation. Update it
+every session. New contributors / sessions read this first.
+
+Related docs:
+- [`IMPLEMENTATION-PLAN.md`](./IMPLEMENTATION-PLAN.md) — overall phasing,
+  exit criteria, risk register
+- [`blueprint/`](./blueprint/) — architectural contracts (~24 docs)
+- [`blueprint/17-open-questions.md`](./blueprint/17-open-questions.md) —
+  unresolved design decisions
+
+## Current state
+
+```
+Phase 0  ■ in progress — workspace setup
+  ✓ Spec + spec-conformance packages scaffolded (committed)
+  ✓ Nomenclature rename pass (compiler→reconciler, renderer→formatter,
+    CompiledStructure→RenderedTree, useContinuation→useLoopControl)
+  ✗ Package renames (still pending decisions — defer to convenience)
+  ✗ Website / typedoc updates (deferred to end of Phase 0)
+
+Phase 1  ■ in progress — spec package type population
+  ✓ Foundation-critical types (envelopes, outcomes, errors, policy)
+  ✓ Substrate protocol interfaces (journal, bus, inbox)
+  ✗ Reconciler-related wire types (RenderedTree, ContextSpec,
+    MessageEntry, SectionEntry, ContentBlock, SemanticNode,
+    FormatterRef, etc.) — needed for Phase 3
+  ✗ Executor / session types (later phases)
+
+Phase 2  □ ready to start once memory substrate is needed
+Phase 3  □ RECONCILER HARNESS (was tool executor; reprioritized 2026-05-14)
+         ready to start once Phase 1 reconciler types + Phase 2 substrate land
+Phase 4  □ Tool executor (was Phase 3) + other harnesses
+Phase 5  □ Adapters, cluster, gateway
+Phase 6  □ v1 sunset
+```
+
+## Critical priority recalibration (2026-05-14)
+
+**The reconciler is the most foundational piece of agentick.** Everything
+connects to it; everything else is plumbing around it. Phase 3 in
+`IMPLEMENTATION-PLAN.md` was originally the tool executor (chosen as
+"simplest proof of substrate"). It is now the **reconciler harness**.
+
+Rationale: if `BaseHarness` doesn't fit the foundational harness cleanly,
+we need to know that before building six other harnesses on top. The
+tool executor is peripheral; proving the substrate against it teaches
+us little. Tool executor moves to Phase 4a.
+
+This means Phase 3 lands more spec types in parallel (ContentBlock,
+RenderedTree, MessageEntry, SemanticNode, FormatterRef, etc.) before
+the reconciler harness can be implemented.
+
+## What's done so far
+
+### Architecture (locked)
+
+- [`blueprint/`](./blueprint/) — 23 docs covering the five-surface
+  harness model, foundation substrate (journal/bus/inbox/OTel),
+  data model, every per-harness contract, flows, and packaging.
+- Naming scheme locked: `compiler-*`, `client-*`, `server-*`,
+  `executor-*`, `persistence-*`, `sandbox-*`.
+- Foundation contract: `Operation`, `DiscreteEvent`, `ChannelEvent`,
+  `MessageEnvelope`, `OperationJournal`, `EventBus`, `MessageInbox`,
+  `BaseHarness` with five surfaces.
+
+### Resolved open questions
+
+From `17-open-questions.md`:
+- **A10** `ReconcilerSnapshot` shape — locked 2026-05-08
+- **A11** `StateApplicator` interface — locked 2026-05-08 (Pick of session)
+- **F2** Handler verdict merge — locked 2026-05-08 (veto > replace > defer > proceed)
+- **N5** Ingest mechanism — locked 2026-05-08 (hybrid: direct call +
+  lifecycle handler chain)
+
+### Code (Phase 0 morning, 2026-05-08, committed)
+
+```
+packages/spec/                                          ✓ scaffolded
+  package.json                                          zero-dep, types-only
+  tsconfig.json + tsconfig.build.json
+  README.md
+  src/version.ts                                        SPEC_VERSION
+  src/index.ts
+  src/data/                                             populated this session
+  src/protocol/                                         populated this session
+  src/guards/index.ts                                   stub
+
+packages/spec-conformance/                              ✓ scaffolded (private: true)
+  package.json                                          (same as before)
+  src/{journal,inbox,harness,renderer}.ts               stubs (Phase 2+)
+
+.changeset/config.json                                  ✓ @agentick/spec in fixed group
+```
+
+### Code (Phase 1 foundation-critical types, 2026-05-11)
+
+```
+packages/spec/src/data/                                 ✓ all populated
+  events.ts             EventEnvelope, ProtocolEvent, EventSurface,
+                        EventPhase, EventScope, EventQuery, NameQuery
+  outcomes.ts           CommandOutcome (6 values), HandlerVerdict,
+                        TerminalEvent<R,E>, HandlerScope
+  operations.ts         Operation<I,R,E>, DiscreteEvent, ChannelEvent<T>
+  inbox.ts              MessageEnvelope<T>, MessageAck, MessageHandler
+  errors.ts             JournalError, InboxError, MessageHandlerError
+  journaling-policy.ts  JournalingPolicy + DEFAULT_JOURNALING_POLICY
+  standard-schema.ts    Inlined StandardSchemaV1 (~30 LOC; zero-dep preserved)
+  index.ts              re-exports all of the above
+
+packages/spec/src/protocol/                             ✓ substrate protocols
+  journal.ts            OperationJournal (append, appendBatch, read, tail,
+                        lookupTerminal, findOrphaned)
+                        + OrphanedOperation, OrphanQuery, JournalReadFrom,
+                          Maybe<T> sentinel
+  bus.ts                EventBus (publish, subscribe)
+                        + SubscribeOptions, BufferOverflowError
+  inbox.ts              MessageInbox (register, send, ask)
+                        + AskOptions, Unsubscribe
+  index.ts              re-exports
+
+packages/spec/src/__tests__/                            ✓ 25 tests passing
+  version.spec.ts       (1 test, SPEC_VERSION format)
+  types.spec.ts         (24 tests, structural smoke for every new type)
+```
+
+**Decisions baked in this session:**
+
+- **Async return type in spec is `Promise<T>` / `AsyncIterable<T>`.** Not
+  `Effect<T, E, R>`. This preserves spec's zero-dep claim and matches
+  the blueprint's own pattern (compiler-react is Effect-free; the
+  runtime bridges to Effect at the BaseHarness boundary). Errors are
+  thrown/rejected, typed via JSDoc `@throws`. Implementations using
+  Effect convert at their protocol boundary via
+  `Effect.runPromise` / `Effect.tryPromise`.
+- **Streaming uses `AsyncIterable<T>`** (TS-native) rather than Effect's
+  `Stream`. Implementations adapt.
+- **No `Option<T>`.** `OperationJournal.lookupTerminal` returns a plain
+  discriminated union `Maybe<T> = { some: true; value: T } | { some: false }`.
+- **Error shape is `{ _tag: ...; ... }` tagged unions** for runtime
+  pattern matching. No exception class hierarchy.
+- **Phantom type fields on `Operation<I, R, E>`** (`__r`, `__e`) are
+  inference-only; not runtime properties.
+
+**Status check:**
+- `pnpm typecheck` — 55/55 green
+- `pnpm vitest run packages/spec/src` — 25/25 green
+- v1 packages unaffected
+
+## What's next
+
+### Immediate
+
+Two parallel work streams can proceed now:
+
+1. **Foundation substrate (Phase 2)** is **unblocked** — spec has the
+   types and protocol interfaces needed to implement `MemoryJournal`,
+   `LocalInbox`, `LocalEventBus`, and `BaseHarness`.
+
+2. **Reconciler spec types (Phase 1 continuation)** can start in
+   parallel — these are needed for Phase 3 (reconciler harness):
+   - `ContentBlock` taxonomy + `MediaSource` (promote from
+     `packages/shared/src/blocks.ts`)
+   - `SemanticNode`, `SemanticType`, `SemanticMetadata` (promote from
+     `packages/core/src/renderers/base.ts`)
+   - `FormatterRef`, `FormatInput`, `FormatResult`, `FormattedContent`,
+     `FormatScope`, `FormatTrace`
+   - `RenderedTree`, `ContextSpec`, `MessageEntry`, `SectionEntry`
+   - `RuntimeDeclarations`, `ToolDeclaration`, `OutputDeclaration`,
+     `ResourceDeclaration`
+   - `ReconcilerSnapshot` (per `03-reconciler-harness.md` §Snapshot rules)
+   - `Message`, `MessageRoles` (promote from
+     `packages/shared/src/messages.ts`)
+   - `TimelineEntry` (promote from `packages/shared/src/timeline.ts`)
+   - `UsageStats` (promote from `packages/shared/src/models.ts`)
+
+Recommended order:
+
+1. **Commit current state** (nomenclature rename + priority reorder).
+2. **Promote reconciler spec types** (Phase 1 continuation). Mostly
+   mechanical — move + re-export from `@agentick/shared` for transient
+   compat.
+3. **Start Phase 2 substrate** (`MemoryJournal`, `LocalInbox`,
+   `LocalEventBus`, `BaseHarness`) — can happen in parallel with #2.
+4. **Phase 3 — Reconciler harness** in `@agentick/reconciler-react`.
+   Port v1 reconciler + JSX runtime + components + hooks. Implement
+   `ReconcilerProtocol`. Prove the substrate against the foundational
+   harness.
+
+### Deferred (do later when needed)
+
+These spec types are NOT needed for foundation substrate (Phase 2) or
+the first harness (Phase 3). Promote them when the consuming harness
+gets implemented:
+
+- **Phase 4 prereqs** (compiler-react, executor adapters):
+  - `ContentBlock` taxonomy (from `packages/shared/src/blocks.ts`)
+  - `Message`, `MessageRoles` (from `packages/shared/src/messages.ts`)
+  - `TimelineEntry` (from `packages/shared/src/timeline.ts`)
+  - `ToolCall`, `ToolResult` (from `packages/shared/src/tools.ts`)
+  - `UsageStats`, `ResponseFormat` (from `packages/shared/src/models.ts`)
+  - `RenderedTree`, `ContextSpec`, `MessageEntry`, `SectionEntry`
+  - `RuntimeDeclarations`, `ToolDeclaration`, `OutputDeclaration`
+  - `SemanticNode`, `SemanticType`, `SemanticMetadata`
+  - `FormatterRef`, `FormatInput`, `FormatResult`, `FormatScope`
+  - `ExecutionResult`, `ExecutorTerminal`, `LanguageModelExecutionResult`
+  - `ExecutionTarget`, `LanguageModelTarget`
+  - `ExecutorDelta`
+  - `ReconcilerSnapshot`
+  - `SessionRecord`
+  - `FrameworkChannels` (concrete channel payloads)
+
+- **Higher-layer protocol interfaces** (promote when implementing the
+  corresponding harness):
+  - `ReconcilerProtocol` (Phase 4b)
+  - `FormatterProtocol` (Phase 4a)
+  - `ExecutorProtocol`, `LanguageModelExecutor` (Phase 4c)
+  - `ToolExecutorProtocol` (Phase 3)
+  - `LoopExecutorProtocol` (Phase 4d)
+  - `SessionHarnessProtocol` (Phase 4e)
+  - `AppHarnessProtocol` (Phase 4f)
+
+### Pending decisions (carried from 2026-05-08, not yet blocking)
+
+The rename pass on existing v1 packages is still pending decisions —
+but it can happen at any time and doesn't block substrate work. Defer
+until convenient. The four open questions:
+
+### Pending decisions (from session 2026-05-08)
+
+1. **`@agentick/server`** exists today, described as "channel routing,
+   session handling, transport adapters." Action:
+   - (a) Rename to `@agentick/gateway` (current gateway pkg is something else?)
+   - (b) Keep as `@agentick/server` (separate from gateway?)
+   - (c) Fold into runtime
+
+2. **`packages/adapters/` has 7 packages** vs the 3 in the original
+   rename list:
+   ```
+   ai-sdk          → @agentick/executor-ai-sdk     (in plan)
+   anthropic       → @agentick/executor-anthropic  (not in plan)
+   apple           → @agentick/executor-apple      (??)
+   bedrock         → @agentick/executor-bedrock    (??)
+   google          → @agentick/executor-google     (in plan)
+   huggingface     → @agentick/executor-huggingface (??)
+   openai          → @agentick/executor-openai     (in plan)
+   ```
+   Rename all 7? Defer some?
+
+3. **Other v1 packages** — angular, cli, client-multiplexer, connector*,
+   guardrails, nestjs, scheduler, secrets, socket.io. Keep current
+   names? Some renamed?
+
+4. **`packages/agent/` and `packages/agentick/`** — which is the
+   meta-package and what's the other?
+
+## Environment quirks
+
+### pnpm install requires explicit registry
+
+Workspace has a Knowify CodeArtifact registry configured (`.npmrc`)
+that intercepts unrelated package requests when its auth token is
+expired. Two workarounds:
+
+```bash
+# Option 1: pass registry flag
+pnpm install --registry=https://registry.npmjs.org/
+
+# Option 2: refresh Knowify token
+# (the team's standard token refresh procedure)
+```
+
+The `.npmrc` warning during pnpm runs about `${NPM_TOKEN}` failing to
+replace is benign — comes from the workspace `.npmrc` template; not a
+v2 concern.
+
+### Vitest configuration is workspace-level
+
+Don't add a per-package `"test": "vitest run"` script — vitest's
+include glob `packages/*/src/**/*.spec.{ts,tsx}` is resolved relative
+to the directory vitest is invoked from. Per-package `pnpm test` ends
+up resolving to `packages/spec/packages/*/...` and finds nothing.
+
+Run tests from workspace root:
+```bash
+pnpm vitest run packages/spec/src           # all spec tests
+pnpm vitest run packages/spec/src/foo.spec.ts   # specific
+```
+
+### Day 1 morning fix applied
+
+Originally `packages/spec/package.json` had `"test": "vitest run"` and
+explicit `typescript` + `vitest` devDeps. Both removed:
+- Test script removed (workspace runs tests from root)
+- TypeScript + vitest provided by root devDeps
+
+## Decision log
+
+Running record of decisions made during execution (separate from the
+blueprint's design decisions; this is execution-level).
+
+### 2026-05-08
+
+- **Day 1 morning approach:** do additive (new packages) safely first;
+  pause before destructive renames until full package inventory was
+  understood.
+- **`@agentick/spec-conformance` not separate repo:** marked private
+  in monorepo. The "private repo" idea was overengineered — conformance
+  tests aren't a competitive moat.
+- **Per-package test scripts:** removed; vitest runs from workspace root.
+
+### 2026-05-11
+
+- **STATUS.md created:** running progress + decision log to enable
+  cross-session continuity.
+- **Spec async return = Promise/AsyncIterable** (not Effect). Preserves
+  zero-dep. Implementations bridge to Effect at the boundary.
+- **Spec error shape = `{ _tag: ...; ... }` tagged union.** No class hierarchy.
+- **`lookupTerminal` returns `Maybe<T>`** (plain discriminated union),
+  not Effect's `Option<T>`.
+- **Phantom type fields on `Operation<I, R, E>`** for inference; not
+  runtime properties. Marked `@internal`.
+- **`DEFAULT_JOURNALING_POLICY`** ships as a const in spec:
+  `alwaysJournal: ["requested", "terminal"]`, `busOnly: ["before", "delta"]`,
+  `overflow: "sliding"`, `queueCapacity: 4096`. Per-surface override at
+  consumer.
+
+### 2026-05-14
+
+- **Nomenclature recalibration:** drop idiomatic naming where it
+  conflicts with proper CS terms. Specifically:
+  - `Compiler harness` → `Reconciler harness` (it reconciles a reactive
+    program; it does not compile in the static-compilation sense).
+  - `Renderer harness` (markdown/xml) → `Formatter harness` (it formats
+    semantic content into output formats; "renderer" collides with
+    React's own meaning).
+  - `CompiledStructure` → `RenderedTree` (matches React's mental model:
+    what the reconciler "renders" to).
+  - `useContinuation` → `useLoopControl` (avoids overloading the existing
+    "gate" concept; clearer semantic about what it does).
+  - `CompileError` → `ReconcileError`.
+  - `RenderError` (formatter) → `FormatError`.
+  - `compileContext` command → `renderTree`.
+  - `compile-until-stable` → `render-until-stable`.
+  - Event prefixes: `compiler:*` → `reconciler:*`,
+    `renderer:*` → `formatter:*`.
+  - Surface enum: `"compiler"` → `"reconciler"`,
+    `"renderer"` → `"formatter"`.
+  - Package: `@agentick/compiler-react` → `@agentick/reconciler-react`.
+  - Doc file: `03-compiler-harness.md` → `03-reconciler-harness.md`,
+    `04-renderer-harness.md` → `04-formatter-harness.md`.
+  - "Harness" stays — adds engineering-discipline specificity over
+    bare "actor" (BaseHarness inheritance, five surfaces, journal
+    durability). Documented as an addressable actor.
+
+### 2026-05-15
+
+- **Phase 3 priority reorder:** the reconciler harness, not the tool
+  executor, is the proof harness. Reasoning: the reconciler IS the
+  foundation; the substrate is plumbing for it. If substrate doesn't fit
+  the foundational harness cleanly, we need to know that before building
+  on top. Tool executor moves to Phase 4a.
+- **Mechanical rename pass complete** across blueprint + plan + status.
+  55/55 typecheck green; 25/25 spec tests green.
+
+## Open architecture decisions (deferred from blueprint)
+
+Top of the priority list from `17-open-questions.md`:
+
+```
+1. A19 — PersistenceBackend methods (Phase 5; defer)
+2. A13 — ExecutorDelta shape (Phase 4c; defer)
+3. C6 — Provider-side tool execution marker (Phase 4c; defer)
+4. B5 — Handler ID validation mechanism (Phase 4b; defer)
+5. A1 — features[] registry (Phase 1; address as types land)
+6. E11 — Spec version migration on restore (Phase 5; defer)
+7. Inbox idempotency cache size + TTL (Phase 2)
+8. Per-harness inbox message catalogs (cross-validate during 4-9)
+9. Cluster routing integration with @effect/cluster (Phase 5 spike)
+```
+
+None of these block immediate work.
+
+## Quick-start for a new session
+
+```
+1. Read this file (STATUS.md).
+2. Skim docs/proposals/v2/IMPLEMENTATION-PLAN.md for phasing.
+3. Read blueprint/00-overview.md for the architecture map.
+4. Read blueprint/01-harness-principle.md + blueprint/19-foundation.md
+   for the foundational concepts.
+5. Check "What's next" section above for the immediate work item.
+6. Update this file when work completes.
+```
+
+## How to update this file
+
+When finishing a session or work block:
+
+1. Move items from "What's next" → "What's done" as appropriate.
+2. Add a dated entry to "Decision log" for any non-obvious choices.
+3. Update "Current state" phase markers.
+4. Add new pending decisions if encountered.
+5. Note any environment surprises.
+6. Commit alongside the work it describes.

@@ -16,7 +16,7 @@
  *
  * Spec uses `Promise` and `AsyncIterable` as canonical async return
  * types. This preserves `@agentick/spec`'s zero-dependency claim and
- * matches the blueprint's pattern (compiler-react is Effect-free; the
+ * matches the blueprint's pattern (reconciler-react is Effect-free; the
  * runtime bridges to Effect at its boundary).
  *
  * Implementations using Effect convert at the protocol boundary:

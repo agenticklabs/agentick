@@ -18,7 +18,7 @@ export interface MessageEnvelope<T = unknown> {
    * Recipient address — `{surface}:{scopeId}`.
    *   `loop:execution-abc-123`
    *   `session:user-42`
-   *   `compiler:mount-xyz`
+   *   `reconciler:mount-xyz`
    *   `supervisor:main`
    */
   readonly addressedTo: string;

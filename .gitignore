@@ -48,7 +48,17 @@ CONTEXT.md
 WORKING_NOTES.md
 packages/tui/UI_IDEAS.md
 plans/
-docs/
+
+# Top-level docs/ — ignored except v2 proposals.
+# Pattern note: must use /* on parents (not bare /), so child re-includes work.
+/docs/*
+!/docs/proposals/
+/docs/proposals/*
+!/docs/proposals/v2/
+!/docs/proposals/v2/**
+
+# Nested docs/ dirs (e.g., packages/mcp/docs/) stay ignored.
+packages/*/docs/
 
 !website/docs/
 

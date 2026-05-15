@@ -75,8 +75,8 @@ describe("@agentick/spec — structural smoke tests", () => {
         "app",
         "session",
         "loop",
-        "compiler",
-        "renderer",
+        "reconciler",
+        "formatter",
         "executor",
         "tool",
         "cluster",
@@ -135,12 +135,12 @@ describe("@agentick/spec — structural smoke tests", () => {
     it("DiscreteEvent has no opId requirement", () => {
       const d: DiscreteEvent = {
         id: "d_1",
-        surface: "compiler",
-        name: "compiler:async:resolved",
+        surface: "reconciler",
+        name: "reconciler:async:resolved",
         scope: {},
         timestamp: Date.now(),
       };
-      expect(d.name).toMatch(/^compiler:/);
+      expect(d.name).toMatch(/^reconciler:/);
     });
   });
 

@@ -9,12 +9,12 @@
  *   - execution-result.ts  ExecutionResult, ExecutorTerminal, LanguageModelExecutionResult
  *   - execution-target.ts  ExecutionTarget, LanguageModelTarget
  *   - execution-deltas.ts  ExecutorDelta
- *   - render.ts  RendererRef, RenderInput, RenderResult, RenderableContent, RenderScope, RenderTrace
+ *   - render.ts  FormatterRef, FormatInput, FormatResult, FormattableContent, FormatScope, FormatTrace
  *   - channels.ts  FrameworkChannels and concrete channel payloads
  *   - timeline.ts  TimelineEntry
  *   - knobs.ts  KnobDeclaration, KnobState
  *   - subscriptions.ts  SubscriptionIntent
- *   - compiler-snapshot.ts  CompilerSnapshot
+ *   - reconciler-snapshot.ts  ReconcilerSnapshot
  *   - session-record.ts  SessionRecord
  *
  * @see docs/proposals/v2/blueprint/02-data-model.md

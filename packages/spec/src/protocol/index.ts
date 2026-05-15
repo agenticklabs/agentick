@@ -4,8 +4,8 @@
  * Phase 1c landed: substrate protocols (journal, bus, inbox).
  *
  * Future phases will add:
- *   - compiler.ts        CompilerProtocol + I/O types
- *   - renderer.ts        RendererProtocol + I/O types
+ *   - reconciler.ts      ReconcilerProtocol + I/O types
+ *   - formatter.ts       FormatterProtocol + I/O types
  *   - loop-executor.ts   LoopExecutorProtocol
  *   - executor.ts        ExecutorProtocol, LanguageModelExecutor
  *   - tool-executor.ts   ToolExecutorProtocol

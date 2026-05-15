@@ -70,8 +70,8 @@ export interface Operation<I, R = unknown, E = unknown> {
  * Optional `parentOpId` for causal linkage to an enclosing operation.
  *
  * Examples:
- *   compiler:async:resolved
- *   compiler:suspended
+ *   reconciler:async:resolved
+ *   reconciler:suspended
  *   cluster:node:joined
  *   gateway:transport:connected
  *
