@@ -30,8 +30,6 @@ export interface Reconciler {
   createRoot(): FiberRoot;
   /** Queue a synchronous update + run all work + run passive effects. */
   render(element: ReactNode, root: FiberRoot): void;
-  /** Optional: connect to react-devtools standalone (best-effort). */
-  injectIntoDevTools(): void;
 }
 
 /**
@@ -42,6 +40,25 @@ export interface Reconciler {
 export function createReconciler(deps: HostConfigDeps): Reconciler {
   const config = createHostConfig(deps);
   const instance = ReactReconciler(config as Parameters<typeof ReactReconciler>[0]);
+
+  // Auto-register with the global React DevTools hook. If DevTools
+  // isn't connected (no `enableReactDevTools()` call) this is a no-op
+  // — the registration sits dormant until DevTools attaches. Safe to
+  // always invoke; failures are swallowed (best-effort).
+  try {
+    (
+      instance as unknown as {
+        injectIntoDevTools?: (info: Record<string, unknown>) => void;
+      }
+    ).injectIntoDevTools?.({
+      bundleType: process.env.NODE_ENV === "development" ? 1 : 0,
+      version: "0.0.0",
+      rendererPackageName: "@agentick/reconciler-react",
+      findFiberByHostInstance: () => null,
+    });
+  } catch {
+    // best-effort
+  }
 
   return {
     createRoot(): FiberRoot {
@@ -95,20 +112,6 @@ export function createReconciler(deps: HostConfigDeps): Reconciler {
       if (flushSyncWork) flushSyncWork();
     },
 
-    injectIntoDevTools(): void {
-      try {
-        (instance as unknown as {
-          injectIntoDevTools?: (info: Record<string, unknown>) => void;
-        }).injectIntoDevTools?.({
-          bundleType: process.env.NODE_ENV === "development" ? 1 : 0,
-          version: "0.0.0",
-          rendererPackageName: "@agentick/reconciler-react",
-          findFiberByHostInstance: () => null,
-        });
-      } catch {
-        // best-effort
-      }
-    },
   };
 }
 

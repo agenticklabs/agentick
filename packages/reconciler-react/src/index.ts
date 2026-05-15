@@ -41,6 +41,17 @@ export { createHostConfig } from "./host/host-config.js";
 export { createReconciler } from "./react/reconciler.js";
 export type { FiberRoot } from "./react/reconciler.js";
 
+// React DevTools bridge
+export {
+  enableReactDevTools,
+  isReactDevToolsConnected,
+  disableReactDevTools,
+} from "./react/devtools-bridge.js";
+export type {
+  EnableReactDevToolsOptions,
+  EnableReactDevToolsOutcome,
+} from "./react/devtools-bridge.js";
+
 // Layer B — Contributor protocol + collect walker
 export type { CollectContext, Contributor } from "./collect/contributor.js";
 export type { IRFragment } from "./collect/fragments.js";

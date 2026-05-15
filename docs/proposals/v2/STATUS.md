@@ -119,8 +119,16 @@ up the right one.
   specify index requirements; concrete durable impls will surface this.
 
 ### Integration gaps
-- **react-devtools bridge** — v1 has `enableReactDevTools()` connecting
-  to standalone DevTools on port 8097. Not wired in v2.
+- ✓ **react-devtools bridge** — ported to
+  `@agentick/reconciler-react/react/devtools-bridge.ts`. Each
+  `createReconciler()` auto-injects into DevTools via
+  `injectIntoDevTools` (no per-mount opt-in). Call
+  `enableReactDevTools({ host?, port? })` once at startup to connect to
+  the standalone DevTools app — returns a typed outcome
+  (`connected`/`already-connected`/`not-installed`/`failed`) instead of
+  console-warning side effects. `react-devtools-core` is loaded via
+  dynamic import (not a declared peer dep — install yourself when
+  needed). Landed 2026-05-15.
 - **Content-block intrinsics** — `<text>`, `<image>`, `<code>`, `<json>`,
   `<document>`, `<audio>`, `<video>` not yet contributors. They'd fold
   into parent `MessageEntry.content` / `SectionEntry.content`.
