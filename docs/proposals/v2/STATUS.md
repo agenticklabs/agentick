@@ -80,11 +80,16 @@ up the right one.
 - **Snapshot/restore hook-state capture**. `ReconcilerSnapshot.hookStates`
   is always empty, `dataCache` always empty. Hibernate-and-resume is
   shape-conformant but doesn't preserve component state yet.
-- **strictNoSuspense plumbing** — field accepted on MountInput, never
-  consulted. Suspense boundaries firing don't currently emit
-  `suspense-boundary-active` warning.
-- **ErrorBoundary detection** — `error-boundary-active` info diagnostic
-  is documented; no code path emits it.
+- ~~strictNoSuspense plumbing~~ DROPPED 2026-05-15. Suspense firing
+  cannot be reliably detected via react-reconciler 0.33's host config
+  callbacks. Tried fetch-count heuristic (false positives/negatives),
+  static element-tree scan (misses dynamic Suspense), and
+  outer-Suspense sentinel (detection works but inner user-Suspense's
+  unwrap-on-resolve doesn't fire with LegacyRoot, leaving fallback
+  stuck in IR). Removed from spec; documented "if you use `<Suspense>`,
+  fallbacks may appear in IR — verify with tests."
+- ✓ **ErrorBoundary detection** — `error-boundary-active` info
+  diagnostic emits via host config `onCaughtError`. Landed 2026-05-15.
 - **Custom lifecycle event dispatch** — `LifecycleCustom` shape exists
   in spec; `LifecycleStore.dispatch` silently ignores unknown kinds.
 
