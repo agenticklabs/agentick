@@ -70,7 +70,6 @@ interface MountState {
   readonly registry: ContributorRegistry;
   readonly rootScope: HostScope;
   readonly lifecycle: LifecycleStore;
-  strictNoSuspense: boolean;
   /**
    * Captures the first render error surfaced via the host config's
    * `onUncaughtError` callback. Cleared at the start of each render
@@ -78,6 +77,18 @@ interface MountState {
    * bugs, missing-bridge errors, etc.).
    */
   renderError: unknown;
+  /**
+   * Set when the host config's `onCaughtError` fires, which React
+   * triggers when an in-tree `<ErrorBoundary>` (class component
+   * componentDidCatch) catches a render error. Drives the
+   * `error-boundary-active` info diagnostic.
+   *
+   * NOT reset per iteration — React fires `onCaughtError` once per
+   * caught error, typically during mount. Subsequent renders of the
+   * now-in-caught-state boundary don't re-fire. Consumed (cleared)
+   * when the diagnostic is emitted.
+   */
+  errorBoundaryFiredInLastRender: boolean;
 }
 
 export interface ReconcilerHarnessOptions {
@@ -265,8 +276,8 @@ export class ReconcilerHarness
       registry: this.registry,
       rootScope,
       lifecycle: new LifecycleStore(),
-      strictNoSuspense: input.strictNoSuspense ?? false,
       renderError: null,
+      errorBoundaryFiredInLastRender: false,
     };
     const reconciler = createReconciler({
       container,
@@ -277,9 +288,11 @@ export class ReconcilerHarness
         if (state.renderError === null) state.renderError = err;
       },
       onCaughtError: () => {
-        // Errors caught by an in-tree <ErrorBoundary> are handled by
-        // user code; the framework surfaces them as info diagnostics
-        // via the host config rather than blocking the render.
+        // Fires when an in-tree <ErrorBoundary> (getDerivedStateFromError /
+        // componentDidCatch) catches a render error. The boundary
+        // handles fallback rendering; we just flag so the loop can
+        // surface an `error-boundary-active` info diagnostic.
+        state.errorBoundaryFiredInLastRender = true;
       },
       onRecoverableError: () => {
         // React 19 emits these for non-fatal issues (hydration mismatch,
@@ -318,17 +331,49 @@ export class ReconcilerHarness
     let iterations = 0;
     let hitMax = false;
 
+    // Track whether boundary diagnostics have been emitted this call —
+    // we report at most one of each kind per renderTree, not one per
+    // ErrorBoundary diagnostic is emitted at most once per renderTree.
+    let errorBoundaryEmitted = false;
+
     // Render-until-stable. The DataBridge tracks in-flight Promises
     // independently of whether React caught the throw — so the loop's
     // termination condition is "bridge has no pending fetches",
     // regardless of React's error handling for thrown Promises.
+    const dataBridge = state.bridges.data;
+    const isMemBridge = dataBridge instanceof InMemoryDataBridge;
+
+    // ErrorBoundary firing during mount/initial render — emit on the
+    // first renderTree.
+    if (state.errorBoundaryFiredInLastRender && !errorBoundaryEmitted) {
+      diagnostics.push({
+        severity: "info",
+        code: "error-boundary-active",
+        message:
+          "An in-tree <ErrorBoundary> caught a render error and rendered its fallback. The fallback content appears in the IR.",
+      });
+      errorBoundaryEmitted = true;
+      state.errorBoundaryFiredInLastRender = false; // consume
+    }
+
     for (iterations = 0; iterations < maxIterations; iterations++) {
       state.renderError = null;
       this.renderOnce(state);
 
-      const dataBridge = state.bridges.data;
-      const pending =
-        dataBridge instanceof InMemoryDataBridge ? dataBridge.pending() : null;
+      // Late ErrorBoundary emission — covers errors that surface
+      // mid-loop (e.g., an error thrown after a useData resolves).
+      if (state.errorBoundaryFiredInLastRender && !errorBoundaryEmitted) {
+        diagnostics.push({
+          severity: "info",
+          code: "error-boundary-active",
+          message:
+            "An in-tree <ErrorBoundary> caught a render error and rendered its fallback. The fallback content appears in the IR.",
+        });
+        errorBoundaryEmitted = true;
+        state.errorBoundaryFiredInLastRender = false; // consume
+      }
+
+      const pending = isMemBridge ? dataBridge.pending() : null;
 
       // If the render produced a real error AND no pending data
       // explains it, terminate with RenderFailed.
@@ -448,7 +493,7 @@ export class ReconcilerHarness
    * The try/catch here short-circuits that retry.
    */
   private renderOnce(state: MountState): void {
-    // Wrap with both BridgeContext (runtime bridges) and LifecycleContext
+    // Wrap with BridgeContext (runtime bridges) and LifecycleContext
     // (per-mount handler registry). User hooks consume the appropriate
     // context. The two contexts are siblings, not nested in meaning —
     // nesting order is arbitrary.
@@ -466,8 +511,8 @@ export class ReconcilerHarness
     } catch (err) {
       // Promises from useData are tracked via the bridge; the loop
       // detects them via hasPending(). Plain errors are real failures.
-      if (!isThenable(err)) {
-        if (state.renderError === null) state.renderError = err;
+      if (!isThenable(err) && state.renderError === null) {
+        state.renderError = err;
       }
     }
   }

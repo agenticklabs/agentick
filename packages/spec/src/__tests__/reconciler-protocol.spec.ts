@@ -215,33 +215,9 @@ describe("@agentick/spec — reconciler protocol", () => {
         "render-error",
         "snapshot-incompatible",
         "unstable-tree",
-        "suspense-boundary-active",
         "error-boundary-active",
       ];
-      expect(codes).toHaveLength(10);
-    });
-  });
-
-  describe("MountInput.strictNoSuspense", () => {
-    it("opts into hard-fail-on-suspense behavior", () => {
-      const input: MountInput = {
-        mountId: "m_1",
-        sessionId: "s_1",
-        element: {} as unknown,
-        bridges: stubBridges(),
-        strictNoSuspense: true,
-      };
-      expect(input.strictNoSuspense).toBe(true);
-    });
-
-    it("defaults to undefined (warn-only)", () => {
-      const input: MountInput = {
-        mountId: "m_1",
-        sessionId: "s_1",
-        element: {} as unknown,
-        bridges: stubBridges(),
-      };
-      expect(input.strictNoSuspense).toBeUndefined();
+      expect(codes).toHaveLength(9);
     });
   });
 

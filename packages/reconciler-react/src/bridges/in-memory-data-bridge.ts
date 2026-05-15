@@ -52,6 +52,7 @@ export interface InMemoryDataBridgeOptions {
 export class InMemoryDataBridge implements DataBridge {
   private readonly cache = new Map<string, Entry>();
   private readonly pendingPromises = new Set<Promise<unknown>>();
+  private fetchCountTotal = 0;
   private readonly options: InMemoryDataBridgeOptions;
 
   constructor(options: InMemoryDataBridgeOptions = {}) {
@@ -72,6 +73,22 @@ export class InMemoryDataBridge implements DataBridge {
    */
   pending(): readonly Promise<unknown>[] {
     return [...this.pendingPromises];
+  }
+
+  /**
+   * Cumulative count of fetches ever started (whether still pending,
+   * fulfilled, or rejected). Used by the harness to detect
+   * Suspense-boundary firing — when the count increases during a
+   * render iteration but our outer try/catch DID NOT see the thrown
+   * Promise, a Suspense ancestor must have caught it.
+   *
+   * Synchronous fetchers (like `async () => "value"`) resolve in a
+   * microtask after the throw, so by the time the harness checks
+   * `pending()` the count is already zero — making `fetchCount()`
+   * delta the only reliable signal.
+   */
+  fetchCount(): number {
+    return this.fetchCountTotal;
   }
 
   resolve<T>(key: string, fetcher: () => Promise<T>, options: DataResolveOptions = {}): T {
@@ -123,6 +140,7 @@ export class InMemoryDataBridge implements DataBridge {
       },
     );
     this.pendingPromises.add(settled);
+    this.fetchCountTotal++;
     this.cache.set(key, {
       status: "pending",
       promise: settled,

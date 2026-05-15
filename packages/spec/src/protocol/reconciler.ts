@@ -19,16 +19,15 @@
  * - **React feature semantics:** the reconciler uses React's reconciler,
  *   component model, hooks, refs, effects, and context. The following
  *   React features have specific semantics:
- *     - `<Suspense fallback>` — fallbacks DO end up in the IR if a
- *       boundary fires. The default reconciler behavior catches thrown
- *       data Promises at the outer level (past any Suspense ancestor),
- *       so `useData` does NOT trigger fallbacks. Suspense fallbacks
- *       fire on `React.lazy`, manual `throw promise`, and any
- *       third-party library that surfaces Promises React intercepts.
- *       Implementations emit a `suspense-boundary-active` warning
- *       diagnostic when a fallback fires. Setting
- *       `MountInput.strictNoSuspense = true` upgrades the warning to a
- *       `RenderFailed` terminal.
+ *     - `<Suspense fallback>` — allowed, but fallback content may
+ *       appear in the IR if a boundary fires. The framework does NOT
+ *       detect or guard against this — Suspense's catch-and-fallback
+ *       behavior is React's native lifecycle and Reconciler harness
+ *       implementations don't interpose. Authors who don't want
+ *       fallback leakage should avoid `<Suspense>` and rely on the
+ *       no-Suspense `useData` primitive (which throws Promises caught
+ *       by the harness's render-until-stable loop, not by user
+ *       Suspense). Verify with your own tests if uncertain.
  *     - `<ErrorBoundary>` (class component `componentDidCatch`) —
  *       SUPPORTED. When a boundary catches a render error, the fallback
  *       lands in the IR; the operation terminates with `succeeded` and
@@ -118,14 +117,6 @@ export interface MountInput extends MountScopedInput {
    * supplied snapshot.
    */
   readonly elementVersion?: string;
-
-  /**
-   * When true, a Suspense boundary firing (`suspense-boundary-active`
-   * diagnostic) is upgraded to a terminal `RenderFailed` error.
-   * Default: false (warn only). Suspense fallbacks STILL land in the
-   * IR — this flag controls whether their presence is fatal.
-   */
-  readonly strictNoSuspense?: boolean;
 
   readonly metadata?: Readonly<Record<string, unknown>>;
 }

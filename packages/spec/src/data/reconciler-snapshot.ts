@@ -124,9 +124,6 @@ export type ReconcileDiagnosticSeverity = "info" | "warning" | "error";
  * - `render-error`              a component threw during render (caught at root)
  * - `snapshot-incompatible`     a restore() encountered a snapshot it could not apply
  * - `unstable-tree`             consecutive renders produced different output past the cap
- * - `suspense-boundary-active`  a `<Suspense>` boundary fired and its fallback
- *                               landed in the IR (warning by default; fatal when
- *                               `MountInput.strictNoSuspense` is set)
  * - `error-boundary-active`     an `<ErrorBoundary>` caught a render error and
  *                               rendered a fallback into the IR (info severity)
  */
@@ -139,7 +136,6 @@ export type ReconcileDiagnosticCode =
   | "render-error"
   | "snapshot-incompatible"
   | "unstable-tree"
-  | "suspense-boundary-active"
   | "error-boundary-active"
   | (string & {});
 
