@@ -19,7 +19,7 @@
  * @see packages/spec/src/protocol/hook-bridges.ts
  */
 
-import type { DataBridge, DataResolveOptions } from "@agentick/spec";
+import type { DataBridge, DataCacheEntry, DataResolveOptions } from "@agentick/spec";
 
 type Entry =
   | {
@@ -158,6 +158,47 @@ export class InMemoryDataBridge implements DataBridge {
   /** Clear every entry. */
   clear(): void {
     this.cache.clear();
+  }
+
+  /**
+   * Export the fulfilled cache entries as `DataCacheEntry[]` for
+   * inclusion in a `ReconcilerSnapshot`. Pending and rejected entries
+   * are skipped — re-fetching is safer than persisting partial state.
+   */
+  exportSnapshot(): readonly DataCacheEntry[] {
+    const out: DataCacheEntry[] = [];
+    for (const [key, entry] of this.cache) {
+      if (entry.status !== "fulfilled") continue;
+      out.push({
+        key,
+        value: entry.value,
+        fetchedAt: entry.fetchedAt,
+        ...(entry.ttl !== undefined ? { ttl: entry.ttl } : {}),
+        ...(entry.tag !== undefined ? { tag: entry.tag } : {}),
+      });
+    }
+    return out;
+  }
+
+  /**
+   * Replace the cache with entries from a `ReconcilerSnapshot`. Existing
+   * pending fetches are dropped (the snapshot represents the
+   * authoritative state). TTL is honored — stale entries are skipped.
+   */
+  importSnapshot(entries: readonly DataCacheEntry[]): void {
+    this.cache.clear();
+    this.pendingPromises.clear();
+    const now = Date.now();
+    for (const e of entries) {
+      if (e.ttl !== undefined && now - e.fetchedAt >= e.ttl) continue;
+      this.cache.set(e.key, {
+        status: "fulfilled",
+        value: e.value,
+        fetchedAt: e.fetchedAt,
+        ...(e.ttl !== undefined ? { ttl: e.ttl } : {}),
+        ...(e.tag !== undefined ? { tag: e.tag } : {}),
+      });
+    }
   }
 }
 

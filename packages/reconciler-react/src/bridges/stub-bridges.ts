@@ -24,7 +24,16 @@ export function stubTimelineBridge(): TimelineBridge {
   };
 }
 
-export function inMemoryKnobBridge(initial: Record<string, unknown> = {}): KnobBridge {
+/**
+ * Knob bridge extended with snapshot export/import so the harness can
+ * persist + restore the model-visible knob state across mounts.
+ */
+export interface InMemoryKnobBridge extends KnobBridge {
+  exportSnapshot(): Readonly<Record<string, unknown>>;
+  importSnapshot(values: Readonly<Record<string, unknown>>): void;
+}
+
+export function inMemoryKnobBridge(initial: Record<string, unknown> = {}): InMemoryKnobBridge {
   const values = new Map<string, unknown>(Object.entries(initial));
   const listeners = new Map<string, Set<() => void>>();
   return {
@@ -48,6 +57,20 @@ export function inMemoryKnobBridge(initial: Record<string, unknown> = {}): KnobB
       return () => {
         set!.delete(listener);
       };
+    },
+    exportSnapshot: () => {
+      const out: Record<string, unknown> = {};
+      for (const [k, v] of values) out[k] = v;
+      return out;
+    },
+    importSnapshot: (next: Readonly<Record<string, unknown>>) => {
+      // Replace contents, notifying subscribers for every affected id.
+      const oldKeys = new Set(values.keys());
+      const newKeys = new Set(Object.keys(next));
+      const changedIds = new Set<string>([...oldKeys, ...newKeys]);
+      values.clear();
+      for (const [k, v] of Object.entries(next)) values.set(k, v);
+      for (const id of changedIds) listeners.get(id)?.forEach((l) => l());
     },
   };
 }

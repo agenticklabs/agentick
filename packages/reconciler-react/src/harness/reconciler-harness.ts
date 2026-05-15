@@ -211,27 +211,38 @@ export class ReconcilerHarness
 
   async snapshot(input: SnapshotInput): Promise<ReconcilerSnapshot> {
     const state = this.mountState(input.mountId);
-    // Phase 3.10+: capture hook state from React fiber tree. For now,
-    // return a spec-shaped empty snapshot so persistence round-trips.
+    // Bridge state — data cache + knobs — is captured when the bridges
+    // expose `exportSnapshot()`. Hook state (useState/useReducer) is
+    // not yet captured; that requires walking React's fiber tree.
+    // TODO(snapshot): traverse fiber tree to extract hook state per
+    // component path so hibernate-and-resume preserves component-local
+    // state across process boundaries.
+    const dataCache =
+      state.bridges.data instanceof InMemoryDataBridge
+        ? state.bridges.data.exportSnapshot()
+        : [];
+    const knobs = exportKnobs(state.bridges);
     return {
       specVersion: SPEC_VERSION,
       mountId: state.mountId,
       ...(state.elementVersion !== undefined ? { elementVersion: state.elementVersion } : {}),
       hookStates: [],
-      dataCache: [],
-      knobs: collectKnobs(state.bridges),
+      dataCache,
+      knobs,
       subscriptions: [],
     };
   }
 
   async restore(input: RestoreInput): Promise<void> {
-    // Phase 3.10+: apply snapshot.hookStates / dataCache to the live
-    // mount before the next render. For now, just remember the
-    // elementVersion in case the runtime checks it.
     const state = this.mounts.get(input.mountId);
     if (!state) return;
     if (input.elementVersion !== undefined) state.elementVersion = input.elementVersion;
-    void input.snapshot;
+    // Apply bridge state from the snapshot before the next renderTree.
+    if (state.bridges.data instanceof InMemoryDataBridge) {
+      state.bridges.data.importSnapshot(input.snapshot.dataCache);
+    }
+    importKnobs(state.bridges, input.snapshot.knobs);
+    // Hook state restoration is deferred (see snapshot()).
   }
 
   // ──────────────────────── inbox dispatch ────────────────────────
@@ -303,17 +314,21 @@ export class ReconcilerHarness
     (state as { root: FiberRoot }).root = reconciler.createRoot();
     this.mounts.set(input.mountId, state);
 
-    // First render is part of mount so the host tree exists and any
-    // synchronous components (no useData blocking) populate the tree
-    // before renderTree is ever called.
-    this.renderOnce(state);
-
+    // Apply snapshot BEFORE the initial render so useData / useKnob
+    // hooks see restored values on first invocation. Hook state
+    // (useState/useReducer) restoration is deferred — see snapshot().
     const restoredFromSnapshot = input.snapshot !== undefined;
-    if (restoredFromSnapshot) {
-      // Phase 3.10+: apply snapshot.hookStates before the first
-      // renderTree. Stored on state for now; restore() is a no-op.
-      void input.snapshot;
+    if (input.snapshot) {
+      if (state.bridges.data instanceof InMemoryDataBridge) {
+        state.bridges.data.importSnapshot(input.snapshot.dataCache);
+      }
+      importKnobs(state.bridges, input.snapshot.knobs);
     }
+
+    // First render — populates the host tree and lets sync components
+    // commit. With a restored snapshot, useData hits cached values
+    // immediately (no fetch starts on first render).
+    this.renderOnce(state);
 
     return { mountId: input.mountId, restoredFromSnapshot };
   }
@@ -448,10 +463,34 @@ export class ReconcilerHarness
   }
 }
 
-function collectKnobs(bridges: HookBridges): Readonly<Record<string, unknown>> {
+/**
+ * Read knob values from the bridge. Prefers `exportSnapshot()` when the
+ * bridge exposes it (preserves any internal ordering/metadata); falls
+ * back to walking `list()` results.
+ */
+function exportKnobs(bridges: HookBridges): Readonly<Record<string, unknown>> {
+  const k = bridges.knobs as { exportSnapshot?: () => Readonly<Record<string, unknown>> };
+  if (typeof k.exportSnapshot === "function") return k.exportSnapshot();
   const out: Record<string, unknown> = {};
-  for (const k of bridges.knobs.list()) out[k.id] = k.value;
+  for (const item of bridges.knobs.list()) out[item.id] = item.value;
   return out;
+}
+
+/**
+ * Apply knob values to the bridge. Prefers `importSnapshot()` when the
+ * bridge exposes it (more efficient + atomic); falls back to a
+ * per-entry `set()` walk.
+ */
+function importKnobs(
+  bridges: HookBridges,
+  values: Readonly<Record<string, unknown>>,
+): void {
+  const k = bridges.knobs as { importSnapshot?: (v: Readonly<Record<string, unknown>>) => void };
+  if (typeof k.importSnapshot === "function") {
+    k.importSnapshot(values);
+    return;
+  }
+  for (const [id, value] of Object.entries(values)) bridges.knobs.set(id, value);
 }
 
 function isThenable(value: unknown): value is PromiseLike<unknown> {
