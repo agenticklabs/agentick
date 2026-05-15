@@ -118,7 +118,7 @@ interface SessionHarnessProtocol<P = unknown> {
     Effect<ApplyResult, StateApplyError, SessionEnv>;
 
   // Tick-end forwarding (called from session's loop.onTickEnd handler)
-  notifyTickEnd(input: NotifyTickEndInput):
+  notifyLifecycle(input: NotifyTickEndInput):
     Effect<TickEndDecision, SessionError, SessionEnv>;
 
   // Observation (synchronous reads against in-memory state)
@@ -505,9 +505,9 @@ class SessionHarness extends BaseHarness<"session"> {
   constructor(deps: SessionDeps) {
     super(...);
 
-    // Wire loop's tick-end to react's notifyTickEnd via session.notifyTickEnd
+    // Wire loop's tick-end to react's notifyLifecycle via session.notifyLifecycle
     this.unsubTickEnd = this.loop.onTickEnd(async (tickResult) => {
-      return this.notifyTickEnd({
+      return this.notifyLifecycle({
         tickResult,
         defaultShouldContinue: this.defaultFromStopReason(tickResult),
       });
@@ -533,11 +533,11 @@ class SessionHarness extends BaseHarness<"session"> {
   }
 
   /** Forward tick result to reconciler harness; return tree's decision. */
-  notifyTickEnd(input: NotifyTickEndInput):
+  notifyLifecycle(input: NotifyTickEndInput):
     Effect<TickEndDecision, SessionError, SessionEnv>
   {
     return this.runOperation(/* op */, async ({ tickResult, defaultShouldContinue }) => {
-      return this.react.notifyTickEnd({
+      return this.react.notifyLifecycle({
         mountId: this.mountId,
         tickResult,
         defaultShouldContinue,
@@ -556,11 +556,11 @@ reconciler harness. Each harness on its own is independent.
 
 - **Swap harness implementations:** replace the reconciler harness with a Vue
   harness — no loop or session code changes; rewire the session's
-  `loop.onTickEnd` handler to call `vue.notifyTickEnd`.
+  `loop.onTickEnd` handler to call `vue.notifyLifecycle`.
 - **Test the loop in isolation:** mock the `.onTickEnd` registration
   point; assert the correct tick result was passed to the (mocked)
   session.
-- **Test the session in isolation:** call `notifyTickEnd` directly; mock
+- **Test the session in isolation:** call `notifyLifecycle` directly; mock
   the reconciler harness.
 
 ## Inbox messages

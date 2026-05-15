@@ -309,7 +309,7 @@ which is Effect-free and depends only on @agentick/spec):
       RenderedTree)
     □ renderToString, renderResource
     □ snapshot, restore
-    □ notifyTickEnd
+    □ notifyLifecycle
   □ Implement inbox: recompile, unmount messages
   □ Lifecycle handlers: onAsyncResolved, onCompileForcedStable,
     onRuntimeError
@@ -336,7 +336,7 @@ Tests:
   □ Compile-until-stable convergence
   □ Async component resolution
   □ Snapshot/restore round-trip
-  □ notifyTickEnd fires useOnTickEnd / useLoopControl hooks correctly
+  □ notifyLifecycle fires useOnTickEnd / useLoopControl hooks correctly
   □ All five surfaces verified end-to-end
   □ OTel exporter integration: spans appear with correct attributes
   □ Backpressure verified
@@ -442,12 +442,12 @@ Tasks:
   □ SessionHarness extends BaseHarness<"session">
   □ All commands per 08-session-harness.md
   □ apply* commands (timeline writes)
-  □ notifyTickEnd command
+  □ notifyLifecycle command
   □ Inbox: send, dispatch, abort, pause, resume, hibernate, restore,
     inject-input, recover, close
   □ Lifecycle handlers: onMount, onHibernateBefore, onSpawn, etc.
   □ Cross-harness wiring at construction:
-    □ loop.onTickEnd → session.notifyTickEnd → react.notifyTickEnd
+    □ loop.onTickEnd → session.notifyLifecycle → react.notifyLifecycle
     □ loop.onExecutorTerminal → session.applyExecutorResult
     □ loop.onToolResults → session.applyToolResults
   □ Lifecycle states (idle | running | paused | hibernating | hibernated | restoring | closed)

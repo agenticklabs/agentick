@@ -4,10 +4,11 @@ import type {
   DataResolveOptions,
   HookBridges,
   KnobBridge,
+  LifecycleEvent,
   LoopBridge,
   MountInput,
   MountResult,
-  NotifyTickEndInput,
+  NotifyLifecycleInput,
   ReconcileDiagnostic,
   ReconcileError,
   ReconcilerInboxMessage,
@@ -106,7 +107,7 @@ describe("@agentick/spec — reconciler protocol", () => {
     });
   });
 
-  describe("rerender / notifyTickEnd / unmount / snapshot / restore", () => {
+  describe("rerender / notifyLifecycle / unmount / snapshot / restore", () => {
     it("RerenderInput carries new element + optional version", () => {
       const input: RerenderInput = {
         mountId: "m_1",
@@ -116,12 +117,38 @@ describe("@agentick/spec — reconciler protocol", () => {
       expect(input.elementVersion).toBe("sha:abc");
     });
 
-    it("NotifyTickEndInput accepts opaque tick result payload", () => {
-      const input: NotifyTickEndInput = {
+    it("NotifyLifecycleInput discriminates on event.kind", () => {
+      const events: LifecycleEvent[] = [
+        { kind: "tick-start", tickId: "t_1", executionId: "e_1" },
+        { kind: "tick-end", tickId: "t_1", result: { stopReason: "end" } },
+        { kind: "execution-start", executionId: "e_1" },
+        { kind: "execution-end", executionId: "e_1", outcome: "succeeded" },
+        {
+          kind: "error",
+          phase: "tick",
+          error: { name: "Error", message: "boom" },
+        },
+      ];
+      const inputs: NotifyLifecycleInput[] = events.map((event) => ({
         mountId: "m_1",
-        tickResult: { ok: true, stopReason: "end" },
+        event,
+      }));
+      expect(inputs).toHaveLength(5);
+      const first = inputs[0]!.event;
+      if (first.kind === "tick-start") {
+        expect(first.tickId).toBe("t_1");
+      }
+    });
+
+    it("LifecycleEvent tick-end carries an opaque result payload", () => {
+      const event: LifecycleEvent = {
+        kind: "tick-end",
+        tickId: "t_1",
+        result: { stopReason: "end", toolCalls: [] },
       };
-      expect((input.tickResult as { ok: boolean }).ok).toBe(true);
+      if (event.kind === "tick-end") {
+        expect((event.result as { stopReason: string }).stopReason).toBe("end");
+      }
     });
 
     it("UnmountInput / SnapshotInput / RestoreInput are mount-scoped", () => {
@@ -200,8 +227,33 @@ describe("@agentick/spec — reconciler protocol", () => {
         "render-error",
         "snapshot-incompatible",
         "unstable-tree",
+        "suspense-boundary-active",
+        "error-boundary-active",
       ];
-      expect(codes).toHaveLength(8);
+      expect(codes).toHaveLength(10);
+    });
+  });
+
+  describe("MountInput.strictNoSuspense", () => {
+    it("opts into hard-fail-on-suspense behavior", () => {
+      const input: MountInput = {
+        mountId: "m_1",
+        sessionId: "s_1",
+        element: {} as unknown,
+        bridges: stubBridges(),
+        strictNoSuspense: true,
+      };
+      expect(input.strictNoSuspense).toBe(true);
+    });
+
+    it("defaults to undefined (warn-only)", () => {
+      const input: MountInput = {
+        mountId: "m_1",
+        sessionId: "s_1",
+        element: {} as unknown,
+        bridges: stubBridges(),
+      };
+      expect(input.strictNoSuspense).toBeUndefined();
     });
   });
 
@@ -312,7 +364,7 @@ describe("@agentick/spec — reconciler protocol", () => {
         "renderTree",
         "renderToString",
         "renderResource",
-        "notifyTickEnd",
+        "notifyLifecycle",
         "unmount",
         "snapshot",
         "restore",

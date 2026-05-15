@@ -107,6 +107,42 @@ packages/spec-conformance/                              ✓ scaffolded (private:
 .changeset/config.json                                  ✓ @agentick/spec in fixed group
 ```
 
+### Amendment — React feature semantics + notifyLifecycle (2026-05-15)
+
+Pushback on the original Phase 3.1 framing landed two refinements:
+
+1. **`notifyTickEnd` → `notifyLifecycle`.** Single command carrying a
+   tagged `LifecycleEvent` union (`tick-start | tick-end |
+   execution-start | execution-end | error` + a namespaced `custom`
+   escape hatch). Direct method-based coupling (synchronous, ordered)
+   coexists with parallel event-bus emission (async, fan-out) — they
+   answer different questions. Future lifecycle kinds don't add
+   protocol methods.
+
+2. **React feature semantics.** "Forbidden" was too strong. Revised:
+   - `<Suspense>` — fallbacks DO appear in the IR if a boundary
+     fires. Default behavior: emit `suspense-boundary-active` warning
+     diagnostic. `MountInput.strictNoSuspense = true` upgrades to a
+     terminal `RenderFailed`. The reconciler's outer Promise catch
+     means `useData` does NOT trigger Suspense boundaries — only
+     things React itself intercepts (e.g., `React.lazy`).
+   - `<ErrorBoundary>` — supported. Catching a render error and
+     rendering a fallback is a *good* pattern (per-section
+     resilience). Emits `error-boundary-active` info diagnostic.
+   - `useTransition` / `useDeferredValue` — allowed; no effect in
+     sync-render mode.
+
+Diagnostic codes added: `suspense-boundary-active` (warning),
+`error-boundary-active` (info).
+
+Blueprint docs updated: `01-harness-principle.md`, `03-reconciler-harness.md`,
+`05-loop-executor.md`, `08-session-harness.md`, `17-open-questions.md`,
+`21-reconciler-implementation.md`, `IMPLEMENTATION-PLAN.md`.
+
+Tests: 74/74 spec green (26 in reconciler-protocol.spec.ts with new
+LifecycleEvent + strictNoSuspense + diagnostic coverage).
+`pnpm -r typecheck` clean.
+
 ### Code (Phase 3.1–3.3 reconciler protocol contracts, 2026-05-15)
 
 ```
@@ -122,7 +158,12 @@ packages/spec/src/protocol/                             ✓ contracts
                           SessionBridge, Sandbox/MCP placeholders
   reconciler.ts           ReconcilerProtocol with mount/rerender/
                           renderTree/renderToString/renderResource/
-                          notifyTickEnd/unmount/snapshot/restore.
+                          notifyLifecycle/unmount/snapshot/restore.
+                          notifyLifecycle carries tagged LifecycleEvent
+                          union (tick-start | tick-end | execution-start |
+                          execution-end | error). Direct-method coupling
+                          coexists with bus-event fan-out — same moments,
+                          different channels.
                           ReconcileError taxonomy (11 tags).
                           ReconcilerInboxMessage (recompile/unmount/
                           invalidate).

@@ -10,20 +10,41 @@
  *
  * ## Design constraints baked into this protocol
  *
- * - **No Suspense.** Implementations MUST NOT surface "loading" states
- *   in the produced `RenderedTree`. The render-until-stable loop
- *   blocks on async data resolution (see `DataBridge`) and only emits
- *   a terminal result when the tree is fully resolved — or terminates
- *   with `outcome: "failed"` when resolution cannot complete.
+ * - **Fully-resolved IR.** `RenderedTree` reflects a fully-resolved
+ *   component tree. The render-until-stable loop blocks on async
+ *   `DataBridge.resolve` calls (Suspense primitive — thrown Promises)
+ *   and only emits a terminal result when the tree is stable — or
+ *   terminates with `outcome: "failed"` when resolution cannot
+ *   complete.
+ * - **React feature semantics:** the reconciler uses React's reconciler,
+ *   component model, hooks, refs, effects, and context. The following
+ *   React features have specific semantics:
+ *     - `<Suspense fallback>` — fallbacks DO end up in the IR if a
+ *       boundary fires. The default reconciler behavior catches thrown
+ *       data Promises at the outer level (past any Suspense ancestor),
+ *       so `useData` does NOT trigger fallbacks. Suspense fallbacks
+ *       fire on `React.lazy`, manual `throw promise`, and any
+ *       third-party library that surfaces Promises React intercepts.
+ *       Implementations emit a `suspense-boundary-active` warning
+ *       diagnostic when a fallback fires. Setting
+ *       `MountInput.strictNoSuspense = true` upgrades the warning to a
+ *       `RenderFailed` terminal.
+ *     - `<ErrorBoundary>` (class component `componentDidCatch`) —
+ *       SUPPORTED. When a boundary catches a render error, the fallback
+ *       lands in the IR; the operation terminates with `succeeded` and
+ *       an `error-boundary-active` info diagnostic. The framework owns
+ *       a root-level boundary as the final sink; unhandled errors
+ *       terminate with `failed`.
+ *     - `useTransition`, `useDeferredValue`, `startTransition` —
+ *       allowed; no effect (the reconciler renders synchronously).
+ *     - React Server Components — not supported.
  * - **JSON-shaped output.** `RenderedTree`, `ReconcilerSnapshot`, and
  *   `RenderToStringPayload` cross the spec firewall — no function
  *   references, no live SDK clients.
  * - **Bridges, not globals.** Implementations consume `HookBridges`
  *   provided at mount time. Module-level singletons are forbidden.
  * - **Sync render flush.** Implementations SHOULD reconcile
- *   synchronously to completion (or to a thrown data Promise) on each
- *   loop iteration. React's concurrent / time-slicing modes are out of
- *   scope.
+ *   synchronously to completion on each render-until-stable iteration.
  *
  * ## Async return discipline
  *
@@ -97,6 +118,14 @@ export interface MountInput extends MountScopedInput {
    * supplied snapshot.
    */
   readonly elementVersion?: string;
+
+  /**
+   * When true, a Suspense boundary firing (`suspense-boundary-active`
+   * diagnostic) is upgraded to a terminal `RenderFailed` error.
+   * Default: false (warn only). Suspense fallbacks STILL land in the
+   * IR — this flag controls whether their presence is fatal.
+   */
+  readonly strictNoSuspense?: boolean;
 
   readonly metadata?: Readonly<Record<string, unknown>>;
 }
@@ -206,20 +235,106 @@ export interface RenderResourceResult {
 }
 
 // ============================================================================
-// notifyTickEnd
+// notifyLifecycle
 // ============================================================================
 
 /**
- * Loose-coupling notification: the loop executor finished a tick and is
- * informing the reconciler so any registered `useOnTickEnd` callbacks
- * can fire. Direct in-process call; the alternative pattern is for the
- * reconciler harness to subscribe to the loop's tickEnd lifecycle.
+ * Lifecycle pass-through events. Carriers of state that user-supplied
+ * hooks (`useOnTickStart`, `useOnTickEnd`, `useOnExecutionEnd`,
+ * `useOnError`) need to observe.
  *
- * The `tickResult` payload is JSON-shaped — its concrete shape is
- * specified in the loop executor's protocol.
+ * **Tagged union, open-ended.** New event kinds can be added without
+ * changing the protocol method count. Implementations dispatch on
+ * `event.kind`; unknown kinds are ignored (the harness MAY emit an
+ * `info`-severity diagnostic for visibility).
+ *
+ * Two coupling axes coexist for these events:
+ *
+ *  - **Direct method-based coupling (this command).** Callers invoke
+ *    `notifyLifecycle` synchronously when ordering matters — typically
+ *    the session / loop executor calling into the reconciler before
+ *    starting the next operation, so hook callbacks finish and React
+ *    state settles in time.
+ *  - **Bus-based fan-out (parallel channel).** The same lifecycle
+ *    moments are independently emitted as `ProtocolEvent` envelopes on
+ *    the shared event bus. Subscribers that don't need ordering
+ *    (devtools, telemetry, persistence) observe via the bus without
+ *    coupling to the reconciler protocol.
+ *
+ * The two channels are not redundant — they answer different questions.
  */
-export interface NotifyTickEndInput extends MountScopedInput {
-  readonly tickResult: unknown;
+export type LifecycleEvent =
+  | LifecycleTickStart
+  | LifecycleTickEnd
+  | LifecycleExecutionStart
+  | LifecycleExecutionEnd
+  | LifecycleError
+  | LifecycleCustom;
+
+export interface LifecycleTickStart {
+  readonly kind: "tick-start";
+  readonly tickId: string;
+  readonly executionId?: string;
+  readonly metadata?: Readonly<Record<string, unknown>>;
+}
+
+export interface LifecycleTickEnd {
+  readonly kind: "tick-end";
+  readonly tickId: string;
+  readonly executionId?: string;
+  /**
+   * Tick result payload — opaque JSON shape specified by the loop
+   * executor protocol. The reconciler forwards the value untouched to
+   * registered `useOnTickEnd` hooks.
+   */
+  readonly result: unknown;
+  readonly metadata?: Readonly<Record<string, unknown>>;
+}
+
+export interface LifecycleExecutionStart {
+  readonly kind: "execution-start";
+  readonly executionId: string;
+  readonly metadata?: Readonly<Record<string, unknown>>;
+}
+
+export interface LifecycleExecutionEnd {
+  readonly kind: "execution-end";
+  readonly executionId: string;
+  /**
+   * Execution outcome — opaque JSON shape specified by the loop
+   * executor protocol (typically the canonical `CommandOutcome`).
+   */
+  readonly outcome: unknown;
+  readonly metadata?: Readonly<Record<string, unknown>>;
+}
+
+export interface LifecycleError {
+  readonly kind: "error";
+  /** Where the error happened — `tick` | `execution` | `tool` | `model` | … */
+  readonly phase: string;
+  readonly error: {
+    readonly name: string;
+    readonly message: string;
+    readonly data?: unknown;
+  };
+  readonly tickId?: string;
+  readonly executionId?: string;
+  readonly metadata?: Readonly<Record<string, unknown>>;
+}
+
+/**
+ * Escape hatch for application-defined lifecycle pass-throughs. The
+ * `kind` MUST be namespaced (e.g., `"app:my-app:phase-x"`) to avoid
+ * collisions with future framework kinds.
+ */
+export interface LifecycleCustom {
+  readonly kind: string & {};
+  readonly metadata?: Readonly<Record<string, unknown>>;
+  readonly [key: string]: unknown;
+}
+
+export interface NotifyLifecycleInput extends MountScopedInput {
+  readonly event: LifecycleEvent;
 }
 
 // ============================================================================
@@ -324,11 +439,16 @@ export interface ReconcilerProtocol {
   renderResource(input: RenderResourceInput): Promise<RenderResourceResult>;
 
   /**
-   * Notify the reconciler that a tick has ended. Fires any registered
-   * `useOnTickEnd` callbacks inside the mount. The runtime calls this
-   * after the loop executor's tick `terminal` event.
+   * Lifecycle pass-through. Direct method-based coupling for events
+   * that user hooks (`useOnTickStart`, `useOnTickEnd`,
+   * `useOnExecutionEnd`, `useOnError`) need to observe synchronously
+   * before the caller proceeds. See {@link LifecycleEvent} for kinds.
+   *
+   * Lifecycle moments are *also* emitted on the shared event bus for
+   * fan-out observers (devtools, telemetry, persistence). The two
+   * channels coexist by design.
    */
-  notifyTickEnd(input: NotifyTickEndInput): Promise<void>;
+  notifyLifecycle(input: NotifyLifecycleInput): Promise<void>;
 
   /**
    * Tear down a mount. Releases hook state and subscription handles.

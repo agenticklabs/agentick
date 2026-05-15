@@ -202,7 +202,7 @@ Three statuses:
 | N2 | JSX namespace conflicts with React | compiler-harness.md (referenced) | LEAN | `jsxImportSource` per file |
 | N3 | Server components alignment | compiler-harness.md (referenced) | OPEN | revisit later |
 | N4 | Async stress testing patterns | compiler-harness.md (referenced) | OPEN | — |
-| N5 | The "ingest results" mechanism (direct command vs indirect via state + rerender) | (resolved 2026-05-08) | **DECIDED** | hybrid: timeline writes via direct method call (`session.applyExecutorResult`); tick-end notification via `loop.onTickEnd → session.notifyTickEnd → react.notifyTickEnd` (lifecycle handler chain). See `15-flows/b-tick-and-tool-loop.md`. |
+| N5 | The "ingest results" mechanism (direct command vs indirect via state + rerender) | (resolved 2026-05-08) | **DECIDED** | hybrid: timeline writes via direct method call (`session.applyExecutorResult`); tick-end notification via `loop.onTickEnd → session.notifyLifecycle → react.notifyLifecycle` (lifecycle handler chain). See `15-flows/b-tick-and-tool-loop.md`. |
 
 ## Priority sign-off list
 

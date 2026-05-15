@@ -112,7 +112,7 @@ interface RunExecutionInput {
   // Policies
   maxTicks: number;
   // NOTE: continuation is NOT a separate policy object.
-  // It comes from reconciler harness's notifyTickEnd via the session's
+  // It comes from reconciler harness's notifyLifecycle via the session's
   // .onTickEnd lifecycle handler wiring. See "Continuation" section below.
 
   // Cancellation
@@ -155,13 +155,13 @@ type StateApplicator = Pick<SessionHarnessProtocol,
 
 The loop does NOT have a `ContinuationPolicy` object. Continuation is
 decided by **the React tree's `useOnTickEnd` / `useLoopControl` hooks**,
-delivered via the reconciler harness's `notifyTickEnd` command.
+delivered via the reconciler harness's `notifyLifecycle` command.
 
 The loop's job:
 
 1. Emit `loop:tick:terminal` with `phase: "before"` and the tick result.
 2. Lifecycle handlers registered via `loop.onTickEnd(fn)` fire here.
-3. The session-installed handler calls `react.notifyTickEnd(...)` and
+3. The session-installed handler calls `react.notifyLifecycle(...)` and
    returns the tree's verdict.
 4. The loop reads the (possibly replaced) decision from its terminal
    payload and proceeds.
@@ -177,7 +177,7 @@ otherwise                                         → stop (with reason)
 ```
 
 See `08-session-harness.md` for the wiring code; see
-`03-reconciler-harness.md` for the `notifyTickEnd` command + `useOnTickEnd`
+`03-reconciler-harness.md` for the `notifyLifecycle` command + `useOnTickEnd`
 hook.
 
 ### Inbox messages
@@ -207,7 +207,7 @@ loop.onExecutionEnd(handler: (result: ExecutionRunResult) => void | Promise<void
 ```
 
 `onTickEnd` is the load-bearing one. The session installs a handler at
-construction that forwards to `react.notifyTickEnd(...)` and returns
+construction that forwards to `react.notifyLifecycle(...)` and returns
 the decision. Multiple handlers register in order; verdicts merge per
 the rules in `19-foundation.md`.
 

@@ -28,7 +28,7 @@ harness is a living application, not a one-shot transformer.
                 │                                      │
    commands ──► │  mount · rerender · renderTree   │ ──► events
                 │  renderToString · renderResource     │
-                │  notifyTickEnd                       │
+                │  notifyLifecycle                     │
                 │  unmount · snapshot · restore        │
                 │                                      │
    inbox ──────►│  recompile · unmount                 │ ──► outcomes
@@ -112,14 +112,20 @@ interface ReactHarnessProtocol {
     Effect<MountResult, RestoreError, ReactEnv>;
 
   /**
-   * Push a tick result into the tree. Fires useOnTickEnd / useLoopControl
-   * hooks. Returns the tree's continuation decision (possibly mutated by
-   * hook callbacks calling result.stop()/continue()).
+   * Lifecycle pass-through. Direct method-based coupling for events
+   * that user-supplied hooks (useOnTickStart, useOnTickEnd,
+   * useOnExecutionEnd, useOnError) need to observe synchronously.
+   *
+   * Tagged-union LifecycleEvent — adding new event kinds doesn't change
+   * the method count. Lifecycle moments are *also* emitted on the
+   * shared event bus for fan-out observers (devtools, telemetry,
+   * persistence) — the two channels coexist.
    *
    * Called from session's loop.onTickEnd handler — see 08-session-harness.md.
+   * `[V2-LANDED]` 2026-05-15 — see packages/spec/src/protocol/reconciler.ts.
    */
-  notifyTickEnd(input: NotifyTickEndInput):
-    Effect<TickEndDecision, ReactRuntimeStateError, ReactEnv>;
+  notifyLifecycle(input: NotifyLifecycleInput):
+    Effect<void, ReactRuntimeStateError, ReactEnv>;
 }
 ```
 
@@ -258,7 +264,7 @@ interface TickEndDecision {
 }
 ```
 
-### How `notifyTickEnd` runs
+### How `notifyLifecycle({ kind: "tick-end" })` runs
 
 ```
 1. Receive NotifyTickEndInput.

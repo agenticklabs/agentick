@@ -125,7 +125,7 @@ core collector.
 - the react-reconciler driver (`reconcile()`)
 - the collector caller (`collect()`)
 - the data-resolution loop (`compileUntilStable` + `useData`)
-- the lifecycle dispatcher (`notifyTickStart`, `notifyTickEnd`, …)
+- the lifecycle dispatcher (`notifyLifecycle({ kind: "tick-start" })`, `({ kind: "tick-end" })`, …)
 - the message bus host (`MessageProvider`, `EntryProvider`)
 
 v2 splits:

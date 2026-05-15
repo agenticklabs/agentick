@@ -116,14 +116,19 @@ export type ReconcileDiagnosticSeverity = "info" | "warning" | "error";
  * Reconciler-specific diagnostic codes. Open list — implementations
  * MAY surface additional codes.
  *
- * - `max-iterations`         the render-until-stable loop hit its cap
- * - `use-data-failed`        a `useData` fetcher rejected during render
- * - `missing-contributor`    no Contributor registered for a host node's type
- * - `missing-bridge`         a hook required a bridge the runtime did not supply
- * - `formatter-error`        the formatter harness failed on a sub-tree
- * - `render-error`           a component threw during render (caught at root)
- * - `snapshot-incompatible`  a restore() encountered a snapshot it could not apply
- * - `unstable-tree`          consecutive renders produced different output past the cap
+ * - `max-iterations`            the render-until-stable loop hit its cap
+ * - `use-data-failed`           a `useData` fetcher rejected during render
+ * - `missing-contributor`       no Contributor registered for a host node's type
+ * - `missing-bridge`            a hook required a bridge the runtime did not supply
+ * - `formatter-error`           the formatter harness failed on a sub-tree
+ * - `render-error`              a component threw during render (caught at root)
+ * - `snapshot-incompatible`     a restore() encountered a snapshot it could not apply
+ * - `unstable-tree`             consecutive renders produced different output past the cap
+ * - `suspense-boundary-active`  a `<Suspense>` boundary fired and its fallback
+ *                               landed in the IR (warning by default; fatal when
+ *                               `MountInput.strictNoSuspense` is set)
+ * - `error-boundary-active`     an `<ErrorBoundary>` caught a render error and
+ *                               rendered a fallback into the IR (info severity)
  */
 export type ReconcileDiagnosticCode =
   | "max-iterations"
@@ -134,6 +139,8 @@ export type ReconcileDiagnosticCode =
   | "render-error"
   | "snapshot-incompatible"
   | "unstable-tree"
+  | "suspense-boundary-active"
+  | "error-boundary-active"
   | (string & {});
 
 /**

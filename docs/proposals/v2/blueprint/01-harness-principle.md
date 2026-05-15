@@ -155,7 +155,7 @@ execution.
 
 ```ts
 loop.onTickEnd(async (tickResult) => {
-  return session.notifyTickEnd(tickResult);
+  return session.notifyLifecycle(tickResult);
 });
 
 react.onAsyncResolved((info) => {
