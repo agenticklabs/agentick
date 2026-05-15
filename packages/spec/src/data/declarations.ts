@@ -1,0 +1,122 @@
+/**
+ * Runtime declarations — non-context registrations attached to a
+ * {@link RenderedTree}. The runtime can materialize, route, or invoke
+ * these; they are NOT model-input content.
+ *
+ * @see docs/proposals/v2/blueprint/02-data-model.md §RuntimeDeclarations
+ * @see docs/proposals/v2/blueprint/07-tool-executor.md
+ */
+
+import type { ContentBlock } from "./content-blocks.js";
+import type { CacheHint } from "./entries.js";
+
+/**
+ * Placeholder for JSON Schema documents. The strict shape is intentionally
+ * loose at the spec layer — strict validation lives in
+ * `@agentick/spec-validator` (opt-in).
+ *
+ * `[PLACEHOLDER]` — narrow once a JSON Schema dialect is chosen.
+ */
+export type JsonSchema = Record<string, unknown>;
+
+// ============================================================================
+// Tool declaration
+// ============================================================================
+
+/**
+ * Where a tool is reachable from.
+ *
+ * `[V1-REPLACED]` of v1's `audience: "model" | "user" | "all"`. The
+ * `["model", "dispatch"]` combination is the new "all"; `"user"` becomes
+ * `"dispatch"` (clearer about who invokes).
+ */
+export type ToolExposure = "model" | "dispatch" | "runtime";
+
+export interface ToolAnnotations {
+  /** `[V1-INHERITED]` Tool intent hint. */
+  readonly intent?: "render" | "action" | "compute";
+  readonly requiresResponse?: boolean;
+  /** Milliseconds. */
+  readonly timeout?: number;
+  readonly defaultResult?: readonly ContentBlock[];
+  /** `[V1-INHERITED]` MCP Apps UI hint. */
+  readonly ui?: {
+    readonly resourceUri?: string;
+    readonly visibility?: ReadonlyArray<"model" | "app">;
+  };
+  readonly cache?: CacheHint;
+  readonly providerMetadata?: Record<string, Record<string, unknown>>;
+}
+
+export interface ToolDeclaration {
+  readonly id: string;
+  readonly name: string;
+  readonly description: string;
+  readonly inputSchema: JsonSchema;
+  readonly exposure: readonly ToolExposure[];
+  /**
+   * Identifier resolved by the runtime / tool executor to a concrete
+   * handler. Never executable code — the spec firewall forbids it.
+   */
+  readonly handlerRef?: string;
+  readonly annotations?: ToolAnnotations;
+  readonly metadata?: Record<string, unknown>;
+}
+
+// ============================================================================
+// Resource declaration
+// ============================================================================
+
+export interface ResourceDeclaration {
+  readonly id: string;
+  readonly uri?: string;
+  readonly name?: string;
+  readonly description?: string;
+  readonly mimeType?: string;
+  /** Resolved by the runtime to a reader implementation. */
+  readonly handlerRef?: string;
+  readonly metadata?: Record<string, unknown>;
+}
+
+// ============================================================================
+// Output declaration
+// ============================================================================
+
+/**
+ * Runtime registration for named outputs the application wants to extract
+ * from the result. Distinct from {@link SpecConfig.responseFormat} which
+ * is a generation-time provider directive.
+ */
+export interface OutputDeclaration {
+  readonly id: string;
+  readonly schema?: JsonSchema;
+  readonly mode?: "text" | "json" | "json_schema";
+  readonly metadata?: Record<string, unknown>;
+}
+
+// ============================================================================
+// MCP declaration — `[PLACEHOLDER]`
+// ============================================================================
+
+export type MCPTransport = "stdio" | "http" | "sse" | "streamable-http";
+
+export interface MCPDeclaration {
+  readonly id: string;
+  readonly serverName: string;
+  readonly transport: MCPTransport;
+  /** Transport-specific configuration (URL, command, headers, ...). */
+  readonly config: Record<string, unknown>;
+  readonly exposes?: ReadonlyArray<"tools" | "resources" | "prompts">;
+  readonly metadata?: Record<string, unknown>;
+}
+
+// ============================================================================
+// Aggregate
+// ============================================================================
+
+export interface RuntimeDeclarations {
+  readonly tools?: readonly ToolDeclaration[];
+  readonly resources?: readonly ResourceDeclaration[];
+  readonly outputs?: readonly OutputDeclaration[];
+  readonly mcp?: readonly MCPDeclaration[];
+}

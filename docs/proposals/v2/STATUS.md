@@ -1,7 +1,7 @@
 # Agentick v2 — Implementation Status
 
 **Branch:** `feat/v2`
-**Last updated:** 2026-05-15
+**Last updated:** 2026-05-15 (later session)
 
 This is the **running progress log** for v2 implementation. Update it
 every session. New contributors / sessions read this first.
@@ -26,10 +26,14 @@ Phase 0  ■ in progress — workspace setup
 Phase 1  ■ in progress — spec package type population
   ✓ Foundation-critical types (envelopes, outcomes, errors, policy)
   ✓ Substrate protocol interfaces (journal, bus, inbox)
-  ✗ Reconciler-related wire types (RenderedTree, ContextSpec,
+  ✓ Reconciler-related wire types (RenderedTree, ContextSpec,
     MessageEntry, SectionEntry, ContentBlock, SemanticNode,
-    FormatterRef, etc.) — needed for Phase 3
-  ✗ Executor / session types (later phases)
+    FormatterRef, FormatInput/Result, RuntimeDeclarations, etc.)
+    — landed 2026-05-15, unblocks Phase 3
+  ✓ Executor wire types (ExecutionResult, ExecutorTerminal,
+    LanguageModelExecutionResult, ExecutionTarget) — landed 2026-05-15
+  ✗ Channels, Timeline, Knobs, ReconcilerSnapshot, SessionRecord
+    (later phases)
 
 Phase 2  □ ready to start once memory substrate is needed
 Phase 3  □ RECONCILER HARNESS (was tool executor; reprioritized 2026-05-14)
@@ -96,6 +100,67 @@ packages/spec-conformance/                              ✓ scaffolded (private:
 
 .changeset/config.json                                  ✓ @agentick/spec in fixed group
 ```
+
+### Code (Phase 1c reconciler-facing wire types, 2026-05-15)
+
+```
+packages/spec/src/data/                                 ✓ wire types for Phase 3
+  content-blocks.ts     ContentBlock taxonomy (21 variants), MediaSource,
+                        role-scoped allow lists. `any` → `unknown`; enums
+                        collapsed to string literal unions. Runtime helpers
+                        stay in @agentick/shared.
+  semantic.ts           SemanticNode (with rendererRef instead of function
+                        ref), SemanticType, SemanticMetadata, FormattableBlock
+  formatter.ts          FormatterRef, FormatterCapabilities, FormatInput,
+                        FormatScope, FormatTrace, FormatDiagnostic,
+                        FormatDiagnostics, FormattedContent, FormatResult
+  entries.ts            CacheHint, MessageEntry, MessageMetadata,
+                        SectionEntry, SectionMetadata, ContextEntry,
+                        ContextSpec
+  declarations.ts       ToolDeclaration, ToolExposure, ToolAnnotations,
+                        ResourceDeclaration, OutputDeclaration,
+                        MCPDeclaration, RuntimeDeclarations, JsonSchema
+  rendered-tree.ts      RenderedTree, SpecConfig, ProviderOptions,
+                        ResponseFormat, ModelSelection, SpecFeatureName
+  execution-result.ts   UsageStats, ExecutionResult, ExecutorError,
+                        ExecutorTerminal, LanguageModelStopReason,
+                        ToolCall, LanguageModelExecutionResult,
+                        ExecutorDelta
+  execution-target.ts   ExecutionTarget, LanguageModelTarget,
+                        TargetCapabilities
+  index.ts              re-exports all of the above
+
+packages/spec/src/__tests__/                            ✓ 48 tests passing
+  rendered-tree.spec.ts (23 new tests: ContentBlock narrowing, SemanticNode,
+                         Formatter protocol, ContextSpec entries,
+                         RuntimeDeclarations, RenderedTree free-root,
+                         ExecutorTerminal outcomes, ExecutionTarget)
+```
+
+**Decisions baked in this session:**
+
+- **Function references can't cross the wire.** v1's
+  `SemanticNode.formatter: Formatter` field becomes
+  `rendererRef?: FormatterRef`. Formatter identity is data; behavior
+  lives behind the formatter harness. `[V1-REPLACED]`.
+- **Enums are runtime artifacts; spec is types-only.** v1's `BlockType`,
+  `MessageRole`, `MediaSourceType`, MIME-type, and `CodeLanguage` enums
+  collapse to string literal unions (with `(string & {})` escape hatch
+  on open lists for ergonomics without losing literal autocomplete).
+- **`readonly` everywhere on wire types.** The spec exposes shapes
+  consumers MUST treat as immutable. Implementations construct fresh
+  objects; downstream code reads.
+- **`ExecutorTerminal` omits `deferred`.** `deferred` is a pre-execution
+  handler verdict (the `before` phase), not a terminal outcome. The
+  envelope carries the five values that actually terminate execution.
+- **Runtime helpers stay in `@agentick/shared`.** Type guards
+  (`isTextBlock`, `isToolUseBlock`, …) and base64 helpers depend on
+  Node Buffer / browser fallbacks — those don't belong in zero-dep spec.
+
+**Status check:**
+- `pnpm -r typecheck` — all packages green
+- `pnpm vitest run packages/spec` — 48/48 green (24 prior + 23 new + 1 version)
+- v1 packages unaffected
 
 ### Code (Phase 1 foundation-critical types, 2026-05-11)
 
