@@ -56,3 +56,19 @@ export { resourceContributor } from "./collect/contributors/resource.js";
 export { outputContributor } from "./collect/contributors/output.js";
 export { mcpContributor } from "./collect/contributors/mcp.js";
 export { modelContributor } from "./collect/contributors/model.js";
+
+// Bridges
+export { InMemoryDataBridge } from "./bridges/in-memory-data-bridge.js";
+export type { InMemoryDataBridgeOptions } from "./bridges/in-memory-data-bridge.js";
+export {
+  stubBridges,
+  stubTimelineBridge,
+  inMemoryKnobBridge,
+  stubLoopBridge,
+  stubSessionBridge,
+} from "./bridges/stub-bridges.js";
+export type { StubBridgesOptions } from "./bridges/stub-bridges.js";
+
+// Layer C — Harness
+export { ReconcilerHarness } from "./harness/reconciler-harness.js";
+export type { ReconcilerHarnessOptions } from "./harness/reconciler-harness.js";

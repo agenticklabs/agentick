@@ -1,0 +1,139 @@
+/**
+ * InMemoryDataBridge — reference `DataBridge` implementation.
+ *
+ * The no-Suspense contract in concrete form:
+ *
+ *   - cached fulfilled  → returns `T` synchronously
+ *   - cached rejected   → throws the underlying `Error` synchronously
+ *   - pending           → throws the in-flight `Promise<T>` (the
+ *                         reconciler render loop catches, awaits, and
+ *                         re-renders — never reaches React Suspense
+ *                         boundaries)
+ *
+ * `resolve` is idempotent on `key` within a single mount session — the
+ * same key always returns the same cached entry. Invalidation
+ * (`invalidate` / `invalidateTag`) drops entries so the next `resolve`
+ * re-fetches.
+ *
+ * @see docs/proposals/v2/blueprint/03-reconciler-harness.md
+ * @see packages/spec/src/protocol/hook-bridges.ts
+ */
+
+import type { DataBridge, DataResolveOptions } from "@agentick/spec";
+
+type Entry =
+  | {
+      readonly status: "pending";
+      readonly promise: Promise<unknown>;
+      readonly tag?: string;
+    }
+  | {
+      readonly status: "fulfilled";
+      readonly value: unknown;
+      readonly fetchedAt: number;
+      readonly ttl?: number;
+      readonly tag?: string;
+    }
+  | {
+      readonly status: "rejected";
+      readonly error: unknown;
+      readonly tag?: string;
+    };
+
+export interface InMemoryDataBridgeOptions {
+  /**
+   * Called whenever a fetch transitions to `fulfilled` or `rejected`.
+   * Useful for triggering a re-render from outside React when the
+   * pending Promise the bridge threw resolves.
+   */
+  readonly onSettled?: (key: string) => void;
+}
+
+export class InMemoryDataBridge implements DataBridge {
+  private readonly cache = new Map<string, Entry>();
+  private readonly options: InMemoryDataBridgeOptions;
+
+  constructor(options: InMemoryDataBridgeOptions = {}) {
+    this.options = options;
+  }
+
+  resolve<T>(key: string, fetcher: () => Promise<T>, options: DataResolveOptions = {}): T {
+    const entry = this.cache.get(key);
+
+    // Cache hit: synchronous return or synchronous throw.
+    if (entry) {
+      if (entry.status === "fulfilled") {
+        if (isFresh(entry, Date.now())) return entry.value as T;
+        this.cache.delete(key);
+      } else if (entry.status === "rejected") {
+        throw entry.error;
+      } else if (entry.status === "pending") {
+        // Same key resolved twice in one render — re-throw the same Promise.
+        throw entry.promise;
+      }
+    }
+
+    // Cache miss: start the fetch, throw the in-flight Promise. The
+    // reconciler's render-until-stable loop is expected to catch it.
+    const promise = (async () => {
+      try {
+        const value = await fetcher();
+        this.cache.set(key, {
+          status: "fulfilled",
+          value,
+          fetchedAt: Date.now(),
+          ...(options.ttl !== undefined ? { ttl: options.ttl } : {}),
+          ...(options.tag !== undefined ? { tag: options.tag } : {}),
+        });
+      } catch (err) {
+        this.cache.set(key, {
+          status: "rejected",
+          error: err,
+          ...(options.tag !== undefined ? { tag: options.tag } : {}),
+        });
+      } finally {
+        this.options.onSettled?.(key);
+      }
+    })();
+    this.cache.set(key, {
+      status: "pending",
+      promise,
+      ...(options.tag !== undefined ? { tag: options.tag } : {}),
+    });
+    throw promise;
+  }
+
+  invalidate(key: string): void {
+    this.cache.delete(key);
+  }
+
+  invalidateTag(tag: string): void {
+    for (const [k, e] of this.cache) {
+      if (e.tag === tag) this.cache.delete(k);
+    }
+  }
+
+  has(key: string): boolean {
+    const e = this.cache.get(key);
+    if (!e) return false;
+    if (e.status !== "fulfilled") return false;
+    return isFresh(e, Date.now());
+  }
+
+  /** Diagnostic: snapshot of cache state for tests / devtools. */
+  entries(): ReadonlyArray<{ readonly key: string; readonly entry: Entry }> {
+    const out: Array<{ readonly key: string; readonly entry: Entry }> = [];
+    for (const [key, entry] of this.cache) out.push({ key, entry });
+    return out;
+  }
+
+  /** Clear every entry. */
+  clear(): void {
+    this.cache.clear();
+  }
+}
+
+function isFresh(entry: Entry & { status: "fulfilled" }, now: number): boolean {
+  if (entry.ttl === undefined) return true;
+  return now - entry.fetchedAt < entry.ttl;
+}
