@@ -16,6 +16,7 @@ import {
   withPath,
 } from "../host/host-context.js";
 import { createReconciler } from "../react/reconciler.js";
+import { flush } from "../testing/flush.js";
 
 describe("host-pipeline — host layer only", () => {
   it("createHostScope seeds a default formatter", () => {
@@ -115,6 +116,31 @@ describe("host-pipeline — react-reconciler end-to-end", () => {
     }
   });
 
+  it("propagates external setState through React's scheduler with flush", async () => {
+    const container = createContainer({ mountId: "m_state" });
+    const reconciler = createReconciler({ container, idPrefix: "m_state" });
+    const root = reconciler.createRoot();
+
+    let setValue: ((v: number) => void) | null = null;
+    function Counter() {
+      const [v, setV] = useState(0);
+      setValue = setV;
+      return React.createElement("section", { id: "s.count" }, `value=${v}`);
+    }
+    reconciler.render(React.createElement(Counter), root);
+    await flush();
+
+    const textOf = (n: HostInstance | undefined) =>
+      n && isElementInstance(n) && isTextInstance(n.children[0]!)
+        ? (n.children[0] as { text: string }).text
+        : "";
+    expect(textOf(container.children[0])).toBe("value=0");
+
+    setValue!(42);
+    await flush();
+    expect(textOf(container.children[0])).toBe("value=42");
+  });
+
   it("commits updates when props change between renders", () => {
     const container = createContainer({ mountId: "m_3" });
     const reconciler = createReconciler({ container, idPrefix: "m_3" });
@@ -161,6 +187,38 @@ describe("host-pipeline — react-reconciler end-to-end", () => {
     expect(idsOf()).toEqual(["a"]);
   });
 
+  it("reorders keyed children without duplicating (within a parent element)", () => {
+    const container = createContainer({ mountId: "m_reorder" });
+    const reconciler = createReconciler({ container, idPrefix: "m_reorder" });
+    const root = reconciler.createRoot();
+
+    function List({ items }: { items: readonly string[] }) {
+      return React.createElement(
+        "section",
+        { id: "s.list" },
+        ...items.map((id) =>
+          React.createElement("message", { key: id, role: id }, id),
+        ),
+      );
+    }
+
+    reconciler.render(React.createElement(List, { items: ["a", "b", "c"] }), root);
+    const section = container.children[0]! as ElementInstance;
+    const idsOf = () =>
+      section.children
+        .filter(isElementInstance)
+        .map((c: ElementInstance) => (c.props as { role: string }).role);
+    expect(idsOf()).toEqual(["a", "b", "c"]);
+
+    reconciler.render(React.createElement(List, { items: ["c", "a"] }), root);
+    expect(idsOf()).toEqual(["c", "a"]);
+    expect(section.children).toHaveLength(2);
+
+    reconciler.render(React.createElement(List, { items: ["b", "c", "a"] }), root);
+    expect(idsOf()).toEqual(["b", "c", "a"]);
+    expect(section.children).toHaveLength(3);
+  });
+
   it("preserves component identity (hostId) across re-renders with same key", () => {
     const container = createContainer({ mountId: "m_5" });
     const reconciler = createReconciler({ container, idPrefix: "m_5" });
@@ -179,6 +237,3 @@ describe("host-pipeline — react-reconciler end-to-end", () => {
   });
 });
 
-// Suppress an unused-symbol warning when this is the only place ElementInstance
-// is consumed via narrowing.
-void useState;

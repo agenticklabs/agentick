@@ -63,9 +63,7 @@ async function harness() {
   const bus = new LocalEventBus();
   const inbox = new LocalInbox();
   const h = new TestHarness("scope-1", journal, bus, inbox);
-  // BaseHarness registers asynchronously — yield once.
-  await Promise.resolve();
-  await Promise.resolve();
+  await h.ready;
   return { h, journal, bus, inbox };
 }
 

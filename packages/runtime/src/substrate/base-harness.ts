@@ -163,6 +163,17 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface> {
   private readonly policy: JournalingPolicy;
   private inboxUnsubscribe?: Unsubscribe;
 
+  /**
+   * Resolves once the harness has finished its async construction
+   * tasks (inbox registration). Callers that need to send inbox
+   * messages to this harness immediately after construction MUST
+   * `await harness.ready` first — otherwise `inbox.send(address, ...)`
+   * may race against registration and reject with `AddressNotFound`.
+   *
+   * Resolves immediately when `autoRegisterInbox: false`.
+   */
+  readonly ready: Promise<void>;
+
   constructor(
     protected readonly surface: Surface,
     protected readonly scopeId: string,
@@ -174,13 +185,16 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface> {
     this.address = `${surface}:${scopeId}`;
     this.policy = options.policy ?? DEFAULT_JOURNALING_POLICY;
     if (options.autoRegisterInbox !== false) {
-      // Fire and forget — register is async only because cluster
-      // implementations may need to negotiate.
-      void this.inbox
+      // Register is async only because cluster impls may need to
+      // negotiate; local impls resolve synchronously. Either way,
+      // `ready` is the deterministic readiness handle.
+      this.ready = this.inbox
         .register(this.address, (msg) => this.dispatchMessage(msg))
         .then((unsub) => {
           this.inboxUnsubscribe = unsub;
         });
+    } else {
+      this.ready = Promise.resolve();
     }
   }
 

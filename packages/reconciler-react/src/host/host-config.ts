@@ -106,16 +106,28 @@ export function createHostConfig(deps: HostConfigDeps): HC {
     },
 
     appendChild(parent, child) {
+      // react-reconciler MAY call appendChild on a child already in the
+      // parent's list (this is how moves-to-end are expressed). Detect
+      // and splice from current position first to avoid duplicates.
+      const existing = parent.children.indexOf(child);
+      if (existing !== -1) parent.children.splice(existing, 1);
       child.parent = parent;
       parent.children.push(child);
     },
 
     appendChildToContainer(c, child) {
+      const existing = c.children.indexOf(child);
+      if (existing !== -1) c.children.splice(existing, 1);
       child.parent = null;
       c.children.push(child);
     },
 
     insertBefore(parent, child, before) {
+      // react-reconciler MOVES existing children by calling insertBefore
+      // with a child already present in the parent's list. Detect and
+      // splice from current position first; otherwise we'd duplicate.
+      const existing = parent.children.indexOf(child);
+      if (existing !== -1) parent.children.splice(existing, 1);
       const idx = parent.children.indexOf(before);
       if (idx === -1) parent.children.push(child);
       else parent.children.splice(idx, 0, child);
@@ -123,6 +135,8 @@ export function createHostConfig(deps: HostConfigDeps): HC {
     },
 
     insertInContainerBefore(c, child, before) {
+      const existing = c.children.indexOf(child);
+      if (existing !== -1) c.children.splice(existing, 1);
       const idx = c.children.indexOf(before);
       if (idx === -1) c.children.push(child);
       else c.children.splice(idx, 0, child);
