@@ -25,7 +25,8 @@ export const sectionContributor: Contributor = {
   contribute(instance: ElementInstance, ctx: CollectContext): readonly IRFragment[] {
     const props = instance.props as SectionProps;
     const id = props.id ?? ctx.stableId("section", instance);
-    const content = ctx.collectContentBlocks(instance);
+    const outbound: IRFragment[] = [];
+    const content = ctx.collectContentBlocks(instance, outbound);
 
     const metadata: SectionMetadata | undefined =
       props.priority !== undefined ||
@@ -51,6 +52,6 @@ export const sectionContributor: Contributor = {
       ...(metadata ? { metadata } : {}),
     };
 
-    return [{ kind: "context-entry", entry }];
+    return [{ kind: "context-entry", entry }, ...outbound];
   },
 };

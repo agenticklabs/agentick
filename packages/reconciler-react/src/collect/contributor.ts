@@ -42,8 +42,17 @@ export interface CollectContext {
    * Used by contributors whose parent IS a content container (e.g.,
    * a `<section>` wants to collect its children's text and tool_use
    * blocks into `SectionEntry.content`).
+   *
+   * Non-content fragments emitted by content-block contributors
+   * (diagnostics from missing-prop validation, etc.) are pushed into
+   * `outbound` so the calling contributor can re-emit them alongside
+   * its own context-entry fragment — otherwise diagnostics buried
+   * inside section / message children would silently disappear.
    */
-  collectContentBlocks(parent: HostInstance): readonly import("@agentick/spec").ContentBlock[];
+  collectContentBlocks(
+    parent: HostInstance,
+    outbound?: IRFragment[],
+  ): readonly import("@agentick/spec").ContentBlock[];
 
   /**
    * Concatenate plain-text children. Used by primitives whose props

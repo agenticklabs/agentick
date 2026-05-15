@@ -36,7 +36,8 @@ export const messageContributor: Contributor = {
       ];
     }
 
-    const content = ctx.collectContentBlocks(instance);
+    const outbound: IRFragment[] = [];
+    const content = ctx.collectContentBlocks(instance, outbound);
     const metadata: MessageMetadata | undefined =
       props.cache !== undefined ||
       props.providerMetadata !== undefined ||
@@ -59,6 +60,6 @@ export const messageContributor: Contributor = {
       ...(metadata ? { metadata } : {}),
     };
 
-    return [{ kind: "context-entry", entry }];
+    return [{ kind: "context-entry", entry }, ...outbound];
   },
 };

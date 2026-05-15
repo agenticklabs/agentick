@@ -56,6 +56,27 @@ export { resourceContributor } from "./collect/contributors/resource.js";
 export { outputContributor } from "./collect/contributors/output.js";
 export { mcpContributor } from "./collect/contributors/mcp.js";
 export { modelContributor } from "./collect/contributors/model.js";
+export {
+  imageContributor,
+  documentContributor,
+  audioContributor,
+  videoContributor,
+} from "./collect/contributors/media.js";
+export {
+  textBlockContributor,
+  codeContributor,
+  jsonContributor,
+  xmlBlockContributor,
+  csvContributor,
+  htmlContributor,
+  reasoningContributor,
+} from "./collect/contributors/textual-blocks.js";
+export {
+  userActionContributor,
+  systemEventContributor,
+  stateChangeContributor,
+} from "./collect/contributors/event-blocks.js";
+export { customBlockContributor } from "./collect/contributors/custom-block.js";
 
 // Bridges
 export { InMemoryDataBridge } from "./bridges/in-memory-data-bridge.js";

@@ -93,8 +93,11 @@ function makeContextFactory(
         return walkInstance(child, scope);
       },
 
-      collectContentBlocks(parent: HostInstance): readonly ContentBlock[] {
-        return foldContentBlocks(parent, scope);
+      collectContentBlocks(
+        parent: HostInstance,
+        outbound?: IRFragment[],
+      ): readonly ContentBlock[] {
+        return foldContentBlocks(parent, scope, outbound);
       },
 
       collectText(parent: HostInstance): string {
@@ -148,7 +151,11 @@ function makeContextFactory(
     return contributor.contribute(instance, make(scope));
   }
 
-  function foldContentBlocks(parent: HostInstance, scope: HostScope): readonly ContentBlock[] {
+  function foldContentBlocks(
+    parent: HostInstance,
+    scope: HostScope,
+    outbound?: IRFragment[],
+  ): readonly ContentBlock[] {
     if (!isElementInstance(parent)) return [];
     const blocks: ContentBlock[] = [];
     for (const child of parent.children) {
@@ -161,25 +168,26 @@ function makeContextFactory(
       // children with the new scope.
       if (child.kind === "element" && child.type === "format") {
         const nextScope = deriveFormatScope(child, scope);
-        for (const b of foldContentBlocks(child, nextScope)) blocks.push(b);
+        for (const b of foldContentBlocks(child, nextScope, outbound)) blocks.push(b);
         continue;
       }
       // Recurse: a wrapper component (no contributor) folds children.
-      // A contributor that produces content-block fragments contributes
-      // them directly to this parent's content.
       const contributor = registry.lookup(child.type);
       if (!contributor) {
-        for (const b of foldContentBlocks(child, scope)) blocks.push(b);
+        for (const b of foldContentBlocks(child, scope, outbound)) blocks.push(b);
         continue;
       }
       // Content-block contributors return `content-block` fragments;
-      // other contributors return non-content fragments which are not
-      // appropriate as inline content. We append the content blocks and
-      // ignore other fragment kinds at this fold level (they are
-      // surfaced at the tree level via the main walk).
+      // diagnostics and other non-content fragments bubble up via the
+      // outbound buffer so the enclosing contributor (section/message)
+      // can re-emit them. Other fragment kinds inside a content
+      // container are unusual — they're dropped here on the assumption
+      // that they're a misuse (a tool declaration inside a message,
+      // etc.).
       const frags = contributor.contribute(child, make(scope));
       for (const f of frags) {
         if (f.kind === "content-block") blocks.push(f.block);
+        else if (f.kind === "diagnostic" && outbound) outbound.push(f);
       }
     }
     return blocks;
