@@ -29,7 +29,12 @@ import type {
 } from "@agentick/spec";
 import { SPEC_VERSION } from "@agentick/spec";
 
-import { resolveFormatter, type HostScope } from "../host/host-context.js";
+import {
+  resolveFormatter,
+  withFormatter,
+  type FormatterBinding,
+  type HostScope,
+} from "../host/host-context.js";
 import {
   isElementInstance,
   isTextInstance,
@@ -115,6 +120,19 @@ function makeContextFactory(
       return [{ kind: "free-root-content", blocks: [block] }];
     }
 
+    // The `format` intrinsic is the canonical formatter-scope provider.
+    // It pushes a new HostScope for its subtree and contributes nothing
+    // itself. <Markdown> / <XML> / user-defined components are React
+    // function-component wrappers that render to `<format formatter={...}>`.
+    if (instance.type === "format") {
+      const nextScope = deriveFormatScope(instance, scope);
+      const out: IRFragment[] = [];
+      for (const child of instance.children) {
+        for (const frag of walkInstance(child, nextScope)) out.push(frag);
+      }
+      return out;
+    }
+
     const contributor = registry.lookup(instance.type);
     if (!contributor) {
       // No contributor — passthrough: walk children and pool their
@@ -136,6 +154,14 @@ function makeContextFactory(
     for (const child of parent.children) {
       if (isTextInstance(child)) {
         if (child.text.length > 0) blocks.push({ type: "text", text: child.text });
+        continue;
+      }
+      // `<format>` inside a content container scopes its descendants'
+      // formatter but contributes no IR fragment itself — fold its
+      // children with the new scope.
+      if (child.kind === "element" && child.type === "format") {
+        const nextScope = deriveFormatScope(child, scope);
+        for (const b of foldContentBlocks(child, nextScope)) blocks.push(b);
         continue;
       }
       // Recurse: a wrapper component (no contributor) folds children.
@@ -175,6 +201,40 @@ function makeContextFactory(
   }
 
   return make;
+}
+
+/**
+ * Derive a new HostScope from a `<format>` intrinsic's props.
+ *
+ * Shape:
+ *   <format formatter={ref} purpose?={purpose}>
+ *
+ * - `formatter` (required) — the FormatterRef to bind.
+ * - `purpose` (optional) — when set, scope only that purpose
+ *   (e.g., `"section"` → only section content uses the new formatter;
+ *   messages keep the parent's default). When absent, the formatter
+ *   replaces the scope's default.
+ *
+ * Invalid / missing `formatter` props are silently passed through with
+ * the parent scope. Diagnostics for malformed `<format>` use can be
+ * added later via the diagnostic stream — kept lenient for now so the
+ * walker never fails on user-error.
+ */
+function deriveFormatScope(
+  instance: { props: Readonly<Record<string, unknown>> },
+  parent: HostScope,
+): HostScope {
+  const props = instance.props as {
+    readonly formatter?: { readonly id: string };
+    readonly purpose?: FormatPurpose;
+  };
+  if (!props.formatter || typeof props.formatter !== "object" || !props.formatter.id) {
+    return parent;
+  }
+  const binding: FormatterBinding = props.purpose
+    ? { formatter: props.formatter, purpose: props.purpose }
+    : { formatter: props.formatter };
+  return withFormatter(parent, binding);
 }
 
 // ============================================================================

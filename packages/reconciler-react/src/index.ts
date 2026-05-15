@@ -97,6 +97,18 @@ export {
   useOnUnmount,
 } from "./react/hooks/index.js";
 
+// Components
+export {
+  FormatScope,
+  Markdown,
+  XML,
+  PlainText,
+} from "./react/components/index.js";
+export type {
+  FormatScopeProps,
+  NamedFormatScopeProps,
+} from "./react/components/index.js";
+
 // Layer C — Harness
 export { ReconcilerHarness } from "./harness/reconciler-harness.js";
 export type { ReconcilerHarnessOptions } from "./harness/reconciler-harness.js";
