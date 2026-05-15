@@ -53,15 +53,94 @@ Phase 3  ■ in progress — RECONCILER HARNESS
          ✓ 3.10a ReconcilerHarness BaseHarness subclass
          ✓ 3.10b InMemoryDataBridge + stub bridges
          ✓ 3.10c render-until-stable loop (no-Suspense useData async path)
-         ✓ 3.11  BridgeContext + 4 hooks (useData/useKnob/useTimeline/
-                 useLoopControl/useSession)
-         ✗ 3.12+ <Markdown>/<XML> formatter provider components
-         ✗ 3.15+ Snapshot/restore concrete impls (hook state capture)
-         ✗ 3.16+ runReconcilerConformance + bridge conformance
+         ✓ 3.11 BridgeContext + 5 hooks (useData/useKnob/useTimeline/
+               useLoopControl/useSession)
+         ✓ 3.12 Lifecycle hooks + tick-start catch-up (useOnTickStart/End,
+               useOnExecutionStart/End, useOnError, useOnMount/Unmount)
+         ✓ 3.13 Formatter scope providers (FormatScope + Markdown/XML/PlainText)
+         ✓ 3.14 runReconcilerConformance + bridge conformance suites
+         ✗ 3.15 Snapshot/restore concrete impls (hook state capture)
 Phase 4  □ Tool executor (was Phase 3) + other harnesses
 Phase 5  □ Adapters, cluster, gateway
 Phase 6  □ v1 sunset
 ```
+
+## Known loose ends (track-but-not-blocking)
+
+Captured 2026-05-15 so these don't fall off the radar while we move on.
+Most are addressed later — none of them gate the next priority
+(conformance suites, 3.14). Listed here so any later session can pick
+up the right one.
+
+### Stubs / placeholders to flesh out
+- **renderToString / renderResource** return spec-shaped empty payloads
+  with `*-not-implemented` warning diagnostics. Need real impls before
+  free-root rendering ships.
+- **Snapshot/restore hook-state capture**. `ReconcilerSnapshot.hookStates`
+  is always empty, `dataCache` always empty. Hibernate-and-resume is
+  shape-conformant but doesn't preserve component state yet.
+- **strictNoSuspense plumbing** — field accepted on MountInput, never
+  consulted. Suspense boundaries firing don't currently emit
+  `suspense-boundary-active` warning.
+- **ErrorBoundary detection** — `error-boundary-active` info diagnostic
+  is documented; no code path emits it.
+- **Custom lifecycle event dispatch** — `LifecycleCustom` shape exists
+  in spec; `LifecycleStore.dispatch` silently ignores unknown kinds.
+
+### Spec gaps
+- **`@agentick/spec/guards`** — directory exists, stubs only. Type guards
+  for runtime validation (isTextBlock, isSection, isToolDeclaration, etc.)
+- **`@agentick/spec-validator`** — referenced in pluggability charter
+  for opt-in JSON-Schema runtime validation; package doesn't exist.
+- **Phantom-type Operation inference (`__r`, `__e`)** — never validated.
+- **Idempotency conflict semantics** — same opId, different input is
+  currently silent first-wins. Charter says we'll add detection "if a
+  real case demands it"; no diagnostic yet.
+
+### Tests deferred
+- **max-iterations diagnostic test** — TODO comment in hooks.spec.tsx.
+  Need a controlled DataBridge fixture that fakes pending without
+  actually throwing.
+- **Concurrent features no-op verification** — useTransition /
+  useDeferredValue documented as no-op; not tested.
+- **Wire-compat round-trip** — pluggability charter rule #7 asserted in
+  docstrings but not exercised. Add a smoke test that
+  `JSON.parse(JSON.stringify(renderedTree))` recovers an equivalent
+  value.
+- **Hibernate/restore round-trip** — even with empty hookStates,
+  snapshot → JSON → restore → renderTree should produce equivalent IR.
+- **findOrphaned semantics for non-memory journals** — protocol doesn't
+  specify index requirements; concrete durable impls will surface this.
+
+### Integration gaps
+- **react-devtools bridge** — v1 has `enableReactDevTools()` connecting
+  to standalone DevTools on port 8097. Not wired in v2.
+- **Content-block intrinsics** — `<text>`, `<image>`, `<code>`, `<json>`,
+  `<document>`, `<audio>`, `<video>` not yet contributors. They'd fold
+  into parent `MessageEntry.content` / `SectionEntry.content`.
+- **Semantic HTML intrinsics** — `<strong>`, `<em>`, `<ul>`, etc. v1 has
+  them; v2 design says they're a formatter concern (formatter harness
+  consumes SemanticNode tree). Not wired.
+- **`format` JSX intrinsic typing** — using `<format formatter={...}>`
+  directly hits a TS error. `<FormatScope>` is the typed escape hatch.
+- **Long-lived primitives** (`<Cron>` / `<Webhook>` / `<EventListener>`)
+  — declared via SubscriptionIntent in the snapshot; no JSX components
+  yet.
+
+### Performance / observability
+- **Bus event emission overhead** — phase contract emits ≥3 events per
+  command. Per-render this is fine; per-tool-call across thousands of
+  dispatches we haven't measured.
+- **Render-until-stable wallclock budget** — only iteration-bounded.
+  A slow fetcher blocks the loop. We may want `awaitTimeoutMs` per
+  iteration.
+- **No metrics export** — OTel projection is a design intent in
+  19-foundation.md; not implemented.
+
+### Documentation gaps
+- **Per-package API reference READMEs** — high-level pitch only. No
+  user-facing component / hook reference for reconciler-react.
+- **Flow diagrams in `15-flows/`** reference v1 vocabulary in places.
 
 ## Critical priority recalibration (2026-05-14)
 
