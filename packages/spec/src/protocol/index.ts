@@ -2,9 +2,9 @@
  * Protocol interfaces — contracts between harnesses and substrates.
  *
  * Phase 1c landed: substrate protocols (journal, bus, inbox).
+ * Phase 3.1 landed: reconciler protocol + hook bridges.
  *
  * Future phases will add:
- *   - reconciler.ts      ReconcilerProtocol + I/O types
  *   - formatter.ts       FormatterProtocol + I/O types
  *   - loop-executor.ts   LoopExecutorProtocol
  *   - executor.ts        ExecutorProtocol, LanguageModelExecutor
@@ -18,3 +18,5 @@
 export * from "./journal.js";
 export * from "./bus.js";
 export * from "./inbox.js";
+export * from "./reconciler.js";
+export * from "./hook-bridges.js";

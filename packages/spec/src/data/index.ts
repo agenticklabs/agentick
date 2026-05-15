@@ -41,3 +41,4 @@ export * from "./declarations.js";
 export * from "./rendered-tree.js";
 export * from "./execution-result.js";
 export * from "./execution-target.js";
+export * from "./reconciler-snapshot.js";

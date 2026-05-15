@@ -1,7 +1,7 @@
 # Agentick v2 — Implementation Status
 
 **Branch:** `feat/v2`
-**Last updated:** 2026-05-15 (Phase 2 substrate landed)
+**Last updated:** 2026-05-15 (Phase 3.1–3.3 spec contracts landed)
 
 This is the **running progress log** for v2 implementation. Update it
 every session. New contributors / sessions read this first.
@@ -39,8 +39,11 @@ Phase 2  ✓ in-memory substrate — MemoryJournal, LocalEventBus,
          LocalInbox, BaseHarness implemented in @agentick/runtime.
          Conformance suites populated for journal + inbox; 82/82 tests
          green; full workspace typecheck clean.
-Phase 3  □ RECONCILER HARNESS (was tool executor; reprioritized 2026-05-14)
-         unblocked — Phase 1c types + Phase 2 substrate both landed.
+Phase 3  ■ in progress — RECONCILER HARNESS
+         ✓ 3.1 ReconcilerProtocol + I/O + errors + inbox messages
+         ✓ 3.2 ReconcilerSnapshot + diagnostics
+         ✓ 3.3 HookBridges (DataBridge no-Suspense contract)
+         ✗ 3.4+ packages/reconciler-react implementation
 Phase 4  □ Tool executor (was Phase 3) + other harnesses
 Phase 5  □ Adapters, cluster, gateway
 Phase 6  □ v1 sunset
@@ -103,6 +106,66 @@ packages/spec-conformance/                              ✓ scaffolded (private:
 
 .changeset/config.json                                  ✓ @agentick/spec in fixed group
 ```
+
+### Code (Phase 3.1–3.3 reconciler protocol contracts, 2026-05-15)
+
+```
+packages/spec/src/data/                                 ✓ snapshot + diagnostics
+  reconciler-snapshot.ts  ReconcilerSnapshot, HookStateEntry,
+                          DataCacheEntry, SubscriptionIntent,
+                          ReconcileDiagnostic, ReconcileDiagnosticCode,
+                          RenderToStringPayload
+
+packages/spec/src/protocol/                             ✓ contracts
+  hook-bridges.ts         HookBridges + DataBridge (no-Suspense),
+                          KnobBridge, TimelineBridge, LoopBridge,
+                          SessionBridge, Sandbox/MCP placeholders
+  reconciler.ts           ReconcilerProtocol with mount/rerender/
+                          renderTree/renderToString/renderResource/
+                          notifyTickEnd/unmount/snapshot/restore.
+                          ReconcileError taxonomy (11 tags).
+                          ReconcilerInboxMessage (recompile/unmount/
+                          invalidate).
+
+packages/spec/src/__tests__/
+  reconciler-protocol.spec.ts                           23 new tests
+                          - MountInput/Result, RenderTreeInput/Result
+                          - RenderToString/Resource I/O
+                          - Snapshot JSON round-trip
+                          - ReconcileError taxonomy
+                          - InboxMessage discrimination
+                          - Diagnostic codes
+                          - DataBridge no-Suspense semantics (cached
+                            sync, pending throws Promise, failure
+                            throws Error)
+                          - Knob/Timeline/Loop/Session shapes
+                          - ReconcilerProtocol method roster
+```
+
+**Design constraints baked into Phase 3.1:**
+
+- **No Suspense.** `DataBridge.resolve` is the no-Suspense contract:
+  cached value returns synchronously; pending throws an in-flight
+  Promise (caught by the reconciler's render-until-stable loop, not
+  by React `<Suspense>`); prior failure throws the underlying Error.
+  `RenderedTree` never carries "loading" states.
+- **JSON firewall.** `ReconcilerSnapshot` survives
+  `JSON.parse(JSON.stringify(s))`. No functions, Dates, Maps, Sets.
+- **Bridges, not globals.** Every runtime-supplied capability hook
+  components need (timeline read, knob get/set, async data, loop
+  control, session identity) goes through `HookBridges` passed at
+  mount time. Module-level singletons are forbidden by contract.
+- **`MountScopedInput` base.** Every operation that targets a mount
+  carries `(mountId, opId?, correlationId?, parentOpId?)`. Phase
+  contract + idempotency + causality come from `BaseHarness`.
+- **Forward-compat strings.** `RenderPurpose`, `SessionStatus`,
+  `HookType`, `ReconcileDiagnosticCode` are open string unions with
+  named recognized values — new variants don't break older snapshots.
+
+**Status check:**
+- `pnpm vitest run packages/spec` — 71/71 green
+- `pnpm -r typecheck` — all packages green
+- Phase 3.4 (`@agentick/reconciler-react` scaffold) unblocked
 
 ### Code (Phase 2 in-memory substrate, 2026-05-15)
 
