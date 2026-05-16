@@ -18,9 +18,19 @@ export {
   BaseHarness,
   HandlerRegistry,
   MiddlewareChain,
+  OperationOutcomeError,
+  mergeVerdict,
+  runHarnessProtocol,
   type Middleware,
   type LifecycleHandler,
   type Unsubscribe,
 } from "./substrate/base-harness.js";
+export {
+  EMPTY_CONTEXT,
+  RuntimeContextRef,
+  getContext,
+  withContext,
+  type RuntimeContext,
+} from "./substrate/runtime-context.js";
 export { matchesQuery } from "./substrate/query.js";
 export { ulid } from "./substrate/ulid.js";

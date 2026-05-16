@@ -12,6 +12,7 @@
  * @see docs/proposals/v2/blueprint/19-foundation.md §The PubSub bus
  */
 
+import type { Effect, Stream } from "effect";
 import type { ProtocolEvent, EventQuery } from "../data/events.js";
 
 /**
@@ -26,8 +27,6 @@ export interface SubscribeOptions {
   /** Per-subscriber bounded buffer. Default: 256. */
   readonly bufferSize?: number;
   readonly overflow?: SubscriberOverflow;
-  /** Cancel the subscription via signal. */
-  readonly signal?: AbortSignal;
 }
 
 /**
@@ -43,32 +42,30 @@ export interface EventBus {
    * call is a no-op (lazy fan-out). Implementations MUST NOT block on
    * slow subscribers — each subscriber has its own bounded buffer.
    */
-  publish(event: ProtocolEvent): Promise<void>;
+  publish(event: ProtocolEvent): Effect.Effect<void, never, never>;
 
   /**
    * Subscribe to events matching a query.
    *
-   * Returns an AsyncIterable that yields new envelopes as they're
-   * published. Termination semantics:
-   *   - consumer for-await early return → unsubscribe
-   *   - options.signal aborts            → unsubscribe + iterable ends
-   *   - bus closed                       → iterable ends
+   * Returns a `Stream` that yields new envelopes as they're published.
+   * Stream interruption (consumer disposes / scope closes) unsubscribes.
    *
    * Buffer overflow follows `options.overflow`. With `"error"`, the
-   * iterable throws `BufferOverflowError`; with `"drop-*"`, events
+   * stream fails with `BufferOverflowError`; with `"drop-*"`, events
    * are silently dropped per the chosen edge.
    */
   subscribe(
     query: EventQuery,
     options?: SubscribeOptions,
-  ): AsyncIterable<ProtocolEvent>;
+  ): Stream.Stream<ProtocolEvent, BufferOverflowError, never>;
 }
 
 /**
- * Thrown by a subscriber's iterable when its bounded buffer overflows
- * and the configured strategy is `"error"`.
+ * Surfaced through the subscribe stream's failure channel when the
+ * bounded buffer overflows and the configured strategy is `"error"`.
  */
 export class BufferOverflowError extends Error {
+  readonly _tag = "BufferOverflowError" as const;
   readonly bufferSize: number;
   constructor(bufferSize: number) {
     super(`Subscriber buffer overflowed (capacity: ${bufferSize})`);

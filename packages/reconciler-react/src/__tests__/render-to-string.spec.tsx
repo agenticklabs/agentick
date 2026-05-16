@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import React from "react";
+import { Chunk, Effect, Stream } from "effect";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
 import { ReconcilerHarness } from "../harness/reconciler-harness.js";
 import { stubBridges } from "../bridges/stub-bridges.js";
@@ -233,8 +234,9 @@ describe("renderToString — operation lifecycle", () => {
       bridges: stubBridges(),
     });
     await harness.renderToString({ mountId: "m_lc" });
+    const chunk = await Effect.runPromise(Stream.runCollect(journal.read({}, "beginning")));
     const names = new Set<string>();
-    for await (const ev of journal.read({}, "beginning")) names.add(`${ev.name}.${ev.phase}`);
+    for (const ev of Chunk.toReadonlyArray(chunk)) names.add(`${ev.name}.${ev.phase}`);
     expect(names.has("reconciler:command:render-to-string.requested")).toBe(true);
     expect(names.has("reconciler:command:render-to-string.terminal")).toBe(true);
   });

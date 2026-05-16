@@ -1,7 +1,7 @@
 # Agentick v2 — Implementation Status
 
 **Branch:** `feat/v2`
-**Last updated:** 2026-05-15 (Phase 4a.4 — ToolExecutorHarness reference impl passes conformance)
+**Last updated:** 2026-05-15 (substrate flipped to Effect-native — Path A reversal)
 
 This is the **running progress log** for v2 implementation. Update it
 every session. New contributors / sessions read this first.
@@ -37,8 +37,10 @@ Phase 1  ■ in progress — spec package type population
 
 Phase 2  ✓ in-memory substrate — MemoryJournal, LocalEventBus,
          LocalInbox, BaseHarness implemented in @agentick/runtime.
-         Conformance suites populated for journal + inbox; 82/82 tests
-         green; full workspace typecheck clean.
+         Effect-native protocols (Effect<R,E,never> / Stream<E,F,never>);
+         FiberRef-based RuntimeContext substrate; conformance suites
+         populated for journal + bus + inbox; 4953 workspace tests green;
+         full workspace typecheck clean.
 Phase 3  ■ in progress — RECONCILER HARNESS
          ✓ 3.1 ReconcilerProtocol + I/O + errors + inbox messages
          ✓ 3.2 ReconcilerSnapshot + diagnostics
@@ -410,6 +412,9 @@ packages/spec-conformance/                              ✓ bodies populated
   blueprint reserves Effect for higher layers (Scope/Span integration);
   the in-memory substrate doesn't need it. If a real case demands
   cancellable Effects, we layer them in then.
+  > **REVERSED 2026-05-15.** This decision contradicted `19-foundation.md`
+  > as written and produced architectural drift. Substrate is now
+  > Effect-native; see the dated entry above.
 - **Idempotency dedup is per `(opId, phase)`, not per envelope id.** Same
   operation replaying the same phase is a no-op. Same opId in different
   phases is normal (requested → terminal).
@@ -753,6 +758,81 @@ blueprint's design decisions; this is execution-level).
     bare "actor" (BaseHarness inheritance, five surfaces, journal
     durability). Documented as an addressable actor.
 
+### 2026-05-16
+
+- **Substrate refinement pass — 8 critical items closed.** Audit of
+  the substrate after the Effect-native migration surfaced eight gaps
+  between the blueprint and the implementation. All eight closed in
+  one pass:
+
+  1. **`Effect.scoped` wrap around every command body.** `runOperation`
+     now establishes a `Scope` for the operation's lifetime — any
+     `Effect.acquireRelease` inside a body runs its finalizer when the
+     operation terminates (success, failure, or interrupt). Unblocks
+     adapters that hold per-operation resources (HttpClient, WebSocket,
+     sandbox process handles).
+
+  2. **Typed error channel.** `runOperation` now returns
+     `Effect<R, E | SubstrateError, never>` instead of
+     `Effect<R, unknown, never>`. New `SubstrateError` tagged union in
+     `@agentick/spec` covers `OperationOutcomeError | JournalError |
+     LifecycleHandlerError`. Callers regain compile-time signal about
+     what failure modes to handle; subclass harnesses can pattern-match
+     in `Effect.catchTag` / `Effect.catchTags`.
+
+  3. **`parentOpId` auto-set from the FiberRef.** When `runOperation`
+     starts and `op.parentOpId === undefined`, it reads the surrounding
+     `RuntimeContextRef`'s `opId` and uses that. Nested operations
+     compose into a causality tree without app code threading
+     parentOpId. Every consumer of the journal/bus (devtools, OTel
+     exporter, replay debugger) can reconstruct the operation tree.
+
+  4. **OTel span integration — without breaking error-identity.**
+     `runOperation` annotates each operation with `Effect.withSpan`
+     via a private `annotateOperationSpan` helper that side-channels
+     the span (success-typed `Effect.void.pipe(Effect.withSpan(...))`)
+     so the failure value the caller sees is the same JS reference the
+     body raised. Earlier attempt to use `Effect.withSpan` directly on
+     the body's pipe lost error-reference identity (failures appeared
+     as Errors with the same `.message` but different `.constructor`
+     ref). Workaround preserves identity at the cost of the span not
+     seeing the original error — for now, OTel sees only the span
+     name + attributes; explicit `recordException` integration is a
+     follow-up.
+
+  5. **Lifecycle-handler failures flow through `SubstrateError`.** A
+     `before`-handler's Effect failing now produces a typed
+     `{ _tag: "LifecycleHandlerError", phase, cause }` instead of
+     silently widening the operation's `E`. The substrate publishes
+     `terminal:failed` for the operation and re-fails with the typed
+     lifecycle error.
+
+  6. **`runHarnessProtocol` extracted to `@agentick/runtime`.**
+     Concrete harnesses (reconciler-react, tool-executor) used to
+     duplicate this `FiberFailure → typed error` unwrap helper.
+     Now exported once; both consumers import it.
+
+  7. **`ToolHandler` accepts Effect, Promise, or sync.** The 90%-case
+     Promise ergonomic (v1-compatible) keeps working. Effect-typed
+     handlers see the harness's `RuntimeContextRef` directly via
+     `getContext` (no `ctx` plumbing), participate in `Effect.scoped`
+     finalizer chains, and cancel via `Effect.race` against an
+     AbortSignal-driven failure. The dispatch body itself converted
+     from Promise-shaped to Effect-shaped so the FiberRef propagates
+     into Effect handlers without crossing the JS-async boundary.
+
+  8. **`AbortSignal` ↔ Effect interrupt bridge.** Effect-typed tool
+     handlers race the handler effect against an `Effect.async` that
+     fails when the dispatch's AbortSignal fires. Promise handlers
+     continue using the `AbortSignal` directly. The two abort
+     primitives coexist without one dictating the other.
+
+  **Status:** `pnpm -r typecheck` clean; 4953/4961 tests green across
+  the workspace; example/v2 demonstrates both Promise and Effect
+  handler paths end-to-end (the Effect `whoami` reads sessionId /
+  executionId / tickId / opId via FiberRef without any parameter
+  plumbing).
+
 ### 2026-05-15
 
 - **Phase 3 priority reorder:** the reconciler harness, not the tool
@@ -762,6 +842,70 @@ blueprint's design decisions; this is execution-level).
   on top. Tool executor moves to Phase 4a.
 - **Mechanical rename pass complete** across blueprint + plan + status.
   55/55 typecheck green; 25/25 spec tests green.
+- **Path A — substrate flipped to Effect-native.** The earlier
+  "Promise/AsyncIterable end-to-end. No Effect in runtime yet"
+  decision is reversed. It contradicted `19-foundation.md` as written
+  (`BaseHarness.runOperation` returns `Effect<R, E, Scope>`; journal /
+  bus / inbox return `Effect` / `Stream`) and produced architectural
+  drift — most visibly in an aborted attempt to bolt a `FiberRef + ALS
+  mirror` `RuntimeContext` onto a Promise-typed substrate. The bolt-on
+  was thrown out; the substrate itself is now Effect.
+
+  Concretely:
+  - `@agentick/spec` protocols flipped: `OperationJournal`,
+    `EventBus`, `MessageInbox`, `MessageHandler` all return Effect /
+    Stream. Tagged-union errors flow through the `E` channel.
+  - `effect` is a direct dependency of `@agentick/spec`,
+    `@agentick/spec-conformance`, `@agentick/runtime`,
+    `@agentick/reconciler-react`, and `@agentick/tool-executor`.
+  - `@agentick/runtime` rewrites: `MemoryJournal` (Stream-based read /
+    tail, idempotency unchanged), `LocalEventBus` (Effect `Queue`
+    backed — `Queue.sliding` for drop-oldest, `Queue.dropping` for
+    drop-newest), `LocalInbox` (Fiber-memoized idempotency cache —
+    same `messageId` joins the same Fiber), `BaseHarness` (Effect
+    `runOperation` with `withContext` establishing
+    `RuntimeContextRef` for the operation's lifetime; FiberRef
+    propagates sessionId / executionId / tickId / opId / parentOpId /
+    correlationId to every Effect launched inside the body).
+  - New `runtime-context.ts`: `RuntimeContextRef: FiberRef<RuntimeContext>`,
+    `getContext`, `withContext`. **No AsyncLocalStorage mirror** —
+    the prior session's dual-surface attempt is the exact pattern we
+    are refactoring v2 to escape (ALS is scoped to async-resource
+    chains; actor identities outlive any single call stack).
+  - `runEventBusConformance` added (charter rule #4 status table
+    flagged it as missing).
+  - Reference harnesses re-anchored: `ReconcilerHarness` and
+    `ToolExecutorHarness` keep their Promise-typed `ReconcilerProtocol`
+    / `ToolExecutorProtocol` public surfaces (the spec hasn't
+    flipped those — Phase 4 concern) but wrap each command body
+    with `Effect.runPromise` via a `runProtocol` bridge that
+    unwraps `FiberFailure` → original typed error. FiberRef scope
+    propagates within each command.
+  - Workspace status: 4953/4961 tests green (3 skipped, 5 todo, 0
+    failed); `pnpm -r typecheck` clean.
+
+  Architectural payoff (now realized for every harness that
+  inherits BaseHarness):
+  - FiberRef propagation across command bodies — sessionId / opId /
+    tickId visible to any downstream Effect via `getContext`. No
+    parameter plumbing, no ALS scope leaks.
+  - `Effect.withSpan` integration point ready in `runOperation` for
+    the OTel projection (`19-foundation.md` §OTel). Spans align with
+    `parentOpId` via FiberRef.
+  - `Effect.scoped` finalizer chaining available for harness
+    teardown / abort cleanup when the per-command scope closes.
+  - `@effect/cluster` substitution path open — `ClusterJournal` /
+    `ClusterInbox` will implement the same Effect-typed protocols
+    that `MemoryJournal` / `LocalInbox` do, satisfying the same
+    conformance suites.
+
+  Cost: the migration was a one-day mechanical conversion. Test
+  bodies cross at `Effect.runPromise` / `Stream.runCollect` at the
+  vitest edge; impl bodies are `Effect.gen` / `Effect.sync` /
+  `Effect.tryPromise` wrappers. Nothing fundamentally new is being
+  built — we're aligning the substrate with the blueprint that
+  already specified it. The longer this drift had run, the more
+  expensive the conversion.
 
 ## Open architecture decisions (deferred from blueprint)
 

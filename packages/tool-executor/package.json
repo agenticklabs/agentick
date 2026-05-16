@@ -54,7 +54,8 @@
   },
   "dependencies": {
     "@agentick/spec": "workspace:*",
-    "@agentick/runtime": "workspace:*"
+    "@agentick/runtime": "workspace:*",
+    "effect": "^3.21.2"
   },
   "devDependencies": {
     "@agentick/spec-conformance": "workspace:*"

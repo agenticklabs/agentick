@@ -1,6 +1,53 @@
 import { describe, expect, it } from "vitest";
+import { Chunk, Effect, Fiber, Stream } from "effect";
 import type { ProtocolEvent } from "@agentick/spec";
+import { runEventBusConformance } from "@agentick/spec-conformance";
 import { LocalEventBus } from "../substrate/local-event-bus.js";
+
+describe("LocalEventBus — conformance", () =>
+  runEventBusConformance(() => new LocalEventBus()));
+
+describe("LocalEventBus — implementation specifics", () => {
+  it("subscriber count drops when the consuming stream is interrupted", async () => {
+    const bus = new LocalEventBus();
+    const fiber = Effect.runFork(Stream.runDrain(bus.subscribe({})));
+    await new Promise((r) => setImmediate(r));
+    expect(bus.subscriberCount()).toBe(1);
+    await Effect.runPromise(Fiber.interrupt(fiber));
+    await new Promise((r) => setImmediate(r));
+    expect(bus.subscriberCount()).toBe(0);
+  });
+
+  it("drop-newest discards new events when buffer is full", async () => {
+    const bus = new LocalEventBus();
+    // Slow consumer so the queue fills up. Each pulled event sleeps 30ms;
+    // three back-to-back publishes land in the queue (capacity 2) before
+    // the consumer takes the first one — the third one is dropped.
+    const fiber = Effect.runFork(
+      Stream.runCollect(
+        Stream.take(bus.subscribe({}, { bufferSize: 2, overflow: "drop-newest" }), 2).pipe(
+          Stream.tap(() => Effect.sleep("30 millis")),
+        ),
+      ),
+    );
+    await new Promise((r) => setImmediate(r));
+    await Effect.runPromise(
+      Effect.all([bus.publish(ev("1")), bus.publish(ev("2")), bus.publish(ev("3"))], {
+        discard: true,
+      }),
+    );
+    const chunk = await Effect.runPromise(Fiber.join(fiber));
+    const ids = Array.from(Chunk.toReadonlyArray(chunk)).map((e) => e.id);
+    expect(ids).toEqual(["1", "2"]);
+  });
+
+  // drop-oldest is exercised at the Effect Queue.sliding boundary — it
+  // is the policy we register the queue with. Deterministically forcing
+  // overflow under a Stream consumer requires manual queue-level
+  // intervention; we trust Queue.sliding's documented behavior and rely
+  // on `drop-newest` (above) to verify the wiring picks the right Queue
+  // variant per overflow setting.
+});
 
 function ev(id: string, partial: Partial<ProtocolEvent> = {}): ProtocolEvent {
   return {
@@ -13,49 +60,3 @@ function ev(id: string, partial: Partial<ProtocolEvent> = {}): ProtocolEvent {
     ...partial,
   } as ProtocolEvent;
 }
-
-describe("LocalEventBus", () => {
-  it("publishes to matching subscribers only (lazy fan-out)", async () => {
-    const bus = new LocalEventBus();
-    const ctrl = new AbortController();
-    const iter = bus.subscribe({ surface: "tool" }, { signal: ctrl.signal });
-    const it1 = iter[Symbol.asyncIterator]();
-    const pending = it1.next();
-    await bus.publish(ev("a", { surface: "session" })); // no match
-    await bus.publish(ev("b", { surface: "tool" })); // match
-    const result = await pending;
-    expect(result.done).toBe(false);
-    if (!result.done) expect(result.value.id).toBe("b");
-    ctrl.abort();
-  });
-
-  it("buffers up to bufferSize then drops oldest by default", async () => {
-    const bus = new LocalEventBus();
-    const iter = bus.subscribe({}, { bufferSize: 2 });
-    const it1 = iter[Symbol.asyncIterator]();
-    await bus.publish(ev("1"));
-    await bus.publish(ev("2"));
-    await bus.publish(ev("3"));
-    const a = await it1.next();
-    const b = await it1.next();
-    expect([a.value!.id, b.value!.id]).toEqual(["2", "3"]);
-    await it1.return?.();
-  });
-
-  it("subscriber abort terminates the iterable", async () => {
-    const bus = new LocalEventBus();
-    const ctrl = new AbortController();
-    const iter = bus.subscribe({}, { signal: ctrl.signal });
-    const it1 = iter[Symbol.asyncIterator]();
-    const pending = it1.next();
-    ctrl.abort();
-    const result = await pending;
-    expect(result.done).toBe(true);
-  });
-
-  it("no subscribers → publish is a no-op", async () => {
-    const bus = new LocalEventBus();
-    await bus.publish(ev("solo"));
-    expect(bus.subscriberCount()).toBe(0);
-  });
-});

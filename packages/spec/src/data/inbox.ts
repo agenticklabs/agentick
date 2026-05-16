@@ -9,6 +9,9 @@
  * @see docs/proposals/v2/blueprint/10-events-handlers-inbox.md §② Inbox
  */
 
+import type { Effect } from "effect";
+import type { MessageHandlerError } from "./errors.js";
+
 /**
  * Wire-safe envelope for inbound messages addressed to a harness.
  * JSON-serializable. Same shape across local and cluster dispatch.
@@ -63,13 +66,14 @@ export interface MessageAck {
 /**
  * Handler signature for inbox messages.
  *
- * Returns a Promise of the result type (or void for tell-style handlers).
- * Implementations may throw to indicate handler error; the substrate
- * catches and routes to the appropriate error channel.
+ * Returns an `Effect` of the result type (or `void` for tell-style
+ * handlers). Failures flow through the `E` channel as
+ * `MessageHandlerError`; routing-side failures stay separate on the
+ * inbox protocol surface.
  *
- * Spec uses Promise as the canonical async return type (zero-dep);
- * implementations using Effect bridge at their handler boundary.
+ * Effect's FiberRef scope, structured concurrency, and finalizers
+ * propagate into the handler body automatically.
  */
 export type MessageHandler<T = unknown, R = unknown> = (
   message: MessageEnvelope<T>,
-) => Promise<R>;
+) => Effect.Effect<R, MessageHandlerError, never>;

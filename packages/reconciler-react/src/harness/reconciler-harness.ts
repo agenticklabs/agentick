@@ -19,11 +19,13 @@
  */
 
 import React, { type ReactNode } from "react";
-import { ulid } from "@agentick/runtime";
+import { Effect } from "effect";
+import { runHarnessProtocol, ulid } from "@agentick/runtime";
 import type {
   EventBus,
   HookBridges,
   MessageEnvelope,
+  MessageHandlerError,
   MountInput,
   MountResult,
   NotifyLifecycleInput,
@@ -135,7 +137,7 @@ export class ReconcilerHarness
 
   // ──────────────────────── ReconcilerProtocol ────────────────────────
 
-  async mount(input: MountInput): Promise<MountResult> {
+  mount(input: MountInput): Promise<MountResult> {
     const op: Operation<MountInput, MountResult> = {
       opId: input.opId ?? `reconciler:mount:${input.mountId}`,
       surface: "reconciler",
@@ -143,55 +145,95 @@ export class ReconcilerHarness
       scope: { sessionId: input.sessionId, executionId: input.executionId },
       input,
     };
-    return this.runOperation(op, async (i) => this.mountBody(i));
+    return runHarnessProtocol(
+      this.runOperation(op, (i) =>
+        Effect.tryPromise({ try: () => this.mountBody(i), catch: (e: unknown) => e }),
+      ),
+    );
   }
 
-  async rerender(input: RerenderInput): Promise<void> {
-    const op: Operation<RerenderInput, void> = {
-      opId: input.opId ?? `reconciler:rerender:${input.mountId}`,
-      surface: "reconciler",
-      name: "reconciler:command:rerender",
-      scope: { sessionId: this.mountState(input.mountId).bridges.session.id },
-      input,
-    };
-    return this.runOperation(op, async (i) => {
-      const state = this.mountState(i.mountId);
-      state.element = i.element as ReactNode;
-      if (i.elementVersion !== undefined) state.elementVersion = i.elementVersion;
-      this.renderOnce(state);
-      this.maybeWarnSuspense(i.element);
-    });
+  rerender(input: RerenderInput): Promise<void> {
+    // Resolve scope synchronously — if the mount doesn't exist, surface
+    // NotMounted as a Promise rejection (callers `.rejects.toMatchObject`).
+    return runHarnessProtocol(
+      Effect.suspend(() => {
+        const state = this.tryMountState(input.mountId);
+        if (!state) {
+          return Effect.fail({ _tag: "NotMounted", mountId: input.mountId } as const);
+        }
+        const op: Operation<RerenderInput, void> = {
+          opId: input.opId ?? `reconciler:rerender:${input.mountId}`,
+          surface: "reconciler",
+          name: "reconciler:command:rerender",
+          scope: { sessionId: state.bridges.session.id },
+          input,
+        };
+        return this.runOperation(op, (i) =>
+          Effect.sync(() => {
+            state.element = i.element as ReactNode;
+            if (i.elementVersion !== undefined) state.elementVersion = i.elementVersion;
+            this.renderOnce(state);
+            this.maybeWarnSuspense(i.element);
+          }),
+        );
+      }),
+    );
   }
 
-  async renderTree(input: RenderTreeInput): Promise<RenderTreeResult> {
-    const state = this.mountState(input.mountId);
-    const op: Operation<RenderTreeInput, RenderTreeResult> = {
-      // Each renderTree call must get a unique opId — Date.now() at
-      // millisecond precision collides for back-to-back calls. ULID is
-      // monotonic + collision-safe.
-      opId: input.opId ?? `reconciler:render:${input.mountId}:${ulid()}`,
-      surface: "reconciler",
-      name: "reconciler:command:render-tree",
-      scope: { sessionId: state.bridges.session.id, executionId: input.executionId },
-      input,
-    };
-    return this.runOperation(op, async (i) => this.renderTreeBody(i, state));
+  renderTree(input: RenderTreeInput): Promise<RenderTreeResult> {
+    return runHarnessProtocol(
+      Effect.suspend(() => {
+        const state = this.tryMountState(input.mountId);
+        if (!state) {
+          return Effect.fail({ _tag: "NotMounted", mountId: input.mountId } as const);
+        }
+        const op: Operation<RenderTreeInput, RenderTreeResult> = {
+          opId: input.opId ?? `reconciler:render:${input.mountId}:${ulid()}`,
+          surface: "reconciler",
+          name: "reconciler:command:render-tree",
+          scope: {
+            sessionId: state.bridges.session.id,
+            executionId: input.executionId,
+          },
+          input,
+        };
+        return this.runOperation(op, (i) =>
+          Effect.tryPromise({
+            try: () => this.renderTreeBody(i, state),
+            catch: (e: unknown) => e,
+          }),
+        );
+      }),
+    );
   }
 
-  async renderToString(input: RenderToStringInput): Promise<RenderToStringResult> {
-    const state = this.mountState(input.mountId);
-    const op: Operation<RenderToStringInput, RenderToStringResult> = {
-      opId: input.opId ?? `reconciler:render-to-string:${input.mountId}:${ulid()}`,
-      surface: "reconciler",
-      name: "reconciler:command:render-to-string",
-      scope: { sessionId: state.bridges.session.id },
-      input,
-    };
-    return this.runOperation(op, async (i) => this.renderToStringBody(i, state));
+  renderToString(input: RenderToStringInput): Promise<RenderToStringResult> {
+    return runHarnessProtocol(
+      Effect.suspend(() => {
+        const state = this.tryMountState(input.mountId);
+        if (!state) {
+          return Effect.fail({ _tag: "NotMounted", mountId: input.mountId } as const);
+        }
+        const op: Operation<RenderToStringInput, RenderToStringResult> = {
+          opId: input.opId ?? `reconciler:render-to-string:${input.mountId}:${ulid()}`,
+          surface: "reconciler",
+          name: "reconciler:command:render-to-string",
+          scope: { sessionId: state.bridges.session.id },
+          input,
+        };
+        return this.runOperation(op, (i) =>
+          Effect.tryPromise({
+            try: () => this.renderToStringBody(i, state),
+            catch: (e: unknown) => e,
+          }),
+        );
+      }),
+    );
   }
 
   async notifyLifecycle(input: NotifyLifecycleInput): Promise<void> {
-    const state = this.mountState(input.mountId);
+    const state = this.tryMountState(input.mountId);
+    if (!state) throw { _tag: "NotMounted", mountId: input.mountId };
     await state.lifecycle.dispatch(input.event);
   }
 
@@ -242,19 +284,30 @@ export class ReconcilerHarness
 
   // ──────────────────────── inbox dispatch ────────────────────────
 
-  protected async handleMessage(msg: MessageEnvelope): Promise<unknown> {
+  protected handleMessage(
+    msg: MessageEnvelope,
+  ): Effect.Effect<unknown, MessageHandlerError, never> {
     const m = msg as MessageEnvelope<ReconcilerInboxMessage | undefined>;
     const payload = m.payload;
-    if (!payload) return undefined;
+    if (!payload) return Effect.succeed(undefined);
     switch (payload.type) {
       case "recompile":
-        return this.renderTree({ mountId: payload.mountId, sessionId: "" });
+        return Effect.tryPromise({
+          try: () => this.renderTree({ mountId: payload.mountId, sessionId: "" }),
+          catch: (cause): MessageHandlerError => ({ _tag: "HandlerError", cause }),
+        });
       case "unmount":
-        return this.unmount({ mountId: payload.mountId });
+        return Effect.tryPromise({
+          try: () => this.unmount({ mountId: payload.mountId }),
+          catch: (cause): MessageHandlerError => ({ _tag: "HandlerError", cause }),
+        });
       case "invalidate":
-        return this.handleInvalidate(payload);
+        return Effect.sync(() => this.handleInvalidate(payload));
       default:
-        throw new Error(`unknown reconciler message type`);
+        return Effect.fail({
+          _tag: "HandlerError",
+          cause: new Error("unknown reconciler message type"),
+        });
     }
   }
 
@@ -538,6 +591,10 @@ export class ReconcilerHarness
     return state;
   }
 
+  private tryMountState(mountId: string): MountState | undefined {
+    return this.mounts.get(mountId);
+  }
+
   /**
    * Emit a one-shot warning if the input element tree statically contains
    * a `<Suspense>` boundary. The DataBridge contract is no-Suspense — any
@@ -570,7 +627,9 @@ export class ReconcilerHarness
     }
   }
 
-  private handleInvalidate(payload: Extract<ReconcilerInboxMessage, { type: "invalidate" }>): void {
+  private handleInvalidate(
+    payload: Extract<ReconcilerInboxMessage, { type: "invalidate" }>,
+  ): undefined {
     const state = this.mounts.get(payload.mountId);
     if (!state) return;
     if (payload.keys) {
@@ -579,8 +638,10 @@ export class ReconcilerHarness
     if (payload.tags) {
       for (const t of payload.tags) state.bridges.data.invalidateTag(t);
     }
+    return undefined;
   }
 }
+
 
 /**
  * Read knob values from the bridge. Prefers `exportSnapshot()` when the

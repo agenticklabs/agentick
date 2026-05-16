@@ -10,6 +10,7 @@
 
 // Substrate protocols (Phase 2)
 export { runJournalConformance } from "./journal.js";
+export { runEventBusConformance } from "./event-bus.js";
 export { runInboxConformance } from "./inbox.js";
 export { runHarnessConformance } from "./harness.js";
 

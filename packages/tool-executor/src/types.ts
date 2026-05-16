@@ -9,6 +9,7 @@
  * @see docs/proposals/v2/blueprint/07-tool-executor.md
  */
 
+import type { Effect } from "effect";
 import type {
   ContentBlock,
   StandardSchemaIssue,
@@ -68,19 +69,37 @@ export interface ToolHandlerCtx {
 // ============================================================================
 
 /**
- * The function shape every tool handler implements. The first argument
- * is the validated input (typed as `unknown` at the harness boundary —
- * the validator narrows it before invocation). The second argument is
- * the per-dispatch dependency bundle: `ctx` (harness-provided) and
- * `use` (render-time `use:` deps captured by the reconciler).
+ * Tool handler bodies may return any of three shapes:
+ *
+ *   1. **Sync** — `readonly ContentBlock[]`
+ *   2. **Promise** — `Promise<readonly ContentBlock[]>` (the v1-compatible
+ *      ergonomic; gets scope via `ctx`, abort via `ctx.signal`)
+ *   3. **Effect** — `Effect<readonly ContentBlock[], unknown, never>`
+ *      (sees the harness's FiberRef via `getContext`, integrates with
+ *      `Effect.scoped` finalizers, cancels via fiber interrupt)
+ *
+ * Effect-typed handlers are the **preferred** form once the body needs
+ * retry / timeout / structured-concurrency / finalizers. The Promise
+ * form remains supported indefinitely — `createTool` (when it lands)
+ * will accept both and dispatch picks the right invocation path.
+ *
+ * The first argument is the validated input (typed `unknown` at the
+ * harness boundary — the validator narrows). The second is the
+ * per-dispatch dependency bundle: `ctx` (harness-provided) and `use`
+ * (render-time `use:` deps captured by the reconciler).
  */
+export type ToolHandlerResult =
+  | readonly ContentBlock[]
+  | Promise<readonly ContentBlock[]>
+  | Effect.Effect<readonly ContentBlock[], unknown, never>;
+
 export type ToolHandler = (
   input: unknown,
   deps: {
     readonly ctx: ToolHandlerCtx;
     readonly use: Readonly<Record<string, unknown>>;
   },
-) => Promise<readonly ContentBlock[]> | readonly ContentBlock[];
+) => ToolHandlerResult;
 
 // ============================================================================
 // Validator

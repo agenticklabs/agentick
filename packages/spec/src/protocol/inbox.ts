@@ -12,11 +12,13 @@
  * @see docs/proposals/v2/blueprint/01-harness-principle.md §② Inbox
  */
 
+import type { Effect } from "effect";
 import type {
   MessageAck,
   MessageEnvelope,
   MessageHandler,
 } from "../data/inbox.js";
+import type { InboxError, MessageHandlerError } from "../data/errors.js";
 
 /**
  * Disposable subscription returned by `register()`.
@@ -29,8 +31,6 @@ export type Unsubscribe = () => void;
 export interface AskOptions {
   /** Timeout for the response. Default: 30_000ms. */
   readonly timeoutMs?: number;
-  /** Cancel the ask via signal. */
-  readonly signal?: AbortSignal;
 }
 
 /**
@@ -41,8 +41,9 @@ export interface AskOptions {
  *   `session:user-42`
  *   `supervisor:main`
  *
- * @throws {InboxError} routing-side failures
- * @throws {MessageHandlerError} handler-side failures (via ask())
+ * Errors flow through the Effect `E` channel as tagged-union values.
+ * Routing-side failures use `InboxError`; handler-side failures use
+ * `MessageHandlerError` (surfaced via `ask`).
  */
 export interface MessageInbox {
   /**
@@ -50,18 +51,18 @@ export interface MessageInbox {
    *
    * Returns an `Unsubscribe` function that, when invoked, removes
    * the registration. Multiple registrations at the same address
-   * MUST be rejected with `InboxError { _tag: "RoutingFailed" }`;
+   * MUST fail with `InboxError { _tag: "RoutingFailed" }`;
    * each address has exactly one owner.
    */
   register<T = unknown, R = unknown>(
     address: string,
     handler: MessageHandler<T, R>,
-  ): Promise<Unsubscribe>;
+  ): Effect.Effect<Unsubscribe, InboxError, never>;
 
   /**
    * Tell: send a message to an address, fire-and-forget with ack.
    *
-   * Resolves with `MessageAck` when the recipient has accepted the
+   * Succeeds with `MessageAck` when the recipient has accepted the
    * message (it has been queued or dispatched). Does NOT wait for
    * handler completion — use `ask()` for that.
    *
@@ -71,7 +72,7 @@ export interface MessageInbox {
   send<T = unknown>(
     address: string,
     message: MessageEnvelope<T>,
-  ): Promise<MessageAck>;
+  ): Effect.Effect<MessageAck, InboxError, never>;
 
   /**
    * Ask: send a message and await the typed response.
@@ -86,5 +87,5 @@ export interface MessageInbox {
     address: string,
     message: MessageEnvelope<T>,
     options?: AskOptions,
-  ): Promise<R>;
+  ): Effect.Effect<R, InboxError | MessageHandlerError, never>;
 }

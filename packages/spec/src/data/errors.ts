@@ -42,3 +42,35 @@ export type InboxError =
 export type MessageHandlerError =
   | { readonly _tag: "HandlerError"; readonly cause: unknown }
   | { readonly _tag: "InvalidPayload"; readonly reason: string };
+
+/**
+ * Lifecycle-handler failure raised by `BaseHarness.runOperation` when a
+ * `before`-phase handler's Effect fails. Distinct from `MessageHandlerError`
+ * (inbox) and from the body's own typed error channel. Carried in the
+ * substrate error channel so callers can pattern-match by `_tag`.
+ */
+export type LifecycleHandlerError = {
+  readonly _tag: "LifecycleHandlerError";
+  readonly phase: "before" | "after" | (string & {});
+  readonly cause: unknown;
+};
+
+/**
+ * Tagged-union envelope for every failure mode the substrate itself can
+ * surface from `BaseHarness.runOperation`. Concrete harnesses union this
+ * with their own body's `E` channel — i.e., `runOperation` returns
+ * `Effect<R, E | SubstrateError, never>`.
+ *
+ * Members:
+ *   - `OperationOutcomeError`  — non-success terminals (canceled, vetoed,
+ *                                 deferred, replayed `failed`)
+ *   - `JournalError`           — write/read failures bubbled from the journal
+ *   - `LifecycleHandlerError`  — a before-handler's Effect failed
+ *
+ * `OperationOutcomeError` is exposed as a class (instanceof-friendly) but
+ * also carries `_tag` so it pattern-matches identically.
+ */
+export type SubstrateError =
+  | { readonly _tag: "OperationOutcomeError"; readonly outcome: import("./outcomes.js").CommandOutcome; readonly terminal: import("./outcomes.js").TerminalEvent }
+  | JournalError
+  | LifecycleHandlerError;

@@ -20,7 +20,8 @@
  * @see docs/proposals/v2/blueprint/07-tool-executor.md
  */
 
-import { ulid } from "@agentick/runtime";
+import { Cause, Effect, Exit, Fiber, Option } from "effect";
+import { runHarnessProtocol, ulid } from "@agentick/runtime";
 import { BaseHarness } from "@agentick/runtime";
 import type {
   AbortInput,
@@ -29,6 +30,7 @@ import type {
   DispatchResult,
   EventBus,
   MessageEnvelope,
+  MessageHandlerError,
   MessageInbox,
   Operation,
   OperationJournal,
@@ -85,7 +87,7 @@ export class ToolExecutorHarness
 
   // ──────────────────────── ToolExecutorProtocol ────────────────────────
 
-  async register(input: RegisterToolInput): Promise<void> {
+  register(input: RegisterToolInput): Promise<void> {
     const name = input.registration.declaration.name;
     const op: Operation<RegisterToolInput, void> = {
       opId: input.opId ?? `tool:register:${name}:${ulid()}`,
@@ -94,12 +96,16 @@ export class ToolExecutorHarness
       scope: {},
       input,
     };
-    return this.runOperation(op, async (i) => {
-      this.registry.add(i.registration);
-    });
+    return runHarnessProtocol(
+      this.runOperation(op, (i) =>
+        Effect.sync(() => {
+          this.registry.add(i.registration);
+        }),
+      ),
+    );
   }
 
-  async unregister(input: UnregisterToolInput): Promise<void> {
+  unregister(input: UnregisterToolInput): Promise<void> {
     const op: Operation<UnregisterToolInput, void> = {
       opId: input.opId ?? `tool:unregister:${input.name}:${ulid()}`,
       surface: "tool",
@@ -107,9 +113,13 @@ export class ToolExecutorHarness
       scope: {},
       input,
     };
-    return this.runOperation(op, async (i) => {
-      this.registry.remove(i.name);
-    });
+    return runHarnessProtocol(
+      this.runOperation(op, (i) =>
+        Effect.sync(() => {
+          this.registry.remove(i.name);
+        }),
+      ),
+    );
   }
 
   async list(filter?: ToolListFilter): Promise<readonly ToolDeclaration[]> {
@@ -119,7 +129,7 @@ export class ToolExecutorHarness
     return this.registry.list(filter);
   }
 
-  async dispatch(input: DispatchInput): Promise<DispatchResult> {
+  dispatch(input: DispatchInput): Promise<DispatchResult> {
     const op: Operation<DispatchInput, DispatchResult> = {
       opId: input.opId ?? `tool:dispatch:${input.toolCallId}`,
       surface: "tool",
@@ -131,7 +141,9 @@ export class ToolExecutorHarness
       },
       input,
     };
-    return this.runOperation(op, async (i) => this.dispatchBody(i));
+    return runHarnessProtocol(
+      this.runOperation(op, (i) => this.dispatchBody(i)),
+    );
   }
 
   async abort(input: AbortInput): Promise<void> {
@@ -170,158 +182,227 @@ export class ToolExecutorHarness
    * response) lands in Phase 4a.7. For now we reject unknown messages
    * via the BaseHarness default `HandlerError` envelope.
    */
-  protected async handleMessage(_msg: MessageEnvelope): Promise<unknown> {
-    throw new Error("tool executor inbox dispatch not yet wired (Phase 4a.7)");
+  protected handleMessage(
+    _msg: MessageEnvelope,
+  ): Effect.Effect<unknown, MessageHandlerError, never> {
+    return Effect.fail({
+      _tag: "HandlerError",
+      cause: new Error("tool executor inbox dispatch not yet wired (Phase 4a.7)"),
+    });
   }
 
   // ──────────────────────── internals ────────────────────────
 
-  private async dispatchBody(input: DispatchInput): Promise<DispatchResult> {
-    const reg = this.registry.get(input.name);
-    if (!reg) {
-      throw {
-        _tag: "ToolNotFoundError",
-        name: input.name,
-        registered: this.registry.names(),
-      } as const;
-    }
-
-    // Exposure check — the via field decides which door the tool is
-    // allowed on.
-    if (!reg.declaration.exposure.includes(input.context.via)) {
-      throw {
-        _tag: "ToolPermissionError",
-        toolName: input.name,
-        via: input.context.via,
-        reason: `tool "${input.name}" is not exposed via "${input.context.via}"`,
-      } as const;
-    }
-
-    // Resolve handler + validator.
-    const entry = this.handlerResolver.resolve(reg.handlerRef);
-    if (!entry) {
-      throw {
-        _tag: "ToolHandlerMissing",
-        toolName: input.name,
-        handlerRef: reg.handlerRef,
-      } as const;
-    }
-
-    // Validate input.
-    const result = await entry.validator.validate(input.input);
-    if (isValidationFailure(result)) {
-      throw {
-        _tag: "ToolValidationError",
-        toolName: input.name,
-        issues: result.issues,
-      } as const;
-    }
-    const validated = result.value;
-
-    // Set up the per-dispatch abort plumbing. Composes:
-    //   - harness-internal controller (signalled by `abort()` inbox / API)
-    //   - caller-supplied `input.signal`
-    //   - timeout (per-call → tool annotation → default)
-    const controller = new AbortController();
-    this.inFlight.set(input.toolCallId, { controller, toolName: input.name });
-
-    const callerSignal = input.signal;
-    const onCallerAbort = () => controller.abort(callerSignal?.reason);
-    callerSignal?.addEventListener("abort", onCallerAbort, { once: true });
-
-    const timeoutMs =
-      input.timeoutMs ?? reg.declaration.annotations?.timeout ?? this.defaultTimeoutMs;
-    let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
-    if (timeoutMs !== undefined && timeoutMs > 0) {
-      timeoutHandle = setTimeout(() => {
-        controller.abort({
-          _tag: "ToolTimeoutError",
+  /**
+   * Effect-shaped body. Runs inside `runOperation`'s FiberRef scope so
+   * Effect-typed handlers see the active `RuntimeContext` via
+   * `getContext`. Promise / sync handlers bridge out via `Effect.tryPromise`
+   * / `Effect.sync` and receive scope through the explicit `ctx` arg
+   * the harness builds from the operation input.
+   */
+  private dispatchBody(
+    input: DispatchInput,
+  ): Effect.Effect<DispatchResult, unknown, never> {
+    return Effect.gen(this, function* () {
+      const reg = this.registry.get(input.name);
+      if (!reg) {
+        return yield* Effect.fail({
+          _tag: "ToolNotFoundError",
+          name: input.name,
+          registered: this.registry.names(),
+        } as const);
+      }
+      if (!reg.declaration.exposure.includes(input.context.via)) {
+        return yield* Effect.fail({
+          _tag: "ToolPermissionError",
           toolName: input.name,
-          ms: timeoutMs,
-        });
-      }, timeoutMs);
-    }
-
-    // Build the handler context.
-    const channelEmits: HandlerChannelSeed[] = [];
-    const ctx: ToolHandlerCtx = {
-      toolCallId: input.toolCallId,
-      ...(input.context.sessionId !== undefined ? { sessionId: input.context.sessionId } : {}),
-      ...(input.context.executionId !== undefined ? { executionId: input.context.executionId } : {}),
-      ...(input.context.tickId !== undefined ? { tickId: input.context.tickId } : {}),
-      signal: controller.signal,
-      setState: (key: string, value: unknown): void => {
-        this.stateStore.set(key, value);
-      },
-      emit: (seed: HandlerChannelSeed): void => {
-        channelEmits.push(seed);
-      },
-    };
-
-    const useDeps: Readonly<Record<string, unknown>> = {
-      ...(reg.useDeps ?? {}),
-      ...(input.context.use ?? {}),
-    };
-
-    const started = Date.now();
-    try {
-      // Fast-fail if already aborted (caller signal arrived before we
-      // wired up our listener, or harness internal abort raced ahead).
-      if (controller.signal.aborted) {
-        throw controller.signal.reason ?? {
-          _tag: "ToolAbortedError",
-          toolCallId: input.toolCallId,
-        };
+          via: input.context.via,
+          reason: `tool "${input.name}" is not exposed via "${input.context.via}"`,
+        } as const);
       }
 
-      const handlerResult = entry.handler(validated, { ctx, use: useDeps });
-      const content = await Promise.race([handlerResult, abortPromise(controller.signal)]);
-      const durationMs = Date.now() - started;
+      const entry = this.handlerResolver.resolve(reg.handlerRef);
+      if (!entry) {
+        return yield* Effect.fail({
+          _tag: "ToolHandlerMissing",
+          toolName: input.name,
+          handlerRef: reg.handlerRef,
+        } as const);
+      }
 
-      const dispatchResult: DispatchResult = {
+      // Validate input. Validator may be sync or async — both shapes
+      // sit inside Effect.tryPromise (sync resolves immediately).
+      const result = yield* Effect.tryPromise({
+        try: async () => entry.validator.validate(input.input),
+        catch: (cause): { readonly _tag: "ToolValidationError"; readonly cause: unknown } => ({
+          _tag: "ToolValidationError",
+          cause,
+        }),
+      });
+      if (isValidationFailure(result)) {
+        return yield* Effect.fail({
+          _tag: "ToolValidationError",
+          toolName: input.name,
+          issues: result.issues,
+        } as const);
+      }
+      const validated = result.value;
+
+      // Per-dispatch abort plumbing. Effect-typed handlers also see
+      // fiber interrupts; Promise/sync handlers see the AbortSignal.
+      const controller = new AbortController();
+      this.inFlight.set(input.toolCallId, { controller, toolName: input.name });
+
+      const callerSignal = input.signal;
+      const onCallerAbort = () => controller.abort(callerSignal?.reason);
+      callerSignal?.addEventListener("abort", onCallerAbort, { once: true });
+
+      const timeoutMs =
+        input.timeoutMs ?? reg.declaration.annotations?.timeout ?? this.defaultTimeoutMs;
+      let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+      if (timeoutMs !== undefined && timeoutMs > 0) {
+        timeoutHandle = setTimeout(() => {
+          controller.abort({
+            _tag: "ToolTimeoutError",
+            toolName: input.name,
+            ms: timeoutMs,
+          });
+        }, timeoutMs);
+      }
+
+      const channelEmits: HandlerChannelSeed[] = [];
+      const ctx: ToolHandlerCtx = {
         toolCallId: input.toolCallId,
-        name: input.name,
-        succeeded: true,
-        content: content as readonly ContentBlock[],
-        executedBy: "agentick",
-        durationMs,
+        ...(input.context.sessionId !== undefined ? { sessionId: input.context.sessionId } : {}),
+        ...(input.context.executionId !== undefined
+          ? { executionId: input.context.executionId }
+          : {}),
+        ...(input.context.tickId !== undefined ? { tickId: input.context.tickId } : {}),
+        signal: controller.signal,
+        setState: (key: string, value: unknown): void => {
+          this.stateStore.set(key, value);
+        },
+        emit: (seed: HandlerChannelSeed): void => {
+          channelEmits.push(seed);
+        },
       };
-      return dispatchResult;
-    } catch (err) {
-      // Distinguish abort-typed errors from handler errors. Abort
-      // signals arrive via either:
-      //   - controller.signal.reason (an aborted-tagged value), OR
-      //   - the thrown `err` from abortPromise.
-      const abortReason = controller.signal.aborted
-        ? controller.signal.reason ?? err
-        : undefined;
-      if (abortReason !== undefined) {
-        // Either a ToolAbortedError or a ToolTimeoutError, both tagged.
-        throw isTaggedAbort(abortReason)
-          ? abortReason
-          : ({
+
+      const useDeps: Readonly<Record<string, unknown>> = {
+        ...(reg.useDeps ?? {}),
+        ...(input.context.use ?? {}),
+      };
+
+      const started = Date.now();
+
+      // Compose body that branches on handler shape.
+      const invokeHandler = Effect.suspend((): Effect.Effect<readonly ContentBlock[], unknown, never> => {
+        if (controller.signal.aborted) {
+          return Effect.fail(
+            controller.signal.reason ?? {
               _tag: "ToolAbortedError",
               toolCallId: input.toolCallId,
-              reason: typeof abortReason === "string" ? abortReason : undefined,
-            } as const);
-      }
-      // Real handler error.
-      throw {
-        _tag: "ToolHandlerError",
-        toolName: input.name,
-        cause: err,
-      } as const;
-    } finally {
+            },
+          );
+        }
+        const handlerResult = entry.handler(validated, { ctx, use: useDeps });
+
+        if (isEffect(handlerResult)) {
+          // Effect-typed handler — yields IN the parent fiber so it
+          // inherits the `RuntimeContextRef` FiberRef set by
+          // `runOperation`. Abort signals translate to fiber interrupts
+          // via `Effect.race` with an AbortSignal-driven failure.
+          const abortEff: Effect.Effect<never, unknown, never> = Effect.async<never, unknown, never>(
+            (resume) => {
+              if (controller.signal.aborted) {
+                resume(
+                  Effect.fail(
+                    controller.signal.reason ?? {
+                      _tag: "ToolAbortedError",
+                      toolCallId: input.toolCallId,
+                    },
+                  ),
+                );
+                return;
+              }
+              const onAbort = () => {
+                resume(
+                  Effect.fail(
+                    controller.signal.reason ?? {
+                      _tag: "ToolAbortedError",
+                      toolCallId: input.toolCallId,
+                    },
+                  ),
+                );
+              };
+              controller.signal.addEventListener("abort", onAbort, { once: true });
+              return Effect.sync(() =>
+                controller.signal.removeEventListener("abort", onAbort),
+              );
+            },
+          );
+          return Effect.race(handlerResult, abortEff);
+        }
+
+        if (isPromiseLike(handlerResult)) {
+          return Effect.tryPromise({
+            try: () =>
+              Promise.race([
+                handlerResult as PromiseLike<readonly ContentBlock[]>,
+                abortPromise(controller.signal),
+              ]) as Promise<readonly ContentBlock[]>,
+            catch: (cause: unknown) => cause,
+          });
+        }
+
+        return Effect.succeed(handlerResult);
+      });
+
+      const exit = yield* Effect.exit(invokeHandler);
+
+      // Cleanup runs unconditionally.
       if (timeoutHandle !== undefined) clearTimeout(timeoutHandle);
       callerSignal?.removeEventListener("abort", onCallerAbort);
       this.inFlight.delete(input.toolCallId);
-      // Channel seeds emitted by the handler are dropped here in
-      // Phase 4a.4 — the session harness consumes them in 4a.6+
-      // when wired through. Holding them in `channelEmits` for the
-      // duration of the call gives observability harnesses a place to
-      // hook in via subclassing.
       void channelEmits;
-    }
+
+      if (Exit.isSuccess(exit)) {
+        const dispatchResult: DispatchResult = {
+          toolCallId: input.toolCallId,
+          name: input.name,
+          succeeded: true,
+          content: exit.value,
+          executedBy: "agentick",
+          durationMs: Date.now() - started,
+        };
+        return dispatchResult;
+      }
+
+      // Failure: distinguish abort vs handler error.
+      const failure = Cause.failureOption(exit.cause);
+      const rawErr = Option.isSome(failure) ? failure.value : undefined;
+      const abortReason = controller.signal.aborted
+        ? controller.signal.reason ?? rawErr
+        : undefined;
+      if (abortReason !== undefined) {
+        return yield* Effect.fail(
+          isTaggedAbort(abortReason)
+            ? abortReason
+            : ({
+                _tag: "ToolAbortedError",
+                toolCallId: input.toolCallId,
+                reason: typeof abortReason === "string" ? abortReason : undefined,
+              } as const),
+        );
+      }
+      if (rawErr !== undefined && isTaggedToolError(rawErr)) {
+        return yield* Effect.fail(rawErr);
+      }
+      return yield* Effect.fail({
+        _tag: "ToolHandlerError",
+        toolName: input.name,
+        cause: rawErr ?? exit.cause,
+      } as const);
+    });
   }
 }
 
@@ -357,6 +438,36 @@ function isTaggedAbort(value: unknown): value is { readonly _tag: string } {
   if (value === null || typeof value !== "object") return false;
   const tag = (value as { _tag?: unknown })._tag;
   return tag === "ToolAbortedError" || tag === "ToolTimeoutError";
+}
+
+function isEffect(
+  value: unknown,
+): value is Effect.Effect<readonly ContentBlock[], unknown, never> {
+  return typeof value === "object" && value !== null && Effect.EffectTypeId in value;
+}
+
+function isPromiseLike(value: unknown): value is PromiseLike<unknown> {
+  return (
+    value !== null &&
+    (typeof value === "object" || typeof value === "function") &&
+    typeof (value as { then?: unknown }).then === "function"
+  );
+}
+
+function isTaggedToolError(
+  value: unknown,
+): value is { readonly _tag: string } {
+  if (value === null || typeof value !== "object") return false;
+  const tag = (value as { _tag?: unknown })._tag;
+  return (
+    tag === "ToolNotFoundError" ||
+    tag === "ToolPermissionError" ||
+    tag === "ToolHandlerMissing" ||
+    tag === "ToolValidationError" ||
+    tag === "ToolAbortedError" ||
+    tag === "ToolTimeoutError" ||
+    tag === "ToolHandlerError"
+  );
 }
 
 // Silence unused-import linting until 4a.6+ uses ToolRegistration alias.

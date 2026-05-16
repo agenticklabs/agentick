@@ -14,30 +14,22 @@
  *
  * ## Async return discipline
  *
- * Spec uses `Promise` and `AsyncIterable` as canonical async return
- * types. This preserves `@agentick/spec`'s zero-dependency claim and
- * matches the blueprint's pattern (reconciler-react is Effect-free; the
- * runtime bridges to Effect at its boundary).
+ * Spec uses `Effect<R, E, never>` for one-shot async operations and
+ * `Stream<E, F, never>` for streaming reads. This is the substrate that
+ * 19-foundation specifies. Errors are typed in the `E` channel as
+ * tagged-union values matching `JournalError`.
  *
- * Implementations using Effect convert at the protocol boundary:
- *
- *   class MemoryJournal implements OperationJournal {
- *     append(event: ProtocolEvent): Promise<void> {
- *       return Effect.runPromise(this.appendEffect(event));
- *     }
- *     private appendEffect(event: ProtocolEvent):
- *       Effect.Effect<void, JournalError, never> { ... }
- *   }
- *
- * Errors are thrown (rejected); typed via JSDoc `@throws` annotations
- * and runtime tag checks. Implementations should reject with values
- * matching the corresponding error type (e.g., `JournalError`).
+ * Promise-shaped consumers cross at the runtime edge via
+ * `Effect.runPromise`. Inside the substrate, FiberRef scope, structured
+ * concurrency, and `Effect.withSpan` propagate automatically.
  *
  * @see docs/proposals/v2/blueprint/19-foundation.md §The OperationJournal contract
  */
 
+import type { Effect, Stream } from "effect";
 import type { ProtocolEvent, EventQuery, EventSurface } from "../data/events.js";
 import type { TerminalEvent } from "../data/outcomes.js";
+import type { JournalError } from "../data/errors.js";
 
 /**
  * Read-cursor position for `read()`.
@@ -78,7 +70,8 @@ export type Maybe<T> = { readonly some: true; readonly value: T } | { readonly s
 /**
  * The journal protocol.
  *
- * @throws {JournalError} on write/read failures (as rejection value).
+ * Errors flow through the Effect `E` channel as tagged-union
+ * `JournalError` values.
  */
 export interface OperationJournal {
   /**
@@ -86,31 +79,32 @@ export interface OperationJournal {
    * `(opId, phase)` pairs for operation envelopes — appending the same
    * envelope twice is a no-op.
    */
-  append(event: ProtocolEvent): Promise<void>;
+  append(event: ProtocolEvent): Effect.Effect<void, JournalError, never>;
 
   /**
    * Append a batch atomically. Implementations that support transactional
    * append SHOULD use a single transaction. Implementations that don't
    * MAY fall back to sequential append.
    */
-  appendBatch(events: readonly ProtocolEvent[]): Promise<void>;
+  appendBatch(events: readonly ProtocolEvent[]): Effect.Effect<void, JournalError, never>;
 
   /**
    * Read events matching a query starting from a given offset.
-   * Returns an AsyncIterable for streaming. The iterable terminates
-   * when the journal has no more matching events at read time.
+   *
+   * Returns a `Stream` of envelopes terminating when the journal has no
+   * more matching events at read time.
    */
-  read(query: EventQuery, from: JournalReadFrom): AsyncIterable<ProtocolEvent>;
+  read(query: EventQuery, from: JournalReadFrom): Stream.Stream<ProtocolEvent, JournalError, never>;
 
   /**
-   * Subscribe to ongoing events matching a query. Returns an
-   * AsyncIterable that yields new events as they are appended.
+   * Subscribe to ongoing events matching a query.
    *
-   * Implementations MUST clean up the subscription when the consumer
-   * stops iterating (e.g., via for-await early return). Use
-   * `AbortSignal` for explicit cancellation.
+   * Returns a `Stream` that yields new events as they are appended.
+   * Implementations MUST clean up the subscription when the stream is
+   * interrupted (Effect's structured concurrency handles this via
+   * scoped finalizers).
    */
-  tail(query: EventQuery, signal?: AbortSignal): AsyncIterable<ProtocolEvent>;
+  tail(query: EventQuery): Stream.Stream<ProtocolEvent, JournalError, never>;
 
   /**
    * Idempotency lookup. Returns the cached terminal envelope's payload
@@ -118,11 +112,13 @@ export interface OperationJournal {
    *
    * Used at command entry to short-circuit replays.
    */
-  lookupTerminal(opId: string): Promise<Maybe<TerminalEvent>>;
+  lookupTerminal(opId: string): Effect.Effect<Maybe<TerminalEvent>, JournalError, never>;
 
   /**
    * Find operations stuck in `requested` (or `before`) without a
    * `terminal`. Used at boot for crash recovery.
    */
-  findOrphaned(query?: OrphanQuery): Promise<readonly OrphanedOperation[]>;
+  findOrphaned(
+    query?: OrphanQuery,
+  ): Effect.Effect<readonly OrphanedOperation[], JournalError, never>;
 }

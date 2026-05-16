@@ -1,8 +1,15 @@
 import { describe, expect, it } from "vitest";
 import React from "react";
+import { Chunk, Effect, Stream } from "effect";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
+import type { ProtocolEvent } from "@agentick/spec";
 import { ReconcilerHarness } from "../harness/reconciler-harness.js";
 import { stubBridges } from "../bridges/stub-bridges.js";
+
+async function collectJournal(journal: MemoryJournal): Promise<ProtocolEvent[]> {
+  const chunk = await Effect.runPromise(Stream.runCollect(journal.read({}, "beginning")));
+  return Array.from(Chunk.toReadonlyArray(chunk));
+}
 
 async function makeHarness() {
   const journal = new MemoryJournal();
@@ -81,10 +88,12 @@ describe("ReconcilerHarness — end-to-end", () => {
     });
     await harness.renderTree({ mountId: "m_2", sessionId: "s_2" });
 
-    const journaled: Array<{ name: string; phase: string; outcome?: string }> = [];
-    for await (const ev of journal.read({}, "beginning")) {
-      journaled.push({ name: ev.name, phase: ev.phase, outcome: ev.outcome });
-    }
+    const events = await collectJournal(journal);
+    const journaled = events.map((ev) => ({
+      name: ev.name,
+      phase: ev.phase,
+      outcome: ev.outcome,
+    }));
     expect(journaled.some((e) => e.name === "reconciler:command:mount" && e.phase === "requested")).toBe(true);
     expect(
       journaled.some(
@@ -141,13 +150,15 @@ describe("ReconcilerHarness — end-to-end", () => {
     });
 
     // Send a recompile via inbox.
-    const ack = await inbox.send("reconciler:h_1", {
-      addressedTo: "reconciler:h_1",
-      type: "recompile",
-      messageId: "msg_recompile_1",
-      timestamp: Date.now(),
-      payload: { type: "recompile", mountId: "m_4" },
-    });
+    const ack = await Effect.runPromise(
+      inbox.send("reconciler:h_1", {
+        addressedTo: "reconciler:h_1",
+        type: "recompile",
+        messageId: "msg_recompile_1",
+        timestamp: Date.now(),
+        payload: { type: "recompile", mountId: "m_4" },
+      }),
+    );
     expect(ack.messageId).toBe("msg_recompile_1");
   });
 

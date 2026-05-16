@@ -43,7 +43,8 @@
     "typecheck": "tsc -p tsconfig.build.json --noEmit"
   },
   "dependencies": {
-    "@agentick/spec": "workspace:*"
+    "@agentick/spec": "workspace:*",
+    "effect": "^3.21.2"
   },
   "devDependencies": {
     "@agentick/spec-conformance": "workspace:*"

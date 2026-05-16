@@ -202,6 +202,40 @@ importers:
         specifier: ^5.4.11
         version: 5.4.21(@types/node@25.0.9)
 
+  example/v2:
+    dependencies:
+      '@agentick/reconciler-react':
+        specifier: workspace:*
+        version: link:../../packages/reconciler-react
+      '@agentick/runtime':
+        specifier: workspace:*
+        version: link:../../packages/runtime
+      '@agentick/spec':
+        specifier: workspace:*
+        version: link:../../packages/spec
+      '@agentick/tool-executor':
+        specifier: workspace:*
+        version: link:../../packages/tool-executor
+      effect:
+        specifier: ^3.21.2
+        version: 3.21.2
+      react:
+        specifier: ^19.2.4
+        version: 19.2.4
+      zod:
+        specifier: ^4.3.6
+        version: 4.3.6
+    devDependencies:
+      '@types/react':
+        specifier: ^19.2.13
+        version: 19.2.13
+      tsx:
+        specifier: ^4.19.2
+        version: 4.21.0
+      typescript:
+        specifier: ^5.7.3
+        version: 5.9.3
+
   packages/adapters/ai-sdk:
     dependencies:
       '@agentick/core':
@@ -721,6 +755,9 @@ importers:
       '@agentick/spec':
         specifier: workspace:*
         version: link:../spec
+      effect:
+        specifier: ^3.21.2
+        version: 3.21.2
       react:
         specifier: ^19.2.4
         version: 19.2.4
@@ -743,6 +780,9 @@ importers:
       '@agentick/spec':
         specifier: workspace:*
         version: link:../spec
+      effect:
+        specifier: ^3.21.2
+        version: 3.21.2
     devDependencies:
       '@agentick/spec-conformance':
         specifier: workspace:*
@@ -890,13 +930,20 @@ importers:
         specifier: ^14.0.0
         version: 14.0.0
 
-  packages/spec: {}
+  packages/spec:
+    dependencies:
+      effect:
+        specifier: ^3.21.2
+        version: 3.21.2
 
   packages/spec-conformance:
     dependencies:
       '@agentick/spec':
         specifier: workspace:*
         version: link:../spec
+      effect:
+        specifier: ^3.21.2
+        version: 3.21.2
       vitest:
         specifier: ^4.0.0
         version: 4.0.18(@opentelemetry/api@1.9.0)(@types/node@25.0.9)(happy-dom@17.6.3)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.4)
@@ -909,6 +956,9 @@ importers:
       '@agentick/spec':
         specifier: workspace:*
         version: link:../spec
+      effect:
+        specifier: ^3.21.2
+        version: 3.21.2
     devDependencies:
       '@agentick/spec-conformance':
         specifier: workspace:*
@@ -3957,6 +4007,9 @@ packages:
   ee-first@1.1.1:
     resolution: {integrity: sha512-WMwm9LhRUo+WUaRN+vRuETqG89IgZphVSNkdFgeb6sS/E4OrDIN7t48CAewSHXc6C8lefD8KKfr5vY61brQlow==}
 
+  effect@3.21.2:
+    resolution: {integrity: sha512-rXd2FGDM8KdjSIrc+mqEELo7ScW7xTVxEf1iInmPSpIde9/nyGuFM710cjTo7/EreGXiUX2MOonPpprbz2XHCg==}
+
   electron-to-chromium@1.5.278:
     resolution: {integrity: sha512-dQ0tM1svDRQOwxnXxm+twlGTjr9Upvt8UFWAgmLsxEzFQxhbti4VwxmMjsDxVC51Zo84swW7FVCXEV+VAkhuPw==}
 
@@ -4169,6 +4222,10 @@ packages:
 
   extendable-error@0.1.7:
     resolution: {integrity: sha512-UOiS2in6/Q0FK0R0q6UY9vYpQ21mr/Qn1KOnte7vsACuNJf514WvCCUHSRCPcgjPT2bAhNIJdlE6bVap1GKmeg==}
+
+  fast-check@3.23.2:
+    resolution: {integrity: sha512-h5+1OzzfCC3Ef7VbtKdcv7zsstUQwUDlYpUTvjeUsJAssPgLn7QzbboPtL5ro04Mq0rPOsMzl7q5hIbRs2wD1A==}
+    engines: {node: '>=8.0.0'}
 
   fast-copy@4.0.2:
     resolution: {integrity: sha512-ybA6PDXIXOXivLJK/z9e+Otk7ve13I4ckBvGO5I2RRmBU1gMHLVDJYEuJYhGwez7YNlYji2M2DvVU+a9mSFDlw==}
@@ -5403,6 +5460,9 @@ packages:
   punycode@2.3.1:
     resolution: {integrity: sha512-vYt7UD1U9Wg6138shLtLOvdAu+8DsC/ilFtEVHcH+wydcSpNE20AfSOduf6MkRFahL5FY7X1oU7nKVZFtfq8Fg==}
     engines: {node: '>=6'}
+
+  pure-rand@6.1.0:
+    resolution: {integrity: sha512-bVWawvoZoBYpp6yIoQtQXHZjmz35RSVHnUOTefl8Vcjr8snTPY1wnpSPMWekcFwbxI6gtmT7rSYPFvz71ldiOA==}
 
   pyodide@0.28.3:
     resolution: {integrity: sha512-rtCsyTU55oNGpLzSVuAd55ZvruJDEX8o6keSdWKN9jPeBVSNlynaKFG7eRqkiIgU7i2M6HEgYtm0atCEQX3u4A==}
@@ -9855,6 +9915,11 @@ snapshots:
 
   ee-first@1.1.1: {}
 
+  effect@3.21.2:
+    dependencies:
+      '@standard-schema/spec': 1.1.0
+      fast-check: 3.23.2
+
   electron-to-chromium@1.5.278: {}
 
   elliptic@6.6.1:
@@ -10191,6 +10256,10 @@ snapshots:
   extend@3.0.2: {}
 
   extendable-error@0.1.7: {}
+
+  fast-check@3.23.2:
+    dependencies:
+      pure-rand: 6.1.0
 
   fast-copy@4.0.2: {}
 
@@ -11484,6 +11553,8 @@ snapshots:
   punycode@1.4.1: {}
 
   punycode@2.3.1: {}
+
+  pure-rand@6.1.0: {}
 
   pyodide@0.28.3:
     dependencies:

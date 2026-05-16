@@ -10,10 +10,19 @@
  *   ④ Middleware   — `.use(mw)` via MiddlewareChain
  *   ⑤ Events       — `emit` (light path) + `emitDelta` (in-flight)
  *
+ * Substrate-internal API is Effect-typed end-to-end. Concrete harnesses
+ * MAY expose Promise-typed protocol surfaces (e.g., ReconcilerProtocol)
+ * by wrapping their command bodies with `Effect.runPromise` at the
+ * public method boundary. The FiberRef scope (`RuntimeContextRef`) is
+ * established by `runOperation` for the lifetime of the command — any
+ * Effect launched within the body sees the active sessionId,
+ * executionId, tickId, opId, parentOpId, correlationId via `getContext`.
+ *
  * @see docs/proposals/v2/blueprint/19-foundation.md §`BaseHarness` — the inheritance point
  * @see docs/proposals/v2/blueprint/01-harness-principle.md
  */
 
+import { Cause, Effect, Exit, Option } from "effect";
 import type {
   CommandOutcome,
   EventBus,
@@ -21,19 +30,25 @@ import type {
   EventScope,
   EventSurface,
   HandlerVerdict,
+  InboxError,
+  JournalError,
   JournalingPolicy,
+  LifecycleHandlerError,
   MessageEnvelope,
   MessageHandlerError,
   MessageInbox,
   Operation,
   OperationJournal,
   ProtocolEvent,
+  SubstrateError,
   TerminalEvent,
+  Unsubscribe,
 } from "@agentick/spec";
 import { DEFAULT_JOURNALING_POLICY } from "@agentick/spec";
 import { ulid } from "./ulid.js";
+import { getContext, type RuntimeContext, withContext } from "./runtime-context.js";
 
-export type Unsubscribe = () => void;
+export type { Unsubscribe } from "@agentick/spec";
 
 /**
  * Lifecycle handler. Runs at a phase boundary (typically `before`); may
@@ -41,38 +56,35 @@ export type Unsubscribe = () => void;
  *
  * Returning `void` is equivalent to `{ kind: "proceed" }`.
  */
-export type LifecycleHandler<I = unknown, R = unknown> = (
+export type LifecycleHandler<I = unknown, R = unknown, E = never> = (
   input: I,
-) =>
-  | HandlerVerdict<R>
-  | void
-  | Promise<HandlerVerdict<R> | void>;
+) => Effect.Effect<HandlerVerdict<R> | void, E, never>;
 
 /**
- * Middleware. Wraps the command body — invoke `next()` to proceed or
- * return a value to short-circuit. Composes outer→inner: the first
+ * Middleware. Wraps the command body — invoke `next(input)` to proceed
+ * or return a value to short-circuit. Composes outer→inner: the first
  * middleware registered is the outermost.
  */
-export type Middleware<I = unknown, R = unknown> = (
+export type Middleware<I = unknown, R = unknown, E = unknown> = (
   input: I,
-  next: (input: I) => Promise<R>,
-) => Promise<R>;
+  next: (input: I) => Effect.Effect<R, E, never>,
+) => Effect.Effect<R, E, never>;
 
 // ============================================================================
 // HandlerRegistry — keyed handler lists
 // ============================================================================
 
 export class HandlerRegistry {
-  private handlers = new Map<string, LifecycleHandler<unknown, unknown>[]>();
+  private handlers = new Map<string, LifecycleHandler<unknown, unknown, unknown>[]>();
 
-  register<I, R>(key: string, handler: LifecycleHandler<I, R>): Unsubscribe {
+  register<I, R, E = never>(key: string, handler: LifecycleHandler<I, R, E>): Unsubscribe {
     const list = this.handlers.get(key) ?? [];
-    list.push(handler as LifecycleHandler<unknown, unknown>);
+    list.push(handler as LifecycleHandler<unknown, unknown, unknown>);
     this.handlers.set(key, list);
     return () => {
       const current = this.handlers.get(key);
       if (!current) return;
-      const idx = current.indexOf(handler as LifecycleHandler<unknown, unknown>);
+      const idx = current.indexOf(handler as LifecycleHandler<unknown, unknown, unknown>);
       if (idx >= 0) current.splice(idx, 1);
     };
   }
@@ -80,18 +92,21 @@ export class HandlerRegistry {
   /**
    * Run all handlers for `key` in registration order. Returns the merged
    * verdict per: veto > replace > defer > proceed.
+   *
+   * Handler failures propagate through the `E` channel.
    */
-  async run<I, R>(key: string, input: I): Promise<HandlerVerdict<R>> {
+  run<I, R>(key: string, input: I): Effect.Effect<HandlerVerdict<R>, unknown, never> {
     const list = this.handlers.get(key) ?? [];
-    let merged: HandlerVerdict<R> = { kind: "proceed" };
-    for (const h of list) {
-      const raw = await h(input);
-      const v = (raw ?? { kind: "proceed" }) as HandlerVerdict<R>;
-      merged = mergeVerdict(merged, v);
-      // Veto short-circuits — additional handlers cannot un-veto.
-      if (merged.kind === "veto") return merged;
-    }
-    return merged;
+    return Effect.gen(function* () {
+      let merged: HandlerVerdict<R> = { kind: "proceed" };
+      for (const h of list) {
+        const raw = yield* h(input) as Effect.Effect<HandlerVerdict<R> | void, unknown, never>;
+        const v = (raw ?? { kind: "proceed" }) as HandlerVerdict<R>;
+        merged = mergeVerdict(merged, v);
+        if (merged.kind === "veto") return merged;
+      }
+      return merged;
+    });
   }
 }
 
@@ -121,12 +136,12 @@ export function mergeVerdict<R>(a: HandlerVerdict<R>, b: HandlerVerdict<R>): Han
 // ============================================================================
 
 export class MiddlewareChain {
-  private middlewares: Middleware<unknown, unknown>[] = [];
+  private middlewares: Middleware<unknown, unknown, unknown>[] = [];
 
-  use<I, R>(mw: Middleware<I, R>): Unsubscribe {
-    this.middlewares.push(mw as Middleware<unknown, unknown>);
+  use<I, R, E = unknown>(mw: Middleware<I, R, E>): Unsubscribe {
+    this.middlewares.push(mw as Middleware<unknown, unknown, unknown>);
     return () => {
-      const idx = this.middlewares.indexOf(mw as Middleware<unknown, unknown>);
+      const idx = this.middlewares.indexOf(mw as Middleware<unknown, unknown, unknown>);
       if (idx >= 0) this.middlewares.splice(idx, 1);
     };
   }
@@ -134,9 +149,11 @@ export class MiddlewareChain {
   /**
    * Compose middlewares around a body. The first registered is outermost.
    */
-  compose<I, R>(body: (input: I) => Promise<R>): (input: I) => Promise<R> {
-    const list = this.middlewares.slice() as Middleware<I, R>[];
-    return list.reduceRight<(input: I) => Promise<R>>(
+  compose<I, R, E>(
+    body: (input: I) => Effect.Effect<R, E, never>,
+  ): (input: I) => Effect.Effect<R, E, never> {
+    const list = this.middlewares.slice() as Middleware<I, R, E>[];
+    return list.reduceRight<(input: I) => Effect.Effect<R, E, never>>(
       (next, mw) => (input) => mw(input, next),
       body,
     );
@@ -164,11 +181,11 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface> {
   private inboxUnsubscribe?: Unsubscribe;
 
   /**
-   * Resolves once the harness has finished its async construction
-   * tasks (inbox registration). Callers that need to send inbox
-   * messages to this harness immediately after construction MUST
-   * `await harness.ready` first — otherwise `inbox.send(address, ...)`
-   * may race against registration and reject with `AddressNotFound`.
+   * Resolves once the harness has finished its async construction tasks
+   * (inbox registration). Callers that need to send inbox messages to
+   * this harness immediately after construction MUST `await
+   * harness.ready` first — otherwise `inbox.send(address, ...)` may race
+   * against registration and fail with `AddressNotFound`.
    *
    * Resolves immediately when `autoRegisterInbox: false`.
    */
@@ -185,14 +202,14 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface> {
     this.address = `${surface}:${scopeId}`;
     this.policy = options.policy ?? DEFAULT_JOURNALING_POLICY;
     if (options.autoRegisterInbox !== false) {
-      // Register is async only because cluster impls may need to
-      // negotiate; local impls resolve synchronously. Either way,
-      // `ready` is the deterministic readiness handle.
-      this.ready = this.inbox
-        .register(this.address, (msg) => this.dispatchMessage(msg))
-        .then((unsub) => {
-          this.inboxUnsubscribe = unsub;
-        });
+      // Register is async — cluster impls may negotiate across nodes.
+      // Local impls resolve immediately. Either way, `ready` is the
+      // deterministic readiness handle.
+      this.ready = Effect.runPromise(
+        this.inbox.register(this.address, (msg) => this.dispatchMessage(msg)),
+      ).then((unsub) => {
+        this.inboxUnsubscribe = unsub;
+      });
     } else {
       this.ready = Promise.resolve();
     }
@@ -206,78 +223,185 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface> {
    *   idempotency check → requested → before (handlers + middleware) →
    *   body → terminal
    *
-   * Returns the operation's result on success. Throws on failure /
-   * vetoed / canceled / deferred (the caller can distinguish via
-   * `instanceof OperationOutcomeError`).
+   * Succeeds with the operation's result. Failures and non-success
+   * terminals (failed, canceled, vetoed, deferred) flow through the `E`
+   * channel as `OperationOutcomeError` (carrying the typed terminal)
+   * unless the body's own error type is preserved on the failed path.
+   *
+   * The harness establishes the `RuntimeContextRef` FiberRef for the
+   * lifetime of the command — sessionId/executionId/tickId/opId/
+   * parentOpId/correlationId from `op.scope` are visible to any
+   * downstream Effect via `getContext`.
    */
-  protected async runOperation<I, R, E = unknown>(
+  protected runOperation<I, R, E>(
     op: Operation<I, R, E>,
-    body: (input: I) => Promise<R>,
-  ): Promise<R> {
-    // 1. Idempotency: replay terminal if op already completed.
-    const cached = await this.journal.lookupTerminal(op.opId);
-    if (cached.some) return this.replayTerminal<R>(cached.value);
+    body: (input: I) => Effect.Effect<R, E, never>,
+  ): Effect.Effect<R, E | SubstrateError, never> {
+    return Effect.gen(this, function* () {
+      // Auto-set parentOpId from the surrounding FiberRef when the caller
+      // didn't supply one. This is what makes nested `runOperation`
+      // calls compose into a causality tree without app code threading
+      // parentOpId by hand.
+      const ambient = yield* getContext;
+      const resolvedOp: Operation<I, R, E> =
+        op.parentOpId === undefined && ambient.opId !== undefined
+          ? { ...op, parentOpId: ambient.opId }
+          : op;
 
-    const scope: EventScope = op.scope ?? {};
+      const scope: EventScope = resolvedOp.scope ?? {};
+      const ctxScope: RuntimeContext = {
+        sessionId: scope.sessionId,
+        executionId: scope.executionId,
+        tickId: scope.tickId,
+        opId: resolvedOp.opId,
+        parentOpId: resolvedOp.parentOpId,
+        correlationId: resolvedOp.correlationId,
+      };
 
-    // 2. Append `requested`.
-    await this.publish(this.makeEvent(op, "requested", scope));
+      return yield* withContext(
+        ctxScope,
+        Effect.scoped(
+          Effect.gen(this, function* () {
+            // 1. Idempotency: replay terminal if op already completed.
+            const cached = yield* this.journal.lookupTerminal(resolvedOp.opId);
+            if (cached.some) {
+              return yield* this.replayTerminal<R>(cached.value);
+            }
 
-    // 3. Append `before` and run handlers.
-    await this.publish(this.makeEvent(op, "before", scope));
-    const verdict = await this.handlers.run<I, R>("before", op.input);
-    switch (verdict.kind) {
-      case "veto":
-        return this.terminate<R>(op, scope, "vetoed", { reason: verdict.reason });
-      case "replace":
-        return this.terminate<R>(op, scope, "replaced", {
-          result: verdict.result,
-          reason: verdict.reason,
-        });
-      case "defer":
-        return this.terminate<R>(op, scope, "deferred", { retryAfter: verdict.retryAfter });
-      case "proceed":
-        break;
-    }
+            // 2. Append `requested`.
+            yield* this.publish(this.makeEvent(resolvedOp, "requested", scope));
 
-    // 4. Compose middleware around body, then execute.
-    const composed = this.middleware.compose<I, R>(body);
-    try {
-      const result = await composed(op.input);
-      return this.terminate<R>(op, scope, "succeeded", { result });
-    } catch (err) {
-      if (err instanceof OperationOutcomeError) throw err;
-      // Publish the terminal:failed envelope but re-throw the ORIGINAL
-      // error (typically a tagged-union value the caller wants to
-      // pattern-match). `terminate` would wrap into OperationOutcomeError
-      // via replayTerminal; the publish-only helper keeps the original
-      // shape visible at the call site.
-      await this.publishTerminal(op, scope, "failed", { error: this.normalizeError(err) });
-      throw err;
-    }
+            // 3. Append `before` and run handlers.
+            yield* this.publish(this.makeEvent(resolvedOp, "before", scope));
+            const verdictExit = yield* Effect.exit(
+              this.handlers.run<I, R>("before", resolvedOp.input),
+            );
+            if (Exit.isFailure(verdictExit)) {
+              const cause = Cause.failureOption(verdictExit.cause);
+              const lifecycleErr: LifecycleHandlerError = {
+                _tag: "LifecycleHandlerError",
+                phase: "before",
+                cause: Option.isSome(cause) ? cause.value : verdictExit.cause,
+              };
+              yield* this.publishTerminal(resolvedOp, scope, "failed", {
+                error: this.normalizeError(lifecycleErr),
+              });
+              return yield* Effect.fail<SubstrateError>(lifecycleErr);
+            }
+            const verdict = verdictExit.value as HandlerVerdict<R>;
+            switch (verdict.kind) {
+              case "veto":
+                return yield* this.terminate<R>(resolvedOp, scope, "vetoed", {
+                  reason: verdict.reason,
+                });
+              case "replace":
+                return yield* this.terminate<R>(resolvedOp, scope, "replaced", {
+                  result: verdict.result,
+                  reason: verdict.reason,
+                });
+              case "defer":
+                return yield* this.terminate<R>(resolvedOp, scope, "deferred", {
+                  retryAfter: verdict.retryAfter,
+                });
+              case "proceed":
+                break;
+            }
+
+            // 4. Compose middleware around body, execute. We capture
+            //    the body's exit so the span integration (below) can
+            //    annotate attributes without going through
+            //    `Effect.withSpan` — which we found copies failures
+            //    when it captures them, breaking error-reference
+            //    identity in adopters' typed error channels.
+            const composed = this.middleware.compose<I, R, E>(body);
+            return yield* composed(resolvedOp.input).pipe(
+              Effect.tap((value) =>
+                this.publishTerminal(resolvedOp, scope, "succeeded", { result: value }),
+              ),
+              Effect.tapError((err) =>
+                this.publishTerminal(resolvedOp, scope, "failed", {
+                  error: this.normalizeError(err),
+                }),
+              ),
+              // Span annotation: attributes carry through whether the
+              // operation succeeded or failed. The span's recordException
+              // path runs on the captured Exit only — the failure value
+              // returned to the caller is untouched.
+              this.annotateOperationSpan(resolvedOp),
+            );
+          }),
+        ),
+      );
+    });
+  }
+
+  /**
+   * Span attributes attached to every operation's OTel span. Exporters
+   * (subscribed via `@effect/opentelemetry`) see these on the span.
+   * Override in concrete harnesses to add domain attributes.
+   */
+  protected spanAttributes(
+    op: Operation<unknown, unknown, unknown>,
+  ): Readonly<Record<string, unknown>> {
+    const scope = op.scope ?? {};
+    return {
+      "agentick.op_id": op.opId,
+      "agentick.surface": op.surface,
+      "agentick.parent_op_id": op.parentOpId,
+      "agentick.correlation_id": op.correlationId,
+      "agentick.session_id": scope.sessionId,
+      "agentick.execution_id": scope.executionId,
+      "agentick.tick_id": scope.tickId,
+    };
+  }
+
+  /**
+   * Wrap an Effect in an OTel span without modifying the failure
+   * channel's identity. We use `Effect.withSpan` on a value-typed
+   * sibling so the span sees the outcome via the captured Exit, while
+   * the caller receives the original success value OR the original
+   * failure value (same JS reference, not copied).
+   *
+   * This avoids the identity-loss `Effect.withSpan` causes when it
+   * captures failures directly — adopters who rely on error-reference
+   * pattern-matching (e.g., `error.cause === originalError`) keep that
+   * guarantee even with OTel attached.
+   */
+  private annotateOperationSpan<A, E>(
+    op: Operation<unknown, unknown, unknown>,
+  ): (eff: Effect.Effect<A, E, never>) => Effect.Effect<A, E, never> {
+    const attributes = this.spanAttributes(op);
+    return (eff) =>
+      Effect.gen(function* () {
+        const exit: Exit.Exit<A, E> = yield* Effect.exit(eff);
+        // Side-channel: emit the span attributes via a fresh, success-
+        // typed effect so withSpan never sees a failure value.
+        yield* Effect.void.pipe(Effect.withSpan(op.name, { attributes }));
+        return yield* exit;
+      });
   }
 
   // ──────── ⑤ Events (light path) ────────
 
   /** Emit a discrete event. No phase contract, no idempotency. */
-  protected async emit(
+  protected emit(
     args: Omit<ProtocolEvent, "id" | "timestamp" | "surface"> & { readonly id?: string },
-  ): Promise<void> {
+  ): Effect.Effect<void, JournalError, never> {
     const envelope: ProtocolEvent = {
       ...args,
       id: args.id ?? ulid(),
       timestamp: Date.now(),
       surface: this.surface,
     };
-    await this.publish(envelope);
+    return this.publish(envelope);
   }
 
   /** Streaming progress within an active operation. */
-  protected async emitDelta(
+  protected emitDelta(
     op: Operation<unknown, unknown, unknown>,
     payload: unknown,
-  ): Promise<void> {
-    await this.publish(this.makeEvent(op, "delta", op.scope ?? {}, { payload }));
+  ): Effect.Effect<void, JournalError, never> {
+    return this.publish(this.makeEvent(op, "delta", op.scope ?? {}, { payload }));
   }
 
   // ──────── ② Inbox dispatch ────────
@@ -286,18 +410,18 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface> {
    * Concrete harnesses override this with a typed switch on message.type.
    * Default: reject with `HandlerError`.
    */
-  protected abstract handleMessage(msg: MessageEnvelope): Promise<unknown>;
+  protected abstract handleMessage(
+    msg: MessageEnvelope,
+  ): Effect.Effect<unknown, MessageHandlerError, never>;
 
-  private async dispatchMessage(msg: MessageEnvelope): Promise<unknown> {
-    try {
-      return await this.handleMessage(msg);
-    } catch (err) {
-      const wrapped: MessageHandlerError = {
-        _tag: "HandlerError",
-        cause: err,
-      };
-      throw wrapped;
-    }
+  private dispatchMessage(
+    msg: MessageEnvelope,
+  ): Effect.Effect<unknown, MessageHandlerError, never> {
+    return this.handleMessage(msg).pipe(
+      Effect.catchAll((cause) =>
+        Effect.fail<MessageHandlerError>({ _tag: "HandlerError", cause }),
+      ),
+    );
   }
 
   // ──────── lifecycle ────────
@@ -332,32 +456,33 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface> {
     } as ProtocolEvent;
   }
 
-  private async terminate<R>(
+  private terminate<R>(
     op: Operation<unknown, R, unknown>,
     scope: EventScope,
     outcome: CommandOutcome,
     payload: Record<string, unknown>,
-  ): Promise<R> {
-    await this.publishTerminal(op, scope, outcome, payload);
-    return this.replayTerminal<R>(this.payloadToTerminal(outcome, payload));
+  ): Effect.Effect<R, OperationOutcomeError | JournalError, never> {
+    return Effect.gen(this, function* () {
+      yield* this.publishTerminal(op, scope, outcome, payload);
+      return yield* this.replayTerminal<R>(this.payloadToTerminal(outcome, payload));
+    });
   }
 
   /**
    * Publish-only terminal — emits the `terminal` envelope but does not
-   * throw / return a typed result. Used on the failure path where the
-   * caller wants to re-throw the original error after journaling the
-   * terminal record.
+   * raise OperationOutcomeError. Used on the failure path where the
+   * caller wants to re-raise the original error after journaling.
    */
-  private async publishTerminal(
+  private publishTerminal(
     op: Operation<unknown, unknown, unknown>,
     scope: EventScope,
     outcome: CommandOutcome,
     payload: Record<string, unknown>,
-  ): Promise<void> {
+  ): Effect.Effect<void, JournalError, never> {
     const error =
       outcome === "failed" ? (payload.error as ProtocolEvent["error"]) : undefined;
     const envelope = this.makeEvent(op, "terminal", scope, { payload, outcome, error });
-    await this.publish(envelope);
+    return this.publish(envelope);
   }
 
   private payloadToTerminal(
@@ -387,20 +512,22 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface> {
     }
   }
 
-  private replayTerminal<R>(terminal: TerminalEvent): R {
+  private replayTerminal<R>(
+    terminal: TerminalEvent,
+  ): Effect.Effect<R, OperationOutcomeError, never> {
     switch (terminal.outcome) {
       case "succeeded":
-        return terminal.result as R;
+        return Effect.succeed(terminal.result as R);
       case "replaced":
-        return terminal.result as R;
+        return Effect.succeed(terminal.result as R);
       case "failed":
-        throw new OperationOutcomeError("failed", terminal);
+        return Effect.fail(new OperationOutcomeError("failed", terminal));
       case "canceled":
-        throw new OperationOutcomeError("canceled", terminal);
+        return Effect.fail(new OperationOutcomeError("canceled", terminal));
       case "vetoed":
-        throw new OperationOutcomeError("vetoed", terminal);
+        return Effect.fail(new OperationOutcomeError("vetoed", terminal));
       case "deferred":
-        throw new OperationOutcomeError("deferred", terminal);
+        return Effect.fail(new OperationOutcomeError("deferred", terminal));
     }
   }
 
@@ -425,12 +552,13 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface> {
    *   3. `policy.alwaysJournal` / `policy.busOnly` phase rules
    *   4. Default-deny on unknown phases
    */
-  private async publish(envelope: ProtocolEvent): Promise<void> {
+  private publish(envelope: ProtocolEvent): Effect.Effect<void, JournalError, never> {
     const decision = this.decide(envelope);
-    if (decision !== "drop") await this.bus.publish(envelope);
+    if (decision === "drop") return Effect.void;
     if (decision === "always" || decision === "journal") {
-      await this.journal.append(envelope);
+      return Effect.zipRight(this.bus.publish(envelope), this.journal.append(envelope));
     }
+    return this.bus.publish(envelope);
   }
 
   private decide(envelope: ProtocolEvent): "always" | "journal" | "bus-only" | "drop" {
@@ -461,11 +589,18 @@ function matchOverride(
 }
 
 /**
- * Thrown by `BaseHarness.runOperation` when an operation terminates with
- * a non-success outcome (failed, canceled, vetoed, deferred). The
- * `terminal` field exposes the typed envelope.
+ * Surfaced through the `runOperation` failure channel when an operation
+ * terminates with a non-success outcome (failed, canceled, vetoed,
+ * deferred). The `terminal` field exposes the typed envelope.
+ *
+ * On the `failed` path, the substrate publishes the terminal:failed
+ * envelope BUT re-raises the body's original typed error rather than
+ * wrapping in `OperationOutcomeError`. Veto / canceled / deferred / the
+ * replay path for cached failed terminals use this error class so the
+ * caller can pattern-match.
  */
 export class OperationOutcomeError extends Error {
+  readonly _tag = "OperationOutcomeError" as const;
   readonly outcome: CommandOutcome;
   readonly terminal: TerminalEvent;
   constructor(outcome: CommandOutcome, terminal: TerminalEvent) {
@@ -474,4 +609,32 @@ export class OperationOutcomeError extends Error {
     this.outcome = outcome;
     this.terminal = terminal;
   }
+}
+
+// Re-export InboxError type so concrete harnesses can type-narrow
+// without pulling from @agentick/spec directly.
+export type { InboxError };
+
+/**
+ * Bridge an `Effect` running through `BaseHarness.runOperation` (or any
+ * other Effect-typed harness machinery) to a Promise that rejects with
+ * the original typed error instead of Effect's `FiberFailure` wrapper.
+ *
+ * Concrete harness protocol surfaces (e.g. `ReconcilerProtocol`,
+ * `ToolExecutorProtocol`) keep Promise-typed return shapes for
+ * ergonomic application code. This helper closes the gap: the typed
+ * `SubstrateError` / `OperationOutcomeError` / body-`E` value at the
+ * head of the failure cause becomes the Promise's rejection reason.
+ *
+ * Defects (interrupts, unhandled throws) reject with a normal `Error`
+ * carrying `Cause.pretty(cause)`.
+ */
+export async function runHarnessProtocol<R>(
+  eff: Effect.Effect<R, unknown, never>,
+): Promise<R> {
+  const exit = await Effect.runPromiseExit(eff);
+  if (Exit.isSuccess(exit)) return exit.value as R;
+  const failure = Cause.failureOption(exit.cause);
+  if (Option.isSome(failure)) throw failure.value;
+  throw new Error(Cause.pretty(exit.cause));
 }

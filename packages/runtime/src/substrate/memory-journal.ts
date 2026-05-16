@@ -13,8 +13,10 @@
  * @see docs/proposals/v2/blueprint/19-foundation.md §The OperationJournal contract
  */
 
+import { Effect, Stream } from "effect";
 import type {
   EventQuery,
+  JournalError,
   ProtocolEvent,
   TerminalEvent,
 } from "@agentick/spec";
@@ -27,13 +29,13 @@ import type {
 } from "@agentick/spec";
 import { matchesQuery } from "./query.js";
 
-interface TailWaiter {
+interface TailListener {
   readonly query: EventQuery;
-  readonly signal?: AbortSignal;
-  resolve: (e: ProtocolEvent | typeof DONE) => void;
+  /** Push a matching event into the consumer's stream. */
+  readonly onEvent: (event: ProtocolEvent) => void;
+  /** Signal end-of-stream (journal closing). */
+  readonly onDone: () => void;
 }
-
-const DONE = Symbol("journal-tail-done");
 
 export interface MemoryJournalOptions {
   /**
@@ -71,7 +73,7 @@ export class MemoryJournal implements OperationJournal {
    */
   private inFlight = new Map<string, ProtocolEvent>();
 
-  private tailWaiters: TailWaiter[] = [];
+  private tailListeners = new Set<TailListener>();
 
   private closed = false;
 
@@ -79,17 +81,31 @@ export class MemoryJournal implements OperationJournal {
     this.capacity = options.capacity ?? 10_000;
   }
 
-  async append(event: ProtocolEvent): Promise<void> {
-    this.appendSync(event);
+  append(event: ProtocolEvent): Effect.Effect<void, JournalError, never> {
+    return Effect.try({
+      try: () => this.appendSync(event),
+      catch: (cause): JournalError => {
+        if (isJournalError(cause)) return cause;
+        return { _tag: "WriteFailed", cause };
+      },
+    });
   }
 
-  async appendBatch(events: readonly ProtocolEvent[]): Promise<void> {
-    for (const e of events) this.appendSync(e);
+  appendBatch(events: readonly ProtocolEvent[]): Effect.Effect<void, JournalError, never> {
+    return Effect.try({
+      try: () => {
+        for (const e of events) this.appendSync(e);
+      },
+      catch: (cause): JournalError => {
+        if (isJournalError(cause)) return cause;
+        return { _tag: "WriteFailed", cause };
+      },
+    });
   }
 
   private appendSync(event: ProtocolEvent): void {
     if (this.closed) {
-      throw { _tag: "WriteFailed", cause: new Error("journal closed") };
+      throw { _tag: "WriteFailed", cause: new Error("journal closed") } satisfies JournalError;
     }
 
     // Idempotency dedup on (opId, phase) for operation envelopes.
@@ -115,87 +131,98 @@ export class MemoryJournal implements OperationJournal {
       this.dropped += overflow;
     }
 
-    if (this.tailWaiters.length > 0) {
-      const remaining: TailWaiter[] = [];
-      for (const w of this.tailWaiters) {
-        if (matchesQuery(event, w.query)) {
-          w.resolve(event);
-        } else {
-          remaining.push(w);
-        }
-      }
-      this.tailWaiters = remaining;
+    for (const listener of this.tailListeners) {
+      if (matchesQuery(event, listener.query)) listener.onEvent(event);
     }
   }
 
-  read(query: EventQuery, from: JournalReadFrom): AsyncIterable<ProtocolEvent> {
-    const snapshot = this.events.slice();
-    const startIndex = this.resolveStart(from, snapshot.length);
-    return iterate(snapshot, startIndex, query);
+  read(
+    query: EventQuery,
+    from: JournalReadFrom,
+  ): Stream.Stream<ProtocolEvent, JournalError, never> {
+    return Stream.suspend(() => {
+      const snapshot = this.events.slice();
+      let startIndex: number;
+      try {
+        startIndex = this.resolveStart(from, snapshot.length);
+      } catch (cause) {
+        return Stream.fail<JournalError>(
+          isJournalError(cause) ? cause : { _tag: "ReadFailed", cause },
+        );
+      }
+      const matched: ProtocolEvent[] = [];
+      for (let i = startIndex; i < snapshot.length; i++) {
+        const e = snapshot[i]!;
+        if (matchesQuery(e, query)) matched.push(e);
+      }
+      return Stream.fromIterable(matched);
+    });
   }
 
-  tail(query: EventQuery, signal?: AbortSignal): AsyncIterable<ProtocolEvent> {
+  tail(query: EventQuery): Stream.Stream<ProtocolEvent, JournalError, never> {
     const journal = this;
-    return {
-      [Symbol.asyncIterator]() {
-        let aborted = false;
-        const onAbort = () => {
-          aborted = true;
-          for (const w of journal.tailWaiters) {
-            if (w.signal === signal) w.resolve(DONE);
+    return Stream.asyncPush<ProtocolEvent>((emit) =>
+      Effect.acquireRelease(
+        Effect.sync(() => {
+          if (journal.closed) {
+            emit.end();
+            return undefined as TailListener | undefined;
           }
-          journal.tailWaiters = journal.tailWaiters.filter((w) => w.signal !== signal);
-        };
-        signal?.addEventListener("abort", onAbort, { once: true });
-        return {
-          async next(): Promise<IteratorResult<ProtocolEvent>> {
-            if (aborted || journal.closed) return { value: undefined, done: true };
-            const next = await new Promise<ProtocolEvent | typeof DONE>((resolve) => {
-              journal.tailWaiters.push({ query, signal, resolve });
-            });
-            if (next === DONE) return { value: undefined, done: true };
-            return { value: next, done: false };
-          },
-          async return(): Promise<IteratorResult<ProtocolEvent>> {
-            signal?.removeEventListener("abort", onAbort);
-            onAbort();
-            return { value: undefined, done: true };
-          },
-        };
-      },
-    };
+          const listener: TailListener = {
+            query,
+            onEvent: (event) => {
+              void emit.single(event);
+            },
+            onDone: () => emit.end(),
+          };
+          journal.tailListeners.add(listener);
+          return listener;
+        }),
+        (listener) =>
+          Effect.sync(() => {
+            if (listener) journal.tailListeners.delete(listener);
+          }),
+      ),
+    );
   }
 
-  async lookupTerminal(opId: string): Promise<Maybe<TerminalEvent>> {
-    const t = this.terminals.get(opId);
-    return t ? { some: true, value: t } : { some: false };
+  lookupTerminal(opId: string): Effect.Effect<Maybe<TerminalEvent>, JournalError, never> {
+    return Effect.sync(() => {
+      const t = this.terminals.get(opId);
+      return t ? ({ some: true, value: t } as const) : ({ some: false } as const);
+    });
   }
 
-  async findOrphaned(query: OrphanQuery = {}): Promise<readonly OrphanedOperation[]> {
-    const olderThan = query.olderThan;
-    const surface = query.surface;
-    const cutoff = olderThan === undefined ? Number.POSITIVE_INFINITY : Date.now() - olderThan;
-    const out: OrphanedOperation[] = [];
-    for (const [opId, earliest] of this.inFlight) {
-      if (surface && earliest.surface !== surface) continue;
-      // Find the latest seen envelope for this opId in our retained slice.
-      let latest = earliest;
-      for (let i = this.events.length - 1; i >= 0; i--) {
-        const e = this.events[i]!;
-        if (e.opId === opId) {
-          latest = e;
-          break;
+  findOrphaned(
+    query: OrphanQuery = {},
+  ): Effect.Effect<readonly OrphanedOperation[], JournalError, never> {
+    return Effect.sync(() => {
+      const olderThan = query.olderThan;
+      const surface = query.surface;
+      const cutoff =
+        olderThan === undefined ? Number.POSITIVE_INFINITY : Date.now() - olderThan;
+      const out: OrphanedOperation[] = [];
+      for (const [opId, earliest] of this.inFlight) {
+        if (surface && earliest.surface !== surface) continue;
+        // Find the latest seen envelope for this opId in our retained slice.
+        let latest = earliest;
+        for (let i = this.events.length - 1; i >= 0; i--) {
+          const e = this.events[i]!;
+          if (e.opId === opId) {
+            latest = e;
+            break;
+          }
         }
+        if (latest.timestamp > cutoff) continue;
+        out.push({
+          opId,
+          surface: latest.surface,
+          name: latest.name,
+          latestTimestamp: latest.timestamp,
+        });
       }
-      if (latest.timestamp > cutoff) continue;
-      out.push({
-        opId,
-        surface: latest.surface,
-        name: latest.name,
-        latestTimestamp: latest.timestamp,
-      });
-    }
-    return out;
+      return out;
+    });
   }
 
   // ────────── helpers ──────────
@@ -206,7 +233,11 @@ export class MemoryJournal implements OperationJournal {
     if (typeof from === "object" && "offset" in from) {
       const local = from.offset - this.dropped;
       if (local < 0) {
-        throw { _tag: "OffsetOutOfRange", requested: from.offset, oldest: this.dropped };
+        throw {
+          _tag: "OffsetOutOfRange",
+          requested: from.offset,
+          oldest: this.dropped,
+        } satisfies JournalError;
       }
       return Math.min(local, snapshotLen);
     }
@@ -217,8 +248,8 @@ export class MemoryJournal implements OperationJournal {
   close(): void {
     if (this.closed) return;
     this.closed = true;
-    for (const w of this.tailWaiters) w.resolve(DONE);
-    this.tailWaiters = [];
+    for (const l of this.tailListeners) l.onDone();
+    this.tailListeners.clear();
   }
 
   /** Diagnostic: total events ever appended (including dropped). */
@@ -254,13 +285,8 @@ function extractTerminal(envelope: ProtocolEvent): TerminalEvent | undefined {
   }
 }
 
-async function* iterate(
-  snapshot: readonly ProtocolEvent[],
-  startIndex: number,
-  query: EventQuery,
-): AsyncIterable<ProtocolEvent> {
-  for (let i = startIndex; i < snapshot.length; i++) {
-    const e = snapshot[i]!;
-    if (matchesQuery(e, query)) yield e;
-  }
+function isJournalError(value: unknown): value is JournalError {
+  if (typeof value !== "object" || value === null) return false;
+  const tag = (value as { _tag?: unknown })._tag;
+  return tag === "WriteFailed" || tag === "ReadFailed" || tag === "OffsetOutOfRange";
 }
