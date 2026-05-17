@@ -120,6 +120,10 @@ export {
   ContextInfoProvider,
   type ContextInfo,
   type ContextInfoStore,
+  useOnMessage,
+  useQueuedMessages,
+  useLastMessage,
+  useFormatter,
 } from "./hooks/index.js";
 
 // ============================================================================
