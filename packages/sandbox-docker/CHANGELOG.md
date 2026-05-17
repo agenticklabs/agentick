@@ -1,5 +1,11 @@
 # @agentick/sandbox-docker
 
+## 0.14.66
+
+### Patch Changes
+
+- @agentick/sandbox@0.14.66
+
 ## 0.14.65
 
 ### Patch Changes

@@ -1,5 +1,13 @@
 # @agentick/google
 
+## 0.14.66
+
+### Patch Changes
+
+- Updated dependencies [35d7370]
+  - @agentick/core@0.14.66
+  - @agentick/shared@0.14.66
+
 ## 0.14.65
 
 ### Patch Changes
