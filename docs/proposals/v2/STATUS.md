@@ -181,14 +181,34 @@ up the right one.
   yet.
 
 ### Performance / observability
-- **Bus event emission overhead** — phase contract emits ≥3 events per
-  command. Per-render this is fine; per-tool-call across thousands of
-  dispatches we haven't measured.
+
+These are **gating items for Phase 4c (executor)** unless flagged
+otherwise. Tracked in `blueprint/17-open-questions.md` §Substrate
+scalability + observability.
+
+- **L5 — OTel exception recording without breaking error-reference
+  identity.** Substrate uses a side-channel `Effect.withSpan` today
+  (span name + attributes carry through; exception capture omitted)
+  because `Effect.withSpan` directly on the body pipeline clones
+  failures, breaking `error.cause === original` semantics. Proper
+  fix: route exceptions through a span-side bridge that records the
+  original reference. Invasive — needs design. **Must land before
+  Phase 4c so executor adapters don't bake-in identity-broken errors.**
+- **L6 — Bus publish hot-path benchmark.** No measurements. Streaming
+  model deltas at 100/sec × N sessions × M subscribers = realistic
+  10k+ Queue.offer/sec. Benchmark plan documented in 17-open-questions.
+  **Must land before Phase 4c.**
+- **L7 — `MemoryJournal.appendedKeys` Set unbounded growth.**
+  Idempotency keys accumulate forever. Long-lived sessions leak. Fix:
+  TTL eviction matching the ring buffer's drop point. **Gates v2.0
+  release** (not Phase 4).
+- **L8 — Substrate self-instrumentation.** No metric surface for
+  subscriberCount / journal size / inbox cache size / queue depth.
+  How does a deployment know if the substrate is overloaded? Designed
+  alongside L6.
 - **Render-until-stable wallclock budget** — only iteration-bounded.
   A slow fetcher blocks the loop. We may want `awaitTimeoutMs` per
   iteration.
-- **No metrics export** — OTel projection is a design intent in
-  19-foundation.md; not implemented.
 
 ### Documentation gaps
 - **Per-package API reference READMEs** — high-level pitch only. No
@@ -832,6 +852,26 @@ blueprint's design decisions; this is execution-level).
   handler paths end-to-end (the Effect `whoami` reads sessionId /
   executionId / tickId / opId via FiberRef without any parameter
   plumbing).
+
+- **Components → reconciler-react.** Decision locked: user-facing
+  component wrappers (`<Section>`, `<Message>`, `<H1>`, `<Tool>`, etc.)
+  live in the matching reconciler package, not a separate
+  `@agentick/components`. Rationale: components are coupled to the
+  reconciler's intrinsics; future Solid / Vue reconcilers ship their
+  own. example/v2 defines them locally as a stopgap; they graduate
+  into `@agentick/reconciler-react` before Phase 4e so app authors can
+  `import { Section, Tool } from "@agentick/reconciler-react"`.
+
+- **Substrate scalability + observability — gates registered.** Four
+  new entries in `blueprint/17-open-questions.md` §L (Observability):
+  L5 (OTel exception recording without breaking error-reference
+  identity), L6 (bus publish hot-path benchmark), L7 (`MemoryJournal.
+  appendedKeys` Set unbounded growth), L8 (substrate self-instrumentation).
+  L5 + L6 are **gating items for Phase 4c (executor harness)** —
+  must land before adapter authors write code on top of the substrate.
+  L7 gates v2.0 release. L8 lands alongside L6. See "Substrate
+  scalability + observability (running notes)" in 17-open-questions.md
+  for the benchmark plan and concrete concerns.
 
 ### 2026-05-15
 

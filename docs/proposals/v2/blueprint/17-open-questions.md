@@ -184,6 +184,10 @@ Three statuses:
 | L2 | Metric names and units | (gap) | LEAN | listed in `09-app-harness.md` |
 | L3 | DevTools surface (separate API) | runtime.md §OQ15 | LEAN | `app.devTools.events()` separate from `app.events()` |
 | L4 | Span naming convention | (gap) | LEAN | matches event names |
+| L5 | OTel `recordException` without breaking error-reference identity | runtime substrate 2026-05-16 | **OPEN** | side-channel span today (no exception recording); proper fix needs span-side bridge that records the original Error ref instead of cloning it via `Effect.withSpan`'s built-in capture. See "Substrate scalability + observability" below. |
+| L6 | Bus publish hot-path performance budget | runtime substrate (gap) | **OPEN** | needs benchmark at 1k+ ops/sec before Phase 4c (executor) lands. See "Substrate scalability + observability" below. |
+| L7 | Journal idempotency-key set unbounded growth | runtime substrate (gap) | **OPEN** | `MemoryJournal.appendedKeys` Set grows for every distinct (opId, phase). Long-lived sessions accumulate. Bound via LRU or TTL? |
+| L8 | Substrate self-instrumentation (metrics on the bus itself) | runtime substrate (gap) | **OPEN** | how do we know if the substrate is the bottleneck under load? `subscriberCount`, journal size, inbox cache size — surfaced where? |
 
 ## M. Spec wire compatibility
 
@@ -243,6 +247,100 @@ Ranked by impact on getting the design crystallized.
     messages. Mostly listed in per-harness docs; needs cross-validation.
 9. **Cluster routing layer integration with `@effect/cluster`.** Spike
     needed (carried from H1).
+10. **L5 — OTel exception recording without breaking error-reference
+    identity.** Substrate currently uses a side-channel `Effect.withSpan`
+    that omits exception capture to preserve `error.cause === original`
+    semantics. Proper fix is invasive — needs design. **Must land
+    before Phase 4c (executor) ships** so executor adapter authors
+    don't write code that relies on identity-broken errors and adapt
+    twice.
+11. **L6 — Bus publish hot-path benchmark.** No measurements yet.
+    **Must land before Phase 4c** to set an executor-streaming budget
+    (delta envelopes from a streaming model can hit 100+/sec per
+    session; multi-session × 100 sessions = 10k+ envelopes/sec).
+12. **L7 — Journal idempotency-key Set bound.** Currently unbounded;
+    long-lived sessions leak memory. Need TTL or LRU. **Gates v2.0
+    release** (not a Phase 4 blocker).
+13. **L8 — Substrate self-instrumentation.** How a deployment knows
+    if the bus is overloaded. Needs metric surface. Designed during
+    L6 benchmark work.
 
 Items 1–2 are gating for spec package implementation. Items 3–9 are
-gating for runtime implementation.
+gating for runtime implementation. Items 10–11 are gating for Phase 4c
+(executor harness). Items 12–13 are gating for v2.0 release.
+
+## Substrate scalability + observability (running notes)
+
+Captured 2026-05-16 after foundation refinements landed. These are the
+real concerns about the substrate's behavior under load — not design
+gaps in the architecture, but unknowns in the implementation that need
+empirical answers before adapters pile on.
+
+### Hot paths to measure
+
+| Path | Per-call cost | Frequency under load | Total budget |
+| --- | --- | --- | --- |
+| `bus.publish(ev)` | O(subscribers) match + Queue.offer per match | every envelope (3+ per op) | ~30k Queue.offer/sec at 10k ops/sec × 1 subscriber |
+| `journal.append(ev)` | Set.add(idempotency) + array.push + listener loop + maybe splice | ≤2 per op (requested, terminal) | ~20k/sec at 10k ops/sec |
+| `runOperation` overhead | `Effect.gen` body + ~6 yields + FiberRef set + Scope acquire/release | per op | unmeasured |
+| Subscriber buffer overflow | sliding queue eviction (drop-oldest default) | bursty model streaming | bounded by `bufferSize` (default 256) |
+
+### Concrete concerns
+
+1. **Bus emit overhead under streaming.** A streaming model produces
+   N tokens/sec as `delta` envelopes. At 100 tokens/sec × 10 concurrent
+   sessions × 3 bus subscribers (devtools + telemetry + audit) = 3k
+   Queue.offer/sec. Effect's `Queue.offer` is fast but uncached
+   `matchesQuery` for non-trivial queries (prefix / scope-filter) is
+   the cost driver. Profile under realistic patterns.
+
+2. **`MemoryJournal.appendedKeys` unbounded growth.** Idempotency Set
+   stores every `(opId, phase)` key forever. Long-lived sessions
+   accumulate. Fix: TTL eviction matching the ring buffer's drop point
+   (when the matching envelope drops from the buffer, its key drops
+   too).
+
+3. **Slow subscriber detection.** If one subscriber lags, its Queue
+   fills, drop-oldest evicts events. No diagnostic emitted today —
+   the slow consumer just silently misses events. Need an envelope
+   like `bus:subscriber:overflow` or a metric.
+
+4. **`Effect.scoped` finalizer overhead.** Every operation acquires
+   and releases a Scope. Cost is bounded but not zero. Stress-test
+   what happens at 10k ops/sec.
+
+5. **FiberRef set/clear cost.** `withContext` reads, merges, locally
+   sets the FiberRef. Per-op. Should be O(1) — verify.
+
+6. **Inbox idempotency cache** — already bounded (10k entries, 10min
+   TTL). Track hit rate under realistic ask/tell patterns to validate
+   the cap.
+
+### Benchmark plan (deferred to before Phase 4c lands)
+
+1. Write `packages/runtime/bench/substrate.bench.ts` (Vitest bench API).
+2. Scenarios:
+   - `runOperation` empty body × 100k iterations
+   - `bus.publish` × 1M with 1 / 10 / 100 subscribers
+   - `journal.append` × 1M (mix of unique opIds + idempotent dups)
+   - `inbox.send` × 1M (mix of unique + dup messageIds)
+   - Streaming simulation: 100 concurrent operations × 100 delta
+     envelopes each
+3. Targets:
+   - `runOperation` empty body: < 10μs / op
+   - `bus.publish` no subscribers: < 1μs / call (lazy fan-out)
+   - `bus.publish` 1 subscriber: < 5μs / call
+   - `journal.append`: < 5μs / call
+4. Compare with v1 EventEmitter-based path for sanity check.
+
+### Components going into reconciler-react
+
+Decision 2026-05-16: user-facing component wrappers (`<Section>`,
+`<Message>`, `<H1>`, `<Tool>`, etc.) live in the matching reconciler
+package — `@agentick/reconciler-react` for the React variant. Not a
+separate `@agentick/components` package. Rationale: components are
+inherently coupled to the reconciler's intrinsics; future Solid or
+Vue reconcilers would ship their own component sets. example/v2
+currently defines them locally as a stopgap; they graduate into
+reconciler-react before Phase 4e (session harness) lands so app
+authors can `import { Section, Tool } from "@agentick/reconciler-react"`.
