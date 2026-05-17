@@ -14,6 +14,13 @@ export default defineConfig({
       "packages/adapters/*/src/**/*.spec.{ts,tsx}",
       "example/*/src/**/*.spec.{ts,tsx}",
     ],
+    benchmark: {
+      include: [
+        "packages/*/src/**/*.bench.{ts,tsx}",
+        "packages/adapters/*/src/**/*.bench.{ts,tsx}",
+      ],
+      exclude: ["**/node_modules/**", "**/dist/**"],
+    },
     exclude: [
       "**/node_modules/**",
       "**/dist/**",

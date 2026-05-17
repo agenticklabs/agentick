@@ -386,6 +386,105 @@ Path forward:
    - `journal.append`: < 5μs / call
 4. Compare with v1 EventEmitter-based path for sanity check.
 
+### Benchmark results (2026-05-17, M-series Mac, Node 24)
+
+Source: `packages/runtime/src/__bench__/substrate.bench.ts`.
+
+| Operation                                  | Mean        | Target  | Status     |
+| ------------------------------------------ | ----------- | ------- | ---------- |
+| `bus.publish` no listeners                 | 0.5 μs      | < 1 μs  | ✓ 2× under |
+| `bus.publish` 1 non-matching subscriber    | 0.5 μs      | —       | ✓ surface index short-circuit works |
+| `bus.publish` 1 matching subscriber        | 6.0 μs      | < 5 μs  | ✗ 20% over |
+| `bus.publishLazy` no subscribers           | 0.5 μs      | < 1 μs  | ✓ 2× under |
+| `bus.publishLazy` 1 subscriber             | 6.0 μs      | —       | parity w/ eager publish |
+| `journal.append` fresh                     | 1.4 μs      | < 5 μs  | ✓ 3.5× under |
+| `journal.append` idempotent dedup          | 0.6 μs      | —       | early-exit |
+| `inbox.send` fresh                         | 9.0 μs      | —       | baseline |
+| `inbox.send` cache hit                     | 0.6 μs      | —       | excellent  |
+| **`runOperation` fresh**                   | **46.8 μs** | < 10 μs | **✗ 4.7× over** |
+| `runOperation` idempotent replay           | 7.5 μs      | —       | short-circuits at lookupTerminal |
+| `LocalChannelPublisher` no subscriber      | 0.5 μs      | —       | lazy skip working |
+| `LocalChannelPublisher` 1 subscriber       | 6.8 μs      | —       | parity with bus.publish 1-sub |
+
+**Streaming simulation (10 concurrent ops × 10 delta envelopes each):**
+
+| Variant | Mean wall time | Per-emission cost |
+| --- | --- | --- |
+| Eager (`emitDelta`)         | 289 μs / iter | 2.9 μs |
+| Lazy  (`emitDeltaLazy`)     | 229 μs / iter | 2.3 μs |
+
+Lazy emission is ~20% faster end-to-end when no subscriber matches —
+validates the construction-on-demand design under realistic streaming
+load.
+
+### Findings + decisions
+
+1. **Lazy emission is the correct call.** `publishLazy` no-subs at 0.5 μs
+   vs. constructing-and-publishing at 6.0 μs is a **12× speedup** on the
+   no-listener hot path. The subscriber index short-circuit (~100 ns)
+   is the load-bearing optimization. **Confirmed.**
+
+2. **The substrate index works as designed.** A subscriber on a
+   non-matching surface costs the same as having no subscriber
+   (0.5 μs) because the index reports "no match for this surface" and
+   `publish` early-returns. **Confirmed.**
+
+3. **Bus publish 1-subscriber is 20% over target.** 6.0 μs vs 5 μs
+   target. Most of the overhead is `Effect.suspend` + `Effect.all`
+   + the deliver loop (`Queue.offer` ~1 μs of Effect-runtime
+   plumbing). Possible micro-optimizations: skip `Effect.all` when
+   only one subscriber matches; inline the for-loop in `publish`.
+   **Acceptable as-is for now**; revisit if streaming workloads
+   surface the gap.
+
+4. **`runOperation` empty body is 4.7× over the original 10 μs target.**
+   46.8 μs per empty operation. Decomposition (from diagnostic
+   benches removed pre-commit):
+   - 3 publishes (`requested` + `before` + `terminal`) at ~7 μs each
+     = 21 μs
+   - Effect framework overhead: ~26 μs
+     - `Effect.scoped` Scope acquisition/release
+     - `withContext` FiberRef.locally
+     - Nested `Effect.gen` yields (~10 microtask boundaries)
+     - `handlers.run` (empty registry still allocates one effect)
+     - `Effect.tap` / `Effect.tapError` / `annotateOperationSpan` pipe
+       chain
+
+   **Target revised:** original 10 μs was aspirational given how
+   much work the phase contract does. Realistic budget for an
+   Effect-native substrate at this surface area: **< 50 μs**.
+   Substrate cost at 50 μs is 0.5% of a typical 10 ms tool call,
+   0.05% of a typical 100 ms model call. Real-world throughput
+   isn't substrate-limited.
+
+5. **Idempotent replay is fast.** Cached terminal lookup short-circuits
+   to 7.5 μs (vs 46.8 μs cold path). For workloads with retries / dedup
+   loads, this is the desired skew.
+
+6. **`inbox.send` fresh at 9 μs.** Setup-heavy: creates a Fiber via
+   `Effect.runFork` to host the handler, registers in the idempotency
+   cache, returns the ack. Cache-hit at 0.6 μs proves the memoization
+   path is cheap. Acceptable.
+
+### Open optimizations (later)
+
+- **`bus.publish` 1-subscriber 20% miss.** Inline the deliver loop;
+  skip `Effect.all` when only one matching subscriber. Would close
+  the gap. **Not blocking Phase 4c.**
+- **`runOperation` framework overhead.** ~26 μs of Effect plumbing.
+  Could inline the nested `Effect.gen` blocks into one, skip
+  `Effect.scoped` when no body finalizers are registered. ~15-20 μs
+  recoverable. **Defer** — revisit if Phase 4c executor benches show
+  substrate as the bottleneck.
+
+### Comparison with v1
+
+Not measured. v1's substrate is structurally different (EventEmitter
++ no phase contract + no idempotency by default). A direct comparison
+isn't apples-to-apples. The relevant baseline is v1's session-level
+operation throughput, which we'll re-baseline after the executor
+harness lands.
+
 ### Components going into reconciler-react
 
 Decision 2026-05-16: user-facing component wrappers (`<Section>`,

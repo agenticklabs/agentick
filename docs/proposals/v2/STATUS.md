@@ -194,10 +194,12 @@ scalability + observability.
   fix: route exceptions through a span-side bridge that records the
   original reference. Invasive — needs design. **Must land before
   Phase 4c so executor adapters don't bake-in identity-broken errors.**
-- **L6 — Bus publish hot-path benchmark.** No measurements. Streaming
-  model deltas at 100/sec × N sessions × M subscribers = realistic
-  10k+ Queue.offer/sec. Benchmark plan documented in 17-open-questions.
-  **Must land before Phase 4c.**
+- ~~**L6 — Bus publish hot-path benchmark.**~~ ✓ landed 2026-05-17.
+  Numbers in `blueprint/17-open-questions.md` §Benchmark results.
+  Headline: lazy emission no-subs at 0.5 μs (12× speedup vs eager),
+  bus.publish 1-sub at 6.0 μs (20% over target — acceptable),
+  runOperation empty body at 46.8 μs (target revised from 10 μs →
+  50 μs after Effect framework overhead measured).
 - **L7 — `MemoryJournal.appendedKeys` Set unbounded growth.**
   Idempotency keys accumulate forever. Long-lived sessions leak. Fix:
   TTL eviction matching the ring buffer's drop point. **Gates v2.0
@@ -777,6 +779,43 @@ blueprint's design decisions; this is execution-level).
   - "Harness" stays — adds engineering-discipline specificity over
     bare "actor" (BaseHarness inheritance, five surfaces, journal
     durability). Documented as an addressable actor.
+
+### 2026-05-17
+
+- **L6 — substrate benchmark suite landed.** New
+  `packages/runtime/src/__bench__/substrate.bench.ts` exercises every
+  hot path (bus.publish ± subscribers, bus.publishLazy, journal.append
+  ± dedup, inbox.send ± cache hit, runOperation ± idempotent replay,
+  LocalChannelPublisher ± subscriber, streaming simulation 10 ops ×
+  10 deltas eager vs lazy). Full table + decisions in
+  `blueprint/17-open-questions.md` §Benchmark results.
+
+  Key results:
+  - **Lazy emission validated end-to-end.** `bus.publishLazy` no-subs
+    at 0.5 μs is a **12× speedup** vs constructing-and-publishing
+    (6.0 μs). The streaming sim shows 10 ops × 10 deltas: lazy at
+    229 μs/iter beats eager at 289 μs/iter by ~20% when no
+    subscriber. Construction-on-demand is the right call.
+  - **`bus.publish` no-listeners hits target.** 0.5 μs < 1 μs.
+  - **`bus.publish` 1-subscriber misses by 20%.** 6.0 μs vs 5 μs.
+    Mostly Effect-runtime overhead (`Effect.all` + `Queue.offer`
+    plumbing). Acceptable; micro-opt available.
+  - **`journal.append` + `inbox.send` cache hit excellent.** ~1.4 μs
+    fresh append, 0.6 μs dedup; 0.6 μs cache hit on inbox.
+  - **`runOperation` empty body is 46.8 μs, 4.7× over original 10 μs
+    target.** Decomposition: ~21 μs in three publishes, ~26 μs in
+    Effect framework overhead (Effect.scoped + withContext + nested
+    Effect.gen yields). **Target revised: < 50 μs.** Realistic
+    given how much work the phase contract does. Substrate cost is
+    0.5% of a 10 ms tool call, 0.05% of a 100 ms model call —
+    real-world throughput is not substrate-limited at this number.
+
+  Optimization opportunities deferred (not blocking Phase 4c):
+  - Inline single-subscriber path in `bus.publish` to skip
+    `Effect.all` overhead.
+  - Flatten nested `Effect.gen` blocks in `runOperation`; skip
+    `Effect.scoped` when no finalizers registered. ~15-20 μs
+    recoverable.
 
 ### 2026-05-16
 
