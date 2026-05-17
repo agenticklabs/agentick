@@ -1,5 +1,14 @@
 # @agentick/core
 
+## 0.14.66
+
+### Patch Changes
+
+- 35d7370: Export missing message hooks
+  - @agentick/kernel@0.14.66
+  - @agentick/shared@0.14.66
+  - @agentick/mcp@0.14.66
+
 ## 0.14.65
 
 ### Patch Changes
