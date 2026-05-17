@@ -153,7 +153,7 @@ export interface HandlerResolver {
 // Harness construction options
 // ============================================================================
 
-import type { ToolRegistration } from "@agentick/spec";
+import type { ChannelPublisher, ToolRegistration } from "@agentick/spec";
 
 export interface ToolExecutorHarnessOptions {
   /**
@@ -177,4 +177,17 @@ export interface ToolExecutorHarnessOptions {
    * caller for timing-out).
    */
   readonly defaultTimeoutMs?: number;
+
+  /**
+   * Optional channel publisher. When set, `ctx.emit(seed)` calls from
+   * tool handlers route through this publisher — assigning sequence,
+   * dispatching to the bus, eventually persisting in the session
+   * harness's channel store when one is wired.
+   *
+   * When omitted (e.g., in tests or environments without channel
+   * routing), `ctx.emit` is a no-op: seeds are dropped silently. This
+   * preserves Phase-4a.4's tolerance for incomplete wiring; the
+   * session harness (Phase 4e) wires the publisher per-session.
+   */
+  readonly channelPublisher?: ChannelPublisher;
 }

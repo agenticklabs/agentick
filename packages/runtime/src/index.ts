@@ -15,6 +15,10 @@ export { MemoryJournal } from "./substrate/memory-journal.js";
 export { LocalEventBus } from "./substrate/local-event-bus.js";
 export { LocalInbox } from "./substrate/local-inbox.js";
 export {
+  LocalChannelPublisher,
+  type LocalChannelPublisherOptions,
+} from "./substrate/local-channel-publisher.js";
+export {
   BaseHarness,
   HandlerRegistry,
   MiddlewareChain,

@@ -228,6 +228,62 @@ async function scenarioDispatchFailure(s: Substrate): Promise<void> {
 }
 
 /**
+ * Subscribe to a channel before dispatching a streaming tool. The tool
+ * emits progress updates via `ctx.emit({ name: "session:channel:..." })`;
+ * the LocalChannelPublisher assigns sequence numbers and routes through
+ * the bus.
+ *
+ * When the session harness lands (Phase 4e), the same code works
+ * unchanged — the publisher just becomes the session's, with retention
+ * + replay-from-offset added on top.
+ */
+async function scenarioChannelStreaming(s: Substrate): Promise<void> {
+  console.log(heading("4d. Channel streaming — ctx.emit → ChannelPublisher → bus"));
+
+  type Progress = {
+    step: number;
+    totalSteps: number;
+    percent: number;
+    message: string;
+  };
+
+  const fiber = Effect.runFork(
+    Stream.runCollect(
+      Stream.take(
+        s.bus.subscribe({
+          surface: "session",
+          name: { exact: "session:channel:tool-progress" },
+        }),
+        3,
+      ),
+    ),
+  );
+  await new Promise((r) => setImmediate(r));
+
+  await s.tools.dispatch({
+    toolCallId: "tc-progress-1",
+    name: "progress",
+    input: { steps: 3 },
+    context: { via: "model", sessionId: SESSION_ID, executionId: "exec-1" },
+  } satisfies DispatchInput);
+
+  const chunk = await Effect.runPromise(Fiber.join(fiber));
+  for (const ev of Chunk.toReadonlyArray(chunk)) {
+    const channelEv = ev as typeof ev & {
+      channelSequence: number;
+      payload: Progress;
+    };
+    console.log(
+      line(
+        `channel#${channelEv.channelSequence}: ` +
+          `${channelEv.payload.percent}% — ${channelEv.payload.message}`,
+      ),
+    );
+  }
+  console.log(line(`publisher current sequence: ${s.channels.sequenceOf("tool-progress")}`));
+}
+
+/**
  * Subscribe to the bus before running an operation, then collect the
  * envelopes that flowed through. Both reconciler + tool harnesses
  * publish on the same bus.
@@ -327,6 +383,7 @@ async function main(): Promise<void> {
     await scenarioDispatchHappyPath(s);
     await scenarioDispatchAbort(s);
     await scenarioDispatchFailure(s);
+    await scenarioChannelStreaming(s);
     await scenarioBusSubscription(s);
     await scenarioJournalAudit(s);
     await scenarioInboxTell(s);

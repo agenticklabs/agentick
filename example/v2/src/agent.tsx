@@ -80,6 +80,18 @@ export function SupportAgent() {
       />
 
       <Tool
+        id="t.progress"
+        name="progress"
+        description="Emit channel events as it works — demonstrates ctx.emit + LocalChannelPublisher"
+        inputSchema={{
+          type: "object",
+          properties: { steps: { type: "number", default: 3 } },
+        }}
+        exposure={["model"]}
+        handlerRef="handlers/progress"
+      />
+
+      <Tool
         id="t.explode"
         name="explode"
         description="Always throws — used to demonstrate terminal:failed envelopes"

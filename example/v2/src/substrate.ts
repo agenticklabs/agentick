@@ -8,7 +8,12 @@
  * — invisible at the surface.
  */
 
-import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
+import {
+  LocalChannelPublisher,
+  LocalEventBus,
+  LocalInbox,
+  MemoryJournal,
+} from "@agentick/runtime";
 import { ReconcilerHarness, stubBridges } from "@agentick/reconciler-react";
 import type { HookBridges } from "@agentick/spec";
 import {
@@ -22,6 +27,7 @@ export interface Substrate {
   readonly journal: MemoryJournal;
   readonly bus: LocalEventBus;
   readonly inbox: LocalInbox;
+  readonly channels: LocalChannelPublisher;
   readonly reconciler: ReconcilerHarness;
   readonly tools: ToolExecutorHarness;
   readonly handlerResolver: InMemoryHandlerResolver;
@@ -33,6 +39,13 @@ export async function buildSubstrate(sessionId: string): Promise<Substrate> {
   const bus = new LocalEventBus();
   const inbox = new LocalInbox();
 
+  // Channel publisher — routes tool ctx.emit() seeds through the bus
+  // with monotonic per-channel sequence numbers. When the session
+  // harness lands (Phase 4e), it implements ChannelPublisher itself
+  // (per-session sequencing + retention + replay). Today's local
+  // impl is the seam.
+  const channels = new LocalChannelPublisher(bus, { defaultScope: { sessionId } });
+
   // Reconciler harness — owns mount/renderTree/renderToString for JSX
   // agent definitions. Scope id is its address suffix —
   // `reconciler:{scopeId}` on the inbox.
@@ -42,6 +55,7 @@ export async function buildSubstrate(sessionId: string): Promise<Substrate> {
   const handlerResolver = buildHandlerResolver();
   const tools = new ToolExecutorHarness("example", journal, bus, inbox, {
     handlerResolver,
+    channelPublisher: channels,
   });
 
   // Wait for both harnesses to finish their inbox registrations.
@@ -52,5 +66,5 @@ export async function buildSubstrate(sessionId: string): Promise<Substrate> {
   // backed bridges that route timeline reads to the persisted log.
   const bridges = stubBridges({ sessionId });
 
-  return { journal, bus, inbox, reconciler, tools, handlerResolver, bridges };
+  return { journal, bus, inbox, channels, reconciler, tools, handlerResolver, bridges };
 }

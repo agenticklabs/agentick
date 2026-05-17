@@ -18,6 +18,7 @@
 export * from "./journal.js";
 export * from "./bus.js";
 export * from "./inbox.js";
+export * from "./channels.js";
 export * from "./reconciler.js";
 export * from "./hook-bridges.js";
 export * from "./tool-executor.js";

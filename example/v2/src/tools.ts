@@ -83,6 +83,28 @@ export function buildHandlerResolver(): InMemoryHandlerResolver {
     }),
   );
 
+  // Handler that emits channel events as it works — progress updates
+  // for streaming UI. ctx.emit routes through the ChannelPublisher
+  // wired on the harness; subscribers see the events on the bus with
+  // monotonic per-channel sequence numbers.
+  resolver.register("handlers/progress", async (input, deps) => {
+    const steps = (input as { steps?: number }).steps ?? 3;
+    for (let i = 1; i <= steps; i++) {
+      deps.ctx.emit({
+        name: "session:channel:tool-progress",
+        payload: {
+          step: i,
+          totalSteps: steps,
+          percent: Math.round((i / steps) * 100),
+          message: `working on step ${i} of ${steps}…`,
+        },
+      });
+      // Yield a microtask so the bus subscriber can drain between emits.
+      await new Promise((r) => setImmediate(r));
+    }
+    return [{ type: "text", text: `completed ${steps} steps` } satisfies ContentBlock];
+  });
+
   // Handler that uses ctx.signal — exercise abort plumbing.
   resolver.register("handlers/slow", async (input, deps) => {
     const ms = ((input as { ms?: number }).ms ?? 1000);

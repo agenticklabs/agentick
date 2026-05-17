@@ -25,6 +25,7 @@ import { runHarnessProtocol, ulid } from "@agentick/runtime";
 import { BaseHarness } from "@agentick/runtime";
 import type {
   AbortInput,
+  ChannelPublisher,
   ContentBlock,
   DispatchInput,
   DispatchResult,
@@ -66,6 +67,7 @@ export class ToolExecutorHarness
   private readonly inFlight = new Map<string, InFlightEntry>();
   private readonly stateStore = new Map<string, unknown>();
   private readonly defaultTimeoutMs?: number;
+  private readonly channelPublisher?: ChannelPublisher;
 
   constructor(
     scopeId: string,
@@ -77,6 +79,7 @@ export class ToolExecutorHarness
     super("tool", scopeId, journal, bus, inbox);
     this.handlerResolver = options.handlerResolver;
     this.defaultTimeoutMs = options.defaultTimeoutMs;
+    this.channelPublisher = options.channelPublisher;
 
     // Eager registrations applied synchronously so callers can dispatch
     // immediately after `await harness.ready`.
@@ -271,6 +274,8 @@ export class ToolExecutorHarness
       }
 
       const channelEmits: HandlerChannelSeed[] = [];
+      const publisher = this.channelPublisher;
+      const opIdForCausality = input.opId ?? `tool:dispatch:${input.toolCallId}`;
       const ctx: ToolHandlerCtx = {
         toolCallId: input.toolCallId,
         ...(input.context.sessionId !== undefined ? { sessionId: input.context.sessionId } : {}),
@@ -283,7 +288,29 @@ export class ToolExecutorHarness
           this.stateStore.set(key, value);
         },
         emit: (seed: HandlerChannelSeed): void => {
+          // Always retain seeds for observability tests / inspection;
+          // route to the publisher when one is wired.
           channelEmits.push(seed);
+          if (publisher) {
+            const channel = seed.name.replace(/^session:channel:/, "");
+            Effect.runFork(
+              publisher.publish({
+                channel,
+                payload: seed.payload,
+                ...(seed.metadata !== undefined ? { metadata: seed.metadata } : {}),
+                parentOpId: opIdForCausality,
+                scope: {
+                  ...(input.context.sessionId !== undefined
+                    ? { sessionId: input.context.sessionId }
+                    : {}),
+                  ...(input.context.executionId !== undefined
+                    ? { executionId: input.context.executionId }
+                    : {}),
+                  ...(input.context.tickId !== undefined ? { tickId: input.context.tickId } : {}),
+                },
+              }),
+            );
+          }
         },
       };
 
