@@ -13,7 +13,7 @@
  */
 
 import type { Effect, Stream } from "effect";
-import type { ProtocolEvent, EventQuery } from "../data/events.js";
+import type { EventPhase, EventSurface, ProtocolEvent, EventQuery } from "../data/events.js";
 
 /**
  * Bounded buffer overflow strategy for subscriber streams.
@@ -30,6 +30,24 @@ export interface SubscribeOptions {
 }
 
 /**
+ * Match-key fragment used by `hasSubscriber` and `publishLazy` to
+ * decide whether anyone wants an envelope BEFORE constructing it.
+ *
+ * The fields here are the cheapest-to-compute subset of `ProtocolEvent`
+ * — enough for the bus's subscriber index to short-circuit
+ * construction. Implementations MAY use less than the full key (e.g.,
+ * conservatively returning `true` from `hasSubscriber` if only
+ * `surface` is supplied), but they MUST NEVER return `false` for a
+ * key that an active subscriber's query would match. False negatives
+ * are correctness bugs; false positives are paper-cut over-builds.
+ */
+export interface EventKey {
+  readonly surface: EventSurface;
+  readonly name: string;
+  readonly phase?: EventPhase;
+}
+
+/**
  * The bus protocol.
  *
  * Cost when no subscribers match: zero. Lazy fan-out is structural.
@@ -43,6 +61,42 @@ export interface EventBus {
    * slow subscribers — each subscriber has its own bounded buffer.
    */
   publish(event: ProtocolEvent): Effect.Effect<void, never, never>;
+
+  /**
+   * Construction-on-demand publish. The bus probes its subscriber
+   * index against `key` first; only invokes `build` (and routes the
+   * resulting envelope) if at least one subscriber's query could
+   * match. When nobody is listening, the cost is one map lookup.
+   *
+   * This is the "enabled" pattern from the Rust `tracing` crate adapted
+   * to typed envelopes: a hot publisher (streaming model tokens, dense
+   * sandbox stdout, etc.) avoids paying envelope-construction cost when
+   * no observer wants the result. Always-journaled phases SHOULD
+   * continue to use `publish` directly — the journal is not a bus
+   * subscriber and `hasSubscriber` doesn't account for it.
+   */
+  publishLazy(
+    key: EventKey,
+    build: () => ProtocolEvent,
+  ): Effect.Effect<void, never, never>;
+
+  /**
+   * Probe whether any active subscriber's query could match an
+   * envelope with the supplied key. O(1) amortized via the bus's
+   * internal subscriber index.
+   *
+   * Contract:
+   *   - false → no subscriber matches; publishing is safe to skip.
+   *   - true  → at least one subscriber's query MAY match; the
+   *             publisher should construct and call `publish`.
+   *             Implementations MAY return `true` conservatively when
+   *             the query system cannot rule a match out from the key
+   *             alone.
+   *
+   * Implementations MUST NEVER return `false` for a key an active
+   * subscriber's query would match — that is a correctness bug.
+   */
+  hasSubscriber(key: EventKey): boolean;
 
   /**
    * Subscribe to events matching a query.

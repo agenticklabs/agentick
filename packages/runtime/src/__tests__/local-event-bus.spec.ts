@@ -49,6 +49,80 @@ describe("LocalEventBus — implementation specifics", () => {
   // variant per overflow setting.
 });
 
+describe("LocalEventBus — subscriber index + lazy emission", () => {
+  it("hasSubscriber returns false when no subscriber exists", () => {
+    const bus = new LocalEventBus();
+    expect(bus.hasSubscriber({ surface: "tool", name: "tool:x" })).toBe(false);
+  });
+
+  it("hasSubscriber returns true for surface that has a subscriber", async () => {
+    const bus = new LocalEventBus();
+    const fiber = Effect.runFork(Stream.runDrain(bus.subscribe({ surface: "tool" })));
+    await new Promise((r) => setImmediate(r));
+    expect(bus.hasSubscriber({ surface: "tool", name: "tool:x" })).toBe(true);
+    expect(bus.hasSubscriber({ surface: "session", name: "session:x" })).toBe(false);
+    await Effect.runPromise(Fiber.interrupt(fiber));
+    await new Promise((r) => setImmediate(r));
+    expect(bus.hasSubscriber({ surface: "tool", name: "tool:x" })).toBe(false);
+  });
+
+  it("hasSubscriber returns true on any surface when a broad subscriber is attached", async () => {
+    const bus = new LocalEventBus();
+    const fiber = Effect.runFork(Stream.runDrain(bus.subscribe({})));
+    await new Promise((r) => setImmediate(r));
+    expect(bus.hasSubscriber({ surface: "tool", name: "tool:x" })).toBe(true);
+    expect(bus.hasSubscriber({ surface: "session", name: "session:x" })).toBe(true);
+    expect(bus.hasSubscriber({ surface: "reconciler", name: "reconciler:x" })).toBe(true);
+    await Effect.runPromise(Fiber.interrupt(fiber));
+  });
+
+  it("publishLazy skips the build thunk when no subscriber matches", async () => {
+    const bus = new LocalEventBus();
+    let built = 0;
+    await Effect.runPromise(
+      bus.publishLazy({ surface: "tool", name: "tool:dispatch", phase: "delta" }, () => {
+        built++;
+        return ev("x", { surface: "tool", name: "tool:dispatch" });
+      }),
+    );
+    expect(built).toBe(0);
+  });
+
+  it("publishLazy invokes the build thunk once when a subscriber matches", async () => {
+    const bus = new LocalEventBus();
+    const fiber = Effect.runFork(
+      Stream.runCollect(Stream.take(bus.subscribe({ surface: "tool" }), 1)),
+    );
+    await new Promise((r) => setImmediate(r));
+    let built = 0;
+    await Effect.runPromise(
+      bus.publishLazy({ surface: "tool", name: "tool:dispatch", phase: "delta" }, () => {
+        built++;
+        return ev("x", { surface: "tool", name: "tool:dispatch" });
+      }),
+    );
+    const chunk = await Effect.runPromise(Fiber.join(fiber));
+    expect(built).toBe(1);
+    expect(Array.from(Chunk.toReadonlyArray(chunk)).map((e) => e.id)).toEqual(["x"]);
+  });
+
+  it("subscriber index tracks attach + detach symmetrically", async () => {
+    const bus = new LocalEventBus();
+    expect(bus.hasSubscriber({ surface: "tool", name: "x" })).toBe(false);
+    const f1 = Effect.runFork(Stream.runDrain(bus.subscribe({ surface: "tool" })));
+    const f2 = Effect.runFork(Stream.runDrain(bus.subscribe({ surface: "tool" })));
+    await new Promise((r) => setImmediate(r));
+    expect(bus.hasSubscriber({ surface: "tool", name: "x" })).toBe(true);
+    await Effect.runPromise(Fiber.interrupt(f1));
+    await new Promise((r) => setImmediate(r));
+    // Still one subscriber on the surface.
+    expect(bus.hasSubscriber({ surface: "tool", name: "x" })).toBe(true);
+    await Effect.runPromise(Fiber.interrupt(f2));
+    await new Promise((r) => setImmediate(r));
+    expect(bus.hasSubscriber({ surface: "tool", name: "x" })).toBe(false);
+  });
+});
+
 function ev(id: string, partial: Partial<ProtocolEvent> = {}): ProtocolEvent {
   return {
     id,

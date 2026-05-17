@@ -383,7 +383,16 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface> {
 
   // ──────── ⑤ Events (light path) ────────
 
-  /** Emit a discrete event. No phase contract, no idempotency. */
+  /**
+   * Emit a discrete event. No phase contract, no idempotency.
+   *
+   * The envelope construction is unconditional because discrete events
+   * may be journaled (per policy `alwaysJournal` / per-name overrides).
+   * For surface-scoped notifications with no journaling expectation,
+   * concrete harnesses should call `emitLazy` instead — it probes the
+   * bus subscriber index and skips envelope construction when nobody
+   * is listening.
+   */
   protected emit(
     args: Omit<ProtocolEvent, "id" | "timestamp" | "surface"> & { readonly id?: string },
   ): Effect.Effect<void, JournalError, never> {
@@ -396,12 +405,82 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface> {
     return this.publish(envelope);
   }
 
-  /** Streaming progress within an active operation. */
+  /**
+   * Construction-on-demand variant of `emit`. The `build` thunk runs
+   * ONLY if the policy decision routes to a journal write OR the bus
+   * has at least one subscriber that could match `key`. For pure
+   * bus-only notifications with no journaling expectation, this is
+   * the cheap path — the cost is one map lookup when nobody is
+   * listening.
+   *
+   * Always-journal phases still require an envelope, so we invoke the
+   * thunk regardless. Bus-only phases skip the thunk when
+   * `bus.hasSubscriber` is false.
+   */
+  protected emitLazy(
+    key: { readonly name: string; readonly phase: EventPhase },
+    build: () => Omit<ProtocolEvent, "id" | "timestamp" | "surface"> & {
+      readonly id?: string;
+    },
+  ): Effect.Effect<void, JournalError, never> {
+    const decision = this.decideFromShape(key.name, key.phase);
+    if (decision === "drop") return Effect.void;
+    if (decision === "always" || decision === "journal") {
+      // Journal needs the envelope regardless of subscribers.
+      return this.emit(build());
+    }
+    // bus-only — probe the subscriber index first.
+    if (!this.bus.hasSubscriber({ surface: this.surface, name: key.name, phase: key.phase })) {
+      return Effect.void;
+    }
+    return this.emit(build());
+  }
+
+  /**
+   * Streaming progress within an active operation. Delta envelopes are
+   * by default bus-only (per `DEFAULT_JOURNALING_POLICY`) — they don't
+   * hit the journal unless an override flips the policy. The lazy
+   * variant `emitDeltaLazy` is the recommended path for hot streams
+   * (model tokens, dense sandbox output) where the delta payload may
+   * cost meaningful CPU to construct.
+   */
   protected emitDelta(
     op: Operation<unknown, unknown, unknown>,
     payload: unknown,
   ): Effect.Effect<void, JournalError, never> {
     return this.publish(this.makeEvent(op, "delta", op.scope ?? {}, { payload }));
+  }
+
+  /**
+   * Construction-on-demand delta emission. The `buildPayload` thunk
+   * runs only when the policy demands journaling OR a subscriber wants
+   * the envelope. Hot publishers (streaming model tokens, dense
+   * sandbox stdout) should prefer this form so they don't pay payload
+   * construction when no observer is listening.
+   */
+  protected emitDeltaLazy(
+    op: Operation<unknown, unknown, unknown>,
+    buildPayload: () => unknown,
+  ): Effect.Effect<void, JournalError, never> {
+    const decision = this.decideFromShape(op.name, "delta");
+    if (decision === "drop") return Effect.void;
+    if (decision === "always" || decision === "journal") {
+      return this.publish(
+        this.makeEvent(op, "delta", op.scope ?? {}, { payload: buildPayload() }),
+      );
+    }
+    if (
+      !this.bus.hasSubscriber({
+        surface: op.surface ?? this.surface,
+        name: op.name,
+        phase: "delta",
+      })
+    ) {
+      return Effect.void;
+    }
+    return this.publish(
+      this.makeEvent(op, "delta", op.scope ?? {}, { payload: buildPayload() }),
+    );
   }
 
   // ──────── ② Inbox dispatch ────────
@@ -562,14 +641,27 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface> {
   }
 
   private decide(envelope: ProtocolEvent): "always" | "journal" | "bus-only" | "drop" {
+    return this.decideFromShape(envelope.name, envelope.phase);
+  }
+
+  /**
+   * Policy routing keyed by the cheapest-to-compute envelope subset
+   * (name + phase). Lets `emitLazy` / `emitDeltaLazy` decide whether
+   * to construct the envelope at all before paying ULID + timestamp +
+   * payload cost.
+   */
+  private decideFromShape(
+    name: string,
+    phase: EventPhase,
+  ): "always" | "journal" | "bus-only" | "drop" {
     const override = this.policy.override
-      ? matchOverride(envelope.name, this.policy.override)
+      ? matchOverride(name, this.policy.override)
       : undefined;
     if (override === "drop") return "drop";
     if (override === "always") return "always";
     if (override === "bus-only") return "bus-only";
-    if (this.policy.alwaysJournal.includes(envelope.phase)) return "journal";
-    if (this.policy.busOnly.includes(envelope.phase)) return "bus-only";
+    if (this.policy.alwaysJournal.includes(phase)) return "journal";
+    if (this.policy.busOnly.includes(phase)) return "bus-only";
     return "bus-only";
   }
 }
