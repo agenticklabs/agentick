@@ -24,3 +24,4 @@ export * from "./hook-bridges.js";
 export * from "./tool-executor.js";
 export * from "./executor.js";
 export * from "./loop-executor.js";
+export * from "./session-harness.js";

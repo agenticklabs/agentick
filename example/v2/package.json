@@ -13,6 +13,7 @@
     "@agentick/loop-executor": "workspace:*",
     "@agentick/reconciler-react": "workspace:*",
     "@agentick/runtime": "workspace:*",
+    "@agentick/session": "workspace:*",
     "@agentick/spec": "workspace:*",
     "@agentick/tool-executor": "workspace:*",
     "effect": "^3.21.2",

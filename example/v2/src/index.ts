@@ -433,6 +433,57 @@ async function scenarioJournalAudit(s: Substrate): Promise<void> {
 }
 
 /**
+ * The framework end-to-end: `session.send({ messages })` runs the full
+ * agent. The session owns its own mount, provides bridges backed by
+ * session state, delegates to the loop executor, and resolves with a
+ * fully-assembled `SendResult` carrying the response text + tool
+ * outputs + usage.
+ *
+ * This is what application authors actually call. Everything above
+ * (reconciler, executor, tool-executor, loop, channel publisher) is
+ * substrate — the session wraps it.
+ */
+async function scenarioSessionSend(s: Substrate): Promise<void> {
+  console.log(heading("4f. Session — session.send({ messages })"));
+
+  const handle = await s.session.send({
+    messages: [
+      { role: "user", content: "What is 47 times 23?" },
+    ],
+  });
+  console.log(line(`executionId: ${handle.executionId}`));
+
+  const result = await handle.result;
+  console.log(line(`response: ${result.response}`));
+  console.log(line(`ticks: ${result.ticks}`));
+  console.log(line(`stopReason: ${result.stopReason}`));
+  console.log(
+    line(
+      `usage: in=${result.usage.inputTokens} out=${result.usage.outputTokens} total=${result.usage.totalTokens}`,
+    ),
+  );
+  console.log(line(`tool dispatches: ${result.toolResults.length}`));
+
+  console.log(sub("session.timeline()"));
+  for (const entry of s.session.timeline()) {
+    if (entry.kind !== "message") continue;
+    const m = entry.message;
+    const text = m.content
+      .filter((b): b is { type: "text"; text: string } => b.type === "text")
+      .map((b) => b.text)
+      .join("");
+    const toolUse = m.content.find((b) => b.type === "tool_use");
+    const toolResult = m.content.find((b) => b.type === "tool_result");
+    const tag = toolUse
+      ? `[tool_use ${(toolUse as { name: string }).name}]`
+      : toolResult
+        ? `[tool_result]`
+        : "";
+    console.log(line(`  · ${m.role.padEnd(9)} ${tag} ${text}`.trimEnd()));
+  }
+}
+
+/**
  * Send an inbox message — the reconciler accepts `recompile`, `unmount`,
  * `invalidate`. The harness is an addressable actor at
  * `reconciler:{scopeId}` — the same call shape works once a cluster
@@ -475,6 +526,7 @@ async function main(): Promise<void> {
     await scenarioDispatchFailure(s);
     await scenarioChannelStreaming(s);
     await scenarioLoopExecution(s, tree);
+    await scenarioSessionSend(s);
     await scenarioBusSubscription(s);
     await scenarioJournalAudit(s);
     await scenarioInboxTell(s);

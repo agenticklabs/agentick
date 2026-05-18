@@ -8,6 +8,8 @@
  * — invisible at the surface.
  */
 
+import React from "react";
+
 import { MockLanguageModelExecutor } from "@agentick/executor";
 import {
   LoopExecutorHarness,
@@ -20,12 +22,14 @@ import {
   MemoryJournal,
 } from "@agentick/runtime";
 import { ReconcilerHarness, stubBridges } from "@agentick/reconciler-react";
+import { SessionHarness } from "@agentick/session";
 import type { HookBridges } from "@agentick/spec";
 import {
   InMemoryHandlerResolver,
   ToolExecutorHarness,
 } from "@agentick/tool-executor";
 
+import { SupportAgent } from "./agent.js";
 import { buildHandlerResolver } from "./tools.js";
 
 export interface Substrate {
@@ -38,6 +42,7 @@ export interface Substrate {
   readonly executor: MockLanguageModelExecutor;
   readonly loop: LoopExecutorHarness;
   readonly stateApplicator: NoopStateApplicator;
+  readonly session: SessionHarness;
   readonly handlerResolver: InMemoryHandlerResolver;
   readonly bridges: HookBridges;
 }
@@ -138,12 +143,94 @@ export async function buildSubstrate(sessionId: string): Promise<Substrate> {
   // what was applied).
   const stateApplicator = new NoopStateApplicator();
 
-  // Wait for all harnesses to finish their inbox registrations.
-  await Promise.all([reconciler.ready, tools.ready, executor.ready, loop.ready]);
+  // Session-scoped executor — independent scripted sequence so the
+  // session.send() demo isn't drained by the earlier loop scenario.
+  const sessionExecutor = new MockLanguageModelExecutor(
+    "session-example",
+    journal,
+    bus,
+    inbox,
+    {
+      scripted: [
+        {
+          result: {
+            specVersion: "2026-05-08",
+            output: [
+              {
+                type: "tool_use",
+                toolUseId: "tc-session-calc",
+                name: "calculator",
+                input: { expression: "47 * 23" },
+              },
+            ],
+            stopReason: "tool_use",
+            toolCalls: [
+              {
+                id: "tc-session-calc",
+                name: "calculator",
+                input: { expression: "47 * 23" },
+              },
+            ],
+            usage: { inputTokens: 15, outputTokens: 8, totalTokens: 23 },
+          },
+          stream: [
+            { kind: "content_delta", delta: "Let me compute that — " },
+            { kind: "content_delta", delta: "calling calculator." },
+          ],
+        },
+        {
+          result: {
+            specVersion: "2026-05-08",
+            output: [
+              { type: "text", text: "47 × 23 = 1081." },
+            ],
+            stopReason: "end",
+            usage: { inputTokens: 22, outputTokens: 9, totalTokens: 31 },
+          },
+        },
+      ],
+    },
+  );
 
-  // Stub bridges for the reconciler — in-memory data cache, knob store,
-  // session metadata. A real session harness (Phase 4e) will supply
-  // backed bridges that route timeline reads to the persisted log.
+  // Session harness — the integration site. Mounts the SupportAgent
+  // into its own mountId inside the shared reconciler, provides
+  // HookBridges backed by session state (TimelineBridge reads the
+  // accumulated timeline; KnobBridge backed by an in-memory map),
+  // and exposes `session.send({ messages })` as the user-facing
+  // entry point.
+  const session = new SessionHarness(journal, bus, inbox, {
+    sessionId,
+    agent: React.createElement(SupportAgent),
+    reconciler,
+    loop,
+    executor: sessionExecutor,
+    toolExecutor: tools,
+    target: {
+      kind: "language-model",
+      provider: "mock",
+      modelId: "mock-v1",
+      capabilities: { supportsTools: true, supportsStreaming: true },
+    },
+    defaultMaxTicks: 4,
+  });
+
+  // Wait for all harnesses to finish their inbox registrations + the
+  // session's own mount to settle.
+  await Promise.all([
+    reconciler.ready,
+    tools.ready,
+    executor.ready,
+    sessionExecutor.ready,
+    loop.ready,
+    session.ready,
+  ]);
+  await session.mountReady;
+
+  // Stub bridges for the standalone reconciler scenarios — in-memory
+  // data cache, knob store, session metadata. The session harness
+  // provides its OWN bridges to the reconciler at mount time; these
+  // bridges are only used by the earlier example scenarios that mount
+  // a separate JSX tree under `MOUNT_ID`.
   const bridges = stubBridges({ sessionId });
 
   return {
@@ -156,6 +243,7 @@ export async function buildSubstrate(sessionId: string): Promise<Substrate> {
     executor,
     loop,
     stateApplicator,
+    session,
     handlerResolver,
     bridges,
   };

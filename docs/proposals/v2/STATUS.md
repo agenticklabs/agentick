@@ -93,7 +93,30 @@ Phase 4  ■ in progress — REMAINING HARNESSES
                 tick 1 returns tool_use → loop dispatches calculator
                 → tick 2 returns final text → terminal "end". Streaming
                 deltas observed on the bus. 2 ticks, 1 tool dispatch.
-         ✗ 4e   Session harness
+         ✓ 4e.1 SessionHarnessProtocol spec types (minimum surface:
+                send, close, timeline, snapshot, StateApplicator
+                methods, notifyLifecycle). SessionMessage, TimelineEntry,
+                SendInput, SendResult, SessionExecutionHandle,
+                SessionSnapshot, SessionError taxonomy.
+         ✗ 4e.2 runSessionConformance suite (deferred — impl proven
+                via example end-to-end)
+         ✓ 4e.3 @agentick/session package + SessionHarness:
+                  - SessionStateStore — in-memory timeline + status +
+                    usage + listeners
+                  - session-bridges — HookBridges backed by session
+                    state (TimelineBridge reads accumulated timeline,
+                    KnobBridge in-memory)
+                  - session-execution-handle — AsyncIterable + .result
+                    dual-shape handle
+                  - SessionHarness — owns mount, implements
+                    StateApplicator (real timeline writes), delegates
+                    send() to LoopExecutorHarness
+         ✓ 4e.4 example/v2 session.send({ messages }) — end-to-end:
+                user message → render → executor → tool_use →
+                dispatch calculator → timeline append (assistant +
+                tool result) → render → executor returns final text →
+                stopReason "end". 2 ticks, 1 tool dispatch, timeline
+                with 4 entries.
          ✗ 4f   App harness
 Phase 5  □ Adapters, cluster, gateway
 Phase 6  □ v1 sunset

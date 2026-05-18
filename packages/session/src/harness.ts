@@ -1,0 +1,402 @@
+/**
+ * `SessionHarness` — reference implementation of
+ * `SessionHarnessProtocol`.
+ *
+ * Owns the integration between JSX agent + reconciler + loop executor.
+ * The user-facing entry point: `session.send({ messages })` runs one
+ * agent execution and returns a `SessionExecutionHandle`.
+ *
+ * @see docs/proposals/v2/blueprint/08-session-harness.md
+ */
+
+import { Effect } from "effect";
+import React, { type ReactNode } from "react";
+
+import { BaseHarness, runHarnessProtocol, ulid } from "@agentick/runtime";
+import type { LoopExecutorHarness } from "@agentick/loop-executor";
+import type { ReconcilerHarness } from "@agentick/reconciler-react";
+import type {
+  AppendEntryInput,
+  ApplyExecutorResultInput,
+  ApplyResult,
+  ApplyToolResultsInput,
+  ContentBlock,
+  EventBus,
+  ExecutionTarget,
+  ExecutorProtocol,
+  LanguageModelExecutionResult,
+  MessageEnvelope,
+  MessageHandlerError,
+  MessageInbox,
+  NotifyTickEndInput,
+  Operation,
+  OperationJournal,
+  SendInput,
+  SendMessageInput,
+  SendResult,
+  SessionError,
+  SessionExecutionHandle,
+  SessionHarnessProtocol,
+  SessionSnapshot,
+  StateApplyError,
+  TickEndForwardDecision,
+  TimelineEntry,
+  ToolExecutorProtocol,
+} from "@agentick/spec";
+import { SPEC_VERSION } from "@agentick/spec";
+
+import { buildSessionBridges, type SessionHookBridges } from "./session-bridges.js";
+import { SessionStateStore } from "./session-state.js";
+import { createSessionExecutionHandle } from "./session-execution-handle.js";
+
+// ============================================================================
+// Construction options
+// ============================================================================
+
+export interface SessionHarnessOptions<P = unknown> {
+  /** Stable session id. */
+  readonly sessionId: string;
+  /** The JSX agent element to mount. */
+  readonly agent: ReactNode;
+  /** Initial component props (optional). */
+  readonly props?: P;
+  /** Reconciler harness that owns the JSX tree. */
+  readonly reconciler: ReconcilerHarness;
+  /** Loop executor harness that orchestrates ticks. */
+  readonly loop: LoopExecutorHarness;
+  /** Executor harness for model invocations. */
+  readonly executor: ExecutorProtocol<
+    unknown,
+    unknown,
+    LanguageModelExecutionResult
+  >;
+  /** Tool executor harness for tool dispatch. */
+  readonly toolExecutor: ToolExecutorProtocol;
+  /** Default execution target — overridable per send (later). */
+  readonly target: ExecutionTarget;
+  /** Default per-execution max tick bound. Default: 8. */
+  readonly defaultMaxTicks?: number;
+  /** Optional initial knob values. */
+  readonly initialKnobs?: Readonly<Record<string, unknown>>;
+}
+
+// ============================================================================
+// SessionHarness
+// ============================================================================
+
+export class SessionHarness<P = unknown>
+  extends BaseHarness<"session">
+  implements SessionHarnessProtocol<P>
+{
+  private readonly store: SessionStateStore;
+  private readonly bridges: SessionHookBridges;
+  private readonly mountId: string;
+  private readonly reconciler: ReconcilerHarness;
+  private readonly loop: LoopExecutorHarness;
+  private readonly executor: SessionHarnessOptions<P>["executor"];
+  private readonly toolExecutor: ToolExecutorProtocol;
+  private readonly target: ExecutionTarget;
+  private readonly defaultMaxTicks: number;
+
+  private _closed = false;
+  private _mountReady: Promise<void>;
+  private _currentExecution: Promise<unknown> | null = null;
+
+  constructor(
+    journal: OperationJournal,
+    bus: EventBus,
+    inbox: MessageInbox,
+    options: SessionHarnessOptions<P>,
+  ) {
+    super("session", options.sessionId, journal, bus, inbox);
+    this.store = new SessionStateStore(options.sessionId);
+    this.bridges = buildSessionBridges(this.store);
+    if (options.initialKnobs) {
+      this.bridges.knobs.importSnapshot(options.initialKnobs);
+    }
+    this.reconciler = options.reconciler;
+    this.loop = options.loop;
+    this.executor = options.executor;
+    this.toolExecutor = options.toolExecutor;
+    this.target = options.target;
+    this.defaultMaxTicks = options.defaultMaxTicks ?? 8;
+    this.mountId = `mount:${options.sessionId}`;
+
+    // Wrap the agent so React's reconciler can mount it. The agent is
+    // a ReactNode (element or component output).
+    const element = options.agent;
+
+    // Eagerly mount — the reconciler exposes `.ready` for its own inbox
+    // registration; our mount is awaited via `_mountReady`.
+    this._mountReady = this.reconciler
+      .mount({
+        mountId: this.mountId,
+        sessionId: options.sessionId,
+        element: React.isValidElement(element)
+          ? element
+          : (element as ReactNode),
+        bridges: this.bridges,
+      })
+      .then(() => {});
+  }
+
+  /**
+   * Resolves once the underlying reconciler mount is complete. Most
+   * callers can `await session.ready` (the base inbox ready) and then
+   * `await session.mountReady` if they need to be sure the JSX tree
+   * has rendered at least once.
+   */
+  get mountReady(): Promise<void> {
+    return this._mountReady;
+  }
+
+  // ──────── SessionHarnessProtocol ────────
+
+  send(input: SendInput<P>): Promise<SessionExecutionHandle> {
+    return runHarnessProtocol(
+      Effect.tryPromise({
+        try: () => this.sendBody(input),
+        catch: (cause): SessionError => ({
+          _tag: "ExecutionFailed",
+          cause,
+        }),
+      }),
+    );
+  }
+
+  timeline(): readonly TimelineEntry[] {
+    return this.store.timeline();
+  }
+
+  snapshot(): SessionSnapshot {
+    return {
+      specVersion: SPEC_VERSION,
+      id: this.store.id,
+      status: this.store.status(),
+      currentTick: this.store.currentTick(),
+      timeline: this.store.timeline(),
+      knobs: this.bridges.knobs.exportSnapshot(),
+      usage: this.store.usage(),
+    };
+  }
+
+  async close(): Promise<void> {
+    if (this._closed) return;
+    this._closed = true;
+    this.store.setStatus("closed" as never);
+    // Tear down the reconciler mount; ignore errors during shutdown.
+    try {
+      await this.reconciler.unmount({ mountId: this.mountId });
+    } catch {
+      // shutdown — best effort
+    }
+    await super.close();
+  }
+
+  // ── StateApplicator ──────────────────────────────────────────────
+
+  applyExecutorResult(
+    input: ApplyExecutorResultInput,
+  ): Promise<ApplyResult> {
+    return runHarnessProtocol(
+      Effect.try({
+        try: () => this.applyExecutorResultSync(input),
+        catch: (cause): StateApplyError => ({
+          _tag: "TimelineWriteFailed",
+          cause,
+        }),
+      }),
+    );
+  }
+
+  applyToolResults(input: ApplyToolResultsInput): Promise<ApplyResult> {
+    return runHarnessProtocol(
+      Effect.try({
+        try: () => this.applyToolResultsSync(input),
+        catch: (cause): StateApplyError => ({
+          _tag: "TimelineWriteFailed",
+          cause,
+        }),
+      }),
+    );
+  }
+
+  appendEntry(input: AppendEntryInput): Promise<ApplyResult> {
+    return runHarnessProtocol(
+      Effect.try({
+        try: () => this.appendEntrySync(input),
+        catch: (cause): StateApplyError => ({
+          _tag: "TimelineWriteFailed",
+          cause,
+        }),
+      }),
+    );
+  }
+
+  async notifyLifecycle(
+    _input: NotifyTickEndInput,
+  ): Promise<TickEndForwardDecision> {
+    // Phase 4e default: forward the tick-end to the reconciler so
+    // any `useOnTickEnd` hooks fire, but don't override the loop's
+    // continuation decision yet. Verdict-merge with in-tree hooks
+    // arrives in a follow-on.
+    return undefined;
+  }
+
+  // ──────── inbox dispatch ────────
+
+  protected handleMessage(
+    _msg: MessageEnvelope,
+  ): Effect.Effect<unknown, MessageHandlerError, never> {
+    return Effect.fail({
+      _tag: "HandlerError",
+      cause: new Error("session inbox dispatch not yet wired (Phase 4e+)"),
+    });
+  }
+
+  // ──────── internals ────────
+
+  private async sendBody(input: SendInput<P>): Promise<SessionExecutionHandle> {
+    if (this._closed) {
+      throw { _tag: "SessionClosedError", attemptedCommand: "send" };
+    }
+    if (this._currentExecution !== null) {
+      throw {
+        _tag: "SessionBusyError",
+        reason: "another execution is in flight (single-execution semantics in 4e MVP)",
+      };
+    }
+
+    await this._mountReady;
+
+    // Apply new messages to the timeline.
+    for (const m of input.messages ?? []) this.appendInputMessage(m);
+
+    const executionId = `exec:${ulid()}`;
+    this.store.setCurrentExecutionId(executionId);
+    this.store.setStatus("running");
+
+    const runPromise = this.loop.runExecution({
+      executionId,
+      sessionId: this.store.id,
+      reconciler: this.reconciler,
+      mountId: this.mountId,
+      executor: this.executor,
+      target: this.target,
+      toolExecutor: this.toolExecutor,
+      stateApplicator: {
+        applyExecutorResult: (i) => this.applyExecutorResult(i).then(() => undefined),
+        applyToolResults: (i) => this.applyToolResults(i).then(() => undefined),
+        appendEntry: (i) => this.appendEntry(i).then(() => undefined),
+      },
+      maxTicks: input.maxTicks ?? this.defaultMaxTicks,
+      ...(input.signal !== undefined ? { signal: input.signal } : {}),
+    });
+
+    this._currentExecution = runPromise;
+
+    const resultPromise: Promise<SendResult> = runPromise
+      .then((terminal) => {
+        const result = terminal.result;
+        if (terminal.outcome !== "succeeded" || !result) {
+          throw new Error(
+            `execution ended with outcome=${terminal.outcome}: ${terminal.reason ?? ""}`,
+          );
+        }
+        const response = result.output
+          .filter((b): b is { type: "text"; text: string } => b.type === "text")
+          .map((b) => b.text)
+          .join("");
+        const sendResult: SendResult = {
+          response,
+          output: result.output,
+          toolResults: result.toolResults,
+          usage: result.usage,
+          stopReason: result.stopReason,
+          ticks: result.ticks,
+          executionId,
+        };
+        return sendResult;
+      })
+      .finally(() => {
+        this._currentExecution = null;
+        this.store.setCurrentExecutionId(null);
+        this.store.setStatus("idle");
+      });
+    resultPromise.catch(() => {
+      // Prevent unhandled rejections — handle has its own .result.
+    });
+
+    const handle = createSessionExecutionHandle({
+      executionId,
+      bus: this.bus,
+      resultPromise,
+      abort: async (reason) => {
+        await this.loop.abort({ executionId, ...(reason !== undefined ? { reason } : {}) });
+      },
+    });
+
+    return handle;
+  }
+
+  private applyExecutorResultSync(input: ApplyExecutorResultInput): ApplyResult {
+    const ids: string[] = [];
+    if (input.result.output.length > 0) {
+      ids.push(
+        this.store.appendMessage({
+          role: "assistant",
+          content: input.result.output,
+        }),
+      );
+    }
+    this.store.addUsage(input.result.usage);
+    this.store.bumpTick();
+    return { appendedEntryIds: ids };
+  }
+
+  private applyToolResultsSync(input: ApplyToolResultsInput): ApplyResult {
+    const ids: string[] = [];
+    for (const tr of input.results) {
+      const block: ContentBlock = {
+        type: "tool_result",
+        toolUseId: tr.toolCallId,
+        name: tr.toolName,
+        content: tr.content,
+        ...(tr.succeeded === false ? { isError: true } : {}),
+      };
+      ids.push(
+        this.store.appendMessage({
+          role: "tool",
+          content: [block],
+          toolCallId: tr.toolCallId,
+          name: tr.toolName,
+        }),
+      );
+    }
+    return { appendedEntryIds: ids };
+  }
+
+  private appendEntrySync(input: AppendEntryInput): ApplyResult {
+    const id = this.store.appendMessage({
+      role: input.entry.role,
+      content: input.entry.content,
+    });
+    return { appendedEntryIds: [id] };
+  }
+
+  private appendInputMessage(m: SendMessageInput): void {
+    const content =
+      typeof m.content === "string"
+        ? [{ type: "text" as const, text: m.content }]
+        : m.content;
+    this.store.appendMessage({
+      role: m.role,
+      content,
+      ...(m.metadata !== undefined ? { metadata: m.metadata } : {}),
+    });
+  }
+}
+
+// Resolve unused-import lint for Operation when concrete subclasses
+// add commands that use it.
+void (undefined as unknown as Operation<unknown, unknown, unknown>);

@@ -216,6 +216,9 @@ importers:
       '@agentick/runtime':
         specifier: workspace:*
         version: link:../../packages/runtime
+      '@agentick/session':
+        specifier: workspace:*
+        version: link:../../packages/session
       '@agentick/spec':
         specifier: workspace:*
         version: link:../../packages/spec
@@ -961,6 +964,37 @@ importers:
       typescript:
         specifier: ^5.8.3
         version: 5.9.3
+
+  packages/session:
+    dependencies:
+      '@agentick/loop-executor':
+        specifier: workspace:*
+        version: link:../loop-executor
+      '@agentick/reconciler-react':
+        specifier: workspace:*
+        version: link:../reconciler-react
+      '@agentick/runtime':
+        specifier: workspace:*
+        version: link:../runtime
+      '@agentick/spec':
+        specifier: workspace:*
+        version: link:../spec
+      effect:
+        specifier: ^3.21.2
+        version: 3.21.2
+      react:
+        specifier: ^19.2.4
+        version: 19.2.4
+    devDependencies:
+      '@agentick/executor':
+        specifier: workspace:*
+        version: link:../executor
+      '@agentick/tool-executor':
+        specifier: workspace:*
+        version: link:../tool-executor
+      '@types/react':
+        specifier: ^19.2.5
+        version: 19.2.13
 
   packages/shared:
     dependencies:
