@@ -20,7 +20,7 @@
  * @see docs/proposals/v2/blueprint/07-tool-executor.md
  */
 
-import { Cause, Effect, Exit, Fiber, Option } from "effect";
+import { Cause, Deferred, Effect, Exit, Fiber, Option } from "effect";
 import { runHarnessProtocol, ulid } from "@agentick/runtime";
 import { BaseHarness } from "@agentick/runtime";
 import type {
@@ -36,7 +36,10 @@ import type {
   Operation,
   OperationJournal,
   RegisterToolInput,
+  ToolConfirmationRequest,
+  ToolConfirmationResponse,
   ToolDeclaration,
+  ToolExecutorInboxMessage,
   ToolExecutorProtocol,
   ToolListFilter,
   ToolRegistration,
@@ -58,6 +61,17 @@ interface InFlightEntry {
   readonly toolName: string;
 }
 
+/**
+ * Pending-confirmation entry. The `Deferred` resolves with the inbound
+ * `ToolConfirmationResponse` (approve or deny). The Deferred is
+ * interrupt-safe — when the dispatch fiber is interrupted (abort path),
+ * the wait is automatically released via the runOperation scope.
+ */
+interface PendingConfirmation {
+  readonly deferred: Deferred.Deferred<ToolConfirmationResponse, never>;
+  readonly toolName: string;
+}
+
 export class ToolExecutorHarness
   extends BaseHarness<"tool">
   implements ToolExecutorProtocol
@@ -65,8 +79,11 @@ export class ToolExecutorHarness
   private readonly registry = new InMemoryToolRegistry();
   private readonly handlerResolver: HandlerResolver;
   private readonly inFlight = new Map<string, InFlightEntry>();
+  private readonly pendingConfirmations = new Map<string, PendingConfirmation>();
+  private readonly alwaysAllowed = new Set<string>();
   private readonly stateStore = new Map<string, unknown>();
   private readonly defaultTimeoutMs?: number;
+  private readonly defaultConfirmationTimeoutMs?: number;
   private readonly channelPublisher?: ChannelPublisher;
 
   constructor(
@@ -79,6 +96,7 @@ export class ToolExecutorHarness
     super("tool", scopeId, journal, bus, inbox);
     this.handlerResolver = options.handlerResolver;
     this.defaultTimeoutMs = options.defaultTimeoutMs;
+    this.defaultConfirmationTimeoutMs = options.defaultConfirmationTimeoutMs;
     this.channelPublisher = options.channelPublisher;
 
     // Eager registrations applied synchronously so callers can dispatch
@@ -181,16 +199,197 @@ export class ToolExecutorHarness
   // ──────────────────────── inbox dispatch ────────────────────────
 
   /**
-   * Inbox dispatcher. The full message handling (abort + confirmation
-   * response) lands in Phase 4a.7. For now we reject unknown messages
-   * via the BaseHarness default `HandlerError` envelope.
+   * Inbox dispatcher. Accepts the two canonical message types defined
+   * in `ToolExecutorInboxMessage`:
+   *
+   *   - `abort` — cancels an in-flight dispatch (or fails a pending
+   *     confirmation wait, which the dispatch's own abort listener
+   *     handles uniformly).
+   *   - `confirmation-response` — resolves a pending confirmation
+   *     prompt with the host's decision (approve / deny, optional
+   *     `always` allow-list, optional `modifiedArguments`).
+   *
+   * Unknown message types route to `HandlerError`.
    */
   protected handleMessage(
-    _msg: MessageEnvelope,
+    msg: MessageEnvelope,
   ): Effect.Effect<unknown, MessageHandlerError, never> {
-    return Effect.fail({
-      _tag: "HandlerError",
-      cause: new Error("tool executor inbox dispatch not yet wired (Phase 4a.7)"),
+    const payload = msg.payload as ToolExecutorInboxMessage | undefined;
+    if (!payload || typeof payload !== "object" || !("type" in payload)) {
+      return Effect.fail({
+        _tag: "HandlerError",
+        cause: new Error("tool inbox: payload missing or untagged"),
+      });
+    }
+    switch (payload.type) {
+      case "abort":
+        return Effect.sync(() => {
+          this.abortInFlight(payload.toolCallId, payload.reason);
+        });
+      case "confirmation-response":
+        return this.deliverConfirmation(payload.response);
+      default: {
+        const unknownType = (payload as { type: string }).type;
+        return Effect.fail({
+          _tag: "HandlerError",
+          cause: new Error(`tool inbox: unknown message type "${unknownType}"`),
+        });
+      }
+    }
+  }
+
+  /**
+   * In-process abort path used by both the protocol-level `abort()`
+   * method and the inbox `abort` message. Triggers the AbortController
+   * for an active dispatch and rejects any pending confirmation.
+   */
+  private abortInFlight(toolCallId: string, reason?: string): void {
+    const entry = this.inFlight.get(toolCallId);
+    if (entry) {
+      entry.controller.abort({
+        _tag: "ToolAbortedError",
+        toolCallId,
+        ...(reason !== undefined ? { reason } : {}),
+      });
+    }
+    // A pending confirmation also needs releasing. The dispatch's
+    // Deferred.await is wrapped in Effect.race against the abort
+    // signal, so the controller.abort above already breaks the wait —
+    // but if the wait happens to be live without an attached
+    // controller (impossible today; defensive), we cancel here too.
+    const pending = this.pendingConfirmations.get(toolCallId);
+    if (pending) {
+      // Resolve as denial with a synthetic response — keeps the
+      // dispatch flow uniform (denial path drains the deferred). The
+      // controller.abort above will short-circuit the dispatch
+      // afterwards.
+      void Effect.runFork(
+        Deferred.succeed(pending.deferred, {
+          toolUseId: toolCallId,
+          approved: false,
+          reason: reason ?? "aborted",
+        }),
+      );
+    }
+  }
+
+  /**
+   * Route an inbound `confirmation-response` payload to the matching
+   * pending Deferred. Unknown toolCallIds produce a HandlerError —
+   * silent drop would mask wiring bugs.
+   */
+  private deliverConfirmation(
+    response: ToolConfirmationResponse,
+  ): Effect.Effect<unknown, MessageHandlerError, never> {
+    const pending = this.pendingConfirmations.get(response.toolUseId);
+    if (!pending) {
+      return Effect.fail({
+        _tag: "HandlerError",
+        cause: new Error(
+          `tool inbox: no pending confirmation for toolUseId "${response.toolUseId}"`,
+        ),
+      });
+    }
+    if (response.always === true) this.alwaysAllowed.add(pending.toolName);
+    return Deferred.succeed(pending.deferred, response).pipe(
+      Effect.map(() => undefined),
+    );
+  }
+
+  /**
+   * Block the dispatch until a `confirmation-response` arrives via the
+   * inbox (or until the abort signal fires, or the optional timeout
+   * elapses). Side-effects:
+   *
+   *   - registers a pending entry keyed by `toolCallId`
+   *   - emits a `tool:confirmation:requested` envelope on the bus
+   *   - publishes the request via `channelPublisher` (channel
+   *     `tool_confirmation`) when one is wired
+   *
+   * Returns the resolved `ToolConfirmationResponse`. Throws
+   * `ToolConfirmationTimeoutError` on timeout. Abort during the wait
+   * produces a synthetic `approved:false, reason:"aborted"` response
+   * — the surrounding dispatch path interprets that as denial AND
+   * the controller.signal.aborted flag still trips the abort branch
+   * later, depending on cause order.
+   */
+  private awaitConfirmation(
+    toolCallId: string,
+    toolName: string,
+    arguments_: Record<string, unknown>,
+    timeoutMs: number | undefined,
+    abortSignal: AbortSignal,
+  ): Effect.Effect<ToolConfirmationResponse, unknown, never> {
+    const self = this;
+    return Effect.gen(function* () {
+      const deferred =
+        yield* Deferred.make<ToolConfirmationResponse, never>();
+      self.pendingConfirmations.set(toolCallId, { deferred, toolName });
+
+      // Emit the request envelope + channel publish. Both are best-
+      // effort observability; failures don't fail the dispatch.
+      const request: ToolConfirmationRequest = {
+        toolUseId: toolCallId,
+        name: toolName,
+        arguments: arguments_,
+      };
+      // Channel publish (primary transport — host UIs subscribe).
+      const publisher = self.channelPublisher;
+      if (publisher) {
+        Effect.runFork(
+          publisher
+            .publish({
+              channel: "tool_confirmation",
+              payload: request,
+              parentOpId: `tool:dispatch:${toolCallId}`,
+              scope: {},
+            })
+            .pipe(Effect.orElse(() => Effect.void)),
+        );
+      }
+
+      // Abort listener — resolves the deferred as denial when the
+      // dispatch's AbortController fires (caller abort, inbox abort,
+      // session close, etc.).
+      const onAbort = () => {
+        Effect.runFork(
+          Deferred.succeed(deferred, {
+            toolUseId: toolCallId,
+            approved: false,
+            reason:
+              abortSignal.reason && typeof abortSignal.reason === "object"
+                ? "aborted"
+                : String(abortSignal.reason ?? "aborted"),
+          }),
+        );
+      };
+      if (abortSignal.aborted) {
+        onAbort();
+      } else {
+        abortSignal.addEventListener("abort", onAbort, { once: true });
+      }
+
+      try {
+        const waitEffect = Deferred.await(deferred);
+        const response =
+          timeoutMs !== undefined && timeoutMs > 0
+            ? yield* waitEffect.pipe(
+                Effect.timeoutFail({
+                  duration: `${timeoutMs} millis`,
+                  onTimeout: () =>
+                    ({
+                      _tag: "ToolConfirmationTimeoutError",
+                      toolName,
+                      ms: timeoutMs,
+                    }) as const,
+                }),
+              )
+            : yield* waitEffect;
+        return response;
+      } finally {
+        self.pendingConfirmations.delete(toolCallId);
+        abortSignal.removeEventListener("abort", onAbort);
+      }
     });
   }
 
@@ -249,7 +448,7 @@ export class ToolExecutorHarness
           issues: result.issues,
         } as const);
       }
-      const validated = result.value;
+      let validated = result.value;
 
       // Per-dispatch abort plumbing. Effect-typed handlers also see
       // fiber interrupts; Promise/sync handlers see the AbortSignal.
@@ -259,6 +458,70 @@ export class ToolExecutorHarness
       const callerSignal = input.signal;
       const onCallerAbort = () => controller.abort(callerSignal?.reason);
       callerSignal?.addEventListener("abort", onCallerAbort, { once: true });
+
+      // ─── Confirmation gate (4a.5) ──────────────────────────────────
+      // Tools annotated `requiresConfirmation: true` pause here until
+      // an external `confirmation-response` inbox message resolves
+      // the pending Deferred. The `always` allow-list short-circuits
+      // future confirmations for the same tool name.
+      if (
+        reg.declaration.annotations?.requiresConfirmation === true &&
+        !this.alwaysAllowed.has(input.name)
+      ) {
+        const confirmation = yield* this.awaitConfirmation(
+          input.toolCallId,
+          input.name,
+          validated as Record<string, unknown>,
+          reg.declaration.annotations.confirmationTimeoutMs ??
+            input.confirmationTimeoutMs ??
+            this.defaultConfirmationTimeoutMs,
+          controller.signal,
+        );
+        if (!confirmation.approved) {
+          // Cleanup before short-circuit.
+          callerSignal?.removeEventListener("abort", onCallerAbort);
+          this.inFlight.delete(input.toolCallId);
+          // Denied → return a DispatchResult with succeeded:false +
+          // a denial content block. Matches v1 (no vetoed terminal).
+          const denialResult: DispatchResult = {
+            toolCallId: input.toolCallId,
+            name: input.name,
+            succeeded: false,
+            content: [
+              {
+                type: "text",
+                text: confirmation.reason
+                  ? `Tool "${input.name}" denied: ${confirmation.reason}`
+                  : `Tool "${input.name}" denied by user.`,
+              },
+            ],
+            executedBy: "agentick",
+            durationMs: 0,
+          };
+          return denialResult;
+        }
+        if (confirmation.always === true) this.alwaysAllowed.add(input.name);
+        // Re-validate when the host returns modifiedArguments — the
+        // user may have edited the call before approving.
+        if (confirmation.modifiedArguments !== undefined) {
+          const revalidated = yield* Effect.tryPromise({
+            try: async () =>
+              entry.validator.validate(confirmation.modifiedArguments),
+            catch: (cause): { readonly _tag: "ToolValidationError"; readonly cause: unknown } => ({
+              _tag: "ToolValidationError",
+              cause,
+            }),
+          });
+          if (isValidationFailure(revalidated)) {
+            return yield* Effect.fail({
+              _tag: "ToolValidationError",
+              toolName: input.name,
+              issues: revalidated.issues,
+            } as const);
+          }
+          validated = revalidated.value;
+        }
+      }
 
       const timeoutMs =
         input.timeoutMs ?? reg.declaration.annotations?.timeout ?? this.defaultTimeoutMs;

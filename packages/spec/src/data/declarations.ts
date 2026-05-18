@@ -38,6 +38,21 @@ export interface ToolAnnotations {
   readonly requiresResponse?: boolean;
   /** Milliseconds. */
   readonly timeout?: number;
+  /**
+   * When true, the tool executor pauses dispatch after validation and
+   * waits for an external `confirmation-response` inbox message before
+   * invoking the handler. Used for risky / side-effecting tools (file
+   * delete, payment, send, etc.).
+   *
+   * `[V1-INHERITED]` from `ToolDefinition.requiresConfirmation`.
+   */
+  readonly requiresConfirmation?: boolean;
+  /**
+   * Per-tool override of the harness's `defaultConfirmationTimeoutMs`.
+   * Milliseconds. When unset, the harness default applies (which
+   * defaults to no timeout — wait forever).
+   */
+  readonly confirmationTimeoutMs?: number;
   readonly defaultResult?: readonly ContentBlock[];
   /** `[V1-INHERITED]` MCP Apps UI hint. */
   readonly ui?: {

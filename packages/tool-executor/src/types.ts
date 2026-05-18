@@ -190,4 +190,14 @@ export interface ToolExecutorHarnessOptions {
    * session harness (Phase 4e) wires the publisher per-session.
    */
   readonly channelPublisher?: ChannelPublisher;
+
+  /**
+   * Default confirmation-wait timeout (milliseconds) applied when a
+   * tool with `annotations.requiresConfirmation` is dispatched and no
+   * tighter override is in scope. `undefined` (the default) means
+   * "wait forever" — match v1 behavior. Per-call (`DispatchInput.
+   * confirmationTimeoutMs`) and per-tool
+   * (`annotations.confirmationTimeoutMs`) both override.
+   */
+  readonly defaultConfirmationTimeoutMs?: number;
 }

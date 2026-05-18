@@ -103,6 +103,14 @@ export interface DispatchInput extends ToolCallScopedInput {
    * `tool.annotations.timeout` if not supplied.
    */
   readonly timeoutMs?: number;
+  /**
+   * Per-call confirmation-wait timeout override (milliseconds). Only
+   * meaningful when the dispatched tool has
+   * `annotations.requiresConfirmation === true`. Falls back to
+   * `annotations.confirmationTimeoutMs` then to the harness's
+   * `defaultConfirmationTimeoutMs` (which defaults to "wait forever").
+   */
+  readonly confirmationTimeoutMs?: number;
 }
 
 /**
