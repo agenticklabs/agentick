@@ -51,6 +51,7 @@
   },
   "devDependencies": {
     "@agentick/executor": "workspace:*",
+    "@agentick/spec-conformance": "workspace:*",
     "@agentick/tool-executor": "workspace:*",
     "@types/react": "^19.2.5"
   },

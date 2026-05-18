@@ -50,3 +50,12 @@ export {
   type LoopExecutorConformanceFactory,
   type LoopExecutorConformanceFactoryInput,
 } from "./loop-executor.js";
+
+// Session harness (Phase 4e.2)
+export {
+  runSessionConformance,
+  defaultSessionConformanceDeps,
+  type SessionConformanceFactory,
+  type SessionConformanceFactoryInput,
+  type SessionConformanceFactoryDeps,
+} from "./session-harness.js";

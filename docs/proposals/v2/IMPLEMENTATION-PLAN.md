@@ -44,9 +44,19 @@ bound) closed. Phase 5+ proceeds as below, in this exact order:
 
 2. CONFORMANCE COMPLETION (~2 days)
    ────────────────────────────────────────────────────────────────
-   □ 4e.2            runSessionConformance suite in @agentick/spec-conformance.
-                     Drafted in 4e; lands now that the surface is
-                     stable post-façade. Run against @agentick/session.
+   ✓ 4e.2            runSessionConformance suite shipped — 13 cases
+                     covering send happy path, timeline writes, snapshot
+                     freezing, state applicator (appendEntry /
+                     applyExecutorResult / applyToolResults), close
+                     idempotency + post-close rejection, notifyLifecycle,
+                     execution handle dual-shape. Run against
+                     @agentick/session.
+
+                     Suite caught two real bugs in SessionHarness:
+                       • send wrapped tagged SessionErrors in generic
+                         ExecutionFailed (masked cause from callers)
+                       • snapshot returned live timeline array by
+                         reference (snapshots weren't frozen)
 
 3. PHASE 5 — PROVIDER ADAPTER ROW (~1 week)
    ────────────────────────────────────────────────────────────────

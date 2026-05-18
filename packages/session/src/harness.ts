@@ -163,10 +163,7 @@ export class SessionHarness<P = unknown>
     return runHarnessProtocol(
       Effect.tryPromise({
         try: () => this.sendBody(input),
-        catch: (cause): SessionError => ({
-          _tag: "ExecutionFailed",
-          cause,
-        }),
+        catch: (cause): SessionError => coerceSessionError(cause),
       }),
     );
   }
@@ -181,7 +178,10 @@ export class SessionHarness<P = unknown>
       id: this.store.id,
       status: this.store.status(),
       currentTick: this.store.currentTick(),
-      timeline: this.store.timeline(),
+      // Materialize a copy — `store.timeline()` returns a live reference.
+      // Without the slice, a captured snapshot mutates in place as the
+      // session does more work, defeating the snapshot contract.
+      timeline: this.store.timeline().slice(),
       knobs: this.bridges.knobs.exportSnapshot(),
       usage: this.store.usage(),
     };
@@ -414,3 +414,22 @@ export class SessionHarness<P = unknown>
 // Resolve unused-import lint for Operation when concrete subclasses
 // add commands that use it.
 void (undefined as unknown as Operation<unknown, unknown, unknown>);
+
+/**
+ * If the thrown value is already a tagged `SessionError`, pass it
+ * through; otherwise wrap as `ExecutionFailed`. Without this, internal
+ * pre-execution failures (e.g., `SessionClosedError`, `SessionBusyError`)
+ * get swallowed into a generic ExecutionFailed and the caller can't
+ * tell what went wrong.
+ */
+function coerceSessionError(cause: unknown): SessionError {
+  if (
+    cause &&
+    typeof cause === "object" &&
+    "_tag" in cause &&
+    typeof (cause as { _tag?: unknown })._tag === "string"
+  ) {
+    return cause as SessionError;
+  }
+  return { _tag: "ExecutionFailed", cause };
+}

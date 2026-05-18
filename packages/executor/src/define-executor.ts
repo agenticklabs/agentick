@@ -81,7 +81,6 @@ import type {
   SectionEntry,
   ToolDeclaration,
 } from "@agentick/spec";
-import { SPEC_VERSION } from "@agentick/spec";
 
 // ============================================================================
 // Public API
@@ -487,6 +486,3 @@ function isLanguageModelExecutionResult(
   return typeof o.stopReason === "string" && Array.isArray(o.output);
 }
 
-// Silence the unused SPEC_VERSION import — kept for future
-// payload-stamping if the callback omits specVersion.
-void SPEC_VERSION;
