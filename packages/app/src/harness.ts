@@ -43,6 +43,7 @@ import {
   type ToolExecutorHarnessOptions,
   type ToolHandler,
 } from "@agentick/tool-executor";
+import { isExecutorFactory } from "@agentick/spec";
 import type {
   AppError,
   AppHarnessProtocol,
@@ -50,6 +51,7 @@ import type {
   EventBus,
   EventQuery,
   ExecutionTarget,
+  ExecutorFactory,
   HandlerVerdict,
   LanguageModelExecutor,
   LoopExecutorProtocol,
@@ -124,14 +126,19 @@ export interface AppHarnessOptions<P = unknown> {
    */
   readonly rootElement: unknown;
   /**
-   * Language-model executor shared across sessions. Provider adapters
-   * (`OpenAIExecutor`, `AnthropicExecutor`, ...) are session-agnostic
-   * by design — they hold a client + abort registry keyed by
-   * executionId, not sessionId. The executor is self-describing: its
-   * `.target` property is read by the app, so the redundant `target`
-   * field below is optional.
+   * Language-model executor shared across sessions. Accepts either:
+   *
+   *   - A pre-built `LanguageModelExecutor` instance — the caller
+   *     constructed it with its own substrate; the app uses it as-is.
+   *   - An `ExecutorFactory` (e.g., from `openai(modelId, opts)`) — the
+   *     app calls it at construction with the app's substrate, so the
+   *     executor's events appear on `app.events(...)` without manual
+   *     wiring.
+   *
+   * The executor is self-describing: its `.target` property is read by
+   * the app, so the redundant `target` field below is optional.
    */
-  readonly executor: LanguageModelExecutor;
+  readonly executor: LanguageModelExecutor | ExecutorFactory;
   /**
    * Optional override of the executor's self-described target. When
    * omitted, `executor.target` is used. Override at this level when a
@@ -255,9 +262,19 @@ export class AppHarness<P = unknown>
     super("app", appId, journal, bus, inbox);
 
     this.rootElement = options.rootElement;
-    this.executor = options.executor;
+    // Executor slot: factory → construct with the app's substrate so
+    // executor events flow through app.events(). Instance → use as-is
+    // (caller owns substrate).
+    this.executor = isExecutorFactory(options.executor)
+      ? options.executor({
+          scopeId: `${appId}:executor`,
+          journal,
+          bus,
+          inbox,
+        })
+      : options.executor;
     // Resolve target: caller override > executor.target.
-    this.target = options.target ?? options.executor.target;
+    this.target = options.target ?? this.executor.target;
 
     // Cascade: longhand (`options.session.*`) wins over shorthand
     // (`options.defaultMaxTicks` / `options.initialProps` /

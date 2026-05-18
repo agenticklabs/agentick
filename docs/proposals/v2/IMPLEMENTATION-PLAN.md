@@ -23,16 +23,19 @@ bound) closed. Phase 5+ proceeds as below, in this exact order:
    ✓ L7              MemoryJournal idempotency state bounded
    ✓ FAÇADE.1        LanguageModelExecutor.target as a property
    ✓ FAÇADE.2        AppHarnessOptions.target → optional override
-                     (reads executor.target by default)
-   ✓ FAÇADE.4        openai(modelId, options?) factory in
-                     @agentick/executor-openai
-   □ FAÇADE.3        Executor slot: accepts instance | factory(substrate)
-                     so factories like openai("gpt-4o") let the app
-                     construct with its own substrate. Closes the
-                     app.events() observability footgun.
-   □ FAÇADE.5        SendInput.executor / SendInput.target per-call
-                     override
-   □ FAÇADE.6        define__ builder exports from every harness package
+   ✓ FAÇADE.3        Executor slot: instance | ExecutorFactory.
+                     AppHarness invokes factories with its own substrate,
+                     closing the app.events() observability footgun by
+                     default. ExecutorFactory marker + isExecutorFactory
+                     guard in @agentick/spec.
+   ✓ FAÇADE.4        openai(modelId, options?) factory — returns an
+                     ExecutorFactory ready to plug into createApp.
+   ✓ FAÇADE.5        SendInput.executor / SendInput.target per-call
+                     override threaded through SessionHarness.sendBody.
+   ◐ FAÇADE.6        defineExecutor + defineApp shipped.
+                     defineSession / defineLoop / defineReconciler /
+                     defineToolExecutor deferred — lower demand,
+                     follow up when a real use case lands.
                      (defineApp / defineSession / defineLoop /
                      defineReconciler / defineToolExecutor /
                      defineExecutor). Same five-surface contract,

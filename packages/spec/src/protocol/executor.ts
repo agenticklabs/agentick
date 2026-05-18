@@ -274,5 +274,44 @@ export interface LanguageModelExecutor
   readonly target: ExecutionTarget;
 }
 
+// ============================================================================
+// ExecutorFactory — deferred construction with shared substrate
+// ============================================================================
+
+/**
+ * Substrate dependencies a `LanguageModelExecutor` is constructed with.
+ * Mirrors the args every `BaseHarness` subclass takes.
+ */
+export interface ExecutorFactoryDeps {
+  readonly scopeId: string;
+  readonly journal: import("./journal.js").OperationJournal;
+  readonly bus: import("./bus.js").EventBus;
+  readonly inbox: import("./inbox.js").MessageInbox;
+}
+
+/**
+ * Deferred-construction form of `LanguageModelExecutor`. Parent harnesses
+ * (typically `AppHarness`) call this factory at construction time with
+ * their own substrate, so the executor's events appear on the
+ * shared journal/bus instead of a private one. Closes the
+ * `app.events()` observability gap by default.
+ *
+ * Marker symbol `executorFactory` disambiguates a factory from a
+ * pre-constructed instance (which exposes `run`, `project`, etc.). The
+ * runtime checks for the marker before the function call.
+ */
+export interface ExecutorFactory {
+  readonly executorFactory: true;
+  (deps: ExecutorFactoryDeps): LanguageModelExecutor;
+}
+
+/** Type guard: distinguishes a factory from a constructed executor. */
+export function isExecutorFactory(v: unknown): v is ExecutorFactory {
+  return (
+    typeof v === "function" &&
+    (v as { executorFactory?: unknown }).executorFactory === true
+  );
+}
+
 // Re-export the executable target alias for ergonomic imports.
 export type { LanguageModelTarget };

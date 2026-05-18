@@ -15,3 +15,7 @@ export {
   type MockLanguageModelExecutorOptions,
   type MockScriptedRun,
 } from "./mock-language-model-executor.js";
+export {
+  defineExecutor,
+  type DefineExecutorInput,
+} from "./define-executor.js";

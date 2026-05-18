@@ -1,7 +1,7 @@
 # Agentick v2 — Implementation Status
 
 **Branch:** `feat/v2`
-**Last updated:** 2026-05-18 (L7 — MemoryJournal idempotency state bounded; v2.0 gating item closed)
+**Last updated:** 2026-05-18 (FAÇADE pass — self-describing executors, factory slot, per-call overrides, defineExecutor)
 
 This is the **running progress log** for v2 implementation. Update it
 every session. New contributors / sessions read this first.

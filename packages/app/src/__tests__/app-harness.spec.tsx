@@ -282,6 +282,74 @@ describe("AppHarness — closeApp", () => {
   });
 });
 
+describe("AppHarness — executor factory slot (FAÇADE.3)", () => {
+  it("invokes an ExecutorFactory with the app's substrate", async () => {
+    const calls: Array<{ scopeId: string; sharedJournal: boolean; sharedBus: boolean }> = [];
+    const journal = new MemoryJournal();
+    const bus = new LocalEventBus();
+    const inbox = new LocalInbox();
+    const executor = mkExecutor(journal, bus, inbox);
+    await executor.ready;
+
+    const factory = Object.assign(
+      (deps: {
+        scopeId: string;
+        journal: MemoryJournal;
+        bus: LocalEventBus;
+        inbox: LocalInbox;
+      }) => {
+        calls.push({
+          scopeId: deps.scopeId,
+          sharedJournal: deps.journal === journal,
+          sharedBus: deps.bus === bus,
+        });
+        return executor;
+      },
+      { executorFactory: true as const },
+    );
+
+    const app = await createApp(React.createElement(MinimalAgent), {
+      executor: factory,
+      journal,
+      bus,
+      inbox,
+      toolHandlers: new Map([
+        [
+          "handlers/calculator",
+          async (input: unknown) => {
+            const { expression } = input as { expression: string };
+            const v = Function(`"use strict"; return (${expression});`)();
+            return [{ type: "text", text: String(v) } as ContentBlock];
+          },
+        ],
+      ]),
+    });
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.sharedJournal).toBe(true);
+    expect(calls[0]!.sharedBus).toBe(true);
+    expect(calls[0]!.scopeId).toMatch(/:executor$/);
+
+    // Sanity check: events flow through because the executor shares
+    // the bus with the app — no explicit shareSubstrate flag needed.
+    const seen = new Set<string>();
+    const collect = (async () => {
+      let i = 0;
+      for await (const ev of app.events({ surface: "executor" })) {
+        seen.add(ev.surface);
+        if (++i >= 2) break;
+      }
+    })();
+    await new Promise((r) => setTimeout(r, 50));
+    await app.runOnce({
+      send: { messages: [{ role: "user", content: "x" }] },
+    });
+    await collect;
+    expect(seen).toEqual(new Set(["executor"]));
+    await app.closeApp();
+  });
+});
+
 describe("AppHarness — slot cascade", () => {
   it("accepts a pre-built reconciler instance via the slot", async () => {
     const executor = mkExecutor();

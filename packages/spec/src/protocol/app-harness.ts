@@ -23,7 +23,11 @@
 
 import type { EventQuery, ProtocolEvent } from "../data/events.js";
 import type { SessionStatus } from "./hook-bridges.js";
-import type { ExecutorProtocol, LanguageModelExecutor } from "./executor.js";
+import type {
+  ExecutorFactory,
+  ExecutorProtocol,
+  LanguageModelExecutor,
+} from "./executor.js";
 import type {
   SendInput,
   SendResult,
@@ -185,5 +189,5 @@ export interface AppHarnessProtocol<P = unknown> {
 
 // Re-export the executor types so consumers of @agentick/spec can
 // satisfy AppHarnessOptions without reaching into other entrypoints.
-export type { ExecutorProtocol, LanguageModelExecutor };
+export type { ExecutorFactory, ExecutorProtocol, LanguageModelExecutor };
 export type { SendInput, SendResult, SessionExecutionHandle, SessionHarnessProtocol };

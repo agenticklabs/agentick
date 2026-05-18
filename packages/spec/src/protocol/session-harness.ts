@@ -113,6 +113,20 @@ export interface SendInput<P = unknown> {
   readonly signal?: AbortSignal;
   /** Override the default max tick bound. */
   readonly maxTicks?: number;
+  /**
+   * Per-call executor override. The session uses this executor for
+   * this single send instead of the app-supplied default. Typed
+   * `LanguageModelExecutor` (factory-form is resolved at App
+   * construction; per-call switching needs an already-constructed
+   * instance).
+   */
+  readonly executor?: import("./executor.js").LanguageModelExecutor;
+  /**
+   * Per-call execution target override. Useful when reusing a single
+   * executor across multiple modelIds (e.g., switching to gpt-4o-mini
+   * for cheap intermediate steps) without rebuilding the executor.
+   */
+  readonly target?: import("../data/execution-target.js").ExecutionTarget;
 }
 
 /**

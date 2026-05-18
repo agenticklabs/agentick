@@ -283,13 +283,20 @@ export class SessionHarness<P = unknown>
     this.store.setCurrentExecutionId(executionId);
     this.store.setStatus("running");
 
+    // Per-call overrides — executor + target — fall through from
+    // SendInput. The app-level executor/target is the default; this
+    // send swaps in caller-supplied alternatives without changing
+    // session state.
+    const executorForCall = input.executor ?? this.executor;
+    const targetForCall = input.target ?? this.target;
+
     const runPromise = this.loop.runExecution({
       executionId,
       sessionId: this.store.id,
       reconciler: this.reconciler,
       mountId: this.mountId,
-      executor: this.executor,
-      target: this.target,
+      executor: executorForCall,
+      target: targetForCall,
       toolExecutor: this.toolExecutor,
       stateApplicator: {
         applyExecutorResult: (i) => this.applyExecutorResult(i).then(() => undefined),

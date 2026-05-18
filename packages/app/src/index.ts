@@ -10,3 +10,8 @@
 
 export { AppHarness, type AppHarnessOptions } from "./harness.js";
 export { createApp } from "./create-app.js";
+
+// `defineApp` is the naming-consistent twin of `createApp` — same
+// function, exported under both names so users can choose the verb
+// that matches their mental model (factory vs. builder).
+export { createApp as defineApp } from "./create-app.js";
