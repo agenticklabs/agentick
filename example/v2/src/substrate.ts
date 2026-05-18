@@ -8,6 +8,7 @@
  * — invisible at the surface.
  */
 
+import { MockLanguageModelExecutor } from "@agentick/executor";
 import {
   LocalChannelPublisher,
   LocalEventBus,
@@ -30,6 +31,7 @@ export interface Substrate {
   readonly channels: LocalChannelPublisher;
   readonly reconciler: ReconcilerHarness;
   readonly tools: ToolExecutorHarness;
+  readonly executor: MockLanguageModelExecutor;
   readonly handlerResolver: InMemoryHandlerResolver;
   readonly bridges: HookBridges;
 }
@@ -58,13 +60,51 @@ export async function buildSubstrate(sessionId: string): Promise<Substrate> {
     channelPublisher: channels,
   });
 
-  // Wait for both harnesses to finish their inbox registrations.
-  await Promise.all([reconciler.ready, tools.ready]);
+  // Executor harness — language-model invocation. The MockLanguageModelExecutor
+  // returns a scripted reply (no real provider wire); real adapters
+  // (OpenAI, Anthropic, etc.) implement the same ExecutorProtocol in
+  // separate packages (Phase 4c).
+  const executor = new MockLanguageModelExecutor(
+    "example",
+    journal,
+    bus,
+    inbox,
+    {
+      scripted: {
+        result: {
+          specVersion: "2026-05-08",
+          output: [{ type: "text", text: "47 × 23 = 1081." }],
+          stopReason: "end",
+          usage: { inputTokens: 12, outputTokens: 8, totalTokens: 20 },
+        },
+        stream: [
+          { kind: "content_delta", delta: "47" },
+          { kind: "content_delta", delta: " × " },
+          { kind: "content_delta", delta: "23 " },
+          { kind: "content_delta", delta: "= " },
+          { kind: "content_delta", delta: "1081." },
+        ],
+      },
+    },
+  );
+
+  // Wait for all harnesses to finish their inbox registrations.
+  await Promise.all([reconciler.ready, tools.ready, executor.ready]);
 
   // Stub bridges for the reconciler — in-memory data cache, knob store,
   // session metadata. A real session harness (Phase 4e) will supply
   // backed bridges that route timeline reads to the persisted log.
   const bridges = stubBridges({ sessionId });
 
-  return { journal, bus, inbox, channels, reconciler, tools, handlerResolver, bridges };
+  return {
+    journal,
+    bus,
+    inbox,
+    channels,
+    reconciler,
+    tools,
+    executor,
+    handlerResolver,
+    bridges,
+  };
 }

@@ -36,3 +36,10 @@ export {
   type ToolExecutorConformanceFactory,
   type FixtureToolSpec,
 } from "./tool-executor.js";
+
+// Executor harness (Phase 4b.2)
+export {
+  runExecutorConformance,
+  type ExecutorConformanceFactory,
+  type ExecutorConformanceFactoryInput,
+} from "./executor.js";

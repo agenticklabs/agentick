@@ -75,10 +75,17 @@ Phase 4  ■ in progress — REMAINING HARNESSES
          ✗ 4a.6 Middleware + lifecycle handler hooks
          ✗ 4a.7 Inbox dispatcher (abort + confirmation-response)
          ✗ 4a.8 v1 tool tests port + parity sweep
-         ✗ 4b   Executor harness
-         ✗ 4c   Loop executor
-         ✗ 4d   Session harness
-         ✗ 4e   App harness
+         ✓ 4b.1 ExecutorProtocol + LanguageModelExecutor spec types
+         ✓ 4b.2 runExecutorConformance suite
+         ✓ 4b.3 @agentick/executor package + MockLanguageModelExecutor
+                reference impl (12/12 tests; 6 conformance + 6 impl-specific)
+         ✓ 4b.4 example/v2 executor scenario — end-to-end
+                JSX → RenderedTree → executor.run → streaming deltas →
+                terminal ExecutionResult
+         ✗ 4c   Provider adapters (OpenAI, Anthropic, Google, AI SDK)
+         ✗ 4d   Loop executor
+         ✗ 4e   Session harness
+         ✗ 4f   App harness
 Phase 5  □ Adapters, cluster, gateway
 Phase 6  □ v1 sunset
 ```

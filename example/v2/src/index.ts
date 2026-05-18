@@ -284,6 +284,68 @@ async function scenarioChannelStreaming(s: Substrate): Promise<void> {
 }
 
 /**
+ * End-to-end executor flow: render the agent into IR, run the executor
+ * against a mock target, watch the streaming deltas land on the bus,
+ * inspect the terminal result.
+ *
+ * The MockLanguageModelExecutor is scripted with a canned reply +
+ * stream. Real provider adapters (Phase 4c — `@agentick/executor-openai`,
+ * etc.) implement the same ExecutorProtocol and slot in here unchanged
+ * from the example app's perspective.
+ */
+async function scenarioExecutorRun(s: Substrate, tree: RenderedTree): Promise<void> {
+  console.log(heading("4e. Executor — JSX agent → RenderedTree → ExecutionResult"));
+
+  type Delta = { kind: string; delta?: string };
+  const fiber = Effect.runFork(
+    Stream.runCollect(
+      Stream.take(
+        s.bus.subscribe({
+          surface: "executor",
+          phase: "delta",
+        }),
+        5,
+      ),
+    ),
+  );
+  await new Promise((r) => setImmediate(r));
+
+  const terminal = await s.executor.run({
+    compiled: tree,
+    target: {
+      kind: "language-model",
+      provider: "mock",
+      modelId: "mock-v1",
+      capabilities: { supportsTools: true, supportsStreaming: true },
+    },
+    scope: { sessionId: SESSION_ID, executionId: "exec-1", tickId: "tick-1" },
+  });
+
+  console.log(line(`outcome: ${terminal.outcome}`));
+  if (terminal.outcome === "succeeded") {
+    const text = terminal.result.output
+      .filter((b): b is { type: "text"; text: string } => b.type === "text")
+      .map((b) => b.text)
+      .join("");
+    console.log(line(`result.output text: ${text}`));
+    console.log(line(`stopReason: ${terminal.result.stopReason}`));
+    const usage = terminal.result.usage;
+    if (usage) {
+      console.log(
+        line(`usage: in=${usage.inputTokens} out=${usage.outputTokens} total=${usage.totalTokens}`),
+      );
+    }
+  }
+
+  const deltas = await Effect.runPromise(Fiber.join(fiber));
+  console.log(line(`streamed ${Chunk.size(deltas)} delta envelopes:`));
+  for (const ev of Chunk.toReadonlyArray(deltas)) {
+    const d = ev.payload as Delta | undefined;
+    console.log(line(`  · ${d?.kind ?? "?"}  delta=${JSON.stringify(d?.delta ?? "")}`));
+  }
+}
+
+/**
  * Subscribe to the bus before running an operation, then collect the
  * envelopes that flowed through. Both reconciler + tool harnesses
  * publish on the same bus.
@@ -384,6 +446,7 @@ async function main(): Promise<void> {
     await scenarioDispatchAbort(s);
     await scenarioDispatchFailure(s);
     await scenarioChannelStreaming(s);
+    await scenarioExecutorRun(s, tree);
     await scenarioBusSubscription(s);
     await scenarioJournalAudit(s);
     await scenarioInboxTell(s);

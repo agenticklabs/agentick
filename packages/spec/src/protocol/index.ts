@@ -22,3 +22,4 @@ export * from "./channels.js";
 export * from "./reconciler.js";
 export * from "./hook-bridges.js";
 export * from "./tool-executor.js";
+export * from "./executor.js";

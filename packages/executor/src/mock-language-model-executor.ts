@@ -1,0 +1,454 @@
+/**
+ * `MockLanguageModelExecutor` — reference implementation of
+ * `LanguageModelExecutor` for tests, examples, and the v2 substrate
+ * proof. Inherits from `BaseHarness<"executor">` for the full phase
+ * contract + FiberRef scope + lazy delta emission.
+ *
+ * Behavior:
+ *   - `project()` folds the rendered tree's `context.entries` into
+ *     canonical `LanguageModelMessage[]` and includes declared tools
+ *     filtered to `exposure.includes("model")`.
+ *   - `execute()` consumes the optional `scripted` result configured at
+ *     construction. If `scripted.stream` is supplied, it emits delta
+ *     envelopes per chunk before returning the accumulated output.
+ *     Without scripting, returns a default "ok" reply.
+ *   - `normalize()` is the identity transform for the mock — it returns
+ *     the scripted result as-is. Real adapters parse provider response
+ *     shapes here.
+ *   - `run()` composes project → execute → normalize, emitting deltas
+ *     via `emitDeltaLazy` so the streaming sim path stays cheap when
+ *     nobody is listening.
+ *   - `abort()` marks the named execution as aborted; the next `run`
+ *     for that id fails with `ProviderAborted`. In-flight runs are
+ *     interrupted via fiber when the substrate scope tears down.
+ *
+ * Provider adapters (Phase 4c) replace `execute` + `normalize`; the
+ * harness shape stays identical.
+ */
+
+import { Effect } from "effect";
+import { BaseHarness, runHarnessProtocol, ulid } from "@agentick/runtime";
+import type {
+  AbortExecutorInput,
+  ContentBlock,
+  ContextEntry,
+  EventBus,
+  ExecuteError,
+  ExecuteInput,
+  ExecutionTarget,
+  ExecutorError,
+  ExecutorTerminal,
+  LanguageModelExecutionResult,
+  LanguageModelExecutor,
+  LanguageModelInput,
+  LanguageModelMessage,
+  LanguageModelMessagePart,
+  LanguageModelTool,
+  MessageEnvelope,
+  MessageHandlerError,
+  MessageInbox,
+  NormalizeError,
+  NormalizeInput,
+  Operation,
+  OperationJournal,
+  ProjectInput,
+  ProjectionError,
+  RenderedTree,
+  RunInput,
+  SectionEntry,
+  ToolDeclaration,
+} from "@agentick/spec";
+import { SPEC_VERSION } from "@agentick/spec";
+
+// ============================================================================
+// Construction options
+// ============================================================================
+
+export interface MockScriptedRun {
+  /** The terminal result the mock executor returns from a `run` call. */
+  readonly result: LanguageModelExecutionResult;
+  /**
+   * Optional ordered chunks the executor emits as `executor:delta`
+   * envelopes during `execute`. Each chunk becomes one delta. When
+   * omitted, the executor emits a single content_delta with the joined
+   * text of the result's `output[type="text"]` blocks.
+   */
+  readonly stream?: ReadonlyArray<{
+    readonly kind: string;
+    readonly delta?: string;
+    readonly blockIndex?: number;
+  }>;
+}
+
+export interface MockLanguageModelExecutorOptions {
+  /**
+   * Scripted outcome for `run`. Without this, the executor returns a
+   * minimal `"hi"` reply with `stopReason: "end"`. Tests usually
+   * provide a scripted value; the example app uses the default.
+   */
+  readonly scripted?: MockScriptedRun;
+}
+
+// ============================================================================
+// Internals
+// ============================================================================
+
+interface InFlightEntry {
+  readonly executionId: string;
+  abortReason?: string;
+}
+
+const DEFAULT_REPLY: LanguageModelExecutionResult = {
+  specVersion: SPEC_VERSION,
+  output: [{ type: "text", text: "hi" }],
+  stopReason: "end",
+  usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+};
+
+// ============================================================================
+// MockLanguageModelExecutor
+// ============================================================================
+
+export class MockLanguageModelExecutor
+  extends BaseHarness<"executor">
+  implements LanguageModelExecutor
+{
+  readonly family = "language-model" as const;
+
+  private readonly scripted: MockScriptedRun | undefined;
+  private readonly inFlight = new Map<string, InFlightEntry>();
+  private readonly aborted = new Set<string>();
+
+  constructor(
+    scopeId: string,
+    journal: OperationJournal,
+    bus: EventBus,
+    inbox: MessageInbox,
+    options: MockLanguageModelExecutorOptions = {},
+  ) {
+    super("executor", scopeId, journal, bus, inbox);
+    this.scripted = options.scripted;
+  }
+
+  // ──────── ExecutorProtocol ────────
+
+  project(input: ProjectInput): Promise<LanguageModelInput> {
+    const op: Operation<ProjectInput, LanguageModelInput> = {
+      opId: `executor:project:${ulid()}`,
+      surface: "executor",
+      name: "executor:command:project",
+      scope: input.scope ?? {},
+      input,
+    };
+    return runHarnessProtocol(
+      this.runOperation(op, (i) =>
+        Effect.try({
+          try: () => projectImpl(i),
+          catch: (cause): ProjectionError => ({
+            _tag: "ProjectionFailed",
+            reason: "projection threw",
+            cause,
+          }),
+        }),
+      ),
+    );
+  }
+
+  execute(input: ExecuteInput<LanguageModelInput>): Promise<unknown> {
+    const executionId = input.scope?.executionId ?? `exec:${ulid()}`;
+    const op: Operation<ExecuteInput<LanguageModelInput>, unknown> = {
+      opId: `executor:execute:${executionId}`,
+      surface: "executor",
+      name: "executor:command:execute",
+      scope: input.scope ?? { executionId },
+      input,
+    };
+    return runHarnessProtocol(
+      this.runOperation(op, (i) => this.executeBody(i, executionId)),
+    );
+  }
+
+  normalize(
+    input: NormalizeInput<unknown>,
+  ): Promise<LanguageModelExecutionResult> {
+    const op: Operation<NormalizeInput<unknown>, LanguageModelExecutionResult> = {
+      opId: `executor:normalize:${ulid()}`,
+      surface: "executor",
+      name: "executor:command:normalize",
+      scope: input.scope ?? {},
+      input,
+    };
+    return runHarnessProtocol(
+      this.runOperation(op, (i) =>
+        Effect.try({
+          try: () => normalizeImpl(i, this.scripted),
+          catch: (cause): NormalizeError => ({
+            _tag: "NormalizationFailed",
+            cause,
+          }),
+        }),
+      ),
+    );
+  }
+
+  run(input: RunInput): Promise<ExecutorTerminal<LanguageModelExecutionResult>> {
+    const executionId = input.scope?.executionId ?? `exec:${ulid()}`;
+    const op: Operation<
+      RunInput,
+      ExecutorTerminal<LanguageModelExecutionResult>
+    > = {
+      opId: `executor:run:${executionId}`,
+      surface: "executor",
+      name: "executor:command:run",
+      scope: { ...(input.scope ?? {}), executionId },
+      input,
+    };
+    return runHarnessProtocol(
+      this.runOperation(op, (i) => this.runBody(i, executionId, op)),
+    );
+  }
+
+  abort(input: AbortExecutorInput): Promise<void> {
+    return runHarnessProtocol(
+      Effect.sync(() => {
+        const entry = this.inFlight.get(input.executionId);
+        if (entry) entry.abortReason = input.reason ?? "aborted";
+        this.aborted.add(input.executionId);
+      }),
+    );
+  }
+
+  // ──────── inbox dispatch ────────
+
+  protected handleMessage(
+    _msg: MessageEnvelope,
+  ): Effect.Effect<unknown, MessageHandlerError, never> {
+    return Effect.fail({
+      _tag: "HandlerError",
+      cause: new Error("executor inbox dispatch not yet wired (Phase 4b minimum)"),
+    });
+  }
+
+  // ──────── internals ────────
+
+  private executeBody(
+    input: ExecuteInput<LanguageModelInput>,
+    executionId: string,
+  ): Effect.Effect<unknown, ExecuteError, never> {
+    return Effect.gen(this, function* () {
+      if (this.aborted.has(executionId)) {
+        return yield* Effect.fail<ExecuteError>({
+          _tag: "ProviderAborted",
+          reason: "aborted prior to execute",
+        });
+      }
+      this.inFlight.set(executionId, { executionId });
+
+      try {
+        // Mock "wire": no real provider call. The scripted result is
+        // returned opaquely; normalize() reads it. Real adapters do
+        // HTTP / SSE here and accumulate the streamed response.
+        return (this.scripted?.result ?? DEFAULT_REPLY) as unknown;
+      } finally {
+        this.inFlight.delete(executionId);
+      }
+    });
+  }
+
+  private runBody(
+    input: RunInput,
+    executionId: string,
+    op: Operation<RunInput, ExecutorTerminal<LanguageModelExecutionResult>>,
+  ): Effect.Effect<
+    ExecutorTerminal<LanguageModelExecutionResult>,
+    ExecutorError,
+    never
+  > {
+    return Effect.gen(this, function* () {
+      // 1. project
+      const projected = yield* projectAsEffect(input);
+
+      // 2. emit chunks (lazy — subscribers gate envelope construction).
+      // Journal-write failures during delta emission are substrate-level
+      // catastrophes, not executor errors. Treat them as defects so the
+      // executor's typed `E` channel stays narrow to `ExecutorError`.
+      const stream = this.scripted?.stream;
+      if (stream && stream.length > 0) {
+        for (const chunk of stream) {
+          yield* this.emitDeltaLazy(op, () => ({
+            kind: chunk.kind,
+            ...(chunk.blockIndex !== undefined ? { blockIndex: chunk.blockIndex } : {}),
+            ...(chunk.delta !== undefined ? { delta: chunk.delta } : {}),
+          })).pipe(Effect.orDie);
+        }
+      }
+
+      // 3. execute
+      if (this.aborted.has(executionId)) {
+        const terminal: ExecutorTerminal<LanguageModelExecutionResult> = {
+          outcome: "canceled",
+          reason: "aborted",
+        };
+        return terminal;
+      }
+      const targetOutput = this.scripted?.result ?? DEFAULT_REPLY;
+      void projected;
+
+      // 4. normalize (identity for mock)
+      const result: LanguageModelExecutionResult = targetOutput;
+      const terminal: ExecutorTerminal<LanguageModelExecutionResult> = {
+        outcome: "succeeded",
+        result,
+      };
+      return terminal;
+    });
+  }
+}
+
+// ============================================================================
+// Pure helpers
+// ============================================================================
+
+function projectAsEffect(input: RunInput): Effect.Effect<LanguageModelInput, never, never> {
+  return Effect.sync(() => projectImpl({ compiled: input.compiled, target: input.target }));
+}
+
+function projectImpl(input: ProjectInput): LanguageModelInput {
+  const messages = buildMessages(input.compiled);
+  const tools = buildTools(input.compiled);
+  const parameters = buildParameters(input.compiled);
+  return {
+    messages,
+    ...(tools.length > 0 ? { tools } : {}),
+    ...(parameters !== undefined ? { parameters } : {}),
+  };
+}
+
+function normalizeImpl(
+  input: NormalizeInput<unknown>,
+  scripted: MockScriptedRun | undefined,
+): LanguageModelExecutionResult {
+  // The mock's execute returned `LanguageModelExecutionResult` directly;
+  // normalize is identity. A real adapter would parse `input.targetOutput`
+  // shaped as the provider response.
+  const out = input.targetOutput;
+  if (isLanguageModelExecutionResult(out)) return out;
+  return scripted?.result ?? DEFAULT_REPLY;
+}
+
+function isLanguageModelExecutionResult(
+  v: unknown,
+): v is LanguageModelExecutionResult {
+  if (typeof v !== "object" || v === null) return false;
+  const o = v as { stopReason?: unknown; output?: unknown };
+  return typeof o.stopReason === "string" && Array.isArray(o.output);
+}
+
+function buildMessages(tree: RenderedTree): ReadonlyArray<LanguageModelMessage> {
+  const messages: LanguageModelMessage[] = [];
+  // Sections (audience: model) fold into a single leading system message.
+  const systemText = collectSectionText(tree.context.entries);
+  if (systemText.length > 0) {
+    messages.push({ role: "system", content: [{ type: "text", text: systemText }] });
+  }
+  // Each MessageEntry maps to one LanguageModelMessage.
+  for (const entry of tree.context.entries) {
+    if (entry.kind !== "message") continue;
+    messages.push({
+      role: entry.role as LanguageModelMessage["role"],
+      content: entry.content.map(messagePartFromBlock),
+    });
+  }
+  return messages;
+}
+
+function collectSectionText(entries: ReadonlyArray<ContextEntry>): string {
+  const parts: string[] = [];
+  for (const e of entries) {
+    if (e.kind !== "section") continue;
+    const text = sectionText(e);
+    if (text.length > 0) parts.push(text);
+  }
+  return parts.join("\n\n");
+}
+
+function sectionText(section: SectionEntry): string {
+  const head = section.title ? `## ${section.title}\n\n` : "";
+  const body = section.content
+    .map((b) => (b.type === "text" ? b.text : ""))
+    .filter((t) => t.length > 0)
+    .join("\n\n");
+  return head + body;
+}
+
+function messagePartFromBlock(block: ContentBlock): LanguageModelMessagePart {
+  switch (block.type) {
+    case "text":
+      return { type: "text", text: block.text };
+    case "image":
+      return {
+        type: "image",
+        imageUrl: block.source.type === "url" ? block.source.url : "[binary]",
+        ...(block.mimeType !== undefined ? { mediaType: block.mimeType } : {}),
+      };
+    case "tool_use":
+      return {
+        type: "tool_use",
+        id: block.toolUseId,
+        name: block.name,
+        input: block.input,
+      };
+    case "tool_result":
+      return {
+        type: "tool_result",
+        toolUseId: block.toolUseId,
+        content: block.content.map(messagePartFromBlock),
+        ...(block.isError !== undefined ? { isError: block.isError } : {}),
+      };
+    default:
+      // Other blocks (csv, html, json, code, etc.) flatten to text.
+      return {
+        type: "text",
+        text:
+          ("text" in block && typeof block.text === "string"
+            ? block.text
+            : JSON.stringify(block)) || "",
+      };
+  }
+}
+
+function buildTools(
+  tree: RenderedTree,
+): ReadonlyArray<LanguageModelTool> {
+  const decl = tree.declarations?.tools ?? [];
+  return decl
+    .filter((t: ToolDeclaration) => t.exposure.includes("model"))
+    .map((t) => ({
+      name: t.name,
+      ...(t.description !== undefined ? { description: t.description } : {}),
+      inputSchema: t.inputSchema as Record<string, unknown>,
+    }));
+}
+
+function buildParameters(tree: RenderedTree) {
+  const cfg = tree.config;
+  if (!cfg) return undefined;
+  const params: {
+    temperature?: number;
+    maxOutputTokens?: number;
+    responseFormat?: { type: "text" | "json" | "json_schema"; schema?: Record<string, unknown> };
+  } = {};
+  if (cfg.temperature !== undefined) params.temperature = cfg.temperature;
+  if (cfg.maxOutputTokens !== undefined) params.maxOutputTokens = cfg.maxOutputTokens;
+  if (cfg.responseFormat !== undefined) {
+    if (cfg.responseFormat.type === "json_schema") {
+      params.responseFormat = {
+        type: "json_schema",
+        schema: cfg.responseFormat.schema as Record<string, unknown>,
+      };
+    } else {
+      params.responseFormat = { type: cfg.responseFormat.type };
+    }
+  }
+  return Object.keys(params).length > 0 ? params : undefined;
+}

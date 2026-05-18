@@ -204,6 +204,9 @@ importers:
 
   example/v2:
     dependencies:
+      '@agentick/executor':
+        specifier: workspace:*
+        version: link:../../packages/executor
       '@agentick/reconciler-react':
         specifier: workspace:*
         version: link:../../packages/reconciler-react
@@ -557,6 +560,22 @@ importers:
       vite:
         specifier: ^6.0.0
         version: 6.4.1(@types/node@22.19.7)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.4)
+
+  packages/executor:
+    dependencies:
+      '@agentick/runtime':
+        specifier: workspace:*
+        version: link:../runtime
+      '@agentick/spec':
+        specifier: workspace:*
+        version: link:../spec
+      effect:
+        specifier: ^3.21.2
+        version: 3.21.2
+    devDependencies:
+      '@agentick/spec-conformance':
+        specifier: workspace:*
+        version: link:../spec-conformance
 
   packages/express:
     dependencies:
