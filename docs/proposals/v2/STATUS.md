@@ -1,7 +1,7 @@
 # Agentick v2 — Implementation Status
 
 **Branch:** `feat/v2`
-**Last updated:** 2026-05-15 (substrate flipped to Effect-native — Path A reversal)
+**Last updated:** 2026-05-17 (Phase 4c — first provider adapter (`@agentick/executor-openai`) landed)
 
 This is the **running progress log** for v2 implementation. Update it
 every session. New contributors / sessions read this first.
@@ -81,7 +81,26 @@ Phase 4  ■ in progress — REMAINING HARNESSES
                 reference impl (12/12 tests; 6 conformance + 6 impl-specific)
          ✓ 4b.4 example/v2 executor scenario — JSX → RenderedTree →
                 executor.run → streaming deltas → ExecutionResult
-         ✗ 4c   Provider adapters (OpenAI, Anthropic, Google, AI SDK)
+         ■ 4c   Provider adapters
+                ✓ 4c.1 @agentick/executor-openai package scaffold
+                ✓ 4c.2 OpenAIExecutor extends BaseHarness<"executor">
+                       implements LanguageModelExecutor (project/execute/
+                       normalize/run/abort). Promise-typed surface via
+                       runHarnessProtocol; per-tick opId composition;
+                       SDK injection point for tests.
+                ✓ 4c.3 tool-use round-trip + streaming deltas
+                       (StreamAccumulator reconstructs ChatCompletion from
+                       chunks; emitDeltaLazy per chunk via Effect-driven
+                       iterator drive; finish_reason → stopReason map).
+                ✓ 4c.4 stub-client tests (8 OpenAI-specific: non-streaming,
+                       model id passthrough, finish_reason mapping, tool
+                       extraction, tool_result threading, abort, streaming
+                       deltas, journaled lifecycle)
+                ✓ 4c.5 runExecutorConformance against OpenAIExecutor
+                       (6/6 pass — identical contract to mock)
+                ✗ 4c.6 Anthropic, Google, AI SDK adapters
+                ✗ 4c.7 example/v2 wired through real provider (deferred
+                       — no API key in CI)
          ✓ 4d.1 LoopExecutorProtocol + StateApplicator spec types
          ✓ 4d.2 runLoopExecutorConformance suite (5 scenarios:
                 happy path, applyExecutorResult call count,

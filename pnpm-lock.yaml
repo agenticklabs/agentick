@@ -583,6 +583,25 @@ importers:
         specifier: workspace:*
         version: link:../spec-conformance
 
+  packages/executor-openai:
+    dependencies:
+      '@agentick/runtime':
+        specifier: workspace:*
+        version: link:../runtime
+      '@agentick/spec':
+        specifier: workspace:*
+        version: link:../spec
+      effect:
+        specifier: ^3.21.2
+        version: 3.21.2
+      openai:
+        specifier: ^6.0.0
+        version: 6.16.0(ws@8.19.0)(zod@4.3.6)
+    devDependencies:
+      '@agentick/spec-conformance':
+        specifier: workspace:*
+        version: link:../spec-conformance
+
   packages/express:
     dependencies:
       '@agentick/gateway':

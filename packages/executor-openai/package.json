@@ -1,0 +1,54 @@
+{
+  "name": "@agentick/executor-openai",
+  "version": "0.0.0",
+  "description": "OpenAI provider adapter for Agentick v2 — implements LanguageModelExecutor against the OpenAI Chat Completions API. Companion to @agentick/executor (mock + base class).",
+  "keywords": [
+    "agent",
+    "ai",
+    "agentick",
+    "executor",
+    "openai",
+    "harness"
+  ],
+  "license": "MIT",
+  "author": "Ryan Lindgren",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/agenticklabs/agentick.git",
+    "directory": "packages/executor-openai"
+  },
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "main": "src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "publishConfig": {
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "import": "./dist/index.js",
+        "default": "./dist/index.js"
+      }
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.build.json --noEmit"
+  },
+  "dependencies": {
+    "@agentick/spec": "workspace:*",
+    "@agentick/runtime": "workspace:*",
+    "effect": "^3.21.2",
+    "openai": "^6.0.0"
+  },
+  "devDependencies": {
+    "@agentick/spec-conformance": "workspace:*"
+  }
+}
