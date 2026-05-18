@@ -284,61 +284,89 @@ async function scenarioChannelStreaming(s: Substrate): Promise<void> {
 }
 
 /**
- * End-to-end executor flow: render the agent into IR, run the executor
- * against a mock target, watch the streaming deltas land on the bus,
- * inspect the terminal result.
+ * End-to-end agent loop: the loop executor orchestrates reconciler +
+ * executor + tool-executor across multiple ticks.
  *
- * The MockLanguageModelExecutor is scripted with a canned reply +
- * stream. Real provider adapters (Phase 4c — `@agentick/executor-openai`,
- * etc.) implement the same ExecutorProtocol and slot in here unchanged
- * from the example app's perspective.
+ * Scripted flow (via the mock executor's scripted sequence in
+ * substrate.ts):
+ *
+ *   Tick 1: render → executor returns tool_use(calculator, "47 * 23")
+ *           → loop dispatches calculator → result "1081"
+ *           → stateApplicator records the apply
+ *   Tick 2: render → executor returns final text "47 × 23 = 1081."
+ *           → stopReason: end → loop terminates
+ *
+ * The full execution emits per-phase events on `surface: "loop"` —
+ * one subscriber sees the entire orchestration without composing four
+ * other harnesses' streams.
+ *
+ * Real provider adapters (Phase 4c) slot in unchanged: same
+ * ExecutorProtocol, same loop algorithm. The loop is provider-agnostic.
  */
-async function scenarioExecutorRun(s: Substrate, tree: RenderedTree): Promise<void> {
-  console.log(heading("4e. Executor — JSX agent → RenderedTree → ExecutionResult"));
+async function scenarioLoopExecution(s: Substrate, tree: RenderedTree): Promise<void> {
+  console.log(heading("4e. Loop executor — reconciler + executor + tool-executor"));
 
   type Delta = { kind: string; delta?: string };
-  const fiber = Effect.runFork(
+  // Subscribe to delta envelopes from the executor (streaming model
+  // tokens) BEFORE we start the loop so we capture them.
+  const deltaFiber = Effect.runFork(
     Stream.runCollect(
       Stream.take(
-        s.bus.subscribe({
-          surface: "executor",
-          phase: "delta",
-        }),
+        s.bus.subscribe({ surface: "executor", phase: "delta" }),
         5,
       ),
     ),
   );
   await new Promise((r) => setImmediate(r));
 
-  const terminal = await s.executor.run({
-    compiled: tree,
+  const terminal = await s.loop.runExecution({
+    executionId: "exec-loop-1",
+    sessionId: SESSION_ID,
+    reconciler: s.reconciler,
+    mountId: MOUNT_ID,
+    executor: s.executor,
     target: {
       kind: "language-model",
       provider: "mock",
       modelId: "mock-v1",
       capabilities: { supportsTools: true, supportsStreaming: true },
     },
-    scope: { sessionId: SESSION_ID, executionId: "exec-1", tickId: "tick-1" },
+    toolExecutor: s.tools,
+    stateApplicator: s.stateApplicator,
+    maxTicks: 4,
   });
 
   console.log(line(`outcome: ${terminal.outcome}`));
-  if (terminal.outcome === "succeeded") {
-    const text = terminal.result.output
+  if (terminal.outcome === "succeeded" && terminal.result) {
+    const r = terminal.result;
+    console.log(line(`ticks: ${r.ticks}`));
+    console.log(line(`stopReason: ${r.stopReason}`));
+    console.log(
+      line(
+        `usage: in=${r.usage.inputTokens} out=${r.usage.outputTokens} total=${r.usage.totalTokens}`,
+      ),
+    );
+    const finalText = r.output
       .filter((b): b is { type: "text"; text: string } => b.type === "text")
       .map((b) => b.text)
       .join("");
-    console.log(line(`result.output text: ${text}`));
-    console.log(line(`stopReason: ${terminal.result.stopReason}`));
-    const usage = terminal.result.usage;
-    if (usage) {
+    if (finalText.length > 0) console.log(line(`final text: ${finalText}`));
+    console.log(line(`tool dispatch results: ${r.toolResults.length}`));
+    for (const tr of r.toolResults) {
+      const text = tr.content
+        .filter((b): b is { type: "text"; text: string } => b.type === "text")
+        .map((b) => b.text)
+        .join("");
       console.log(
-        line(`usage: in=${usage.inputTokens} out=${usage.outputTokens} total=${usage.totalTokens}`),
+        line(
+          `  · ${tr.toolName} (${tr.toolCallId}) ${tr.succeeded ? "✓" : "✗"} → ${text}`,
+        ),
       );
     }
   }
 
-  const deltas = await Effect.runPromise(Fiber.join(fiber));
-  console.log(line(`streamed ${Chunk.size(deltas)} delta envelopes:`));
+  const deltas = await Effect.runPromise(Fiber.join(deltaFiber));
+  console.log(line(`streamed ${Chunk.size(deltas)} delta envelopes during tick 1:`));
   for (const ev of Chunk.toReadonlyArray(deltas)) {
     const d = ev.payload as Delta | undefined;
     console.log(line(`  · ${d?.kind ?? "?"}  delta=${JSON.stringify(d?.delta ?? "")}`));
@@ -446,7 +474,7 @@ async function main(): Promise<void> {
     await scenarioDispatchAbort(s);
     await scenarioDispatchFailure(s);
     await scenarioChannelStreaming(s);
-    await scenarioExecutorRun(s, tree);
+    await scenarioLoopExecution(s, tree);
     await scenarioBusSubscription(s);
     await scenarioJournalAudit(s);
     await scenarioInboxTell(s);

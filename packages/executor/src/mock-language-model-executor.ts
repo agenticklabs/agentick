@@ -82,11 +82,14 @@ export interface MockScriptedRun {
 
 export interface MockLanguageModelExecutorOptions {
   /**
-   * Scripted outcome for `run`. Without this, the executor returns a
-   * minimal `"hi"` reply with `stopReason: "end"`. Tests usually
-   * provide a scripted value; the example app uses the default.
+   * Scripted outcome for `run`. Accepts either a single scripted run
+   * (every `run()` returns the same result) or an array of scripted
+   * runs consumed in order — the i-th `run()` returns the i-th entry.
+   * After the array is exhausted, subsequent calls reuse the last
+   * entry. Without this, the executor returns a minimal `"hi"` reply
+   * with `stopReason: "end"`.
    */
-  readonly scripted?: MockScriptedRun;
+  readonly scripted?: MockScriptedRun | ReadonlyArray<MockScriptedRun>;
 }
 
 // ============================================================================
@@ -115,7 +118,8 @@ export class MockLanguageModelExecutor
 {
   readonly family = "language-model" as const;
 
-  private readonly scripted: MockScriptedRun | undefined;
+  private readonly scriptedSequence: ReadonlyArray<MockScriptedRun>;
+  private scriptIndex = 0;
   private readonly inFlight = new Map<string, InFlightEntry>();
   private readonly aborted = new Set<string>();
 
@@ -127,7 +131,21 @@ export class MockLanguageModelExecutor
     options: MockLanguageModelExecutorOptions = {},
   ) {
     super("executor", scopeId, journal, bus, inbox);
-    this.scripted = options.scripted;
+    this.scriptedSequence = options.scripted
+      ? Array.isArray(options.scripted)
+        ? options.scripted
+        : [options.scripted as MockScriptedRun]
+      : [];
+  }
+
+  private nextScripted(): MockScriptedRun | undefined {
+    if (this.scriptedSequence.length === 0) return undefined;
+    const entry =
+      this.scriptedSequence[
+        Math.min(this.scriptIndex, this.scriptedSequence.length - 1)
+      ];
+    this.scriptIndex++;
+    return entry;
   }
 
   // ──────── ExecutorProtocol ────────
@@ -178,10 +196,13 @@ export class MockLanguageModelExecutor
       scope: input.scope ?? {},
       input,
     };
+    // normalize is independent of the run-sequence cursor — it just
+    // identity-transforms whatever was passed in (matching what a real
+    // adapter would do parsing a provider response).
     return runHarnessProtocol(
       this.runOperation(op, (i) =>
         Effect.try({
-          try: () => normalizeImpl(i, this.scripted),
+          try: () => normalizeImpl(i, this.scriptedSequence[0]),
           catch: (cause): NormalizeError => ({
             _tag: "NormalizationFailed",
             cause,
@@ -193,11 +214,20 @@ export class MockLanguageModelExecutor
 
   run(input: RunInput): Promise<ExecutorTerminal<LanguageModelExecutionResult>> {
     const executionId = input.scope?.executionId ?? `exec:${ulid()}`;
+    // opId is per-tick, not per-execution — the same executor.run may be
+    // called many times within one execution (multi-tick loops). Using
+    // executionId alone would make the substrate's idempotency replay
+    // the first tick's terminal on every subsequent tick.
+    const tickId = input.scope?.tickId;
+    const opId =
+      tickId !== undefined
+        ? `executor:run:${executionId}:${tickId}`
+        : `executor:run:${executionId}:${ulid()}`;
     const op: Operation<
       RunInput,
       ExecutorTerminal<LanguageModelExecutionResult>
     > = {
-      opId: `executor:run:${executionId}`,
+      opId,
       surface: "executor",
       name: "executor:command:run",
       scope: { ...(input.scope ?? {}), executionId },
@@ -245,10 +275,8 @@ export class MockLanguageModelExecutor
       this.inFlight.set(executionId, { executionId });
 
       try {
-        // Mock "wire": no real provider call. The scripted result is
-        // returned opaquely; normalize() reads it. Real adapters do
-        // HTTP / SSE here and accumulate the streamed response.
-        return (this.scripted?.result ?? DEFAULT_REPLY) as unknown;
+        const next = this.nextScripted();
+        return (next?.result ?? DEFAULT_REPLY) as unknown;
       } finally {
         this.inFlight.delete(executionId);
       }
@@ -265,6 +293,10 @@ export class MockLanguageModelExecutor
     never
   > {
     return Effect.gen(this, function* () {
+      // Snapshot the next scripted run for this invocation. Subsequent
+      // calls advance the sequence cursor in `nextScripted()`.
+      const next = this.nextScripted();
+
       // 1. project
       const projected = yield* projectAsEffect(input);
 
@@ -272,7 +304,7 @@ export class MockLanguageModelExecutor
       // Journal-write failures during delta emission are substrate-level
       // catastrophes, not executor errors. Treat them as defects so the
       // executor's typed `E` channel stays narrow to `ExecutorError`.
-      const stream = this.scripted?.stream;
+      const stream = next?.stream;
       if (stream && stream.length > 0) {
         for (const chunk of stream) {
           yield* this.emitDeltaLazy(op, () => ({
@@ -291,7 +323,7 @@ export class MockLanguageModelExecutor
         };
         return terminal;
       }
-      const targetOutput = this.scripted?.result ?? DEFAULT_REPLY;
+      const targetOutput = next?.result ?? DEFAULT_REPLY;
       void projected;
 
       // 4. normalize (identity for mock)

@@ -79,11 +79,20 @@ Phase 4  ■ in progress — REMAINING HARNESSES
          ✓ 4b.2 runExecutorConformance suite
          ✓ 4b.3 @agentick/executor package + MockLanguageModelExecutor
                 reference impl (12/12 tests; 6 conformance + 6 impl-specific)
-         ✓ 4b.4 example/v2 executor scenario — end-to-end
-                JSX → RenderedTree → executor.run → streaming deltas →
-                terminal ExecutionResult
+         ✓ 4b.4 example/v2 executor scenario — JSX → RenderedTree →
+                executor.run → streaming deltas → ExecutionResult
          ✗ 4c   Provider adapters (OpenAI, Anthropic, Google, AI SDK)
-         ✗ 4d   Loop executor
+         ✓ 4d.1 LoopExecutorProtocol + StateApplicator spec types
+         ✓ 4d.2 runLoopExecutorConformance suite (5 scenarios:
+                happy path, applyExecutorResult call count,
+                tool-call round-trip, max ticks, abort no-op)
+         ✓ 4d.3 @agentick/loop-executor package +
+                LoopExecutorHarness + NoopStateApplicator
+                (5/5 conformance tests pass against reference impl)
+         ✓ 4d.4 example/v2 loop scenario — multi-tick agent loop:
+                tick 1 returns tool_use → loop dispatches calculator
+                → tick 2 returns final text → terminal "end". Streaming
+                deltas observed on the bus. 2 ticks, 1 tool dispatch.
          ✗ 4e   Session harness
          ✗ 4f   App harness
 Phase 5  □ Adapters, cluster, gateway

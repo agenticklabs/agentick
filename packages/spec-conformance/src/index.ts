@@ -43,3 +43,10 @@ export {
   type ExecutorConformanceFactory,
   type ExecutorConformanceFactoryInput,
 } from "./executor.js";
+
+// Loop executor (Phase 4d.2)
+export {
+  runLoopExecutorConformance,
+  type LoopExecutorConformanceFactory,
+  type LoopExecutorConformanceFactoryInput,
+} from "./loop-executor.js";
