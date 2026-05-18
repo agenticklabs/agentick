@@ -90,6 +90,13 @@ export interface MockLanguageModelExecutorOptions {
    * with `stopReason: "end"`.
    */
   readonly scripted?: MockScriptedRun | ReadonlyArray<MockScriptedRun>;
+  /**
+   * Self-described target. Defaults to a generic
+   * `{ kind: "language-model", provider: "mock", modelId: "mock-v1" }`
+   * with tool + streaming capabilities. Provider adapters supply their
+   * own derived target; tests can override here.
+   */
+  readonly target?: ExecutionTarget;
 }
 
 // ============================================================================
@@ -112,11 +119,19 @@ const DEFAULT_REPLY: LanguageModelExecutionResult = {
 // MockLanguageModelExecutor
 // ============================================================================
 
+const DEFAULT_MOCK_TARGET: ExecutionTarget = {
+  kind: "language-model",
+  provider: "mock",
+  modelId: "mock-v1",
+  capabilities: { supportsTools: true, supportsStreaming: true },
+};
+
 export class MockLanguageModelExecutor
   extends BaseHarness<"executor">
   implements LanguageModelExecutor
 {
   readonly family = "language-model" as const;
+  readonly target: ExecutionTarget;
 
   private readonly scriptedSequence: ReadonlyArray<MockScriptedRun>;
   private scriptIndex = 0;
@@ -131,6 +146,7 @@ export class MockLanguageModelExecutor
     options: MockLanguageModelExecutorOptions = {},
   ) {
     super("executor", scopeId, journal, bus, inbox);
+    this.target = options.target ?? DEFAULT_MOCK_TARGET;
     this.scriptedSequence = options.scripted
       ? Array.isArray(options.scripted)
         ? options.scripted

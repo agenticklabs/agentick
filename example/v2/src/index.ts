@@ -31,7 +31,6 @@ import React from "react";
 import type {
   ContentBlock,
   DispatchInput,
-  ExecutionTarget,
   MessageEnvelope,
   ProtocolEvent,
   ReconcilerInboxMessage,
@@ -545,16 +544,10 @@ async function scenarioAppHarness(): Promise<void> {
   );
   await executor.ready;
 
-  const target: ExecutionTarget = {
-    kind: "language-model",
-    provider: "mock",
-    modelId: "mock-v1",
-    capabilities: { supportsTools: true, supportsStreaming: true },
-  };
-
+  // Note the absence of an explicit `target` — the executor is
+  // self-describing (FAÇADE.1) so createApp reads `executor.target`.
   const app = await createApp(React.createElement(SupportAgent), {
     executor,
-    target,
     toolHandlers: new Map([
       [
         "handlers/calculator",

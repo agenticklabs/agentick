@@ -127,11 +127,18 @@ export interface AppHarnessOptions<P = unknown> {
    * Language-model executor shared across sessions. Provider adapters
    * (`OpenAIExecutor`, `AnthropicExecutor`, ...) are session-agnostic
    * by design — they hold a client + abort registry keyed by
-   * executionId, not sessionId.
+   * executionId, not sessionId. The executor is self-describing: its
+   * `.target` property is read by the app, so the redundant `target`
+   * field below is optional.
    */
   readonly executor: LanguageModelExecutor;
-  /** Default execution target carried to every `loop.runExecution`. */
-  readonly target: ExecutionTarget;
+  /**
+   * Optional override of the executor's self-described target. When
+   * omitted, `executor.target` is used. Override at this level when a
+   * single shared executor should advertise different capabilities or
+   * provider options per app.
+   */
+  readonly target?: ExecutionTarget;
 
   // ────────── Sub-harness slots (shared across sessions) ──────────
 
@@ -249,7 +256,8 @@ export class AppHarness<P = unknown>
 
     this.rootElement = options.rootElement;
     this.executor = options.executor;
-    this.target = options.target;
+    // Resolve target: caller override > executor.target.
+    this.target = options.target ?? options.executor.target;
 
     // Cascade: longhand (`options.session.*`) wins over shorthand
     // (`options.defaultMaxTicks` / `options.initialProps` /

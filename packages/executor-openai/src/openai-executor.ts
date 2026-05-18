@@ -42,6 +42,7 @@ import type {
   EventBus,
   ExecuteError,
   ExecuteInput,
+  ExecutionTarget,
   ExecutorError,
   ExecutorTerminal,
   LanguageModelExecutionResult,
@@ -100,6 +101,13 @@ export interface OpenAIExecutorOptions {
    * via `emitDeltaLazy`.
    */
   readonly stream?: boolean;
+  /**
+   * Override the self-described target. Defaults to
+   * `{ kind: "language-model", provider: "openai", modelId: options.model ?? "gpt-4o-mini", capabilities: {...} }`.
+   * Set this when surfacing a non-stock OpenAI-compatible endpoint
+   * (vLLM, LM Studio, ollama) or to advertise additional capabilities.
+   */
+  readonly target?: ExecutionTarget;
 }
 
 // ============================================================================
@@ -131,6 +139,7 @@ export class OpenAIExecutor
   implements LanguageModelExecutor
 {
   readonly family = "language-model" as const;
+  readonly target: ExecutionTarget;
 
   private readonly client: OpenAI;
   private readonly defaultModel: string | undefined;
@@ -149,6 +158,12 @@ export class OpenAIExecutor
     this.client = options.client ?? new OpenAI(buildClientOptions(options));
     this.defaultModel = options.model;
     this.streamByDefault = options.stream ?? false;
+    this.target = options.target ?? {
+      kind: "language-model",
+      provider: "openai",
+      modelId: options.model ?? "gpt-4o-mini",
+      capabilities: { supportsTools: true, supportsStreaming: true },
+    };
   }
 
   // ──────── ExecutorProtocol ────────

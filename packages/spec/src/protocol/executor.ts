@@ -263,6 +263,15 @@ export interface LanguageModelExecutor
   > {
   /** Type-narrowed for documentation; not load-bearing structurally. */
   readonly family: "language-model";
+
+  /**
+   * Self-described execution target. The executor knows its own
+   * provider + modelId + capabilities — this property is read by the
+   * app/session/loop so callers don't have to declare the target
+   * redundantly at every layer. Per-call overrides still flow via
+   * `RunInput.target` / `SendInput.target`.
+   */
+  readonly target: ExecutionTarget;
 }
 
 // Re-export the executable target alias for ergonomic imports.

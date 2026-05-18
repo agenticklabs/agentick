@@ -20,17 +20,16 @@ bound) closed. Phase 5+ proceeds as below, in this exact order:
    Drops a layer between the user and BaseHarness so the 90% case is
    three lines, not ten.
    ────────────────────────────────────────────────────────────────
-   ✓ L7              MemoryJournal idempotency state bounded (DONE)
-   □ FAÇADE.1        LanguageModelExecutor.target as a property
-                     (read on the executor, not declared twice)
-   □ FAÇADE.2        AppHarnessOptions.target → optional override
-                     (read from executor by default)
+   ✓ L7              MemoryJournal idempotency state bounded
+   ✓ FAÇADE.1        LanguageModelExecutor.target as a property
+   ✓ FAÇADE.2        AppHarnessOptions.target → optional override
+                     (reads executor.target by default)
+   ✓ FAÇADE.4        openai(modelId, options?) factory in
+                     @agentick/executor-openai
    □ FAÇADE.3        Executor slot: accepts instance | factory(substrate)
                      so factories like openai("gpt-4o") let the app
                      construct with its own substrate. Closes the
                      app.events() observability footgun.
-   □ FAÇADE.4        openai(modelId, options?) factory in
-                     @agentick/executor-openai
    □ FAÇADE.5        SendInput.executor / SendInput.target per-call
                      override
    □ FAÇADE.6        define__ builder exports from every harness package
