@@ -1,11 +1,90 @@
 # Agentick v2 — Implementation Plan
 
-**Status:** Active · last updated 2026-05-08
+**Status:** Active · last updated 2026-05-18
 **Branch:** `feat/v2`
 **Reference:** [`blueprint/`](./blueprint/) — architectural contract docs
+**Progress log:** [`STATUS.md`](./STATUS.md) — what actually shipped
 
 This is the execution plan for the v2 rewrite. It assumes the blueprint
 is the contract; this doc is sequencing.
+
+## ▶ Current ordering (2026-05-18, supersedes Phase-4-onward sections)
+
+Phase 4 is functionally complete — all six harnesses (reconciler →
+tool-executor → executor → loop → session → app) shipped with the
+substrate L1/L2/L3/L4 + L5 (OTel) + L6 (benchmarks) + L7 (idempotency
+bound) closed. Phase 5+ proceeds as below, in this exact order:
+
+```
+1. ERGONOMIC FACADE (~3–4 days) — single cohesive PR.
+   Drops a layer between the user and BaseHarness so the 90% case is
+   three lines, not ten.
+   ────────────────────────────────────────────────────────────────
+   ✓ L7              MemoryJournal idempotency state bounded (DONE)
+   □ FAÇADE.1        LanguageModelExecutor.target as a property
+                     (read on the executor, not declared twice)
+   □ FAÇADE.2        AppHarnessOptions.target → optional override
+                     (read from executor by default)
+   □ FAÇADE.3        Executor slot: accepts instance | factory(substrate)
+                     so factories like openai("gpt-4o") let the app
+                     construct with its own substrate. Closes the
+                     app.events() observability footgun.
+   □ FAÇADE.4        openai(modelId, options?) factory in
+                     @agentick/executor-openai
+   □ FAÇADE.5        SendInput.executor / SendInput.target per-call
+                     override
+   □ FAÇADE.6        define__ builder exports from every harness package
+                     (defineApp / defineSession / defineLoop /
+                     defineReconciler / defineToolExecutor /
+                     defineExecutor). Same five-surface contract,
+                     callback-style entry point — no BaseHarness
+                     subclassing for the common case.
+
+2. CONFORMANCE COMPLETION (~2 days)
+   ────────────────────────────────────────────────────────────────
+   □ 4e.2            runSessionConformance suite in @agentick/spec-conformance.
+                     Drafted in 4e; lands now that the surface is
+                     stable post-façade. Run against @agentick/session.
+
+3. PHASE 5 — PROVIDER ADAPTER ROW (~1 week)
+   ────────────────────────────────────────────────────────────────
+   □ Phase5.1        @agentick/executor-anthropic — anthropic("claude-...")
+   □ Phase5.2        @agentick/executor-google — google("gemini-...")
+   □ Phase5.3        @agentick/executor-ai-sdk — aisdk({ model, tools? }).
+                     The progressive-adoption story. Wraps Vercel
+                     AI SDK as our executor; extracts tools into our
+                     handler resolver (observability uniformity).
+
+4. PHASE 5 — PRODUCTION SUBSTRATE (~2 weeks)
+   ────────────────────────────────────────────────────────────────
+   □ Phase5.4        @agentick/persistence-sqlite implements
+                     OperationJournal (pass runJournalConformance)
+   □ Phase5.5        @agentick/persistence-postgres impl + conformance
+   □ Phase5.6        Gateway / server adapter port from v1
+   □ Phase5.7        @agentick/cluster — defer if time-constrained
+                     (v2.1 candidate)
+
+5. PHASE 4 LOOSE ENDS (~3 days, parallel-safe)
+   ────────────────────────────────────────────────────────────────
+   □ 4a.5–4a.8       Tool executor: confirmation flow, middleware
+                     hooks, inbox dispatcher, v1 parity sweep
+   □ 4f.6b           App.use(integration) — interceptors + observers
+                     + services registry
+   □ 4f.7            App persistence + telemetry Layer slots
+   □ L8              Substrate self-instrumentation (defer until
+                     production deployment exercises it)
+
+6. PHASE 6 — V1 SUNSET (~1–2 weeks)
+   ────────────────────────────────────────────────────────────────
+   □ Migration guides per package
+   □ v1 → v2 mapping doc per blueprint section
+   □ Cut v2.0 from feat/v2 → main
+```
+
+The detailed legacy phasing below remains as historical reference for
+the foundation work. Items 1–6 above are authoritative for new work.
+
+---
 
 ## Strategic approach
 

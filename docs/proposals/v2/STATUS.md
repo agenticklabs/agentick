@@ -1,7 +1,7 @@
 # Agentick v2 — Implementation Status
 
 **Branch:** `feat/v2`
-**Last updated:** 2026-05-18 (Phase 4f — App harness MVP + reconciler-agnostic typing fix)
+**Last updated:** 2026-05-18 (L7 — MemoryJournal idempotency state bounded; v2.0 gating item closed)
 
 This is the **running progress log** for v2 implementation. Update it
 every session. New contributors / sessions read this first.
@@ -325,10 +325,13 @@ scalability + observability.
   bus.publish 1-sub at 6.0 μs (20% over target — acceptable),
   runOperation empty body at 46.8 μs (target revised from 10 μs →
   50 μs after Effect framework overhead measured).
-- **L7 — `MemoryJournal.appendedKeys` Set unbounded growth.**
-  Idempotency keys accumulate forever. Long-lived sessions leak. Fix:
-  TTL eviction matching the ring buffer's drop point. **Gates v2.0
-  release** (not Phase 4).
+- ~~**L7 — `MemoryJournal.appendedKeys` Set unbounded growth.**~~
+  ✓ landed 2026-05-18. Eviction tied to the ring buffer's drop point —
+  when an event drops, its (opId, phase) key is removed from
+  `appendedKeys`, and `terminals` / `inFlight` are cleaned up
+  accordingly. 14/14 journal tests pass; full workspace 5005/5005.
+  MemoryJournal is explicitly non-durable; durable journals (sqlite,
+  pg) implement dedup against their backing store and aren't affected.
 - **L8 — Substrate self-instrumentation.** No metric surface for
   subscriberCount / journal size / inbox cache size / queue depth.
   How does a deployment know if the substrate is overloaded? Designed

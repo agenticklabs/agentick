@@ -127,8 +127,24 @@ export class MemoryJournal implements OperationJournal {
     this.events.push(event);
     if (this.events.length > this.capacity) {
       const overflow = this.events.length - this.capacity;
-      this.events.splice(0, overflow);
+      const evicted = this.events.splice(0, overflow);
       this.dropped += overflow;
+
+      // L7 — keep idempotency state bounded by the ring's drop point.
+      // Each evicted event releases its (opId, phase) key plus the
+      // terminals / inFlight maps it contributed to. MemoryJournal is
+      // explicitly non-durable; losing dedup state when its visible
+      // window scrolls is acceptable. Durable journals (sqlite, pg)
+      // implement the dedup against their backing store and aren't
+      // affected.
+      for (const e of evicted) {
+        if (!e.opId) continue;
+        this.appendedKeys.delete(`${e.opId}::${e.phase}`);
+        if (e.phase === "terminal") this.terminals.delete(e.opId);
+        // Clear orphan tracking when its earliest sighting evicts.
+        const tracked = this.inFlight.get(e.opId);
+        if (tracked === e) this.inFlight.delete(e.opId);
+      }
     }
 
     for (const listener of this.tailListeners) {
