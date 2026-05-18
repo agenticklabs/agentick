@@ -344,6 +344,151 @@ export interface SessionHarnessProtocol<P = unknown> {
    * Full hook integration arrives with the lifecycle wiring pass.
    */
   notifyLifecycle(input: NotifyTickEndInput): Promise<TickEndForwardDecision>;
+
+  // ──────────────────────────────────────────────────────────────────
+  // Extended interaction surface (Phase 4e+ — block 5 of the plan)
+  //
+  // Each method below is independent of the substrate phase contract;
+  // they're conveniences sitting on top of the same primitives the
+  // loop executor uses (timeline writes, tool dispatch, child session
+  // construction).
+  // ──────────────────────────────────────────────────────────────────
+
+  /**
+   * Spawn a child session. The parent's app provides the shared
+   * substrate + sub-harnesses; the child gets its own sessionId and
+   * timeline. When `input.send` is supplied, the spawn immediately
+   * runs one execution against the child and returns the handle.
+   * Otherwise the caller receives the child `SessionHarnessProtocol`
+   * for further interaction.
+   *
+   * `[V1-INHERITED]` — collapses v1's `spawn(component, input?, opts?)`
+   * into a single options object.
+   *
+   * @throws {SessionError} — `SessionClosedError` if the parent is
+   *   shutting down; impl-specific failures otherwise.
+   */
+  spawn(
+    input: SpawnInput<P>,
+  ): Promise<SessionExecutionHandle | SessionHarnessProtocol<P>>;
+
+  /**
+   * Host-side tool dispatch. Invokes a registered tool by name with
+   * the supplied input, bypassing the model. The dispatch flows
+   * through the session's tool executor with `via: "dispatch"`, so
+   * tools must declare `exposure: ["dispatch", ...]` to be reachable.
+   *
+   * Returns the tool's content blocks. Throws `ToolExecutorError`
+   * (validation failure, permission denied, handler failure, etc.)
+   * surfaced from the harness.
+   */
+  dispatch(
+    name: string,
+    input: Record<string, unknown>,
+  ): Promise<readonly ContentBlock[]>;
+
+  /**
+   * Queue a message for the next execution. If no execution is
+   * running, the message is prepended to the inputs of the caller's
+   * subsequent `send(...)`. If an execution IS running, the message
+   * is held until the current execution terminates, then folded into
+   * the next `send(...)` automatically.
+   *
+   * `[V1-INHERITED]` — mirrors `session.queue(message)`.
+   */
+  queue(message: SendMessageInput): Promise<void>;
+
+  /**
+   * Write a timeline entry directly. Useful for user-side events,
+   * out-of-band facts, or pre-populating context before a send. When
+   * `opts.trigger` is true the session immediately runs a fresh
+   * execution after the append (analogous to `send` with no new
+   * messages) and returns the handle.
+   *
+   * Returns the appended entry id when not triggering; returns the
+   * execution handle when triggering.
+   */
+  append(
+    input: AppendEntryInput,
+    opts?: { readonly trigger?: boolean },
+  ): Promise<{ readonly entryId: string } | SessionExecutionHandle>;
+
+  /**
+   * Append an event-role observation to the timeline. Convenience
+   * wrapper over `append` that sets `role: "event"` and stamps
+   * `metadata.type` from the input. Observations are visible to the
+   * model by default but never invoke handler logic.
+   */
+  observe(input: ObserveInput): Promise<{ readonly entryId: string }>;
+}
+
+// ============================================================================
+// Inputs for the extended surface
+// ============================================================================
+
+export interface SpawnInput<P = unknown> {
+  /**
+   * Child agent root. Opaque to the session boundary — forwarded to
+   * the bound reconciler at mount time. Same type contract as
+   * `AppHarnessOptions.rootElement`.
+   */
+  readonly agent: unknown;
+  /**
+   * Optional initial send for the child. When supplied, the spawn
+   * immediately runs one execution against the child session and
+   * returns the resulting handle. When omitted, the spawn returns
+   * the unbound child `SessionHarnessProtocol`.
+   */
+  readonly send?: SendInput<P>;
+  /** Stable child session id. Generated if omitted. */
+  readonly sessionId?: string;
+  /** Caller metadata stored on the child's registry entry. */
+  readonly metadata?: Readonly<Record<string, unknown>>;
+  /** Initial component props for the child agent. */
+  readonly initialProps?: P;
+  /** Initial knob values for the child. */
+  readonly initialKnobs?: Readonly<Record<string, unknown>>;
+  /** Override the parent's max tick bound for this child. */
+  readonly maxTicks?: number;
+}
+
+export interface ObserveInput {
+  /** Observation type label — stored in `metadata.type`. */
+  readonly type: string;
+  /** Either content blocks or a plain text payload (wrapped). */
+  readonly content: string | readonly ContentBlock[];
+  /** Additional metadata merged onto the message envelope. */
+  readonly metadata?: Readonly<Record<string, unknown>>;
+}
+
+// ============================================================================
+// SpawnContext — the surface the parent app exposes to a child session
+//
+// Avoids leaking AppHarnessProtocol back into the session boundary. The
+// session's `SessionHarnessOptions.spawnContext?` carries this; sessions
+// without an app-level parent can't spawn.
+// ============================================================================
+
+export interface SpawnContext<P = unknown> {
+  /**
+   * Construct a new session bound to the same app. The parent passes
+   * its own `sessionId` so the child's registry entry can link back.
+   * The returned session is fully wired (substrate, sub-harnesses,
+   * mountReady) and ready for `send`.
+   */
+  createChildSession(
+    input: SpawnContextChildInput<P>,
+  ): Promise<SessionHarnessProtocol<P>>;
+}
+
+export interface SpawnContextChildInput<P = unknown> {
+  readonly parentSessionId: string;
+  readonly agent: unknown;
+  readonly sessionId?: string;
+  readonly metadata?: Readonly<Record<string, unknown>>;
+  readonly initialProps?: P;
+  readonly initialKnobs?: Readonly<Record<string, unknown>>;
+  readonly maxTicks?: number;
 }
 
 // Convenience re-exports for ergonomic imports.

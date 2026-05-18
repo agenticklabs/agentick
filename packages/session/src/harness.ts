@@ -27,6 +27,7 @@ import type {
   MessageHandlerError,
   MessageInbox,
   NotifyTickEndInput,
+  ObserveInput,
   Operation,
   OperationJournal,
   SendInput,
@@ -36,6 +37,8 @@ import type {
   SessionExecutionHandle,
   SessionHarnessProtocol,
   SessionSnapshot,
+  SpawnContext,
+  SpawnInput,
   StateApplyError,
   TickEndForwardDecision,
   TimelineEntry,
@@ -89,6 +92,15 @@ export interface SessionHarnessOptions<P = unknown> {
   readonly defaultMaxTicks?: number;
   /** Optional initial knob values. */
   readonly initialKnobs?: Readonly<Record<string, unknown>>;
+  /**
+   * Spawn context for child sessions. Typically injected by the
+   * AppHarness when it constructs a session — the session keeps a
+   * narrow back-reference to its parent app so `spawn()` works.
+   * Sessions without a spawnContext throw when `spawn()` is called.
+   */
+  readonly spawnContext?: SpawnContext<P>;
+  /** Parent session id when this session is itself a spawned child. */
+  readonly parentSessionId?: string;
 }
 
 // ============================================================================
@@ -107,6 +119,10 @@ export class SessionHarness<P = unknown>
   private readonly executor: SessionHarnessOptions<P>["executor"];
   private readonly toolExecutor: ToolExecutorProtocol;
   private readonly target: ExecutionTarget;
+  private readonly spawnContext: SpawnContext<P> | undefined;
+  private readonly parentSessionId: string | undefined;
+  /** Messages queued via `queue()` — flushed into the next `send`. */
+  private readonly _queuedMessages: SendMessageInput[] = [];
   private readonly defaultMaxTicks: number;
 
   private _closed = false;
@@ -130,6 +146,8 @@ export class SessionHarness<P = unknown>
     this.executor = options.executor;
     this.toolExecutor = options.toolExecutor;
     this.target = options.target;
+    this.spawnContext = options.spawnContext;
+    this.parentSessionId = options.parentSessionId;
     this.defaultMaxTicks = options.defaultMaxTicks ?? 8;
     this.mountId = `mount:${options.sessionId}`;
 
@@ -250,6 +268,101 @@ export class SessionHarness<P = unknown>
     return undefined;
   }
 
+  // ──────── Extended interaction surface (block 5) ────────
+
+  async spawn(
+    input: SpawnInput<P>,
+  ): Promise<SessionExecutionHandle | SessionHarnessProtocol<P>> {
+    if (this._closed) {
+      throw { _tag: "SessionClosedError", attemptedCommand: "spawn" } satisfies SessionError;
+    }
+    if (this.spawnContext === undefined) {
+      throw {
+        _tag: "ExecutionFailed",
+        cause: new Error(
+          "spawn() requires a spawnContext — the session was constructed without an app-level parent",
+        ),
+      } satisfies SessionError;
+    }
+    const childInput = {
+      parentSessionId: this.store.id,
+      agent: input.agent,
+      ...(input.sessionId !== undefined ? { sessionId: input.sessionId } : {}),
+      ...(input.metadata !== undefined ? { metadata: input.metadata } : {}),
+      ...(input.initialProps !== undefined
+        ? { initialProps: input.initialProps }
+        : {}),
+      ...(input.initialKnobs !== undefined
+        ? { initialKnobs: input.initialKnobs }
+        : {}),
+      ...(input.maxTicks !== undefined ? { maxTicks: input.maxTicks } : {}),
+    };
+    const child = await this.spawnContext.createChildSession(childInput);
+    if (input.send !== undefined) {
+      return child.send(input.send);
+    }
+    return child;
+  }
+
+  async dispatch(
+    name: string,
+    input: Record<string, unknown>,
+  ): Promise<readonly ContentBlock[]> {
+    if (this._closed) {
+      throw { _tag: "SessionClosedError", attemptedCommand: "dispatch" } satisfies SessionError;
+    }
+    await this._mountReady;
+    const result = await this.toolExecutor.dispatch({
+      toolCallId: `host:${ulid()}`,
+      name,
+      input,
+      context: { via: "dispatch", sessionId: this.store.id },
+    });
+    return result.content;
+  }
+
+  async queue(message: SendMessageInput): Promise<void> {
+    if (this._closed) {
+      throw { _tag: "SessionClosedError", attemptedCommand: "queue" } satisfies SessionError;
+    }
+    this._queuedMessages.push(message);
+  }
+
+  async append(
+    input: AppendEntryInput,
+    opts: { readonly trigger?: boolean } = {},
+  ): Promise<{ readonly entryId: string } | SessionExecutionHandle> {
+    if (this._closed) {
+      throw { _tag: "SessionClosedError", attemptedCommand: "append" } satisfies SessionError;
+    }
+    const applied = this.appendEntrySync(input);
+    const entryId = applied.appendedEntryIds[0]!;
+    if (opts.trigger) {
+      // Trigger an execution with no new messages — the appended
+      // entry is already in the timeline. The send path picks it up.
+      return this.send({ messages: [] });
+    }
+    return { entryId };
+  }
+
+  async observe(input: ObserveInput): Promise<{ readonly entryId: string }> {
+    if (this._closed) {
+      throw { _tag: "SessionClosedError", attemptedCommand: "observe" } satisfies SessionError;
+    }
+    const content: readonly ContentBlock[] =
+      typeof input.content === "string"
+        ? [{ type: "text", text: input.content }]
+        : input.content;
+    // Call the store directly so the metadata field is preserved.
+    // appendEntrySync's narrower input doesn't carry metadata.
+    const id = this.store.appendMessage({
+      role: "event",
+      content,
+      metadata: { type: input.type, ...(input.metadata ?? {}) },
+    });
+    return { entryId: id };
+  }
+
   // ──────── inbox dispatch ────────
 
   protected handleMessage(
@@ -276,7 +389,12 @@ export class SessionHarness<P = unknown>
 
     await this._mountReady;
 
-    // Apply new messages to the timeline.
+    // Flush queued messages first, then apply the send's own messages.
+    // Queue order is FIFO — older queued items land before this call's.
+    if (this._queuedMessages.length > 0) {
+      const drained = this._queuedMessages.splice(0, this._queuedMessages.length);
+      for (const m of drained) this.appendInputMessage(m);
+    }
     for (const m of input.messages ?? []) this.appendInputMessage(m);
 
     const executionId = `exec:${ulid()}`;

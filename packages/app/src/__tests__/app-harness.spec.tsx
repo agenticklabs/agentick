@@ -271,6 +271,38 @@ describe("AppHarness — events()", () => {
   });
 });
 
+describe("AppHarness — spawn (SpawnContext implementation)", () => {
+  it("session.spawn() routes through app.createChildSession and returns a real child", async () => {
+    const app = await mkApp();
+    const parent = await app.createSession({ sessionId: "parent" });
+    const child = await parent.spawn({
+      agent: React.createElement(MinimalAgent),
+      sessionId: "child-1",
+      metadata: { kind: "spawned" },
+    });
+    expect(child).toBeDefined();
+    // Child is also registered in the app's registry.
+    expect(app.getSession("child-1")).toBe(child);
+    await app.closeApp();
+  });
+
+  it("session.spawn({ send }) auto-runs the child to terminal", async () => {
+    const app = await mkApp();
+    const parent = await app.createSession({ sessionId: "parent-2" });
+    const handle = await parent.spawn({
+      agent: React.createElement(MinimalAgent),
+      send: { messages: [{ role: "user", content: "compute" }] },
+    });
+    // When `send` is provided, spawn returns a SessionExecutionHandle.
+    expect("result" in handle).toBe(true);
+    if ("result" in handle) {
+      const result = await handle.result;
+      expect(result.response).toContain("1081");
+    }
+    await app.closeApp();
+  });
+});
+
 describe("AppHarness — closeApp", () => {
   it("closes registered sessions and rejects subsequent commands", async () => {
     const app = await mkApp();

@@ -69,6 +69,8 @@ import type {
   SessionHarnessProtocol,
   SessionListEntry,
   SessionStatus,
+  SpawnContext,
+  SpawnContextChildInput,
   ToolExecutorProtocol,
 } from "@agentick/spec";
 
@@ -224,6 +226,7 @@ interface InternalSessionEntry<P> {
   readonly tools: ToolExecutorHarness;
   readonly metadata: Readonly<Record<string, unknown>>;
   readonly createdAt: number;
+  readonly parentSessionId?: string;
   lastActiveAt?: number;
   ephemeral: boolean;
 }
@@ -234,7 +237,7 @@ interface InternalSessionEntry<P> {
 
 export class AppHarness<P = unknown>
   extends BaseHarness<"app">
-  implements AppHarnessProtocol<P>
+  implements AppHarnessProtocol<P>, SpawnContext<P>
 {
   private readonly rootElement: unknown;
   private readonly executor: LanguageModelExecutor;
@@ -398,6 +401,10 @@ export class AppHarness<P = unknown>
   private async createSessionBody(
     input: CreateSessionInput<P>,
     ephemeral: boolean,
+    overrides: {
+      readonly agent?: unknown;
+      readonly parentSessionId?: string;
+    } = {},
   ): Promise<SessionHarnessProtocol<P>> {
     this.assertOpen();
     const sessionId = input.sessionId ?? `session:${ulid()}`;
@@ -426,7 +433,7 @@ export class AppHarness<P = unknown>
     const session = new SessionHarness<P>(this.journal, this.bus, this.inbox, {
       ...this.sessionDefaults,
       sessionId,
-      agent: this.rootElement,
+      agent: overrides.agent ?? this.rootElement,
       reconciler: this.reconciler,
       loop: this.loop,
       executor: this.executor,
@@ -444,6 +451,11 @@ export class AppHarness<P = unknown>
         : this.sessionDefaults.initialKnobs !== undefined
           ? { initialKnobs: this.sessionDefaults.initialKnobs }
           : {}),
+      // Inject self as SpawnContext so the child can spawn grandchildren.
+      spawnContext: this,
+      ...(overrides.parentSessionId !== undefined
+        ? { parentSessionId: overrides.parentSessionId }
+        : {}),
     });
 
     await Promise.all([tools.ready, session.ready]);
@@ -456,9 +468,37 @@ export class AppHarness<P = unknown>
       metadata: input.metadata ?? {},
       createdAt: Date.now(),
       ephemeral,
+      ...(overrides.parentSessionId !== undefined
+        ? { parentSessionId: overrides.parentSessionId }
+        : {}),
     };
     this.registry.set(sessionId, entry);
     return session;
+  }
+
+  /**
+   * `SpawnContext` impl — invoked by a parent SessionHarness when its
+   * `spawn()` method is called. Creates a child session linked to the
+   * parent in the registry.
+   */
+  async createChildSession(
+    input: SpawnContextChildInput<P>,
+  ): Promise<SessionHarnessProtocol<P>> {
+    const createInput: CreateSessionInput<P> = {
+      ...(input.sessionId !== undefined ? { sessionId: input.sessionId } : {}),
+      ...(input.metadata !== undefined ? { metadata: input.metadata } : {}),
+      ...(input.initialProps !== undefined
+        ? { initialProps: input.initialProps }
+        : {}),
+      ...(input.initialKnobs !== undefined
+        ? { initialKnobs: input.initialKnobs }
+        : {}),
+      ...(input.maxTicks !== undefined ? { maxTicks: input.maxTicks } : {}),
+    };
+    return this.createSessionBody(createInput, /* ephemeral */ false, {
+      agent: input.agent,
+      parentSessionId: input.parentSessionId,
+    });
   }
 
   private async runOnceBody(input: RunOnceInput<P>): Promise<RunOnceResult> {
