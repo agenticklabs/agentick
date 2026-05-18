@@ -1,7 +1,7 @@
 # Agentick v2 — Implementation Status
 
 **Branch:** `feat/v2`
-**Last updated:** 2026-05-17 (Phase 4c — first provider adapter (`@agentick/executor-openai`) landed)
+**Last updated:** 2026-05-18 (Phase 4f — App harness MVP + reconciler-agnostic typing fix)
 
 This is the **running progress log** for v2 implementation. Update it
 every session. New contributors / sessions read this first.
@@ -136,7 +136,38 @@ Phase 4  ■ in progress — REMAINING HARNESSES
                 tool result) → render → executor returns final text →
                 stopReason "end". 2 ticks, 1 tool dispatch, timeline
                 with 4 entries.
-         ✗ 4f   App harness
+         ■ 4f   App harness
+                ✓ 4f.1 AppHarnessProtocol spec types (createSession,
+                       runOnce, getSession, listSessions, closeApp);
+                       CreateSessionInput, RunOnceInput/Result,
+                       SessionEntry, SessionFilter, AppError taxonomy.
+                       Spec stays React-agnostic — construction options
+                       live in the impl package.
+                ✓ 4f.2 @agentick/app package + AppHarness:
+                        - Shared substrate (journal/bus/inbox) + shared
+                          sub-harnesses (reconciler, loop) — one
+                          instance per app, reused by every session
+                        - Per-session ToolExecutorHarness (so JSX-
+                          declared tools don't bleed between sessions),
+                          shared HandlerResolver
+                        - In-memory SessionRegistry with metadata filter
+                        - Promise-typed surface via runHarnessProtocol
+                        - 6/6 smoke tests pass: createSession + send,
+                          listSessions filter, duplicate-id reject,
+                          runOnce ephemeral dispose, closeApp guard,
+                          direct constructor variant
+                ✓ 4f.3 example/v2 scenarioAppHarness — createApp(<Agent />,
+                       opts) → runOnce + createSession + listSessions
+                       + closeApp end-to-end. Verifies the ergonomic
+                       surface wraps everything below.
+                ✓ 4f.4 RECONCILER-AGNOSTIC TYPING — session/app types
+                       changed from `ReactNode` to `unknown`. The spec
+                       was already renderer-agnostic
+                       (`MountInput.element: unknown`); the impls had
+                       drifted. React/Angular/etc. reconcilers all
+                       satisfy the contract with no app/session change.
+                ✗ 4f.5 use() integrations + cross-session events()
+                ✗ 4f.6 persistence + telemetry Layer slots
 Phase 5  □ Adapters, cluster, gateway
 Phase 6  □ v1 sunset
 ```

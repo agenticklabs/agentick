@@ -1,0 +1,209 @@
+/**
+ * Smoke tests for `AppHarness` / `createApp`.
+ *
+ * Verifies the user-facing surface end-to-end against the
+ * `MockLanguageModelExecutor`: createSession + send + result, runOnce
+ * (ephemeral registration that auto-disposes), registry filtering,
+ * closeApp.
+ */
+
+import React from "react";
+import { describe, expect, it } from "vitest";
+
+import { MockLanguageModelExecutor } from "@agentick/executor";
+import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
+import { InMemoryHandlerResolver } from "@agentick/tool-executor";
+import type { ContentBlock, ExecutionTarget } from "@agentick/spec";
+
+import { AppHarness, createApp } from "../index.js";
+
+// ---------------------------------------------------------------------------
+// Fixtures
+// ---------------------------------------------------------------------------
+
+function MinimalAgent() {
+  // Plain JSX agent — a single user message + an exposed calculator tool.
+  return React.createElement(
+    React.Fragment,
+    null,
+    React.createElement(
+      "section" as never,
+      { id: "system", audience: "model" },
+      "You are a helpful agent.",
+    ),
+    React.createElement("tool" as never, {
+      id: "t.calculator",
+      name: "calculator",
+      description: "Evaluate arithmetic",
+      inputSchema: {
+        type: "object",
+        required: ["expression"],
+        properties: { expression: { type: "string" } },
+      },
+      exposure: ["model"],
+      handlerRef: "handlers/calculator",
+    }),
+    React.createElement("message" as never, { role: "user" }, "47 * 23"),
+  );
+}
+
+function mkExecutor(): MockLanguageModelExecutor {
+  return new MockLanguageModelExecutor(
+    "app-test-exec",
+    new MemoryJournal(),
+    new LocalEventBus(),
+    new LocalInbox(),
+    {
+      scripted: [
+        {
+          result: {
+            specVersion: "2026-05-08",
+            output: [
+              {
+                type: "tool_use",
+                toolUseId: "tc-1",
+                name: "calculator",
+                input: { expression: "47 * 23" },
+              },
+            ],
+            stopReason: "tool_use",
+            toolCalls: [
+              { id: "tc-1", name: "calculator", input: { expression: "47 * 23" } },
+            ],
+            usage: { inputTokens: 8, outputTokens: 4, totalTokens: 12 },
+          },
+        },
+        {
+          result: {
+            specVersion: "2026-05-08",
+            output: [{ type: "text", text: "47 × 23 = 1081." }],
+            stopReason: "end",
+            usage: { inputTokens: 10, outputTokens: 8, totalTokens: 18 },
+          },
+        },
+      ],
+    },
+  );
+}
+
+function mkTarget(): ExecutionTarget {
+  return {
+    kind: "language-model",
+    provider: "mock",
+    modelId: "mock-v1",
+    capabilities: { supportsTools: true, supportsStreaming: true },
+  };
+}
+
+async function mkApp() {
+  const executor = mkExecutor();
+  await executor.ready;
+  const toolHandlers = new Map<string, (input: unknown) => Promise<ContentBlock[]>>([
+    [
+      "handlers/calculator",
+      async (input) => {
+        const { expression } = input as { expression: string };
+        const value = Function(`"use strict"; return (${expression});`)();
+        return [{ type: "text", text: String(value) }];
+      },
+    ],
+  ]);
+  return createApp(React.createElement(MinimalAgent), {
+    executor,
+    target: mkTarget(),
+    toolHandlers,
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+describe("AppHarness — createSession + send", () => {
+  it("registers a session and resolves a SendResult", async () => {
+    const app = await mkApp();
+    const session = await app.createSession({ metadata: { tenant: "acme" } });
+    const handle = await session.send({
+      messages: [{ role: "user", content: "What's 47 * 23?" }],
+    });
+    const result = await handle.result;
+    expect(result.response).toContain("1081");
+    expect(result.ticks).toBe(2);
+    await app.closeApp();
+  });
+
+  it("listSessions filters by status + metadata", async () => {
+    const app = await mkApp();
+    await app.createSession({ sessionId: "s1", metadata: { tier: "free" } });
+    await app.createSession({ sessionId: "s2", metadata: { tier: "pro" } });
+    const all = app.listSessions();
+    expect(all.map((e) => e.id).sort()).toEqual(["s1", "s2"]);
+    const pro = app.listSessions({ metadata: { tier: "pro" } });
+    expect(pro).toHaveLength(1);
+    expect(pro[0]!.id).toBe("s2");
+    await app.closeApp();
+  });
+
+  it("createSession with duplicate id throws SessionAlreadyExistsError", async () => {
+    const app = await mkApp();
+    await app.createSession({ sessionId: "dup" });
+    await expect(app.createSession({ sessionId: "dup" })).rejects.toMatchObject(
+      { _tag: "SessionAlreadyExistsError", sessionId: "dup" },
+    );
+    await app.closeApp();
+  });
+});
+
+describe("AppHarness — runOnce", () => {
+  it("creates an ephemeral session, runs send, and disposes", async () => {
+    const app = await mkApp();
+    const { result, sessionId } = await app.runOnce({
+      send: { messages: [{ role: "user", content: "calc?" }] },
+    });
+    expect(result.response).toContain("1081");
+    expect(sessionId).toMatch(/^runonce:/);
+    // Registry should be empty after dispose.
+    expect(app.listSessions()).toHaveLength(0);
+    expect(app.getSession(sessionId)).toBeUndefined();
+    await app.closeApp();
+  });
+});
+
+describe("AppHarness — closeApp", () => {
+  it("closes registered sessions and rejects subsequent commands", async () => {
+    const app = await mkApp();
+    await app.createSession({ sessionId: "to-close" });
+    await app.closeApp();
+    await expect(app.createSession({ sessionId: "after-close" })).rejects.toMatchObject(
+      { _tag: "AppClosedError" },
+    );
+  });
+});
+
+describe("AppHarness — constructor variant", () => {
+  it("direct `new AppHarness(...)` plus appReady is equivalent to createApp", async () => {
+    const executor = mkExecutor();
+    await executor.ready;
+    const app = new AppHarness({
+      rootElement: React.createElement(MinimalAgent),
+      executor,
+      target: mkTarget(),
+      toolHandlers: new Map([
+        [
+          "handlers/calculator",
+          async (input: unknown) => {
+            const { expression } = input as { expression: string };
+            const v = Function(`"use strict"; return (${expression});`)();
+            return [{ type: "text", text: String(v) } as ContentBlock];
+          },
+        ],
+      ]),
+    });
+    await app.appReady;
+    const { result } = await app.runOnce({
+      send: { messages: [{ role: "user", content: "x" }] },
+    });
+    expect(result.ticks).toBe(2);
+    await app.closeApp();
+  });
+});

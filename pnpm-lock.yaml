@@ -204,6 +204,9 @@ importers:
 
   example/v2:
     dependencies:
+      '@agentick/app':
+        specifier: workspace:*
+        version: link:../../packages/app
       '@agentick/executor':
         specifier: workspace:*
         version: link:../../packages/executor
@@ -390,6 +393,40 @@ importers:
       vitest:
         specifier: ^4.0.18
         version: 4.0.18(@opentelemetry/api@1.9.0)(@types/node@22.19.7)(happy-dom@17.6.3)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.4)
+
+  packages/app:
+    dependencies:
+      '@agentick/loop-executor':
+        specifier: workspace:*
+        version: link:../loop-executor
+      '@agentick/reconciler-react':
+        specifier: workspace:*
+        version: link:../reconciler-react
+      '@agentick/runtime':
+        specifier: workspace:*
+        version: link:../runtime
+      '@agentick/session':
+        specifier: workspace:*
+        version: link:../session
+      '@agentick/spec':
+        specifier: workspace:*
+        version: link:../spec
+      '@agentick/tool-executor':
+        specifier: workspace:*
+        version: link:../tool-executor
+      effect:
+        specifier: ^3.21.2
+        version: 3.21.2
+    devDependencies:
+      '@agentick/executor':
+        specifier: workspace:*
+        version: link:../executor
+      '@types/react':
+        specifier: ^19.2.5
+        version: 19.2.13
+      react:
+        specifier: ^19.2.4
+        version: 19.2.4
 
   packages/cli:
     dependencies:

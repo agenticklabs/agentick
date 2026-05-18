@@ -29,13 +29,18 @@
 import { Chunk, Effect, Fiber, Stream } from "effect";
 import React from "react";
 import type {
+  ContentBlock,
   DispatchInput,
+  ExecutionTarget,
   MessageEnvelope,
   ProtocolEvent,
   ReconcilerInboxMessage,
   RenderedTree,
   ToolDeclaration,
 } from "@agentick/spec";
+import { createApp } from "@agentick/app";
+import { MockLanguageModelExecutor } from "@agentick/executor";
+import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
 
 import { SupportAgent } from "./agent.js";
 import { buildSubstrate, type Substrate } from "./substrate.js";
@@ -484,6 +489,111 @@ async function scenarioSessionSend(s: Substrate): Promise<void> {
 }
 
 /**
+ * App harness — `createApp(<Agent />, { executor, target })` wraps every
+ * lower layer. One factory call gives back an `AppHarness` that owns the
+ * shared substrate + sub-harnesses + the session registry. The user
+ * surface is `app.createSession()` / `app.runOnce()` / `app.closeApp()`.
+ *
+ * Real applications start here — `buildSubstrate()` and direct harness
+ * construction (everything in `substrate.ts`) are the substrate
+ * walkthrough, not the production path.
+ */
+async function scenarioAppHarness(): Promise<void> {
+  console.log(heading("4g. App harness — createApp(<Agent />, opts)"));
+
+  // The app's mock executor is independent of the earlier scenarios'
+  // executor (which has been drained by the loop/session demos).
+  const executor = new MockLanguageModelExecutor(
+    "app-demo-exec",
+    new MemoryJournal(),
+    new LocalEventBus(),
+    new LocalInbox(),
+    {
+      scripted: [
+        {
+          result: {
+            specVersion: "2026-05-08",
+            output: [
+              {
+                type: "tool_use",
+                toolUseId: "tc-app-calc",
+                name: "calculator",
+                input: { expression: "47 * 23" },
+              },
+            ],
+            stopReason: "tool_use",
+            toolCalls: [
+              {
+                id: "tc-app-calc",
+                name: "calculator",
+                input: { expression: "47 * 23" },
+              },
+            ],
+            usage: { inputTokens: 9, outputTokens: 4, totalTokens: 13 },
+          },
+        },
+        {
+          result: {
+            specVersion: "2026-05-08",
+            output: [{ type: "text", text: "47 × 23 = 1081." }],
+            stopReason: "end",
+            usage: { inputTokens: 14, outputTokens: 9, totalTokens: 23 },
+          },
+        },
+      ],
+    },
+  );
+  await executor.ready;
+
+  const target: ExecutionTarget = {
+    kind: "language-model",
+    provider: "mock",
+    modelId: "mock-v1",
+    capabilities: { supportsTools: true, supportsStreaming: true },
+  };
+
+  const app = await createApp(React.createElement(SupportAgent), {
+    executor,
+    target,
+    toolHandlers: new Map([
+      [
+        "handlers/calculator",
+        async (input: unknown): Promise<readonly ContentBlock[]> => {
+          const { expression } = input as { expression: string };
+          const value = Function(`"use strict"; return (${expression});`)();
+          return [{ type: "text", text: String(value) }];
+        },
+      ],
+    ]),
+  });
+  console.log(line(`createApp returned an AppHarness`));
+
+  // Path 1: ephemeral runOnce.
+  const { result, sessionId } = await app.runOnce({
+    send: { messages: [{ role: "user", content: "What is 47 * 23?" }] },
+  });
+  console.log(line(`runOnce sessionId=${sessionId}`));
+  console.log(line(`runOnce response: ${result.response}`));
+  console.log(line(`runOnce ticks=${result.ticks} stop=${result.stopReason}`));
+
+  // Path 2: persistent session via createSession.
+  const session = await app.createSession({
+    sessionId: "user-43",
+    metadata: { tier: "pro" },
+  });
+  console.log(line(`createSession → ${session === app.getSession("user-43") ? "registered" : "MISSING"}`));
+  const listing = app.listSessions({ metadata: { tier: "pro" } });
+  console.log(
+    line(
+      `listSessions filter(tier=pro): ${listing.length} entr${listing.length === 1 ? "y" : "ies"}`,
+    ),
+  );
+
+  await app.closeApp();
+  console.log(line(`closeApp ✓`));
+}
+
+/**
  * Send an inbox message — the reconciler accepts `recompile`, `unmount`,
  * `invalidate`. The harness is an addressable actor at
  * `reconciler:{scopeId}` — the same call shape works once a cluster
@@ -527,6 +637,7 @@ async function main(): Promise<void> {
     await scenarioChannelStreaming(s);
     await scenarioLoopExecution(s, tree);
     await scenarioSessionSend(s);
+    await scenarioAppHarness();
     await scenarioBusSubscription(s);
     await scenarioJournalAudit(s);
     await scenarioInboxTell(s);

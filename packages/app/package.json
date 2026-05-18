@@ -1,0 +1,58 @@
+{
+  "name": "@agentick/app",
+  "version": "0.0.0",
+  "description": "Reference app harness for Agentick v2. Outermost runtime boundary — owns shared substrate, shared sub-harnesses (reconciler, loop, executor), the session registry, and the createApp ergonomic surface.",
+  "keywords": [
+    "agent",
+    "ai",
+    "agentick",
+    "app",
+    "harness"
+  ],
+  "license": "MIT",
+  "author": "Ryan Lindgren",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/agenticklabs/agentick.git",
+    "directory": "packages/app"
+  },
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "main": "src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "publishConfig": {
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "import": "./dist/index.js",
+        "default": "./dist/index.js"
+      }
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.build.json --noEmit"
+  },
+  "dependencies": {
+    "@agentick/spec": "workspace:*",
+    "@agentick/runtime": "workspace:*",
+    "@agentick/reconciler-react": "workspace:*",
+    "@agentick/loop-executor": "workspace:*",
+    "@agentick/tool-executor": "workspace:*",
+    "@agentick/session": "workspace:*",
+    "effect": "^3.21.2"
+  },
+  "devDependencies": {
+    "@agentick/executor": "workspace:*",
+    "@types/react": "^19.2.5",
+    "react": "^19.2.4"
+  }
+}

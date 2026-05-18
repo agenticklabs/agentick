@@ -10,7 +10,6 @@
  */
 
 import { Effect } from "effect";
-import React, { type ReactNode } from "react";
 
 import { BaseHarness, runHarnessProtocol, ulid } from "@agentick/runtime";
 import type { LoopExecutorHarness } from "@agentick/loop-executor";
@@ -56,8 +55,13 @@ import { createSessionExecutionHandle } from "./session-execution-handle.js";
 export interface SessionHarnessOptions<P = unknown> {
   /** Stable session id. */
   readonly sessionId: string;
-  /** The JSX agent element to mount. */
-  readonly agent: ReactNode;
+  /**
+   * Agent root element. Opaque to the session — forwarded as-is to
+   * `reconciler.mount({ element })`. The concrete reconciler impl owns
+   * the type contract (React, Angular, etc.); the session is
+   * reconciler-agnostic.
+   */
+  readonly agent: unknown;
   /** Initial component props (optional). */
   readonly props?: P;
   /** Reconciler harness that owns the JSX tree. */
@@ -122,19 +126,15 @@ export class SessionHarness<P = unknown>
     this.defaultMaxTicks = options.defaultMaxTicks ?? 8;
     this.mountId = `mount:${options.sessionId}`;
 
-    // Wrap the agent so React's reconciler can mount it. The agent is
-    // a ReactNode (element or component output).
-    const element = options.agent;
-
-    // Eagerly mount — the reconciler exposes `.ready` for its own inbox
-    // registration; our mount is awaited via `_mountReady`.
+    // Eagerly mount — the reconciler exposes `.ready` for its own
+    // inbox registration; our mount is awaited via `_mountReady`. The
+    // element type is opaque here — `MountInput.element: unknown` in
+    // the spec — and the bound reconciler impl interprets it.
     this._mountReady = this.reconciler
       .mount({
         mountId: this.mountId,
         sessionId: options.sessionId,
-        element: React.isValidElement(element)
-          ? element
-          : (element as ReactNode),
+        element: options.agent,
         bridges: this.bridges,
       })
       .then(() => {});
