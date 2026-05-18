@@ -21,6 +21,7 @@
  * @see docs/proposals/v2/blueprint/09-app-harness.md
  */
 
+import type { EventQuery, ProtocolEvent } from "../data/events.js";
 import type { SessionStatus } from "./hook-bridges.js";
 import type { ExecutorProtocol, LanguageModelExecutor } from "./executor.js";
 import type {
@@ -155,6 +156,23 @@ export interface AppHarnessProtocol<P = unknown> {
    * substrate round-trip).
    */
   listSessions(filter?: SessionFilter): readonly SessionListEntry[];
+
+  /**
+   * Cross-session event subscription. Returns an `AsyncIterable` over
+   * `ProtocolEvent` envelopes matching the filter. Every event from
+   * every session, sub-harness, and the app itself flows through —
+   * filter via the `EventQuery` (by surface, name prefix, phase,
+   * outcome, or scope.sessionId).
+   *
+   * The iterable is *live* — it yields envelopes published AFTER the
+   * subscription opens. Use the journal (or future replay APIs) for
+   * historical reads.
+   *
+   * Multiple subscribers are independent (the substrate bus is
+   * multi-subscriber by design). Breaking out of the `for await`
+   * cleanly unsubscribes.
+   */
+  events(filter?: EventQuery): AsyncIterable<ProtocolEvent>;
 
   /**
    * Close every open session, release shared resources (reconciler

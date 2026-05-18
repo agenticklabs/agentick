@@ -184,7 +184,22 @@ Phase 4  ■ in progress — REMAINING HARNESSES
                        for reconciler). Same leak fixed on SessionHarness:
                        `reconciler`/`loop` are now ReconcilerProtocol /
                        LoopExecutorProtocol (was concrete classes).
-                ✗ 4f.6 use() integrations + cross-session events()
+                ✓ 4f.6a app.events(filter?) cross-session subscription —
+                       AsyncIterable<ProtocolEvent> over the app's bus.
+                       Filter via EventQuery. Multi-subscriber; clean
+                       cleanup on break-out via Fiber.interrupt.
+                       3 tests pass (filter, multi-sub, close).
+                       NOTE: caller-supplied executor must share the
+                       app's substrate (journal/bus/inbox) to appear in
+                       app.events(). When the executor is constructed
+                       with its own substrate, its events stay private
+                       — a feature for isolation, a footgun for naive
+                       use. Slot-pattern for executor (instance | opts
+                       so app constructs with its own substrate) is a
+                       future ergonomics fix; documented in the test
+                       helper for now.
+                ✗ 4f.6b use() integrations (interceptors + observers
+                        + services registry)
                 ✗ 4f.7 persistence + telemetry Layer slots
 Phase 5  □ Adapters, cluster, gateway
 Phase 6  □ v1 sunset

@@ -48,12 +48,16 @@ function MinimalAgent() {
   );
 }
 
-function mkExecutor(): MockLanguageModelExecutor {
+function mkExecutor(
+  journal = new MemoryJournal(),
+  bus = new LocalEventBus(),
+  inbox = new LocalInbox(),
+): MockLanguageModelExecutor {
   return new MockLanguageModelExecutor(
     "app-test-exec",
-    new MemoryJournal(),
-    new LocalEventBus(),
-    new LocalInbox(),
+    journal,
+    bus,
+    inbox,
     {
       scripted: [
         {
@@ -96,8 +100,16 @@ function mkTarget(): ExecutionTarget {
   };
 }
 
-async function mkApp() {
-  const executor = mkExecutor();
+async function mkApp(opts: { shareSubstrate?: boolean } = {}) {
+  // For cross-session-event tests the executor must publish to the
+  // app's bus. The simplest path: construct shared substrate, pass it
+  // to both the executor and the app.
+  const journal = new MemoryJournal();
+  const bus = new LocalEventBus();
+  const inbox = new LocalInbox();
+  const executor = opts.shareSubstrate
+    ? mkExecutor(journal, bus, inbox)
+    : mkExecutor();
   await executor.ready;
   const toolHandlers = new Map<string, (input: unknown) => Promise<ContentBlock[]>>([
     [
@@ -113,6 +125,7 @@ async function mkApp() {
     executor,
     target: mkTarget(),
     toolHandlers,
+    ...(opts.shareSubstrate ? { journal, bus, inbox } : {}),
   });
 }
 
@@ -166,6 +179,94 @@ describe("AppHarness — runOnce", () => {
     // Registry should be empty after dispose.
     expect(app.listSessions()).toHaveLength(0);
     expect(app.getSession(sessionId)).toBeUndefined();
+    await app.closeApp();
+  });
+});
+
+describe("AppHarness — events()", () => {
+  it("streams envelopes from every session through the app boundary", async () => {
+    const app = await mkApp({ shareSubstrate: true });
+    const collected: string[] = [];
+    const stopAt = 3; // one dispatch → requested + before + terminal
+
+    const iter = app.events({ surface: "tool" });
+    const collect = (async () => {
+      for await (const ev of iter) {
+        collected.push(`${ev.name}.${ev.phase}`);
+        if (collected.length >= stopAt) break;
+      }
+    })();
+
+    await new Promise((r) => setTimeout(r, 50));
+    await app.runOnce({
+      send: { messages: [{ role: "user", content: "x" }] },
+    });
+    await collect;
+
+    // At minimum we expect requested + before + terminal on dispatch.
+    expect(
+      collected.some((s) => s === "tool:command:dispatch.requested"),
+    ).toBe(true);
+    expect(
+      collected.some((s) => s === "tool:command:dispatch.terminal"),
+    ).toBe(true);
+    await app.closeApp();
+  });
+
+  it("filters by surface — only matching surface flows", async () => {
+    const app = await mkApp({ shareSubstrate: true });
+    const seen = new Set<string>();
+    let count = 0;
+    const iter = app.events({ surface: "executor" });
+    const collect = (async () => {
+      for await (const ev of iter) {
+        seen.add(ev.surface);
+        if (++count >= 2) break;
+      }
+    })();
+
+    // Give the Stream fork's scoped subscription time to register.
+    await new Promise((r) => setTimeout(r, 50));
+    await app.runOnce({
+      send: { messages: [{ role: "user", content: "x" }] },
+    });
+    await collect;
+
+    expect(seen).toEqual(new Set(["executor"]));
+    await app.closeApp();
+  });
+
+  it("supports multiple independent subscribers", async () => {
+    const app = await mkApp({ shareSubstrate: true });
+    const a: string[] = [];
+    const b: string[] = [];
+
+    const iterA = app.events({ surface: "tool" });
+    const iterB = app.events({ surface: "loop" });
+
+    const collectA = (async () => {
+      for await (const ev of iterA) {
+        a.push(ev.name);
+        if (a.length >= 1) break;
+      }
+    })();
+    const collectB = (async () => {
+      for await (const ev of iterB) {
+        b.push(ev.name);
+        if (b.length >= 1) break;
+      }
+    })();
+
+    await new Promise((r) => setImmediate(r));
+    await app.runOnce({
+      send: { messages: [{ role: "user", content: "x" }] },
+    });
+    await Promise.all([collectA, collectB]);
+
+    expect(a.length).toBeGreaterThan(0);
+    expect(b.length).toBeGreaterThan(0);
+    expect(a.every((n) => n.startsWith("tool:"))).toBe(true);
+    expect(b.every((n) => n.startsWith("loop:"))).toBe(true);
     await app.closeApp();
   });
 });
