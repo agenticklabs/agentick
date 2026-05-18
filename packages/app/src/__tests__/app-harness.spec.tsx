@@ -12,6 +12,7 @@ import { describe, expect, it } from "vitest";
 
 import { MockLanguageModelExecutor } from "@agentick/executor";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
+import { ReconcilerHarness } from "@agentick/reconciler-react";
 import { InMemoryHandlerResolver } from "@agentick/tool-executor";
 import type { ContentBlock, ExecutionTarget } from "@agentick/spec";
 
@@ -177,6 +178,105 @@ describe("AppHarness — closeApp", () => {
     await expect(app.createSession({ sessionId: "after-close" })).rejects.toMatchObject(
       { _tag: "AppClosedError" },
     );
+  });
+});
+
+describe("AppHarness — slot cascade", () => {
+  it("accepts a pre-built reconciler instance via the slot", async () => {
+    const executor = mkExecutor();
+    await executor.ready;
+    const journal = new MemoryJournal();
+    const bus = new LocalEventBus();
+    const inbox = new LocalInbox();
+    const reconciler = new ReconcilerHarness("custom-recon", journal, bus, inbox);
+    await reconciler.ready;
+
+    const app = await createApp(React.createElement(MinimalAgent), {
+      executor,
+      target: mkTarget(),
+      reconciler,
+      journal,
+      bus,
+      inbox,
+      toolHandlers: new Map([
+        [
+          "handlers/calculator",
+          async (input: unknown) => {
+            const { expression } = input as { expression: string };
+            const v = Function(`"use strict"; return (${expression});`)();
+            return [{ type: "text", text: String(v) } as ContentBlock];
+          },
+        ],
+      ]),
+    });
+    // Smoke test that the injected reconciler actually runs.
+    const { result } = await app.runOnce({
+      send: { messages: [{ role: "user", content: "x" }] },
+    });
+    expect(result.response).toContain("1081");
+    await app.closeApp();
+  });
+
+  it("longhand `session.defaultMaxTicks` beats shorthand `defaultMaxTicks`", async () => {
+    const executor = mkExecutor();
+    await executor.ready;
+    const app = new AppHarness({
+      rootElement: React.createElement(MinimalAgent),
+      executor,
+      target: mkTarget(),
+      defaultMaxTicks: 999,          // shorthand
+      session: { defaultMaxTicks: 1 }, // longhand — should win
+      toolHandlers: new Map([
+        [
+          "handlers/calculator",
+          async (input: unknown) => {
+            const { expression } = input as { expression: string };
+            const v = Function(`"use strict"; return (${expression});`)();
+            return [{ type: "text", text: String(v) } as ContentBlock];
+          },
+        ],
+      ]),
+    });
+    await app.appReady;
+    // Tick 1 returns tool_use; with maxTicks=1 the loop terminates
+    // immediately with max_ticks before tick 2 lands.
+    const { result } = await app.runOnce({
+      send: { messages: [{ role: "user", content: "x" }] },
+    });
+    expect(result.ticks).toBe(1);
+    expect(result.stopReason).toBe("max_ticks");
+    await app.closeApp();
+  });
+
+  it("per-call `createSession.maxTicks` beats both shorthand and longhand", async () => {
+    const executor = mkExecutor();
+    await executor.ready;
+    const app = new AppHarness({
+      rootElement: React.createElement(MinimalAgent),
+      executor,
+      target: mkTarget(),
+      defaultMaxTicks: 1,            // shorthand
+      session: { defaultMaxTicks: 1 }, // longhand
+      toolHandlers: new Map([
+        [
+          "handlers/calculator",
+          async (input: unknown) => {
+            const { expression } = input as { expression: string };
+            const v = Function(`"use strict"; return (${expression});`)();
+            return [{ type: "text", text: String(v) } as ContentBlock];
+          },
+        ],
+      ]),
+    });
+    await app.appReady;
+    // Per-call override = 4 → loop runs to completion (2 ticks).
+    const { result } = await app.runOnce({
+      maxTicks: 4,
+      send: { messages: [{ role: "user", content: "x" }] },
+    });
+    expect(result.ticks).toBe(2);
+    expect(result.stopReason).toBe("end");
+    await app.closeApp();
   });
 });
 

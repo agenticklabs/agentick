@@ -12,8 +12,7 @@
 import { Effect } from "effect";
 
 import { BaseHarness, runHarnessProtocol, ulid } from "@agentick/runtime";
-import type { LoopExecutorHarness } from "@agentick/loop-executor";
-import type { ReconcilerHarness } from "@agentick/reconciler-react";
+import type { LoopExecutorProtocol, ReconcilerProtocol } from "@agentick/spec";
 import type {
   AppendEntryInput,
   ApplyExecutorResultInput,
@@ -64,10 +63,18 @@ export interface SessionHarnessOptions<P = unknown> {
   readonly agent: unknown;
   /** Initial component props (optional). */
   readonly props?: P;
-  /** Reconciler harness that owns the JSX tree. */
-  readonly reconciler: ReconcilerHarness;
-  /** Loop executor harness that orchestrates ticks. */
-  readonly loop: LoopExecutorHarness;
+  /**
+   * Reconciler that owns the agent's element tree. Typed as the
+   * protocol — any conformant impl (React reconciler, future Angular
+   * reconciler, etc.) drops in.
+   */
+  readonly reconciler: ReconcilerProtocol;
+  /**
+   * Loop executor that orchestrates ticks. Typed as the protocol so
+   * alternative orchestrators (cluster-aware, replay-based, etc.) can
+   * be injected without changing the session boundary.
+   */
+  readonly loop: LoopExecutorProtocol;
   /** Executor harness for model invocations. */
   readonly executor: ExecutorProtocol<
     unknown,
@@ -95,8 +102,8 @@ export class SessionHarness<P = unknown>
   private readonly store: SessionStateStore;
   private readonly bridges: SessionHookBridges;
   private readonly mountId: string;
-  private readonly reconciler: ReconcilerHarness;
-  private readonly loop: LoopExecutorHarness;
+  private readonly reconciler: ReconcilerProtocol;
+  private readonly loop: LoopExecutorProtocol;
   private readonly executor: SessionHarnessOptions<P>["executor"];
   private readonly toolExecutor: ToolExecutorProtocol;
   private readonly target: ExecutionTarget;

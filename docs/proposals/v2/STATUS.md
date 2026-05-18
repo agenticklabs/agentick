@@ -166,8 +166,26 @@ Phase 4  ■ in progress — REMAINING HARNESSES
                        (`MountInput.element: unknown`); the impls had
                        drifted. React/Angular/etc. reconcilers all
                        satisfy the contract with no app/session change.
-                ✗ 4f.5 use() integrations + cross-session events()
-                ✗ 4f.6 persistence + telemetry Layer slots
+                ✓ 4f.5 SLOT-PATTERN CONFIG CASCADE — every parent
+                       harness's options now accept child slots as
+                       either a pre-built instance OR an options bag
+                       for the default impl. CSS shorthand/longhand
+                       semantics: per-call > app-level longhand
+                       (`session.defaultMaxTicks`) > app-level shorthand
+                       (`defaultMaxTicks`) > framework default.
+                         - AppHarnessOptions.reconciler: instance | opts
+                         - AppHarnessOptions.loop: instance only (no
+                           opts on LoopExecutorHarness today)
+                         - AppHarnessOptions.tools: per-session
+                           ToolExecutor defaults
+                         - AppHarnessOptions.session: per-session
+                           SessionHarness defaults
+                       Duck-typed slot resolution (`mount()` discriminator
+                       for reconciler). Same leak fixed on SessionHarness:
+                       `reconciler`/`loop` are now ReconcilerProtocol /
+                       LoopExecutorProtocol (was concrete classes).
+                ✗ 4f.6 use() integrations + cross-session events()
+                ✗ 4f.7 persistence + telemetry Layer slots
 Phase 5  □ Adapters, cluster, gateway
 Phase 6  □ v1 sunset
 ```
