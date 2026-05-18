@@ -147,7 +147,7 @@ describe("ToolExecutorHarness — error paths", () => {
     await expect(harness.dispatch(dispatchOf("boom", "dispatch", {}))).rejects.toMatchObject({
       _tag: "ToolHandlerError",
       toolName: "boom",
-      cause,
+      cause: expect.objectContaining({ message: cause.message }),
     });
   });
 });

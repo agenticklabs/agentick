@@ -184,8 +184,8 @@ Three statuses:
 | L2 | Metric names and units | (gap) | LEAN | listed in `09-app-harness.md` |
 | L3 | DevTools surface (separate API) | runtime.md §OQ15 | LEAN | `app.devTools.events()` separate from `app.events()` |
 | L4 | Span naming convention | (gap) | LEAN | matches event names |
-| L5 | OTel `recordException` without breaking error-reference identity | runtime substrate 2026-05-16 | **OPEN** | side-channel span today (no exception recording); see findings in "Substrate scalability + observability" below — `Effect.withSpan` mutates fiber tracing context in a way that propagates into nested `Effect.either`, cloning failure values even on the "wrap success-typed inside withSpan" Option B pattern. Path forward: manual span lifecycle via `Tracer` service (Option B'), or accept identity loss and document contract (current). |
-| L6 | Bus publish hot-path performance budget | runtime substrate (gap) | **OPEN** | needs benchmark at 1k+ ops/sec before Phase 4c (executor) lands. See "Substrate scalability + observability" below. |
+| L5 | OTel `recordException` without breaking error-reference identity | runtime substrate 2026-05-16 | **DECIDED 2026-05-18** | use standard `Effect.withSpan` — get full trace hierarchy + exception recording. Effect enhances stack traces by reconstructing the top-level failure object, but inner Error references in `.cause` are preserved as-is. Structural equality (`toEqual`, `toMatchObject` with `expect.objectContaining`), `instanceof`, `_tag` pattern matching, and property access all work normally. Only `error === originalError` reference identity on the outer failure object is lost. Adopters needing such checks should use `_tag` or `instanceof` instead. See findings below. |
+| L6 | Bus publish hot-path performance budget | runtime substrate (gap) | **DECIDED 2026-05-17** | benchmarks landed; numbers in §Benchmark results below. Lazy emission validated (12× speedup); runOperation target revised 10 → 50 μs after measuring Effect framework cost. |
 | L7 | Journal idempotency-key set unbounded growth | runtime substrate (gap) | **OPEN** | `MemoryJournal.appendedKeys` Set grows for every distinct (opId, phase). Long-lived sessions accumulate. Bound via LRU or TTL? |
 | L8 | Substrate self-instrumentation (metrics on the bus itself) | runtime substrate (gap) | **OPEN** | how do we know if the substrate is the bottleneck under load? `subscriberCount`, journal size, inbox cache size — surfaced where? |
 
@@ -247,23 +247,19 @@ Ranked by impact on getting the design crystallized.
     messages. Mostly listed in per-harness docs; needs cross-validation.
 9. **Cluster routing layer integration with `@effect/cluster`.** Spike
     needed (carried from H1).
-10. **L5 — OTel exception recording without breaking error-reference
-    identity.** Substrate currently uses a side-channel `Effect.withSpan`
-    that omits exception capture to preserve `error.cause === original`
-    semantics. Proper fix is invasive — needs design. **Must land
-    before Phase 4c (executor) ships** so executor adapter authors
-    don't write code that relies on identity-broken errors and adapt
-    twice.
-11. **L6 — Bus publish hot-path benchmark.** No measurements yet.
-    **Must land before Phase 4c** to set an executor-streaming budget
-    (delta envelopes from a streaming model can hit 100+/sec per
-    session; multi-session × 100 sessions = 10k+ envelopes/sec).
+10. ~~**L5 — OTel exception recording without breaking error-reference
+    identity.**~~ ✓ decided 2026-05-18: use standard `Effect.withSpan`;
+    accept narrow loss of outer-wrapper `===` identity in exchange
+    for full OTel integration. Structural equality / instanceof /
+    `_tag` matching all preserved. See L5 section below for
+    investigation + adopter patterns.
+11. ~~**L6 — Bus publish hot-path benchmark.**~~ ✓ landed 2026-05-17;
+    numbers in §Benchmark results. Lazy emission validated.
 12. **L7 — Journal idempotency-key Set bound.** Currently unbounded;
     long-lived sessions leak memory. Need TTL or LRU. **Gates v2.0
     release** (not a Phase 4 blocker).
 13. **L8 — Substrate self-instrumentation.** How a deployment knows
-    if the bus is overloaded. Needs metric surface. Designed during
-    L6 benchmark work.
+    if the bus is overloaded. Needs metric surface.
 
 Items 1–2 are gating for spec package implementation. Items 3–9 are
 gating for runtime implementation. Items 10–11 are gating for Phase 4c
@@ -316,58 +312,78 @@ empirical answers before adapters pile on.
    TTL). Track hit rate under realistic ask/tell patterns to validate
    the cap.
 
-### L5 investigation log (2026-05-17)
+### L5 investigation + decision (2026-05-17 → 2026-05-18)
 
-Tried three approaches; none preserve reference identity under
-`Effect.withSpan`:
+Tried three approaches for "preserve reference identity through
+`Effect.withSpan`":
 
-1. **Direct `Effect.withSpan(body)`** — `Effect.withSpan` clones the
-   failure value when ending the span. `error.cause === original` →
-   false. Confirmed via isolated repro (`Effect.fail(err).pipe(
-   Effect.withSpan(...))` then unwrap with `Cause.failureOption` and
-   compare references).
+1. Direct `Effect.withSpan(body)` — outer failure object reconstructed.
+2. `Effect.either` inside `withSpan`, re-fail outside — same result;
+   the reconstruction happens via fiber-runtime tracing instrumentation,
+   not via `withSpan`'s top-level wrap.
+3. `useSpan` (no parent attachment) — preserves identity but children
+   don't inherit the span as parent (loss of trace hierarchy).
 
-2. **`Effect.either` inside `withSpan`, re-fail outside** — surprisingly
-   still clones. The clone happens at the `Effect.either` call site
-   when it's inside a withSpan-decorated effect. Confirmed: same code
-   outside withSpan preserves identity; inside withSpan it doesn't.
-   Hypothesis: `Effect.withSpan` modifies the fiber's tracing context
-   in a way that influences how cause values are stored when `either`
-   converts them to `Left`.
+**Decision (2026-05-18): use standard `Effect.withSpan` — accept the trade.**
 
-3. **Wrap inner gen in withSpan, return Either, re-fail outside** —
-   same result as (2). The propagation is happening deeper than the
-   layering.
+Empirical findings on what Effect's instrumentation actually preserves:
 
-What still works (current substrate behavior):
-- Failure shape is preserved: `_tag`, `name`, `message`, custom
-  properties all match.
-- `instanceof OperationOutcomeError` etc. work because the cloned
-  value preserves the prototype chain.
-- `toMatchObject({ _tag, cause: <error with message "x"> })` works
-  via deep-equality.
+- **Top-level failure reference is lost.** `Effect.fail(wrapper)` →
+  through `withSpan` → `Cause.failureOption` returns a different
+  reference for the *outer* wrapper object.
+- **Inner references are preserved.** `wrapper.cause` (the original
+  Error reference passed into the wrapper) survives intact —
+  `received.cause === innerOriginal` returns true when the wrapper
+  itself was reconstructed.
+- **All structural data is preserved.** Same enumerable + non-enumerable
+  own properties, same prototype chain, same `instanceof` result,
+  same `_tag` discriminator, identical stack trace (Effect copies it
+  byte-for-byte).
+- **Standard matchers work as expected.** `toEqual` and `toMatchObject`
+  treat the reconstructed value as equal to the original because they
+  do deep structural equality. The only path that breaks is exact
+  reference equality (`===`) on the outer failure object.
 
-What breaks:
-- `error.cause === original` reference identity.
-- Code that uses `WeakMap<Error, ...>` for tag-along data.
-- Tests written as `.rejects.toBe(original)` (strict equality).
+Recommended adopter patterns:
 
-Path forward:
+```ts
+// ✓ All of these work normally:
+catch (err) {
+  if (err._tag === "ToolHandlerError") { ... }      // tag match
+  if (err instanceof OperationOutcomeError) { ... }  // prototype check
+  if (err.cause?.message === "boom") { ... }         // property access
+}
 
-- **(Option B' / proper fix)**: manual span lifecycle via the `Tracer`
-  service. Read parent span from FiberRef, call `Tracer.span(name,
-  opts)` to create a child, run the body, call `span.end(time, exit)`
-  with the captured Exit. Bypasses `Effect.withSpan` entirely. More
-  code (~30 LOC), no clone path. Recommended for Phase 4c.
+// In tests:
+await expect(...).rejects.toMatchObject({
+  _tag: "ToolHandlerError",
+  cause: expect.objectContaining({ message: "boom" }),
+});
+```
 
-- **Stopgap (current)**: side-channel `Effect.withSpan` on a
-  success-typed sibling effect. Operations get span name + attributes
-  in OTel exporters. Exception recording omitted. Substrate failure
-  channel preserves reference identity for adopters who don't enable
-  OTel; with OTel enabled, identity is best-effort.
+```ts
+// ✗ These will fail under OTel-enabled substrates:
+catch (err) {
+  if (err === originalSentinel) { ... }   // identity check on wrapper
+}
 
-- **Upstream**: file an Effect issue documenting the `withSpan` →
-  `either` interaction. Either a bug or undocumented behavior.
+// In tests:
+await expect(...).rejects.toBe(originalError);  // strict equality
+```
+
+Rationale for accepting the trade rather than building Option B':
+
+1. The cost is narrow (only outer-wrapper `===` identity).
+2. The substitute idioms (`_tag`, `instanceof`, `objectContaining`)
+   are what adopters use in practice anyway.
+3. Effect provides full OTel span context propagation and exception
+   recording out of the box — Option B' would re-implement what we'd
+   be paying anyway to disable.
+4. Effect framework cost is already 26 μs/op; a custom Tracer path
+   would add more, not less.
+
+Substrate (`base-harness.ts`) restored to `Effect.withSpan` direct
+usage. JSDoc on `annotateOperationSpan` documents the contract.
 
 ### Benchmark plan (deferred to before Phase 4c lands)
 

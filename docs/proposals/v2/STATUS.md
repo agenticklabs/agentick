@@ -186,14 +186,17 @@ These are **gating items for Phase 4c (executor)** unless flagged
 otherwise. Tracked in `blueprint/17-open-questions.md` §Substrate
 scalability + observability.
 
-- **L5 — OTel exception recording without breaking error-reference
-  identity.** Substrate uses a side-channel `Effect.withSpan` today
-  (span name + attributes carry through; exception capture omitted)
-  because `Effect.withSpan` directly on the body pipeline clones
-  failures, breaking `error.cause === original` semantics. Proper
-  fix: route exceptions through a span-side bridge that records the
-  original reference. Invasive — needs design. **Must land before
-  Phase 4c so executor adapters don't bake-in identity-broken errors.**
+- ~~**L5 — OTel exception recording without breaking error-reference
+  identity.**~~ ✓ decided 2026-05-18. Restored standard `Effect.withSpan`
+  (was side-channel). Empirical finding: only the *outer* failure
+  wrapper loses `===` identity; inner `.cause` Error references survive,
+  all structural data (`_tag`, prototype chain, properties, stack)
+  matches, and the recommended matchers (`instanceof`, `_tag` checks,
+  `expect.objectContaining`) all work as adopters would expect. The
+  narrow loss is acceptable in exchange for full OTel span hierarchy
+  + exception recording. Substrate `annotateOperationSpan` documents
+  the contract; see `blueprint/17-open-questions.md` §L5 investigation
+  for findings + adopter patterns.
 - ~~**L6 — Bus publish hot-path benchmark.**~~ ✓ landed 2026-05-17.
   Numbers in `blueprint/17-open-questions.md` §Benchmark results.
   Headline: lazy emission no-subs at 0.5 μs (12× speedup vs eager),

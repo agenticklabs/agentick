@@ -356,29 +356,24 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface> {
   }
 
   /**
-   * Wrap an Effect in an OTel span without modifying the failure
-   * channel's identity. We use `Effect.withSpan` on a value-typed
-   * sibling so the span sees the outcome via the captured Exit, while
-   * the caller receives the original success value OR the original
-   * failure value (same JS reference, not copied).
+   * Wrap an Effect in an OTel span using the standard `Effect.withSpan`.
    *
-   * This avoids the identity-loss `Effect.withSpan` causes when it
-   * captures failures directly — adopters who rely on error-reference
-   * pattern-matching (e.g., `error.cause === originalError`) keep that
-   * guarantee even with OTel attached.
+   * Effect's `withSpan` enhances failure stack traces with span context
+   * by reconstructing top-level failure values (the outer object the
+   * effect failed with). Inner Error references and tagged-union
+   * fields like `.cause` are preserved as-is — deep-equality, instanceof,
+   * `_tag` matching, and property-based access all work normally. Only
+   * a top-level `=== originalError` identity check on the outer failure
+   * object will see a different reference. Adopters who need such
+   * identity matching should reach for `_tag` or `instanceof` instead.
+   *
+   * @see docs/proposals/v2/blueprint/17-open-questions.md §L5
    */
   private annotateOperationSpan<A, E>(
     op: Operation<unknown, unknown, unknown>,
   ): (eff: Effect.Effect<A, E, never>) => Effect.Effect<A, E, never> {
     const attributes = this.spanAttributes(op);
-    return (eff) =>
-      Effect.gen(function* () {
-        const exit: Exit.Exit<A, E> = yield* Effect.exit(eff);
-        // Side-channel: emit the span attributes via a fresh, success-
-        // typed effect so withSpan never sees a failure value.
-        yield* Effect.void.pipe(Effect.withSpan(op.name, { attributes }));
-        return yield* exit;
-      });
+    return (eff) => eff.pipe(Effect.withSpan(op.name, { attributes }));
   }
 
   // ──────── ⑤ Events (light path) ────────

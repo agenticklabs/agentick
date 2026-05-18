@@ -98,7 +98,7 @@ describe("bus.publish — no subscribers", () => {
 describe("bus.publish — 1 matching subscriber", () => {
   const bus = new LocalEventBus();
   const event = mkEvent("e");
-  let consumer: Fiber.RuntimeFiber<void> | undefined;
+  let consumer: Fiber.RuntimeFiber<void, unknown> | undefined;
   let started = false;
 
   afterAll(async () => {
@@ -122,7 +122,7 @@ describe("bus.publish — 1 matching subscriber", () => {
 describe("bus.publish — 1 non-matching subscriber", () => {
   const bus = new LocalEventBus();
   const event = mkEvent("e", { surface: "tool" });
-  let consumer: Fiber.RuntimeFiber<void> | undefined;
+  let consumer: Fiber.RuntimeFiber<void, unknown> | undefined;
   let started = false;
 
   afterAll(async () => {
@@ -155,7 +155,7 @@ describe("bus.publishLazy — lazy emission", () => {
 
 describe("bus.publishLazy — lazy emission with subscriber", () => {
   const bus = new LocalEventBus();
-  let consumer: Fiber.RuntimeFiber<void> | undefined;
+  let consumer: Fiber.RuntimeFiber<void, unknown> | undefined;
   let started = false;
 
   afterAll(async () => {
@@ -301,7 +301,7 @@ describe("LocalChannelPublisher — no subscriber", () => {
 describe("LocalChannelPublisher — 1 subscriber", () => {
   const bus = new LocalEventBus();
   const pub = new LocalChannelPublisher(bus);
-  let consumer: Fiber.RuntimeFiber<void> | undefined;
+  let consumer: Fiber.RuntimeFiber<void, unknown> | undefined;
   let started = false;
   let counter = 0;
 
