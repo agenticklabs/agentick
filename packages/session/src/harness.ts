@@ -9,7 +9,7 @@
  * @see docs/proposals/v2/blueprint/08-session-harness.md
  */
 
-import { Effect } from "effect";
+import { Effect, Fiber, Stream } from "effect";
 
 import { BaseHarness, runHarnessProtocol, ulid } from "@agentick/runtime";
 import type { LoopExecutorProtocol, ReconcilerProtocol } from "@agentick/spec";
@@ -18,10 +18,12 @@ import type {
   ApplyExecutorResultInput,
   ApplyResult,
   ApplyToolResultsInput,
+  ChannelHandle,
   ContentBlock,
   EventBus,
   ExecutionTarget,
   ExecutorProtocol,
+  KnobHandle,
   LanguageModelExecutionResult,
   MessageEnvelope,
   MessageHandlerError,
@@ -30,6 +32,7 @@ import type {
   ObserveInput,
   Operation,
   OperationJournal,
+  ProtocolEvent,
   SendInput,
   SendMessageInput,
   SendResult,
@@ -121,8 +124,6 @@ export class SessionHarness<P = unknown>
   private readonly target: ExecutionTarget;
   private readonly spawnContext: SpawnContext<P> | undefined;
   private readonly parentSessionId: string | undefined;
-  /** Messages queued via `queue()` — flushed into the next `send`. */
-  private readonly _queuedMessages: SendMessageInput[] = [];
   private readonly defaultMaxTicks: number;
 
   private _closed = false;
@@ -321,11 +322,36 @@ export class SessionHarness<P = unknown>
     return result.content;
   }
 
+  /**
+   * `queue` writes a user-role message directly to the timeline and
+   * — if no execution is in flight — fires a fresh `send` immediately.
+   *
+   * Mid-execution, the message becomes visible through the reactive
+   * timeline subscription: the next render picks it up, the next tick
+   * feeds it to the model. No separate "queued messages" buffer; the
+   * timeline is the buffer.
+   *
+   * v1 parity: queued items flow through the JSX `<Timeline>`
+   * component, which the reconciler reads live each render — same
+   * effect as appending to the session timeline here.
+   */
   async queue(message: SendMessageInput): Promise<void> {
     if (this._closed) {
       throw { _tag: "SessionClosedError", attemptedCommand: "queue" } satisfies SessionError;
     }
-    this._queuedMessages.push(message);
+    // queue() coerces to user role regardless of message.role — that's
+    // the verb's contract. Use append() / observe() for non-user entries.
+    this.appendInputMessage({ ...message, role: "user" });
+    // Auto-trigger when the session is idle. Mid-execution, the
+    // running send picks up the message at its next render naturally.
+    if (this._currentExecution === null) {
+      // Fire-and-forget — the caller doesn't await the resulting
+      // execution. Use `send({ messages: [m] })` if you need the
+      // handle.
+      void this.send({ messages: [] }).catch(() => {
+        // Surfaced via session events; nothing to do here.
+      });
+    }
   }
 
   async append(
@@ -363,6 +389,77 @@ export class SessionHarness<P = unknown>
     return { entryId: id };
   }
 
+  channel<T = unknown>(name: string): ChannelHandle<T> {
+    const fullName = `session:channel:${name}`;
+    const sessionId = this.store.id;
+    const bus = this.bus;
+    return {
+      name,
+      publish: async (
+        payload: T,
+        metadata?: Readonly<Record<string, unknown>>,
+      ) => {
+        const ev: ProtocolEvent = {
+          id: ulid(),
+          surface: "session",
+          name: fullName,
+          phase: "delta",
+          timestamp: Date.now(),
+          scope: { sessionId },
+          payload,
+          ...(metadata !== undefined ? { metadata } : {}),
+        } as ProtocolEvent;
+        await Effect.runPromise(bus.publish(ev));
+      },
+      subscribe: (listener) => {
+        const fiber = Effect.runFork(
+          Stream.runForEach(
+            bus.subscribe({ surface: "session", name: { exact: fullName } }),
+            (ev) =>
+              Effect.sync(() => {
+                const evx = ev as {
+                  channelSequence?: number;
+                  parentOpId?: string;
+                  metadata?: Readonly<Record<string, unknown>>;
+                  correlationId?: string;
+                };
+                const meta: import("@agentick/spec").ChannelEventMeta = {
+                  id: ev.id,
+                  timestamp: ev.timestamp,
+                  ...(evx.metadata !== undefined
+                    ? { metadata: evx.metadata }
+                    : {}),
+                  ...(evx.correlationId !== undefined
+                    ? { correlationId: evx.correlationId }
+                    : {}),
+                  ...(evx.parentOpId !== undefined
+                    ? { parentOpId: evx.parentOpId }
+                    : {}),
+                  ...(evx.channelSequence !== undefined
+                    ? { channelSequence: evx.channelSequence }
+                    : {}),
+                };
+                listener(ev.payload as T, meta);
+              }),
+          ),
+        );
+        return () => {
+          void Effect.runPromise(Fiber.interrupt(fiber));
+        };
+      },
+    };
+  }
+
+  knob<T = unknown>(name: string): KnobHandle<T> {
+    const bridge = this.bridges.knobs;
+    return {
+      name,
+      get: () => bridge.get(name) as T,
+      set: (value: T) => bridge.set(name, value),
+      subscribe: (listener) => bridge.subscribe(name, listener),
+    };
+  }
+
   // ──────── inbox dispatch ────────
 
   protected handleMessage(
@@ -389,12 +486,7 @@ export class SessionHarness<P = unknown>
 
     await this._mountReady;
 
-    // Flush queued messages first, then apply the send's own messages.
-    // Queue order is FIFO — older queued items land before this call's.
-    if (this._queuedMessages.length > 0) {
-      const drained = this._queuedMessages.splice(0, this._queuedMessages.length);
-      for (const m of drained) this.appendInputMessage(m);
-    }
+    // Apply new messages to the timeline.
     for (const m of input.messages ?? []) this.appendInputMessage(m);
 
     const executionId = `exec:${ulid()}`;

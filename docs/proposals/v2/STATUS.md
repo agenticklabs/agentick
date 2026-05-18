@@ -1,7 +1,7 @@
 # Agentick v2 — Implementation Status
 
 **Branch:** `feat/v2`
-**Last updated:** 2026-05-18 (Phase5.3 — @agentick/executor-ai-sdk bridge; unlocks the AI SDK provider universe)
+**Last updated:** 2026-05-18 (tool confirmation flow + session extended surface — spawn/dispatch/queue/append/observe/channel/knob)
 
 This is the **running progress log** for v2 implementation. Update it
 every session. New contributors / sessions read this first.

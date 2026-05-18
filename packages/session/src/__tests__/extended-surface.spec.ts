@@ -146,27 +146,65 @@ describe("SessionHarness — dispatch (host-side tool invocation)", () => {
 });
 
 describe("SessionHarness — queue", () => {
-  it("flushes queued messages on the next send", async () => {
+  it("writes the message to the timeline immediately as a user-role entry", async () => {
     const { session } = await mkSession();
-    await session.queue({ role: "user", content: "first" });
-    await session.queue({ role: "user", content: "second" });
-    const handle = await session.send({
-      messages: [{ role: "user", content: "third" }],
-    });
-    await handle.result;
-    const userMessages = session
+    await session.queue({ role: "user", content: "hello" });
+    // Give the auto-triggered send a tick to settle so the timeline
+    // also picks up the assistant reply, then snapshot.
+    await new Promise((r) => setImmediate(r));
+
+    const userTexts = session
       .timeline()
-      .filter(
-        (e) => e.kind === "message" && e.message.role === "user",
-      )
-      .map((e) => e.message.content);
-    const texts = userMessages
-      .flatMap((blocks) => blocks)
+      .filter((e) => e.kind === "message" && e.message.role === "user")
+      .flatMap((e) => e.message.content)
       .filter((b): b is { type: "text"; text: string } => b.type === "text")
       .map((b) => b.text);
-    // Queued items land before the send's own messages — FIFO.
-    expect(texts.indexOf("first")).toBeLessThan(texts.indexOf("second"));
-    expect(texts.indexOf("second")).toBeLessThan(texts.indexOf("third"));
+    expect(userTexts).toContain("hello");
+    await session.close();
+  });
+
+  it("auto-triggers a send when idle so the model sees the queued message", async () => {
+    // Track executions seen on the bus.
+    const { session, bus } = await mkSession();
+    const seen: string[] = [];
+    const unsub = bus.subscribeCallback?.(
+      { surface: "loop", phase: "requested" },
+      (ev) => seen.push(ev.name),
+    );
+    void unsub;
+
+    await session.queue({ role: "user", content: "auto-fire" });
+    // Wait for the auto-fired execution to complete.
+    await new Promise((r) => setTimeout(r, 50));
+
+    const tl = session.timeline();
+    const hasAssistant = tl.some(
+      (e) => e.kind === "message" && e.message.role === "assistant",
+    );
+    expect(hasAssistant).toBe(true);
+    await session.close();
+  });
+
+  it("coerces role to 'user' regardless of input.role", async () => {
+    const { session } = await mkSession();
+    // Even if caller passes role:"system", queue() rewrites to user.
+    await session.queue({
+      role: "system" as never,
+      content: "should-be-user",
+    });
+    await new Promise((r) => setImmediate(r));
+    const tl = session.timeline();
+    const found = tl.find(
+      (e) =>
+        e.kind === "message" &&
+        e.message.content.some(
+          (b) => b.type === "text" && b.text === "should-be-user",
+        ),
+    );
+    expect(found).toBeDefined();
+    if (found && found.kind === "message") {
+      expect(found.message.role).toBe("user");
+    }
     await session.close();
   });
 });
@@ -221,6 +259,62 @@ describe("SessionHarness — observe", () => {
       expect(event.message.metadata?.type).toBe("user-interaction");
       expect(event.message.metadata?.foo).toBe("bar");
     }
+    await session.close();
+  });
+});
+
+describe("SessionHarness — channel handle", () => {
+  it("publish emits an envelope on session:channel:<name> that subscribe receives", async () => {
+    const { session } = await mkSession();
+    const ch = session.channel<{ pct: number }>("progress");
+
+    const received: Array<{ pct: number }> = [];
+    const unsub = ch.subscribe((payload) => received.push(payload));
+    // Let the subscribe's Stream scope register.
+    await new Promise((r) => setTimeout(r, 30));
+
+    await ch.publish({ pct: 25 });
+    await ch.publish({ pct: 75 });
+    await new Promise((r) => setImmediate(r));
+
+    expect(received).toEqual([{ pct: 25 }, { pct: 75 }]);
+    unsub();
+    await session.close();
+  });
+
+  it("two handles to the same channel name see each other's publishes", async () => {
+    const { session } = await mkSession();
+    const a = session.channel<string>("topic");
+    const b = session.channel<string>("topic");
+
+    const onA: string[] = [];
+    const unsub = a.subscribe((p) => onA.push(p));
+    await new Promise((r) => setTimeout(r, 30));
+
+    await b.publish("from-b");
+    await new Promise((r) => setImmediate(r));
+
+    expect(onA).toEqual(["from-b"]);
+    unsub();
+    await session.close();
+  });
+});
+
+describe("SessionHarness — knob handle", () => {
+  it("get/set/subscribe through KnobBridge", async () => {
+    const { session } = await mkSession();
+    // Pre-register a knob into the session's bridge so get/set has something
+    // to read.
+    const k = session.knob<number>("temperature");
+    // Bridge initially returns undefined for unregistered knobs.
+    expect(k.get()).toBe(undefined);
+
+    let pings = 0;
+    const unsub = k.subscribe(() => pings++);
+    k.set(0.7);
+    expect(k.get()).toBe(0.7);
+    expect(pings).toBeGreaterThan(0);
+    unsub();
     await session.close();
   });
 });

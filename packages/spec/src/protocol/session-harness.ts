@@ -420,6 +420,22 @@ export interface SessionHarnessProtocol<P = unknown> {
    * model by default but never invoke handler logic.
    */
   observe(input: ObserveInput): Promise<{ readonly entryId: string }>;
+
+  /**
+   * Return a programmatic handle for a named channel. Each call
+   * returns a new handle bound to the same name — handles are cheap
+   * wrappers, not registered. Channel events flow on
+   * `surface: "session"` with name `session:channel:<name>`.
+   */
+  channel<T = unknown>(name: string): ChannelHandle<T>;
+
+  /**
+   * Return a programmatic handle for a named knob. Wraps the
+   * session's `KnobBridge`. Throws on `get()` / `set()` when the knob
+   * is not registered (knobs come from the JSX tree via `useKnob` or
+   * `knob(...)` declarations).
+   */
+  knob<T = unknown>(name: string): KnobHandle<T>;
 }
 
 // ============================================================================
@@ -459,6 +475,44 @@ export interface ObserveInput {
   readonly content: string | readonly ContentBlock[];
   /** Additional metadata merged onto the message envelope. */
   readonly metadata?: Readonly<Record<string, unknown>>;
+}
+
+// ============================================================================
+// Channel + knob handles (block 5 extras)
+// ============================================================================
+
+/**
+ * Per-channel programmatic handle returned by `session.channel(name)`.
+ * Ergonomic wrapper over the session's bus + (optional) channel
+ * publisher — callers don't need to know the envelope shape.
+ */
+export interface ChannelHandle<T = unknown> {
+  readonly name: string;
+  /** Publish a payload on this channel. */
+  publish(payload: T, metadata?: Readonly<Record<string, unknown>>): Promise<void>;
+  /** Subscribe to incoming payloads. Returns an unsubscribe fn. */
+  subscribe(listener: (payload: T, meta: ChannelEventMeta) => void): () => void;
+}
+
+export interface ChannelEventMeta {
+  readonly id: string;
+  readonly timestamp: number;
+  readonly channelSequence?: number;
+  readonly metadata?: Readonly<Record<string, unknown>>;
+  readonly correlationId?: string;
+  readonly parentOpId?: string;
+}
+
+/**
+ * Per-knob programmatic handle returned by `session.knob(name)`.
+ * Wraps `KnobBridge` get/set/subscribe so callers can refer to a knob
+ * by reference instead of repeating `id` strings.
+ */
+export interface KnobHandle<T = unknown> {
+  readonly name: string;
+  get(): T;
+  set(value: T): void;
+  subscribe(listener: () => void): () => void;
 }
 
 // ============================================================================

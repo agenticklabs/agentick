@@ -89,8 +89,23 @@ bound) closed. Phase 5+ proceeds as below, in this exact order:
 
 5. PHASE 4 LOOSE ENDS (~3 days, parallel-safe)
    ────────────────────────────────────────────────────────────────
-   □ 4a.5–4a.8       Tool executor: confirmation flow, middleware
-                     hooks, inbox dispatcher, v1 parity sweep
+   ✓ 4a.5+4a.7       Tool confirmation flow + inbox dispatcher
+   ✓ Session.spawn / dispatch / queue / append / observe
+   ✓ Session.channel(name) / knob(name) handles
+   ☐ session.request(method, params) — generic RPC primitive.
+                     Same Deferred-keyed-by-id machinery as
+                     confirmation flow, generalized. Defer until the
+                     second use case (MCP elicitation / sampling)
+                     surfaces concrete shape demands. When extracted,
+                     confirmation flow re-implements ON TOP of request().
+   ☐ session.pause / resume — deferred per direction (hibernate/
+                     restore likely sufficient).
+   ☐ session.skill — pending architectural reconsideration (likely
+                     a higher-order utility built on spawn, not a
+                     peer primitive).
+   ☐ session.shell — explicitly deferred.
+   □ 4a.6            Tool executor middleware + lifecycle hooks
+   □ 4a.8            Tool executor v1 parity sweep
    □ 4f.6b           App.use(integration) — interceptors + observers
                      + services registry
    □ 4f.7            App persistence + telemetry Layer slots
