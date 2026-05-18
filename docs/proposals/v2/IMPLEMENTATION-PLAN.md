@@ -60,12 +60,23 @@ bound) closed. Phase 5+ proceeds as below, in this exact order:
 
 3. PHASE 5 — PROVIDER ADAPTER ROW (~1 week)
    ────────────────────────────────────────────────────────────────
-   □ Phase5.1        @agentick/executor-anthropic — anthropic("claude-...")
-   □ Phase5.2        @agentick/executor-google — google("gemini-...")
-   □ Phase5.3        @agentick/executor-ai-sdk — aisdk({ model, tools? }).
-                     The progressive-adoption story. Wraps Vercel
-                     AI SDK as our executor; extracts tools into our
-                     handler resolver (observability uniformity).
+   ✓ Phase5.3        @agentick/executor-ai-sdk — aisdk({ model })
+                     bridge. Wraps Vercel AI SDK as our executor;
+                     translates LanguageModelInput → ModelMessage[],
+                     calls generateText, maps finishReason +
+                     toolCalls back. ExecutorFactory marker; works
+                     with createApp({ executor: aisdk({ model }) }).
+                     Unlocks Anthropic, Google, etc. via the AI SDK
+                     provider universe. 14/14 tests + conformance
+                     against MockLanguageModelV2.
+                     Tool extraction from aisdk({ tools }) deferred —
+                     JSX-declared tools work today.
+   □ Phase5.1        @agentick/executor-anthropic — native
+                     anthropic("claude-...") factory (alternative to
+                     going through aisdk wrapper; tighter envelope
+                     fidelity, no AI SDK dep).
+   □ Phase5.2        @agentick/executor-google — native
+                     google("gemini-...") factory.
 
 4. PHASE 5 — PRODUCTION SUBSTRATE (~2 weeks)
    ────────────────────────────────────────────────────────────────

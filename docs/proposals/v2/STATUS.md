@@ -1,7 +1,7 @@
 # Agentick v2 — Implementation Status
 
 **Branch:** `feat/v2`
-**Last updated:** 2026-05-18 (4e.2 — runSessionConformance suite; caught 2 SessionHarness bugs)
+**Last updated:** 2026-05-18 (Phase5.3 — @agentick/executor-ai-sdk bridge; unlocks the AI SDK provider universe)
 
 This is the **running progress log** for v2 implementation. Update it
 every session. New contributors / sessions read this first.
