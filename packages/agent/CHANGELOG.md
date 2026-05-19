@@ -1,5 +1,13 @@
 # @agentick/agent
 
+## 0.14.67
+
+### Patch Changes
+
+- Updated dependencies [c753f82]
+  - @agentick/core@0.14.67
+  - @agentick/shared@0.14.67
+
 ## 0.14.66
 
 ### Patch Changes
