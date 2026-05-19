@@ -47,6 +47,10 @@ import type {
 import { DEFAULT_JOURNALING_POLICY } from "@agentick/spec";
 import { ulid } from "./ulid.js";
 import { getContext, type RuntimeContext, withContext } from "./runtime-context.js";
+import {
+  RequestResponseRegistry,
+  type RequestError,
+} from "./request-response-registry.js";
 
 export type { Unsubscribe } from "@agentick/spec";
 
@@ -177,6 +181,13 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface> {
   protected readonly address: string;
   protected readonly handlers = new HandlerRegistry();
   protected readonly middleware = new MiddlewareChain();
+  /**
+   * In-flight request/response correlation map. Every BaseHarness can
+   * issue `this.request(channel, payload)` and receives `request-response`
+   * inbox messages routed automatically by `dispatchMessage` before
+   * the subclass's `handleMessage` is consulted.
+   */
+  protected readonly requests = new RequestResponseRegistry<unknown>();
   private readonly policy: JournalingPolicy;
   private inboxUnsubscribe?: Unsubscribe;
 
@@ -491,10 +502,81 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface> {
   private dispatchMessage(
     msg: MessageEnvelope,
   ): Effect.Effect<unknown, MessageHandlerError, never> {
+    // Auto-intercept `request-response` messages BEFORE the subclass
+    // sees them. The payload's `correlationId` routes to the pending
+    // Deferred via the registry. Subclasses never see these.
+    if (msg.type === "request-response") {
+      return Effect.sync(() => {
+        const payload = msg.payload as
+          | { correlationId?: string; response?: unknown }
+          | undefined;
+        if (
+          payload &&
+          typeof payload.correlationId === "string" &&
+          this.requests.has(payload.correlationId)
+        ) {
+          this.requests.resolve(payload.correlationId, payload.response);
+        }
+        // Unknown correlationId is non-fatal — stale response after
+        // timeout or after the registry was cleared. Log-only behavior
+        // surfaces via the regular `HandlerError` path in a follow-up.
+      });
+    }
     return this.handleMessage(msg).pipe(
       Effect.catchAll((cause) =>
         Effect.fail<MessageHandlerError>({ _tag: "HandlerError", cause }),
       ),
+    );
+  }
+
+  // ──────── request/response (block 5) ────────
+
+  /**
+   * Send a request on a channel and await a correlated response.
+   *
+   * Publishes a channel envelope tagged with a correlationId + replyTo
+   * (this harness's inbox address). Subscribers (in-process via
+   * `channel.onRequest`, or out-of-process via gateway) deliver a
+   * `request-response` inbox message back here, which auto-routes to
+   * the pending Deferred via `this.requests`.
+   *
+   * `[V1-INHERITED]` — generalizes v1's `ToolConfirmationCoordinator`
+   * across all harnesses. Tool confirmation refactors onto this.
+   */
+  protected request<TReq, TResp>(
+    channel: string,
+    payload: TReq,
+    opts: { readonly timeoutMs?: number; readonly signal?: AbortSignal } = {},
+  ): Effect.Effect<TResp, RequestError, never> {
+    const correlationId = `req:${ulid()}`;
+    const replyTo = this.address;
+    const registered = this.requests.register({
+      correlationId,
+      ...(opts.timeoutMs !== undefined ? { timeoutMs: opts.timeoutMs } : {}),
+      ...(opts.signal !== undefined ? { signal: opts.signal } : {}),
+    });
+    // Publish the request envelope on the bus. The channel name pattern
+    // matches `ChannelHandle.publish` — `session:channel:<channel>`.
+    const fullName = `session:channel:${channel}`;
+    const envelope: ProtocolEvent = {
+      id: ulid(),
+      surface: "session",
+      name: fullName,
+      phase: "delta",
+      timestamp: Date.now(),
+      scope: {},
+      payload,
+      metadata: {
+        requestType: "request",
+        correlationId,
+        replyTo,
+      },
+    } as ProtocolEvent;
+    return Effect.flatMap(this.bus.publish(envelope), () =>
+      Effect.tryPromise<TResp, RequestError>({
+        try: () => registered.promise as Promise<TResp>,
+        catch: (cause): RequestError => cause as RequestError,
+      }),
     );
   }
 

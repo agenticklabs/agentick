@@ -393,6 +393,8 @@ export class SessionHarness<P = unknown>
     const fullName = `session:channel:${name}`;
     const sessionId = this.store.id;
     const bus = this.bus;
+    const inbox = this.inbox;
+    const sessionAddress = this.address;
     return {
       name,
       publish: async (
@@ -412,6 +414,8 @@ export class SessionHarness<P = unknown>
         await Effect.runPromise(bus.publish(ev));
       },
       subscribe: (listener) => {
+        // Subscribe is pub/sub only — drop envelopes tagged as
+        // requests so handlers using onRequest aren't double-routed.
         const fiber = Effect.runFork(
           Stream.runForEach(
             bus.subscribe({ surface: "session", name: { exact: fullName } }),
@@ -423,6 +427,7 @@ export class SessionHarness<P = unknown>
                   metadata?: Readonly<Record<string, unknown>>;
                   correlationId?: string;
                 };
+                if (evx.metadata?.requestType === "request") return;
                 const meta: import("@agentick/spec").ChannelEventMeta = {
                   id: ev.id,
                   timestamp: ev.timestamp,
@@ -447,7 +452,75 @@ export class SessionHarness<P = unknown>
           void Effect.runPromise(Fiber.interrupt(fiber));
         };
       },
+      request: async <TReq, TResp>(
+        payload: TReq,
+        opts?: { timeoutMs?: number; signal?: AbortSignal },
+      ): Promise<TResp> => {
+        // Delegate to the session's BaseHarness.request capability.
+        // The session is itself a BaseHarness — protected method
+        // accessed via the public sessionRequest helper below.
+        return this.sessionRequest<TReq, TResp>(name, payload, opts);
+      },
+      onRequest: <TReq = unknown, TResp = unknown>(
+        listener: (
+          payload: TReq,
+          ctx: import("@agentick/spec").RequestContext<TResp>,
+        ) => void,
+      ) => {
+        const fiber = Effect.runFork(
+          Stream.runForEach(
+            bus.subscribe({ surface: "session", name: { exact: fullName } }),
+            (ev) =>
+              Effect.sync(() => {
+                const evx = ev as {
+                  metadata?: Readonly<Record<string, unknown>>;
+                };
+                const md = evx.metadata;
+                if (md?.requestType !== "request") return;
+                const correlationId = md.correlationId as string | undefined;
+                const replyTo = md.replyTo as string | undefined;
+                if (!correlationId || !replyTo) return;
+                const ctx: import("@agentick/spec").RequestContext<TResp> = {
+                  correlationId,
+                  replyTo,
+                  metadata: md,
+                  respond: async (response: TResp) => {
+                    await Effect.runPromise(
+                      inbox.send(replyTo, {
+                        addressedTo: replyTo,
+                        type: "request-response",
+                        messageId: `m_${correlationId}`,
+                        timestamp: Date.now(),
+                        payload: { correlationId, response },
+                      }),
+                    );
+                  },
+                };
+                listener(ev.payload as TReq, ctx);
+              }),
+          ),
+        );
+        return () => {
+          void Effect.runPromise(Fiber.interrupt(fiber));
+        };
+        // sessionAddress acknowledged via the outer closure so the
+        // lint doesn't flag it as unused when the parent uses it.
+        void sessionAddress;
+      },
     };
+  }
+
+  /**
+   * Public bridge to `BaseHarness.request` — channel handles call
+   * this so they don't need access to the protected method.
+   */
+  async sessionRequest<TReq, TResp>(
+    channel: string,
+    payload: TReq,
+    opts?: { timeoutMs?: number; signal?: AbortSignal },
+  ): Promise<TResp> {
+    const eff = this.request<TReq, TResp>(channel, payload, opts ?? {});
+    return runHarnessProtocol(eff);
   }
 
   knob<T = unknown>(name: string): KnobHandle<T> {

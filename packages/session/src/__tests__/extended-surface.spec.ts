@@ -263,6 +263,55 @@ describe("SessionHarness — observe", () => {
   });
 });
 
+describe("SessionHarness — channel.request / onRequest (RPC)", () => {
+  it("in-process round-trip: request → onRequest listener → respond → promise resolves", async () => {
+    const { session } = await mkSession();
+    const ch = session.channel<{ q: string }>("ping");
+
+    const unsub = ch.onRequest<{ q: string }, { a: string }>((req, ctx) => {
+      ctx.respond({ a: `pong:${req.q}` });
+    });
+    await new Promise((r) => setTimeout(r, 30));
+
+    const result = await ch.request<{ q: string }, { a: string }>({ q: "hi" });
+    expect(result).toEqual({ a: "pong:hi" });
+    unsub();
+    await session.close();
+  });
+
+  it("subscribe does NOT see request envelopes (clean split)", async () => {
+    const { session } = await mkSession();
+    const ch = session.channel<{ msg: string }>("split");
+
+    const subscribed: Array<{ msg: string }> = [];
+    const unsubA = ch.subscribe((payload) => subscribed.push(payload));
+    const unsubB = ch.onRequest<{ msg: string }, { ack: true }>((req, ctx) =>
+      ctx.respond({ ack: true }),
+    );
+    await new Promise((r) => setTimeout(r, 30));
+
+    // Pure publish — subscribe sees it.
+    await ch.publish({ msg: "hello" });
+    // Request — onRequest listener handles it, subscribe should NOT see it.
+    await ch.request<{ msg: string }, { ack: true }>({ msg: "do something" });
+    await new Promise((r) => setImmediate(r));
+
+    expect(subscribed).toEqual([{ msg: "hello" }]); // only the publish
+    unsubA();
+    unsubB();
+    await session.close();
+  });
+
+  it("times out when no responder is attached", async () => {
+    const { session } = await mkSession();
+    const ch = session.channel("orphan");
+    await expect(
+      ch.request<{ x: number }, unknown>({ x: 1 }, { timeoutMs: 50 }),
+    ).rejects.toMatchObject({ _tag: "RequestTimeoutError" });
+    await session.close();
+  });
+});
+
 describe("SessionHarness — channel handle", () => {
   it("publish emits an envelope on session:channel:<name> that subscribe receives", async () => {
     const { session } = await mkSession();

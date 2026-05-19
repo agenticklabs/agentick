@@ -1,15 +1,21 @@
 /**
- * Confirmation flow tests (4a.5 + 4a.7).
+ * Confirmation flow tests (4a.5 + 4a.7, refactored onto BaseHarness.request).
  *
  * Tools declared `annotations.requiresConfirmation: true` pause after
- * validation and wait for an inbound `confirmation-response` inbox
- * message. Approve → handler runs. Deny → DispatchResult with
- * `succeeded: false` and a denial-message content block. Abort or
- * timeout → typed failures.
+ * validation and wait for an inbound `request-response` inbox message
+ * routed by correlationId. Tests subscribe to the bus to capture the
+ * outbound request envelope (which carries the correlationId in
+ * metadata), then deliver a `request-response` to the harness's inbox.
+ *
+ * Approve → handler runs (modifiedArguments re-validated when set).
+ * Deny    → DispatchResult{ succeeded: false, content: [denial] }.
+ * Abort   → denial-shaped result with reason extracted from the abort
+ *           reason (controller.signal.reason).
+ * Timeout → ToolConfirmationTimeoutError (typed failure).
  */
 
 import { describe, expect, it } from "vitest";
-import { Effect } from "effect";
+import { Chunk, Effect, Stream } from "effect";
 
 import type {
   DispatchInput,
@@ -49,30 +55,57 @@ function dispatchOf(
   };
 }
 
+/**
+ * Wait for the next request envelope on `session:channel:tool_confirmation`
+ * and return its `correlationId` + `replyTo`. The harness publishes a
+ * request envelope when the confirmation gate trips.
+ */
+async function captureRequest(
+  bus: { subscribe: (q: unknown) => Stream.Stream<unknown, unknown, never> },
+): Promise<{ correlationId: string; replyTo: string }> {
+  const chunk = await Effect.runPromise(
+    Stream.runCollect(
+      Stream.take(
+        bus.subscribe({
+          surface: "session",
+          name: { exact: "session:channel:tool_confirmation" },
+        }) as Stream.Stream<{ metadata?: Record<string, unknown> }, unknown, never>,
+        1,
+      ),
+    ),
+  );
+  const ev = Array.from(Chunk.toReadonlyArray(chunk))[0]!;
+  const meta = ev.metadata ?? {};
+  return {
+    correlationId: meta.correlationId as string,
+    replyTo: meta.replyTo as string,
+  };
+}
+
+/**
+ * Deliver a `request-response` inbox message — the generic shape
+ * routed by `BaseHarness.dispatchMessage`.
+ */
 function deliverResponse(
   inbox: { send: (addr: string, msg: MessageEnvelope) => Effect.Effect<unknown, unknown, never> },
-  address: string,
+  replyTo: string,
+  correlationId: string,
   response: ToolConfirmationResponse,
 ) {
   const msg: MessageEnvelope = {
-    addressedTo: address,
-    type: "confirmation-response",
-    messageId: `m_${response.toolUseId}`,
+    addressedTo: replyTo,
+    type: "request-response",
+    messageId: `m_${correlationId}`,
     timestamp: Date.now(),
-    payload: { type: "confirmation-response", response },
+    payload: { correlationId, response },
   };
-  return Effect.runPromise(inbox.send(address, msg));
+  return Effect.runPromise(inbox.send(replyTo, msg));
 }
 
 describe("ToolExecutorHarness — confirmation flow", () => {
-  // `address` is protected on BaseHarness; tests reconstruct it.
-  const addrFor = (scopeId: string) => `tool:${scopeId}`;
-
-  it("approve: handler runs after confirmation response arrives", async () => {
+  it("approve: handler runs after request-response arrives", async () => {
     let handlerRan = 0;
-    const scopeId = "scope-approve";
-    const { harness, inbox } = await createTestHarness({
-      scopeId,
+    const { harness, inbox, bus } = await createTestHarness({
       tools: [confirmTool()],
       handlers: [
         {
@@ -86,10 +119,8 @@ describe("ToolExecutorHarness — confirmation flow", () => {
     });
 
     const dispatchP = harness.dispatch(dispatchOf("delete-file", "tc-1"));
-    // Give the dispatch a tick to register its pending confirmation.
-    await new Promise((r) => setImmediate(r));
-
-    await deliverResponse(inbox, addrFor(scopeId), {
+    const { correlationId, replyTo } = await captureRequest(bus);
+    await deliverResponse(inbox, replyTo, correlationId, {
       toolUseId: "tc-1",
       approved: true,
     });
@@ -102,9 +133,7 @@ describe("ToolExecutorHarness — confirmation flow", () => {
 
   it("deny: succeeded=false with denial content; handler never runs", async () => {
     let handlerRan = 0;
-    const scopeId = "scope-deny";
-    const { harness, inbox } = await createTestHarness({
-      scopeId,
+    const { harness, inbox, bus } = await createTestHarness({
       tools: [confirmTool()],
       handlers: [
         {
@@ -118,9 +147,8 @@ describe("ToolExecutorHarness — confirmation flow", () => {
     });
 
     const dispatchP = harness.dispatch(dispatchOf("delete-file", "tc-2"));
-    await new Promise((r) => setImmediate(r));
-
-    await deliverResponse(inbox, addrFor(scopeId), {
+    const { correlationId, replyTo } = await captureRequest(bus);
+    await deliverResponse(inbox, replyTo, correlationId, {
       toolUseId: "tc-2",
       approved: false,
       reason: "user said no",
@@ -137,9 +165,7 @@ describe("ToolExecutorHarness — confirmation flow", () => {
 
   it("modifiedArguments: handler receives the edited input", async () => {
     let receivedInput: unknown = null;
-    const scopeId = "scope-modify";
-    const { harness, inbox } = await createTestHarness({
-      scopeId,
+    const { harness, inbox, bus } = await createTestHarness({
       tools: [confirmTool()],
       handlers: [
         {
@@ -155,9 +181,8 @@ describe("ToolExecutorHarness — confirmation flow", () => {
     const dispatchP = harness.dispatch(
       dispatchOf("delete-file", "tc-3", { path: "/tmp/risky" }),
     );
-    await new Promise((r) => setImmediate(r));
-
-    await deliverResponse(inbox, addrFor(scopeId), {
+    const { correlationId, replyTo } = await captureRequest(bus);
+    await deliverResponse(inbox, replyTo, correlationId, {
       toolUseId: "tc-3",
       approved: true,
       modifiedArguments: { path: "/tmp/safe" },
@@ -169,9 +194,7 @@ describe("ToolExecutorHarness — confirmation flow", () => {
 
   it("always: subsequent dispatches of the same tool skip the gate", async () => {
     let handlerRan = 0;
-    const scopeId = "scope-always";
-    const { harness, inbox } = await createTestHarness({
-      scopeId,
+    const { harness, inbox, bus } = await createTestHarness({
       tools: [confirmTool()],
       handlers: [
         {
@@ -185,8 +208,8 @@ describe("ToolExecutorHarness — confirmation flow", () => {
     });
 
     const first = harness.dispatch(dispatchOf("delete-file", "tc-4"));
-    await new Promise((r) => setImmediate(r));
-    await deliverResponse(inbox, addrFor(scopeId), {
+    const { correlationId, replyTo } = await captureRequest(bus);
+    await deliverResponse(inbox, replyTo, correlationId, {
       toolUseId: "tc-4",
       approved: true,
       always: true,
@@ -212,14 +235,17 @@ describe("ToolExecutorHarness — confirmation flow", () => {
     });
 
     const dispatchP = harness.dispatch(dispatchOf("delete-file", "tc-6"));
-    // Cancel after a tick — abort during the confirmation wait.
     setTimeout(() => {
       void harness.abort({ toolCallId: "tc-6", reason: "session closed" });
     }, 10);
 
     const result = await dispatchP;
     expect(result.succeeded).toBe(false);
-    expect((result.content[0] as { text: string }).text).toContain("aborted");
+    // The denial message carries the abort _tag (extracted by
+    // stringifyAbortReason since reason came in as a tagged object).
+    expect((result.content[0] as { text: string }).text).toContain(
+      "ToolAbortedError",
+    );
   });
 
   it("timeout: per-dispatch confirmationTimeoutMs trips ToolConfirmationTimeoutError", async () => {

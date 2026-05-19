@@ -38,3 +38,9 @@ export {
 } from "./substrate/runtime-context.js";
 export { matchesQuery } from "./substrate/query.js";
 export { ulid } from "./substrate/ulid.js";
+export {
+  RequestResponseRegistry,
+  type RegisterOptions,
+  type RegisteredRequest,
+  type RequestError,
+} from "./substrate/request-response-registry.js";

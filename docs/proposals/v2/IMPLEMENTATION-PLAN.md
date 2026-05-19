@@ -92,12 +92,14 @@ bound) closed. Phase 5+ proceeds as below, in this exact order:
    ✓ 4a.5+4a.7       Tool confirmation flow + inbox dispatcher
    ✓ Session.spawn / dispatch / queue / append / observe
    ✓ Session.channel(name) / knob(name) handles
-   ☐ session.request(method, params) — generic RPC primitive.
-                     Same Deferred-keyed-by-id machinery as
-                     confirmation flow, generalized. Defer until the
-                     second use case (MCP elicitation / sampling)
-                     surfaces concrete shape demands. When extracted,
-                     confirmation flow re-implements ON TOP of request().
+   ✓ Request/response primitive — RequestResponseRegistry
+                     bookkeeping in @agentick/runtime; BaseHarness.request
+                     + auto-interception of request-response inbox
+                     messages; ChannelHandle.request + onRequest for
+                     in-process responder pattern. Tool confirmation
+                     refactored onto it (net code reduction). The
+                     primitive every future MCP elicitation/sampling
+                     impl will use.
    ☐ session.pause / resume — deferred per direction (hibernate/
                      restore likely sufficient).
    ☐ session.skill — pending architectural reconsideration (likely

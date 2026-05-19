@@ -1,7 +1,7 @@
 # Agentick v2 — Implementation Status
 
 **Branch:** `feat/v2`
-**Last updated:** 2026-05-18 (tool confirmation flow + session extended surface — spawn/dispatch/queue/append/observe/channel/knob)
+**Last updated:** 2026-05-18 (request/response primitive — Registry + BaseHarness.request + channel.onRequest; tool confirmation refactored onto it)
 
 This is the **running progress log** for v2 implementation. Update it
 every session. New contributors / sessions read this first.

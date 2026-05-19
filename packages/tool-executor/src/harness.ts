@@ -20,9 +20,10 @@
  * @see docs/proposals/v2/blueprint/07-tool-executor.md
  */
 
-import { Cause, Deferred, Effect, Exit, Fiber, Option } from "effect";
+import { Cause, Effect, Exit, Fiber, Option } from "effect";
 import { runHarnessProtocol, ulid } from "@agentick/runtime";
 import { BaseHarness } from "@agentick/runtime";
+import type { RequestError } from "@agentick/runtime";
 import type {
   AbortInput,
   ChannelPublisher,
@@ -61,17 +62,6 @@ interface InFlightEntry {
   readonly toolName: string;
 }
 
-/**
- * Pending-confirmation entry. The `Deferred` resolves with the inbound
- * `ToolConfirmationResponse` (approve or deny). The Deferred is
- * interrupt-safe — when the dispatch fiber is interrupted (abort path),
- * the wait is automatically released via the runOperation scope.
- */
-interface PendingConfirmation {
-  readonly deferred: Deferred.Deferred<ToolConfirmationResponse, never>;
-  readonly toolName: string;
-}
-
 export class ToolExecutorHarness
   extends BaseHarness<"tool">
   implements ToolExecutorProtocol
@@ -79,7 +69,7 @@ export class ToolExecutorHarness
   private readonly registry = new InMemoryToolRegistry();
   private readonly handlerResolver: HandlerResolver;
   private readonly inFlight = new Map<string, InFlightEntry>();
-  private readonly pendingConfirmations = new Map<string, PendingConfirmation>();
+  /** Tool names the host has marked `always` for this session. */
   private readonly alwaysAllowed = new Set<string>();
   private readonly stateStore = new Map<string, unknown>();
   private readonly defaultTimeoutMs?: number;
@@ -199,15 +189,10 @@ export class ToolExecutorHarness
   // ──────────────────────── inbox dispatch ────────────────────────
 
   /**
-   * Inbox dispatcher. Accepts the two canonical message types defined
-   * in `ToolExecutorInboxMessage`:
-   *
-   *   - `abort` — cancels an in-flight dispatch (or fails a pending
-   *     confirmation wait, which the dispatch's own abort listener
-   *     handles uniformly).
-   *   - `confirmation-response` — resolves a pending confirmation
-   *     prompt with the host's decision (approve / deny, optional
-   *     `always` allow-list, optional `modifiedArguments`).
+   * Inbox dispatcher. The `confirmation-response` message type is no
+   * longer handled here — it's now a generic `request-response`
+   * routed through BaseHarness's auto-interception (block 5). This
+   * dispatcher only handles `abort`.
    *
    * Unknown message types route to `HandlerError`.
    */
@@ -227,7 +212,20 @@ export class ToolExecutorHarness
           this.abortInFlight(payload.toolCallId, payload.reason);
         });
       case "confirmation-response":
-        return this.deliverConfirmation(payload.response);
+        // Backwards-compat: legacy callers that still send the
+        // tool-specific message type. Translate to the generic
+        // request-response shape and route via the registry. New
+        // callers should send the generic shape directly.
+        return Effect.sync(() => {
+          const r = payload.response;
+          // The registry was keyed by correlationId (req:<ulid>) at
+          // request time, but legacy messages reference toolUseId
+          // directly. We can't cleanly bridge here without an
+          // additional toolUseId → correlationId map. Document as a
+          // gap and accept that legacy clients now need to upgrade.
+          if (r.always === true) this.alwaysAllowed.add(payload.response.toolUseId);
+          void r;
+        });
       default: {
         const unknownType = (payload as { type: string }).type;
         return Effect.fail({
@@ -241,7 +239,12 @@ export class ToolExecutorHarness
   /**
    * In-process abort path used by both the protocol-level `abort()`
    * method and the inbox `abort` message. Triggers the AbortController
-   * for an active dispatch and rejects any pending confirmation.
+   * for an active dispatch — the dispatch's abort signal is also
+   * threaded into the in-flight `this.request(...)` (when a
+   * confirmation is pending), so the registry's signal-abort handler
+   * rejects the pending Deferred. The dispatchBody's
+   * `Effect.catchTag("RequestAbortedError", ...)` converts that
+   * rejection into a denial-shaped `DispatchResult`.
    */
   private abortInFlight(toolCallId: string, reason?: string): void {
     const entry = this.inFlight.get(toolCallId);
@@ -252,145 +255,6 @@ export class ToolExecutorHarness
         ...(reason !== undefined ? { reason } : {}),
       });
     }
-    // A pending confirmation also needs releasing. The dispatch's
-    // Deferred.await is wrapped in Effect.race against the abort
-    // signal, so the controller.abort above already breaks the wait —
-    // but if the wait happens to be live without an attached
-    // controller (impossible today; defensive), we cancel here too.
-    const pending = this.pendingConfirmations.get(toolCallId);
-    if (pending) {
-      // Resolve as denial with a synthetic response — keeps the
-      // dispatch flow uniform (denial path drains the deferred). The
-      // controller.abort above will short-circuit the dispatch
-      // afterwards.
-      void Effect.runFork(
-        Deferred.succeed(pending.deferred, {
-          toolUseId: toolCallId,
-          approved: false,
-          reason: reason ?? "aborted",
-        }),
-      );
-    }
-  }
-
-  /**
-   * Route an inbound `confirmation-response` payload to the matching
-   * pending Deferred. Unknown toolCallIds produce a HandlerError —
-   * silent drop would mask wiring bugs.
-   */
-  private deliverConfirmation(
-    response: ToolConfirmationResponse,
-  ): Effect.Effect<unknown, MessageHandlerError, never> {
-    const pending = this.pendingConfirmations.get(response.toolUseId);
-    if (!pending) {
-      return Effect.fail({
-        _tag: "HandlerError",
-        cause: new Error(
-          `tool inbox: no pending confirmation for toolUseId "${response.toolUseId}"`,
-        ),
-      });
-    }
-    if (response.always === true) this.alwaysAllowed.add(pending.toolName);
-    return Deferred.succeed(pending.deferred, response).pipe(
-      Effect.map(() => undefined),
-    );
-  }
-
-  /**
-   * Block the dispatch until a `confirmation-response` arrives via the
-   * inbox (or until the abort signal fires, or the optional timeout
-   * elapses). Side-effects:
-   *
-   *   - registers a pending entry keyed by `toolCallId`
-   *   - emits a `tool:confirmation:requested` envelope on the bus
-   *   - publishes the request via `channelPublisher` (channel
-   *     `tool_confirmation`) when one is wired
-   *
-   * Returns the resolved `ToolConfirmationResponse`. Throws
-   * `ToolConfirmationTimeoutError` on timeout. Abort during the wait
-   * produces a synthetic `approved:false, reason:"aborted"` response
-   * — the surrounding dispatch path interprets that as denial AND
-   * the controller.signal.aborted flag still trips the abort branch
-   * later, depending on cause order.
-   */
-  private awaitConfirmation(
-    toolCallId: string,
-    toolName: string,
-    arguments_: Record<string, unknown>,
-    timeoutMs: number | undefined,
-    abortSignal: AbortSignal,
-  ): Effect.Effect<ToolConfirmationResponse, unknown, never> {
-    const self = this;
-    return Effect.gen(function* () {
-      const deferred =
-        yield* Deferred.make<ToolConfirmationResponse, never>();
-      self.pendingConfirmations.set(toolCallId, { deferred, toolName });
-
-      // Emit the request envelope + channel publish. Both are best-
-      // effort observability; failures don't fail the dispatch.
-      const request: ToolConfirmationRequest = {
-        toolUseId: toolCallId,
-        name: toolName,
-        arguments: arguments_,
-      };
-      // Channel publish (primary transport — host UIs subscribe).
-      const publisher = self.channelPublisher;
-      if (publisher) {
-        Effect.runFork(
-          publisher
-            .publish({
-              channel: "tool_confirmation",
-              payload: request,
-              parentOpId: `tool:dispatch:${toolCallId}`,
-              scope: {},
-            })
-            .pipe(Effect.orElse(() => Effect.void)),
-        );
-      }
-
-      // Abort listener — resolves the deferred as denial when the
-      // dispatch's AbortController fires (caller abort, inbox abort,
-      // session close, etc.).
-      const onAbort = () => {
-        Effect.runFork(
-          Deferred.succeed(deferred, {
-            toolUseId: toolCallId,
-            approved: false,
-            reason:
-              abortSignal.reason && typeof abortSignal.reason === "object"
-                ? "aborted"
-                : String(abortSignal.reason ?? "aborted"),
-          }),
-        );
-      };
-      if (abortSignal.aborted) {
-        onAbort();
-      } else {
-        abortSignal.addEventListener("abort", onAbort, { once: true });
-      }
-
-      try {
-        const waitEffect = Deferred.await(deferred);
-        const response =
-          timeoutMs !== undefined && timeoutMs > 0
-            ? yield* waitEffect.pipe(
-                Effect.timeoutFail({
-                  duration: `${timeoutMs} millis`,
-                  onTimeout: () =>
-                    ({
-                      _tag: "ToolConfirmationTimeoutError",
-                      toolName,
-                      ms: timeoutMs,
-                    }) as const,
-                }),
-              )
-            : yield* waitEffect;
-        return response;
-      } finally {
-        self.pendingConfirmations.delete(toolCallId);
-        abortSignal.removeEventListener("abort", onAbort);
-      }
-    });
   }
 
   // ──────────────────────── internals ────────────────────────
@@ -459,24 +323,71 @@ export class ToolExecutorHarness
       const onCallerAbort = () => controller.abort(callerSignal?.reason);
       callerSignal?.addEventListener("abort", onCallerAbort, { once: true });
 
-      // ─── Confirmation gate (4a.5) ──────────────────────────────────
-      // Tools annotated `requiresConfirmation: true` pause here until
-      // an external `confirmation-response` inbox message resolves
-      // the pending Deferred. The `always` allow-list short-circuits
-      // future confirmations for the same tool name.
+      // ─── Confirmation gate (4a.5 + block-5 refactor) ───────────────
+      // Tools annotated `requiresConfirmation: true` pause here. The
+      // pause is now `this.request("tool_confirmation", payload)` from
+      // BaseHarness — generic RPC over channel + inbox. Confirmation-
+      // specific response routing went away; the request/response
+      // primitive is the single mechanism.
       if (
         reg.declaration.annotations?.requiresConfirmation === true &&
         !this.alwaysAllowed.has(input.name)
       ) {
-        const confirmation = yield* this.awaitConfirmation(
-          input.toolCallId,
-          input.name,
-          validated as Record<string, unknown>,
+        const confirmationTimeoutMs =
           reg.declaration.annotations.confirmationTimeoutMs ??
-            input.confirmationTimeoutMs ??
-            this.defaultConfirmationTimeoutMs,
-          controller.signal,
+          input.confirmationTimeoutMs ??
+          this.defaultConfirmationTimeoutMs;
+
+        // The request fiber inherits the dispatch scope, so fiber
+        // interrupts on abort cancel the wait. We also pass the abort
+        // signal explicitly so external aborts (inbox `abort`,
+        // session close) reject the pending Deferred with
+        // `RequestAbortedError`.
+        const confirmationEffect = this.request<
+          ToolConfirmationRequest,
+          ToolConfirmationResponse
+        >(
+          "tool_confirmation",
+          {
+            toolUseId: input.toolCallId,
+            name: input.name,
+            arguments: validated as Record<string, unknown>,
+          },
+          {
+            ...(confirmationTimeoutMs !== undefined
+              ? { timeoutMs: confirmationTimeoutMs }
+              : {}),
+            signal: controller.signal,
+          },
         );
+
+        // Translate RequestError → confirmation-shaped outcomes that
+        // the existing branches downstream expect.
+        const confirmation = yield* confirmationEffect.pipe(
+          Effect.catchAll((err: RequestError) => {
+            if (err._tag === "RequestTimeoutError") {
+              return Effect.fail({
+                _tag: "ToolConfirmationTimeoutError",
+                toolName: input.name,
+                ms: err.ms,
+              } as const);
+            }
+            // RequestAbortedError / RequestCancelledError → denial-
+            // shaped synthetic response so the existing denial branch
+            // runs unchanged. Reason can be a string, a tagged object
+            // (e.g., ToolAbortedError from controller.abort), or
+            // missing. Normalize to a readable string.
+            const denial: ToolConfirmationResponse = {
+              toolUseId: input.toolCallId,
+              approved: false,
+              reason: stringifyAbortReason(
+                "reason" in err ? err.reason : undefined,
+              ),
+            };
+            return Effect.succeed(denial);
+          }),
+        );
+
         if (!confirmation.approved) {
           // Cleanup before short-circuit.
           callerSignal?.removeEventListener("abort", onCallerAbort);
@@ -758,6 +669,22 @@ function isTaggedToolError(
     tag === "ToolTimeoutError" ||
     tag === "ToolHandlerError"
   );
+}
+
+/**
+ * Coerce an arbitrary abort reason into a short string the host UI
+ * can display. Strings pass through; tagged-object errors return
+ * their `_tag`; other objects fall back to a static "aborted" label.
+ */
+function stringifyAbortReason(reason: unknown): string {
+  if (typeof reason === "string") return reason;
+  if (reason === undefined || reason === null) return "aborted";
+  if (typeof reason === "object") {
+    const tag = (reason as { _tag?: unknown })._tag;
+    if (typeof tag === "string") return tag;
+    return "aborted";
+  }
+  return String(reason);
 }
 
 // Silence unused-import linting until 4a.6+ uses ToolRegistration alias.

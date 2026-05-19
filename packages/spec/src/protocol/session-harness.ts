@@ -485,13 +485,59 @@ export interface ObserveInput {
  * Per-channel programmatic handle returned by `session.channel(name)`.
  * Ergonomic wrapper over the session's bus + (optional) channel
  * publisher — callers don't need to know the envelope shape.
+ *
+ * Bidirectional via `request` + `onRequest`:
+ *   - `publish` / `subscribe` — pub/sub (fanout)
+ *   - `request` / `onRequest` — correlated request/response (1:1)
+ *
+ * Subscribe listeners do NOT see request envelopes (those carry a
+ * `requestType: "request"` metadata flag); request listeners do NOT
+ * see plain publishes. Clean split — no defensive `if (ctx.respond)`
+ * checks.
  */
 export interface ChannelHandle<T = unknown> {
   readonly name: string;
-  /** Publish a payload on this channel. */
+  /** Publish a payload on this channel. Fanout — every subscriber sees it. */
   publish(payload: T, metadata?: Readonly<Record<string, unknown>>): Promise<void>;
-  /** Subscribe to incoming payloads. Returns an unsubscribe fn. */
+  /**
+   * Subscribe to publishes on this channel. Does NOT receive request
+   * envelopes — use `onRequest` for those. Returns an unsubscribe fn.
+   */
   subscribe(listener: (payload: T, meta: ChannelEventMeta) => void): () => void;
+  /**
+   * Send a request on this channel and await a correlated response.
+   *
+   * Publishes an envelope tagged with a correlationId + replyTo
+   * (the owning harness's inbox address). The first matching
+   * `request-response` inbox message resolves the Promise. Times out
+   * after `opts.timeoutMs` if set. Honors `opts.signal` for abort.
+   */
+  request<TReq, TResp>(
+    payload: TReq,
+    opts?: { timeoutMs?: number; signal?: AbortSignal },
+  ): Promise<TResp>;
+  /**
+   * Subscribe to *requests* on this channel. The listener receives a
+   * `respond` callback bound to the request's correlationId — calling
+   * it sends a `request-response` inbox message back to the requester.
+   *
+   * Returns an unsubscribe fn.
+   */
+  onRequest<TReq = unknown, TResp = unknown>(
+    listener: (payload: TReq, ctx: RequestContext<TResp>) => void,
+  ): () => void;
+}
+
+/**
+ * Context passed to `onRequest` listeners. `respond` is the action
+ * verb; `correlationId` + `replyTo` are exposed read-only for
+ * debugging/logging.
+ */
+export interface RequestContext<TResp = unknown> {
+  readonly correlationId: string;
+  readonly replyTo: string;
+  readonly metadata: Readonly<Record<string, unknown>>;
+  respond(payload: TResp): Promise<void>;
 }
 
 export interface ChannelEventMeta {
