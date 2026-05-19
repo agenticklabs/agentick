@@ -94,6 +94,37 @@ describe("useData — no-Suspense blocking resolution", () => {
     expect(textOf(m.content)).toBe("done");
   });
 
+  it("respects awaitTimeoutMs and surfaces a diagnostic", async () => {
+    const data = new InMemoryDataBridge();
+    const bridges: HookBridges = { ...stubBridges(), data };
+    const harness = await makeHarness();
+
+    // Fetcher that never resolves
+    const stuck = new Promise<string>(() => {
+      /* never */
+    });
+
+    function Stuck() {
+      const v = useData("stuck", () => stuck);
+      return React.createElement("message", { role: "user" }, v);
+    }
+
+    await harness.mount({
+      mountId: "m_to",
+      sessionId: "s",
+      element: React.createElement(Stuck),
+      bridges,
+    });
+
+    const { diagnostics } = await harness.renderTree({
+      mountId: "m_to",
+      sessionId: "s",
+      awaitTimeoutMs: 25,
+    });
+
+    expect(diagnostics.some((d) => d.code === "await-timeout")).toBe(true);
+  });
+
   it("a fetcher rejection propagates as a render error (no loading state)", async () => {
     const data = new InMemoryDataBridge();
     const bridges: HookBridges = { ...stubBridges(), data };

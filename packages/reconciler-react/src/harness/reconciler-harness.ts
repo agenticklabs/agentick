@@ -487,8 +487,32 @@ export class ReconcilerHarness
 
       // Await every in-flight fetch (allSettled — failures cache as
       // rejected entries; the next render throws them synchronously
-      // and the loop will see no pending and terminate).
-      await Promise.allSettled(pending);
+      // and the loop will see no pending and terminate). When the
+      // caller supplied `awaitTimeoutMs`, race the wait against a
+      // timer — exceeding the budget surfaces an `await-timeout`
+      // diagnostic and terminates the loop.
+      const settled = Promise.allSettled(pending);
+      if (input.awaitTimeoutMs !== undefined) {
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        const timeout = new Promise<"timeout">((resolve) => {
+          timer = setTimeout(() => resolve("timeout"), input.awaitTimeoutMs);
+        });
+        const outcome = await Promise.race([
+          settled.then(() => "settled" as const),
+          timeout,
+        ]);
+        if (timer !== undefined) clearTimeout(timer);
+        if (outcome === "timeout") {
+          diagnostics.push({
+            severity: "warning",
+            code: "await-timeout",
+            message: `render-until-stable: useData await exceeded ${input.awaitTimeoutMs}ms; terminating with partial IR`,
+          });
+          break;
+        }
+      } else {
+        await settled;
+      }
     }
 
     if (iterations >= maxIterations) {

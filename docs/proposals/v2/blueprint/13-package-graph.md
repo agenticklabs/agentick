@@ -20,12 +20,11 @@ Pluggable component       Contract (in spec)               Implementations
 Reconciler harness          spec/protocol/compiler.ts        @agentick/reconciler-react
                                                             (future: @agentick/compiler-vue, ...)
 
-Formatter harness          spec/protocol/renderer.ts        @agentick/formatter-markdown*
-                                                           @agentick/formatter-xml*
-                                                           @agentick/formatter-text*
-                                                           @agentick/formatter-json*
-                                                           (* = ship inside compiler-react in v2;
-                                                              split out only if needed)
+Formatters (pure functions)  spec/data/formatter.ts          @agentick/formatters
+                             (Formatter type)                 (ships markdownFormatter,
+                                                              xmlFormatter, textFormatter,
+                                                              defineFormatter; one consolidated
+                                                              package — see ADR 22)
 
 Executor harness          spec/protocol/executor.ts        @agentick/executor-anthropic
                                                            @agentick/executor-openai

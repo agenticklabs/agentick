@@ -461,14 +461,14 @@ which is Effect-free and depends only on @agentick/spec):
   □ ReactiveCellState capture/restore (CompilerSnapshot.cells)
   □ useDataCache (Layer 2)
 
-Formatter harness (small; tightly bound to the reconciler in v2):
-  □ FormatterHarness extends BaseHarness<"formatter">
-  □ Built-in formatters: markdown, xml, text, json
-    (port v1 MarkdownRenderer + XMLRenderer to reconciler-react)
-  □ Formatter registry
-  □ FormatScope nested resolution
-  □ aroundFormat middleware
-  □ runFormatterConformance passes
+Formatters (downgraded from harness to pure functions per ADR 22):
+  ✓ @agentick/formatters package — defineFormatter, markdownFormatter,
+    xmlFormatter, textFormatter, builtInFormatters()
+  ✓ Formatter registry slot on ReconcilerHarnessOptions
+  ✓ Per-entry dispatch via FormatterRef (id → format fallback)
+  ✓ Scope switching via <Markdown> / <XML> / <PlainText> providers
+  □ Middleware via plain function composition (no harness)
+  ✓ Post-collect formatter pass in renderTreeBody
 
 Tests:
   □ Port v1 reconciler tests

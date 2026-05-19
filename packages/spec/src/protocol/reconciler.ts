@@ -168,6 +168,17 @@ export interface RenderTreeInput extends MountScopedInput {
    */
   readonly maxIterations?: number;
   /**
+   * Wallclock budget per iteration's data-fetch wait. The harness races
+   * the iteration's pending `useData` fetches against this timeout —
+   * when exceeded, the loop terminates with an `await-timeout`
+   * diagnostic and returns whatever IR was built so far. Default:
+   * unbounded.
+   *
+   * Use this when you have a slow upstream fetcher and want to fail
+   * fast rather than block the loop indefinitely.
+   */
+  readonly awaitTimeoutMs?: number;
+  /**
    * When true, the bridge MAY use cached data without re-validation.
    * When false, the harness invalidates entries past their TTL before
    * the first render.

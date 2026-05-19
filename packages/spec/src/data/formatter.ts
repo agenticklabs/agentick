@@ -6,7 +6,7 @@
  * ({@link FormatterRef}); behavior lives behind the harness.
  *
  * @see docs/proposals/v2/blueprint/02-data-model.md §Renderer protocol types
- * @see docs/proposals/v2/blueprint/04-formatter-harness.md
+ * @see docs/proposals/v2/blueprint/04-formatters.md
  */
 
 import type { ContentBlock } from "./content-blocks.js";

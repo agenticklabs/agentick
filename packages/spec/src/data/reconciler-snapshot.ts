@@ -103,9 +103,13 @@ export type ReconcileDiagnosticSeverity = "info" | "warning" | "error";
  * - `unstable-tree`             consecutive renders produced different output past the cap
  * - `error-boundary-active`     an `<ErrorBoundary>` caught a render error and
  *                               rendered a fallback into the IR (info severity)
+ * - `await-timeout`             the render-until-stable loop's `awaitTimeoutMs`
+ *                               budget elapsed before an iteration's `useData`
+ *                               fetchers resolved
  */
 export type ReconcileDiagnosticCode =
   | "max-iterations"
+  | "await-timeout"
   | "use-data-failed"
   | "missing-contributor"
   | "missing-bridge"

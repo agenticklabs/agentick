@@ -748,7 +748,7 @@ the same suite if it produces an equivalent `RenderedTree`.
 - `03-reconciler-harness.md` — spec-level surface (commands / events / lifecycle / inbox)
 - `02-data-model.md` — `RenderedTree`, `ContextSpec`, `ContextEntry`,
   `RuntimeDeclarations`
-- `04-formatter-harness.md` — what the formatter does after the reconciler
+- `04-formatters.md` — what the formatter does inside the reconciler's fold pass
 - `13-package-graph.md` — package home + dep arrows
 - `15-flows/a-cold-start-and-mount.md` — mount sequence
 - `15-flows/b-tick-and-tool-loop.md` — renderTree inside a tick

@@ -47,7 +47,7 @@ docs/proposals/v2/
 | `03` §Async components | `compiler-harness.md §Async Components` | — |
 | `03` §Long-lived primitives | `compiler-harness.md §Long-Lived Primitives` | runtime.md §Long-lived JSX primitives |
 | `03` §Snapshot shape (`[PROPOSAL]`) | (synthesized) | compiler-harness.md §Compile-Until-Stable |
-| `04-formatter-harness.md` | `renderer-harness.md` (entire) | compiler-harness.md §Formatter Harness |
+| `04-formatters.md` | `renderer-harness.md` (entire) — downgraded to pure functions per ADR 22 | compiler-harness.md §Formatter Harness |
 | `05-loop-executor.md` | `loop-executor.md` (entire) | runtime.md §Tick Loop |
 | `05` §State applicator (`[PLACEHOLDER]`) | (synthesized) | loop-executor.md §commands (referenced) |
 | `06-executor-harness.md` | `executor.md` §Executor Harness | — |
@@ -331,7 +331,7 @@ The blueprint contains:
 01-harness-principle.md
 02-data-model.md
 03-reconciler-harness.md
-04-formatter-harness.md
+04-formatters.md
 05-loop-executor.md
 06-executor-harness.md
 07-tool-executor.md

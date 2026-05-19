@@ -698,7 +698,7 @@ Structural components create content scopes for their children.
 
 These don't create `ContextEntry` values themselves. They establish
 renderer scope for descendants. They MAY nest arbitrarily — see
-`04-formatter-harness.md` §Nested Renderer Scopes.
+`04-formatters.md` §Scope switching.
 
 ### Content components → blocks within a scope
 

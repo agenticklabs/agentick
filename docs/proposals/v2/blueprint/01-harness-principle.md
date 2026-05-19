@@ -415,7 +415,7 @@ Each harness gets its own doc. The shapes:
 | Session | `session` | `08-session-harness.md` | `send`, `dispatch`, `abort`, `pause`, `hibernate`, `inject-input` |
 | Loop executor | `loop` | `05-loop-executor.md` | `halt`, `pause` |
 | React | `react` | `03-reconciler-harness.md` | `recompile`, `unmount` |
-| Renderer | `renderer` | `04-formatter-harness.md` | (typically commands only) |
+| ~~Renderer~~ | (no harness) | `04-formatters.md` | Formatters are pure functions, not a harness — see ADR 22 |
 | Executor | `executor` | `06-executor-harness.md` | `abort` |
 | Tool executor | `tool` | `07-tool-executor.md` | `abort`, `confirmation-response` |
 

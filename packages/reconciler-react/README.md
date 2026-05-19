@@ -37,6 +37,39 @@ The host tree never crosses the harness boundary; only `RenderedTree`,
 See `docs/proposals/v2/blueprint/21-reconciler-implementation.md` for
 the full design.
 
+## State hooks: `useKnob` vs `useSessionState`
+
+Two different reactive state bridges, each with a hook:
+
+| Hook | Bridge | Visibility | Purpose |
+|---|---|---|---|
+| `useKnob(id, initial)` | `KnobBridge` | **Model-visible** | Surface in `knobs.list()` to the model; settable via the executor's `set_knob` tool. Use for agent configuration the model can tweak. |
+| `useSessionState(key, initial)` | `StateBridge` | **Framework-internal** | Component state that survives across mounts / hibernate-resume but is NOT visible to the model. Use for prose state machines, scratch counters, derived state, anything the LLM shouldn't see. |
+
+Both persist through the session's snapshot/restore round-trip.
+
+### Migration from v1's `useComState`
+
+If you came from v1's `useComState(key, initial)`:
+
+```diff
+- import { useComState } from "agentick";
++ import { useSessionState } from "@agentick/reconciler-react";
+
+- const status = useComState("status", "pending");
+- status.set("active");
+- console.log(status());
++ const [status, setStatus] = useSessionState("status", "pending");
++ setStatus("active");
++ console.log(status);
+```
+
+Semantic is identical — same per-session storage, same persistence
+through snapshots. The signal-style call API (`status()` / `status.set()`)
+is replaced with React's `[value, setter]` tuple. The COM bag is gone;
+the session owns a `StateBridge` instead. See
+[ADR 22 §D1](../../docs/proposals/v2/blueprint/22-state-formatters-reconciler-shape.md).
+
 ## Status
 
 Phase 3 of the v2 implementation plan — `docs/proposals/v2/STATUS.md`.

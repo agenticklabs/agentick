@@ -219,10 +219,11 @@ resource, snapshots. `[V1-REPLACED]` of v1's
 `@agentick/core/jsx + reconciler + compiler + COM`.
 See `03-reconciler-harness.md`.
 
-**Formatter harness**
-First-class harness that turns semantic content into rendered content
-(markdown, XML, text, JSON). Used by reconciler harness during compile and
-directly for non-execution use cases. See `04-formatter-harness.md`.
+**Formatter**
+Pure function `(SemanticContentBlock[]) → ContentBlock[]` that turns
+semantic content into wire-ready content (markdown, XML, text, JSON).
+Invoked by the reconciler's collect fold pass; downstream consumers
+see wire-shape only. Not a harness — see ADR 22 + `04-formatters.md`.
 
 **Executor harness**
 Family-aware boundary that turns IR into target system calls and

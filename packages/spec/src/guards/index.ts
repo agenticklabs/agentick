@@ -30,6 +30,7 @@ import type {
   ExecutionResult,
   ExecutorError,
   ExecutorTerminal,
+  FormatterRef,
   GeneratedFileBlock,
   GeneratedImageBlock,
   HtmlBlock,
@@ -41,18 +42,24 @@ import type {
   LifecycleExecutionStart,
   LifecycleTickEnd,
   LifecycleTickStart,
+  MCPDeclaration,
   MediaBlock,
   MessageEntry,
+  OutputDeclaration,
   ProtocolEvent,
   ReasoningBlock,
   RenderedTree,
+  ResourceDeclaration,
   SectionEntry,
+  SemanticContentBlock,
+  SemanticNode,
   SpecFeatureName,
   StateChangeBlock,
   SystemEventBlock,
   TerminalEvent,
   TextBlock,
   ToolBlock,
+  ToolDeclaration,
   ToolResultBlock,
   ToolUseBlock,
   UserActionBlock,
@@ -284,4 +291,81 @@ export function isLifecycleError(e: LifecycleEvent): e is LifecycleError {
  */
 export function hasFeature(tree: RenderedTree, feature: SpecFeatureName): boolean {
   return tree.features?.includes(feature) ?? false;
+}
+
+// ============================================================================
+// Declarations — narrow on top-level kind
+// ============================================================================
+
+/**
+ * `RuntimeDeclarations` is shaped as `{ tools?, resources?, outputs?,
+ * mcp? }`. These guards check that an arbitrary value matches the
+ * structural shape of a single declaration — useful when adopters
+ * carry declarations through external pipelines without a static type.
+ */
+export function isToolDeclaration(value: unknown): value is ToolDeclaration {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    typeof (value as { name?: unknown }).name === "string" &&
+    typeof (value as { handlerRef?: unknown }).handlerRef === "string" &&
+    typeof (value as { inputSchema?: unknown }).inputSchema === "object"
+  );
+}
+
+export function isResourceDeclaration(value: unknown): value is ResourceDeclaration {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    typeof (value as { id?: unknown }).id === "string" &&
+    typeof (value as { uri?: unknown }).uri === "string"
+  );
+}
+
+export function isOutputDeclaration(value: unknown): value is OutputDeclaration {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    typeof (value as { id?: unknown }).id === "string" &&
+    typeof (value as { mode?: unknown }).mode === "string"
+  );
+}
+
+export function isMCPDeclaration(value: unknown): value is MCPDeclaration {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    typeof (value as { id?: unknown }).id === "string" &&
+    typeof (value as { transport?: unknown }).transport === "object"
+  );
+}
+
+// ============================================================================
+// Semantic content — detect the sidecar pattern from ADR 22
+// ============================================================================
+
+/**
+ * True when a `ContentBlock` carries a `semanticNode` sidecar — i.e.,
+ * the reconciler's collect walker emitted a structured prose tree that
+ * the formatter pass will resolve. Reconciler-internal: nothing
+ * downstream of the formatter pass should observe a `true` here.
+ *
+ * @see docs/proposals/v2/blueprint/22-state-formatters-reconciler-shape.md §D5
+ */
+export function isSemanticContent(
+  block: ContentBlock,
+): block is SemanticContentBlock & { readonly semanticNode: SemanticNode } {
+  return "semanticNode" in block && (block as { semanticNode?: unknown }).semanticNode != null;
+}
+
+/**
+ * True for a structurally-valid `FormatterRef`. Used by the reconciler's
+ * formatter registry when accepting refs from the wire.
+ */
+export function isFormatterRef(value: unknown): value is FormatterRef {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    typeof (value as { id?: unknown }).id === "string"
+  );
 }

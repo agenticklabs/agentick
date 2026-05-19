@@ -231,6 +231,6 @@ transformation pipelines.
 
 - `03-reconciler-harness.md` — `mount`, `renderTree`, `renderToString`,
   `renderResource`.
-- `04-formatter-harness.md` — direct renderer use.
+- `04-formatters.md` — direct formatter use (pure functions).
 - `13-package-graph.md` — what `@agentick/react` and
   `@agentick/react-hooks` ship.

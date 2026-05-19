@@ -25,7 +25,7 @@ and the rest of the blueprint sits on top of it.
 19-foundation.md                  the substrate underneath (read third)
 02-data-model.md                  the wire shapes everything else exchanges
 03-reconciler-harness.md            producer of RenderedTree (v2 ships @agentick/reconciler-react)
-04-formatter-harness.md            semantic content → rendered content
+04-formatters.md                   semantic content → rendered content (pure functions, see ADR 22)
 05-loop-executor.md               tick orchestration
 06-executor-harness.md            RenderedTree → provider → result
 07-tool-executor.md               handler dispatch

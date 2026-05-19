@@ -240,3 +240,62 @@ describe("guards — hasFeature", () => {
     expect(hasFeature(tree, "sections")).toBe(false);
   });
 });
+
+describe("declaration guards", () => {
+  it("isToolDeclaration narrows on shape", async () => {
+    const { isToolDeclaration } = await import("../guards/index.js");
+    expect(
+      isToolDeclaration({
+        id: "t",
+        name: "calc",
+        description: "x",
+        inputSchema: { type: "object" },
+        handlerRef: "h.calc",
+      }),
+    ).toBe(true);
+    expect(isToolDeclaration({ name: "calc" })).toBe(false);
+    expect(isToolDeclaration(null)).toBe(false);
+  });
+
+  it("isResourceDeclaration", async () => {
+    const { isResourceDeclaration } = await import("../guards/index.js");
+    expect(isResourceDeclaration({ id: "r", uri: "file://x" })).toBe(true);
+    expect(isResourceDeclaration({ id: "r" })).toBe(false);
+  });
+
+  it("isOutputDeclaration", async () => {
+    const { isOutputDeclaration } = await import("../guards/index.js");
+    expect(isOutputDeclaration({ id: "o", mode: "json" })).toBe(true);
+    expect(isOutputDeclaration({ id: "o" })).toBe(false);
+  });
+
+  it("isMCPDeclaration", async () => {
+    const { isMCPDeclaration } = await import("../guards/index.js");
+    expect(
+      isMCPDeclaration({ id: "m", transport: { kind: "stdio", command: "x" } }),
+    ).toBe(true);
+    expect(isMCPDeclaration({ id: "m" })).toBe(false);
+  });
+});
+
+describe("semantic content guards", () => {
+  it("isSemanticContent detects the semanticNode sidecar", async () => {
+    const { isSemanticContent } = await import("../guards/index.js");
+    expect(
+      isSemanticContent({
+        type: "text",
+        text: "",
+        semanticNode: { children: [{ text: "x" }] },
+      } as ContentBlock),
+    ).toBe(true);
+    expect(isSemanticContent({ type: "text", text: "hello" })).toBe(false);
+  });
+
+  it("isFormatterRef accepts well-shaped refs", async () => {
+    const { isFormatterRef } = await import("../guards/index.js");
+    expect(isFormatterRef({ id: "formatter.markdown", format: "markdown" })).toBe(true);
+    expect(isFormatterRef({ id: "x" })).toBe(true);
+    expect(isFormatterRef({ format: "markdown" })).toBe(false);
+    expect(isFormatterRef(null)).toBe(false);
+  });
+});
