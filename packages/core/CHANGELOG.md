@@ -1,5 +1,28 @@
 # @agentick/core
 
+## 0.14.66
+
+### Patch Changes
+
+- 35d7370: Export missing message hooks
+  - @agentick/kernel@0.14.66
+  - @agentick/shared@0.14.66
+  - @agentick/mcp@0.14.66
+
+## 0.14.65
+
+### Patch Changes
+
+- 3483cbf: Section duplicate warning — switch from `Logger.warn` to dev-only `console.warn`.
+
+  The previous release introduced a `Logger.warn` for duplicate `<Section id>` collisions. That produced a structured pino log line per occurrence, which is too noisy for an authoring-mistake / render-bug warning that should behave like React's `react/jsx-key` warning.
+
+  Now uses plain `console.warn`, gated on `"production" !== process.env.NODE_ENV` (the same yoda-style guard React uses in `react-reconciler.development.js`). Bundler dead-code elimination can strip the warning from production builds; in dev/test it surfaces directly without polluting structured logs.
+
+  - @agentick/kernel@0.14.65
+  - @agentick/shared@0.14.65
+  - @agentick/mcp@0.14.65
+
 ## 0.14.64
 
 ### Patch Changes

@@ -18,7 +18,7 @@
 import React, { useRef } from "react";
 import { MCPClient } from "./client.js";
 import { MCPToolComponent } from "./component.js";
-import { MCPResourceComponent } from "./resource-component.js";
+import { MCPResourceComponent, type MCPResourceRenderer } from "./resource-component.js";
 import { MCPServerInfoSection } from "./server-info-section.js";
 import { MCPAppHost } from "./app-host.js";
 import type { MCPConfig, MCPServerConfig } from "./types.js";
@@ -56,6 +56,16 @@ export interface MCPComponentProps extends ComponentBaseProps, Partial<EngineCom
    */
   listResourcesToolName?: string;
   readResourceToolName?: string;
+
+  /**
+   * Renderer for the orientation Section produced by the resource
+   * component. Forwarded to {@link MCPResourceComponent}. Default is
+   * the path-grouped tree renderer; pass `renderResourceList` for the
+   * historical flat listing, your own function for something custom,
+   * or `() => null` to suppress the Section entirely (tools still
+   * register).
+   */
+  renderResources?: MCPResourceRenderer;
 }
 
 // ============================================================================
@@ -95,6 +105,7 @@ export function MCPComponent(props: MCPComponentProps): JSX.Element {
         mcpClient={mcpClient}
         listToolName={props.listResourcesToolName}
         readToolName={props.readResourceToolName}
+        renderResources={props.renderResources}
       />
       <MCPAppHost key="mcp-app-host" mcpClient={mcpClient} />
     </>

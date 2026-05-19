@@ -16,7 +16,12 @@ import { createTestAdapter } from "../../testing/test-adapter.js";
 import { System } from "../../jsx/components/messages.js";
 import { Timeline } from "../../jsx/components/timeline.js";
 import { MCPClient } from "../client.js";
-import { MCPResourceComponent } from "../resource-component.js";
+import {
+  MCPResourceComponent,
+  renderResourceList,
+  renderResourceTree,
+  type MCPResourceRenderer,
+} from "../resource-component.js";
 import type { MCPConfig } from "../types.js";
 
 // ============================================================================
@@ -88,6 +93,7 @@ function createResourceAgent(opts: {
   servers: Record<string, MCPConfig>;
   listToolName?: string;
   readToolName?: string;
+  renderResources?: MCPResourceRenderer;
 }) {
   return function ResourceAgent() {
     return (
@@ -98,6 +104,7 @@ function createResourceAgent(opts: {
           mcpClient={opts.mcpClient}
           listToolName={opts.listToolName}
           readToolName={opts.readToolName}
+          renderResources={opts.renderResources}
         />
         <Timeline />
       </>
@@ -467,6 +474,225 @@ describe("MCPResourceComponent", () => {
       expect(toolNames).toContain("fetch_schema");
       expect(toolNames).not.toContain("list_resources");
       expect(toolNames).not.toContain("read_resource");
+    });
+  });
+
+  // ────────────────────────────────────────────────────────────────────
+  // Renderers — direct unit tests on the pure functions
+  // ────────────────────────────────────────────────────────────────────
+  describe("renderResourceTree", () => {
+    it("returns the empty-set message when there are no resources or templates", () => {
+      const out = renderResourceTree([], []);
+      expect(out).toBe("No resources available.");
+    });
+
+    it("groups by scheme://host and collapses multi-segment URIs into directory counts", () => {
+      const out = renderResourceTree(
+        [
+          { uri: "knowify://me", name: "me", serverName: "k", mimeType: "text/markdown" } as any,
+          {
+            uri: "knowify://company",
+            name: "company",
+            serverName: "k",
+            mimeType: "text/markdown",
+          } as any,
+          { uri: "knowify://guide/overview", name: "overview", serverName: "k" } as any,
+          { uri: "knowify://guide/relationships", name: "relationships", serverName: "k" } as any,
+          { uri: "knowify://schema/projects", name: "projects", serverName: "k" } as any,
+          { uri: "knowify://schema/invoices", name: "invoices", serverName: "k" } as any,
+          { uri: "knowify://schema/clients", name: "clients", serverName: "k" } as any,
+        ],
+        [],
+      );
+      const text = String(out);
+      // Group header present
+      expect(text).toContain("knowify://");
+      // Root-level leaves rendered with mime
+      expect(text).toContain("company");
+      expect(text).toContain("me");
+      expect(text).toContain("[text/markdown]");
+      // Directories collapsed with counts
+      expect(text).toContain("guide/");
+      expect(text).toContain("2 resources");
+      expect(text).toContain("schema/");
+      expect(text).toContain("3 resources");
+      // Individual schemas NOT listed (they're collapsed under schema/)
+      expect(text).not.toContain("projects");
+      expect(text).not.toContain("invoices");
+      // Tool guidance present
+      expect(text).toContain("list_resources");
+      expect(text).toContain("read_resource");
+    });
+
+    it("attaches a template description to its directory entry", () => {
+      const out = renderResourceTree(
+        [
+          { uri: "knowify://schema/projects", name: "projects", serverName: "k" } as any,
+          { uri: "knowify://schema/invoices", name: "invoices", serverName: "k" } as any,
+        ],
+        [
+          {
+            uriTemplate: "knowify://schema/{model}",
+            name: "resource-schema",
+            description: "Per-model field schema",
+            serverName: "k",
+          } as any,
+        ],
+      );
+      const text = String(out);
+      expect(text).toContain("schema/");
+      expect(text).toContain("2 resources");
+      expect(text).toContain("template: knowify://schema/{model}");
+      expect(text).toContain("Per-model field schema");
+    });
+
+    it("singular vs plural — one resource renders 'resource', not 'resources'", () => {
+      const out = renderResourceTree(
+        [{ uri: "knowify://guide/overview", name: "overview", serverName: "k" } as any],
+        [],
+      );
+      expect(String(out)).toMatch(/1 resource(\n|$)/);
+      expect(String(out)).not.toContain("1 resources");
+    });
+
+    it("handles multiple groups (different schemes / hosts)", () => {
+      const out = renderResourceTree(
+        [
+          { uri: "knowify://me", name: "me", serverName: "k" } as any,
+          { uri: "ui://app/hello", name: "hello", serverName: "u", mimeType: "text/html" } as any,
+        ],
+        [],
+      );
+      const text = String(out);
+      expect(text).toContain("knowify://");
+      expect(text).toContain("ui://");
+    });
+  });
+
+  describe("renderResourceList", () => {
+    it("renders the historical flat listing format", () => {
+      const out = renderResourceList(
+        [{ uri: "db://users", name: "users", description: "Users table", serverName: "d" } as any],
+        [
+          {
+            uriTemplate: "db://t/{name}",
+            name: "table",
+            description: "A table",
+            serverName: "d",
+          } as any,
+        ],
+      );
+      const text = String(out);
+      expect(text).toContain("Resources:");
+      expect(text).toContain("users");
+      expect(text).toContain("Users table");
+      expect(text).toContain("Resource Templates:");
+      expect(text).toContain("db://t/{name}");
+    });
+  });
+
+  describe("renderResources prop", () => {
+    it("uses tree renderer by default — directories collapsed in the model context", async () => {
+      const mcpClient = createMockMCPClient({
+        db: mockSDKClient({
+          resources: [
+            { uri: "db://schema/users", name: "users" },
+            { uri: "db://schema/orders", name: "orders" },
+            { uri: "db://schema/invoices", name: "invoices" },
+          ],
+        }),
+      });
+      const model = createTestAdapter({ defaultResponse: "ok" });
+      const Agent = createResourceAgent({ mcpClient, servers: { db: dummyConfig("db") } });
+      const app = createApp(Agent, { model, maxTicks: 1 });
+      const session = await app.session();
+      await session.send(userMsg("hi")).result;
+
+      const inputs = model.getCapturedInputs();
+      const sys = JSON.stringify(inputs[inputs.length - 1]);
+      // Tree: directory + count, no individual schema names
+      expect(sys).toContain("schema/");
+      expect(sys).toContain("3 resources");
+      expect(sys).not.toContain("db://schema/users");
+      expect(sys).not.toContain("db://schema/orders");
+    });
+
+    it("uses renderResourceList when explicitly passed — individual URIs appear", async () => {
+      const mcpClient = createMockMCPClient({
+        db: mockSDKClient({
+          resources: [
+            { uri: "db://schema/users", name: "users" },
+            { uri: "db://schema/orders", name: "orders" },
+          ],
+        }),
+      });
+      const model = createTestAdapter({ defaultResponse: "ok" });
+      const Agent = createResourceAgent({
+        mcpClient,
+        servers: { db: dummyConfig("db") },
+        renderResources: renderResourceList,
+      });
+      const app = createApp(Agent, { model, maxTicks: 1 });
+      const session = await app.session();
+      await session.send(userMsg("hi")).result;
+
+      const sys = JSON.stringify(model.getCapturedInputs().slice(-1)[0]);
+      expect(sys).toContain("Resources:");
+      expect(sys).toContain("users");
+      expect(sys).toContain("orders");
+    });
+
+    it("suppresses the Section entirely when renderer returns null — tools still register", async () => {
+      const mcpClient = createMockMCPClient({
+        db: mockSDKClient({
+          resources: [{ uri: "db://schema/users", name: "users" }],
+        }),
+      });
+      const model = createTestAdapter({ defaultResponse: "ok" });
+      const Agent = createResourceAgent({
+        mcpClient,
+        servers: { db: dummyConfig("db") },
+        renderResources: () => null,
+      });
+      const app = createApp(Agent, { model, maxTicks: 1 });
+      const session = await app.session();
+      await session.send(userMsg("hi")).result;
+
+      const captured = model.getCapturedInputs().slice(-1)[0];
+      const sys = JSON.stringify(captured);
+      // No orientation section content — the schema users name should not
+      // appear via either tree count or flat listing
+      expect(sys).not.toContain("schema/   —");
+      expect(sys).not.toContain("Resources:");
+      // Tools still registered
+      const toolNames = (captured.tools ?? []).map((t: any) => t.name);
+      expect(toolNames).toContain("list_resources");
+      expect(toolNames).toContain("read_resource");
+    });
+
+    it("invokes a custom renderer with the discovered resources and templates", async () => {
+      const mcpClient = createMockMCPClient({
+        db: mockSDKClient({
+          resources: [{ uri: "db://schema/users", name: "users" }],
+          resourceTemplates: [{ uriTemplate: "db://t/{name}", name: "table", description: "any" }],
+        }),
+      });
+      const renderer = vi.fn((_resources, _templates) => "CUSTOM_OUTPUT") as MCPResourceRenderer;
+      const model = createTestAdapter({ defaultResponse: "ok" });
+      const Agent = createResourceAgent({
+        mcpClient,
+        servers: { db: dummyConfig("db") },
+        renderResources: renderer,
+      });
+      const app = createApp(Agent, { model, maxTicks: 1 });
+      const session = await app.session();
+      await session.send(userMsg("hi")).result;
+
+      expect(renderer).toHaveBeenCalled();
+      const [resources, templates] = (renderer as any).mock.calls[0];
+      expect(resources.map((r: any) => r.uri)).toEqual(["db://schema/users"]);
+      expect(templates.map((t: any) => t.uriTemplate)).toEqual(["db://t/{name}"]);
+      expect(JSON.stringify(model.getCapturedInputs().slice(-1)[0])).toContain("CUSTOM_OUTPUT");
     });
   });
 });

@@ -50,8 +50,17 @@ export { MCPService } from "./service.js";
 
 // ── Low-level components (implementation details, rarely needed) ──────
 export { MCPToolComponent, MCPTool } from "./component.js";
-export { MCPResourceComponent, MCPResources } from "./resource-component.js";
-export type { MCPResourceComponentProps, MCPServerEntry } from "./resource-component.js";
+export {
+  MCPResourceComponent,
+  MCPResources,
+  renderResourceTree,
+  renderResourceList,
+} from "./resource-component.js";
+export type {
+  MCPResourceComponentProps,
+  MCPServerEntry,
+  MCPResourceRenderer,
+} from "./resource-component.js";
 export { MCPServerInfoSection } from "./server-info-section.js";
 export type { MCPServerInfoSectionProps } from "./server-info-section.js";
 export { MCPAppHost } from "./app-host.js";
