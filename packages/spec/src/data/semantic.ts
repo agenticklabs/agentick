@@ -59,7 +59,7 @@ export type SemanticType =
 
 /**
  * Tree node carrying structured content with formatting hints. Lives inside
- * a {@link FormattableBlock} and is interpreted by a formatter.
+ * a {@link SemanticContentBlock} and is interpreted by a formatter.
  */
 export interface SemanticNode {
   /** Plain text content (leaf nodes). */
@@ -99,9 +99,9 @@ export interface SemanticMetadata {
 
 /**
  * Extended {@link ContentBlock} carrying semantic metadata for the formatter
- * harness. All `FormattableBlock`s are valid `ContentBlock`s.
+ * harness. All `SemanticContentBlock`s are valid `ContentBlock`s.
  */
-export type FormattableBlock = ContentBlock & {
+export type SemanticContentBlock = ContentBlock & {
   readonly semanticNode?: SemanticNode;
   readonly semantic?: SemanticMetadata;
 };

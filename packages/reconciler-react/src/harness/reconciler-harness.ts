@@ -60,6 +60,11 @@ import { BridgeContext } from "../react/bridge-context.js";
 import { LifecycleContext } from "../react/lifecycle-context.js";
 import { InMemoryDataBridge } from "../bridges/in-memory-data-bridge.js";
 import { LifecycleStore } from "./lifecycle-store.js";
+import {
+  builtInFormatters,
+  markdownFormatter,
+  type DefinedFormatter,
+} from "@agentick/formatters";
 
 interface MountState {
   readonly mountId: string;
@@ -96,6 +101,21 @@ interface MountState {
 export interface ReconcilerHarnessOptions {
   /** Override the built-in contributor set with caller-supplied registry. */
   readonly registry?: ContributorRegistry;
+  /**
+   * Override the built-in formatter set. Keyed by `FormatterRef.id`. When
+   * omitted, the markdown / xml / text reference formatters from
+   * `@agentick/formatters` are pre-loaded.
+   *
+   * @see docs/proposals/v2/blueprint/22-state-formatters-reconciler-shape.md §D2
+   */
+  readonly formatters?: ReadonlyMap<string, DefinedFormatter>;
+  /**
+   * `FormatterRef.id` to dispatch when an entry doesn't pin its own
+   * formatter (no `renderedWith` field). Defaults to the markdown
+   * formatter's id — markdown is the path of least surprise for LLM
+   * input.
+   */
+  readonly defaultFormatterId?: string;
 }
 
 /**
@@ -111,6 +131,8 @@ export class ReconcilerHarness
 {
   private readonly mounts = new Map<string, MountState>();
   private readonly registry: ContributorRegistry;
+  private readonly formatters: ReadonlyMap<string, DefinedFormatter>;
+  private readonly defaultFormatterId: string;
   /**
    * Mount IDs that have already produced a Suspense heuristic warning.
    * One warning per mount — rerendering with the same Suspense tree
@@ -127,6 +149,9 @@ export class ReconcilerHarness
   ) {
     super("reconciler", scopeId, journal, bus, inbox);
     this.registry = options.registry ?? createBuiltInRegistry();
+    this.formatters = options.formatters ?? builtInFormatters();
+    this.defaultFormatterId =
+      options.defaultFormatterId ?? markdownFormatter.__identity.id;
   }
 
   // ──────────────────────── Contributor registration ────────────────────────
@@ -537,9 +562,15 @@ export class ReconcilerHarness
     //    scope's default when an entry doesn't pin one.
     const fallback = state.rootScope.formatters.default;
     const effective = input.formatter ?? fallback;
-    const text = serializeTreeToString(tree.tree, effective, {
-      respectEntryFormatter: input.formatter === undefined,
-    });
+    const text = serializeTreeToString(
+      tree.tree,
+      effective,
+      {
+        respectEntryFormatter: input.formatter === undefined,
+        defaultFormatterId: this.defaultFormatterId,
+        formatters: this.formatters,
+      },
+    );
     const mimeType = mimeForFormatter(effective);
 
     return {
@@ -726,152 +757,178 @@ function elementTreeContainsSuspense(node: unknown): boolean {
  * extraction is the caller's job — use renderTree + filter + custom
  * serialize.
  */
+interface SerializeOptions {
+  readonly respectEntryFormatter: boolean;
+  readonly defaultFormatterId: string;
+  readonly formatters: ReadonlyMap<string, DefinedFormatter>;
+}
+
+/**
+ * Walk the {@link RenderedTree} and serialize each entry through the
+ * appropriate formatter. Formatters do block-level work (markdown
+ * fences, XML wrapping); message/section framing happens here in the
+ * reconciler.
+ *
+ * Dispatch:
+ *   - When `respectEntryFormatter` is true, an entry's `renderedWith.id`
+ *     wins; falls back to the requested formatter when missing.
+ *   - When false (explicit caller override), the requested formatter
+ *     applies to every entry.
+ *   - Missing formatters fall back to `defaultFormatterId` (markdown).
+ */
 function serializeTreeToString(
   tree: import("@agentick/spec").RenderedTree,
   requestedFormatter: import("@agentick/spec").FormatterRef,
-  options: { readonly respectEntryFormatter: boolean },
+  options: SerializeOptions,
 ): string {
-  const requestedFormat = requestedFormatter.format ?? "markdown";
   const parts: string[] = [];
 
   for (const entry of tree.context.entries) {
-    const entryFormat = options.respectEntryFormatter
-      ? (entry.renderedWith?.format ?? requestedFormat)
-      : requestedFormat;
-    if (entry.kind === "section") {
-      parts.push(serializeSection(entry, entryFormat));
-    } else {
-      parts.push(serializeMessage(entry, entryFormat));
-    }
+    const formatter = resolveFormatter(
+      entry.renderedWith,
+      requestedFormatter,
+      options,
+    );
+    const body = formatter(entry.content as readonly import("@agentick/spec").SemanticContentBlock[]);
+    const bodyText = blocksToText(body);
+    const framed =
+      entry.kind === "section"
+        ? frameSection(entry, bodyText, formatter.__identity.format)
+        : frameMessage(entry, bodyText, formatter.__identity.format);
+    parts.push(framed);
   }
 
   if (tree.content && tree.content.length > 0) {
-    const freeRootFormat = options.respectEntryFormatter
-      ? (tree.renderedWith?.format ?? requestedFormat)
-      : requestedFormat;
-    parts.push(serializeContentBlocks(tree.content, freeRootFormat));
+    const formatter = resolveFormatter(
+      tree.renderedWith,
+      requestedFormatter,
+      options,
+    );
+    const body = formatter(tree.content as readonly import("@agentick/spec").SemanticContentBlock[]);
+    parts.push(blocksToText(body));
   }
 
   return parts.filter((p) => p.length > 0).join("\n\n");
 }
 
-function serializeSection(
-  entry: import("@agentick/spec").SectionEntry,
-  format: string,
-): string {
-  const body = serializeContentBlocks(entry.content, format);
-  if (format === "xml") {
-    const title = entry.title ? ` title="${escapeXml(entry.title)}"` : "";
-    return `<section id="${escapeXml(entry.id)}"${title}>\n${body}\n</section>`;
+function resolveFormatter(
+  entryRef: import("@agentick/spec").FormatterRef | undefined,
+  requested: import("@agentick/spec").FormatterRef,
+  options: SerializeOptions,
+): DefinedFormatter {
+  const ref = options.respectEntryFormatter
+    ? (entryRef ?? requested)
+    : requested;
+  // First try the exact id. Then fall back to any formatter whose
+  // identity.format matches the requested format (so adopters can pass
+  // `{ format: "xml" }` without knowing the canonical id).
+  const byId = options.formatters.get(ref.id);
+  if (byId) return byId;
+  if (ref.format) {
+    for (const fmt of options.formatters.values()) {
+      if (fmt.__identity.format === ref.format) return fmt;
+    }
   }
-  if (format === "text") {
-    const head = entry.title ? `${entry.title}\n` : "";
-    return `${head}${body}`;
-  }
-  // markdown default
-  const head = entry.title ? `## ${entry.title}\n\n` : "";
-  return `${head}${body}`;
+  return (
+    options.formatters.get(options.defaultFormatterId) ??
+    // Last-resort: a no-op formatter pretending to be markdown.
+    (Object.assign(
+      (b: readonly import("@agentick/spec").SemanticContentBlock[]) => b,
+      { __identity: { id: "formatter.markdown", format: "markdown" as const } },
+    ) as DefinedFormatter)
+  );
 }
 
-function serializeMessage(
-  entry: import("@agentick/spec").MessageEntry,
-  format: string,
-): string {
-  const body = serializeContentBlocks(entry.content, format);
-  if (format === "xml") {
-    return `<message role="${escapeXml(entry.role)}">\n${body}\n</message>`;
-  }
-  if (format === "text") {
-    return `${entry.role}: ${body}`;
-  }
-  // markdown default
-  return `**${entry.role}:** ${body}`;
-}
-
-function serializeContentBlocks(
+function blocksToText(
   blocks: readonly import("@agentick/spec").ContentBlock[],
-  format: string,
 ): string {
-  return blocks.map((b) => serializeContentBlock(b, format)).join("\n\n");
+  const out: string[] = [];
+  for (const block of blocks) {
+    out.push(blockToText(block));
+  }
+  return out.filter((s) => s.length > 0).join("\n\n");
 }
 
-function serializeContentBlock(
-  block: import("@agentick/spec").ContentBlock,
-  format: string,
-): string {
+function blockToText(block: import("@agentick/spec").ContentBlock): string {
   switch (block.type) {
     case "text":
-      return block.text;
     case "reasoning":
-      if (format === "xml") return `<reasoning>${escapeXml(block.text)}</reasoning>`;
-      return `_(reasoning)_ ${block.text}`;
-    case "code": {
-      if (format === "xml")
-        return `<code language="${escapeXml(block.language)}">${escapeXml(block.text)}</code>`;
-      if (format === "text") return block.text;
-      return `\`\`\`${block.language}\n${block.text}\n\`\`\``;
-    }
-    case "json": {
-      const text = block.text ?? (block.data !== undefined ? JSON.stringify(block.data) : "");
-      if (format === "xml") return `<json>${escapeXml(text)}</json>`;
-      if (format === "text") return text;
-      return `\`\`\`json\n${text}\n\`\`\``;
-    }
     case "xml":
     case "csv":
     case "html":
       return block.text ?? "";
+    case "code":
+      return block.text;
+    case "json":
+      return block.text ?? (block.data !== undefined ? JSON.stringify(block.data) : "");
     case "image": {
       const src = block.source.type === "url" ? block.source.url : "[binary]";
-      if (format === "xml")
-        return `<image src="${escapeXml(src)}"${block.altText ? ` alt="${escapeXml(block.altText)}"` : ""}/>`;
       return `![${block.altText ?? ""}](${src})`;
     }
     case "document":
     case "audio":
     case "video": {
       const src = block.source.type === "url" ? block.source.url : "[binary]";
-      if (format === "xml") return `<${block.type} src="${escapeXml(src)}"/>`;
       return `[${block.type}](${src})`;
     }
     case "tool_use":
-      if (format === "xml")
-        return `<tool_use name="${escapeXml(block.name)}">${escapeXml(JSON.stringify(block.input))}</tool_use>`;
       return `[tool_use ${block.name}] ${JSON.stringify(block.input)}`;
     case "tool_result":
-      // tool_result.content is itself a ContentBlock[] — recurse.
-      return serializeContentBlocks(block.content, format);
+      return blocksToText(block.content);
     case "user_action":
     case "system_event":
     case "state_change":
       return block.text ?? "";
     case "custom":
-      if (format === "xml") {
-        const attrs = Object.entries(block.attrs)
-          .map(([k, v]) => ` ${k}="${escapeXml(v)}"`)
-          .join("");
-        return `<${block.tag}${attrs}>${escapeXml(block.content)}</${block.tag}>`;
-      }
       return block.content;
     case "generated_image":
       return `![generated image](data:${block.mimeType};base64,${block.data.slice(0, 16)}…)`;
     case "generated_file":
       return `[generated file](${block.uri})`;
     case "executable_code":
-      return `\`\`\`${block.language ?? ""}\n${block.code}\n\`\`\``;
+      return block.code;
     case "code_execution_result":
-      return `\`\`\`\n${block.output}\n\`\`\``;
+      return block.output;
     default:
       return "";
   }
 }
 
-function escapeXml(s: string): string {
+function frameSection(
+  entry: import("@agentick/spec").SectionEntry,
+  body: string,
+  format: string,
+): string {
+  if (format === "xml") {
+    const title = entry.title ? ` title="${escapeAttr(entry.title)}"` : "";
+    return `<section id="${escapeAttr(entry.id)}"${title}>\n${body}\n</section>`;
+  }
+  if (format === "text") {
+    return entry.title ? `${entry.title}\n${body}` : body;
+  }
+  return entry.title ? `## ${entry.title}\n\n${body}` : body;
+}
+
+function frameMessage(
+  entry: import("@agentick/spec").MessageEntry,
+  body: string,
+  format: string,
+): string {
+  if (format === "xml") {
+    return `<message role="${escapeAttr(entry.role)}">\n${body}\n</message>`;
+  }
+  if (format === "text") {
+    return `${entry.role}: ${body}`;
+  }
+  return `**${entry.role}:** ${body}`;
+}
+
+function escapeAttr(s: string): string {
   return s
     .replace(/&/g, "&amp;")
+    .replace(/"/g, "&quot;")
     .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
+    .replace(/>/g, "&gt;");
 }
 
 function mimeForFormatter(formatter: import("@agentick/spec").FormatterRef): string {

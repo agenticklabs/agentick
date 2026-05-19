@@ -41,7 +41,8 @@
       "@agentick/sandbox-secure-exec",
       "@agentick/scheduler",
       "@agentick/secrets",
-      "@agentick/mcp"
+      "@agentick/mcp",
+      "@agentick/formatters"
     ]
   ],
   "linked": [],

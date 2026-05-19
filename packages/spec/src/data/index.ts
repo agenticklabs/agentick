@@ -6,7 +6,7 @@
  * reconciler-facing types needed to unblock Phase 3:
  *
  *   - content-blocks.ts   ContentBlock taxonomy (promoted from @agentick/shared)
- *   - semantic.ts         SemanticNode, SemanticMetadata, FormattableBlock
+ *   - semantic.ts         SemanticNode, SemanticMetadata, SemanticContentBlock
  *   - formatter.ts        FormatterRef, FormatInput, FormatResult, FormatScope, FormatTrace
  *   - entries.ts          ContextEntry, MessageEntry, SectionEntry, CacheHint
  *   - declarations.ts     ToolDeclaration, ResourceDeclaration, OutputDeclaration, MCPDeclaration

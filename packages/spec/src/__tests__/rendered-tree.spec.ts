@@ -11,7 +11,7 @@ import type {
   FormatResult,
   FormatScope,
   FormatTrace,
-  FormattableBlock,
+  SemanticContentBlock,
   FormattedContent,
   FormatterRef,
   ImageBlock,
@@ -81,9 +81,9 @@ describe("@agentick/spec — reconciler-facing types", () => {
       expect(node.rendererRef?.id).toBe("md");
     });
 
-    it("FormattableBlock is ContentBlock + optional semantic metadata", () => {
+    it("SemanticContentBlock is ContentBlock + optional semantic metadata", () => {
       const meta: SemanticMetadata = { type: "heading", level: 2 };
-      const fb: FormattableBlock = {
+      const fb: SemanticContentBlock = {
         type: "text",
         text: "Hi",
         semantic: meta,

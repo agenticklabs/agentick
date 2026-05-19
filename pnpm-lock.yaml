@@ -689,6 +689,12 @@ importers:
         specifier: ^4.0.18
         version: 4.0.18(@opentelemetry/api@1.9.0)(@types/node@22.19.7)(happy-dom@17.6.3)(jiti@2.6.1)(msw@2.14.6(@types/node@22.19.7)(typescript@5.9.3))(tsx@4.21.0)(yaml@2.8.4)
 
+  packages/formatters:
+    dependencies:
+      '@agentick/spec':
+        specifier: workspace:*
+        version: link:../spec
+
   packages/gateway:
     dependencies:
       '@agentick/core':
@@ -868,6 +874,9 @@ importers:
 
   packages/reconciler-react:
     dependencies:
+      '@agentick/formatters':
+        specifier: workspace:*
+        version: link:../formatters
       '@agentick/runtime':
         specifier: workspace:*
         version: link:../runtime

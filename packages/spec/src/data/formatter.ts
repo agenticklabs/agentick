@@ -10,7 +10,7 @@
  */
 
 import type { ContentBlock } from "./content-blocks.js";
-import type { FormattableBlock, SemanticType } from "./semantic.js";
+import type { SemanticContentBlock, SemanticType } from "./semantic.js";
 
 /**
  * Identity reference to a formatter implementation. Crosses the wire;
@@ -71,7 +71,7 @@ export interface FormatScope {
  * Anything the formatter accepts as input — a formattable block or a
  * scoped switch to another formatter.
  */
-export type FormattableContent = FormattableBlock | FormatScope;
+export type FormattableContent = SemanticContentBlock | FormatScope;
 
 /**
  * Formatter input envelope.
@@ -134,3 +134,46 @@ export interface FormattedContent {
  * blueprint and may be used interchangeably.
  */
 export type FormatResult = FormattedContent;
+
+// ============================================================================
+// Formatter function
+// ============================================================================
+
+/**
+ * Pure function that turns semantic content blocks into wire-ready
+ * content blocks. Same shape as v1's `Formatter` (see
+ * `packages/core/src/renderers/base.ts:8`) — the layer was proven there
+ * and is preserved verbatim modulo v2's spec-firewall replacement of
+ * `formatter: Formatter` on {@link SemanticNode} with `rendererRef: FormatterRef`.
+ *
+ * Implementations walk the input, resolve each block's `semanticNode`
+ * subtree (when present), and emit wire-shape `ContentBlock[]`:
+ *
+ *   - Text/Reasoning blocks carrying a `semanticNode` → flattened TextBlock
+ *     with the rendered string.
+ *   - Native blocks (Image, Audio, Video, Document) → passed through.
+ *   - Format-specific framing (markdown fences for CodeBlock, XML tags
+ *     for table elements, etc.) is the formatter's call.
+ *
+ * Formatters are stateless. Middleware (caching, golden capture,
+ * logging) composes via plain function wrappers — no harness needed.
+ *
+ * @see docs/proposals/v2/blueprint/22-state-formatters-reconciler-shape.md §D2
+ * @see docs/proposals/v2/blueprint/04-formatters.md
+ */
+export type Formatter = (
+  blocks: readonly SemanticContentBlock[],
+) => readonly ContentBlock[];
+
+/**
+ * Identity metadata attached to a {@link Formatter} so it can be
+ * registered + looked up via {@link FormatterRef}.
+ *
+ * `defineFormatter` ({@link `@agentick/reconciler-react`}) returns a
+ * `Formatter` decorated with this metadata as non-enumerable properties.
+ */
+export interface FormatterIdentity {
+  readonly id: string;
+  readonly format: "markdown" | "xml" | "text" | "json" | (string & {});
+  readonly version?: string;
+}

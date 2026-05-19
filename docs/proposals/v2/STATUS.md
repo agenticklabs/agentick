@@ -1,7 +1,7 @@
 # Agentick v2 — Implementation Status
 
 **Branch:** `feat/v2`
-**Last updated:** 2026-05-19 (ADR 22 — StateBridge landed: `useSessionState` hook, in-memory bridge, snapshot/restore wired, `ReconcilerSnapshot.hookStates` removed)
+**Last updated:** 2026-05-19 (ADR 22 Step 2 — `@agentick/formatters` package: `defineFormatter` + markdown/xml/text reference formatters; reconciler dispatches via registry slot; private `serializeTreeToString` replaced)
 
 This is the **running progress log** for v2 implementation. Update it
 every session. New contributors / sessions read this first.
