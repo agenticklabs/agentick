@@ -130,9 +130,9 @@ function stubReconciler(): ReconcilerProtocol {
     snapshot: async () => ({
       specVersion: "2026-05-08",
       mountId: "stub-mount",
-      hookStates: [],
       dataCache: [],
       knobs: {},
+      state: {},
       subscriptions: [],
     }),
     restore: async () => undefined,

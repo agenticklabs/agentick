@@ -29,46 +29,23 @@ export interface ReconcilerSnapshot {
    * the snapshot (or surface an `IncompatibleElement` diagnostic).
    */
   readonly elementVersion?: string;
-  /** Per-component hook state, keyed by stable component path. */
-  readonly hookStates: readonly HookStateEntry[];
   /** Cached results of `useData` calls. */
   readonly dataCache: readonly DataCacheEntry[];
   /** Current values of model-visible `useKnob` state. */
   readonly knobs: Readonly<Record<string, unknown>>;
+  /**
+   * Current values of session-internal state (`useSessionState`).
+   * Owned by the session's StateBridge; the reconciler snapshot mirrors
+   * the value so a remount sees the same state.
+   *
+   * @see docs/proposals/v2/blueprint/22-state-formatters-reconciler-shape.md §D1
+   */
+  readonly state: Readonly<Record<string, unknown>>;
   /** Long-lived primitive intent declarations (cron, webhook, …). */
   readonly subscriptions: readonly SubscriptionIntent[];
   /** Free-form metadata for future extensibility. */
   readonly metadata?: Readonly<Record<string, unknown>>;
 }
-
-/**
- * One captured hook state slot. Indexed by `(componentPath, hookIndex)`
- * — the same scheme React uses internally to associate hook slots with
- * a component instance.
- */
-export interface HookStateEntry {
-  /** Deterministic component path identifier (stable across rerenders). */
-  readonly path: string;
-  /** Position of the hook within the component's hook list. */
-  readonly hookIndex: number;
-  readonly type: HookType;
-  readonly value: unknown;
-}
-
-/**
- * Captured hook varieties. Open list to allow new hook types to add
- * snapshot capture without breaking older snapshots.
- */
-export type HookType =
-  | "state"
-  | "reducer"
-  | "ref"
-  | "memo"
-  | "callback"
-  | "knob"
-  | "data"
-  | "signal"
-  | (string & {});
 
 /**
  * One cached `useData` result.

@@ -157,9 +157,9 @@ describe("@agentick/spec — reconciler protocol", () => {
         specVersion: "2026-05-01",
         mountId: "m_1",
         elementVersion: "v1",
-        hookStates: [{ path: "0.1", hookIndex: 0, type: "state", value: 42 }],
         dataCache: [{ key: "user/42", value: { name: "x" }, fetchedAt: 1 }],
         knobs: { mood: "curious" },
+        state: { sessionCount: 3 },
         subscriptions: [
           {
             id: "cron.daily",
@@ -353,6 +353,15 @@ function stubBridges(): HookBridges {
       list: () => [],
       subscribe: () => () => {},
     },
+    state: {
+      get: () => undefined,
+      set: () => {},
+      has: () => false,
+      list: () => [],
+      subscribe: () => () => {},
+      exportSnapshot: () => ({}),
+      importSnapshot: () => {},
+    },
     data: {
       resolve: <T>(_k: string, _f: () => Promise<T>): T => undefined as unknown as T,
       invalidate: () => {},
@@ -371,9 +380,9 @@ function emptySnapshot(mountId: string): ReconcilerSnapshot {
   return {
     specVersion: "2026-05-01",
     mountId,
-    hookStates: [],
     dataCache: [],
     knobs: {},
+    state: {},
     subscriptions: [],
   };
 }

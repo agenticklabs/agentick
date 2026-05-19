@@ -34,6 +34,7 @@ export type { Unsubscribe };
  * Required bridges (every reconciler-using runtime must supply):
  *   - `timeline` — read-only access to the session's persisted entries
  *   - `knobs` — model-visible reactive state managed by the harness
+ *   - `state` — session-internal reactive state (`useSessionState`)
  *   - `data` — blocking async resolution (the `useData` backbone)
  *   - `loop` — imperative tick control (`useLoopControl`)
  *   - `session` — current session identity / status
@@ -49,6 +50,7 @@ export type { Unsubscribe };
 export interface HookBridges {
   readonly timeline: TimelineBridge;
   readonly knobs: KnobBridge;
+  readonly state: StateBridge;
   readonly data: DataBridge;
   readonly loop: LoopBridge;
   readonly session: SessionBridge;
@@ -197,6 +199,42 @@ export interface KnobDescriptor {
   readonly value: unknown;
   /** Standard-Schema-compliant validator (opaque to spec). */
   readonly schema?: unknown;
+}
+
+// ============================================================================
+// State bridge
+// ============================================================================
+
+/**
+ * Session-internal reactive state. Sibling of {@link KnobBridge}, but
+ * **not model-visible** — the executor's `set_knob` tool does not reach
+ * here, and `list()` returns keys for framework / debug use only.
+ *
+ * This is the v2 analog of v1's COM state bag (the one wrapped by
+ * `useComState(key, initial)`). The session owns the bridge across
+ * mounts so values survive remount; persistence is via
+ * `exportSnapshot` / `importSnapshot`.
+ *
+ * `useSessionState<T>(key, initial)` is the React hook that wraps this
+ * surface via `useSyncExternalStore` — subsequent `set(key, value)`
+ * calls re-render subscribed components.
+ *
+ * @see docs/proposals/v2/blueprint/22-state-formatters-reconciler-shape.md §D1
+ */
+export interface StateBridge {
+  get(key: string): unknown;
+  set(key: string, value: unknown): void;
+  has(key: string): boolean;
+  list(): readonly string[];
+  /** Notify when the value at `key` changes. */
+  subscribe(key: string, listener: () => void): Unsubscribe;
+  /**
+   * Serialize all entries for persistence. The session writes this into
+   * its snapshot; `importSnapshot` restores on hibernate-resume.
+   */
+  exportSnapshot(): Readonly<Record<string, unknown>>;
+  /** Replace storage with the values from a prior `exportSnapshot`. */
+  importSnapshot(values: Readonly<Record<string, unknown>>): void;
 }
 
 // ============================================================================

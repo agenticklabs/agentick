@@ -15,13 +15,18 @@
  * `@agentick/reconciler-react` (no session-level persistence yet).
  */
 
-import { InMemoryDataBridge, inMemoryKnobBridge } from "@agentick/reconciler-react";
+import {
+  InMemoryDataBridge,
+  inMemoryKnobBridge,
+  inMemoryStateBridge,
+} from "@agentick/reconciler-react";
 import type {
   HookBridges,
   KnobDescriptor,
   LoopBridge,
   MessageRole,
   SessionBridge,
+  StateBridge,
   TimelineBridge,
   TimelineEntrySummary,
   TimelineSnapshot,
@@ -85,6 +90,12 @@ export function knobBridgeFor(
   return inMemoryKnobBridge({ ...initial });
 }
 
+export function stateBridgeFor(
+  initial: Readonly<Record<string, unknown>> = {},
+): StateBridge {
+  return inMemoryStateBridge({ ...initial });
+}
+
 export function loopBridgeStub(): LoopBridge {
   return {
     continueAfterTick: () => {},
@@ -124,6 +135,7 @@ export function buildSessionBridges(
   return {
     timeline: timelineBridgeFor(store),
     knobs: knobBridgeFor(),
+    state: stateBridgeFor(),
     data: new InMemoryDataBridge(),
     loop: loopBridgeStub(),
     session: sessionBridgeFor(store),

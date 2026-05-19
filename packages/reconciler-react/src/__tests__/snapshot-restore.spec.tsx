@@ -246,16 +246,28 @@ describe("ReconcilerHarness — snapshot/restore through the harness", () => {
     expect(round).toEqual(snap);
   });
 
-  it("snapshot.hookStates is empty — TODO for useState/useReducer capture", async () => {
-    const harness = await makeHarness("hooks");
+  it("snapshot captures and restores StateBridge values", async () => {
+    const harness = await makeHarness("state");
+    const bridges = stubBridges();
+    bridges.state.set("counter", 7);
+    bridges.state.set("label", "hello");
     await harness.mount({
-      mountId: "m_h",
+      mountId: "m_s",
       sessionId: "s",
       element: React.createElement("message", { role: "user" }, "ok"),
-      bridges: stubBridges(),
+      bridges,
     });
-    const snap = await harness.snapshot({ mountId: "m_h" });
-    expect(snap.hookStates).toEqual([]);
+    const snap = await harness.snapshot({ mountId: "m_s" });
+    expect(snap.state).toEqual({ counter: 7, label: "hello" });
+
+    // Round-trip JSON to confirm wire shape
+    const wire = JSON.parse(JSON.stringify(snap));
+    expect(wire.state).toEqual({ counter: 7, label: "hello" });
+
+    // Mutate the live bridge, then restore — values should snap back.
+    bridges.state.set("counter", 99);
+    await harness.restore({ mountId: "m_s", snapshot: snap });
+    expect(bridges.state.get("counter")).toBe(7);
   });
 
   it("custom (non-InMemory) data bridge does not export to snapshot", async () => {

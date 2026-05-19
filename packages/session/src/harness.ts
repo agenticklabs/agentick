@@ -95,6 +95,8 @@ export interface SessionHarnessOptions<P = unknown> {
   readonly defaultMaxTicks?: number;
   /** Optional initial knob values. */
   readonly initialKnobs?: Readonly<Record<string, unknown>>;
+  /** Optional initial session-state values (`useSessionState`). */
+  readonly initialState?: Readonly<Record<string, unknown>>;
   /**
    * Optional tool bridge exposed to the reconciler via HookBridges.
    * When supplied, reconciler-side tools (e.g. React `createTool`
@@ -153,6 +155,9 @@ export class SessionHarness<P = unknown>
     });
     if (options.initialKnobs) {
       this.bridges.knobs.importSnapshot(options.initialKnobs);
+    }
+    if (options.initialState) {
+      this.bridges.state.importSnapshot(options.initialState);
     }
     this.reconciler = options.reconciler;
     this.loop = options.loop;

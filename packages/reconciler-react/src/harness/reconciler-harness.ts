@@ -248,24 +248,24 @@ export class ReconcilerHarness
 
   async snapshot(input: SnapshotInput): Promise<ReconcilerSnapshot> {
     const state = this.mountState(input.mountId);
-    // Bridge state — data cache + knobs — is captured when the bridges
-    // expose `exportSnapshot()`. Hook state (useState/useReducer) is
-    // not yet captured; that requires walking React's fiber tree.
-    // TODO(snapshot): traverse fiber tree to extract hook state per
-    // component path so hibernate-and-resume preserves component-local
-    // state across process boundaries.
+    // Bridge state — data cache, knobs, and session state — is captured
+    // via each bridge's `exportSnapshot()`. Component-local hook state
+    // (raw `useState` / `useReducer`) is NOT captured by design — see
+    // ADR 22 §D1. Components persisting state across hibernation use
+    // `useSessionState(key, initial)` to land values in the StateBridge.
     const dataCache =
       state.bridges.data instanceof InMemoryDataBridge
         ? state.bridges.data.exportSnapshot()
         : [];
     const knobs = exportKnobs(state.bridges);
+    const stateValues = state.bridges.state.exportSnapshot();
     return {
       specVersion: SPEC_VERSION,
       mountId: state.mountId,
       ...(state.elementVersion !== undefined ? { elementVersion: state.elementVersion } : {}),
-      hookStates: [],
       dataCache,
       knobs,
+      state: stateValues,
       subscriptions: [],
     };
   }
@@ -279,7 +279,7 @@ export class ReconcilerHarness
       state.bridges.data.importSnapshot(input.snapshot.dataCache);
     }
     importKnobs(state.bridges, input.snapshot.knobs);
-    // Hook state restoration is deferred (see snapshot()).
+    state.bridges.state.importSnapshot(input.snapshot.state);
   }
 
   // ──────────────────────── inbox dispatch ────────────────────────
@@ -364,15 +364,15 @@ export class ReconcilerHarness
     (state as { root: FiberRoot }).root = reconciler.createRoot();
     this.mounts.set(input.mountId, state);
 
-    // Apply snapshot BEFORE the initial render so useData / useKnob
-    // hooks see restored values on first invocation. Hook state
-    // (useState/useReducer) restoration is deferred — see snapshot().
+    // Apply snapshot BEFORE the initial render so useData / useKnob /
+    // useSessionState hooks see restored values on first invocation.
     const restoredFromSnapshot = input.snapshot !== undefined;
     if (input.snapshot) {
       if (state.bridges.data instanceof InMemoryDataBridge) {
         state.bridges.data.importSnapshot(input.snapshot.dataCache);
       }
       importKnobs(state.bridges, input.snapshot.knobs);
+      state.bridges.state.importSnapshot(input.snapshot.state);
     }
 
     // First render — populates the host tree and lets sync components

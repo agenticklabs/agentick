@@ -96,6 +96,7 @@ export {
   stubBridges,
   stubTimelineBridge,
   inMemoryKnobBridge,
+  inMemoryStateBridge,
   stubLoopBridge,
   stubSessionBridge,
 } from "./bridges/stub-bridges.js";
@@ -129,6 +130,7 @@ export {
   useOnUnmount,
   useOnLifecycleCustom,
   useToolBridge,
+  useSessionState,
 } from "./react/hooks/index.js";
 
 // React-flavored createTool (extends @agentick/tool with use() hook)
