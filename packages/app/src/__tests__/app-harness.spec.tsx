@@ -314,6 +314,139 @@ describe("AppHarness — closeApp", () => {
   });
 });
 
+describe("AppHarness — telemetry slot (4f.7 placeholder)", () => {
+  it("accepts an Effect Layer in options.telemetry without affecting runtime behavior", async () => {
+    // Import Layer lazily — the slot accepts any Layer shape.
+    const { Layer } = await import("effect");
+    const noopLayer = Layer.empty;
+    const journal = new MemoryJournal();
+    const bus = new LocalEventBus();
+    const inbox = new LocalInbox();
+    const executor = mkExecutor(journal, bus, inbox);
+    await executor.ready;
+    const app = await createApp(React.createElement(MinimalAgent), {
+      executor,
+      telemetry: noopLayer,
+      journal,
+      bus,
+      inbox,
+      toolHandlers: new Map([
+        [
+          "handlers/calculator",
+          async (input: unknown) => {
+            const { expression } = input as { expression: string };
+            const v = Function(`"use strict"; return (${expression});`)();
+            return [{ type: "text", text: String(v) } as ContentBlock];
+          },
+        ],
+      ]),
+    });
+    // Slot is accepted; runtime behavior unchanged. Smoke-check that
+    // a normal runOnce still works alongside the telemetry slot.
+    const { result } = await app.runOnce({
+      send: { messages: [{ role: "user", content: "x" }] },
+    });
+    expect(result.response).toContain("1081");
+    await app.closeApp();
+  });
+});
+
+describe("AppHarness — services registry (4f.6b)", () => {
+  it("register, get, has — round-trip", async () => {
+    const app = await mkApp();
+    const myService = { ping: () => "pong" };
+    expect(app.services.has("ping")).toBe(false);
+    const unsub = app.services.register("ping", myService);
+    expect(app.services.has("ping")).toBe(true);
+    expect(app.services.get<typeof myService>("ping")?.ping()).toBe("pong");
+    unsub();
+    expect(app.services.has("ping")).toBe(false);
+    await app.closeApp();
+  });
+
+  it("unsubscribe only removes the original instance (not a re-registration)", async () => {
+    const app = await mkApp();
+    const a = { v: 1 };
+    const b = { v: 2 };
+    const unsubA = app.services.register("counter", a);
+    app.services.register("counter", b); // overwrites
+    unsubA(); // should NOT remove b
+    expect(app.services.get<typeof b>("counter")).toBe(b);
+    await app.closeApp();
+  });
+});
+
+describe("AppHarness — onSessionCreate hook", () => {
+  it("proceed/void verdict lets the session be created", async () => {
+    const app = await mkApp();
+    const calls: Array<unknown> = [];
+    app.onSessionCreate(async (input) => {
+      calls.push(input);
+    });
+    const session = await app.createSession({ sessionId: "s-ok" });
+    expect(session).toBeDefined();
+    expect(calls).toHaveLength(1);
+    await app.closeApp();
+  });
+
+  it("veto verdict rejects createSession", async () => {
+    const app = await mkApp();
+    app.onSessionCreate(async () => ({ kind: "veto", reason: "policy" }));
+    await expect(app.createSession({ sessionId: "s-veto" })).rejects.toMatchObject(
+      { _tag: "AppExecutionFailed" },
+    );
+    expect(app.getSession("s-veto")).toBeUndefined();
+    await app.closeApp();
+  });
+
+  it("Unsubscribe removes the hook", async () => {
+    const app = await mkApp();
+    let count = 0;
+    const unsub = app.onSessionCreate(async () => {
+      count++;
+    });
+    await app.createSession({ sessionId: "s-1" });
+    unsub();
+    await app.createSession({ sessionId: "s-2" });
+    expect(count).toBe(1);
+    await app.closeApp();
+  });
+});
+
+describe("AppHarness — onSessionClose / onAppClose hooks", () => {
+  it("onSessionClose fires when a session is disposed", async () => {
+    const app = await mkApp();
+    const closed: string[] = [];
+    app.onSessionClose((info) => {
+      closed.push(info.sessionId);
+    });
+    await app.runOnce({
+      send: { messages: [{ role: "user", content: "x" }] },
+      sessionId: "runonce-s",
+    });
+    // runOnce auto-disposes when it completes.
+    expect(closed).toContain("runonce-s");
+    await app.closeApp();
+  });
+
+  it("onAppClose fires before sessions are torn down", async () => {
+    const app = await mkApp();
+    const order: string[] = [];
+    app.onAppClose(() => {
+      order.push("app-close");
+    });
+    app.onSessionClose(() => {
+      order.push("session-close");
+    });
+    await app.createSession({ sessionId: "before-close" });
+    await app.closeApp();
+    // app-close fires before session-close (per the spec — onAppClose
+    // sees pre-shutdown state).
+    expect(order[0]).toBe("app-close");
+    expect(order).toContain("session-close");
+  });
+});
+
 describe("AppHarness — executor factory slot (FAÇADE.3)", () => {
   it("invokes an ExecutorFactory with the app's substrate", async () => {
     const calls: Array<{ scopeId: string; sharedJournal: boolean; sharedBus: boolean }> = [];

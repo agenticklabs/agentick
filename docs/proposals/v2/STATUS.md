@@ -1,7 +1,7 @@
 # Agentick v2 — Implementation Status
 
 **Branch:** `feat/v2`
-**Last updated:** 2026-05-18 (request/response primitive — Registry + BaseHarness.request + channel.onRequest; tool confirmation refactored onto it)
+**Last updated:** 2026-05-18 (block 5 loose ends closed — BaseHarness.use, tool hooks, app services + lifecycle hooks, telemetry slot, v1 parity audit)
 
 This is the **running progress log** for v2 implementation. Update it
 every session. New contributors / sessions read this first.

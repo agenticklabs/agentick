@@ -64,7 +64,9 @@ import type {
   RunOnceInput,
   RunOnceResult,
   SendResult,
+  ServiceRegistry,
   SessionEntry,
+  TelemetryLayer,
   SessionFilter,
   SessionHarnessProtocol,
   SessionListEntry,
@@ -210,10 +212,24 @@ export interface AppHarnessOptions<P = unknown> {
 
   /**
    * Inject a custom journal/bus/inbox. Defaults to in-memory locals.
+   * Persistence is currently the `journal` slot — supply a durable
+   * `OperationJournal` impl (e.g., SqlitePersistenceJournal once
+   * shipped) for operational durability.
    */
   readonly journal?: OperationJournal;
   readonly bus?: EventBus;
   readonly inbox?: MessageInbox;
+
+  /**
+   * Telemetry `Layer` (Effect). Placeholder slot — defined for forward
+   * compat with OTel/observability backends. The MVP impl accepts and
+   * stores it but does NOT yet apply the Layer to running commands
+   * (requires a runtime refactor in `runHarnessProtocol`). Adopters
+   * relying on it today should set up their OTel SDK out-of-band.
+   *
+   * @see docs/proposals/v2/blueprint/09-app-harness.md §Telemetry
+   */
+  readonly telemetry?: TelemetryLayer;
 }
 
 // ============================================================================
@@ -256,6 +272,38 @@ export class AppHarness<P = unknown>
   private readonly registry = new Map<string, InternalSessionEntry<P>>();
   private _closed = false;
 
+  /**
+   * Stored `TelemetryLayer` (4f.7 placeholder slot). Accepted for
+   * forward compat; not yet applied to command execution.
+   */
+  private readonly telemetryLayer: import("@agentick/spec").TelemetryLayer | undefined;
+
+  /**
+   * App-level service registry. Integrations + sessions read from
+   * here. Simple key/value; no token branding (callers annotate the
+   * type at the get site).
+   */
+  readonly services: ServiceRegistry = new InMemoryServiceRegistry();
+
+  /**
+   * Lifecycle hook chains keyed by phase. Invoked manually at the
+   * named boundary (createSessionBody / disposeSession / closeAppBody).
+   * Not routed through `runOperation` today — see the protocol doc
+   * note on the deferred command-refactor.
+   */
+  private readonly sessionCreateHandlers: Array<
+    (input: CreateSessionInput<P>) => Promise<
+      { readonly kind: "veto"; readonly reason?: string } | void
+    >
+  > = [];
+  private readonly sessionCloseHandlers: Array<
+    (info: {
+      readonly sessionId: string;
+      readonly metadata: Readonly<Record<string, unknown>>;
+    }) => Promise<void> | void
+  > = [];
+  private readonly appCloseHandlers: Array<() => Promise<void> | void> = [];
+
   constructor(options: AppHarnessOptions<P>) {
     const appId = options.appId ?? `app:${ulid()}`;
     const journal = options.journal ?? new MemoryJournal({ capacity: 10_000 });
@@ -278,6 +326,7 @@ export class AppHarness<P = unknown>
       : options.executor;
     // Resolve target: caller override > executor.target.
     this.target = options.target ?? this.executor.target;
+    this.telemetryLayer = options.telemetry;
 
     // Cascade: longhand (`options.session.*`) wins over shorthand
     // (`options.defaultMaxTicks` / `options.initialProps` /
@@ -385,6 +434,41 @@ export class AppHarness<P = unknown>
     );
   }
 
+  // ──────── lifecycle hooks (block 5 — α design) ────────
+
+  onSessionCreate(
+    handler: (
+      input: CreateSessionInput<P>,
+    ) => Promise<{ readonly kind: "veto"; readonly reason?: string } | void>,
+  ): () => void {
+    this.sessionCreateHandlers.push(handler);
+    return () => {
+      const i = this.sessionCreateHandlers.indexOf(handler);
+      if (i >= 0) this.sessionCreateHandlers.splice(i, 1);
+    };
+  }
+
+  onSessionClose(
+    handler: (info: {
+      readonly sessionId: string;
+      readonly metadata: Readonly<Record<string, unknown>>;
+    }) => Promise<void> | void,
+  ): () => void {
+    this.sessionCloseHandlers.push(handler);
+    return () => {
+      const i = this.sessionCloseHandlers.indexOf(handler);
+      if (i >= 0) this.sessionCloseHandlers.splice(i, 1);
+    };
+  }
+
+  onAppClose(handler: () => Promise<void> | void): () => void {
+    this.appCloseHandlers.push(handler);
+    return () => {
+      const i = this.appCloseHandlers.indexOf(handler);
+      if (i >= 0) this.appCloseHandlers.splice(i, 1);
+    };
+  }
+
   // ──────── inbox dispatch (deferred to 4f+) ────────
 
   protected handleMessage(
@@ -407,6 +491,24 @@ export class AppHarness<P = unknown>
     } = {},
   ): Promise<SessionHarnessProtocol<P>> {
     this.assertOpen();
+
+    // Run `onSessionCreate` handlers — first veto wins. Replace and
+    // defer verdicts aren't supported for session creation (no
+    // meaningful semantics here yet); we recognize only veto/proceed.
+    for (const h of this.sessionCreateHandlers) {
+      const verdict = await h(input);
+      if (verdict && verdict.kind === "veto") {
+        throw {
+          _tag: "AppExecutionFailed",
+          cause: new Error(
+            verdict.reason
+              ? `session create vetoed: ${verdict.reason}`
+              : "session create vetoed",
+          ),
+        } as AppError;
+      }
+    }
+
     const sessionId = input.sessionId ?? `session:${ulid()}`;
     if (this.registry.has(sessionId)) {
       throw { _tag: "SessionAlreadyExistsError", sessionId } as AppError;
@@ -529,6 +631,17 @@ export class AppHarness<P = unknown>
 
   private async closeAppBody(): Promise<void> {
     if (this._closed) return;
+
+    // Fire onAppClose handlers FIRST so they can observe pre-shutdown
+    // state. Errors swallowed.
+    for (const h of this.appCloseHandlers) {
+      try {
+        await h();
+      } catch {
+        // best effort
+      }
+    }
+
     this._closed = true;
 
     // Close every registered session. Order isn't load-bearing — each
@@ -561,6 +674,15 @@ export class AppHarness<P = unknown>
       await entry.tools.close();
     } catch {
       // best effort
+    }
+    // Fire onSessionClose handlers (informational, return value
+    // ignored). Errors swallowed — handlers don't block teardown.
+    for (const h of this.sessionCloseHandlers) {
+      try {
+        await h({ sessionId: entry.id, metadata: entry.metadata });
+      } catch {
+        // best effort
+      }
     }
   }
 
@@ -768,6 +890,31 @@ function closeOf(v: unknown): Promise<void> {
     return (v as { close: () => Promise<void> }).close();
   }
   return Promise.resolve();
+}
+
+/**
+ * In-memory `ServiceRegistry`. Simple Map-backed key/value with
+ * unsubscribe on register.
+ */
+class InMemoryServiceRegistry implements ServiceRegistry {
+  private readonly store = new Map<string, unknown>();
+
+  register<T>(token: string, instance: T): () => void {
+    this.store.set(token, instance);
+    return () => {
+      // Only delete if it's still the same instance — prevents
+      // unsubscribing from a later registration.
+      if (this.store.get(token) === instance) this.store.delete(token);
+    };
+  }
+
+  get<T>(token: string): T | undefined {
+    return this.store.get(token) as T | undefined;
+  }
+
+  has(token: string): boolean {
+    return this.store.has(token);
+  }
 }
 
 // Re-export the SessionEntry shape for ergonomic imports.

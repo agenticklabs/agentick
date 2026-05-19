@@ -106,11 +106,25 @@ bound) closed. Phase 5+ proceeds as below, in this exact order:
                      a higher-order utility built on spawn, not a
                      peer primitive).
    ☐ session.shell — explicitly deferred.
-   □ 4a.6            Tool executor middleware + lifecycle hooks
-   □ 4a.8            Tool executor v1 parity sweep
-   □ 4f.6b           App.use(integration) — interceptors + observers
-                     + services registry
-   □ 4f.7            App persistence + telemetry Layer slots
+   ✓ 4a.6            Tool middleware + onBeforeDispatch hook.
+                     `use()` moved to BaseHarness (universal); only
+                     typed subclass hooks (e.g., onBeforeDispatch)
+                     remain per-harness.
+   ✓ 4a.8            Tool v1 parity sweep — audit-only; substrate
+                     parity confirmed, feature gaps (createTool, use(),
+                     prop overrides) are separate user-surface work.
+                     See docs/proposals/v2/notes/4a.8-tool-v1-parity.md
+   ✓ 4f.6b           α design shipped: dropped AppIntegration bundle;
+                     added services registry +
+                     onSessionCreate/onSessionClose/onAppClose hooks.
+                     `app.use(middleware)` is inherited BaseHarness
+                     primitive (note: AppHarness commands don't yet
+                     route through runOperation so middleware on those
+                     is silently no-op — requires command refactor).
+   ✓ 4f.7            telemetry?: Layer slot accepted (forward compat).
+                     Persistence-through-journal-slot documented.
+                     Actual Layer-application requires runtime refactor
+                     in runHarnessProtocol (deferred).
    □ L8              Substrate self-instrumentation (defer until
                      production deployment exercises it)
 

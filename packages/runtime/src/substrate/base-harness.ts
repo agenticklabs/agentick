@@ -202,6 +202,24 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface> {
    */
   readonly ready: Promise<void>;
 
+  /**
+   * Register an around-style middleware that wraps every operation
+   * the harness routes through `runOperation`. Composition is
+   * outer→inner — the first registered is the outermost wrap.
+   * Returns an `Unsubscribe` to remove it.
+   *
+   * Note: this is the universal surface. Harnesses whose *public*
+   * commands don't currently go through `runOperation`
+   * (`SessionHarness.send`, `AppHarness.createSession`, etc.) will
+   * accept registrations but those operations won't be wrapped until
+   * they're refactored to use `runOperation`.
+   */
+  use<I = unknown, R = unknown, E = unknown>(
+    mw: Middleware<I, R, E>,
+  ): Unsubscribe {
+    return this.middleware.use(mw as Middleware<unknown, unknown, unknown>);
+  }
+
   constructor(
     protected readonly surface: Surface,
     protected readonly scopeId: string,

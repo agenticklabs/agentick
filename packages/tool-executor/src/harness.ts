@@ -22,7 +22,11 @@
 
 import { Cause, Effect, Exit, Fiber, Option } from "effect";
 import { runHarnessProtocol, ulid } from "@agentick/runtime";
-import { BaseHarness } from "@agentick/runtime";
+import {
+  BaseHarness,
+  type LifecycleHandler,
+  type Unsubscribe,
+} from "@agentick/runtime";
 import type { RequestError } from "@agentick/runtime";
 import type {
   AbortInput,
@@ -184,6 +188,40 @@ export class ToolExecutorHarness
   /** Snapshot the entire handler state map. */
   snapshotState(): Readonly<Record<string, unknown>> {
     return Object.fromEntries(this.stateStore.entries());
+  }
+
+  // ──────────────────────── lifecycle hooks (4a.6) ────────────────────────
+  //
+  // `use(middleware)` is inherited from BaseHarness — it's the universal
+  // primitive. Subclasses don't re-expose it (would duplicate). Typed
+  // call sites pass generics:
+  //
+  //   tools.use<DispatchInput, DispatchResult>((input, next) => ...);
+
+  /**
+   * Register a handler that runs BEFORE every dispatch's body. The
+   * handler can return a `HandlerVerdict` to influence execution:
+   *
+   *   - `{ kind: "proceed" }` (or void) — continue normally
+   *   - `{ kind: "veto", reason? }` — abort dispatch, terminal:vetoed
+   *   - `{ kind: "replace", result, reason? }` — short-circuit with
+   *     the supplied result, terminal:replaced
+   *   - `{ kind: "defer", retryAfter? }` — terminal:deferred (caller
+   *     responsibility to retry)
+   *
+   * Returns `Unsubscribe`. Multiple handlers compose per the
+   * `mergeVerdict` rules: veto > replace > defer > proceed.
+   *
+   * Re-exposes `BaseHarness.handlers.register("before", ...)` with a
+   * tool-typed signature.
+   */
+  onBeforeDispatch(
+    handler: LifecycleHandler<DispatchInput, DispatchResult, unknown>,
+  ): Unsubscribe {
+    return this.handlers.register(
+      "before",
+      handler as LifecycleHandler<unknown, unknown, unknown>,
+    );
   }
 
   // ──────────────────────── inbox dispatch ────────────────────────
