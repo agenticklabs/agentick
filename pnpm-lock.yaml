@@ -874,6 +874,9 @@ importers:
       '@agentick/spec':
         specifier: workspace:*
         version: link:../spec
+      '@agentick/tool':
+        specifier: workspace:*
+        version: link:../tool
       effect:
         specifier: ^3.21.2
         version: 3.21.2

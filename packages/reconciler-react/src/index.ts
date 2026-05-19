@@ -128,7 +128,15 @@ export {
   useOnMount,
   useOnUnmount,
   useOnLifecycleCustom,
+  useToolBridge,
 } from "./react/hooks/index.js";
+
+// React-flavored createTool (extends @agentick/tool with use() hook)
+export { createTool } from "./react/create-tool.js";
+export type {
+  ReactToolSpec,
+  CreatedReactTool,
+} from "./react/create-tool.js";
 
 // Components
 export {

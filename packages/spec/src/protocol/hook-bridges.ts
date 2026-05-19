@@ -54,6 +54,14 @@ export interface HookBridges {
   readonly session: SessionBridge;
   readonly sandbox?: SandboxBridge;
   readonly mcp?: MCPBridge;
+  /**
+   * Tool registration bridge — exposed when the session's tool
+   * executor is wired. Enables reconciler-side tools (e.g. the
+   * React-flavored `createTool` with `use()` hook in
+   * `@agentick/reconciler-react`) to register handlers at render
+   * time so they close over React-Context-derived deps.
+   */
+  readonly tools?: ToolBridge;
 }
 
 // ============================================================================
@@ -258,4 +266,30 @@ export interface MCPServerBridge {
   readonly id: string;
   readonly tools: readonly unknown[];
   readonly resources: readonly unknown[];
+}
+
+// ============================================================================
+// Tool bridge — render-time handler registration
+// ============================================================================
+
+/**
+ * The tool bridge lets reconciler-side tools register their handler
+ * at render time, closing over framework-context-derived deps (React
+ * Context, Angular DI, etc).
+ *
+ * Sessions wire this to their tool executor's `HandlerResolver`:
+ *   - `register` → `HandlerResolver.register(ref, handler, validator)`
+ *   - `unregister` → `HandlerResolver.unregister(ref)`
+ *
+ * Implementations MAY accept re-registration on the same `handlerRef`
+ * (last-writer wins) — needed when a component re-renders with new
+ * captured deps.
+ */
+export interface ToolBridge {
+  register(
+    handlerRef: string,
+    handler: import("../data/tool-handler.js").ToolHandler,
+    validator?: import("../data/validator.js").Validator,
+  ): Unsubscribe;
+  unregister(handlerRef: string): void;
 }

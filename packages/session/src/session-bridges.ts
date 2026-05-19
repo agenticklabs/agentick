@@ -25,6 +25,7 @@ import type {
   TimelineBridge,
   TimelineEntrySummary,
   TimelineSnapshot,
+  ToolBridge,
   Unsubscribe,
 } from "@agentick/spec";
 
@@ -118,6 +119,7 @@ export interface SessionHookBridges extends HookBridges {
 
 export function buildSessionBridges(
   store: SessionStateStore,
+  options: { readonly toolBridge?: ToolBridge } = {},
 ): SessionHookBridges {
   return {
     timeline: timelineBridgeFor(store),
@@ -125,5 +127,8 @@ export function buildSessionBridges(
     data: new InMemoryDataBridge(),
     loop: loopBridgeStub(),
     session: sessionBridgeFor(store),
+    ...(options.toolBridge !== undefined
+      ? { tools: options.toolBridge }
+      : {}),
   };
 }

@@ -1,7 +1,7 @@
 # Agentick v2 — Implementation Status
 
 **Branch:** `feat/v2`
-**Last updated:** 2026-05-19 (AppHarness command refactor — createSession / runOnce / closeApp route through runOperation; app.use() and telemetry Layer wired)
+**Last updated:** 2026-05-19 (Tool factory layering — `@agentick/tool` generic + ToolBridge + `@agentick/reconciler-react` React-flavored `createTool` with `use()` hook)
 
 This is the **running progress log** for v2 implementation. Update it
 every session. New contributors / sessions read this first.

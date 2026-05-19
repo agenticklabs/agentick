@@ -280,6 +280,14 @@ export class AppHarness<P = unknown>
   private readonly telemetryLayer: import("@agentick/spec").TelemetryLayer | undefined;
 
   /**
+   * Tool bridge surfaced to each session's HookBridges. Wraps the
+   * shared HandlerResolver so reconciler-side tools (React
+   * `createTool` with `use()`) can register handlers at render time
+   * keyed by `handlerRef`. Constructed in the constructor.
+   */
+  private readonly toolBridge!: import("@agentick/spec").ToolBridge;
+
+  /**
    * App-level service registry. Integrations + sessions read from
    * here. Simple key/value; no token branding (callers annotate the
    * type at the get site).
@@ -356,6 +364,13 @@ export class AppHarness<P = unknown>
         this.handlerResolver.register(ref, handler);
       }
     }
+    this.toolBridge = {
+      register: (handlerRef, handler, validator) => {
+        this.handlerResolver.register(handlerRef, handler, validator);
+        return () => this.handlerResolver.unregister(handlerRef);
+      },
+      unregister: (handlerRef) => this.handlerResolver.unregister(handlerRef),
+    };
   }
 
   /**
@@ -610,6 +625,9 @@ export class AppHarness<P = unknown>
           : {}),
       // Inject self as SpawnContext so the child can spawn grandchildren.
       spawnContext: this,
+      // Surface the shared handler resolver as a ToolBridge so
+      // reconciler-side tools register handlers at render time.
+      toolBridge: this.toolBridge,
       ...(overrides.parentSessionId !== undefined
         ? { parentSessionId: overrides.parentSessionId }
         : {}),

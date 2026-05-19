@@ -96,6 +96,14 @@ export interface SessionHarnessOptions<P = unknown> {
   /** Optional initial knob values. */
   readonly initialKnobs?: Readonly<Record<string, unknown>>;
   /**
+   * Optional tool bridge exposed to the reconciler via HookBridges.
+   * When supplied, reconciler-side tools (e.g. React `createTool`
+   * with `use()` hook) register handlers at render time. The bridge
+   * is typically built by the AppHarness wrapping its shared
+   * HandlerResolver.
+   */
+  readonly toolBridge?: import("@agentick/spec").ToolBridge;
+  /**
    * Spawn context for child sessions. Typically injected by the
    * AppHarness when it constructs a session — the session keeps a
    * narrow back-reference to its parent app so `spawn()` works.
@@ -138,7 +146,11 @@ export class SessionHarness<P = unknown>
   ) {
     super("session", options.sessionId, journal, bus, inbox);
     this.store = new SessionStateStore(options.sessionId);
-    this.bridges = buildSessionBridges(this.store);
+    this.bridges = buildSessionBridges(this.store, {
+      ...(options.toolBridge !== undefined
+        ? { toolBridge: options.toolBridge }
+        : {}),
+    });
     if (options.initialKnobs) {
       this.bridges.knobs.importSnapshot(options.initialKnobs);
     }
