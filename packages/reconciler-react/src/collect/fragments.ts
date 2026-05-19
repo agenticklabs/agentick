@@ -17,6 +17,7 @@ import type {
   OutputDeclaration,
   ProviderOptions,
   ResourceDeclaration,
+  SemanticNode,
   SpecConfig,
   ToolDeclaration,
 } from "@agentick/spec";
@@ -32,7 +33,17 @@ export type IRFragment =
   | { readonly kind: "provider-options"; readonly partial: ProviderOptions }
   | { readonly kind: "diagnostic"; readonly diagnostic: FormatDiagnostic }
   | { readonly kind: "metadata"; readonly key: string; readonly value: unknown }
-  | { readonly kind: "content-block"; readonly block: ContentBlock };
+  | { readonly kind: "content-block"; readonly block: ContentBlock }
+  /**
+   * Semantic node produced by JSX semantic-HTML contributors (`<strong>`,
+   * `<h1>`, `<ul>`, etc.). The grouping pass in `foldContentBlocks`
+   * coalesces contiguous semantic-node + text contributions into a
+   * single `TextBlock` (with `semanticNode` sidecar). Native ContentBlock
+   * fragments (Image, Code, etc.) break the run.
+   *
+   * @see docs/proposals/v2/blueprint/22-state-formatters-reconciler-shape.md §D5
+   */
+  | { readonly kind: "semantic-node"; readonly node: SemanticNode };
 
 /**
  * Convenience: produce an empty fragment array. Useful for contributors

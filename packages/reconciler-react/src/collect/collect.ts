@@ -23,6 +23,8 @@ import type {
   ProviderOptions,
   RenderedTree,
   ResourceDeclaration,
+  SemanticContentBlock,
+  SemanticNode,
   SpecConfig,
   SpecFeatureName,
   ToolDeclaration,
@@ -151,46 +153,135 @@ function makeContextFactory(
     return contributor.contribute(instance, make(scope));
   }
 
+  /**
+   * Walk a content-container's children and assemble its
+   * `ContentBlock[]`. Inline grouping rule (ADR 22 §D5):
+   *
+   *   - Contiguous text + semantic-node fragments coalesce into ONE
+   *     TextBlock. If any semantic-node appeared in the run, the
+   *     resulting TextBlock carries a `semanticNode` sidecar tree;
+   *     otherwise the TextBlock is a plain `{ text: "..." }`.
+   *   - Native ContentBlock fragments (Image, CodeBlock, JsonBlock, …)
+   *     break the run — they're their own block.
+   *
+   * The walker does NOT distinguish inline vs block semantic elements;
+   * spacing and layout are the formatter's responsibility.
+   *
+   * The result type is `SemanticContentBlock[]` because TextBlocks may
+   * carry sidecars. The harness's post-collect formatter pass consumes
+   * the sidecars and replaces these with wire-shape `ContentBlock[]`.
+   */
   function foldContentBlocks(
     parent: HostInstance,
     scope: HostScope,
     outbound?: IRFragment[],
-  ): readonly ContentBlock[] {
+  ): readonly SemanticContentBlock[] {
     if (!isElementInstance(parent)) return [];
-    const blocks: ContentBlock[] = [];
+
+    type Item =
+      | { readonly kind: "text"; readonly value: string }
+      | { readonly kind: "semantic"; readonly value: SemanticNode }
+      | { readonly kind: "block"; readonly value: SemanticContentBlock };
+
+    const items: Item[] = [];
+    gatherItems(parent, scope, outbound, items);
+    return coalesce(items);
+  }
+
+  function gatherItems(
+    parent: HostInstance,
+    scope: HostScope,
+    outbound: IRFragment[] | undefined,
+    items: Array<
+      | { readonly kind: "text"; readonly value: string }
+      | { readonly kind: "semantic"; readonly value: SemanticNode }
+      | { readonly kind: "block"; readonly value: SemanticContentBlock }
+    >,
+  ): void {
+    if (!isElementInstance(parent)) return;
     for (const child of parent.children) {
       if (isTextInstance(child)) {
-        if (child.text.length > 0) blocks.push({ type: "text", text: child.text });
+        if (child.text.length > 0) items.push({ kind: "text", value: child.text });
         continue;
       }
-      // `<format>` inside a content container scopes its descendants'
-      // formatter but contributes no IR fragment itself — fold its
-      // children with the new scope.
+      // `<format>` scopes its descendants' formatter but contributes no
+      // fragment itself — recurse with the new scope.
       if (child.kind === "element" && child.type === "format") {
         const nextScope = deriveFormatScope(child, scope);
-        for (const b of foldContentBlocks(child, nextScope, outbound)) blocks.push(b);
+        gatherItems(child, nextScope, outbound, items);
         continue;
       }
-      // Recurse: a wrapper component (no contributor) folds children.
       const contributor = registry.lookup(child.type);
       if (!contributor) {
-        for (const b of foldContentBlocks(child, scope, outbound)) blocks.push(b);
+        // Wrapper component without a contributor — fold children.
+        gatherItems(child, scope, outbound, items);
         continue;
       }
-      // Content-block contributors return `content-block` fragments;
-      // diagnostics and other non-content fragments bubble up via the
-      // outbound buffer so the enclosing contributor (section/message)
-      // can re-emit them. Other fragment kinds inside a content
-      // container are unusual — they're dropped here on the assumption
-      // that they're a misuse (a tool declaration inside a message,
-      // etc.).
       const frags = contributor.contribute(child, make(scope));
       for (const f of frags) {
-        if (f.kind === "content-block") blocks.push(f.block);
-        else if (f.kind === "diagnostic" && outbound) outbound.push(f);
+        if (f.kind === "content-block") {
+          items.push({ kind: "block", value: f.block });
+        } else if (f.kind === "semantic-node") {
+          items.push({ kind: "semantic", value: f.node });
+        } else if (f.kind === "diagnostic" && outbound) {
+          outbound.push(f);
+        }
       }
     }
-    return blocks;
+  }
+
+  function coalesce(
+    items: ReadonlyArray<
+      | { readonly kind: "text"; readonly value: string }
+      | { readonly kind: "semantic"; readonly value: SemanticNode }
+      | { readonly kind: "block"; readonly value: SemanticContentBlock }
+    >,
+  ): readonly SemanticContentBlock[] {
+    const result: SemanticContentBlock[] = [];
+    let runText: string[] = [];
+    let runSem: SemanticNode[] = [];
+    let hasSemantic = false;
+
+    const flush = (): void => {
+      if (hasSemantic) {
+        // Convert any tailing plain text into semantic leaves
+        for (const t of runText) runSem.push({ text: t });
+        result.push({
+          type: "text",
+          text: "",
+          semanticNode: { children: runSem },
+        } as SemanticContentBlock);
+      } else if (runText.length > 0) {
+        result.push({ type: "text", text: runText.join("") });
+      }
+      runText = [];
+      runSem = [];
+      hasSemantic = false;
+    };
+
+    for (const item of items) {
+      if (item.kind === "text") {
+        if (hasSemantic) {
+          runSem.push({ text: item.value });
+        } else {
+          runText.push(item.value);
+        }
+      } else if (item.kind === "semantic") {
+        if (!hasSemantic) {
+          // Promote any accumulated plain text to semantic leaves.
+          for (const t of runText) runSem.push({ text: t });
+          runText = [];
+          hasSemantic = true;
+        }
+        runSem.push(item.value);
+      } else {
+        // Native ContentBlock breaks the run.
+        flush();
+        result.push(item.value);
+      }
+    }
+    flush();
+    return result;
   }
 
   function foldText(parent: HostInstance): string {

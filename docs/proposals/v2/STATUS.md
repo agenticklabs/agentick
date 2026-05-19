@@ -1,7 +1,7 @@
 # Agentick v2 — Implementation Status
 
 **Branch:** `feat/v2`
-**Last updated:** 2026-05-19 (ADR 22 Step 2 — `@agentick/formatters` package: `defineFormatter` + markdown/xml/text reference formatters; reconciler dispatches via registry slot; private `serializeTreeToString` replaced)
+**Last updated:** 2026-05-19 (ADR 22 Step 3 — Semantic HTML contributors via `makeSemanticContributor` factory; coalescing pass folds contiguous text + semantic-node fragments into TextBlocks with sidecars; formatter dispatch runs post-collect)
 
 This is the **running progress log** for v2 implementation. Update it
 every session. New contributors / sessions read this first.

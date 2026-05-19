@@ -516,10 +516,55 @@ export class ReconcilerHarness
       });
     }
 
+    // Formatter pass — collect produces SemanticContentBlocks (with
+    // optional `semanticNode` sidecars on TextBlocks); dispatch them
+    // through the active formatter so the returned tree carries
+    // wire-shape ContentBlocks only. See ADR 22 §D2 + §D5.
+    const tree = this.applyFormatters(collected.tree, state.rootScope.formatters.default);
+
     return {
-      tree: collected.tree,
+      tree,
       diagnostics,
       iterations: hitMax ? maxIterations : iterations + 1,
+    };
+  }
+
+  /**
+   * Walk a freshly-collected `RenderedTree` and replace each entry's
+   * content with the formatter-flattened version. The formatter for an
+   * entry is resolved via the same `id → format` fallback chain used by
+   * `renderToString`'s dispatch.
+   */
+  private applyFormatters(
+    tree: import("@agentick/spec").RenderedTree,
+    fallback: import("@agentick/spec").FormatterRef,
+  ): import("@agentick/spec").RenderedTree {
+    const entries = tree.context.entries.map((entry) => {
+      const ref = entry.renderedWith ?? fallback;
+      const fmt = resolveFormatterFromMap(this.formatters, ref, this.defaultFormatterId);
+      const formatted = fmt(
+        entry.content as readonly import("@agentick/spec").SemanticContentBlock[],
+      );
+      return { ...entry, content: formatted };
+    });
+    const rootContent =
+      tree.content && tree.content.length > 0
+        ? (() => {
+            const ref = tree.renderedWith ?? fallback;
+            const fmt = resolveFormatterFromMap(
+              this.formatters,
+              ref,
+              this.defaultFormatterId,
+            );
+            return fmt(
+              tree.content as readonly import("@agentick/spec").SemanticContentBlock[],
+            );
+          })()
+        : tree.content;
+    return {
+      ...tree,
+      context: { ...tree.context, entries },
+      ...(rootContent !== undefined ? { content: rootContent } : {}),
     };
   }
 
@@ -809,6 +854,34 @@ function serializeTreeToString(
   }
 
   return parts.filter((p) => p.length > 0).join("\n\n");
+}
+
+/**
+ * Map-only formatter resolution. Shared by the formatter pass in
+ * `renderTreeBody` and by `serializeTreeToString`'s entry dispatch.
+ * Mirrors {@link resolveFormatter}'s fallback chain: exact id match,
+ * then format match, then the configured default, then a structural
+ * markdown no-op.
+ */
+function resolveFormatterFromMap(
+  formatters: ReadonlyMap<string, DefinedFormatter>,
+  ref: import("@agentick/spec").FormatterRef,
+  defaultId: string,
+): DefinedFormatter {
+  const byId = formatters.get(ref.id);
+  if (byId) return byId;
+  if (ref.format) {
+    for (const fmt of formatters.values()) {
+      if (fmt.__identity.format === ref.format) return fmt;
+    }
+  }
+  return (
+    formatters.get(defaultId) ??
+    (Object.assign(
+      (b: readonly import("@agentick/spec").SemanticContentBlock[]) => b,
+      { __identity: { id: "formatter.markdown", format: "markdown" as const } },
+    ) as DefinedFormatter)
+  );
 }
 
 function resolveFormatter(
