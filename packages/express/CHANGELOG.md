@@ -1,5 +1,11 @@
 # @agentick/express
 
+## 0.14.68
+
+### Patch Changes
+
+- @agentick/gateway@0.14.68
+
 ## 0.14.67
 
 ### Patch Changes
