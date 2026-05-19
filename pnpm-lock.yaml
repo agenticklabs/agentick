@@ -1101,6 +1101,16 @@ importers:
         specifier: ^4.0.0
         version: 4.0.18(@opentelemetry/api@1.9.0)(@types/node@25.0.9)(happy-dom@17.6.3)(jiti@2.6.1)(msw@2.14.6(@types/node@25.0.9)(typescript@5.9.3))(tsx@4.21.0)(yaml@2.8.4)
 
+  packages/tool:
+    dependencies:
+      '@agentick/spec':
+        specifier: workspace:*
+        version: link:../spec
+    devDependencies:
+      zod:
+        specifier: ^4.3.6
+        version: 4.3.6
+
   packages/tool-executor:
     dependencies:
       '@agentick/runtime':
