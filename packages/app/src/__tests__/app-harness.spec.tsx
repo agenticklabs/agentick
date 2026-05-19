@@ -314,6 +314,66 @@ describe("AppHarness — closeApp", () => {
   });
 });
 
+describe("AppHarness — middleware on app commands (command refactor)", () => {
+  it("app.use(middleware) wraps createSession after the command refactor", async () => {
+    const { Effect } = await import("effect");
+    const calls: string[] = [];
+    const app = await mkApp();
+    app.use((input, next) =>
+      Effect.gen(function* () {
+        calls.push("in");
+        const r = yield* next(input);
+        calls.push("out");
+        return r;
+      }),
+    );
+    await app.createSession({ sessionId: "mw-1" });
+    expect(calls).toEqual(["in", "out"]);
+    await app.closeApp();
+  });
+
+  it("app.use(middleware) wraps runOnce too", async () => {
+    const { Effect } = await import("effect");
+    const calls: string[] = [];
+    const app = await mkApp();
+    app.use((input, next) =>
+      Effect.gen(function* () {
+        calls.push("in");
+        const r = yield* next(input);
+        calls.push("out");
+        return r;
+      }),
+    );
+    await app.runOnce({
+      send: { messages: [{ role: "user", content: "x" }] },
+    });
+    expect(calls).toEqual(["in", "out"]);
+    await app.closeApp();
+  });
+
+  it("emits app:command envelopes on the bus", async () => {
+    const app = await mkApp();
+    const names: string[] = [];
+    const collect = (async () => {
+      let i = 0;
+      for await (const ev of app.events({ surface: "app" })) {
+        names.push(`${ev.name}.${ev.phase}`);
+        if (++i >= 3) break;
+      }
+    })();
+    await new Promise((r) => setTimeout(r, 30));
+    await app.createSession({ sessionId: "envelope-1" });
+    await collect;
+    // After the refactor, createSession emits requested + before +
+    // terminal (terminal is journaled per the default policy; before
+    // is bus-only).
+    expect(
+      names.some((n) => n.startsWith("app:command:create-session")),
+    ).toBe(true);
+    await app.closeApp();
+  });
+});
+
 describe("AppHarness — telemetry slot (4f.7 placeholder)", () => {
   it("accepts an Effect Layer in options.telemetry without affecting runtime behavior", async () => {
     // Import Layer lazily — the slot accepts any Layer shape.

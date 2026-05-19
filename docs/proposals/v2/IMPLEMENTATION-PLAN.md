@@ -118,13 +118,22 @@ bound) closed. Phase 5+ proceeds as below, in this exact order:
                      added services registry +
                      onSessionCreate/onSessionClose/onAppClose hooks.
                      `app.use(middleware)` is inherited BaseHarness
-                     primitive (note: AppHarness commands don't yet
-                     route through runOperation so middleware on those
-                     is silently no-op — requires command refactor).
-   ✓ 4f.7            telemetry?: Layer slot accepted (forward compat).
-                     Persistence-through-journal-slot documented.
-                     Actual Layer-application requires runtime refactor
-                     in runHarnessProtocol (deferred).
+                     primitive.
+   ✓ 4f.7            telemetry?: Layer slot accepted; applied via
+                     Effect.provide inside the App's runWithTelemetry
+                     helper. Persistence-through-journal-slot
+                     documented.
+   ✓ AppHarness command refactor — createSession / runOnce /
+                     closeApp now route through `runOperation`.
+                     `app.use(middleware)` actually fires on these
+                     commands; OTel spans, bus envelopes
+                     (`app:command:create-session.requested/before/
+                     terminal`), and journal entries flow uniformly
+                     with every other harness. Telemetry Layer (4f.7)
+                     wires through `Effect.provide` per-command when
+                     set. Existing dup-id behavior preserved by using
+                     random opIds rather than sessionId-derived ones
+                     (proper idempotency-by-sessionId is a follow-up).
    □ L8              Substrate self-instrumentation (defer until
                      production deployment exercises it)
 

@@ -1,7 +1,7 @@
 # Agentick v2 — Implementation Status
 
 **Branch:** `feat/v2`
-**Last updated:** 2026-05-18 (block 5 loose ends closed — BaseHarness.use, tool hooks, app services + lifecycle hooks, telemetry slot, v1 parity audit)
+**Last updated:** 2026-05-19 (AppHarness command refactor — createSession / runOnce / closeApp route through runOperation; app.use() and telemetry Layer wired)
 
 This is the **running progress log** for v2 implementation. Update it
 every session. New contributors / sessions read this first.

@@ -18,7 +18,7 @@
  * @see docs/proposals/v2/blueprint/09-app-harness.md
  */
 
-import { Effect, Fiber, Stream } from "effect";
+import { Effect, Fiber, Layer, Stream } from "effect";
 
 import {
   BaseHarness,
@@ -58,6 +58,7 @@ import type {
   MessageEnvelope,
   MessageHandlerError,
   MessageInbox,
+  Operation,
   OperationJournal,
   ProtocolEvent,
   ReconcilerProtocol,
@@ -377,20 +378,45 @@ export class AppHarness<P = unknown>
   createSession(
     input: CreateSessionInput<P> = {},
   ): Promise<SessionHarnessProtocol<P>> {
-    return runHarnessProtocol(
-      Effect.tryPromise({
-        try: () => this.createSessionBody(input, /* ephemeral */ false),
-        catch: (cause): AppError => mapAppError(cause),
-      }),
+    const op: Operation<
+      CreateSessionInput<P>,
+      SessionHarnessProtocol<P>
+    > = {
+      opId: `app:create-session:${ulid()}`,
+      surface: "app",
+      name: "app:command:create-session",
+      scope: {
+        ...(input.sessionId !== undefined ? { sessionId: input.sessionId } : {}),
+      },
+      input,
+    };
+    return this.runWithTelemetry(
+      this.runOperation(op, (i) =>
+        Effect.tryPromise({
+          try: () => this.createSessionBody(i, /* ephemeral */ false),
+          catch: (cause): AppError => mapAppError(cause),
+        }),
+      ),
     );
   }
 
   runOnce(input: RunOnceInput<P>): Promise<RunOnceResult> {
-    return runHarnessProtocol(
-      Effect.tryPromise({
-        try: () => this.runOnceBody(input),
-        catch: (cause): AppError => mapAppError(cause),
-      }),
+    const op: Operation<RunOnceInput<P>, RunOnceResult> = {
+      opId: `app:run-once:${ulid()}`,
+      surface: "app",
+      name: "app:command:run-once",
+      scope: {
+        ...(input.sessionId !== undefined ? { sessionId: input.sessionId } : {}),
+      },
+      input,
+    };
+    return this.runWithTelemetry(
+      this.runOperation(op, (i) =>
+        Effect.tryPromise({
+          try: () => this.runOnceBody(i),
+          catch: (cause): AppError => mapAppError(cause),
+        }),
+      ),
     );
   }
 
@@ -426,12 +452,41 @@ export class AppHarness<P = unknown>
   }
 
   closeApp(): Promise<void> {
-    return runHarnessProtocol(
-      Effect.tryPromise({
-        try: () => this.closeAppBody(),
-        catch: (cause): AppError => mapAppError(cause),
-      }),
+    const op: Operation<void, void> = {
+      opId: `app:close-app:${ulid()}`,
+      surface: "app",
+      name: "app:command:close-app",
+      scope: {},
+      input: undefined,
+    };
+    return this.runWithTelemetry(
+      this.runOperation(op, () =>
+        Effect.tryPromise({
+          try: () => this.closeAppBody(),
+          catch: (cause): AppError => mapAppError(cause),
+        }),
+      ),
     );
+  }
+
+  /**
+   * Wrap an Effect with the optional `telemetry` Layer (4f.7) before
+   * handing to `runHarnessProtocol`. When no Layer is set, this is a
+   * pass-through. When set, the Layer provides services
+   * (e.g., OTel Tracer) to the Effect's runtime context so the
+   * substrate's `Effect.withSpan` annotations flow to the configured
+   * exporter.
+   */
+  private runWithTelemetry<R>(
+    eff: Effect.Effect<R, unknown, never>,
+  ): Promise<R> {
+    if (this.telemetryLayer === undefined) return runHarnessProtocol(eff);
+    const provided = Effect.provide(eff, this.telemetryLayer) as Effect.Effect<
+      R,
+      unknown,
+      never
+    >;
+    return runHarnessProtocol(provided);
   }
 
   // ──────── lifecycle hooks (block 5 — α design) ────────
