@@ -8,9 +8,11 @@
  *    counts (e.g. `schema/ — 55 resources`). Bounded in size regardless
  *    of how many resources a server exposes. Override via
  *    `renderResources` (the renderer IS the config — no string presets).
- * 2. **`list_resources` tool** — full details with URIs, mime types,
- *    optional server/pattern filters.
- * 3. **`read_resource` tool** — fetch resource content by URI.
+ * 2. **`list_mcp_resources` tool** — full details with URIs, mime
+ *    types, optional server/pattern filters. (Tool name configurable
+ *    via `listToolName`.)
+ * 3. **`read_mcp_resource` tool** — fetch resource content by URI.
+ *    (Configurable via `readToolName`.)
  *
  * Supports multiple servers simultaneously. Resources from all servers
  * are unified under a single pair of tools — the model doesn't need
@@ -78,7 +80,14 @@ export interface MCPResourceComponentProps extends ComponentBaseProps, Partial<E
   sectionId?: string;
 
   /**
-   * Custom tool names. Defaults to "list_resources" and "read_resource".
+   * Tool names. Default to `list_mcp_resources` and `read_mcp_resource`.
+   *
+   * The `mcp_` namespace prefix is deliberate: it disambiguates these
+   * from filesystem tools like `read_file` / `glob` that the model has
+   * in other contexts. Generic names like `read_resource` collide
+   * cognitively with `read_file` and lead models to confuse MCP URIs
+   * with paths (and vice versa). Override only if you have a specific
+   * naming convention to satisfy.
    */
   listToolName?: string;
   readToolName?: string;
@@ -112,8 +121,8 @@ interface DiscoveryResult {
 // ============================================================================
 
 export function MCPResourceComponent(props: MCPResourceComponentProps): JSX.Element | null {
-  const listToolName = props.listToolName ?? "list_resources";
-  const readToolName = props.readToolName ?? "read_resource";
+  const listToolName = props.listToolName ?? "list_mcp_resources";
+  const readToolName = props.readToolName ?? "read_mcp_resource";
   const renderResources = props.renderResources ?? renderResourceTree;
 
   // useData blocks compilation until discovery completes.
@@ -176,8 +185,11 @@ export function MCPResourceComponent(props: MCPResourceComponentProps): JSX.Elem
         key="mcp-list-resources"
         name={listToolName}
         description={
-          "List available MCP resources with full URIs, mime types, and descriptions. " +
-          "Optionally filter by server name or name pattern."
+          "List MCP resources across connected MCP servers. Returns full " +
+          "URIs (e.g. `scheme://path`), mime types, and descriptions. " +
+          "Optionally filter by `server` name or substring `pattern`. " +
+          "MCP resources are NOT filesystem files — use filesystem tools " +
+          "(glob/grep/read_file) for those."
         }
         input={z.object({
           server: z.string().optional().describe("Filter by server name"),
@@ -189,11 +201,12 @@ export function MCPResourceComponent(props: MCPResourceComponentProps): JSX.Elem
         key="mcp-read-resource"
         name={readToolName}
         description={
-          "Read the content of an MCP resource by URI. " +
-          "Use list_resources first to discover available URIs."
+          `Read the content of an MCP resource by URI (e.g. ` +
+          `\`scheme://path\`). Use ${listToolName} first to discover ` +
+          `available URIs. NOT for filesystem paths — use read_file for those.`
         }
         input={z.object({
-          uri: z.string().describe("Resource URI to read"),
+          uri: z.string().describe("MCP resource URI to read (e.g. `scheme://path`)"),
         })}
         handler={createReadHandler(discovery.mcpClient)}
       />
@@ -226,7 +239,7 @@ export function MCPResources(props: MCPResourceComponentProps): JSX.Element {
  *     guide/   — 5 resources
  *     schema/  — 55 resources  (template: knowify://schema/{model})
  *
- *   Use list_resources to discover URIs; read_resource to fetch content.
+ *   Use the MCP list/read tools to discover URIs and fetch content.
  *
  * Grouping rule: split URIs by scheme://host then by first path segment.
  * Resources whose URI has no path segment (host-only, e.g. `knowify://me`)
@@ -342,7 +355,7 @@ export const renderResourceTree: MCPResourceRenderer = (resources, templates) =>
   }
 
   lines.push(
-    "Use list_resources to discover URIs (optionally filter by `server` or `pattern`); read_resource to fetch content.",
+    "Use the MCP list-resources tool to discover URIs (optionally filter by `server` or `pattern`); the read-resource tool to fetch content.",
   );
 
   return lines.join("\n");
@@ -385,7 +398,9 @@ export const renderResourceList: MCPResourceRenderer = (resources, templates) =>
   }
 
   lines.push("");
-  lines.push("Use list_resources for URIs and details. Use read_resource to fetch content.");
+  lines.push(
+    "Use the MCP list-resources tool for URIs and details. Use the MCP read-resource tool to fetch content.",
+  );
 
   return lines.join("\n");
 };
