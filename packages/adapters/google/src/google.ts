@@ -73,26 +73,7 @@ export function createGoogleModel(config: GoogleAdapterConfig = {}): ModelClass 
 
       prepareInput: async (input: ModelInput) => {
         const normalizedInput = await normalizeModelInput(input, config);
-        const contents: any[] = [];
-        let systemInstruction: string | undefined;
-
-        for (const message of normalizedInput.messages) {
-          if (message.role === "system") {
-            systemInstruction = message.content
-              .filter((block) => block.type === "text")
-              .map((block) => (block as TextBlock).text)
-              .join("\n\n");
-            continue;
-          }
-
-          const parts = convertBlocksToGoogleParts(message.content);
-          if (parts.length === 0) continue;
-
-          contents.push({
-            role: message.role === "assistant" ? "model" : "user",
-            parts,
-          });
-        }
+        const { contents, systemInstruction } = toGoogleMessages(normalizedInput.messages);
 
         const generateConfig: any = {
           temperature: normalizedInput.temperature,
@@ -515,6 +496,55 @@ export function convertBlocksToGoogleParts(blocks: ContentBlock[]): any[] {
   }
 
   return parts;
+}
+
+/**
+ * Transform agentick `Message[]` into the shape Google's GenAI API expects:
+ *   - `contents` — the conversational turns (user / model)
+ *   - `systemInstruction` — a single string with ALL system messages joined
+ *
+ * Google's `systemInstruction` accepts only one value, but agentick callers
+ * can emit multiple `role: "system"` messages (e.g. an identity block and
+ * a separate resource-listing block). A naïve last-write-wins implementation
+ * silently drops everything but the final system message — a class of bug
+ * that mostly surfaces in production once the system prompt is split. We
+ * accumulate ALL system message texts into `systemParts` and concatenate
+ * them with a blank-line separator, mirroring the Anthropic adapter's
+ * `toAnthropicMessages` pattern.
+ *
+ * Empty system messages (no text blocks, or all empty after filtering) are
+ * skipped so they don't introduce spurious separators.
+ */
+export function toGoogleMessages(messages: Message[]): {
+  contents: any[];
+  systemInstruction: string | undefined;
+} {
+  const contents: any[] = [];
+  const systemParts: string[] = [];
+
+  for (const message of messages) {
+    if (message.role === "system") {
+      const text = message.content
+        .filter((block) => block.type === "text")
+        .map((block) => (block as TextBlock).text)
+        .join("\n\n");
+      if (text) systemParts.push(text);
+      continue;
+    }
+
+    const parts = convertBlocksToGoogleParts(message.content);
+    if (parts.length === 0) continue;
+
+    contents.push({
+      role: message.role === "assistant" ? "model" : "user",
+      parts,
+    });
+  }
+
+  return {
+    contents,
+    systemInstruction: systemParts.length > 0 ? systemParts.join("\n\n") : undefined,
+  };
 }
 
 /**
