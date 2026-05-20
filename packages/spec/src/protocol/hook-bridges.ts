@@ -40,8 +40,10 @@ export type { Unsubscribe };
  *   - `session` — current session identity / status
  *
  * Optional bridges (supplied when the corresponding harness is wired):
- *   - `sandbox` — sandbox provider handle for `useSandbox`
- *   - `mcp` — MCP server bundle for `<MCP>` / `useMCP`
+ *   - `sandbox` — sandbox handle registry (`<Sandbox>` / `useSandbox`)
+ *   - `mcp` — MCP connection registry (`<MCP>` / `useMCP`)
+ *   - `subscriptions` — long-lived primitives (`<Cron>` / `<Webhook>` /
+ *     `<EventListener>`) — handler dispatch driven by external triggers
  *
  * Additional bridges MAY be added without breaking existing hooks —
  * components that reference an unsupplied bridge throw at render time,
@@ -56,6 +58,7 @@ export interface HookBridges {
   readonly session: SessionBridge;
   readonly sandbox?: SandboxBridge;
   readonly mcp?: MCPBridge;
+  readonly subscriptions?: SubscriptionBridge;
   /**
    * Tool registration bridge — exposed when the session's tool
    * executor is wired. Enables reconciler-side tools (e.g. the
@@ -285,26 +288,106 @@ export type SessionStatus =
 // ============================================================================
 
 /**
- * Placeholder. Concrete shape defined alongside the sandbox protocol.
- * `[PLACEHOLDER]` — Phase 4+.
+ * Sandbox handle registry. Framework-specific components (e.g.,
+ * `<Sandbox provider={...}>` in reconciler-react) create
+ * {@link SandboxHandle}s via a {@link SandboxProvider}, register them
+ * here, and unregister on unmount. Tools that need a sandbox query
+ * the bridge from the dispatch context (handler `use:` callback).
+ *
+ * Snapshot/restore: handles aren't serializable. The bridge tracks
+ * live registrations only. Persistence is the component's job — it
+ * stores a {@link SandboxIntent} in the reconciler snapshot and
+ * re-creates the handle on restore.
+ *
+ * @see docs/proposals/v2/blueprint/22-state-formatters-reconciler-shape.md
  */
 export interface SandboxBridge {
-  readonly handle: unknown;
+  register(
+    id: string,
+    handle: import("../data/sandbox.js").SandboxHandle,
+  ): Unsubscribe;
+  unregister(id: string): void;
+  get(id: string): import("../data/sandbox.js").SandboxHandle | undefined;
+  list(): readonly SandboxRegistration[];
+  subscribe(id: string, listener: () => void): Unsubscribe;
+}
+
+export interface SandboxRegistration {
+  readonly id: string;
+  readonly workspacePath: string;
 }
 
 /**
- * Placeholder. Concrete shape defined alongside the MCP protocol.
- * `[PLACEHOLDER]` — Phase 4+.
+ * MCP connection registry. Framework-specific components (e.g.,
+ * `<MCP servers={[...]}>`) create live {@link MCPConnection}s and
+ * register them here. Tools and adopters consume the bridge to issue
+ * requests, observe connection state, and read the merged
+ * tool/resource declaration set.
  */
 export interface MCPBridge {
-  readonly servers: readonly MCPServerBridge[];
+  register(connection: import("../data/mcp.js").MCPConnection): Unsubscribe;
+  unregister(id: string): void;
+  get(id: string): import("../data/mcp.js").MCPConnection | undefined;
+  list(): readonly import("../data/mcp.js").MCPConnection[];
+  /** Fires when any connection's status / tool list / resource list changes. */
+  subscribe(listener: () => void): Unsubscribe;
 }
 
-export interface MCPServerBridge {
-  readonly id: string;
-  readonly tools: readonly unknown[];
-  readonly resources: readonly unknown[];
+// ============================================================================
+// Subscription bridge — long-lived primitives (Cron, Webhook, EventListener)
+// ============================================================================
+
+/**
+ * Registry for long-lived subscription intents. Framework-specific
+ * components (e.g., `<Cron expr={...} onTick={...}>` in
+ * reconciler-react) declare an intent + handler here on mount, and
+ * unregister on unmount.
+ *
+ * Intents are JSON-serializable and survive hibernate-resume via the
+ * snapshot pathway. Handlers are NOT serializable — on restore, the
+ * component re-declares with the same intent + a freshly-bound
+ * handler from the rerendered tree.
+ *
+ * Dispatch (firing the handler) is the responsibility of an external
+ * driver — a scheduler for cron, an HTTP server for webhooks, a bus
+ * subscription for event listeners. Drivers call `dispatch(id, event)`
+ * when their trigger fires; the bridge invokes the handler with the
+ * payload + a {@link SubscriptionCtx}.
+ *
+ * @see docs/proposals/v2/blueprint/22-state-formatters-reconciler-shape.md
+ */
+export interface SubscriptionBridge {
+  declare(
+    intent: import("../data/reconciler-snapshot.js").SubscriptionIntent,
+    handler: SubscriptionHandler,
+  ): Unsubscribe;
+  /** All currently-declared intents. Used by external drivers (scheduler, HTTP). */
+  list(): readonly import("../data/reconciler-snapshot.js").SubscriptionIntent[];
+  /** Fire the handler bound to `id`. Returns the handler's promise. */
+  dispatch(id: string, event: unknown): Promise<void>;
+  /** Notify when the intent list changes. */
+  subscribe(listener: () => void): Unsubscribe;
+  /** Serialize intents for snapshot persistence (handlers excluded). */
+  exportSnapshot(): readonly import("../data/reconciler-snapshot.js").SubscriptionIntent[];
+  /**
+   * Restore intent metadata from a prior snapshot. Handlers must be
+   * re-bound by the component re-declaring on the post-restore render.
+   */
+  importSnapshot(
+    intents: readonly import("../data/reconciler-snapshot.js").SubscriptionIntent[],
+  ): void;
 }
+
+export interface SubscriptionCtx {
+  readonly id: string;
+  readonly sessionId: string;
+  readonly signal: AbortSignal;
+}
+
+export type SubscriptionHandler = (
+  event: unknown,
+  ctx: SubscriptionCtx,
+) => Promise<void> | void;
 
 // ============================================================================
 // Tool bridge — render-time handler registration
