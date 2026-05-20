@@ -210,6 +210,9 @@ importers:
       '@agentick/executor':
         specifier: workspace:*
         version: link:../../packages/executor
+      '@agentick/executor-ai-sdk':
+        specifier: workspace:*
+        version: link:../../packages/executor-ai-sdk
       '@agentick/loop-executor':
         specifier: workspace:*
         version: link:../../packages/loop-executor
@@ -228,6 +231,12 @@ importers:
       '@agentick/tool-executor':
         specifier: workspace:*
         version: link:../../packages/tool-executor
+      '@ai-sdk/provider':
+        specifier: ^2.0.0
+        version: 2.0.1
+      ai:
+        specifier: ^5.0.0
+        version: 5.0.123(zod@4.3.6)
       effect:
         specifier: ^3.21.2
         version: 3.21.2

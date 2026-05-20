@@ -587,6 +587,89 @@ async function scenarioAppHarness(): Promise<void> {
 }
 
 /**
+ * AI SDK bridge — drive the loop through `@agentick/executor-ai-sdk`
+ * using an inline `LanguageModelV2` stub. Proves the bridge works
+ * end-to-end without needing an API key; swap in `@ai-sdk/anthropic`
+ * or `@ai-sdk/google` (and a real model id) and the same code runs
+ * against a live provider.
+ *
+ * The inline stub uses `@ai-sdk/provider`'s `LanguageModelV2` interface
+ * directly rather than `ai/test`'s `MockLanguageModelV2` — keeps the
+ * dep tree clean (no `msw`) and shows adopters the minimal surface a
+ * provider implements.
+ */
+async function scenarioAISDK(): Promise<void> {
+  const { aisdk } = await import("@agentick/executor-ai-sdk");
+  type LanguageModelV2 = import("@ai-sdk/provider").LanguageModelV2;
+
+  console.log(heading("4h. AI SDK bridge — createApp({ executor: aisdk({ model }) })"));
+
+  // Scripted two-turn model:
+  //   1. tool-call → calculator(47 * 23)
+  //   2. text     → "47 × 23 = 1081."
+  let turn = 0;
+  const model: LanguageModelV2 = {
+    specificationVersion: "v2",
+    provider: "mock-aisdk",
+    modelId: "mock-calc",
+    supportedUrls: {},
+    doGenerate: async () => {
+      turn += 1;
+      if (turn === 1) {
+        return {
+          content: [
+            {
+              type: "tool-call",
+              toolCallId: "tc-aisdk-calc",
+              toolName: "calculator",
+              input: JSON.stringify({ expression: "47 * 23" }),
+            },
+          ],
+          finishReason: "tool-calls" as const,
+          usage: { inputTokens: 12, outputTokens: 8, totalTokens: 20 },
+          warnings: [],
+        };
+      }
+      return {
+        content: [{ type: "text" as const, text: "47 × 23 = 1081." }],
+        finishReason: "stop" as const,
+        usage: { inputTokens: 24, outputTokens: 11, totalTokens: 35 },
+        warnings: [],
+      };
+    },
+    doStream: async () => {
+      throw new Error("streaming not implemented in this example");
+    },
+  };
+
+  const app = await createApp(React.createElement(SupportAgent), {
+    executor: aisdk({ model }),
+    toolHandlers: new Map([
+      [
+        "handlers/calculator",
+        async (input: unknown): Promise<readonly ContentBlock[]> => {
+          const { expression } = input as { expression: string };
+          const value = Function(`"use strict"; return (${expression});`)();
+          return [{ type: "text", text: String(value) }];
+        },
+      ],
+    ]),
+  });
+  console.log(line(`createApp via aisdk({ model: <inline LanguageModelV2 stub> })`));
+
+  const { result, sessionId } = await app.runOnce({
+    send: { messages: [{ role: "user", content: "What is 47 * 23?" }] },
+  });
+  console.log(line(`runOnce sessionId=${sessionId}`));
+  console.log(line(`runOnce response: ${result.response}`));
+  console.log(line(`runOnce ticks=${result.ticks} stop=${result.stopReason}`));
+  console.log(line(`turns through the mock model: ${turn}`));
+
+  await app.closeApp();
+  console.log(line(`closeApp ✓`));
+}
+
+/**
  * Send an inbox message — the reconciler accepts `recompile`, `unmount`,
  * `invalidate`. The harness is an addressable actor at
  * `reconciler:{scopeId}` — the same call shape works once a cluster
@@ -631,6 +714,7 @@ async function main(): Promise<void> {
     await scenarioLoopExecution(s, tree);
     await scenarioSessionSend(s);
     await scenarioAppHarness();
+    await scenarioAISDK();
     await scenarioBusSubscription(s);
     await scenarioJournalAudit(s);
     await scenarioInboxTell(s);

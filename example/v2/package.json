@@ -11,12 +11,15 @@
   "dependencies": {
     "@agentick/app": "workspace:*",
     "@agentick/executor": "workspace:*",
+    "@agentick/executor-ai-sdk": "workspace:*",
     "@agentick/loop-executor": "workspace:*",
     "@agentick/reconciler-react": "workspace:*",
     "@agentick/runtime": "workspace:*",
     "@agentick/session": "workspace:*",
     "@agentick/spec": "workspace:*",
     "@agentick/tool-executor": "workspace:*",
+    "@ai-sdk/provider": "^2.0.0",
+    "ai": "^5.0.0",
     "effect": "^3.21.2",
     "react": "^19.2.4",
     "zod": "^4.3.6"

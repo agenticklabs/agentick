@@ -1,7 +1,7 @@
 # Agentick v2 — Implementation Status
 
 **Branch:** `feat/v2`
-**Last updated:** 2026-05-19 (ADR 22 Batch A+B — blueprint doc rewrite to `04-formatters.md`, package README, `useComState` → `useSessionState` migration note. spec/guards extended with `isToolDeclaration` / `isSemanticContent` / `isFormatterRef` etc. `awaitTimeoutMs` budget + `await-timeout` diagnostic on render-until-stable.)
+**Last updated:** 2026-05-19 (Phase 5 — example/v2 `scenarioAISDK`: createApp({ executor: aisdk({ model }) }) end-to-end via an inline LanguageModelV2 stub. 2 ticks, 1 tool dispatch, correct final answer. Closes Phase 5 task #49.)
 
 This is the **running progress log** for v2 implementation. Update it
 every session. New contributors / sessions read this first.
