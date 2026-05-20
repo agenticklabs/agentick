@@ -11,11 +11,7 @@
 import { describe, expect, it } from "vitest";
 import { Effect } from "effect";
 
-import type {
-  DispatchInput,
-  DispatchResult,
-  ToolRegistration,
-} from "@agentick/spec";
+import type { DispatchInput, DispatchResult, ToolRegistration } from "@agentick/spec";
 
 import { createTestHarness } from "../testing/index.js";
 
@@ -168,9 +164,9 @@ describe("ToolExecutorHarness — .onBeforeDispatch(handler)", () => {
     // Veto path: BaseHarness's terminate emits terminal:vetoed and
     // replayTerminal causes the caller to receive an
     // OperationOutcomeError (Promise reject).
-    await expect(
-      harness.dispatch(dispatchOf("echo", "c-h-2")),
-    ).rejects.toMatchObject({ _tag: "OperationOutcomeError" });
+    await expect(harness.dispatch(dispatchOf("echo", "c-h-2"))).rejects.toMatchObject({
+      _tag: "OperationOutcomeError",
+    });
     expect(ran).toBe(0);
     void journal;
   });
@@ -190,9 +186,7 @@ describe("ToolExecutorHarness — .onBeforeDispatch(handler)", () => {
       vetoes++;
       return Effect.succeed({ kind: "veto", reason: "no" } as const);
     });
-    await expect(
-      harness.dispatch(dispatchOf("echo", "c-h-3")),
-    ).rejects.toBeTruthy();
+    await expect(harness.dispatch(dispatchOf("echo", "c-h-3"))).rejects.toBeTruthy();
     expect(vetoes).toBe(1);
     unsub();
     // After unsub, dispatch should succeed.

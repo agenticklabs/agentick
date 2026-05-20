@@ -4,10 +4,10 @@
   "description": "Generic, reconciler-agnostic tool authoring for Agentick v2. createTool() returns a registration bundle (declaration + handler + validator) that drops into any tool-executor. Reconciler-specific variants (e.g., React tools with use() hook) extend this in their respective packages.",
   "keywords": [
     "agent",
-    "ai",
     "agentick",
-    "tool",
-    "createTool"
+    "ai",
+    "createTool",
+    "tool"
   ],
   "license": "MIT",
   "author": "Ryan Lindgren",

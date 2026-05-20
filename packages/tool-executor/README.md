@@ -27,12 +27,12 @@ inspecting private fields.
 `ToolDeclaration.exposure` (from `@agentick/spec/data/declarations`)
 decides which door is reachable:
 
-| `exposure` | Reachable from |
-| --- | --- |
-| `["model"]` | model only |
-| `["dispatch"]` | host only |
-| `["model", "dispatch"]` | both doors |
-| `["runtime"]` | internal use; neither door |
+| `exposure`              | Reachable from             |
+| ----------------------- | -------------------------- |
+| `["model"]`             | model only                 |
+| `["dispatch"]`          | host only                  |
+| `["model", "dispatch"]` | both doors                 |
+| `["runtime"]`           | internal use; neither door |
 
 The harness enforces exposure at dispatch time
 (`ToolPermissionError` for the wrong door).

@@ -55,10 +55,7 @@ export function makeSemanticContributor(
 ): Contributor {
   return {
     type,
-    contribute(
-      instance: ElementInstance,
-      ctx: CollectContext,
-    ): readonly IRFragment[] {
+    contribute(instance: ElementInstance, ctx: CollectContext): readonly IRFragment[] {
       const node: SemanticNode = {
         semantic: options.semantic,
         ...(options.propsMapper

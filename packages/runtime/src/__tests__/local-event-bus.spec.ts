@@ -4,8 +4,7 @@ import type { ProtocolEvent } from "@agentick/spec";
 import { runEventBusConformance } from "@agentick/spec-conformance";
 import { LocalEventBus } from "../substrate/local-event-bus.js";
 
-describe("LocalEventBus — conformance", () =>
-  runEventBusConformance(() => new LocalEventBus()));
+describe("LocalEventBus — conformance", () => runEventBusConformance(() => new LocalEventBus()));
 
 describe("LocalEventBus — implementation specifics", () => {
   it("subscriber count drops when the consuming stream is interrupted", async () => {

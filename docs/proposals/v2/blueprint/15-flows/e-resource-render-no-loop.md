@@ -140,7 +140,7 @@ bridges:
 
 ```ts
 const stubBridges: HookBridges = {
-  readTimeline: () => [],            // empty timeline; pure render
+  readTimeline: () => [], // empty timeline; pure render
   appendTimeline: () => {},
   getKnob: () => undefined,
   setKnob: () => {},

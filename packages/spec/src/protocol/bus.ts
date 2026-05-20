@@ -75,10 +75,7 @@ export interface EventBus {
    * continue to use `publish` directly — the journal is not a bus
    * subscriber and `hasSubscriber` doesn't account for it.
    */
-  publishLazy(
-    key: EventKey,
-    build: () => ProtocolEvent,
-  ): Effect.Effect<void, never, never>;
+  publishLazy(key: EventKey, build: () => ProtocolEvent): Effect.Effect<void, never, never>;
 
   /**
    * Probe whether any active subscriber's query could match an

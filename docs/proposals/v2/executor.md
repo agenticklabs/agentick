@@ -176,20 +176,11 @@ drivers for the initial protocol.
 
 ```ts
 interface LanguageModelExecutor extends Executor {
-  project(
-    compiled: CompiledStructure,
-    target: LanguageModelTarget,
-  ): LanguageModelInput;
+  project(compiled: CompiledStructure, target: LanguageModelTarget): LanguageModelInput;
 
-  execute(
-    input: LanguageModelInput,
-    target: LanguageModelTarget,
-  ): AsyncIterable<ExecutorDelta>;
+  execute(input: LanguageModelInput, target: LanguageModelTarget): AsyncIterable<ExecutorDelta>;
 
-  normalize(
-    output: unknown,
-    target: LanguageModelTarget,
-  ): LanguageModelExecutionResult;
+  normalize(output: unknown, target: LanguageModelTarget): LanguageModelExecutionResult;
 
   run(
     compiled: CompiledStructure,
@@ -411,7 +402,7 @@ Normalization rules:
 - Provider-specific metadata needed on later turns MUST round-trip through
   `finishMetadata` or block-level metadata.
 - Empty or malformed provider responses MUST become `ExecutorTerminal {
-  outcome: "failed" }`, not ad-hoc thrown strings.
+outcome: "failed" }`, not ad-hoc thrown strings.
 - The loop executor MUST NOT inspect provider-native output directly.
 
 ## Streaming Model

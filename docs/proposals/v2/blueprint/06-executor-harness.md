@@ -135,20 +135,15 @@ Normalization MUST be deterministic for equivalent target output.
 
 ```ts
 interface ExecutorProtocol {
-  project(input: ProjectInput):
-    Effect<TargetInput, ProjectionError, ExecutorEnv>;
+  project(input: ProjectInput): Effect<TargetInput, ProjectionError, ExecutorEnv>;
 
-  execute(input: ExecuteInput):
-    Effect<TargetOutput, ExecuteError, ExecutorEnv>;
+  execute(input: ExecuteInput): Effect<TargetOutput, ExecuteError, ExecutorEnv>;
 
-  normalize(input: NormalizeInput):
-    Effect<ExecutionResult, NormalizeError, ExecutorEnv>;
+  normalize(input: NormalizeInput): Effect<ExecutionResult, NormalizeError, ExecutorEnv>;
 
-  run(input: RunInput):
-    Effect<ExecutorTerminal, ExecutorError, ExecutorEnv>;
+  run(input: RunInput): Effect<ExecutorTerminal, ExecutorError, ExecutorEnv>;
 
-  abort(executionId: string):
-    Effect<void, never, ExecutorEnv>;
+  abort(executionId: string): Effect<void, never, ExecutorEnv>;
 }
 
 interface ProjectInput {
@@ -220,21 +215,21 @@ executor.use({
 
 Common uses:
 
-| Surface | Use case |
-| --- | --- |
-| `aroundProject` replace | Substitute target input (test fixture) |
-| `aroundExecute` veto | Refuse on rate-limit-hit or quota-exhausted |
-| `onProviderResponse` | Tap response for analytics, recording |
-| `aroundNormalize` replace | Force a stop reason for testing |
+| Surface                   | Use case                                    |
+| ------------------------- | ------------------------------------------- |
+| `aroundProject` replace   | Substitute target input (test fixture)      |
+| `aroundExecute` veto      | Refuse on rate-limit-hit or quota-exhausted |
+| `onProviderResponse`      | Tap response for analytics, recording       |
+| `aroundNormalize` replace | Force a stop reason for testing             |
 
 ## Inbox messages
 
 The executor harness accepts inbound messages at address
 `executor:{executionId}`:
 
-| Message type | Payload | Effect |
-| --- | --- | --- |
-| `abort` | `{ reason?: string }` | Aborts the in-flight provider call. |
+| Message type | Payload               | Effect                              |
+| ------------ | --------------------- | ----------------------------------- |
+| `abort`      | `{ reason?: string }` | Aborts the in-flight provider call. |
 
 ## Outcomes and failures
 
@@ -259,7 +254,7 @@ type ExecutorError =
 interface ProjectionError {
   _tag: "ProjectionError";
   reason: string;
-  feature?: string;                // unsupported feature in target
+  feature?: string; // unsupported feature in target
 }
 
 interface ProviderError {
@@ -300,17 +295,21 @@ interface ExecutorTimeoutError {
 
 ```ts
 interface LanguageModelExecutor extends ExecutorProtocol {
-  project(input: ProjectInput<LanguageModelTarget>):
-    Effect<LanguageModelInput, ProjectionError, ExecutorEnv>;
+  project(
+    input: ProjectInput<LanguageModelTarget>,
+  ): Effect<LanguageModelInput, ProjectionError, ExecutorEnv>;
 
-  execute(input: ExecuteInput<LanguageModelTarget, LanguageModelInput>):
-    Effect<AsyncIterable<ProviderChunk>, ExecuteError, ExecutorEnv>;
+  execute(
+    input: ExecuteInput<LanguageModelTarget, LanguageModelInput>,
+  ): Effect<AsyncIterable<ProviderChunk>, ExecuteError, ExecutorEnv>;
 
-  normalize(input: NormalizeInput<LanguageModelTarget, ProviderResponse>):
-    Effect<LanguageModelExecutionResult, NormalizeError, ExecutorEnv>;
+  normalize(
+    input: NormalizeInput<LanguageModelTarget, ProviderResponse>,
+  ): Effect<LanguageModelExecutionResult, NormalizeError, ExecutorEnv>;
 
-  run(input: RunInput<LanguageModelTarget>):
-    Effect<ExecutorTerminal<LanguageModelExecutionResult>, ExecutorError, ExecutorEnv>;
+  run(
+    input: RunInput<LanguageModelTarget>,
+  ): Effect<ExecutorTerminal<LanguageModelExecutionResult>, ExecutorError, ExecutorEnv>;
 }
 
 interface LanguageModelInput {
@@ -384,14 +383,19 @@ shape for `ExecutorDelta`. Blueprint position `[PROPOSAL]`:
 
 ```ts
 interface ExecutorDelta {
-  kind: "content-delta" | "tool-call-delta" | "reasoning-delta" |
-        "content-block" | "usage" | "stop";
+  kind:
+    | "content-delta"
+    | "tool-call-delta"
+    | "reasoning-delta"
+    | "content-block"
+    | "usage"
+    | "stop";
   blockIndex?: number;
-  delta?: string;                   // for *-delta kinds
-  block?: ContentBlock;             // for "content-block" kind
-  toolCallId?: string;              // for tool-call-delta
+  delta?: string; // for *-delta kinds
+  block?: ContentBlock; // for "content-block" kind
+  toolCallId?: string; // for tool-call-delta
   toolName?: string;
-  usage?: Partial<UsageStats>;      // for "usage" kind
+  usage?: Partial<UsageStats>; // for "usage" kind
   stopReason?: LanguageModelStopReason; // for "stop" kind
   metadata?: Record<string, unknown>;
 }
@@ -445,12 +449,12 @@ SHOULD NOT read another adapter's namespace.
 
 The executor maps `CacheHint` on entries/declarations to provider mechanics:
 
-| Provider | Mechanism |
-| --- | --- |
+| Provider  | Mechanism                                                    |
+| --------- | ------------------------------------------------------------ |
 | Anthropic | `cache_control` on content blocks (4 marker max per request) |
-| OpenAI | Automatic prefix caching; optional `prompt_cache_key` |
-| Google | `cachedContents` API (out-of-band upload, then reference) |
-| AI SDK | Adapter-specific |
+| OpenAI    | Automatic prefix caching; optional `prompt_cache_key`        |
+| Google    | `cachedContents` API (out-of-band upload, then reference)    |
+| AI SDK    | Adapter-specific                                             |
 
 Compiler MUST NOT reorder context for caching. Author intent is preserved.
 The executor reports cache behavior via `executor:provider:request` and

@@ -59,7 +59,10 @@ describe("InMemoryToolRegistry", () => {
     const r = new InMemoryToolRegistry();
     r.add(reg("a"));
     r.add(reg("b"));
-    const names = r.list().map((d) => d.name).sort();
+    const names = r
+      .list()
+      .map((d) => d.name)
+      .sort();
     expect(names).toEqual(["a", "b"]);
   });
 
@@ -67,7 +70,13 @@ describe("InMemoryToolRegistry", () => {
     const r = new InMemoryToolRegistry();
     r.add(
       reg("model-only", {
-        declaration: { id: "model-only", description: "x", inputSchema: {}, name: "model-only", exposure: ["model"] },
+        declaration: {
+          id: "model-only",
+          description: "x",
+          inputSchema: {},
+          name: "model-only",
+          exposure: ["model"],
+        },
       }),
     );
     r.add(
@@ -109,7 +118,10 @@ describe("InMemoryToolRegistry", () => {
     r.add(reg("calc.add"));
     r.add(reg("calc.sub"));
     r.add(reg("fs.read"));
-    const calc = r.list({ nameMatches: "^calc\\." }).map((d) => d.name).sort();
+    const calc = r
+      .list({ nameMatches: "^calc\\." })
+      .map((d) => d.name)
+      .sort();
     expect(calc).toEqual(["calc.add", "calc.sub"]);
   });
 

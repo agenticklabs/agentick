@@ -225,7 +225,7 @@ describe("@agentick/spec — reconciler protocol", () => {
     it("resolve returns T synchronously when cached", () => {
       const data: DataBridge = {
         resolve<T>(key: string, fetcher: () => Promise<T>): T {
-          if (key === "cached") return ("hit" as unknown) as T;
+          if (key === "cached") return "hit" as unknown as T;
           throw fetcher();
         },
         invalidate() {},

@@ -8,12 +8,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { SemanticContentBlock, SemanticNode } from "@agentick/spec";
-import {
-  defineFormatter,
-  markdownFormatter,
-  textFormatter,
-  xmlFormatter,
-} from "../index.js";
+import { defineFormatter, markdownFormatter, textFormatter, xmlFormatter } from "../index.js";
 
 function textBlock(text: string): SemanticContentBlock {
   return { type: "text", text } as SemanticContentBlock;
@@ -67,15 +62,11 @@ describe("markdownFormatter", () => {
       { type: "json", data: { ok: true } } as SemanticContentBlock,
     ];
     const out = markdownFormatter(blocks);
-    expect((out[0] as { text: string }).text).toBe(
-      "```json\n" + '{"ok":true}' + "\n```",
-    );
+    expect((out[0] as { text: string }).text).toBe("```json\n" + '{"ok":true}' + "\n```");
   });
 
   it("formats <strong> as bold", () => {
-    const out = markdownFormatter([
-      semantic({ semantic: "strong", children: [{ text: "go" }] }),
-    ]);
+    const out = markdownFormatter([semantic({ semantic: "strong", children: [{ text: "go" }] })]);
     expect((out[0] as { text: string }).text).toBe("**go**");
   });
 
@@ -90,9 +81,7 @@ describe("markdownFormatter", () => {
         ],
       }),
     ]);
-    expect((out[0] as { text: string }).text).toBe(
-      "hello **world**, *now*",
-    );
+    expect((out[0] as { text: string }).text).toBe("hello **world**, *now*");
   });
 
   it("renders heading with level prop", () => {
@@ -131,9 +120,7 @@ describe("markdownFormatter", () => {
 
 describe("xmlFormatter", () => {
   it("wraps semantic strong with <strong> tags", () => {
-    const out = xmlFormatter([
-      semantic({ semantic: "strong", children: [{ text: "x" }] }),
-    ]);
+    const out = xmlFormatter([semantic({ semantic: "strong", children: [{ text: "x" }] })]);
     expect((out[0] as { text: string }).text).toBe("<strong>x</strong>");
   });
 
@@ -158,9 +145,7 @@ describe("xmlFormatter", () => {
       semantic({
         semantic: "list",
         props: { ordered: true },
-        children: [
-          { semantic: "list-item", children: [{ text: "a" }] },
-        ],
+        children: [{ semantic: "list-item", children: [{ text: "a" }] }],
       }),
     ]);
     expect((out[0] as { text: string }).text).toBe("<ol><li>a</li></ol>");
@@ -170,9 +155,7 @@ describe("xmlFormatter", () => {
     const out = xmlFormatter([
       { type: "code", language: "ts", text: "const x = 1;" } as SemanticContentBlock,
     ]);
-    expect((out[0] as { text: string }).text).toBe(
-      '<code language="ts">const x = 1;</code>',
-    );
+    expect((out[0] as { text: string }).text).toBe('<code language="ts">const x = 1;</code>');
   });
 });
 
@@ -180,10 +163,7 @@ describe("textFormatter", () => {
   it("strips semantic markup", () => {
     const out = textFormatter([
       semantic({
-        children: [
-          { text: "Hello " },
-          { semantic: "strong", children: [{ text: "world" }] },
-        ],
+        children: [{ text: "Hello " }, { semantic: "strong", children: [{ text: "world" }] }],
       }),
     ]);
     expect((out[0] as { text: string }).text).toBe("Hello world");

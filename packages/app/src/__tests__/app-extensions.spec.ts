@@ -17,14 +17,9 @@ import { describe, expect, it, vi } from "vitest";
 import { createApp } from "../create-app.js";
 import { MockLanguageModelExecutor } from "@agentick/executor";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
-import type {
-  AppExtension,
-  AppInstaller,
-  ContentBlock,
-} from "@agentick/spec";
+import type { AppExtension, AppInstaller, ContentBlock } from "@agentick/spec";
 
-const Agent = () =>
-  React.createElement("message", { role: "user" }, "hello");
+const Agent = () => React.createElement("message", { role: "user" }, "hello");
 
 async function mkExecutor() {
   const exec = new MockLanguageModelExecutor(
@@ -121,9 +116,7 @@ describe("AppExtension — installer surfaces", () => {
     expect(captured).not.toBeNull();
     const session = await app.createSession();
     // The bridge should be on the session's HookBridges under "sandbox"
-    const bridges = (
-      session as unknown as { readonly bridges: Record<string, unknown> }
-    ).bridges;
+    const bridges = (session as unknown as { readonly bridges: Record<string, unknown> }).bridges;
     expect(bridges.sandbox).toBe(myBridge);
     await app.closeApp();
   });

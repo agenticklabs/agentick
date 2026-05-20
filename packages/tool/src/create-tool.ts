@@ -112,11 +112,8 @@ export interface CreatedTool {
 
 let autoCounter = 0;
 
-export function createTool<TInput = unknown>(
-  spec: ToolSpec<TInput>,
-): CreatedTool {
-  const handlerRef =
-    spec.handlerRef ?? `tool:${spec.name}:${++autoCounter}`;
+export function createTool<TInput = unknown>(spec: ToolSpec<TInput>): CreatedTool {
+  const handlerRef = spec.handlerRef ?? `tool:${spec.name}:${++autoCounter}`;
 
   const declaration: ToolDeclaration = {
     id: spec.name,
@@ -133,9 +130,7 @@ export function createTool<TInput = unknown>(
     return spec.handler(input as TInput, { ctx });
   };
 
-  const validator: Validator = spec.input
-    ? fromStandardSchema(spec.input)
-    : permissiveValidator;
+  const validator: Validator = spec.input ? fromStandardSchema(spec.input) : permissiveValidator;
 
   return { declaration, handlerRef, handler, validator };
 }

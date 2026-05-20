@@ -47,13 +47,16 @@ public command surface.
 ## What this harness manages
 
 **Identity:**
+
 - `id`, `parentSessionId`, immutable `metadata`.
 
 **Mounted React tree:**
+
 - One mounted instance per active session (the reconciler harness's `mountId`).
 - The tree stays mounted across multiple executions for a session.
 
 **State:**
+
 - `timeline: TimelineEntry[]` — full chronology, persisted incrementally.
 - `knobs: Map<name, KnobState>` — model-visible reactive values.
 - `channels: Map<name, ChannelState>` — named streams.
@@ -62,9 +65,11 @@ public command surface.
 - `useResolved` data cache.
 
 **Lifecycle:**
+
 - `idle | running | paused | hibernating | hibernated | restoring | closed`.
 
 **Persistence:**
+
 - Snapshot policies: snapshot on tick end, on hibernate, on explicit
   `checkpoint()`, etc.
 
@@ -80,20 +85,15 @@ It does NOT manage:
 
 ```ts
 interface SessionHarnessProtocol<P = unknown> {
-  send(input: SendInput<P>):
-    Effect<SessionExecutionHandle, SessionError, SessionEnv>;
+  send(input: SendInput<P>): Effect<SessionExecutionHandle, SessionError, SessionEnv>;
 
-  dispatch(input: DispatchHostInput):
-    Effect<ContentBlock[], DispatchError, SessionEnv>;
+  dispatch(input: DispatchHostInput): Effect<ContentBlock[], DispatchError, SessionEnv>;
 
-  render(input: FormatInput<P>):
-    Effect<SessionExecutionHandle, SessionError, SessionEnv>;
+  render(input: FormatInput<P>): Effect<SessionExecutionHandle, SessionError, SessionEnv>;
 
-  append(input: AppendInput):
-    Effect<SessionExecutionHandle | void, SessionError, SessionEnv>;
+  append(input: AppendInput): Effect<SessionExecutionHandle | void, SessionError, SessionEnv>;
 
-  spawn(input: SpawnInput<P>):
-    Effect<SessionExecutionHandle, SessionError, SessionEnv>;
+  spawn(input: SpawnInput<P>): Effect<SessionExecutionHandle, SessionError, SessionEnv>;
 
   abort(reason?: string): Effect<void, never, SessionEnv>;
 
@@ -104,22 +104,19 @@ interface SessionHarnessProtocol<P = unknown> {
   recover(strategy: RecoveryStrategy): Effect<void, SessionError, SessionEnv>;
 
   hibernate(): Effect<void, SessionError, SessionEnv>;
-  restore(snapshot: SessionSnapshot):
-    Effect<void, SessionError, SessionEnv>;
+  restore(snapshot: SessionSnapshot): Effect<void, SessionError, SessionEnv>;
 
   close(): Effect<void, never, SessionEnv>;
 
   // State application — used by loop executor, host door, subscription handlers
-  applyExecutorResult(input: ApplyExecutorResultInput):
-    Effect<ApplyResult, StateApplyError, SessionEnv>;
-  applyToolResults(input: ApplyToolResultsInput):
-    Effect<ApplyResult, StateApplyError, SessionEnv>;
-  appendEntry(input: AppendEntryInput):
-    Effect<ApplyResult, StateApplyError, SessionEnv>;
+  applyExecutorResult(
+    input: ApplyExecutorResultInput,
+  ): Effect<ApplyResult, StateApplyError, SessionEnv>;
+  applyToolResults(input: ApplyToolResultsInput): Effect<ApplyResult, StateApplyError, SessionEnv>;
+  appendEntry(input: AppendEntryInput): Effect<ApplyResult, StateApplyError, SessionEnv>;
 
   // Tick-end forwarding (called from session's loop.onTickEnd handler)
-  notifyLifecycle(input: NotifyTickEndInput):
-    Effect<TickEndDecision, SessionError, SessionEnv>;
+  notifyLifecycle(input: NotifyTickEndInput): Effect<TickEndDecision, SessionError, SessionEnv>;
 
   // Observation (synchronous reads against in-memory state)
   timeline(query?: TimelineQuery): TimelineEntry[];
@@ -166,7 +163,7 @@ and wants the agent to react.
 ```ts
 interface AppendInput {
   entry: TimelineEntry;
-  trigger?: boolean;             // run a tick after appending
+  trigger?: boolean; // run a tick after appending
 }
 ```
 
@@ -211,11 +208,11 @@ where it stopped. Distinct from `abort` (which terminates).
 `[GAP]` — pause/resume is in the source proposals' command list but the
 semantics are not described. **Blueprint position `[PROPOSAL]`:**
 
-| State | `pause` | `resume` |
-| --- | --- | --- |
-| `idle` | no-op | error |
-| `running` | mark; complete current tick; transition to `paused` | error |
-| `paused` | error | re-enter loop with same execution context |
+| State     | `pause`                                             | `resume`                                  |
+| --------- | --------------------------------------------------- | ----------------------------------------- |
+| `idle`    | no-op                                               | error                                     |
+| `running` | mark; complete current tick; transition to `paused` | error                                     |
+| `paused`  | error                                               | re-enter loop with same execution context |
 
 Sign-off needed.
 
@@ -320,14 +317,14 @@ close
 
 Use cases:
 
-| Interceptor | Use case |
-| --- | --- |
-| `send` veto | Refuse send during pause |
-| `send` defer | Queue if knob limit exceeded |
-| `dispatch` replace | Host-side tool sandboxing |
-| `hibernate` defer | Critical-region in flight; retry after cleanup |
-| `hibernate` veto | Ongoing payment processing must not hibernate |
-| `close` proceed-with-cleanup | Persist final snapshot, flush channels |
+| Interceptor                  | Use case                                       |
+| ---------------------------- | ---------------------------------------------- |
+| `send` veto                  | Refuse send during pause                       |
+| `send` defer                 | Queue if knob limit exceeded                   |
+| `dispatch` replace           | Host-side tool sandboxing                      |
+| `hibernate` defer            | Critical-region in flight; retry after cleanup |
+| `hibernate` veto             | Ongoing payment processing must not hibernate  |
+| `close` proceed-with-cleanup | Persist final snapshot, flush channels         |
 
 `[V1-REPLACED]` of v1's `LifecycleCallbacks` (`onTickStart`, `onTickEnd`,
 `onComplete`, `onError`) — they become observers on the corresponding
@@ -337,8 +334,8 @@ event names; or interceptors when they need to change behavior.
 
 ```ts
 type SessionError =
-  | TickError                        // proxied from loop executor
-  | DispatchError                    // proxied from tool executor
+  | TickError // proxied from loop executor
+  | DispatchError // proxied from tool executor
   | TimelineError
   | KnobError
   | ChannelError
@@ -433,7 +430,7 @@ interface SessionState {
   currentTick: number;
 
   // Mounted React tree
-  mountId?: string;                              // empty when idle/hibernated
+  mountId?: string; // empty when idle/hibernated
 
   // Timeline (persisted incrementally — see 14-state-tiers.md)
   timeline: TimelineEntry[];
@@ -476,9 +473,9 @@ interface ChannelState {
 
 interface SubscriptionIntent {
   id: string;
-  source: string;                           // e.g., "webhook:/orders"
+  source: string; // e.g., "webhook:/orders"
   handlerId: string;
-  config: Record<string, unknown>;          // source-specific
+  config: Record<string, unknown>; // source-specific
   registeredAt: number;
 }
 
@@ -568,17 +565,17 @@ reconciler harness. Each harness on its own is independent.
 The session harness accepts inbound messages at address
 `session:{sessionId}`:
 
-| Message type | Payload | Effect |
-| --- | --- | --- |
-| `send` | `SendInput` | Triggers an execution. Idempotent on `messageId`. |
-| `dispatch` | `{ name, input }` | Host-door tool dispatch. |
-| `abort` | `{ reason: string }` | Aborts in-flight execution. |
-| `pause` | `{}` | Pauses session at next tick boundary. |
-| `resume` | `{}` | Resumes from pause. |
-| `inject-input` | `Message` | Pushes a message into the running execution. |
-| `hibernate` | `{}` | Initiates hibernate (subject to interceptors). |
-| `recover` | `RecoveryStrategy` | Triggers recovery procedure. |
-| `close` | `{}` | Terminates session. |
+| Message type   | Payload              | Effect                                            |
+| -------------- | -------------------- | ------------------------------------------------- |
+| `send`         | `SendInput`          | Triggers an execution. Idempotent on `messageId`. |
+| `dispatch`     | `{ name, input }`    | Host-door tool dispatch.                          |
+| `abort`        | `{ reason: string }` | Aborts in-flight execution.                       |
+| `pause`        | `{}`                 | Pauses session at next tick boundary.             |
+| `resume`       | `{}`                 | Resumes from pause.                               |
+| `inject-input` | `Message`            | Pushes a message into the running execution.      |
+| `hibernate`    | `{}`                 | Initiates hibernate (subject to interceptors).    |
+| `recover`      | `RecoveryStrategy`   | Triggers recovery procedure.                      |
+| `close`        | `{}`                 | Terminates session.                               |
 
 These mirror the command surface but are reachable by external callers
 who don't hold a typed reference. In Tier 0/1 they dispatch via local
@@ -702,7 +699,7 @@ an Effect Semaphore.
 
 ```ts
 interface SessionSnapshot {
-  version: string;                        // [V1-INHERITED]
+  version: string; // [V1-INHERITED]
   sessionId: string;
   parentSessionId: string | null;
   metadata: Record<string, unknown>;
@@ -752,12 +749,13 @@ interface SessionExecutionHandle {
   abort(reason?: string): void;
 }
 
-interface SendResult {                    // [V1-INHERITED]
+interface SendResult {
+  // [V1-INHERITED]
   response: string;
   outputs: Record<string, unknown>;
   usage: UsageStats;
   stopReason?: string;
-  raw: RenderedTree;                 // [V1-REPLACED] of COMInput
+  raw: RenderedTree; // [V1-REPLACED] of COMInput
 }
 ```
 

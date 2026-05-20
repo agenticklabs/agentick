@@ -22,10 +22,7 @@
  */
 
 import type { RenderedTree } from "../data/rendered-tree.js";
-import type {
-  ExecutionTarget,
-  LanguageModelTarget,
-} from "../data/execution-target.js";
+import type { ExecutionTarget, LanguageModelTarget } from "../data/execution-target.js";
 import type {
   ExecutionResult,
   ExecutorError,
@@ -42,8 +39,11 @@ import type {
  * own slice. `run`'s E channel is the union — see `ExecutorError` in
  * `data/execution-result.ts`.
  */
-export type ProjectionError =
-  | { readonly _tag: "ProjectionFailed"; readonly reason: string; readonly cause?: unknown };
+export type ProjectionError = {
+  readonly _tag: "ProjectionFailed";
+  readonly reason: string;
+  readonly cause?: unknown;
+};
 
 export type ExecuteError =
   | { readonly _tag: "ProviderRejected"; readonly status?: number; readonly cause?: unknown }
@@ -51,8 +51,7 @@ export type ExecuteError =
   | { readonly _tag: "ProviderAborted"; readonly reason?: string }
   | { readonly _tag: "StreamFailed"; readonly cause: unknown };
 
-export type NormalizeError =
-  | { readonly _tag: "NormalizationFailed"; readonly cause: unknown };
+export type NormalizeError = { readonly _tag: "NormalizationFailed"; readonly cause: unknown };
 
 // ============================================================================
 // Command inputs
@@ -158,8 +157,18 @@ export interface LanguageModelMessage {
 export type LanguageModelMessagePart =
   | { readonly type: "text"; readonly text: string }
   | { readonly type: "image"; readonly imageUrl: string; readonly mediaType?: string }
-  | { readonly type: "tool_use"; readonly id: string; readonly name: string; readonly input: unknown }
-  | { readonly type: "tool_result"; readonly toolUseId: string; readonly content: ReadonlyArray<LanguageModelMessagePart>; readonly isError?: boolean };
+  | {
+      readonly type: "tool_use";
+      readonly id: string;
+      readonly name: string;
+      readonly input: unknown;
+    }
+  | {
+      readonly type: "tool_result";
+      readonly toolUseId: string;
+      readonly content: ReadonlyArray<LanguageModelMessagePart>;
+      readonly isError?: boolean;
+    };
 
 export interface LanguageModelTool {
   readonly name: string;
@@ -171,7 +180,10 @@ export interface LanguageModelParameters {
   readonly temperature?: number;
   readonly maxOutputTokens?: number;
   readonly stopSequences?: ReadonlyArray<string>;
-  readonly responseFormat?: { readonly type: "text" | "json" | "json_schema"; readonly schema?: Record<string, unknown> };
+  readonly responseFormat?: {
+    readonly type: "text" | "json" | "json_schema";
+    readonly schema?: Record<string, unknown>;
+  };
 }
 
 // ============================================================================
@@ -255,12 +267,11 @@ export interface ExecutorProtocol<
  * shipped reference impl is `MockLanguageModelExecutor` in
  * `@agentick/executor`; provider adapters in Phase 4c.
  */
-export interface LanguageModelExecutor
-  extends ExecutorProtocol<
-    LanguageModelInput,
-    unknown,
-    LanguageModelExecutionResult
-  > {
+export interface LanguageModelExecutor extends ExecutorProtocol<
+  LanguageModelInput,
+  unknown,
+  LanguageModelExecutionResult
+> {
   /** Type-narrowed for documentation; not load-bearing structurally. */
   readonly family: "language-model";
 
@@ -307,10 +318,7 @@ export interface ExecutorFactory {
 
 /** Type guard: distinguishes a factory from a constructed executor. */
 export function isExecutorFactory(v: unknown): v is ExecutorFactory {
-  return (
-    typeof v === "function" &&
-    (v as { executorFactory?: unknown }).executorFactory === true
-  );
+  return typeof v === "function" && (v as { executorFactory?: unknown }).executorFactory === true;
 }
 
 // Re-export the executable target alias for ergonomic imports.

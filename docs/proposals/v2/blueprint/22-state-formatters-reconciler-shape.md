@@ -68,8 +68,8 @@ interface SemanticNode {
   readonly semantic?: SemanticType;
   readonly props?: Readonly<Record<string, unknown>>;
   readonly children?: readonly SemanticNode[];
-  readonly rendererRef?: FormatterRef;  // v2's spec-firewall replacement
-                                         // for v1's `formatter: Formatter`
+  readonly rendererRef?: FormatterRef; // v2's spec-firewall replacement
+  // for v1's `formatter: Formatter`
 }
 ```
 

@@ -9,11 +9,7 @@
 import { describe, expect, it } from "vitest";
 
 import { MockLanguageModelExecutor } from "@agentick/executor";
-import {
-  LocalEventBus,
-  LocalInbox,
-  MemoryJournal,
-} from "@agentick/runtime";
+import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
 import { InMemoryHandlerResolver, ToolExecutorHarness } from "@agentick/tool-executor";
 import { LoopExecutorHarness } from "@agentick/loop-executor";
 import { ReconcilerHarness, stubBridges } from "@agentick/reconciler-react";
@@ -81,9 +77,7 @@ async function mkSession(
   const reconciler = new ReconcilerHarness("test-r", journal, bus, inbox);
   const loop = new LoopExecutorHarness("test-l", journal, bus, inbox);
   const resolver = new InMemoryHandlerResolver();
-  resolver.register("h.calc", async () => [
-    { type: "text", text: "42" },
-  ]);
+  resolver.register("h.calc", async () => [{ type: "text", text: "42" }]);
   const tools = new ToolExecutorHarness("test-t", journal, bus, inbox, {
     handlerResolver: resolver,
     ...(opts.tools ? { initialTools: opts.tools } : {}),
@@ -99,12 +93,8 @@ async function mkSession(
     executor,
     toolExecutor: tools,
     target,
-    ...(opts.spawnContext !== undefined
-      ? { spawnContext: opts.spawnContext }
-      : {}),
-    ...(opts.parentSessionId !== undefined
-      ? { parentSessionId: opts.parentSessionId }
-      : {}),
+    ...(opts.spawnContext !== undefined ? { spawnContext: opts.spawnContext } : {}),
+    ...(opts.parentSessionId !== undefined ? { parentSessionId: opts.parentSessionId } : {}),
   });
   await session.ready;
   await session.mountReady;
@@ -167,9 +157,8 @@ describe("SessionHarness — queue", () => {
     // Track executions seen on the bus.
     const { session, bus } = await mkSession();
     const seen: string[] = [];
-    const unsub = bus.subscribeCallback?.(
-      { surface: "loop", phase: "requested" },
-      (ev) => seen.push(ev.name),
+    const unsub = bus.subscribeCallback?.({ surface: "loop", phase: "requested" }, (ev) =>
+      seen.push(ev.name),
     );
     void unsub;
 
@@ -178,9 +167,7 @@ describe("SessionHarness — queue", () => {
     await new Promise((r) => setTimeout(r, 50));
 
     const tl = session.timeline();
-    const hasAssistant = tl.some(
-      (e) => e.kind === "message" && e.message.role === "assistant",
-    );
+    const hasAssistant = tl.some((e) => e.kind === "message" && e.message.role === "assistant");
     expect(hasAssistant).toBe(true);
     await session.close();
   });
@@ -197,9 +184,7 @@ describe("SessionHarness — queue", () => {
     const found = tl.find(
       (e) =>
         e.kind === "message" &&
-        e.message.content.some(
-          (b) => b.type === "text" && b.text === "should-be-user",
-        ),
+        e.message.content.some((b) => b.type === "text" && b.text === "should-be-user"),
     );
     expect(found).toBeDefined();
     if (found && found.kind === "message") {
@@ -251,9 +236,7 @@ describe("SessionHarness — observe", () => {
     });
     expect(typeof entryId).toBe("string");
     const tl = session.timeline();
-    const event = tl.find(
-      (e) => e.kind === "message" && e.message.role === "event",
-    );
+    const event = tl.find((e) => e.kind === "message" && e.message.role === "event");
     expect(event).toBeDefined();
     if (event && event.kind === "message") {
       expect(event.message.metadata?.type).toBe("user-interaction");
@@ -371,9 +354,7 @@ describe("SessionHarness — knob handle", () => {
 describe("SessionHarness — spawn", () => {
   it("throws when no spawnContext is wired", async () => {
     const { session } = await mkSession();
-    await expect(
-      session.spawn({ agent: null }),
-    ).rejects.toMatchObject({ _tag: "ExecutionFailed" });
+    await expect(session.spawn({ agent: null })).rejects.toMatchObject({ _tag: "ExecutionFailed" });
     await session.close();
   });
 

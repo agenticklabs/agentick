@@ -423,7 +423,7 @@ Example:
 
 This produces no `context.entries`, but may produce:
 
-```ts
+````ts
 {
   context: { entries: [] },
   content: [
@@ -432,7 +432,7 @@ This produces no `context.entries`, but may produce:
   ],
   text: "Hello **world**\n\n```json\n{\"ok\":true}\n```"
 }
-```
+````
 
 The exact `text` value depends on the selected renderer.
 
@@ -574,9 +574,9 @@ A compiled structure MUST NOT include executable handlers:
     tools: [
       {
         name: "search",
-        handler: async () => [] // invalid
-      }
-    ]
+        handler: async () => [], // invalid
+      },
+    ];
   }
 }
 ```

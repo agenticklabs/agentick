@@ -31,34 +31,34 @@ Compile output    one tick                       renderTree      HTML (rendered 
 
 ## Detailed tier table
 
-| State element | Tier | Owner | Persists across hibernate? | Persists across crash? | Browser analog |
-| --- | --- | --- | --- | --- | --- |
-| `useState` / `useReducer` cells | Reactive tree | reconciler harness fiber | yes (compiler snapshot) | yes (in snapshot) | React state |
-| `useSignal` cells | Reactive tree | reconciler harness | yes (compiler snapshot) | yes | React state |
-| Pending async component promises | Reactive tree | reconciler harness | canceled on hibernate; re-run on restore | re-run | n/a |
-| `useData` resolved cache | Reactive tree | reconciler harness (runtime-bridged) | yes (Layer 2) | yes | sessionStorage |
-| Tool `use:` deps | Reactive tree (per render) | reconciler harness | recaptured on next render | recaptured | n/a |
-| Active mountId | Reactive tree | reconciler harness | unmounted on hibernate; new mountId on restore | new on restore | window |
-| Timeline entries | Session-side / Persistent | Session + persistence | yes (incremental write) | yes | history |
-| Knob values | Session-side / Persistent | Session + persistence | yes | yes | localStorage |
-| Channel pointers (lastSequence, retention) | Session-side / Persistent | Session + persistence | yes | yes | n/a |
-| Channel events (recent buffer) | Session-side / Persistent | Channel store | yes (per retention policy) | yes | n/a |
-| Subscription intents | Session-side / Persistent | Session + persistence | yes | yes | service workers |
-| Resolve cache (Layer 1) | Session-side / Persistent | Session + persistence | yes | yes | sessionStorage |
-| Spawn parent reference | Session-side | Session | yes (parentSessionId; ref re-resolved) | yes | n/a |
-| Knob declarations (schemas) | Reactive tree | reconciler harness | re-collected on render | re-collected | n/a |
-| Sandbox connection | Active resources | Scope | NO — released | NO | running process |
-| MCP client connections | Active resources | Scope | NO — released | NO | running process |
-| Open file handles | Active resources | Scope | NO | NO | open files |
-| In-flight provider stream | Active resources | Scope | aborted | aborted | open fetch |
-| Tool handler in progress | Active resources | Scope | aborted | aborted | open fetch |
-| Loop executor's tick state | Active resources | Scope (per execution) | aborted; partial state in timeline | timeline entry preserved | n/a |
-| Per-session PubSub | Active resources | Scope | re-created on activate | re-created | n/a |
-| Compiler-private snapshot | Persistent (when hibernated) | Session snapshot record | yes | yes | n/a |
-| Session record (status, currentTick, metadata) | Persistent | Persistence backend | yes | yes | n/a |
-| App configuration (rootElement, opts) | App-level | App harness (in process) | n/a | n/a (re-instantiated on app start) | application code |
-| Cluster routing table | Cluster-level | Cluster framework | n/a (cluster-managed) | yes (cluster persists) | DNS |
-| Auth identity | Per-request | Gateway | no | no | session cookie |
+| State element                                  | Tier                         | Owner                                | Persists across hibernate?                     | Persists across crash?             | Browser analog   |
+| ---------------------------------------------- | ---------------------------- | ------------------------------------ | ---------------------------------------------- | ---------------------------------- | ---------------- |
+| `useState` / `useReducer` cells                | Reactive tree                | reconciler harness fiber             | yes (compiler snapshot)                        | yes (in snapshot)                  | React state      |
+| `useSignal` cells                              | Reactive tree                | reconciler harness                   | yes (compiler snapshot)                        | yes                                | React state      |
+| Pending async component promises               | Reactive tree                | reconciler harness                   | canceled on hibernate; re-run on restore       | re-run                             | n/a              |
+| `useData` resolved cache                       | Reactive tree                | reconciler harness (runtime-bridged) | yes (Layer 2)                                  | yes                                | sessionStorage   |
+| Tool `use:` deps                               | Reactive tree (per render)   | reconciler harness                   | recaptured on next render                      | recaptured                         | n/a              |
+| Active mountId                                 | Reactive tree                | reconciler harness                   | unmounted on hibernate; new mountId on restore | new on restore                     | window           |
+| Timeline entries                               | Session-side / Persistent    | Session + persistence                | yes (incremental write)                        | yes                                | history          |
+| Knob values                                    | Session-side / Persistent    | Session + persistence                | yes                                            | yes                                | localStorage     |
+| Channel pointers (lastSequence, retention)     | Session-side / Persistent    | Session + persistence                | yes                                            | yes                                | n/a              |
+| Channel events (recent buffer)                 | Session-side / Persistent    | Channel store                        | yes (per retention policy)                     | yes                                | n/a              |
+| Subscription intents                           | Session-side / Persistent    | Session + persistence                | yes                                            | yes                                | service workers  |
+| Resolve cache (Layer 1)                        | Session-side / Persistent    | Session + persistence                | yes                                            | yes                                | sessionStorage   |
+| Spawn parent reference                         | Session-side                 | Session                              | yes (parentSessionId; ref re-resolved)         | yes                                | n/a              |
+| Knob declarations (schemas)                    | Reactive tree                | reconciler harness                   | re-collected on render                         | re-collected                       | n/a              |
+| Sandbox connection                             | Active resources             | Scope                                | NO — released                                  | NO                                 | running process  |
+| MCP client connections                         | Active resources             | Scope                                | NO — released                                  | NO                                 | running process  |
+| Open file handles                              | Active resources             | Scope                                | NO                                             | NO                                 | open files       |
+| In-flight provider stream                      | Active resources             | Scope                                | aborted                                        | aborted                            | open fetch       |
+| Tool handler in progress                       | Active resources             | Scope                                | aborted                                        | aborted                            | open fetch       |
+| Loop executor's tick state                     | Active resources             | Scope (per execution)                | aborted; partial state in timeline             | timeline entry preserved           | n/a              |
+| Per-session PubSub                             | Active resources             | Scope                                | re-created on activate                         | re-created                         | n/a              |
+| Compiler-private snapshot                      | Persistent (when hibernated) | Session snapshot record              | yes                                            | yes                                | n/a              |
+| Session record (status, currentTick, metadata) | Persistent                   | Persistence backend                  | yes                                            | yes                                | n/a              |
+| App configuration (rootElement, opts)          | App-level                    | App harness (in process)             | n/a                                            | n/a (re-instantiated on app start) | application code |
+| Cluster routing table                          | Cluster-level                | Cluster framework                    | n/a (cluster-managed)                          | yes (cluster persists)             | DNS              |
+| Auth identity                                  | Per-request                  | Gateway                              | no                                             | no                                 | session cookie   |
 
 ## Tier 1 — Reactive tree
 
@@ -229,24 +229,29 @@ interface PersistenceBackend {
   deleteSession(id: string): Effect<void, PersistenceError>;
 
   // Timeline (incremental)
-  appendEntry(sessionId: string, entry: TimelineEntry):
-    Effect<void, PersistenceError>;
-  loadEntries(sessionId: string, window: EntryWindow):
-    Effect<TimelineEntry[], PersistenceError>;
-  queryEntries(sessionId: string, query: EntryQuery):
-    Effect<TimelineEntry[], PersistenceError>;
+  appendEntry(sessionId: string, entry: TimelineEntry): Effect<void, PersistenceError>;
+  loadEntries(sessionId: string, window: EntryWindow): Effect<TimelineEntry[], PersistenceError>;
+  queryEntries(sessionId: string, query: EntryQuery): Effect<TimelineEntry[], PersistenceError>;
 
   // Channel storage (per channel, per session)
-  appendChannelEvent(sessionId: string, channel: string, event: ChannelEvent):
-    Effect<void, PersistenceError>;
-  readChannelEvents(sessionId: string, channel: string, range: ChannelRange):
-    Effect<ChannelEvent[], PersistenceError>;
-  trimChannel(sessionId: string, channel: string, retention: ChannelRetention):
-    Effect<void, PersistenceError>;
+  appendChannelEvent(
+    sessionId: string,
+    channel: string,
+    event: ChannelEvent,
+  ): Effect<void, PersistenceError>;
+  readChannelEvents(
+    sessionId: string,
+    channel: string,
+    range: ChannelRange,
+  ): Effect<ChannelEvent[], PersistenceError>;
+  trimChannel(
+    sessionId: string,
+    channel: string,
+    retention: ChannelRetention,
+  ): Effect<void, PersistenceError>;
 
   // Content (blobs)
-  saveContent(ref: ContentRef, content: Content):
-    Effect<void, PersistenceError>;
+  saveContent(ref: ContentRef, content: Content): Effect<void, PersistenceError>;
   loadContent(ref: ContentRef): Effect<Content, PersistenceError>;
 }
 ```
@@ -358,14 +363,14 @@ rules for the full type and behavior.
 
 Quick recap of what's in:
 
-| In snapshot | Where it lives in code |
-| --- | --- |
-| `useState` / `useReducer` cell values | per `(componentPath, hookIndex)` |
-| `useSignal` cell values | same indexing |
-| `useData` Layer-2 cache | keyed by user cache key |
-| Pending async component paths | bare list |
-| Active renderer scope stack | `FormatterRef[]` |
-| Compile diagnostics + suppressed-cell audit | `FormatDiagnostics` |
+| In snapshot                                 | Where it lives in code           |
+| ------------------------------------------- | -------------------------------- |
+| `useState` / `useReducer` cell values       | per `(componentPath, hookIndex)` |
+| `useSignal` cell values                     | same indexing                    |
+| `useData` Layer-2 cache                     | keyed by user cache key          |
+| Pending async component paths               | bare list                        |
+| Active renderer scope stack                 | `FormatterRef[]`                 |
+| Compile diagnostics + suppressed-cell audit | `FormatDiagnostics`              |
 
 Quick recap of what's NOT in:
 
@@ -427,22 +432,22 @@ interface TimelineEntry {
   // Stable identity
   id: string;
   sessionId: string;
-  sequence: number;                        // monotonic per session
-  tick: number;                            // tick this entry belongs to
+  sequence: number; // monotonic per session
+  tick: number; // tick this entry belongs to
 
   // Persistence metadata
-  createdAt: string;                       // ISO 8601
+  createdAt: string; // ISO 8601
   executionId?: string;
 
   // Content envelope
   kind: "message" | "event" | "tool_call" | "tool_result";
-  message?: Message;                       // when kind === "message"
-  event?: ProtocolEvent;                   // when kind === "event"
-  toolCall?: ToolCall;                     // when kind === "tool_call"
-  toolResult?: ToolResult;                 // when kind === "tool_result"
+  message?: Message; // when kind === "message"
+  event?: ProtocolEvent; // when kind === "event"
+  toolCall?: ToolCall; // when kind === "tool_call"
+  toolResult?: ToolResult; // when kind === "tool_result"
 
   // Optional storage references
-  largeContentRefs?: ContentRef[];         // for blobs stored separately
+  largeContentRefs?: ContentRef[]; // for blobs stored separately
 }
 ```
 

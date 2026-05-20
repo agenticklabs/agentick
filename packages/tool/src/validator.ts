@@ -10,11 +10,7 @@
  * types they target are spec-owned.
  */
 
-import type {
-  StandardSchemaV1,
-  Validator,
-  ValidatorResult,
-} from "@agentick/spec";
+import type { StandardSchemaV1, Validator, ValidatorResult } from "@agentick/spec";
 
 /** A validator that accepts every input unchanged. */
 export const permissiveValidator: Validator = {
@@ -28,9 +24,7 @@ export const permissiveValidator: Validator = {
  * Zod, Valibot, ArkType, Effect Schema, and any other library that
  * implements Standard Schema v1.
  */
-export function fromStandardSchema<I, O>(
-  schema: StandardSchemaV1<I, O>,
-): Validator {
+export function fromStandardSchema<I, O>(schema: StandardSchemaV1<I, O>): Validator {
   return {
     validate(value: unknown): ValidatorResult | Promise<ValidatorResult> {
       const result = schema["~standard"].validate(value);

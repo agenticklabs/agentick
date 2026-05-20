@@ -4,11 +4,11 @@
   "description": "In-process substrate (MemoryJournal, LocalEventBus, LocalInbox, BaseHarness) for Agentick v2. The default implementation of the @agentick/spec protocol interfaces.",
   "keywords": [
     "agent",
-    "ai",
     "agentick",
+    "ai",
+    "harness",
     "runtime",
-    "substrate",
-    "harness"
+    "substrate"
   ],
   "license": "MIT",
   "author": "Ryan Lindgren",

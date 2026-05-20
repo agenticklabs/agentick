@@ -52,11 +52,7 @@ export type MediaSourceType = "url" | "base64" | "reference" | "s3" | "gcs";
 
 // Common MIME hints — open strings, but typed for ergonomics.
 export type ImageMimeType = "image/jpeg" | "image/png" | "image/gif" | "image/webp" | (string & {});
-export type DocumentMimeType =
-  | "application/pdf"
-  | "text/plain"
-  | "text/markdown"
-  | (string & {});
+export type DocumentMimeType = "application/pdf" | "text/plain" | "text/markdown" | (string & {});
 export type AudioMimeType = "audio/mpeg" | "audio/wav" | "audio/ogg" | "audio/mp4" | (string & {});
 export type VideoMimeType = "video/mp4" | "video/webm" | (string & {});
 
@@ -396,8 +392,4 @@ export type AssistantAllowedBlock =
   | CodeExecutionResultBlock
   | CustomContentBlock;
 
-export type EventAllowedBlock =
-  | TextBlock
-  | UserActionBlock
-  | SystemEventBlock
-  | StateChangeBlock;
+export type EventAllowedBlock = TextBlock | UserActionBlock | SystemEventBlock | StateChangeBlock;

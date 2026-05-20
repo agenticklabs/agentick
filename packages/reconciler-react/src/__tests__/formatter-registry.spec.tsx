@@ -16,9 +16,7 @@ import { defineFormatter, type DefinedFormatter } from "@agentick/formatters";
 import { ReconcilerHarness } from "../harness/reconciler-harness.js";
 import { stubBridges } from "../bridges/stub-bridges.js";
 
-async function makeHarness(
-  options: ConstructorParameters<typeof ReconcilerHarness>[4] = {},
-) {
+async function makeHarness(options: ConstructorParameters<typeof ReconcilerHarness>[4] = {}) {
   const h = new ReconcilerHarness(
     "h_fmt",
     new MemoryJournal(),
@@ -36,11 +34,7 @@ describe("ReconcilerHarness — formatter registry slot", () => {
       id: "shout",
       format: "markdown",
       render: (blocks) =>
-        blocks.map((b) =>
-          b.type === "text"
-            ? { type: "text", text: b.text.toUpperCase() }
-            : b,
-        ),
+        blocks.map((b) => (b.type === "text" ? { type: "text", text: b.text.toUpperCase() } : b)),
     });
 
     const harness = await makeHarness({
@@ -81,11 +75,7 @@ describe("ReconcilerHarness — formatter registry slot", () => {
     await harness.mount({
       mountId: "m_default",
       sessionId: "s",
-      element: React.createElement(
-        "section",
-        { id: "s", title: "T" },
-        "body",
-      ),
+      element: React.createElement("section", { id: "s", title: "T" }, "body"),
       bridges: stubBridges(),
       defaultFormatter: { id: "markdown", format: "markdown" },
     });

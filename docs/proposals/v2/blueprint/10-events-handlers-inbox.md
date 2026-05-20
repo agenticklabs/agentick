@@ -51,11 +51,11 @@ through ③ or ④. Cross-process control is through ②.
 ```ts
 interface EventEnvelope {
   id: string;
-  opId?: string;                    // present on operation lifecycle events
+  opId?: string; // present on operation lifecycle events
   surface: EventSurface;
-  name: string;                     // hierarchical: <surface>:<domain>:<action>
-  phase: EventPhase;                // requested | before | delta | terminal
-  outcome?: CommandOutcome;         // present on phase: "terminal"
+  name: string; // hierarchical: <surface>:<domain>:<action>
+  phase: EventPhase; // requested | before | delta | terminal
+  outcome?: CommandOutcome; // present on phase: "terminal"
   timestamp: number;
   scope: EventScope;
   payload?: unknown;
@@ -64,8 +64,15 @@ interface EventEnvelope {
 }
 
 type EventSurface =
-  | "app" | "session" | "loop" | "reconciler" | "formatter" | "executor" | "tool"
-  | "cluster" | "gateway";
+  | "app"
+  | "session"
+  | "loop"
+  | "reconciler"
+  | "formatter"
+  | "executor"
+  | "tool"
+  | "cluster"
+  | "gateway";
 
 type EventPhase = "requested" | "before" | "delta" | "terminal";
 
@@ -106,10 +113,7 @@ type NameQuery =
 ### Subscribing
 
 ```ts
-session.events.subscribe(
-  { name: { prefix: "tool:dispatch" } },
-  (envelope) => audit.log(envelope),
-);
+session.events.subscribe({ name: { prefix: "tool:dispatch" } }, (envelope) => audit.log(envelope));
 
 app.events.subscribe(
   { name: { exact: "loop:tick:terminal" }, outcome: ["failed", "vetoed"] },
@@ -148,12 +152,12 @@ session:lifecycle:hibernate:terminal:succeeded
 requested ──► before? ──► delta* ──► terminal
 ```
 
-| Phase | Required? | Notes |
-| --- | --- | --- |
-| `requested` | exactly once | argument bound |
-| `before` | zero or one | for interceptable ops; handlers/middleware fire here |
-| `delta` | zero or more | optional incremental progress |
-| `terminal` | exactly once | MUST include `outcome` |
+| Phase       | Required?    | Notes                                                |
+| ----------- | ------------ | ---------------------------------------------------- |
+| `requested` | exactly once | argument bound                                       |
+| `before`    | zero or one  | for interceptable ops; handlers/middleware fire here |
+| `delta`     | zero or more | optional incremental progress                        |
+| `terminal`  | exactly once | MUST include `outcome`                               |
 
 A subscriber that ignores all `delta` events MUST be able to reconstruct
 the correct outcome from `terminal` alone — the **terminal correctness
@@ -193,8 +197,9 @@ react.onCompileForcedStable((diagnostics) => { ... });
 ### Handler signature
 
 ```ts
-type LifecycleHandler<TPayload, TVerdict = void> =
-  (payload: TPayload) => Effect<TVerdict, never, never> | Promise<TVerdict> | TVerdict;
+type LifecycleHandler<TPayload, TVerdict = void> = (
+  payload: TPayload,
+) => Effect<TVerdict, never, never> | Promise<TVerdict> | TVerdict;
 ```
 
 Handlers may return:
@@ -216,9 +221,9 @@ global / runtime ────► app ────► session
 
 Multi-handler ordering at the same lifecycle moment:
 
-| Phase | Order |
-| --- | --- |
-| `before` | global → app → session (outer wraps inner) |
+| Phase                | Order                                          |
+| -------------------- | ---------------------------------------------- |
+| `before`             | global → app → session (outer wraps inner)     |
 | `after` / `terminal` | session → app → global (inner completes first) |
 
 Within a scope, handlers run in registration order. Each receives the
@@ -293,13 +298,13 @@ operation. Different shapes, different uses.
 
 ```ts
 interface MessageEnvelope {
-  addressedTo: string;              // `{surface}:{scopeId}`
-  type: string;                     // discriminator within harness's accepted messages
-  from?: string;                    // sender address for response/ack
-  messageId: string;                // idempotency key (caller-supplied; defaults to ULID)
-  parentOpId?: string;              // causality
+  addressedTo: string; // `{surface}:{scopeId}`
+  type: string; // discriminator within harness's accepted messages
+  from?: string; // sender address for response/ack
+  messageId: string; // idempotency key (caller-supplied; defaults to ULID)
+  parentOpId?: string; // causality
   correlationId?: string;
-  payload?: unknown;                // typed by message type
+  payload?: unknown; // typed by message type
   timestamp: number;
 }
 ```
@@ -349,15 +354,15 @@ registry. In Tier 2 (cluster), unknown-locally addresses route via
 
 ### Per-harness inbox messages
 
-| Harness | Common inbox messages |
-| --- | --- |
-| App | `create-session`, `close-app` |
-| Session | `send`, `dispatch`, `abort`, `pause`, `hibernate`, `inject-input` |
-| Loop executor | `halt`, `pause` |
-| React | `recompile`, `unmount` |
-| Renderer | (typically commands only) |
-| Executor | `abort` |
-| Tool executor | `abort`, `confirmation-response` |
+| Harness       | Common inbox messages                                             |
+| ------------- | ----------------------------------------------------------------- |
+| App           | `create-session`, `close-app`                                     |
+| Session       | `send`, `dispatch`, `abort`, `pause`, `hibernate`, `inject-input` |
+| Loop executor | `halt`, `pause`                                                   |
+| React         | `recompile`, `unmount`                                            |
+| Renderer      | (typically commands only)                                         |
+| Executor      | `abort`                                                           |
+| Tool executor | `abort`, `confirmation-response`                                  |
 
 See per-harness docs (03–09) for canonical message types.
 
@@ -365,99 +370,99 @@ See per-harness docs (03–09) for canonical message types.
 
 ### `surface: "app"`
 
-| v2 name | Phase | Payload |
-| --- | --- | --- |
-| `app:lifecycle:created:terminal` | terminal | `{ appId }` |
-| `app:lifecycle:closed:terminal` | terminal | `{ appId }` |
-| `app:session:created:terminal` | terminal | `{ sessionId }` |
-| `app:session:closed:terminal` | terminal | `{ sessionId }` |
-| `app:session:hibernated:terminal` | terminal | `{ sessionId }` |
-| `app:session:restored:terminal` | terminal | `{ sessionId }` |
-| `app:cross-session:event` | n/a | inner event re-emitted |
+| v2 name                           | Phase    | Payload                |
+| --------------------------------- | -------- | ---------------------- |
+| `app:lifecycle:created:terminal`  | terminal | `{ appId }`            |
+| `app:lifecycle:closed:terminal`   | terminal | `{ appId }`            |
+| `app:session:created:terminal`    | terminal | `{ sessionId }`        |
+| `app:session:closed:terminal`     | terminal | `{ sessionId }`        |
+| `app:session:hibernated:terminal` | terminal | `{ sessionId }`        |
+| `app:session:restored:terminal`   | terminal | `{ sessionId }`        |
+| `app:cross-session:event`         | n/a      | inner event re-emitted |
 
 ### `surface: "session"`
 
-| v2 name | v1 mapping | Phase | Payload |
-| --- | --- | --- | --- |
-| `session:lifecycle:mount:*` | — | all | mount info |
-| `session:lifecycle:hibernate:*` | — | all | (none) |
-| `session:lifecycle:restore:*` | — | all | snapshot ref |
-| `session:lifecycle:close:*` | — | all | reason |
-| `session:execution:requested` | `execution_start` | requested | execution + send |
-| `session:execution:terminal` | `execution_end`, `result` | terminal | `SendResult` |
-| `session:tick:*` | `tick_start`, `tick_end` | all | tick info |
-| `session:timeline:appended:terminal` | — | terminal | TimelineEntry |
-| `session:timeline:entry-committed:terminal` | `entry_committed` | terminal | entry + index |
-| `session:apply:executor-result:*` | — | all | `LanguageModelExecutionResult` |
-| `session:apply:tool-results:*` | — | all | `ToolResult[]` |
-| `session:apply:entry:*` | — | all | TimelineEntry |
-| `session:channel:published:terminal` | — | terminal | channel event |
-| `session:knob:set:terminal` | — | terminal | from / to |
-| `session:subscription:registered:terminal` | — | terminal | intent |
-| `session:subscription:routed:terminal` | — | terminal | intent + payload |
-| `session:spawn:*` | `spawn_start`, `spawn_end` | all | spawn info |
-| `session:fork:*` | `fork_start`, `fork_end` | all | fork info |
-| `session:context:terminal` | `context_update` | terminal | utilization |
-| `session:error` | `engine_error` | n/a | error |
+| v2 name                                     | v1 mapping                 | Phase     | Payload                        |
+| ------------------------------------------- | -------------------------- | --------- | ------------------------------ |
+| `session:lifecycle:mount:*`                 | —                          | all       | mount info                     |
+| `session:lifecycle:hibernate:*`             | —                          | all       | (none)                         |
+| `session:lifecycle:restore:*`               | —                          | all       | snapshot ref                   |
+| `session:lifecycle:close:*`                 | —                          | all       | reason                         |
+| `session:execution:requested`               | `execution_start`          | requested | execution + send               |
+| `session:execution:terminal`                | `execution_end`, `result`  | terminal  | `SendResult`                   |
+| `session:tick:*`                            | `tick_start`, `tick_end`   | all       | tick info                      |
+| `session:timeline:appended:terminal`        | —                          | terminal  | TimelineEntry                  |
+| `session:timeline:entry-committed:terminal` | `entry_committed`          | terminal  | entry + index                  |
+| `session:apply:executor-result:*`           | —                          | all       | `LanguageModelExecutionResult` |
+| `session:apply:tool-results:*`              | —                          | all       | `ToolResult[]`                 |
+| `session:apply:entry:*`                     | —                          | all       | TimelineEntry                  |
+| `session:channel:published:terminal`        | —                          | terminal  | channel event                  |
+| `session:knob:set:terminal`                 | —                          | terminal  | from / to                      |
+| `session:subscription:registered:terminal`  | —                          | terminal  | intent                         |
+| `session:subscription:routed:terminal`      | —                          | terminal  | intent + payload               |
+| `session:spawn:*`                           | `spawn_start`, `spawn_end` | all       | spawn info                     |
+| `session:fork:*`                            | `fork_start`, `fork_end`   | all       | fork info                      |
+| `session:context:terminal`                  | `context_update`           | terminal  | utilization                    |
+| `session:error`                             | `engine_error`             | n/a       | error                          |
 
 ### `surface: "loop"`
 
-| v2 name | Phase | Payload |
-| --- | --- | --- |
-| `loop:execution:*` | all | `ExecutionRunResult` |
-| `loop:tick:*` | all | tick info |
-| `loop:compile:*` | all | (forwarded from react) |
-| `loop:executor:*` | all | (forwarded from executor) |
-| `loop:tool-dispatch:*` | all | per-call |
+| v2 name                 | Phase          | Payload                          |
+| ----------------------- | -------------- | -------------------------------- |
+| `loop:execution:*`      | all            | `ExecutionRunResult`             |
+| `loop:tick:*`           | all            | tick info                        |
+| `loop:compile:*`        | all            | (forwarded from react)           |
+| `loop:executor:*`       | all            | (forwarded from executor)        |
+| `loop:tool-dispatch:*`  | all            | per-call                         |
 | `loop:execution:halted` | n/a (discrete) | reason from `halt` inbox message |
 
 ### `surface: "reconciler"`
 
-| v2 name | Phase | Payload |
-| --- | --- | --- |
-| `reconciler:mount:*` | all | mountId |
-| `reconciler:rerender:*` | all | trigger |
-| `reconciler:render:*` | all | iter count, RenderedTree |
-| `reconciler:render-to-string:*` | all | FormattedContent |
-| `reconciler:render-resource:*` | all | FormattedContent |
-| `reconciler:notify-tick-end:*` | all | TickEndDecision |
-| `reconciler:async:resolved` | n/a (discrete) | componentId |
-| `reconciler:suspended` | n/a (discrete) | componentId |
-| `reconciler:runtime-error` | n/a (discrete) | cause |
-| `reconciler:unmount:*` | all | — |
-| `reconciler:snapshot:*` | all | snapshot |
-| `reconciler:restore:*` | all | mountId |
+| v2 name                         | Phase          | Payload                  |
+| ------------------------------- | -------------- | ------------------------ |
+| `reconciler:mount:*`            | all            | mountId                  |
+| `reconciler:rerender:*`         | all            | trigger                  |
+| `reconciler:render:*`           | all            | iter count, RenderedTree |
+| `reconciler:render-to-string:*` | all            | FormattedContent         |
+| `reconciler:render-resource:*`  | all            | FormattedContent         |
+| `reconciler:notify-tick-end:*`  | all            | TickEndDecision          |
+| `reconciler:async:resolved`     | n/a (discrete) | componentId              |
+| `reconciler:suspended`          | n/a (discrete) | componentId              |
+| `reconciler:runtime-error`      | n/a (discrete) | cause                    |
+| `reconciler:unmount:*`          | all            | —                        |
+| `reconciler:snapshot:*`         | all            | snapshot                 |
+| `reconciler:restore:*`          | all            | mountId                  |
 
 ### `surface: "formatter"`
 
-| v2 name | Phase | Payload |
-| --- | --- | --- |
-| `formatter:format:*` | all | FormatInput / FormatResult |
-| `formatter:format-to-text:*` | all | FormatInput / FormatResult |
-| `formatter:format-resource:*` | all | FormatInput / FormatResult |
-| `formatter:capabilities:inspect:terminal` | terminal | `FormatterCapabilities` |
+| v2 name                                   | Phase    | Payload                    |
+| ----------------------------------------- | -------- | -------------------------- |
+| `formatter:format:*`                      | all      | FormatInput / FormatResult |
+| `formatter:format-to-text:*`              | all      | FormatInput / FormatResult |
+| `formatter:format-resource:*`             | all      | FormatInput / FormatResult |
+| `formatter:capabilities:inspect:terminal` | terminal | `FormatterCapabilities`    |
 
 ### `surface: "executor"`
 
-| v2 name | Phase | Payload |
-| --- | --- | --- |
-| `executor:request:*` | all | overall lifecycle |
-| `executor:project:terminal` | terminal | TargetInput |
-| `executor:provider:request` | n/a | provider input |
-| `executor:provider:response` | n/a | provider raw |
-| `executor:delta` | delta | ExecutorDelta |
-| `executor:normalize:terminal` | terminal | ExecutionResult |
-| `executor:tool-call:detected` | n/a | ToolCall |
+| v2 name                       | Phase    | Payload           |
+| ----------------------------- | -------- | ----------------- |
+| `executor:request:*`          | all      | overall lifecycle |
+| `executor:project:terminal`   | terminal | TargetInput       |
+| `executor:provider:request`   | n/a      | provider input    |
+| `executor:provider:response`  | n/a      | provider raw      |
+| `executor:delta`              | delta    | ExecutorDelta     |
+| `executor:normalize:terminal` | terminal | ExecutionResult   |
+| `executor:tool-call:detected` | n/a      | ToolCall          |
 
 ### `surface: "tool"`
 
-| v2 name | v1 mapping | Phase | Payload |
-| --- | --- | --- | --- |
-| `tool:dispatch:*` | `tool_result_start`, `tool_result` | all | DispatchInput / ToolResult |
-| `tool:validation:terminal` | — | terminal | issues / valid |
-| `tool:confirmation:requested` | `tool_confirmation_required` | requested | request |
-| `tool:confirmation:resolved` | `tool_confirmation_result` | terminal | response |
-| `tool:handler:*` | — | n/a | handler lifecycle |
+| v2 name                       | v1 mapping                         | Phase     | Payload                    |
+| ----------------------------- | ---------------------------------- | --------- | -------------------------- |
+| `tool:dispatch:*`             | `tool_result_start`, `tool_result` | all       | DispatchInput / ToolResult |
+| `tool:validation:terminal`    | —                                  | terminal  | issues / valid             |
+| `tool:confirmation:requested` | `tool_confirmation_required`       | requested | request                    |
+| `tool:confirmation:resolved`  | `tool_confirmation_result`         | terminal  | response                   |
+| `tool:handler:*`              | —                                  | n/a       | handler lifecycle          |
 
 ### `surface: "cluster"` (optional wrapper)
 

@@ -23,11 +23,7 @@ describe("renderToString — basic markdown serialization", () => {
     await harness.mount({
       mountId: "m1",
       sessionId: "s",
-      element: React.createElement(
-        "section",
-        { id: "s.intro", title: "Intro" },
-        "Welcome.",
-      ),
+      element: React.createElement("section", { id: "s.intro", title: "Intro" }, "Welcome."),
       bridges: stubBridges(),
       defaultFormatter: { id: "markdown", format: "markdown" },
     });
@@ -101,11 +97,7 @@ describe("renderToString — XML format", () => {
       element: React.createElement(
         XML,
         null,
-        React.createElement(
-          "section",
-          { id: "s.<>&", title: 'A&B"' },
-          "body",
-        ),
+        React.createElement("section", { id: "s.<>&", title: 'A&B"' }, "body"),
       ),
       bridges: stubBridges(),
       defaultFormatter: { id: "markdown", format: "markdown" },
@@ -243,9 +235,9 @@ describe("renderToString — operation lifecycle", () => {
 
   it("rejects with NotMounted for an unknown mountId", async () => {
     const harness = await makeHarness();
-    await expect(
-      harness.renderToString({ mountId: "ghost" }),
-    ).rejects.toMatchObject({ _tag: "NotMounted" });
+    await expect(harness.renderToString({ mountId: "ghost" })).rejects.toMatchObject({
+      _tag: "NotMounted",
+    });
   });
 });
 

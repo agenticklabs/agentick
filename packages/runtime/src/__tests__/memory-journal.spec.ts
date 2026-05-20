@@ -66,11 +66,7 @@ describe("MemoryJournal — capacity & overflow", () => {
 
   it("L7 — evicts terminals + inFlight maps with their events", async () => {
     const j = new MemoryJournal({ capacity: 2 });
-    const evt = (
-      opId: string,
-      phase: "requested" | "terminal",
-      id: string,
-    ) =>
+    const evt = (opId: string, phase: "requested" | "terminal", id: string) =>
       ({
         id,
         opId,

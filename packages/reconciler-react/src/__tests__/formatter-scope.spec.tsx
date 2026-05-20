@@ -5,12 +5,7 @@ import { createHostScope } from "../host/host-context.js";
 import { createReconciler } from "../react/reconciler.js";
 import { collect } from "../collect/collect.js";
 import { createBuiltInRegistry } from "../collect/contributors/built-ins.js";
-import {
-  FormatScope,
-  Markdown,
-  XML,
-  PlainText,
-} from "../react/components/format-scope.js";
+import { FormatScope, Markdown, XML, PlainText } from "../react/components/format-scope.js";
 
 /**
  * Render an element + collect with the markdown-default root scope.
@@ -31,11 +26,7 @@ function renderAndCollect(element: React.ReactNode) {
 describe("FormatScope (and Markdown / XML / PlainText sugar)", () => {
   it("emits no IR fragment of its own — purely a scope provider", () => {
     const { tree } = renderAndCollect(
-      React.createElement(
-        Markdown,
-        null,
-        React.createElement("message", { role: "user" }, "hi"),
-      ),
+      React.createElement(Markdown, null, React.createElement("message", { role: "user" }, "hi")),
     );
     // Only the message entry, no extra fragment for Markdown/format.
     expect(tree.context.entries).toHaveLength(1);
@@ -53,11 +44,7 @@ describe("FormatScope (and Markdown / XML / PlainText sugar)", () => {
       React.createElement(
         React.Fragment,
         null,
-        React.createElement(
-          "section",
-          { id: "s.outer" },
-          "outer body",
-        ),
+        React.createElement("section", { id: "s.outer" }, "outer body"),
         React.createElement(
           Markdown,
           null,
@@ -82,11 +69,7 @@ describe("FormatScope (and Markdown / XML / PlainText sugar)", () => {
 
   it("XML swaps to xml", () => {
     const { tree } = renderAndCollect(
-      React.createElement(
-        XML,
-        null,
-        React.createElement("section", { id: "s" }, "body"),
-      ),
+      React.createElement(XML, null, React.createElement("section", { id: "s" }, "body")),
     );
     const s = tree.context.entries[0]!;
     if (s.kind !== "section") throw new Error("expected section");
@@ -96,11 +79,7 @@ describe("FormatScope (and Markdown / XML / PlainText sugar)", () => {
 
   it("PlainText swaps to text", () => {
     const { tree } = renderAndCollect(
-      React.createElement(
-        PlainText,
-        null,
-        React.createElement("section", { id: "s" }, "body"),
-      ),
+      React.createElement(PlainText, null, React.createElement("section", { id: "s" }, "body")),
     );
     const s = tree.context.entries[0]!;
     if (s.kind !== "section") throw new Error("expected section");
@@ -113,11 +92,7 @@ describe("FormatScope (and Markdown / XML / PlainText sugar)", () => {
       React.createElement(
         Markdown,
         null,
-        React.createElement(
-          XML,
-          null,
-          React.createElement("section", { id: "s.inner" }, "deep"),
-        ),
+        React.createElement(XML, null, React.createElement("section", { id: "s.inner" }, "deep")),
       ),
     );
     const s = tree.context.entries[0]!;
@@ -135,11 +110,7 @@ describe("FormatScope (and Markdown / XML / PlainText sugar)", () => {
           null,
           React.createElement("section", { id: "s.md" }, "md body"),
         ),
-        React.createElement(
-          XML,
-          null,
-          React.createElement("section", { id: "s.xml" }, "xml body"),
-        ),
+        React.createElement(XML, null, React.createElement("section", { id: "s.xml" }, "xml body")),
       ),
     );
     const [a, b] = tree.context.entries;

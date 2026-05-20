@@ -49,9 +49,7 @@ export class LocalChannelPublisher implements ChannelPublisher {
     this.defaultScope = options.defaultScope ?? {};
   }
 
-  publish<T = unknown>(
-    seed: ChannelSeed<T>,
-  ): Effect.Effect<void, ChannelPublishError, never> {
+  publish<T = unknown>(seed: ChannelSeed<T>): Effect.Effect<void, ChannelPublishError, never> {
     return Effect.suspend((): Effect.Effect<void, ChannelPublishError, never> => {
       if (this.closed) {
         return Effect.fail({ _tag: "ChannelPublisherClosed" });

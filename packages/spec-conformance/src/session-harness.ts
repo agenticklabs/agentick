@@ -67,11 +67,7 @@ export interface SessionConformanceFactoryDeps {
   readonly inbox: MessageInbox;
   readonly reconciler: ReconcilerProtocol;
   readonly loop: LoopExecutorProtocol;
-  readonly executor: ExecutorProtocol<
-    unknown,
-    unknown,
-    LanguageModelExecutionResult
-  >;
+  readonly executor: ExecutorProtocol<unknown, unknown, LanguageModelExecutionResult>;
   readonly toolExecutor: ToolExecutorProtocol;
   readonly target: ExecutionTarget;
   /** Opaque agent root passed to `mount({ element })`. */
@@ -180,11 +176,7 @@ function stubLoop(text: string): LoopExecutorProtocol {
   };
 }
 
-function stubExecutor(): ExecutorProtocol<
-  unknown,
-  unknown,
-  LanguageModelExecutionResult
-> {
+function stubExecutor(): ExecutorProtocol<unknown, unknown, LanguageModelExecutionResult> {
   const result: LanguageModelExecutionResult = {
     specVersion: "2026-05-08",
     output: [{ type: "text", text: "stub" }],
@@ -247,14 +239,10 @@ function emptySubstrate(): StubSubstrate {
       throw new Error("conformance stub: journal.tail should not be invoked");
     },
     lookupTerminal: () => {
-      throw new Error(
-        "conformance stub: journal.lookupTerminal should not be invoked",
-      );
+      throw new Error("conformance stub: journal.lookupTerminal should not be invoked");
     },
     findOrphaned: () => {
-      throw new Error(
-        "conformance stub: journal.findOrphaned should not be invoked",
-      );
+      throw new Error("conformance stub: journal.findOrphaned should not be invoked");
     },
   } as unknown as OperationJournal;
   const bus: EventBus = {} as unknown as EventBus;
@@ -289,9 +277,7 @@ export function defaultSessionConformanceDeps(
   };
 }
 
-export function runSessionConformance(
-  factory: SessionConformanceFactory,
-): void {
+export function runSessionConformance(factory: SessionConformanceFactory): void {
   describe("SessionHarnessProtocol — send happy path", () => {
     it("returns a handle whose .result resolves to a SendResult", async () => {
       const session = await factory({
@@ -339,9 +325,7 @@ export function runSessionConformance(
         ],
       });
       const tl = session.timeline();
-      const userMessages = tl.filter(
-        (e) => e.kind === "message" && e.message.role === "user",
-      );
+      const userMessages = tl.filter((e) => e.kind === "message" && e.message.role === "user");
       expect(userMessages.length).toBeGreaterThanOrEqual(2);
       await session.close();
     });
@@ -358,9 +342,7 @@ export function runSessionConformance(
       });
       await handle.result;
       const tl = session.timeline();
-      const assistant = tl.find(
-        (e) => e.kind === "message" && e.message.role === "assistant",
-      );
+      const assistant = tl.find((e) => e.kind === "message" && e.message.role === "assistant");
       expect(assistant).toBeDefined();
       await session.close();
     });
@@ -411,9 +393,7 @@ export function runSessionConformance(
       const marker = tl.find(
         (e) =>
           e.kind === "message" &&
-          e.message.content.some(
-            (b) => b.type === "text" && b.text === "marker",
-          ),
+          e.message.content.some((b) => b.type === "text" && b.text === "marker"),
       );
       expect(marker).toBeDefined();
       await session.close();
@@ -439,9 +419,7 @@ export function runSessionConformance(
         (e) =>
           e.kind === "message" &&
           e.message.role === "assistant" &&
-          e.message.content.some(
-            (b) => b.type === "text" && b.text === "from-applicator",
-          ),
+          e.message.content.some((b) => b.type === "text" && b.text === "from-applicator"),
       );
       expect(found).toBeDefined();
       await session.close();
@@ -475,9 +453,7 @@ export function runSessionConformance(
       });
       expect(res.appendedEntryIds.length).toBe(2);
       const tl = session.timeline();
-      const toolMessages = tl.filter(
-        (e) => e.kind === "message" && e.message.role === "tool",
-      );
+      const toolMessages = tl.filter((e) => e.kind === "message" && e.message.role === "tool");
       expect(toolMessages.length).toBeGreaterThanOrEqual(2);
       await session.close();
     });
@@ -535,9 +511,9 @@ export function runSessionConformance(
         messages: [{ role: "user", content: "x" }],
       });
       // Should have the iteration symbol.
-      expect(typeof (handle as unknown as { [Symbol.asyncIterator]: unknown })[
-        Symbol.asyncIterator
-      ]).toBe("function");
+      expect(
+        typeof (handle as unknown as { [Symbol.asyncIterator]: unknown })[Symbol.asyncIterator],
+      ).toBe("function");
       // And a result Promise.
       expect(typeof handle.result.then).toBe("function");
       const result = await handle.result;

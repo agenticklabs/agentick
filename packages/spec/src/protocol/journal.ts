@@ -34,10 +34,7 @@ import type { JournalError } from "../data/errors.js";
 /**
  * Read-cursor position for `read()`.
  */
-export type JournalReadFrom =
-  | { readonly offset: number }
-  | "latest"
-  | "beginning";
+export type JournalReadFrom = { readonly offset: number } | "latest" | "beginning";
 
 /**
  * Operation found by `findOrphaned()` — an operation that emitted

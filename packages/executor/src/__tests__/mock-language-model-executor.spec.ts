@@ -118,9 +118,7 @@ describe("MockLanguageModelExecutor — run + streaming", () => {
     });
 
     const fiber = Effect.runFork(
-      Stream.runCollect(
-        Stream.take(bus.subscribe({ surface: "executor", phase: "delta" }), 3),
-      ),
+      Stream.runCollect(Stream.take(bus.subscribe({ surface: "executor", phase: "delta" }), 3)),
     );
     await new Promise((r) => setImmediate(r));
 
@@ -197,8 +195,6 @@ describe("MockLanguageModelExecutor — terminal envelope journaled", () => {
     const events = Array.from(Chunk.toReadonlyArray(chunk));
     const names = new Set(events.map((e) => `${e.name}.${e.phase}`));
     expect(names.has("executor:command:run.requested")).toBe(true);
-    expect(
-      [...names].some((n) => n.startsWith("executor:command:run.terminal")),
-    ).toBe(true);
+    expect([...names].some((n) => n.startsWith("executor:command:run.terminal"))).toBe(true);
   });
 });

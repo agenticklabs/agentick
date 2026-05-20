@@ -51,12 +51,7 @@ function mkEvent(id: string, overrides: Partial<ProtocolEvent> = {}): ProtocolEv
 }
 
 class BenchHarness extends BaseHarness<"tool"> {
-  constructor(
-    scopeId: string,
-    journal: OperationJournal,
-    bus: EventBus,
-    inbox: MessageInbox,
-  ) {
+  constructor(scopeId: string, journal: OperationJournal, bus: EventBus, inbox: MessageInbox) {
     super("tool", scopeId, journal, bus, inbox);
   }
 
@@ -292,9 +287,7 @@ describe("LocalChannelPublisher — no subscriber", () => {
 
   bench("publish, no subscriber (lazy skip)", async () => {
     counter++;
-    await Effect.runPromise(
-      pub.publish({ channel: "bench-progress", payload: { i: counter } }),
-    );
+    await Effect.runPromise(pub.publish({ channel: "bench-progress", payload: { i: counter } }));
   });
 });
 
@@ -316,9 +309,7 @@ describe("LocalChannelPublisher — 1 subscriber", () => {
       started = true;
     }
     counter++;
-    await Effect.runPromise(
-      pub.publish({ channel: "bench-progress", payload: { i: counter } }),
-    );
+    await Effect.runPromise(pub.publish({ channel: "bench-progress", payload: { i: counter } }));
   });
 });
 

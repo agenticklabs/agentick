@@ -207,11 +207,7 @@ describe("content blocks — custom + diagnostics", () => {
       React.createElement(
         "section",
         { id: "s" },
-        React.createElement(
-          "custom",
-          { tag: "checkpoint", attrs: { phase: "ingest" } },
-          "saved",
-        ),
+        React.createElement("custom", { tag: "checkpoint", attrs: { phase: "ingest" } }, "saved"),
       ),
     );
     expect(contentOf(tree)[0]).toMatchObject({

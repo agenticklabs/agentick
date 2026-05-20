@@ -170,9 +170,7 @@ describe("host-pipeline — react-reconciler end-to-end", () => {
       return React.createElement(
         React.Fragment,
         null,
-        ...items.map((id) =>
-          React.createElement("message", { key: id, role: id }, id),
-        ),
+        ...items.map((id) => React.createElement("message", { key: id, role: id }, id)),
       );
     }
 
@@ -196,9 +194,7 @@ describe("host-pipeline — react-reconciler end-to-end", () => {
       return React.createElement(
         "section",
         { id: "s.list" },
-        ...items.map((id) =>
-          React.createElement("message", { key: id, role: id }, id),
-        ),
+        ...items.map((id) => React.createElement("message", { key: id, role: id }, id)),
       );
     }
 
@@ -236,4 +232,3 @@ describe("host-pipeline — react-reconciler end-to-end", () => {
     expect(firstId).toBe(secondId);
   });
 });
-

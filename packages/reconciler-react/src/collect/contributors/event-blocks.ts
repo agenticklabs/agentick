@@ -7,11 +7,7 @@
  * human-readable formatted representation).
  */
 
-import type {
-  StateChangeBlock,
-  SystemEventBlock,
-  UserActionBlock,
-} from "@agentick/spec";
+import type { StateChangeBlock, SystemEventBlock, UserActionBlock } from "@agentick/spec";
 import type { ElementInstance } from "../../host/host-instance.js";
 import type { CollectContext, Contributor } from "../contributor.js";
 import type { IRFragment } from "../fragments.js";

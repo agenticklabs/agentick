@@ -101,9 +101,7 @@ describe("OpenAIExecutor — tool-use round-trip", () => {
       {
         kind: "non-streaming",
         completion: mkCompletion({
-          toolCalls: [
-            { id: "call_1", name: "calculator", arguments: { a: 2, b: 3 } },
-          ],
+          toolCalls: [{ id: "call_1", name: "calculator", arguments: { a: 2, b: 3 } }],
           finishReason: "tool_calls",
         }),
       },
@@ -121,9 +119,7 @@ describe("OpenAIExecutor — tool-use round-trip", () => {
       name: "calculator",
       input: { a: 2, b: 3 },
     });
-    expect(
-      terminal.result.output.find((b) => b.type === "tool_use"),
-    ).toBeDefined();
+    expect(terminal.result.output.find((b) => b.type === "tool_use")).toBeDefined();
   });
 
   it("threads tool_result messages back to the provider in subsequent calls", async () => {
@@ -182,9 +178,9 @@ describe("OpenAIExecutor — tool-use round-trip", () => {
     );
     expect(toolMessage).toBeDefined();
     // The assistant message that requested the call must carry tool_calls.
-    const assistantMsg = sent.find(
-      (m) => (m as { role?: string }).role === "assistant",
-    ) as { tool_calls?: ReadonlyArray<{ id: string }> } | undefined;
+    const assistantMsg = sent.find((m) => (m as { role?: string }).role === "assistant") as
+      | { tool_calls?: ReadonlyArray<{ id: string }> }
+      | undefined;
     expect(assistantMsg?.tool_calls?.[0]?.id).toBe("call_1");
   });
 });
@@ -225,9 +221,7 @@ describe("OpenAIExecutor — streaming", () => {
     const { exec, bus } = await makeExecutor(stub, { stream: true });
 
     const fiber = Effect.runFork(
-      Stream.runCollect(
-        Stream.take(bus.subscribe({ surface: "executor", phase: "delta" }), 4),
-      ),
+      Stream.runCollect(Stream.take(bus.subscribe({ surface: "executor", phase: "delta" }), 4)),
     );
     await new Promise((r) => setImmediate(r));
 
@@ -261,8 +255,6 @@ describe("OpenAIExecutor — journaled lifecycle", () => {
     const events = Array.from(Chunk.toReadonlyArray(chunk));
     const names = new Set(events.map((e) => `${e.name}.${e.phase}`));
     expect(names.has("executor:command:run.requested")).toBe(true);
-    expect(
-      [...names].some((n) => n.startsWith("executor:command:run.terminal")),
-    ).toBe(true);
+    expect([...names].some((n) => n.startsWith("executor:command:run.terminal"))).toBe(true);
   });
 });

@@ -60,12 +60,12 @@ export interface FormatScopeProps {
  * Canonical formatter-scope primitive. Render with the formatter you
  * want descendants to use.
  */
-export function FormatScope({ formatter, purpose, children }: FormatScopeProps): React.ReactElement {
-  return internalIntrinsic(
-    "format",
-    purpose ? { formatter, purpose } : { formatter },
-    children,
-  );
+export function FormatScope({
+  formatter,
+  purpose,
+  children,
+}: FormatScopeProps): React.ReactElement {
+  return internalIntrinsic("format", purpose ? { formatter, purpose } : { formatter }, children);
 }
 
 export interface NamedFormatScopeProps {

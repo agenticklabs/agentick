@@ -25,14 +25,14 @@ The host tree never crosses the harness boundary; only `RenderedTree`,
 
 ## React feature semantics
 
-| Feature                     | Behavior                                                   |
-| --------------------------- | ---------------------------------------------------------- |
-| Reconciler, hooks, refs, effects, context | full support (real React)                    |
-| `useData` (custom)          | blocks render via thrown Promise; loop awaits & re-renders |
-| `<Suspense>` fallbacks      | warning diagnostic; opt-in hard-fail via `strictNoSuspense` |
-| `<ErrorBoundary>`           | supported (per-section resilience)                          |
-| `useTransition` / `useDeferredValue` | allowed, no effect (sync render mode)              |
-| React Server Components     | not supported                                              |
+| Feature                                   | Behavior                                                    |
+| ----------------------------------------- | ----------------------------------------------------------- |
+| Reconciler, hooks, refs, effects, context | full support (real React)                                   |
+| `useData` (custom)                        | blocks render via thrown Promise; loop awaits & re-renders  |
+| `<Suspense>` fallbacks                    | warning diagnostic; opt-in hard-fail via `strictNoSuspense` |
+| `<ErrorBoundary>`                         | supported (per-section resilience)                          |
+| `useTransition` / `useDeferredValue`      | allowed, no effect (sync render mode)                       |
+| React Server Components                   | not supported                                               |
 
 See `docs/proposals/v2/blueprint/21-reconciler-implementation.md` for
 the full design.
@@ -41,9 +41,9 @@ the full design.
 
 Two different reactive state bridges, each with a hook:
 
-| Hook | Bridge | Visibility | Purpose |
-|---|---|---|---|
-| `useKnob(id, initial)` | `KnobBridge` | **Model-visible** | Surface in `knobs.list()` to the model; settable via the executor's `set_knob` tool. Use for agent configuration the model can tweak. |
+| Hook                            | Bridge        | Visibility             | Purpose                                                                                                                                                                                        |
+| ------------------------------- | ------------- | ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `useKnob(id, initial)`          | `KnobBridge`  | **Model-visible**      | Surface in `knobs.list()` to the model; settable via the executor's `set_knob` tool. Use for agent configuration the model can tweak.                                                          |
 | `useSessionState(key, initial)` | `StateBridge` | **Framework-internal** | Component state that survives across mounts / hibernate-resume but is NOT visible to the model. Use for prose state machines, scratch counters, derived state, anything the LLM shouldn't see. |
 
 Both persist through the session's snapshot/restore round-trip.

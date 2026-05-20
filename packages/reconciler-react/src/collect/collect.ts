@@ -95,10 +95,7 @@ function makeContextFactory(
         return walkInstance(child, scope);
       },
 
-      collectContentBlocks(
-        parent: HostInstance,
-        outbound?: IRFragment[],
-      ): readonly ContentBlock[] {
+      collectContentBlocks(parent: HostInstance, outbound?: IRFragment[]): readonly ContentBlock[] {
         return foldContentBlocks(parent, scope, outbound);
       },
 

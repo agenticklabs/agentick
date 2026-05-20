@@ -16,9 +16,10 @@ import type { ToolHandler, Validator } from "../types.js";
 import { createTestHarness } from "../testing/index.js";
 import { permissiveValidator } from "../validator.js";
 
-function makeHandlerForBehavior(
-  fixture: FixtureToolSpec,
-): { handler: ToolHandler; validator: Validator } {
+function makeHandlerForBehavior(fixture: FixtureToolSpec): {
+  handler: ToolHandler;
+  validator: Validator;
+} {
   switch (fixture.behavior.kind) {
     case "echo":
       return {

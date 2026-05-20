@@ -15,9 +15,7 @@ export function runEventBusConformance(factory: () => EventBus): void {
     it("delivers to matching subscribers; ignores non-matching", async () => {
       const bus = factory();
       const fiber = Effect.runFork(
-        Stream.runCollect(
-          Stream.take(bus.subscribe({ surface: "tool" }), 1),
-        ),
+        Stream.runCollect(Stream.take(bus.subscribe({ surface: "tool" }), 1)),
       );
       await new Promise((r) => setImmediate(r));
       await Effect.runPromise(bus.publish(ev("a", { surface: "session" })));

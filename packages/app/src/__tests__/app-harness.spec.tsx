@@ -53,42 +53,34 @@ function mkExecutor(
   bus = new LocalEventBus(),
   inbox = new LocalInbox(),
 ): MockLanguageModelExecutor {
-  return new MockLanguageModelExecutor(
-    "app-test-exec",
-    journal,
-    bus,
-    inbox,
-    {
-      scripted: [
-        {
-          result: {
-            specVersion: "2026-05-08",
-            output: [
-              {
-                type: "tool_use",
-                toolUseId: "tc-1",
-                name: "calculator",
-                input: { expression: "47 * 23" },
-              },
-            ],
-            stopReason: "tool_use",
-            toolCalls: [
-              { id: "tc-1", name: "calculator", input: { expression: "47 * 23" } },
-            ],
-            usage: { inputTokens: 8, outputTokens: 4, totalTokens: 12 },
-          },
+  return new MockLanguageModelExecutor("app-test-exec", journal, bus, inbox, {
+    scripted: [
+      {
+        result: {
+          specVersion: "2026-05-08",
+          output: [
+            {
+              type: "tool_use",
+              toolUseId: "tc-1",
+              name: "calculator",
+              input: { expression: "47 * 23" },
+            },
+          ],
+          stopReason: "tool_use",
+          toolCalls: [{ id: "tc-1", name: "calculator", input: { expression: "47 * 23" } }],
+          usage: { inputTokens: 8, outputTokens: 4, totalTokens: 12 },
         },
-        {
-          result: {
-            specVersion: "2026-05-08",
-            output: [{ type: "text", text: "47 × 23 = 1081." }],
-            stopReason: "end",
-            usage: { inputTokens: 10, outputTokens: 8, totalTokens: 18 },
-          },
+      },
+      {
+        result: {
+          specVersion: "2026-05-08",
+          output: [{ type: "text", text: "47 × 23 = 1081." }],
+          stopReason: "end",
+          usage: { inputTokens: 10, outputTokens: 8, totalTokens: 18 },
         },
-      ],
-    },
-  );
+      },
+    ],
+  });
 }
 
 function mkTarget(): ExecutionTarget {
@@ -107,9 +99,7 @@ async function mkApp(opts: { shareSubstrate?: boolean } = {}) {
   const journal = new MemoryJournal();
   const bus = new LocalEventBus();
   const inbox = new LocalInbox();
-  const executor = opts.shareSubstrate
-    ? mkExecutor(journal, bus, inbox)
-    : mkExecutor();
+  const executor = opts.shareSubstrate ? mkExecutor(journal, bus, inbox) : mkExecutor();
   await executor.ready;
   const toolHandlers = new Map<string, (input: unknown) => Promise<ContentBlock[]>>([
     [
@@ -161,9 +151,10 @@ describe("AppHarness — createSession + send", () => {
   it("createSession with duplicate id throws SessionAlreadyExistsError", async () => {
     const app = await mkApp();
     await app.createSession({ sessionId: "dup" });
-    await expect(app.createSession({ sessionId: "dup" })).rejects.toMatchObject(
-      { _tag: "SessionAlreadyExistsError", sessionId: "dup" },
-    );
+    await expect(app.createSession({ sessionId: "dup" })).rejects.toMatchObject({
+      _tag: "SessionAlreadyExistsError",
+      sessionId: "dup",
+    });
     await app.closeApp();
   });
 });
@@ -204,12 +195,8 @@ describe("AppHarness — events()", () => {
     await collect;
 
     // At minimum we expect requested + before + terminal on dispatch.
-    expect(
-      collected.some((s) => s === "tool:command:dispatch.requested"),
-    ).toBe(true);
-    expect(
-      collected.some((s) => s === "tool:command:dispatch.terminal"),
-    ).toBe(true);
+    expect(collected.some((s) => s === "tool:command:dispatch.requested")).toBe(true);
+    expect(collected.some((s) => s === "tool:command:dispatch.terminal")).toBe(true);
     await app.closeApp();
   });
 
@@ -308,9 +295,9 @@ describe("AppHarness — closeApp", () => {
     const app = await mkApp();
     await app.createSession({ sessionId: "to-close" });
     await app.closeApp();
-    await expect(app.createSession({ sessionId: "after-close" })).rejects.toMatchObject(
-      { _tag: "AppClosedError" },
-    );
+    await expect(app.createSession({ sessionId: "after-close" })).rejects.toMatchObject({
+      _tag: "AppClosedError",
+    });
   });
 });
 
@@ -367,9 +354,7 @@ describe("AppHarness — middleware on app commands (command refactor)", () => {
     // After the refactor, createSession emits requested + before +
     // terminal (terminal is journaled per the default policy; before
     // is bus-only).
-    expect(
-      names.some((n) => n.startsWith("app:command:create-session")),
-    ).toBe(true);
+    expect(names.some((n) => n.startsWith("app:command:create-session"))).toBe(true);
     await app.closeApp();
   });
 });
@@ -452,9 +437,9 @@ describe("AppHarness — onSessionCreate hook", () => {
   it("veto verdict rejects createSession", async () => {
     const app = await mkApp();
     app.onSessionCreate(async () => ({ kind: "veto", reason: "policy" }));
-    await expect(app.createSession({ sessionId: "s-veto" })).rejects.toMatchObject(
-      { _tag: "AppExecutionFailed" },
-    );
+    await expect(app.createSession({ sessionId: "s-veto" })).rejects.toMatchObject({
+      _tag: "AppExecutionFailed",
+    });
     expect(app.getSession("s-veto")).toBeUndefined();
     await app.closeApp();
   });
@@ -618,7 +603,7 @@ describe("AppHarness — slot cascade", () => {
       rootElement: React.createElement(MinimalAgent),
       executor,
       target: mkTarget(),
-      defaultMaxTicks: 999,          // shorthand
+      defaultMaxTicks: 999, // shorthand
       session: { defaultMaxTicks: 1 }, // longhand — should win
       toolHandlers: new Map([
         [
@@ -649,7 +634,7 @@ describe("AppHarness — slot cascade", () => {
       rootElement: React.createElement(MinimalAgent),
       executor,
       target: mkTarget(),
-      defaultMaxTicks: 1,            // shorthand
+      defaultMaxTicks: 1, // shorthand
       session: { defaultMaxTicks: 1 }, // longhand
       toolHandlers: new Map([
         [

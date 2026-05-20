@@ -121,8 +121,8 @@ describe("defineExecutor()", () => {
       inbox: new LocalInbox(),
     });
     await exec.ready;
-    await expect(
-      exec.run({ compiled: mkTree(), target: mkTarget() }),
-    ).rejects.toMatchObject({ _tag: "ProviderRejected" });
+    await expect(exec.run({ compiled: mkTree(), target: mkTarget() })).rejects.toMatchObject({
+      _tag: "ProviderRejected",
+    });
   });
 });

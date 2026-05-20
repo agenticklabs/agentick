@@ -130,8 +130,7 @@ export function mkCompletion(opts: {
           ...(toolCalls ? { tool_calls: toolCalls } : {}),
         },
         finish_reason:
-          opts.finishReason ??
-          (toolCalls && toolCalls.length > 0 ? "tool_calls" : "stop"),
+          opts.finishReason ?? (toolCalls && toolCalls.length > 0 ? "tool_calls" : "stop"),
         logprobs: null,
       },
     ],

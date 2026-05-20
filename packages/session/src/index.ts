@@ -7,8 +7,5 @@
  * @see docs/proposals/v2/blueprint/08-session-harness.md
  */
 
-export {
-  SessionHarness,
-  type SessionHarnessOptions,
-} from "./harness.js";
+export { SessionHarness, type SessionHarnessOptions } from "./harness.js";
 export { SessionStateStore, type AppendMessageInput } from "./session-state.js";

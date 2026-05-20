@@ -38,13 +38,7 @@ export interface FormatterCapabilities {
  * (e.g., wrapping a section in `<section>` tags only when rendering for
  * the model context).
  */
-export type FormatPurpose =
-  | "context"
-  | "message"
-  | "section"
-  | "free-root"
-  | "resource"
-  | "output";
+export type FormatPurpose = "context" | "message" | "section" | "free-root" | "resource" | "output";
 
 /**
  * Pointer back to the IR entry whose content is being formatted. Carried
@@ -161,9 +155,7 @@ export type FormatResult = FormattedContent;
  * @see docs/proposals/v2/blueprint/22-state-formatters-reconciler-shape.md §D2
  * @see docs/proposals/v2/blueprint/04-formatters.md
  */
-export type Formatter = (
-  blocks: readonly SemanticContentBlock[],
-) => readonly ContentBlock[];
+export type Formatter = (blocks: readonly SemanticContentBlock[]) => readonly ContentBlock[];
 
 /**
  * Identity metadata attached to a {@link Formatter} so it can be

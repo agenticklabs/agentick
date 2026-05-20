@@ -71,6 +71,10 @@ export type LifecycleHandlerError = {
  * also carries `_tag` so it pattern-matches identically.
  */
 export type SubstrateError =
-  | { readonly _tag: "OperationOutcomeError"; readonly outcome: import("./outcomes.js").CommandOutcome; readonly terminal: import("./outcomes.js").TerminalEvent }
+  | {
+      readonly _tag: "OperationOutcomeError";
+      readonly outcome: import("./outcomes.js").CommandOutcome;
+      readonly terminal: import("./outcomes.js").TerminalEvent;
+    }
   | JournalError
   | LifecycleHandlerError;

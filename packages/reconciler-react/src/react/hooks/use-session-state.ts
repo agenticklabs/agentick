@@ -18,10 +18,7 @@
 import { useCallback, useRef, useSyncExternalStore } from "react";
 import { useBridges } from "../bridge-context.js";
 
-export function useSessionState<T>(
-  key: string,
-  initial: T,
-): readonly [T, (value: T) => void] {
+export function useSessionState<T>(key: string, initial: T): readonly [T, (value: T) => void] {
   const { state } = useBridges();
 
   const registered = useRef(false);

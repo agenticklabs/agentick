@@ -153,9 +153,9 @@ export function runReconcilerConformance(factory: ReconcilerConformanceFactory):
       expect(tree.context.entries.some((e) => e.kind === "section" && e.id === "s.intro")).toBe(
         true,
       );
-      expect(
-        tree.context.entries.some((e) => e.kind === "message" && e.role === "user"),
-      ).toBe(true);
+      expect(tree.context.entries.some((e) => e.kind === "message" && e.role === "user")).toBe(
+        true,
+      );
       expect(tree.declarations?.tools?.some((t) => t.name === "echo")).toBe(true);
     });
 

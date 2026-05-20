@@ -51,7 +51,7 @@ import { Markdown, XML, PlainText } from "@agentick/reconciler-react";
   <Markdown>
     <message role="user">Hello, world!</message>
   </Markdown>
-</Agent>
+</Agent>;
 ```
 
 ## API
@@ -59,9 +59,7 @@ import { Markdown, XML, PlainText } from "@agentick/reconciler-react";
 ### `Formatter`
 
 ```ts
-type Formatter = (
-  blocks: readonly SemanticContentBlock[],
-) => readonly ContentBlock[];
+type Formatter = (blocks: readonly SemanticContentBlock[]) => readonly ContentBlock[];
 ```
 
 Pure function. Input may carry `semanticNode` sidecars on `TextBlock`s
@@ -84,9 +82,7 @@ const upperCaseFormatter = defineFormatter({
   format: "markdown",
   version: "1.0.0",
   render: (blocks) =>
-    blocks.map((b) =>
-      b.type === "text" ? { ...b, text: b.text.toUpperCase() } : b,
-    ),
+    blocks.map((b) => (b.type === "text" ? { ...b, text: b.text.toUpperCase() } : b)),
 });
 ```
 
@@ -98,11 +94,11 @@ property carrying `{ id, format, version? }`.
 Reference formatters. Each is itself the result of a `defineFormatter`
 call.
 
-| Formatter | Semantic input | Output style |
-|---|---|---|
-| `markdownFormatter` | `<strong>` → `**...**`, `<h1>` → `# ...`, `<ul>`/`<li>` → `- ...`, `<a>` → `[...](href)` | Markdown |
-| `xmlFormatter` | `<strong>` → `<strong>...</strong>`, `<h1>` → `<h1>...</h1>`, etc. | XML tags |
-| `textFormatter` | Strips all semantic markup | Plain text |
+| Formatter           | Semantic input                                                                           | Output style |
+| ------------------- | ---------------------------------------------------------------------------------------- | ------------ |
+| `markdownFormatter` | `<strong>` → `**...**`, `<h1>` → `# ...`, `<ul>`/`<li>` → `- ...`, `<a>` → `[...](href)` | Markdown     |
+| `xmlFormatter`      | `<strong>` → `<strong>...</strong>`, `<h1>` → `<h1>...</h1>`, etc.                       | XML tags     |
+| `textFormatter`     | Strips all semantic markup                                                               | Plain text   |
 
 Each handles the full `SemanticType` set defined in
 `@agentick/spec/data/semantic.ts`.

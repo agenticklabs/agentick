@@ -4,10 +4,5 @@
     "tsBuildInfoFile": "dist/.tsbuildinfo.build"
   },
   "include": ["src"],
-  "exclude": [
-    "src/**/*.spec.ts",
-    "src/**/*.bench.ts",
-    "src/**/__tests__",
-    "src/**/__bench__"
-  ]
+  "exclude": ["src/**/*.spec.ts", "src/**/*.bench.ts", "src/**/__tests__", "src/**/__bench__"]
 }

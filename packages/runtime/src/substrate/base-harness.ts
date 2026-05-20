@@ -47,10 +47,7 @@ import type {
 import { DEFAULT_JOURNALING_POLICY } from "@agentick/spec";
 import { ulid } from "./ulid.js";
 import { getContext, type RuntimeContext, withContext } from "./runtime-context.js";
-import {
-  RequestResponseRegistry,
-  type RequestError,
-} from "./request-response-registry.js";
+import { RequestResponseRegistry, type RequestError } from "./request-response-registry.js";
 
 export type { Unsubscribe } from "@agentick/spec";
 
@@ -214,9 +211,7 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface> {
    * accept registrations but those operations won't be wrapped until
    * they're refactored to use `runOperation`.
    */
-  use<I = unknown, R = unknown, E = unknown>(
-    mw: Middleware<I, R, E>,
-  ): Unsubscribe {
+  use<I = unknown, R = unknown, E = unknown>(mw: Middleware<I, R, E>): Unsubscribe {
     return this.middleware.use(mw as Middleware<unknown, unknown, unknown>);
   }
 
@@ -489,9 +484,7 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface> {
     const decision = this.decideFromShape(op.name, "delta");
     if (decision === "drop") return Effect.void;
     if (decision === "always" || decision === "journal") {
-      return this.publish(
-        this.makeEvent(op, "delta", op.scope ?? {}, { payload: buildPayload() }),
-      );
+      return this.publish(this.makeEvent(op, "delta", op.scope ?? {}, { payload: buildPayload() }));
     }
     if (
       !this.bus.hasSubscriber({
@@ -502,9 +495,7 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface> {
     ) {
       return Effect.void;
     }
-    return this.publish(
-      this.makeEvent(op, "delta", op.scope ?? {}, { payload: buildPayload() }),
-    );
+    return this.publish(this.makeEvent(op, "delta", op.scope ?? {}, { payload: buildPayload() }));
   }
 
   // ──────── ② Inbox dispatch ────────
@@ -525,9 +516,7 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface> {
     // Deferred via the registry. Subclasses never see these.
     if (msg.type === "request-response") {
       return Effect.sync(() => {
-        const payload = msg.payload as
-          | { correlationId?: string; response?: unknown }
-          | undefined;
+        const payload = msg.payload as { correlationId?: string; response?: unknown } | undefined;
         if (
           payload &&
           typeof payload.correlationId === "string" &&
@@ -541,9 +530,7 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface> {
       });
     }
     return this.handleMessage(msg).pipe(
-      Effect.catchAll((cause) =>
-        Effect.fail<MessageHandlerError>({ _tag: "HandlerError", cause }),
-      ),
+      Effect.catchAll((cause) => Effect.fail<MessageHandlerError>({ _tag: "HandlerError", cause })),
     );
   }
 
@@ -653,8 +640,7 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface> {
     outcome: CommandOutcome,
     payload: Record<string, unknown>,
   ): Effect.Effect<void, JournalError, never> {
-    const error =
-      outcome === "failed" ? (payload.error as ProtocolEvent["error"]) : undefined;
+    const error = outcome === "failed" ? (payload.error as ProtocolEvent["error"]) : undefined;
     const envelope = this.makeEvent(op, "terminal", scope, { payload, outcome, error });
     return this.publish(envelope);
   }
@@ -749,9 +735,7 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface> {
     name: string,
     phase: EventPhase,
   ): "always" | "journal" | "bus-only" | "drop" {
-    const override = this.policy.override
-      ? matchOverride(name, this.policy.override)
-      : undefined;
+    const override = this.policy.override ? matchOverride(name, this.policy.override) : undefined;
     if (override === "drop") return "drop";
     if (override === "always") return "always";
     if (override === "bus-only") return "bus-only";
@@ -816,9 +800,7 @@ export type { InboxError };
  * Defects (interrupts, unhandled throws) reject with a normal `Error`
  * carrying `Cause.pretty(cause)`.
  */
-export async function runHarnessProtocol<R>(
-  eff: Effect.Effect<R, unknown, never>,
-): Promise<R> {
+export async function runHarnessProtocol<R>(eff: Effect.Effect<R, unknown, never>): Promise<R> {
   const exit = await Effect.runPromiseExit(eff);
   if (Exit.isSuccess(exit)) return exit.value as R;
   const failure = Cause.failureOption(exit.cause);

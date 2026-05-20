@@ -36,6 +36,11 @@
       "types": "./src/testing.ts",
       "import": "./dist/testing.js",
       "default": "./dist/testing.js"
+    },
+    "./v2": {
+      "types": "./src/v2/index.ts",
+      "import": "./src/v2/index.ts",
+      "default": "./src/v2/index.ts"
     }
   },
   "publishConfig": {
@@ -50,6 +55,11 @@
         "types": "./dist/testing.d.ts",
         "import": "./dist/testing.js",
         "default": "./dist/testing.js"
+      },
+      "./v2": {
+        "types": "./dist/v2/index.d.ts",
+        "import": "./dist/v2/index.js",
+        "default": "./dist/v2/index.js"
       }
     },
     "main": "./dist/index.js",
@@ -65,7 +75,10 @@
   },
   "dependencies": {
     "@agentick/core": "workspace:*",
+    "@agentick/runtime": "workspace:*",
+    "@agentick/spec": "workspace:*",
     "diff": "^8.0.3",
+    "effect": "^3.21.2",
     "react": "^19.0.0",
     "zod": "^4.3.6"
   },

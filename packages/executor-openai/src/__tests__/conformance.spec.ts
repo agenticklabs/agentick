@@ -22,16 +22,16 @@ import { StubOpenAIClient, asClient } from "./stub-openai-client.js";
  * `LanguageModelExecutionResult` so the stub client's canned response
  * normalizes back to an equivalent result.
  */
-function completionFor(
-  scripted: LanguageModelExecutionResult | undefined,
-): ChatCompletion {
+function completionFor(scripted: LanguageModelExecutionResult | undefined): ChatCompletion {
   const text =
     scripted?.output
       .filter((b): b is { type: "text"; text: string } => b.type === "text")
       .map((b) => b.text)
       .join("") ?? "hi";
   const toolBlocks = scripted?.output.filter(
-    (b): b is {
+    (
+      b,
+    ): b is {
       type: "tool_use";
       toolUseId: string;
       name: string;
@@ -81,9 +81,7 @@ describe("OpenAIExecutor — ExecutorProtocol conformance", () =>
     // The suite calls project/run/normalize/abort in some order — provide
     // enough canned responses for the full sequence. The stub clamps to
     // the last entry, so a single repeating completion is sufficient.
-    const stub = new StubOpenAIClient([
-      { kind: "non-streaming", completion },
-    ]);
+    const stub = new StubOpenAIClient([{ kind: "non-streaming", completion }]);
     const journal = new MemoryJournal();
     const bus = new LocalEventBus();
     const inbox = new LocalInbox();

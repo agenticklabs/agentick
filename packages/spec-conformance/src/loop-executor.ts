@@ -32,8 +32,9 @@ export interface LoopExecutorConformanceFactoryInput {
   readonly harnessId: string;
 }
 
-export type LoopExecutorConformanceFactory =
-  (input: LoopExecutorConformanceFactoryInput) => Promise<LoopExecutorProtocol>;
+export type LoopExecutorConformanceFactory = (
+  input: LoopExecutorConformanceFactoryInput,
+) => Promise<LoopExecutorProtocol>;
 
 // ============================================================================
 // Minimal stubs — every conformance test composes these
@@ -96,11 +97,9 @@ function stubExecutor(
   return {
     project: async () => ({ messages: [] }),
     execute: async () => scripts[Math.min(i, scripts.length - 1)],
-    normalize: async (input) =>
-      input.targetOutput as LanguageModelExecutionResult,
+    normalize: async (input) => input.targetOutput as LanguageModelExecutionResult,
     run: async () => {
-      const result =
-        scripts[Math.min(i, scripts.length - 1)] ?? scripts[scripts.length - 1]!;
+      const result = scripts[Math.min(i, scripts.length - 1)] ?? scripts[scripts.length - 1]!;
       i++;
       return { outcome: "succeeded", result };
     },
@@ -147,9 +146,7 @@ function makeRecordingApplicator() {
 // Suite
 // ============================================================================
 
-export function runLoopExecutorConformance(
-  factory: LoopExecutorConformanceFactory,
-): void {
+export function runLoopExecutorConformance(factory: LoopExecutorConformanceFactory): void {
   describe("LoopExecutorProtocol — happy path", () => {
     it("runs one tick, returns ExecutionTerminal{succeeded}", async () => {
       const loop = await factory({ harnessId: "loop-happy-1" });
@@ -233,9 +230,7 @@ export function runLoopExecutorConformance(
           },
         ],
         stopReason: "tool_use",
-        toolCalls: [
-          { id: "tc-1", name: "calculator", input: { expression: "1 + 1" } },
-        ],
+        toolCalls: [{ id: "tc-1", name: "calculator", input: { expression: "1 + 1" } }],
       };
       const secondRun: LanguageModelExecutionResult = {
         specVersion: "2026-05-08",
@@ -263,9 +258,7 @@ export function runLoopExecutorConformance(
       expect(result.toolResults[0]!.toolName).toBe("calculator");
       expect(result.toolResults[0]!.succeeded).toBe(true);
 
-      const toolApplyCalls = calls.filter(
-        (c) => c.method === "applyToolResults",
-      );
+      const toolApplyCalls = calls.filter((c) => c.method === "applyToolResults");
       expect(toolApplyCalls).toHaveLength(1);
     });
   });

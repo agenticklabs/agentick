@@ -21,7 +21,9 @@ import { InMemoryDataBridge } from "./in-memory-data-bridge.js";
 export function stubTimelineBridge(): TimelineBridge {
   return {
     read: (): TimelineSnapshot => ({ entries: [], version: 0 }),
-    subscribe: (_listener: () => void): Unsubscribe => () => {},
+    subscribe:
+      (_listener: () => void): Unsubscribe =>
+      () => {},
   };
 }
 
@@ -83,9 +85,7 @@ export function inMemoryKnobBridge(initial: Record<string, unknown> = {}): InMem
  *
  * @see docs/proposals/v2/blueprint/22-state-formatters-reconciler-shape.md §D1
  */
-export function inMemoryStateBridge(
-  initial: Readonly<Record<string, unknown>> = {},
-): StateBridge {
+export function inMemoryStateBridge(initial: Readonly<Record<string, unknown>> = {}): StateBridge {
   const values = new Map<string, unknown>(Object.entries(initial));
   const listeners = new Map<string, Set<() => void>>();
   return {

@@ -59,9 +59,7 @@ function formatNode(node: SemanticNode): string {
       return `<p>${childText}</p>`;
     case "list": {
       const tag = node.props?.ordered === true ? "ol" : "ul";
-      const items = (node.children ?? [])
-        .map((item) => `<li>${formatNode(item)}</li>`)
-        .join("");
+      const items = (node.children ?? []).map((item) => `<li>${formatNode(item)}</li>`).join("");
       return `<${tag}>${items}</${tag}>`;
     }
     case "list-item":
@@ -69,9 +67,7 @@ function formatNode(node: SemanticNode): string {
     case "table": {
       const rows = (node.children ?? [])
         .map((r) => {
-          const cells = (r.children ?? [])
-            .map((c) => `<td>${formatNode(c)}</td>`)
-            .join("");
+          const cells = (r.children ?? []).map((c) => `<td>${formatNode(c)}</td>`).join("");
           return `<tr>${cells}</tr>`;
         })
         .join("");

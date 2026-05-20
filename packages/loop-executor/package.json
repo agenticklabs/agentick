@@ -4,11 +4,11 @@
   "description": "Reference loop executor harness for Agentick v2. Orchestrates one agent execution by composing the reconciler, executor, and tool-executor harnesses through the canonical tick loop.",
   "keywords": [
     "agent",
-    "ai",
     "agentick",
+    "ai",
+    "harness",
     "loop",
-    "orchestration",
-    "harness"
+    "orchestration"
   ],
   "license": "MIT",
   "author": "Ryan Lindgren",
@@ -43,8 +43,8 @@
     "typecheck": "tsc -p tsconfig.build.json --noEmit"
   },
   "dependencies": {
-    "@agentick/spec": "workspace:*",
     "@agentick/runtime": "workspace:*",
+    "@agentick/spec": "workspace:*",
     "effect": "^3.21.2"
   },
   "devDependencies": {

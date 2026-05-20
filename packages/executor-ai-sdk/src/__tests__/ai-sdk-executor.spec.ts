@@ -9,11 +9,7 @@
 import { describe, expect, it } from "vitest";
 
 import { MockLanguageModelV2 } from "ai/test";
-import {
-  LocalEventBus,
-  LocalInbox,
-  MemoryJournal,
-} from "@agentick/runtime";
+import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
 import type { RenderedTree, LanguageModelTarget } from "@agentick/spec";
 import { isExecutorFactory } from "@agentick/spec";
 

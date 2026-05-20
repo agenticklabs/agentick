@@ -4,8 +4,8 @@
   "description": "Reference formatters for Agentick v2. Pure functions that turn SemanticContentBlock[] into wire-ready ContentBlock[]. Ships markdown / xml / text formatters + the defineFormatter builder. Reconciler plugs these into its formatter registry; markdown is the default.",
   "keywords": [
     "agent",
-    "ai",
     "agentick",
+    "ai",
     "formatter",
     "markdown",
     "xml"

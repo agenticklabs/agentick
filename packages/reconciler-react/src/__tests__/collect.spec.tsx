@@ -30,11 +30,7 @@ describe("collect — minimum RenderedTree", () => {
 describe("collect — structural primitives", () => {
   it("collects sections with stable ids from props", () => {
     const { tree } = renderAndCollect(
-      React.createElement(
-        "section",
-        { id: "s.todos", title: "Todos" },
-        "1. ship reconciler",
-      ),
+      React.createElement("section", { id: "s.todos", title: "Todos" }, "1. ship reconciler"),
     );
     expect(tree.context.entries).toHaveLength(1);
     const entry = tree.context.entries[0]!;
@@ -86,9 +82,7 @@ describe("collect — structural primitives", () => {
   });
 
   it("falls back to stable hostId when section id prop is absent", () => {
-    const { tree } = renderAndCollect(
-      React.createElement("section", null, "anonymous section"),
-    );
+    const { tree } = renderAndCollect(React.createElement("section", null, "anonymous section"));
     expect(tree.context.entries).toHaveLength(1);
     const entry = tree.context.entries[0]!;
     if (entry.kind !== "section") throw new Error("expected section");
@@ -179,9 +173,7 @@ describe("collect — composition", () => {
     function System({ children }: { children: React.ReactNode }) {
       return React.createElement("message", { role: "system" }, children);
     }
-    const { tree } = renderAndCollect(
-      React.createElement(System, null, "You are helpful."),
-    );
+    const { tree } = renderAndCollect(React.createElement(System, null, "You are helpful."));
     expect(tree.context.entries).toHaveLength(1);
     const entry = tree.context.entries[0]!;
     if (entry.kind !== "message") throw new Error("expected message");

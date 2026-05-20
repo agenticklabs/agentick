@@ -6,9 +6,9 @@ This is the load-bearing principle behind every v2 decision. Read this
 before designing a new interface, choosing between an abstract class
 and a concrete one, or arguing about where a feature should live.
 
-> If `01-harness-principle.md` is *how* harnesses are shaped, and
-> `19-foundation.md` is *what* sits underneath them, then this doc is
-> *why* we draw the lines where we do.
+> If `01-harness-principle.md` is _how_ harnesses are shaped, and
+> `19-foundation.md` is _what_ sits underneath them, then this doc is
+> _why_ we draw the lines where we do.
 
 ## The thesis
 
@@ -48,7 +48,7 @@ produces an ecosystem.
 **`[V1-REPLACED]`** of the v1 approach where infrastructure choices
 (EventEmitter, in-memory session store, sync renderers) were baked into
 classes. v2 makes the same choices in the default impl but exposes them
-behind interfaces that *any* backing technology can satisfy.
+behind interfaces that _any_ backing technology can satisfy.
 
 ## The strongest counterargument (and our mitigation)
 
@@ -64,7 +64,7 @@ ditch:
    follow the same rule.
 2. **Treat the conformance suite as the load-bearing artifact.** Prose
    in `docs/proposals/v2/blueprint/` is documentation. The vitest
-   suite in `@agentick/spec-conformance` is the *contract*. What passes
+   suite in `@agentick/spec-conformance` is the _contract_. What passes
    is conformant; what fails is not.
 
 ## The ten engineering rules
@@ -75,16 +75,16 @@ Durability, observability, addressability, transport, persistence,
 distribution, sandbox execution, formatting, tool dispatch — each is a
 protocol with one or more reference impls.
 
-| Concern              | Protocol                | Reference impl              | Other plausible impls                  |
-| -------------------- | ----------------------- | --------------------------- | -------------------------------------- |
-| Durable record       | `OperationJournal`      | `MemoryJournal`             | `PostgresJournal`, `RedisStreamsJournal`, `SqliteJournal` |
-| Live observation     | `EventBus`              | `LocalEventBus`             | `ClusterEventBus`, NATS-backed         |
-| Addressable inbound  | `MessageInbox`          | `LocalInbox`                | `ClusterInbox` (Effect.cluster, etc.)  |
-| JSX evaluation       | `ReconcilerProtocol`    | `@agentick/reconciler-react`| Vue/Solid hosts (theoretical)          |
-| Content formatting   | `FormatterProtocol`     | Markdown / XML / Text       | Custom application formatters          |
-| Provider execution   | `LanguageModelExecutor` | `@agentick/openai`, etc.    | Any HTTP-shaped LLM API                |
-| Tool dispatch        | `ToolExecutorProtocol`  | (Phase 4a)                  | MCP-backed, RPC-backed                 |
-| Sandbox execution    | `SandboxProvider`       | `sandbox-local`, `sandbox-docker` | Firecracker, Cloudflare Workers  |
+| Concern             | Protocol                | Reference impl                    | Other plausible impls                                     |
+| ------------------- | ----------------------- | --------------------------------- | --------------------------------------------------------- |
+| Durable record      | `OperationJournal`      | `MemoryJournal`                   | `PostgresJournal`, `RedisStreamsJournal`, `SqliteJournal` |
+| Live observation    | `EventBus`              | `LocalEventBus`                   | `ClusterEventBus`, NATS-backed                            |
+| Addressable inbound | `MessageInbox`          | `LocalInbox`                      | `ClusterInbox` (Effect.cluster, etc.)                     |
+| JSX evaluation      | `ReconcilerProtocol`    | `@agentick/reconciler-react`      | Vue/Solid hosts (theoretical)                             |
+| Content formatting  | `FormatterProtocol`     | Markdown / XML / Text             | Custom application formatters                             |
+| Provider execution  | `LanguageModelExecutor` | `@agentick/openai`, etc.          | Any HTTP-shaped LLM API                                   |
+| Tool dispatch       | `ToolExecutorProtocol`  | (Phase 4a)                        | MCP-backed, RPC-backed                                    |
+| Sandbox execution   | `SandboxProvider`       | `sandbox-local`, `sandbox-docker` | Firecracker, Cloudflare Workers                           |
 
 If a concern feels load-bearing, it gets a protocol.
 
@@ -117,20 +117,20 @@ This trade is non-negotiable. Defaults conform; they don't dictate.
 ### 4. Conformance suites are the executable form of the spec
 
 The blueprint is documentation. `@agentick/spec-conformance` is the
-contract. Every protocol gets a suite *before* a second impl is allowed
+contract. Every protocol gets a suite _before_ a second impl is allowed
 to claim conformance.
 
 Status:
 
-| Protocol             | Suite                       | Status        |
-| -------------------- | --------------------------- | ------------- |
-| `OperationJournal`   | `runJournalConformance`     | Phase 2 ✓     |
-| `MessageInbox`       | `runInboxConformance`       | Phase 2 ✓     |
-| `EventBus`           | `runEventBusConformance`    | Phase 2.5 ✗   |
-| `BaseHarness`        | `runHarnessConformance`     | Phase 3 ✗     |
-| `ReconcilerProtocol` | `runReconcilerConformance`  | Phase 3 ✗     |
-| `FormatterProtocol`  | `runFormatterConformance`   | Phase 4a ✗    |
-| Each executor family | `runExecutorConformance`    | Phase 4c ✗    |
+| Protocol             | Suite                      | Status      |
+| -------------------- | -------------------------- | ----------- |
+| `OperationJournal`   | `runJournalConformance`    | Phase 2 ✓   |
+| `MessageInbox`       | `runInboxConformance`      | Phase 2 ✓   |
+| `EventBus`           | `runEventBusConformance`   | Phase 2.5 ✗ |
+| `BaseHarness`        | `runHarnessConformance`    | Phase 3 ✗   |
+| `ReconcilerProtocol` | `runReconcilerConformance` | Phase 3 ✗   |
+| `FormatterProtocol`  | `runFormatterConformance`  | Phase 4a ✗  |
+| Each executor family | `runExecutorConformance`   | Phase 4c ✗  |
 
 A second impl that hasn't been driven through the suite is not
 conformant — it's a hypothesis.
@@ -140,11 +140,11 @@ conformant — it's a hypothesis.
 Not everything is or should be user-pluggable. State the tier
 explicitly in each protocol README.
 
-| Tier                      | Who plugs it                   | Example                                                                   |
-| ------------------------- | ------------------------------ | ------------------------------------------------------------------------- |
-| **T1 User-pluggable**     | App developers in user code    | `OperationJournal`, `MessageInbox`, `EventBus`, `Formatter`, `SandboxProvider` |
-| **T2 Vendor-pluggable**   | Adapter authors                | Executor adapters, MCP servers, persistence backends                       |
-| **T3 Framework-internal** | Forking required               | The reconciler is React. Pluggability is at `ReconcilerProtocol`, not at "swap React for Vue" |
+| Tier                      | Who plugs it                | Example                                                                                       |
+| ------------------------- | --------------------------- | --------------------------------------------------------------------------------------------- |
+| **T1 User-pluggable**     | App developers in user code | `OperationJournal`, `MessageInbox`, `EventBus`, `Formatter`, `SandboxProvider`                |
+| **T2 Vendor-pluggable**   | Adapter authors             | Executor adapters, MCP servers, persistence backends                                          |
+| **T3 Framework-internal** | Forking required            | The reconciler is React. Pluggability is at `ReconcilerProtocol`, not at "swap React for Vue" |
 
 Pretending T3 things are T1 produces hollow abstractions. Pretending T1
 things are T3 produces lock-in. Stating the tier prevents both.
@@ -209,8 +209,8 @@ If the adoption gradient breaks, the protocol is wrong.
 
 ### 9. Naming reflects the boundary, not the technology
 
-Package and protocol names describe what they *are*, not what they're
-*made of*:
+Package and protocol names describe what they _are_, not what they're
+_made of_:
 
 ```
 @agentick/runtime         (not @agentick/memory-substrate)

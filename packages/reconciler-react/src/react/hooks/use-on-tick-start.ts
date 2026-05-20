@@ -17,7 +17,9 @@ import { useEffect, useRef } from "react";
 import type { LifecycleTickStart } from "@agentick/spec";
 import { useLifecycleStore } from "../lifecycle-context.js";
 
-export function useOnTickStart(callback: (event: LifecycleTickStart) => void | Promise<void>): void {
+export function useOnTickStart(
+  callback: (event: LifecycleTickStart) => void | Promise<void>,
+): void {
   const store = useLifecycleStore();
   // Capture the latest callback in a ref so the effect only registers
   // once per component instance, while still calling the freshest

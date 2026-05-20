@@ -108,11 +108,7 @@ export interface RunExecutionInput {
   readonly mountId: string;
 
   /** Executor harness for the model run. */
-  readonly executor: ExecutorProtocol<
-    unknown,
-    unknown,
-    LanguageModelExecutionResult
-  >;
+  readonly executor: ExecutorProtocol<unknown, unknown, LanguageModelExecutionResult>;
   readonly target: ExecutionTarget;
 
   /** Tool executor harness for dispatch of `result.toolCalls`. */
@@ -138,7 +134,12 @@ export interface ExecutionRunResult {
   readonly executionId: string;
   readonly ticks: number;
   readonly usage: UsageStats;
-  readonly stopReason: LanguageModelStopReason | "max_ticks" | "aborted" | "vetoed" | "executor_failed";
+  readonly stopReason:
+    | LanguageModelStopReason
+    | "max_ticks"
+    | "aborted"
+    | "vetoed"
+    | "executor_failed";
   /** Canonical content stream — concatenated `output` from each tick's executor result. */
   readonly output: readonly ContentBlock[];
   /** Tool dispatch results accumulated across ticks. */
@@ -235,4 +236,3 @@ export interface LoopExecutorProtocol {
    */
   abort(input: { readonly executionId: string; readonly reason?: string }): Promise<void>;
 }
-

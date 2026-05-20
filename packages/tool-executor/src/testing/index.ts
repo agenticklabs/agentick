@@ -7,11 +7,7 @@
  * impl without spelling out substrate boilerplate.
  */
 
-import {
-  LocalEventBus,
-  LocalInbox,
-  MemoryJournal,
-} from "@agentick/runtime";
+import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
 import type { ToolRegistration } from "@agentick/spec";
 import { InMemoryHandlerResolver } from "../handler-resolver.js";
 import { ToolExecutorHarness } from "../harness.js";

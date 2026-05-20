@@ -10,8 +10,5 @@
  * @see docs/proposals/v2/blueprint/06-executor-harness.md
  */
 
-export {
-  AISDKExecutor,
-  type AISDKExecutorOptions,
-} from "./ai-sdk-executor.js";
+export { AISDKExecutor, type AISDKExecutorOptions } from "./ai-sdk-executor.js";
 export { aisdk, type AISDKFactoryOptions } from "./aisdk-factory.js";

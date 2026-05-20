@@ -30,9 +30,7 @@ export interface StandardSchemaProps<Input = unknown, Output = Input> {
   readonly vendor: string;
   readonly validate: (
     value: unknown,
-  ) =>
-    | StandardSchemaResult<Output>
-    | Promise<StandardSchemaResult<Output>>;
+  ) => StandardSchemaResult<Output> | Promise<StandardSchemaResult<Output>>;
   /** Optional type-only marker for inference. Never present at runtime. */
   readonly types?: { readonly input: Input; readonly output: Output };
 }

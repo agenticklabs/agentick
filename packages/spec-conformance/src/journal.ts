@@ -80,9 +80,7 @@ export function runJournalConformance(factory: () => OperationJournal): void {
 
     it("lookupTerminal returns Some after terminal append", async () => {
       const j = factory();
-      await Effect.runPromise(
-        j.append(mkEvent({ id: "e1", opId: "op-42", phase: "requested" })),
-      );
+      await Effect.runPromise(j.append(mkEvent({ id: "e1", opId: "op-42", phase: "requested" })));
       let look = await Effect.runPromise(j.lookupTerminal("op-42"));
       expect(look.some).toBe(false);
       await Effect.runPromise(
@@ -116,18 +114,14 @@ export function runJournalConformance(factory: () => OperationJournal): void {
   describe("OperationJournal — tail subscription", () => {
     it("tail yields events appended after subscription", async () => {
       const j = factory();
-      const fiber = Effect.runFork(
-        Stream.runHead(j.tail({})).pipe(Effect.map((o) => o)),
-      );
+      const fiber = Effect.runFork(Stream.runHead(j.tail({})).pipe(Effect.map((o) => o)));
       // Microtask flush to ensure the tail listener is registered.
       await new Promise((r) => setImmediate(r));
       const ev = mkEvent({ id: "live", opId: "op-1", phase: "requested" });
       await Effect.runPromise(j.append(ev));
       const result = await Effect.runPromise(Fiber.join(fiber));
       // Stream.runHead returns Option<T>; cast safely.
-      expect((result as unknown as { _tag: string; value?: ProtocolEvent })._tag).toBe(
-        "Some",
-      );
+      expect((result as unknown as { _tag: string; value?: ProtocolEvent })._tag).toBe("Some");
       const found = result as unknown as { value?: ProtocolEvent };
       expect(found.value?.id).toBe("live");
     });
@@ -147,16 +141,10 @@ export function runJournalConformance(factory: () => OperationJournal): void {
   describe("OperationJournal — crash recovery", () => {
     it("findOrphaned returns ops with requested but no terminal", async () => {
       const j = factory();
+      await Effect.runPromise(j.append(mkEvent({ id: "a1", opId: "op-A", phase: "requested" })));
+      await Effect.runPromise(j.append(mkEvent({ id: "b1", opId: "op-B", phase: "requested" })));
       await Effect.runPromise(
-        j.append(mkEvent({ id: "a1", opId: "op-A", phase: "requested" })),
-      );
-      await Effect.runPromise(
-        j.append(mkEvent({ id: "b1", opId: "op-B", phase: "requested" })),
-      );
-      await Effect.runPromise(
-        j.append(
-          mkEvent({ id: "b2", opId: "op-B", phase: "terminal", outcome: "succeeded" }),
-        ),
+        j.append(mkEvent({ id: "b2", opId: "op-B", phase: "terminal", outcome: "succeeded" })),
       );
       const orphans = await Effect.runPromise(j.findOrphaned());
       expect(orphans.map((o) => o.opId)).toEqual(["op-A"]);

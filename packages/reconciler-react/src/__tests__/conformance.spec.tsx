@@ -102,11 +102,7 @@ function toReactElement(input: ElementInput): React.ReactNode {
         input.text ?? "",
       );
     case "message":
-      return React.createElement(
-        "message",
-        { role: input.role },
-        input.text ?? "",
-      );
+      return React.createElement("message", { role: input.role }, input.text ?? "");
     case "tool":
       return React.createElement("tool", {
         name: input.name,

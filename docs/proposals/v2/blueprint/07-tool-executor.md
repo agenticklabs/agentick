@@ -75,11 +75,9 @@ with `exposure: ["runtime"]` is internal and reachable by neither.
 
 ```ts
 interface ToolExecutorProtocol {
-  dispatch(input: DispatchInput):
-    Effect<ToolResult, ToolExecutorError, ToolExecutorEnv>;
+  dispatch(input: DispatchInput): Effect<ToolResult, ToolExecutorError, ToolExecutorEnv>;
 
-  abort(toolCallId: string):
-    Effect<void, never, ToolExecutorEnv>;
+  abort(toolCallId: string): Effect<void, never, ToolExecutorEnv>;
 }
 
 interface DispatchInput {
@@ -118,8 +116,13 @@ interface ToolResult {
   success: boolean;
   content: ContentBlock[];
   error?: string;
-  executedBy?: ToolExecutor;          // engine | adapter | provider | client
-  metadata?: { executionTimeMs?: number; retryCount?: number; cacheHit?: boolean; [k: string]: unknown };
+  executedBy?: ToolExecutor; // engine | adapter | provider | client
+  metadata?: {
+    executionTimeMs?: number;
+    retryCount?: number;
+    cacheHit?: boolean;
+    [k: string]: unknown;
+  };
 }
 ```
 
@@ -163,14 +166,14 @@ toolExecutor.use({
 
 Common uses:
 
-| Surface | Use case |
-| --- | --- |
-| `aroundDispatch` veto | Permission denied for this user/tool |
-| `aroundDispatch` replace | Test fixture, sandbox proxy |
-| `aroundDispatch` (input rewrite before next) | Sanitize input |
-| `aroundDispatch` (result rewrite after next) | Redact secrets in result |
-| `onConfirmationRequired` replace verdict | Auto-approve in tests |
-| `onHandlerError` replace verdict | Retry with adjusted input |
+| Surface                                      | Use case                             |
+| -------------------------------------------- | ------------------------------------ |
+| `aroundDispatch` veto                        | Permission denied for this user/tool |
+| `aroundDispatch` replace                     | Test fixture, sandbox proxy          |
+| `aroundDispatch` (input rewrite before next) | Sanitize input                       |
+| `aroundDispatch` (result rewrite after next) | Redact secrets in result             |
+| `onConfirmationRequired` replace verdict     | Auto-approve in tests                |
+| `onHandlerError` replace verdict             | Retry with adjusted input            |
 
 `[V1-REPLACED]` of v1's `ExecutionRunner.executeToolCall(call, tool, next)` —
 that's `aroundDispatch` middleware with around-style replace semantics.
@@ -180,10 +183,10 @@ that's `aroundDispatch` middleware with around-style replace semantics.
 The tool executor accepts inbound messages at address
 `tool:{sessionId}` (one per session):
 
-| Message type | Payload | Effect |
-| --- | --- | --- |
-| `abort` | `{ toolCallId: string; reason?: string }` | Aborts an in-flight tool dispatch. |
-| `confirmation-response` | `ToolConfirmationResponse` | Resolves a pending confirmation prompt. |
+| Message type            | Payload                                   | Effect                                  |
+| ----------------------- | ----------------------------------------- | --------------------------------------- |
+| `abort`                 | `{ toolCallId: string; reason?: string }` | Aborts an in-flight tool dispatch.      |
+| `confirmation-response` | `ToolConfirmationResponse`                | Resolves a pending confirmation prompt. |
 
 The `confirmation-response` message is how the gateway / external client
 delivers the user's approval/denial for a tool requiring confirmation.
@@ -303,7 +306,7 @@ interface ToolConfirmationRequest {
   name: string;
   arguments: Record<string, unknown>;
   message?: string;
-  metadata?: Record<string, unknown>;        // including DiffPreviewMetadata
+  metadata?: Record<string, unknown>; // including DiffPreviewMetadata
 }
 
 interface ToolConfirmationResponse {
@@ -339,8 +342,10 @@ interface ResolvedTool {
 }
 
 interface ToolHandler {
-  (input: unknown, deps: { ctx: ToolHandlerCtx; use: Record<string, unknown> }):
-    Promise<ContentBlock[]> | ContentBlock[];
+  (
+    input: unknown,
+    deps: { ctx: ToolHandlerCtx; use: Record<string, unknown> },
+  ): Promise<ContentBlock[]> | ContentBlock[];
 }
 
 interface ToolHandlerCtx {
@@ -348,7 +353,7 @@ interface ToolHandlerCtx {
   sessionId?: string;
   executionId?: string;
   signal: AbortSignal;
-  setState(key: string, value: unknown): void;     // [V1-INHERITED] stateful tool pattern
+  setState(key: string, value: unknown): void; // [V1-INHERITED] stateful tool pattern
   emit(event: ChannelEvent): void;
 }
 ```
@@ -367,7 +372,7 @@ const ShellTool = createTool({
   name: "shell",
   description: "Execute a command",
   input: z.object({ command: z.string() }),
-  use: () => ({ sandbox: useSandbox() }),     // captured at render time
+  use: () => ({ sandbox: useSandbox() }), // captured at render time
   handler: async ({ command }, deps) => {
     const out = await deps!.sandbox.exec(command);
     return [{ type: "text", text: out.stdout }];

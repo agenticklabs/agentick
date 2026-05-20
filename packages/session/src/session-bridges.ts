@@ -70,8 +70,7 @@ export function timelineBridgeFor(store: SessionStateStore): TimelineBridge {
         .map(toEntrySummary),
       version: store.timelineVersion(),
     }),
-    subscribe: (listener: () => void): Unsubscribe =>
-      store.subscribeTimeline(listener),
+    subscribe: (listener: () => void): Unsubscribe => store.subscribeTimeline(listener),
   };
 }
 
@@ -90,9 +89,7 @@ export function knobBridgeFor(
   return inMemoryKnobBridge({ ...initial });
 }
 
-export function stateBridgeFor(
-  initial: Readonly<Record<string, unknown>> = {},
-): StateBridge {
+export function stateBridgeFor(initial: Readonly<Record<string, unknown>> = {}): StateBridge {
   return inMemoryStateBridge({ ...initial });
 }
 
@@ -148,9 +145,7 @@ export function buildSessionBridges(
     data: new InMemoryDataBridge(),
     loop: loopBridgeStub(),
     session: sessionBridgeFor(store),
-    ...(options.toolBridge !== undefined
-      ? { tools: options.toolBridge }
-      : {}),
+    ...(options.toolBridge !== undefined ? { tools: options.toolBridge } : {}),
   };
   if (options.extensionBridges && options.extensionBridges.size > 0) {
     // Spread extension bridges into the bundle by name. Adopters

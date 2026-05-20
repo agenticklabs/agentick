@@ -22,9 +22,7 @@ import type {
 } from "@agentick/spec";
 
 export interface DefineFormatterInput extends FormatterIdentity {
-  readonly render: (
-    blocks: readonly SemanticContentBlock[],
-  ) => readonly ContentBlock[];
+  readonly render: (blocks: readonly SemanticContentBlock[]) => readonly ContentBlock[];
 }
 
 /**

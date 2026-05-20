@@ -81,9 +81,7 @@ function formatNode(node: SemanticNode): string {
       const header = rows[0]!;
       const headerCells = (header.children ?? []).map(formatNode);
       const separator = headerCells.map(() => "---");
-      const body = rows.slice(1).map((r) =>
-        (r.children ?? []).map(formatNode).join(" | "),
-      );
+      const body = rows.slice(1).map((r) => (r.children ?? []).map(formatNode).join(" | "));
       const lines = [
         `| ${headerCells.join(" | ")} |`,
         `| ${separator.join(" | ")} |`,

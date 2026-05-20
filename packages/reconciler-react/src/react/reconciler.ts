@@ -21,9 +21,7 @@ import type { ReconcilerContainer } from "../host/container.js";
 import type { HostConfigDeps } from "../host/host-config.js";
 import { createHostConfig } from "../host/host-config.js";
 
-export type FiberRoot = ReturnType<
-  ReturnType<typeof ReactReconciler>["createContainer"]
->;
+export type FiberRoot = ReturnType<ReturnType<typeof ReactReconciler>["createContainer"]>;
 
 export interface Reconciler {
   /** Create a FiberRoot tied to this reconciler's container. */
@@ -67,9 +65,7 @@ export function createReconciler(deps: HostConfigDeps): Reconciler {
       //  concurrentUpdatesByDefaultOverride, identifierPrefix,
       //  onUncaughtError, onCaughtError, onRecoverableError,
       //  transitionCallbacks)
-      const createContainer = instance.createContainer as (
-        ...args: unknown[]
-      ) => FiberRoot;
+      const createContainer = instance.createContainer as (...args: unknown[]) => FiberRoot;
       return createContainer(
         deps.container,
         0, // LegacyRoot — we render synchronously
@@ -99,19 +95,18 @@ export function createReconciler(deps: HostConfigDeps): Reconciler {
         updateContainerSync(element, root, null, undefined);
       } else {
         // Fallback for older react-reconciler shapes.
-        (instance.updateContainer as (
-          el: ReactNode,
-          r: FiberRoot,
-          parent?: unknown,
-          cb?: () => void,
-        ) => void)(element, root, null, undefined);
+        (
+          instance.updateContainer as (
+            el: ReactNode,
+            r: FiberRoot,
+            parent?: unknown,
+            cb?: () => void,
+          ) => void
+        )(element, root, null, undefined);
       }
-      const flushSyncWork = (
-        instance as unknown as { flushSyncWork?: () => void }
-      ).flushSyncWork;
+      const flushSyncWork = (instance as unknown as { flushSyncWork?: () => void }).flushSyncWork;
       if (flushSyncWork) flushSyncWork();
     },
-
   };
 }
 

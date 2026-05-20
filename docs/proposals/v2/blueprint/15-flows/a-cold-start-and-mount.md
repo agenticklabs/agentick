@@ -197,13 +197,13 @@ session:lifecycle:restore:terminal { succeeded }
 
 ## What can fail
 
-| Failure | Where it surfaces |
-| --- | --- |
-| Persistence load timeout | `RestoreError` from session.restore |
-| Compiler snapshot corrupt or wrong spec version | `RestoreError` with `cause: VersionMismatch` |
-| Async component throws on re-run after restore | `reconciler:async:resolved` with `outcome: failed` → loop's `reconciler:render:terminal { failed }` |
-| Subscription handler ID no longer in tree | `session:subscription:handler-unbound:terminal` per intent |
-| Cluster node unavailable for activation | `cluster:activation:terminal { failed }` (then routing retries) |
+| Failure                                         | Where it surfaces                                                                                   |
+| ----------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| Persistence load timeout                        | `RestoreError` from session.restore                                                                 |
+| Compiler snapshot corrupt or wrong spec version | `RestoreError` with `cause: VersionMismatch`                                                        |
+| Async component throws on re-run after restore  | `reconciler:async:resolved` with `outcome: failed` → loop's `reconciler:render:terminal { failed }` |
+| Subscription handler ID no longer in tree       | `session:subscription:handler-unbound:terminal` per intent                                          |
+| Cluster node unavailable for activation         | `cluster:activation:terminal { failed }` (then routing retries)                                     |
 
 ## Cross-references
 

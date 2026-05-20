@@ -102,9 +102,11 @@ function matches(decl: ToolDeclaration, filter: ToolListFilter): boolean {
  * via JSON shape. Both sides are JSON-firewall-safe by construction.
  */
 function areRegistrationsEqual(a: ToolRegistration, b: ToolRegistration): boolean {
-  return jsonEqual(a.declaration, b.declaration)
-    && a.handlerRef === b.handlerRef
-    && jsonEqual(a.useDeps ?? {}, b.useDeps ?? {});
+  return (
+    jsonEqual(a.declaration, b.declaration) &&
+    a.handlerRef === b.handlerRef &&
+    jsonEqual(a.useDeps ?? {}, b.useDeps ?? {})
+  );
 }
 
 function jsonEqual(a: unknown, b: unknown): boolean {

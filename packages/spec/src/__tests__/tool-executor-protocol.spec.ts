@@ -166,9 +166,7 @@ describe("@agentick/spec — tool executor protocol", () => {
         outcome: "failed",
         durationMs: 7,
       };
-      expectTypeOf(terminal.outcome).toEqualTypeOf<
-        "succeeded" | "failed" | "vetoed" | "aborted"
-      >();
+      expectTypeOf(terminal.outcome).toEqualTypeOf<"succeeded" | "failed" | "vetoed" | "aborted">();
     });
   });
 

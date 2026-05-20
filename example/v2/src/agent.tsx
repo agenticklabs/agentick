@@ -16,8 +16,8 @@ export function SupportAgent() {
     <>
       <System>
         <Paragraph>
-          You are a helpful support agent. Use the calculator for arithmetic
-          and the diagnostic tools when asked to introspect.
+          You are a helpful support agent. Use the calculator for arithmetic and the diagnostic
+          tools when asked to introspect.
         </Paragraph>
       </System>
 

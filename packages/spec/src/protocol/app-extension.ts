@@ -101,11 +101,7 @@ export interface AppInstaller {
    * extension might register a `read_secret` tool here so it works
    * before any JSX tool components mount).
    */
-  registerToolHandler(
-    handlerRef: string,
-    handler: ToolHandler,
-    validator?: Validator,
-  ): Unsubscribe;
+  registerToolHandler(handlerRef: string, handler: ToolHandler, validator?: Validator): Unsubscribe;
 
   // ──────────────────────── Substrate ────────────────────────
 

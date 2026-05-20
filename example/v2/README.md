@@ -23,7 +23,7 @@ into something an application author can use end-to-end:
 5. **Context plumbing through `ctx`** — `whoami` tool reads
    `sessionId` / `executionId` / `tickId` / `toolCallId` from the
    harness-supplied `ctx` (second arg to the handler). The substrate
-   owns a FiberRef-backed `RuntimeContext` for the *Effect* side; the
+   owns a FiberRef-backed `RuntimeContext` for the _Effect_ side; the
    harness mirrors it into `ctx` for Promise-typed tool handlers.
 6. **Bus subscription** — every harness operation publishes on the same
    `EventBus`; one Stream observes both

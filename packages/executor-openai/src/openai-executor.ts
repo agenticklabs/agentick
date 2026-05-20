@@ -134,10 +134,7 @@ const STOP_REASON_MAP: Record<string, LanguageModelStopReason> = {
 // OpenAIExecutor
 // ============================================================================
 
-export class OpenAIExecutor
-  extends BaseHarness<"executor">
-  implements LanguageModelExecutor
-{
+export class OpenAIExecutor extends BaseHarness<"executor"> implements LanguageModelExecutor {
   readonly family = "language-model" as const;
   readonly target: ExecutionTarget;
 
@@ -200,23 +197,18 @@ export class OpenAIExecutor
       input,
     };
     return runHarnessProtocol(
-      this.runOperation(op, (i) =>
-        this.executeBody(i, executionId, undefined),
-      ),
+      this.runOperation(op, (i) => this.executeBody(i, executionId, undefined)),
     );
   }
 
-  normalize(
-    input: NormalizeInput<unknown>,
-  ): Promise<LanguageModelExecutionResult> {
-    const op: Operation<NormalizeInput<unknown>, LanguageModelExecutionResult> =
-      {
-        opId: `executor:normalize:${ulid()}`,
-        surface: "executor",
-        name: "executor:command:normalize",
-        scope: input.scope ?? {},
-        input,
-      };
+  normalize(input: NormalizeInput<unknown>): Promise<LanguageModelExecutionResult> {
+    const op: Operation<NormalizeInput<unknown>, LanguageModelExecutionResult> = {
+      opId: `executor:normalize:${ulid()}`,
+      surface: "executor",
+      name: "executor:command:normalize",
+      scope: input.scope ?? {},
+      input,
+    };
     return runHarnessProtocol(
       this.runOperation(op, (i) =>
         Effect.try({
@@ -230,9 +222,7 @@ export class OpenAIExecutor
     );
   }
 
-  run(
-    input: RunInput,
-  ): Promise<ExecutorTerminal<LanguageModelExecutionResult>> {
+  run(input: RunInput): Promise<ExecutorTerminal<LanguageModelExecutionResult>> {
     const executionId = input.scope?.executionId ?? `exec:${ulid()}`;
     // Per-tick opId composition — see MockLanguageModelExecutor for the
     // rationale (substrate idempotency keys must differ per tick).
@@ -241,19 +231,14 @@ export class OpenAIExecutor
       tickId !== undefined
         ? `executor:run:${executionId}:${tickId}`
         : `executor:run:${executionId}:${ulid()}`;
-    const op: Operation<
-      RunInput,
-      ExecutorTerminal<LanguageModelExecutionResult>
-    > = {
+    const op: Operation<RunInput, ExecutorTerminal<LanguageModelExecutionResult>> = {
       opId,
       surface: "executor",
       name: "executor:command:run",
       scope: { ...(input.scope ?? {}), executionId },
       input,
     };
-    return runHarnessProtocol(
-      this.runOperation(op, (i) => this.runBody(i, executionId, op)),
-    );
+    return runHarnessProtocol(this.runOperation(op, (i) => this.runBody(i, executionId, op)));
   }
 
   abort(input: AbortExecutorInput): Promise<void> {
@@ -276,9 +261,7 @@ export class OpenAIExecutor
   ): Effect.Effect<unknown, MessageHandlerError, never> {
     return Effect.fail({
       _tag: "HandlerError",
-      cause: new Error(
-        "openai executor inbox dispatch not yet wired (Phase 4c minimum)",
-      ),
+      cause: new Error("openai executor inbox dispatch not yet wired (Phase 4c minimum)"),
     });
   }
 
@@ -310,8 +293,7 @@ export class OpenAIExecutor
       try {
         const params = toOpenAIParams(input.targetInput, this.defaultModel);
         const wantStream =
-          this.streamByDefault &&
-          (input.target.capabilities?.supportsStreaming ?? true);
+          this.streamByDefault && (input.target.capabilities?.supportsStreaming ?? true);
         const signal = mergeSignals(input.signal, controller.signal);
 
         if (!wantStream) {
@@ -338,10 +320,7 @@ export class OpenAIExecutor
     op: Operation<unknown, unknown> | undefined,
   ): Effect.Effect<ChatCompletion, ExecuteError, never> {
     return Effect.gen(this, function* () {
-      const stream = yield* Effect.tryPromise<
-        AsyncIterable<ChatCompletionChunk>,
-        ExecuteError
-      >({
+      const stream = yield* Effect.tryPromise<AsyncIterable<ChatCompletionChunk>, ExecuteError>({
         try: () =>
           this.client.chat.completions.create(
             {
@@ -357,10 +336,7 @@ export class OpenAIExecutor
       const iterator = stream[Symbol.asyncIterator]();
       const accum = new StreamAccumulator();
       while (true) {
-        const step = yield* Effect.tryPromise<
-          IteratorResult<ChatCompletionChunk>,
-          ExecuteError
-        >({
+        const step = yield* Effect.tryPromise<IteratorResult<ChatCompletionChunk>, ExecuteError>({
           try: () => iterator.next(),
           catch: (cause): ExecuteError => mapExecuteError(cause),
         });
@@ -368,9 +344,7 @@ export class OpenAIExecutor
         const chunk = step.value;
         accum.push(chunk);
         if (op !== undefined) {
-          yield* this.emitDeltaLazy(op, () =>
-            mapChunkToDelta(chunk, accum),
-          ).pipe(Effect.orDie);
+          yield* this.emitDeltaLazy(op, () => mapChunkToDelta(chunk, accum)).pipe(Effect.orDie);
         }
       }
 
@@ -382,11 +356,7 @@ export class OpenAIExecutor
     input: RunInput,
     executionId: string,
     op: Operation<RunInput, ExecutorTerminal<LanguageModelExecutionResult>>,
-  ): Effect.Effect<
-    ExecutorTerminal<LanguageModelExecutionResult>,
-    ExecutorError,
-    never
-  > {
+  ): Effect.Effect<ExecutorTerminal<LanguageModelExecutionResult>, ExecutorError, never> {
     return Effect.gen(this, function* () {
       // Pre-execution abort short-circuit. Mid-stream aborts surface as
       // `ProviderAborted` from `executeBody` and are caught below.
@@ -436,8 +406,7 @@ export class OpenAIExecutor
 
       // 3. normalize (deterministic)
       const result = yield* Effect.try({
-        try: () =>
-          normalizeImpl({ targetOutput: raw, target: input.target }),
+        try: () => normalizeImpl({ targetOutput: raw, target: input.target }),
         catch: (cause): ExecutorError => ({
           _tag: "NormalizationFailed",
           cause,
@@ -481,10 +450,7 @@ function toOpenAIParams(
   const messages: ChatCompletionMessageParam[] = [];
   for (const m of input.messages) messages.push(...toOpenAIMessages(m));
 
-  const tools =
-    input.tools && input.tools.length > 0
-      ? input.tools.map(toOpenAITool)
-      : undefined;
+  const tools = input.tools && input.tools.length > 0 ? input.tools.map(toOpenAITool) : undefined;
 
   const params: ChatCompletionCreateParams = {
     model: defaultModel ?? "gpt-4o-mini",
@@ -523,9 +489,7 @@ function toOpenAIParams(
   return params;
 }
 
-function toOpenAIMessages(
-  m: LanguageModelMessage,
-): ChatCompletionMessageParam[] {
+function toOpenAIMessages(m: LanguageModelMessage): ChatCompletionMessageParam[] {
   // Tool result messages must go on their own `role: "tool"` entry.
   const toolResults: ChatCompletionMessageParam[] = [];
   const textParts: { type: "text"; text: string }[] = [];
@@ -631,9 +595,7 @@ function projectImpl(input: ProjectInput): LanguageModelInput {
   };
 }
 
-function buildMessages(
-  tree: RenderedTree,
-): ReadonlyArray<LanguageModelMessage> {
+function buildMessages(tree: RenderedTree): ReadonlyArray<LanguageModelMessage> {
   const messages: LanguageModelMessage[] = [];
   const systemText = collectSectionText(tree.context.entries);
   if (systemText.length > 0) {
@@ -699,9 +661,7 @@ function messagePartFromBlock(block: ContentBlock): LanguageModelMessagePart {
       return {
         type: "text",
         text:
-          "text" in block && typeof block.text === "string"
-            ? block.text
-            : JSON.stringify(block),
+          "text" in block && typeof block.text === "string" ? block.text : JSON.stringify(block),
       };
   }
 }
@@ -749,9 +709,7 @@ function buildParameters(tree: RenderedTree) {
 // ChatCompletion → LanguageModelExecutionResult
 // ============================================================================
 
-function normalizeImpl(
-  input: NormalizeInput<unknown>,
-): LanguageModelExecutionResult {
+function normalizeImpl(input: NormalizeInput<unknown>): LanguageModelExecutionResult {
   const raw = input.targetOutput;
   if (!isChatCompletion(raw)) {
     throw new Error("normalize expected ChatCompletion shape");
@@ -852,12 +810,8 @@ class StreamAccumulator {
   private created = 0;
   private model = "";
   private text = "";
-  private finishReason: ChatCompletion["choices"][0]["finish_reason"] | null =
-    null;
-  private toolCallsByIndex = new Map<
-    number,
-    { id: string; name: string; arguments: string }
-  >();
+  private finishReason: ChatCompletion["choices"][0]["finish_reason"] | null = null;
+  private toolCallsByIndex = new Map<number, { id: string; name: string; arguments: string }>();
   private usage:
     | { prompt_tokens: number; completion_tokens: number; total_tokens: number }
     | undefined;
@@ -882,8 +836,7 @@ class StreamAccumulator {
     if (Array.isArray(delta.tool_calls)) {
       for (const tc of delta.tool_calls) {
         const idx = tc.index;
-        const entry =
-          this.toolCallsByIndex.get(idx) ?? { id: "", name: "", arguments: "" };
+        const entry = this.toolCallsByIndex.get(idx) ?? { id: "", name: "", arguments: "" };
         if (tc.id) entry.id = tc.id;
         if (tc.function?.name) entry.name = tc.function.name;
         if (tc.function?.arguments) entry.arguments += tc.function.arguments;
@@ -1001,15 +954,11 @@ function mapExecuteError(cause: unknown): ExecuteError {
   return { _tag: "StreamFailed", cause };
 }
 
-function mergeSignals(
-  a: AbortSignal | undefined,
-  b: AbortSignal,
-): AbortSignal | undefined {
+function mergeSignals(a: AbortSignal | undefined, b: AbortSignal): AbortSignal | undefined {
   if (a === undefined) return b;
   if (a.aborted) return a;
   const c = new AbortController();
-  const onAbort = (signal: AbortSignal) => () =>
-    c.abort(signal.reason ?? "aborted");
+  const onAbort = (signal: AbortSignal) => () => c.abort(signal.reason ?? "aborted");
   a.addEventListener("abort", onAbort(a), { once: true });
   b.addEventListener("abort", onAbort(b), { once: true });
   return c.signal;

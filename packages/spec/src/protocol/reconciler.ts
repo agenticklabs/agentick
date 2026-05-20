@@ -364,10 +364,18 @@ export type ReconcileError =
   | { readonly _tag: "AlreadyMounted"; readonly mountId: string }
   | { readonly _tag: "RenderFailed"; readonly cause: unknown; readonly path?: string }
   | { readonly _tag: "DataFetchFailed"; readonly key: string; readonly cause: unknown }
-  | { readonly _tag: "MaxIterationsExceeded"; readonly iterations: number; readonly reason?: string }
+  | {
+      readonly _tag: "MaxIterationsExceeded";
+      readonly iterations: number;
+      readonly reason?: string;
+    }
   | { readonly _tag: "UnstableTree"; readonly iterations: number }
   | { readonly _tag: "InvalidElement"; readonly reason: string }
-  | { readonly _tag: "SnapshotIncompatible"; readonly specVersion: string; readonly reason?: string }
+  | {
+      readonly _tag: "SnapshotIncompatible";
+      readonly specVersion: string;
+      readonly reason?: string;
+    }
   | { readonly _tag: "BridgeUnavailable"; readonly bridge: string; readonly hook: string }
   | { readonly _tag: "FormatterFailed"; readonly cause: unknown };
 

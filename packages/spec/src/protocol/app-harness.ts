@@ -24,11 +24,7 @@
 import type { Layer } from "effect";
 import type { EventQuery, ProtocolEvent } from "../data/events.js";
 import type { SessionStatus } from "./hook-bridges.js";
-import type {
-  ExecutorFactory,
-  ExecutorProtocol,
-  LanguageModelExecutor,
-} from "./executor.js";
+import type { ExecutorFactory, ExecutorProtocol, LanguageModelExecutor } from "./executor.js";
 import type {
   SendInput,
   SendResult,

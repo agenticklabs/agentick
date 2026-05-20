@@ -113,10 +113,7 @@ interface AISDKProjectedInput {
 // AISDKExecutor
 // ============================================================================
 
-export class AISDKExecutor
-  extends BaseHarness<"executor">
-  implements LanguageModelExecutor
-{
+export class AISDKExecutor extends BaseHarness<"executor"> implements LanguageModelExecutor {
   readonly family = "language-model" as const;
   readonly target: ExecutionTarget;
 
@@ -169,22 +166,17 @@ export class AISDKExecutor
       scope: input.scope ?? { executionId },
       input,
     };
-    return runHarnessProtocol(
-      this.runOperation(op, (i) => this.executeBody(i, executionId)),
-    );
+    return runHarnessProtocol(this.runOperation(op, (i) => this.executeBody(i, executionId)));
   }
 
-  normalize(
-    input: NormalizeInput<unknown>,
-  ): Promise<LanguageModelExecutionResult> {
-    const op: Operation<NormalizeInput<unknown>, LanguageModelExecutionResult> =
-      {
-        opId: `executor:normalize:${ulid()}`,
-        surface: "executor",
-        name: "executor:command:normalize",
-        scope: input.scope ?? {},
-        input,
-      };
+  normalize(input: NormalizeInput<unknown>): Promise<LanguageModelExecutionResult> {
+    const op: Operation<NormalizeInput<unknown>, LanguageModelExecutionResult> = {
+      opId: `executor:normalize:${ulid()}`,
+      surface: "executor",
+      name: "executor:command:normalize",
+      scope: input.scope ?? {},
+      input,
+    };
     return runHarnessProtocol(
       this.runOperation(op, (i) =>
         Effect.try({
@@ -198,28 +190,21 @@ export class AISDKExecutor
     );
   }
 
-  run(
-    input: RunInput,
-  ): Promise<ExecutorTerminal<LanguageModelExecutionResult>> {
+  run(input: RunInput): Promise<ExecutorTerminal<LanguageModelExecutionResult>> {
     const executionId = input.scope?.executionId ?? `exec:${ulid()}`;
     const tickId = input.scope?.tickId;
     const opId =
       tickId !== undefined
         ? `executor:run:${executionId}:${tickId}`
         : `executor:run:${executionId}:${ulid()}`;
-    const op: Operation<
-      RunInput,
-      ExecutorTerminal<LanguageModelExecutionResult>
-    > = {
+    const op: Operation<RunInput, ExecutorTerminal<LanguageModelExecutionResult>> = {
       opId,
       surface: "executor",
       name: "executor:command:run",
       scope: { ...(input.scope ?? {}), executionId },
       input,
     };
-    return runHarnessProtocol(
-      this.runOperation(op, (i) => this.runBody(i, executionId)),
-    );
+    return runHarnessProtocol(this.runOperation(op, (i) => this.runBody(i, executionId)));
   }
 
   abort(input: AbortExecutorInput): Promise<void> {
@@ -287,11 +272,7 @@ export class AISDKExecutor
   private runBody(
     input: RunInput,
     executionId: string,
-  ): Effect.Effect<
-    ExecutorTerminal<LanguageModelExecutionResult>,
-    ExecutorError,
-    never
-  > {
+  ): Effect.Effect<ExecutorTerminal<LanguageModelExecutionResult>, ExecutorError, never> {
     return Effect.gen(this, function* () {
       if (this.aborted.has(executionId)) {
         const terminal: ExecutorTerminal<LanguageModelExecutionResult> = {
@@ -329,8 +310,7 @@ export class AISDKExecutor
       }
 
       const result = yield* Effect.try({
-        try: () =>
-          normalizeImpl({ targetOutput: raw, target: input.target }),
+        try: () => normalizeImpl({ targetOutput: raw, target: input.target }),
         catch: (cause): ExecutorError => ({
           _tag: "NormalizationFailed",
           cause,
@@ -358,9 +338,7 @@ function projectImpl(input: ProjectInput): LanguageModelInput {
   };
 }
 
-function buildMessages(
-  tree: RenderedTree,
-): ReadonlyArray<LanguageModelMessage> {
+function buildMessages(tree: RenderedTree): ReadonlyArray<LanguageModelMessage> {
   const messages: LanguageModelMessage[] = [];
   const systemText = collectSectionText(tree.context.entries);
   if (systemText.length > 0) {
@@ -426,9 +404,7 @@ function messagePartFromBlock(block: ContentBlock): LanguageModelMessagePart {
       return {
         type: "text",
         text:
-          "text" in block && typeof block.text === "string"
-            ? block.text
-            : JSON.stringify(block),
+          "text" in block && typeof block.text === "string" ? block.text : JSON.stringify(block),
       };
   }
 }
@@ -464,9 +440,7 @@ function toAISDKMessage(m: LanguageModelMessage): ModelMessage[] {
         {
           role: "system",
           content: m.content
-            .filter(
-              (p): p is { type: "text"; text: string } => p.type === "text",
-            )
+            .filter((p): p is { type: "text"; text: string } => p.type === "text")
             .map((p) => p.text)
             .join("\n"),
         },
@@ -481,9 +455,7 @@ function toAISDKMessage(m: LanguageModelMessage): ModelMessage[] {
               return {
                 type: "image",
                 image: p.imageUrl,
-                ...(p.mediaType !== undefined
-                  ? { mediaType: p.mediaType }
-                  : {}),
+                ...(p.mediaType !== undefined ? { mediaType: p.mediaType } : {}),
               };
             }
             // Fallback — flatten to text.
@@ -516,9 +488,7 @@ function toAISDKMessage(m: LanguageModelMessage): ModelMessage[] {
       for (const p of m.content) {
         if (p.type === "tool_result") {
           const textOnly = p.content
-            .filter(
-              (c): c is { type: "text"; text: string } => c.type === "text",
-            )
+            .filter((c): c is { type: "text"; text: string } => c.type === "text")
             .map((c) => c.text)
             .join("\n");
           parts.push({
@@ -529,9 +499,7 @@ function toAISDKMessage(m: LanguageModelMessage): ModelMessage[] {
           });
         }
       }
-      return parts.length > 0
-        ? [{ role: "tool", content: parts } as ModelMessage]
-        : [];
+      return parts.length > 0 ? [{ role: "tool", content: parts } as ModelMessage] : [];
     }
     default:
       return [];
@@ -542,9 +510,7 @@ function toAISDKMessage(m: LanguageModelMessage): ModelMessage[] {
 // AI SDK result → LanguageModelExecutionResult
 // ============================================================================
 
-function normalizeImpl(
-  input: NormalizeInput<unknown>,
-): LanguageModelExecutionResult {
+function normalizeImpl(input: NormalizeInput<unknown>): LanguageModelExecutionResult {
   const raw = input.targetOutput as GenerateTextResult<ToolSet, unknown>;
   if (!raw || typeof raw !== "object") {
     throw new Error("normalize expected an AI SDK GenerateTextResult");
@@ -643,15 +609,11 @@ function mapExecuteError(cause: unknown): ExecuteError {
   return { _tag: "StreamFailed", cause };
 }
 
-function mergeSignals(
-  a: AbortSignal | undefined,
-  b: AbortSignal,
-): AbortSignal | undefined {
+function mergeSignals(a: AbortSignal | undefined, b: AbortSignal): AbortSignal | undefined {
   if (a === undefined) return b;
   if (a.aborted) return a;
   const c = new AbortController();
-  const onAbort = (signal: AbortSignal) => () =>
-    c.abort(signal.reason ?? "aborted");
+  const onAbort = (signal: AbortSignal) => () => c.abort(signal.reason ?? "aborted");
   a.addEventListener("abort", onAbort(a), { once: true });
   b.addEventListener("abort", onAbort(b), { once: true });
   return c.signal;

@@ -99,19 +99,19 @@ This bounds:
 The implementation substrate is `@effect/cluster` (Effect's actor
 framework). Mapping:
 
-| Agentick concept | Effect Cluster primitive |
-| --- | --- |
-| Session | Sharded entity (`RecipientType`) |
-| Session ID | Entity ID |
-| `session.send(msg)` | Typed message to entity |
-| App Supervisor | Singleton entity (one per app per cluster) |
-| Hibernation | Entity deactivation |
-| Wake on event | Entity activation on message arrival |
-| Snapshot / restore | Entity state persistence |
-| Cross-session events | Cluster PubSub |
-| Session migration | Entity migration (cluster handles) |
-| Spawn child session | Spawn child entity (registered) |
-| Multi-tenant | Multiple `RecipientType`s |
+| Agentick concept     | Effect Cluster primitive                   |
+| -------------------- | ------------------------------------------ |
+| Session              | Sharded entity (`RecipientType`)           |
+| Session ID           | Entity ID                                  |
+| `session.send(msg)`  | Typed message to entity                    |
+| App Supervisor       | Singleton entity (one per app per cluster) |
+| Hibernation          | Entity deactivation                        |
+| Wake on event        | Entity activation on message arrival       |
+| Snapshot / restore   | Entity state persistence                   |
+| Cross-session events | Cluster PubSub                             |
+| Session migration    | Entity migration (cluster handles)         |
+| Spawn child session  | Spawn child entity (registered)            |
+| Multi-tenant         | Multiple `RecipientType`s                  |
 
 `[GAP]` `[SOURCE: cluster.md §Open Question 1]` — the substrate choice is
 "open", but blueprint position is `@effect/cluster`. Sign-off needed.
@@ -213,9 +213,9 @@ Migration:
 "PubSub is the substrate" resolves to **two distinct backbones** with
 different semantics:
 
-| Operation | Pattern | Backbone (production default) |
-| --- | --- | --- |
-| Entity messaging (cluster routing) | Point-to-point RPC | Effect Cluster's native routing — handled by the cluster framework |
+| Operation                           | Pattern                                | Backbone (production default)                                                                      |
+| ----------------------------------- | -------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| Entity messaging (cluster routing)  | Point-to-point RPC                     | Effect Cluster's native routing — handled by the cluster framework                                 |
 | Observable state (events, channels) | Durable streams, sequenced, replayable | **Redis Streams** or **NATS JetStream** — append-only log, consumer groups, replay from any offset |
 
 **Streams everywhere for observable state.** Events, channels, and the
@@ -229,11 +229,11 @@ needs replay/resume.
 
 ### Default backends
 
-| Tier | Persistence | Cluster bus | Streams |
-| --- | --- | --- | --- |
-| Single-node / dev | Memory or SQLite | n/a (in-process) | In-memory PubSub |
-| Production small/medium | Postgres or Redis | Redis cluster routing | Redis Streams |
-| High-throughput | Postgres | NATS-backed routing | NATS JetStream |
+| Tier                    | Persistence       | Cluster bus           | Streams          |
+| ----------------------- | ----------------- | --------------------- | ---------------- |
+| Single-node / dev       | Memory or SQLite  | n/a (in-process)      | In-memory PubSub |
+| Production small/medium | Postgres or Redis | Redis cluster routing | Redis Streams    |
+| High-throughput         | Postgres          | NATS-backed routing   | NATS JetStream   |
 
 All backends are pluggable Layers.
 
@@ -438,12 +438,12 @@ Layer.succeed(ClusterService, localCluster()) in test layers.
 
 Gateway and cluster are independent wrappers. Common combinations:
 
-| Deployment | Gateway | Cluster |
-| --- | --- | --- |
-| Embedded library | none | none |
-| Single-server app | optional (HTTP/WS) | none |
-| Production small | optional fleet | Redis cluster |
-| Production large | dedicated fleet | NATS-backed |
+| Deployment        | Gateway            | Cluster       |
+| ----------------- | ------------------ | ------------- |
+| Embedded library  | none               | none          |
+| Single-server app | optional (HTTP/WS) | none          |
+| Production small  | optional fleet     | Redis cluster |
+| Production large  | dedicated fleet    | NATS-backed   |
 
 Gateways are not cluster members; they are stateless front doors that
 route into the cluster. See `12-gateway.md`.

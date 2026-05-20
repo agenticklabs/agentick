@@ -157,9 +157,7 @@ export class MockLanguageModelExecutor
   private nextScripted(): MockScriptedRun | undefined {
     if (this.scriptedSequence.length === 0) return undefined;
     const entry =
-      this.scriptedSequence[
-        Math.min(this.scriptIndex, this.scriptedSequence.length - 1)
-      ];
+      this.scriptedSequence[Math.min(this.scriptIndex, this.scriptedSequence.length - 1)];
     this.scriptIndex++;
     return entry;
   }
@@ -197,14 +195,10 @@ export class MockLanguageModelExecutor
       scope: input.scope ?? { executionId },
       input,
     };
-    return runHarnessProtocol(
-      this.runOperation(op, (i) => this.executeBody(i, executionId)),
-    );
+    return runHarnessProtocol(this.runOperation(op, (i) => this.executeBody(i, executionId)));
   }
 
-  normalize(
-    input: NormalizeInput<unknown>,
-  ): Promise<LanguageModelExecutionResult> {
+  normalize(input: NormalizeInput<unknown>): Promise<LanguageModelExecutionResult> {
     const op: Operation<NormalizeInput<unknown>, LanguageModelExecutionResult> = {
       opId: `executor:normalize:${ulid()}`,
       surface: "executor",
@@ -239,19 +233,14 @@ export class MockLanguageModelExecutor
       tickId !== undefined
         ? `executor:run:${executionId}:${tickId}`
         : `executor:run:${executionId}:${ulid()}`;
-    const op: Operation<
-      RunInput,
-      ExecutorTerminal<LanguageModelExecutionResult>
-    > = {
+    const op: Operation<RunInput, ExecutorTerminal<LanguageModelExecutionResult>> = {
       opId,
       surface: "executor",
       name: "executor:command:run",
       scope: { ...(input.scope ?? {}), executionId },
       input,
     };
-    return runHarnessProtocol(
-      this.runOperation(op, (i) => this.runBody(i, executionId, op)),
-    );
+    return runHarnessProtocol(this.runOperation(op, (i) => this.runBody(i, executionId, op)));
   }
 
   abort(input: AbortExecutorInput): Promise<void> {
@@ -303,11 +292,7 @@ export class MockLanguageModelExecutor
     input: RunInput,
     executionId: string,
     op: Operation<RunInput, ExecutorTerminal<LanguageModelExecutionResult>>,
-  ): Effect.Effect<
-    ExecutorTerminal<LanguageModelExecutionResult>,
-    ExecutorError,
-    never
-  > {
+  ): Effect.Effect<ExecutorTerminal<LanguageModelExecutionResult>, ExecutorError, never> {
     return Effect.gen(this, function* () {
       // Snapshot the next scripted run for this invocation. Subsequent
       // calls advance the sequence cursor in `nextScripted()`.
@@ -384,9 +369,7 @@ function normalizeImpl(
   return scripted?.result ?? DEFAULT_REPLY;
 }
 
-function isLanguageModelExecutionResult(
-  v: unknown,
-): v is LanguageModelExecutionResult {
+function isLanguageModelExecutionResult(v: unknown): v is LanguageModelExecutionResult {
   if (typeof v !== "object" || v === null) return false;
   const o = v as { stopReason?: unknown; output?: unknown };
   return typeof o.stopReason === "string" && Array.isArray(o.output);
@@ -465,9 +448,7 @@ function messagePartFromBlock(block: ContentBlock): LanguageModelMessagePart {
   }
 }
 
-function buildTools(
-  tree: RenderedTree,
-): ReadonlyArray<LanguageModelTool> {
+function buildTools(tree: RenderedTree): ReadonlyArray<LanguageModelTool> {
   const decl = tree.declarations?.tools ?? [];
   return decl
     .filter((t: ToolDeclaration) => t.exposure.includes("model"))

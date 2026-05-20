@@ -23,11 +23,7 @@
  * @see docs/proposals/v2/IMPLEMENTATION-PLAN.md (current ordering, FAÇADE.3)
  */
 
-import {
-  LocalEventBus,
-  LocalInbox,
-  MemoryJournal,
-} from "@agentick/runtime";
+import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
 import type {
   EventBus,
   ExecutorFactory,
@@ -36,10 +32,7 @@ import type {
   OperationJournal,
 } from "@agentick/spec";
 
-import {
-  OpenAIExecutor,
-  type OpenAIExecutorOptions,
-} from "./openai-executor.js";
+import { OpenAIExecutor, type OpenAIExecutorOptions } from "./openai-executor.js";
 
 /**
  * Options accepted by the `openai(...)` factory. Strict subset of
@@ -47,8 +40,7 @@ import {
  * optional substrate injection (only used when calling the factory
  * standalone — when passed to AppHarness, the app's substrate wins).
  */
-export interface OpenAIFactoryOptions
-  extends Omit<OpenAIExecutorOptions, "model"> {
+export interface OpenAIFactoryOptions extends Omit<OpenAIExecutorOptions, "model"> {
   /**
    * Substrate injection for standalone use (calling the factory
    * directly outside an AppHarness). Ignored when the factory is
@@ -74,25 +66,15 @@ let counter = 0;
  * the factory falls back to local substrate when no parent supplies
  * one.
  */
-export function openai(
-  modelId: string,
-  options: OpenAIFactoryOptions = {},
-): ExecutorFactory {
+export function openai(modelId: string, options: OpenAIFactoryOptions = {}): ExecutorFactory {
   const factory = (deps?: ExecutorFactoryDeps): OpenAIExecutor => {
-    const scopeId =
-      deps?.scopeId ?? options.scopeId ?? `openai:${++counter}`;
+    const scopeId = deps?.scopeId ?? options.scopeId ?? `openai:${++counter}`;
     const journal = deps?.journal ?? options.journal ?? new MemoryJournal();
     const bus = deps?.bus ?? options.bus ?? new LocalEventBus();
     const inbox = deps?.inbox ?? options.inbox ?? new LocalInbox();
 
     // Strip factory-only fields before forwarding to the executor.
-    const {
-      journal: _j,
-      bus: _b,
-      inbox: _i,
-      scopeId: _s,
-      ...executorOptions
-    } = options;
+    const { journal: _j, bus: _b, inbox: _i, scopeId: _s, ...executorOptions } = options;
     void _j;
     void _b;
     void _i;

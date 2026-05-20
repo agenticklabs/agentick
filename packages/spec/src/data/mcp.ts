@@ -20,11 +20,7 @@ import type { ResourceDeclaration, ToolDeclaration } from "./declarations.js";
 // Connection
 // ============================================================================
 
-export type MCPConnectionStatus =
-  | "connecting"
-  | "ready"
-  | "failed"
-  | "disconnected";
+export type MCPConnectionStatus = "connecting" | "ready" | "failed" | "disconnected";
 
 /**
  * Live MCP connection registered with the {@link MCPBridge} by a

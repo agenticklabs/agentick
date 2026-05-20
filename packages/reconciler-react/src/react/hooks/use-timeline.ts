@@ -14,10 +14,7 @@ import { useBridges } from "../bridge-context.js";
 
 export function useTimeline(): TimelineSnapshot {
   const { timeline } = useBridges();
-  const subscribe = useCallback(
-    (listener: () => void) => timeline.subscribe(listener),
-    [timeline],
-  );
+  const subscribe = useCallback((listener: () => void) => timeline.subscribe(listener), [timeline]);
   const getSnapshot = useCallback(() => timeline.read(), [timeline]);
   return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 }

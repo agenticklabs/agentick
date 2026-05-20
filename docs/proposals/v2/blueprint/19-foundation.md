@@ -67,16 +67,16 @@ per harness; they are properties of the substrate every harness shares.
 
 Three categories of envelope on the **outbound** side:
 
-| Category | Created by | Phase contract? | Idempotent? | Use |
-| --- | --- | --- | --- | --- |
-| **Operation** lifecycle | `BaseHarness.runOperation` | yes | yes | Commands with typed outcomes |
-| **Discrete** event | `BaseHarness.emit` (or `bus.publish`) | no | no | Notifications, infrastructure events |
-| **Channel** event | `channel.publish(...)` | no | no (retention applies) | User-defined named streams |
+| Category                | Created by                            | Phase contract? | Idempotent?            | Use                                  |
+| ----------------------- | ------------------------------------- | --------------- | ---------------------- | ------------------------------------ |
+| **Operation** lifecycle | `BaseHarness.runOperation`            | yes             | yes                    | Commands with typed outcomes         |
+| **Discrete** event      | `BaseHarness.emit` (or `bus.publish`) | no              | no                     | Notifications, infrastructure events |
+| **Channel** event       | `channel.publish(...)`                | no              | no (retention applies) | User-defined named streams           |
 
 One category on the **inbound** side:
 
-| Category | Created by | Wire-safe? | Routing | Use |
-| --- | --- | --- | --- | --- |
+| Category    | Created by                    | Wire-safe?     | Routing                       | Use                                               |
+| ----------- | ----------------------------- | -------------- | ----------------------------- | ------------------------------------------------- |
 | **Message** | external sender to an address | **yes** (JSON) | local dispatch or cluster RPC | Addressable inbound commands; the actor's mailbox |
 
 ## The Operation envelope
@@ -205,7 +205,7 @@ interface OperationJournal {
   /** Read events matching a query, from a given offset. */
   read(
     query: EventQuery,
-    from: { offset: number } | "latest" | "beginning"
+    from: { offset: number } | "latest" | "beginning",
   ): Stream<ProtocolEvent, JournalError, never>;
 
   /** Subscribe to ongoing events matching a query. */
@@ -215,8 +215,10 @@ interface OperationJournal {
   lookupTerminal(opId: string): Effect<Option<TerminalEvent>, JournalError, never>;
 
   /** Query operations that started but never reached terminal. Used at boot. */
-  findOrphaned(query: { surface?: EventSurface; olderThan?: number }):
-    Effect<readonly OrphanedOperation[], JournalError, never>;
+  findOrphaned(query: {
+    surface?: EventSurface;
+    olderThan?: number;
+  }): Effect<readonly OrphanedOperation[], JournalError, never>;
 }
 
 type JournalError =
@@ -324,8 +326,9 @@ interface MessageEnvelope {
   timestamp: number;
 }
 
-type MessageHandler<T extends MessageEnvelope> =
-  (msg: T) => Effect<unknown, MessageHandlerError, never>;
+type MessageHandler<T extends MessageEnvelope> = (
+  msg: T,
+) => Effect<unknown, MessageHandlerError, never>;
 
 type InboxError =
   | { _tag: "AddressNotFound"; address: string }
@@ -422,14 +425,14 @@ explicit policy.
 
 Effect's primitives line up well here:
 
-| Need | Effect primitive |
-| --- | --- |
-| Decouple producer from slow consumer | `Queue` or `PubSub` with bounded buffer |
-| Drop policy on overflow | `BackingQueue.dropping` / `sliding` / `suspend` |
-| Async write fork | `Effect.fork` returns a fiber; producer doesn't wait |
-| Bounded subscriber buffer | `Stream.buffer({ capacity, strategy })` |
-| Throttle / batch | `Stream.groupedWithin`, `Stream.throttle` |
-| Backpressure on streams | `Stream`'s pull-based model is backpressured by default |
+| Need                                 | Effect primitive                                        |
+| ------------------------------------ | ------------------------------------------------------- |
+| Decouple producer from slow consumer | `Queue` or `PubSub` with bounded buffer                 |
+| Drop policy on overflow              | `BackingQueue.dropping` / `sliding` / `suspend`         |
+| Async write fork                     | `Effect.fork` returns a fiber; producer doesn't wait    |
+| Bounded subscriber buffer            | `Stream.buffer({ capacity, strategy })`                 |
+| Throttle / batch                     | `Stream.groupedWithin`, `Stream.throttle`               |
+| Backpressure on streams              | `Stream`'s pull-based model is backpressured by default |
 
 This means **journal writes can be async, with a bounded queue between
 the harness and the durable backend**:
@@ -478,9 +481,9 @@ interface JournalingPolicy {
 }
 
 const DEFAULT_POLICY: JournalingPolicy = {
-  alwaysJournal: ["requested", "terminal"],   // recovery + audit spine
-  busOnly: ["before", "delta"],                // observability noise
-  overflow: "sliding",                          // favor harness throughput
+  alwaysJournal: ["requested", "terminal"], // recovery + audit spine
+  busOnly: ["before", "delta"], // observability noise
+  overflow: "sliding", // favor harness throughput
   queueCapacity: 4096,
 };
 ```
@@ -563,7 +566,7 @@ property of the journal write path from day one.
 
 ## OpenTelemetry as a projection
 
-OTel is a *consumer* of the envelope stream, not a parallel system.
+OTel is a _consumer_ of the envelope stream, not a parallel system.
 
 ```
                    ProtocolEvent envelopes
@@ -642,7 +645,7 @@ Zero observability code in the harnesses.
 
 ```ts
 abstract class BaseHarness<Surface extends EventSurface> {
-  protected readonly address: string;          // {surface}:{scopeId}
+  protected readonly address: string; // {surface}:{scopeId}
 
   // ⑤ Lifecycle handler registries (typed per concrete harness)
   protected readonly handlers = new HandlerRegistry();
@@ -690,10 +693,14 @@ abstract class BaseHarness<Surface extends EventSurface> {
       yield* this.appendPhase(op, "before");
       const beforeOutcome = yield* this.handlers.runBefore(op);
       switch (beforeOutcome.kind) {
-        case "veto":    return yield* this.appendTerminalAndFail(op, "vetoed", beforeOutcome);
-        case "replace": return yield* this.appendTerminalAndReturn(op, "replaced", beforeOutcome.result);
-        case "defer":   return yield* this.appendTerminalAndDefer(op, beforeOutcome);
-        case "proceed": break;
+        case "veto":
+          return yield* this.appendTerminalAndFail(op, "vetoed", beforeOutcome);
+        case "replace":
+          return yield* this.appendTerminalAndReturn(op, "replaced", beforeOutcome.result);
+        case "defer":
+          return yield* this.appendTerminalAndDefer(op, beforeOutcome);
+        case "proceed":
+          break;
       }
 
       // 5. Execute composed (middleware-wrapped) body in child Scope with span
@@ -736,16 +743,18 @@ abstract class BaseHarness<Surface extends EventSurface> {
    * Concrete harnesses override this with a typed switch on message.type.
    * Default: throw NoHandlerForMessageType.
    */
-  protected abstract handleMessage(msg: MessageEnvelope): Effect<unknown, MessageHandlerError, never>;
+  protected abstract handleMessage(
+    msg: MessageEnvelope,
+  ): Effect<unknown, MessageHandlerError, never>;
 
   // ──────── Internal: write-path policy ────────
 
   /** Publishes an envelope to bus + (conditionally) journal per policy. */
   private publishEnvelope(envelope: ProtocolEvent): Effect<void> {
     return Effect.gen(this, function* () {
-      yield* this.bus.publish(envelope);                     // always (lazy fan-out)
+      yield* this.bus.publish(envelope); // always (lazy fan-out)
       if (this.shouldJournal(envelope)) {
-        yield* this.journalQueue.offer(envelope);           // bounded, may drop
+        yield* this.journalQueue.offer(envelope); // bounded, may drop
       }
     });
   }
@@ -1055,44 +1064,44 @@ pattern produces a working harness with all the substrate properties
 
 ## Effect primitives used
 
-| Primitive | Used for |
-| --- | --- |
-| `Effect<R, E>` | Typed errors at every harness boundary |
-| `Scope` | Structured cleanup; tick / execution / session scopes |
-| `Effect.scoped` | Automatic finalizer chaining |
-| `FiberRef` | Correlation across fork boundaries (opId, sessionId, span context) |
-| `PubSub<ProtocolEvent>` | The event bus |
-| `Stream<ProtocolEvent>` | Subscriber consumption with backpressure |
-| `Queue` | Bounded journal-write queue with overflow strategies |
-| `Layer` | Swappable substrates (memory ↔ Postgres ↔ Redis ↔ cluster) |
-| `Semaphore` | Per-session command serialization |
-| `Ref` / `STM` | In-memory state with consistency |
-| `Effect.race` / `Effect.timeout` | Cancellation, deadlines; ask-message timeouts |
-| `Effect.withSpan` | OTel integration; FiberRef carries span context |
-| `Effect.Metric` | Metrics declared once, exported via OTel |
-| `@effect/cluster` | Production cluster journal + inbox substrate (Layer 7) |
-| `@effect/workflow` | Long-running operations with checkpoints (optional, Layer 7+) |
-| `@effect/opentelemetry` | NodeSdk Layer for OTLP export |
+| Primitive                        | Used for                                                           |
+| -------------------------------- | ------------------------------------------------------------------ |
+| `Effect<R, E>`                   | Typed errors at every harness boundary                             |
+| `Scope`                          | Structured cleanup; tick / execution / session scopes              |
+| `Effect.scoped`                  | Automatic finalizer chaining                                       |
+| `FiberRef`                       | Correlation across fork boundaries (opId, sessionId, span context) |
+| `PubSub<ProtocolEvent>`          | The event bus                                                      |
+| `Stream<ProtocolEvent>`          | Subscriber consumption with backpressure                           |
+| `Queue`                          | Bounded journal-write queue with overflow strategies               |
+| `Layer`                          | Swappable substrates (memory ↔ Postgres ↔ Redis ↔ cluster)         |
+| `Semaphore`                      | Per-session command serialization                                  |
+| `Ref` / `STM`                    | In-memory state with consistency                                   |
+| `Effect.race` / `Effect.timeout` | Cancellation, deadlines; ask-message timeouts                      |
+| `Effect.withSpan`                | OTel integration; FiberRef carries span context                    |
+| `Effect.Metric`                  | Metrics declared once, exported via OTel                           |
+| `@effect/cluster`                | Production cluster journal + inbox substrate (Layer 7)             |
+| `@effect/workflow`               | Long-running operations with checkpoints (optional, Layer 7+)      |
+| `@effect/opentelemetry`          | NodeSdk Layer for OTLP export                                      |
 
 ## Properties that fall out of the substrate
 
 Once Layer 3 is in place, these are properties of the architecture, not
 features of any individual harness:
 
-| Property | How it's enabled |
-| --- | --- |
-| **Crash recovery** | `journal.findOrphaned` at boot |
-| **At-least-once delivery** | Caller retries with same opId; idempotency check |
-| **Replay / audit** | Journal IS the audit log; query by opId/sessionId/timeRange |
-| **Distributed migration** | Cluster mode: entity migrates with journal cursor + inbox re-registration |
-| **Resume across reconnect** | Subscriber persists last-seen offset; reconnect → `journal.read(query, from)` |
-| **Time travel debugging** | Read-only replay of journal up to chosen offset |
-| **Cross-process control** | Inbox + addressable harness ids; same handler signature local + remote |
-| **Tracing** | `Effect.withSpan` in `runOperation`; FiberRef propagation |
-| **Metrics** | OTel exporter subscribes to bus; counters / histograms / gauges derived |
-| **Structured logging** | Same: subscribe → log at level derived from outcome |
-| **Headless = free** | Lazy fan-out: no subscribers → publish is a cheap no-op |
-| **Library-first AND distributed-capable** | Direct fn-ref surfaces in-process; inbox + bus wire-safe for cross-process |
+| Property                                  | How it's enabled                                                              |
+| ----------------------------------------- | ----------------------------------------------------------------------------- |
+| **Crash recovery**                        | `journal.findOrphaned` at boot                                                |
+| **At-least-once delivery**                | Caller retries with same opId; idempotency check                              |
+| **Replay / audit**                        | Journal IS the audit log; query by opId/sessionId/timeRange                   |
+| **Distributed migration**                 | Cluster mode: entity migrates with journal cursor + inbox re-registration     |
+| **Resume across reconnect**               | Subscriber persists last-seen offset; reconnect → `journal.read(query, from)` |
+| **Time travel debugging**                 | Read-only replay of journal up to chosen offset                               |
+| **Cross-process control**                 | Inbox + addressable harness ids; same handler signature local + remote        |
+| **Tracing**                               | `Effect.withSpan` in `runOperation`; FiberRef propagation                     |
+| **Metrics**                               | OTel exporter subscribes to bus; counters / histograms / gauges derived       |
+| **Structured logging**                    | Same: subscribe → log at level derived from outcome                           |
+| **Headless = free**                       | Lazy fan-out: no subscribers → publish is a cheap no-op                       |
+| **Library-first AND distributed-capable** | Direct fn-ref surfaces in-process; inbox + bus wire-safe for cross-process    |
 
 ## Open calls
 
@@ -1102,7 +1111,7 @@ above; this list is what's actually outstanding for Layer 1–4.
 
 1. **Default journaling policy across surfaces.** The doc proposes
    `alwaysJournal: ["requested", "terminal"]` and `busOnly: ["before",
-   "delta"]`. Sign-off needed; per-surface tuning exposed.
+"delta"]`. Sign-off needed; per-surface tuning exposed.
 2. **Default queue capacity and overflow strategy.**
    **Lean:** `queueCapacity: 4096`, `overflow: "sliding"` for general
    surfaces; `"suspend"` for surfaces marked critical (audit, payment).
@@ -1163,15 +1172,15 @@ the concerns themselves are not solved by Layer 1–4. They are real, they
 will need answers before production deployment, and acknowledging them
 here keeps us from pretending the foundation is complete when it isn't.
 
-| Concern | Status | When it must be answered |
-| --- | --- | --- |
-| **Backpressure detail tuning** (per-phase policy defaults, queue capacity, overflow strategies) | Knobs exist; defaults are first guesses. | Before durable backend ships (Layer 6) |
-| **Envelope schema evolution** | Spec versioning exists; migration mechanism does not. | Before first additive change to `EventEnvelope` |
-| **Journal retention / GC** | Append-only is fine until N grows large. No retention policy specified. | Before durable backend ships (Layer 6) |
-| **Multi-writer correctness in cluster mode** | Single-writer-per-session via entity activation gets us most of the way; cross-session writes need explicit thinking. | Before cluster Layer ships (Layer 7) |
-| **Hot/cold tiering for production journals** | Not specified. | Production deployment |
-| **Compliance hard-delete** (GDPR / right-to-erasure) | Not specified. | Production deployment with regulated data |
-| **Cross-org federation** | Out of scope for v2. Single-trust-domain stance. | If/when v3 needs it |
+| Concern                                                                                         | Status                                                                                                                | When it must be answered                        |
+| ----------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------- |
+| **Backpressure detail tuning** (per-phase policy defaults, queue capacity, overflow strategies) | Knobs exist; defaults are first guesses.                                                                              | Before durable backend ships (Layer 6)          |
+| **Envelope schema evolution**                                                                   | Spec versioning exists; migration mechanism does not.                                                                 | Before first additive change to `EventEnvelope` |
+| **Journal retention / GC**                                                                      | Append-only is fine until N grows large. No retention policy specified.                                               | Before durable backend ships (Layer 6)          |
+| **Multi-writer correctness in cluster mode**                                                    | Single-writer-per-session via entity activation gets us most of the way; cross-session writes need explicit thinking. | Before cluster Layer ships (Layer 7)            |
+| **Hot/cold tiering for production journals**                                                    | Not specified.                                                                                                        | Production deployment                           |
+| **Compliance hard-delete** (GDPR / right-to-erasure)                                            | Not specified.                                                                                                        | Production deployment with regulated data       |
+| **Cross-org federation**                                                                        | Out of scope for v2. Single-trust-domain stance.                                                                      | If/when v3 needs it                             |
 
 **What we ARE solving in Layer 1–4:**
 

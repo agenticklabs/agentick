@@ -11,23 +11,12 @@
 import React from "react";
 
 import { MockLanguageModelExecutor } from "@agentick/executor";
-import {
-  LoopExecutorHarness,
-  NoopStateApplicator,
-} from "@agentick/loop-executor";
-import {
-  LocalChannelPublisher,
-  LocalEventBus,
-  LocalInbox,
-  MemoryJournal,
-} from "@agentick/runtime";
+import { LoopExecutorHarness, NoopStateApplicator } from "@agentick/loop-executor";
+import { LocalChannelPublisher, LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
 import { ReconcilerHarness, stubBridges } from "@agentick/reconciler-react";
 import { SessionHarness } from "@agentick/session";
 import type { HookBridges } from "@agentick/spec";
-import {
-  InMemoryHandlerResolver,
-  ToolExecutorHarness,
-} from "@agentick/tool-executor";
+import { InMemoryHandlerResolver, ToolExecutorHarness } from "@agentick/tool-executor";
 
 import { SupportAgent } from "./agent.js";
 import { buildHandlerResolver } from "./tools.js";
@@ -81,53 +70,47 @@ export async function buildSubstrate(sessionId: string): Promise<Substrate> {
   //   tick 1: model emits tool_use(calculator)
   //   tick 2: model emits final text given the tool result
   // The earlier executor-only scenario consumes only the first entry.
-  const executor = new MockLanguageModelExecutor(
-    "example",
-    journal,
-    bus,
-    inbox,
-    {
-      scripted: [
-        {
-          result: {
-            specVersion: "2026-05-08",
-            output: [
-              {
-                type: "tool_use",
-                toolUseId: "tc-loop-calc",
-                name: "calculator",
-                input: { expression: "47 * 23" },
-              },
-            ],
-            stopReason: "tool_use",
-            toolCalls: [
-              {
-                id: "tc-loop-calc",
-                name: "calculator",
-                input: { expression: "47 * 23" },
-              },
-            ],
-            usage: { inputTokens: 12, outputTokens: 8, totalTokens: 20 },
-          },
-          stream: [
-            { kind: "content_delta", delta: "47" },
-            { kind: "content_delta", delta: " × " },
-            { kind: "content_delta", delta: "23 " },
-            { kind: "content_delta", delta: "= " },
-            { kind: "content_delta", delta: "1081." },
+  const executor = new MockLanguageModelExecutor("example", journal, bus, inbox, {
+    scripted: [
+      {
+        result: {
+          specVersion: "2026-05-08",
+          output: [
+            {
+              type: "tool_use",
+              toolUseId: "tc-loop-calc",
+              name: "calculator",
+              input: { expression: "47 * 23" },
+            },
           ],
+          stopReason: "tool_use",
+          toolCalls: [
+            {
+              id: "tc-loop-calc",
+              name: "calculator",
+              input: { expression: "47 * 23" },
+            },
+          ],
+          usage: { inputTokens: 12, outputTokens: 8, totalTokens: 20 },
         },
-        {
-          result: {
-            specVersion: "2026-05-08",
-            output: [{ type: "text", text: "47 × 23 = 1081." }],
-            stopReason: "end",
-            usage: { inputTokens: 18, outputTokens: 10, totalTokens: 28 },
-          },
+        stream: [
+          { kind: "content_delta", delta: "47" },
+          { kind: "content_delta", delta: " × " },
+          { kind: "content_delta", delta: "23 " },
+          { kind: "content_delta", delta: "= " },
+          { kind: "content_delta", delta: "1081." },
+        ],
+      },
+      {
+        result: {
+          specVersion: "2026-05-08",
+          output: [{ type: "text", text: "47 × 23 = 1081." }],
+          stopReason: "end",
+          usage: { inputTokens: 18, outputTokens: 10, totalTokens: 28 },
         },
-      ],
-    },
-  );
+      },
+    ],
+  });
 
   // Loop executor harness — orchestration: render → executor.run →
   // tool dispatch → state apply → continuation → repeat (bounded by
@@ -145,52 +128,44 @@ export async function buildSubstrate(sessionId: string): Promise<Substrate> {
 
   // Session-scoped executor — independent scripted sequence so the
   // session.send() demo isn't drained by the earlier loop scenario.
-  const sessionExecutor = new MockLanguageModelExecutor(
-    "session-example",
-    journal,
-    bus,
-    inbox,
-    {
-      scripted: [
-        {
-          result: {
-            specVersion: "2026-05-08",
-            output: [
-              {
-                type: "tool_use",
-                toolUseId: "tc-session-calc",
-                name: "calculator",
-                input: { expression: "47 * 23" },
-              },
-            ],
-            stopReason: "tool_use",
-            toolCalls: [
-              {
-                id: "tc-session-calc",
-                name: "calculator",
-                input: { expression: "47 * 23" },
-              },
-            ],
-            usage: { inputTokens: 15, outputTokens: 8, totalTokens: 23 },
-          },
-          stream: [
-            { kind: "content_delta", delta: "Let me compute that — " },
-            { kind: "content_delta", delta: "calling calculator." },
+  const sessionExecutor = new MockLanguageModelExecutor("session-example", journal, bus, inbox, {
+    scripted: [
+      {
+        result: {
+          specVersion: "2026-05-08",
+          output: [
+            {
+              type: "tool_use",
+              toolUseId: "tc-session-calc",
+              name: "calculator",
+              input: { expression: "47 * 23" },
+            },
           ],
+          stopReason: "tool_use",
+          toolCalls: [
+            {
+              id: "tc-session-calc",
+              name: "calculator",
+              input: { expression: "47 * 23" },
+            },
+          ],
+          usage: { inputTokens: 15, outputTokens: 8, totalTokens: 23 },
         },
-        {
-          result: {
-            specVersion: "2026-05-08",
-            output: [
-              { type: "text", text: "47 × 23 = 1081." },
-            ],
-            stopReason: "end",
-            usage: { inputTokens: 22, outputTokens: 9, totalTokens: 31 },
-          },
+        stream: [
+          { kind: "content_delta", delta: "Let me compute that — " },
+          { kind: "content_delta", delta: "calling calculator." },
+        ],
+      },
+      {
+        result: {
+          specVersion: "2026-05-08",
+          output: [{ type: "text", text: "47 × 23 = 1081." }],
+          stopReason: "end",
+          usage: { inputTokens: 22, outputTokens: 9, totalTokens: 31 },
         },
-      ],
-    },
-  );
+      },
+    ],
+  });
 
   // Session harness — the integration site. Mounts the SupportAgent
   // into its own mountId inside the shared reconciler, provides

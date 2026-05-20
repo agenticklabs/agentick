@@ -20,17 +20,8 @@ import type ReactReconciler from "react-reconciler";
 import type { ReconcilerContainer } from "./container.js";
 import type { HostScope, FormatterBinding } from "./host-context.js";
 import { withFormatter } from "./host-context.js";
-import type {
-  ElementInstance,
-  HostInstance,
-  Props,
-  TextInstance,
-} from "./host-instance.js";
-import {
-  createElementInstance,
-  createTextInstance,
-  isElementInstance,
-} from "./host-instance.js";
+import type { ElementInstance, HostInstance, Props, TextInstance } from "./host-instance.js";
+import { createElementInstance, createTextInstance, isElementInstance } from "./host-instance.js";
 
 export interface HostConfigDeps {
   /** Container the config writes into. One per mount. */
@@ -58,20 +49,20 @@ export interface HostConfigDeps {
  * them as a tuple for readability.
  */
 type HC = ReactReconciler.HostConfig<
-  string,                       // Type — JSX element type as seen by host
-  Props,                        // Props
-  ReconcilerContainer,          // Container
-  ElementInstance,              // Instance
-  TextInstance,                 // TextInstance
-  never,                        // SuspenseInstance
-  never,                        // HydratableInstance
-  never,                        // FormInstance
-  HostInstance,                 // PublicInstance
-  HostScope,                    // HostContext
-  never,                        // ChildSet (mutation mode → unused)
+  string, // Type — JSX element type as seen by host
+  Props, // Props
+  ReconcilerContainer, // Container
+  ElementInstance, // Instance
+  TextInstance, // TextInstance
+  never, // SuspenseInstance
+  never, // HydratableInstance
+  never, // FormInstance
+  HostInstance, // PublicInstance
+  HostScope, // HostContext
+  never, // ChildSet (mutation mode → unused)
   ReturnType<typeof setTimeout>, // TimeoutHandle
-  -1,                           // NoTimeout
-  null                          // TransitionStatus
+  -1, // NoTimeout
+  null // TransitionStatus
 >;
 
 export function createHostConfig(deps: HostConfigDeps): HC {

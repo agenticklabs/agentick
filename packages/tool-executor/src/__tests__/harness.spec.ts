@@ -3,7 +3,10 @@ import type { DispatchInput, ToolRegistration } from "@agentick/spec";
 import { createTestHarness } from "../testing/index.js";
 import { permissiveValidator } from "../validator.js";
 
-function echoReg(name = "echo", exposure: ("model" | "dispatch")[] = ["model", "dispatch"]): ToolRegistration {
+function echoReg(
+  name = "echo",
+  exposure: ("model" | "dispatch")[] = ["model", "dispatch"],
+): ToolRegistration {
   return {
     declaration: {
       id: name,
@@ -48,7 +51,12 @@ describe("ToolExecutorHarness — dispatch happy path", () => {
     });
 
     const result = await harness.dispatch(
-      dispatchOf("echo", "dispatch", { a: 1 }, { context: { via: "dispatch", use: { sandbox: "s1" } } }),
+      dispatchOf(
+        "echo",
+        "dispatch",
+        { a: 1 },
+        { context: { via: "dispatch", use: { sandbox: "s1" } } },
+      ),
     );
 
     expect(result.succeeded).toBe(true);
@@ -84,9 +92,7 @@ describe("ToolExecutorHarness — error paths", () => {
       tools: [echoReg("model-only", ["model"])],
       handlers: [{ handlerRef: "h.model-only", handler: async () => [] }],
     });
-    await expect(
-      harness.dispatch(dispatchOf("model-only", "dispatch", {})),
-    ).rejects.toMatchObject({
+    await expect(harness.dispatch(dispatchOf("model-only", "dispatch", {}))).rejects.toMatchObject({
       _tag: "ToolPermissionError",
       toolName: "model-only",
       via: "dispatch",

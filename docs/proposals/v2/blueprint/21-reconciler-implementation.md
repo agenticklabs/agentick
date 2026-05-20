@@ -21,32 +21,32 @@ Everything else is plumbing.
 
 ## Vocabulary (lowest-level terms)
 
-| Term                | Meaning                                                                                                  | React-reconciler equivalent      |
-| ------------------- | -------------------------------------------------------------------------------------------------------- | -------------------------------- |
-| **Element**         | A `React.ReactElement` produced by JSX. Pure value. No side effects.                                     | `React$Element`                  |
-| **Component**       | A function that returns Elements (or class). Has identity, hooks, effects, props.                        | `React.Component` / fn component |
-| **Fiber**           | React's internal scheduler node. We never touch fibers directly.                                         | `Fiber`                          |
-| **Host config**     | The object the harness gives to `react-reconciler` describing how to build/mutate the host tree.         | `HostConfig`                     |
-| **Host instance**   | One node in the host tree — what `react-reconciler` calls into our `createInstance`/`commitUpdate` for.  | `Instance`                       |
-| **Host tree**       | The mutable in-memory tree of host instances, assembled during reconciliation. Transient.                | (no first-class name)            |
-| **Container**       | The root of the host tree. Carries `FormatterScope` and root children.                                   | `Container`                      |
-| **Host context**    | Value passed down through `getChildHostContext`. Carries `FormatterScope` inheritance.                   | `HostContext`                    |
-| **Reconcile**       | The act of running React against the host config to mutate the host tree.                                | "reconciliation"                 |
-| **Render** (React)  | The component-function execution phase. Components run; hooks fire; effects schedule.                    | "render"                         |
-| **Commit**          | The synchronous mutation phase where host config callbacks (`appendChild`, `commitUpdate`) fire.         | "commit"                         |
-| **Collect**         | Our second phase: walk the host tree, dispatch by component identity, produce `RenderedTree`. New verb.  | (no equivalent — this is ours)   |
-| **Contributor**     | A per-element-type collector strategy. Maps `(HostInstance, Context) → IR fragments`. Pluggable.         | (no equivalent — this is ours)   |
-| **FormatterScope**  | Immutable record of which formatter is bound at a tree node, by `audience` / `purpose`. Lexically scoped.| (we carry this in `HostContext`) |
-| **HookBridge**      | Runtime-provided implementation behind a React hook (e.g., the timeline reader behind `useTimeline()`).  | (n/a — agentick-specific)        |
-| **Snapshot**        | `ReconcilerSnapshot` — JSON form of harness-private state needed to rehydrate after hibernate/restart.   | (n/a)                            |
+| Term               | Meaning                                                                                                   | React-reconciler equivalent      |
+| ------------------ | --------------------------------------------------------------------------------------------------------- | -------------------------------- |
+| **Element**        | A `React.ReactElement` produced by JSX. Pure value. No side effects.                                      | `React$Element`                  |
+| **Component**      | A function that returns Elements (or class). Has identity, hooks, effects, props.                         | `React.Component` / fn component |
+| **Fiber**          | React's internal scheduler node. We never touch fibers directly.                                          | `Fiber`                          |
+| **Host config**    | The object the harness gives to `react-reconciler` describing how to build/mutate the host tree.          | `HostConfig`                     |
+| **Host instance**  | One node in the host tree — what `react-reconciler` calls into our `createInstance`/`commitUpdate` for.   | `Instance`                       |
+| **Host tree**      | The mutable in-memory tree of host instances, assembled during reconciliation. Transient.                 | (no first-class name)            |
+| **Container**      | The root of the host tree. Carries `FormatterScope` and root children.                                    | `Container`                      |
+| **Host context**   | Value passed down through `getChildHostContext`. Carries `FormatterScope` inheritance.                    | `HostContext`                    |
+| **Reconcile**      | The act of running React against the host config to mutate the host tree.                                 | "reconciliation"                 |
+| **Render** (React) | The component-function execution phase. Components run; hooks fire; effects schedule.                     | "render"                         |
+| **Commit**         | The synchronous mutation phase where host config callbacks (`appendChild`, `commitUpdate`) fire.          | "commit"                         |
+| **Collect**        | Our second phase: walk the host tree, dispatch by component identity, produce `RenderedTree`. New verb.   | (no equivalent — this is ours)   |
+| **Contributor**    | A per-element-type collector strategy. Maps `(HostInstance, Context) → IR fragments`. Pluggable.          | (no equivalent — this is ours)   |
+| **FormatterScope** | Immutable record of which formatter is bound at a tree node, by `audience` / `purpose`. Lexically scoped. | (we carry this in `HostContext`) |
+| **HookBridge**     | Runtime-provided implementation behind a React hook (e.g., the timeline reader behind `useTimeline()`).   | (n/a — agentick-specific)        |
+| **Snapshot**       | `ReconcilerSnapshot` — JSON form of harness-private state needed to rehydrate after hibernate/restart.    | (n/a)                            |
 
 What we deliberately do NOT use:
 
 - "Renderer" for a content formatter — v1's name. v2 calls these
   **Formatters** (a separate harness). "Renderer" is reserved for
-  *React renderers*, of which our reconciler IS one.
+  _React renderers_, of which our reconciler IS one.
 - "Compiler" for the harness — v1's name. v2 calls this the
-  **Reconciler harness** because *reconciliation* is what
+  **Reconciler harness** because _reconciliation_ is what
   react-reconciler does, and the React vocabulary is the lowest-level
   available term.
 - "COM" / "Context Object Model" — v1's mutable intermediate
@@ -100,11 +100,12 @@ behind the boundary.
 `host-config.ts` line 20: `const RENDERER_COMPONENTS = new Map<unknown, Renderer>()`.
 Calling `registerRendererComponent(MarkdownComponent, mdRenderer)` writes
 to a process-global Map. This means:
+
 - Multi-tenant servers can't isolate formatter registries per session.
 - Hot reload corrupts the Map.
 - Two `MemoryJournal`s can't have different formatter sets.
 
-v2 binds the formatter scope to the *Container* (`HostContext`).
+v2 binds the formatter scope to the _Container_ (`HostContext`).
 Lexical, immutable, per-mount.
 
 ### 3. The collector is a 1,084-LOC switch statement
@@ -122,6 +123,7 @@ core collector.
 ### 4. The orchestrator does five jobs
 
 `FiberCompiler` (738 LOC) is simultaneously:
+
 - the react-reconciler driver (`reconcile()`)
 - the collector caller (`collect()`)
 - the data-resolution loop (`compileUntilStable` + `useData`)
@@ -129,6 +131,7 @@ core collector.
 - the message bus host (`MessageProvider`, `EntryProvider`)
 
 v2 splits:
+
 - **Reconcile + collect** stays in the reconciler harness.
 - **Lifecycle dispatch** moves to `BaseHarness` surfaces.
 - **Message bus** moves to the inbox / event bus substrate.
@@ -151,13 +154,13 @@ directly. No string variants.
 
 ```ts
 interface CompiledStructure {
-  sections: Map<string, CompiledSection>;     // Map, not array — not JSON
-  timelineEntries: CompiledTimelineEntry[];   // OK
-  systemEntries: CompiledTimelineEntry[];     // duplicates timeline
-  tools: ExecutableTool[];                    // live closures
-  ephemeral: CompiledEphemeral[];             // separate from timeline
-  metadata: Record<string, unknown>;          // OK
-  totalTokens?: number;                       // runtime concern
+  sections: Map<string, CompiledSection>; // Map, not array — not JSON
+  timelineEntries: CompiledTimelineEntry[]; // OK
+  systemEntries: CompiledTimelineEntry[]; // duplicates timeline
+  tools: ExecutableTool[]; // live closures
+  ephemeral: CompiledEphemeral[]; // separate from timeline
+  metadata: Record<string, unknown>; // OK
+  totalTokens?: number; // runtime concern
 }
 ```
 
@@ -172,9 +175,10 @@ boundary, looked up via `handlerRef`.
 ### 7. `AgentickNode` is mutable graph; not the IR
 
 The host tree's `AgentickNode` has `parent`, mutable `children`, and
-`renderer`. v1 *also* passes this around as the compile output.
+`renderer`. v1 _also_ passes this around as the compile output.
 
 v2 separation:
+
 - `HostInstance` (mutable, transient, the host tree) — never crosses
   the harness boundary.
 - `RenderedTree` (immutable, JSON, the IR) — crosses the boundary.
@@ -184,6 +188,7 @@ v2 separation:
 ### 8. Two distinct concepts share the name "Renderer"
 
 In v1, "Renderer" simultaneously means:
+
 - A `react-reconciler` host (the React vocabulary).
 - A `Formatter` that turns semantic blocks into text (agentick's own
   concept).
@@ -196,7 +201,7 @@ files don't share a word.
 
 `useOnTickStart`, `useOnTickEnd`, `useAfterCompile`, `useContinuation`
 live in the compiler package and fire from `FiberCompiler.notifyX()`.
-These are *session* concerns leaking into the reconciler.
+These are _session_ concerns leaking into the reconciler.
 
 v2: the reconciler is a `BaseHarness` and gets lifecycle handlers (③)
 and middleware (④) from the substrate. The "session sends tickEnd to
@@ -329,9 +334,9 @@ export interface TextInstance {
 }
 
 export type HostType =
-  | string                                   // intrinsic ("section", "message", …)
-  | ((...args: never[]) => unknown)          // function component
-  | symbol;                                  // Fragment
+  | string // intrinsic ("section", "message", …)
+  | ((...args: never[]) => unknown) // function component
+  | symbol; // Fragment
 ```
 
 ```ts
@@ -412,10 +417,7 @@ export interface Contributor<T extends HostType = HostType> {
    * is the contributor's responsibility — typical pattern is to
    * dispatch children back through the collector.
    */
-  contribute(
-    instance: ElementInstance,
-    ctx: CollectContext,
-  ): readonly IRFragment[];
+  contribute(instance: ElementInstance, ctx: CollectContext): readonly IRFragment[];
 }
 
 export type IRFragment =
@@ -461,19 +463,19 @@ The 1,084-LOC v1 collector collapses to a registry + small contributors.
 
 ### Layer B — built-in contributors
 
-| Component / intrinsic   | Contributor produces                              |
-| ----------------------- | ------------------------------------------------- |
-| `<section>` / `<Section>` | `{ kind: "context-entry", entry: SectionEntry }` |
-| `<message>` / `<Message>` | `{ kind: "context-entry", entry: MessageEntry }` |
-| `<tool>` / `<Tool>`       | `{ kind: "tool-declaration", tool }`             |
-| `<resource>`              | `{ kind: "resource-declaration", resource }`     |
-| `<output>`                | `{ kind: "output-declaration", output }`         |
-| `<mcp>`                   | `{ kind: "mcp-declaration", mcp }`               |
-| `<model>` / `<openai>` / `<google>` | `{ kind: "spec-config", partial }` and/or `{ kind: "provider-options", partial }` |
-| `<ephemeral>`             | `{ kind: "context-entry", entry: SectionEntry with role hint }` (no longer a separate kind) |
-| Content blocks (`<text>`, `<image>`, `<code>`, …) | Folded into parent's `content: ContentBlock[]` |
-| Semantic HTML (`<strong>`, `<em>`, `<ul>`, …) | Folded into parent's `semanticNode` tree via formatter |
-| `Fragment` / unknown      | Pass-through; recurse children                   |
+| Component / intrinsic                             | Contributor produces                                                                        |
+| ------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| `<section>` / `<Section>`                         | `{ kind: "context-entry", entry: SectionEntry }`                                            |
+| `<message>` / `<Message>`                         | `{ kind: "context-entry", entry: MessageEntry }`                                            |
+| `<tool>` / `<Tool>`                               | `{ kind: "tool-declaration", tool }`                                                        |
+| `<resource>`                                      | `{ kind: "resource-declaration", resource }`                                                |
+| `<output>`                                        | `{ kind: "output-declaration", output }`                                                    |
+| `<mcp>`                                           | `{ kind: "mcp-declaration", mcp }`                                                          |
+| `<model>` / `<openai>` / `<google>`               | `{ kind: "spec-config", partial }` and/or `{ kind: "provider-options", partial }`           |
+| `<ephemeral>`                                     | `{ kind: "context-entry", entry: SectionEntry with role hint }` (no longer a separate kind) |
+| Content blocks (`<text>`, `<image>`, `<code>`, …) | Folded into parent's `content: ContentBlock[]`                                              |
+| Semantic HTML (`<strong>`, `<em>`, `<ul>`, …)     | Folded into parent's `semanticNode` tree via formatter                                      |
+| `Fragment` / unknown                              | Pass-through; recurse children                                                              |
 
 Built-in contributors live in `packages/reconciler-react/src/contributors/`.
 User-defined primitives register through the harness API:
@@ -503,17 +505,21 @@ export class ReconcilerHarness extends BaseHarness<"reconciler"> {
 
   private async renderTreeBody(input: RenderTreeInput): Promise<RenderTreeResult> {
     await this.ensureMounted(input);
-    await this.reconcileUntilStable(input);    // Layer A
-    const tree = await this.collect(input);    // Layer B
+    await this.reconcileUntilStable(input); // Layer A
+    const tree = await this.collect(input); // Layer B
     return { tree, snapshot: this.snapshotPrivate() };
   }
 
   protected async handleMessage(msg: MessageEnvelope): Promise<unknown> {
     switch (msg.type) {
-      case "recompile":   return this.handleRecompile(msg);
-      case "unmount":     return this.handleUnmount(msg);
-      case "invalidate":  return this.handleInvalidate(msg);
-      default:            throw new Error(`unknown: ${msg.type}`);
+      case "recompile":
+        return this.handleRecompile(msg);
+      case "unmount":
+        return this.handleUnmount(msg);
+      case "invalidate":
+        return this.handleInvalidate(msg);
+      default:
+        throw new Error(`unknown: ${msg.type}`);
     }
   }
 }
@@ -525,7 +531,7 @@ Layer B are pure.
 ## Hook bridges
 
 Hooks like `useTimeline`, `useKnob`, `useData`, `useSandbox`, `useMCP`
-need *runtime* state inside React components. They cannot reach across
+need _runtime_ state inside React components. They cannot reach across
 the spec firewall directly — the runtime is not allowed to hand a
 React component a live `Session` object.
 
@@ -592,9 +598,9 @@ mounted application after hibernation. Concretely:
 ```ts
 interface ReconcilerSnapshot {
   readonly specVersion: string;
-  readonly hookStates: Record<string, unknown>;       // per-component hook state
-  readonly dataCache: readonly DataCacheEntry[];      // useData results
-  readonly knobs: Record<string, unknown>;            // useKnob current values
+  readonly hookStates: Record<string, unknown>; // per-component hook state
+  readonly dataCache: readonly DataCacheEntry[]; // useData results
+  readonly knobs: Record<string, unknown>; // useKnob current values
   readonly subscriptions: readonly SubscriptionIntent[];
   // NOT: HostInstance tree (re-derived from rerender)
   // NOT: live formatter refs (FormatterScope captured from session config)
@@ -670,6 +676,7 @@ packages/reconciler-react/
 ## Boundary contract
 
 Inputs to the reconciler harness:
+
 - `MountInput` — a React element factory + bridge bundle
 - `RenderTreeInput` — the request; carries op metadata + optional override props
 - `MessageEnvelope` — inbox messages (`recompile`, `unmount`, `invalidate`)
@@ -677,11 +684,13 @@ Inputs to the reconciler harness:
 - Middleware via `.use(mw)`
 
 Outputs from the reconciler harness:
+
 - `RenderedTree` (the IR — JSON-shaped, spec-firewall-safe)
 - `ReconcilerSnapshot` (for hibernation; JSON-shaped)
 - Events on the bus (`reconciler:render:requested|before|delta|terminal`)
 
 **What never crosses:**
+
 - The HostInstance tree
 - React fibers
 - The HostConfig

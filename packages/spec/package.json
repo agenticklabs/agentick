@@ -5,10 +5,10 @@
   "keywords": [
     "agent",
     "ai",
-    "types",
-    "protocol",
     "contract",
-    "spec"
+    "protocol",
+    "spec",
+    "types"
   ],
   "license": "MIT",
   "author": "Ryan Lindgren",

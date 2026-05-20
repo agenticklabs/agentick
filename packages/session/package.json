@@ -4,10 +4,10 @@
   "description": "Reference session harness for Agentick v2. Integration site that wires JSX agent + reconciler + loop executor into the user-facing `session.send({ messages })` surface.",
   "keywords": [
     "agent",
-    "ai",
     "agentick",
-    "session",
-    "harness"
+    "ai",
+    "harness",
+    "session"
   ],
   "license": "MIT",
   "author": "Ryan Lindgren",
@@ -42,10 +42,10 @@
     "typecheck": "tsc -p tsconfig.build.json --noEmit"
   },
   "dependencies": {
-    "@agentick/spec": "workspace:*",
-    "@agentick/runtime": "workspace:*",
-    "@agentick/reconciler-react": "workspace:*",
     "@agentick/loop-executor": "workspace:*",
+    "@agentick/reconciler-react": "workspace:*",
+    "@agentick/runtime": "workspace:*",
+    "@agentick/spec": "workspace:*",
     "effect": "^3.21.2",
     "react": "^19.2.4"
   },

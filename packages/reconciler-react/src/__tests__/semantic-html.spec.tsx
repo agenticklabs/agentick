@@ -44,11 +44,7 @@ describe("semantic HTML — coalescing", () => {
     await harness.mount({
       mountId: "m_plain",
       sessionId: "s",
-      element: React.createElement(
-        "message",
-        { role: "user" },
-        "Hello world",
-      ),
+      element: React.createElement("message", { role: "user" }, "Hello world"),
       bridges: stubBridges(),
     });
     const { tree } = await harness.renderTree({
@@ -124,13 +120,7 @@ describe("semantic HTML — coalescing", () => {
       element: React.createElement(
         "message",
         { role: "user" },
-        React.createElement(
-          "p",
-          null,
-          "Hello ",
-          React.createElement("em", null, "world"),
-          "!",
-        ),
+        React.createElement("p", null, "Hello ", React.createElement("em", null, "world"), "!"),
       ),
       bridges: stubBridges(),
     });
@@ -139,9 +129,7 @@ describe("semantic HTML — coalescing", () => {
       sessionId: "s",
     });
     const msg = getMessage(tree);
-    expect((msg.content[0] as { text: string }).text).toBe(
-      "Hello *world*!\n\n",
-    );
+    expect((msg.content[0] as { text: string }).text).toBe("Hello *world*!\n\n");
   });
 });
 
@@ -199,9 +187,7 @@ describe("semantic HTML — element coverage", () => {
     });
     const { tree } = await harness.renderTree({ mountId: "m_ul", sessionId: "s" });
     const msg = getMessage(tree);
-    expect((msg.content[0] as { text: string }).text).toBe(
-      "- alpha\n- beta\n\n",
-    );
+    expect((msg.content[0] as { text: string }).text).toBe("- alpha\n- beta\n\n");
   });
 
   it("ordered list", async () => {
@@ -223,9 +209,7 @@ describe("semantic HTML — element coverage", () => {
     });
     const { tree } = await harness.renderTree({ mountId: "m_ol", sessionId: "s" });
     const msg = getMessage(tree);
-    expect((msg.content[0] as { text: string }).text).toBe(
-      "1. first\n2. second\n\n",
-    );
+    expect((msg.content[0] as { text: string }).text).toBe("1. first\n2. second\n\n");
   });
 
   it("link carries href into the markdown output", async () => {
@@ -244,9 +228,7 @@ describe("semantic HTML — element coverage", () => {
     });
     const { tree } = await harness.renderTree({ mountId: "m_a", sessionId: "s" });
     const msg = getMessage(tree);
-    expect((msg.content[0] as { text: string }).text).toBe(
-      "See [the docs](https://x.test).",
-    );
+    expect((msg.content[0] as { text: string }).text).toBe("See [the docs](https://x.test).");
   });
 
   it("img tag becomes inline markdown image", async () => {
@@ -264,9 +246,7 @@ describe("semantic HTML — element coverage", () => {
     });
     const { tree } = await harness.renderTree({ mountId: "m_img", sessionId: "s" });
     const msg = getMessage(tree);
-    expect((msg.content[0] as { text: string }).text).toBe(
-      "Look: ![pic](https://x.test/p.png)",
-    );
+    expect((msg.content[0] as { text: string }).text).toBe("Look: ![pic](https://x.test/p.png)");
   });
 
   it("blockquote", async () => {
@@ -283,9 +263,7 @@ describe("semantic HTML — element coverage", () => {
     });
     const { tree } = await harness.renderTree({ mountId: "m_bq", sessionId: "s" });
     const msg = getMessage(tree);
-    expect((msg.content[0] as { text: string }).text).toBe(
-      "> a wise saying\n\n",
-    );
+    expect((msg.content[0] as { text: string }).text).toBe("> a wise saying\n\n");
   });
 });
 
@@ -311,9 +289,7 @@ describe("semantic HTML — format scope", () => {
     });
     const { tree } = await harness.renderTree({ mountId: "m_xml", sessionId: "s" });
     const msg = getMessage(tree);
-    expect((msg.content[0] as { text: string }).text).toBe(
-      "Hello <strong>world</strong>!",
-    );
+    expect((msg.content[0] as { text: string }).text).toBe("Hello <strong>world</strong>!");
   });
 
   it("plain-text scope strips semantic markup", async () => {

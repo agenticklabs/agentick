@@ -70,6 +70,7 @@ In Effect: typed `Effect<Result, Error, Service>` exposed via `Context.Tag`.
 Each command is a service method.
 
 Used for:
+
 - Driving the harness from outside (sending messages, dispatching operations,
   controlling state)
 - Recovery (telling the harness how to recover from an observed outcome)
@@ -84,6 +85,7 @@ In Effect: `PubSub<Event>` + `Stream<Event>` consumers. Backpressure
 built in. Subscribers tied to `Scope` for clean lifecycle.
 
 Used for:
+
 - Observability (logs, metrics, dashboards, audit)
 - Reactive integrations (UI updates, event-driven workflows)
 - Replay and debugging
@@ -105,6 +107,7 @@ Lifecycle callbacks are interceptors registered against lifecycle commands.
 Middleware is ordered interceptor composition. They are not separate primitives.
 
 Used for:
+
 - Coordinating with external state (flush before hibernate, sync
   before close)
 - Vetoing operations during critical regions (don't hibernate while
@@ -170,10 +173,10 @@ wire shape should use protocol-oriented names:
 
 ```ts
 interface EventEnvelope {
-  id: string;                  // unique event id
-  opId: string;                // operation correlation id
+  id: string; // unique event id
+  opId: string; // operation correlation id
   surface: "app" | "session" | "compiler" | "executor" | "tool";
-  name: string;                // hierarchical semantic name
+  name: string; // hierarchical semantic name
   phase: "requested" | "before" | "delta" | "terminal";
   outcome?: "succeeded" | "failed" | "canceled" | "vetoed" | "replaced" | "deferred";
   timestamp: number;
@@ -183,7 +186,7 @@ interface EventEnvelope {
     executionId?: string;
     tickId?: string;
   };
-  payload?: unknown;           // phase-specific structured payload
+  payload?: unknown; // phase-specific structured payload
   tags?: string[];
   error?: { name: string; message: string; data?: unknown };
 }
@@ -278,6 +281,7 @@ App harness
 ```
 
 Each layer:
+
 - Emits its own events
 - Exposes its own commands
 - Provides its own interceptor boundaries
@@ -293,6 +297,7 @@ Each layer consumes the layer below through a typed harness boundary.
 Each harness gets its own doc, but the shapes-per-layer:
 
 **React runtime harness** — manages the React tree as a living application
+
 - Commands: mount, rerender, compileContext, renderToString, renderResource,
   unmount, snapshot, restore
 - Events: mounted, suspended, errored, recompiled,
@@ -303,12 +308,14 @@ Each harness gets its own doc, but the shapes-per-layer:
 - Errors: CompileError, RendererError, AsyncComponentError
 
 **Renderer harness** — renders semantic content into concrete content/text
+
 - Commands: render, renderToText, renderResource, inspectCapabilities
 - Events: render-started, render-delta, rendered, render-failed
 - Interceptors: render, renderToText, renderResource
 - Errors: UnsupportedContentError, UnsupportedRendererError, RenderError
 
 **Loop executor** — runs one execution/tick loop
+
 - Commands: runExecution, abort
 - Events: execution, tick, compile, executor, tool-dispatch, ingest,
   continuation events
@@ -317,6 +324,7 @@ Each harness gets its own doc, but the shapes-per-layer:
 - Errors: ExecutionError, TickError, LoopCanceledError
 
 **Executor harness** — manages model + tool execution
+
 - Commands: execute(spec, model), abort
 - Events: stream chunks, completion, errors, model-request,
   model-response
@@ -324,12 +332,14 @@ Each harness gets its own doc, but the shapes-per-layer:
 - Errors: ProviderError, ProjectionError, NetworkError
 
 **Tool Executor harness** — sub-layer of executor
+
 - Commands: dispatch(name, input, ctx), abort
 - Events: tool-called, tool-result, tool-error
 - Interceptors: dispatch, confirmation-required, tool-error
 - Errors: ToolNotFound, ValidationError, HandlerError
 
 **Session harness** — message-driven session layer
+
 - Commands: send, dispatch, render, append, spawn, abort, pause,
   resume, inject, recover, hibernate, restore, close
 - Events: tick events, timeline events, lifecycle events (the
@@ -338,6 +348,7 @@ Each harness gets its own doc, but the shapes-per-layer:
 - Errors: SessionError, TickError
 
 **App harness** — manages sessions + cross-cutting
+
 - Commands: createSession, runOnce, getSession, listSessions,
   closeApp
 - Events: app-level lifecycle, cross-session events (sessionId-tagged)
@@ -418,6 +429,7 @@ The harness principle reshapes the doc set:
   all others.
 
 Each harness doc follows the same template:
+
 1. What this harness manages
 2. Commands in (API surface)
 3. Events out (taxonomy)
@@ -436,7 +448,7 @@ Each harness doc follows the same template:
    - first `veto` wins (short-circuit)
    - `replace` short-circuits
    - multiple `defer` responses merge via earliest retry policy
-   Needs final normative spec text.
+     Needs final normative spec text.
 
 3. **Interceptor timeout.** What if a handler hangs? Default
    timeout? Cancellation policy?

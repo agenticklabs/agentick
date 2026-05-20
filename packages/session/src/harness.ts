@@ -82,11 +82,7 @@ export interface SessionHarnessOptions<P = unknown> {
    */
   readonly loop: LoopExecutorProtocol;
   /** Executor harness for model invocations. */
-  readonly executor: ExecutorProtocol<
-    unknown,
-    unknown,
-    LanguageModelExecutionResult
-  >;
+  readonly executor: ExecutorProtocol<unknown, unknown, LanguageModelExecutionResult>;
   /** Tool executor harness for tool dispatch. */
   readonly toolExecutor: ToolExecutorProtocol;
   /** Default execution target — overridable per send (later). */
@@ -156,9 +152,7 @@ export class SessionHarness<P = unknown>
     super("session", options.sessionId, journal, bus, inbox);
     this.store = new SessionStateStore(options.sessionId);
     this.bridges = buildSessionBridges(this.store, {
-      ...(options.toolBridge !== undefined
-        ? { toolBridge: options.toolBridge }
-        : {}),
+      ...(options.toolBridge !== undefined ? { toolBridge: options.toolBridge } : {}),
       ...(options.extensionBridges !== undefined
         ? { extensionBridges: options.extensionBridges }
         : {}),
@@ -248,9 +242,7 @@ export class SessionHarness<P = unknown>
 
   // ── StateApplicator ──────────────────────────────────────────────
 
-  applyExecutorResult(
-    input: ApplyExecutorResultInput,
-  ): Promise<ApplyResult> {
+  applyExecutorResult(input: ApplyExecutorResultInput): Promise<ApplyResult> {
     return runHarnessProtocol(
       Effect.try({
         try: () => this.applyExecutorResultSync(input),
@@ -286,9 +278,7 @@ export class SessionHarness<P = unknown>
     );
   }
 
-  async notifyLifecycle(
-    _input: NotifyTickEndInput,
-  ): Promise<TickEndForwardDecision> {
+  async notifyLifecycle(_input: NotifyTickEndInput): Promise<TickEndForwardDecision> {
     // Phase 4e default: forward the tick-end to the reconciler so
     // any `useOnTickEnd` hooks fire, but don't override the loop's
     // continuation decision yet. Verdict-merge with in-tree hooks
@@ -298,9 +288,7 @@ export class SessionHarness<P = unknown>
 
   // ──────── Extended interaction surface (block 5) ────────
 
-  async spawn(
-    input: SpawnInput<P>,
-  ): Promise<SessionExecutionHandle | SessionHarnessProtocol<P>> {
+  async spawn(input: SpawnInput<P>): Promise<SessionExecutionHandle | SessionHarnessProtocol<P>> {
     if (this._closed) {
       throw { _tag: "SessionClosedError", attemptedCommand: "spawn" } satisfies SessionError;
     }
@@ -317,12 +305,8 @@ export class SessionHarness<P = unknown>
       agent: input.agent,
       ...(input.sessionId !== undefined ? { sessionId: input.sessionId } : {}),
       ...(input.metadata !== undefined ? { metadata: input.metadata } : {}),
-      ...(input.initialProps !== undefined
-        ? { initialProps: input.initialProps }
-        : {}),
-      ...(input.initialKnobs !== undefined
-        ? { initialKnobs: input.initialKnobs }
-        : {}),
+      ...(input.initialProps !== undefined ? { initialProps: input.initialProps } : {}),
+      ...(input.initialKnobs !== undefined ? { initialKnobs: input.initialKnobs } : {}),
       ...(input.maxTicks !== undefined ? { maxTicks: input.maxTicks } : {}),
     };
     const child = await this.spawnContext.createChildSession(childInput);
@@ -332,10 +316,7 @@ export class SessionHarness<P = unknown>
     return child;
   }
 
-  async dispatch(
-    name: string,
-    input: Record<string, unknown>,
-  ): Promise<readonly ContentBlock[]> {
+  async dispatch(name: string, input: Record<string, unknown>): Promise<readonly ContentBlock[]> {
     if (this._closed) {
       throw { _tag: "SessionClosedError", attemptedCommand: "dispatch" } satisfies SessionError;
     }
@@ -403,9 +384,7 @@ export class SessionHarness<P = unknown>
       throw { _tag: "SessionClosedError", attemptedCommand: "observe" } satisfies SessionError;
     }
     const content: readonly ContentBlock[] =
-      typeof input.content === "string"
-        ? [{ type: "text", text: input.content }]
-        : input.content;
+      typeof input.content === "string" ? [{ type: "text", text: input.content }] : input.content;
     // Call the store directly so the metadata field is preserved.
     // appendEntrySync's narrower input doesn't carry metadata.
     const id = this.store.appendMessage({
@@ -424,10 +403,7 @@ export class SessionHarness<P = unknown>
     const sessionAddress = this.address;
     return {
       name,
-      publish: async (
-        payload: T,
-        metadata?: Readonly<Record<string, unknown>>,
-      ) => {
+      publish: async (payload: T, metadata?: Readonly<Record<string, unknown>>) => {
         const ev: ProtocolEvent = {
           id: ulid(),
           surface: "session",
@@ -458,15 +434,9 @@ export class SessionHarness<P = unknown>
                 const meta: import("@agentick/spec").ChannelEventMeta = {
                   id: ev.id,
                   timestamp: ev.timestamp,
-                  ...(evx.metadata !== undefined
-                    ? { metadata: evx.metadata }
-                    : {}),
-                  ...(evx.correlationId !== undefined
-                    ? { correlationId: evx.correlationId }
-                    : {}),
-                  ...(evx.parentOpId !== undefined
-                    ? { parentOpId: evx.parentOpId }
-                    : {}),
+                  ...(evx.metadata !== undefined ? { metadata: evx.metadata } : {}),
+                  ...(evx.correlationId !== undefined ? { correlationId: evx.correlationId } : {}),
+                  ...(evx.parentOpId !== undefined ? { parentOpId: evx.parentOpId } : {}),
                   ...(evx.channelSequence !== undefined
                     ? { channelSequence: evx.channelSequence }
                     : {}),
@@ -489,10 +459,7 @@ export class SessionHarness<P = unknown>
         return this.sessionRequest<TReq, TResp>(name, payload, opts);
       },
       onRequest: <TReq = unknown, TResp = unknown>(
-        listener: (
-          payload: TReq,
-          ctx: import("@agentick/spec").RequestContext<TResp>,
-        ) => void,
+        listener: (payload: TReq, ctx: import("@agentick/spec").RequestContext<TResp>) => void,
       ) => {
         const fiber = Effect.runFork(
           Stream.runForEach(
@@ -710,9 +677,7 @@ export class SessionHarness<P = unknown>
 
   private appendInputMessage(m: SendMessageInput): void {
     const content =
-      typeof m.content === "string"
-        ? [{ type: "text" as const, text: m.content }]
-        : m.content;
+      typeof m.content === "string" ? [{ type: "text" as const, text: m.content }] : m.content;
     this.store.appendMessage({
       role: m.role,
       content,

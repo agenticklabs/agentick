@@ -136,46 +136,44 @@ export class LocalInbox implements MessageInbox {
     message: MessageEnvelope<T>,
     options: AskOptions = {},
   ): Effect.Effect<R, InboxError | MessageHandlerError, never> {
-    return Effect.suspend(
-      (): Effect.Effect<R, InboxError | MessageHandlerError, never> => {
-        if (this.closed) {
-          return Effect.fail<InboxError>({ _tag: "InboxClosed" });
-        }
+    return Effect.suspend((): Effect.Effect<R, InboxError | MessageHandlerError, never> => {
+      if (this.closed) {
+        return Effect.fail<InboxError>({ _tag: "InboxClosed" });
+      }
 
-        const cached = this.lookup(message.messageId);
-        if (cached) {
-          // Reuse the existing fiber — handler ran (or is running) once.
-          return Fiber.join(cached.fiber) as Effect.Effect<
-            R,
-            MessageHandlerError,
-            never
-          >;
-        }
+      const cached = this.lookup(message.messageId);
+      if (cached) {
+        // Reuse the existing fiber — handler ran (or is running) once.
+        return Fiber.join(cached.fiber) as Effect.Effect<R, MessageHandlerError, never>;
+      }
 
-        const handler = this.handlers.get(address);
-        if (!handler) {
-          return Effect.fail<InboxError>({ _tag: "AddressNotFound", address });
-        }
+      const handler = this.handlers.get(address);
+      if (!handler) {
+        return Effect.fail<InboxError>({ _tag: "AddressNotFound", address });
+      }
 
-        const timeoutMs = options.timeoutMs ?? 30_000;
-        const ack: MessageAck = { messageId: message.messageId, receivedAt: Date.now() };
+      const timeoutMs = options.timeoutMs ?? 30_000;
+      const ack: MessageAck = { messageId: message.messageId, receivedAt: Date.now() };
 
-        const handlerEffect = handler(message as MessageEnvelope<unknown>) as Effect.Effect<
-          R,
-          MessageHandlerError,
-          never
-        >;
-        const fiber = Effect.runFork(handlerEffect);
-        this.remember(message.messageId, ack, fiber as Fiber.RuntimeFiber<unknown, MessageHandlerError>);
+      const handlerEffect = handler(message as MessageEnvelope<unknown>) as Effect.Effect<
+        R,
+        MessageHandlerError,
+        never
+      >;
+      const fiber = Effect.runFork(handlerEffect);
+      this.remember(
+        message.messageId,
+        ack,
+        fiber as Fiber.RuntimeFiber<unknown, MessageHandlerError>,
+      );
 
-        return (Fiber.join(fiber) as Effect.Effect<R, MessageHandlerError, never>).pipe(
-          Effect.timeoutFail({
-            duration: `${timeoutMs} millis`,
-            onTimeout: (): InboxError => ({ _tag: "AskTimeout", timeoutMs }),
-          }),
-        );
-      },
-    );
+      return (Fiber.join(fiber) as Effect.Effect<R, MessageHandlerError, never>).pipe(
+        Effect.timeoutFail({
+          duration: `${timeoutMs} millis`,
+          onTimeout: (): InboxError => ({ _tag: "AskTimeout", timeoutMs }),
+        }),
+      );
+    });
   }
 
   /** Close inbox: pending iterators terminate, further calls fail. */

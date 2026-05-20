@@ -14,15 +14,15 @@ This revises the position I took in ADR 22 (sandbox-as-handle, not harness). Rec
 
 ## Why this shape
 
-| Criterion | Sandbox per instance |
-|---|---|
-| Stateful across calls | Workspace path, mounted volumes, env, possibly persistent shell session |
-| Lifecycle | creating → ready → degraded / failed → destroyed |
-| Substrate-bound operations | **Every exec / file op is a journaled operation — critical for audit** |
-| Streaming events | `exec` streams stdout/stderr as delta envelopes |
-| Receives inbox messages | `abort-exec`, `destroy`, runtime mount changes from external orchestrators |
-| Around-style middleware | Auth (allowed commands), audit (log every exec), sandbox escape detection, rate limit, golden test capture |
-| Multi-instance | One sandbox per `<Sandbox>` mount; multiple sandboxes per app |
+| Criterion                  | Sandbox per instance                                                                                       |
+| -------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| Stateful across calls      | Workspace path, mounted volumes, env, possibly persistent shell session                                    |
+| Lifecycle                  | creating → ready → degraded / failed → destroyed                                                           |
+| Substrate-bound operations | **Every exec / file op is a journaled operation — critical for audit**                                     |
+| Streaming events           | `exec` streams stdout/stderr as delta envelopes                                                            |
+| Receives inbox messages    | `abort-exec`, `destroy`, runtime mount changes from external orchestrators                                 |
+| Around-style middleware    | Auth (allowed commands), audit (log every exec), sandbox escape detection, rate limit, golden test capture |
+| Multi-instance             | One sandbox per `<Sandbox>` mount; multiple sandboxes per app                                              |
 
 **The audit story is the load-bearing one.** A tool that calls `sandbox.exec("rm -rf /")` produces two journaled operations:
 
@@ -91,6 +91,7 @@ interface SandboxHarnessProtocol {
 ```
 
 Every command is a journaled operation:
+
 - `sandbox:command:exec:requested / :before / :delta (stdout/stderr) / :terminal`
 - `sandbox:command:read-file:requested / :before / :terminal`
 - `sandbox:command:write-file:requested / :before / :terminal`
@@ -204,8 +205,8 @@ interface SandboxACL {
   readonly write?: readonly string[];
   /** Always-allowed exec patterns. */
   readonly exec?: {
-    readonly allow?: readonly string[];   // regex or command-prefix patterns
-    readonly deny?: readonly string[];    // takes precedence over allow
+    readonly allow?: readonly string[]; // regex or command-prefix patterns
+    readonly deny?: readonly string[]; // takes precedence over allow
   };
   /** Network policy (handled by provider, not the ACL flow). */
   readonly network?: boolean;
@@ -218,26 +219,25 @@ prompting. When it calls `sandbox.exec({ command: "rm -rf /tmp" })`
 and `rm` isn't allowed, the harness issues:
 
 ```ts
-const decision = yield* this.request<
-  SandboxPermissionRequest,
-  SandboxPermissionResponse
->("sandbox_permission", {
-  kind: "exec",
-  command: "rm -rf /tmp",
-  sandboxId: this.scopeId,
-  rationale: "command not in allow.exec.allow",
-});
+const decision =
+  yield *
+  this.request<SandboxPermissionRequest, SandboxPermissionResponse>("sandbox_permission", {
+    kind: "exec",
+    command: "rm -rf /tmp",
+    sandboxId: this.scopeId,
+    rationale: "command not in allow.exec.allow",
+  });
 ```
 
 The response carries one of:
 
 ```ts
 type SandboxPermissionResponse =
-  | { decision: "allow-once" }                          // proceed; don't remember
-  | { decision: "allow-session" }                       // proceed; remember for this session
+  | { decision: "allow-once" } // proceed; don't remember
+  | { decision: "allow-session" } // proceed; remember for this session
   | { decision: "allow-session-pattern"; pattern: string } // remember a pattern (e.g., "git *")
-  | { decision: "deny" }                                // throw SandboxPermissionDeniedError
-  | { decision: "deny-session" };                       // throw + remember to refuse silently
+  | { decision: "deny" } // throw SandboxPermissionDeniedError
+  | { decision: "deny-session" }; // throw + remember to refuse silently
 ```
 
 Same call shape for `readFile` (`kind: "read", path: ...`),
@@ -317,10 +317,12 @@ harness wraps the provider — providers don't know about the harness
 substrate.
 
 Provider responsibility:
+
 - `create(options): Promise<SandboxHandle>` — spin up the underlying resource
 - `restore?(snapshot): Promise<SandboxHandle>` — optional restore from snapshot
 
 Harness responsibility:
+
 - Wrap the handle's methods into journaled, middleware-able commands
 - Stream events on the bus
 - Handle abort signal → SIGTERM / cleanup
@@ -372,6 +374,7 @@ createApp(
 ```
 
 The `<Sandbox>` component:
+
 1. Uses `useData` to await `provider.create(options)` (Effect-wrapped)
 2. Constructs a `SandboxHarness` wrapping the live `SandboxHandle`
 3. Registers the harness with the bridge (`bridges.sandbox`)
@@ -393,17 +396,14 @@ export const Bash = createTool({
     if (!use.sandbox) {
       return [{ type: "text", text: "Error: no sandbox available" }];
     }
-    const result = await Effect.runPromise(
-      use.sandbox.exec({ command, signal: ctx.signal }),
-    );
-    return [
-      { type: "text", text: result.stdout || result.stderr || "(no output)" },
-    ];
+    const result = await Effect.runPromise(use.sandbox.exec({ command, signal: ctx.signal }));
+    return [{ type: "text", text: result.stdout || result.stderr || "(no output)" }];
   },
 });
 ```
 
 Two layers of journaling visible to adopters:
+
 - `tool:command:dispatch:requested ... :terminal` (tool layer)
 - `sandbox:command:exec:requested ... :delta ... :terminal` (sandbox layer)
 
@@ -413,21 +413,21 @@ for ops dashboards.
 
 ## What v2 gains over v1
 
-| v1 | v2 |
-|---|---|
-| `sandbox.exec(cmd).then(...)` | `sandbox.exec(input)` returns `Effect<...>`; fiber interruption propagates SIGTERM |
-| Stdout/stderr accumulated in memory | Streams as bus delta events; large output bounded by adopter strategy |
-| No middleware | `aroundExec`, `aroundReadFile`, etc. — compose auth/audit/rate-limit/golden-capture |
-| Cancellation via AbortSignal | Effect interruption + provider's SIGTERM/SIGKILL semantics |
-| No audit trail | Every exec / file op is a journaled envelope |
-| `useSandbox()` returns raw handle | `useSandbox()` returns the harness; commands have full substrate observability |
-| Lifecycle hooks via React `useOnUnmount` only | Five-surface lifecycle (onCreate / onDestroy / onDegraded / onExecError / onSandboxEscape / onResourceLimit / onSignal / onMount*) |
-| OS keychain integration ad-hoc per adopter | `SandboxCredentialStorage` plugin interface |
-| Provider snapshot/restore optional, unused | First-class `provider.restore()` with `SandboxSnapshot` opaque blob; harness persists `SandboxIntent` |
-| No replay | Journal supports replay of exec sequences for debugging |
-| Hand-rolled error types | Tagged `_tag` errors throughout (`SandboxExecError`, `SandboxIoError`, `SandboxMountError`, `SandboxEscapeError`, `SandboxResourceLimitError`, `SandboxPermissionDeniedError`) |
-| Permissions: hardcoded `allow` only, no runtime override | Two-tier ACL: static config + per-session learned via `request("sandbox_permission")`; policy callback for headless |
-| Per-tool middleware composed manually | Centralized at the sandbox layer; one definition covers every tool that uses the sandbox |
+| v1                                                       | v2                                                                                                                                                                             |
+| -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `sandbox.exec(cmd).then(...)`                            | `sandbox.exec(input)` returns `Effect<...>`; fiber interruption propagates SIGTERM                                                                                             |
+| Stdout/stderr accumulated in memory                      | Streams as bus delta events; large output bounded by adopter strategy                                                                                                          |
+| No middleware                                            | `aroundExec`, `aroundReadFile`, etc. — compose auth/audit/rate-limit/golden-capture                                                                                            |
+| Cancellation via AbortSignal                             | Effect interruption + provider's SIGTERM/SIGKILL semantics                                                                                                                     |
+| No audit trail                                           | Every exec / file op is a journaled envelope                                                                                                                                   |
+| `useSandbox()` returns raw handle                        | `useSandbox()` returns the harness; commands have full substrate observability                                                                                                 |
+| Lifecycle hooks via React `useOnUnmount` only            | Five-surface lifecycle (onCreate / onDestroy / onDegraded / onExecError / onSandboxEscape / onResourceLimit / onSignal / onMount\*)                                            |
+| OS keychain integration ad-hoc per adopter               | `SandboxCredentialStorage` plugin interface                                                                                                                                    |
+| Provider snapshot/restore optional, unused               | First-class `provider.restore()` with `SandboxSnapshot` opaque blob; harness persists `SandboxIntent`                                                                          |
+| No replay                                                | Journal supports replay of exec sequences for debugging                                                                                                                        |
+| Hand-rolled error types                                  | Tagged `_tag` errors throughout (`SandboxExecError`, `SandboxIoError`, `SandboxMountError`, `SandboxEscapeError`, `SandboxResourceLimitError`, `SandboxPermissionDeniedError`) |
+| Permissions: hardcoded `allow` only, no runtime override | Two-tier ACL: static config + per-session learned via `request("sandbox_permission")`; policy callback for headless                                                            |
+| Per-tool middleware composed manually                    | Centralized at the sandbox layer; one definition covers every tool that uses the sandbox                                                                                       |
 
 ## Migration path for v1 adopters
 
@@ -478,6 +478,7 @@ Tool handlers that called `sandbox.exec(cmd)` directly need to wrap in `Effect.r
 **Total: ~4-5 days of focused work.**
 
 Smaller than MCP because:
+
 - Fewer command surfaces
 - No protocol-level state machine (MCP has JSON-RPC + capabilities)
 - Auth is simpler (storage interface vs full OAuth flow)
@@ -489,15 +490,15 @@ Per ADR 23: sandbox ships first to validate the extension package shape end-to-e
 
 ## Open questions
 
-- **OQ24.1** — `sandbox.shell()` for persistent shell sessions: in scope for v1 of the harness, or follow-up? *Lean: follow-up. Most agents don't need it; the ones that do compose `exec` calls.*
-- **OQ24.2** — Should `sandbox.exec` accept `stdin` as a stream, or only as a string? *Lean: string for v1; Stream stdin can come later when an adopter actually needs it.*
-- **OQ24.3** — Path normalization (relative paths → absolute paths inside workspace). Done by the harness or the provider? *Lean: harness. Centralized so middleware sees consistent paths.*
-- **OQ24.4** — Should `aroundExec` middleware see the full command string or pre-parsed argv? *Lean: command string. Adopters who want parsed args can run a parser inside their middleware. Keeps the contract simple.*
-- **OQ24.5** — Resource limits enforced by the harness, the provider, or both? *Lean: provider enforces; harness emits events. Single source of truth at the provider; harness surfaces observability.*
-- **OQ24.6** — ACL pattern matching format: globs only, regex only, or both? *Lean: globs for paths (familiar to ops), regex available as an opt-in for exec patterns. Pattern format is a string with a leading prefix (`glob:` / `regex:` / bare = glob).*
-- **OQ24.7** — When `allow-session-pattern` is granted, what's the pattern's scope? Just that command/path or the matching family? *Lean: the user/policy provides the exact pattern string they want to remember. The harness just trusts what was returned. UI surfaces "remember as `git *`" as a checkbox.*
-- **OQ24.8** — Should `stat` and `readdir` also flow through the permission request, or piggyback on read? *Lean: piggyback. A `stat` that fails because the path isn't readable is still informative (you can't even see it exists). Adopters who want stricter granularity configure separate `allow.stat` / `allow.readdir` — opt-in complexity, default behavior matches read.*
-- **OQ24.9** — Cross-session persistence of ACL decisions (`SandboxPermissionStore`) — when do we add it? *Lean: when a real adopter needs it. Session-scoped covers single-conversation use; multi-session apps with sticky permissions can add it incrementally.*
+- **OQ24.1** — `sandbox.shell()` for persistent shell sessions: in scope for v1 of the harness, or follow-up? _Lean: follow-up. Most agents don't need it; the ones that do compose `exec` calls._
+- **OQ24.2** — Should `sandbox.exec` accept `stdin` as a stream, or only as a string? _Lean: string for v1; Stream stdin can come later when an adopter actually needs it._
+- **OQ24.3** — Path normalization (relative paths → absolute paths inside workspace). Done by the harness or the provider? _Lean: harness. Centralized so middleware sees consistent paths._
+- **OQ24.4** — Should `aroundExec` middleware see the full command string or pre-parsed argv? _Lean: command string. Adopters who want parsed args can run a parser inside their middleware. Keeps the contract simple._
+- **OQ24.5** — Resource limits enforced by the harness, the provider, or both? _Lean: provider enforces; harness emits events. Single source of truth at the provider; harness surfaces observability._
+- **OQ24.6** — ACL pattern matching format: globs only, regex only, or both? _Lean: globs for paths (familiar to ops), regex available as an opt-in for exec patterns. Pattern format is a string with a leading prefix (`glob:` / `regex:` / bare = glob)._
+- **OQ24.7** — When `allow-session-pattern` is granted, what's the pattern's scope? Just that command/path or the matching family? _Lean: the user/policy provides the exact pattern string they want to remember. The harness just trusts what was returned. UI surfaces "remember as `git _`" as a checkbox.\*
+- **OQ24.8** — Should `stat` and `readdir` also flow through the permission request, or piggyback on read? _Lean: piggyback. A `stat` that fails because the path isn't readable is still informative (you can't even see it exists). Adopters who want stricter granularity configure separate `allow.stat` / `allow.readdir` — opt-in complexity, default behavior matches read._
+- **OQ24.9** — Cross-session persistence of ACL decisions (`SandboxPermissionStore`) — when do we add it? _Lean: when a real adopter needs it. Session-scoped covers single-conversation use; multi-session apps with sticky permissions can add it incrementally._
 
 ## Cross-references
 

@@ -72,10 +72,7 @@ describe("@agentick/spec — reconciler-facing types", () => {
       const ref: FormatterRef = { id: "md", format: "markdown" };
       const node: SemanticNode = {
         semantic: "paragraph",
-        children: [
-          { text: "hello " },
-          { semantic: "strong", children: [{ text: "world" }] },
-        ],
+        children: [{ text: "hello " }, { semantic: "strong", children: [{ text: "world" }] }],
         rendererRef: ref,
       };
       expect(node.rendererRef?.id).toBe("md");

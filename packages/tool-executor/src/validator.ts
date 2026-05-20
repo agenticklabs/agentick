@@ -31,9 +31,7 @@ export const permissiveValidator: Validator = {
  * The returned object delegates to the schema's `~standard.validate`,
  * preserving async behavior.
  */
-export function fromStandardSchema<I, O>(
-  schema: StandardSchemaV1<I, O>,
-): Validator {
+export function fromStandardSchema<I, O>(schema: StandardSchemaV1<I, O>): Validator {
   return {
     validate(value: unknown): ValidatorResult | Promise<ValidatorResult> {
       const result = schema["~standard"].validate(value);

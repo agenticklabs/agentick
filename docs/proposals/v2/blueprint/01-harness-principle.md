@@ -58,13 +58,13 @@ replaceable.
 
 ## The five surfaces at a glance
 
-| # | Surface | Form | Wire-safe? | Affects exec? | Cross-process? |
-| --- | --- | --- | --- | --- | --- |
-| ① | Commands | direct method call | no (any types) | yes (it IS exec) | no |
-| ② | Inbox | typed message via address | **yes** (JSON) | yes | **yes** |
-| ③ | Lifecycle handlers | `.onX(fn)` direct fn ref | no | yes | no |
-| ④ | Middleware | `.use(mw)` direct fn ref | no | yes | no |
-| ⑤ | Events | observation stream | yes (JSON) | **no** | yes |
+| #   | Surface            | Form                      | Wire-safe?     | Affects exec?    | Cross-process? |
+| --- | ------------------ | ------------------------- | -------------- | ---------------- | -------------- |
+| ①   | Commands           | direct method call        | no (any types) | yes (it IS exec) | no             |
+| ②   | Inbox              | typed message via address | **yes** (JSON) | yes              | **yes**        |
+| ③   | Lifecycle handlers | `.onX(fn)` direct fn ref  | no             | yes              | no             |
+| ④   | Middleware         | `.use(mw)` direct fn ref  | no             | yes              | no             |
+| ⑤   | Events             | observation stream        | yes (JSON)     | **no**           | yes            |
 
 The crucial property: **the inbox is the cross-process command channel,
 events are the cross-process observation channel, and direct fn-ref
@@ -81,16 +81,16 @@ idiosyncrasies; integrations were ad-hoc.
 
 The harness principle replaces all of those with one shape:
 
-| v1 mechanism | v2 surface |
-| --- | --- |
-| Lifecycle callbacks (`onTickStart`, etc.) | ③ Lifecycle handlers (`.onX(fn)`) |
-| `app.use(middleware)` | ④ Middleware (`.use(mw)`) |
-| `EventEmitter` listeners | ⑤ Events (`bus.subscribe`) |
-| `ExecutionRunner.transformCompiled` | ④ Middleware on the relevant op |
-| `ExecutionRunner.executeToolCall` | ④ Middleware on tool dispatch |
-| Channel `subscribe()` | ⑤ Events (channels are named event subsets) |
-| Direct method calls (`session.send`) | ① Commands |
-| Cross-process control (new in v2) | ② Inbox |
+| v1 mechanism                              | v2 surface                                  |
+| ----------------------------------------- | ------------------------------------------- |
+| Lifecycle callbacks (`onTickStart`, etc.) | ③ Lifecycle handlers (`.onX(fn)`)           |
+| `app.use(middleware)`                     | ④ Middleware (`.use(mw)`)                   |
+| `EventEmitter` listeners                  | ⑤ Events (`bus.subscribe`)                  |
+| `ExecutionRunner.transformCompiled`       | ④ Middleware on the relevant op             |
+| `ExecutionRunner.executeToolCall`         | ④ Middleware on tool dispatch               |
+| Channel `subscribe()`                     | ⑤ Events (channels are named event subsets) |
+| Direct method calls (`session.send`)      | ① Commands                                  |
+| Cross-process control (new in v2)         | ② Inbox                                     |
 
 Same shape across every harness. Learn five surfaces once; apply at every
 layer.
@@ -102,9 +102,9 @@ layer.
 Direct method calls. Imperative, typed.
 
 ```ts
-session.send({ messages });           // returns SessionExecutionHandle
-react.renderTree({ mountId });    // returns RenderedTree
-loop.runExecution(input);             // returns ExecutionRunResult
+session.send({ messages }); // returns SessionExecutionHandle
+react.renderTree({ mountId }); // returns RenderedTree
+loop.runExecution(input); // returns ExecutionRunResult
 ```
 
 - Inputs and outputs are typed (any TypeScript shape; not constrained to
@@ -222,14 +222,10 @@ Broadcast notifications of things that happened. Past tense. Multiple
 subscribers, no coordination, no response expected.
 
 ```ts
-session.events.subscribe(
-  { name: { prefix: "tool:dispatch" } },
-  (envelope) => audit.log(envelope),
-);
+session.events.subscribe({ name: { prefix: "tool:dispatch" } }, (envelope) => audit.log(envelope));
 
-app.events.subscribe(
-  { name: "loop:tick:terminal", outcome: "succeeded" },
-  (envelope) => telemetry.record(envelope),
+app.events.subscribe({ name: "loop:tick:terminal", outcome: "succeeded" }, (envelope) =>
+  telemetry.record(envelope),
 );
 ```
 
@@ -279,12 +275,12 @@ handlers, or middleware — emit a strict phase sequence:
 requested ──► before? ──► delta* ──► terminal
 ```
 
-| Phase | Required? | Meaning |
-| --- | --- | --- |
-| `requested` | exactly once | Operation arrived; argument bound. |
-| `before` | zero or one | Only for interceptable operations; middleware/handlers run here. |
-| `delta` | zero or more | Optional incremental progress. |
-| `terminal` | exactly once | Operation completed with an outcome. MUST include `outcome`. |
+| Phase       | Required?    | Meaning                                                          |
+| ----------- | ------------ | ---------------------------------------------------------------- |
+| `requested` | exactly once | Operation arrived; argument bound.                               |
+| `before`    | zero or one  | Only for interceptable operations; middleware/handlers run here. |
+| `delta`     | zero or more | Optional incremental progress.                                   |
+| `terminal`  | exactly once | Operation completed with an outcome. MUST include `outcome`.     |
 
 This contract emits envelopes to the event bus (⑤) for observers. The
 mechanics of running the operation use the in-process surfaces (① + ③ +
@@ -298,14 +294,14 @@ invariant**.
 
 Operations terminate with one of:
 
-| Outcome | Meaning |
-| --- | --- |
-| `succeeded` | Normal completion with result payload. |
-| `failed` | Typed error in `E` channel. |
-| `canceled` | Abort or cancellation signal triggered. |
-| `vetoed` | Lifecycle handler / middleware halted before completion. |
-| `replaced` | Lifecycle handler / middleware supplied a result without normal execution. |
-| `deferred` | Lifecycle handler / middleware requested a delay. |
+| Outcome     | Meaning                                                                    |
+| ----------- | -------------------------------------------------------------------------- |
+| `succeeded` | Normal completion with result payload.                                     |
+| `failed`    | Typed error in `E` channel.                                                |
+| `canceled`  | Abort or cancellation signal triggered.                                    |
+| `vetoed`    | Lifecycle handler / middleware halted before completion.                   |
+| `replaced`  | Lifecycle handler / middleware supplied a result without normal execution. |
+| `deferred`  | Lifecycle handler / middleware requested a delay.                          |
 
 **Outcome payload rule:** non-success outcomes that are protocol-defined
 (`vetoed`, `replaced`, `deferred`) are **successful harness executions
@@ -395,29 +391,29 @@ composition boundaries.** Below that, stop.
 
 ## What this enables
 
-| Property | Mechanism |
-| --- | --- |
-| **Symmetry** | Five surfaces, same shape, every layer. |
-| **Pluggability** | Swap any harness implementation by substituting a Layer. |
-| **Composable observability** | Subscribe at any harness; events compose by scope. |
-| **Cross-process integration without overhead penalty** | Inbox is wire-safe; in-process couplings use direct fn refs. |
-| **Uniform testability** | Mock any harness; same pattern at every level. |
-| **Explicit integration points** | Where do I plug in X? At the relevant surface of the relevant harness. |
-| **Library-first AND distributed-capable** | Hybrid surfaces by design. |
+| Property                                               | Mechanism                                                              |
+| ------------------------------------------------------ | ---------------------------------------------------------------------- |
+| **Symmetry**                                           | Five surfaces, same shape, every layer.                                |
+| **Pluggability**                                       | Swap any harness implementation by substituting a Layer.               |
+| **Composable observability**                           | Subscribe at any harness; events compose by scope.                     |
+| **Cross-process integration without overhead penalty** | Inbox is wire-safe; in-process couplings use direct fn refs.           |
+| **Uniform testability**                                | Mock any harness; same pattern at every level.                         |
+| **Explicit integration points**                        | Where do I plug in X? At the relevant surface of the relevant harness. |
+| **Library-first AND distributed-capable**              | Hybrid surfaces by design.                                             |
 
 ## Reference: per-layer harness shapes
 
 Each harness gets its own doc. The shapes:
 
-| Harness | Surface ID | Doc | Notable inbox messages |
-| --- | --- | --- | --- |
-| App | `app` | `09-app-harness.md` | `create-session`, `close-app` |
-| Session | `session` | `08-session-harness.md` | `send`, `dispatch`, `abort`, `pause`, `hibernate`, `inject-input` |
-| Loop executor | `loop` | `05-loop-executor.md` | `halt`, `pause` |
-| React | `react` | `03-reconciler-harness.md` | `recompile`, `unmount` |
-| ~~Renderer~~ | (no harness) | `04-formatters.md` | Formatters are pure functions, not a harness — see ADR 22 |
-| Executor | `executor` | `06-executor-harness.md` | `abort` |
-| Tool executor | `tool` | `07-tool-executor.md` | `abort`, `confirmation-response` |
+| Harness       | Surface ID   | Doc                        | Notable inbox messages                                            |
+| ------------- | ------------ | -------------------------- | ----------------------------------------------------------------- |
+| App           | `app`        | `09-app-harness.md`        | `create-session`, `close-app`                                     |
+| Session       | `session`    | `08-session-harness.md`    | `send`, `dispatch`, `abort`, `pause`, `hibernate`, `inject-input` |
+| Loop executor | `loop`       | `05-loop-executor.md`      | `halt`, `pause`                                                   |
+| React         | `react`      | `03-reconciler-harness.md` | `recompile`, `unmount`                                            |
+| ~~Renderer~~  | (no harness) | `04-formatters.md`         | Formatters are pure functions, not a harness — see ADR 22         |
+| Executor      | `executor`   | `06-executor-harness.md`   | `abort`                                                           |
+| Tool executor | `tool`       | `07-tool-executor.md`      | `abort`, `confirmation-response`                                  |
 
 Each per-harness doc follows a uniform template:
 
@@ -447,7 +443,7 @@ Each per-harness doc follows a uniform template:
 - **Effect Services + Layers + PubSub + cluster RPC are the implementation
   vocabulary.**
 - **Phase contract on operations is uniform** (`requested → before →
-  delta* → terminal`).
+delta* → terminal`).
 - **Outcome vocabulary spans success/failure/cancellation/veto/replace/
   defer.**
 - **Cross-scope handler ordering: outer-in for `before`, inner-out for

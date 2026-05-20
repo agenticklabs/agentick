@@ -11,12 +11,7 @@
  * `handlerRef` to a remote node; the protocol surface is identical.
  */
 
-import type {
-  HandlerEntry,
-  HandlerResolver,
-  ToolHandler,
-  Validator,
-} from "./types.js";
+import type { HandlerEntry, HandlerResolver, ToolHandler, Validator } from "./types.js";
 import { permissiveValidator } from "./validator.js";
 
 export class InMemoryHandlerResolver implements HandlerResolver {

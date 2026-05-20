@@ -324,13 +324,34 @@ export interface ToolDispatchAborted {
  * `terminal:failed` envelope.
  */
 export type ToolExecutorError =
-  | { readonly _tag: "ToolNotFoundError"; readonly name: string; readonly registered: readonly string[] }
-  | { readonly _tag: "ToolValidationError"; readonly toolName: string; readonly issues: readonly StandardSchemaIssue[] }
+  | {
+      readonly _tag: "ToolNotFoundError";
+      readonly name: string;
+      readonly registered: readonly string[];
+    }
+  | {
+      readonly _tag: "ToolValidationError";
+      readonly toolName: string;
+      readonly issues: readonly StandardSchemaIssue[];
+    }
   | { readonly _tag: "ToolHandlerError"; readonly toolName: string; readonly cause: unknown }
-  | { readonly _tag: "ToolPermissionError"; readonly toolName: string; readonly via: DispatchContext["via"]; readonly reason?: string }
+  | {
+      readonly _tag: "ToolPermissionError";
+      readonly toolName: string;
+      readonly via: DispatchContext["via"];
+      readonly reason?: string;
+    }
   | { readonly _tag: "ToolTimeoutError"; readonly toolName: string; readonly ms: number }
-  | { readonly _tag: "ToolConfirmationDeniedError"; readonly toolName: string; readonly reason?: string }
-  | { readonly _tag: "ToolConfirmationTimeoutError"; readonly toolName: string; readonly ms: number }
+  | {
+      readonly _tag: "ToolConfirmationDeniedError";
+      readonly toolName: string;
+      readonly reason?: string;
+    }
+  | {
+      readonly _tag: "ToolConfirmationTimeoutError";
+      readonly toolName: string;
+      readonly ms: number;
+    }
   | { readonly _tag: "ToolAbortedError"; readonly toolCallId: string; readonly reason?: string }
   | { readonly _tag: "ToolAlreadyRegistered"; readonly name: string }
   | { readonly _tag: "ToolHandlerMissing"; readonly toolName: string; readonly handlerRef: string };

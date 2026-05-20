@@ -29,11 +29,7 @@ describe("ReconcilerHarness — end-to-end", () => {
       React.createElement(
         React.Fragment,
         null,
-        React.createElement(
-          "message",
-          { role: "system" },
-          "You are a helpful agent.",
-        ),
+        React.createElement("message", { role: "system" }, "You are a helpful agent."),
         React.createElement("section", { id: "s.tools", title: "Tools" }, "available tools…"),
         React.createElement("tool", {
           id: "t.echo",
@@ -94,7 +90,9 @@ describe("ReconcilerHarness — end-to-end", () => {
       phase: ev.phase,
       outcome: ev.outcome,
     }));
-    expect(journaled.some((e) => e.name === "reconciler:command:mount" && e.phase === "requested")).toBe(true);
+    expect(
+      journaled.some((e) => e.name === "reconciler:command:mount" && e.phase === "requested"),
+    ).toBe(true);
     expect(
       journaled.some(
         (e) =>
@@ -133,9 +131,10 @@ describe("ReconcilerHarness — end-to-end", () => {
 
   it("renderTree on an unmounted mountId rejects with NotMounted", async () => {
     const { harness } = await makeHarness();
-    await expect(
-      harness.renderTree({ mountId: "missing", sessionId: "s" }),
-    ).rejects.toMatchObject({ _tag: "NotMounted", mountId: "missing" });
+    await expect(harness.renderTree({ mountId: "missing", sessionId: "s" })).rejects.toMatchObject({
+      _tag: "NotMounted",
+      mountId: "missing",
+    });
   });
 
   it("inbox recompile message triggers a re-render", async () => {

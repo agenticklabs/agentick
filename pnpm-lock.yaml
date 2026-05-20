@@ -933,9 +933,18 @@ importers:
       '@agentick/core':
         specifier: workspace:*
         version: link:../core
+      '@agentick/runtime':
+        specifier: workspace:*
+        version: link:../runtime
+      '@agentick/spec':
+        specifier: workspace:*
+        version: link:../spec
       diff:
         specifier: ^8.0.3
         version: 8.0.3
+      effect:
+        specifier: ^3.21.2
+        version: 3.21.2
       react:
         specifier: ^19.0.0
         version: 19.2.4

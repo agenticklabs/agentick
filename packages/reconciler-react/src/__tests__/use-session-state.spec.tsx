@@ -17,12 +17,7 @@ import { ReconcilerHarness } from "../harness/reconciler-harness.js";
 import { useSessionState } from "../react/hooks/use-session-state.js";
 
 async function makeHarness(id = "h_state") {
-  const h = new ReconcilerHarness(
-    id,
-    new MemoryJournal(),
-    new LocalEventBus(),
-    new LocalInbox(),
-  );
+  const h = new ReconcilerHarness(id, new MemoryJournal(), new LocalEventBus(), new LocalInbox());
   await h.ready;
   return h;
 }

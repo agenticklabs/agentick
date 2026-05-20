@@ -79,14 +79,14 @@ wire protocol between client and gateway is identical across tiers.
 
 ## Transports supported
 
-| Transport | Bidirectional | Streaming | Use case |
-| --- | --- | --- | --- |
-| HTTP + SSE | two channels (POST + SSE) | server→client only | browsers, simple REST clients |
-| Streamable HTTP (MCP-style) | one endpoint, upgrades to SSE | server-streamed | browsers, MCP clients |
-| WebSocket | native bidirectional | both directions | browsers with bidirectional channels |
-| gRPC | native bidirectional via HTTP/2 | both directions | service-to-service, typed |
-| Unix socket | TCP semantics, local | both directions | same-machine IPC |
-| In-process | direct calls | both directions | embedded SDK, tests |
+| Transport                   | Bidirectional                   | Streaming          | Use case                             |
+| --------------------------- | ------------------------------- | ------------------ | ------------------------------------ |
+| HTTP + SSE                  | two channels (POST + SSE)       | server→client only | browsers, simple REST clients        |
+| Streamable HTTP (MCP-style) | one endpoint, upgrades to SSE   | server-streamed    | browsers, MCP clients                |
+| WebSocket                   | native bidirectional            | both directions    | browsers with bidirectional channels |
+| gRPC                        | native bidirectional via HTTP/2 | both directions    | service-to-service, typed            |
+| Unix socket                 | TCP semantics, local            | both directions    | same-machine IPC                     |
+| In-process                  | direct calls                    | both directions    | embedded SDK, tests                  |
 
 `[V1-INHERITED]` from v1's transport list. v2 adds streamable HTTP and
 optionally gRPC.
@@ -153,23 +153,27 @@ adapters translate to/from:
 
 ```ts
 interface GatewayProtocol {
-  authenticate(req: AuthRequest):
-    Effect<AuthResult, AuthError, GatewayEnv>;
+  authenticate(req: AuthRequest): Effect<AuthResult, AuthError, GatewayEnv>;
 
-  authorize(ctx: AuthorizedRequest):
-    Effect<AuthorizationResult, AuthorizationError, GatewayEnv>;
+  authorize(ctx: AuthorizedRequest): Effect<AuthorizationResult, AuthorizationError, GatewayEnv>;
 
-  proxyCommand(ctx: AuthorizedRequest, command: HarnessCommand):
-    Effect<HarnessResult, HarnessError | GatewayError, GatewayEnv>;
+  proxyCommand(
+    ctx: AuthorizedRequest,
+    command: HarnessCommand,
+  ): Effect<HarnessResult, HarnessError | GatewayError, GatewayEnv>;
 
-  subscribeStream(ctx: AuthorizedRequest, query: EventQuery):
-    Effect<Stream<ProtocolEvent>, GatewayError, GatewayEnv>;
+  subscribeStream(
+    ctx: AuthorizedRequest,
+    query: EventQuery,
+  ): Effect<Stream<ProtocolEvent>, GatewayError, GatewayEnv>;
 
-  publishChannel(ctx: AuthorizedRequest, channel: string, event: ChannelEvent):
-    Effect<void, GatewayError, GatewayEnv>;
+  publishChannel(
+    ctx: AuthorizedRequest,
+    channel: string,
+    event: ChannelEvent,
+  ): Effect<void, GatewayError, GatewayEnv>;
 
-  closeConnection(connectionId: string):
-    Effect<void, never, GatewayEnv>;
+  closeConnection(connectionId: string): Effect<void, never, GatewayEnv>;
 }
 ```
 
@@ -206,13 +210,13 @@ subscribeStream      publishChannel    closeConnection
 
 Common uses:
 
-| Interceptor | Use case |
-| --- | --- |
-| `authenticate` replace | Test-mode bypass with fixture identity |
-| `authorize` veto | Deny access to a session not owned by this identity |
-| `proxyCommand` proceed (with rewrite) | Inject scope (tenantId from auth) into request |
-| `subscribeStream` veto | Hide DevTools events from non-admin clients |
-| `publishChannel` defer | Queue if rate-limit hit |
+| Interceptor                           | Use case                                            |
+| ------------------------------------- | --------------------------------------------------- |
+| `authenticate` replace                | Test-mode bypass with fixture identity              |
+| `authorize` veto                      | Deny access to a session not owned by this identity |
+| `proxyCommand` proceed (with rewrite) | Inject scope (tenantId from auth) into request      |
+| `subscribeStream` veto                | Hide DevTools events from non-admin clients         |
+| `publishChannel` defer                | Queue if rate-limit hit                             |
 
 ## Outcomes and failures
 
@@ -296,7 +300,7 @@ Client connects                       Gateway                      Runtime
 WS / HTTP open
                                       authenticate
                                       ◄── identity
-                                      
+
 sendCreateSession({ ... })
                                       authorize
                                       proxyCommand:
@@ -304,7 +308,7 @@ sendCreateSession({ ... })
                                                                     creates Session
                                       ◄── session entity ref
                                       mapping: connectionId → sessionId
-                                      
+
 sendMessage({ messages })
                                       proxyCommand:
                                         session.send(...)
@@ -312,12 +316,12 @@ sendMessage({ messages })
                                                                     streams events
                                       ◄── Stream<ProtocolEvent>
                                       forward as SSE / WS frames
-                                      
+
 client disconnects
                                       mark connection idle
                                       runtime keeps session alive
                                       (hibernates per policy)
-                                      
+
 client reconnects
                                       authenticate (same identity)
                                       reattach to existing sessionId

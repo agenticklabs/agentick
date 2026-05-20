@@ -170,9 +170,7 @@ function dispatchOf(
 // Suite
 // ============================================================================
 
-export function runToolExecutorConformance(
-  factory: ToolExecutorConformanceFactory,
-): void {
+export function runToolExecutorConformance(factory: ToolExecutorConformanceFactory): void {
   describe("ToolExecutorProtocol — registry", () => {
     it("list reports registered declarations", async () => {
       const exec = await factory.createExecutor([echoTool(), modelOnlyTool()]);
@@ -185,16 +183,13 @@ export function runToolExecutorConformance(
       await exec.unregister({ name: "echo" });
       const names = (await exec.list()).map((d) => d.name);
       expect(names).not.toContain("echo");
-      await expect(
-        exec.dispatch(dispatchOf("echo", "dispatch", {})),
-      ).rejects.toMatchObject({ _tag: "ToolNotFoundError" });
+      await expect(exec.dispatch(dispatchOf("echo", "dispatch", {}))).rejects.toMatchObject({
+        _tag: "ToolNotFoundError",
+      });
     });
 
     it("list supports exposure filter", async () => {
-      const exec = await factory.createExecutor([
-        modelOnlyTool("m1"),
-        dispatchOnlyTool("d1"),
-      ]);
+      const exec = await factory.createExecutor([modelOnlyTool("m1"), dispatchOnlyTool("d1")]);
       const modelNames = (await exec.list({ exposure: "model" })).map((d) => d.name);
       expect(modelNames).toContain("m1");
       expect(modelNames).not.toContain("d1");
@@ -228,9 +223,7 @@ export function runToolExecutorConformance(
   describe("ToolExecutorProtocol — dispatch happy path", () => {
     it("returns a DispatchResult with the handler's content", async () => {
       const exec = await factory.createExecutor([echoTool()]);
-      const result = await exec.dispatch(
-        dispatchOf("echo", "dispatch", { hello: "world" }),
-      );
+      const result = await exec.dispatch(dispatchOf("echo", "dispatch", { hello: "world" }));
       expect(result.name).toBe("echo");
       expect(result.succeeded).toBe(true);
       expect(result.content[0]).toMatchObject({ type: "text" });
@@ -246,9 +239,7 @@ export function runToolExecutorConformance(
 
     it("JSON firewall — DispatchResult round-trips through JSON without loss", async () => {
       const exec = await factory.createExecutor([echoTool()]);
-      const result = await exec.dispatch(
-        dispatchOf("echo", "dispatch", { hello: "world" }),
-      );
+      const result = await exec.dispatch(dispatchOf("echo", "dispatch", { hello: "world" }));
       const round = JSON.parse(JSON.stringify(result));
       expect(round).toEqual(result);
     });
@@ -257,16 +248,18 @@ export function runToolExecutorConformance(
   describe("ToolExecutorProtocol — two doors", () => {
     it("model-only tool rejects host-door dispatch with ToolPermissionError", async () => {
       const exec = await factory.createExecutor([modelOnlyTool()]);
-      await expect(
-        exec.dispatch(dispatchOf("model.only", "dispatch", {})),
-      ).rejects.toMatchObject({ _tag: "ToolPermissionError", via: "dispatch" });
+      await expect(exec.dispatch(dispatchOf("model.only", "dispatch", {}))).rejects.toMatchObject({
+        _tag: "ToolPermissionError",
+        via: "dispatch",
+      });
     });
 
     it("dispatch-only tool rejects model-door dispatch with ToolPermissionError", async () => {
       const exec = await factory.createExecutor([dispatchOnlyTool()]);
-      await expect(
-        exec.dispatch(dispatchOf("dispatch.only", "model", {})),
-      ).rejects.toMatchObject({ _tag: "ToolPermissionError", via: "model" });
+      await expect(exec.dispatch(dispatchOf("dispatch.only", "model", {}))).rejects.toMatchObject({
+        _tag: "ToolPermissionError",
+        via: "model",
+      });
     });
 
     it("dual-exposure tool accepts both doors", async () => {
@@ -281,9 +274,10 @@ export function runToolExecutorConformance(
   describe("ToolExecutorProtocol — validation + lookup", () => {
     it("unknown name rejects with ToolNotFoundError", async () => {
       const exec = await factory.createExecutor([echoTool()]);
-      await expect(
-        exec.dispatch(dispatchOf("missing", "dispatch", {})),
-      ).rejects.toMatchObject({ _tag: "ToolNotFoundError", name: "missing" });
+      await expect(exec.dispatch(dispatchOf("missing", "dispatch", {}))).rejects.toMatchObject({
+        _tag: "ToolNotFoundError",
+        name: "missing",
+      });
     });
 
     it("input that violates inputSchema rejects with ToolValidationError", async () => {
@@ -298,9 +292,7 @@ export function runToolExecutorConformance(
       // Use echoTool (lenient schema) so the handler runs; strict tool's
       // `deny-validation` behavior produces failures by design.
       const exec = await factory.createExecutor([echoTool()]);
-      const result = await exec.dispatch(
-        dispatchOf("echo", "dispatch", { q: "ok" }),
-      );
+      const result = await exec.dispatch(dispatchOf("echo", "dispatch", { q: "ok" }));
       expect(result.succeeded).toBe(true);
     });
   });
@@ -308,9 +300,10 @@ export function runToolExecutorConformance(
   describe("ToolExecutorProtocol — handler errors", () => {
     it("handler throwing rejects with ToolHandlerError", async () => {
       const exec = await factory.createExecutor([throwingTool()]);
-      await expect(
-        exec.dispatch(dispatchOf("boom", "dispatch", {})),
-      ).rejects.toMatchObject({ _tag: "ToolHandlerError", toolName: "boom" });
+      await expect(exec.dispatch(dispatchOf("boom", "dispatch", {}))).rejects.toMatchObject({
+        _tag: "ToolHandlerError",
+        toolName: "boom",
+      });
     });
   });
 
@@ -318,9 +311,7 @@ export function runToolExecutorConformance(
     it("abort(toolCallId) causes the in-flight dispatch to reject", async () => {
       const exec = await factory.createExecutor([slowTool()]);
       const callId = "slow-call-1";
-      const inFlight = exec.dispatch(
-        dispatchOf("slow", "dispatch", {}, { toolCallId: callId }),
-      );
+      const inFlight = exec.dispatch(dispatchOf("slow", "dispatch", {}, { toolCallId: callId }));
       // Abort shortly after dispatch begins.
       await new Promise<void>((r) => setTimeout(r, 5));
       await exec.abort({ toolCallId: callId, reason: "test" });

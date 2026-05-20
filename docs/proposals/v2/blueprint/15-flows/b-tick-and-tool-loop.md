@@ -421,18 +421,18 @@ race the running execution.
 
 Where errors can happen and what they look like:
 
-| Phase | Failure | Outcome |
-| --- | --- | --- |
-| `renderTree` | async component throws | `reconciler:render:terminal { failed }` → `loop:tick:terminal { failed }` → `TickError { phase: "compile" }` |
-| `renderTree` | iteration cap exceeded | `reconciler:render:terminal { succeeded, forcedStable: true }`; loop continues |
-| executor `project` | unsupported feature | `executor:project:terminal { failed }` → `ProjectionError` |
-| executor `execute` | provider 5xx | `executor:request:terminal { failed }` → `ProviderError` |
-| executor `normalize` | malformed response | `executor:normalize:terminal { failed }` → `NormalizationError` |
-| tool dispatch | validation issue | `tool:validation:terminal { failed }` → `ToolValidationError`; loop continues with that tool's result as error |
-| tool dispatch | handler throws | `tool:handler:errored` → `ToolHandlerError`; same |
-| tool confirmation | denied | `tool:confirmation:resolved { approved: false }` → `ToolConfirmationDeniedError` |
-| state apply | persistence write fails | `loop:ingest:terminal { failed }` → `TickError { phase: "ingest" }` |
-| continuation | policy throws | rare; surfaces as `TickError { phase: "continuation" }` |
+| Phase                | Failure                 | Outcome                                                                                                        |
+| -------------------- | ----------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `renderTree`         | async component throws  | `reconciler:render:terminal { failed }` → `loop:tick:terminal { failed }` → `TickError { phase: "compile" }`   |
+| `renderTree`         | iteration cap exceeded  | `reconciler:render:terminal { succeeded, forcedStable: true }`; loop continues                                 |
+| executor `project`   | unsupported feature     | `executor:project:terminal { failed }` → `ProjectionError`                                                     |
+| executor `execute`   | provider 5xx            | `executor:request:terminal { failed }` → `ProviderError`                                                       |
+| executor `normalize` | malformed response      | `executor:normalize:terminal { failed }` → `NormalizationError`                                                |
+| tool dispatch        | validation issue        | `tool:validation:terminal { failed }` → `ToolValidationError`; loop continues with that tool's result as error |
+| tool dispatch        | handler throws          | `tool:handler:errored` → `ToolHandlerError`; same                                                              |
+| tool confirmation    | denied                  | `tool:confirmation:resolved { approved: false }` → `ToolConfirmationDeniedError`                               |
+| state apply          | persistence write fails | `loop:ingest:terminal { failed }` → `TickError { phase: "ingest" }`                                            |
+| continuation         | policy throws           | rare; surfaces as `TickError { phase: "continuation" }`                                                        |
 
 A tick-level failure terminates the execution by default unless an
 interceptor handles it.

@@ -115,11 +115,7 @@ describe("ReconcilerHarness — snapshot/restore through the harness", () => {
     function App() {
       const [mood] = useKnob("mood", "curious");
       const name = useData("user", async () => "Ryan");
-      return React.createElement(
-        "message",
-        { role: "user" },
-        `${mood}-${name}`,
-      );
+      return React.createElement("message", { role: "user" }, `${mood}-${name}`);
     }
     await harness.mount({
       mountId: "m_snap",

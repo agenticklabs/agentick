@@ -18,11 +18,7 @@
 
 import { Effect, Queue, Stream } from "effect";
 import type { EventKey, EventQuery, EventSurface, ProtocolEvent } from "@agentick/spec";
-import type {
-  EventBus,
-  SubscribeOptions,
-  SubscriberOverflow,
-} from "@agentick/spec";
+import type { EventBus, SubscribeOptions, SubscriberOverflow } from "@agentick/spec";
 import { BufferOverflowError } from "@agentick/spec";
 import { matchesQuery } from "./query.js";
 
@@ -72,10 +68,7 @@ export class LocalEventBus implements EventBus {
     });
   }
 
-  publishLazy(
-    key: EventKey,
-    build: () => ProtocolEvent,
-  ): Effect.Effect<void, never, never> {
+  publishLazy(key: EventKey, build: () => ProtocolEvent): Effect.Effect<void, never, never> {
     return Effect.suspend(() => {
       if (!this.hasSubscriber(key)) return Effect.void;
       // At least one subscriber may match — construct and route through
@@ -140,11 +133,7 @@ export class LocalEventBus implements EventBus {
         // For overflow === "error" we instead detect publish-side full and
         // shut down the queue with a BufferOverflowError surfaced as a
         // typed stream failure via the deliver() path.
-        return Stream.fromQueue(queue) as Stream.Stream<
-          ProtocolEvent,
-          BufferOverflowError,
-          never
-        >;
+        return Stream.fromQueue(queue) as Stream.Stream<ProtocolEvent, BufferOverflowError, never>;
       }),
     );
   }
@@ -171,10 +160,7 @@ export class LocalEventBus implements EventBus {
 
   // ────────── helpers ──────────
 
-  private deliver(
-    sub: Subscriber,
-    event: ProtocolEvent,
-  ): Effect.Effect<void, never, never> {
+  private deliver(sub: Subscriber, event: ProtocolEvent): Effect.Effect<void, never, never> {
     // sliding (drop-oldest) and dropping (drop-newest) handle their own
     // overflow inside Effect's Queue. Offer always succeeds; for
     // dropping it returns false (drops the new value).

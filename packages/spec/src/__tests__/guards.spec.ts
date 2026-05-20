@@ -271,9 +271,7 @@ describe("declaration guards", () => {
 
   it("isMCPDeclaration", async () => {
     const { isMCPDeclaration } = await import("../guards/index.js");
-    expect(
-      isMCPDeclaration({ id: "m", transport: { kind: "stdio", command: "x" } }),
-    ).toBe(true);
+    expect(isMCPDeclaration({ id: "m", transport: { kind: "stdio", command: "x" } })).toBe(true);
     expect(isMCPDeclaration({ id: "m" })).toBe(false);
   });
 });

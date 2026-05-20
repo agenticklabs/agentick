@@ -37,8 +37,9 @@ export interface ExecutorConformanceFactoryInput {
   readonly scripted?: LanguageModelExecutionResult;
 }
 
-export type ExecutorConformanceFactory =
-  (input: ExecutorConformanceFactoryInput) => Promise<LanguageModelExecutor>;
+export type ExecutorConformanceFactory = (
+  input: ExecutorConformanceFactoryInput,
+) => Promise<LanguageModelExecutor>;
 
 // ============================================================================
 // Fixtures
@@ -95,9 +96,7 @@ function mkScripted(text = "hi"): LanguageModelExecutionResult {
 // Suite
 // ============================================================================
 
-export function runExecutorConformance(
-  factory: ExecutorConformanceFactory,
-): void {
+export function runExecutorConformance(factory: ExecutorConformanceFactory): void {
   describe("ExecutorProtocol — project phase", () => {
     it("projects a RenderedTree into a target-shaped input", async () => {
       const executor = await factory({ harnessId: "ex-project-1" });
@@ -154,9 +153,7 @@ export function runExecutorConformance(
   describe("ExecutorProtocol — abort", () => {
     it("abort with an unknown executionId is a no-op", async () => {
       const executor = await factory({ harnessId: "ex-abort-1" });
-      await expect(
-        executor.abort({ executionId: "no-such-execution" }),
-      ).resolves.toBeUndefined();
+      await expect(executor.abort({ executionId: "no-such-execution" })).resolves.toBeUndefined();
     });
   });
 

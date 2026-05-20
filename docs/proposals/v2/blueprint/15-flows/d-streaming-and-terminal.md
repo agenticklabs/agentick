@@ -36,13 +36,13 @@ App-level events  (app:cross-session:*)
 
 A subscriber chooses **altitude based on use case**:
 
-| Use case | Altitude |
-| --- | --- |
-| Render token-by-token in UI | executor or loop deltas |
-| Trace a single agent run for debugging | loop terminals |
-| Audit log of all session activity | session terminals |
-| Multi-tenant observability dashboard | app cross-session |
-| DevTools recording with provider raw | DevTools bus |
+| Use case                               | Altitude                |
+| -------------------------------------- | ----------------------- |
+| Render token-by-token in UI            | executor or loop deltas |
+| Trace a single agent run for debugging | loop terminals          |
+| Audit log of all session activity      | session terminals       |
+| Multi-tenant observability dashboard   | app cross-session       |
+| DevTools recording with provider raw   | DevTools bus            |
 
 ## Terminal correctness invariant
 
@@ -249,7 +249,7 @@ const terminal = await firstValueFrom(
   session.events({
     name: { exact: "session:execution:terminal" },
     outcome: "succeeded",
-  })
+  }),
 );
 // terminal.payload is SendResult (or ExecutionRunResult inside session
 // terminal — see envelope payload table below)
@@ -257,17 +257,17 @@ const terminal = await firstValueFrom(
 
 ## Terminal payload table
 
-| Event | Phase | Payload on succeeded |
-| --- | --- | --- |
-| `executor:request:terminal` | terminal | `LanguageModelExecutionResult` |
-| `executor:normalize:terminal` | terminal | `LanguageModelExecutionResult` |
-| `loop:tick:terminal` | terminal | `{ tick, shouldContinue, usage }` |
-| `loop:execution:terminal` | terminal | `ExecutionRunResult` |
-| `tool:dispatch:terminal` | terminal | `ToolResult` |
-| `session:execution:terminal` | terminal | `SendResult` |
-| `reconciler:render:terminal` | terminal | `{ iterations, forcedStable, compiled }` |
-| `reconciler:render-to-string:terminal` | terminal | `FormattedContent` |
-| `formatter:format:terminal` | terminal | `FormatResult` |
+| Event                                  | Phase    | Payload on succeeded                     |
+| -------------------------------------- | -------- | ---------------------------------------- |
+| `executor:request:terminal`            | terminal | `LanguageModelExecutionResult`           |
+| `executor:normalize:terminal`          | terminal | `LanguageModelExecutionResult`           |
+| `loop:tick:terminal`                   | terminal | `{ tick, shouldContinue, usage }`        |
+| `loop:execution:terminal`              | terminal | `ExecutionRunResult`                     |
+| `tool:dispatch:terminal`               | terminal | `ToolResult`                             |
+| `session:execution:terminal`           | terminal | `SendResult`                             |
+| `reconciler:render:terminal`           | terminal | `{ iterations, forcedStable, compiled }` |
+| `reconciler:render-to-string:terminal` | terminal | `FormattedContent`                       |
+| `formatter:format:terminal`            | terminal | `FormatResult`                           |
 
 On `failed`, payload is `error: ProtocolError`. On `canceled`, payload
 includes optional `reason`. On `vetoed`, payload includes `reason`. On
@@ -276,16 +276,16 @@ includes optional `reason`. On `vetoed`, payload includes `reason`. On
 
 ## Event delta payloads
 
-| Delta event | Payload shape |
-| --- | --- |
-| `executor:delta { kind: "content-delta" }` | `{ blockIndex, delta: string }` |
+| Delta event                                  | Payload shape                               |
+| -------------------------------------------- | ------------------------------------------- |
+| `executor:delta { kind: "content-delta" }`   | `{ blockIndex, delta: string }`             |
 | `executor:delta { kind: "tool-call-delta" }` | `{ toolCallId, blockIndex, delta: string }` |
-| `executor:delta { kind: "reasoning-delta" }` | `{ blockIndex, delta: string }` |
-| `executor:delta { kind: "content-block" }` | `{ blockIndex, block: ContentBlock }` |
-| `executor:delta { kind: "usage" }` | `{ usage: Partial<UsageStats> }` |
-| `executor:delta { kind: "stop" }` | `{ stopReason: LanguageModelStopReason }` |
-| `reconciler:render:delta` | `{ iteration }` |
-| `formatter:format:delta` | implementation-specific |
+| `executor:delta { kind: "reasoning-delta" }` | `{ blockIndex, delta: string }`             |
+| `executor:delta { kind: "content-block" }`   | `{ blockIndex, block: ContentBlock }`       |
+| `executor:delta { kind: "usage" }`           | `{ usage: Partial<UsageStats> }`            |
+| `executor:delta { kind: "stop" }`            | `{ stopReason: LanguageModelStopReason }`   |
+| `reconciler:render:delta`                    | `{ iteration }`                             |
+| `formatter:format:delta`                     | implementation-specific                     |
 
 `[PROPOSAL]` shapes (carried from `02-data-model.md` and
 `06-executor-harness.md`); sign-off needed.

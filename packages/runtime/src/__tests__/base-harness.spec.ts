@@ -78,7 +78,9 @@ class TestHarness extends BaseHarness<"tool"> {
     );
   }
 
-  protected handleMessage(msg: MessageEnvelope): Effect.Effect<unknown, MessageHandlerError, never> {
+  protected handleMessage(
+    msg: MessageEnvelope,
+  ): Effect.Effect<unknown, MessageHandlerError, never> {
     return Effect.suspend((): Effect.Effect<unknown, MessageHandlerError, never> => {
       if (msg.type === "echo") return Effect.succeed(msg.payload);
       return Effect.fail({
@@ -147,9 +149,7 @@ describe("BaseHarness — verdict merge", () => {
   it("veto short-circuits with outcome=vetoed", async () => {
     const { h } = await harness();
     h.onBefore(() => ({ kind: "veto", reason: "denied" }));
-    await expect(h.add("op-veto", { a: 1, b: 1 })).rejects.toBeInstanceOf(
-      OperationOutcomeError,
-    );
+    await expect(h.add("op-veto", { a: 1, b: 1 })).rejects.toBeInstanceOf(OperationOutcomeError);
   });
 
   it("replace short-circuits with caller-supplied result", async () => {

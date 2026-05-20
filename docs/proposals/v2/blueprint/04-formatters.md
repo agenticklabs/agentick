@@ -24,14 +24,14 @@ the call:
 A formatter has **none** of the load-bearing properties that justify
 the harness model in v2:
 
-| Property | Justifies harness? | Formatter |
-|---|---|---|
-| Stateful between calls | yes | no — deterministic input → output |
-| Lifecycle (mount/unmount) | yes | no |
-| Substrate-bound (journal/bus/inbox) | yes | no — nothing to journal |
-| Receives inbox messages from peers | yes | no |
-| Streams progressive output | maybe | no — model needs complete prompt |
-| Around-style middleware | yes | covered by function composition |
+| Property                            | Justifies harness? | Formatter                         |
+| ----------------------------------- | ------------------ | --------------------------------- |
+| Stateful between calls              | yes                | no — deterministic input → output |
+| Lifecycle (mount/unmount)           | yes                | no                                |
+| Substrate-bound (journal/bus/inbox) | yes                | no — nothing to journal           |
+| Receives inbox messages from peers  | yes                | no                                |
+| Streams progressive output          | maybe              | no — model needs complete prompt  |
+| Around-style middleware             | yes                | covered by function composition   |
 
 The wire-level audience is the LLM. The output is a complete prompt
 the model consumes atomically. No streaming. No reactive updates. No
@@ -44,9 +44,7 @@ peer messaging. The harness wrapping was bureaucracy.
 
 ```ts
 // In @agentick/spec/data/formatter.ts
-type Formatter = (
-  blocks: readonly SemanticContentBlock[],
-) => readonly ContentBlock[];
+type Formatter = (blocks: readonly SemanticContentBlock[]) => readonly ContentBlock[];
 
 interface FormatterIdentity {
   readonly id: string;
@@ -64,7 +62,7 @@ interface SemanticNode {
   readonly semantic?: SemanticType;
   readonly props?: Readonly<Record<string, unknown>>;
   readonly children?: readonly SemanticNode[];
-  readonly rendererRef?: FormatterRef;  // nested formatter switching
+  readonly rendererRef?: FormatterRef; // nested formatter switching
 }
 ```
 
@@ -161,7 +159,7 @@ recurses.
 
 ```ts
 new ReconcilerHarness(scopeId, journal, bus, inbox, {
-  formatters: builtInFormatters(),         // optional, defaults to builtIn
+  formatters: builtInFormatters(), // optional, defaults to builtIn
   defaultFormatterId: "formatter.markdown", // optional, defaults to markdown
 });
 ```

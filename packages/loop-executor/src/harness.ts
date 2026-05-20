@@ -80,19 +80,11 @@ function zeroUsage(): MutableUsage {
 // LoopExecutorHarness
 // ============================================================================
 
-export class LoopExecutorHarness
-  extends BaseHarness<"loop">
-  implements LoopExecutorProtocol
-{
+export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExecutorProtocol {
   private readonly inFlight = new Map<string, InFlightEntry>();
   private readonly aborted = new Map<string, string | undefined>();
 
-  constructor(
-    scopeId: string,
-    journal: OperationJournal,
-    bus: EventBus,
-    inbox: MessageInbox,
-  ) {
+  constructor(scopeId: string, journal: OperationJournal, bus: EventBus, inbox: MessageInbox) {
     super("loop", scopeId, journal, bus, inbox);
   }
 
@@ -109,9 +101,7 @@ export class LoopExecutorHarness
       },
       input,
     };
-    return runHarnessProtocol(
-      this.runOperation(op, (i) => this.runExecutionBody(i)),
-    );
+    return runHarnessProtocol(this.runOperation(op, (i) => this.runExecutionBody(i)));
   }
 
   abort(input: { executionId: string; reason?: string }): Promise<void> {
@@ -155,9 +145,7 @@ export class LoopExecutorHarness
    * via their public Promise surfaces. The loop's own typed lifecycle
    * goes through `runOperation` at the public entry point.
    */
-  private async runExecutionAsync(
-    input: RunExecutionInput,
-  ): Promise<ExecutionTerminal> {
+  private async runExecutionAsync(input: RunExecutionInput): Promise<ExecutionTerminal> {
     const executionId = input.executionId;
     this.inFlight.set(executionId, { executionId });
 
@@ -282,8 +270,7 @@ export class LoopExecutorHarness
         acc.lastStopReason = result.stopReason;
 
         // 5. Continuation decision (default policy).
-        const wantsContinue =
-          result.stopReason === "tool_use" && tickToolResults.length > 0;
+        const wantsContinue = result.stopReason === "tool_use" && tickToolResults.length > 0;
         if (!wantsContinue) {
           stopReason = result.stopReason;
           break;
@@ -300,10 +287,7 @@ export class LoopExecutorHarness
       // If we exited the loop because of maxTicks reached at the top
       // of the next iteration (uncommon — the break inside catches
       // most cases), normalize the stop reason.
-      if (
-        acc.ticks >= input.maxTicks &&
-        acc.lastStopReason === "tool_use"
-      ) {
+      if (acc.ticks >= input.maxTicks && acc.lastStopReason === "tool_use") {
         stopReason = "max_ticks";
       }
 
@@ -348,7 +332,6 @@ function accumulateUsage(acc: MutableUsage, add?: UsageStats): void {
     acc.cachedInputTokens = (acc.cachedInputTokens ?? 0) + add.cachedInputTokens;
   }
   if (add.cacheCreationTokens !== undefined) {
-    acc.cacheCreationTokens =
-      (acc.cacheCreationTokens ?? 0) + add.cacheCreationTokens;
+    acc.cacheCreationTokens = (acc.cacheCreationTokens ?? 0) + add.cacheCreationTokens;
   }
 }

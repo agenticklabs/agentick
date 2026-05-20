@@ -14,12 +14,7 @@
  */
 
 import { Effect, Stream } from "effect";
-import type {
-  EventQuery,
-  JournalError,
-  ProtocolEvent,
-  TerminalEvent,
-} from "@agentick/spec";
+import type { EventQuery, JournalError, ProtocolEvent, TerminalEvent } from "@agentick/spec";
 import type {
   JournalReadFrom,
   Maybe,
@@ -215,8 +210,7 @@ export class MemoryJournal implements OperationJournal {
     return Effect.sync(() => {
       const olderThan = query.olderThan;
       const surface = query.surface;
-      const cutoff =
-        olderThan === undefined ? Number.POSITIVE_INFINITY : Date.now() - olderThan;
+      const cutoff = olderThan === undefined ? Number.POSITIVE_INFINITY : Date.now() - olderThan;
       const out: OrphanedOperation[] = [];
       for (const [opId, earliest] of this.inFlight) {
         if (surface && earliest.surface !== surface) continue;

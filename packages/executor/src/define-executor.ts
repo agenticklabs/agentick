@@ -135,13 +135,7 @@ export function defineExecutor(spec: DefineExecutorInput): ExecutorFactory {
     const journal = deps?.journal ?? new MemoryJournal();
     const bus = deps?.bus ?? new LocalEventBus();
     const inbox = deps?.inbox ?? new LocalInbox();
-    return new CallbackLanguageModelExecutor(
-      scopeId,
-      journal,
-      bus,
-      inbox,
-      spec,
-    );
+    return new CallbackLanguageModelExecutor(scopeId, journal, bus, inbox, spec);
   };
   return Object.assign(factory, { executorFactory: true as const });
 }
@@ -212,22 +206,17 @@ class CallbackLanguageModelExecutor
       scope: input.scope ?? { executionId },
       input,
     };
-    return runHarnessProtocol(
-      this.runOperation(op, (i) => this.executeBody(i, executionId)),
-    );
+    return runHarnessProtocol(this.runOperation(op, (i) => this.executeBody(i, executionId)));
   }
 
-  normalize(
-    input: NormalizeInput<unknown>,
-  ): Promise<LanguageModelExecutionResult> {
-    const op: Operation<NormalizeInput<unknown>, LanguageModelExecutionResult> =
-      {
-        opId: `executor:normalize:${ulid()}`,
-        surface: "executor",
-        name: "executor:command:normalize",
-        scope: input.scope ?? {},
-        input,
-      };
+  normalize(input: NormalizeInput<unknown>): Promise<LanguageModelExecutionResult> {
+    const op: Operation<NormalizeInput<unknown>, LanguageModelExecutionResult> = {
+      opId: `executor:normalize:${ulid()}`,
+      surface: "executor",
+      name: "executor:command:normalize",
+      scope: input.scope ?? {},
+      input,
+    };
     return runHarnessProtocol(
       this.runOperation(op, (i) =>
         Effect.try({
@@ -241,28 +230,21 @@ class CallbackLanguageModelExecutor
     );
   }
 
-  run(
-    input: RunInput,
-  ): Promise<ExecutorTerminal<LanguageModelExecutionResult>> {
+  run(input: RunInput): Promise<ExecutorTerminal<LanguageModelExecutionResult>> {
     const executionId = input.scope?.executionId ?? `exec:${ulid()}`;
     const tickId = input.scope?.tickId;
     const opId =
       tickId !== undefined
         ? `executor:run:${executionId}:${tickId}`
         : `executor:run:${executionId}:${ulid()}`;
-    const op: Operation<
-      RunInput,
-      ExecutorTerminal<LanguageModelExecutionResult>
-    > = {
+    const op: Operation<RunInput, ExecutorTerminal<LanguageModelExecutionResult>> = {
       opId,
       surface: "executor",
       name: "executor:command:run",
       scope: { ...(input.scope ?? {}), executionId },
       input,
     };
-    return runHarnessProtocol(
-      this.runOperation(op, (i) => this.runBody(i, executionId)),
-    );
+    return runHarnessProtocol(this.runOperation(op, (i) => this.runBody(i, executionId)));
   }
 
   abort(input: AbortExecutorInput): Promise<void> {
@@ -285,9 +267,7 @@ class CallbackLanguageModelExecutor
   ): Effect.Effect<unknown, MessageHandlerError, never> {
     return Effect.fail({
       _tag: "HandlerError",
-      cause: new Error(
-        "defineExecutor inbox dispatch not yet wired (FAÇADE.6 MVP)",
-      ),
+      cause: new Error("defineExecutor inbox dispatch not yet wired (FAÇADE.6 MVP)"),
     });
   }
 
@@ -307,10 +287,7 @@ class CallbackLanguageModelExecutor
       const controller = new AbortController();
       this.inFlight.set(executionId, { executionId, abort: controller });
       try {
-        const result = yield* Effect.tryPromise<
-          LanguageModelExecutionResult,
-          ExecuteError
-        >({
+        const result = yield* Effect.tryPromise<LanguageModelExecutionResult, ExecuteError>({
           try: () =>
             this.spec.run(input.targetInput, {
               ...(input.signal !== undefined ? { signal: input.signal } : {}),
@@ -335,11 +312,7 @@ class CallbackLanguageModelExecutor
   private runBody(
     input: RunInput,
     executionId: string,
-  ): Effect.Effect<
-    ExecutorTerminal<LanguageModelExecutionResult>,
-    ExecutorError,
-    never
-  > {
+  ): Effect.Effect<ExecutorTerminal<LanguageModelExecutionResult>, ExecutorError, never> {
     return Effect.gen(this, function* () {
       if (this.aborted.has(executionId)) {
         const terminal: ExecutorTerminal<LanguageModelExecutionResult> = {
@@ -382,9 +355,7 @@ function defaultProject(input: ProjectInput): LanguageModelInput {
   };
 }
 
-function buildMessages(
-  tree: RenderedTree,
-): ReadonlyArray<LanguageModelMessage> {
+function buildMessages(tree: RenderedTree): ReadonlyArray<LanguageModelMessage> {
   const messages: LanguageModelMessage[] = [];
   const systemText = collectSectionText(tree.context.entries);
   if (systemText.length > 0) {
@@ -450,9 +421,7 @@ function messagePartFromBlock(block: ContentBlock): LanguageModelMessagePart {
       return {
         type: "text",
         text:
-          "text" in block && typeof block.text === "string"
-            ? block.text
-            : JSON.stringify(block),
+          "text" in block && typeof block.text === "string" ? block.text : JSON.stringify(block),
       };
   }
 }
@@ -468,9 +437,7 @@ function buildTools(tree: RenderedTree): ReadonlyArray<LanguageModelTool> {
     }));
 }
 
-function normalizeImpl(
-  input: NormalizeInput<unknown>,
-): LanguageModelExecutionResult {
+function normalizeImpl(input: NormalizeInput<unknown>): LanguageModelExecutionResult {
   const out = input.targetOutput;
   if (isLanguageModelExecutionResult(out)) return out;
   throw new Error(
@@ -478,11 +445,8 @@ function normalizeImpl(
   );
 }
 
-function isLanguageModelExecutionResult(
-  v: unknown,
-): v is LanguageModelExecutionResult {
+function isLanguageModelExecutionResult(v: unknown): v is LanguageModelExecutionResult {
   if (typeof v !== "object" || v === null) return false;
   const o = v as { stopReason?: unknown; output?: unknown };
   return typeof o.stopReason === "string" && Array.isArray(o.output);
 }
-

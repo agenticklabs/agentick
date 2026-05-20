@@ -5,12 +5,7 @@
  * structural framing of markdown/XML is noise.
  */
 
-import type {
-  ContentBlock,
-  SemanticContentBlock,
-  SemanticNode,
-  TextBlock,
-} from "@agentick/spec";
+import type { ContentBlock, SemanticContentBlock, SemanticNode, TextBlock } from "@agentick/spec";
 
 import { defineFormatter } from "./define-formatter.js";
 
@@ -33,9 +28,7 @@ function formatNode(node: SemanticNode): string {
       return child;
     case "table": {
       const rows = (node.children ?? [])
-        .map((r) =>
-          (r.children ?? []).map(formatNode).join("\t"),
-        )
+        .map((r) => (r.children ?? []).map(formatNode).join("\t"))
         .join("\n");
       return `${rows}\n\n`;
     }

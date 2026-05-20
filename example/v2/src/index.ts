@@ -314,12 +314,7 @@ async function scenarioLoopExecution(s: Substrate, tree: RenderedTree): Promise<
   // Subscribe to delta envelopes from the executor (streaming model
   // tokens) BEFORE we start the loop so we capture them.
   const deltaFiber = Effect.runFork(
-    Stream.runCollect(
-      Stream.take(
-        s.bus.subscribe({ surface: "executor", phase: "delta" }),
-        5,
-      ),
-    ),
+    Stream.runCollect(Stream.take(s.bus.subscribe({ surface: "executor", phase: "delta" }), 5)),
   );
   await new Promise((r) => setImmediate(r));
 
@@ -362,9 +357,7 @@ async function scenarioLoopExecution(s: Substrate, tree: RenderedTree): Promise<
         .map((b) => b.text)
         .join("");
       console.log(
-        line(
-          `  · ${tr.toolName} (${tr.toolCallId}) ${tr.succeeded ? "✓" : "✗"} → ${text}`,
-        ),
+        line(`  · ${tr.toolName} (${tr.toolCallId}) ${tr.succeeded ? "✓" : "✗"} → ${text}`),
       );
     }
   }
@@ -386,9 +379,7 @@ async function scenarioBusSubscription(s: Substrate): Promise<void> {
   console.log(heading("5. Bus subscription — observe every operation"));
 
   // A dispatch publishes 3 envelopes (requested → before → terminal).
-  const fiber = Effect.runFork(
-    Stream.runCollect(Stream.take(s.bus.subscribe({}), 3)),
-  );
+  const fiber = Effect.runFork(Stream.runCollect(Stream.take(s.bus.subscribe({}), 3)));
   await new Promise((r) => setImmediate(r));
 
   await s.tools.dispatch({
@@ -411,9 +402,7 @@ async function scenarioBusSubscription(s: Substrate): Promise<void> {
  */
 async function scenarioJournalAudit(s: Substrate): Promise<void> {
   console.log(heading("6. Journal — durable audit log"));
-  const chunk = await Effect.runPromise(
-    Stream.runCollect(s.journal.read({}, "beginning")),
-  );
+  const chunk = await Effect.runPromise(Stream.runCollect(s.journal.read({}, "beginning")));
   const events = Array.from(Chunk.toReadonlyArray(chunk));
   console.log(line(`total journaled envelopes: ${events.length}`));
 
@@ -451,9 +440,7 @@ async function scenarioSessionSend(s: Substrate): Promise<void> {
   console.log(heading("4f. Session — session.send({ messages })"));
 
   const handle = await s.session.send({
-    messages: [
-      { role: "user", content: "What is 47 times 23?" },
-    ],
+    messages: [{ role: "user", content: "What is 47 times 23?" }],
   });
   console.log(line(`executionId: ${handle.executionId}`));
 
@@ -574,7 +561,9 @@ async function scenarioAppHarness(): Promise<void> {
     sessionId: "user-43",
     metadata: { tier: "pro" },
   });
-  console.log(line(`createSession → ${session === app.getSession("user-43") ? "registered" : "MISSING"}`));
+  console.log(
+    line(`createSession → ${session === app.getSession("user-43") ? "registered" : "MISSING"}`),
+  );
   const listing = app.listSessions({ metadata: { tier: "pro" } });
   console.log(
     line(

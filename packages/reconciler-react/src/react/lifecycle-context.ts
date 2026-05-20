@@ -20,10 +20,7 @@ export interface LifecycleProviderProps {
   readonly children?: ReactNode;
 }
 
-export function LifecycleProvider({
-  value,
-  children,
-}: LifecycleProviderProps): React.ReactElement {
+export function LifecycleProvider({ value, children }: LifecycleProviderProps): React.ReactElement {
   return React.createElement(LifecycleContext.Provider, { value }, children);
 }
 

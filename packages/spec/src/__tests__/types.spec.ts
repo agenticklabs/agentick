@@ -218,10 +218,7 @@ describe("@agentick/spec — structural smoke tests", () => {
 
   describe("DEFAULT_JOURNALING_POLICY", () => {
     it("alwaysJournal includes requested + terminal", () => {
-      expect(DEFAULT_JOURNALING_POLICY.alwaysJournal).toEqual([
-        "requested",
-        "terminal",
-      ]);
+      expect(DEFAULT_JOURNALING_POLICY.alwaysJournal).toEqual(["requested", "terminal"]);
     });
 
     it("busOnly includes before + delta", () => {

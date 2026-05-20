@@ -14,9 +14,7 @@ export function runInboxConformance(factory: () => MessageInbox): void {
     it("rejects duplicate registration at the same address", async () => {
       const inbox = factory();
       await Effect.runPromise(inbox.register("loop:exec-1", () => Effect.void));
-      const exit = await Effect.runPromiseExit(
-        inbox.register("loop:exec-1", () => Effect.void),
-      );
+      const exit = await Effect.runPromiseExit(inbox.register("loop:exec-1", () => Effect.void));
       expect(Exit.isFailure(exit)).toBe(true);
       if (Exit.isFailure(exit)) {
         const err = exit.cause._tag === "Fail" ? exit.cause.error : undefined;
@@ -26,13 +24,9 @@ export function runInboxConformance(factory: () => MessageInbox): void {
 
     it("unsubscribe frees the address for re-registration", async () => {
       const inbox = factory();
-      const unsub = await Effect.runPromise(
-        inbox.register("loop:exec-1", () => Effect.void),
-      );
+      const unsub = await Effect.runPromise(inbox.register("loop:exec-1", () => Effect.void));
       unsub();
-      const out = await Effect.runPromise(
-        inbox.register("loop:exec-1", () => Effect.void),
-      );
+      const out = await Effect.runPromise(inbox.register("loop:exec-1", () => Effect.void));
       expect(typeof out).toBe("function");
     });
   });
@@ -59,9 +53,7 @@ export function runInboxConformance(factory: () => MessageInbox): void {
 
     it("AddressNotFound for unknown address", async () => {
       const inbox = factory();
-      const exit = await Effect.runPromiseExit(
-        inbox.send("nobody:x", mkMsg("nobody:x", "ping")),
-      );
+      const exit = await Effect.runPromiseExit(inbox.send("nobody:x", mkMsg("nobody:x", "ping")));
       expect(Exit.isFailure(exit)).toBe(true);
       if (Exit.isFailure(exit) && exit.cause._tag === "Fail") {
         expect(exit.cause.error).toMatchObject({ _tag: "AddressNotFound" });

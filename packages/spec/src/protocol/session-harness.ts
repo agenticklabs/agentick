@@ -48,13 +48,7 @@ import type { LoopToolResult } from "./loop-executor.js";
  * widened with `"event"` for app-level state events that flow through
  * the timeline without participating in model context.
  */
-export type SessionMessageRole =
-  | "user"
-  | "assistant"
-  | "system"
-  | "tool"
-  | "event"
-  | (string & {});
+export type SessionMessageRole = "user" | "assistant" | "system" | "tool" | "event" | (string & {});
 
 /**
  * Persistence-shaped message — what the timeline stores. Carries the
@@ -368,9 +362,7 @@ export interface SessionHarnessProtocol<P = unknown> {
    * @throws {SessionError} — `SessionClosedError` if the parent is
    *   shutting down; impl-specific failures otherwise.
    */
-  spawn(
-    input: SpawnInput<P>,
-  ): Promise<SessionExecutionHandle | SessionHarnessProtocol<P>>;
+  spawn(input: SpawnInput<P>): Promise<SessionExecutionHandle | SessionHarnessProtocol<P>>;
 
   /**
    * Host-side tool dispatch. Invokes a registered tool by name with
@@ -382,10 +374,7 @@ export interface SessionHarnessProtocol<P = unknown> {
    * (validation failure, permission denied, handler failure, etc.)
    * surfaced from the harness.
    */
-  dispatch(
-    name: string,
-    input: Record<string, unknown>,
-  ): Promise<readonly ContentBlock[]>;
+  dispatch(name: string, input: Record<string, unknown>): Promise<readonly ContentBlock[]>;
 
   /**
    * Queue a message for the next execution. If no execution is
@@ -576,9 +565,7 @@ export interface SpawnContext<P = unknown> {
    * The returned session is fully wired (substrate, sub-harnesses,
    * mountReady) and ready for `send`.
    */
-  createChildSession(
-    input: SpawnContextChildInput<P>,
-  ): Promise<SessionHarnessProtocol<P>>;
+  createChildSession(input: SpawnContextChildInput<P>): Promise<SessionHarnessProtocol<P>>;
 }
 
 export interface SpawnContextChildInput<P = unknown> {

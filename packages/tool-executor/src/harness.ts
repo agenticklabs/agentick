@@ -22,11 +22,7 @@
 
 import { Cause, Effect, Exit, Fiber, Option } from "effect";
 import { runHarnessProtocol, ulid } from "@agentick/runtime";
-import {
-  BaseHarness,
-  type LifecycleHandler,
-  type Unsubscribe,
-} from "@agentick/runtime";
+import { BaseHarness, type LifecycleHandler, type Unsubscribe } from "@agentick/runtime";
 import type { RequestError } from "@agentick/runtime";
 import type {
   AbortInput,
@@ -66,10 +62,7 @@ interface InFlightEntry {
   readonly toolName: string;
 }
 
-export class ToolExecutorHarness
-  extends BaseHarness<"tool">
-  implements ToolExecutorProtocol
-{
+export class ToolExecutorHarness extends BaseHarness<"tool"> implements ToolExecutorProtocol {
   private readonly registry = new InMemoryToolRegistry();
   private readonly handlerResolver: HandlerResolver;
   private readonly inFlight = new Map<string, InFlightEntry>();
@@ -156,9 +149,7 @@ export class ToolExecutorHarness
       },
       input,
     };
-    return runHarnessProtocol(
-      this.runOperation(op, (i) => this.dispatchBody(i)),
-    );
+    return runHarnessProtocol(this.runOperation(op, (i) => this.dispatchBody(i)));
   }
 
   async abort(input: AbortInput): Promise<void> {
@@ -215,13 +206,8 @@ export class ToolExecutorHarness
    * Re-exposes `BaseHarness.handlers.register("before", ...)` with a
    * tool-typed signature.
    */
-  onBeforeDispatch(
-    handler: LifecycleHandler<DispatchInput, DispatchResult, unknown>,
-  ): Unsubscribe {
-    return this.handlers.register(
-      "before",
-      handler as LifecycleHandler<unknown, unknown, unknown>,
-    );
+  onBeforeDispatch(handler: LifecycleHandler<DispatchInput, DispatchResult, unknown>): Unsubscribe {
+    return this.handlers.register("before", handler as LifecycleHandler<unknown, unknown, unknown>);
   }
 
   // ──────────────────────── inbox dispatch ────────────────────────
@@ -304,9 +290,7 @@ export class ToolExecutorHarness
    * / `Effect.sync` and receive scope through the explicit `ctx` arg
    * the harness builds from the operation input.
    */
-  private dispatchBody(
-    input: DispatchInput,
-  ): Effect.Effect<DispatchResult, unknown, never> {
+  private dispatchBody(input: DispatchInput): Effect.Effect<DispatchResult, unknown, never> {
     return Effect.gen(this, function* () {
       const reg = this.registry.get(input.name);
       if (!reg) {
@@ -381,10 +365,7 @@ export class ToolExecutorHarness
         // signal explicitly so external aborts (inbox `abort`,
         // session close) reject the pending Deferred with
         // `RequestAbortedError`.
-        const confirmationEffect = this.request<
-          ToolConfirmationRequest,
-          ToolConfirmationResponse
-        >(
+        const confirmationEffect = this.request<ToolConfirmationRequest, ToolConfirmationResponse>(
           "tool_confirmation",
           {
             toolUseId: input.toolCallId,
@@ -392,9 +373,7 @@ export class ToolExecutorHarness
             arguments: validated as Record<string, unknown>,
           },
           {
-            ...(confirmationTimeoutMs !== undefined
-              ? { timeoutMs: confirmationTimeoutMs }
-              : {}),
+            ...(confirmationTimeoutMs !== undefined ? { timeoutMs: confirmationTimeoutMs } : {}),
             signal: controller.signal,
           },
         );
@@ -418,9 +397,7 @@ export class ToolExecutorHarness
             const denial: ToolConfirmationResponse = {
               toolUseId: input.toolCallId,
               approved: false,
-              reason: stringifyAbortReason(
-                "reason" in err ? err.reason : undefined,
-              ),
+              reason: stringifyAbortReason("reason" in err ? err.reason : undefined),
             };
             return Effect.succeed(denial);
           }),
@@ -454,8 +431,7 @@ export class ToolExecutorHarness
         // user may have edited the call before approving.
         if (confirmation.modifiedArguments !== undefined) {
           const revalidated = yield* Effect.tryPromise({
-            try: async () =>
-              entry.validator.validate(confirmation.modifiedArguments),
+            try: async () => entry.validator.validate(confirmation.modifiedArguments),
             catch: (cause): { readonly _tag: "ToolValidationError"; readonly cause: unknown } => ({
               _tag: "ToolValidationError",
               cause,
@@ -534,24 +510,28 @@ export class ToolExecutorHarness
       const started = Date.now();
 
       // Compose body that branches on handler shape.
-      const invokeHandler = Effect.suspend((): Effect.Effect<readonly ContentBlock[], unknown, never> => {
-        if (controller.signal.aborted) {
-          return Effect.fail(
-            controller.signal.reason ?? {
-              _tag: "ToolAbortedError",
-              toolCallId: input.toolCallId,
-            },
-          );
-        }
-        const handlerResult = entry.handler(validated, { ctx, use: useDeps });
+      const invokeHandler = Effect.suspend(
+        (): Effect.Effect<readonly ContentBlock[], unknown, never> => {
+          if (controller.signal.aborted) {
+            return Effect.fail(
+              controller.signal.reason ?? {
+                _tag: "ToolAbortedError",
+                toolCallId: input.toolCallId,
+              },
+            );
+          }
+          const handlerResult = entry.handler(validated, { ctx, use: useDeps });
 
-        if (isEffect(handlerResult)) {
-          // Effect-typed handler — yields IN the parent fiber so it
-          // inherits the `RuntimeContextRef` FiberRef set by
-          // `runOperation`. Abort signals translate to fiber interrupts
-          // via `Effect.race` with an AbortSignal-driven failure.
-          const abortEff: Effect.Effect<never, unknown, never> = Effect.async<never, unknown, never>(
-            (resume) => {
+          if (isEffect(handlerResult)) {
+            // Effect-typed handler — yields IN the parent fiber so it
+            // inherits the `RuntimeContextRef` FiberRef set by
+            // `runOperation`. Abort signals translate to fiber interrupts
+            // via `Effect.race` with an AbortSignal-driven failure.
+            const abortEff: Effect.Effect<never, unknown, never> = Effect.async<
+              never,
+              unknown,
+              never
+            >((resume) => {
               if (controller.signal.aborted) {
                 resume(
                   Effect.fail(
@@ -574,27 +554,25 @@ export class ToolExecutorHarness
                 );
               };
               controller.signal.addEventListener("abort", onAbort, { once: true });
-              return Effect.sync(() =>
-                controller.signal.removeEventListener("abort", onAbort),
-              );
-            },
-          );
-          return Effect.race(handlerResult, abortEff);
-        }
+              return Effect.sync(() => controller.signal.removeEventListener("abort", onAbort));
+            });
+            return Effect.race(handlerResult, abortEff);
+          }
 
-        if (isPromiseLike(handlerResult)) {
-          return Effect.tryPromise({
-            try: () =>
-              Promise.race([
-                handlerResult as PromiseLike<readonly ContentBlock[]>,
-                abortPromise(controller.signal),
-              ]) as Promise<readonly ContentBlock[]>,
-            catch: (cause: unknown) => cause,
-          });
-        }
+          if (isPromiseLike(handlerResult)) {
+            return Effect.tryPromise({
+              try: () =>
+                Promise.race([
+                  handlerResult as PromiseLike<readonly ContentBlock[]>,
+                  abortPromise(controller.signal),
+                ]) as Promise<readonly ContentBlock[]>,
+              catch: (cause: unknown) => cause,
+            });
+          }
 
-        return Effect.succeed(handlerResult);
-      });
+          return Effect.succeed(handlerResult);
+        },
+      );
 
       const exit = yield* Effect.exit(invokeHandler);
 
@@ -620,7 +598,7 @@ export class ToolExecutorHarness
       const failure = Cause.failureOption(exit.cause);
       const rawErr = Option.isSome(failure) ? failure.value : undefined;
       const abortReason = controller.signal.aborted
-        ? controller.signal.reason ?? rawErr
+        ? (controller.signal.reason ?? rawErr)
         : undefined;
       if (abortReason !== undefined) {
         return yield* Effect.fail(
@@ -665,11 +643,9 @@ function abortPromise(signal: AbortSignal): Promise<never> {
     return Promise.reject(signal.reason ?? new Error("aborted"));
   }
   return new Promise<never>((_, reject) => {
-    signal.addEventListener(
-      "abort",
-      () => reject(signal.reason ?? new Error("aborted")),
-      { once: true },
-    );
+    signal.addEventListener("abort", () => reject(signal.reason ?? new Error("aborted")), {
+      once: true,
+    });
   });
 }
 
@@ -679,9 +655,7 @@ function isTaggedAbort(value: unknown): value is { readonly _tag: string } {
   return tag === "ToolAbortedError" || tag === "ToolTimeoutError";
 }
 
-function isEffect(
-  value: unknown,
-): value is Effect.Effect<readonly ContentBlock[], unknown, never> {
+function isEffect(value: unknown): value is Effect.Effect<readonly ContentBlock[], unknown, never> {
   return typeof value === "object" && value !== null && Effect.EffectTypeId in value;
 }
 
@@ -693,9 +667,7 @@ function isPromiseLike(value: unknown): value is PromiseLike<unknown> {
   );
 }
 
-function isTaggedToolError(
-  value: unknown,
-): value is { readonly _tag: string } {
+function isTaggedToolError(value: unknown): value is { readonly _tag: string } {
   if (value === null || typeof value !== "object") return false;
   const tag = (value as { _tag?: unknown })._tag;
   return (

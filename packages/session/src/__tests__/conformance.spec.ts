@@ -9,10 +9,7 @@
 import { describe } from "vitest";
 
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
-import {
-  defaultSessionConformanceDeps,
-  runSessionConformance,
-} from "@agentick/spec-conformance";
+import { defaultSessionConformanceDeps, runSessionConformance } from "@agentick/spec-conformance";
 
 import { SessionHarness } from "../harness.js";
 
@@ -38,20 +35,15 @@ describe("SessionHarness — SessionHarnessProtocol conformance", () =>
       },
     );
 
-    const session = new SessionHarness(
-      realDeps.journal,
-      realDeps.bus,
-      realDeps.inbox,
-      {
-        sessionId: harnessId,
-        agent: realDeps.agent,
-        reconciler: realDeps.reconciler,
-        loop: realDeps.loop,
-        executor: realDeps.executor,
-        toolExecutor: realDeps.toolExecutor,
-        target: realDeps.target,
-      },
-    );
+    const session = new SessionHarness(realDeps.journal, realDeps.bus, realDeps.inbox, {
+      sessionId: harnessId,
+      agent: realDeps.agent,
+      reconciler: realDeps.reconciler,
+      loop: realDeps.loop,
+      executor: realDeps.executor,
+      toolExecutor: realDeps.toolExecutor,
+      target: realDeps.target,
+    });
     await session.ready;
     await session.mountReady;
     return session;

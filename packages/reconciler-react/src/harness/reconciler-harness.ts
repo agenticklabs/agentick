@@ -60,11 +60,7 @@ import { BridgeContext } from "../react/bridge-context.js";
 import { LifecycleContext } from "../react/lifecycle-context.js";
 import { InMemoryDataBridge } from "../bridges/in-memory-data-bridge.js";
 import { LifecycleStore } from "./lifecycle-store.js";
-import {
-  builtInFormatters,
-  markdownFormatter,
-  type DefinedFormatter,
-} from "@agentick/formatters";
+import { builtInFormatters, markdownFormatter, type DefinedFormatter } from "@agentick/formatters";
 
 interface MountState {
   readonly mountId: string;
@@ -125,10 +121,7 @@ export interface ReconcilerHarnessOptions {
  */
 const DEFAULT_MAX_ITERATIONS = 10;
 
-export class ReconcilerHarness
-  extends BaseHarness<"reconciler">
-  implements ReconcilerProtocol
-{
+export class ReconcilerHarness extends BaseHarness<"reconciler"> implements ReconcilerProtocol {
   private readonly mounts = new Map<string, MountState>();
   private readonly registry: ContributorRegistry;
   private readonly formatters: ReadonlyMap<string, DefinedFormatter>;
@@ -150,8 +143,7 @@ export class ReconcilerHarness
     super("reconciler", scopeId, journal, bus, inbox);
     this.registry = options.registry ?? createBuiltInRegistry();
     this.formatters = options.formatters ?? builtInFormatters();
-    this.defaultFormatterId =
-      options.defaultFormatterId ?? markdownFormatter.__identity.id;
+    this.defaultFormatterId = options.defaultFormatterId ?? markdownFormatter.__identity.id;
   }
 
   // ──────────────────────── Contributor registration ────────────────────────
@@ -279,9 +271,7 @@ export class ReconcilerHarness
     // ADR 22 §D1. Components persisting state across hibernation use
     // `useSessionState(key, initial)` to land values in the StateBridge.
     const dataCache =
-      state.bridges.data instanceof InMemoryDataBridge
-        ? state.bridges.data.exportSnapshot()
-        : [];
+      state.bridges.data instanceof InMemoryDataBridge ? state.bridges.data.exportSnapshot() : [];
     const knobs = exportKnobs(state.bridges);
     const stateValues = state.bridges.state.exportSnapshot();
     return {
@@ -497,10 +487,7 @@ export class ReconcilerHarness
         const timeout = new Promise<"timeout">((resolve) => {
           timer = setTimeout(() => resolve("timeout"), input.awaitTimeoutMs);
         });
-        const outcome = await Promise.race([
-          settled.then(() => "settled" as const),
-          timeout,
-        ]);
+        const outcome = await Promise.race([settled.then(() => "settled" as const), timeout]);
         if (timer !== undefined) clearTimeout(timer);
         if (outcome === "timeout") {
           diagnostics.push({
@@ -575,14 +562,8 @@ export class ReconcilerHarness
       tree.content && tree.content.length > 0
         ? (() => {
             const ref = tree.renderedWith ?? fallback;
-            const fmt = resolveFormatterFromMap(
-              this.formatters,
-              ref,
-              this.defaultFormatterId,
-            );
-            return fmt(
-              tree.content as readonly import("@agentick/spec").SemanticContentBlock[],
-            );
+            const fmt = resolveFormatterFromMap(this.formatters, ref, this.defaultFormatterId);
+            return fmt(tree.content as readonly import("@agentick/spec").SemanticContentBlock[]);
           })()
         : tree.content;
     return {
@@ -631,15 +612,11 @@ export class ReconcilerHarness
     //    scope's default when an entry doesn't pin one.
     const fallback = state.rootScope.formatters.default;
     const effective = input.formatter ?? fallback;
-    const text = serializeTreeToString(
-      tree.tree,
-      effective,
-      {
-        respectEntryFormatter: input.formatter === undefined,
-        defaultFormatterId: this.defaultFormatterId,
-        formatters: this.formatters,
-      },
-    );
+    const text = serializeTreeToString(tree.tree, effective, {
+      respectEntryFormatter: input.formatter === undefined,
+      defaultFormatterId: this.defaultFormatterId,
+      formatters: this.formatters,
+    });
     const mimeType = mimeForFormatter(effective);
 
     return {
@@ -668,11 +645,7 @@ export class ReconcilerHarness
     const wrapped = React.createElement(
       BridgeContext.Provider,
       { value: state.bridges },
-      React.createElement(
-        LifecycleContext.Provider,
-        { value: state.lifecycle },
-        state.element,
-      ),
+      React.createElement(LifecycleContext.Provider, { value: state.lifecycle }, state.element),
     );
     try {
       state.reconciler.render(wrapped, state.root);
@@ -742,7 +715,6 @@ export class ReconcilerHarness
   }
 }
 
-
 /**
  * Read knob values from the bridge. Prefers `exportSnapshot()` when the
  * bridge exposes it (preserves any internal ordering/metadata); falls
@@ -761,10 +733,7 @@ function exportKnobs(bridges: HookBridges): Readonly<Record<string, unknown>> {
  * bridge exposes it (more efficient + atomic); falls back to a
  * per-entry `set()` walk.
  */
-function importKnobs(
-  bridges: HookBridges,
-  values: Readonly<Record<string, unknown>>,
-): void {
+function importKnobs(bridges: HookBridges, values: Readonly<Record<string, unknown>>): void {
   const k = bridges.knobs as { importSnapshot?: (v: Readonly<Record<string, unknown>>) => void };
   if (typeof k.importSnapshot === "function") {
     k.importSnapshot(values);
@@ -853,12 +822,10 @@ function serializeTreeToString(
   const parts: string[] = [];
 
   for (const entry of tree.context.entries) {
-    const formatter = resolveFormatter(
-      entry.renderedWith,
-      requestedFormatter,
-      options,
+    const formatter = resolveFormatter(entry.renderedWith, requestedFormatter, options);
+    const body = formatter(
+      entry.content as readonly import("@agentick/spec").SemanticContentBlock[],
     );
-    const body = formatter(entry.content as readonly import("@agentick/spec").SemanticContentBlock[]);
     const bodyText = blocksToText(body);
     const framed =
       entry.kind === "section"
@@ -868,12 +835,10 @@ function serializeTreeToString(
   }
 
   if (tree.content && tree.content.length > 0) {
-    const formatter = resolveFormatter(
-      tree.renderedWith,
-      requestedFormatter,
-      options,
+    const formatter = resolveFormatter(tree.renderedWith, requestedFormatter, options);
+    const body = formatter(
+      tree.content as readonly import("@agentick/spec").SemanticContentBlock[],
     );
-    const body = formatter(tree.content as readonly import("@agentick/spec").SemanticContentBlock[]);
     parts.push(blocksToText(body));
   }
 
@@ -901,10 +866,9 @@ function resolveFormatterFromMap(
   }
   return (
     formatters.get(defaultId) ??
-    (Object.assign(
-      (b: readonly import("@agentick/spec").SemanticContentBlock[]) => b,
-      { __identity: { id: "formatter.markdown", format: "markdown" as const } },
-    ) as DefinedFormatter)
+    (Object.assign((b: readonly import("@agentick/spec").SemanticContentBlock[]) => b, {
+      __identity: { id: "formatter.markdown", format: "markdown" as const },
+    }) as DefinedFormatter)
   );
 }
 
@@ -913,9 +877,7 @@ function resolveFormatter(
   requested: import("@agentick/spec").FormatterRef,
   options: SerializeOptions,
 ): DefinedFormatter {
-  const ref = options.respectEntryFormatter
-    ? (entryRef ?? requested)
-    : requested;
+  const ref = options.respectEntryFormatter ? (entryRef ?? requested) : requested;
   // First try the exact id. Then fall back to any formatter whose
   // identity.format matches the requested format (so adopters can pass
   // `{ format: "xml" }` without knowing the canonical id).
@@ -929,16 +891,13 @@ function resolveFormatter(
   return (
     options.formatters.get(options.defaultFormatterId) ??
     // Last-resort: a no-op formatter pretending to be markdown.
-    (Object.assign(
-      (b: readonly import("@agentick/spec").SemanticContentBlock[]) => b,
-      { __identity: { id: "formatter.markdown", format: "markdown" as const } },
-    ) as DefinedFormatter)
+    (Object.assign((b: readonly import("@agentick/spec").SemanticContentBlock[]) => b, {
+      __identity: { id: "formatter.markdown", format: "markdown" as const },
+    }) as DefinedFormatter)
   );
 }
 
-function blocksToText(
-  blocks: readonly import("@agentick/spec").ContentBlock[],
-): string {
+function blocksToText(blocks: readonly import("@agentick/spec").ContentBlock[]): string {
   const out: string[] = [];
   for (const block of blocks) {
     out.push(blockToText(block));

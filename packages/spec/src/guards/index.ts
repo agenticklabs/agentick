@@ -137,9 +137,7 @@ export function isCustomBlock(b: ContentBlock): b is CustomContentBlock {
 
 // Block-category guards
 export function isMediaBlock(b: ContentBlock): b is MediaBlock {
-  return (
-    b.type === "image" || b.type === "document" || b.type === "audio" || b.type === "video"
-  );
+  return b.type === "image" || b.type === "document" || b.type === "audio" || b.type === "video";
 }
 export function isToolBlock(b: ContentBlock): b is ToolBlock {
   return b.type === "tool_use" || b.type === "tool_result";
@@ -154,9 +152,7 @@ export function isDataBlock(b: ContentBlock): b is DataBlock {
   );
 }
 export function isEventBlock(b: ContentBlock): b is EventBlock {
-  return (
-    b.type === "user_action" || b.type === "system_event" || b.type === "state_change"
-  );
+  return b.type === "user_action" || b.type === "system_event" || b.type === "state_change";
 }
 
 // ============================================================================

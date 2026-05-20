@@ -98,10 +98,7 @@ export class LifecycleStore {
    * execution-start) is currently active AND this handler has not yet
    * received it, fire it now (catch-up).
    */
-  register<K extends LifecycleHandlerKind>(
-    kind: K,
-    handler: Handler<EventForKind<K>>,
-  ): () => void {
+  register<K extends LifecycleHandlerKind>(kind: K, handler: Handler<EventForKind<K>>): () => void {
     const wrapped = handler as AnyHandler;
     this.handlers[kind].add(wrapped);
 

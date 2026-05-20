@@ -8,12 +8,7 @@
  */
 
 import { Chunk, Effect, Fiber, Stream } from "effect";
-import type {
-  ProtocolEvent,
-  SendResult,
-  SessionExecutionHandle,
-  EventBus,
-} from "@agentick/spec";
+import type { ProtocolEvent, SendResult, SessionExecutionHandle, EventBus } from "@agentick/spec";
 
 export interface SessionExecutionHandleArgs {
   readonly executionId: string;

@@ -4,12 +4,12 @@
   "description": "Vercel AI SDK bridge for Agentick v2 — wraps any AI SDK LanguageModel as a LanguageModelExecutor. The progressive-adoption path: bring your existing AI SDK setup, get JSX agents + sessions + observability for free.",
   "keywords": [
     "agent",
-    "ai",
     "agentick",
-    "executor",
+    "ai",
     "ai-sdk",
-    "vercel",
-    "harness"
+    "executor",
+    "harness",
+    "vercel"
   ],
   "license": "MIT",
   "author": "Ryan Lindgren",
@@ -44,10 +44,10 @@
     "typecheck": "tsc -p tsconfig.build.json --noEmit"
   },
   "dependencies": {
-    "@agentick/spec": "workspace:*",
     "@agentick/runtime": "workspace:*",
-    "effect": "^3.21.2",
-    "ai": "^5.0.0"
+    "@agentick/spec": "workspace:*",
+    "ai": "^5.0.0",
+    "effect": "^3.21.2"
   },
   "devDependencies": {
     "@agentick/spec-conformance": "workspace:*",

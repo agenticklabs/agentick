@@ -4,8 +4,8 @@
   "description": "Reference executor harness for Agentick v2. Implements ExecutorProtocol from @agentick/spec — project / execute / normalize / run / abort. Ships MockLanguageModelExecutor for tests + reference; provider adapters (OpenAI, Anthropic, Google, AI SDK) live in separate packages.",
   "keywords": [
     "agent",
-    "ai",
     "agentick",
+    "ai",
     "executor",
     "harness"
   ],
@@ -42,8 +42,8 @@
     "typecheck": "tsc -p tsconfig.build.json --noEmit"
   },
   "dependencies": {
-    "@agentick/spec": "workspace:*",
     "@agentick/runtime": "workspace:*",
+    "@agentick/spec": "workspace:*",
     "effect": "^3.21.2"
   },
   "devDependencies": {

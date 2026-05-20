@@ -25,8 +25,11 @@ export type EventSurface =
   | "formatter"
   | "executor"
   | "tool"
+  | "sandbox"
+  | "mcp"
   | "cluster"
-  | "gateway";
+  | "gateway"
+  | (string & {});
 
 /**
  * Operation lifecycle phase.
@@ -57,6 +60,10 @@ export interface EventScope {
   readonly nodeId?: string;
   /** Populated by the gateway wrapper when present. */
   readonly gatewayId?: string;
+  /** Populated by sandbox harness operations. */
+  readonly sandboxId?: string;
+  /** Populated by MCP harness operations. */
+  readonly mcpConnectionId?: string;
 }
 
 /**

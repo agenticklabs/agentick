@@ -78,7 +78,5 @@ export interface ChannelPublisher {
    *   4. Persists to channel storage if applicable (session harness
    *      tracks retention; local publisher does not).
    */
-  publish<T = unknown>(
-    seed: ChannelSeed<T>,
-  ): Effect.Effect<void, ChannelPublishError, never>;
+  publish<T = unknown>(seed: ChannelSeed<T>): Effect.Effect<void, ChannelPublishError, never>;
 }

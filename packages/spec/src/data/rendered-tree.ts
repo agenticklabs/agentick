@@ -17,11 +17,7 @@
 import type { ContentBlock } from "./content-blocks.js";
 import type { RuntimeDeclarations } from "./declarations.js";
 import type { ContextSpec } from "./entries.js";
-import type {
-  FormatDiagnostics,
-  FormatterRef,
-  FormatTrace,
-} from "./formatter.js";
+import type { FormatDiagnostics, FormatterRef, FormatTrace } from "./formatter.js";
 
 // ============================================================================
 // SpecConfig + ProviderOptions
@@ -34,7 +30,11 @@ import type {
 export type ResponseFormat =
   | { readonly type: "text" }
   | { readonly type: "json" }
-  | { readonly type: "json_schema"; readonly schema: Record<string, unknown>; readonly name?: string };
+  | {
+      readonly type: "json_schema";
+      readonly schema: Record<string, unknown>;
+      readonly name?: string;
+    };
 
 /**
  * Identifies a model — either a concrete id understood by the executor or

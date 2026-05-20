@@ -56,10 +56,10 @@ live tree, and `RenderedTree` is the snapshot artifact.
 Two distinct packages share the React substrate but serve different
 roles — easy to confuse, important to keep separate:
 
-| Package | Role | Where it runs |
-| --- | --- | --- |
-| `@agentick/reconciler-react` | **Reconciler harness implementation.** Takes JSX agent definitions, produces `RenderedTree`. Server-side; runs in the runtime. | server / runtime |
-| `@agentick/client-react` | **Client SDK.** Pure React hooks for connecting a browser app to a session via transport. Inherits behavior unchanged from v1's `@agentick/react`. | browser |
+| Package                      | Role                                                                                                                                               | Where it runs    |
+| ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------- |
+| `@agentick/reconciler-react` | **Reconciler harness implementation.** Takes JSX agent definitions, produces `RenderedTree`. Server-side; runs in the runtime.                     | server / runtime |
+| `@agentick/client-react`     | **Client SDK.** Pure React hooks for connecting a browser app to a session via transport. Inherits behavior unchanged from v1's `@agentick/react`. | browser          |
 
 This doc is exclusively about `@agentick/reconciler-react`.
 
@@ -91,25 +91,19 @@ It does NOT manage:
 interface ReactHarnessProtocol {
   mount(input: MountInput): Effect<MountResult, MountError, ReactEnv>;
 
-  rerender(input: RerenderInput):
-    Effect<RerenderResult, RerenderError, ReactEnv>;
+  rerender(input: RerenderInput): Effect<RerenderResult, RerenderError, ReactEnv>;
 
-  renderTree(input: RenderTreeInput):
-    Effect<RenderTreeResult, ReconcileError, ReactEnv>;
+  renderTree(input: RenderTreeInput): Effect<RenderTreeResult, ReconcileError, ReactEnv>;
 
-  renderToString(input: RenderToStringInput):
-    Effect<RenderToStringResult, FormatError, ReactEnv>;
+  renderToString(input: RenderToStringInput): Effect<RenderToStringResult, FormatError, ReactEnv>;
 
-  renderResource(input: RenderResourceInput):
-    Effect<RenderResourceResult, FormatError, ReactEnv>;
+  renderResource(input: RenderResourceInput): Effect<RenderResourceResult, FormatError, ReactEnv>;
 
   unmount(input: UnmountInput): Effect<void, UnmountError, ReactEnv>;
 
-  snapshot(input: SnapshotInput):
-    Effect<ReconcilerSnapshot, SnapshotError, ReactEnv>;
+  snapshot(input: SnapshotInput): Effect<ReconcilerSnapshot, SnapshotError, ReactEnv>;
 
-  restore(input: RestoreInput):
-    Effect<MountResult, RestoreError, ReactEnv>;
+  restore(input: RestoreInput): Effect<MountResult, RestoreError, ReactEnv>;
 
   /**
    * Lifecycle pass-through. Direct method-based coupling for events
@@ -124,8 +118,7 @@ interface ReactHarnessProtocol {
    * Called from session's loop.onTickEnd handler — see 08-session-harness.md.
    * `[V2-LANDED]` 2026-05-15 — see packages/spec/src/protocol/reconciler.ts.
    */
-  notifyLifecycle(input: NotifyLifecycleInput):
-    Effect<void, ReactRuntimeStateError, ReactEnv>;
+  notifyLifecycle(input: NotifyLifecycleInput): Effect<void, ReactRuntimeStateError, ReactEnv>;
 }
 ```
 
@@ -135,13 +128,13 @@ input/output types. Synthesizing minimal types:
 ```ts
 interface MountInput {
   rootElement: JSX.Element;
-  hookBridges: HookBridges;            // runtime-provided bridge fns
+  hookBridges: HookBridges; // runtime-provided bridge fns
   rendererRegistry?: FormatterRegistry; // for non-default renderer ids
   options?: { compileMaxIterations?: number; debug?: boolean };
 }
 
 interface MountResult {
-  mountId: string;                     // identifies the mounted tree
+  mountId: string; // identifies the mounted tree
 }
 
 interface RerenderInput {
@@ -169,7 +162,7 @@ interface RenderTreeResult {
 
 interface RenderToStringInput {
   mountId: string;
-  renderer: FormatterRef;               // explicit; no default fallback
+  renderer: FormatterRef; // explicit; no default fallback
   options?: Record<string, unknown>;
 }
 
@@ -177,7 +170,7 @@ interface RenderToStringResult extends FormattedContent {}
 
 interface RenderResourceInput {
   mountId: string;
-  resourceId: string;                  // matches a ResourceDeclaration
+  resourceId: string; // matches a ResourceDeclaration
   renderer?: FormatterRef;
 }
 
@@ -215,9 +208,9 @@ interface ReconcilerSnapshot {
 }
 
 interface ReactiveCellState {
-  hookIndex: number;                          // positional; React invariant
+  hookIndex: number; // positional; React invariant
   hookKind: "state" | "reducer" | "signal";
-  value: unknown;                             // structured-clone-shaped
+  value: unknown; // structured-clone-shaped
 }
 
 interface ResolvedValue {
@@ -299,14 +292,14 @@ interface TickResult extends TickResultPayload {
 
 **What's in the snapshot:**
 
-| Owned by compiler snapshot | Owned by session/runtime (Tier 2) |
-| --- | --- |
-| `useState`/`useReducer` cell values | timeline entries |
-| `useSignal` cell values | knob values |
-| `useData` Layer-2 cache (in-flight + resolved) | session.resolveCache (Layer 1) |
-| Pending async component paths | channel state |
-| Active renderer scope stack | subscription intents |
-| Compile diagnostics | persistence metadata |
+| Owned by compiler snapshot                     | Owned by session/runtime (Tier 2) |
+| ---------------------------------------------- | --------------------------------- |
+| `useState`/`useReducer` cell values            | timeline entries                  |
+| `useSignal` cell values                        | knob values                       |
+| `useData` Layer-2 cache (in-flight + resolved) | session.resolveCache (Layer 1)    |
+| Pending async component paths                  | channel state                     |
+| Active renderer scope stack                    | subscription intents              |
+| Compile diagnostics                            | persistence metadata              |
 
 **Serialization rule:** cell values are structured-clone shaped — primitives,
 arrays, plain objects, `Date`, `Map`, `Set`. Functions, class instances,
@@ -361,12 +354,12 @@ executions). Runs reconciliation but does NOT compile.
 
 Re-render the tree because some reactive state changed. Triggered by:
 
-| Trigger | Source |
-| --- | --- |
-| `state-change` | `useState`/`useReducer` setter |
-| `signal-update` | `useSignal` write |
-| `external-event` | runtime injecting an event into a hook bridge |
-| `explicit` | runtime forces a re-render (e.g., before a snapshot) |
+| Trigger          | Source                                               |
+| ---------------- | ---------------------------------------------------- |
+| `state-change`   | `useState`/`useReducer` setter                       |
+| `signal-update`  | `useSignal` write                                    |
+| `external-event` | runtime injecting an event into a hook bridge        |
+| `explicit`       | runtime forces a re-render (e.g., before a snapshot) |
 
 ### `renderTree`
 
@@ -473,10 +466,10 @@ short-circuits and returns its own `RenderedTree`).
 
 The React harness accepts inbound messages at address `react:{mountId}`:
 
-| Message type | Payload | Effect |
-| --- | --- | --- |
-| `recompile` | `{}` | Force a recompile (next tick will see fresh output). |
-| `unmount` | `{ reason?: string }` | Tear down the mounted tree. |
+| Message type | Payload               | Effect                                               |
+| ------------ | --------------------- | ---------------------------------------------------- |
+| `recompile`  | `{}`                  | Force a recompile (next tick will see fresh output). |
+| `unmount`    | `{ reason?: string }` | Tear down the mounted tree.                          |
 
 External callers without a typed reference (e.g., gateway debug
 endpoints, devtools) use these to influence the React harness directly.
@@ -538,12 +531,12 @@ loop:
 `[GAP]` — `MAX` default unset and "structural equality" strategy unset.
 **`[PROPOSAL]`**:
 
-| Setting | Value |
-| --- | --- |
-| Default max iterations | 16 |
-| Equality strategy | hash-on-emit (`SHA-256` of canonicalized JSON), compare hashes |
-| forcedStable in dev | warn-only, include diagnostic |
-| forcedStable in prod | warn + emit metric |
+| Setting                | Value                                                          |
+| ---------------------- | -------------------------------------------------------------- |
+| Default max iterations | 16                                                             |
+| Equality strategy      | hash-on-emit (`SHA-256` of canonicalized JSON), compare hashes |
+| forcedStable in dev    | warn-only, include diagnostic                                  |
+| forcedStable in prod   | warn + emit metric                                             |
 
 Triggers that destabilize output:
 
@@ -562,21 +555,21 @@ Two hook categories:
 
 **Agentick hooks** — runtime-backed via bridge interfaces:
 
-| Hook | Reads from / writes to |
-| --- | --- |
-| `useSignal<T>(initial)` | Compiler-private reactive cell. |
-| `useKnob<T>(name, initial, schema)` | Runtime knob registry. |
-| `useTimeline()` | Session timeline (windowed read by default). |
-| `useChannel(name)` | Session channel registry; offset semantics. |
-| `useData<T>(loader, options)` | Async value with loader. `persist: false` (default) → Layer 2 (compiler snapshot cache). `persist: true` → Layer 1 (session.resolveCache, durable). |
-| `useResolved<T>(key)` | Read-only sugar over Layer 1. No loader. Returns `T \| undefined`. For consuming values placed in `session.resolveCache` by the runtime (session metadata, explicit `session.resolve`). |
-| `useSandbox()` | Reads sandbox provided by `<Sandbox>` ancestor (React Context). |
-| `useMCP(serverId)` | Reads MCP client. |
-| `useOnEntry(handler)` | Fires on each new timeline entry. |
-| `useOnEvent(handler)` | Fires on each event matching a query. |
-| `useOnTickEnd(handler)` | Fires after each tick. Handler receives `TickResult` with control methods (`stop`, `continue`). Drives continuation decision. |
-| `useLoopControl(handler)` | Sugar over `useOnTickEnd` — same shape, naming convention for handlers focused on continuation logic. |
-| `useOnMount(fn)` / `useOnUnmount(fn)` | Component lifecycle. |
+| Hook                                  | Reads from / writes to                                                                                                                                                                  |
+| ------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `useSignal<T>(initial)`               | Compiler-private reactive cell.                                                                                                                                                         |
+| `useKnob<T>(name, initial, schema)`   | Runtime knob registry.                                                                                                                                                                  |
+| `useTimeline()`                       | Session timeline (windowed read by default).                                                                                                                                            |
+| `useChannel(name)`                    | Session channel registry; offset semantics.                                                                                                                                             |
+| `useData<T>(loader, options)`         | Async value with loader. `persist: false` (default) → Layer 2 (compiler snapshot cache). `persist: true` → Layer 1 (session.resolveCache, durable).                                     |
+| `useResolved<T>(key)`                 | Read-only sugar over Layer 1. No loader. Returns `T \| undefined`. For consuming values placed in `session.resolveCache` by the runtime (session metadata, explicit `session.resolve`). |
+| `useSandbox()`                        | Reads sandbox provided by `<Sandbox>` ancestor (React Context).                                                                                                                         |
+| `useMCP(serverId)`                    | Reads MCP client.                                                                                                                                                                       |
+| `useOnEntry(handler)`                 | Fires on each new timeline entry.                                                                                                                                                       |
+| `useOnEvent(handler)`                 | Fires on each event matching a query.                                                                                                                                                   |
+| `useOnTickEnd(handler)`               | Fires after each tick. Handler receives `TickResult` with control methods (`stop`, `continue`). Drives continuation decision.                                                           |
+| `useLoopControl(handler)`             | Sugar over `useOnTickEnd` — same shape, naming convention for handlers focused on continuation logic.                                                                                   |
+| `useOnMount(fn)` / `useOnUnmount(fn)` | Component lifecycle.                                                                                                                                                                    |
 
 **Hook layering — locked 2026-05-08:**
 
@@ -677,16 +670,16 @@ Three kinds of components contribute to compiled output:
 
 ### Structural components → context entries / declarations
 
-| Component | Output |
-| --- | --- |
-| `<System>`, `<User>`, `<Assistant>`, `<ToolResult>`, `<Event>`, `<Message>` | `MessageEntry` |
-| `<Timeline>` | zero or more `MessageEntry` (windowed) |
-| `<Section>` | `SectionEntry` |
-| Tool `render()` output | `SectionEntry` |
-| `<Tool>`, `createTool()` JSX | `ToolDeclaration` |
-| `<Output>` | `OutputDeclaration` |
-| `<MCP>` (resource/tool/prompt) | runtime declarations |
-| `<Model>`, generation-hint props | `SpecConfig` / `providerOptions` |
+| Component                                                                   | Output                                 |
+| --------------------------------------------------------------------------- | -------------------------------------- |
+| `<System>`, `<User>`, `<Assistant>`, `<ToolResult>`, `<Event>`, `<Message>` | `MessageEntry`                         |
+| `<Timeline>`                                                                | zero or more `MessageEntry` (windowed) |
+| `<Section>`                                                                 | `SectionEntry`                         |
+| Tool `render()` output                                                      | `SectionEntry`                         |
+| `<Tool>`, `createTool()` JSX                                                | `ToolDeclaration`                      |
+| `<Output>`                                                                  | `OutputDeclaration`                    |
+| `<MCP>` (resource/tool/prompt)                                              | runtime declarations                   |
+| `<Model>`, generation-hint props                                            | `SpecConfig` / `providerOptions`       |
 
 Structural components create content scopes for their children.
 
@@ -921,14 +914,14 @@ the compiler/renderer; the React harness is useful on its own.
 
 ## Open questions resolved here
 
-| Question | Position |
-| --- | --- |
-| Compile-until-stable cap | 16 iterations default `[PROPOSAL]` |
-| Equality strategy | hash-on-emit `[PROPOSAL]` |
-| Snapshot opacity | small structured shape over runtime owns durable state `[PROPOSAL]` |
-| Async hibernate | cancel + re-run policy `[PROPOSAL]` |
-| Handler resolution | registry rebuilt per render `[PROPOSAL]` |
-| useResolved Layer 1 | reads persisted resolves on restore `[PROPOSAL]` |
+| Question                 | Position                                                            |
+| ------------------------ | ------------------------------------------------------------------- |
+| Compile-until-stable cap | 16 iterations default `[PROPOSAL]`                                  |
+| Equality strategy        | hash-on-emit `[PROPOSAL]`                                           |
+| Snapshot opacity         | small structured shape over runtime owns durable state `[PROPOSAL]` |
+| Async hibernate          | cancel + re-run policy `[PROPOSAL]`                                 |
+| Handler resolution       | registry rebuilt per render `[PROPOSAL]`                            |
+| useResolved Layer 1      | reads persisted resolves on restore `[PROPOSAL]`                    |
 
 ## Open questions deferred
 

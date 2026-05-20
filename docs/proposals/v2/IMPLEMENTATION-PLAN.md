@@ -333,6 +333,7 @@ Tasks:
 ```
 
 **Exit criteria:**
+
 - `pnpm --filter @agentick/spec build` green
 - `pnpm --filter @agentick/spec test` green
 - All wire-format tests ported and green
@@ -400,6 +401,7 @@ Tasks:
 ```
 
 **Exit criteria:**
+
 - All conformance tests green for memory implementations
 - BaseHarness pseudocode from `19-foundation.md` works end-to-end with
   mock concrete harness in tests
@@ -416,7 +418,7 @@ of agentick.
 
 **Why this is Phase 3, not tool executor:** the reconciler IS what
 agentick is. The substrate (journal/inbox/bus/BaseHarness) is plumbing
-*for* the reconciler. Proving the substrate against a peripheral
+_for_ the reconciler. Proving the substrate against a peripheral
 harness (tool executor) teaches us little about whether `BaseHarness`
 fits the foundational one. If the substrate doesn't fit the reconciler
 cleanly, we need to know that before building six other harnesses on
@@ -485,6 +487,7 @@ Tests:
 ```
 
 **Exit criteria:**
+
 - Reconciler harness ships in `@agentick/reconciler-react`
 - Formatter harness ships (built-in markdown/xml)
 - All v1 reconciler + compiler + renderer tests pass against v2
@@ -625,6 +628,7 @@ Tests:
 ```
 
 **Phase 4 Exit criteria:**
+
 - All harnesses implemented
 - All v1 tests pass against v2 (or explicitly retired with documented
   reason)
@@ -842,28 +846,28 @@ EOD checkpoint:
 
 ## Definition of done per phase
 
-| Phase | Done = |
-| --- | --- |
-| 0 | renames atomic, v1 tests green, new packages skeletoned |
-| 1 | spec compiles + exports all contract types; ported wire-format tests green |
-| 2 | conformance tests green for memory substrate |
-| 3 | tool executor end-to-end passes all v1 tool tests |
-| 4 | all harnesses pass conformance + ported v1 tests; Hello World agent runs |
-| 5 | persistence backends + (optionally) cluster + gateway pass conformance |
-| 6 | v1 retired, docs updated, v2.0 published |
+| Phase | Done =                                                                     |
+| ----- | -------------------------------------------------------------------------- |
+| 0     | renames atomic, v1 tests green, new packages skeletoned                    |
+| 1     | spec compiles + exports all contract types; ported wire-format tests green |
+| 2     | conformance tests green for memory substrate                               |
+| 3     | tool executor end-to-end passes all v1 tool tests                          |
+| 4     | all harnesses pass conformance + ported v1 tests; Hello World agent runs   |
+| 5     | persistence backends + (optionally) cluster + gateway pass conformance     |
+| 6     | v1 retired, docs updated, v2.0 published                                   |
 
 ## Risk register
 
-| Risk | Phase | Mitigation |
-| --- | --- | --- |
-| Substrate proves wrong shape | 2–3 | Phase 3 is the test; if it doesn't fit, halt and rethink before building all harnesses |
-| Conformance suite is too lax (catches less than expected) | 2–3 | Property-based tests + explicit invariant fixtures; tighten as we discover edge cases |
-| `@effect/cluster` integration fails | 5 | Spike early in Phase 5; can defer cluster to v2.1 if needed |
-| Schema evolution breaks production | 6+ | Spec versioning enforced; conformance fixtures cross-version |
-| `ReconcilerSnapshot` shape doesn't survive non-React substrate | future | Spec types are extensible; first non-React reconciler will inform refinement |
-| Browser bundle Effect leak | 4b/5 | Build inspection on every release; trim transitive deps |
-| Provider adapter regressions | 4c | v1 adapter tests are the regression suite; keep them green |
-| v1 → v2 migration breaks user code | 6 | No backwards compat per CLAUDE.md, but write a migration guide; major version bump |
+| Risk                                                           | Phase  | Mitigation                                                                             |
+| -------------------------------------------------------------- | ------ | -------------------------------------------------------------------------------------- |
+| Substrate proves wrong shape                                   | 2–3    | Phase 3 is the test; if it doesn't fit, halt and rethink before building all harnesses |
+| Conformance suite is too lax (catches less than expected)      | 2–3    | Property-based tests + explicit invariant fixtures; tighten as we discover edge cases  |
+| `@effect/cluster` integration fails                            | 5      | Spike early in Phase 5; can defer cluster to v2.1 if needed                            |
+| Schema evolution breaks production                             | 6+     | Spec versioning enforced; conformance fixtures cross-version                           |
+| `ReconcilerSnapshot` shape doesn't survive non-React substrate | future | Spec types are extensible; first non-React reconciler will inform refinement           |
+| Browser bundle Effect leak                                     | 4b/5   | Build inspection on every release; trim transitive deps                                |
+| Provider adapter regressions                                   | 4c     | v1 adapter tests are the regression suite; keep them green                             |
+| v1 → v2 migration breaks user code                             | 6      | No backwards compat per CLAUDE.md, but write a migration guide; major version bump     |
 
 ## Pull-back-and-replan criteria
 

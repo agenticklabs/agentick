@@ -41,14 +41,14 @@ method:
 
 …all in one ~600-line method. Extracting this into a harness:
 
-| Property | v1 | v2 |
-| --- | --- | --- |
-| Reusable in tests | hard (mock 5 things via Session) | trivial (provide 5 mocks) |
-| Reusable from non-Session contexts | impossible | yes (any caller can run a loop) |
-| Observable per-phase | partially (DevTools events) | fully (per-phase events + interceptors) |
-| Replaceable continuation policy | bake in or override Runner | interceptor on `continuation` |
-| Replaceable tool dispatch | `Runner.executeToolCall` | tool executor harness boundary |
-| State application | inside Session | injected `StateApplicator` |
+| Property                           | v1                               | v2                                      |
+| ---------------------------------- | -------------------------------- | --------------------------------------- |
+| Reusable in tests                  | hard (mock 5 things via Session) | trivial (provide 5 mocks)               |
+| Reusable from non-Session contexts | impossible                       | yes (any caller can run a loop)         |
+| Observable per-phase               | partially (DevTools events)      | fully (per-phase events + interceptors) |
+| Replaceable continuation policy    | bake in or override Runner       | interceptor on `continuation`           |
+| Replaceable tool dispatch          | `Runner.executeToolCall`         | tool executor harness boundary          |
+| State application                  | inside Session                   | injected `StateApplicator`              |
 
 `[V1-REPLACED]` of `Session.executeTick` plus `ExecutionRunner` (its
 `transformCompiled` and `executeToolCall` hooks become interceptors at
@@ -78,23 +78,21 @@ It does NOT manage:
 
 ```ts
 interface LoopExecutorProtocol {
-  runExecution(input: RunExecutionInput):
-    Effect<ExecutionTerminal, LoopExecutorError, LoopEnv>;
+  runExecution(input: RunExecutionInput): Effect<ExecutionTerminal, LoopExecutorError, LoopEnv>;
 
-  abort(executionId: string):
-    Effect<void, LoopExecutorError, LoopEnv>;
+  abort(executionId: string): Effect<void, LoopExecutorError, LoopEnv>;
 }
 ```
 
 ```ts
 interface RunExecutionInput {
-  executionId: string;                  // assigned by session
+  executionId: string; // assigned by session
   sessionId: string;
   parentExecutionId?: string;
 
   // Where compile commands are sent (direct method calls)
   reactHarness: ReactHarnessProtocol;
-  mountId: string;                      // already mounted by session
+  mountId: string; // already mounted by session
 
   // Provider runs (direct method calls)
   executor: ExecutorProtocol;
@@ -134,8 +132,8 @@ interface ExecutionRunResult {
   ticks: number;
   usage: UsageStats;
   stopReason: LanguageModelStopReason | "max_ticks" | "aborted" | "vetoed";
-  output: ContentBlock[];               // canonical content stream
-  outputs: Record<string, unknown>;     // OutputDeclaration extractions
+  output: ContentBlock[]; // canonical content stream
+  outputs: Record<string, unknown>; // OutputDeclaration extractions
 }
 ```
 
@@ -147,8 +145,10 @@ harness's apply commands. See `08-session-harness.md` for the methods;
 loop calls them directly. Locked in `17-open-questions.md` (A11).
 
 ```ts
-type StateApplicator = Pick<SessionHarnessProtocol,
-  "applyExecutorResult" | "applyToolResults" | "appendEntry">;
+type StateApplicator = Pick<
+  SessionHarnessProtocol,
+  "applyExecutorResult" | "applyToolResults" | "appendEntry"
+>;
 ```
 
 ### Continuation
@@ -185,10 +185,10 @@ hook.
 The loop executor accepts inbound messages at address
 `loop:{executionId}`:
 
-| Message type | Payload | Effect |
-| --- | --- | --- |
-| `halt` | `{ reason: string }` | Aborts the execution; emits `loop:execution:halted`. |
-| `pause` | `{}` | Pauses at next tick boundary. |
+| Message type | Payload              | Effect                                               |
+| ------------ | -------------------- | ---------------------------------------------------- |
+| `halt`       | `{ reason: string }` | Aborts the execution; emits `loop:execution:halted`. |
+| `pause`      | `{}`                 | Pauses at next tick boundary.                        |
 
 Inbox messages let external callers (gateway, supervisor, scheduled
 jobs) influence execution without holding a typed reference to the
@@ -264,14 +264,14 @@ continuation — wraps the continue/stop decision
 
 Use cases:
 
-| Interceptor | Use case |
-| --- | --- |
-| `execution` veto | Refuse to start (rate limit hit) |
-| `compile` replace | REPL runner replaces tools with command descriptions |
-| `executor` replace | Test fixture, golden response |
-| `tool-dispatch` veto | Permission check |
-| `ingest` defer | Batch persist before applying |
-| `continuation` replace | Force stop after N ticks regardless of model |
+| Interceptor            | Use case                                             |
+| ---------------------- | ---------------------------------------------------- |
+| `execution` veto       | Refuse to start (rate limit hit)                     |
+| `compile` replace      | REPL runner replaces tools with command descriptions |
+| `executor` replace     | Test fixture, golden response                        |
+| `tool-dispatch` veto   | Permission check                                     |
+| `ingest` defer         | Batch persist before applying                        |
+| `continuation` replace | Force stop after N ticks regardless of model         |
 
 Replace at `compile` is the v2 equivalent of v1's
 `ExecutionRunner.transformCompiled`. Replace at `tool-dispatch` is the
@@ -281,11 +281,7 @@ in the tool executor harness — see `07-tool-executor.md`).
 ## Outcomes and failures
 
 ```ts
-type LoopExecutorError =
-  | ExecutionError
-  | TickError
-  | LoopCanceledError
-  | MaxTicksExceeded;
+type LoopExecutorError = ExecutionError | TickError | LoopCanceledError | MaxTicksExceeded;
 
 interface ExecutionError {
   _tag: "ExecutionError";

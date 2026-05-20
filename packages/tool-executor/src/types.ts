@@ -15,12 +15,7 @@
  * @see docs/proposals/v2/blueprint/07-tool-executor.md
  */
 
-import type {
-  ChannelPublisher,
-  ToolHandler,
-  ToolRegistration,
-  Validator,
-} from "@agentick/spec";
+import type { ChannelPublisher, ToolHandler, ToolRegistration, Validator } from "@agentick/spec";
 
 // Re-export the moved types so existing import paths keep working.
 export type {

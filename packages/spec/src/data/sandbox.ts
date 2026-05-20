@@ -109,6 +109,167 @@ export interface SandboxResourceLimits {
 }
 
 // ============================================================================
+// ACL — static config + per-session learned (ADR 24)
+// ============================================================================
+
+/**
+ * Static access-control config supplied at sandbox construction time
+ * (`<Sandbox allow={...}>`). The harness checks every operation
+ * against this allow list first; if the target isn't allowed, it
+ * issues a `sandbox_permission` request (the same primitive the tool
+ * executor uses for confirmation flows). The user / policy decides;
+ * the harness remembers the decision for the rest of the session.
+ *
+ * Pattern format:
+ *   - bare string or `glob:<pattern>` — glob match (default)
+ *   - `regex:<pattern>` — regex match (opt-in for exec)
+ *   - absolute path — exact match (for read/write)
+ */
+export interface SandboxACL {
+  /** Always-allowed read paths / globs. */
+  readonly read?: readonly string[];
+  /** Always-allowed write paths / globs. */
+  readonly write?: readonly string[];
+  /** Always-allowed exec command patterns. */
+  readonly exec?: {
+    readonly allow?: readonly string[];
+    readonly deny?: readonly string[];
+  };
+  /** Network policy (enforced by the provider, not the ACL flow). */
+  readonly network?: boolean;
+}
+
+/**
+ * Request payload sent via `harness.request("sandbox_permission", payload)`.
+ * The session routes this to a configured policy callback or to the
+ * user (via TUI / web prompt / etc.).
+ */
+export type SandboxPermissionRequest =
+  | {
+      readonly kind: "read";
+      readonly path: string;
+      readonly sandboxId: string;
+      readonly rationale?: string;
+    }
+  | {
+      readonly kind: "write";
+      readonly path: string;
+      readonly sandboxId: string;
+      readonly rationale?: string;
+    }
+  | {
+      readonly kind: "exec";
+      readonly command: string;
+      readonly sandboxId: string;
+      readonly rationale?: string;
+    }
+  | {
+      readonly kind: "mount";
+      readonly hostPath: string;
+      readonly sandboxPath: string;
+      readonly sandboxId: string;
+      readonly rationale?: string;
+    };
+
+/**
+ * Response shape for `sandbox_permission`. The decision is honored by
+ * the harness — for the `*-session*` variants, the decision is
+ * remembered (in the harness's per-session ACL state) and applied
+ * silently to future matching operations.
+ */
+export type SandboxPermissionResponse =
+  | { readonly decision: "allow-once" }
+  | { readonly decision: "allow-session" }
+  | { readonly decision: "allow-session-pattern"; readonly pattern: string }
+  | { readonly decision: "deny" }
+  | { readonly decision: "deny-session" };
+
+// ============================================================================
+// Per-command inputs / results
+// ============================================================================
+
+export interface SandboxExecInput {
+  readonly command: string;
+  readonly cwd?: string;
+  readonly env?: Readonly<Record<string, string>>;
+  readonly timeoutMs?: number;
+  readonly stdin?: string;
+}
+
+/**
+ * Streaming delta envelope payload for `sandbox:command:exec:delta`.
+ * Adopters tail stdout/stderr live by subscribing.
+ */
+export interface SandboxExecDelta {
+  readonly stream: "stdout" | "stderr";
+  readonly chunk: string;
+}
+
+export interface SandboxReadFileInput {
+  readonly path: string;
+}
+
+export interface SandboxWriteFileInput {
+  readonly path: string;
+  readonly content: string;
+}
+
+export interface SandboxEditFileInput {
+  readonly path: string;
+  readonly edits: readonly SandboxEdit[];
+  /** Optional optimistic-concurrency check. */
+  readonly expectedHash?: string;
+}
+
+/**
+ * Surgical edit shape — port of v1's `Edit`. The harness's `editFile`
+ * applies these atomically (read → transform → write tempfile → rename
+ * → fsync), preserving v1's behavior.
+ */
+export interface SandboxEdit {
+  readonly old?: string;
+  readonly new?: string;
+  readonly all?: boolean;
+  readonly mode?:
+    | "replace"
+    | "delete"
+    | "insert-before"
+    | "insert-after"
+    | "insert-start"
+    | "insert-end"
+    | "range";
+  readonly startLine?: number;
+  readonly endLine?: number;
+}
+
+export interface SandboxEditResult {
+  readonly applied: number;
+  readonly skipped: number;
+  readonly content: string;
+  readonly hash: string;
+}
+
+export interface SandboxStatInput {
+  readonly path: string;
+}
+
+export interface SandboxStat {
+  readonly path: string;
+  readonly size: number;
+  readonly kind: "file" | "directory" | "symlink" | "other";
+  readonly mtime: number;
+}
+
+export interface SandboxReaddirInput {
+  readonly path: string;
+}
+
+export interface SandboxDirEntry {
+  readonly name: string;
+  readonly kind: "file" | "directory" | "symlink" | "other";
+}
+
+// ============================================================================
 // Snapshot / intent
 // ============================================================================
 

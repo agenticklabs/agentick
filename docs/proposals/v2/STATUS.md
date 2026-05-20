@@ -7,6 +7,7 @@ This is the **running progress log** for v2 implementation. Update it
 every session. New contributors / sessions read this first.
 
 Related docs:
+
 - [`IMPLEMENTATION-PLAN.md`](./IMPLEMENTATION-PLAN.md) — overall phasing,
   exit criteria, risk register
 - [`blueprint/`](./blueprint/) — architectural contracts (~24 docs)
@@ -213,6 +214,7 @@ Most are addressed later — none of them gate the next priority
 up the right one.
 
 ### Stubs / placeholders to flesh out
+
 - ~~renderToString / renderResource return spec-shaped empty payloads~~
   ✓ renderToString implemented 2026-05-15 with default markdown/xml/text
   serializer. renderResource dropped — over-specified; resource content
@@ -239,12 +241,13 @@ up the right one.
 - ✓ **ErrorBoundary detection** — `error-boundary-active` info
   diagnostic emits via host config `onCaughtError`. Landed 2026-05-15.
 - ✓ **Custom lifecycle event dispatch** — `LifecycleStore.registerCustom`
-  + `useOnLifecycleCustom(kind, handler)` hook land 2026-05-15. Dispatching
-  a custom kind with no registered handler emits a one-shot
-  `console.warn` per kind so typos surface instead of being silently
-  dropped. Tests in `lifecycle.spec.tsx`.
+  - `useOnLifecycleCustom(kind, handler)` hook land 2026-05-15. Dispatching
+    a custom kind with no registered handler emits a one-shot
+    `console.warn` per kind so typos surface instead of being silently
+    dropped. Tests in `lifecycle.spec.tsx`.
 
 ### Spec gaps
+
 - **`@agentick/spec/guards`** — directory exists, stubs only. Type guards
   for runtime validation (isTextBlock, isSection, isToolDeclaration, etc.)
 - **`@agentick/spec-validator`** — referenced in pluggability charter
@@ -255,6 +258,7 @@ up the right one.
   real case demands it"; no diagnostic yet.
 
 ### Tests deferred
+
 - **max-iterations diagnostic test** — TODO comment in hooks.spec.tsx.
   Need a controlled DataBridge fixture that fakes pending without
   actually throwing.
@@ -270,6 +274,7 @@ up the right one.
   specify index requirements; concrete durable impls will surface this.
 
 ### Integration gaps
+
 - ✓ **react-devtools bridge** — ported to
   `@agentick/reconciler-react/react/devtools-bridge.ts`. Each
   `createReconciler()` auto-injects into DevTools via
@@ -310,15 +315,15 @@ scalability + observability.
 
 - ~~**L5 — OTel exception recording without breaking error-reference
   identity.**~~ ✓ decided 2026-05-18. Restored standard `Effect.withSpan`
-  (was side-channel). Empirical finding: only the *outer* failure
+  (was side-channel). Empirical finding: only the _outer_ failure
   wrapper loses `===` identity; inner `.cause` Error references survive,
   all structural data (`_tag`, prototype chain, properties, stack)
   matches, and the recommended matchers (`instanceof`, `_tag` checks,
   `expect.objectContaining`) all work as adopters would expect. The
   narrow loss is acceptable in exchange for full OTel span hierarchy
-  + exception recording. Substrate `annotateOperationSpan` documents
-  the contract; see `blueprint/17-open-questions.md` §L5 investigation
-  for findings + adopter patterns.
+  - exception recording. Substrate `annotateOperationSpan` documents
+    the contract; see `blueprint/17-open-questions.md` §L5 investigation
+    for findings + adopter patterns.
 - ~~**L6 — Bus publish hot-path benchmark.**~~ ✓ landed 2026-05-17.
   Numbers in `blueprint/17-open-questions.md` §Benchmark results.
   Headline: lazy emission no-subs at 0.5 μs (12× speedup vs eager),
@@ -341,6 +346,7 @@ scalability + observability.
   iteration.
 
 ### Documentation gaps
+
 - **Per-package API reference READMEs** — high-level pitch only. No
   user-facing component / hook reference for reconciler-react.
 - **Flow diagrams in `15-flows/`** reference v1 vocabulary in places.
@@ -377,6 +383,7 @@ the reconciler harness can be implemented.
 ### Resolved open questions
 
 From `17-open-questions.md`:
+
 - **A10** `ReconcilerSnapshot` shape — locked 2026-05-08
 - **A11** `StateApplicator` interface — locked 2026-05-08 (Pick of session)
 - **F2** Handler verdict merge — locked 2026-05-08 (veto > replace > defer > proceed)
@@ -409,7 +416,7 @@ Pushback on the original Phase 3.1 framing landed two refinements:
 
 1. **`notifyTickEnd` → `notifyLifecycle`.** Single command carrying a
    tagged `LifecycleEvent` union (`tick-start | tick-end |
-   execution-start | execution-end | error` + a namespaced `custom`
+execution-start | execution-end | error` + a namespaced `custom`
    escape hatch). Direct method-based coupling (synchronous, ordered)
    coexists with parallel event-bus emission (async, fan-out) — they
    answer different questions. Future lifecycle kinds don't add
@@ -423,7 +430,7 @@ Pushback on the original Phase 3.1 framing landed two refinements:
      means `useData` does NOT trigger Suspense boundaries — only
      things React itself intercepts (e.g., `React.lazy`).
    - `<ErrorBoundary>` — supported. Catching a render error and
-     rendering a fallback is a *good* pattern (per-section
+     rendering a fallback is a _good_ pattern (per-section
      resilience). Emits `error-boundary-active` info diagnostic.
    - `useTransition` / `useDeferredValue` — allowed; no effect in
      sync-render mode.
@@ -500,6 +507,7 @@ packages/spec/src/__tests__/
   named recognized values — new variants don't break older snapshots.
 
 **Status check:**
+
 - `pnpm vitest run packages/spec` — 71/71 green
 - `pnpm -r typecheck` — all packages green
 - Phase 3.4 (`@agentick/reconciler-react` scaffold) unblocked
@@ -582,6 +590,7 @@ packages/spec-conformance/                              ✓ bodies populated
   the meantime.
 
 **Status check:**
+
 - `pnpm vitest run packages/runtime packages/spec` — 82/82 green
   (24 prior spec + 23 phase-1c spec + 12 journal + 9 inbox + 4 bus + 9 base-harness + 1 version)
 - `pnpm -r typecheck` — all packages green
@@ -644,6 +653,7 @@ packages/spec/src/__tests__/                            ✓ 48 tests passing
   Node Buffer / browser fallbacks — those don't belong in zero-dep spec.
 
 **Status check:**
+
 - `pnpm -r typecheck` — all packages green
 - `pnpm vitest run packages/spec` — 48/48 green (24 prior + 23 new + 1 version)
 - v1 packages unaffected
@@ -698,6 +708,7 @@ packages/spec/src/__tests__/                            ✓ 25 tests passing
   inference-only; not runtime properties.
 
 **Status check:**
+
 - `pnpm typecheck` — 55/55 green
 - `pnpm vitest run packages/spec/src` — 25/25 green
 - v1 packages unaffected
@@ -791,6 +802,7 @@ until convenient. The four open questions:
 
 2. **`packages/adapters/` has 7 packages** vs the 3 in the original
    rename list:
+
    ```
    ai-sdk          → @agentick/executor-ai-sdk     (in plan)
    anthropic       → @agentick/executor-anthropic  (not in plan)
@@ -800,9 +812,10 @@ until convenient. The four open questions:
    huggingface     → @agentick/executor-huggingface (??)
    openai          → @agentick/executor-openai     (in plan)
    ```
+
    Rename all 7? Defer some?
 
-3. **Other v1 packages** — angular, cli, client-multiplexer, connector*,
+3. **Other v1 packages** — angular, cli, client-multiplexer, connector\*,
    guardrails, nestjs, scheduler, secrets, socket.io. Keep current
    names? Some renamed?
 
@@ -837,6 +850,7 @@ to the directory vitest is invoked from. Per-package `pnpm test` ends
 up resolving to `packages/spec/packages/*/...` and finds nothing.
 
 Run tests from workspace root:
+
 ```bash
 pnpm vitest run packages/spec/src           # all spec tests
 pnpm vitest run packages/spec/src/foo.spec.ts   # specific
@@ -846,6 +860,7 @@ pnpm vitest run packages/spec/src/foo.spec.ts   # specific
 
 Originally `packages/spec/package.json` had `"test": "vitest run"` and
 explicit `typescript` + `vitest` devDeps. Both removed:
+
 - Test script removed (workspace runs tests from root)
 - TypeScript + vitest provided by root devDeps
 
@@ -951,7 +966,6 @@ blueprint's design decisions; this is execution-level).
   the substrate after the Effect-native migration surfaced eight gaps
   between the blueprint and the implementation. All eight closed in
   one pass:
-
   1. **`Effect.scoped` wrap around every command body.** `runOperation`
      now establishes a `Scope` for the operation's lifetime — any
      `Effect.acquireRelease` inside a body runs its finalizer when the
@@ -963,7 +977,7 @@ blueprint's design decisions; this is execution-level).
      `Effect<R, E | SubstrateError, never>` instead of
      `Effect<R, unknown, never>`. New `SubstrateError` tagged union in
      `@agentick/spec` covers `OperationOutcomeError | JournalError |
-     LifecycleHandlerError`. Callers regain compile-time signal about
+LifecycleHandlerError`. Callers regain compile-time signal about
      what failure modes to handle; subclass harnesses can pattern-match
      in `Effect.catchTag` / `Effect.catchTags`.
 
@@ -1033,7 +1047,7 @@ blueprint's design decisions; this is execution-level).
   new entries in `blueprint/17-open-questions.md` §L (Observability):
   L5 (OTel exception recording without breaking error-reference
   identity), L6 (bus publish hot-path benchmark), L7 (`MemoryJournal.
-  appendedKeys` Set unbounded growth), L8 (substrate self-instrumentation).
+appendedKeys` Set unbounded growth), L8 (substrate self-instrumentation).
   L5 + L6 are **gating items for Phase 4c (executor harness)** —
   must land before adapter authors write code on top of the substrate.
   L7 gates v2.0 release. L8 lands alongside L6. See "Substrate
@@ -1055,7 +1069,7 @@ blueprint's design decisions; this is execution-level).
   (`BaseHarness.runOperation` returns `Effect<R, E, Scope>`; journal /
   bus / inbox return `Effect` / `Stream`) and produced architectural
   drift — most visibly in an aborted attempt to bolt a `FiberRef + ALS
-  mirror` `RuntimeContext` onto a Promise-typed substrate. The bolt-on
+mirror` `RuntimeContext` onto a Promise-typed substrate. The bolt-on
   was thrown out; the substrate itself is now Effect.
 
   Concretely:

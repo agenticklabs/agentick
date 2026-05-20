@@ -142,9 +142,9 @@ describe("useData — no-Suspense blocking resolution", () => {
       bridges,
     });
 
-    await expect(
-      harness.renderTree({ mountId: "m_broken", sessionId: "s" }),
-    ).rejects.toMatchObject({ _tag: "RenderFailed" });
+    await expect(harness.renderTree({ mountId: "m_broken", sessionId: "s" })).rejects.toMatchObject(
+      { _tag: "RenderFailed" },
+    );
   });
 
   // TODO(hooks): max-iterations test. The naive "fresh key each render"

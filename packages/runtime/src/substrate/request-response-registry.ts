@@ -23,8 +23,16 @@ import { Cause, Deferred, Effect, Exit, Fiber, Option } from "effect";
  */
 export type RequestError =
   | { readonly _tag: "RequestTimeoutError"; readonly ms: number; readonly correlationId: string }
-  | { readonly _tag: "RequestAbortedError"; readonly correlationId: string; readonly reason?: unknown }
-  | { readonly _tag: "RequestCancelledError"; readonly correlationId: string; readonly reason?: unknown };
+  | {
+      readonly _tag: "RequestAbortedError";
+      readonly correlationId: string;
+      readonly reason?: unknown;
+    }
+  | {
+      readonly _tag: "RequestCancelledError";
+      readonly correlationId: string;
+      readonly reason?: unknown;
+    };
 
 export interface RegisterOptions {
   readonly correlationId: string;

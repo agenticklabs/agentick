@@ -3,12 +3,12 @@
 In-process substrate for Agentick v2. Provides the default implementation
 of the `@agentick/spec` protocol interfaces:
 
-| Implementation     | Spec interface                       |
-| ------------------ | ------------------------------------ |
-| `MemoryJournal`    | `OperationJournal`                   |
-| `LocalEventBus`    | `EventBus`                           |
-| `LocalInbox`       | `MessageInbox`                       |
-| `BaseHarness`      | (not a spec interface — base class)  |
+| Implementation  | Spec interface                      |
+| --------------- | ----------------------------------- |
+| `MemoryJournal` | `OperationJournal`                  |
+| `LocalEventBus` | `EventBus`                          |
+| `LocalInbox`    | `MessageInbox`                      |
+| `BaseHarness`   | (not a spec interface — base class) |
 
 `BaseHarness` is the inheritance point every concrete harness sits on
 top of. It composes journal + bus + inbox into the five-surface model

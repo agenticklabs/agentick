@@ -28,7 +28,9 @@ function modelFor(scripted: LanguageModelExecutionResult | undefined): MockLangu
       .map((b) => b.text)
       .join("") ?? "hi";
   const toolBlocks = scripted?.output.filter(
-    (b): b is {
+    (
+      b,
+    ): b is {
       type: "tool_use";
       toolUseId: string;
       name: string;
@@ -52,10 +54,7 @@ function modelFor(scripted: LanguageModelExecutionResult | undefined): MockLangu
     provider: "mock-aisdk",
     modelId: "mock-1",
     doGenerate: async () => ({
-      content:
-        toolCalls.length > 0
-          ? toolCalls
-          : ([{ type: "text", text }] as const),
+      content: toolCalls.length > 0 ? toolCalls : ([{ type: "text", text }] as const),
       finishReason,
       usage: {
         inputTokens: scripted?.usage?.inputTokens ?? 0,

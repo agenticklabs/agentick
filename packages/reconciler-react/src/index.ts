@@ -103,11 +103,7 @@ export {
 export type { StubBridgesOptions } from "./bridges/stub-bridges.js";
 
 // Bridge context + hooks
-export {
-  BridgeContext,
-  BridgeProvider,
-  useBridges,
-} from "./react/bridge-context.js";
+export { BridgeContext, BridgeProvider, useBridges } from "./react/bridge-context.js";
 export type { BridgeProviderProps } from "./react/bridge-context.js";
 export {
   LifecycleContext,
@@ -135,22 +131,11 @@ export {
 
 // React-flavored createTool (extends @agentick/tool with use() hook)
 export { createTool } from "./react/create-tool.js";
-export type {
-  ReactToolSpec,
-  CreatedReactTool,
-} from "./react/create-tool.js";
+export type { ReactToolSpec, CreatedReactTool } from "./react/create-tool.js";
 
 // Components
-export {
-  FormatScope,
-  Markdown,
-  XML,
-  PlainText,
-} from "./react/components/index.js";
-export type {
-  FormatScopeProps,
-  NamedFormatScopeProps,
-} from "./react/components/index.js";
+export { FormatScope, Markdown, XML, PlainText } from "./react/components/index.js";
+export type { FormatScopeProps, NamedFormatScopeProps } from "./react/components/index.js";
 
 // Layer C — Harness
 export { ReconcilerHarness } from "./harness/reconciler-harness.js";

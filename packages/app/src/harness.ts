@@ -29,14 +29,8 @@ import {
   ulid,
 } from "@agentick/runtime";
 import { LoopExecutorHarness } from "@agentick/loop-executor";
-import {
-  ReconcilerHarness,
-  type ReconcilerHarnessOptions,
-} from "@agentick/reconciler-react";
-import {
-  SessionHarness,
-  type SessionHarnessOptions,
-} from "@agentick/session";
+import { ReconcilerHarness, type ReconcilerHarnessOptions } from "@agentick/reconciler-react";
+import { SessionHarness, type SessionHarnessOptions } from "@agentick/session";
 import {
   InMemoryHandlerResolver,
   ToolExecutorHarness,
@@ -106,23 +100,14 @@ import type {
  */
 export type SessionDefaults<P = unknown> = Omit<
   SessionHarnessOptions<P>,
-  | "sessionId"
-  | "agent"
-  | "reconciler"
-  | "loop"
-  | "executor"
-  | "toolExecutor"
-  | "target"
+  "sessionId" | "agent" | "reconciler" | "loop" | "executor" | "toolExecutor" | "target"
 >;
 
 /**
  * Per-session forwarded `ToolExecutorHarness` options. `handlerResolver`
  * is owned by the App (shared across sessions) and excluded here.
  */
-export type ToolExecutorDefaults = Omit<
-  ToolExecutorHarnessOptions,
-  "handlerResolver"
->;
+export type ToolExecutorDefaults = Omit<ToolExecutorHarnessOptions, "handlerResolver">;
 
 export interface AppHarnessOptions<P = unknown> {
   /** Stable app id; defaults to `app:${ulid()}`. */
@@ -321,9 +306,9 @@ export class AppHarness<P = unknown>
    * note on the deferred command-refactor.
    */
   private readonly sessionCreateHandlers: Array<
-    (input: CreateSessionInput<P>) => Promise<
-      { readonly kind: "veto"; readonly reason?: string } | void
-    >
+    (
+      input: CreateSessionInput<P>,
+    ) => Promise<{ readonly kind: "veto"; readonly reason?: string } | void>
   > = [];
   private readonly sessionCloseHandlers: Array<
     (info: {
@@ -373,18 +358,11 @@ export class AppHarness<P = unknown>
     this.toolDefaults = options.tools ?? {};
 
     // Reconciler slot — instance or options.
-    this.reconciler = resolveReconciler(
-      options.reconciler,
-      appId,
-      journal,
-      bus,
-      inbox,
-    );
+    this.reconciler = resolveReconciler(options.reconciler, appId, journal, bus, inbox);
 
     // Loop slot — instance only today (no options on
     // LoopExecutorHarness yet); falls back to bundled default.
-    this.loop =
-      options.loop ?? new LoopExecutorHarness(appId, journal, bus, inbox);
+    this.loop = options.loop ?? new LoopExecutorHarness(appId, journal, bus, inbox);
 
     this.handlerResolver = new InMemoryHandlerResolver();
     if (options.toolHandlers) {
@@ -490,23 +468,15 @@ export class AppHarness<P = unknown>
     // `ready` getter still work.
     const reconcilerReady = readyOf(this.reconciler);
     const loopReady = readyOf(this.loop);
-    return Promise.all([
-      this.ready,
-      reconcilerReady,
-      loopReady,
-      this.extensionsReady,
-    ]).then(() => {});
+    return Promise.all([this.ready, reconcilerReady, loopReady, this.extensionsReady]).then(
+      () => {},
+    );
   }
 
   // ──────── AppHarnessProtocol ────────
 
-  createSession(
-    input: CreateSessionInput<P> = {},
-  ): Promise<SessionHarnessProtocol<P>> {
-    const op: Operation<
-      CreateSessionInput<P>,
-      SessionHarnessProtocol<P>
-    > = {
+  createSession(input: CreateSessionInput<P> = {}): Promise<SessionHarnessProtocol<P>> {
+    const op: Operation<CreateSessionInput<P>, SessionHarnessProtocol<P>> = {
       opId: `app:create-session:${ulid()}`,
       surface: "app",
       name: "app:command:create-session",
@@ -560,9 +530,7 @@ export class AppHarness<P = unknown>
         status,
         metadata: entry.metadata,
         createdAt: entry.createdAt,
-        ...(entry.lastActiveAt !== undefined
-          ? { lastActiveAt: entry.lastActiveAt }
-          : {}),
+        ...(entry.lastActiveAt !== undefined ? { lastActiveAt: entry.lastActiveAt } : {}),
       };
       out.push(listing);
     }
@@ -602,15 +570,9 @@ export class AppHarness<P = unknown>
    * substrate's `Effect.withSpan` annotations flow to the configured
    * exporter.
    */
-  private runWithTelemetry<R>(
-    eff: Effect.Effect<R, unknown, never>,
-  ): Promise<R> {
+  private runWithTelemetry<R>(eff: Effect.Effect<R, unknown, never>): Promise<R> {
     if (this.telemetryLayer === undefined) return runHarnessProtocol(eff);
-    const provided = Effect.provide(eff, this.telemetryLayer) as Effect.Effect<
-      R,
-      unknown,
-      never
-    >;
+    const provided = Effect.provide(eff, this.telemetryLayer) as Effect.Effect<R, unknown, never>;
     return runHarnessProtocol(provided);
   }
 
@@ -681,9 +643,7 @@ export class AppHarness<P = unknown>
         throw {
           _tag: "AppExecutionFailed",
           cause: new Error(
-            verdict.reason
-              ? `session create vetoed: ${verdict.reason}`
-              : "session create vetoed",
+            verdict.reason ? `session create vetoed: ${verdict.reason}` : "session create vetoed",
           ),
         } as AppError;
       }
@@ -698,16 +658,10 @@ export class AppHarness<P = unknown>
     // App (shared); the rest of the options cascade from per-app
     // `tools` defaults. (Per-call tools overrides arrive in a follow-up
     // when `CreateSessionInput` grows a `tools` slot.)
-    const tools = new ToolExecutorHarness(
-      sessionId,
-      this.journal,
-      this.bus,
-      this.inbox,
-      {
-        ...this.toolDefaults,
-        handlerResolver: this.handlerResolver,
-      },
-    );
+    const tools = new ToolExecutorHarness(sessionId, this.journal, this.bus, this.inbox, {
+      ...this.toolDefaults,
+      handlerResolver: this.handlerResolver,
+    });
 
     // Cascade: per-call `createSession.*` > per-app `session.*` >
     // shorthand (`defaultMaxTicks`/`initialProps`/`initialKnobs`).
@@ -721,8 +675,7 @@ export class AppHarness<P = unknown>
       executor: this.executor,
       toolExecutor: tools,
       target: this.target,
-      defaultMaxTicks:
-        input.maxTicks ?? this.sessionDefaults.defaultMaxTicks ?? 8,
+      defaultMaxTicks: input.maxTicks ?? this.sessionDefaults.defaultMaxTicks ?? 8,
       ...(input.initialProps !== undefined
         ? { props: input.initialProps }
         : this.sessionDefaults.props !== undefined
@@ -740,9 +693,7 @@ export class AppHarness<P = unknown>
       toolBridge: this.toolBridge,
       // Extension-provided bridges (installed by extension packages via
       // `AppHarnessOptions.extensions`) flow into every session.
-      ...(this.extensionBridges.size > 0
-        ? { extensionBridges: this.extensionBridges }
-        : {}),
+      ...(this.extensionBridges.size > 0 ? { extensionBridges: this.extensionBridges } : {}),
       ...(overrides.parentSessionId !== undefined
         ? { parentSessionId: overrides.parentSessionId }
         : {}),
@@ -771,18 +722,12 @@ export class AppHarness<P = unknown>
    * `spawn()` method is called. Creates a child session linked to the
    * parent in the registry.
    */
-  async createChildSession(
-    input: SpawnContextChildInput<P>,
-  ): Promise<SessionHarnessProtocol<P>> {
+  async createChildSession(input: SpawnContextChildInput<P>): Promise<SessionHarnessProtocol<P>> {
     const createInput: CreateSessionInput<P> = {
       ...(input.sessionId !== undefined ? { sessionId: input.sessionId } : {}),
       ...(input.metadata !== undefined ? { metadata: input.metadata } : {}),
-      ...(input.initialProps !== undefined
-        ? { initialProps: input.initialProps }
-        : {}),
-      ...(input.initialKnobs !== undefined
-        ? { initialKnobs: input.initialKnobs }
-        : {}),
+      ...(input.initialProps !== undefined ? { initialProps: input.initialProps } : {}),
+      ...(input.initialKnobs !== undefined ? { initialKnobs: input.initialKnobs } : {}),
       ...(input.maxTicks !== undefined ? { maxTicks: input.maxTicks } : {}),
     };
     return this.createSessionBody(createInput, /* ephemeral */ false, {
@@ -797,9 +742,7 @@ export class AppHarness<P = unknown>
     const createInput: CreateSessionInput<P> = {
       sessionId,
       ...(input.metadata !== undefined ? { metadata: input.metadata } : {}),
-      ...(input.initialProps !== undefined
-        ? { initialProps: input.initialProps }
-        : {}),
+      ...(input.initialProps !== undefined ? { initialProps: input.initialProps } : {}),
       ...(input.maxTicks !== undefined ? { maxTicks: input.maxTicks } : {}),
     };
     const session = (await this.createSessionBody(
@@ -853,10 +796,7 @@ export class AppHarness<P = unknown>
     // Tear down shared sub-harnesses last so their inboxes are still
     // alive while sessions detach. `close()` may not exist on
     // user-supplied impls — guard it.
-    await Promise.allSettled([
-      closeOf(this.reconciler),
-      closeOf(this.loop),
-    ]);
+    await Promise.allSettled([closeOf(this.reconciler), closeOf(this.loop)]);
     await super.close();
   }
 
@@ -943,10 +883,7 @@ function mapAppError(cause: unknown): AppError {
  * Each `for await` creates its own subscription; the substrate bus is
  * multi-subscriber by design.
  */
-function makeBusAsyncIterator(
-  bus: EventBus,
-  query: EventQuery,
-): AsyncIterator<ProtocolEvent> {
+function makeBusAsyncIterator(bus: EventBus, query: EventQuery): AsyncIterator<ProtocolEvent> {
   const stream = bus.subscribe(query);
   const queue: ProtocolEvent[] = [];
   const resolvers: Array<(r: IteratorResult<ProtocolEvent>) => void> = [];
@@ -1015,9 +952,7 @@ function makeBusAsyncIterator(
  */
 function isReconcilerInstance(v: unknown): v is ReconcilerProtocol {
   return (
-    typeof v === "object" &&
-    v !== null &&
-    typeof (v as { mount?: unknown }).mount === "function"
+    typeof v === "object" && v !== null && typeof (v as { mount?: unknown }).mount === "function"
   );
 }
 
@@ -1039,27 +974,16 @@ function resolveReconciler(
  * top-level convenience shortcuts; conflicts resolve like CSS
  * shorthand-vs-longhand.
  */
-function mergeSessionDefaults<P>(
-  options: AppHarnessOptions<P>,
-): SessionDefaults<P> {
+function mergeSessionDefaults<P>(options: AppHarnessOptions<P>): SessionDefaults<P> {
   const fromLong = options.session ?? {};
   const merged: Record<string, unknown> = { ...fromLong };
-  if (
-    fromLong.defaultMaxTicks === undefined &&
-    options.defaultMaxTicks !== undefined
-  ) {
+  if (fromLong.defaultMaxTicks === undefined && options.defaultMaxTicks !== undefined) {
     merged.defaultMaxTicks = options.defaultMaxTicks;
   }
-  if (
-    fromLong.props === undefined &&
-    options.initialProps !== undefined
-  ) {
+  if (fromLong.props === undefined && options.initialProps !== undefined) {
     merged.props = options.initialProps;
   }
-  if (
-    fromLong.initialKnobs === undefined &&
-    options.initialKnobs !== undefined
-  ) {
+  if (fromLong.initialKnobs === undefined && options.initialKnobs !== undefined) {
     merged.initialKnobs = options.initialKnobs;
   }
   return merged as SessionDefaults<P>;

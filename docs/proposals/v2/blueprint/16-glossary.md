@@ -209,8 +209,9 @@ timeline, knobs, channels, subscription intents. See `08-session-harness.md`.
 
 **Loop executor**
 Per-execution orchestration harness. Drives tick mechanics, calls React
-+ executor + tool executor. **Internal contract, not public API in v2.**
-See `05-loop-executor.md`.
+
+- executor + tool executor. **Internal contract, not public API in v2.**
+  See `05-loop-executor.md`.
 
 **reconciler harness**
 Producer-side harness. Maintains a mounted React JSX tree as a living
@@ -369,39 +370,39 @@ listening: zero.
 
 ## v1 → v2 cross-reference
 
-| v1 concept | v2 placement |
-| --- | --- |
-| COM (`packages/core/src/com/`) | GONE — replaced by React fiber tree + session state |
-| `RenderedTree` (Map-based, with live refs) | `RenderedTree` (JSON-shaped, with `FormatterRef` and `handlerRef`) |
-| `COMInput` (model input) | folded into `RenderedTree` |
-| `EngineInput` | folded into `RenderedTree` |
-| `ExecutionRunner.transformCompiled` | loop interceptor on `compile` (replace) |
-| `ExecutionRunner.executeToolCall` | tool executor interceptor on `dispatch` |
-| `ExecutionRunner.onSessionInit/onPersist/onRestore/onDestroy` | session interceptors on lifecycle commands |
-| `LifecycleCallbacks` | observers on `*:terminal` events |
-| `EventEmitter` on session | session-scoped PubSub |
-| `Tool.audience` | `ToolDeclaration.exposure` |
-| `SectionEntry.intent` | dropped (id + title sufficient) |
-| `EphemeralEntry` / `EphemeralPosition` | compile/runtime-only transient render input |
-| `EngineModel.fromEngineState` / `toEngineState` | executor `project` / `normalize` phases |
-| `EngineModel.stream` / `generate` | executor `execute` phase |
-| `StructureRenderer` | formatter harness + executor projection (split) |
-| `Formatter` (function on `SemanticNode`) | `FormatterRef` (JSON-safe ref, function lives behind harness) |
-| `ToolExecutionType.OUTPUT` | `OutputDeclaration` + Tool with same id |
-| `_providerInput` smuggled in modelOutput | `executor:provider:request` event |
-| ~43 raw stream event types | wrapped in `EventEnvelope` (same names, new shape) |
-| StopReason enum (~17 values) | `LanguageModelStopReason` (6 values; provider-specific in `finishMetadata`) |
-| Session = sharded entity (early v2) | Session = library object first; cluster wraps |
-| Distributed-by-default (early v2) | Library-first; cluster optional |
+| v1 concept                                                    | v2 placement                                                                |
+| ------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| COM (`packages/core/src/com/`)                                | GONE — replaced by React fiber tree + session state                         |
+| `RenderedTree` (Map-based, with live refs)                    | `RenderedTree` (JSON-shaped, with `FormatterRef` and `handlerRef`)          |
+| `COMInput` (model input)                                      | folded into `RenderedTree`                                                  |
+| `EngineInput`                                                 | folded into `RenderedTree`                                                  |
+| `ExecutionRunner.transformCompiled`                           | loop interceptor on `compile` (replace)                                     |
+| `ExecutionRunner.executeToolCall`                             | tool executor interceptor on `dispatch`                                     |
+| `ExecutionRunner.onSessionInit/onPersist/onRestore/onDestroy` | session interceptors on lifecycle commands                                  |
+| `LifecycleCallbacks`                                          | observers on `*:terminal` events                                            |
+| `EventEmitter` on session                                     | session-scoped PubSub                                                       |
+| `Tool.audience`                                               | `ToolDeclaration.exposure`                                                  |
+| `SectionEntry.intent`                                         | dropped (id + title sufficient)                                             |
+| `EphemeralEntry` / `EphemeralPosition`                        | compile/runtime-only transient render input                                 |
+| `EngineModel.fromEngineState` / `toEngineState`               | executor `project` / `normalize` phases                                     |
+| `EngineModel.stream` / `generate`                             | executor `execute` phase                                                    |
+| `StructureRenderer`                                           | formatter harness + executor projection (split)                             |
+| `Formatter` (function on `SemanticNode`)                      | `FormatterRef` (JSON-safe ref, function lives behind harness)               |
+| `ToolExecutionType.OUTPUT`                                    | `OutputDeclaration` + Tool with same id                                     |
+| `_providerInput` smuggled in modelOutput                      | `executor:provider:request` event                                           |
+| ~43 raw stream event types                                    | wrapped in `EventEnvelope` (same names, new shape)                          |
+| StopReason enum (~17 values)                                  | `LanguageModelStopReason` (6 values; provider-specific in `finishMetadata`) |
+| Session = sharded entity (early v2)                           | Session = library object first; cluster wraps                               |
+| Distributed-by-default (early v2)                             | Library-first; cluster optional                                             |
 
 ## Annotation conventions in this blueprint
 
-| Marker | Meaning |
-| --- | --- |
-| `[V1-INHERITED]` | v2 keeps the v1 shape (sometimes promoted/refined) |
-| `[V1-REPLACED]` | v2 replaces a v1 concept |
-| `[V1-REFINED]` | v2 keeps the v1 shape but tightens it |
-| `[GAP]` | source proposals leave undefined |
-| `[PLACEHOLDER]` | blueprint synthesizes a placeholder, sign-off needed |
-| `[PROPOSAL]` | blueprint takes a position on an open question, sign-off needed |
-| `[SOURCE: doc.md §X]` | direct citation to a v2 source proposal |
+| Marker                | Meaning                                                         |
+| --------------------- | --------------------------------------------------------------- |
+| `[V1-INHERITED]`      | v2 keeps the v1 shape (sometimes promoted/refined)              |
+| `[V1-REPLACED]`       | v2 replaces a v1 concept                                        |
+| `[V1-REFINED]`        | v2 keeps the v1 shape but tightens it                           |
+| `[GAP]`               | source proposals leave undefined                                |
+| `[PLACEHOLDER]`       | blueprint synthesizes a placeholder, sign-off needed            |
+| `[PROPOSAL]`          | blueprint takes a position on an open question, sign-off needed |
+| `[SOURCE: doc.md §X]` | direct citation to a v2 source proposal                         |

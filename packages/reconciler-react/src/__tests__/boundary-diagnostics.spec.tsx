@@ -116,9 +116,9 @@ describe("error-boundary-active diagnostic", () => {
       element: React.createElement(Throws),
       bridges: stubBridges(),
     });
-    await expect(
-      harness.renderTree({ mountId: "m_no_eb", sessionId: "s" }),
-    ).rejects.toMatchObject({ _tag: "RenderFailed" });
+    await expect(harness.renderTree({ mountId: "m_no_eb", sessionId: "s" })).rejects.toMatchObject({
+      _tag: "RenderFailed",
+    });
   });
 
   it("ErrorBoundary diagnostic is emitted at most once per renderTree", async () => {

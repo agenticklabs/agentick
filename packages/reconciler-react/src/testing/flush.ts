@@ -36,10 +36,7 @@ export async function flush(): Promise<void> {
  * the trigger → effect timing is non-deterministic across platforms
  * (local macOS vs CI Linux).
  */
-export async function waitFor(
-  assertion: () => void,
-  timeoutMs = 2000,
-): Promise<void> {
+export async function waitFor(assertion: () => void, timeoutMs = 2000): Promise<void> {
   const start = Date.now();
   let lastError: unknown;
   while (Date.now() - start < timeoutMs) {

@@ -246,15 +246,15 @@ incrementally during execution; hibernate doesn't dump anything.
 
 ## Restore failure modes
 
-| Failure | Behavior |
-| --- | --- |
-| Session record missing | New session creation (if id was provided as fresh) or `SessionNotFoundError` |
-| Compiler snapshot missing | Fresh re-mount as if first activation; `useResolved` reads return undefined |
-| Spec version mismatch | `RestoreError { cause: VersionMismatch }`; caller decides migration policy |
-| Async component throws on re-run | `reconciler:async:resolved { failed }`; tree compiles with that subtree errored |
+| Failure                                   | Behavior                                                                                                    |
+| ----------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| Session record missing                    | New session creation (if id was provided as fresh) or `SessionNotFoundError`                                |
+| Compiler snapshot missing                 | Fresh re-mount as if first activation; `useResolved` reads return undefined                                 |
+| Spec version mismatch                     | `RestoreError { cause: VersionMismatch }`; caller decides migration policy                                  |
+| Async component throws on re-run          | `reconciler:async:resolved { failed }`; tree compiles with that subtree errored                             |
 | Subscription handler ID no longer in tree | `session:subscription:handler-unbound:terminal` per intent; supervisor applies miss policy (drop / requeue) |
-| Sandbox provider can't reconnect | First tool dispatch that needs sandbox throws; tree may render an error component if it has one |
-| Persistence load timeout | `RestoreError`; cluster may retry on another node |
+| Sandbox provider can't reconnect          | First tool dispatch that needs sandbox throws; tree may render an error component if it has one             |
+| Persistence load timeout                  | `RestoreError`; cluster may retry on another node                                                           |
 
 ## Hibernation policies
 

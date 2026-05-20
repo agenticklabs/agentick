@@ -4,8 +4,8 @@
   "description": "Reference app harness for Agentick v2. Outermost runtime boundary — owns shared substrate, shared sub-harnesses (reconciler, loop, executor), the session registry, and the createApp ergonomic surface.",
   "keywords": [
     "agent",
-    "ai",
     "agentick",
+    "ai",
     "app",
     "harness"
   ],
@@ -42,12 +42,12 @@
     "typecheck": "tsc -p tsconfig.build.json --noEmit"
   },
   "dependencies": {
-    "@agentick/spec": "workspace:*",
-    "@agentick/runtime": "workspace:*",
-    "@agentick/reconciler-react": "workspace:*",
     "@agentick/loop-executor": "workspace:*",
-    "@agentick/tool-executor": "workspace:*",
+    "@agentick/reconciler-react": "workspace:*",
+    "@agentick/runtime": "workspace:*",
     "@agentick/session": "workspace:*",
+    "@agentick/spec": "workspace:*",
+    "@agentick/tool-executor": "workspace:*",
     "effect": "^3.21.2"
   },
   "devDependencies": {

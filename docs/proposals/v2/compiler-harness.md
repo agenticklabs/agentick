@@ -314,13 +314,7 @@ interface RendererCapabilities {
 
 interface RenderInput {
   content: RenderableContent[];
-  purpose:
-    | "context"
-    | "message"
-    | "section"
-    | "free-root"
-    | "resource"
-    | "output";
+  purpose: "context" | "message" | "section" | "free-root" | "resource" | "output";
   source?: RenderSourceRef;
   options?: Record<string, unknown>;
 }

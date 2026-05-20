@@ -76,16 +76,16 @@ See [`compiled-spec.md`](./compiled-spec.md) for the canonical structure design.
 Many v2 protocol types should be promoted or refined from existing v1 wire-safe
 types instead of reinvented.
 
-| V2 area | V1 source | V2 treatment |
-| --- | --- | --- |
-| Content blocks | `packages/shared/src/blocks.ts` | Promote to spec, replace loose `any` bags with `unknown` or named extension bags where possible. |
-| Block and role names | `packages/shared/src/block-types.ts` | Promote canonical discriminators and keep extension policy explicit. |
-| Messages | `packages/shared/src/messages.ts` | Refine into `MessageEntry` for compiled context. |
-| Response format and usage | `packages/shared/src/models.ts` | Promote `ResponseFormat` and `UsageStats`; keep model execution input separate from compiled prompt. |
-| Tool contracts | `packages/shared/src/tools.ts` and `packages/core/src/tool/tool.ts` | Split wire-safe declaration fields from executable tool implementation. Replace v1 `audience` with declaration `exposure`. |
-| Stream events | `packages/shared/src/streaming.ts` | Use as prior art for v2 `ProtocolEvent` and executor stream normalization, not as-is. |
-| Current compiler output | `packages/core/src/compiler/types.ts` | Migration source only; not protocol-safe because it contains executable/runtime references. |
-| Current COM input | `packages/core/src/com/types.ts` | Migration source only; replaced by `CompiledStructure` plus runtime state. |
+| V2 area                   | V1 source                                                           | V2 treatment                                                                                                               |
+| ------------------------- | ------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| Content blocks            | `packages/shared/src/blocks.ts`                                     | Promote to spec, replace loose `any` bags with `unknown` or named extension bags where possible.                           |
+| Block and role names      | `packages/shared/src/block-types.ts`                                | Promote canonical discriminators and keep extension policy explicit.                                                       |
+| Messages                  | `packages/shared/src/messages.ts`                                   | Refine into `MessageEntry` for compiled context.                                                                           |
+| Response format and usage | `packages/shared/src/models.ts`                                     | Promote `ResponseFormat` and `UsageStats`; keep model execution input separate from compiled prompt.                       |
+| Tool contracts            | `packages/shared/src/tools.ts` and `packages/core/src/tool/tool.ts` | Split wire-safe declaration fields from executable tool implementation. Replace v1 `audience` with declaration `exposure`. |
+| Stream events             | `packages/shared/src/streaming.ts`                                  | Use as prior art for v2 `ProtocolEvent` and executor stream normalization, not as-is.                                      |
+| Current compiler output   | `packages/core/src/compiler/types.ts`                               | Migration source only; not protocol-safe because it contains executable/runtime references.                                |
+| Current COM input         | `packages/core/src/com/types.ts`                                    | Migration source only; replaced by `CompiledStructure` plus runtime state.                                                 |
 
 New v2-only types include:
 

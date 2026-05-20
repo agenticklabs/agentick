@@ -28,10 +28,7 @@
 
 import * as React from "react";
 
-import {
-  createTool as baseCreateTool,
-  type CreatedTool,
-} from "@agentick/tool";
+import { createTool as baseCreateTool, type CreatedTool } from "@agentick/tool";
 import type {
   ContentBlock,
   JsonSchema,
@@ -49,9 +46,7 @@ import { useToolBridge } from "./hooks/use-tool-bridge.js";
 
 export interface ReactToolSpec<
   TInput = unknown,
-  TDeps extends Readonly<Record<string, unknown>> = Readonly<
-    Record<string, unknown>
-  >,
+  TDeps extends Readonly<Record<string, unknown>> = Readonly<Record<string, unknown>>,
 > {
   readonly name: string;
   readonly description: string;
@@ -100,9 +95,7 @@ export interface CreatedReactTool extends CreatedTool {
 
 export function createTool<
   TInput = unknown,
-  TDeps extends Readonly<Record<string, unknown>> = Readonly<
-    Record<string, unknown>
-  >,
+  TDeps extends Readonly<Record<string, unknown>> = Readonly<Record<string, unknown>>,
 >(spec: ReactToolSpec<TInput, TDeps>): CreatedReactTool {
   // Shared mutable cell. The Tool component writes the latest deps
   // here on every render; the handler reads from here on every
@@ -112,14 +105,10 @@ export function createTool<
   const base = baseCreateTool<TInput>({
     name: spec.name,
     description: spec.description,
-    ...(spec.inputSchema !== undefined
-      ? { inputSchema: spec.inputSchema }
-      : {}),
+    ...(spec.inputSchema !== undefined ? { inputSchema: spec.inputSchema } : {}),
     ...(spec.input !== undefined ? { input: spec.input } : {}),
     ...(spec.exposure !== undefined ? { exposure: spec.exposure } : {}),
-    ...(spec.annotations !== undefined
-      ? { annotations: spec.annotations }
-      : {}),
+    ...(spec.annotations !== undefined ? { annotations: spec.annotations } : {}),
     ...(spec.metadata !== undefined ? { metadata: spec.metadata } : {}),
     ...(spec.handlerRef !== undefined ? { handlerRef: spec.handlerRef } : {}),
     handler: async (input, { ctx }) => {
@@ -136,11 +125,7 @@ export function createTool<
 
     React.useEffect(() => {
       if (!bridge) return;
-      const unregister = bridge.register(
-        base.handlerRef,
-        base.handler,
-        base.validator,
-      );
+      const unregister = bridge.register(base.handlerRef, base.handler, base.validator);
       return () => {
         unregister();
       };
@@ -156,9 +141,7 @@ export function createTool<
       ...(base.declaration.annotations !== undefined
         ? { annotations: base.declaration.annotations }
         : {}),
-      ...(base.declaration.metadata !== undefined
-        ? { metadata: base.declaration.metadata }
-        : {}),
+      ...(base.declaration.metadata !== undefined ? { metadata: base.declaration.metadata } : {}),
     });
   };
   Tool.displayName = `Tool(${spec.name})`;

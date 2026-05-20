@@ -11,13 +11,7 @@ import { describe, expect, it } from "vitest";
 import { z } from "zod";
 
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
-import type {
-  HookBridges,
-  ToolBridge,
-  ToolHandler,
-  Unsubscribe,
-  Validator,
-} from "@agentick/spec";
+import type { HookBridges, ToolBridge, ToolHandler, Unsubscribe, Validator } from "@agentick/spec";
 
 import { createTool } from "../react/create-tool.js";
 import { stubBridges } from "../bridges/stub-bridges.js";
@@ -33,9 +27,7 @@ function makeToolBridge(): { bridge: ToolBridge; registered: RegisteredHandler[]
   const registered: RegisteredHandler[] = [];
   const bridge: ToolBridge = {
     register(ref, handler, validator): Unsubscribe {
-      const entry: RegisteredHandler = validator
-        ? { ref, handler, validator }
-        : { ref, handler };
+      const entry: RegisteredHandler = validator ? { ref, handler, validator } : { ref, handler };
       registered.push(entry);
       return () => {
         const i = registered.findIndex((e) => e.ref === ref);
@@ -124,9 +116,7 @@ describe("reconciler-react createTool — render-time wiring", () => {
       name: "tagged",
       description: "echo with tag",
       use: () => ({ tag: "ALPHA" }),
-      handler: async ({ word }, { use }) => [
-        { type: "text", text: `${use.tag}:${word}` },
-      ],
+      handler: async ({ word }, { use }) => [{ type: "text", text: `${use.tag}:${word}` }],
     });
 
     const harness = await makeHarness();
@@ -139,10 +129,7 @@ describe("reconciler-react createTool — render-time wiring", () => {
     await harness.renderTree({ mountId: "m2", sessionId: "s2" });
 
     expect(registered).toHaveLength(1);
-    const result = await registered[0]!.handler(
-      { word: "hello" },
-      { ctx: fakeCtx(), use: {} },
-    );
+    const result = await registered[0]!.handler({ word: "hello" }, { ctx: fakeCtx(), use: {} });
     expect(result).toEqual([{ type: "text", text: "ALPHA:hello" }]);
   });
 
@@ -153,9 +140,7 @@ describe("reconciler-react createTool — render-time wiring", () => {
     const tool = createTool({
       name: "no-deps",
       description: "no deps",
-      handler: async (_input, { use }) => [
-        { type: "text", text: JSON.stringify(use) },
-      ],
+      handler: async (_input, { use }) => [{ type: "text", text: JSON.stringify(use) }],
     });
 
     const harness = await makeHarness();
@@ -167,10 +152,7 @@ describe("reconciler-react createTool — render-time wiring", () => {
     });
     await harness.renderTree({ mountId: "m3", sessionId: "s3" });
 
-    const result = await registered[0]!.handler(
-      {},
-      { ctx: fakeCtx(), use: {} },
-    );
+    const result = await registered[0]!.handler({}, { ctx: fakeCtx(), use: {} });
     expect(result).toEqual([{ type: "text", text: "{}" }]);
   });
 

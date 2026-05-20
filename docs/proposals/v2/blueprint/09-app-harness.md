@@ -54,17 +54,13 @@ It does NOT own:
 
 ```ts
 interface AppHarnessProtocol<P = unknown> {
-  createSession(input: CreateSessionInput<P>):
-    Effect<Session<P>, AppError, AppEnv>;
+  createSession(input: CreateSessionInput<P>): Effect<Session<P>, AppError, AppEnv>;
 
-  runOnce(input: RunOnceInput<P>):
-    Effect<RunOnceResult, AppError, AppEnv>;
+  runOnce(input: RunOnceInput<P>): Effect<RunOnceResult, AppError, AppEnv>;
 
-  getSession(id: string):
-    Effect<Session<P> | null, AppError, AppEnv>;
+  getSession(id: string): Effect<Session<P> | null, AppError, AppEnv>;
 
-  listSessions(filter?: SessionFilter):
-    Effect<SessionListEntry[], AppError, AppEnv>;
+  listSessions(filter?: SessionFilter): Effect<SessionListEntry[], AppError, AppEnv>;
 
   closeApp(): Effect<void, never, AppEnv>;
 
@@ -75,7 +71,7 @@ interface AppHarnessProtocol<P = unknown> {
 
 ```ts
 interface CreateSessionInput<P> {
-  sessionId?: string;                  // generated if omitted
+  sessionId?: string; // generated if omitted
   parentSessionId?: string | null;
   metadata?: Record<string, unknown>;
   initialProps?: P;
@@ -90,7 +86,7 @@ interface RunOnceInput<P> {
 
 interface RunOnceResult {
   result: SendResult;
-  events: ProtocolEvent[];             // captured (default off; see config)
+  events: ProtocolEvent[]; // captured (default off; see config)
 }
 ```
 
@@ -165,13 +161,13 @@ app.use({
 
 Use cases:
 
-| Surface | Use case |
-| --- | --- |
-| `onSessionCreate` veto | Tenant quota exceeded |
+| Surface                                  | Use case                        |
+| ---------------------------------------- | ------------------------------- |
+| `onSessionCreate` veto                   | Tenant quota exceeded           |
 | `onSessionCreate` (proceed with rewrite) | Inject tenant-specific metadata |
-| `onSessionClose` defer | Flush analytics before close |
-| `onAppClose` | Persist final app state |
-| `aroundCreateSession` | Wrap with auth check |
+| `onSessionClose` defer                   | Flush analytics before close    |
+| `onAppClose`                             | Persist final app state         |
+| `aroundCreateSession`                    | Wrap with auth check            |
 
 The legacy `app.use(integration)` for full integrations remains; it
 installs a bundle of handlers/middleware/observers under one name.
@@ -180,11 +176,11 @@ installs a bundle of handlers/middleware/observers under one name.
 
 The app harness accepts inbound messages at address `app:{appId}`:
 
-| Message type | Payload | Effect |
-| --- | --- | --- |
-| `create-session` | `CreateSessionInput` | Creates a new session; returns the new sessionId. |
-| `close-app` | `{ reason?: string }` | Initiates app shutdown. |
-| `list-sessions` | `SessionFilter?` | Returns matching session ids. |
+| Message type     | Payload               | Effect                                            |
+| ---------------- | --------------------- | ------------------------------------------------- |
+| `create-session` | `CreateSessionInput`  | Creates a new session; returns the new sessionId. |
+| `close-app`      | `{ reason?: string }` | Initiates app shutdown.                           |
+| `list-sessions`  | `SessionFilter?`      | Returns matching session ids.                     |
 
 App-level inbox messages are typically sent by the gateway in cluster
 mode. In Tier 0/1, in-process callers use the direct command methods
@@ -197,10 +193,12 @@ type AppError =
   | AppNotInitializedError
   | SessionAlreadyExistsError
   | SessionNotFoundError
-  | AuthError                    // when policy interceptor vetoes
+  | AuthError // when policy interceptor vetoes
   | AppClosedError;
 
-interface AppNotInitializedError { _tag: "AppNotInitializedError"; }
+interface AppNotInitializedError {
+  _tag: "AppNotInitializedError";
+}
 interface SessionAlreadyExistsError {
   _tag: "SessionAlreadyExistsError";
   sessionId: string;
@@ -209,7 +207,9 @@ interface SessionNotFoundError {
   _tag: "SessionNotFoundError";
   sessionId: string;
 }
-interface AppClosedError { _tag: "AppClosedError"; }
+interface AppClosedError {
+  _tag: "AppClosedError";
+}
 ```
 
 ## App configuration
@@ -221,9 +221,9 @@ interface AppOptions<P> {
 
   // Defaults pushed into every session
   model?: ExecutionTarget;
-  tools?: ToolDeclaration[];                    // additional to JSX-declared
+  tools?: ToolDeclaration[]; // additional to JSX-declared
   sandbox?: SandboxProvider;
-  renderer?: FormatterRef;                       // default content renderer
+  renderer?: FormatterRef; // default content renderer
 
   // Renderer registry — non-default renderers
   renderers?: Renderer[];
@@ -294,15 +294,15 @@ createApp(<MyAgent />, { persistence: postgresPersistence() });
 
 Resolution rules:
 
-| Concern | Rule |
-| --- | --- |
-| Model | JSX wins; `<Model>` overrides config; multiple `<Model>` scope to nearest ancestor |
-| Tools | union; JSX wins on name collision |
-| Sandbox | JSX-only (naturally tree-scoped); config sets root default |
-| Renderer | JSX-scoped; config sets default |
-| Persistence | config-only (bootstrap concern; chicken-and-egg with hydration) |
-| Executor adapters | config-only (per-provider) |
-| Telemetry | config-only |
+| Concern           | Rule                                                                               |
+| ----------------- | ---------------------------------------------------------------------------------- |
+| Model             | JSX wins; `<Model>` overrides config; multiple `<Model>` scope to nearest ancestor |
+| Tools             | union; JSX wins on name collision                                                  |
+| Sandbox           | JSX-only (naturally tree-scoped); config sets root default                         |
+| Renderer          | JSX-scoped; config sets default                                                    |
+| Persistence       | config-only (bootstrap concern; chicken-and-egg with hydration)                    |
+| Executor adapters | config-only (per-provider)                                                         |
+| Telemetry         | config-only                                                                        |
 
 ## Session registry
 
@@ -382,17 +382,17 @@ The app constructs and owns shared services. Services are accessible to
 session-level code via Effect's service-injection idiom (Layer/Tag) but
 the user surface remains imperative.
 
-| Service | Owned by app | Owned by session |
-| --- | --- | --- |
-| Renderer registry | yes | (reads via app) |
-| Executor adapters | yes | (reads via app) |
-| Persistence backend | yes | (reads via app) |
-| Telemetry exporter | yes | (reads via app) |
-| Sandbox provider (default) | yes | (overridden per session JSX) |
-| MCP clients (shared across sessions) | yes | (overridden per session JSX) |
-| Tool registry root | yes | (extended per session) |
-| Knob declarations registry | (root) | per session |
-| Channel registry | (root) | per session |
+| Service                              | Owned by app | Owned by session             |
+| ------------------------------------ | ------------ | ---------------------------- |
+| Renderer registry                    | yes          | (reads via app)              |
+| Executor adapters                    | yes          | (reads via app)              |
+| Persistence backend                  | yes          | (reads via app)              |
+| Telemetry exporter                   | yes          | (reads via app)              |
+| Sandbox provider (default)           | yes          | (overridden per session JSX) |
+| MCP clients (shared across sessions) | yes          | (overridden per session JSX) |
+| Tool registry root                   | yes          | (extended per session)       |
+| Knob declarations registry           | (root)       | per session                  |
+| Channel registry                     | (root)       | per session                  |
 
 ## Cross-session observability
 

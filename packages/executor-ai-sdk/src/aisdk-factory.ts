@@ -21,11 +21,7 @@
  * tool-executor harness as usual.
  */
 
-import {
-  LocalEventBus,
-  LocalInbox,
-  MemoryJournal,
-} from "@agentick/runtime";
+import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
 import type {
   EventBus,
   ExecutorFactory,
@@ -34,10 +30,7 @@ import type {
   OperationJournal,
 } from "@agentick/spec";
 
-import {
-  AISDKExecutor,
-  type AISDKExecutorOptions,
-} from "./ai-sdk-executor.js";
+import { AISDKExecutor, type AISDKExecutorOptions } from "./ai-sdk-executor.js";
 
 export interface AISDKFactoryOptions extends AISDKExecutorOptions {
   /**
@@ -60,19 +53,12 @@ let counter = 0;
  */
 export function aisdk(options: AISDKFactoryOptions): ExecutorFactory {
   const factory = (deps?: ExecutorFactoryDeps): AISDKExecutor => {
-    const scopeId =
-      deps?.scopeId ?? options.scopeId ?? `aisdk:${++counter}`;
+    const scopeId = deps?.scopeId ?? options.scopeId ?? `aisdk:${++counter}`;
     const journal = deps?.journal ?? options.journal ?? new MemoryJournal();
     const bus = deps?.bus ?? options.bus ?? new LocalEventBus();
     const inbox = deps?.inbox ?? options.inbox ?? new LocalInbox();
 
-    const {
-      journal: _j,
-      bus: _b,
-      inbox: _i,
-      scopeId: _s,
-      ...executorOptions
-    } = options;
+    const { journal: _j, bus: _b, inbox: _i, scopeId: _s, ...executorOptions } = options;
     void _j;
     void _b;
     void _i;

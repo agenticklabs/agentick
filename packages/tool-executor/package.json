@@ -4,11 +4,11 @@
   "description": "Reference tool executor harness for Agentick v2. Reference implementation of ToolExecutorProtocol from @agentick/spec — registry, dispatch (model + host doors), validation, confirmation flow, abort, lifecycle events.",
   "keywords": [
     "agent",
-    "ai",
     "agentick",
-    "tool",
+    "ai",
     "executor",
-    "harness"
+    "harness",
+    "tool"
   ],
   "license": "MIT",
   "author": "Ryan Lindgren",
@@ -53,8 +53,8 @@
     "typecheck": "tsc -p tsconfig.build.json --noEmit"
   },
   "dependencies": {
-    "@agentick/spec": "workspace:*",
     "@agentick/runtime": "workspace:*",
+    "@agentick/spec": "workspace:*",
     "effect": "^3.21.2"
   },
   "devDependencies": {

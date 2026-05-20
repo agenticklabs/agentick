@@ -46,8 +46,8 @@ command. The single canonical IR — replaces v1's
 
 ```ts
 interface RenderedTree {
-  specVersion: string;                // date version, e.g. "2026-05-01"
-  features?: string[];                // [PLACEHOLDER] — see below
+  specVersion: string; // date version, e.g. "2026-05-01"
+  features?: string[]; // [PLACEHOLDER] — see below
   context: ContextSpec;
   declarations?: RuntimeDeclarations;
   config?: SpecConfig;
@@ -94,14 +94,14 @@ appears as `"caching"`.
 
 ```ts
 type SpecFeatureName =
-  | "sections"             // SectionEntry is used
-  | "tool-declarations"    // ToolDeclaration is used
-  | "caching"              // cache hints on entries/declarations
-  | "provider-options"     // providerOptions present
-  | "free-root-content"    // content/text at top level
-  | "render-trace"         // renderTrace present
-  | "outputs"              // OutputDeclaration present
-  | "mcp-declarations";    // MCPDeclaration present
+  | "sections" // SectionEntry is used
+  | "tool-declarations" // ToolDeclaration is used
+  | "caching" // cache hints on entries/declarations
+  | "provider-options" // providerOptions present
+  | "free-root-content" // content/text at top level
+  | "render-trace" // renderTrace present
+  | "outputs" // OutputDeclaration present
+  | "mcp-declarations"; // MCPDeclaration present
 ```
 
 Implementations include only the features they used. Adapters reject
@@ -125,7 +125,7 @@ in array order. Both subkinds are discriminated by `kind`.
 ```ts
 interface MessageEntry {
   kind: "message";
-  role: string;                       // Agentick semantic role
+  role: string; // Agentick semantic role
   content: ContentBlock[];
   renderedWith?: FormatterRef;
   renderTrace?: FormatTrace[];
@@ -160,8 +160,8 @@ canonical roles without configuration.
 ```ts
 interface SectionEntry {
   kind: "section";
-  id: string;                         // stable identity across recompiles
-  title?: string;                     // optional human label
+  id: string; // stable identity across recompiles
+  title?: string; // optional human label
   content: ContentBlock[];
   renderedWith?: FormatterRef;
   renderTrace?: FormatTrace[];
@@ -169,7 +169,7 @@ interface SectionEntry {
 }
 
 interface SectionMetadata {
-  priority?: number;                  // hint to executors that may reorder
+  priority?: number; // hint to executors that may reorder
   cache?: CacheHint;
   providerMetadata?: Record<string, Record<string, unknown>>;
   [key: string]: unknown;
@@ -194,8 +194,8 @@ references). The v2 shape has none of those:
 
 ```ts
 interface CacheHint {
-  ttl?: "5m" | "1h" | string;         // cross-provider hint
-  scope?: "prefix" | "block";         // [PLACEHOLDER]
+  ttl?: "5m" | "1h" | string; // cross-provider hint
+  scope?: "prefix" | "block"; // [PLACEHOLDER]
   [key: string]: unknown;
 }
 ```
@@ -228,7 +228,7 @@ interface ToolDeclaration {
   description: string;
   inputSchema: JsonSchema;
   exposure: ToolExposure[];
-  handlerRef?: string;                // resolved by runtime/tool executor
+  handlerRef?: string; // resolved by runtime/tool executor
   annotations?: ToolAnnotations;
   metadata?: Record<string, unknown>;
 }
@@ -236,11 +236,11 @@ interface ToolDeclaration {
 type ToolExposure = "model" | "dispatch" | "runtime";
 ```
 
-| Exposure | Meaning |
-| --- | --- |
-| `model` | Executor MAY expose this tool to the model provider. |
+| Exposure   | Meaning                                                                     |
+| ---------- | --------------------------------------------------------------------------- |
+| `model`    | Executor MAY expose this tool to the model provider.                        |
 | `dispatch` | Runtime MAY invoke via direct command (`session.dispatch`, slash commands). |
-| `runtime` | Internal runtime use; not model- or dispatch-visible. |
+| `runtime`  | Internal runtime use; not model- or dispatch-visible.                       |
 
 Replaces v1's `audience: "model" | "user" | "all"` (`packages/shared/src/tools.ts`).
 The `["model", "dispatch"]` combination is the new "all"; `"user"` becomes
@@ -256,11 +256,12 @@ starting point:
 
 ```ts
 interface ToolAnnotations {
-  intent?: "render" | "action" | "compute";    // [V1-INHERITED]
-  requiresResponse?: boolean;                  // [V1-INHERITED]
-  timeout?: number;                            // [V1-INHERITED]
-  defaultResult?: ContentBlock[];              // [V1-INHERITED]
-  ui?: {                                       // [V1-INHERITED] MCP Apps
+  intent?: "render" | "action" | "compute"; // [V1-INHERITED]
+  requiresResponse?: boolean; // [V1-INHERITED]
+  timeout?: number; // [V1-INHERITED]
+  defaultResult?: ContentBlock[]; // [V1-INHERITED]
+  ui?: {
+    // [V1-INHERITED] MCP Apps
     resourceUri?: string;
     visibility?: Array<"model" | "app">;
   };
@@ -302,10 +303,10 @@ interface OutputDeclaration {
 
 Distinct from `SpecConfig.responseFormat`:
 
-| Concept | Purpose |
-| --- | --- |
+| Concept                     | Purpose                                                                                                             |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------- |
 | `SpecConfig.responseFormat` | Generation-time directive on the model call ("respond as JSON conforming to this schema"). Provider knob territory. |
-| `OutputDeclaration` | Runtime registration of named outputs the application wants to extract from the result. Binding territory. |
+| `OutputDeclaration`         | Runtime registration of named outputs the application wants to extract from the result. Binding territory.          |
 
 Both can coexist: `responseFormat` requests structured generation; one or
 more `OutputDeclaration` entries describe how the runtime extracts and
@@ -321,7 +322,7 @@ interface MCPDeclaration {
   id: string;
   serverName: string;
   transport: "stdio" | "http" | "sse" | "streamable-http";
-  config: Record<string, unknown>;          // transport-specific
+  config: Record<string, unknown>; // transport-specific
   exposes?: Array<"tools" | "resources" | "prompts">;
   metadata?: Record<string, unknown>;
 }
@@ -382,24 +383,44 @@ type SemanticNode = {
   semantic?: SemanticType;
   props?: Record<string, unknown>;
   children?: SemanticNode[];
-  formatter?: Formatter;            // [V1-REPLACED] — promoted to FormatterRef
+  formatter?: Formatter; // [V1-REPLACED] — promoted to FormatterRef
 };
 
 type SemanticType =
-  | "strong" | "em" | "mark" | "underline" | "strikethrough"
-  | "subscript" | "superscript" | "small" | "code"
-  | "heading" | "list" | "table" | "paragraph" | "blockquote"
-  | "line-break" | "horizontal-rule"
-  | "image" | "audio" | "video"
-  | "link" | "quote" | "citation" | "keyboard" | "variable" | "list-item"
-  | "custom" | "preformatted";
+  | "strong"
+  | "em"
+  | "mark"
+  | "underline"
+  | "strikethrough"
+  | "subscript"
+  | "superscript"
+  | "small"
+  | "code"
+  | "heading"
+  | "list"
+  | "table"
+  | "paragraph"
+  | "blockquote"
+  | "line-break"
+  | "horizontal-rule"
+  | "image"
+  | "audio"
+  | "video"
+  | "link"
+  | "quote"
+  | "citation"
+  | "keyboard"
+  | "variable"
+  | "list-item"
+  | "custom"
+  | "preformatted";
 
 interface SemanticMetadata {
   type: SemanticType;
-  level?: number;                   // headings 1–6
-  structure?: unknown;              // tables, lists, etc.
-  href?: string;                    // links
-  rendererTag?: string;             // 'timestamp', 'custom-tag', etc.
+  level?: number; // headings 1–6
+  structure?: unknown; // tables, lists, etc.
+  href?: string; // links
+  rendererTag?: string; // 'timestamp', 'custom-tag', etc.
   rendererAttrs?: Record<string, unknown>;
   preformatted?: boolean;
 }
@@ -432,13 +453,7 @@ interface FormatterCapabilities {
 
 interface FormatInput {
   content: FormattableContent[];
-  purpose:
-    | "context"
-    | "message"
-    | "section"
-    | "free-root"
-    | "resource"
-    | "output";
+  purpose: "context" | "message" | "section" | "free-root" | "resource" | "output";
   source?: FormatSourceRef;
   options?: Record<string, unknown>;
 }
@@ -532,9 +547,7 @@ already exists in v1 (`packages/shared/src/models.ts`), `[V1-INHERITED]`.
 `ModelSelection` is new and not enumerated; lean:
 
 ```ts
-type ModelSelection =
-  | { kind: "by-id"; id: string }
-  | { kind: "by-ref"; ref: string };          // resolved against registry
+type ModelSelection = { kind: "by-id"; id: string } | { kind: "by-ref"; ref: string }; // resolved against registry
 ```
 
 Sign-off needed.
@@ -587,7 +600,7 @@ Rules:
 interface LanguageModelExecutionResult extends ExecutionResult {
   toolCalls?: ToolCall[];
   stopReason: LanguageModelStopReason;
-  raw?: unknown;                              // pass-through; debug only
+  raw?: unknown; // pass-through; debug only
 }
 
 type LanguageModelStopReason =
@@ -620,10 +633,10 @@ variants live in `finishMetadata`.
 ```ts
 interface ExecutorDelta {
   // [PLACEHOLDER] — chunk normalization is open question 1 in executor.md
-  kind: string;                               // e.g., "content_delta", "tool_call_delta"
+  kind: string; // e.g., "content_delta", "tool_call_delta"
   blockIndex?: number;
   delta?: string;
-  block?: ContentBlock;                       // when a full block emerges
+  block?: ContentBlock; // when a full block emerges
   metadata?: Record<string, unknown>;
 }
 ```
@@ -667,7 +680,9 @@ interface TargetCapabilities {
 The protocol-level event envelope lives at the harness boundary:
 
 ```ts
-interface EventEnvelope { /* see 01-harness-principle.md */ }
+interface EventEnvelope {
+  /* see 01-harness-principle.md */
+}
 type ProtocolEvent = EventEnvelope & { payload?: unknown };
 ```
 
@@ -689,13 +704,7 @@ to keep public stream cadence small.
 ## Outcome and lifecycle handler verdict types
 
 ```ts
-type CommandOutcome =
-  | "succeeded"
-  | "failed"
-  | "canceled"
-  | "vetoed"
-  | "replaced"
-  | "deferred";
+type CommandOutcome = "succeeded" | "failed" | "canceled" | "vetoed" | "replaced" | "deferred";
 
 /**
  * Lifecycle handler verdict. Returned from a handler registered via
@@ -847,7 +856,7 @@ interface StandardSchemaV1<Input = unknown, Output = unknown> {
     readonly version: 1;
     readonly vendor: string;
     readonly validate: (
-      value: unknown
+      value: unknown,
     ) => StandardSchemaResult<Output> | Promise<StandardSchemaResult<Output>>;
     readonly types?: { input: Input; output: Output };
   };
@@ -886,13 +895,13 @@ Most consumers use type guards. Strict JSON-Schema validation is opt-in.
 
 ## Cross-references
 
-| Type | Used by | Doc |
-| --- | --- | --- |
-| `RenderedTree` | reconciler harness produces; loop executor + executor consume | 03, 05, 06 |
-| `ContextEntry`, `MessageEntry`, `SectionEntry` | Same | 03, 06 |
-| `ToolDeclaration`, `OutputDeclaration` | reconciler harness produces; tool executor + runtime consume | 03, 07 |
-| `FormatterRef`, `FormatInput`, `FormatResult` | Formatter harness | 04 |
-| `ExecutionResult`, `ExecutorTerminal` | Executor harness produces; loop executor consumes | 06 |
-| `ExecutionTarget` | Loop executor passes to executor | 05, 06 |
-| `EventEnvelope`, `ProtocolEvent` | Every harness emits | 10 |
-| `ChannelEvent`, framework channels | Gateway ↔ client | 12 |
+| Type                                           | Used by                                                       | Doc        |
+| ---------------------------------------------- | ------------------------------------------------------------- | ---------- |
+| `RenderedTree`                                 | reconciler harness produces; loop executor + executor consume | 03, 05, 06 |
+| `ContextEntry`, `MessageEntry`, `SectionEntry` | Same                                                          | 03, 06     |
+| `ToolDeclaration`, `OutputDeclaration`         | reconciler harness produces; tool executor + runtime consume  | 03, 07     |
+| `FormatterRef`, `FormatInput`, `FormatResult`  | Formatter harness                                             | 04         |
+| `ExecutionResult`, `ExecutorTerminal`          | Executor harness produces; loop executor consumes             | 06         |
+| `ExecutionTarget`                              | Loop executor passes to executor                              | 05, 06     |
+| `EventEnvelope`, `ProtocolEvent`               | Every harness emits                                           | 10         |
+| `ChannelEvent`, framework channels             | Gateway ↔ client                                              | 12         |

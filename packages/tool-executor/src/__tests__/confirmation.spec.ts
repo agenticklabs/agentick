@@ -60,9 +60,9 @@ function dispatchOf(
  * and return its `correlationId` + `replyTo`. The harness publishes a
  * request envelope when the confirmation gate trips.
  */
-async function captureRequest(
-  bus: { subscribe: (q: unknown) => Stream.Stream<unknown, unknown, never> },
-): Promise<{ correlationId: string; replyTo: string }> {
+async function captureRequest(bus: {
+  subscribe: (q: unknown) => Stream.Stream<unknown, unknown, never>;
+}): Promise<{ correlationId: string; replyTo: string }> {
   const chunk = await Effect.runPromise(
     Stream.runCollect(
       Stream.take(
@@ -158,9 +158,7 @@ describe("ToolExecutorHarness — confirmation flow", () => {
     expect(result.succeeded).toBe(false);
     expect(handlerRan).toBe(0);
     expect((result.content[0] as { text: string }).text).toContain("denied");
-    expect((result.content[0] as { text: string }).text).toContain(
-      "user said no",
-    );
+    expect((result.content[0] as { text: string }).text).toContain("user said no");
   });
 
   it("modifiedArguments: handler receives the edited input", async () => {
@@ -178,9 +176,7 @@ describe("ToolExecutorHarness — confirmation flow", () => {
       ],
     });
 
-    const dispatchP = harness.dispatch(
-      dispatchOf("delete-file", "tc-3", { path: "/tmp/risky" }),
-    );
+    const dispatchP = harness.dispatch(dispatchOf("delete-file", "tc-3", { path: "/tmp/risky" }));
     const { correlationId, replyTo } = await captureRequest(bus);
     await deliverResponse(inbox, replyTo, correlationId, {
       toolUseId: "tc-3",
@@ -243,9 +239,7 @@ describe("ToolExecutorHarness — confirmation flow", () => {
     expect(result.succeeded).toBe(false);
     // The denial message carries the abort _tag (extracted by
     // stringifyAbortReason since reason came in as a tagged object).
-    expect((result.content[0] as { text: string }).text).toContain(
-      "ToolAbortedError",
-    );
+    expect((result.content[0] as { text: string }).text).toContain("ToolAbortedError");
   });
 
   it("timeout: per-dispatch confirmationTimeoutMs trips ToolConfirmationTimeoutError", async () => {
@@ -260,9 +254,7 @@ describe("ToolExecutorHarness — confirmation flow", () => {
     });
 
     await expect(
-      harness.dispatch(
-        dispatchOf("delete-file", "tc-7", {}, { confirmationTimeoutMs: 50 }),
-      ),
+      harness.dispatch(dispatchOf("delete-file", "tc-7", {}, { confirmationTimeoutMs: 50 })),
     ).rejects.toMatchObject({
       _tag: "ToolConfirmationTimeoutError",
       toolName: "delete-file",

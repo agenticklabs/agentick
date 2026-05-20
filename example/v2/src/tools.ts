@@ -107,7 +107,7 @@ export function buildHandlerResolver(): InMemoryHandlerResolver {
 
   // Handler that uses ctx.signal — exercise abort plumbing.
   resolver.register("handlers/slow", async (input, deps) => {
-    const ms = ((input as { ms?: number }).ms ?? 1000);
+    const ms = (input as { ms?: number }).ms ?? 1000;
     await new Promise<void>((resolve, reject) => {
       const t = setTimeout(resolve, ms);
       deps.ctx.signal.addEventListener(
