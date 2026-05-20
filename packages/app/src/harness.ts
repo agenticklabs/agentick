@@ -46,7 +46,10 @@ import {
 import { isExecutorFactory } from "@agentick/spec";
 import type {
   AppError,
+  AppExtension,
   AppHarnessProtocol,
+  AppInstaller,
+  AppInstallerHost,
   CreateSessionInput,
   EventBus,
   EventQuery,
@@ -75,6 +78,7 @@ import type {
   SpawnContext,
   SpawnContextChildInput,
   ToolExecutorProtocol,
+  Unsubscribe,
 } from "@agentick/spec";
 
 // ============================================================================
@@ -231,6 +235,22 @@ export interface AppHarnessOptions<P = unknown> {
    * @see docs/proposals/v2/blueprint/09-app-harness.md §Telemetry
    */
   readonly telemetry?: TelemetryLayer;
+
+  /**
+   * Pluggable extensions. Each extension is a `{ name, install }`
+   * record produced by an extension package's `withX()` factory.
+   * AppHarness invokes `install(installer)` for each extension at
+   * construction; the installer exposes methods for registering
+   * bridges, contributors, tool handlers, and bus subscriptions.
+   *
+   * Extensions install in the supplied order; last-writer-wins on
+   * bridge name collisions. Installer state is owned by the app and
+   * teardown happens in `closeApp` (calls `uninstall` in reverse).
+   *
+   * @see docs/proposals/v2/blueprint/22-state-formatters-reconciler-shape.md
+   * @see `@agentick/spec` §AppExtension
+   */
+  readonly extensions?: readonly AppExtension[];
 }
 
 // ============================================================================
@@ -313,6 +333,14 @@ export class AppHarness<P = unknown>
   > = [];
   private readonly appCloseHandlers: Array<() => Promise<void> | void> = [];
 
+  // ──────── Extension state ────────
+  /** Bridges merged into every session's HookBridges. */
+  private readonly extensionBridges = new Map<string, unknown>();
+  /** Extensions in install order (used to drive uninstall in reverse). */
+  private readonly installedExtensions: AppExtension[] = [];
+  /** Pending install promise resolved once all extensions complete `install()`. */
+  private readonly extensionsReady: Promise<void>;
+
   constructor(options: AppHarnessOptions<P>) {
     const appId = options.appId ?? `app:${ulid()}`;
     const journal = options.journal ?? new MemoryJournal({ capacity: 10_000 });
@@ -371,6 +399,83 @@ export class AppHarness<P = unknown>
       },
       unregister: (handlerRef) => this.handlerResolver.unregister(handlerRef),
     };
+
+    // Drive extensions. Each one runs against a shared installer that
+    // routes registrations into our internal maps + sub-harnesses.
+    // Extensions run sequentially in supplied order.
+    this.extensionsReady = (async () => {
+      const exts = options.extensions ?? [];
+      const installer = this.makeInstaller();
+      for (const ext of exts) {
+        await ext.install(installer);
+        this.installedExtensions.push(ext);
+      }
+    })();
+  }
+
+  private makeInstaller(): AppInstaller {
+    const self = this;
+    const installerHost: AppInstallerHost = {
+      appId: this.scopeId,
+      metadata: {},
+    };
+    return {
+      registerBridge(name, bridge): Unsubscribe {
+        const prior = self.extensionBridges.get(name);
+        self.extensionBridges.set(name, bridge);
+        return () => {
+          if (self.extensionBridges.get(name) === bridge) {
+            if (prior !== undefined) self.extensionBridges.set(name, prior);
+            else self.extensionBridges.delete(name);
+          }
+        };
+      },
+      registerContributor(contributor): Unsubscribe {
+        // The reconciler harness exposes `registerContributor` on
+        // ReconcilerHarness specifically. Duck-type — external
+        // reconciler impls without the method silently drop.
+        const r = self.reconciler as {
+          registerContributor?: (c: unknown) => void;
+        };
+        if (typeof r.registerContributor === "function") {
+          r.registerContributor(contributor);
+        }
+        // No unregister surface today; reconciler registry is
+        // append-only. Future work if extensions need hot-swap.
+        return () => {};
+      },
+      registerToolHandler(handlerRef, handler, validator): Unsubscribe {
+        self.handlerResolver.register(handlerRef, handler, validator);
+        return () => self.handlerResolver.unregister(handlerRef);
+      },
+      subscribeBus(filter, listener): Unsubscribe {
+        // Use the app's bus directly. We need a fiber-like handle to
+        // unsubscribe; the simplest path is Stream.runForEach with a
+        // Fiber.interrupt on cleanup, but our app surface already
+        // exposes `app.events(filter)` as an AsyncIterable — extensions
+        // typically don't need fiber-level granularity. We provide the
+        // simple-bus subscription here; advanced flow uses app.events().
+        const iter = self.events(filter)[Symbol.asyncIterator]();
+        let aborted = false;
+        (async () => {
+          while (!aborted) {
+            const next = await iter.next();
+            if (next.done || aborted) break;
+            try {
+              await listener(next.value);
+            } catch {
+              // Swallow listener errors so one extension can't kill the bus.
+            }
+          }
+          await iter.return?.();
+        })();
+        return () => {
+          aborted = true;
+          iter.return?.();
+        };
+      },
+      app: installerHost,
+    };
   }
 
   /**
@@ -385,7 +490,12 @@ export class AppHarness<P = unknown>
     // `ready` getter still work.
     const reconcilerReady = readyOf(this.reconciler);
     const loopReady = readyOf(this.loop);
-    return Promise.all([this.ready, reconcilerReady, loopReady]).then(() => {});
+    return Promise.all([
+      this.ready,
+      reconcilerReady,
+      loopReady,
+      this.extensionsReady,
+    ]).then(() => {});
   }
 
   // ──────── AppHarnessProtocol ────────
@@ -628,6 +738,11 @@ export class AppHarness<P = unknown>
       // Surface the shared handler resolver as a ToolBridge so
       // reconciler-side tools register handlers at render time.
       toolBridge: this.toolBridge,
+      // Extension-provided bridges (installed by extension packages via
+      // `AppHarnessOptions.extensions`) flow into every session.
+      ...(this.extensionBridges.size > 0
+        ? { extensionBridges: this.extensionBridges }
+        : {}),
       ...(overrides.parentSessionId !== undefined
         ? { parentSessionId: overrides.parentSessionId }
         : {}),
@@ -710,6 +825,17 @@ export class AppHarness<P = unknown>
     for (const h of this.appCloseHandlers) {
       try {
         await h();
+      } catch {
+        // best effort
+      }
+    }
+
+    // Tear down extensions in reverse install order. Errors swallowed
+    // so one misbehaving extension can't block teardown of others.
+    const installer = this.makeInstaller();
+    for (const ext of this.installedExtensions.slice().reverse()) {
+      try {
+        await ext.uninstall?.(installer);
       } catch {
         // best effort
       }

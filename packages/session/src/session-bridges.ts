@@ -130,9 +130,18 @@ export interface SessionHookBridges extends HookBridges {
 
 export function buildSessionBridges(
   store: SessionStateStore,
-  options: { readonly toolBridge?: ToolBridge } = {},
+  options: {
+    readonly toolBridge?: ToolBridge;
+    /**
+     * Extension-provided bridges. Merged into the bundle by name —
+     * adopters install extensions (`@agentick/sandbox`, etc.) via
+     * `AppHarnessOptions.extensions`; the AppHarness then forwards
+     * the merged map to every session it constructs.
+     */
+    readonly extensionBridges?: ReadonlyMap<string, unknown>;
+  } = {},
 ): SessionHookBridges {
-  return {
+  const base: SessionHookBridges = {
     timeline: timelineBridgeFor(store),
     knobs: knobBridgeFor(),
     state: stateBridgeFor(),
@@ -143,4 +152,14 @@ export function buildSessionBridges(
       ? { tools: options.toolBridge }
       : {}),
   };
+  if (options.extensionBridges && options.extensionBridges.size > 0) {
+    // Spread extension bridges into the bundle by name. Adopters
+    // augment `HookBridges` (via `declare module "@agentick/spec"`)
+    // so the slots are typed correctly at the consumer.
+    return {
+      ...base,
+      ...Object.fromEntries(options.extensionBridges),
+    } as SessionHookBridges;
+  }
+  return base;
 }

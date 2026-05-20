@@ -98,6 +98,13 @@ export interface SessionHarnessOptions<P = unknown> {
   /** Optional initial session-state values (`useSessionState`). */
   readonly initialState?: Readonly<Record<string, unknown>>;
   /**
+   * Extension-provided bridges (sandbox, mcp, subscriptions, …) merged
+   * into the per-session HookBridges. Adopters typically don't supply
+   * this directly — the AppHarness installs extensions and passes the
+   * resulting map through.
+   */
+  readonly extensionBridges?: ReadonlyMap<string, unknown>;
+  /**
    * Optional tool bridge exposed to the reconciler via HookBridges.
    * When supplied, reconciler-side tools (e.g. React `createTool`
    * with `use()` hook) register handlers at render time. The bridge
@@ -151,6 +158,9 @@ export class SessionHarness<P = unknown>
     this.bridges = buildSessionBridges(this.store, {
       ...(options.toolBridge !== undefined
         ? { toolBridge: options.toolBridge }
+        : {}),
+      ...(options.extensionBridges !== undefined
+        ? { extensionBridges: options.extensionBridges }
         : {}),
     });
     if (options.initialKnobs) {

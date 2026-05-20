@@ -100,15 +100,6 @@ export {
   stubLoopBridge,
   stubSessionBridge,
 } from "./bridges/stub-bridges.js";
-export { inMemorySandboxBridge } from "./bridges/in-memory-sandbox-bridge.js";
-export {
-  inMemoryMCPBridge,
-  type InMemoryMCPBridge,
-} from "./bridges/in-memory-mcp-bridge.js";
-export {
-  inMemorySubscriptionBridge,
-  type InMemorySubscriptionBridgeOptions,
-} from "./bridges/in-memory-subscription-bridge.js";
 export type { StubBridgesOptions } from "./bridges/stub-bridges.js";
 
 // Bridge context + hooks
