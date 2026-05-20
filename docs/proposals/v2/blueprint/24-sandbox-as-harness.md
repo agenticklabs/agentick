@@ -113,7 +113,14 @@ sandbox:status:destroyed
 sandbox:mount:added             sandbox:mount:removed
 sandbox:resource:limit-exceeded
 sandbox:security:escape-attempt
+sandbox:permission:requested    sandbox:permission:granted
+sandbox:permission:denied
 ```
+
+The `permission:*` events let observability adopters track which ACL
+decisions are happening, what's getting auto-allowed by the policy,
+and what's being denied. Combined with `app.events({ surface: "sandbox" })`,
+this is enough for a security review dashboard.
 
 `degraded` is when the provider reports the sandbox is alive but
 something's wrong (low disk, soft memory limit hit). Adopters can
@@ -176,6 +183,113 @@ status-probe     {}                          // request health, get reply on bus
 
 External orchestrators (CI runners, orchestration platforms) talk to
 the sandbox via inbox messages. Same pattern as other harnesses.
+
+### Access control (ACL) — configured + per-session learned
+
+Sandbox operations have a two-tier permission model:
+
+1. **Static config** in `<Sandbox allow={...}>` — paths / commands the
+   agent is always allowed to touch without asking.
+2. **Per-session learned** — when the agent tries to read / write /
+   exec something outside the static allowlist, the harness pauses on
+   `this.request("sandbox_permission", payload)` and the session
+   surfaces the prompt to the user (or to a configured policy
+   callback). The decision is remembered for the rest of the session.
+
+```ts
+interface SandboxACL {
+  /** Always-allowed read paths. Globs and absolute paths. */
+  readonly read?: readonly string[];
+  /** Always-allowed write paths. Globs and absolute paths. */
+  readonly write?: readonly string[];
+  /** Always-allowed exec patterns. */
+  readonly exec?: {
+    readonly allow?: readonly string[];   // regex or command-prefix patterns
+    readonly deny?: readonly string[];    // takes precedence over allow
+  };
+  /** Network policy (handled by provider, not the ACL flow). */
+  readonly network?: boolean;
+}
+```
+
+When the agent calls `sandbox.exec({ command: "git status" })` and
+`git` matches `allow.exec.allow`, the operation proceeds without
+prompting. When it calls `sandbox.exec({ command: "rm -rf /tmp" })`
+and `rm` isn't allowed, the harness issues:
+
+```ts
+const decision = yield* this.request<
+  SandboxPermissionRequest,
+  SandboxPermissionResponse
+>("sandbox_permission", {
+  kind: "exec",
+  command: "rm -rf /tmp",
+  sandboxId: this.scopeId,
+  rationale: "command not in allow.exec.allow",
+});
+```
+
+The response carries one of:
+
+```ts
+type SandboxPermissionResponse =
+  | { decision: "allow-once" }                          // proceed; don't remember
+  | { decision: "allow-session" }                       // proceed; remember for this session
+  | { decision: "allow-session-pattern"; pattern: string } // remember a pattern (e.g., "git *")
+  | { decision: "deny" }                                // throw SandboxPermissionDeniedError
+  | { decision: "deny-session" };                       // throw + remember to refuse silently
+```
+
+Same call shape for `readFile` (`kind: "read", path: ...`),
+`writeFile` (`kind: "write", path: ...`), `editFile` (`kind: "write"`),
+`addMount` (`kind: "mount", hostPath: ..., sandboxPath: ...`).
+
+`stat` and `readdir` typically piggyback on read permissions but
+adopters can configure stricter granularity if needed.
+
+**Per-session ACL state** lives on the harness itself (kept in
+StateBridge if it survives hibernation; otherwise in-memory only).
+Operations check the learned list before raising the prompt:
+
+```ts
+function isAllowed(harness, kind, target): boolean {
+  // 1. Static config (from <Sandbox allow={...}>)
+  if (matchesStaticAllow(harness.acl, kind, target)) return true;
+  // 2. Session-learned allows
+  if (harness.sessionAllows.matches(kind, target)) return true;
+  // 3. Session-learned denies (silent refusal)
+  if (harness.sessionDenies.matches(kind, target)) return false; // throw immediately
+  // 4. Otherwise → request permission
+  return null; // pending decision
+}
+```
+
+The prompt itself is surfaced by the session via the request/response
+inbox primitive. The session can route it to:
+
+- A console TUI prompt (`@agentick/tui` ships a default UI)
+- A web modal (gateway-mediated, when the gateway lands)
+- A configured policy callback for headless / CI use:
+
+  ```ts
+  withSandbox({
+    policy: async (request) => {
+      // Auto-allow shell commands matching a corporate allowlist
+      if (request.kind === "exec" && CORP_ALLOWED.test(request.command)) {
+        return { decision: "allow-session-pattern", pattern: request.command };
+      }
+      // Otherwise deny silently
+      return { decision: "deny" };
+    },
+  });
+  ```
+
+If no policy callback is registered AND the request times out, the
+harness throws `SandboxPermissionDeniedError` with `cause: "timeout"`.
+
+**Cross-session persistence is out of scope** for v1 of the harness.
+A keychain-style permission store (`SandboxPermissionStore`) is a
+future addition; for now decisions are session-scoped only.
 
 ### Auth / credentials
 
@@ -311,7 +425,8 @@ for ops dashboards.
 | OS keychain integration ad-hoc per adopter | `SandboxCredentialStorage` plugin interface |
 | Provider snapshot/restore optional, unused | First-class `provider.restore()` with `SandboxSnapshot` opaque blob; harness persists `SandboxIntent` |
 | No replay | Journal supports replay of exec sequences for debugging |
-| Hand-rolled error types | Tagged `_tag` errors throughout (`SandboxExecError`, `SandboxIoError`, `SandboxMountError`, `SandboxEscapeError`, `SandboxResourceLimitError`) |
+| Hand-rolled error types | Tagged `_tag` errors throughout (`SandboxExecError`, `SandboxIoError`, `SandboxMountError`, `SandboxEscapeError`, `SandboxResourceLimitError`, `SandboxPermissionDeniedError`) |
+| Permissions: hardcoded `allow` only, no runtime override | Two-tier ACL: static config + per-session learned via `request("sandbox_permission")`; policy callback for headless |
 | Per-tool middleware composed manually | Centralized at the sandbox layer; one definition covers every tool that uses the sandbox |
 
 ## Migration path for v1 adopters
@@ -379,6 +494,10 @@ Per ADR 23: sandbox ships first to validate the extension package shape end-to-e
 - **OQ24.3** — Path normalization (relative paths → absolute paths inside workspace). Done by the harness or the provider? *Lean: harness. Centralized so middleware sees consistent paths.*
 - **OQ24.4** — Should `aroundExec` middleware see the full command string or pre-parsed argv? *Lean: command string. Adopters who want parsed args can run a parser inside their middleware. Keeps the contract simple.*
 - **OQ24.5** — Resource limits enforced by the harness, the provider, or both? *Lean: provider enforces; harness emits events. Single source of truth at the provider; harness surfaces observability.*
+- **OQ24.6** — ACL pattern matching format: globs only, regex only, or both? *Lean: globs for paths (familiar to ops), regex available as an opt-in for exec patterns. Pattern format is a string with a leading prefix (`glob:` / `regex:` / bare = glob).*
+- **OQ24.7** — When `allow-session-pattern` is granted, what's the pattern's scope? Just that command/path or the matching family? *Lean: the user/policy provides the exact pattern string they want to remember. The harness just trusts what was returned. UI surfaces "remember as `git *`" as a checkbox.*
+- **OQ24.8** — Should `stat` and `readdir` also flow through the permission request, or piggyback on read? *Lean: piggyback. A `stat` that fails because the path isn't readable is still informative (you can't even see it exists). Adopters who want stricter granularity configure separate `allow.stat` / `allow.readdir` — opt-in complexity, default behavior matches read.*
+- **OQ24.9** — Cross-session persistence of ACL decisions (`SandboxPermissionStore`) — when do we add it? *Lean: when a real adopter needs it. Session-scoped covers single-conversation use; multi-session apps with sticky permissions can add it incrementally.*
 
 ## Cross-references
 
