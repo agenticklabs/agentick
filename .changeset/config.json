@@ -42,7 +42,8 @@
       "@agentick/scheduler",
       "@agentick/secrets",
       "@agentick/mcp",
-      "@agentick/formatters"
+      "@agentick/formatters",
+      "@agentick/subscriptions"
     ]
   ],
   "linked": [],
