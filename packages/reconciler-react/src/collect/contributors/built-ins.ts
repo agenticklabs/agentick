@@ -39,6 +39,7 @@ import {
 } from "./event-blocks.js";
 import { customBlockContributor } from "./custom-block.js";
 import { semanticHtmlContributors } from "./semantic-html.js";
+import { contentPassthroughContributor } from "./content-passthrough.js";
 
 export function createBuiltInRegistry(): ContributorRegistry {
   const r = new ContributorRegistry();
@@ -66,6 +67,7 @@ export function createBuiltInRegistry(): ContributorRegistry {
   r.register(systemEventContributor);
   r.register(stateChangeContributor);
   r.register(customBlockContributor);
+  r.register(contentPassthroughContributor);
   // Semantic HTML — produces semantic-node fragments that fold into the
   // enclosing TextBlock's semanticNode sidecar. See ADR 22 §D5.
   for (const c of semanticHtmlContributors()) r.register(c);

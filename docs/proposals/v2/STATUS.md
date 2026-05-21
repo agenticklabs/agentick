@@ -1,7 +1,7 @@
 # Agentick v2 — Implementation Status
 
 **Branch:** `feat/v2`
-**Last updated:** 2026-05-19 (Phase 5 — example/v2 `scenarioAISDK`: createApp({ executor: aisdk({ model }) }) end-to-end via an inline LanguageModelV2 stub. 2 ticks, 1 tool dispatch, correct final answer. Closes Phase 5 task #49.)
+**Last updated:** 2026-05-19 (Component port — `<Timeline>` ported from v1 to `@agentick/reconciler-react`. Reads via `useTimeline()`/`TimelineBridge`; default rendering emits `<message role>` containing a new `<content blocks=…>` passthrough intrinsic that re-injects persisted spec-shape `ContentBlock[]` into the collect pipeline without re-authoring. Render-prop form + token-budget compaction (`maxTokens`/`strategy`/`headroom`/`preserveRoles`/`guidance` with truncate + sliding-window strategies + custom-function escape hatch). Dropped from v1: `Timeline.Provider`/`Timeline.Messages`, `useConversationHistory`, pending/queued message rendering (deferred until a v2 queued-messages bridge surface exists). 11 new tests + 197 reconciler-react total, 481 dependent-package tests green. Stubbed `TimelineBridge` extended with `append`/`replace` for testability + snapshot-reference caching to avoid `useSyncExternalStore` infinite loops.)
 
 This is the **running progress log** for v2 implementation. Update it
 every session. New contributors / sessions read this first.

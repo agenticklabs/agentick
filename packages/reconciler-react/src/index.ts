@@ -136,6 +136,28 @@ export type { ReactToolSpec, CreatedReactTool } from "./react/create-tool.js";
 // Components
 export { FormatScope, Markdown, XML, PlainText } from "./react/components/index.js";
 export type { FormatScopeProps, NamedFormatScopeProps } from "./react/components/index.js";
+export { Timeline } from "./react/components/index.js";
+export type {
+  TimelineProps,
+  TimelineRenderFn,
+  ConversationHistoryOptions,
+  TimelineBudgetOptions,
+} from "./react/components/index.js";
+export { compactEntries, getEntryTokens } from "./react/components/index.js";
+export type {
+  CompactionStrategy,
+  CompactionFunction,
+  CompactionResult,
+  CompactOptions,
+  CompactResult,
+  TokenBudgetInfo,
+} from "./react/components/index.js";
+
+// Passthrough contributor (exported so custom registries can opt-in)
+export { contentPassthroughContributor } from "./collect/contributors/content-passthrough.js";
+
+// Stub bridges — re-export the in-memory timeline variant for tests
+export type { InMemoryTimelineBridge } from "./bridges/stub-bridges.js";
 
 // Layer C — Harness
 export { ReconcilerHarness } from "./harness/reconciler-harness.js";

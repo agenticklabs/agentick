@@ -13,17 +13,53 @@ import type {
   SessionBridge,
   StateBridge,
   TimelineBridge,
+  TimelineEntrySummary,
   TimelineSnapshot,
   Unsubscribe,
 } from "@agentick/spec";
 import { InMemoryDataBridge } from "./in-memory-data-bridge.js";
 
-export function stubTimelineBridge(): TimelineBridge {
+/**
+ * In-memory TimelineBridge with an `append` writer for tests. Real
+ * runtimes back the bridge with a persistent journal; this stub is a
+ * thin Map + version counter that fires subscribers on `append`.
+ */
+export interface InMemoryTimelineBridge extends TimelineBridge {
+  append(entry: TimelineEntrySummary): void;
+  replace(entries: readonly TimelineEntrySummary[]): void;
+}
+
+export function stubTimelineBridge(
+  initial: readonly TimelineEntrySummary[] = [],
+): InMemoryTimelineBridge {
+  let entries: readonly TimelineEntrySummary[] = initial.slice();
+  let version = initial.length > 0 ? 1 : 0;
+  // Cache the snapshot reference — useSyncExternalStore compares with
+  // Object.is, so returning a fresh object each call would loop forever.
+  let snapshot: TimelineSnapshot = { entries, version };
+  const listeners = new Set<() => void>();
+  const notify = () => listeners.forEach((l) => l());
+  const bump = () => {
+    version += 1;
+    snapshot = { entries, version };
+    notify();
+  };
   return {
-    read: (): TimelineSnapshot => ({ entries: [], version: 0 }),
-    subscribe:
-      (_listener: () => void): Unsubscribe =>
-      () => {},
+    read: (): TimelineSnapshot => snapshot,
+    subscribe: (listener: () => void): Unsubscribe => {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
+    append: (entry) => {
+      entries = [...entries, entry];
+      bump();
+    },
+    replace: (next) => {
+      entries = next.slice();
+      bump();
+    },
   };
 }
 
