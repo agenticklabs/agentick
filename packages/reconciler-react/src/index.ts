@@ -100,7 +100,7 @@ export {
   stubLoopBridge,
   stubSessionBridge,
 } from "./bridges/stub-bridges.js";
-export type { StubBridgesOptions } from "./bridges/stub-bridges.js";
+export type { StubBridgesOptions, InMemoryKnobBridge } from "./bridges/stub-bridges.js";
 
 // Bridge context + hooks
 export { BridgeContext, BridgeProvider, useBridges } from "./react/bridge-context.js";

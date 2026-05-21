@@ -19,10 +19,10 @@ import {
   InMemoryDataBridge,
   inMemoryKnobBridge,
   inMemoryStateBridge,
+  type InMemoryKnobBridge,
 } from "@agentick/reconciler-react";
 import type {
   HookBridges,
-  KnobDescriptor,
   LoopBridge,
   MessageRole,
   SessionBridge,
@@ -74,18 +74,14 @@ export function timelineBridgeFor(store: SessionStateStore): TimelineBridge {
   };
 }
 
-export interface KnobBridgeWithSnapshot {
-  get(id: string): unknown;
-  set(id: string, value: unknown): void;
-  list(): readonly KnobDescriptor[];
-  subscribe(id: string, listener: () => void): Unsubscribe;
-  exportSnapshot(): Readonly<Record<string, unknown>>;
-  importSnapshot(values: Readonly<Record<string, unknown>>): void;
-}
+/**
+ * @deprecated Use `InMemoryKnobBridge` from `@agentick/reconciler-react`
+ * directly. Kept as a re-export alias to avoid a breaking surface change
+ * in this commit.
+ */
+export type KnobBridgeWithSnapshot = InMemoryKnobBridge;
 
-export function knobBridgeFor(
-  initial: Readonly<Record<string, unknown>> = {},
-): KnobBridgeWithSnapshot {
+export function knobBridgeFor(initial: Readonly<Record<string, unknown>> = {}): InMemoryKnobBridge {
   return inMemoryKnobBridge({ ...initial });
 }
 
@@ -121,7 +117,7 @@ export function sessionBridgeFor(store: SessionStateStore): SessionBridge {
  * session snapshot.
  */
 export interface SessionHookBridges extends HookBridges {
-  readonly knobs: KnobBridgeWithSnapshot;
+  readonly knobs: InMemoryKnobBridge;
   readonly data: InMemoryDataBridge;
 }
 

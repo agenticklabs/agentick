@@ -9,6 +9,7 @@ import type {
   HookBridges,
   KnobBridge,
   KnobDescriptor,
+  KnobRegistration,
   LoopBridge,
   SessionBridge,
   StateBridge,
@@ -66,6 +67,12 @@ export function stubTimelineBridge(
 /**
  * Knob bridge extended with snapshot export/import so the harness can
  * persist + restore the model-visible knob state across mounts.
+ *
+ * Descriptor storage is deliberately NOT included in snapshots —
+ * descriptors are re-declared by components on remount; persisting them
+ * would only matter if a hibernated session resumes mid-execution
+ * BEFORE the first render, which the current snapshot/restore design
+ * does not support anyway.
  */
 export interface InMemoryKnobBridge extends KnobBridge {
   exportSnapshot(): Readonly<Record<string, unknown>>;
@@ -74,16 +81,32 @@ export interface InMemoryKnobBridge extends KnobBridge {
 
 export function inMemoryKnobBridge(initial: Record<string, unknown> = {}): InMemoryKnobBridge {
   const values = new Map<string, unknown>(Object.entries(initial));
+  const descriptors = new Map<string, KnobRegistration>();
   const listeners = new Map<string, Set<() => void>>();
+  // Wildcard listeners — fired on every value or descriptor change.
+  // Used by `<Knobs />` to re-render the section when any knob changes.
+  const wildcards = new Set<() => void>();
+  const notifyAll = (id: string) => {
+    listeners.get(id)?.forEach((l) => l());
+    wildcards.forEach((l) => l());
+  };
   return {
     get: (id: string) => values.get(id),
     set: (id: string, value: unknown) => {
       values.set(id, value);
-      listeners.get(id)?.forEach((l) => l());
+      notifyAll(id);
     },
     list: (): readonly KnobDescriptor[] => {
       const out: KnobDescriptor[] = [];
-      for (const [id, value] of values) out.push({ id, value });
+      // Knobs surface via descriptors first (registration order), then any
+      // value-only entries (initial values, set-without-register).
+      for (const [id, descriptor] of descriptors) {
+        out.push({ id, value: values.get(id), ...descriptor });
+      }
+      for (const [id, value] of values) {
+        if (descriptors.has(id)) continue;
+        out.push({ id, value });
+      }
       return out;
     },
     subscribe: (id: string, listener: () => void): Unsubscribe => {
@@ -97,6 +120,21 @@ export function inMemoryKnobBridge(initial: Record<string, unknown> = {}): InMem
         set!.delete(listener);
       };
     },
+    subscribeAll: (listener: () => void): Unsubscribe => {
+      wildcards.add(listener);
+      return () => {
+        wildcards.delete(listener);
+      };
+    },
+    register: (id: string, descriptor: KnobRegistration) => {
+      descriptors.set(id, descriptor);
+      // Initialize value only when no value yet exists. Existing values
+      // win — descriptor updates MUST NOT clobber model-set state.
+      if (!values.has(id) && descriptor.defaultValue !== undefined) {
+        values.set(id, descriptor.defaultValue);
+      }
+      notifyAll(id);
+    },
     exportSnapshot: () => {
       const out: Record<string, unknown> = {};
       for (const [k, v] of values) out[k] = v;
@@ -109,7 +147,7 @@ export function inMemoryKnobBridge(initial: Record<string, unknown> = {}): InMem
       const changedIds = new Set<string>([...oldKeys, ...newKeys]);
       values.clear();
       for (const [k, v] of Object.entries(next)) values.set(k, v);
-      for (const id of changedIds) listeners.get(id)?.forEach((l) => l());
+      for (const id of changedIds) notifyAll(id);
     },
   };
 }

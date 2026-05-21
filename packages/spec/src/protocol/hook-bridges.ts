@@ -181,8 +181,19 @@ export interface TimelineEntrySummary {
  * for code outside React (the runtime, slash commands, the executor's
  * `set_knob` tool dispatch).
  *
- * `useKnob(id, initial)` inside a React component creates a binding —
- * the binding is registered with the bridge on first render, and
+ * Two surfaces:
+ *
+ *   1. **Value surface** — `get` / `set` / `subscribe` operate on the
+ *      current value cell. Pure data; wire-safe.
+ *   2. **Descriptor surface** — `register` / `list` carry rich metadata
+ *      (semantic constraints, validation, presentation hints) that the
+ *      `<Knobs />` section + `set_knob` tool consume to drive
+ *      model-facing UX. `validate` is a function reference and is
+ *      non-serializable; cross-process bridges drop it.
+ *
+ * `useKnob(id, initial, options?)` inside a React component creates a
+ * binding — the binding's descriptor is registered with the bridge on
+ * first render (and again on descriptor-identity change), and
  * subsequent `set(id, value)` calls trigger a re-render of components
  * subscribed to that id.
  */
@@ -192,14 +203,104 @@ export interface KnobBridge {
   list(): readonly KnobDescriptor[];
   /** Notify when the value at `id` changes. */
   subscribe(id: string, listener: () => void): Unsubscribe;
+  /**
+   * Notify when ANY knob's value or descriptor changes. Used by the
+   * `<Knobs />` section to re-render the model-facing listing without
+   * having to enumerate every id (the registry grows dynamically as
+   * components mount).
+   */
+  subscribeAll(listener: () => void): Unsubscribe;
+  /**
+   * Push a descriptor for `id`. The bridge MUST preserve any existing
+   * value for `id` if one is present; if no value exists yet, the
+   * bridge initializes `value` to `descriptor.defaultValue` (or `undefined`
+   * when no default is supplied).
+   *
+   * Subsequent calls update the descriptor in place (useful when authors
+   * dynamically change `options` / `min` / `max` based on app state).
+   * The `<Knobs />` section re-renders whenever a descriptor changes.
+   */
+  register(id: string, descriptor: KnobRegistration): void;
 }
 
-export interface KnobDescriptor {
-  readonly id: string;
+/**
+ * Semantic categorization of a knob's value, derived from its `valueType`
+ * + constraints. Drives the model-facing `set_knob` tool description
+ * and the default `<Knobs />` section formatter.
+ *
+ *   - `toggle`  boolean
+ *   - `range`   number with `min` and/or `max`
+ *   - `number`  unconstrained number
+ *   - `select`  string with non-empty `options`
+ *   - `text`    unconstrained string
+ */
+export type KnobSemanticType = "toggle" | "range" | "number" | "select" | "text";
+
+/**
+ * Primitive value cell a knob carries. Wire-safe.
+ */
+export type KnobValueType = "string" | "number" | "boolean";
+
+export type KnobPrimitive = string | number | boolean;
+
+/**
+ * Descriptor payload supplied to `KnobBridge.register`. The bridge
+ * synthesizes the full {@link KnobDescriptor} (which includes `id` +
+ * current `value`) from this payload.
+ *
+ * All fields are optional. Validation MAY rely on whichever subset the
+ * caller supplied — the bridge does not enforce shape consistency
+ * beyond what's declared. v1 parity field-for-field (see
+ * `packages/core/src/hooks/knob.ts`).
+ */
+export interface KnobRegistration {
   readonly description?: string;
-  readonly value: unknown;
+  readonly defaultValue?: KnobPrimitive;
+  readonly valueType?: KnobValueType;
+  /** Logical grouping for batch dispatch via `set_knob(group, value)`. */
+  readonly group?: string;
+  /** Enum constraint. The model's `set_knob` tool surfaces these as options. */
+  readonly options?: readonly KnobPrimitive[];
+  /** Inclusive lower bound (number knobs). */
+  readonly min?: number;
+  /** Inclusive upper bound (number knobs). */
+  readonly max?: number;
+  readonly step?: number;
+  /** Max string length (string knobs). */
+  readonly maxLength?: number;
+  /** Regex pattern (string knobs); applied via `new RegExp(pattern)`. */
+  readonly pattern?: string;
+  readonly required?: boolean;
+  /**
+   * "Momentary" knob: auto-resets to `defaultValue` after the model reads
+   * it. Used for one-shot triggers ("do this once") and edge-triggered
+   * events. Reset semantics are owned by `useKnob` / `<Knobs />`, not
+   * by the bridge.
+   */
+  readonly momentary?: boolean;
+  /**
+   * Hide this knob from the default `<Knobs />` section listing. Useful
+   * for internally-managed knobs (e.g., per-message collapse state)
+   * that would otherwise clutter the model's view.
+   */
+  readonly inline?: boolean;
+  /**
+   * Custom validator. Return `true` if valid, or an error message
+   * string to surface to the model. Non-serializable — cross-process
+   * bridges drop this field.
+   */
+  readonly validate?: (value: KnobPrimitive) => true | string;
   /** Standard-Schema-compliant validator (opaque to spec). */
   readonly schema?: unknown;
+}
+
+/**
+ * Full descriptor returned by `KnobBridge.list`. Combines the
+ * registration metadata with the current `value`.
+ */
+export interface KnobDescriptor extends KnobRegistration {
+  readonly id: string;
+  readonly value: unknown;
 }
 
 // ============================================================================
