@@ -86,7 +86,28 @@ export function inMemoryKnobBridge(initial: Record<string, unknown> = {}): InMem
   // Wildcard listeners — fired on every value or descriptor change.
   // Used by `<Knobs />` to re-render the section when any knob changes.
   const wildcards = new Set<() => void>();
+  // Cached `list()` snapshot — invalidated on every register/set so
+  // `useSyncExternalStore` consumers see stable references between
+  // mutations (avoids infinite render loops from fresh array literals).
+  let listCache: readonly KnobDescriptor[] | null = null;
+  const invalidateList = () => {
+    listCache = null;
+  };
+  const buildList = (): readonly KnobDescriptor[] => {
+    const out: KnobDescriptor[] = [];
+    // Descriptor-known ids first (registration order), then value-only
+    // entries (initial values, set-without-register).
+    for (const [id, descriptor] of descriptors) {
+      out.push({ id, value: values.get(id), ...descriptor });
+    }
+    for (const [id, value] of values) {
+      if (descriptors.has(id)) continue;
+      out.push({ id, value });
+    }
+    return out;
+  };
   const notifyAll = (id: string) => {
+    invalidateList();
     listeners.get(id)?.forEach((l) => l());
     wildcards.forEach((l) => l());
   };
@@ -97,17 +118,8 @@ export function inMemoryKnobBridge(initial: Record<string, unknown> = {}): InMem
       notifyAll(id);
     },
     list: (): readonly KnobDescriptor[] => {
-      const out: KnobDescriptor[] = [];
-      // Knobs surface via descriptors first (registration order), then any
-      // value-only entries (initial values, set-without-register).
-      for (const [id, descriptor] of descriptors) {
-        out.push({ id, value: values.get(id), ...descriptor });
-      }
-      for (const [id, value] of values) {
-        if (descriptors.has(id)) continue;
-        out.push({ id, value });
-      }
-      return out;
+      if (listCache === null) listCache = buildList();
+      return listCache;
     },
     subscribe: (id: string, listener: () => void): Unsubscribe => {
       let set = listeners.get(id);

@@ -143,6 +143,14 @@ export { Message } from "./react/components/index.js";
 export type { MessageProps } from "./react/components/index.js";
 export { Section } from "./react/components/index.js";
 export type { SectionProps } from "./react/components/index.js";
+export { Knobs, useKnobsContext, useKnobsContextOptional } from "./react/components/index.js";
+export type {
+  KnobsProps,
+  KnobsRenderFn,
+  KnobsContextValue,
+  KnobInfo,
+  KnobGroup,
+} from "./react/components/index.js";
 export { Timeline } from "./react/components/index.js";
 export type {
   TimelineProps,

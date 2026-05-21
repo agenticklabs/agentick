@@ -7,6 +7,9 @@ export type { MessageProps } from "./message.js";
 export { Section } from "./section.js";
 export type { SectionProps } from "./section.js";
 
+export { Knobs, useKnobsContext, useKnobsContextOptional } from "./knobs.js";
+export type { KnobsProps, KnobsRenderFn, KnobsContextValue, KnobInfo, KnobGroup } from "./knobs.js";
+
 export { Timeline } from "./timeline.js";
 export type {
   TimelineProps,
