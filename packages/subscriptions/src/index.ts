@@ -24,7 +24,4 @@ export {
 
 export { attachInProcessScheduler } from "./scheduler.js";
 
-export {
-  withSubscriptions,
-  type WithSubscriptionsOptions,
-} from "./extension.js";
+export { withSubscriptions, type WithSubscriptionsOptions } from "./extension.js";

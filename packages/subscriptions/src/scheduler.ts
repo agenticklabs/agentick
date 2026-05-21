@@ -33,9 +33,7 @@ interface CronEntry {
   timer: ReturnType<typeof setTimeout> | undefined;
 }
 
-export function attachInProcessScheduler(
-  bridge: SubscriptionBridge,
-): Unsubscribe {
+export function attachInProcessScheduler(bridge: SubscriptionBridge): Unsubscribe {
   const timers = new Map<string, CronEntry>();
   let closed = false;
 

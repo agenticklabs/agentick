@@ -6,8 +6,8 @@
     "agent",
     "agentick",
     "ai",
-    "subscriptions",
     "cron",
+    "subscriptions",
     "webhook"
   ],
   "license": "MIT",

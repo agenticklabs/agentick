@@ -80,7 +80,12 @@ describe("createSubscriptionBridge — snapshot/restore", () => {
 
     const next = createSubscriptionBridge();
     next.importSnapshot(snap);
-    expect(next.list().map((i) => i.id).sort()).toEqual(["c1", "c2"]);
+    expect(
+      next
+        .list()
+        .map((i) => i.id)
+        .sort(),
+    ).toEqual(["c1", "c2"]);
   });
 
   it("pending intents (no handler) reject dispatch", async () => {

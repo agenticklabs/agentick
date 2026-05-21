@@ -46,9 +46,7 @@ describe("<Cron> — declare via bridge", () => {
     await harness.renderTree({ mountId: "m1", sessionId: "s1" });
 
     const declared = bridge.list();
-    expect(declared).toEqual([
-      { id: "c1", kind: "cron", config: { expr: "@hourly" } },
-    ]);
+    expect(declared).toEqual([{ id: "c1", kind: "cron", config: { expr: "@hourly" } }]);
 
     await bridge.dispatch("c1", { firedAt: 1 });
     expect(onTick).toHaveBeenCalledTimes(1);
@@ -134,8 +132,8 @@ describe("subscription components — error when bridge missing", () => {
       }),
       bridges,
     });
-    await expect(
-      harness.renderTree({ mountId: "m4", sessionId: "s4" }),
-    ).rejects.toMatchObject({ _tag: "RenderFailed" });
+    await expect(harness.renderTree({ mountId: "m4", sessionId: "s4" })).rejects.toMatchObject({
+      _tag: "RenderFailed",
+    });
   });
 });

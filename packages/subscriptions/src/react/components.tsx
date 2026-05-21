@@ -20,11 +20,7 @@ import { useBridges, useOnUnmount } from "@agentick/reconciler-react";
 import type { SubscriptionIntent } from "@agentick/spec";
 
 import "../augment.js";
-import type {
-  SubscriptionBridge,
-  SubscriptionCtx,
-  SubscriptionHandler,
-} from "../bridge.js";
+import type { SubscriptionBridge, SubscriptionCtx, SubscriptionHandler } from "../bridge.js";
 
 // ============================================================================
 // Helpers
@@ -47,10 +43,7 @@ function useSubscriptionBridge(): SubscriptionBridge {
  * on unmount. The handler always reads the latest props via a ref so
  * re-renders pick up new closures without re-declaration thrash.
  */
-function useDeclareSubscription(
-  intent: SubscriptionIntent,
-  handler: SubscriptionHandler,
-): void {
+function useDeclareSubscription(intent: SubscriptionIntent, handler: SubscriptionHandler): void {
   const bridge = useSubscriptionBridge();
   const handlerRef = React.useRef(handler);
   handlerRef.current = handler;
@@ -88,10 +81,7 @@ export interface CronProps {
    * `@yearly`).
    */
   readonly expr: string;
-  readonly onTick: (
-    event: { firedAt: number },
-    ctx: SubscriptionCtx,
-  ) => void | Promise<void>;
+  readonly onTick: (event: { firedAt: number }, ctx: SubscriptionCtx) => void | Promise<void>;
   readonly metadata?: Readonly<Record<string, unknown>>;
 }
 
@@ -124,10 +114,7 @@ export interface WebhookProps {
    * this intent. The adopter wires HTTP routes (Express, Hono, Next.js
    * — whatever) to `bridge.dispatch(id, request)`.
    */
-  readonly onRequest: (
-    event: unknown,
-    ctx: SubscriptionCtx,
-  ) => void | Promise<void>;
+  readonly onRequest: (event: unknown, ctx: SubscriptionCtx) => void | Promise<void>;
   readonly metadata?: Readonly<Record<string, unknown>>;
 }
 
@@ -156,10 +143,7 @@ export interface EventListenerProps {
   readonly id: string;
   /** Bus channel id, queue name, or other driver-specific selector. */
   readonly channel: string;
-  readonly onEvent: (
-    event: unknown,
-    ctx: SubscriptionCtx,
-  ) => void | Promise<void>;
+  readonly onEvent: (event: unknown, ctx: SubscriptionCtx) => void | Promise<void>;
   readonly metadata?: Readonly<Record<string, unknown>>;
 }
 

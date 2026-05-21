@@ -37,9 +37,7 @@ export interface WithSubscriptionsOptions {
   ) => void | Promise<void>;
 }
 
-export function withSubscriptions(
-  options: WithSubscriptionsOptions = {},
-): AppExtension {
+export function withSubscriptions(options: WithSubscriptionsOptions = {}): AppExtension {
   return {
     name: "@agentick/subscriptions",
     async install(installer) {

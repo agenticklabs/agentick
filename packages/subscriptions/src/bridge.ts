@@ -17,10 +17,7 @@
  * @see docs/proposals/v2/blueprint/22-state-formatters-reconciler-shape.md
  */
 
-import type {
-  SubscriptionIntent,
-  Unsubscribe,
-} from "@agentick/spec";
+import type { SubscriptionIntent, Unsubscribe } from "@agentick/spec";
 
 // ============================================================================
 // Surface
@@ -42,10 +39,7 @@ export interface SubscriptionCtx {
   readonly metadata: Readonly<Record<string, unknown>>;
 }
 
-export type SubscriptionHandler = (
-  event: unknown,
-  ctx: SubscriptionCtx,
-) => void | Promise<void>;
+export type SubscriptionHandler = (event: unknown, ctx: SubscriptionCtx) => void | Promise<void>;
 
 export interface SubscriptionBridge {
   declare(intent: SubscriptionIntent, handler: SubscriptionHandler): Unsubscribe;
@@ -115,9 +109,7 @@ export function createSubscriptionBridge(
     async dispatch(id, event, opts): Promise<void> {
       const entry = live.get(id);
       if (!entry) {
-        throw new Error(
-          `SubscriptionBridge: no handler declared for id=${id}`,
-        );
+        throw new Error(`SubscriptionBridge: no handler declared for id=${id}`);
       }
       const ctx: SubscriptionCtx = {
         id,

@@ -25,10 +25,7 @@ describe("attachInProcessScheduler", () => {
     const bridge = createSubscriptionBridge();
     const unsubscribe = attachInProcessScheduler(bridge);
     const handler = vi.fn(async () => {});
-    bridge.declare(
-      { id: "c", kind: "cron", config: { expr: "@hourly" } },
-      handler,
-    );
+    bridge.declare({ id: "c", kind: "cron", config: { expr: "@hourly" } }, handler);
     // @hourly fires on the next :00. We're at 10:00:00, so the
     // next fire is 11:00:00 — one hour out.
     await vi.advanceTimersByTimeAsync(60 * 60 * 1000);
@@ -40,10 +37,7 @@ describe("attachInProcessScheduler", () => {
     const bridge = createSubscriptionBridge();
     const detach = attachInProcessScheduler(bridge);
     const handler = vi.fn(async () => {});
-    bridge.declare(
-      { id: "c", kind: "cron", config: { expr: "@hourly" } },
-      handler,
-    );
+    bridge.declare({ id: "c", kind: "cron", config: { expr: "@hourly" } }, handler);
     detach();
     await vi.advanceTimersByTimeAsync(60 * 60 * 1000);
     expect(handler).not.toHaveBeenCalled();
@@ -53,10 +47,7 @@ describe("attachInProcessScheduler", () => {
     const bridge = createSubscriptionBridge();
     attachInProcessScheduler(bridge);
     const handler = vi.fn(async () => {});
-    bridge.declare(
-      { id: "w", kind: "webhook", config: { path: "/x" } },
-      handler,
-    );
+    bridge.declare({ id: "w", kind: "webhook", config: { path: "/x" } }, handler);
     await vi.advanceTimersByTimeAsync(24 * 60 * 60 * 1000);
     expect(handler).not.toHaveBeenCalled();
   });
@@ -66,10 +57,7 @@ describe("attachInProcessScheduler", () => {
     attachInProcessScheduler(bridge);
     const handler = vi.fn(async () => {});
     // Every minute
-    bridge.declare(
-      { id: "c", kind: "cron", config: { expr: "* * * * *" } },
-      handler,
-    );
+    bridge.declare({ id: "c", kind: "cron", config: { expr: "* * * * *" } }, handler);
     await vi.advanceTimersByTimeAsync(60 * 1000);
     expect(handler).toHaveBeenCalledTimes(1);
   });
