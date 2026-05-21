@@ -12,3 +12,5 @@ export { useOnMount, useOnUnmount } from "./use-on-mount.js";
 export { useOnLifecycleCustom } from "./use-on-lifecycle-custom.js";
 export { useToolBridge } from "./use-tool-bridge.js";
 export { useSessionState } from "./use-session-state.js";
+export { useGate, gate } from "./use-gate.js";
+export type { GateDescriptor, GateState, GateValue } from "./use-gate.js";

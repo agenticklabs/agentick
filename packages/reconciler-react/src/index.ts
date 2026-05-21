@@ -127,7 +127,10 @@ export {
   useOnLifecycleCustom,
   useToolBridge,
   useSessionState,
+  useGate,
+  gate,
 } from "./react/hooks/index.js";
+export type { GateDescriptor, GateState, GateValue } from "./react/hooks/index.js";
 
 // React-flavored createTool (extends @agentick/tool with use() hook)
 export { createTool } from "./react/create-tool.js";
@@ -138,6 +141,8 @@ export { FormatScope, Markdown, XML, PlainText } from "./react/components/index.
 export type { FormatScopeProps, NamedFormatScopeProps } from "./react/components/index.js";
 export { Message } from "./react/components/index.js";
 export type { MessageProps } from "./react/components/index.js";
+export { Section } from "./react/components/index.js";
+export type { SectionProps } from "./react/components/index.js";
 export { Timeline } from "./react/components/index.js";
 export type {
   TimelineProps,
