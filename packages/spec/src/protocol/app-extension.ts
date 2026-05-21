@@ -28,7 +28,9 @@
 import type { EventQuery, ProtocolEvent } from "../data/events.js";
 import type { ToolHandler } from "../data/tool-handler.js";
 import type { Validator } from "../data/validator.js";
-import type { Unsubscribe } from "./inbox.js";
+import type { EventBus } from "./bus.js";
+import type { MessageInbox, Unsubscribe } from "./inbox.js";
+import type { OperationJournal } from "./journal.js";
 
 // ============================================================================
 // Extension
@@ -115,6 +117,22 @@ export interface AppInstaller {
     listener: (event: ProtocolEvent) => void | Promise<void>,
   ): Unsubscribe;
 
+  // ──────────────────────── Substrate access ────────────────────────
+
+  /**
+   * The app's shared substrate. Extensions construct child harnesses
+   * (e.g., a `SandboxHarness` per `<Sandbox>` JSX instance, an
+   * `MCPConnectionHarness` per `<MCP>`) using this — events from those
+   * child harnesses flow into the app's bus and journal, so
+   * `app.events({ surface: "sandbox" })` works without further wiring.
+   *
+   * Extensions don't construct harnesses lazily inside React
+   * components (the JSX tree doesn't see substrate). Instead, they
+   * expose factories on their bridges: `bridge.createHarness(init)`
+   * closes over this substrate and the React component just calls it.
+   */
+  readonly substrate: AppSubstrate;
+
   // ──────────────────────── App ────────────────────────
 
   /**
@@ -123,6 +141,18 @@ export interface AppInstaller {
    * Opaque to the spec; the runtime types it concretely.
    */
   readonly app: AppInstallerHost;
+}
+
+/**
+ * The shared substrate primitives the AppHarness owns. Exposed to
+ * extensions so they can wire child harnesses into the same journal /
+ * bus / inbox the app uses — sub-harness events appear on
+ * `app.events()` and the audit trail is unified.
+ */
+export interface AppSubstrate {
+  readonly journal: OperationJournal;
+  readonly bus: EventBus;
+  readonly inbox: MessageInbox;
 }
 
 /**

@@ -933,6 +933,9 @@ importers:
       '@agentick/core':
         specifier: workspace:*
         version: link:../core
+      '@agentick/reconciler-react':
+        specifier: workspace:*
+        version: link:../reconciler-react
       '@agentick/runtime':
         specifier: workspace:*
         version: link:../runtime

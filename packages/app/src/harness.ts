@@ -452,6 +452,11 @@ export class AppHarness<P = unknown>
           iter.return?.();
         };
       },
+      substrate: {
+        journal: self.journal,
+        bus: self.bus,
+        inbox: self.inbox,
+      },
       app: installerHost,
     };
   }

@@ -1,15 +1,16 @@
 /**
  * `withSandbox()` — `AppExtension` factory for the sandbox surface.
  *
- * Registers an in-memory `SandboxBridge` with the AppHarness's
- * installer. The `<Sandbox provider={...}>` JSX component (in
- * `@agentick/sandbox/v2/react`) populates the bridge at mount time by
- * constructing a `SandboxHarness` per `<Sandbox>` instance and
- * registering it.
+ * Constructs a `SandboxBridge` wired to the AppHarness's shared
+ * substrate at install time. The bridge's `createHarness(input)`
+ * method closes over that substrate — React components that mount
+ * `<Sandbox>` call into the bridge to materialize harnesses, and
+ * those harnesses publish events into the app's bus + journal.
  *
- * Adopters who want pre-configured sandboxes at app-init (not driven
- * by JSX) can use `withSandbox({ initialize })` to spin them up in
- * the `install()` hook.
+ * This is the critical architectural point: the bridge is constructed
+ * during `install()` (when substrate is reachable) and lives for the
+ * lifetime of the app. Whether the `<Sandbox>` JSX is mounted or not
+ * is irrelevant — the bridge is ready and usable.
  *
  * @see docs/proposals/v2/blueprint/24-sandbox-as-harness.md
  * @see docs/proposals/v2/blueprint/22-state-formatters-reconciler-shape.md §AppExtension
@@ -17,16 +18,9 @@
 
 import type { AppExtension, AppInstaller } from "@agentick/spec";
 
-import { inMemorySandboxBridge, type SandboxBridge } from "./bridge.js";
+import { createSandboxBridge, type SandboxBridge } from "./bridge.js";
 
 export interface WithSandboxOptions {
-  /**
-   * Provide a pre-built bridge instance. Default: a fresh
-   * `inMemorySandboxBridge()`. Override when you want to share a
-   * bridge across multiple apps (rare) or implement a custom
-   * registry shape.
-   */
-  readonly bridge?: SandboxBridge;
   /**
    * Run at extension install time, with the bridge already
    * registered. Useful for pre-spinning sandboxes at app-init that
@@ -36,10 +30,10 @@ export interface WithSandboxOptions {
 }
 
 export function withSandbox(options: WithSandboxOptions = {}): AppExtension {
-  const bridge = options.bridge ?? inMemorySandboxBridge();
   return {
     name: "@agentick/sandbox",
     async install(installer) {
+      const bridge = createSandboxBridge({ substrate: installer.substrate });
       installer.registerBridge("sandbox", bridge);
       if (options.initialize) {
         await options.initialize(bridge, installer);
@@ -47,3 +41,7 @@ export function withSandbox(options: WithSandboxOptions = {}): AppExtension {
     },
   };
 }
+
+// Adopters who want a custom bridge implementation write their own
+// AppExtension that calls installer.registerBridge("sandbox", customBridge)
+// — same surface, same result, no `bridgeFactory` option needed.

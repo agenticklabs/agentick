@@ -1,17 +1,31 @@
 /**
- * `SandboxBridge` — registry of live `SandboxHarness` instances.
+ * `SandboxBridge` — factory + registry for `SandboxHarness` instances.
  *
- * The bridge is the typed pipe between framework components (e.g.,
- * `<Sandbox>` in reconciler-react) and consumers (tools that call
- * `useSandbox()` to get a harness handle). Framework components
- * register harnesses on mount and unregister on unmount; consumers
- * query by id (or grab the first ready harness when there's only one).
+ * The bridge is created at extension install time (`withSandbox()`),
+ * which is when the AppHarness's substrate (journal / bus / inbox) is
+ * accessible. The bridge closes over the substrate and exposes
+ * `createHarness(init)` so React components — which never see the
+ * substrate — can construct harnesses that publish into the app's bus.
+ *
+ * Without this pattern, sandbox events would land in an isolated bus
+ * the rest of the app can't read; `app.events({ surface: "sandbox" })`
+ * would return nothing. Routing creation through the bridge keeps the
+ * audit trail unified — the load-bearing reason sandbox is a harness
+ * in the first place.
  *
  * @see docs/proposals/v2/blueprint/24-sandbox-as-harness.md
  */
 
-import type { Unsubscribe } from "@agentick/spec";
-import type { SandboxHarness } from "./harness.js";
+import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
+import type {
+  AppSubstrate,
+  SandboxACL,
+  SandboxCreateOptions,
+  SandboxProvider,
+  Unsubscribe,
+} from "@agentick/spec";
+
+import { SandboxHarness } from "./harness.js";
 
 export interface SandboxRegistration {
   readonly id: string;
@@ -19,7 +33,32 @@ export interface SandboxRegistration {
   readonly status: "creating" | "ready" | "degraded" | "failed" | "destroyed";
 }
 
+export interface CreateSandboxHarnessInput {
+  readonly sandboxId: string;
+  readonly provider: SandboxProvider;
+  readonly options: SandboxCreateOptions;
+  readonly acl?: SandboxACL;
+  readonly permissionTimeoutDecision?: "allow-once" | "deny";
+  readonly permissionTimeoutMs?: number;
+}
+
 export interface SandboxBridge {
+  /**
+   * Construct a `SandboxHarness` wired into the app's shared
+   * substrate. The harness's events flow into `app.events()` and its
+   * operations journal into the same store as everything else.
+   *
+   * Auto-registers the harness with the bridge — callers do not need
+   * to also call `register`. The unregister handle is returned via
+   * the registration listener path.
+   */
+  createHarness(input: CreateSandboxHarnessInput): Promise<SandboxHarness>;
+
+  /**
+   * Manually register a harness — useful when adopters build a
+   * harness outside the bridge's factory and want it visible to
+   * consumers via `get()` / `list()`.
+   */
   register(harness: SandboxHarness): Unsubscribe;
   unregister(id: string): void;
   get(id: string): SandboxHarness | undefined;
@@ -28,12 +67,33 @@ export interface SandboxBridge {
   subscribe(listener: () => void): Unsubscribe;
 }
 
-export function inMemorySandboxBridge(): SandboxBridge {
+export interface CreateSandboxBridgeOptions {
+  readonly substrate: AppSubstrate;
+}
+
+export function createSandboxBridge(options: CreateSandboxBridgeOptions): SandboxBridge {
   const harnesses = new Map<string, SandboxHarness>();
   const listeners = new Set<() => void>();
   const notify = (): void => listeners.forEach((l) => l());
 
-  return {
+  const bridge: SandboxBridge = {
+    async createHarness(input): Promise<SandboxHarness> {
+      const harness = await SandboxHarness.fromProvider(
+        options.substrate.journal,
+        options.substrate.bus,
+        options.substrate.inbox,
+        {
+          sandboxId: input.sandboxId,
+          provider: input.provider,
+          options: input.options,
+          ...(input.acl !== undefined ? { acl: input.acl } : {}),
+        },
+      );
+      await harness.ready;
+      harnesses.set(input.sandboxId, harness);
+      notify();
+      return harness;
+    },
     register(harness): Unsubscribe {
       harnesses.set(harness.sandboxId, harness);
       notify();
@@ -64,4 +124,23 @@ export function inMemorySandboxBridge(): SandboxBridge {
       };
     },
   };
+  return bridge;
+}
+
+/**
+ * Convenience for tests + small-scope adopters: an in-memory bridge
+ * not wired to a real `AppSubstrate`. The harnesses it manufactures
+ * use local substrate, so events don't flow into a real
+ * `app.events()` — fine for unit tests, not for production. Adopters
+ * who want unified observability use `createSandboxBridge({ substrate })`
+ * from inside an `AppExtension.install()` hook.
+ */
+export function inMemorySandboxBridge(): SandboxBridge {
+  return createSandboxBridge({
+    substrate: {
+      journal: new MemoryJournal(),
+      bus: new LocalEventBus(),
+      inbox: new LocalInbox(),
+    },
+  });
 }

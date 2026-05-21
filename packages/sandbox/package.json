@@ -41,6 +41,11 @@
       "types": "./src/v2/index.ts",
       "import": "./src/v2/index.ts",
       "default": "./src/v2/index.ts"
+    },
+    "./v2/react": {
+      "types": "./src/v2/react/index.ts",
+      "import": "./src/v2/react/index.ts",
+      "default": "./src/v2/react/index.ts"
     }
   },
   "publishConfig": {
@@ -60,6 +65,11 @@
         "types": "./dist/v2/index.d.ts",
         "import": "./dist/v2/index.js",
         "default": "./dist/v2/index.js"
+      },
+      "./v2/react": {
+        "types": "./dist/v2/react/index.d.ts",
+        "import": "./dist/v2/react/index.js",
+        "default": "./dist/v2/react/index.js"
       }
     },
     "main": "./dist/index.js",
@@ -75,6 +85,7 @@
   },
   "dependencies": {
     "@agentick/core": "workspace:*",
+    "@agentick/reconciler-react": "workspace:*",
     "@agentick/runtime": "workspace:*",
     "@agentick/spec": "workspace:*",
     "diff": "^8.0.3",
