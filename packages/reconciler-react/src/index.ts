@@ -136,6 +136,8 @@ export type { ReactToolSpec, CreatedReactTool } from "./react/create-tool.js";
 // Components
 export { FormatScope, Markdown, XML, PlainText } from "./react/components/index.js";
 export type { FormatScopeProps, NamedFormatScopeProps } from "./react/components/index.js";
+export { Message } from "./react/components/index.js";
+export type { MessageProps } from "./react/components/index.js";
 export { Timeline } from "./react/components/index.js";
 export type {
   TimelineProps,

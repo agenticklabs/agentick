@@ -3,10 +3,11 @@
  *
  * Reads the session's timeline via `useTimeline()` (which subscribes to
  * the `TimelineBridge`'s version stamp). Each entry is emitted as
- * `<message role={entry.role}><content blocks={entry.content} /></message>`
- * — the `<content>` passthrough contributor folds the persisted spec-shape
- * blocks into the enclosing message's content array without requiring
- * authors to re-author each block as a JSX intrinsic.
+ * `<Message {...entry} />` — the contributor's `content` prop accepts the
+ * persisted spec-shape `ContentBlock[]` verbatim, so no translation is
+ * needed. `TimelineEntrySummary.timestamp` lands on the host props inert
+ * (the contributor doesn't read it; the host strip step keeps it
+ * available for any inspecting tooling).
  *
  * Optional token-budget compaction (`maxTokens`, `strategy`, `headroom`,
  * `preserveRoles`, `guidance`) drops entries that don't fit. The
@@ -24,8 +25,9 @@
 
 import React, { useEffect, useMemo, useRef, type ReactNode } from "react";
 import type { JSX } from "react";
-import type { ContentBlock, TimelineEntrySummary } from "@agentick/spec";
+import type { TimelineEntrySummary } from "@agentick/spec";
 import { useTimeline } from "../hooks/use-timeline.js";
+import { Message } from "./message.js";
 import { compactEntries, type CompactionStrategy, type TokenBudgetInfo } from "./token-budget.js";
 
 const h = React.createElement;
@@ -182,30 +184,7 @@ export function Timeline(props: TimelineProps): JSX.Element {
   return h(
     React.Fragment,
     null,
-    ...kept.map((entry, i) => renderEntry(entry, i)),
+    ...kept.map((entry, i) => h(Message, { key: entry.id ?? `entry-${i}`, ...entry })),
     props.children !== undefined ? props.children : null,
   );
-}
-
-function renderEntry(entry: TimelineEntrySummary, index: number): React.ReactElement {
-  const key = entry.id ?? `entry-${index}`;
-  const blocks = entry.content as readonly ContentBlock[];
-  return internalIntrinsic(
-    "message",
-    { key, role: entry.role, id: entry.id },
-    internalIntrinsic("content", { blocks }),
-  );
-}
-
-/**
- * Centralized type-cast for emitting v2 host intrinsics React's
- * IntrinsicElements doesn't (yet) declare. Mirrors `format-scope.tsx`.
- */
-function internalIntrinsic(
-  type: string,
-  props: Readonly<Record<string, unknown>>,
-  ...children: React.ReactNode[]
-): React.ReactElement {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return React.createElement(type as any, props, ...children);
 }

@@ -1,6 +1,9 @@
 export { FormatScope, Markdown, XML, PlainText } from "./format-scope.js";
 export type { FormatScopeProps, NamedFormatScopeProps } from "./format-scope.js";
 
+export { Message } from "./message.js";
+export type { MessageProps } from "./message.js";
+
 export { Timeline } from "./timeline.js";
 export type {
   TimelineProps,

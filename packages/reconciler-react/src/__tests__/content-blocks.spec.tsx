@@ -268,6 +268,47 @@ describe("content blocks — composing inside <message>", () => {
   });
 });
 
+describe("<message> — `content` prop precedence (v1-compat)", () => {
+  it("non-empty `content` prop wins over children", () => {
+    const prebuilt: ContentBlock[] = [
+      { type: "text", text: "from prop" },
+      { type: "code", language: "typescript", text: "const x = 1" },
+    ];
+    const { tree } = renderAndCollect(
+      React.createElement(
+        "message",
+        { role: "user", content: prebuilt },
+        // Children should be ignored when prop is non-empty.
+        "from children",
+        React.createElement("image", {
+          source: { type: "url", url: "https://x.test/a.png" },
+        }),
+      ),
+    );
+    const blocks = contentOf(tree);
+    expect(blocks.map((b) => b.type)).toEqual(["text", "code"]);
+    expect((blocks[0] as { text: string }).text).toBe("from prop");
+  });
+
+  it("empty `content` prop falls through to children", () => {
+    const { tree } = renderAndCollect(
+      React.createElement(
+        "message",
+        { role: "user", content: [] as ContentBlock[] },
+        "fallback text",
+      ),
+    );
+    const blocks = contentOf(tree);
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0]).toMatchObject({ type: "text", text: "fallback text" });
+  });
+
+  it("omitted `content` prop collects from children as before", () => {
+    const { tree } = renderAndCollect(React.createElement("message", { role: "user" }, "hello"));
+    expect(contentOf(tree)).toEqual([{ type: "text", text: "hello" }]);
+  });
+});
+
 describe("content blocks — JSON firewall", () => {
   it("all block types survive JSON round-trip", () => {
     const src = { type: "url", url: "https://x.test/" } as const;
