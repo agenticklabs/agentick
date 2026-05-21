@@ -338,6 +338,40 @@ describe("useGate — element rendering", () => {
   });
 });
 
+describe("useGate — knob descriptor", () => {
+  it("registers description + group + three-state options on the knob bridge", async () => {
+    const knobs = inMemoryKnobBridge();
+    const bridges: HookBridges = { ...stubBridges(), knobs };
+    const harness = await makeHarness();
+    const { Probe } = captureGate(
+      "verification",
+      gate({
+        description: "Verification pending",
+        instructions: "Run checks before completing.",
+        activateWhen: () => false,
+      }),
+    );
+
+    await harness.mount({
+      mountId: "m_desc",
+      sessionId: "s",
+      element: React.createElement(Probe),
+      bridges,
+    });
+    await flush();
+
+    const verification = knobs.list().find((k) => k.id === "verification");
+    expect(verification).toMatchObject({
+      id: "verification",
+      value: "inactive",
+      description: "Verification pending",
+      valueType: "string",
+      group: "gates",
+      options: ["inactive", "active", "deferred"],
+    });
+  });
+});
+
 describe("useGate — clear / defer", () => {
   it("clear() flips state to inactive", async () => {
     const knobs = inMemoryKnobBridge();

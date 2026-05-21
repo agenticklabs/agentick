@@ -41,11 +41,13 @@
  * @see packages/core/src/hooks/gate.ts (v1 origin)
  */
 
-import React, { useCallback, useRef } from "react";
+import React, { useCallback, useMemo, useRef } from "react";
 import type { TickResult } from "@agentick/spec";
-import { useKnob } from "./use-knob.js";
+import { useKnob, type UseKnobOptions } from "./use-knob.js";
 import { useLoopControl } from "./use-loop-control.js";
 import { useOnTickEnd } from "./use-on-tick-end.js";
+
+const GATE_OPTIONS: readonly GateValue[] = ["inactive", "active", "deferred"];
 
 // ============================================================================
 // Types
@@ -90,7 +92,20 @@ export function gate(opts: GateDescriptor): GateDescriptor {
 // ============================================================================
 
 export function useGate(name: string, options: GateDescriptor): GateState {
-  const [state, setState] = useKnob<GateValue>(name, "inactive");
+  // Push gate metadata onto the bridge so the model's `set_knob` tool +
+  // `<Knobs />` section see this knob as a `select` with three known
+  // values, grouped under "gates", with the gate's description as
+  // human-readable context.
+  const knobOptions = useMemo<UseKnobOptions>(
+    () => ({
+      description: options.description,
+      valueType: "string",
+      group: "gates",
+      options: GATE_OPTIONS,
+    }),
+    [options.description],
+  );
+  const [state, setState] = useKnob<GateValue>(name, "inactive", knobOptions);
   const loop = useLoopControl();
 
   // Ground-truth ref — survives the render-to-callback gap and lets the
