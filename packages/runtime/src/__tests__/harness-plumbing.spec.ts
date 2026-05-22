@@ -281,9 +281,11 @@ describe("harness plumbing — addressed inbox messages", () => {
     const messageId = ulid();
     const ack = await Effect.runPromise(
       inbox.send(address, {
+        addressedTo: address,
         messageId,
         type: "tool:knobs:set",
         payload: { id: "verbose", value: true },
+        timestamp: Date.now(),
       }),
     );
     // MessageAck carries `messageId` + `receivedAt` — receipt is the
@@ -299,9 +301,11 @@ describe("harness plumbing — addressed inbox messages", () => {
     const { events, stop } = await subscribeEnvelopes(bus, { surface: "tool" });
     await Effect.runPromise(
       inbox.send(`tool:session-8`, {
+        addressedTo: `tool:session-8`,
         messageId: ulid(),
         type: "tool:knobs:set",
         payload: { id: "mood", value: "decisive" },
+        timestamp: Date.now(),
       }),
     );
     await settle(30);
@@ -316,9 +320,11 @@ describe("harness plumbing — addressed inbox messages", () => {
     const messageId = ulid();
     const ack = await Effect.runPromise(
       inbox.send(`tool:session-9`, {
+        addressedTo: `tool:session-9`,
         messageId,
         type: "tool:knobs:nonexistent",
         payload: {},
+        timestamp: Date.now(),
       }),
     );
     // Inbox accepted the message (`messageId` echoed); the handler will
@@ -362,9 +368,11 @@ describe("harness plumbing — middleware on Operations", () => {
     );
     await Effect.runPromise(
       inbox.send(`tool:session-mw`, {
+        addressedTo: `tool:session-mw`,
         messageId: ulid(),
         type: "tool:knobs:set",
         payload: { id: "mood", value: "playful" },
+        timestamp: Date.now(),
       }),
     );
     await new Promise((r) => setTimeout(r, 20));
@@ -462,24 +470,26 @@ describe("harness plumbing — sender identity in envelopes", () => {
     // `from` field needed today.
   });
 
-  it("MessageEnvelope MAY carry an explicit replyTo for request/response", async () => {
+  it("MessageEnvelope carries an explicit `from` for response/ack tracking", async () => {
     // ADR 26 open question #6 — when cross-actor messaging needs
-    // explicit `from`/`replyTo` tracking. The substrate's MessageEnvelope
-    // already supports this via `replyTo` for request/response pairing.
+    // explicit `from` tracking. The substrate's MessageEnvelope
+    // already supports this for sender identification on response/ack.
     // This test documents the current shape so the ADR can land on
-    // whether `from` should be promoted to a first-class field.
+    // whether richer sender metadata needs further promotion.
     const { inbox } = await makeKnobsHarness("test-reply");
     const messageId = ulid();
     const ack = await Effect.runPromise(
       inbox.send(`tool:test-reply`, {
+        addressedTo: `tool:test-reply`,
         messageId,
         type: "tool:knobs:set",
         payload: { id: "verbose", value: true },
-        replyTo: "external-actor:dashboard-42",
+        from: "external-actor:dashboard-42",
+        timestamp: Date.now(),
       }),
     );
-    // Verifying the substrate accepts replyTo as a known envelope
-    // field; correlation/routing lands in higher layers.
+    // Verifying the substrate accepts `from` as a known envelope field;
+    // correlation/routing lands in higher layers.
     expect(ack.messageId).toBe(messageId);
   });
 });
