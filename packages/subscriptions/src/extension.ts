@@ -40,12 +40,17 @@ export interface WithSubscriptionsOptions {
 export function withSubscriptions(options: WithSubscriptionsOptions = {}): AppExtension {
   return {
     name: "@agentick/subscriptions",
+    target: "app",
     async install(installer) {
       const bridge = createSubscriptionBridge();
-      installer.registerBridge("subscriptions", bridge);
+      installer.registerNamespace("subscriptions", bridge);
 
       if (options.scheduler !== false) {
-        attachInProcessScheduler(bridge);
+        const detach = attachInProcessScheduler(bridge);
+        // Detach the scheduler when the app closes so timers don't
+        // outlive the harness (per ADR 26 — installer.onClose replaces
+        // the AppExtension.uninstall lifecycle).
+        installer.onClose(() => detach());
       }
 
       if (options.initialize) {

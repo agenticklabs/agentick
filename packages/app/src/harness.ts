@@ -44,6 +44,7 @@ import type {
   AppHarnessProtocol,
   AppInstaller,
   AppInstallerHost,
+  Extension,
   CreateSessionInput,
   EventBus,
   EventQuery,
@@ -229,13 +230,19 @@ export interface AppHarnessOptions<P = unknown> {
    * bridges, contributors, tool handlers, and bus subscriptions.
    *
    * Extensions install in the supplied order; last-writer-wins on
-   * bridge name collisions. Installer state is owned by the app and
-   * teardown happens in `closeApp` (calls `uninstall` in reverse).
+   * slot name collisions. Installer state is owned by the app and
+   * teardown happens in `closeApp` (fires registered `onClose` handlers
+   * in reverse order).
    *
-   * @see docs/proposals/v2/blueprint/22-state-formatters-reconciler-shape.md
-   * @see `@agentick/spec` §AppExtension
+   * Per ADR 26: extensions are a discriminated union by `target`. The
+   * app filters for `target === "app"` and installs those at app
+   * construction; `target === "session"` extensions are cached and
+   * forwarded to every session at session creation.
+   *
+   * @see docs/proposals/v2/blueprint/26-harness-api-shape.md
+   * @see `@agentick/spec` §Extension
    */
-  readonly extensions?: readonly AppExtension[];
+  readonly extensions?: readonly Extension[];
 }
 
 // ============================================================================
@@ -319,11 +326,21 @@ export class AppHarness<P = unknown>
   private readonly appCloseHandlers: Array<() => Promise<void> | void> = [];
 
   // ──────── Extension state ────────
-  /** Bridges merged into every session's HookBridges. */
+  /** Harnesses merged into every session's HookBridges by slot name. */
   private readonly extensionBridges = new Map<string, unknown>();
-  /** Extensions in install order (used to drive uninstall in reverse). */
-  private readonly installedExtensions: AppExtension[] = [];
-  /** Pending install promise resolved once all extensions complete `install()`. */
+  /**
+   * `target === "session"` extensions cached at app construction and
+   * forwarded to every session the app creates. Installed per-session at
+   * the SessionHarness's own install pass (which lands in ADR 26 Step 8).
+   * For Step 1 we hold them but don't yet wire them through.
+   */
+  private readonly sessionExtensions: readonly Extension[] = [];
+  /**
+   * Close handlers registered by extensions via `installer.onClose(...)`.
+   * Fired in reverse order during `closeApp`.
+   */
+  private readonly extensionCloseHandlers: Array<() => void | Promise<void>> = [];
+  /** Pending install promise resolved once all app-targeted extensions complete `install()`. */
   private readonly extensionsReady: Promise<void>;
 
   constructor(options: AppHarnessOptions<P>) {
@@ -378,15 +395,29 @@ export class AppHarness<P = unknown>
       unregister: (handlerRef) => this.handlerResolver.unregister(handlerRef),
     };
 
-    // Drive extensions. Each one runs against a shared installer that
-    // routes registrations into our internal maps + sub-harnesses.
-    // Extensions run sequentially in supplied order.
+    // Per ADR 26: extensions are a discriminated union by `target`.
+    // App filters for `target === "app"` and installs immediately;
+    // session-targeted ones are cached for forwarding at session
+    // creation.
+    const allExtensions = options.extensions ?? [];
+    const appExtensions: AppExtension[] = [];
+    const sessionExtensions: Extension[] = [];
+    for (const ext of allExtensions) {
+      if (ext.target === "app") appExtensions.push(ext);
+      else sessionExtensions.push(ext);
+    }
+    // Mutable assignment to the readonly field — set once at
+    // construction.
+    (this as unknown as { sessionExtensions: readonly Extension[] }).sessionExtensions =
+      sessionExtensions;
+
+    // Drive app-targeted extensions. Each runs against a shared
+    // installer that routes registrations into our internal maps +
+    // sub-harnesses. Extensions run sequentially in supplied order.
     this.extensionsReady = (async () => {
-      const exts = options.extensions ?? [];
       const installer = this.makeInstaller();
-      for (const ext of exts) {
+      for (const ext of appExtensions) {
         await ext.install(installer);
-        this.installedExtensions.push(ext);
       }
     })();
   }
@@ -398,15 +429,23 @@ export class AppHarness<P = unknown>
       metadata: {},
     };
     return {
-      registerBridge(name, bridge): Unsubscribe {
+      kind: "app",
+      hostId: this.scopeId,
+      registerNamespace(name, harness): Unsubscribe {
         const prior = self.extensionBridges.get(name);
-        self.extensionBridges.set(name, bridge);
+        self.extensionBridges.set(name, harness);
         return () => {
-          if (self.extensionBridges.get(name) === bridge) {
+          if (self.extensionBridges.get(name) === harness) {
             if (prior !== undefined) self.extensionBridges.set(name, prior);
             else self.extensionBridges.delete(name);
           }
         };
+      },
+      getNamespace<T>(name: string): T | undefined {
+        return self.extensionBridges.get(name) as T | undefined;
+      },
+      onClose(handler): void {
+        self.extensionCloseHandlers.push(handler);
       },
       registerContributor(contributor): Unsubscribe {
         // The reconciler harness exposes `registerContributor` on
@@ -778,12 +817,13 @@ export class AppHarness<P = unknown>
       }
     }
 
-    // Tear down extensions in reverse install order. Errors swallowed
-    // so one misbehaving extension can't block teardown of others.
-    const installer = this.makeInstaller();
-    for (const ext of this.installedExtensions.slice().reverse()) {
+    // Fire extension close handlers in reverse registration order.
+    // Errors swallowed so one misbehaving extension can't block
+    // teardown of others. (ADR 26: `installer.onClose(handler)`
+    // replaces the old `AppExtension.uninstall` lifecycle.)
+    for (const handler of this.extensionCloseHandlers.slice().reverse()) {
       try {
-        await ext.uninstall?.(installer);
+        await handler();
       } catch {
         // best effort
       }

@@ -13,7 +13,7 @@
  * is irrelevant — the bridge is ready and usable.
  *
  * @see docs/proposals/v2/blueprint/24-sandbox-as-harness.md
- * @see docs/proposals/v2/blueprint/22-state-formatters-reconciler-shape.md §AppExtension
+ * @see docs/proposals/v2/blueprint/26-harness-api-shape.md §Extension
  */
 
 import type { AppExtension, AppInstaller } from "@agentick/spec";
@@ -32,9 +32,10 @@ export interface WithSandboxOptions {
 export function withSandbox(options: WithSandboxOptions = {}): AppExtension {
   return {
     name: "@agentick/sandbox",
+    target: "app",
     async install(installer) {
       const bridge = createSandboxBridge({ substrate: installer.substrate });
-      installer.registerBridge("sandbox", bridge);
+      installer.registerNamespace("sandbox", bridge);
       if (options.initialize) {
         await options.initialize(bridge, installer);
       }
@@ -43,5 +44,5 @@ export function withSandbox(options: WithSandboxOptions = {}): AppExtension {
 }
 
 // Adopters who want a custom bridge implementation write their own
-// AppExtension that calls installer.registerBridge("sandbox", customBridge)
+// AppExtension that calls installer.registerNamespace("sandbox", customBridge)
 // — same surface, same result, no `bridgeFactory` option needed.
