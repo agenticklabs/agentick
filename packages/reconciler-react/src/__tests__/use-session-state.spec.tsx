@@ -49,13 +49,16 @@ describe("useSessionState — initial registration", () => {
     const m = tree.context.entries[0]!;
     if (m.kind !== "message") throw new Error("expected message");
     expect(textOf(m.content)).toBe("count=5");
+    // useSessionState's seeding fires fire-and-forget via async set;
+    // give it a microtask to land.
+    await new Promise((r) => setImmediate(r));
     expect(bridges.state.get("count")).toBe(5);
   });
 
   it("does NOT overwrite an existing value when re-mounting", async () => {
     const harness = await makeHarness();
     const bridges = stubBridges();
-    bridges.state.set("count", 99);
+    await bridges.state.set({ key: "count", value: 99 });
 
     function Counter() {
       const [count] = useSessionState("count", 5);
@@ -100,7 +103,7 @@ describe("useSessionState — persistence across mounts", () => {
     await harness.renderTree({ mountId: "m_a", sessionId: "s" });
 
     // Simulate the agent updating state mid-session
-    bridges.state.set("count", 42);
+    await bridges.state.set({ key: "count", value: 42 });
     await harness.unmount({ mountId: "m_a", sessionId: "s" });
 
     // Remount with the SAME bridges bundle — session-owns-bridge contract.
@@ -144,7 +147,7 @@ describe("useSessionState — reactivity", () => {
     if (firstEntry.kind !== "message") throw new Error("expected message");
     expect(textOf(firstEntry.content)).toBe("count=0");
 
-    bridges.state.set("count", 7);
+    await bridges.state.set({ key: "count", value: 7 });
     const second = await harness.renderTree({ mountId: "m_r", sessionId: "s" });
     const secondEntry = second.tree.context.entries[0]!;
     if (secondEntry.kind !== "message") throw new Error("expected message");

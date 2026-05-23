@@ -914,6 +914,9 @@ importers:
       '@agentick/spec':
         specifier: workspace:*
         version: link:../spec
+      '@agentick/state':
+        specifier: workspace:*
+        version: link:../state
       '@agentick/tool':
         specifier: workspace:*
         version: link:../tool
@@ -1115,6 +1118,9 @@ importers:
       '@agentick/spec':
         specifier: workspace:*
         version: link:../spec
+      '@agentick/state':
+        specifier: workspace:*
+        version: link:../state
       effect:
         specifier: ^3.21.2
         version: 3.21.2
@@ -1158,6 +1164,22 @@ importers:
       vitest:
         specifier: ^4.0.0
         version: 4.0.18(@opentelemetry/api@1.9.0)(@types/node@25.0.9)(happy-dom@17.6.3)(jiti@2.6.1)(msw@2.14.6(@types/node@25.0.9)(typescript@5.9.3))(tsx@4.21.0)(yaml@2.8.4)
+
+  packages/state:
+    dependencies:
+      '@agentick/runtime':
+        specifier: workspace:*
+        version: link:../runtime
+      '@agentick/spec':
+        specifier: workspace:*
+        version: link:../spec
+      effect:
+        specifier: ^3.21.2
+        version: 3.21.2
+    devDependencies:
+      '@agentick/spec-conformance':
+        specifier: workspace:*
+        version: link:../spec-conformance
 
   packages/subscriptions:
     dependencies:

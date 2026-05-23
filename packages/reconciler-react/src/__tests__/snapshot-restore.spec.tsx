@@ -245,8 +245,8 @@ describe("ReconcilerHarness — snapshot/restore through the harness", () => {
   it("snapshot captures and restores StateBridge values", async () => {
     const harness = await makeHarness("state");
     const bridges = stubBridges();
-    bridges.state.set("counter", 7);
-    bridges.state.set("label", "hello");
+    await bridges.state.set({ key: "counter", value: 7 });
+    await bridges.state.set({ key: "label", value: "hello" });
     await harness.mount({
       mountId: "m_s",
       sessionId: "s",
@@ -261,7 +261,7 @@ describe("ReconcilerHarness — snapshot/restore through the harness", () => {
     expect(wire.state).toEqual({ counter: 7, label: "hello" });
 
     // Mutate the live bridge, then restore — values should snap back.
-    bridges.state.set("counter", 99);
+    await bridges.state.set({ key: "counter", value: 99 });
     await harness.restore({ mountId: "m_s", snapshot: snap });
     expect(bridges.state.get("counter")).toBe(7);
   });

@@ -17,8 +17,9 @@
  * nodes) can address it at `inbox://knobs:{sessionId}:knobs`.
  */
 
-import { InMemoryDataBridge, inMemoryStateBridge } from "@agentick/reconciler-react";
+import { InMemoryDataBridge } from "@agentick/reconciler-react";
 import { KnobsHarness } from "@agentick/knobs";
+import { StateHarness } from "@agentick/state";
 import type {
   EventBus,
   HookBridges,
@@ -27,7 +28,6 @@ import type {
   MessageRole,
   OperationJournal,
   SessionBridge,
-  StateBridge,
   TimelineBridge,
   TimelineEntrySummary,
   TimelineSnapshot,
@@ -75,9 +75,8 @@ export function timelineBridgeFor(store: SessionStateStore): TimelineBridge {
   };
 }
 
-export function stateBridgeFor(initial: Readonly<Record<string, unknown>> = {}): StateBridge {
-  return inMemoryStateBridge({ ...initial });
-}
+// StateHarness is constructed inline in buildSessionBridges so it can
+// share the session's substrate; no per-call factory needed.
 
 export function loopBridgeStub(): LoopBridge {
   return {
@@ -109,6 +108,7 @@ export function sessionBridgeFor(store: SessionStateStore): SessionBridge {
  */
 export interface SessionHookBridges extends HookBridges {
   readonly knobs: KnobsHarness;
+  readonly state: StateHarness;
   readonly data: InMemoryDataBridge;
 }
 
@@ -132,9 +132,15 @@ export function buildSessionBridges(
   },
   options: BuildSessionBridgesOptions = {},
 ): SessionHookBridges {
-  // Knobs is a harness wired to the session's substrate (ADR 26).
+  // Knobs + State are harnesses wired to the session's substrate (ADR 26).
   const knobs = new KnobsHarness(
     `${store.id}:knobs`,
+    substrate.journal,
+    substrate.bus,
+    substrate.inbox,
+  );
+  const state = new StateHarness(
+    `${store.id}:state`,
     substrate.journal,
     substrate.bus,
     substrate.inbox,
@@ -143,7 +149,7 @@ export function buildSessionBridges(
   const base: SessionHookBridges = {
     timeline: timelineBridgeFor(store),
     knobs,
-    state: stateBridgeFor(),
+    state,
     data: new InMemoryDataBridge(),
     loop: loopBridgeStub(),
     session: sessionBridgeFor(store),

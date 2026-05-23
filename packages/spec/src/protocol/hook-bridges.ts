@@ -22,6 +22,7 @@
 import type { ContentBlock, MessageRole } from "../data/content-blocks.js";
 import type { Unsubscribe } from "./inbox.js";
 import type { KnobsHarnessProtocol } from "./knobs-harness.js";
+import type { StateHarnessProtocol } from "./state-harness.js";
 
 export type { Unsubscribe };
 
@@ -57,7 +58,13 @@ export interface HookBridges {
    * dispatch). The previous `KnobBridge` interface has retired.
    */
   readonly knobs: KnobsHarnessProtocol;
-  readonly state: StateBridge;
+  /**
+   * State is a full harness (ADR 26). `useBridges().state` returns a
+   * `StateHarnessProtocol` — sync reads (get/has/list/subscribe/
+   * subscribeAll) + async Operation-backed writes (set/delete). The
+   * previous `StateBridge` interface has retired.
+   */
+  readonly state: StateHarnessProtocol;
   readonly data: DataBridge;
   readonly loop: LoopBridge;
   readonly session: SessionBridge;
@@ -268,40 +275,13 @@ export interface KnobDescriptor extends KnobRegistration {
 }
 
 // ============================================================================
-// State bridge
+// State — retired; see StateHarnessProtocol
 // ============================================================================
-
-/**
- * Session-internal reactive state. Sibling of {@link KnobBridge}, but
- * **not model-visible** — the executor's `set_knob` tool does not reach
- * here, and `list()` returns keys for framework / debug use only.
- *
- * This is the v2 analog of v1's COM state bag (the one wrapped by
- * `useComState(key, initial)`). The session owns the bridge across
- * mounts so values survive remount; persistence is via
- * `exportSnapshot` / `importSnapshot`.
- *
- * `useSessionState<T>(key, initial)` is the React hook that wraps this
- * surface via `useSyncExternalStore` — subsequent `set(key, value)`
- * calls re-render subscribed components.
- *
- * @see docs/proposals/v2/blueprint/22-state-formatters-reconciler-shape.md §D1
- */
-export interface StateBridge {
-  get(key: string): unknown;
-  set(key: string, value: unknown): void;
-  has(key: string): boolean;
-  list(): readonly string[];
-  /** Notify when the value at `key` changes. */
-  subscribe(key: string, listener: () => void): Unsubscribe;
-  /**
-   * Serialize all entries for persistence. The session writes this into
-   * its snapshot; `importSnapshot` restores on hibernate-resume.
-   */
-  exportSnapshot(): Readonly<Record<string, unknown>>;
-  /** Replace storage with the values from a prior `exportSnapshot`. */
-  importSnapshot(values: Readonly<Record<string, unknown>>): void;
-}
+//
+// Per ADR 26, `StateBridge` was retired. The session-internal K/V
+// surface is now `StateHarnessProtocol` (in `./state-harness.ts`).
+// `useSessionState<T>(key, initial)` reads via `useBridges().state`
+// against that harness.
 
 // ============================================================================
 // Loop bridge

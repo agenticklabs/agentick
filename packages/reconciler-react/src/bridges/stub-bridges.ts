@@ -11,13 +11,14 @@ import type {
   KnobsHarnessProtocol,
   LoopBridge,
   SessionBridge,
-  StateBridge,
+  StateHarnessProtocol,
   TimelineBridge,
   TimelineEntrySummary,
   TimelineSnapshot,
   Unsubscribe,
 } from "@agentick/spec";
 import { KnobsHarness } from "@agentick/knobs";
+import { StateHarness } from "@agentick/state";
 import { LocalEventBus, LocalInbox, MemoryJournal, ulid } from "@agentick/runtime";
 import { InMemoryDataBridge } from "./in-memory-data-bridge.js";
 
@@ -90,48 +91,21 @@ export function stubKnobsHarness(
 }
 
 /**
- * In-memory `StateBridge` — sibling of `inMemoryKnobBridge` minus knob
- * descriptor metadata. Wraps a string-keyed bag with subscribe + snapshot
- * round-trip. Used by `useSessionState` (v2 analog of v1's `useComState`).
- *
- * @see docs/proposals/v2/blueprint/22-state-formatters-reconciler-shape.md §D1
+ * Build a {@link StateHarness} for use in test bridges. Like
+ * {@link stubKnobsHarness}, wraps the harness with its own in-memory
+ * substrate. `initial` seeds entries via `importSnapshot`.
  */
-export function inMemoryStateBridge(initial: Readonly<Record<string, unknown>> = {}): StateBridge {
-  const values = new Map<string, unknown>(Object.entries(initial));
-  const listeners = new Map<string, Set<() => void>>();
-  return {
-    get: (key: string) => values.get(key),
-    set: (key: string, value: unknown) => {
-      values.set(key, value);
-      listeners.get(key)?.forEach((l) => l());
-    },
-    has: (key: string) => values.has(key),
-    list: (): readonly string[] => [...values.keys()],
-    subscribe: (key: string, listener: () => void): Unsubscribe => {
-      let set = listeners.get(key);
-      if (!set) {
-        set = new Set();
-        listeners.set(key, set);
-      }
-      set.add(listener);
-      return () => {
-        set!.delete(listener);
-      };
-    },
-    exportSnapshot: () => {
-      const out: Record<string, unknown> = {};
-      for (const [k, v] of values) out[k] = v;
-      return out;
-    },
-    importSnapshot: (next: Readonly<Record<string, unknown>>) => {
-      const oldKeys = new Set(values.keys());
-      const newKeys = new Set(Object.keys(next));
-      const changedKeys = new Set<string>([...oldKeys, ...newKeys]);
-      values.clear();
-      for (const [k, v] of Object.entries(next)) values.set(k, v);
-      for (const key of changedKeys) listeners.get(key)?.forEach((l) => l());
-    },
-  };
+export function stubStateHarness(initial: Readonly<Record<string, unknown>> = {}): StateHarness {
+  const harness = new StateHarness(
+    `stub:${ulid()}`,
+    new MemoryJournal({ capacity: 1024 }),
+    new LocalEventBus(),
+    new LocalInbox(),
+  );
+  if (Object.keys(initial).length > 0) {
+    harness.importSnapshot(initial);
+  }
+  return harness;
 }
 
 export function stubLoopBridge(): LoopBridge {
@@ -166,7 +140,7 @@ export function stubBridges(options: StubBridgesOptions = {}): HookBridges {
   return {
     timeline: stubTimelineBridge(),
     knobs: stubKnobsHarness(options.knobs) as KnobsHarnessProtocol,
-    state: inMemoryStateBridge(options.state),
+    state: stubStateHarness(options.state) as StateHarnessProtocol,
     data: new InMemoryDataBridge({ onSettled: options.onDataSettled }),
     loop: stubLoopBridge(),
     session: stubSessionBridge(options.sessionId),

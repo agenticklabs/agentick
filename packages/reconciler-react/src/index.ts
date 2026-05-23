@@ -96,7 +96,7 @@ export {
   stubBridges,
   stubTimelineBridge,
   stubKnobsHarness,
-  inMemoryStateBridge,
+  stubStateHarness,
   stubLoopBridge,
   stubSessionBridge,
 } from "./bridges/stub-bridges.js";
