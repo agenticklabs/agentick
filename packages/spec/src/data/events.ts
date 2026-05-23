@@ -83,6 +83,14 @@ export interface EventEnvelope {
   /** Present on operation lifecycle events. */
   readonly opId?: string;
 
+  /**
+   * Parent operation id. Present on inner operations spawned by a
+   * surrounding `runOperation`. Auto-populated by `BaseHarness` from
+   * the ambient `RuntimeContext.opId` (via FiberRef). Subscribers can
+   * filter `parentOpId === undefined` to see only top-level ops.
+   */
+  readonly parentOpId?: string;
+
   readonly surface: EventSurface;
 
   /** Hierarchical name: `<surface>:<domain>:<action>`. */

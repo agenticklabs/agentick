@@ -606,6 +606,7 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface> {
     return {
       id: ulid(),
       opId: op.opId,
+      parentOpId: op.parentOpId,
       surface: op.surface ?? this.surface,
       name: op.name,
       phase,

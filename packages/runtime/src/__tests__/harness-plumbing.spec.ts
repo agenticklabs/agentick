@@ -424,19 +424,84 @@ describe("harness plumbing — parent/child Operation composition", () => {
       (e) => e.surface === "tool" && e.name === "tool:knobs:set" && e.phase === "requested",
     );
     expect(childReq).toBeDefined();
-    // BaseHarness threads parentOpId via FiberRef when Operation.parentOpId
-    // is undefined; the envelope's `opId` is the child's own id but the
-    // ambient context carries the parent's. The exact field where parent
-    // linkage shows up is documented in BaseHarness — we verify the
-    // ambient context picked up the parent via the OpId differing AND
-    // both envelopes living in the journal.
+    // Promise-bridged composition (parent's runOperation body calls
+    // `Effect.promise(() => child.set(...))`, where `set` internally
+    // runs a fresh `Effect.runPromise`): the child's fiber does NOT
+    // inherit the parent's FiberRef, so auto-propagation of
+    // `parentOpId` is lost across the bridge. Causality must be
+    // threaded explicitly (or composition must stay Effect-native).
+    // The Effect-native composition path is exercised separately.
     expect(childReq!.opId).not.toBe(parentOpId);
+    expect(parentReq!.parentOpId).toBeUndefined();
 
     // Both Operations' envelopes appear in the bus event stream.
     const parentEvents = events.filter((e) => e.opId === parentOpId);
     expect(parentEvents.length).toBeGreaterThan(0);
     const childEvents = events.filter((e) => e.opId === childReq!.opId);
     expect(childEvents.length).toBeGreaterThan(0);
+  });
+
+  it("Effect-native nested runOperation auto-threads parentOpId onto child envelope", async () => {
+    // Effect-native composition: the outer Operation's body stays within
+    // the Effect fiber and invokes a second `runOperation` directly. The
+    // RuntimeContext FiberRef carries the outer opId through to the
+    // child, which auto-populates `parentOpId` on its Operation and
+    // hence on every emitted envelope.
+    //
+    // This is the canonical composition shape — distinct from the
+    // Promise-bridged path above, which crosses `Effect.runPromise` and
+    // loses the FiberRef.
+    const { journal, bus, inbox } = await makeSubstrate();
+
+    class ComposingHarness extends BaseHarness<"tool"> {
+      constructor() {
+        super("tool", "compose-test", journal, bus, inbox);
+      }
+      outerEffect(): Effect.Effect<string, never, never> {
+        const outer: Operation<{}, string, never> = {
+          opId: `tool:outer:${ulid()}`,
+          surface: "tool",
+          name: "tool:outer",
+          input: {},
+        };
+        return this.runOperation(outer, () =>
+          Effect.gen(this, function* () {
+            const inner: Operation<{}, string, never> = {
+              opId: `tool:inner:${ulid()}`,
+              surface: "tool",
+              name: "tool:inner",
+              input: {},
+            };
+            return yield* this.runOperation(inner, () => Effect.succeed("ok"));
+          }),
+        );
+      }
+      protected handleMessage(): Effect.Effect<unknown, MessageHandlerError, never> {
+        return Effect.fail({ _tag: "HandlerError", cause: "n/a" });
+      }
+    }
+
+    const h = new ComposingHarness();
+    await h.ready;
+    const { events, stop } = await subscribeEnvelopes(bus, {});
+    const result = await Effect.runPromise(h.outerEffect());
+    await settle();
+    await stop();
+    expect(result).toBe("ok");
+
+    const outerReq = events.find((e) => e.name === "tool:outer" && e.phase === "requested");
+    const innerReq = events.find((e) => e.name === "tool:inner" && e.phase === "requested");
+    expect(outerReq).toBeDefined();
+    expect(innerReq).toBeDefined();
+    expect(outerReq!.parentOpId).toBeUndefined();
+    expect(innerReq!.parentOpId).toBe(outerReq!.opId);
+    // All inner-op envelopes (requested / before / terminal) inherit
+    // parentOpId — composition produces a clean causality tree.
+    const innerEnvs = events.filter((e) => e.opId === innerReq!.opId);
+    expect(innerEnvs.length).toBeGreaterThan(0);
+    for (const env of innerEnvs) {
+      expect(env.parentOpId).toBe(outerReq!.opId);
+    }
   });
 });
 
