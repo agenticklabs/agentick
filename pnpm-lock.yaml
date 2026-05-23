@@ -707,6 +707,25 @@ importers:
         specifier: workspace:*
         version: link:../spec
 
+  packages/gates:
+    dependencies:
+      '@agentick/reconciler-react':
+        specifier: workspace:*
+        version: link:../reconciler-react
+      '@agentick/spec':
+        specifier: workspace:*
+        version: link:../spec
+      react:
+        specifier: ^19.0.0
+        version: 19.2.4
+    devDependencies:
+      '@agentick/runtime':
+        specifier: workspace:*
+        version: link:../runtime
+      '@types/react':
+        specifier: ^19.2.5
+        version: 19.2.13
+
   packages/gateway:
     dependencies:
       '@agentick/core':

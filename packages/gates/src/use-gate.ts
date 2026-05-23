@@ -43,9 +43,12 @@
 
 import React, { useCallback, useMemo, useRef } from "react";
 import type { TickResult } from "@agentick/spec";
-import { useKnob, type UseKnobOptions } from "./use-knob.js";
-import { useLoopControl } from "./use-loop-control.js";
-import { useOnTickEnd } from "./use-on-tick-end.js";
+import {
+  useKnob,
+  useLoopControl,
+  useOnTickEnd,
+  type UseKnobOptions,
+} from "@agentick/reconciler-react";
 
 const GATE_OPTIONS: readonly GateValue[] = ["inactive", "active", "deferred"];
 

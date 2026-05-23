@@ -127,10 +127,8 @@ export {
   useOnLifecycleCustom,
   useToolBridge,
   useSessionState,
-  useGate,
-  gate,
 } from "./react/hooks/index.js";
-export type { GateDescriptor, GateState, GateValue } from "./react/hooks/index.js";
+export type { UseKnobOptions } from "./react/hooks/index.js";
 
 // React-flavored createTool (extends @agentick/tool with use() hook)
 export { createTool } from "./react/create-tool.js";

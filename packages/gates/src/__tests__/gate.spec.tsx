@@ -12,10 +12,9 @@ import { describe, expect, it, vi } from "vitest";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
 import type { HookBridges, LifecycleTickEnd, TickResult, SectionEntry } from "@agentick/spec";
 
-import { ReconcilerHarness } from "../harness/reconciler-harness.js";
-import { stubBridges, stubKnobsHarness } from "../bridges/stub-bridges.js";
-import { gate, useGate, type GateState } from "../react/hooks/use-gate.js";
-import { flush } from "../testing/flush.js";
+import { ReconcilerHarness, stubBridges, stubKnobsHarness } from "@agentick/reconciler-react";
+import { flush } from "@agentick/reconciler-react/testing";
+import { gate, useGate, type GateState } from "../use-gate.js";
 
 async function makeHarness() {
   const harness = new ReconcilerHarness(
