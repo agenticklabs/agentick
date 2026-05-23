@@ -13,7 +13,12 @@
  */
 
 import type { Effect } from "effect";
-import type { MessageAck, MessageEnvelope, MessageHandler } from "../data/inbox.js";
+import type {
+  MessageAck,
+  MessageEnvelope,
+  MessageEnvelopeInput,
+  MessageHandler,
+} from "../data/inbox.js";
 import type { InboxError, MessageHandlerError } from "../data/errors.js";
 
 /**
@@ -62,12 +67,16 @@ export interface MessageInbox {
    * message (it has been queued or dispatched). Does NOT wait for
    * handler completion — use `ask()` for that.
    *
-   * Idempotent on `message.messageId`. Same id twice → first call
-   * runs the handler; subsequent calls return the cached ack.
+   * The inbox stamps `addressedTo` (from `address`), `timestamp`, and
+   * `messageId` (ULID if not supplied on the input) before the handler
+   * sees the full `MessageEnvelope`.
+   *
+   * Idempotent on `messageId`. Same id twice → first call runs the
+   * handler; subsequent calls return the cached ack.
    */
   send<T = unknown>(
     address: string,
-    message: MessageEnvelope<T>,
+    input: MessageEnvelopeInput<T>,
   ): Effect.Effect<MessageAck, InboxError, never>;
 
   /**
@@ -76,12 +85,14 @@ export interface MessageInbox {
    * RPC-shaped. Has a timeout because remote handlers may be
    * unreachable. Use sparingly — most messages should be tell.
    *
-   * Idempotent on `message.messageId`. Same id twice → first call
-   * runs the handler; subsequent calls return the cached response.
+   * Same stamping behavior as {@link send}.
+   *
+   * Idempotent on `messageId`. Same id twice → first call runs the
+   * handler; subsequent calls return the cached response.
    */
   ask<T = unknown, R = unknown>(
     address: string,
-    message: MessageEnvelope<T>,
+    input: MessageEnvelopeInput<T>,
     options?: AskOptions,
   ): Effect.Effect<R, InboxError | MessageHandlerError, never>;
 }

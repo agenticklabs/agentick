@@ -208,10 +208,8 @@ describe("inbox.send — fresh messageIds", () => {
     counter++;
     await Effect.runPromise(
       inbox.send("bench:addr", {
-        addressedTo: "bench:addr",
         type: "ping",
         messageId: `m-${counter}`,
-        timestamp: Date.now(),
       }),
     );
   });
@@ -221,10 +219,8 @@ describe("inbox.send — idempotent replay", () => {
   const inbox = new LocalInbox();
   Effect.runSync(inbox.register("bench:addr2", () => Effect.succeed(undefined)));
   const msg = {
-    addressedTo: "bench:addr2",
     type: "ping",
     messageId: "m-dup",
-    timestamp: Date.now(),
   };
   Effect.runSync(inbox.send("bench:addr2", msg));
 

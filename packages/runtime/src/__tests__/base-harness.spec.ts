@@ -228,10 +228,8 @@ describe("BaseHarness — inbox dispatch", () => {
     const { inbox } = await harness();
     const r = await Effect.runPromise(
       inbox.ask("tool:scope-1", {
-        addressedTo: "tool:scope-1",
         type: "echo",
         messageId: "m-echo",
-        timestamp: Date.now(),
         payload: { ok: true },
       }),
     );

@@ -151,10 +151,8 @@ describe("ReconcilerHarness — end-to-end", () => {
     // Send a recompile via inbox.
     const ack = await Effect.runPromise(
       inbox.send("reconciler:h_1", {
-        addressedTo: "reconciler:h_1",
         type: "recompile",
         messageId: "msg_recompile_1",
-        timestamp: Date.now(),
         payload: { type: "recompile", mountId: "m_4" },
       }),
     );

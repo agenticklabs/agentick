@@ -281,11 +281,9 @@ describe("harness plumbing — addressed inbox messages", () => {
     const messageId = ulid();
     const ack = await Effect.runPromise(
       inbox.send(address, {
-        addressedTo: address,
         messageId,
         type: "tool:knobs:set",
         payload: { id: "verbose", value: true },
-        timestamp: Date.now(),
       }),
     );
     // MessageAck carries `messageId` + `receivedAt` — receipt is the
@@ -301,11 +299,8 @@ describe("harness plumbing — addressed inbox messages", () => {
     const { events, stop } = await subscribeEnvelopes(bus, { surface: "tool" });
     await Effect.runPromise(
       inbox.send(`tool:session-8`, {
-        addressedTo: `tool:session-8`,
-        messageId: ulid(),
         type: "tool:knobs:set",
         payload: { id: "mood", value: "decisive" },
-        timestamp: Date.now(),
       }),
     );
     await settle(30);
@@ -320,11 +315,9 @@ describe("harness plumbing — addressed inbox messages", () => {
     const messageId = ulid();
     const ack = await Effect.runPromise(
       inbox.send(`tool:session-9`, {
-        addressedTo: `tool:session-9`,
         messageId,
         type: "tool:knobs:nonexistent",
         payload: {},
-        timestamp: Date.now(),
       }),
     );
     // Inbox accepted the message (`messageId` echoed); the handler will
@@ -368,11 +361,8 @@ describe("harness plumbing — middleware on Operations", () => {
     );
     await Effect.runPromise(
       inbox.send(`tool:session-mw`, {
-        addressedTo: `tool:session-mw`,
-        messageId: ulid(),
         type: "tool:knobs:set",
         payload: { id: "mood", value: "playful" },
-        timestamp: Date.now(),
       }),
     );
     await new Promise((r) => setTimeout(r, 20));
@@ -480,12 +470,10 @@ describe("harness plumbing — sender identity in envelopes", () => {
     const messageId = ulid();
     const ack = await Effect.runPromise(
       inbox.send(`tool:test-reply`, {
-        addressedTo: `tool:test-reply`,
         messageId,
         type: "tool:knobs:set",
         payload: { id: "verbose", value: true },
         from: "external-actor:dashboard-42",
-        timestamp: Date.now(),
       }),
     );
     // Verifying the substrate accepts `from` as a known envelope field;

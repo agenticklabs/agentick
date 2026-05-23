@@ -15,6 +15,12 @@ import type { MessageHandlerError } from "./errors.js";
 /**
  * Wire-safe envelope for inbound messages addressed to a harness.
  * JSON-serializable. Same shape across local and cluster dispatch.
+ *
+ * **Construction:** callers don't build `MessageEnvelope` directly.
+ * They pass a {@link MessageEnvelopeInput} to {@link MessageInbox.send} /
+ * {@link MessageInbox.ask}; the inbox stamps `addressedTo` (from the
+ * `address` arg), `timestamp` (send time), and `messageId` (ULID if not
+ * supplied) before handlers see the envelope.
  */
 export interface MessageEnvelope<T = unknown> {
   /**
@@ -23,6 +29,8 @@ export interface MessageEnvelope<T = unknown> {
    *   `session:user-42`
    *   `reconciler:mount-xyz`
    *   `supervisor:main`
+   *
+   * Stamped by the inbox at send-time from the `address` argument.
    */
   readonly addressedTo: string;
 
@@ -36,9 +44,9 @@ export interface MessageEnvelope<T = unknown> {
   readonly from?: string;
 
   /**
-   * Idempotency key. Caller-supplied; defaults to system ULID.
-   * Same messageId twice → cached result returned (for ask) or
-   * ack-only (for tell), with the handler running exactly once.
+   * Idempotency key. Caller-supplied or system ULID. Same messageId
+   * twice → cached result returned (for ask) or ack-only (for tell),
+   * with the handler running exactly once.
    */
   readonly messageId: string;
 
@@ -49,8 +57,32 @@ export interface MessageEnvelope<T = unknown> {
   /** Typed payload (constrained by `type`). */
   readonly payload?: T;
 
-  /** ISO milliseconds since epoch at send time. */
+  /**
+   * Milliseconds since epoch at send time. Stamped by the inbox.
+   */
   readonly timestamp: number;
+}
+
+/**
+ * Caller-supplied input for {@link MessageInbox.send} /
+ * {@link MessageInbox.ask}. A subset of {@link MessageEnvelope} omitting
+ * the fields the inbox stamps:
+ *
+ *   - `addressedTo` — derived from the `address` argument
+ *   - `timestamp`   — stamped at send time
+ *   - `messageId`   — defaults to system ULID when not supplied
+ *
+ * Caller-required: `type`. Caller-optional: `from`, `parentOpId`,
+ * `correlationId`, `payload`, and an explicit `messageId` (for
+ * idempotency replay).
+ */
+export interface MessageEnvelopeInput<T = unknown> {
+  readonly type: string;
+  readonly messageId?: string;
+  readonly from?: string;
+  readonly parentOpId?: string;
+  readonly correlationId?: string;
+  readonly payload?: T;
 }
 
 /**

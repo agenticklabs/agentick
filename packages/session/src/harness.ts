@@ -481,10 +481,8 @@ export class SessionHarness<P = unknown>
                   respond: async (response: TResp) => {
                     await Effect.runPromise(
                       inbox.send(replyTo, {
-                        addressedTo: replyTo,
                         type: "request-response",
                         messageId: `m_${correlationId}`,
-                        timestamp: Date.now(),
                         payload: { correlationId, response },
                       }),
                     );

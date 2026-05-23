@@ -7,7 +7,7 @@
 
 import { describe, expect, it } from "vitest";
 import { Effect, Exit } from "effect";
-import type { MessageEnvelope, MessageInbox } from "@agentick/spec";
+import type { MessageEnvelopeInput, MessageInbox } from "@agentick/spec";
 
 export function runInboxConformance(factory: () => MessageInbox): void {
   describe("MessageInbox — registration", () => {
@@ -150,16 +150,14 @@ export function runInboxConformance(factory: () => MessageInbox): void {
 }
 
 function mkMsg<T = unknown>(
-  addressedTo: string,
+  _addressedTo: string,
   type: string,
   payload?: T,
   messageId = "m_1",
-): MessageEnvelope<T> {
+): MessageEnvelopeInput<T> {
   return {
-    addressedTo,
     type,
     messageId,
-    timestamp: Date.now(),
-    payload,
+    ...(payload !== undefined ? { payload } : {}),
   };
 }

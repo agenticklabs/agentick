@@ -19,7 +19,7 @@ import { Chunk, Effect, Stream } from "effect";
 
 import type {
   DispatchInput,
-  MessageEnvelope,
+  MessageEnvelopeInput,
   ToolConfirmationResponse,
   ToolRegistration,
 } from "@agentick/spec";
@@ -87,16 +87,16 @@ async function captureRequest(bus: {
  * routed by `BaseHarness.dispatchMessage`.
  */
 function deliverResponse(
-  inbox: { send: (addr: string, msg: MessageEnvelope) => Effect.Effect<unknown, unknown, never> },
+  inbox: {
+    send: (addr: string, msg: MessageEnvelopeInput) => Effect.Effect<unknown, unknown, never>;
+  },
   replyTo: string,
   correlationId: string,
   response: ToolConfirmationResponse,
 ) {
-  const msg: MessageEnvelope = {
-    addressedTo: replyTo,
+  const msg: MessageEnvelopeInput = {
     type: "request-response",
     messageId: `m_${correlationId}`,
-    timestamp: Date.now(),
     payload: { correlationId, response },
   };
   return Effect.runPromise(inbox.send(replyTo, msg));

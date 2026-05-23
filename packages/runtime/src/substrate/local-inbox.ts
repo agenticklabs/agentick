@@ -19,10 +19,30 @@ import type {
   InboxError,
   MessageAck,
   MessageEnvelope,
+  MessageEnvelopeInput,
   MessageHandler,
   MessageHandlerError,
 } from "@agentick/spec";
 import type { AskOptions, MessageInbox, Unsubscribe } from "@agentick/spec";
+import { ulid } from "./ulid.js";
+
+/**
+ * Promote a caller's {@link MessageEnvelopeInput} to a full
+ * {@link MessageEnvelope}. Stamps `addressedTo`, `messageId` (if not
+ * supplied), and `timestamp`.
+ */
+function stampEnvelope<T>(address: string, input: MessageEnvelopeInput<T>): MessageEnvelope<T> {
+  return {
+    addressedTo: address,
+    type: input.type,
+    messageId: input.messageId ?? ulid(),
+    timestamp: Date.now(),
+    ...(input.from !== undefined ? { from: input.from } : {}),
+    ...(input.parentOpId !== undefined ? { parentOpId: input.parentOpId } : {}),
+    ...(input.correlationId !== undefined ? { correlationId: input.correlationId } : {}),
+    ...(input.payload !== undefined ? { payload: input.payload } : {}),
+  };
+}
 
 interface IdempotencyEntry {
   readonly expiresAt: number;
@@ -95,13 +115,14 @@ export class LocalInbox implements MessageInbox {
 
   send<T = unknown>(
     address: string,
-    message: MessageEnvelope<T>,
+    input: MessageEnvelopeInput<T>,
   ): Effect.Effect<MessageAck, InboxError, never> {
     return Effect.suspend((): Effect.Effect<MessageAck, InboxError, never> => {
       if (this.closed) {
         return Effect.fail({ _tag: "InboxClosed" });
       }
 
+      const message = stampEnvelope(address, input);
       const cached = this.lookup(message.messageId);
       if (cached) return Effect.succeed(cached.ack);
 
@@ -133,7 +154,7 @@ export class LocalInbox implements MessageInbox {
 
   ask<T = unknown, R = unknown>(
     address: string,
-    message: MessageEnvelope<T>,
+    input: MessageEnvelopeInput<T>,
     options: AskOptions = {},
   ): Effect.Effect<R, InboxError | MessageHandlerError, never> {
     return Effect.suspend((): Effect.Effect<R, InboxError | MessageHandlerError, never> => {
@@ -141,6 +162,7 @@ export class LocalInbox implements MessageInbox {
         return Effect.fail<InboxError>({ _tag: "InboxClosed" });
       }
 
+      const message = stampEnvelope(address, input);
       const cached = this.lookup(message.messageId);
       if (cached) {
         // Reuse the existing fiber — handler ran (or is running) once.
