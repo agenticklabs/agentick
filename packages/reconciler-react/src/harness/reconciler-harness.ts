@@ -739,7 +739,12 @@ function importKnobs(bridges: HookBridges, values: Readonly<Record<string, unkno
     k.importSnapshot(values);
     return;
   }
-  for (const [id, value] of Object.entries(values)) bridges.knobs.set(id, value);
+  // Fallback path for KnobBridge implementations without importSnapshot.
+  // Fire-and-forget the async set Operations; by the time the next render
+  // reads `get(id)`, the values are populated.
+  for (const [id, value] of Object.entries(values)) {
+    void bridges.knobs.set({ id, value: value as never });
+  }
 }
 
 function isThenable(value: unknown): value is PromiseLike<unknown> {

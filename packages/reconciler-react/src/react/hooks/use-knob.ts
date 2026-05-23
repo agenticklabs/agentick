@@ -1,19 +1,30 @@
 /**
  * `useKnob` — model-visible, reactive state managed by the harness.
  *
- * Registers a knob descriptor (description, constraints, momentary,
- * inline, validation) on first render, then exposes the current value
- * + setter. Subsequent updates from anywhere (other components,
- * external `bridge.set`, the `set_knob` tool) trigger re-renders of
- * components consuming the knob via `useSyncExternalStore`.
+ * Registers a knob descriptor in `useEffect` (post-commit) via
+ * fire-and-forget on the async register Operation. The first
+ * `getSnapshot` falls back to `initial` because the harness may not
+ * have the value yet; once register's Operation lands (microtask after
+ * commit), the wildcard listener fires, useSyncExternalStore re-reads,
+ * and renders converge on the harness-stored value.
+ *
+ * Subsequent updates from anywhere (other components, external
+ * `harness.set`, the `set_knob` tool dispatch, inbox mutations from
+ * remote actors) trigger re-renders via the harness's per-id subscribe.
+ *
+ * Per ADR 26, `useBridges().knobs` is the session's `KnobsHarness` — a
+ * full harness, not a "bridge". `set` / `register` are async Operations
+ * that emit envelopes through the substrate. This hook fires them
+ * fire-and-forget (`void`) — the React setter API stays sync; the
+ * Operation completes in the background and the harness notifies
+ * subscribers when the value lands.
  *
  * Momentary semantics: when `options.momentary` is true, the hook
  * registers a `useOnExecutionEnd` handler that resets the value to
- * `initial` (the descriptor's `defaultValue`) after each execution
- * completes. Matches v1: momentary = one-shot trigger, auto-resets
- * between executions, not between ticks.
+ * `initial` after each execution completes. Matches v1: momentary =
+ * one-shot trigger, auto-resets between executions, not between ticks.
  *
- * @see packages/spec/src/protocol/hook-bridges.ts §KnobBridge
+ * @see packages/spec/src/protocol/knobs-harness.ts
  */
 
 import { useCallback, useEffect, useRef, useSyncExternalStore } from "react";
@@ -49,75 +60,63 @@ export function useKnob<T extends KnobPrimitive>(
 ): readonly [T, (value: T) => void] {
   const { knobs } = useBridges();
 
-  // Two-phase initialization:
-  //
-  //   1. Synchronously seed the value cell on first render so
-  //      `useSyncExternalStore.getSnapshot` returns `initial` rather than
-  //      `undefined`. We do this with `set` (not `register`) because
-  //      `set` only fires id-scoped listeners, not the wildcard. The
-  //      wildcard fan-out would re-render any mounted `<Knobs />` mid-
-  //      render of THIS component, tripping React's "setState in render"
-  //      guard.
-  //
-  //   2. Push the full descriptor in a `useEffect` after commit. The
-  //      bridge's wildcard listeners fire then, safely outside any
-  //      render pass. Re-registration happens whenever the `options`
-  //      reference changes.
-  const seededRef = useRef(false);
-  if (!seededRef.current) {
-    if (knobs.get(id) === undefined) knobs.set(id, initial);
-    seededRef.current = true;
-  }
-
+  // Register descriptor in useEffect (post-commit, no setState-in-render
+  // hazard). Fire-and-forget the async Operation; by the time it
+  // resolves, the harness has the descriptor + (if previously unset)
+  // value === defaultValue, wildcard listeners have fired, and any
+  // subscribed components re-render.
   useEffect(() => {
-    const registration: KnobRegistration = {
-      defaultValue: initial,
-      valueType: options?.valueType ?? inferValueType(initial),
-      ...(options?.description !== undefined ? { description: options.description } : {}),
-      ...(options?.group !== undefined ? { group: options.group } : {}),
-      ...(options?.options !== undefined ? { options: options.options } : {}),
-      ...(options?.min !== undefined ? { min: options.min } : {}),
-      ...(options?.max !== undefined ? { max: options.max } : {}),
-      ...(options?.step !== undefined ? { step: options.step } : {}),
-      ...(options?.maxLength !== undefined ? { maxLength: options.maxLength } : {}),
-      ...(options?.pattern !== undefined ? { pattern: options.pattern } : {}),
-      ...(options?.required !== undefined ? { required: options.required } : {}),
-      ...(options?.momentary !== undefined ? { momentary: options.momentary } : {}),
-      ...(options?.inline !== undefined ? { inline: options.inline } : {}),
-      ...(options?.validate !== undefined ? { validate: options.validate } : {}),
-      ...(options?.schema !== undefined ? { schema: options.schema } : {}),
-    };
-    knobs.register(id, registration);
-    // Deliberately not unregistering on unmount — knob state outlives
-    // its declaring component (matches v1 semantics; resume-from-snapshot
-    // re-attaches the descriptor on next mount).
+    void knobs.register({ id, descriptor: buildRegistration(initial, options) });
   }, [knobs, id, initial, options]);
 
   const subscribe = useCallback(
     (listener: () => void) => knobs.subscribe(id, listener),
     [knobs, id],
   );
-  const getSnapshot = useCallback(() => knobs.get(id) as T, [knobs, id]);
+  // Fallback to `initial` while the register Operation is in flight —
+  // `getSnapshot` is referentially stable in primitives between renders.
+  const getSnapshot = useCallback(() => (knobs.get(id) ?? initial) as T, [knobs, id, initial]);
   const value = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 
   const set = useCallback(
     (next: T) => {
-      knobs.set(id, next);
+      void knobs.set({ id, value: next });
     },
     [knobs, id],
   );
 
-  // Momentary reset — schedule via lifecycle handler so the reset fires
-  // at execution end (matches v1). The hook is called unconditionally
-  // every render (React's rules of hooks); the handler body short-
-  // circuits when this call site isn't momentary, so the cost is one
-  // lifecycle subscription per `useKnob` regardless.
+  // Momentary reset at execution-end. Conditional handler body so the
+  // cost is one lifecycle subscription per useKnob regardless of
+  // whether momentary is active.
   const momentary = options?.momentary === true;
   const initialRef = useRef(initial);
   initialRef.current = initial;
   useOnExecutionEnd(() => {
-    if (momentary) knobs.set(id, initialRef.current);
+    if (momentary) void knobs.set({ id, value: initialRef.current });
   });
 
   return [value, set] as const;
+}
+
+function buildRegistration(
+  initial: KnobPrimitive,
+  options: UseKnobOptions | undefined,
+): KnobRegistration {
+  return {
+    defaultValue: initial,
+    valueType: options?.valueType ?? inferValueType(initial),
+    ...(options?.description !== undefined ? { description: options.description } : {}),
+    ...(options?.group !== undefined ? { group: options.group } : {}),
+    ...(options?.options !== undefined ? { options: options.options } : {}),
+    ...(options?.min !== undefined ? { min: options.min } : {}),
+    ...(options?.max !== undefined ? { max: options.max } : {}),
+    ...(options?.step !== undefined ? { step: options.step } : {}),
+    ...(options?.maxLength !== undefined ? { maxLength: options.maxLength } : {}),
+    ...(options?.pattern !== undefined ? { pattern: options.pattern } : {}),
+    ...(options?.required !== undefined ? { required: options.required } : {}),
+    ...(options?.momentary !== undefined ? { momentary: options.momentary } : {}),
+    ...(options?.inline !== undefined ? { inline: options.inline } : {}),
+    ...(options?.validate !== undefined ? { validate: options.validate } : {}),
+    ...(options?.schema !== undefined ? { schema: options.schema } : {}),
+  };
 }

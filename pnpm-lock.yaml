@@ -430,6 +430,9 @@ importers:
       '@agentick/executor':
         specifier: workspace:*
         version: link:../executor
+      '@agentick/knobs':
+        specifier: workspace:*
+        version: link:../knobs
       '@types/react':
         specifier: ^19.2.5
         version: 19.2.13
@@ -902,6 +905,9 @@ importers:
       '@agentick/formatters':
         specifier: workspace:*
         version: link:../formatters
+      '@agentick/knobs':
+        specifier: workspace:*
+        version: link:../knobs
       '@agentick/runtime':
         specifier: workspace:*
         version: link:../runtime
@@ -1094,6 +1100,9 @@ importers:
 
   packages/session:
     dependencies:
+      '@agentick/knobs':
+        specifier: workspace:*
+        version: link:../knobs
       '@agentick/loop-executor':
         specifier: workspace:*
         version: link:../loop-executor

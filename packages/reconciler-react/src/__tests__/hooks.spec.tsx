@@ -3,7 +3,7 @@ import React, { useEffect } from "react";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
 import { ReconcilerHarness } from "../harness/reconciler-harness.js";
 import { InMemoryDataBridge } from "../bridges/in-memory-data-bridge.js";
-import { stubBridges, inMemoryKnobBridge } from "../bridges/stub-bridges.js";
+import { stubBridges, stubKnobsHarness } from "../bridges/stub-bridges.js";
 import { useData } from "../react/hooks/use-data.js";
 import { useKnob } from "../react/hooks/use-knob.js";
 import { useLoopControl } from "../react/hooks/use-loop-control.js";
@@ -158,7 +158,7 @@ describe("useData — no-Suspense blocking resolution", () => {
 
 describe("useKnob", () => {
   it("registers initial value, returns current value, re-renders on external set", async () => {
-    const knobs = inMemoryKnobBridge();
+    const knobs = stubKnobsHarness();
     const bridges: HookBridges = { ...stubBridges(), knobs };
     const harness = await makeHarness();
 
@@ -180,7 +180,7 @@ describe("useKnob", () => {
     expect(textOf(m1.content)).toBe("mood=curious");
 
     // External mutation — set_knob tool dispatch equivalent.
-    knobs.set("mood", "decisive");
+    await knobs.set({ id: "mood", value: "decisive" });
     // Allow React's useSyncExternalStore listener to schedule the
     // subscriber re-render before we ask the harness for a fresh tree.
     await flush();

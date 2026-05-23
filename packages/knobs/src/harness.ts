@@ -41,7 +41,6 @@ import type {
   KnobRegistration,
   KnobValueType,
   KnobsDispatchInput,
-  KnobsError,
   KnobsHarnessProtocol,
   KnobsRegisterInput,
   KnobsSetInput,
@@ -134,7 +133,12 @@ export class KnobsHarness extends BaseHarness<"knobs"> implements KnobsHarnessPr
   // ─────────── Async surface — full Operations ───────────
 
   set(input: KnobsSetInput): Promise<void> {
-    const op: Operation<KnobsSetInput, void, KnobsError> = {
+    // The Operation's body is the mutation. Lifecycle handlers fire
+    // first (`before` phase can veto); middleware wraps the body;
+    // terminal envelope publishes after. Pure async — by the time
+    // the Promise resolves, the value is set, listeners have fired,
+    // and the audit envelope is on the bus + journal.
+    const op: Operation<KnobsSetInput, void, never> = {
       opId: `knobs:set:${ulid()}`,
       surface: "knobs",
       name: "knobs:command:set",
@@ -151,7 +155,7 @@ export class KnobsHarness extends BaseHarness<"knobs"> implements KnobsHarnessPr
   }
 
   register(input: KnobsRegisterInput): Promise<void> {
-    const op: Operation<KnobsRegisterInput, void, KnobsError> = {
+    const op: Operation<KnobsRegisterInput, void, never> = {
       opId: `knobs:register:${ulid()}`,
       surface: "knobs",
       name: "knobs:command:register",
@@ -168,7 +172,12 @@ export class KnobsHarness extends BaseHarness<"knobs"> implements KnobsHarnessPr
   }
 
   dispatch(input: KnobsDispatchInput): Promise<readonly ContentBlock[]> {
-    const op: Operation<KnobsDispatchInput, readonly ContentBlock[], KnobsError> = {
+    // Validation + apply happen inside the body. Result (success
+    // message or error blocks) is the Operation's result. The
+    // Operation succeeds either way; the result payload distinguishes
+    // validation failure from successful mutation (v1 set_knob
+    // semantics).
+    const op: Operation<KnobsDispatchInput, readonly ContentBlock[], never> = {
       opId: `knobs:dispatch:${ulid()}`,
       surface: "knobs",
       name: "knobs:command:dispatch",

@@ -13,7 +13,7 @@ import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
 import type { HookBridges, LifecycleTickEnd, TickResult, SectionEntry } from "@agentick/spec";
 
 import { ReconcilerHarness } from "../harness/reconciler-harness.js";
-import { inMemoryKnobBridge, stubBridges } from "../bridges/stub-bridges.js";
+import { stubBridges, stubKnobsHarness } from "../bridges/stub-bridges.js";
 import { gate, useGate, type GateState } from "../react/hooks/use-gate.js";
 import { flush } from "../testing/flush.js";
 
@@ -73,7 +73,7 @@ function captureGate(name: string, opts: Parameters<typeof gate>[0]) {
 
 describe("useGate — activation", () => {
   it("flips inactive → active when activateWhen returns true at tick-end", async () => {
-    const knobs = inMemoryKnobBridge();
+    const knobs = stubKnobsHarness();
     const bridges: HookBridges = { ...stubBridges(), knobs };
     const harness = await makeHarness();
     const verification = gate({
@@ -115,7 +115,7 @@ describe("useGate — activation", () => {
   });
 
   it("does not activate when activateWhen returns false", async () => {
-    const knobs = inMemoryKnobBridge();
+    const knobs = stubKnobsHarness();
     const bridges: HookBridges = { ...stubBridges(), knobs };
     const harness = await makeHarness();
     const { Probe } = captureGate(
@@ -145,7 +145,7 @@ describe("useGate — activation", () => {
   });
 
   it("does NOT re-activate when state has already been engaged", async () => {
-    const knobs = inMemoryKnobBridge();
+    const knobs = stubKnobsHarness();
     const bridges: HookBridges = { ...stubBridges(), knobs };
     const harness = await makeHarness();
     const activateWhen = vi.fn(() => true);
@@ -191,7 +191,7 @@ describe("useGate — activation", () => {
 
 describe("useGate — continuation blocking", () => {
   it("forces continueAfterTick when active and shouldContinue is false", async () => {
-    const knobs = inMemoryKnobBridge();
+    const knobs = stubKnobsHarness();
     const continueAfterTick = vi.fn();
     const bridges: HookBridges = {
       ...stubBridges(),
@@ -223,7 +223,7 @@ describe("useGate — continuation blocking", () => {
   });
 
   it("does NOT block when active but shouldContinue is true", async () => {
-    const knobs = inMemoryKnobBridge();
+    const knobs = stubKnobsHarness();
     const continueAfterTick = vi.fn();
     const bridges: HookBridges = {
       ...stubBridges(),
@@ -254,7 +254,7 @@ describe("useGate — continuation blocking", () => {
   });
 
   it("un-defers a deferred gate to active when blocking exit", async () => {
-    const knobs = inMemoryKnobBridge();
+    const knobs = stubKnobsHarness();
     const continueAfterTick = vi.fn();
     const bridges: HookBridges = {
       ...stubBridges(),
@@ -299,7 +299,7 @@ describe("useGate — continuation blocking", () => {
 
 describe("useGate — element rendering", () => {
   it("renders a <section> with title + instructions only when active", async () => {
-    const knobs = inMemoryKnobBridge();
+    const knobs = stubKnobsHarness();
     const bridges: HookBridges = { ...stubBridges(), knobs };
     const harness = await makeHarness();
     const { Probe } = captureGate(
@@ -325,7 +325,7 @@ describe("useGate — element rendering", () => {
     }
 
     // Manually flip the knob to active (simulating the model calling set_knob).
-    knobs.set("verification", "active");
+    await knobs.set({ id: "verification", value: "active" });
     await flush();
 
     const { tree } = await harness.renderTree({ mountId: "m_render", sessionId: "s" });
@@ -340,7 +340,7 @@ describe("useGate — element rendering", () => {
 
 describe("useGate — knob descriptor", () => {
   it("registers description + group + three-state options on the knob bridge", async () => {
-    const knobs = inMemoryKnobBridge();
+    const knobs = stubKnobsHarness();
     const bridges: HookBridges = { ...stubBridges(), knobs };
     const harness = await makeHarness();
     const { Probe } = captureGate(
@@ -374,7 +374,7 @@ describe("useGate — knob descriptor", () => {
 
 describe("useGate — clear / defer", () => {
   it("clear() flips state to inactive", async () => {
-    const knobs = inMemoryKnobBridge();
+    const knobs = stubKnobsHarness();
     const bridges: HookBridges = { ...stubBridges(), knobs };
     const harness = await makeHarness();
     const { ref, Probe } = captureGate(

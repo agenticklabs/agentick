@@ -47,11 +47,10 @@
 
 import React, { createContext, useContext, useMemo, useSyncExternalStore } from "react";
 import type {
-  ContentBlock,
-  KnobBridge,
   KnobDescriptor,
   KnobPrimitive,
   KnobSemanticType,
+  KnobsDispatchInput,
   StandardSchemaV1,
 } from "@agentick/spec";
 
@@ -199,107 +198,14 @@ function formatKnobsForModel(groups: readonly KnobGroup[], hasInlineKnobs: boole
 }
 
 // ============================================================================
-// set_knob validation + dispatch
+// set_knob — input type re-exported from spec
 // ============================================================================
+//
+// The validation pipeline + dispatch live on `KnobsHarness.dispatch(...)`
+// (in `@agentick/knobs`). The set_knob tool below just forwards the
+// validated input to the harness; no duplicate validation logic here.
 
-function errorBlocks(text: string): readonly ContentBlock[] {
-  return [{ type: "text", text }];
-}
-
-function validateValue(desc: KnobDescriptor, value: KnobPrimitive): string | null {
-  if (desc.valueType && typeof value !== desc.valueType) {
-    return `Invalid type for "${desc.id}". Expected ${desc.valueType}, got ${typeof value}.`;
-  }
-  if (desc.options && desc.options.length > 0 && !desc.options.some((o) => o === value)) {
-    return `Invalid value for "${desc.id}". Valid options: ${desc.options
-      .map(formatValue)
-      .join(", ")}`;
-  }
-  if (typeof value === "number") {
-    if (desc.min !== undefined && value < desc.min) {
-      return `Value for "${desc.id}" must be >= ${desc.min}. Got ${value}.`;
-    }
-    if (desc.max !== undefined && value > desc.max) {
-      return `Value for "${desc.id}" must be <= ${desc.max}. Got ${value}.`;
-    }
-  }
-  if (typeof value === "string") {
-    if (desc.maxLength !== undefined && value.length > desc.maxLength) {
-      return `Value for "${desc.id}" exceeds max length of ${desc.maxLength}. Got ${value.length} chars.`;
-    }
-    if (desc.pattern !== undefined && !new RegExp(desc.pattern).test(value)) {
-      return `Value for "${desc.id}" does not match pattern: ${desc.pattern}`;
-    }
-  }
-  if (desc.validate) {
-    const result = desc.validate(value);
-    if (result !== true) return `Validation failed for "${desc.id}": ${result}`;
-  }
-  return null;
-}
-
-export interface SetKnobInput {
-  readonly name?: string;
-  readonly group?: string;
-  readonly value: KnobPrimitive;
-}
-
-/**
- * @internal — exported for tests; the public surface is `<Knobs />`.
- * Validates input + dispatches to `bridge`. Order matches v1's
- * validation pipeline (exactly-one(name, group) → exists → type →
- * options → bounds → length/pattern → custom validate).
- */
-export function executeSetKnob(bridge: KnobBridge, input: SetKnobInput): readonly ContentBlock[] {
-  const hasName = input.name !== undefined && input.name !== "";
-  const hasGroup = input.group !== undefined && input.group !== "";
-
-  if (hasName && hasGroup) return errorBlocks("Provide either name or group, not both.");
-  if (!hasName && !hasGroup) return errorBlocks("Provide either name or group.");
-
-  const all = bridge.list();
-
-  if (hasName) {
-    const knob = all.find((k) => k.id === input.name);
-    if (!knob) {
-      return errorBlocks(
-        `Unknown knob "${input.name}". Available: ${all.map((k) => k.id).join(", ")}`,
-      );
-    }
-    const err = validateValue(knob, input.value);
-    if (err) return errorBlocks(err);
-    bridge.set(knob.id, input.value);
-    return [{ type: "text", text: `Set ${knob.id} to ${formatValue(input.value)}.` }];
-  }
-
-  // Group dispatch: validate every member's type matches before mutating.
-  const targets = all.filter((k) => k.group === input.group);
-  if (targets.length === 0) {
-    return errorBlocks(`No knobs found in group "${input.group}".`);
-  }
-  const expected = targets[0]!.valueType;
-  for (const t of targets) {
-    if (t.valueType !== expected) {
-      return errorBlocks(
-        `Type mismatch in group "${input.group}": "${t.id}" is ${t.valueType}, expected ${expected}.`,
-      );
-    }
-  }
-  for (const t of targets) {
-    const err = validateValue(t, input.value);
-    if (err) return errorBlocks(err);
-  }
-  for (const t of targets) bridge.set(t.id, input.value);
-  const names = targets.map((t) => t.id).join(", ");
-  return [
-    {
-      type: "text",
-      text: `Set ${targets.length} knobs in group "${input.group}" to ${formatValue(
-        input.value,
-      )}: ${names}.`,
-    },
-  ];
-}
+export type SetKnobInput = KnobsDispatchInput;
 
 // ============================================================================
 // set_knob input schema (hand-rolled Standard Schema validator)
@@ -371,7 +277,11 @@ const SetKnobTool = createTool({
     const { knobs } = useBridges();
     return { knobs };
   },
-  handler: (input, { use }) => executeSetKnob(use.knobs, input),
+  // Delegate validation + mutation to the harness. The harness's
+  // dispatch() runs the same pipeline the v1 set_knob tool ran,
+  // emits Operation envelopes for audit, and returns the same
+  // ContentBlock[] (success message or error blocks).
+  handler: async (input, { use }) => use.knobs.dispatch(input),
 });
 
 // ============================================================================

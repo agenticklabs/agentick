@@ -3,7 +3,7 @@ import React from "react";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
 import { ReconcilerHarness } from "../harness/reconciler-harness.js";
 import { InMemoryDataBridge } from "../bridges/in-memory-data-bridge.js";
-import { inMemoryKnobBridge, stubBridges } from "../bridges/stub-bridges.js";
+import { stubBridges, stubKnobsHarness } from "../bridges/stub-bridges.js";
 import { useData } from "../react/hooks/use-data.js";
 import { useKnob } from "../react/hooks/use-knob.js";
 import { flush } from "../testing/flush.js";
@@ -88,12 +88,12 @@ describe("InMemoryDataBridge — snapshot/restore unit", () => {
   });
 });
 
-describe("inMemoryKnobBridge — snapshot/restore unit", () => {
+describe("KnobsHarness — snapshot/restore unit", () => {
   it("export → import round-trips all values + fires subscribers on changed ids", () => {
-    const src = inMemoryKnobBridge({ a: 1, b: 2 });
+    const src = stubKnobsHarness({ a: 1, b: 2 });
     expect(src.exportSnapshot()).toEqual({ a: 1, b: 2 });
 
-    const dest = inMemoryKnobBridge();
+    const dest = stubKnobsHarness();
     let aChanges = 0;
     let cChanges = 0;
     dest.subscribe("a", () => aChanges++);
@@ -206,7 +206,7 @@ describe("ReconcilerHarness — snapshot/restore through the harness", () => {
       element: React.createElement(App),
       bridges: bridges1,
     });
-    bridges1.knobs.set("mood", "decisive");
+    await bridges1.knobs.set({ id: "mood", value: "decisive" });
     await flush();
     const snap = await harness1.snapshot({ mountId: "m_k1" });
     expect(snap.knobs.mood).toBe("decisive");

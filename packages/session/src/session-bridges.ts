@@ -1,30 +1,31 @@
 /**
  * `HookBridges` backed by session state.
  *
- * The reconciler harness needs five bridges at mount time:
+ * The reconciler harness consumes a bundle of bridges/harnesses at
+ * mount time:
  *
- *   - `TimelineBridge` — synchronous read of accumulated timeline
- *   - `KnobBridge`     — get/set/list/subscribe on model-visible knobs
- *   - `DataBridge`     — `useData` cache + Promise tracking
- *   - `LoopBridge`     — `useLoopControl` continuation knob
- *   - `SessionBridge`  — id + status + tick metadata
+ *   - `TimelineBridge`        — synchronous read of accumulated timeline
+ *   - `KnobsHarnessProtocol`  — model-visible knobs (full harness per ADR 26)
+ *   - `StateBridge`           — session-internal reactive state
+ *   - `DataBridge`            — `useData` cache + Promise tracking
+ *   - `LoopBridge`            — `useLoopControl` continuation knob
+ *   - `SessionBridge`         — id + status + tick metadata
  *
- * In Phase 4e we back the first three with the session's own in-memory
- * state. `LoopBridge` is a stub (no continuation override yet), and
- * `DataBridge` reuses the `InMemoryDataBridge` shipped from
- * `@agentick/reconciler-react` (no session-level persistence yet).
+ * Knobs is constructed as a `KnobsHarness` per ADR 26 — wired to the
+ * session's substrate so its Operation envelopes flow into the app
+ * bus and journal, and remote actors (admin dashboards, cluster
+ * nodes) can address it at `inbox://knobs:{sessionId}:knobs`.
  */
 
-import {
-  InMemoryDataBridge,
-  inMemoryKnobBridge,
-  inMemoryStateBridge,
-  type InMemoryKnobBridge,
-} from "@agentick/reconciler-react";
+import { InMemoryDataBridge, inMemoryStateBridge } from "@agentick/reconciler-react";
+import { KnobsHarness } from "@agentick/knobs";
 import type {
+  EventBus,
   HookBridges,
   LoopBridge,
+  MessageInbox,
   MessageRole,
+  OperationJournal,
   SessionBridge,
   StateBridge,
   TimelineBridge,
@@ -74,17 +75,6 @@ export function timelineBridgeFor(store: SessionStateStore): TimelineBridge {
   };
 }
 
-/**
- * @deprecated Use `InMemoryKnobBridge` from `@agentick/reconciler-react`
- * directly. Kept as a re-export alias to avoid a breaking surface change
- * in this commit.
- */
-export type KnobBridgeWithSnapshot = InMemoryKnobBridge;
-
-export function knobBridgeFor(initial: Readonly<Record<string, unknown>> = {}): InMemoryKnobBridge {
-  return inMemoryKnobBridge({ ...initial });
-}
-
 export function stateBridgeFor(initial: Readonly<Record<string, unknown>> = {}): StateBridge {
   return inMemoryStateBridge({ ...initial });
 }
@@ -112,31 +102,47 @@ export function sessionBridgeFor(store: SessionStateStore): SessionBridge {
 }
 
 /**
- * Assemble the full `HookBridges` bundle from session state. The
- * `DataBridge` is fresh per-mount; future phases may persist it on the
- * session snapshot.
+ * Assemble the full `HookBridges` bundle from session state. KnobsHarness
+ * is constructed against the session's shared substrate so its
+ * envelopes flow into the app's bus + journal (visible via
+ * `app.events({ surface: "knobs" })`).
  */
 export interface SessionHookBridges extends HookBridges {
-  readonly knobs: InMemoryKnobBridge;
+  readonly knobs: KnobsHarness;
   readonly data: InMemoryDataBridge;
+}
+
+export interface BuildSessionBridgesOptions {
+  readonly toolBridge?: ToolBridge;
+  /**
+   * Extension-provided bridges. Merged into the bundle by name —
+   * adopters install extensions (`@agentick/sandbox`, etc.) via
+   * `AppHarnessOptions.extensions`; the AppHarness then forwards
+   * the merged map to every session it constructs.
+   */
+  readonly extensionBridges?: ReadonlyMap<string, unknown>;
 }
 
 export function buildSessionBridges(
   store: SessionStateStore,
-  options: {
-    readonly toolBridge?: ToolBridge;
-    /**
-     * Extension-provided bridges. Merged into the bundle by name —
-     * adopters install extensions (`@agentick/sandbox`, etc.) via
-     * `AppHarnessOptions.extensions`; the AppHarness then forwards
-     * the merged map to every session it constructs.
-     */
-    readonly extensionBridges?: ReadonlyMap<string, unknown>;
-  } = {},
+  substrate: {
+    readonly journal: OperationJournal;
+    readonly bus: EventBus;
+    readonly inbox: MessageInbox;
+  },
+  options: BuildSessionBridgesOptions = {},
 ): SessionHookBridges {
+  // Knobs is a harness wired to the session's substrate (ADR 26).
+  const knobs = new KnobsHarness(
+    `${store.id}:knobs`,
+    substrate.journal,
+    substrate.bus,
+    substrate.inbox,
+  );
+
   const base: SessionHookBridges = {
     timeline: timelineBridgeFor(store),
-    knobs: knobBridgeFor(),
+    knobs,
     state: stateBridgeFor(),
     data: new InMemoryDataBridge(),
     loop: loopBridgeStub(),
@@ -144,9 +150,6 @@ export function buildSessionBridges(
     ...(options.toolBridge !== undefined ? { tools: options.toolBridge } : {}),
   };
   if (options.extensionBridges && options.extensionBridges.size > 0) {
-    // Spread extension bridges into the bundle by name. Adopters
-    // augment `HookBridges` (via `declare module "@agentick/spec"`)
-    // so the slots are typed correctly at the consumer.
     return {
       ...base,
       ...Object.fromEntries(options.extensionBridges),

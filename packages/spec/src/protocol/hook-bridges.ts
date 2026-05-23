@@ -21,6 +21,7 @@
 
 import type { ContentBlock, MessageRole } from "../data/content-blocks.js";
 import type { Unsubscribe } from "./inbox.js";
+import type { KnobsHarnessProtocol } from "./knobs-harness.js";
 
 export type { Unsubscribe };
 
@@ -49,7 +50,13 @@ export type { Unsubscribe };
  */
 export interface HookBridges {
   readonly timeline: TimelineBridge;
-  readonly knobs: KnobBridge;
+  /**
+   * Knobs are a full harness (ADR 26). `useBridges().knobs` returns a
+   * `KnobsHarnessProtocol` — sync reads (get/has/list/subscribe/
+   * subscribeAll) + async Operation-backed writes (set/register/
+   * dispatch). The previous `KnobBridge` interface has retired.
+   */
+  readonly knobs: KnobsHarnessProtocol;
   readonly state: StateBridge;
   readonly data: DataBridge;
   readonly loop: LoopBridge;
@@ -172,56 +179,13 @@ export interface TimelineEntrySummary {
 }
 
 // ============================================================================
-// Knob bridge
+// Knob metadata (descriptors, value primitives)
 // ============================================================================
-
-/**
- * Model-visible, reactive state managed by the reconciler harness.
- * The harness owns knob storage; the bridge is the read/write surface
- * for code outside React (the runtime, slash commands, the executor's
- * `set_knob` tool dispatch).
- *
- * Two surfaces:
- *
- *   1. **Value surface** — `get` / `set` / `subscribe` operate on the
- *      current value cell. Pure data; wire-safe.
- *   2. **Descriptor surface** — `register` / `list` carry rich metadata
- *      (semantic constraints, validation, presentation hints) that the
- *      `<Knobs />` section + `set_knob` tool consume to drive
- *      model-facing UX. `validate` is a function reference and is
- *      non-serializable; cross-process bridges drop it.
- *
- * `useKnob(id, initial, options?)` inside a React component creates a
- * binding — the binding's descriptor is registered with the bridge on
- * first render (and again on descriptor-identity change), and
- * subsequent `set(id, value)` calls trigger a re-render of components
- * subscribed to that id.
- */
-export interface KnobBridge {
-  get(id: string): unknown;
-  set(id: string, value: unknown): void;
-  list(): readonly KnobDescriptor[];
-  /** Notify when the value at `id` changes. */
-  subscribe(id: string, listener: () => void): Unsubscribe;
-  /**
-   * Notify when ANY knob's value or descriptor changes. Used by the
-   * `<Knobs />` section to re-render the model-facing listing without
-   * having to enumerate every id (the registry grows dynamically as
-   * components mount).
-   */
-  subscribeAll(listener: () => void): Unsubscribe;
-  /**
-   * Push a descriptor for `id`. The bridge MUST preserve any existing
-   * value for `id` if one is present; if no value exists yet, the
-   * bridge initializes `value` to `descriptor.defaultValue` (or `undefined`
-   * when no default is supplied).
-   *
-   * Subsequent calls update the descriptor in place (useful when authors
-   * dynamically change `options` / `min` / `max` based on app state).
-   * The `<Knobs />` section re-renders whenever a descriptor changes.
-   */
-  register(id: string, descriptor: KnobRegistration): void;
-}
+//
+// The full knob harness contract — including `set` / `register` / `dispatch`
+// methods — lives in `./knobs-harness.ts` (`KnobsHarnessProtocol`). The
+// types below carry the metadata shared between authors (declaring a
+// knob's shape) and the harness (validating + presenting it).
 
 /**
  * Semantic categorization of a knob's value, derived from its `valueType`

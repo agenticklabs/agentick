@@ -7,9 +7,8 @@
 
 import type {
   HookBridges,
-  KnobBridge,
-  KnobDescriptor,
-  KnobRegistration,
+  KnobPrimitive,
+  KnobsHarnessProtocol,
   LoopBridge,
   SessionBridge,
   StateBridge,
@@ -18,6 +17,8 @@ import type {
   TimelineSnapshot,
   Unsubscribe,
 } from "@agentick/spec";
+import { KnobsHarness } from "@agentick/knobs";
+import { LocalEventBus, LocalInbox, MemoryJournal, ulid } from "@agentick/runtime";
 import { InMemoryDataBridge } from "./in-memory-data-bridge.js";
 
 /**
@@ -65,103 +66,27 @@ export function stubTimelineBridge(
 }
 
 /**
- * Knob bridge extended with snapshot export/import so the harness can
- * persist + restore the model-visible knob state across mounts.
+ * Build a {@link KnobsHarness} for use in test bridges. Wraps the harness
+ * with an in-memory substrate (own journal/bus/inbox). Real session
+ * deployments share substrate with the host AppHarness; this factory
+ * is for standalone unit tests where the substrate plumbing isn't
+ * exercised.
  *
- * Descriptor storage is deliberately NOT included in snapshots —
- * descriptors are re-declared by components on remount; persisting them
- * would only matter if a hibernated session resumes mid-execution
- * BEFORE the first render, which the current snapshot/restore design
- * does not support anyway.
+ * `initial` seeds values eagerly via `importSnapshot`.
  */
-export interface InMemoryKnobBridge extends KnobBridge {
-  exportSnapshot(): Readonly<Record<string, unknown>>;
-  importSnapshot(values: Readonly<Record<string, unknown>>): void;
-}
-
-export function inMemoryKnobBridge(initial: Record<string, unknown> = {}): InMemoryKnobBridge {
-  const values = new Map<string, unknown>(Object.entries(initial));
-  const descriptors = new Map<string, KnobRegistration>();
-  const listeners = new Map<string, Set<() => void>>();
-  // Wildcard listeners — fired on every value or descriptor change.
-  // Used by `<Knobs />` to re-render the section when any knob changes.
-  const wildcards = new Set<() => void>();
-  // Cached `list()` snapshot — invalidated on every register/set so
-  // `useSyncExternalStore` consumers see stable references between
-  // mutations (avoids infinite render loops from fresh array literals).
-  let listCache: readonly KnobDescriptor[] | null = null;
-  const invalidateList = () => {
-    listCache = null;
-  };
-  const buildList = (): readonly KnobDescriptor[] => {
-    const out: KnobDescriptor[] = [];
-    // Descriptor-known ids first (registration order), then value-only
-    // entries (initial values, set-without-register).
-    for (const [id, descriptor] of descriptors) {
-      out.push({ id, value: values.get(id), ...descriptor });
-    }
-    for (const [id, value] of values) {
-      if (descriptors.has(id)) continue;
-      out.push({ id, value });
-    }
-    return out;
-  };
-  const notifyAll = (id: string) => {
-    invalidateList();
-    listeners.get(id)?.forEach((l) => l());
-    wildcards.forEach((l) => l());
-  };
-  return {
-    get: (id: string) => values.get(id),
-    set: (id: string, value: unknown) => {
-      values.set(id, value);
-      notifyAll(id);
-    },
-    list: (): readonly KnobDescriptor[] => {
-      if (listCache === null) listCache = buildList();
-      return listCache;
-    },
-    subscribe: (id: string, listener: () => void): Unsubscribe => {
-      let set = listeners.get(id);
-      if (!set) {
-        set = new Set();
-        listeners.set(id, set);
-      }
-      set.add(listener);
-      return () => {
-        set!.delete(listener);
-      };
-    },
-    subscribeAll: (listener: () => void): Unsubscribe => {
-      wildcards.add(listener);
-      return () => {
-        wildcards.delete(listener);
-      };
-    },
-    register: (id: string, descriptor: KnobRegistration) => {
-      descriptors.set(id, descriptor);
-      // Initialize value only when no value yet exists. Existing values
-      // win — descriptor updates MUST NOT clobber model-set state.
-      if (!values.has(id) && descriptor.defaultValue !== undefined) {
-        values.set(id, descriptor.defaultValue);
-      }
-      notifyAll(id);
-    },
-    exportSnapshot: () => {
-      const out: Record<string, unknown> = {};
-      for (const [k, v] of values) out[k] = v;
-      return out;
-    },
-    importSnapshot: (next: Readonly<Record<string, unknown>>) => {
-      // Replace contents, notifying subscribers for every affected id.
-      const oldKeys = new Set(values.keys());
-      const newKeys = new Set(Object.keys(next));
-      const changedIds = new Set<string>([...oldKeys, ...newKeys]);
-      values.clear();
-      for (const [k, v] of Object.entries(next)) values.set(k, v);
-      for (const id of changedIds) notifyAll(id);
-    },
-  };
+export function stubKnobsHarness(
+  initial: Readonly<Record<string, KnobPrimitive>> = {},
+): KnobsHarness {
+  const harness = new KnobsHarness(
+    `stub:${ulid()}`,
+    new MemoryJournal({ capacity: 1024 }),
+    new LocalEventBus(),
+    new LocalInbox(),
+  );
+  if (Object.keys(initial).length > 0) {
+    harness.importSnapshot(initial);
+  }
+  return harness;
 }
 
 /**
@@ -222,7 +147,7 @@ export function stubSessionBridge(id = "s_stub"): SessionBridge {
 
 export interface StubBridgesOptions {
   readonly sessionId?: string;
-  readonly knobs?: Record<string, unknown>;
+  readonly knobs?: Readonly<Record<string, KnobPrimitive>>;
   readonly state?: Record<string, unknown>;
   readonly onDataSettled?: (key: string) => void;
 }
@@ -231,11 +156,16 @@ export interface StubBridgesOptions {
  * Convenience: produce a `HookBridges` bundle with in-memory + stub
  * implementations. Useful for unit tests; real runtimes plug in their
  * own concrete bridges.
+ *
+ * `knobs` is a real {@link KnobsHarness} (per ADR 26 — knobs is a
+ * harness, not a bridge). Tests that need to invoke knob operations
+ * use the harness's async surface (`set` / `register` / `dispatch`)
+ * and the eager-mutation guarantee.
  */
 export function stubBridges(options: StubBridgesOptions = {}): HookBridges {
   return {
     timeline: stubTimelineBridge(),
-    knobs: inMemoryKnobBridge(options.knobs),
+    knobs: stubKnobsHarness(options.knobs) as KnobsHarnessProtocol,
     state: inMemoryStateBridge(options.state),
     data: new InMemoryDataBridge({ onSettled: options.onDataSettled }),
     loop: stubLoopBridge(),

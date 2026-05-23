@@ -54,6 +54,7 @@
   },
   "dependencies": {
     "@agentick/formatters": "workspace:*",
+    "@agentick/knobs": "workspace:*",
     "@agentick/runtime": "workspace:*",
     "@agentick/spec": "workspace:*",
     "@agentick/tool": "workspace:*",

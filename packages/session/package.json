@@ -42,6 +42,7 @@
     "typecheck": "tsc -p tsconfig.build.json --noEmit"
   },
   "dependencies": {
+    "@agentick/knobs": "workspace:*",
     "@agentick/loop-executor": "workspace:*",
     "@agentick/reconciler-react": "workspace:*",
     "@agentick/runtime": "workspace:*",

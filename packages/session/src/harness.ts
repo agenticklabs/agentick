@@ -151,14 +151,20 @@ export class SessionHarness<P = unknown>
   ) {
     super("session", options.sessionId, journal, bus, inbox);
     this.store = new SessionStateStore(options.sessionId);
-    this.bridges = buildSessionBridges(this.store, {
-      ...(options.toolBridge !== undefined ? { toolBridge: options.toolBridge } : {}),
-      ...(options.extensionBridges !== undefined
-        ? { extensionBridges: options.extensionBridges }
-        : {}),
-    });
+    this.bridges = buildSessionBridges(
+      this.store,
+      { journal, bus, inbox },
+      {
+        ...(options.toolBridge !== undefined ? { toolBridge: options.toolBridge } : {}),
+        ...(options.extensionBridges !== undefined
+          ? { extensionBridges: options.extensionBridges }
+          : {}),
+      },
+    );
     if (options.initialKnobs) {
-      this.bridges.knobs.importSnapshot(options.initialKnobs);
+      this.bridges.knobs.importSnapshot(
+        options.initialKnobs as Readonly<Record<string, string | number | boolean>>,
+      );
     }
     if (options.initialState) {
       this.bridges.state.importSnapshot(options.initialState);
@@ -520,7 +526,11 @@ export class SessionHarness<P = unknown>
     return {
       name,
       get: () => bridge.get(name) as T,
-      set: (value: T) => bridge.set(name, value),
+      // Fire-and-forget the async Operation; callers using this
+      // sync surface expect "queue the mutation, move on."
+      set: (value: T) => {
+        void bridge.set({ id: name, value: value as string | number | boolean });
+      },
       subscribe: (listener) => bridge.subscribe(name, listener),
     };
   }

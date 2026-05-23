@@ -12,32 +12,40 @@ import React from "react";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
 import {
   runDataBridgeConformance,
-  runKnobBridgeConformance,
   runLoopBridgeConformance,
   runReconcilerConformance,
   runTimelineBridgeConformance,
   type ElementInput,
   type ReconcilerConformanceFactory,
 } from "@agentick/spec-conformance";
+import { runKnobsHarnessConformance } from "@agentick/knobs";
 import type { HookBridges, ReconcilerProtocol } from "@agentick/spec";
 import { InMemoryDataBridge } from "../bridges/in-memory-data-bridge.js";
 import {
-  inMemoryKnobBridge,
   stubBridges,
+  stubKnobsHarness,
   stubLoopBridge,
   stubTimelineBridge,
 } from "../bridges/stub-bridges.js";
 import { ReconcilerHarness } from "../harness/reconciler-harness.js";
 
 // ============================================================================
-// Bridge conformance
+// Bridge / harness conformance
 // ============================================================================
 
 describe("InMemoryDataBridge — conformance", () =>
   runDataBridgeConformance(() => new InMemoryDataBridge()));
 
-describe("inMemoryKnobBridge — conformance", () =>
-  runKnobBridgeConformance(() => inMemoryKnobBridge()));
+// Knobs is now a harness (ADR 26). Conformance suite lives in @agentick/knobs.
+// We run it here against the in-process stub to validate the
+// reconciler-react integration uses a real harness behind useBridges().knobs.
+runKnobsHarnessConformance({
+  make: async () => {
+    const harness = stubKnobsHarness();
+    await harness.ready;
+    return harness;
+  },
+});
 
 describe("stubTimelineBridge — conformance", () =>
   runTimelineBridgeConformance(() => stubTimelineBridge()));
