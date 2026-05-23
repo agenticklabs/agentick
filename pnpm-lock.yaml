@@ -772,6 +772,22 @@ importers:
         specifier: ^13.0.0
         version: 13.1.3
 
+  packages/knobs:
+    dependencies:
+      '@agentick/runtime':
+        specifier: workspace:*
+        version: link:../runtime
+      '@agentick/spec':
+        specifier: workspace:*
+        version: link:../spec
+      effect:
+        specifier: ^3.21.2
+        version: 3.21.2
+    devDependencies:
+      '@agentick/spec-conformance':
+        specifier: workspace:*
+        version: link:../spec-conformance
+
   packages/loop-executor:
     dependencies:
       '@agentick/runtime':

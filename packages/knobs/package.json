@@ -1,0 +1,41 @@
+{
+  "name": "@agentick/knobs",
+  "version": "0.0.0",
+  "private": true,
+  "description": "KnobsHarness — model-visible reactive state with sync reads + async writes. Per ADR 26, this is a harness (extends BaseHarness), not a 'bridge.' Bundled into the agentick metapackage; not published independently.",
+  "keywords": [
+    "agent",
+    "agentick",
+    "ai",
+    "harness",
+    "knobs"
+  ],
+  "license": "MIT",
+  "author": "Ryan Lindgren",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/agenticklabs/agentick.git",
+    "directory": "packages/knobs"
+  },
+  "type": "module",
+  "main": "src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.build.json --noEmit"
+  },
+  "dependencies": {
+    "@agentick/runtime": "workspace:*",
+    "@agentick/spec": "workspace:*",
+    "effect": "^3.21.2"
+  },
+  "devDependencies": {
+    "@agentick/spec-conformance": "workspace:*"
+  }
+}
