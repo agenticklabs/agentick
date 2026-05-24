@@ -1,11 +1,17 @@
 /**
- * `useTimeline` — read the session's timeline as a reactive snapshot.
+ * `useTimeline` — read the session's timeline projection as a reactive
+ * snapshot.
  *
- * Read-only. Writes go through session commands; the bridge is purely
- * an accessor. Backed by `useSyncExternalStore` so components re-render
- * when the timeline's `version` advances.
+ * Read-only from the React side. Writes go through session commands or
+ * directly through the TimelineHarness's Operations (`append`, `compact`,
+ * `replaceProjection`, `resetProjection`). Backed by `useSyncExternalStore`
+ * so components re-render when the projection's `version` advances.
  *
- * @see packages/spec/src/protocol/hook-bridges.ts §TimelineBridge
+ * Returns the projection (what's currently model-visible). For the
+ * uncompacted durable log, call `bridges.timeline.readPersisted()` via
+ * `useBridges()`.
+ *
+ * @see packages/spec/src/protocol/timeline-harness.ts
  */
 
 import { useCallback, useSyncExternalStore } from "react";

@@ -3,9 +3,9 @@
  *
  * Author-facing surface for emitting a role-bearing context entry.
  * Mirrors the contributor's prop shape (see `collect/contributors/message.ts`)
- * so persisted `TimelineEntrySummary` records can be spread directly:
+ * so persisted timeline message records can be spread directly:
  *
- *   <Message {...entry} />
+ *   <Message {...entry.message} />
  *
  * Content resolution follows the contributor's controlled-or-uncontrolled
  * rule: a non-empty `content` prop wins; otherwise children are folded

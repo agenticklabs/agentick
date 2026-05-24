@@ -26,7 +26,7 @@ interface MessageProps {
   /**
    * Pre-built content blocks. When supplied and non-empty, takes
    * precedence over children — useful when re-emitting persisted
-   * `TimelineEntrySummary` shape via `<Message {...entry} />`.
+   * timeline messages via `<Message {...entry.message} />`.
    */
   readonly content?: readonly ContentBlock[];
   readonly cache?: MessageMetadata["cache"];

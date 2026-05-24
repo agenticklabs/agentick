@@ -1,5 +1,5 @@
 /**
- * `<Timeline>` — read persisted entries through the TimelineBridge and
+ * `<Timeline>` — read persisted entries through the TimelineHarness and
  * re-emit them through the collect pipeline.
  */
 
@@ -7,16 +7,18 @@ import React from "react";
 import { describe, expect, it, vi } from "vitest";
 
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
-import type { HookBridges, MessageEntry, TimelineEntrySummary } from "@agentick/spec";
+import type { HookBridges, MessageEntry, TimelineEntry } from "@agentick/spec";
 
 import { ReconcilerHarness } from "../harness/reconciler-harness.js";
-import { stubBridges, stubTimelineBridge } from "../bridges/stub-bridges.js";
+import { stubBridges, stubTimelineHarness } from "../bridges/stub-bridges.js";
 import { Timeline } from "../react/components/timeline.js";
 import {
   compactEntries,
   getEntryTokens,
   type TokenBudgetInfo,
 } from "../react/components/token-budget.js";
+
+type MessageTimelineEntry = Extract<TimelineEntry, { kind: "message" }>;
 
 async function makeHarness() {
   const harness = new ReconcilerHarness(
@@ -29,30 +31,24 @@ async function makeHarness() {
   return harness;
 }
 
-function userEntry(id: string, text: string, timestamp = 0): TimelineEntrySummary {
+function userEntry(id: string, text: string, ts = 0): MessageTimelineEntry {
   return {
-    id,
-    role: "user",
-    content: [{ type: "text", text }],
-    timestamp,
+    kind: "message",
+    message: { id, role: "user", content: [{ type: "text", text }], ts },
   };
 }
 
-function assistantEntry(id: string, text: string, timestamp = 0): TimelineEntrySummary {
+function assistantEntry(id: string, text: string, ts = 0): MessageTimelineEntry {
   return {
-    id,
-    role: "assistant",
-    content: [{ type: "text", text }],
-    timestamp,
+    kind: "message",
+    message: { id, role: "assistant", content: [{ type: "text", text }], ts },
   };
 }
 
-function systemEntry(id: string, text: string, timestamp = 0): TimelineEntrySummary {
+function systemEntry(id: string, text: string, ts = 0): MessageTimelineEntry {
   return {
-    id,
-    role: "system",
-    content: [{ type: "text", text }],
-    timestamp,
+    kind: "message",
+    message: { id, role: "system", content: [{ type: "text", text }], ts },
   };
 }
 
@@ -71,7 +67,7 @@ function joinText(content: readonly { text?: string }[]): string {
 
 describe("<Timeline> — default rendering", () => {
   it("emits one <message> per persisted entry with content passed through", async () => {
-    const timeline = stubTimelineBridge([userEntry("e1", "hello"), assistantEntry("e2", "world")]);
+    const timeline = stubTimelineHarness([userEntry("e1", "hello"), assistantEntry("e2", "world")]);
     const bridges: HookBridges = { ...stubBridges(), timeline };
     const harness = await makeHarness();
 
@@ -92,7 +88,7 @@ describe("<Timeline> — default rendering", () => {
   });
 
   it("renders an empty Fragment when the timeline is empty", async () => {
-    const timeline = stubTimelineBridge();
+    const timeline = stubTimelineHarness();
     const bridges: HookBridges = { ...stubBridges(), timeline };
     const harness = await makeHarness();
 
@@ -110,7 +106,7 @@ describe("<Timeline> — default rendering", () => {
 
 describe("<Timeline> — filtering", () => {
   it("restricts rendered entries by role", async () => {
-    const timeline = stubTimelineBridge([
+    const timeline = stubTimelineHarness([
       systemEntry("s1", "you are helpful"),
       userEntry("u1", "hi"),
       assistantEntry("a1", "yo"),
@@ -131,9 +127,9 @@ describe("<Timeline> — filtering", () => {
   });
 
   it("limits to the newest N entries when `limit` is set", async () => {
-    const entries: TimelineEntrySummary[] = [];
+    const entries: MessageTimelineEntry[] = [];
     for (let i = 0; i < 5; i++) entries.push(userEntry(`e${i}`, `msg-${i}`));
-    const timeline = stubTimelineBridge(entries);
+    const timeline = stubTimelineHarness(entries);
     const bridges: HookBridges = { ...stubBridges(), timeline };
     const harness = await makeHarness();
 
@@ -152,7 +148,7 @@ describe("<Timeline> — filtering", () => {
   });
 
   it("applies a custom predicate after role filtering", async () => {
-    const timeline = stubTimelineBridge([
+    const timeline = stubTimelineHarness([
       userEntry("u1", "yes"),
       userEntry("u2", "no"),
       userEntry("u3", "yes"),
@@ -164,7 +160,7 @@ describe("<Timeline> — filtering", () => {
       mountId: "m_pred",
       sessionId: "s",
       element: React.createElement(Timeline, {
-        filter: (entry) => joinText(entry.content) === "yes",
+        filter: (entry) => joinText(entry.message.content) === "yes",
       }),
       bridges,
     });
@@ -178,7 +174,7 @@ describe("<Timeline> — filtering", () => {
 
 describe("<Timeline> — render prop", () => {
   it("receives kept entries and budget info, replacing default rendering", async () => {
-    const timeline = stubTimelineBridge([userEntry("u1", "hello"), assistantEntry("a1", "world")]);
+    const timeline = stubTimelineHarness([userEntry("u1", "hello"), assistantEntry("a1", "world")]);
     const bridges: HookBridges = { ...stubBridges(), timeline };
     const harness = await makeHarness();
 
@@ -193,11 +189,11 @@ describe("<Timeline> — render prop", () => {
           return entries.map((e) =>
             React.createElement(
               "message" as unknown as React.ComponentType<unknown>,
-              { key: e.id, role: e.role },
+              { key: e.message.id, role: e.message.role },
               React.createElement(
                 "text" as unknown as React.ComponentType<unknown>,
                 {},
-                `RP:${joinText(e.content)}`,
+                `RP:${joinText(e.message.content)}`,
               ),
             ),
           );
@@ -220,9 +216,9 @@ describe("<Timeline> — token budget", () => {
   it("evicts oldest entries when over budget and fires onEvict", async () => {
     // Each entry text length ≈ 100 chars → ~29 tokens with overhead.
     const text = "x".repeat(100);
-    const entries: TimelineEntrySummary[] = [];
+    const entries: MessageTimelineEntry[] = [];
     for (let i = 0; i < 6; i++) entries.push(userEntry(`e${i}`, text));
-    const timeline = stubTimelineBridge(entries);
+    const timeline = stubTimelineHarness(entries);
     const bridges: HookBridges = { ...stubBridges(), timeline };
     const harness = await makeHarness();
 
@@ -251,19 +247,19 @@ describe("<Timeline> — token budget", () => {
 
     // onEvict fires post-render with the dropped entries.
     expect(onEvict).toHaveBeenCalledTimes(1);
-    const dropped = onEvict.mock.calls[0]![0] as readonly TimelineEntrySummary[];
-    expect(dropped.map((e) => e.id)).toEqual(["e0", "e1", "e2", "e3"]);
+    const dropped = onEvict.mock.calls[0]![0] as readonly MessageTimelineEntry[];
+    expect(dropped.map((e) => e.message.id)).toEqual(["e0", "e1", "e2", "e3"]);
   });
 
   it("preserves `system` role under sliding-window even when budget is tight", async () => {
     const text = "x".repeat(100);
-    const entries: TimelineEntrySummary[] = [
+    const entries: MessageTimelineEntry[] = [
       systemEntry("sys", text),
       userEntry("u1", text),
       userEntry("u2", text),
       userEntry("u3", text),
     ];
-    const timeline = stubTimelineBridge(entries);
+    const timeline = stubTimelineHarness(entries);
     const bridges: HookBridges = { ...stubBridges(), timeline };
     const harness = await makeHarness();
 

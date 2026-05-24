@@ -4,79 +4,34 @@
  * The reconciler harness consumes a bundle of bridges/harnesses at
  * mount time:
  *
- *   - `TimelineBridge`        — synchronous read of accumulated timeline
- *   - `KnobsHarnessProtocol`  — model-visible knobs (full harness per ADR 26)
- *   - `StateBridge`           — session-internal reactive state
- *   - `DataBridge`            — `useData` cache + Promise tracking
- *   - `LoopBridge`            — `useLoopControl` continuation knob
- *   - `SessionBridge`         — id + status + tick metadata
+ *   - `TimelineHarnessProtocol` — log + projection (full harness per ADR 26)
+ *   - `KnobsHarnessProtocol`    — model-visible knobs (full harness per ADR 26)
+ *   - `StateHarnessProtocol`    — session-internal reactive state (full harness)
+ *   - `DataBridge`              — `useData` cache + Promise tracking
+ *   - `LoopBridge`              — `useLoopControl` continuation knob
+ *   - `SessionBridge`           — id + status + tick metadata
  *
- * Knobs is constructed as a `KnobsHarness` per ADR 26 — wired to the
- * session's substrate so its Operation envelopes flow into the app
- * bus and journal, and remote actors (admin dashboards, cluster
- * nodes) can address it at `inbox://knobs:{sessionId}:knobs`.
+ * Timeline / Knobs / State are constructed against the session's
+ * substrate (journal + bus + inbox) so their Operation envelopes flow
+ * into the app bus and journal, and remote actors (admin dashboards,
+ * cluster nodes) can address them at `inbox://{surface}:{sessionId}:{surface}`.
  */
 
 import { InMemoryDataBridge } from "@agentick/reconciler-react";
 import { KnobsHarness } from "@agentick/knobs";
 import { StateHarness } from "@agentick/state";
+import { TimelineHarness } from "@agentick/timeline";
 import type {
   EventBus,
   HookBridges,
   LoopBridge,
   MessageInbox,
-  MessageRole,
   OperationJournal,
   SessionBridge,
-  TimelineBridge,
-  TimelineEntrySummary,
-  TimelineSnapshot,
   ToolBridge,
-  Unsubscribe,
 } from "@agentick/spec";
 
 import type { SessionStateStore } from "./session-state.js";
-
-/**
- * Map the session's persistence-shaped `TimelineEntry` (message wrapper
- * with visibility/tags) to the reconciler bridge's
- * `TimelineEntrySummary` (flat row the hooks consume).
- */
-function toEntrySummary(entry: {
-  readonly kind: "message";
-  readonly message: {
-    readonly id: string;
-    readonly role: string;
-    readonly content: readonly unknown[];
-    readonly ts: number;
-    readonly metadata?: Readonly<Record<string, unknown>>;
-  };
-}): TimelineEntrySummary {
-  const m = entry.message;
-  return {
-    id: m.id,
-    role: m.role as MessageRole,
-    content: m.content as TimelineEntrySummary["content"],
-    timestamp: m.ts,
-    ...(m.metadata !== undefined ? { metadata: m.metadata } : {}),
-  };
-}
-
-export function timelineBridgeFor(store: SessionStateStore): TimelineBridge {
-  return {
-    read: (): TimelineSnapshot => ({
-      entries: store
-        .timeline()
-        .filter((e) => e.visibility !== "log")
-        .map(toEntrySummary),
-      version: store.timelineVersion(),
-    }),
-    subscribe: (listener: () => void): Unsubscribe => store.subscribeTimeline(listener),
-  };
-}
-
-// StateHarness is constructed inline in buildSessionBridges so it can
-// share the session's substrate; no per-call factory needed.
 
 export function loopBridgeStub(): LoopBridge {
   return {
@@ -101,12 +56,12 @@ export function sessionBridgeFor(store: SessionStateStore): SessionBridge {
 }
 
 /**
- * Assemble the full `HookBridges` bundle from session state. KnobsHarness
- * is constructed against the session's shared substrate so its
- * envelopes flow into the app's bus + journal (visible via
- * `app.events({ surface: "knobs" })`).
+ * Assemble the full `HookBridges` bundle from session state. Timeline /
+ * Knobs / State are constructed against the session's shared substrate
+ * so their envelopes flow into the app's bus + journal.
  */
 export interface SessionHookBridges extends HookBridges {
+  readonly timeline: TimelineHarness;
   readonly knobs: KnobsHarness;
   readonly state: StateHarness;
   readonly data: InMemoryDataBridge;
@@ -132,7 +87,13 @@ export function buildSessionBridges(
   },
   options: BuildSessionBridgesOptions = {},
 ): SessionHookBridges {
-  // Knobs + State are harnesses wired to the session's substrate (ADR 26).
+  // Timeline / Knobs / State are harnesses wired to the session's substrate (ADR 26).
+  const timeline = new TimelineHarness(
+    `${store.id}:timeline`,
+    substrate.journal,
+    substrate.bus,
+    substrate.inbox,
+  );
   const knobs = new KnobsHarness(
     `${store.id}:knobs`,
     substrate.journal,
@@ -147,7 +108,7 @@ export function buildSessionBridges(
   );
 
   const base: SessionHookBridges = {
-    timeline: timelineBridgeFor(store),
+    timeline,
     knobs,
     state,
     data: new InMemoryDataBridge(),

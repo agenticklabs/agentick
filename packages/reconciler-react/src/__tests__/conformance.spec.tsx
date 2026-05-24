@@ -14,18 +14,18 @@ import {
   runDataBridgeConformance,
   runLoopBridgeConformance,
   runReconcilerConformance,
-  runTimelineBridgeConformance,
   type ElementInput,
   type ReconcilerConformanceFactory,
 } from "@agentick/spec-conformance";
 import { runKnobsHarnessConformance } from "@agentick/knobs";
+import { runTimelineHarnessConformance } from "@agentick/timeline";
 import type { HookBridges, ReconcilerProtocol } from "@agentick/spec";
 import { InMemoryDataBridge } from "../bridges/in-memory-data-bridge.js";
 import {
   stubBridges,
   stubKnobsHarness,
   stubLoopBridge,
-  stubTimelineBridge,
+  stubTimelineHarness,
 } from "../bridges/stub-bridges.js";
 import { ReconcilerHarness } from "../harness/reconciler-harness.js";
 
@@ -47,8 +47,17 @@ runKnobsHarnessConformance({
   },
 });
 
-describe("stubTimelineBridge — conformance", () =>
-  runTimelineBridgeConformance(() => stubTimelineBridge()));
+// Timeline is now a harness (ADR 26 Step 5a). Conformance suite lives in
+// @agentick/timeline. We run it here against the in-process stub to
+// validate the reconciler-react integration uses a real harness behind
+// useBridges().timeline.
+runTimelineHarnessConformance({
+  make: async () => {
+    const harness = stubTimelineHarness();
+    await harness.ready;
+    return harness;
+  },
+});
 
 describe("stubLoopBridge — conformance", () => runLoopBridgeConformance(() => stubLoopBridge()));
 

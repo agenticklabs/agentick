@@ -1,5 +1,5 @@
 /**
- * Token-budget compaction for timeline entries.
+ * Token-budget compaction for timeline message entries.
  *
  * Pure functions. Used by `<Timeline maxTokens={…}>` to evict older
  * entries when the persisted history exceeds a configured budget.
@@ -13,11 +13,18 @@
  * @see packages/core/src/jsx/components/token-budget.ts (v1 origin)
  */
 
-import type { ContentBlock, TimelineEntrySummary } from "@agentick/spec";
+import type { ContentBlock, TimelineEntry } from "@agentick/spec";
 
 // ============================================================================
 // Types
 // ============================================================================
+
+/**
+ * Token-budget compaction operates on message-kind entries only. Other
+ * timeline kinds (state-change records, subscription receipts) get
+ * filtered out before reaching this layer.
+ */
+type MessageTimelineEntry = Extract<TimelineEntry, { kind: "message" }>;
 
 /**
  * Compaction strategy for handling token-budget overflow.
@@ -31,14 +38,14 @@ import type { ContentBlock, TimelineEntrySummary } from "@agentick/spec";
 export type CompactionStrategy = "none" | "truncate" | "sliding-window" | CompactionFunction;
 
 export type CompactionFunction = (
-  entries: readonly TimelineEntrySummary[],
+  entries: readonly MessageTimelineEntry[],
   budget: { maxTokens: number; currentTokens: number },
   guidance?: string,
 ) => CompactionResult;
 
 export interface CompactionResult {
-  readonly kept: readonly TimelineEntrySummary[];
-  readonly evicted: readonly TimelineEntrySummary[];
+  readonly kept: readonly MessageTimelineEntry[];
+  readonly evicted: readonly MessageTimelineEntry[];
 }
 
 /**
@@ -66,8 +73,8 @@ export interface CompactOptions {
 }
 
 export interface CompactResult {
-  readonly kept: readonly TimelineEntrySummary[];
-  readonly evicted: readonly TimelineEntrySummary[];
+  readonly kept: readonly MessageTimelineEntry[];
+  readonly evicted: readonly MessageTimelineEntry[];
   readonly currentTokens: number;
 }
 
@@ -131,9 +138,9 @@ function blockCharCount(block: ContentBlock): number {
   }
 }
 
-export function getEntryTokens(entry: TimelineEntrySummary): number {
+export function getEntryTokens(entry: MessageTimelineEntry): number {
   let chars = 0;
-  for (const block of entry.content) chars += blockCharCount(block);
+  for (const block of entry.message.content) chars += blockCharCount(block);
   return Math.ceil(chars / CHARS_PER_TOKEN) + ENTRY_OVERHEAD;
 }
 
@@ -142,11 +149,11 @@ export function getEntryTokens(entry: TimelineEntrySummary): number {
 // ============================================================================
 
 function truncateStrategy(
-  entries: readonly TimelineEntrySummary[],
+  entries: readonly MessageTimelineEntry[],
   effectiveBudget: number,
 ): CompactionResult {
-  const kept: TimelineEntrySummary[] = [];
-  const evicted: TimelineEntrySummary[] = [];
+  const kept: MessageTimelineEntry[] = [];
+  const evicted: MessageTimelineEntry[] = [];
   let budget = effectiveBudget;
   for (let i = entries.length - 1; i >= 0; i--) {
     const tokens = getEntryTokens(entries[i]!);
@@ -161,14 +168,14 @@ function truncateStrategy(
 }
 
 function slidingWindowStrategy(
-  entries: readonly TimelineEntrySummary[],
+  entries: readonly MessageTimelineEntry[],
   effectiveBudget: number,
   preserveRoles: readonly string[],
 ): CompactionResult {
   const preserved = new Set<number>();
   let preservedTokens = 0;
   for (let i = 0; i < entries.length; i++) {
-    if (preserveRoles.includes(entries[i]!.role)) {
+    if (preserveRoles.includes(entries[i]!.message.role)) {
       preserved.add(i);
       preservedTokens += getEntryTokens(entries[i]!);
     }
@@ -186,8 +193,8 @@ function slidingWindowStrategy(
     }
   }
 
-  const kept: TimelineEntrySummary[] = [];
-  const evicted: TimelineEntrySummary[] = [];
+  const kept: MessageTimelineEntry[] = [];
+  const evicted: MessageTimelineEntry[] = [];
   for (let i = 0; i < entries.length; i++) {
     if (preserved.has(i) || keptCandidates.has(i)) kept.push(entries[i]!);
     else evicted.push(entries[i]!);
@@ -200,7 +207,7 @@ function slidingWindowStrategy(
 // ============================================================================
 
 export function compactEntries(
-  entries: readonly TimelineEntrySummary[],
+  entries: readonly MessageTimelineEntry[],
   options: CompactOptions,
 ): CompactResult {
   const {

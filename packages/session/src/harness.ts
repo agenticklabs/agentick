@@ -215,19 +215,23 @@ export class SessionHarness<P = unknown>
   }
 
   timeline(): readonly TimelineEntry[] {
-    return this.store.timeline();
+    // The session's user-facing `timeline()` returns the projection —
+    // what's currently model-visible. Tests + adopters that need the
+    // immutable durable log call `bridges.timeline.readPersisted()`.
+    return this.bridges.timeline.read().entries;
   }
 
   snapshot(): SessionSnapshot {
+    // Step 5a: snapshot.timeline holds the durable persisted log. The
+    // projection (potentially compacted) is not yet round-tripped via
+    // SessionSnapshot — Step 6 (SnapshotHarness) will compose per-harness
+    // snapshots into the session shape and carry both layers.
     return {
       specVersion: SPEC_VERSION,
       id: this.store.id,
       status: this.store.status(),
       currentTick: this.store.currentTick(),
-      // Materialize a copy — `store.timeline()` returns a live reference.
-      // Without the slice, a captured snapshot mutates in place as the
-      // session does more work, defeating the snapshot contract.
-      timeline: this.store.timeline().slice(),
+      timeline: [...this.bridges.timeline.readPersisted()],
       knobs: this.bridges.knobs.exportSnapshot(),
       usage: this.store.usage(),
     };
@@ -243,6 +247,24 @@ export class SessionHarness<P = unknown>
     } catch {
       // shutdown — best effort
     }
+    // Close every bridge that exposes a `close()` — built-ins
+    // (timeline/knobs/state) and extension-installed bridges
+    // (sandbox/mcp/subscriptions/...) alike. Duck-typed: any bridge
+    // entry whose `close` is a function gets shut down. Plain accessor
+    // bridges (data/loop/session) are no-ops here.
+    const closes: Promise<unknown>[] = [];
+    for (const value of Object.values(this.bridges)) {
+      if (
+        value !== null &&
+        typeof value === "object" &&
+        typeof (value as { close?: unknown }).close === "function"
+      ) {
+        closes.push(
+          Promise.resolve((value as { close: () => unknown }).close()).catch(() => undefined),
+        );
+      }
+    }
+    await Promise.all(closes);
     await super.close();
   }
 
@@ -250,8 +272,8 @@ export class SessionHarness<P = unknown>
 
   applyExecutorResult(input: ApplyExecutorResultInput): Promise<ApplyResult> {
     return runHarnessProtocol(
-      Effect.try({
-        try: () => this.applyExecutorResultSync(input),
+      Effect.tryPromise({
+        try: () => this.applyExecutorResultBody(input),
         catch: (cause): StateApplyError => ({
           _tag: "TimelineWriteFailed",
           cause,
@@ -262,8 +284,8 @@ export class SessionHarness<P = unknown>
 
   applyToolResults(input: ApplyToolResultsInput): Promise<ApplyResult> {
     return runHarnessProtocol(
-      Effect.try({
-        try: () => this.applyToolResultsSync(input),
+      Effect.tryPromise({
+        try: () => this.applyToolResultsBody(input),
         catch: (cause): StateApplyError => ({
           _tag: "TimelineWriteFailed",
           cause,
@@ -274,8 +296,8 @@ export class SessionHarness<P = unknown>
 
   appendEntry(input: AppendEntryInput): Promise<ApplyResult> {
     return runHarnessProtocol(
-      Effect.try({
-        try: () => this.appendEntrySync(input),
+      Effect.tryPromise({
+        try: () => this.appendEntryBody(input),
         catch: (cause): StateApplyError => ({
           _tag: "TimelineWriteFailed",
           cause,
@@ -355,7 +377,7 @@ export class SessionHarness<P = unknown>
     }
     // queue() coerces to user role regardless of message.role — that's
     // the verb's contract. Use append() / observe() for non-user entries.
-    this.appendInputMessage({ ...message, role: "user" });
+    await this.appendInputMessage({ ...message, role: "user" });
     // Auto-trigger when the session is idle. Mid-execution, the
     // running send picks up the message at its next render naturally.
     if (this._currentExecution === null) {
@@ -375,7 +397,7 @@ export class SessionHarness<P = unknown>
     if (this._closed) {
       throw { _tag: "SessionClosedError", attemptedCommand: "append" } satisfies SessionError;
     }
-    const applied = this.appendEntrySync(input);
+    const applied = await this.appendEntryBody(input);
     const entryId = applied.appendedEntryIds[0]!;
     if (opts.trigger) {
       // Trigger an execution with no new messages — the appended
@@ -391,9 +413,7 @@ export class SessionHarness<P = unknown>
     }
     const content: readonly ContentBlock[] =
       typeof input.content === "string" ? [{ type: "text", text: input.content }] : input.content;
-    // Call the store directly so the metadata field is preserved.
-    // appendEntrySync's narrower input doesn't carry metadata.
-    const id = this.store.appendMessage({
+    const id = await this.appendMessageEntry({
       role: "event",
       content,
       metadata: { type: input.type, ...(input.metadata ?? {}) },
@@ -562,7 +582,7 @@ export class SessionHarness<P = unknown>
     await this._mountReady;
 
     // Apply new messages to the timeline.
-    for (const m of input.messages ?? []) this.appendInputMessage(m);
+    for (const m of input.messages ?? []) await this.appendInputMessage(m);
 
     const executionId = `exec:${ulid()}`;
     this.store.setCurrentExecutionId(executionId);
@@ -638,22 +658,21 @@ export class SessionHarness<P = unknown>
     return handle;
   }
 
-  private applyExecutorResultSync(input: ApplyExecutorResultInput): ApplyResult {
+  private async applyExecutorResultBody(input: ApplyExecutorResultInput): Promise<ApplyResult> {
     const ids: string[] = [];
     if (input.result.output.length > 0) {
-      ids.push(
-        this.store.appendMessage({
-          role: "assistant",
-          content: input.result.output,
-        }),
-      );
+      const id = await this.appendMessageEntry({
+        role: "assistant",
+        content: input.result.output,
+      });
+      ids.push(id);
     }
     this.store.addUsage(input.result.usage);
     this.store.bumpTick();
     return { appendedEntryIds: ids };
   }
 
-  private applyToolResultsSync(input: ApplyToolResultsInput): ApplyResult {
+  private async applyToolResultsBody(input: ApplyToolResultsInput): Promise<ApplyResult> {
     const ids: string[] = [];
     for (const tr of input.results) {
       const block: ContentBlock = {
@@ -663,34 +682,67 @@ export class SessionHarness<P = unknown>
         content: tr.content,
         ...(tr.succeeded === false ? { isError: true } : {}),
       };
-      ids.push(
-        this.store.appendMessage({
-          role: "tool",
-          content: [block],
-          toolCallId: tr.toolCallId,
-          name: tr.toolName,
-        }),
-      );
+      const id = await this.appendMessageEntry({
+        role: "tool",
+        content: [block],
+        toolCallId: tr.toolCallId,
+        name: tr.toolName,
+      });
+      ids.push(id);
     }
     return { appendedEntryIds: ids };
   }
 
-  private appendEntrySync(input: AppendEntryInput): ApplyResult {
-    const id = this.store.appendMessage({
+  private async appendEntryBody(input: AppendEntryInput): Promise<ApplyResult> {
+    const id = await this.appendMessageEntry({
       role: input.entry.role,
       content: input.entry.content,
     });
     return { appendedEntryIds: [id] };
   }
 
-  private appendInputMessage(m: SendMessageInput): void {
+  private async appendInputMessage(m: SendMessageInput): Promise<void> {
     const content =
       typeof m.content === "string" ? [{ type: "text" as const, text: m.content }] : m.content;
-    this.store.appendMessage({
+    await this.appendMessageEntry({
       role: m.role,
       content,
       ...(m.metadata !== undefined ? { metadata: m.metadata } : {}),
     });
+  }
+
+  /**
+   * Internal helper — build a `TimelineEntry` for a message and route
+   * the append through the TimelineHarness. Returns the message id so
+   * `StateApplicator` callers can include it in their `ApplyResult`.
+   */
+  private async appendMessageEntry(input: {
+    readonly role: import("@agentick/spec").SessionMessageRole;
+    readonly content: readonly ContentBlock[];
+    readonly visibility?: "model" | "observer" | "log";
+    readonly toolCallId?: string;
+    readonly name?: string;
+    readonly tags?: readonly string[];
+    readonly metadata?: Readonly<Record<string, unknown>>;
+  }): Promise<string> {
+    const messageId = `m_${ulid()}`;
+    const message: import("@agentick/spec").SessionMessage = {
+      id: messageId,
+      role: input.role,
+      content: input.content,
+      ts: Date.now(),
+      ...(input.toolCallId !== undefined ? { toolCallId: input.toolCallId } : {}),
+      ...(input.name !== undefined ? { name: input.name } : {}),
+      ...(input.metadata !== undefined ? { metadata: input.metadata } : {}),
+    };
+    const entry: TimelineEntry = {
+      kind: "message",
+      message,
+      ...(input.visibility !== undefined ? { visibility: input.visibility } : {}),
+      ...(input.tags !== undefined ? { tags: input.tags } : {}),
+    };
+    await this.bridges.timeline.append({ entry });
+    return messageId;
   }
 }
 

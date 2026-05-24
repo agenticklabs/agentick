@@ -12,58 +12,44 @@ import type {
   LoopBridge,
   SessionBridge,
   StateHarnessProtocol,
-  TimelineBridge,
-  TimelineEntrySummary,
-  TimelineSnapshot,
-  Unsubscribe,
+  TimelineEntry,
+  TimelineHarnessProtocol,
 } from "@agentick/spec";
 import { KnobsHarness } from "@agentick/knobs";
 import { StateHarness } from "@agentick/state";
+import { TimelineHarness } from "@agentick/timeline";
 import { LocalEventBus, LocalInbox, MemoryJournal, ulid } from "@agentick/runtime";
 import { InMemoryDataBridge } from "./in-memory-data-bridge.js";
 
 /**
- * In-memory TimelineBridge with an `append` writer for tests. Real
- * runtimes back the bridge with a persistent journal; this stub is a
- * thin Map + version counter that fires subscribers on `append`.
+ * Build a {@link TimelineHarness} for use in test bridges. Wraps the
+ * harness with an in-memory substrate (own journal/bus/inbox). Real
+ * session deployments share substrate with the host AppHarness; this
+ * factory is for standalone unit tests where the substrate plumbing
+ * isn't exercised.
+ *
+ * `initial` seeds entries eagerly via `importSnapshot({ mode: "as-is" })` —
+ * both log and projection start as a live mirror of the supplied array.
  */
-export interface InMemoryTimelineBridge extends TimelineBridge {
-  append(entry: TimelineEntrySummary): void;
-  replace(entries: readonly TimelineEntrySummary[]): void;
-}
-
-export function stubTimelineBridge(
-  initial: readonly TimelineEntrySummary[] = [],
-): InMemoryTimelineBridge {
-  let entries: readonly TimelineEntrySummary[] = initial.slice();
-  let version = initial.length > 0 ? 1 : 0;
-  // Cache the snapshot reference — useSyncExternalStore compares with
-  // Object.is, so returning a fresh object each call would loop forever.
-  let snapshot: TimelineSnapshot = { entries, version };
-  const listeners = new Set<() => void>();
-  const notify = () => listeners.forEach((l) => l());
-  const bump = () => {
-    version += 1;
-    snapshot = { entries, version };
-    notify();
-  };
-  return {
-    read: (): TimelineSnapshot => snapshot,
-    subscribe: (listener: () => void): Unsubscribe => {
-      listeners.add(listener);
-      return () => {
-        listeners.delete(listener);
-      };
-    },
-    append: (entry) => {
-      entries = [...entries, entry];
-      bump();
-    },
-    replace: (next) => {
-      entries = next.slice();
-      bump();
-    },
-  };
+export function stubTimelineHarness(initial: readonly TimelineEntry[] = []): TimelineHarness {
+  const harness = new TimelineHarness(
+    `stub:${ulid()}`,
+    new MemoryJournal({ capacity: 1024 }),
+    new LocalEventBus(),
+    new LocalInbox(),
+  );
+  if (initial.length > 0) {
+    void harness.importSnapshot(
+      {
+        persisted: initial,
+        projection: initial,
+        persistedVersion: initial.length,
+        projectionVersion: initial.length,
+      },
+      { mode: "as-is" },
+    );
+  }
+  return harness;
 }
 
 /**
@@ -123,6 +109,7 @@ export interface StubBridgesOptions {
   readonly sessionId?: string;
   readonly knobs?: Readonly<Record<string, KnobPrimitive>>;
   readonly state?: Record<string, unknown>;
+  readonly timeline?: readonly TimelineEntry[];
   readonly onDataSettled?: (key: string) => void;
 }
 
@@ -131,14 +118,13 @@ export interface StubBridgesOptions {
  * implementations. Useful for unit tests; real runtimes plug in their
  * own concrete bridges.
  *
- * `knobs` is a real {@link KnobsHarness} (per ADR 26 — knobs is a
- * harness, not a bridge). Tests that need to invoke knob operations
- * use the harness's async surface (`set` / `register` / `dispatch`)
- * and the eager-mutation guarantee.
+ * `timeline` / `knobs` / `state` are real harnesses (per ADR 26 — these
+ * are harnesses, not bridges). Tests that need to invoke harness
+ * operations use the async surface and the eager-mutation guarantee.
  */
 export function stubBridges(options: StubBridgesOptions = {}): HookBridges {
   return {
-    timeline: stubTimelineBridge(),
+    timeline: stubTimelineHarness(options.timeline) as TimelineHarnessProtocol,
     knobs: stubKnobsHarness(options.knobs) as KnobsHarnessProtocol,
     state: stubStateHarness(options.state) as StateHarnessProtocol,
     data: new InMemoryDataBridge({ onSettled: options.onDataSettled }),

@@ -21,11 +21,11 @@ export {
   type ElementInput,
 } from "./reconciler.js";
 
-// Bridge conformance (Phase 3.14). Knobs is a harness; its conformance
-// suite ships from `@agentick/knobs` (`runKnobsHarnessConformance`),
-// not here.
+// Bridge conformance (Phase 3.14). Knobs / state / timeline are
+// harnesses (ADR 26); their conformance suites ship from their
+// respective packages (`runKnobsHarnessConformance` from
+// `@agentick/knobs`, etc.), not here.
 export { runDataBridgeConformance } from "./data-bridge.js";
-export { runTimelineBridgeConformance } from "./timeline-bridge.js";
 export { runLoopBridgeConformance } from "./loop-bridge.js";
 
 // Renderer / formatter protocols (Phase 4a — formatter harness)

@@ -19,10 +19,11 @@
  * @see docs/proposals/v2/blueprint/03-reconciler-harness.md §Hooks model
  */
 
-import type { ContentBlock, MessageRole } from "../data/content-blocks.js";
+import type { ContentBlock } from "../data/content-blocks.js";
 import type { Unsubscribe } from "./inbox.js";
 import type { KnobsHarnessProtocol } from "./knobs-harness.js";
 import type { StateHarnessProtocol } from "./state-harness.js";
+import type { TimelineHarnessProtocol } from "./timeline-harness.js";
 
 export type { Unsubscribe };
 
@@ -50,7 +51,15 @@ export type { Unsubscribe };
  * surfacing a `missing-bridge` diagnostic.
  */
 export interface HookBridges {
-  readonly timeline: TimelineBridge;
+  /**
+   * Timeline is a full harness (ADR 26 Step 5a). `useBridges().timeline`
+   * returns a `TimelineHarnessProtocol` — sync `read`/`subscribe`/
+   * `readPersisted` + async Operation-backed `append`/`compact`/
+   * `replaceProjection`/`resetProjection`. The previous `TimelineBridge`
+   * interface has retired; the canonical entry shape is `TimelineEntry`
+   * (full kind-discriminated entries — no `TimelineEntrySummary` view).
+   */
+  readonly timeline: TimelineHarnessProtocol;
   /**
    * Knobs are a full harness (ADR 26). `useBridges().knobs` returns a
    * `KnobsHarnessProtocol` — sync reads (get/has/list/subscribe/
@@ -154,36 +163,10 @@ export interface DataResolveOptions {
 // Timeline bridge
 // ============================================================================
 
-/**
- * Read-only access to the session's timeline. Backed by the session
- * harness's persistent store; the reconciler never writes through this
- * bridge — writes happen via session commands.
- */
-export interface TimelineBridge {
-  read(): TimelineSnapshot;
-  /**
-   * Subscribe to timeline change notifications. The listener is fired
-   * when the timeline version changes; the listener implementation
-   * SHOULD trigger a re-render (e.g., via setState) in components that
-   * depend on timeline state.
-   */
-  subscribe(listener: () => void): Unsubscribe;
-}
-
-export interface TimelineSnapshot {
-  readonly entries: readonly TimelineEntrySummary[];
-  /** Monotonic version stamp. Used for memoization. */
-  readonly version: number;
-}
-
-export interface TimelineEntrySummary {
-  readonly id: string;
-  readonly role: MessageRole;
-  readonly content: readonly ContentBlock[];
-  /** Epoch ms. */
-  readonly timestamp: number;
-  readonly metadata?: Readonly<Record<string, unknown>>;
-}
+// The `TimelineBridge` / `TimelineSnapshot` / `TimelineEntrySummary` shapes
+// retired in ADR 26 Step 5a. The timeline now lives in a full harness
+// (`TimelineHarnessProtocol`) and exposes the canonical `TimelineEntry[]`
+// shape directly — no summary projection. See ./timeline-harness.ts.
 
 // ============================================================================
 // Knob metadata (descriptors, value primitives)

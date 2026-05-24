@@ -94,7 +94,7 @@ export { InMemoryDataBridge } from "./bridges/in-memory-data-bridge.js";
 export type { InMemoryDataBridgeOptions } from "./bridges/in-memory-data-bridge.js";
 export {
   stubBridges,
-  stubTimelineBridge,
+  stubTimelineHarness,
   stubKnobsHarness,
   stubStateHarness,
   stubLoopBridge,
@@ -168,9 +168,6 @@ export type {
 
 // Passthrough contributor (exported so custom registries can opt-in)
 export { contentPassthroughContributor } from "./collect/contributors/content-passthrough.js";
-
-// Stub bridges — re-export the in-memory timeline variant for tests
-export type { InMemoryTimelineBridge } from "./bridges/stub-bridges.js";
 
 // Layer C — Harness
 export { ReconcilerHarness } from "./harness/reconciler-harness.js";

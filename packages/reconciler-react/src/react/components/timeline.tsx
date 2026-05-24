@@ -2,12 +2,10 @@
  * `<Timeline>` — render persisted conversation history.
  *
  * Reads the session's timeline via `useTimeline()` (which subscribes to
- * the `TimelineBridge`'s version stamp). Each entry is emitted as
- * `<Message {...entry} />` — the contributor's `content` prop accepts the
- * persisted spec-shape `ContentBlock[]` verbatim, so no translation is
- * needed. `TimelineEntrySummary.timestamp` lands on the host props inert
- * (the contributor doesn't read it; the host strip step keeps it
- * available for any inspecting tooling).
+ * the TimelineHarness's projection version stamp). Each `message`-kind
+ * entry is emitted as `<Message {...entry.message} />`; other entry
+ * kinds (future state-change records, subscription receipts) are
+ * filtered out — they're not part of the model-visible conversation.
  *
  * Optional token-budget compaction (`maxTokens`, `strategy`, `headroom`,
  * `preserveRoles`, `guidance`) drops entries that don't fit. The
@@ -17,7 +15,7 @@
  * Notes vs. v1:
  *   - No `Timeline.Provider` / `Timeline.Messages` (premature abstraction)
  *   - No pending/queued message rendering — v2 has no equivalent surface
- *     on `TimelineBridge` yet. When that lands, extend in place.
+ *     on the TimelineHarness yet. When that lands, extend in place.
  *   - No `useConversationHistory` — call `useTimeline()` directly.
  *
  * @see packages/core/src/jsx/components/timeline.tsx (v1 origin)
@@ -25,7 +23,7 @@
 
 import React, { useEffect, useMemo, useRef, type ReactNode } from "react";
 import type { JSX } from "react";
-import type { TimelineEntrySummary } from "@agentick/spec";
+import type { TimelineEntry } from "@agentick/spec";
 import { useTimeline } from "../hooks/use-timeline.js";
 import { Message } from "./message.js";
 import { compactEntries, type CompactionStrategy, type TokenBudgetInfo } from "./token-budget.js";
@@ -36,9 +34,16 @@ const h = React.createElement;
 // Types
 // ============================================================================
 
+/**
+ * Type narrowing helper — the only entry kind in the timeline today.
+ * Future kinds (state-change records, subscription receipts) will get
+ * their own contributors; `<Timeline>` only renders messages.
+ */
+type MessageTimelineEntry = Extract<TimelineEntry, { kind: "message" }>;
+
 export interface ConversationHistoryOptions {
   /** Custom predicate applied after role filtering. */
-  readonly filter?: (entry: TimelineEntrySummary) => boolean;
+  readonly filter?: (entry: MessageTimelineEntry) => boolean;
   /** Cap the number of entries returned (newest preserved). */
   readonly limit?: number;
   /** Restrict to these roles. */
@@ -51,7 +56,7 @@ export interface TimelineBudgetOptions {
   /** Compaction algorithm. Default: `"sliding-window"`. */
   readonly strategy?: CompactionStrategy;
   /** Fired after render when entries are dropped. */
-  readonly onEvict?: (entries: readonly TimelineEntrySummary[]) => void;
+  readonly onEvict?: (entries: readonly MessageTimelineEntry[]) => void;
   /** Forwarded to custom compaction functions. */
   readonly guidance?: string;
   /** Roles never evicted by `sliding-window`. Default: `["system"]`. */
@@ -61,7 +66,7 @@ export interface TimelineBudgetOptions {
 }
 
 export type TimelineRenderFn = (
-  entries: readonly TimelineEntrySummary[],
+  entries: readonly MessageTimelineEntry[],
   budget: TokenBudgetInfo | null,
 ) => ReactNode;
 
@@ -78,13 +83,13 @@ export interface TimelineProps extends ConversationHistoryOptions, TimelineBudge
 // ============================================================================
 
 function applyFilters(
-  entries: readonly TimelineEntrySummary[],
+  entries: readonly MessageTimelineEntry[],
   options: ConversationHistoryOptions,
-): readonly TimelineEntrySummary[] {
-  let out: readonly TimelineEntrySummary[] = entries;
+): readonly MessageTimelineEntry[] {
+  let out: readonly MessageTimelineEntry[] = entries;
   if (options.roles && options.roles.length > 0) {
     const allowed = options.roles;
-    out = out.filter((e) => allowed.includes(e.role));
+    out = out.filter((e) => allowed.includes(e.message.role));
   }
   if (options.filter) {
     out = out.filter(options.filter);
@@ -120,8 +125,8 @@ function applyFilters(
  * <Timeline maxTokens={8000}>
  *   {(entries, budget) =>
  *     entries.map((e) => (
- *       <message key={e.id} role={e.role}>
- *         <content blocks={e.content} />
+ *       <message key={e.message.id} role={e.message.role}>
+ *         <content blocks={e.message.content} />
  *       </message>
  *     ))
  *   }
@@ -131,16 +136,28 @@ function applyFilters(
 export function Timeline(props: TimelineProps): JSX.Element {
   const snapshot = useTimeline();
 
+  // Restrict to message entries — Timeline doesn't render non-message
+  // kinds. Drop entries flagged `visibility: "log"` (journaled but not
+  // for any render). `"observer"` is kept here — UI shows it; the
+  // formatter filters it out for model context separately.
+  const messageEntries = useMemo<readonly MessageTimelineEntry[]>(
+    () =>
+      snapshot.entries.filter(
+        (e): e is MessageTimelineEntry => e.kind === "message" && e.visibility !== "log",
+      ),
+    [snapshot.entries],
+  );
+
   const filtered = useMemo(
-    () => applyFilters(snapshot.entries, props),
-    [snapshot.entries, props.filter, props.limit, props.roles],
+    () => applyFilters(messageEntries, props),
+    [messageEntries, props.filter, props.limit, props.roles],
   );
 
   const { kept, evicted, budget } = useMemo(() => {
     if (props.maxTokens == null) {
       return {
         kept: filtered,
-        evicted: [] as readonly TimelineEntrySummary[],
+        evicted: [] as readonly MessageTimelineEntry[],
         budget: null as TokenBudgetInfo | null,
       };
     }
@@ -184,7 +201,9 @@ export function Timeline(props: TimelineProps): JSX.Element {
   return h(
     React.Fragment,
     null,
-    ...kept.map((entry, i) => h(Message, { key: entry.id ?? `entry-${i}`, ...entry })),
+    ...kept.map((entry, i) =>
+      h(Message, { key: entry.message.id ?? `entry-${i}`, ...entry.message }),
+    ),
     props.children !== undefined ? props.children : null,
   );
 }

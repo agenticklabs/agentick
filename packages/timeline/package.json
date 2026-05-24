@@ -1,0 +1,41 @@
+{
+  "name": "@agentick/timeline",
+  "version": "0.0.0",
+  "private": true,
+  "description": "TimelineHarness — the session's conversation log + projection. Append-only log paired with a materialized projection that can diverge via compaction. Per ADR 26, this is a harness (extends BaseHarness). Bundled into the agentick metapackage; not published independently.",
+  "keywords": [
+    "agent",
+    "agentick",
+    "ai",
+    "harness",
+    "timeline"
+  ],
+  "license": "MIT",
+  "author": "Ryan Lindgren",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/agenticklabs/agentick.git",
+    "directory": "packages/timeline"
+  },
+  "type": "module",
+  "main": "src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.build.json --noEmit"
+  },
+  "dependencies": {
+    "@agentick/runtime": "workspace:*",
+    "@agentick/spec": "workspace:*",
+    "effect": "^3.21.2"
+  },
+  "devDependencies": {
+    "@agentick/spec-conformance": "workspace:*"
+  }
+}

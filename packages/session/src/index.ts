@@ -8,4 +8,4 @@
  */
 
 export { SessionHarness, type SessionHarnessOptions } from "./harness.js";
-export { SessionStateStore, type AppendMessageInput } from "./session-state.js";
+export { SessionStateStore } from "./session-state.js";

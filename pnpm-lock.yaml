@@ -936,6 +936,9 @@ importers:
       '@agentick/state':
         specifier: workspace:*
         version: link:../state
+      '@agentick/timeline':
+        specifier: workspace:*
+        version: link:../timeline
       '@agentick/tool':
         specifier: workspace:*
         version: link:../tool
@@ -1140,6 +1143,9 @@ importers:
       '@agentick/state':
         specifier: workspace:*
         version: link:../state
+      '@agentick/timeline':
+        specifier: workspace:*
+        version: link:../timeline
       effect:
         specifier: ^3.21.2
         version: 3.21.2
@@ -1218,6 +1224,22 @@ importers:
       '@types/react':
         specifier: ^19.2.13
         version: 19.2.13
+
+  packages/timeline:
+    dependencies:
+      '@agentick/runtime':
+        specifier: workspace:*
+        version: link:../runtime
+      '@agentick/spec':
+        specifier: workspace:*
+        version: link:../spec
+      effect:
+        specifier: ^3.21.2
+        version: 3.21.2
+    devDependencies:
+      '@agentick/spec-conformance':
+        specifier: workspace:*
+        version: link:../spec-conformance
 
   packages/tool:
     dependencies:
