@@ -145,6 +145,15 @@ export { Message } from "./react/components/index.js";
 export type { MessageProps } from "./react/components/index.js";
 export { Section } from "./react/components/index.js";
 export type { SectionProps } from "./react/components/index.js";
+export {
+  System,
+  User,
+  Assistant,
+  Paragraph,
+  H1,
+  H2,
+  H3,
+} from "./react/components/index.js";
 
 // Passthrough contributor (exported so custom registries can opt-in)
 export { contentPassthroughContributor } from "./collect/contributors/content-passthrough.js";

@@ -62,6 +62,7 @@ import type {
   ReconcilerProtocol,
   RunOnceInput,
   RunOnceResult,
+  SendInput,
   SendResult,
   ServiceRegistry,
   SessionEntry,
@@ -604,6 +605,42 @@ export class AppHarness<P = unknown>
         }),
       ),
     );
+  }
+
+  /**
+   * Alias for {@link closeApp}. Ergonomic — reads naturally as
+   * `await app.close()` alongside `await session.close()` /
+   * `await harness.close()`.
+   */
+  close(): Promise<void> {
+    return this.closeApp();
+  }
+
+  /**
+   * Ergonomic shortcut over {@link runOnce}: send a user message or a
+   * pre-built `SendInput` through a one-shot ephemeral session and
+   * return the result directly (no `RunOnceResult` wrapper).
+   *
+   * @example
+   *   const result = await app.send("What's 47 * 23?");
+   *   console.log(result.response);
+   *
+   * @example
+   *   const result = await app.send({
+   *     messages: [{ role: "user", content: "Hello" }],
+   *     metadata: { trace: "demo" },
+   *   });
+   *
+   * Adopters who need the ephemeral `sessionId` for telemetry / event
+   * subscription should use {@link runOnce} directly.
+   */
+  async send(input: string | SendInput<P>): Promise<SendResult> {
+    const sendInput: SendInput<P> =
+      typeof input === "string"
+        ? ({ messages: [{ role: "user", content: input }] } as SendInput<P>)
+        : input;
+    const { result } = await this.runOnce({ send: sendInput });
+    return result;
   }
 
   /**

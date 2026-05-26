@@ -306,3 +306,62 @@ For this refactor: `stubBridges()` convenience goes in
 package, `agentick/testing` can re-export from
 `@agentick/core/testing`. Same end-shape either way; no need to
 formalize the v2 aggregator inside THIS refactor.
+
+### 2026-05-23 — End-to-end real-model example landed (example/v2-real)
+
+Built `example/v2-real/` to validate ergonomics with a real OpenAI
+model via the AI SDK adapter. The example is the forcing function for
+API surface — every awkward seam shows up here first.
+
+**Ergonomic gaps surfaced + filled:**
+
+- **`app.send(string)` shortcut** — `app.runOnce({ send: { messages:
+  [{ role: "user", content: "..." }] } })` is too verbose for the
+  90% path. Added an overload: `app.send(input: string | SendInput<P>):
+  Promise<SendResult>` that unwraps `runOnce` and lets the user pass
+  a plain prompt string. Lives on `AppHarness` (see `harness.ts:637`).
+  Returns `SendResult` directly (no `{ result, sessionId }` wrapper).
+
+- **`app.close()` alias** — adopters reach for `app.close()` by reflex
+  (mirrors `session.close()` / `harness.close()`). Added as a thin
+  alias for `closeApp()` at `harness.ts:615`. Both names available.
+
+- **Semantic role components** — `<Message role="system">...</Message>`
+  is awful for the system prompt; users want `<System>...</System>`.
+  Added `<System>`, `<User>`, `<Assistant>` as pass-through wrappers
+  over `<Message>`, plus block-level `<Paragraph>`, `<H1>`, `<H2>`,
+  `<H3>` over the `paragraph` / `heading` intrinsics. Lives in
+  `reconciler-react/src/react/components/semantic.tsx`. Trivial
+  wrappers — no behavior, just prop shape.
+
+**Ergonomic gaps NOT YET filled — punt list:**
+
+- The example currently imports `React` solely for
+  `React.createElement(Agent)` in the `createApp(...)` call. v1
+  accepted JSX directly. The reason this is awkward is that `createApp`
+  takes `rootElement: unknown` — TypeScript can't infer JSX without
+  a tsx file, and `index.ts` is plain ts. Mitigation: write
+  `index.tsx` instead, or accept that `React.createElement` is fine
+  for the single call site. Left as-is for now — adopters using `.tsx`
+  for their entry get `createApp(<Agent />, { ... })` naturally.
+
+- `result.usage.totalTokens` — currently shipped under
+  `result.usage.{inputTokens, outputTokens, totalTokens}`. Reads
+  naturally. No change.
+
+- `result.stopReason` — union type with provider-native + framework
+  ("max_ticks", "aborted", etc.) values. Acceptable.
+
+- `<Knobs />` auto-emits a `set_knob` tool. Adopters who don't want
+  knobs simply don't render `<Knobs />`. Good zero-config story.
+
+**Verified:** `pnpm typecheck` green across all 86 workspace packages
+including `example-v2-real`. Example not yet run end-to-end (requires
+adopter's `OPENAI_API_KEY`).
+
+**Lesson:** writing the example BEFORE freezing the user surface
+surfaced 3 missing ergonomic affordances (semantic components,
+`app.send` shortcut, `app.close` alias) that pure-test-driven design
+would have shipped without. The example is the unit test for
+ergonomics. Keep it as a first-class artifact, run it before every
+release.
