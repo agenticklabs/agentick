@@ -33,6 +33,7 @@
 import type { ContentBlock } from "../data/content-blocks.js";
 import type { SessionMessageRole, TimelineEntry } from "./session-harness.js";
 import type { Unsubscribe } from "./inbox.js";
+import type { SnapshotCapable } from "./hook-bridges.js";
 
 // ============================================================================
 // Public snapshot shape (what `read()` returns)
@@ -203,7 +204,7 @@ export type TimelineError =
 // Protocol
 // ============================================================================
 
-export interface TimelineHarnessProtocol {
+export interface TimelineHarnessProtocol extends SnapshotCapable<TimelineHarnessSnapshot> {
   /**
    * Harness identifier. Composes into the inbox address as
    * `timeline:{id}` — admin actors send mutations addressed here.

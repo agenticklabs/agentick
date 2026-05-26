@@ -23,7 +23,19 @@
 
 import type { ContentBlock } from "../data/content-blocks.js";
 import type { Unsubscribe } from "./inbox.js";
-import type { KnobDescriptor, KnobPrimitive, KnobRegistration } from "./hook-bridges.js";
+import type {
+  KnobDescriptor,
+  KnobPrimitive,
+  KnobRegistration,
+  SnapshotCapable,
+} from "./hook-bridges.js";
+
+/**
+ * Snapshot payload for {@link KnobsHarnessProtocol.exportSnapshot}.
+ * Map of knob id → current value. Descriptor metadata is NOT included —
+ * descriptors come from re-rendering the JSX tree, not from the snapshot.
+ */
+export type KnobsHarnessSnapshot = Readonly<Record<string, KnobPrimitive>>;
 
 // ============================================================================
 // Operation inputs
@@ -67,7 +79,7 @@ export type KnobsError =
 // Protocol
 // ============================================================================
 
-export interface KnobsHarnessProtocol {
+export interface KnobsHarnessProtocol extends SnapshotCapable<KnobsHarnessSnapshot> {
   /**
    * Harness identifier. Composes into the inbox address as
    * `knobs:{id}` — admin actors send mutations addressed here.

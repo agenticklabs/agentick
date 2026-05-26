@@ -20,6 +20,7 @@
  */
 
 import type { Unsubscribe } from "./inbox.js";
+import type { SnapshotCapable } from "./hook-bridges.js";
 
 // ============================================================================
 // Operation inputs
@@ -34,11 +35,14 @@ export interface StateDeleteInput {
   readonly key: string;
 }
 
+/** Snapshot payload — a map of state keys to current values. */
+export type StateHarnessSnapshot = Readonly<Record<string, unknown>>;
+
 // ============================================================================
 // Protocol
 // ============================================================================
 
-export interface StateHarnessProtocol {
+export interface StateHarnessProtocol extends SnapshotCapable<StateHarnessSnapshot> {
   /**
    * Harness identifier. Composes into the inbox address as
    * `state:{id}` — admin actors send mutations addressed here.

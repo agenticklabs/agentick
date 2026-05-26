@@ -21,9 +21,6 @@
 
 import type { ContentBlock } from "../data/content-blocks.js";
 import type { Unsubscribe } from "./inbox.js";
-import type { KnobsHarnessProtocol } from "./knobs-harness.js";
-import type { StateHarnessProtocol } from "./state-harness.js";
-import type { TimelineHarnessProtocol } from "./timeline-harness.js";
 
 export type { Unsubscribe };
 
@@ -34,52 +31,41 @@ export type { Unsubscribe };
 /**
  * Bundle of bridges the runtime supplies to a reconciler harness mount.
  *
- * Required bridges (every reconciler-using runtime must supply):
- *   - `timeline` — read-only access to the session's persisted entries
- *   - `knobs` — model-visible reactive state managed by the harness
- *   - `state` — session-internal reactive state (`useSessionState`)
- *   - `data` — blocking async resolution (the `useData` backbone)
- *   - `loop` — imperative tick control (`useLoopControl`)
- *   - `session` — current session identity / status
+ * **Per ADR 27 (modular built-ins):** this interface is intentionally a
+ * minimal seed. Every harness package — built-in (timeline, knobs,
+ * state, gates) and optional (sandbox, mcp, subscriptions) — registers
+ * its slot via TypeScript module augmentation:
  *
- * Extension bridges (sandbox, mcp, subscriptions, telemetry, …) attach
- * via TypeScript module augmentation from their respective packages —
- * see §"Bridge extensibility" below.
+ *   declare module "@agentick/spec" {
+ *     interface HookBridges {
+ *       readonly timeline: TimelineHarnessProtocol;
+ *     }
+ *   }
  *
- * Additional bridges MAY be added without breaking existing hooks —
- * components that reference an unsupplied bridge throw at render time,
- * surfacing a `missing-bridge` diagnostic.
+ * Spec stays neutral about what's on the substrate. The harness package
+ * imports its own `augment.ts` as a side effect, adding the slot to the
+ * type. Adopters who import the harness package (transitively, via the
+ * `agentick` metapackage or directly) see the slot typed correctly.
+ *
+ * The slots declared in this file are the small interface-only contracts
+ * that don't have a dedicated harness package — `data`, `loop`,
+ * `session`, `tools`. Anything backed by a real harness (timeline,
+ * knobs, state, sandbox, ...) augments from its own package.
+ *
+ * @see docs/proposals/v2/blueprint/27-modular-built-ins.md
  */
 export interface HookBridges {
   /**
-   * Timeline is a full harness (ADR 26 Step 5a). `useBridges().timeline`
-   * returns a `TimelineHarnessProtocol` — sync `read`/`subscribe`/
-   * `readPersisted` + async Operation-backed `append`/`compact`/
-   * `replaceProjection`/`resetProjection`. The previous `TimelineBridge`
-   * interface has retired; the canonical entry shape is `TimelineEntry`
-   * (full kind-discriminated entries — no `TimelineEntrySummary` view).
+   * Blocking async resolution (the `useData` backbone). Reference impl
+   * `InMemoryDataBridge` lives in `@agentick/reconciler-react`. The
+   * interface stays in spec because it's the no-Suspense contract the
+   * reconciler render loop is built against.
    */
-  readonly timeline: TimelineHarnessProtocol;
-  /**
-   * Knobs are a full harness (ADR 26). `useBridges().knobs` returns a
-   * `KnobsHarnessProtocol` — sync reads (get/has/list/subscribe/
-   * subscribeAll) + async Operation-backed writes (set/register/
-   * dispatch). The previous `KnobBridge` interface has retired.
-   */
-  readonly knobs: KnobsHarnessProtocol;
-  /**
-   * State is a full harness (ADR 26). `useBridges().state` returns a
-   * `StateHarnessProtocol` — sync reads (get/has/list/subscribe/
-   * subscribeAll) + async Operation-backed writes (set/delete). The
-   * previous `StateBridge` interface has retired.
-   */
-  readonly state: StateHarnessProtocol;
   readonly data: DataBridge;
+  /** Imperative tick control. The reactor for `useLoopControl()`. */
   readonly loop: LoopBridge;
+  /** Snapshot view of the current session identity. Read-only. */
   readonly session: SessionBridge;
-  // Extension bridges (sandbox, mcp, subscriptions, telemetry, …) are
-  // added here via TypeScript module augmentation from each extension
-  // package. See "Bridge extensibility" below.
   /**
    * Tool registration bridge — exposed when the session's tool
    * executor is wired. Enables reconciler-side tools (e.g. the
@@ -88,6 +74,32 @@ export interface HookBridges {
    * time so they close over React-Context-derived deps.
    */
   readonly tools?: ToolBridge;
+  // Foundational and optional harness slots (timeline, knobs, state,
+  // sandbox, mcp, ...) are added by their respective packages via
+  // `declare module "@agentick/spec"` augmentation. They do NOT live in
+  // this interface body — see ADR 27.
+}
+
+// ============================================================================
+// SnapshotCapable — marker interface for harnesses with snapshot support
+// ============================================================================
+
+/**
+ * Harnesses whose protocol extends this declare that they round-trip
+ * their state through `exportSnapshot()` / `importSnapshot()`. The
+ * reconciler harness iterates over `HookBridges` slots at snapshot time
+ * and feature-tests for this contract; no harness-specific knowledge
+ * lives in the reconciler.
+ *
+ * Concrete harness protocols MAY add optional parameters to
+ * `importSnapshot` (e.g., a hydration mode) — adding optional
+ * parameters to an inherited method is structurally compatible.
+ *
+ * @see docs/proposals/v2/blueprint/27-modular-built-ins.md
+ */
+export interface SnapshotCapable<TSnapshot = unknown> {
+  exportSnapshot(): TSnapshot;
+  importSnapshot(snapshot: TSnapshot): void | Promise<void>;
 }
 
 // ============================================================================

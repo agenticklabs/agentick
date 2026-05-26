@@ -73,3 +73,80 @@ framework. They're complementary.
 **Decision:** CLAUDE.md gets a "v2 modularity model" subsection — not
 just a link to the ADR. The principles are loaded into every agent
 conversation; non-negotiable for v2 work.
+
+Committed as `0504d142`.
+
+### 2026-05-26 — Stage 1: rollback of doomed pre-ADR-27 refactor
+
+Reverted the three packages (`@agentick/data`,
+`@agentick/in-memory-bridges`, `@agentick/reconciler-react-tests`) +
+all working-tree modifications + 13 test file moves. Working tree is
+clean. 85/85 workspace typecheck green. Back to the post-Step-5a
+baseline (`c9161ab8` + docs commit `0504d142`).
+
+**Decision:** the rollback happened as a discard, not a commit. The
+doomed refactor's work was entirely uncommitted (working tree only)
+so `git restore .` + `find -delete` was sufficient. No revert commit
+in the history clutters the log.
+
+### 2026-05-26 — Stage 2: augmentation refactor
+
+Added `src/augment.ts` to timeline, knobs, state. Each declares its
+HookBridges slot via `declare module "@agentick/spec"`. Each package's
+`index.ts` does `import "./augment.js"` for side-effect loading.
+
+Stripped `timeline`, `knobs`, `state` from `HookBridges` in spec.
+Kept `data`, `loop`, `session`, `tools?` (small interface-only
+contracts without their own harness packages — fine to live in spec).
+
+Added `SnapshotCapable<T>` to spec; updated each of the three
+foundational harness protocols to `extends SnapshotCapable<TSnapshot>`
+where T is a snapshot payload type defined alongside the protocol:
+- `KnobsHarnessSnapshot = Readonly<Record<string, KnobPrimitive>>`
+- `StateHarnessSnapshot = Readonly<Record<string, unknown>>`
+- `TimelineHarnessSnapshot` already existed.
+
+**Surprise:** 85/85 typecheck green + 5358 tests pass without any
+changes to reconciler-react's snapshot code yet. The augmentations
+are visible to reconciler-react TRANSITIVELY — its package.json deps
+on timeline/knobs/state pull in their .d.ts files (via node_modules),
+which TypeScript scans for module augmentations. Reconciler-react
+typechecks against the augmented `HookBridges` shape without having
+to import the augment files itself.
+
+That means Stage 3 (generic snapshot iteration) is decoupled from
+Stage 2 — Stage 2 is non-breaking on its own. Stage 5 (dropping
+reconciler-react's harness deps) is what would force Stage 3 to land
+first, because dropping the deps removes the augmentations from
+reconciler-react's view.
+
+**Decision:** SnapshotCapable's `importSnapshot` takes only
+`(snapshot: T)` — no options parameter. Protocols that want options
+(like `TimelineHarnessProtocol` with its `TimelineImportSnapshotOptions`)
+add it as an optional additional parameter when they declare their own
+`importSnapshot`. Adding optional parameters is structurally compatible
+in TypeScript; this keeps the marker interface minimal.
+
+**Surprise (good):** the 2 pre-existing `executor-ai-sdk/msw` test
+failures we'd been carrying since Step 5a no longer appear. Must be
+related to the fresh pnpm install. All 282 test files pass.
+
+**Observation:** the rollback was painless because nothing was
+committed. Each prior commit (`c9161ab8`, `94a2d0c1`, `cb183bcb`...)
+holds standalone value. Lesson reinforced: prefer many small commits
+during exploratory architectural work so partial reverts are cheap.
+
+### 2026-05-26 — Metapackage clarification
+
+User confirmed: `agentick` (the public metapackage at
+`packages/agentick/`) is mostly a re-export of `@agentick/core` plus
+a couple of others. v2 keeps the same shape — a `@agentick/core`
+aggregator bundling the built-ins, with `agentick` as the published
+public face.
+
+For this refactor: `stubBridges()` convenience goes in
+`agentick/testing` (the metapackage's test subpath). When/if a v2
+`@agentick/core` aggregator gets formalized as a distinct workspace
+package, `agentick/testing` can re-export from
+`@agentick/core/testing`. Same end-shape either way; no need to
+formalize the v2 aggregator inside THIS refactor.
