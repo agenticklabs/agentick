@@ -6,10 +6,14 @@
  * guarantees this slot exists; adopters who want a custom implementation
  * (e.g., durable journaled persistence) pass their own `withTimeline({...})`.
  *
- * Note: SessionInstaller is defined in ADR 26 Step 1 but not yet wired
- * into SessionHarness (Step 8). For now this factory compiles and is not
- * yet invoked at session construction — the SessionHarness internally
- * constructs the TimelineHarness directly.
+ * **Wiring status (ADR 26 Step 8 — pending).** SessionInstaller exists
+ * in the spec; SessionHarness doesn't drive session-targeted extensions
+ * through it yet. Today the SessionHarness constructs TimelineHarness
+ * directly in `session-bridges.ts`. When Step 8 lands, that direct
+ * construction is replaced by an array of default `SessionExtension`s —
+ * `[withTimeline(), withKnobs(), withState()]` — that the installer
+ * resolves at session construction, and adopters override any of them
+ * by passing a configured variant in `AppHarnessOptions.extensions`.
  */
 
 import type { SessionExtension, SessionInstaller, TimelineEntry } from "@agentick/spec";

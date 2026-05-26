@@ -3,7 +3,6 @@ import type {
   DataBridge,
   DataResolveOptions,
   HookBridges,
-  KnobBridge,
   LifecycleEvent,
   LoopBridge,
   MountInput,
@@ -24,8 +23,6 @@ import type {
   SessionBridge,
   SnapshotInput,
   SubscriptionIntent,
-  TimelineBridge,
-  TimelineSnapshot,
   UnmountInput,
 } from "../index.js";
 
@@ -282,26 +279,12 @@ describe("@agentick/spec — reconciler protocol", () => {
     });
   });
 
-  describe("HookBridges — Knob / Timeline / Loop / Session", () => {
-    it("KnobBridge get/set/list/subscribe", () => {
-      const k: KnobBridge = {
-        get: () => 1,
-        set: () => {},
-        list: () => [{ id: "x", value: 1 }],
-        subscribe: () => () => {},
-      };
-      expect(k.get("x")).toBe(1);
-      expect(k.list()).toHaveLength(1);
-    });
-
-    it("TimelineBridge read returns a snapshot with version", () => {
-      const t: TimelineBridge = {
-        read: () => ({ entries: [], version: 0 }),
-        subscribe: () => () => {},
-      };
-      const snap: TimelineSnapshot = t.read();
-      expect(snap.version).toBe(0);
-    });
+  describe("HookBridges — Loop / Session", () => {
+    // Knob / Timeline / State are full harnesses now (ADR 26). Their
+    // conformance suites live with their packages (`@agentick/knobs`,
+    // `@agentick/timeline`, `@agentick/state`) — see
+    // `runKnobsHarnessConformance`, `runTimelineHarnessConformance`,
+    // `runStateHarnessConformance`.
 
     it("LoopBridge has continue / stop", () => {
       const l: LoopBridge = {

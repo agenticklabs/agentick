@@ -25,7 +25,7 @@ export type ACLDecision = "allow" | "deny" | "pending";
  * Mutable per-session ACL state. The harness owns one of these and
  * `update`s it whenever a `sandbox_permission` response carries a
  * `*-session*` decision. Snapshot persistence is handled by the
- * caller (typically via the StateBridge).
+ * caller (typically via the StateHarness).
  */
 export class SessionACL {
   private readonly readAllows: string[] = [];
@@ -86,7 +86,7 @@ export class SessionACL {
     return "pending";
   }
 
-  /** Snapshot for persistence via StateBridge. */
+  /** Snapshot for persistence via StateHarness. */
   exportSnapshot(): SessionACLSnapshot {
     return {
       readAllows: [...this.readAllows],

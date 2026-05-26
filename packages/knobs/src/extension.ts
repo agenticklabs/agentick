@@ -6,10 +6,12 @@
  * contract guarantees this slot exists; adopters who want a custom
  * implementation pass a configured `withKnobs({ ... })`.
  *
- * Note: SessionInstaller is defined in ADR 26 Step 1 but not yet
- * wired into the SessionHarness (that's Step 8). For now this factory
- * compiles and runs against a SessionInstaller-shaped object, but is
- * not called from a real session until Step 8 lands.
+ * **Wiring status (ADR 26 Step 8 — pending).** SessionInstaller exists
+ * in the spec; SessionHarness doesn't drive session-targeted extensions
+ * through it yet. Today the SessionHarness constructs KnobsHarness
+ * directly in `session-bridges.ts`. When Step 8 lands, this factory is
+ * the default session extension and adopters override by passing a
+ * configured `withKnobs({ ... })` in `AppHarnessOptions.extensions`.
  *
  * @see docs/proposals/v2/blueprint/26-harness-api-shape.md
  */

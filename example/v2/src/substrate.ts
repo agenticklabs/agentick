@@ -169,8 +169,8 @@ export async function buildSubstrate(sessionId: string): Promise<Substrate> {
 
   // Session harness — the integration site. Mounts the SupportAgent
   // into its own mountId inside the shared reconciler, provides
-  // HookBridges backed by session state (TimelineBridge reads the
-  // accumulated timeline; KnobBridge backed by an in-memory map),
+  // HookBridges backed by full harnesses (TimelineHarness for the
+  // log + projection; KnobsHarness + StateHarness for reactive state),
   // and exposes `session.send({ messages })` as the user-facing
   // entry point.
   const session = new SessionHarness(journal, bus, inbox, {
@@ -202,10 +202,11 @@ export async function buildSubstrate(sessionId: string): Promise<Substrate> {
   await session.mountReady;
 
   // Stub bridges for the standalone reconciler scenarios — in-memory
-  // data cache, knob store, session metadata. The session harness
-  // provides its OWN bridges to the reconciler at mount time; these
-  // bridges are only used by the earlier example scenarios that mount
-  // a separate JSX tree under `MOUNT_ID`.
+  // data cache + stub knobs/state/timeline harnesses + session
+  // metadata. The session harness provides its OWN bridges to the
+  // reconciler at mount time; these bridges are only used by the
+  // earlier example scenarios that mount a separate JSX tree under
+  // `MOUNT_ID`.
   const bridges = stubBridges({ sessionId });
 
   return {

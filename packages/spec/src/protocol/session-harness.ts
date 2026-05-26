@@ -9,8 +9,9 @@
  * Internally the session:
  *   1. Mounts the agent JSX into the reconciler (once, at construction).
  *   2. Provides `HookBridges` to the reconciler backed by session state
- *      — `TimelineBridge` reads the session's accumulated timeline,
- *      `KnobBridge` reads/writes the session's knob map, etc.
+ *      — `TimelineHarnessProtocol` exposes the session's timeline log +
+ *      projection, `KnobsHarnessProtocol` reads/writes knob values,
+ *      `StateHarnessProtocol` carries the adopter K/V bag, etc.
  *   3. Delegates `send()` to the loop executor as a single execution.
  *   4. Implements `StateApplicator` — the loop's writes to session state
  *      land here (timeline appends, knob updates, channel publishes).
@@ -420,9 +421,9 @@ export interface SessionHarnessProtocol<P = unknown> {
 
   /**
    * Return a programmatic handle for a named knob. Wraps the
-   * session's `KnobBridge`. Throws on `get()` / `set()` when the knob
-   * is not registered (knobs come from the JSX tree via `useKnob` or
-   * `knob(...)` declarations).
+   * session's `KnobsHarnessProtocol`. Throws on `get()` / `set()` when
+   * the knob is not registered (knobs come from the JSX tree via
+   * `useKnob` or `knob(...)` declarations).
    */
   knob<T = unknown>(name: string): KnobHandle<T>;
 }
@@ -540,8 +541,8 @@ export interface ChannelEventMeta {
 
 /**
  * Per-knob programmatic handle returned by `session.knob(name)`.
- * Wraps `KnobBridge` get/set/subscribe so callers can refer to a knob
- * by reference instead of repeating `id` strings.
+ * Wraps `KnobsHarnessProtocol` get/set/subscribe so callers can refer
+ * to a knob by reference instead of repeating `id` strings.
  */
 export interface KnobHandle<T = unknown> {
   readonly name: string;

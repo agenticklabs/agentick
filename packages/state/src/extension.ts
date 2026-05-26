@@ -7,9 +7,12 @@
  * implementation (e.g., redis-backed) pass their own
  * `withState({ ... })`.
  *
- * Note: SessionInstaller is defined in ADR 26 Step 1 but not yet
- * wired into SessionHarness (Step 8). For now this factory compiles
- * and is not yet invoked.
+ * **Wiring status (ADR 26 Step 8 — pending).** SessionInstaller exists
+ * in the spec; SessionHarness doesn't drive session-targeted extensions
+ * through it yet. Today the SessionHarness constructs StateHarness
+ * directly in `session-bridges.ts`. When Step 8 lands, this factory is
+ * the default session extension and adopters override by passing a
+ * configured `withState({ ... })` in `AppHarnessOptions.extensions`.
  */
 
 import type { SessionExtension, SessionInstaller } from "@agentick/spec";

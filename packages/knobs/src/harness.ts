@@ -26,7 +26,7 @@
  *
  * Snapshot/restore — `exportSnapshot()` / `importSnapshot()` round-trip
  * the value cells. Descriptors are NOT snapshotted (components re-
- * declare on remount). Matches the prior `inMemoryKnobBridge` contract.
+ * declare on remount).
  *
  * @see docs/proposals/v2/blueprint/26-harness-api-shape.md
  */

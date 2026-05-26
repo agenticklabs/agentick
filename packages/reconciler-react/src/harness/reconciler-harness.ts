@@ -269,7 +269,7 @@ export class ReconcilerHarness extends BaseHarness<"reconciler"> implements Reco
     // via each bridge's `exportSnapshot()`. Component-local hook state
     // (raw `useState` / `useReducer`) is NOT captured by design — see
     // ADR 22 §D1. Components persisting state across hibernation use
-    // `useSessionState(key, initial)` to land values in the StateBridge.
+    // `useSessionState(key, initial)` to land values in the StateHarness.
     const dataCache =
       state.bridges.data instanceof InMemoryDataBridge ? state.bridges.data.exportSnapshot() : [];
     const knobs = exportKnobs(state.bridges);
@@ -739,9 +739,10 @@ function importKnobs(bridges: HookBridges, values: Readonly<Record<string, unkno
     k.importSnapshot(values);
     return;
   }
-  // Fallback path for KnobBridge implementations without importSnapshot.
-  // Fire-and-forget the async set Operations; by the time the next render
-  // reads `get(id)`, the values are populated.
+  // Fallback for KnobsHarnessProtocol impls that don't expose
+  // `importSnapshot` (it's not on the protocol — reference impl only).
+  // Fire-and-forget the async set Operations; by the time the next
+  // render reads `get(id)`, the values are populated.
   for (const [id, value] of Object.entries(values)) {
     void bridges.knobs.set({ id, value: value as never });
   }

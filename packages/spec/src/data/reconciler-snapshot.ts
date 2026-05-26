@@ -35,8 +35,8 @@ export interface ReconcilerSnapshot {
   readonly knobs: Readonly<Record<string, unknown>>;
   /**
    * Current values of session-internal state (`useSessionState`).
-   * Owned by the session's StateBridge; the reconciler snapshot mirrors
-   * the value so a remount sees the same state.
+   * Owned by the session's StateHarness; the reconciler snapshot
+   * mirrors the value so a remount sees the same state.
    *
    * @see docs/proposals/v2/blueprint/22-state-formatters-reconciler-shape.md §D1
    */
