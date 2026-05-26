@@ -265,22 +265,22 @@ export class ReconcilerHarness extends BaseHarness<"reconciler"> implements Reco
 
   async snapshot(input: SnapshotInput): Promise<ReconcilerSnapshot> {
     const state = this.mountState(input.mountId);
-    // Bridge state — data cache, knobs, and session state — is captured
-    // via each bridge's `exportSnapshot()`. Component-local hook state
-    // (raw `useState` / `useReducer`) is NOT captured by design — see
-    // ADR 22 §D1. Components persisting state across hibernation use
+    // Per ADR 27: bridge state is captured generically by iterating
+    // every slot on `HookBridges` and feature-testing for
+    // `SnapshotCapable`. No harness-specific knowledge in the
+    // reconciler. Component-local hook state (raw `useState` /
+    // `useReducer`) is NOT captured by design — see ADR 22 §D1.
+    // Components persisting state across hibernation use
     // `useSessionState(key, initial)` to land values in the StateHarness.
+    const bridges = captureBridgeSnapshots(state.bridges);
     const dataCache =
       state.bridges.data instanceof InMemoryDataBridge ? state.bridges.data.exportSnapshot() : [];
-    const knobs = exportKnobs(state.bridges);
-    const stateValues = state.bridges.state.exportSnapshot();
     return {
       specVersion: SPEC_VERSION,
       mountId: state.mountId,
       ...(state.elementVersion !== undefined ? { elementVersion: state.elementVersion } : {}),
+      bridges: bridges as ReconcilerSnapshot["bridges"],
       dataCache,
-      knobs,
-      state: stateValues,
       subscriptions: [],
     };
   }
@@ -293,8 +293,7 @@ export class ReconcilerHarness extends BaseHarness<"reconciler"> implements Reco
     if (state.bridges.data instanceof InMemoryDataBridge) {
       state.bridges.data.importSnapshot(input.snapshot.dataCache);
     }
-    importKnobs(state.bridges, input.snapshot.knobs);
-    state.bridges.state.importSnapshot(input.snapshot.state);
+    await applyBridgeSnapshots(state.bridges, input.snapshot.bridges);
   }
 
   // ──────────────────────── inbox dispatch ────────────────────────
@@ -386,8 +385,7 @@ export class ReconcilerHarness extends BaseHarness<"reconciler"> implements Reco
       if (state.bridges.data instanceof InMemoryDataBridge) {
         state.bridges.data.importSnapshot(input.snapshot.dataCache);
       }
-      importKnobs(state.bridges, input.snapshot.knobs);
-      state.bridges.state.importSnapshot(input.snapshot.state);
+      await applyBridgeSnapshots(state.bridges, input.snapshot.bridges);
     }
 
     // First render — populates the host tree and lets sync components
@@ -716,36 +714,55 @@ export class ReconcilerHarness extends BaseHarness<"reconciler"> implements Reco
 }
 
 /**
- * Read knob values from the bridge. Prefers `exportSnapshot()` when the
- * bridge exposes it (preserves any internal ordering/metadata); falls
- * back to walking `list()` results.
+ * Iterate every slot on `bridges` and capture its snapshot if the slot
+ * exposes the `SnapshotCapable` contract (`exportSnapshot()`).
+ * Generic — no harness-specific knowledge. Per ADR 27, any harness
+ * that extends `SnapshotCapable<T>` on its protocol gets its snapshot
+ * captured automatically; impls that happen to expose `exportSnapshot`
+ * without declaring it on the protocol (like `InMemoryDataBridge`)
+ * still work via runtime feature detection.
+ *
+ * The `data` slot is excluded here because the reconciler keeps its
+ * snapshot in the top-level `dataCache` field for back-compat — see
+ * `ReconcilerSnapshot` in `@agentick/spec`.
  */
-function exportKnobs(bridges: HookBridges): Readonly<Record<string, unknown>> {
-  const k = bridges.knobs as { exportSnapshot?: () => Readonly<Record<string, unknown>> };
-  if (typeof k.exportSnapshot === "function") return k.exportSnapshot();
+function captureBridgeSnapshots(bridges: HookBridges): Record<string, unknown> {
   const out: Record<string, unknown> = {};
-  for (const item of bridges.knobs.list()) out[item.id] = item.value;
+  for (const [name, bridge] of Object.entries(bridges)) {
+    if (name === "data") continue; // captured separately as dataCache
+    if (bridge === null || bridge === undefined) continue;
+    const exportFn = (bridge as { exportSnapshot?: () => unknown }).exportSnapshot;
+    if (typeof exportFn === "function") {
+      out[name] = exportFn.call(bridge);
+    }
+  }
   return out;
 }
 
 /**
- * Apply knob values to the bridge. Prefers `importSnapshot()` when the
- * bridge exposes it (more efficient + atomic); falls back to a
- * per-entry `set()` walk.
+ * Apply per-slot snapshot payloads to the bridges. Iterates entries in
+ * the snapshot map; for each bridge that exposes `importSnapshot`,
+ * invokes it with the recorded value. Async-aware — `importSnapshot`
+ * may return a Promise (e.g., TimelineHarness) and we await all
+ * concurrently for restore-before-render ordering.
  */
-function importKnobs(bridges: HookBridges, values: Readonly<Record<string, unknown>>): void {
-  const k = bridges.knobs as { importSnapshot?: (v: Readonly<Record<string, unknown>>) => void };
-  if (typeof k.importSnapshot === "function") {
-    k.importSnapshot(values);
-    return;
+async function applyBridgeSnapshots(
+  bridges: HookBridges,
+  snapshotBridges: Readonly<Record<string, unknown>> | undefined,
+): Promise<void> {
+  if (!snapshotBridges) return;
+  const pending: Promise<unknown>[] = [];
+  for (const [name, value] of Object.entries(snapshotBridges)) {
+    if (value === undefined) continue;
+    const bridge = (bridges as unknown as Record<string, unknown>)[name];
+    if (bridge === null || bridge === undefined) continue;
+    const importFn = (bridge as { importSnapshot?: (s: unknown) => unknown }).importSnapshot;
+    if (typeof importFn === "function") {
+      const result = importFn.call(bridge, value);
+      if (result instanceof Promise) pending.push(result);
+    }
   }
-  // Fallback for KnobsHarnessProtocol impls that don't expose
-  // `importSnapshot` (it's not on the protocol — reference impl only).
-  // Fire-and-forget the async set Operations; by the time the next
-  // render reads `get(id)`, the values are populated.
-  for (const [id, value] of Object.entries(values)) {
-    void bridges.knobs.set({ id, value: value as never });
-  }
+  if (pending.length > 0) await Promise.all(pending);
 }
 
 function isThenable(value: unknown): value is PromiseLike<unknown> {

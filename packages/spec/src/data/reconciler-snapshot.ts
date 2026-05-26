@@ -14,9 +14,25 @@
  */
 
 import type { ContentBlock } from "./content-blocks.js";
+import type { HookBridges, SnapshotCapable } from "../protocol/hook-bridges.js";
 
 /**
  * Snapshot of harness-private state for a single mount.
+ *
+ * **Per ADR 27 (modular built-ins):** harness state is captured in the
+ * generic `bridges` map, keyed by `HookBridges` slot names. The
+ * reconciler iterates `Object.entries(bridges)` and feature-tests each
+ * slot for the `SnapshotCapable` contract — no harness-specific
+ * knowledge lives in the reconciler. New harness packages register
+ * their `HookBridges` slot via TypeScript module augmentation and
+ * extend `SnapshotCapable<T>` on their protocol; the snapshot map type
+ * picks them up automatically via the mapped-type inference below.
+ *
+ * `dataCache` and `subscriptions` retain their own top-level fields
+ * because they're not 1:1 mappings of a single bridge's state — they
+ * represent reconciler-internal concerns that incidentally LIVE in
+ * bridge state. `subscriptions` will move to its own bridge slot
+ * (via the subscriptions harness) in a later pass.
  */
 export interface ReconcilerSnapshot {
   /** Spec date version. Compatibility check at restore time. */
@@ -29,18 +45,29 @@ export interface ReconcilerSnapshot {
    * the snapshot (or surface an `IncompatibleElement` diagnostic).
    */
   readonly elementVersion?: string;
-  /** Cached results of `useData` calls. */
-  readonly dataCache: readonly DataCacheEntry[];
-  /** Current values of model-visible `useKnob` state. */
-  readonly knobs: Readonly<Record<string, unknown>>;
   /**
-   * Current values of session-internal state (`useSessionState`).
-   * Owned by the session's StateHarness; the reconciler snapshot
-   * mirrors the value so a remount sees the same state.
+   * Per-bridge snapshot payloads, keyed by `HookBridges` slot name.
+   * Only slots whose protocol extends `SnapshotCapable<T>` (timeline,
+   * knobs, state, ...) populate here at typecheck time; runtime
+   * feature-detection picks up impls that happen to have
+   * `exportSnapshot` even if their protocol doesn't formally declare
+   * it (e.g., `InMemoryDataBridge`).
    *
-   * @see docs/proposals/v2/blueprint/22-state-formatters-reconciler-shape.md §D1
+   * Adding a new harness with snapshot support requires zero reconciler
+   * changes — the harness extends `SnapshotCapable<T>` and augments
+   * `HookBridges` from its own package; the type + runtime pick it up
+   * automatically.
    */
-  readonly state: Readonly<Record<string, unknown>>;
+  readonly bridges: Readonly<{
+    [K in keyof HookBridges]?: HookBridges[K] extends SnapshotCapable<infer S> ? S : unknown;
+  }>;
+  /**
+   * Cached results of `useData` calls. Kept as a top-level field for
+   * back-compat with InMemoryDataBridge's snapshot shape; future
+   * versions may collapse this into `bridges.data` if DataBridge's
+   * protocol formally extends SnapshotCapable.
+   */
+  readonly dataCache: readonly DataCacheEntry[];
   /** Long-lived primitive intent declarations (cron, webhook, …). */
   readonly subscriptions: readonly SubscriptionIntent[];
   /** Free-form metadata for future extensibility. */

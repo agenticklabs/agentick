@@ -128,7 +128,7 @@ describe("ReconcilerHarness — snapshot/restore through the harness", () => {
     await flush();
 
     const snap = await harness.snapshot({ mountId: "m_snap" });
-    expect(snap.knobs).toEqual({ mood: "curious" });
+    expect(snap.bridges.knobs).toEqual({ mood: "curious" });
     expect(snap.dataCache).toHaveLength(1);
     expect(snap.dataCache[0]).toMatchObject({ key: "user", value: "Ryan" });
     expect(snap.elementVersion).toBe("sha:v1");
@@ -209,7 +209,7 @@ describe("ReconcilerHarness — snapshot/restore through the harness", () => {
     await bridges1.knobs.set({ id: "mood", value: "decisive" });
     await flush();
     const snap = await harness1.snapshot({ mountId: "m_k1" });
-    expect(snap.knobs.mood).toBe("decisive");
+    expect((snap.bridges.knobs as { mood?: string }).mood).toBe("decisive");
 
     const harness2 = await makeHarness("knob-h2");
     const bridges2 = stubBridges();
@@ -254,11 +254,11 @@ describe("ReconcilerHarness — snapshot/restore through the harness", () => {
       bridges,
     });
     const snap = await harness.snapshot({ mountId: "m_s" });
-    expect(snap.state).toEqual({ counter: 7, label: "hello" });
+    expect(snap.bridges.state).toEqual({ counter: 7, label: "hello" });
 
     // Round-trip JSON to confirm wire shape
     const wire = JSON.parse(JSON.stringify(snap));
-    expect(wire.state).toEqual({ counter: 7, label: "hello" });
+    expect(wire.bridges.state).toEqual({ counter: 7, label: "hello" });
 
     // Mutate the live bridge, then restore — values should snap back.
     await bridges.state.set({ key: "counter", value: 99 });

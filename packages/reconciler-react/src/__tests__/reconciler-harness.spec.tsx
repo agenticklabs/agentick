@@ -174,7 +174,7 @@ describe("ReconcilerHarness — end-to-end", () => {
     expect(snap.specVersion).toMatch(/^\d{4}-\d{2}-\d{2}$/);
     expect(snap.mountId).toBe("m_5");
     expect(snap.elementVersion).toBe("sha:abc");
-    expect(snap.knobs).toEqual({ mood: "curious" });
+    expect(snap.bridges.knobs).toEqual({ mood: "curious" });
     // Round-trips through JSON without losing information (spec firewall).
     const round = JSON.parse(JSON.stringify(snap));
     expect(round).toEqual(snap);

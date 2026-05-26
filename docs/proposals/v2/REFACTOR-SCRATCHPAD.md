@@ -131,6 +131,68 @@ in TypeScript; this keeps the marker interface minimal.
 failures we'd been carrying since Step 5a no longer appear. Must be
 related to the fresh pnpm install. All 282 test files pass.
 
+### 2026-05-26 — Stage 3: generic snapshot iteration
+
+Rewrote `ReconcilerSnapshot` (`@agentick/spec/data/reconciler-snapshot.ts`):
+the hardcoded `knobs` and `state` fields collapse into a generic
+`bridges` map typed as:
+
+```ts
+readonly bridges: Readonly<{
+  [K in keyof HookBridges]?: HookBridges[K] extends SnapshotCapable<infer S>
+    ? S
+    : unknown;
+}>;
+```
+
+Mapped over `HookBridges` augmented slots. Adding a new harness with
+`extends SnapshotCapable<T>` automatically populates the snapshot
+type — zero reconciler changes.
+
+`dataCache` retains its own top-level field for now because
+`DataBridge` doesn't formally extend `SnapshotCapable` in the spec
+(its reference impl `InMemoryDataBridge` happens to provide
+`exportSnapshot`, but the protocol stays minimal so adopter
+implementations of DataBridge aren't forced to implement snapshot).
+Future work could collapse `dataCache` into `bridges.data` if we
+formalize DataBridge as SnapshotCapable.
+
+Replaced reconciler-react's `exportKnobs` / `importKnobs` /
+hardcoded `bridges.state.exportSnapshot()` with two generic helpers:
+
+- `captureBridgeSnapshots(bridges)` — iterates `Object.entries`,
+  feature-tests each slot for `exportSnapshot()`, accumulates into the
+  snapshot map. Skips `data` (separate top-level field).
+- `applyBridgeSnapshots(bridges, snapshotBridges)` — iterates the
+  snapshot map, feature-tests each bridge for `importSnapshot`,
+  invokes with the recorded payload. Async-aware (awaits returned
+  Promises so restore-before-render ordering holds for harnesses with
+  async importSnapshot like TimelineHarness).
+
+Reconciler-react now has NO harness-specific knowledge in its
+snapshot code. Adding `useSandbox` or any other harness's snapshot
+support requires zero reconciler changes — the harness extends
+`SnapshotCapable<T>`, augments `HookBridges`, and is picked up
+automatically by both the type and the runtime iteration.
+
+**Cleanup:** 4 test files (snapshot-restore.spec.tsx,
+reconciler-harness.spec.tsx) accessed the old `snap.knobs` /
+`snap.state` shapes. Updated to `snap.bridges.knobs` /
+`snap.bridges.state`. 2 spec-conformance stub fixtures
+(loop-executor.ts, session-harness.ts) shipped a `ReconcilerSnapshot`
+literal with old field names; updated to the new `bridges: {}` shape.
+
+5547 workspace tests green (5358 + 189 tui).
+
+**Note for future me:** the typecheck PASSES against the augmented
+shape even though reconciler-react still imports timeline/knobs/state
+as deps. The augmentations from those packages' `augment.ts` are
+visible to reconciler-react TRANSITIVELY through node_modules. Stage 5
+(dropping the deps) is what would test whether the generic iteration
+is truly slot-agnostic — at that point reconciler-react wouldn't see
+the augmentations and would have to operate purely on `Object.entries`
+runtime iteration. That's the real validation.
+
 **Observation:** the rollback was painless because nothing was
 committed. Each prior commit (`c9161ab8`, `94a2d0c1`, `cb183bcb`...)
 holds standalone value. Lesson reinforced: prefer many small commits
