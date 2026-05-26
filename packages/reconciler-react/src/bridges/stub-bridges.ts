@@ -1,97 +1,315 @@
 /**
- * Stub HookBridges for tests and minimal-runtime use.
+ * Mock HookBridges for reconciler-react's own tests.
  *
- * Each function returns a small implementation with no-op or in-memory
- * behavior. Real runtimes replace these with backed implementations.
+ * Per ADR 27, `@agentick/reconciler-react` does NOT depend on any
+ * harness package. Its tests use these protocol-conforming mocks
+ * (lightweight, deps-free) when they need bridges to drive the
+ * reconciler.
+ *
+ * **What these are NOT:** they do not exercise the real harness
+ * behavior (no journal envelopes, no inbox routing, no operation
+ * lifecycle). Tests of "does the real harness work correctly with the
+ * reconciler" — knobs validation pipeline, timeline pending/drain,
+ * state K/V semantics — live in their respective harness packages
+ * (`@agentick/<harness>/__tests__/integration-with-reconciler.spec.tsx`)
+ * and use the real stub factories from `@agentick/<harness>/testing`.
+ *
+ * Adopters writing tests should NOT import from here — they should use
+ * `agentick/testing` (which composes real harness stubs from each
+ * package's `/testing` subpath).
+ *
+ * @see docs/proposals/v2/blueprint/27-modular-built-ins.md
  */
 
 import type {
   HookBridges,
+  KnobDescriptor,
   KnobPrimitive,
+  KnobsDispatchInput,
   KnobsHarnessProtocol,
+  KnobsRegisterInput,
+  KnobsSetInput,
   LoopBridge,
+  PendingEntry,
   SessionBridge,
+  StateDeleteInput,
   StateHarnessProtocol,
+  StateSetInput,
+  TimelineAppendInput,
+  TimelineDrainResult,
   TimelineEntry,
   TimelineHarnessProtocol,
+  TimelineQueueInput,
+  TimelineReplaceProjectionInput,
+  TimelineSnapshot,
+  TimelineHarnessSnapshot,
+  CompactStrategy,
+  CompactResult,
+  Unsubscribe,
 } from "@agentick/spec";
-import { KnobsHarness } from "@agentick/knobs";
-import { StateHarness } from "@agentick/state";
-import { TimelineHarness } from "@agentick/timeline";
-import { LocalEventBus, LocalInbox, MemoryJournal, ulid } from "@agentick/runtime";
 import { InMemoryDataBridge } from "./in-memory-data-bridge.js";
 
 /**
- * Build a {@link TimelineHarness} for use in test bridges. Wraps the
- * harness with an in-memory substrate (own journal/bus/inbox). Real
- * session deployments share substrate with the host AppHarness; this
- * factory is for standalone unit tests where the substrate plumbing
- * isn't exercised.
- *
- * `initial` seeds entries eagerly via `importSnapshot({ mode: "as-is" })` —
- * both log and projection start as a live mirror of the supplied array.
+ * Mock timeline harness — Map + Promise resolvers; satisfies
+ * `TimelineHarnessProtocol`. NOT a real `TimelineHarness`. Use
+ * `@agentick/timeline/testing` `stubTimelineHarness` for tests that
+ * exercise harness behavior.
  */
-export function stubTimelineHarness(initial: readonly TimelineEntry[] = []): TimelineHarness {
-  const harness = new TimelineHarness(
-    `stub:${ulid()}`,
-    new MemoryJournal({ capacity: 1024 }),
-    new LocalEventBus(),
-    new LocalInbox(),
-  );
-  if (initial.length > 0) {
-    void harness.importSnapshot(
-      {
-        persisted: initial,
-        projection: initial,
-        persistedVersion: initial.length,
-        projectionVersion: initial.length,
-      },
-      { mode: "as-is" },
-    );
-  }
-  return harness;
+export function mockTimelineHarness(
+  initial: readonly TimelineEntry[] = [],
+): TimelineHarnessProtocol {
+  const persisted: TimelineEntry[] = [...initial];
+  let projection: TimelineEntry[] = [...initial];
+  let pending: PendingEntry[] = [];
+  let version = 0;
+  const listeners = new Set<() => void>();
+  const notify = () => listeners.forEach((l) => l());
+
+  let snapshot: TimelineSnapshot = { entries: [...projection], version };
+  const refresh = () => {
+    version += 1;
+    snapshot = { entries: [...projection], version };
+  };
+  if (initial.length > 0) refresh();
+
+  return {
+    id: "mock:timeline",
+    ready: Promise.resolve(),
+    read: () => snapshot,
+    subscribe: (l) => {
+      listeners.add(l);
+      return () => listeners.delete(l) as unknown as void;
+    },
+    readPending: () => pending,
+    readPersisted: () => persisted,
+    append: async ({ entry }: TimelineAppendInput) => {
+      persisted.push(entry);
+      projection.push(entry);
+      refresh();
+      notify();
+    },
+    queue: async ({ role, content, metadata }: TimelineQueueInput) => {
+      const id = `m_pending_${Date.now()}_${Math.random()}`;
+      pending = [
+        ...pending,
+        { id, role, content, ts: Date.now(), ...(metadata !== undefined ? { metadata } : {}) },
+      ];
+      notify();
+      return { id };
+    },
+    drain: async (): Promise<TimelineDrainResult> => {
+      const draining = pending;
+      pending = [];
+      notify();
+      const drained: TimelineEntry[] = [];
+      for (const p of draining) {
+        const entry: TimelineEntry = {
+          kind: "message",
+          message: {
+            id: p.id,
+            role: p.role,
+            content: p.content,
+            ts: p.ts,
+            ...(p.metadata !== undefined ? { metadata: p.metadata } : {}),
+          },
+        };
+        persisted.push(entry);
+        projection.push(entry);
+        drained.push(entry);
+      }
+      if (drained.length > 0) {
+        refresh();
+        notify();
+      }
+      return { entries: drained };
+    },
+    compact: async (strategy: CompactStrategy): Promise<CompactResult> => {
+      const source = strategy.source ?? "persisted";
+      const entries = source === "persisted" ? persisted : projection;
+      const before = entries.length;
+      const next = await strategy.run({
+        entries,
+        ...(strategy.instructions !== undefined ? { instructions: strategy.instructions } : {}),
+      });
+      projection = [...next];
+      refresh();
+      notify();
+      return { entriesBefore: before, entriesAfter: projection.length, source };
+    },
+    replaceProjection: async (input: TimelineReplaceProjectionInput) => {
+      projection = [...input.entries];
+      refresh();
+      notify();
+    },
+    resetProjection: async () => {
+      projection = [...persisted];
+      refresh();
+      notify();
+    },
+    exportSnapshot: (): TimelineHarnessSnapshot => ({
+      persisted: [...persisted],
+      projection: [...projection],
+      persistedVersion: persisted.length,
+      projectionVersion: version,
+    }),
+    importSnapshot: async (snap: TimelineHarnessSnapshot): Promise<void> => {
+      // Mock: rewrite from snapshot.
+      persisted.length = 0;
+      persisted.push(...snap.persisted);
+      projection = [...snap.projection];
+      version = snap.projectionVersion;
+      snapshot = { entries: [...projection], version };
+      notify();
+    },
+    close: async () => {},
+  };
 }
 
 /**
- * Build a {@link KnobsHarness} for use in test bridges. Wraps the harness
- * with an in-memory substrate (own journal/bus/inbox). Real session
- * deployments share substrate with the host AppHarness; this factory
- * is for standalone unit tests where the substrate plumbing isn't
- * exercised.
- *
- * `initial` seeds values eagerly via `importSnapshot`.
+ * Mock knobs harness — minimal Map + listener set; satisfies
+ * `KnobsHarnessProtocol`. No validation pipeline, no envelopes, no
+ * inbox. Use `@agentick/knobs/testing` for tests that exercise harness
+ * behavior.
  */
-export function stubKnobsHarness(
+export function mockKnobsHarness(
   initial: Readonly<Record<string, KnobPrimitive>> = {},
-): KnobsHarness {
-  const harness = new KnobsHarness(
-    `stub:${ulid()}`,
-    new MemoryJournal({ capacity: 1024 }),
-    new LocalEventBus(),
-    new LocalInbox(),
-  );
-  if (Object.keys(initial).length > 0) {
-    harness.importSnapshot(initial);
+): KnobsHarnessProtocol {
+  const values = new Map<string, KnobPrimitive>(Object.entries(initial));
+  const descriptors = new Map<string, KnobDescriptor>();
+  for (const [id, value] of values) {
+    descriptors.set(id, { id, value, valueType: typeof value as "string" | "number" | "boolean" });
   }
-  return harness;
+  const keyListeners = new Map<string, Set<() => void>>();
+  const wildcards = new Set<() => void>();
+  // Cached snapshot ref — invalidated on every mutation. Without this
+  // `useSyncExternalStore` sees a fresh array on every list() call and
+  // loops infinitely. Mirrors the real KnobsHarness's `listCache`.
+  let listCache: readonly KnobDescriptor[] | null = null;
+  const fire = (id: string) => {
+    listCache = null;
+    keyListeners.get(id)?.forEach((l) => l());
+    wildcards.forEach((l) => l());
+  };
+
+  return {
+    id: "mock:knobs",
+    ready: Promise.resolve(),
+    get: (id) => values.get(id),
+    has: (id) => values.has(id),
+    list: () => {
+      if (listCache !== null) return listCache;
+      listCache = [...descriptors.values()];
+      return listCache;
+    },
+    subscribe: (id, l) => {
+      let set = keyListeners.get(id);
+      if (!set) {
+        set = new Set();
+        keyListeners.set(id, set);
+      }
+      set.add(l);
+      return () => set!.delete(l) as unknown as void;
+    },
+    subscribeAll: (l) => {
+      wildcards.add(l);
+      return () => wildcards.delete(l) as unknown as void;
+    },
+    set: async ({ id, value }: KnobsSetInput) => {
+      values.set(id, value);
+      const prev = descriptors.get(id);
+      descriptors.set(id, { ...(prev ?? {}), id, value });
+      fire(id);
+    },
+    register: async ({ id, descriptor }: KnobsRegisterInput) => {
+      const current = values.has(id) ? values.get(id) : descriptor.defaultValue;
+      if (current !== undefined && !values.has(id)) values.set(id, current);
+      descriptors.set(id, { ...descriptor, id, value: current });
+      fire(id);
+    },
+    dispatch: async (_input: KnobsDispatchInput) => {
+      // Mock — accept without validation. Returns minimal content.
+      return [{ type: "text", text: "(mock) set_knob applied" }];
+    },
+    exportSnapshot: () => {
+      const out: Record<string, KnobPrimitive> = {};
+      for (const [k, v] of values) out[k] = v;
+      return out;
+    },
+    importSnapshot: (snap: Readonly<Record<string, KnobPrimitive>>) => {
+      values.clear();
+      descriptors.clear();
+      for (const [k, v] of Object.entries(snap)) {
+        values.set(k, v);
+        descriptors.set(k, {
+          id: k,
+          value: v,
+          valueType: typeof v as "string" | "number" | "boolean",
+        });
+        fire(k);
+      }
+    },
+    close: async () => {},
+  };
 }
 
 /**
- * Build a {@link StateHarness} for use in test bridges. Like
- * {@link stubKnobsHarness}, wraps the harness with its own in-memory
- * substrate. `initial` seeds entries via `importSnapshot`.
+ * Mock state harness — Map + listeners; satisfies
+ * `StateHarnessProtocol`. Use `@agentick/state/testing` for tests that
+ * exercise harness behavior.
  */
-export function stubStateHarness(initial: Readonly<Record<string, unknown>> = {}): StateHarness {
-  const harness = new StateHarness(
-    `stub:${ulid()}`,
-    new MemoryJournal({ capacity: 1024 }),
-    new LocalEventBus(),
-    new LocalInbox(),
-  );
-  if (Object.keys(initial).length > 0) {
-    harness.importSnapshot(initial);
-  }
-  return harness;
+export function mockStateHarness(
+  initial: Readonly<Record<string, unknown>> = {},
+): StateHarnessProtocol {
+  const values = new Map<string, unknown>(Object.entries(initial));
+  const keyListeners = new Map<string, Set<() => void>>();
+  const wildcards = new Set<() => void>();
+  const fire = (key: string) => {
+    keyListeners.get(key)?.forEach((l) => l());
+    wildcards.forEach((l) => l());
+  };
+
+  return {
+    id: "mock:state",
+    ready: Promise.resolve(),
+    get: (key) => values.get(key),
+    has: (key) => values.has(key),
+    list: () => [...values.keys()],
+    subscribe: (key, l) => {
+      let set = keyListeners.get(key);
+      if (!set) {
+        set = new Set();
+        keyListeners.set(key, set);
+      }
+      set.add(l);
+      return () => set!.delete(l) as unknown as void;
+    },
+    subscribeAll: (l) => {
+      wildcards.add(l);
+      return () => wildcards.delete(l) as unknown as void;
+    },
+    set: async ({ key, value }: StateSetInput) => {
+      values.set(key, value);
+      fire(key);
+    },
+    delete: async ({ key }: StateDeleteInput) => {
+      if (!values.has(key)) return;
+      values.delete(key);
+      fire(key);
+    },
+    exportSnapshot: () => {
+      const out: Record<string, unknown> = {};
+      for (const [k, v] of values) out[k] = v;
+      return out;
+    },
+    importSnapshot: (snap: Readonly<Record<string, unknown>>) => {
+      const before = new Set(values.keys());
+      values.clear();
+      for (const [k, v] of Object.entries(snap)) values.set(k, v);
+      const after = new Set(values.keys());
+      for (const k of new Set([...before, ...after])) fire(k);
+    },
+    close: async () => {},
+  };
 }
 
 export function stubLoopBridge(): LoopBridge {
@@ -114,21 +332,37 @@ export interface StubBridgesOptions {
 }
 
 /**
- * Convenience: produce a `HookBridges` bundle with in-memory + stub
- * implementations. Useful for unit tests; real runtimes plug in their
- * own concrete bridges.
+ * Convenience: produce a `HookBridges` bundle with mock protocol
+ * implementations. Suitable for testing the RECONCILER itself —
+ * mount, render, lifecycle, snapshot mechanics.
  *
- * `timeline` / `knobs` / `state` are real harnesses (per ADR 26 — these
- * are harnesses, not bridges). Tests that need to invoke harness
- * operations use the async surface and the eager-mutation guarantee.
+ * Tests that exercise specific harness behavior (knobs validation
+ * pipeline, timeline pending/drain semantics, state K/V routing
+ * through real Operations) should NOT use this — they belong in the
+ * relevant harness package's `__tests__/integration-with-reconciler.spec.tsx`
+ * and use real harness stubs from `@agentick/<harness>/testing`.
+ *
+ * @see docs/proposals/v2/blueprint/27-modular-built-ins.md
  */
 export function stubBridges(options: StubBridgesOptions = {}): HookBridges {
+  // `timeline`, `knobs`, `state` are typed onto HookBridges only when
+  // their respective packages' `augment.ts` is loaded. Reconciler-react
+  // doesn't dep on those packages, so the slots aren't visible here at
+  // typecheck — we still construct them at runtime (consumers who
+  // imported `@agentick/{timeline,knobs,state}` see them typed).
+  // Cast through `unknown` to acknowledge the type gap is intentional.
   return {
-    timeline: stubTimelineHarness(options.timeline) as TimelineHarnessProtocol,
-    knobs: stubKnobsHarness(options.knobs) as KnobsHarnessProtocol,
-    state: stubStateHarness(options.state) as StateHarnessProtocol,
     data: new InMemoryDataBridge({ onSettled: options.onDataSettled }),
     loop: stubLoopBridge(),
     session: stubSessionBridge(options.sessionId),
-  };
+    timeline: mockTimelineHarness(options.timeline),
+    knobs: mockKnobsHarness(options.knobs),
+    state: mockStateHarness(options.state),
+  } as unknown as HookBridges;
 }
+
+// Note: `stubKnobsHarness`, `stubTimelineHarness`, `stubStateHarness`
+// (the REAL harness factories) live in their respective packages'
+// `/testing` subpaths now (`@agentick/timeline/testing`, etc.).
+// Reconciler-react no longer ships them — tests that need real
+// harness behavior import directly from those packages.

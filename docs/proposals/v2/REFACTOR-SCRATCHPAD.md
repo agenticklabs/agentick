@@ -42,6 +42,7 @@ any harness can have a `/react` subpath, and the modularity story
 becomes real.
 
 **Expected pain points (anticipated, not yet hit):**
+
 - Generic snapshot iteration replaces hardcoded `bridges.knobs`,
   `bridges.state` access in `reconciler-harness.ts`. Snapshot shape
   changes from named fields to mapped type.
@@ -102,6 +103,7 @@ contracts without their own harness packages — fine to live in spec).
 Added `SnapshotCapable<T>` to spec; updated each of the three
 foundational harness protocols to `extends SnapshotCapable<TSnapshot>`
 where T is a snapshot payload type defined alongside the protocol:
+
 - `KnobsHarnessSnapshot = Readonly<Record<string, KnobPrimitive>>`
 - `StateHarnessSnapshot = Readonly<Record<string, unknown>>`
 - `TimelineHarnessSnapshot` already existed.
@@ -192,6 +194,98 @@ visible to reconciler-react TRANSITIVELY through node_modules. Stage 5
 is truly slot-agnostic — at that point reconciler-react wouldn't see
 the augmentations and would have to operate purely on `Object.entries`
 runtime iteration. That's the real validation.
+
+### 2026-05-26 — Stages 4–7: the big move
+
+Done together because they were coupled — moving hooks/components
+out of reconciler-react required dropping the harness package deps,
+which required relocating integration tests, which required
+per-harness `/testing` subpaths.
+
+**What landed:**
+
+1. **Per-harness `/testing` subpaths** (`@agentick/timeline/testing`,
+   `@agentick/knobs/testing`, `@agentick/state/testing`) — each owns
+   its `stubXHarness` factory that constructs the real harness on an
+   in-memory substrate.
+
+2. **Per-harness `/react` subpaths**:
+   - `@agentick/knobs/react` — `useKnob`, `<Knobs>`, `useKnobsContext`
+   - `@agentick/state/react` — `useSessionState`
+   - `@agentick/timeline/react` — `useTimeline`, `<Timeline>`,
+     `token-budget`, `compactEntries`
+     Each /react subpath depends on `@agentick/reconciler-react` for
+     `useBridges` + `BridgeContext`. Each `index.ts` does
+     `import "../augment.js"` for side-effect loading of the slot.
+
+3. **Mock-based stubs in reconciler-react** — `mockTimelineHarness`,
+   `mockKnobsHarness`, `mockStateHarness`. They satisfy the protocols
+   without importing harness packages. Used by reconciler-react's own
+   tests. **Adopters do not import these** — they use real stubs from
+   per-harness `/testing` subpaths via `agentick/testing` (eventual)
+   or directly.
+
+4. **Reconciler-react's harness deps dropped.** No more
+   `@agentick/timeline`, `@agentick/knobs`, `@agentick/state` in its
+   `dependencies`. It's now a true leaf in the workspace harness
+   graph (deps: spec, runtime, formatters, tool only). **Real cycle
+   break achieved** — turbo no longer detects a cycle.
+
+5. **Integration tests relocated:**
+   - `reconciler-react/__tests__/knobs.spec.tsx` →
+     `@agentick/knobs/__tests__/integration-with-reconciler.spec.tsx`
+   - `reconciler-react/__tests__/timeline.spec.tsx` →
+     `@agentick/timeline/__tests__/integration-with-reconciler.spec.tsx`
+   - `reconciler-react/__tests__/use-session-state.spec.tsx` →
+     `@agentick/state/__tests__/integration-with-reconciler.spec.tsx`
+   - `reconciler-react/__tests__/snapshot-restore.spec.tsx` →
+     `@agentick/session/__tests__/snapshot-restore.spec.tsx`
+   - `hooks.spec.tsx`'s `useKnob` block — deleted (coverage moves
+     with the hook to knobs's integration test).
+
+6. **Conformance suites move with harnesses.** Reconciler-react's
+   `conformance.spec.tsx` drops the `runKnobsHarnessConformance` and
+   `runTimelineHarnessConformance` invocations — these already run
+   against the real harness in `@agentick/knobs/src/__tests__/harness.spec.ts`
+   and `@agentick/timeline/__tests__/harness.spec.ts`.
+
+**Surprises:**
+
+- **mockKnobsHarness needed list() snapshot caching** — without it,
+  `useSyncExternalStore` saw a fresh array on every `list()` call and
+  the `<Knobs>` component infinite-looped. The real KnobsHarness has
+  `listCache: KnobDescriptor[] | null = null` for the same reason
+  (recurring v2 gotcha worth a spec note: `useSyncExternalStore` snapshot
+  references MUST be stable between mutations). Added `listCache` to
+  the mock.
+
+- **`stubBridges()` in reconciler-react needs `as unknown as HookBridges`
+  cast.** Reconciler-react doesn't see the augmented `timeline`/`knobs`/
+  `state` slots in its own typecheck (no harness package dep), so
+  TypeScript treats the field initializers as excess properties on
+  the empty-seed HookBridges. The runtime values are correct; the cast
+  acknowledges the type-vs-runtime gap. Adopter test code (which DOES
+  import harness packages) sees the augmented HookBridges normally.
+
+- **`gates` needed a regular dep on `@agentick/knobs`** to import
+  `useKnob` from `@agentick/knobs/react`. Was previously fine via
+  reconciler-react re-export. Updated.
+
+- **External callers fixed:** `@agentick/app/__tests__/knobs-integration.spec.tsx`
+  now imports `useKnob` from `@agentick/knobs/react` (was reconciler-react).
+
+5501 workspace tests green (5312 + 189 tui; was 5358 — we LOST 1 test
+from the useKnob removal in hooks.spec.tsx, GAINED few from the test
+relocations not netting back to 5358).
+
+`agentick/testing` composed `stubBridges()` convenience deferred —
+adopters can use per-harness `/testing` imports for now; the metapackage
+composition lands when we formalize a v2 `@agentick/core` aggregator.
+
+**The architecture is real.** Reconciler-react is a true leaf. Any
+harness package — built-in or optional — can have a `/react` subpath
+without workspace cycle risk. Tests live where the deps are. Built-in
+and optional follow the identical pattern.
 
 **Observation:** the rollback was painless because nothing was
 committed. Each prior commit (`c9161ab8`, `94a2d0c1`, `cb183bcb`...)

@@ -31,10 +31,12 @@
     "typecheck": "tsc -p tsconfig.build.json --noEmit"
   },
   "dependencies": {
+    "@agentick/knobs": "workspace:*",
     "@agentick/reconciler-react": "workspace:*",
     "@agentick/spec": "workspace:*"
   },
   "devDependencies": {
+    "@agentick/knobs": "workspace:*",
     "@agentick/runtime": "workspace:*",
     "@types/react": "^19.2.5"
   },

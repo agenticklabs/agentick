@@ -3,9 +3,11 @@ import React, { useEffect } from "react";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
 import { ReconcilerHarness } from "../harness/reconciler-harness.js";
 import { InMemoryDataBridge } from "../bridges/in-memory-data-bridge.js";
-import { stubBridges, stubKnobsHarness } from "../bridges/stub-bridges.js";
+import { stubBridges, mockKnobsHarness } from "../bridges/stub-bridges.js";
 import { useData } from "../react/hooks/use-data.js";
-import { useKnob } from "../react/hooks/use-knob.js";
+// useKnob moved to @agentick/knobs/react per ADR 27.
+// useKnob's integration coverage lives in
+// packages/knobs/src/__tests__/integration-with-reconciler.spec.tsx.
 import { useLoopControl } from "../react/hooks/use-loop-control.js";
 import { useSession } from "../react/hooks/use-session.js";
 import { flush } from "../testing/flush.js";
@@ -156,41 +158,8 @@ describe("useData — no-Suspense blocking resolution", () => {
   // suite (Phase 3.16).
 });
 
-describe("useKnob", () => {
-  it("registers initial value, returns current value, re-renders on external set", async () => {
-    const knobs = stubKnobsHarness();
-    const bridges: HookBridges = { ...stubBridges(), knobs };
-    const harness = await makeHarness();
-
-    function App() {
-      const [mood, _setMood] = useKnob("mood", "curious");
-      return React.createElement("message", { role: "user" }, `mood=${mood}`);
-    }
-
-    await harness.mount({
-      mountId: "m_knob",
-      sessionId: "s",
-      element: React.createElement(App),
-      bridges,
-    });
-
-    const r1 = await harness.renderTree({ mountId: "m_knob", sessionId: "s" });
-    const m1 = r1.tree.context.entries[0]!;
-    if (m1.kind !== "message") throw new Error("expected message");
-    expect(textOf(m1.content)).toBe("mood=curious");
-
-    // External mutation — set_knob tool dispatch equivalent.
-    await knobs.set({ id: "mood", value: "decisive" });
-    // Allow React's useSyncExternalStore listener to schedule the
-    // subscriber re-render before we ask the harness for a fresh tree.
-    await flush();
-
-    const r2 = await harness.renderTree({ mountId: "m_knob", sessionId: "s" });
-    const m2 = r2.tree.context.entries[0]!;
-    if (m2.kind !== "message") throw new Error("expected message");
-    expect(textOf(m2.content)).toBe("mood=decisive");
-  });
-});
+// useKnob test moved with the hook — see
+// packages/knobs/src/__tests__/integration-with-reconciler.spec.tsx.
 
 describe("useLoopControl", () => {
   it("returns the loop bridge — components can request continue/stop", async () => {

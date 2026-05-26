@@ -16,7 +16,7 @@
 
 import { useCallback, useSyncExternalStore } from "react";
 import type { TimelineSnapshot } from "@agentick/spec";
-import { useBridges } from "../bridge-context.js";
+import { useBridges } from "@agentick/reconciler-react";
 
 export function useTimeline(): TimelineSnapshot {
   const { timeline } = useBridges();

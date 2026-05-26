@@ -1,10 +1,16 @@
 /**
- * Wire `@agentick/spec-conformance` against the reference impls in
- * `@agentick/reconciler-react`.
+ * Wire `@agentick/spec-conformance` against `@agentick/reconciler-react`.
+ *
+ * Reconciler / DataBridge / LoopBridge conformance suites — the
+ * contracts this package directly satisfies. Per ADR 27, harness
+ * conformance (knobs, state, timeline) runs in each harness's own
+ * package — `runKnobsHarnessConformance` lives in `@agentick/knobs`
+ * and runs against the real `KnobsHarness` from
+ * `@agentick/knobs/src/__tests__/harness.spec.ts` (and likewise for
+ * state and timeline).
  *
  * Every suite here represents an executable contract from the
- * pluggability charter. Any future implementation that satisfies the
- * same protocols passes the same suites.
+ * pluggability charter.
  */
 
 import { describe } from "vitest";
@@ -17,47 +23,17 @@ import {
   type ElementInput,
   type ReconcilerConformanceFactory,
 } from "@agentick/spec-conformance";
-import { runKnobsHarnessConformance } from "@agentick/knobs";
-import { runTimelineHarnessConformance } from "@agentick/timeline";
 import type { HookBridges, ReconcilerProtocol } from "@agentick/spec";
 import { InMemoryDataBridge } from "../bridges/in-memory-data-bridge.js";
-import {
-  stubBridges,
-  stubKnobsHarness,
-  stubLoopBridge,
-  stubTimelineHarness,
-} from "../bridges/stub-bridges.js";
+import { stubBridges, stubLoopBridge } from "../bridges/stub-bridges.js";
 import { ReconcilerHarness } from "../harness/reconciler-harness.js";
 
 // ============================================================================
-// Bridge / harness conformance
+// Bridge conformance
 // ============================================================================
 
 describe("InMemoryDataBridge — conformance", () =>
   runDataBridgeConformance(() => new InMemoryDataBridge()));
-
-// Knobs is now a harness (ADR 26). Conformance suite lives in @agentick/knobs.
-// We run it here against the in-process stub to validate the
-// reconciler-react integration uses a real harness behind useBridges().knobs.
-runKnobsHarnessConformance({
-  make: async () => {
-    const harness = stubKnobsHarness();
-    await harness.ready;
-    return harness;
-  },
-});
-
-// Timeline is now a harness (ADR 26 Step 5a). Conformance suite lives in
-// @agentick/timeline. We run it here against the in-process stub to
-// validate the reconciler-react integration uses a real harness behind
-// useBridges().timeline.
-runTimelineHarnessConformance({
-  make: async () => {
-    const harness = stubTimelineHarness();
-    await harness.ready;
-    return harness;
-  },
-});
 
 describe("stubLoopBridge — conformance", () => runLoopBridgeConformance(() => stubLoopBridge()));
 

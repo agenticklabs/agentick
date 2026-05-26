@@ -92,13 +92,18 @@ export { customBlockContributor } from "./collect/contributors/custom-block.js";
 // Bridges
 export { InMemoryDataBridge } from "./bridges/in-memory-data-bridge.js";
 export type { InMemoryDataBridgeOptions } from "./bridges/in-memory-data-bridge.js";
+
+// Mock-based test stubs — reconciler-react's own test infrastructure.
+// Per ADR 27, the REAL harness stub factories live in each harness
+// package's `/testing` subpath (`@agentick/timeline/testing`, etc.).
+// Use the metapackage's `agentick/testing` for composed convenience.
 export {
   stubBridges,
-  stubTimelineHarness,
-  stubKnobsHarness,
-  stubStateHarness,
   stubLoopBridge,
   stubSessionBridge,
+  mockTimelineHarness,
+  mockKnobsHarness,
+  mockStateHarness,
 } from "./bridges/stub-bridges.js";
 export type { StubBridgesOptions } from "./bridges/stub-bridges.js";
 
@@ -113,8 +118,6 @@ export {
 export type { LifecycleProviderProps } from "./react/lifecycle-context.js";
 export {
   useData,
-  useKnob,
-  useTimeline,
   useLoopControl,
   useSession,
   useOnTickStart,
@@ -126,45 +129,22 @@ export {
   useOnUnmount,
   useOnLifecycleCustom,
   useToolBridge,
-  useSessionState,
 } from "./react/hooks/index.js";
-export type { UseKnobOptions } from "./react/hooks/index.js";
 
 // React-flavored createTool (extends @agentick/tool with use() hook)
 export { createTool } from "./react/create-tool.js";
 export type { ReactToolSpec, CreatedReactTool } from "./react/create-tool.js";
 
-// Components
+// Components — only those that aren't harness-specific live here.
+// Per ADR 27, <Knobs> / <Timeline> moved to their respective /react
+// subpaths in `@agentick/knobs/react` and `@agentick/timeline/react`.
+// Hooks `useKnob`, `useTimeline`, `useSessionState` moved similarly.
 export { FormatScope, Markdown, XML, PlainText } from "./react/components/index.js";
 export type { FormatScopeProps, NamedFormatScopeProps } from "./react/components/index.js";
 export { Message } from "./react/components/index.js";
 export type { MessageProps } from "./react/components/index.js";
 export { Section } from "./react/components/index.js";
 export type { SectionProps } from "./react/components/index.js";
-export { Knobs, useKnobsContext, useKnobsContextOptional } from "./react/components/index.js";
-export type {
-  KnobsProps,
-  KnobsRenderFn,
-  KnobsContextValue,
-  KnobInfo,
-  KnobGroup,
-} from "./react/components/index.js";
-export { Timeline } from "./react/components/index.js";
-export type {
-  TimelineProps,
-  TimelineRenderFn,
-  ConversationHistoryOptions,
-  TimelineBudgetOptions,
-} from "./react/components/index.js";
-export { compactEntries, getEntryTokens } from "./react/components/index.js";
-export type {
-  CompactionStrategy,
-  CompactionFunction,
-  CompactionResult,
-  CompactOptions,
-  CompactResult,
-  TokenBudgetInfo,
-} from "./react/components/index.js";
 
 // Passthrough contributor (exported so custom registries can opt-in)
 export { contentPassthroughContributor } from "./collect/contributors/content-passthrough.js";

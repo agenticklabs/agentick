@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
 import React from "react";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
-import { ReconcilerHarness } from "../harness/reconciler-harness.js";
-import { InMemoryDataBridge } from "../bridges/in-memory-data-bridge.js";
-import { stubBridges, stubKnobsHarness } from "../bridges/stub-bridges.js";
-import { useData } from "../react/hooks/use-data.js";
-import { useKnob } from "../react/hooks/use-knob.js";
-import { flush } from "../testing/flush.js";
+import { ReconcilerHarness } from "@agentick/reconciler-react";
+import { InMemoryDataBridge } from "@agentick/reconciler-react";
+import { stubBridges, mockKnobsHarness } from "@agentick/reconciler-react";
+import { useData } from "@agentick/reconciler-react";
+import { useKnob } from "@agentick/knobs/react";
+import { flush } from "@agentick/reconciler-react/testing";
 import type { HookBridges, ReconcilerSnapshot } from "@agentick/spec";
 
 async function makeHarness(scope = `snap-${Math.random()}`) {
@@ -90,10 +90,10 @@ describe("InMemoryDataBridge — snapshot/restore unit", () => {
 
 describe("KnobsHarness — snapshot/restore unit", () => {
   it("export → import round-trips all values + fires subscribers on changed ids", () => {
-    const src = stubKnobsHarness({ a: 1, b: 2 });
+    const src = mockKnobsHarness({ a: 1, b: 2 });
     expect(src.exportSnapshot()).toEqual({ a: 1, b: 2 });
 
-    const dest = stubKnobsHarness();
+    const dest = mockKnobsHarness();
     let aChanges = 0;
     let cChanges = 0;
     dest.subscribe("a", () => aChanges++);

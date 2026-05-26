@@ -21,7 +21,7 @@ import { describe, expect, it } from "vitest";
 import { MockLanguageModelExecutor } from "@agentick/executor";
 import { KnobsHarness } from "@agentick/knobs";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
-import { useKnob } from "@agentick/reconciler-react";
+import { useKnob } from "@agentick/knobs/react";
 import type { ContentBlock } from "@agentick/spec";
 
 import { createApp } from "../create-app.js";

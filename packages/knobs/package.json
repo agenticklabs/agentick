@@ -24,6 +24,16 @@
       "types": "./src/index.ts",
       "import": "./src/index.ts",
       "default": "./src/index.ts"
+    },
+    "./react": {
+      "types": "./src/react/index.ts",
+      "import": "./src/react/index.ts",
+      "default": "./src/react/index.ts"
+    },
+    "./testing": {
+      "types": "./src/testing/index.ts",
+      "import": "./src/testing/index.ts",
+      "default": "./src/testing/index.ts"
     }
   },
   "scripts": {
@@ -31,11 +41,17 @@
     "typecheck": "tsc -p tsconfig.build.json --noEmit"
   },
   "dependencies": {
+    "@agentick/reconciler-react": "workspace:*",
     "@agentick/runtime": "workspace:*",
     "@agentick/spec": "workspace:*",
+    "@agentick/tool": "workspace:*",
     "effect": "^3.21.2"
   },
   "devDependencies": {
-    "@agentick/spec-conformance": "workspace:*"
+    "@agentick/spec-conformance": "workspace:*",
+    "@types/react": "^19.2.5"
+  },
+  "peerDependencies": {
+    "react": "^19.0.0"
   }
 }

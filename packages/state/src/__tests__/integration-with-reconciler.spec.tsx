@@ -12,9 +12,9 @@ import { describe, expect, it } from "vitest";
 
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
 
-import { stubBridges } from "../bridges/stub-bridges.js";
-import { ReconcilerHarness } from "../harness/reconciler-harness.js";
-import { useSessionState } from "../react/hooks/use-session-state.js";
+import { stubBridges } from "@agentick/reconciler-react";
+import { ReconcilerHarness } from "@agentick/reconciler-react";
+import { useSessionState } from "@agentick/state/react";
 
 async function makeHarness(id = "h_state") {
   const h = new ReconcilerHarness(id, new MemoryJournal(), new LocalEventBus(), new LocalInbox());

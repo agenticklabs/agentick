@@ -54,9 +54,9 @@ import type {
   StandardSchemaV1,
 } from "@agentick/spec";
 
-import { useBridges } from "../bridge-context.js";
-import { createTool } from "../create-tool.js";
-import { Section } from "./section.js";
+import { useBridges } from "@agentick/reconciler-react";
+import { createTool } from "@agentick/reconciler-react";
+import { Section } from "@agentick/reconciler-react";
 
 const h = React.createElement;
 

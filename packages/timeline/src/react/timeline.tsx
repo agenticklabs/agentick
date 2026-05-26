@@ -24,8 +24,8 @@
 import React, { useEffect, useMemo, useRef, type ReactNode } from "react";
 import type { JSX } from "react";
 import type { TimelineEntry } from "@agentick/spec";
-import { useTimeline } from "../hooks/use-timeline.js";
-import { Message } from "./message.js";
+import { useTimeline } from "./use-timeline.js";
+import { Message } from "@agentick/reconciler-react";
 import { compactEntries, type CompactionStrategy, type TokenBudgetInfo } from "./token-budget.js";
 
 const h = React.createElement;

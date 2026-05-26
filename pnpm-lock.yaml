@@ -709,6 +709,9 @@ importers:
 
   packages/gates:
     dependencies:
+      '@agentick/knobs':
+        specifier: workspace:*
+        version: link:../knobs
       '@agentick/reconciler-react':
         specifier: workspace:*
         version: link:../reconciler-react
@@ -796,19 +799,31 @@ importers:
 
   packages/knobs:
     dependencies:
+      '@agentick/reconciler-react':
+        specifier: workspace:*
+        version: link:../reconciler-react
       '@agentick/runtime':
         specifier: workspace:*
         version: link:../runtime
       '@agentick/spec':
         specifier: workspace:*
         version: link:../spec
+      '@agentick/tool':
+        specifier: workspace:*
+        version: link:../tool
       effect:
         specifier: ^3.21.2
         version: 3.21.2
+      react:
+        specifier: ^19.0.0
+        version: 19.2.4
     devDependencies:
       '@agentick/spec-conformance':
         specifier: workspace:*
         version: link:../spec-conformance
+      '@types/react':
+        specifier: ^19.2.5
+        version: 19.2.13
 
   packages/loop-executor:
     dependencies:
@@ -924,21 +939,12 @@ importers:
       '@agentick/formatters':
         specifier: workspace:*
         version: link:../formatters
-      '@agentick/knobs':
-        specifier: workspace:*
-        version: link:../knobs
       '@agentick/runtime':
         specifier: workspace:*
         version: link:../runtime
       '@agentick/spec':
         specifier: workspace:*
         version: link:../spec
-      '@agentick/state':
-        specifier: workspace:*
-        version: link:../state
-      '@agentick/timeline':
-        specifier: workspace:*
-        version: link:../timeline
       '@agentick/tool':
         specifier: workspace:*
         version: link:../tool
@@ -1192,6 +1198,9 @@ importers:
 
   packages/state:
     dependencies:
+      '@agentick/reconciler-react':
+        specifier: workspace:*
+        version: link:../reconciler-react
       '@agentick/runtime':
         specifier: workspace:*
         version: link:../runtime
@@ -1201,10 +1210,16 @@ importers:
       effect:
         specifier: ^3.21.2
         version: 3.21.2
+      react:
+        specifier: ^19.0.0
+        version: 19.2.4
     devDependencies:
       '@agentick/spec-conformance':
         specifier: workspace:*
         version: link:../spec-conformance
+      '@types/react':
+        specifier: ^19.2.5
+        version: 19.2.13
 
   packages/subscriptions:
     dependencies:
@@ -1227,6 +1242,9 @@ importers:
 
   packages/timeline:
     dependencies:
+      '@agentick/reconciler-react':
+        specifier: workspace:*
+        version: link:../reconciler-react
       '@agentick/runtime':
         specifier: workspace:*
         version: link:../runtime
@@ -1236,10 +1254,16 @@ importers:
       effect:
         specifier: ^3.21.2
         version: 3.21.2
+      react:
+        specifier: ^19.0.0
+        version: 19.2.4
     devDependencies:
       '@agentick/spec-conformance':
         specifier: workspace:*
         version: link:../spec-conformance
+      '@types/react':
+        specifier: ^19.2.5
+        version: 19.2.13
 
   packages/tool:
     dependencies:

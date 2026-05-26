@@ -7,22 +7,7 @@ export type { MessageProps } from "./message.js";
 export { Section } from "./section.js";
 export type { SectionProps } from "./section.js";
 
-export { Knobs, useKnobsContext, useKnobsContextOptional } from "./knobs.js";
-export type { KnobsProps, KnobsRenderFn, KnobsContextValue, KnobInfo, KnobGroup } from "./knobs.js";
-
-export { Timeline } from "./timeline.js";
-export type {
-  TimelineProps,
-  TimelineRenderFn,
-  ConversationHistoryOptions,
-  TimelineBudgetOptions,
-} from "./timeline.js";
-export { compactEntries, getEntryTokens } from "./token-budget.js";
-export type {
-  CompactionStrategy,
-  CompactionFunction,
-  CompactionResult,
-  CompactOptions,
-  CompactResult,
-  TokenBudgetInfo,
-} from "./token-budget.js";
+// Note: <Knobs>, <Timeline>, and token-budget moved to per-harness
+// /react subpaths per ADR 27. Adopters import:
+//   <Knobs> + useKnobsContext       from "@agentick/knobs/react"
+//   <Timeline> + compactEntries     from "@agentick/timeline/react"

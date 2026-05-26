@@ -29,7 +29,7 @@ These principles drive every package boundary and import in v2. **Read
 [`docs/proposals/v2/blueprint/27-modular-built-ins.md`](docs/proposals/v2/blueprint/27-modular-built-ins.md)
 for the full reasoning. Summary:**
 
-- **Built-in extensions are not "built in." They are *bundled*.** Timeline,
+- **Built-in extensions are not "built in." They are _bundled_.** Timeline,
   knobs, state, gates are private workspace packages that follow the
   same architectural pattern as optional extensions (sandbox, mcp). The
   metapackage (`agentick`) bundles the built-ins; optionals are

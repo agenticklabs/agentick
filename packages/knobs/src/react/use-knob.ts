@@ -29,8 +29,8 @@
 
 import { useCallback, useEffect, useRef, useSyncExternalStore } from "react";
 import type { KnobPrimitive, KnobRegistration, KnobValueType } from "@agentick/spec";
-import { useBridges } from "../bridge-context.js";
-import { useOnExecutionEnd } from "./use-on-execution-end.js";
+import { useBridges } from "@agentick/reconciler-react";
+import { useOnExecutionEnd } from "@agentick/reconciler-react";
 
 export interface UseKnobOptions {
   readonly description?: string;

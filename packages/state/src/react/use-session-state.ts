@@ -16,7 +16,7 @@
  */
 
 import { useCallback, useEffect, useSyncExternalStore } from "react";
-import { useBridges } from "../bridge-context.js";
+import { useBridges } from "@agentick/reconciler-react";
 
 export function useSessionState<T>(key: string, initial: T): readonly [T, (value: T) => void] {
   const { state } = useBridges();

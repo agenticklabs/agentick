@@ -15,11 +15,11 @@ import { describe, expect, it } from "vitest";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
 import type { HookBridges, LifecycleExecutionEnd, SectionEntry } from "@agentick/spec";
 
-import { ReconcilerHarness } from "../harness/reconciler-harness.js";
-import { stubBridges, stubKnobsHarness } from "../bridges/stub-bridges.js";
-import { useKnob } from "../react/hooks/use-knob.js";
-import { Knobs } from "../react/components/knobs.js";
-import { flush } from "../testing/flush.js";
+import { ReconcilerHarness } from "@agentick/reconciler-react";
+import { stubBridges, mockKnobsHarness } from "@agentick/reconciler-react";
+import { useKnob } from "@agentick/knobs/react";
+import { Knobs } from "@agentick/knobs/react";
+import { flush } from "@agentick/reconciler-react/testing";
 
 async function makeHarness() {
   const harness = new ReconcilerHarness(
@@ -49,7 +49,7 @@ function textOf(content: readonly { text?: string }[]): string {
 
 describe("useKnob — descriptor registration", () => {
   it("registers a descriptor with description + options + valueType", async () => {
-    const knobs = stubKnobsHarness();
+    const knobs = mockKnobsHarness();
     const bridges: HookBridges = { ...stubBridges(), knobs };
     const harness = await makeHarness();
 
@@ -83,7 +83,7 @@ describe("useKnob — descriptor registration", () => {
   });
 
   it("infers valueType from initial when not explicit", async () => {
-    const knobs = stubKnobsHarness();
+    const knobs = mockKnobsHarness();
     const bridges: HookBridges = { ...stubBridges(), knobs };
     const harness = await makeHarness();
 
@@ -109,7 +109,7 @@ describe("useKnob — descriptor registration", () => {
   });
 
   it("preserves an existing value on re-registration", async () => {
-    const knobs = stubKnobsHarness();
+    const knobs = mockKnobsHarness();
     await knobs.set({ id: "mood", value: "playful" }); // Set BEFORE useKnob renders.
     const bridges: HookBridges = { ...stubBridges(), knobs };
     const harness = await makeHarness();
@@ -133,7 +133,7 @@ describe("useKnob — descriptor registration", () => {
 
 describe("useKnob — momentary semantics", () => {
   it("resets value to initial at execution-end when momentary", async () => {
-    const knobs = stubKnobsHarness();
+    const knobs = mockKnobsHarness();
     const bridges: HookBridges = { ...stubBridges(), knobs };
     const harness = await makeHarness();
 
@@ -169,7 +169,7 @@ describe("useKnob — momentary semantics", () => {
   });
 
   it("does NOT reset non-momentary knobs", async () => {
-    const knobs = stubKnobsHarness();
+    const knobs = mockKnobsHarness();
     const bridges: HookBridges = { ...stubBridges(), knobs };
     const harness = await makeHarness();
 
@@ -202,7 +202,7 @@ describe("useKnob — momentary semantics", () => {
 
 describe("<Knobs /> — default rendering", () => {
   it("returns null when no knobs are registered", async () => {
-    const knobs = stubKnobsHarness();
+    const knobs = mockKnobsHarness();
     const bridges: HookBridges = { ...stubBridges(), knobs };
     const harness = await makeHarness();
 
@@ -217,7 +217,7 @@ describe("<Knobs /> — default rendering", () => {
   });
 
   it("renders the knobs section + set_knob tool when knobs are registered", async () => {
-    const knobs = stubKnobsHarness();
+    const knobs = mockKnobsHarness();
     const bridges: HookBridges = { ...stubBridges(), knobs };
     const harness = await makeHarness();
 
@@ -257,7 +257,7 @@ describe("<Knobs /> — default rendering", () => {
   });
 
   it("hides inline knobs from the section", async () => {
-    const knobs = stubKnobsHarness();
+    const knobs = mockKnobsHarness();
     const bridges: HookBridges = { ...stubBridges(), knobs };
     const harness = await makeHarness();
 
@@ -284,7 +284,7 @@ describe("<Knobs /> — default rendering", () => {
 
 describe("<Knobs /> — render prop", () => {
   it("delegates section rendering to the children function", async () => {
-    const knobs = stubKnobsHarness();
+    const knobs = mockKnobsHarness();
     const bridges: HookBridges = { ...stubBridges(), knobs };
     const harness = await makeHarness();
 
@@ -318,7 +318,7 @@ describe("<Knobs /> — render prop", () => {
 
 describe("<Knobs /> — reactivity", () => {
   it("section reflects external knob mutations after subscribeAll fires", async () => {
-    const knobs = stubKnobsHarness();
+    const knobs = mockKnobsHarness();
     const bridges: HookBridges = { ...stubBridges(), knobs };
     const harness = await makeHarness();
 

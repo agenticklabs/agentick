@@ -54,11 +54,8 @@
   },
   "dependencies": {
     "@agentick/formatters": "workspace:*",
-    "@agentick/knobs": "workspace:*",
     "@agentick/runtime": "workspace:*",
     "@agentick/spec": "workspace:*",
-    "@agentick/state": "workspace:*",
-    "@agentick/timeline": "workspace:*",
     "@agentick/tool": "workspace:*",
     "effect": "^3.21.2",
     "react": "^19.2.4",

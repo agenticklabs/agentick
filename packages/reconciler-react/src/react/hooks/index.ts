@@ -1,7 +1,4 @@
 export { useData } from "./use-data.js";
-export { useKnob } from "./use-knob.js";
-export type { UseKnobOptions } from "./use-knob.js";
-export { useTimeline } from "./use-timeline.js";
 export { useLoopControl } from "./use-loop-control.js";
 export { useSession } from "./use-session.js";
 export { useOnTickStart } from "./use-on-tick-start.js";
@@ -12,4 +9,9 @@ export { useOnError } from "./use-on-error.js";
 export { useOnMount, useOnUnmount } from "./use-on-mount.js";
 export { useOnLifecycleCustom } from "./use-on-lifecycle-custom.js";
 export { useToolBridge } from "./use-tool-bridge.js";
-export { useSessionState } from "./use-session-state.js";
+
+// Note: useKnob / useTimeline / useSessionState moved to per-harness
+// /react subpaths per ADR 27. Adopters import:
+//   useKnob          from "@agentick/knobs/react"
+//   useTimeline      from "@agentick/timeline/react"
+//   useSessionState  from "@agentick/state/react"

@@ -6,9 +6,9 @@
 
 ## TL;DR
 
-**Built-in extensions are not "built in." They are *bundled*.** They follow the identical architectural pattern as optional extensions; the only difference is whether the public metapackage (`agentick`) bundles them. There is no special-case code path for "foundational" vs "optional" — same shape, same wiring, same lifecycle.
+**Built-in extensions are not "built in." They are _bundled_.** They follow the identical architectural pattern as optional extensions; the only difference is whether the public metapackage (`agentick`) bundles them. There is no special-case code path for "foundational" vs "optional" — same shape, same wiring, same lifecycle.
 
-This is the lever that unlocks real modularity. Without it, you get a framework that *talks* modular while *coding* monolithic, and you hit a wall every time you try to layer something cleanly.
+This is the lever that unlocks real modularity. Without it, you get a framework that _talks_ modular while _coding_ monolithic, and you hit a wall every time you try to layer something cleanly.
 
 ## The mistake this corrects
 
@@ -18,9 +18,9 @@ But for the foundational ones we left their slots **hardcoded in `@agentick/spec
 
 ```ts
 export interface HookBridges {
-  readonly timeline: TimelineHarnessProtocol;  // hardcoded
-  readonly knobs: KnobsHarnessProtocol;        // hardcoded
-  readonly state: StateHarnessProtocol;        // hardcoded
+  readonly timeline: TimelineHarnessProtocol; // hardcoded
+  readonly knobs: KnobsHarnessProtocol; // hardcoded
+  readonly state: StateHarnessProtocol; // hardcoded
   // sandbox / mcp / subscriptions / ... come in via TS module augmentation
 }
 ```
@@ -65,6 +65,7 @@ Every harness that lives on the substrate has the same shape:
 ```
 
 **Each harness owns its full vertical:**
+
 - Its own harness implementation
 - Its own augmentation declaration (registers its `HookBridges` slot)
 - Its own React surface (if any)
@@ -196,7 +197,9 @@ export interface SnapshotCapable<TSnapshot = unknown> {
 Harness protocols extend this when they support snapshot/restore:
 
 ```ts
-export interface KnobsHarnessProtocol extends SnapshotCapable<Readonly<Record<string, KnobPrimitive>>> {
+export interface KnobsHarnessProtocol extends SnapshotCapable<
+  Readonly<Record<string, KnobPrimitive>>
+> {
   // ...
 }
 ```
@@ -209,9 +212,7 @@ export interface KnobsHarnessProtocol extends SnapshotCapable<Readonly<Record<st
 export interface ReconcilerSnapshot {
   // ...
   readonly bridges: {
-    readonly [K in keyof HookBridges]?: HookBridges[K] extends SnapshotCapable<infer S>
-      ? S
-      : never;
+    readonly [K in keyof HookBridges]?: HookBridges[K] extends SnapshotCapable<infer S> ? S : never;
   };
 }
 ```
@@ -262,7 +263,9 @@ Or, for convenience, the metapackage composes them:
 export { stubTimelineHarness } from "@agentick/timeline/testing";
 export { stubKnobsHarness } from "@agentick/knobs/testing";
 // ...
-export function stubBridges(options?: StubBridgesOptions): HookBridges { /* composes */ }
+export function stubBridges(options?: StubBridgesOptions): HookBridges {
+  /* composes */
+}
 ```
 
 Adopters who want the convenience use `agentick/testing`; adopters who want minimal imports use per-harness `/testing`.
