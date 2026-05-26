@@ -134,6 +134,84 @@ describe("TimelineHarness — inbox addressability", () => {
   });
 });
 
+describe("TimelineHarness — pending Operation envelopes", () => {
+  it("queue() emits requested + terminal under command:queue", async () => {
+    const { harness, bus } = await makeHarness();
+    const { events, stop } = await subscribeEnvelopes(bus, {
+      surface: "timeline",
+      name: { exact: "timeline:command:queue" },
+    });
+    await harness.queue({ role: "user", content: [{ type: "text", text: "hi" }] });
+    await settle();
+    await stop();
+    expect(events.some((e) => e.phase === "requested")).toBe(true);
+    expect(events.some((e) => e.phase === "terminal")).toBe(true);
+    await harness.close();
+  });
+
+  it("drain() emits its own envelope AND child append envelopes with parentOpId", async () => {
+    const { harness, bus } = await makeHarness();
+    await harness.queue({ role: "user", content: [{ type: "text", text: "x" }] });
+    await harness.queue({ role: "user", content: [{ type: "text", text: "y" }] });
+
+    const { events, stop } = await subscribeEnvelopes(bus, { surface: "timeline" });
+    await harness.drain();
+    await settle();
+    await stop();
+
+    const drainReq = events.find(
+      (e) => e.name === "timeline:command:drain" && e.phase === "requested",
+    );
+    expect(drainReq).toBeDefined();
+    const drainOpId = drainReq!.opId;
+
+    // Two append envelopes follow, each with parentOpId = drain's opId.
+    const appendReqs = events.filter(
+      (e) => e.name === "timeline:command:append" && e.phase === "requested",
+    );
+    expect(appendReqs.length).toBe(2);
+    for (const a of appendReqs) {
+      expect(a.parentOpId).toBe(drainOpId);
+    }
+    await harness.close();
+  });
+});
+
+describe("TimelineHarness — pending inbox routing", () => {
+  it("inbox queue message reaches the queue() Operation", async () => {
+    const { harness, inbox } = await makeHarness("s_q");
+    await Effect.runPromise(
+      inbox.send(`timeline:s_q`, {
+        messageId: ulid(),
+        type: "timeline:queue",
+        payload: { role: "user", content: [{ type: "text", text: "from inbox" }] },
+      }),
+    );
+    await settle();
+    const pending = harness.readPending();
+    expect(pending).toHaveLength(1);
+    expect(pending[0]!.role).toBe("user");
+    await harness.close();
+  });
+
+  it("inbox drain message moves pending → log + projection", async () => {
+    const { harness, inbox } = await makeHarness("s_d");
+    await harness.queue({ role: "user", content: [{ type: "text", text: "queued" }] });
+    expect(harness.readPending()).toHaveLength(1);
+
+    await Effect.runPromise(
+      inbox.send(`timeline:s_d`, {
+        messageId: ulid(),
+        type: "timeline:drain",
+      }),
+    );
+    await settle();
+    expect(harness.readPending()).toEqual([]);
+    expect(harness.read().entries).toHaveLength(1);
+    await harness.close();
+  });
+});
+
 describe("TimelineHarness — snapshot round-trip across instances", () => {
   it("exportSnapshot / importSnapshot preserves log + projection across instances", async () => {
     const { harness } = await makeHarness();

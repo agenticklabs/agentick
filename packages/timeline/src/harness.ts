@@ -41,11 +41,15 @@ import type {
   MessageInbox,
   Operation,
   OperationJournal,
+  PendingEntry,
   TimelineAppendInput,
+  TimelineDrainResult,
   TimelineEntry,
   TimelineHarnessProtocol,
   TimelineHarnessSnapshot,
   TimelineImportSnapshotOptions,
+  TimelineQueueInput,
+  TimelineQueueResult,
   TimelineReplaceProjectionInput,
   TimelineSnapshot,
 } from "@agentick/spec";
@@ -56,12 +60,15 @@ type TimelineInboxMessage =
       readonly type: "timeline:replaceProjection";
       readonly payload: TimelineReplaceProjectionInput;
     }
-  | { readonly type: "timeline:resetProjection" };
+  | { readonly type: "timeline:resetProjection" }
+  | { readonly type: "timeline:queue"; readonly payload: TimelineQueueInput }
+  | { readonly type: "timeline:drain" };
 
 export class TimelineHarness extends BaseHarness<"timeline"> implements TimelineHarnessProtocol {
   // ─── Storage ───
   private _persisted: TimelineEntry[] = [];
   private _projection: TimelineEntry[] = [];
+  private _pending: PendingEntry[] = [];
   private _persistedVersion = 0;
   private _projectionVersion = 0;
   private _lastCompaction?: TimelineHarnessSnapshot["lastCompaction"];
@@ -93,6 +100,12 @@ export class TimelineHarness extends BaseHarness<"timeline"> implements Timeline
     };
   }
 
+  // ─────────── Sync surface — pending (queued, awaiting drain) ───────────
+
+  readPending(): readonly PendingEntry[] {
+    return this._pending;
+  }
+
   // ─────────── Sync surface — log (tooling / custom compactors) ───────────
 
   readPersisted(): readonly TimelineEntry[] {
@@ -102,6 +115,18 @@ export class TimelineHarness extends BaseHarness<"timeline"> implements Timeline
   // ─────────── Async surface — full Operations ───────────
 
   append(input: TimelineAppendInput): Promise<void> {
+    return runHarnessProtocol(this.appendEffect(input));
+  }
+
+  /**
+   * Effect-native append — used by `drain` so that inner appends
+   * compose within the drain's Effect fiber, letting BaseHarness
+   * auto-thread `parentOpId` onto every emitted envelope (Step 3.5).
+   * Going through the Promise-typed `append` would cross
+   * `Effect.runPromise`, lose the FiberRef, and break the causality
+   * tree.
+   */
+  private appendEffect(input: TimelineAppendInput): Effect.Effect<void, never, never> {
     const op: Operation<TimelineAppendInput, void, never> = {
       opId: `timeline:append:${ulid()}`,
       surface: "timeline",
@@ -109,13 +134,11 @@ export class TimelineHarness extends BaseHarness<"timeline"> implements Timeline
       scope: { sessionId: this.scopeId },
       input,
     };
-    return runHarnessProtocol(
-      this.runOperation(op, (i) =>
-        Effect.sync(() => {
-          this.applyAppend(i);
-        }),
-      ),
-    );
+    return this.runOperation(op, (i) =>
+      Effect.sync(() => {
+        this.applyAppend(i);
+      }),
+    ) as Effect.Effect<void, never, never>;
   }
 
   compact(strategy: CompactStrategy): Promise<CompactResult> {
@@ -207,6 +230,80 @@ export class TimelineHarness extends BaseHarness<"timeline"> implements Timeline
     );
   }
 
+  // ─────────── Async surface — pending queue (queue / drain) ───────────
+
+  queue(input: TimelineQueueInput): Promise<TimelineQueueResult> {
+    const id = `m_${ulid()}`;
+    const op: Operation<TimelineQueueInput, TimelineQueueResult, never> = {
+      opId: `timeline:queue:${ulid()}`,
+      surface: "timeline",
+      name: "timeline:command:queue",
+      scope: { sessionId: this.scopeId },
+      input,
+    };
+    return runHarnessProtocol(
+      this.runOperation(op, (i) =>
+        Effect.sync(() => {
+          const entry: PendingEntry = {
+            id,
+            role: i.role,
+            content: i.content,
+            ts: Date.now(),
+            ...(i.metadata !== undefined ? { metadata: i.metadata } : {}),
+          };
+          this._pending = [...this._pending, entry];
+          this.notify();
+          return { id };
+        }),
+      ),
+    );
+  }
+
+  drain(): Promise<TimelineDrainResult> {
+    const op: Operation<undefined, TimelineDrainResult, never> = {
+      opId: `timeline:drain:${ulid()}`,
+      surface: "timeline",
+      name: "timeline:command:drain",
+      scope: { sessionId: this.scopeId },
+      input: undefined,
+    };
+    return runHarnessProtocol(
+      this.runOperation(op, () =>
+        Effect.gen(this, function* () {
+          if (this._pending.length === 0) {
+            return { entries: [] as readonly TimelineEntry[] };
+          }
+          // Snapshot pending atomically (callers may add more between
+          // operations); clear it before appending so subscribers see
+          // pending=[] once the appends start.
+          const draining = this._pending;
+          this._pending = [];
+          this.notify();
+
+          const drained: TimelineEntry[] = [];
+          for (const p of draining) {
+            const entry: TimelineEntry = {
+              kind: "message",
+              message: {
+                id: p.id,
+                role: p.role,
+                content: p.content,
+                ts: p.ts,
+                ...(p.metadata !== undefined ? { metadata: p.metadata } : {}),
+              },
+            };
+            // appendEffect is Effect-native — staying in this fiber
+            // lets the substrate auto-thread parentOpId onto every
+            // append envelope so observers see the causality tree.
+            yield* this.appendEffect({ entry });
+            drained.push(entry);
+          }
+          return { entries: drained as readonly TimelineEntry[] };
+        }),
+      ),
+    );
+  }
+
   // ─────────── Snapshot / restore ───────────
 
   exportSnapshot(): TimelineHarnessSnapshot {
@@ -287,6 +384,16 @@ export class TimelineHarness extends BaseHarness<"timeline"> implements Timeline
       case "timeline:resetProjection":
         return Effect.tryPromise<void, MessageHandlerError>({
           try: () => this.resetProjection(),
+          catch: (cause): MessageHandlerError => ({ _tag: "HandlerError", cause }),
+        });
+      case "timeline:queue":
+        return Effect.tryPromise<TimelineQueueResult, MessageHandlerError>({
+          try: () => this.queue(m.payload),
+          catch: (cause): MessageHandlerError => ({ _tag: "HandlerError", cause }),
+        });
+      case "timeline:drain":
+        return Effect.tryPromise<TimelineDrainResult, MessageHandlerError>({
+          try: () => this.drain(),
           catch: (cause): MessageHandlerError => ({ _tag: "HandlerError", cause }),
         });
       default:

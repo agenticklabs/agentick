@@ -359,17 +359,20 @@ export class SessionHarness<P = unknown>
   }
 
   /**
-   * `queue` writes a user-role message directly to the timeline and
-   * — if no execution is in flight — fires a fresh `send` immediately.
+   * `queue` pushes a user-role message onto the TimelineHarness pending
+   * queue and — if no execution is in flight — fires a fresh `send`
+   * immediately. The next `sendBody` drains pending into the durable
+   * timeline before the execution's first tick.
    *
-   * Mid-execution, the message becomes visible through the reactive
-   * timeline subscription: the next render picks it up, the next tick
-   * feeds it to the model. No separate "queued messages" buffer; the
-   * timeline is the buffer.
+   * Mid-execution, the message stays in pending and is visible to the
+   * model via the Timeline component (which reads both projection
+   * AND pending). It lands in the durable timeline at the start of the
+   * NEXT sendBody. Per-tick drain (so mid-execution queue lands in the
+   * current execution's timeline before the next tick) is a follow-up.
    *
    * v1 parity: queued items flow through the JSX `<Timeline>`
-   * component, which the reconciler reads live each render — same
-   * effect as appending to the session timeline here.
+   * component, which surfaces pending entries alongside history so
+   * the model sees them on the next render.
    */
   async queue(message: SendMessageInput): Promise<void> {
     if (this._closed) {
@@ -377,7 +380,7 @@ export class SessionHarness<P = unknown>
     }
     // queue() coerces to user role regardless of message.role — that's
     // the verb's contract. Use append() / observe() for non-user entries.
-    await this.appendInputMessage({ ...message, role: "user" });
+    await this.queueInputMessage({ ...message, role: "user" });
     // Auto-trigger when the session is idle. Mid-execution, the
     // running send picks up the message at its next render naturally.
     if (this._currentExecution === null) {
@@ -581,8 +584,18 @@ export class SessionHarness<P = unknown>
 
     await this._mountReady;
 
-    // Apply new messages to the timeline.
-    for (const m of input.messages ?? []) await this.appendInputMessage(m);
+    // Queue new input messages onto pending. The model sees them on
+    // the next render via the Timeline component (which reads pending
+    // alongside the projection); the durable timeline catches up below
+    // when we drain.
+    for (const m of input.messages ?? []) await this.queueInputMessage(m);
+
+    // Drain all pending messages into the timeline before this execution
+    // starts so the loop's first tick sees them in the durable timeline.
+    // Messages queued mid-execution stay in pending until the NEXT
+    // sendBody; the Timeline component still surfaces them to the model
+    // via render. (Per-tick drain is a follow-up — see ADR 26 Step 6+.)
+    await this.bridges.timeline.drain();
 
     const executionId = `exec:${ulid()}`;
     this.store.setCurrentExecutionId(executionId);
@@ -701,10 +714,17 @@ export class SessionHarness<P = unknown>
     return { appendedEntryIds: [id] };
   }
 
-  private async appendInputMessage(m: SendMessageInput): Promise<void> {
+  /**
+   * Route a user-input message into the pending queue. The harness's
+   * Timeline component reads `readPending()` and renders pending
+   * entries alongside the projection so the model sees them on the
+   * next render. The actual append (durable timeline write) happens
+   * at the start of the next `sendBody` via `bridges.timeline.drain()`.
+   */
+  private async queueInputMessage(m: SendMessageInput): Promise<void> {
     const content =
       typeof m.content === "string" ? [{ type: "text" as const, text: m.content }] : m.content;
-    await this.appendMessageEntry({
+    await this.bridges.timeline.queue({
       role: m.role,
       content,
       ...(m.metadata !== undefined ? { metadata: m.metadata } : {}),

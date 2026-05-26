@@ -334,6 +334,105 @@ export function runTimelineHarnessConformance(deps: TimelineHarnessFactoryDeps):
     });
   });
 
+  describe("TimelineHarness — pending (queue / drain)", () => {
+    it("queue() pushes to readPending without writing log or projection", async () => {
+      const h = await deps.make();
+      const { id } = await h.queue({ role: "user", content: [{ type: "text", text: "hi" }] });
+      const pending = h.readPending();
+      expect(pending).toHaveLength(1);
+      expect(pending[0]!.id).toBe(id);
+      expect(pending[0]!.role).toBe("user");
+      // Log and projection untouched.
+      expect(h.readPersisted()).toEqual([]);
+      expect(h.read().entries).toEqual([]);
+      await h.close();
+    });
+
+    it("queue() fires subscribe (single signal)", async () => {
+      const h = await deps.make();
+      let count = 0;
+      h.subscribe(() => count++);
+      await h.queue({ role: "user", content: [{ type: "text", text: "x" }] });
+      await h.queue({ role: "user", content: [{ type: "text", text: "y" }] });
+      expect(count).toBe(2);
+      await h.close();
+    });
+
+    it("queue() returns id that survives drain (stable identity)", async () => {
+      const h = await deps.make();
+      const { id } = await h.queue({ role: "user", content: [{ type: "text", text: "hi" }] });
+      const result = await h.drain();
+      expect(result.entries).toHaveLength(1);
+      const e0 = result.entries[0]!;
+      if (e0.kind !== "message") throw new Error("expected message");
+      expect(e0.message.id).toBe(id);
+      await h.close();
+    });
+
+    it("drain() moves pending → log + projection in order; clears pending", async () => {
+      const h = await deps.make();
+      await h.queue({ role: "user", content: [{ type: "text", text: "first" }] });
+      await h.queue({ role: "user", content: [{ type: "text", text: "second" }] });
+      expect(h.readPending()).toHaveLength(2);
+
+      const result = await h.drain();
+      expect(result.entries).toHaveLength(2);
+      expect(h.readPending()).toEqual([]);
+      expect(h.readPersisted()).toHaveLength(2);
+      expect(h.read().entries).toHaveLength(2);
+      const [e0, e1] = h.read().entries;
+      if (e0?.kind !== "message" || e1?.kind !== "message") throw new Error("expected messages");
+      expect((e0.message.content[0] as { text: string }).text).toBe("first");
+      expect((e1.message.content[0] as { text: string }).text).toBe("second");
+      await h.close();
+    });
+
+    it("drain() on empty pending returns empty result with no side effects", async () => {
+      const h = await deps.make();
+      let count = 0;
+      h.subscribe(() => count++);
+      const result = await h.drain();
+      expect(result.entries).toEqual([]);
+      expect(h.readPersisted()).toEqual([]);
+      // No mutation → no subscriber notification.
+      expect(count).toBe(0);
+      await h.close();
+    });
+
+    it("queue + append + drain interleave correctly", async () => {
+      const h = await deps.make();
+      // Direct append (e.g., loop's assistant output) lands in log + projection.
+      await h.append({ entry: messageEntry("assistant-1", "first assistant reply") });
+      expect(h.read().entries).toHaveLength(1);
+
+      // Queue (e.g., user input while idle) lands in pending only.
+      await h.queue({ role: "user", content: [{ type: "text", text: "follow up" }] });
+      expect(h.read().entries).toHaveLength(1); // still
+      expect(h.readPending()).toHaveLength(1);
+
+      // Drain at tick start.
+      await h.drain();
+      expect(h.read().entries).toHaveLength(2);
+      expect(h.readPending()).toEqual([]);
+      await h.close();
+    });
+
+    it("queue() preserves metadata through drain", async () => {
+      const h = await deps.make();
+      const { id } = await h.queue({
+        role: "user",
+        content: [{ type: "text", text: "hi" }],
+        metadata: { source: "test", priority: "low" },
+      });
+      const result = await h.drain();
+      const e0 = result.entries[0]!;
+      if (e0.kind !== "message") throw new Error("expected message");
+      expect(e0.message.id).toBe(id);
+      expect(e0.message.metadata).toEqual({ source: "test", priority: "low" });
+      await h.close();
+    });
+  });
+
   describe("TimelineHarness — identity stability", () => {
     it("read() returns same snapshot reference between mutations", async () => {
       const h = await deps.make();
