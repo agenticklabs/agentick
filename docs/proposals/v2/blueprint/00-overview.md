@@ -19,10 +19,21 @@ right after `01-harness-principle.md`** — it describes the substrate
 every harness inherits from (operations, journal, bus, OTel projection)
 and the rest of the blueprint sits on top of it.
 
+**ADRs 26 + 27 are foundational and load-bearing.** Read them after
+`19-foundation.md` and before any package-specific docs:
+
+- `26-harness-api-shape.md` — everything-is-a-harness; uniform shape.
+- `27-modular-built-ins.md` — built-ins are bundled, not privileged;
+  same modular pattern for foundational and optional extensions; the
+  augmentation model + per-harness layout convention. **Active
+  architectural direction; non-negotiable for new v2 code.**
+
 ```
 00-overview.md                    (this file)
 01-harness-principle.md           the five protocol surfaces (read second)
 19-foundation.md                  the substrate underneath (read third)
+26-harness-api-shape.md           ADR 26 — harness as the single shape (foundational)
+27-modular-built-ins.md           ADR 27 — bundled built-ins + augmentation (foundational)
 02-data-model.md                  the wire shapes everything else exchanges
 03-reconciler-harness.md            producer of RenderedTree (v2 ships @agentick/reconciler-react)
 04-formatters.md                   semantic content → rendered content (pure functions, see ADR 22)

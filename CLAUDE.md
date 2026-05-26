@@ -15,11 +15,64 @@ any work that might touch v2 concerns, read these in order:**
 2. [`docs/proposals/v2/IMPLEMENTATION-PLAN.md`](docs/proposals/v2/IMPLEMENTATION-PLAN.md) —
    the phased rollout plan.
 3. [`docs/proposals/v2/blueprint/`](docs/proposals/v2/blueprint/) —
-   architectural contracts (23 docs; start with `00-overview.md`,
-   `01-harness-principle.md`, `19-foundation.md`).
+   architectural contracts. **Start with these foundational ADRs:**
+   - `00-overview.md` — v2 architecture entry point
+   - `26-harness-api-shape.md` — "everything is a harness" (ADR 26)
+   - **`27-modular-built-ins.md` — built-ins are bundled, not privileged (ADR 27, foundational)**
 
 Until v2.0 is cut, `main` remains v1 stable; v2 work happens on
 `feat/v2`. Don't merge v2 changes to `main`.
+
+### v2 modularity model — non-negotiable
+
+These principles drive every package boundary and import in v2. **Read
+[`docs/proposals/v2/blueprint/27-modular-built-ins.md`](docs/proposals/v2/blueprint/27-modular-built-ins.md)
+for the full reasoning. Summary:**
+
+- **Built-in extensions are not "built in." They are *bundled*.** Timeline,
+  knobs, state, gates are private workspace packages that follow the
+  same architectural pattern as optional extensions (sandbox, mcp). The
+  metapackage (`agentick`) bundles the built-ins; optionals are
+  separate npm installs. No code-level distinction between the two.
+- **`HookBridges` in `@agentick/spec` is an empty seed.** Every harness
+  package — built-in or optional — augments it via TypeScript module
+  augmentation (`declare module "@agentick/spec"`). Spec does NOT
+  hardcode foundational slots.
+- **Per-harness package layout (the convention):**
+  ```
+  @agentick/<harness>/
+    src/
+      harness.ts                   — BaseHarness impl
+      augment.ts                   — adds the HookBridges slot
+      extension.ts                 — withX() session-extension factory
+      conformance.ts               — runXHarnessConformance suite
+      react/                       — optional React surface (hooks + components)
+      testing/                     — optional stubXHarness factory
+      __tests__/
+        harness.spec.ts                       — harness-only tests
+        integration-with-reconciler.spec.ts   — uses real ReconcilerHarness
+  ```
+- **`@agentick/reconciler-react` has NO dependency on any harness
+  package.** It owns the JSX → IR pipeline, the bridge context
+  (`BridgeProvider` / `useBridges`), and the reference
+  `InMemoryDataBridge`. Snapshot/restore iterates `HookBridges`
+  generically via `SnapshotCapable` feature detection — no hardcoded
+  slot names. Any harness can add a `/react` subpath that depends on
+  reconciler-react WITHOUT creating a cycle.
+- **Tests live where their dependencies live.** A "knobs work with the
+  reconciler" test belongs in `@agentick/knobs/__tests__/`, not in
+  reconciler-react. Reconciler-react's tests test the reconciler
+  ITSELF, using protocol mocks where bridges are needed. Cross-harness
+  integration tests live in `@agentick/session` (which depends on all
+  the harnesses it integrates) or in the public metapackage.
+- **Shipping ≠ architecture.** Built-ins ship as private workspace
+  packages bundled into the `agentick` metapackage. Optional extensions
+  ship as public packages installed separately. The pattern at the
+  code level is identical between them.
+
+**If you find yourself wanting to special-case foundational harnesses
+vs optional extensions, stop. The pattern is intentionally uniform.**
+The asymmetry between them is purely a packaging concern.
 
 ## Philosophy
 
