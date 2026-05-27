@@ -365,3 +365,92 @@ surfaced 3 missing ergonomic affordances (semantic components,
 would have shipped without. The example is the unit test for
 ergonomics. Keep it as a first-class artifact, run it before every
 release.
+
+### 2026-05-27 — Model-catalog / ModelAdapter architecture (design note, deferred)
+
+User flagged a real architectural concern: `@agentick/executor-openai`
+is named like an executor but is actually a provider impl. The
+conceptual hierarchy is wrong — providers should be ADAPTERS that
+the executor (a higher-level abstraction) consumes. AI SDK is a
+library and `executor-ai-sdk` correctly names that relationship.
+
+**The resolution: a shared model catalog + two executor paths.**
+
+```
+@agentick/model-catalog (new package, no runtime deps)
+  Static Map<(provider, modelId), ModelCapabilities>
+  Capabilities: contextWindow, maxOutputTokens, supportsTools,
+                supportsImages, supportsAudio, supportsReasoning,
+                pricePerInputToken, pricePerOutputToken, ...
+
+@agentick/executor (the native executor, framework-level)
+  Consumes a ModelAdapter (protocol — new, in spec)
+  Native adapters: @agentick/openai, @agentick/anthropic,
+                   @agentick/google, @agentick/vertex
+  Each adapter ships capabilities inline, OR delegates to the catalog
+  via (provider, modelId) lookup.
+
+@agentick/executor-ai-sdk (parallel executor)
+  Wraps ai-sdk's LanguageModel
+  Looks up capabilities from the catalog via
+    (model.provider, model.modelId) — both fields exposed by ai-sdk's
+    LanguageModel.
+  Unknown model → default to "no enhanced features," call API.
+
+Both paths feed the same `target.capabilities` to the framework.
+Compaction triggers, multimodal validation, cost routing, etc.
+work uniformly regardless of which executor backs the session.
+```
+
+**Why this matters (the framework value-add):**
+
+1. **Auto-compaction.** Executor tracks `usage.inputTokens /
+   capabilities.contextWindow`. At threshold (e.g., 80%), trigger
+   `session.timeline.compact(strategy)` before next tick. Adopter
+   writes zero glue.
+2. **Multimodal rejection at the boundary.** Tree has `<Image>` block,
+   model has `supportsImages: false`. Throw at project step before
+   the API call. No mystery 400s.
+3. **Tool-support validation.** Model declares no tool support, tree
+   has `<Tool>`. Refuse mount or warn loudly.
+4. **Cost-aware routing.** Adopters write knobs that route trivial
+   follow-ups to cheaper models; framework exposes per-tick cost from
+   adapter pricing metadata.
+5. **Reasoning passthrough.** Adapters report `supportsReasoning:
+   true`; framework collects reasoning tokens, preserves Anthropic
+   extended-thinking turns.
+
+**Renames implied:**
+- `@agentick/executor-openai` → `@agentick/openai` (adapter, not executor)
+- (future) `@agentick/anthropic`, `@agentick/google`, `@agentick/vertex`
+- `@agentick/executor` (currently scaffold + mock + defineExecutor) →
+  also bundles the native executor impl that consumes `ModelAdapter`
+- `@agentick/executor-ai-sdk` — stays, name fits
+
+**Counter-argument considered:** adds indirection; each provider
+impl is just an HTTP wrapper. Rebuttal: the layer IS the value.
+Without it, every adopter rebuilds capability tracking, compaction
+triggers, multimodal validation. v1 lacked a coherent compaction
+harness — v2 has `session.timeline.compact()`, so capability-aware
+policy now has somewhere to land.
+
+**MVP scope when we pick this up:**
+1. `@agentick/spec`: `ModelAdapter` interface + `ModelCapabilities`
+2. `@agentick/model-catalog`: static table seeded with major models
+3. `@agentick/executor`: native executor consuming `ModelAdapter`
+4. ONE concrete adapter (likely `@agentick/anthropic` first — Claude
+   is the assistant building the framework, dogfoods nicely)
+5. `@agentick/executor-ai-sdk`: capability lookup via catalog
+6. Rename: `executor-openai` → `openai` adapter
+7. Update example/v2-real to use native + openai adapter
+
+**Out of scope for MVP:** auto-compaction triggers, multimodal
+validation, cost routing. Ship the metadata flow; the policy is
+follow-up.
+
+**Why deferred from FAÇADE.6:** the executor harness PROTOCOL
+doesn't change to support either path. FAÇADE.6 (define___ APIs)
+is independent and unblocks immediately. Model-catalog/adapter is
+its own pass; capture as a design note here, revisit after FAÇADE.6.
+
+Tracked. Pick up after FAÇADE.6 lands.

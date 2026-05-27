@@ -37,7 +37,12 @@ import {
   type ToolExecutorHarnessOptions,
   type ToolHandler,
 } from "@agentick/tool-executor";
-import { isExecutorFactory } from "@agentick/spec";
+import {
+  isExecutorFactory,
+  isLoopExecutorFactory,
+  isReconcilerFactory,
+  isToolExecutorFactory,
+} from "@agentick/spec";
 import type {
   AppError,
   AppExtension,
@@ -73,6 +78,9 @@ import type {
   SessionStatus,
   SpawnContext,
   SpawnContextChildInput,
+  LoopExecutorFactory,
+  ReconcilerFactory,
+  ToolExecutorFactory,
   ToolExecutorProtocol,
   Unsubscribe,
 } from "@agentick/spec";
@@ -151,27 +159,36 @@ export interface AppHarnessOptions<P = unknown> {
    * React `ReconcilerHarness` with. Defaults to the bundled React
    * reconciler with empty options.
    */
-  readonly reconciler?: ReconcilerProtocol | ReconcilerHarnessOptions;
+  readonly reconciler?: ReconcilerProtocol | ReconcilerHarnessOptions | ReconcilerFactory;
 
   /**
-   * Loop executor slot — pass a pre-built `LoopExecutorProtocol` impl
-   * OR omit to use the bundled `LoopExecutorHarness`. `LoopExecutorHarness`
-   * has no construction options today, so options-form is reserved
-   * for forward compatibility.
+   * Loop executor slot. Accepts:
+   *
+   *   - A pre-built `LoopExecutorProtocol` instance — used as-is.
+   *   - A `LoopExecutorFactory` (produced by `defineLoop(...)`) — the
+   *     App calls it at construction with the shared substrate so the
+   *     loop's events flow through `app.events()`.
+   *   - Omit — bundled `LoopExecutorHarness` is constructed with the
+   *     shared substrate.
    */
-  readonly loop?: LoopExecutorProtocol;
+  readonly loop?: LoopExecutorProtocol | LoopExecutorFactory;
 
   // ────────── Per-session defaults (constructed per createSession) ──────────
 
   /**
-   * Default `ToolExecutorHarness` options forwarded to every session's
-   * tool executor instance. The `handlerResolver` is wired by the App
-   * (shared across sessions) and cannot be overridden here.
+   * Tool executor slot. Accepts either:
+   *
+   *   - `ToolExecutorDefaults` (options) — forwarded to the App's default
+   *     `ToolExecutorHarness` instance. The `handlerResolver` is wired
+   *     by the App (shared across sessions).
+   *   - `ToolExecutorFactory` — produced by `defineToolExecutor(...)`.
+   *     The App calls the factory per-session with the shared substrate
+   *     so the executor's events flow through `app.events()`.
    *
    * Cascade: per-call `createSession.tools` (when added) > this >
    * convenience `toolHandlers` > defaults.
    */
-  readonly tools?: ToolExecutorDefaults;
+  readonly tools?: ToolExecutorDefaults | ToolExecutorFactory;
 
   /**
    * Default `SessionHarness` options forwarded to every session. The
@@ -253,7 +270,13 @@ export interface AppHarnessOptions<P = unknown> {
 interface InternalSessionEntry<P> {
   readonly id: string;
   readonly session: SessionHarness<P>;
-  readonly tools: ToolExecutorHarness;
+  /**
+   * The session's tool executor — `ToolExecutorHarness` (reference impl)
+   * when the App constructed it from options, or a user-supplied
+   * `ToolExecutorProtocol` produced by `defineToolExecutor()` when the
+   * `tools` slot received a factory.
+   */
+  readonly tools: ToolExecutorProtocol;
   readonly metadata: Readonly<Record<string, unknown>>;
   readonly createdAt: number;
   readonly parentSessionId?: string;
@@ -276,7 +299,19 @@ export class AppHarness<P = unknown>
   // Per-session defaults resolved from the cascade
   // (session-longhand > shorthand > built-in).
   private readonly sessionDefaults: SessionDefaults<P>;
+  /**
+   * Options forwarded to the default `ToolExecutorHarness` constructed
+   * per-session. Undefined when the caller supplied a
+   * `ToolExecutorFactory` at the `tools` slot — `toolFactory` carries
+   * the factory in that case.
+   */
   private readonly toolDefaults: ToolExecutorDefaults;
+  /**
+   * Caller-supplied factory at the `tools` slot. When set, each session's
+   * tool executor is produced by invoking this factory with the shared
+   * substrate; `toolDefaults` is ignored.
+   */
+  private readonly toolFactory: ToolExecutorFactory | undefined;
 
   // Shared sub-harnesses (one per app, used by every session).
   private readonly reconciler: ReconcilerProtocol;
@@ -373,14 +408,25 @@ export class AppHarness<P = unknown>
     // `options.initialKnobs`). Per-call `createSession.*` wins over both
     // and applies at session construction.
     this.sessionDefaults = mergeSessionDefaults(options);
-    this.toolDefaults = options.tools ?? {};
+    // Tool slot: factory → defer construction to per-session via
+    // `toolFactory`; options/undefined → forward to the bundled
+    // `ToolExecutorHarness` via `toolDefaults`.
+    if (isToolExecutorFactory(options.tools)) {
+      this.toolFactory = options.tools;
+      this.toolDefaults = {};
+    } else {
+      this.toolFactory = undefined;
+      this.toolDefaults = options.tools ?? {};
+    }
 
     // Reconciler slot — instance or options.
     this.reconciler = resolveReconciler(options.reconciler, appId, journal, bus, inbox);
 
-    // Loop slot — instance only today (no options on
-    // LoopExecutorHarness yet); falls back to bundled default.
-    this.loop = options.loop ?? new LoopExecutorHarness(appId, journal, bus, inbox);
+    // Loop slot: factory → call with shared substrate; instance → use
+    // as-is; undefined → bundled default with shared substrate.
+    this.loop = isLoopExecutorFactory(options.loop)
+      ? options.loop({ scopeId: appId, journal, bus, inbox })
+      : (options.loop ?? new LoopExecutorHarness(appId, journal, bus, inbox));
 
     this.handlerResolver = new InMemoryHandlerResolver();
     if (options.toolHandlers) {
@@ -735,14 +781,22 @@ export class AppHarness<P = unknown>
       throw { _tag: "SessionAlreadyExistsError", sessionId } as AppError;
     }
 
-    // Per-session tool executor. The `handlerResolver` is owned by the
-    // App (shared); the rest of the options cascade from per-app
-    // `tools` defaults. (Per-call tools overrides arrive in a follow-up
-    // when `CreateSessionInput` grows a `tools` slot.)
-    const tools = new ToolExecutorHarness(sessionId, this.journal, this.bus, this.inbox, {
-      ...this.toolDefaults,
-      handlerResolver: this.handlerResolver,
-    });
+    // Per-session tool executor. Two paths:
+    //   - `toolFactory` set → invoke it with the shared substrate; the
+    //     resulting `ToolExecutorProtocol` is opaque to the App.
+    //   - Otherwise → construct the bundled `ToolExecutorHarness` from
+    //     `toolDefaults` + the shared `handlerResolver`.
+    const tools: ToolExecutorProtocol = this.toolFactory
+      ? this.toolFactory({
+          scopeId: sessionId,
+          journal: this.journal,
+          bus: this.bus,
+          inbox: this.inbox,
+        })
+      : new ToolExecutorHarness(sessionId, this.journal, this.bus, this.inbox, {
+          ...this.toolDefaults,
+          handlerResolver: this.handlerResolver,
+        });
 
     // Cascade: per-call `createSession.*` > per-app `session.*` >
     // shorthand (`defaultMaxTicks`/`initialProps`/`initialKnobs`).
@@ -780,7 +834,10 @@ export class AppHarness<P = unknown>
         : {}),
     });
 
-    await Promise.all([tools.ready, session.ready]);
+    // `ready` / `close` aren't on `ToolExecutorProtocol` — duck-type
+    // through `readyOf` / `closeOf` so both the reference harness AND
+    // factory-produced impls work transparently.
+    await Promise.all([readyOf(tools), session.ready]);
     await session.mountReady;
 
     const entry: InternalSessionEntry<P> = {
@@ -892,7 +949,7 @@ export class AppHarness<P = unknown>
       // best effort — already-closed sessions throw; ignore
     }
     try {
-      await entry.tools.close();
+      await closeOf(entry.tools);
     } catch {
       // best effort
     }
@@ -1039,12 +1096,15 @@ function isReconcilerInstance(v: unknown): v is ReconcilerProtocol {
 }
 
 function resolveReconciler(
-  slot: ReconcilerProtocol | ReconcilerHarnessOptions | undefined,
+  slot: ReconcilerProtocol | ReconcilerHarnessOptions | ReconcilerFactory | undefined,
   scopeId: string,
   journal: OperationJournal,
   bus: EventBus,
   inbox: MessageInbox,
 ): ReconcilerProtocol {
+  if (isReconcilerFactory(slot)) {
+    return slot({ scopeId, journal, bus, inbox });
+  }
   if (slot && isReconcilerInstance(slot)) return slot;
   const opts = (slot as ReconcilerHarnessOptions | undefined) ?? {};
   return new ReconcilerHarness(scopeId, journal, bus, inbox, opts);

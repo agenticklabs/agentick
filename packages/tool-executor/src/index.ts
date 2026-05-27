@@ -17,6 +17,9 @@
 // Harness
 export { ToolExecutorHarness } from "./harness.js";
 
+// Callback-style factory (FAÇADE.6)
+export { defineToolExecutor, type DefineToolExecutorInput } from "./define-tool-executor.js";
+
 // Registry
 export { InMemoryToolRegistry } from "./registry.js";
 

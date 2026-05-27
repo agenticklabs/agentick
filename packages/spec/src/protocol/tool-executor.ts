@@ -427,3 +427,40 @@ export interface ToolExecutorProtocol {
    */
   list(filter?: ToolListFilter): Promise<readonly ToolDeclaration[]>;
 }
+
+// ============================================================================
+// ToolExecutorFactory — deferred construction with shared substrate
+// ============================================================================
+
+/**
+ * Substrate dependencies a `ToolExecutorProtocol` is constructed with.
+ * Mirrors `ExecutorFactoryDeps` — same shape, different slot.
+ */
+export interface ToolExecutorFactoryDeps {
+  readonly scopeId: string;
+  readonly journal: import("./journal.js").OperationJournal;
+  readonly bus: import("./bus.js").EventBus;
+  readonly inbox: import("./inbox.js").MessageInbox;
+}
+
+/**
+ * Deferred-construction form of `ToolExecutorProtocol`. Parent harnesses
+ * (`SessionHarness` / `AppHarness`) call this factory with their own
+ * substrate so the executor's events flow through the shared bus/journal
+ * without manual wiring.
+ *
+ * Marker symbol `toolExecutorFactory` disambiguates a factory from a
+ * pre-constructed instance.
+ */
+export interface ToolExecutorFactory {
+  readonly toolExecutorFactory: true;
+  (deps: ToolExecutorFactoryDeps): ToolExecutorProtocol;
+}
+
+/** Type guard. */
+export function isToolExecutorFactory(v: unknown): v is ToolExecutorFactory {
+  return (
+    typeof v === "function" &&
+    (v as { toolExecutorFactory?: unknown }).toolExecutorFactory === true
+  );
+}

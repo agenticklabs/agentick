@@ -470,3 +470,35 @@ export interface ReconcilerProtocol {
    */
   restore(input: RestoreInput): Promise<void>;
 }
+
+// ============================================================================
+// ReconcilerFactory — deferred construction with shared substrate
+// ============================================================================
+
+export interface ReconcilerFactoryDeps {
+  readonly scopeId: string;
+  readonly journal: import("./journal.js").OperationJournal;
+  readonly bus: import("./bus.js").EventBus;
+  readonly inbox: import("./inbox.js").MessageInbox;
+}
+
+/**
+ * Deferred-construction form of `ReconcilerProtocol`. Used by
+ * `defineReconciler(...)` so the parent harness can call the factory
+ * with the shared substrate.
+ *
+ * Marker symbol `reconcilerFactory` disambiguates a factory from a
+ * pre-constructed instance.
+ */
+export interface ReconcilerFactory {
+  readonly reconcilerFactory: true;
+  (deps: ReconcilerFactoryDeps): ReconcilerProtocol;
+}
+
+/** Type guard. */
+export function isReconcilerFactory(v: unknown): v is ReconcilerFactory {
+  return (
+    typeof v === "function" &&
+    (v as { reconcilerFactory?: unknown }).reconcilerFactory === true
+  );
+}

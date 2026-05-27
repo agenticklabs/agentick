@@ -9,3 +9,4 @@
 
 export { SessionHarness, type SessionHarnessOptions } from "./harness.js";
 export { SessionStateStore } from "./session-state.js";
+export { defineSession, type DefineSessionInput } from "./define-session.js";

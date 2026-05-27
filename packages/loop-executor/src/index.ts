@@ -10,3 +10,4 @@
 
 export { LoopExecutorHarness } from "./harness.js";
 export { NoopStateApplicator } from "./noop-state-applicator.js";
+export { defineLoop, type DefineLoopInput } from "./define-loop.js";

@@ -236,3 +236,35 @@ export interface LoopExecutorProtocol {
    */
   abort(input: { readonly executionId: string; readonly reason?: string }): Promise<void>;
 }
+
+// ============================================================================
+// LoopExecutorFactory — deferred construction with shared substrate
+// ============================================================================
+
+export interface LoopExecutorFactoryDeps {
+  readonly scopeId: string;
+  readonly journal: import("./journal.js").OperationJournal;
+  readonly bus: import("./bus.js").EventBus;
+  readonly inbox: import("./inbox.js").MessageInbox;
+}
+
+/**
+ * Deferred-construction form of `LoopExecutorProtocol`. Parent harnesses
+ * (`AppHarness`) call this factory with their own substrate so the
+ * loop's events flow through the shared bus/journal.
+ *
+ * Marker symbol `loopExecutorFactory` disambiguates a factory from a
+ * pre-constructed instance.
+ */
+export interface LoopExecutorFactory {
+  readonly loopExecutorFactory: true;
+  (deps: LoopExecutorFactoryDeps): LoopExecutorProtocol;
+}
+
+/** Type guard. */
+export function isLoopExecutorFactory(v: unknown): v is LoopExecutorFactory {
+  return (
+    typeof v === "function" &&
+    (v as { loopExecutorFactory?: unknown }).loopExecutorFactory === true
+  );
+}

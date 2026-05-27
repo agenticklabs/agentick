@@ -390,6 +390,40 @@ export interface SessionHarnessProtocol<P = unknown> {
 }
 
 // ============================================================================
+// SessionHarnessFactory — deferred construction with shared substrate
+// ============================================================================
+
+export interface SessionHarnessFactoryDeps {
+  readonly scopeId: string;
+  readonly journal: import("./journal.js").OperationJournal;
+  readonly bus: import("./bus.js").EventBus;
+  readonly inbox: import("./inbox.js").MessageInbox;
+}
+
+/**
+ * Deferred-construction form of `SessionHarnessProtocol`. Used by
+ * `defineSession(...)` so the App can call the factory at session
+ * creation time with the shared substrate.
+ *
+ * Marker symbol `sessionHarnessFactory` disambiguates a factory from a
+ * pre-constructed instance.
+ */
+export interface SessionHarnessFactory<P = unknown> {
+  readonly sessionHarnessFactory: true;
+  (deps: SessionHarnessFactoryDeps): SessionHarnessProtocol<P>;
+}
+
+/** Type guard. */
+export function isSessionHarnessFactory<P = unknown>(
+  v: unknown,
+): v is SessionHarnessFactory<P> {
+  return (
+    typeof v === "function" &&
+    (v as { sessionHarnessFactory?: unknown }).sessionHarnessFactory === true
+  );
+}
+
+// ============================================================================
 // Inputs for the extended surface
 // ============================================================================
 
