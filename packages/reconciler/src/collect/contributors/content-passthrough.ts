@@ -23,7 +23,7 @@
  *     <content blocks={ragResults} />
  *   </section>
  *
- * @see packages/reconciler-react/src/collect/contributors/message.ts
+ * @see packages/reconciler/src/collect/contributors/message.ts
  */
 
 import type { ContentBlock } from "@agentick/spec";

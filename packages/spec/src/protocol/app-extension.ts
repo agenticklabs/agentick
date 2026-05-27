@@ -153,7 +153,7 @@ export interface AppInstaller extends BaseInstaller {
   /**
    * Add a `Contributor` to the reconciler's registry. Reconciler-specific:
    * the type parameter is whatever shape the active reconciler uses for
-   * host instances (`HostInstance` in `@agentick/reconciler-react`).
+   * host instances (`HostInstance` in `@agentick/reconciler`).
    *
    * Non-reconciler extensions skip this method.
    */

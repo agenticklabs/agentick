@@ -57,7 +57,7 @@ export type { Unsubscribe };
 export interface HookBridges {
   /**
    * Blocking async resolution (the `useData` backbone). Reference impl
-   * `InMemoryDataBridge` lives in `@agentick/reconciler-react`. The
+   * `InMemoryDataBridge` lives in `@agentick/reconciler`. The
    * interface stays in spec because it's the no-Suspense contract the
    * reconciler render loop is built against.
    */

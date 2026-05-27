@@ -206,7 +206,7 @@ export class LifecycleStore {
           this.warnedUnhandledKinds.add(kind);
           // eslint-disable-next-line no-console
           console.warn(
-            `[@agentick/reconciler-react] LifecycleEvent kind "${kind}" dispatched ` +
+            `[@agentick/reconciler] LifecycleEvent kind "${kind}" dispatched ` +
               `with no registered handlers. Register one via ` +
               `useOnLifecycleCustom("${kind}", handler).`,
           );

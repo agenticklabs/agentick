@@ -1,10 +1,10 @@
 /**
- * Mock HookBridges for reconciler-react's own tests.
+ * Mock `HookBridges` for tests across the workspace.
  *
- * Per ADR 27, `@agentick/reconciler-react` does NOT depend on any
- * harness package. Its tests use these protocol-conforming mocks
- * (lightweight, deps-free) when they need bridges to drive the
- * reconciler.
+ * Per ADR 27, `@agentick/reconciler` (and `@agentick/reconciler-react`)
+ * does NOT depend on any harness package. Tests that need bridges to
+ * drive the reconciler use these protocol-conforming mocks
+ * (lightweight, deps-free).
  *
  * **What these are NOT:** they do not exercise the real harness
  * behavior (no journal envelopes, no inbox routing, no operation
@@ -353,11 +353,11 @@ export interface StubBridgesOptions {
  */
 export function stubBridges(options: StubBridgesOptions = {}): HookBridges {
   // `timeline`, `knobs`, `state` are typed onto HookBridges only when
-  // their respective packages' `augment.ts` is loaded. Reconciler-react
-  // doesn't dep on those packages, so the slots aren't visible here at
-  // typecheck — we still construct them at runtime (consumers who
-  // imported `@agentick/{timeline,knobs,state}` see them typed).
-  // Cast through `unknown` to acknowledge the type gap is intentional.
+  // their respective packages' `augment.ts` is loaded. This package
+  // doesn't depend on those harness packages, so the slots aren't
+  // visible here at typecheck — we still construct them at runtime
+  // (consumers who imported `@agentick/{timeline,knobs,state}` see
+  // them typed). Cast through `unknown` to acknowledge the type gap.
   return {
     data: new InMemoryDataBridge({ onSettled: options.onDataSettled }),
     loop: stubLoopBridge(),
@@ -371,5 +371,5 @@ export function stubBridges(options: StubBridgesOptions = {}): HookBridges {
 // Note: `stubKnobsHarness`, `stubTimelineHarness`, `stubStateHarness`
 // (the REAL harness factories) live in their respective packages'
 // `/testing` subpaths now (`@agentick/timeline/testing`, etc.).
-// Reconciler-react no longer ships them — tests that need real
+// This package does not ship them — tests that need real
 // harness behavior import directly from those packages.
