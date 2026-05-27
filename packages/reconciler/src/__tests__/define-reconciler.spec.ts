@@ -11,10 +11,9 @@ import {
   type RenderTreeResult,
 } from "@agentick/spec";
 
+import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
+
 import { defineReconciler } from "../define-reconciler.js";
-import { LocalEventBus } from "../substrate/local-event-bus.js";
-import { LocalInbox } from "../substrate/local-inbox.js";
-import { MemoryJournal } from "../substrate/memory-journal.js";
 
 const fakeRenderTreeResult = (mountId: string): RenderTreeResult => ({
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

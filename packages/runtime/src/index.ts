@@ -44,9 +44,3 @@ export {
   type RegisteredRequest,
   type RequestError,
 } from "./substrate/request-response-registry.js";
-
-// Callback-style factory for the reconciler protocol (FAÇADE.6).
-// Reconciler-agnostic — lives here in runtime alongside BaseHarness so
-// callers can wire any reconciler (React, Angular, custom) without
-// depending on @agentick/reconciler-react.
-export { defineReconciler, type DefineReconcilerInput } from "./define-reconciler.js";

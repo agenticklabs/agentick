@@ -36,11 +36,14 @@
  */
 
 import { Effect } from "effect";
-import { BaseHarness, runHarnessProtocol } from "./substrate/base-harness.js";
-import { LocalEventBus } from "./substrate/local-event-bus.js";
-import { LocalInbox } from "./substrate/local-inbox.js";
-import { MemoryJournal } from "./substrate/memory-journal.js";
-import { ulid } from "./substrate/ulid.js";
+import {
+  BaseHarness,
+  LocalEventBus,
+  LocalInbox,
+  MemoryJournal,
+  runHarnessProtocol,
+  ulid,
+} from "@agentick/runtime";
 import type {
   EventBus,
   MessageEnvelope,

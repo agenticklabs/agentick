@@ -65,7 +65,12 @@ const PACKAGE_GROUPS: Array<{ label: string; packages: string[] }> = [
   },
   {
     label: "v2 (work in progress)",
-    packages: ["@agentick/runtime", "@agentick/reconciler-react", "@agentick/tool-executor"],
+    packages: [
+      "@agentick/runtime",
+      "@agentick/reconciler",
+      "@agentick/reconciler-react",
+      "@agentick/tool-executor",
+    ],
   },
 ];
 

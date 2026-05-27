@@ -3,6 +3,7 @@
   "entryPointStrategy": "packages",
   "entryPoints": [
     "../packages/runtime",
+    "../packages/reconciler",
     "../packages/reconciler-react",
     "../packages/tool-executor",
     "../packages/core",
