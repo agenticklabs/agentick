@@ -85,6 +85,7 @@
   },
   "dependencies": {
     "@agentick/core": "workspace:*",
+    "@agentick/reconciler": "workspace:*",
     "@agentick/reconciler-react": "workspace:*",
     "@agentick/runtime": "workspace:*",
     "@agentick/spec": "workspace:*",

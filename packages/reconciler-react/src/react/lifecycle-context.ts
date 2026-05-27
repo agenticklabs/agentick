@@ -10,7 +10,7 @@
  */
 
 import React, { createContext, useContext, type ReactNode } from "react";
-import type { LifecycleStore } from "../harness/lifecycle-store.js";
+import type { LifecycleStore } from "@agentick/reconciler";
 
 export const LifecycleContext = createContext<LifecycleStore | null>(null);
 LifecycleContext.displayName = "AgentickLifecycleContext";

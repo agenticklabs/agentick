@@ -2,13 +2,13 @@ import { describe, expect, it, vi } from "vitest";
 import React, { useState } from "react";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
 import { ReconcilerHarness } from "../harness/reconciler-harness.js";
-import { stubBridges } from "../bridges/stub-bridges.js";
+import { stubBridges } from "@agentick/reconciler";
 import { useOnTickStart } from "../react/hooks/use-on-tick-start.js";
 import { useOnTickEnd } from "../react/hooks/use-on-tick-end.js";
 import { useOnExecutionStart } from "../react/hooks/use-on-execution-start.js";
 import { useOnExecutionEnd } from "../react/hooks/use-on-execution-end.js";
 import { useOnError } from "../react/hooks/use-on-error.js";
-import { LifecycleStore } from "../harness/lifecycle-store.js";
+import { LifecycleStore } from "@agentick/reconciler";
 import { flush } from "../testing/flush.js";
 
 async function makeHarness() {

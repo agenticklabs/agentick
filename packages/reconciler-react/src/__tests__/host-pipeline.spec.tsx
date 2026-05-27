@@ -1,20 +1,20 @@
 import { describe, expect, it } from "vitest";
 import React, { useState } from "react";
-import { createContainer } from "../host/container.js";
+import { createContainer } from "@agentick/reconciler";
 import {
   createElementInstance,
   isElementInstance,
   isTextInstance,
   type ElementInstance,
   type HostInstance,
-} from "../host/host-instance.js";
+} from "@agentick/reconciler";
 import {
   createHostScope,
   resolveFormatter,
   rootScope,
   withFormatter,
   withPath,
-} from "../host/host-context.js";
+} from "@agentick/reconciler";
 import { createReconciler } from "../react/reconciler.js";
 import { flush } from "../testing/flush.js";
 

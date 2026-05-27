@@ -48,18 +48,35 @@ const app = await createApp(myAgent, {
 
 ## What lives here
 
-- `defineReconciler` — callback-style `ReconcilerProtocol` factory.
+- **Layer A — Generic host tree shapes.** `HostInstance`,
+  `ElementInstance`, `TextInstance`, `HostScope`, `ReconcilerContainer`
+  — the contract concrete reconcilers (React, Angular, …) build
+  against.
+- **Layer B — Contributor protocol + collect walker + built-in
+  contributors.** Turns a host tree into the spec's `RenderedTree` IR.
+  Built-ins cover `<Section>`, `<Message>`, `<Tool>`, `<Resource>`,
+  `<Output>`, `<MCP>`, `<Model>`, all content blocks (text, image,
+  audio, video, document, code, json, …), event roles, custom blocks,
+  and semantic HTML.
+- **Bridges.** `InMemoryDataBridge` (reference impl), plus
+  protocol-conforming mocks (`stubBridges`, `mockTimelineHarness`,
+  `mockKnobsHarness`, `mockStateHarness`) used by tests across the
+  workspace.
+- **`LifecycleStore`** — generic per-mount lifecycle handler registry.
+  Used by `useOnTickStart` / `useOnTickEnd` / `useOnError` / etc. in
+  any reconciler.
+- **`defineReconciler`** — callback-style `ReconcilerProtocol` factory.
   Required callbacks: `mount`, `unmount`, `renderTree`. Optional:
-  `rerender`, `notifyLifecycle`, `renderToString`, `snapshot`, `restore`.
+  `rerender`, `notifyLifecycle`, `renderToString`, `snapshot`,
+  `restore`.
 
 ## What does NOT live here
 
-- The React reconciler — `@agentick/reconciler-react` owns that.
-- JSX intrinsic types, JSX runtime — those are tied to specific JSX
-  runtimes and live in the concrete reconciler packages.
-- Contributors, `<Tool>` / `<Section>` / `<Message>` components — those
-  are React-specific in v2 today (they depend on React hooks). They
-  live in `@agentick/reconciler-react`.
+- React-specific code — `react-reconciler`'s `HostConfig` binding, JSX
+  runtime, React hooks, JSX components. Those live in
+  `@agentick/reconciler-react`.
+- `ReconcilerHarness` (the React reference impl) — also in
+  `@agentick/reconciler-react`.
 
 ## See also
 

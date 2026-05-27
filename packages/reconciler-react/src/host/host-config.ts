@@ -17,11 +17,19 @@
  */
 
 import type ReactReconciler from "react-reconciler";
-import type { ReconcilerContainer } from "./container.js";
-import type { HostScope, FormatterBinding } from "./host-context.js";
-import { withFormatter } from "./host-context.js";
-import type { ElementInstance, HostInstance, Props, TextInstance } from "./host-instance.js";
-import { createElementInstance, createTextInstance, isElementInstance } from "./host-instance.js";
+import {
+  createElementInstance,
+  createTextInstance,
+  isElementInstance,
+  withFormatter,
+  type ElementInstance,
+  type FormatterBinding,
+  type HostInstance,
+  type HostScope,
+  type Props,
+  type ReconcilerContainer,
+  type TextInstance,
+} from "@agentick/reconciler";
 
 export interface HostConfigDeps {
   /** Container the config writes into. One per mount. */

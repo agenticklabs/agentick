@@ -1,10 +1,8 @@
 import { describe, expect, it } from "vitest";
 import React from "react";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
-import { ReconcilerHarness } from "@agentick/reconciler-react";
-import { InMemoryDataBridge } from "@agentick/reconciler-react";
-import { stubBridges, mockKnobsHarness } from "@agentick/reconciler-react";
-import { useData } from "@agentick/reconciler-react";
+import { ReconcilerHarness, useData } from "@agentick/reconciler-react";
+import { InMemoryDataBridge, stubBridges, mockKnobsHarness } from "@agentick/reconciler";
 import { useKnob } from "@agentick/knobs/react";
 import { flush } from "@agentick/reconciler-react/testing";
 import type { HookBridges, ReconcilerSnapshot } from "@agentick/spec";

@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest";
 import React, { useEffect } from "react";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
 import { ReconcilerHarness } from "../harness/reconciler-harness.js";
-import { InMemoryDataBridge } from "../bridges/in-memory-data-bridge.js";
-import { stubBridges, mockKnobsHarness } from "../bridges/stub-bridges.js";
+import { InMemoryDataBridge } from "@agentick/reconciler";
+import { stubBridges, mockKnobsHarness } from "@agentick/reconciler";
 import { useData } from "../react/hooks/use-data.js";
 // useKnob moved to @agentick/knobs/react per ADR 27.
 // useKnob's integration coverage lives in
@@ -225,7 +225,7 @@ describe("useBridges without a BridgeProvider", () => {
     // rendered through a separate reconciler with NO provider in the
     // tree. The error from useBridges() propagates as a RenderFailed.
     const { useBridges } = await import("../react/bridge-context.js");
-    const { createContainer } = await import("../host/container.js");
+    const { createContainer } = await import("@agentick/reconciler");
     const { createReconciler } = await import("../react/reconciler.js");
 
     const container = createContainer({ mountId: "bare" });

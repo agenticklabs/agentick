@@ -14,7 +14,7 @@ import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
 import type { HookBridges, ToolBridge, ToolHandler, Unsubscribe, Validator } from "@agentick/spec";
 
 import { createTool } from "../react/create-tool.js";
-import { stubBridges } from "../bridges/stub-bridges.js";
+import { stubBridges } from "@agentick/reconciler";
 import { ReconcilerHarness } from "../harness/reconciler-harness.js";
 
 interface RegisteredHandler {

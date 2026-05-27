@@ -48,18 +48,21 @@ import type {
 import { SPEC_VERSION } from "@agentick/spec";
 import { BaseHarness } from "@agentick/runtime";
 
-import type { ReconcilerContainer } from "../host/container.js";
-import { createContainer } from "../host/container.js";
-import { createHostScope, type HostScope } from "../host/host-context.js";
+import {
+  collect,
+  ContributorRegistry,
+  createBuiltInRegistry,
+  createContainer,
+  createHostScope,
+  InMemoryDataBridge,
+  LifecycleStore,
+  type Contributor,
+  type HostScope,
+  type ReconcilerContainer,
+} from "@agentick/reconciler";
 import { createReconciler, type FiberRoot, type Reconciler } from "../react/reconciler.js";
-import { collect } from "../collect/collect.js";
-import { ContributorRegistry } from "../collect/registry.js";
-import { createBuiltInRegistry } from "../collect/contributors/built-ins.js";
-import type { Contributor } from "../collect/contributor.js";
 import { BridgeContext } from "../react/bridge-context.js";
 import { LifecycleContext } from "../react/lifecycle-context.js";
-import { InMemoryDataBridge } from "../bridges/in-memory-data-bridge.js";
-import { LifecycleStore } from "./lifecycle-store.js";
 import { builtInFormatters, markdownFormatter, type DefinedFormatter } from "@agentick/formatters";
 
 interface MountState {

@@ -216,6 +216,9 @@ importers:
       '@agentick/loop-executor':
         specifier: workspace:*
         version: link:../../packages/loop-executor
+      '@agentick/reconciler':
+        specifier: workspace:*
+        version: link:../../packages/reconciler
       '@agentick/reconciler-react':
         specifier: workspace:*
         version: link:../../packages/reconciler-react
@@ -761,6 +764,9 @@ importers:
       '@agentick/knobs':
         specifier: workspace:*
         version: link:../knobs
+      '@agentick/reconciler':
+        specifier: workspace:*
+        version: link:../reconciler
       '@agentick/reconciler-react':
         specifier: workspace:*
         version: link:../reconciler-react
@@ -848,6 +854,9 @@ importers:
 
   packages/knobs:
     dependencies:
+      '@agentick/reconciler':
+        specifier: workspace:*
+        version: link:../reconciler
       '@agentick/reconciler-react':
         specifier: workspace:*
         version: link:../reconciler-react
@@ -1000,6 +1009,9 @@ importers:
       '@agentick/formatters':
         specifier: workspace:*
         version: link:../formatters
+      '@agentick/reconciler':
+        specifier: workspace:*
+        version: link:../reconciler
       '@agentick/runtime':
         specifier: workspace:*
         version: link:../runtime
@@ -1047,6 +1059,9 @@ importers:
       '@agentick/core':
         specifier: workspace:*
         version: link:../core
+      '@agentick/reconciler':
+        specifier: workspace:*
+        version: link:../reconciler
       '@agentick/reconciler-react':
         specifier: workspace:*
         version: link:../reconciler-react
@@ -1198,9 +1213,9 @@ importers:
       '@agentick/loop-executor':
         specifier: workspace:*
         version: link:../loop-executor
-      '@agentick/reconciler-react':
+      '@agentick/reconciler':
         specifier: workspace:*
-        version: link:../reconciler-react
+        version: link:../reconciler
       '@agentick/runtime':
         specifier: workspace:*
         version: link:../runtime
@@ -1223,6 +1238,9 @@ importers:
       '@agentick/executor':
         specifier: workspace:*
         version: link:../executor
+      '@agentick/reconciler-react':
+        specifier: workspace:*
+        version: link:../reconciler-react
       '@agentick/spec-conformance':
         specifier: workspace:*
         version: link:../spec-conformance
@@ -1259,6 +1277,9 @@ importers:
 
   packages/state:
     dependencies:
+      '@agentick/reconciler':
+        specifier: workspace:*
+        version: link:../reconciler
       '@agentick/reconciler-react':
         specifier: workspace:*
         version: link:../reconciler-react
@@ -1284,6 +1305,9 @@ importers:
 
   packages/subscriptions:
     dependencies:
+      '@agentick/reconciler':
+        specifier: workspace:*
+        version: link:../reconciler
       '@agentick/reconciler-react':
         specifier: workspace:*
         version: link:../reconciler-react
@@ -1303,6 +1327,9 @@ importers:
 
   packages/timeline:
     dependencies:
+      '@agentick/reconciler':
+        specifier: workspace:*
+        version: link:../reconciler
       '@agentick/reconciler-react':
         specifier: workspace:*
         version: link:../reconciler-react

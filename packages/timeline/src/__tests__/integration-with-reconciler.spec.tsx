@@ -10,7 +10,7 @@ import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
 import type { HookBridges, MessageEntry, TimelineEntry } from "@agentick/spec";
 
 import { ReconcilerHarness } from "@agentick/reconciler-react";
-import { stubBridges, mockTimelineHarness } from "@agentick/reconciler-react";
+import { stubBridges, mockTimelineHarness } from "@agentick/reconciler";
 import { Timeline } from "@agentick/timeline/react";
 import { compactEntries, getEntryTokens, type TokenBudgetInfo } from "@agentick/timeline/react";
 

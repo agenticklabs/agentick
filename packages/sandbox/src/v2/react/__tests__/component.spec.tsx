@@ -12,7 +12,8 @@ import React from "react";
 import { describe, expect, it, vi } from "vitest";
 
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
-import { ReconcilerHarness, stubBridges } from "@agentick/reconciler-react";
+import { ReconcilerHarness } from "@agentick/reconciler-react";
+import { stubBridges } from "@agentick/reconciler";
 import type { HookBridges, SandboxHandle, SandboxProvider } from "@agentick/spec";
 
 import { inMemorySandboxBridge, type SandboxBridge } from "../../bridge.js";

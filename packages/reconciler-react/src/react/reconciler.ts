@@ -17,7 +17,7 @@
 
 import ReactReconciler from "react-reconciler";
 import type { ReactNode } from "react";
-import type { ReconcilerContainer } from "../host/container.js";
+import type { ReconcilerContainer } from "@agentick/reconciler";
 import type { HostConfigDeps } from "../host/host-config.js";
 import { createHostConfig } from "../host/host-config.js";
 

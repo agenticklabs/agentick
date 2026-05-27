@@ -16,7 +16,7 @@ import { describe, expect, it } from "vitest";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
 
 import { ReconcilerHarness } from "../harness/reconciler-harness.js";
-import { stubBridges } from "../bridges/stub-bridges.js";
+import { stubBridges } from "@agentick/reconciler";
 
 async function makeHarness() {
   const h = new ReconcilerHarness(

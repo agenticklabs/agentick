@@ -17,7 +17,7 @@
  * cluster nodes) can address them at `inbox://{surface}:{sessionId}:{surface}`.
  */
 
-import { InMemoryDataBridge } from "@agentick/reconciler-react";
+import { InMemoryDataBridge } from "@agentick/reconciler";
 import { KnobsHarness } from "@agentick/knobs";
 import { StateHarness } from "@agentick/state";
 import { TimelineHarness } from "@agentick/timeline";

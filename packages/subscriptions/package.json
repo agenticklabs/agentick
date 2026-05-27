@@ -53,6 +53,7 @@
     "typecheck": "tsc -p tsconfig.build.json --noEmit"
   },
   "dependencies": {
+    "@agentick/reconciler": "workspace:*",
     "@agentick/reconciler-react": "workspace:*",
     "@agentick/runtime": "workspace:*",
     "@agentick/spec": "workspace:*",

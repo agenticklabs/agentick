@@ -454,3 +454,77 @@ is independent and unblocks immediately. Model-catalog/adapter is
 its own pass; capture as a design note here, revisit after FAÇADE.6.
 
 Tracked. Pick up after FAÇADE.6 lands.
+
+### 2026-05-27 — Reconciler/reconciler-react split completed
+
+After the initial extraction of `@agentick/reconciler` (which only
+moved `defineReconciler`), audit revealed ~3000 LOC of
+reconciler-agnostic code still trapped in `@agentick/reconciler-react`.
+Smoking gun: `@agentick/session/src/session-bridges.ts` was importing
+`InMemoryDataBridge` from `@agentick/reconciler-react` — a
+reconciler-agnostic Session reaching into a React-named package for a
+generic ref impl.
+
+**This pass: moved the reconciler-agnostic code into its proper home.**
+
+Moved from `@agentick/reconciler-react` → `@agentick/reconciler`:
+- `collect/` (~1800 LOC: walker + 18 contributors)
+- `host/host-instance.ts` (163 LOC)
+- `host/host-context.ts` (123 LOC)
+- `host/container.ts` (48 LOC)
+- `bridges/in-memory-data-bridge.ts` (226 LOC)
+- `bridges/stub-bridges.ts` (375 LOC)
+- `harness/lifecycle-store.ts` → `lifecycle-store.ts` (240 LOC)
+
+Stayed in `@agentick/reconciler-react` (truly React-coupled):
+- `host/host-config.ts` (the react-reconciler HostConfig)
+- `harness/reconciler-harness.ts` (the React reference impl)
+- `react/` directory (hooks, components, JSX bindings)
+
+Updated consumers in `@agentick/session`, `@agentick/gates`,
+`@agentick/state`, `@agentick/subscriptions`, `@agentick/knobs`,
+`@agentick/timeline`, `@agentick/sandbox`, `example/v2`. All now
+import generic bridges/host/contributors from `@agentick/reconciler`,
+React-specific things from `@agentick/reconciler-react`.
+
+`@agentick/session/package.json` reconciler-react dep moved from
+production `dependencies` to `devDependencies` (used only by tests).
+The production code is now reconciler-agnostic at the package level —
+matches its actual intent.
+
+Cruft removed:
+- `packages/reconciler-react/src/snapshot/` empty directory deleted
+  (cruft since May 15)
+- `packages/reconciler-react/src/index.ts` JSDoc updated; outdated
+  "Phase 3 progresses" marker removed; index ~80 LOC smaller after
+  moved exports dropped
+- Empty `host/`, `harness/`, `bridges/`, `collect/` directories in
+  reconciler-react cleaned up (those that became empty after moves)
+
+Per CLAUDE.md "no backwards compat" — moved symbols are NOT
+re-exported from `@agentick/reconciler-react`. Consumers retargeted
+to the canonical package.
+
+**Verification:** workspace typecheck clean across 87 packages.
+5314/5314 effective tests pass; 2 pre-existing executor-ai-sdk msw
+failures unchanged.
+
+**Reflected dependency graph (production-code only, excluding tests):**
+
+```
+@agentick/spec
+  ↑
+@agentick/runtime          (substrate primitives)
+  ↑
+@agentick/reconciler       (IR collection + bridges + lifecycle)
+  ↑
+@agentick/reconciler-react (React-specific binding)
+  ↑
+@agentick/session, gates, knobs, state, timeline, sandbox, subscriptions
+  ↑
+@agentick/app
+```
+
+Sessions no longer reach through React to get bridges. Future Angular
+or Vue reconcilers depend on `@agentick/reconciler`, not the
+React-named package. The dependency graph reflects the architecture.

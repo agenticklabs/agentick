@@ -12,7 +12,8 @@ import { MockLanguageModelExecutor } from "@agentick/executor";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
 import { InMemoryHandlerResolver, ToolExecutorHarness } from "@agentick/tool-executor";
 import { LoopExecutorHarness } from "@agentick/loop-executor";
-import { ReconcilerHarness, stubBridges } from "@agentick/reconciler-react";
+import { ReconcilerHarness } from "@agentick/reconciler-react";
+import { stubBridges } from "@agentick/reconciler";
 import type {
   ContentBlock,
   ExecutionTarget,

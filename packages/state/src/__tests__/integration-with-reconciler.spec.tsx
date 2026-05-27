@@ -12,7 +12,7 @@ import { describe, expect, it } from "vitest";
 
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
 
-import { stubBridges } from "@agentick/reconciler-react";
+import { stubBridges } from "@agentick/reconciler";
 import { ReconcilerHarness } from "@agentick/reconciler-react";
 import { useSessionState } from "@agentick/state/react";
 

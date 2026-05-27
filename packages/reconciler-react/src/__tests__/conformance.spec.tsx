@@ -24,8 +24,8 @@ import {
   type ReconcilerConformanceFactory,
 } from "@agentick/spec-conformance";
 import type { HookBridges, ReconcilerProtocol } from "@agentick/spec";
-import { InMemoryDataBridge } from "../bridges/in-memory-data-bridge.js";
-import { stubBridges, stubLoopBridge } from "../bridges/stub-bridges.js";
+import { InMemoryDataBridge } from "@agentick/reconciler";
+import { stubBridges, stubLoopBridge } from "@agentick/reconciler";
 import { ReconcilerHarness } from "../harness/reconciler-harness.js";
 
 // ============================================================================

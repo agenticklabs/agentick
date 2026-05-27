@@ -3,7 +3,7 @@ import React from "react";
 import { Chunk, Effect, Stream } from "effect";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
 import { ReconcilerHarness } from "../harness/reconciler-harness.js";
-import { stubBridges } from "../bridges/stub-bridges.js";
+import { stubBridges } from "@agentick/reconciler";
 import { Markdown, XML } from "../react/components/format-scope.js";
 
 async function makeHarness(scope = `rts-${Math.random()}`) {

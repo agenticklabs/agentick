@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
 import React from "react";
-import { createContainer } from "../host/container.js";
-import { createHostScope } from "../host/host-context.js";
+import { createContainer } from "@agentick/reconciler";
+import { createHostScope } from "@agentick/reconciler";
 import { createReconciler } from "../react/reconciler.js";
-import { collect } from "../collect/collect.js";
-import { createBuiltInRegistry } from "../collect/contributors/built-ins.js";
+import { collect } from "@agentick/reconciler";
+import { createBuiltInRegistry } from "@agentick/reconciler";
 import { FormatScope, Markdown, XML, PlainText } from "../react/components/format-scope.js";
 
 /**

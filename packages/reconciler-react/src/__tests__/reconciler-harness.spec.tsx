@@ -4,7 +4,7 @@ import { Chunk, Effect, Stream } from "effect";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
 import type { ProtocolEvent } from "@agentick/spec";
 import { ReconcilerHarness } from "../harness/reconciler-harness.js";
-import { stubBridges } from "../bridges/stub-bridges.js";
+import { stubBridges } from "@agentick/reconciler";
 
 async function collectJournal(journal: MemoryJournal): Promise<ProtocolEvent[]> {
   const chunk = await Effect.runPromise(Stream.runCollect(journal.read({}, "beginning")));

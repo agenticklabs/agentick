@@ -12,7 +12,8 @@ import { describe, expect, it, vi } from "vitest";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
 import type { HookBridges, LifecycleTickEnd, TickResult, SectionEntry } from "@agentick/spec";
 
-import { ReconcilerHarness, stubBridges } from "@agentick/reconciler-react";
+import { ReconcilerHarness } from "@agentick/reconciler-react";
+import { stubBridges } from "@agentick/reconciler";
 import { stubKnobsHarness } from "@agentick/knobs/testing";
 import { flush } from "@agentick/reconciler-react/testing";
 import { gate, useGate, type GateState } from "../use-gate.js";

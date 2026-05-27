@@ -16,7 +16,7 @@ import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
 import type { HookBridges, LifecycleExecutionEnd, SectionEntry } from "@agentick/spec";
 
 import { ReconcilerHarness } from "@agentick/reconciler-react";
-import { stubBridges, mockKnobsHarness } from "@agentick/reconciler-react";
+import { stubBridges, mockKnobsHarness } from "@agentick/reconciler";
 import { useKnob } from "@agentick/knobs/react";
 import { Knobs } from "@agentick/knobs/react";
 import { flush } from "@agentick/reconciler-react/testing";

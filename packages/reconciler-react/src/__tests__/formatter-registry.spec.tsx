@@ -14,7 +14,7 @@ import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
 import { defineFormatter, type DefinedFormatter } from "@agentick/formatters";
 
 import { ReconcilerHarness } from "../harness/reconciler-harness.js";
-import { stubBridges } from "../bridges/stub-bridges.js";
+import { stubBridges } from "@agentick/reconciler";
 
 async function makeHarness(options: ConstructorParameters<typeof ReconcilerHarness>[4] = {}) {
   const h = new ReconcilerHarness(
