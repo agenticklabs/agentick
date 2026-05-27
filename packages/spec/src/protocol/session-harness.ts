@@ -300,11 +300,6 @@ export interface SessionHarnessProtocol<P = unknown> {
   send(input: SendInput<P>): Promise<SessionExecutionHandle>;
 
   /**
-   * Synchronous read of the current timeline.
-   */
-  timeline(): readonly TimelineEntry[];
-
-  /**
    * Capture the current state as a serializable snapshot.
    */
   snapshot(): SessionSnapshot;
@@ -378,40 +373,6 @@ export interface SessionHarnessProtocol<P = unknown> {
   dispatch(name: string, input: Record<string, unknown>): Promise<readonly ContentBlock[]>;
 
   /**
-   * Queue a message for the next execution. If no execution is
-   * running, the message is prepended to the inputs of the caller's
-   * subsequent `send(...)`. If an execution IS running, the message
-   * is held until the current execution terminates, then folded into
-   * the next `send(...)` automatically.
-   *
-   * `[V1-INHERITED]` — mirrors `session.queue(message)`.
-   */
-  queue(message: SendMessageInput): Promise<void>;
-
-  /**
-   * Write a timeline entry directly. Useful for user-side events,
-   * out-of-band facts, or pre-populating context before a send. When
-   * `opts.trigger` is true the session immediately runs a fresh
-   * execution after the append (analogous to `send` with no new
-   * messages) and returns the handle.
-   *
-   * Returns the appended entry id when not triggering; returns the
-   * execution handle when triggering.
-   */
-  append(
-    input: AppendEntryInput,
-    opts?: { readonly trigger?: boolean },
-  ): Promise<{ readonly entryId: string } | SessionExecutionHandle>;
-
-  /**
-   * Append an event-role observation to the timeline. Convenience
-   * wrapper over `append` that sets `role: "event"` and stamps
-   * `metadata.type` from the input. Observations are visible to the
-   * model by default but never invoke handler logic.
-   */
-  observe(input: ObserveInput): Promise<{ readonly entryId: string }>;
-
-  /**
    * Return a programmatic handle for a named channel. Each call
    * returns a new handle bound to the same name — handles are cheap
    * wrappers, not registered. Channel events flow on
@@ -456,15 +417,6 @@ export interface SpawnInput<P = unknown> {
   readonly initialKnobs?: Readonly<Record<string, unknown>>;
   /** Override the parent's max tick bound for this child. */
   readonly maxTicks?: number;
-}
-
-export interface ObserveInput {
-  /** Observation type label — stored in `metadata.type`. */
-  readonly type: string;
-  /** Either content blocks or a plain text payload (wrapped). */
-  readonly content: string | readonly ContentBlock[];
-  /** Additional metadata merged onto the message envelope. */
-  readonly metadata?: Readonly<Record<string, unknown>>;
 }
 
 // ============================================================================

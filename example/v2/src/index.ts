@@ -455,8 +455,8 @@ async function scenarioSessionSend(s: Substrate): Promise<void> {
   );
   console.log(line(`tool dispatches: ${result.toolResults.length}`));
 
-  console.log(sub("session.timeline()"));
-  for (const entry of s.session.timeline()) {
+  console.log(sub("session.timeline"));
+  for (const entry of s.session.timeline.read().entries) {
     if (entry.kind !== "message") continue;
     const m = entry.message;
     const text = m.content

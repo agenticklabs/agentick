@@ -135,113 +135,63 @@ describe("SessionHarness — dispatch (host-side tool invocation)", () => {
   });
 });
 
-describe("SessionHarness — queue", () => {
-  it("writes the message to the timeline immediately as a user-role entry", async () => {
+describe("SessionHarness — timeline handle (top-level)", () => {
+  it("queue + drain on send: queued user messages land in the timeline at execution start", async () => {
     const { session } = await mkSession();
-    await session.queue({ role: "user", content: "hello" });
-    // Give the auto-triggered send a tick to settle so the timeline
-    // also picks up the assistant reply, then snapshot.
-    await new Promise((r) => setImmediate(r));
+    await session.timeline.queue({
+      role: "user",
+      content: [{ type: "text", text: "hello" }],
+    });
+    expect(session.timeline.readPending().length).toBe(1);
+    await (await session.send({ messages: [] })).result;
+    expect(session.timeline.readPending().length).toBe(0);
 
-    const userTexts = session
-      .timeline()
-      .filter((e) => e.kind === "message" && e.message.role === "user")
-      .flatMap((e) => e.message.content)
+    const userTexts = session.timeline
+      .read()
+      .entries.filter((e) => e.kind === "message" && e.message.role === "user")
+      .flatMap((e) => (e.kind === "message" ? e.message.content : []))
       .filter((b): b is { type: "text"; text: string } => b.type === "text")
       .map((b) => b.text);
     expect(userTexts).toContain("hello");
     await session.close();
   });
 
-  it("auto-triggers a send when idle so the model sees the queued message", async () => {
-    // Track executions seen on the bus.
-    const { session, bus } = await mkSession();
-    const seen: string[] = [];
-    const unsub = bus.subscribeCallback?.({ surface: "loop", phase: "requested" }, (ev) =>
-      seen.push(ev.name),
-    );
-    void unsub;
-
-    await session.queue({ role: "user", content: "auto-fire" });
-    // Wait for the auto-fired execution to complete.
-    await new Promise((r) => setTimeout(r, 50));
-
-    const tl = session.timeline();
-    const hasAssistant = tl.some((e) => e.kind === "message" && e.message.role === "assistant");
-    expect(hasAssistant).toBe(true);
-    await session.close();
-  });
-
-  it("coerces role to 'user' regardless of input.role", async () => {
-    const { session } = await mkSession();
-    // Even if caller passes role:"system", queue() rewrites to user.
-    await session.queue({
-      role: "system" as never,
-      content: "should-be-user",
-    });
-    await new Promise((r) => setImmediate(r));
-    const tl = session.timeline();
-    const found = tl.find(
-      (e) =>
-        e.kind === "message" &&
-        e.message.content.some((b) => b.type === "text" && b.text === "should-be-user"),
-    );
-    expect(found).toBeDefined();
-    if (found && found.kind === "message") {
-      expect(found.message.role).toBe("user");
-    }
-    await session.close();
-  });
-});
-
-describe("SessionHarness — append", () => {
-  it("writes a timeline entry and returns its id when not triggering", async () => {
+  it("append writes an entry directly to log + projection", async () => {
     const { session } = await mkSession();
     const content: ContentBlock[] = [{ type: "text", text: "manual entry" }];
-    const result = await session.append({
-      sessionId: "ignored",
-      entry: { role: "user", content },
+    await session.timeline.append({
+      kind: "message",
+      message: { id: "m-manual", role: "user", content, ts: Date.now() },
     });
-    expect("entryId" in result).toBe(true);
-    if ("entryId" in result) {
-      expect(typeof result.entryId).toBe("string");
-    }
+    const found = session.timeline
+      .read()
+      .entries.find(
+        (e) =>
+          e.kind === "message" &&
+          e.message.content.some((b) => b.type === "text" && b.text === "manual entry"),
+      );
+    expect(found).toBeDefined();
     await session.close();
   });
 
-  it("trigger=true returns an execution handle", async () => {
+  it("subscribe fires on queue, append, and drain", async () => {
     const { session } = await mkSession();
-    const result = await session.append(
-      {
-        sessionId: "ignored",
-        entry: { role: "user", content: [{ type: "text", text: "go" }] },
-      },
-      { trigger: true },
-    );
-    expect("executionId" in result).toBe(true);
-    if ("executionId" in result) {
-      await result.result;
-    }
-    await session.close();
-  });
-});
-
-describe("SessionHarness — observe", () => {
-  it("appends an event-role entry with metadata.type", async () => {
-    const { session } = await mkSession();
-    const { entryId } = await session.observe({
-      type: "user-interaction",
-      content: "clicked button X",
-      metadata: { foo: "bar" },
+    let notifications = 0;
+    const unsub = session.timeline.subscribe(() => {
+      notifications += 1;
     });
-    expect(typeof entryId).toBe("string");
-    const tl = session.timeline();
-    const event = tl.find((e) => e.kind === "message" && e.message.role === "event");
-    expect(event).toBeDefined();
-    if (event && event.kind === "message") {
-      expect(event.message.metadata?.type).toBe("user-interaction");
-      expect(event.message.metadata?.foo).toBe("bar");
-    }
+    await session.timeline.queue({
+      role: "user",
+      content: [{ type: "text", text: "q1" }],
+    });
+    expect(notifications).toBeGreaterThanOrEqual(1);
+    const before = notifications;
+    await session.timeline.append({
+      kind: "message",
+      message: { id: "m-app", role: "user", content: [{ type: "text", text: "a1" }], ts: 0 },
+    });
+    expect(notifications).toBeGreaterThan(before);
+    unsub();
     await session.close();
   });
 });

@@ -56,7 +56,7 @@ describe("TimelineHarness — Operation envelopes", () => {
   it("append() emits requested + terminal envelopes on the timeline surface", async () => {
     const { harness, bus } = await makeHarness();
     const { events, stop } = await subscribeEnvelopes(bus, { surface: "timeline" });
-    await harness.append({ entry: messageEntry("e1", "hello") });
+    await harness.append(messageEntry("e1", "hello") );
     await settle();
     await stop();
     const phases = events.map((e) => e.phase);
@@ -68,7 +68,7 @@ describe("TimelineHarness — Operation envelopes", () => {
 
   it("compact() emits envelopes under command:compact", async () => {
     const { harness, bus } = await makeHarness();
-    await harness.append({ entry: messageEntry("e1", "a") });
+    await harness.append(messageEntry("e1", "a") );
     const { events, stop } = await subscribeEnvelopes(bus, {
       surface: "timeline",
       name: { exact: "timeline:command:compact" },
@@ -90,7 +90,7 @@ describe("TimelineHarness — inbox addressability", () => {
       inbox.send(`timeline:s_inbox`, {
         messageId: ulid(),
         type: "timeline:append",
-        payload: { entry },
+        payload: { entries: [entry] },
       }),
     );
     await settle();
@@ -100,7 +100,7 @@ describe("TimelineHarness — inbox addressability", () => {
 
   it("inbox replaceProjection message reaches the harness", async () => {
     const { harness, inbox } = await makeHarness("s_replace");
-    await harness.append({ entry: messageEntry("e1", "original") });
+    await harness.append(messageEntry("e1", "original"));
     const replacement = [messageEntry("r1", "replaced")];
     await Effect.runPromise(
       inbox.send(`timeline:s_replace`, {
@@ -119,7 +119,7 @@ describe("TimelineHarness — inbox addressability", () => {
   it("inbox resetProjection message rebuilds projection from log", async () => {
     const { harness, inbox } = await makeHarness("s_reset");
     const e1 = messageEntry("e1", "a");
-    await harness.append({ entry: e1 });
+    await harness.append(e1);
     await harness.compact(withHandler({ handler: async () => [] }));
     expect(harness.read().entries).toEqual([]);
     await Effect.runPromise(
@@ -165,14 +165,12 @@ describe("TimelineHarness — pending Operation envelopes", () => {
     expect(drainReq).toBeDefined();
     const drainOpId = drainReq!.opId;
 
-    // Two append envelopes follow, each with parentOpId = drain's opId.
+    // One batched append envelope follows, with parentOpId = drain's opId.
     const appendReqs = events.filter(
       (e) => e.name === "timeline:command:append" && e.phase === "requested",
     );
-    expect(appendReqs.length).toBe(2);
-    for (const a of appendReqs) {
-      expect(a.parentOpId).toBe(drainOpId);
-    }
+    expect(appendReqs.length).toBe(1);
+    expect(appendReqs[0]!.parentOpId).toBe(drainOpId);
     await harness.close();
   });
 });
@@ -184,7 +182,7 @@ describe("TimelineHarness — pending inbox routing", () => {
       inbox.send(`timeline:s_q`, {
         messageId: ulid(),
         type: "timeline:queue",
-        payload: { role: "user", content: [{ type: "text", text: "from inbox" }] },
+        payload: [{ role: "user", content: [{ type: "text", text: "from inbox" }] }],
       }),
     );
     await settle();
@@ -215,8 +213,8 @@ describe("TimelineHarness — pending inbox routing", () => {
 describe("TimelineHarness — snapshot round-trip across instances", () => {
   it("exportSnapshot / importSnapshot preserves log + projection across instances", async () => {
     const { harness } = await makeHarness();
-    await harness.append({ entry: messageEntry("e1", "a") });
-    await harness.append({ entry: messageEntry("e2", "b") });
+    await harness.append(messageEntry("e1", "a") );
+    await harness.append(messageEntry("e2", "b") );
     await harness.compact(
       withHandler({
         handler: async ({ entries }) => [messageEntry("summary", `count=${entries.length}`)],

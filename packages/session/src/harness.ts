@@ -29,7 +29,6 @@ import type {
   MessageHandlerError,
   MessageInbox,
   NotifyTickEndInput,
-  ObserveInput,
   Operation,
   OperationJournal,
   ProtocolEvent,
@@ -48,6 +47,9 @@ import type {
   ToolExecutorProtocol,
 } from "@agentick/spec";
 import { SPEC_VERSION } from "@agentick/spec";
+import type { KnobsHandle } from "@agentick/knobs";
+import type { StateHandle } from "@agentick/state";
+import type { TimelineHandle } from "@agentick/timeline";
 
 import { buildSessionBridges, type SessionHookBridges } from "./session-bridges.js";
 import { SessionStateStore } from "./session-state.js";
@@ -214,11 +216,38 @@ export class SessionHarness<P = unknown>
     );
   }
 
-  timeline(): readonly TimelineEntry[] {
-    // The session's user-facing `timeline()` returns the projection —
-    // what's currently model-visible. Tests + adopters that need the
-    // immutable durable log call `bridges.timeline.readPersisted()`.
-    return this.bridges.timeline.read().entries;
+  // ──────── Top-level harness handles (ADR 27 augmentations) ────────
+
+  /**
+   * The session's timeline handle — append/queue/drain/compact/subscribe
+   * + sync reads of projection, persisted log, and pending. Curated
+   * subset of `TimelineHarnessProtocol`. The `bridges.timeline` runtime
+   * harness satisfies the `TimelineHandle` interface structurally;
+   * no wrapper.
+   *
+   * Adopters who previously called `session.timeline()`, `session.append()`,
+   * `session.queue()`, or `session.observe()` now reach for
+   * `session.timeline.{read, append, queue, observe?, ...}`.
+   */
+  get timeline(): TimelineHandle {
+    return this.bridges.timeline;
+  }
+
+  /**
+   * The session's knobs handle — list/get/set/dispatch/subscribe over
+   * the model-visible reactive state. Per-knob access (by reference)
+   * remains `session.knob(name)`.
+   */
+  get knobs(): KnobsHandle {
+    return this.bridges.knobs;
+  }
+
+  /**
+   * The session's adopter-stash state handle — K/V get/set/has/delete/
+   * list + per-key and global subscription. Not model-visible.
+   */
+  get state(): StateHandle {
+    return this.bridges.state;
   }
 
   snapshot(): SessionSnapshot {
@@ -356,72 +385,6 @@ export class SessionHarness<P = unknown>
       context: { via: "dispatch", sessionId: this.store.id },
     });
     return result.content;
-  }
-
-  /**
-   * `queue` pushes a user-role message onto the TimelineHarness pending
-   * queue and — if no execution is in flight — fires a fresh `send`
-   * immediately. The next `sendBody` drains pending into the durable
-   * timeline before the execution's first tick.
-   *
-   * Mid-execution, the message stays in pending and is visible to the
-   * model via the Timeline component (which reads both projection
-   * AND pending). It lands in the durable timeline at the start of the
-   * NEXT sendBody. Per-tick drain (so mid-execution queue lands in the
-   * current execution's timeline before the next tick) is a follow-up.
-   *
-   * v1 parity: queued items flow through the JSX `<Timeline>`
-   * component, which surfaces pending entries alongside history so
-   * the model sees them on the next render.
-   */
-  async queue(message: SendMessageInput): Promise<void> {
-    if (this._closed) {
-      throw { _tag: "SessionClosedError", attemptedCommand: "queue" } satisfies SessionError;
-    }
-    // queue() coerces to user role regardless of message.role — that's
-    // the verb's contract. Use append() / observe() for non-user entries.
-    await this.queueInputMessage({ ...message, role: "user" });
-    // Auto-trigger when the session is idle. Mid-execution, the
-    // running send picks up the message at its next render naturally.
-    if (this._currentExecution === null) {
-      // Fire-and-forget — the caller doesn't await the resulting
-      // execution. Use `send({ messages: [m] })` if you need the
-      // handle.
-      void this.send({ messages: [] }).catch(() => {
-        // Surfaced via session events; nothing to do here.
-      });
-    }
-  }
-
-  async append(
-    input: AppendEntryInput,
-    opts: { readonly trigger?: boolean } = {},
-  ): Promise<{ readonly entryId: string } | SessionExecutionHandle> {
-    if (this._closed) {
-      throw { _tag: "SessionClosedError", attemptedCommand: "append" } satisfies SessionError;
-    }
-    const applied = await this.appendEntryBody(input);
-    const entryId = applied.appendedEntryIds[0]!;
-    if (opts.trigger) {
-      // Trigger an execution with no new messages — the appended
-      // entry is already in the timeline. The send path picks it up.
-      return this.send({ messages: [] });
-    }
-    return { entryId };
-  }
-
-  async observe(input: ObserveInput): Promise<{ readonly entryId: string }> {
-    if (this._closed) {
-      throw { _tag: "SessionClosedError", attemptedCommand: "observe" } satisfies SessionError;
-    }
-    const content: readonly ContentBlock[] =
-      typeof input.content === "string" ? [{ type: "text", text: input.content }] : input.content;
-    const id = await this.appendMessageEntry({
-      role: "event",
-      content,
-      metadata: { type: input.type, ...(input.metadata ?? {}) },
-    });
-    return { entryId: id };
   }
 
   channel<T = unknown>(name: string): ChannelHandle<T> {
@@ -729,6 +692,7 @@ export class SessionHarness<P = unknown>
       content,
       ...(m.metadata !== undefined ? { metadata: m.metadata } : {}),
     });
+    // Single-input call → result.ids has length 1; caller doesn't need it.
   }
 
   /**
@@ -761,7 +725,7 @@ export class SessionHarness<P = unknown>
       ...(input.visibility !== undefined ? { visibility: input.visibility } : {}),
       ...(input.tags !== undefined ? { tags: input.tags } : {}),
     };
-    await this.bridges.timeline.append({ entry });
+    await this.bridges.timeline.append(entry);
     return messageId;
   }
 }

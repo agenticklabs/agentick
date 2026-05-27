@@ -323,7 +323,7 @@ export function runSessionConformance(factory: SessionConformanceFactory): void 
           { role: "user", content: "second" },
         ],
       });
-      const tl = session.timeline();
+      const tl = session.snapshot().timeline;
       const userMessages = tl.filter((e) => e.kind === "message" && e.message.role === "user");
       expect(userMessages.length).toBeGreaterThanOrEqual(2);
       await session.close();
@@ -340,7 +340,7 @@ export function runSessionConformance(factory: SessionConformanceFactory): void 
         messages: [{ role: "user", content: "x" }],
       });
       await handle.result;
-      const tl = session.timeline();
+      const tl = session.snapshot().timeline;
       const assistant = tl.find((e) => e.kind === "message" && e.message.role === "assistant");
       expect(assistant).toBeDefined();
       await session.close();
@@ -388,7 +388,7 @@ export function runSessionConformance(factory: SessionConformanceFactory): void 
         entry: { role: "user", content },
       });
       expect(res.appendedEntryIds.length).toBe(1);
-      const tl = session.timeline();
+      const tl = session.snapshot().timeline;
       const marker = tl.find(
         (e) =>
           e.kind === "message" &&
@@ -413,7 +413,7 @@ export function runSessionConformance(factory: SessionConformanceFactory): void 
         },
       });
       expect(res.appendedEntryIds.length).toBe(1);
-      const tl = session.timeline();
+      const tl = session.snapshot().timeline;
       const found = tl.find(
         (e) =>
           e.kind === "message" &&
@@ -451,7 +451,7 @@ export function runSessionConformance(factory: SessionConformanceFactory): void 
         ],
       });
       expect(res.appendedEntryIds.length).toBe(2);
-      const tl = session.timeline();
+      const tl = session.snapshot().timeline;
       const toolMessages = tl.filter((e) => e.kind === "message" && e.message.role === "tool");
       expect(toolMessages.length).toBeGreaterThanOrEqual(2);
       await session.close();

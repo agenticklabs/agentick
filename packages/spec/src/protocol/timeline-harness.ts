@@ -49,8 +49,14 @@ export interface TimelineSnapshot {
 // Operation inputs
 // ============================================================================
 
+/**
+ * Internal Operation input — a batch of entries to append atomically.
+ * The protocol's `append(...entries)` is variadic at the call site;
+ * the harness wraps the rest-args into this shape so the Operation
+ * envelope's `input` field carries a single named payload.
+ */
 export interface TimelineAppendInput {
-  readonly entry: TimelineEntry;
+  readonly entries: readonly TimelineEntry[];
 }
 
 export interface TimelineReplaceProjectionInput {
@@ -78,11 +84,11 @@ export interface TimelineQueueInput {
 
 export interface TimelineQueueResult {
   /**
-   * The id the harness assigned to this pending message. The same id
-   * lands on the resulting `TimelineEntry.message.id` when this pending
-   * message is drained. Stable from queue through drain.
+   * Ids the harness assigned to the queued messages, in input order.
+   * Each id lands on the resulting `TimelineEntry.message.id` at drain
+   * time. Stable from queue through drain.
    */
-  readonly id: string;
+  readonly ids: readonly string[];
 }
 
 /**
@@ -254,26 +260,31 @@ export interface TimelineHarnessProtocol extends SnapshotCapable<TimelineHarness
   // ─────────── Async surface (Operations) ───────────
 
   /**
-   * Append an entry to the log AND to the projection. Goes through
-   * `runOperation` — emits `timeline:command:append:requested →
-   * :terminal` envelopes. The persisted log is the journal of all
-   * appends; the projection sees the new entry at the tail (after the
-   * compacted prefix when one exists).
+   * Append one or more entries to the log AND to the projection,
+   * atomically. Goes through `runOperation` — emits a single
+   * `timeline:command:append:requested → :terminal` envelope pair
+   * around the whole batch. The persisted log is the journal of all
+   * appends; the projection sees the new entries at the tail (after
+   * the compacted prefix when one exists).
+   *
+   * Calling with zero args is a no-op (returns a resolved promise
+   * without emitting an envelope).
    */
-  append(input: TimelineAppendInput): Promise<void>;
+  append(...entries: TimelineEntry[]): Promise<void>;
 
   /**
-   * Push a pending message onto the queue. NOT appended yet — drain()
-   * is what moves it to the log + projection. Returns the id the
-   * harness assigned; the same id is preserved through drain so
-   * callers can correlate.
+   * Push one or more pending messages onto the queue. NOT appended yet
+   * — drain() is what moves them to the log + projection. Returns the
+   * ids the harness assigned (in input order); the same ids land on
+   * the corresponding `TimelineEntry.message.id` at drain time.
    *
-   * Use this from `session.queue()` and `session.send({ messages })`
-   * to express "user input arriving" — the message becomes visible to
-   * UI subscribers immediately (via `readPending()` + `subscribe()`)
-   * but doesn't enter the timeline until the next tick's drain.
+   * Used by `session.send({ messages })` to express "user input
+   * arriving" — messages become visible to UI subscribers immediately
+   * (via `readPending()` + `subscribe()`) but don't enter the timeline
+   * until the next tick's drain. Calling with zero args is a no-op
+   * (returns `{ ids: [] }` without emitting an envelope).
    */
-  queue(input: TimelineQueueInput): Promise<TimelineQueueResult>;
+  queue(...inputs: TimelineQueueInput[]): Promise<TimelineQueueResult>;
 
   /**
    * Drain pending entries into the log + projection. Each pending

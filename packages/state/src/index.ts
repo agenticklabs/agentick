@@ -15,5 +15,6 @@
 import "./augment.js";
 
 export { StateHarness } from "./harness.js";
+export type { StateHandle } from "./handle.js";
 export { withState, type WithStateOptions } from "./extension.js";
 export { runStateHarnessConformance } from "./conformance.js";

@@ -35,7 +35,6 @@ import type {
   StateDeleteInput,
   StateHarnessProtocol,
   StateSetInput,
-  TimelineAppendInput,
   TimelineDrainResult,
   TimelineEntry,
   TimelineHarnessProtocol,
@@ -82,20 +81,28 @@ export function mockTimelineHarness(
     },
     readPending: () => pending,
     readPersisted: () => persisted,
-    append: async ({ entry }: TimelineAppendInput) => {
-      persisted.push(entry);
-      projection.push(entry);
+    append: async (...entries: TimelineEntry[]) => {
+      if (entries.length === 0) return;
+      for (const entry of entries) {
+        persisted.push(entry);
+        projection.push(entry);
+      }
       refresh();
       notify();
     },
-    queue: async ({ role, content, metadata }: TimelineQueueInput) => {
-      const id = `m_pending_${Date.now()}_${Math.random()}`;
-      pending = [
-        ...pending,
-        { id, role, content, ts: Date.now(), ...(metadata !== undefined ? { metadata } : {}) },
-      ];
+    queue: async (...inputs: TimelineQueueInput[]) => {
+      if (inputs.length === 0) return { ids: [] };
+      const ts = Date.now();
+      const queued = inputs.map(({ role, content, metadata }) => ({
+        id: `m_pending_${ts}_${Math.random()}`,
+        role,
+        content,
+        ts,
+        ...(metadata !== undefined ? { metadata } : {}),
+      }));
+      pending = [...pending, ...queued];
       notify();
-      return { id };
+      return { ids: queued.map((q) => q.id) };
     },
     drain: async (): Promise<TimelineDrainResult> => {
       const draining = pending;

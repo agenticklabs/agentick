@@ -15,6 +15,7 @@
 import "./augment.js";
 
 export { TimelineHarness } from "./harness.js";
+export type { TimelineHandle } from "./handle.js";
 export { withTimeline, type WithTimelineOptions } from "./extension.js";
 export { withHandler, type WithHandlerOptions } from "./strategies.js";
 export { runTimelineHarnessConformance } from "./conformance.js";

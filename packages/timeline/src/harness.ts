@@ -61,7 +61,7 @@ type TimelineInboxMessage =
       readonly payload: TimelineReplaceProjectionInput;
     }
   | { readonly type: "timeline:resetProjection" }
-  | { readonly type: "timeline:queue"; readonly payload: TimelineQueueInput }
+  | { readonly type: "timeline:queue"; readonly payload: readonly TimelineQueueInput[] }
   | { readonly type: "timeline:drain" };
 
 export class TimelineHarness extends BaseHarness<"timeline"> implements TimelineHarnessProtocol {
@@ -114,8 +114,9 @@ export class TimelineHarness extends BaseHarness<"timeline"> implements Timeline
 
   // ─────────── Async surface — full Operations ───────────
 
-  append(input: TimelineAppendInput): Promise<void> {
-    return runHarnessProtocol(this.appendEffect(input));
+  append(...entries: TimelineEntry[]): Promise<void> {
+    if (entries.length === 0) return Promise.resolve();
+    return runHarnessProtocol(this.appendEffect({ entries }));
   }
 
   /**
@@ -232,28 +233,29 @@ export class TimelineHarness extends BaseHarness<"timeline"> implements Timeline
 
   // ─────────── Async surface — pending queue (queue / drain) ───────────
 
-  queue(input: TimelineQueueInput): Promise<TimelineQueueResult> {
-    const id = `m_${ulid()}`;
-    const op: Operation<TimelineQueueInput, TimelineQueueResult, never> = {
+  queue(...inputs: TimelineQueueInput[]): Promise<TimelineQueueResult> {
+    if (inputs.length === 0) return Promise.resolve({ ids: [] });
+    const op: Operation<readonly TimelineQueueInput[], TimelineQueueResult, never> = {
       opId: `timeline:queue:${ulid()}`,
       surface: "timeline",
       name: "timeline:command:queue",
       scope: { sessionId: this.scopeId },
-      input,
+      input: inputs,
     };
     return runHarnessProtocol(
-      this.runOperation(op, (i) =>
+      this.runOperation(op, (batch) =>
         Effect.sync(() => {
-          const entry: PendingEntry = {
-            id,
-            role: i.role,
-            content: i.content,
-            ts: Date.now(),
-            ...(i.metadata !== undefined ? { metadata: i.metadata } : {}),
-          };
-          this._pending = [...this._pending, entry];
+          const ts = Date.now();
+          const entries: PendingEntry[] = batch.map((m) => ({
+            id: `m_${ulid()}`,
+            role: m.role,
+            content: m.content,
+            ts,
+            ...(m.metadata !== undefined ? { metadata: m.metadata } : {}),
+          }));
+          this._pending = [...this._pending, ...entries];
           this.notify();
-          return { id };
+          return { ids: entries.map((e) => e.id) };
         }),
       ),
     );
@@ -280,24 +282,21 @@ export class TimelineHarness extends BaseHarness<"timeline"> implements Timeline
           this._pending = [];
           this.notify();
 
-          const drained: TimelineEntry[] = [];
-          for (const p of draining) {
-            const entry: TimelineEntry = {
-              kind: "message",
-              message: {
-                id: p.id,
-                role: p.role,
-                content: p.content,
-                ts: p.ts,
-                ...(p.metadata !== undefined ? { metadata: p.metadata } : {}),
-              },
-            };
-            // appendEffect is Effect-native — staying in this fiber
-            // lets the substrate auto-thread parentOpId onto every
-            // append envelope so observers see the causality tree.
-            yield* this.appendEffect({ entry });
-            drained.push(entry);
-          }
+          const drained: TimelineEntry[] = draining.map((p) => ({
+            kind: "message",
+            message: {
+              id: p.id,
+              role: p.role,
+              content: p.content,
+              ts: p.ts,
+              ...(p.metadata !== undefined ? { metadata: p.metadata } : {}),
+            },
+          }));
+          // appendEffect is Effect-native — staying in this fiber lets
+          // the substrate auto-thread parentOpId onto the emitted
+          // envelope so observers see the causality tree. One envelope
+          // covers the whole batch.
+          yield* this.appendEffect({ entries: drained });
           return { entries: drained as readonly TimelineEntry[] };
         }),
       ),
@@ -373,7 +372,7 @@ export class TimelineHarness extends BaseHarness<"timeline"> implements Timeline
     switch (m.type) {
       case "timeline:append":
         return Effect.tryPromise<void, MessageHandlerError>({
-          try: () => this.append(m.payload),
+          try: () => this.append(...m.payload.entries),
           catch: (cause): MessageHandlerError => ({ _tag: "HandlerError", cause }),
         });
       case "timeline:replaceProjection":
@@ -388,7 +387,7 @@ export class TimelineHarness extends BaseHarness<"timeline"> implements Timeline
         });
       case "timeline:queue":
         return Effect.tryPromise<TimelineQueueResult, MessageHandlerError>({
-          try: () => this.queue(m.payload),
+          try: () => this.queue(...m.payload),
           catch: (cause): MessageHandlerError => ({ _tag: "HandlerError", cause }),
         });
       case "timeline:drain":
@@ -407,9 +406,11 @@ export class TimelineHarness extends BaseHarness<"timeline"> implements Timeline
   // ─────────── Internals ───────────
 
   private applyAppend(input: TimelineAppendInput): void {
-    this._persisted.push(input.entry);
+    for (const entry of input.entries) {
+      this._persisted.push(entry);
+      this._projection.push(entry);
+    }
     this._persistedVersion += 1;
-    this._projection.push(input.entry);
     this._projectionVersion += 1;
     this.refreshSnapshot();
     this.notify();

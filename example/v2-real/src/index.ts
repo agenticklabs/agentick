@@ -35,6 +35,18 @@ async function main(): Promise<void> {
     executor: aisdk({ model: openai("gpt-4o-mini") }),
   });
 
+  const session = await app.createSession();
+
+  await session.timeline.append({
+    kind: "message",
+    message: {
+      id: "demo-1",
+      ts: Date.now(),
+      role: "user",
+      content: [{ type: "text", text: "What's 47 * 23, and tell me a fun fact about that number?" }],
+    },
+  });
+
   try {
     console.log("→ User: What's 47 * 23, and tell me a fun fact about that number?\n");
     const result = await app.send(

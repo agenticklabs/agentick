@@ -15,5 +15,6 @@
 import "./augment.js";
 
 export { KnobsHarness } from "./harness.js";
+export type { KnobsHandle } from "./handle.js";
 export { withKnobs, type WithKnobsOptions } from "./extension.js";
 export { runKnobsHarnessConformance } from "./conformance.js";
