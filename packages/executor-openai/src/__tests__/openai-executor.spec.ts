@@ -242,6 +242,207 @@ describe("OpenAIExecutor — streaming", () => {
   });
 });
 
+describe("OpenAIExecutor — parseThinkTags preset", () => {
+  it("routes inline <think> blocks to reasoning on non-streaming response", async () => {
+    const stub = new StubOpenAIClient([
+      {
+        kind: "non-streaming",
+        completion: mkCompletion({
+          text: "<think>step by step</think>Answer: 42",
+        }),
+      },
+    ]);
+    const journal = new MemoryJournal();
+    const bus = new LocalEventBus();
+    const inbox = new LocalInbox();
+    const exec = new OpenAIExecutor("exec-think-1", journal, bus, inbox, {
+      client: asClient(stub),
+      model: "gpt-4o-mini",
+      parseThinkTags: true,
+    });
+    await exec.ready;
+
+    const terminal = await exec.run({
+      compiled: emptyTree(),
+      target: mkTarget(),
+    });
+    if (terminal.outcome !== "succeeded") throw new Error("expected success");
+    // ReasoningBlock should arrive before the text block.
+    expect(terminal.result.output[0]).toMatchObject({
+      type: "reasoning",
+      text: "step by step",
+    });
+    expect(terminal.result.output[1]).toMatchObject({
+      type: "text",
+      text: "Answer: 42",
+    });
+  });
+
+  it("streams <think> as reasoning deltas through the typed stream", async () => {
+    const stub = new StubOpenAIClient([
+      {
+        kind: "streaming",
+        chunks: [
+          mkContentChunk({ delta: "<think>" }),
+          mkContentChunk({ delta: "thinking" }),
+          mkContentChunk({ delta: "</think>" }),
+          mkContentChunk({ delta: "Answer" }),
+          mkFinishChunk({
+            finishReason: "stop",
+            usage: { prompt_tokens: 4, completion_tokens: 3, total_tokens: 7 },
+          }),
+        ],
+      },
+    ]);
+    const journal = new MemoryJournal();
+    const bus = new LocalEventBus();
+    const inbox = new LocalInbox();
+    const exec = new OpenAIExecutor("exec-think-2", journal, bus, inbox, {
+      client: asClient(stub),
+      model: "gpt-4o-mini",
+      parseThinkTags: true,
+    });
+    await exec.ready;
+
+    const projected = await exec.project({
+      compiled: emptyTree(),
+      target: mkTarget(),
+    });
+    const stream = exec.executeStream({
+      targetInput: projected,
+      target: mkTarget(),
+    });
+    const seen: string[] = [];
+    for await (const ev of stream) {
+      seen.push(ev.type);
+    }
+    expect(seen).toContain("reasoning-start");
+    expect(seen).toContain("reasoning-delta");
+    expect(seen).toContain("reasoning-end");
+    expect(seen).toContain("reasoning");
+    expect(seen).toContain("content-delta");
+  });
+});
+
+describe("OpenAIExecutor — customBlocks", () => {
+  it("extracts adopter-declared tags as custom-block deltas (streaming)", async () => {
+    const stub = new StubOpenAIClient([
+      {
+        kind: "streaming",
+        chunks: [
+          mkContentChunk({ delta: 'Found ' }),
+          mkContentChunk({ delta: '<citation source="wiki">Paris</citation>' }),
+          mkContentChunk({ delta: " in the docs" }),
+          mkFinishChunk({
+            finishReason: "stop",
+            usage: { prompt_tokens: 4, completion_tokens: 3, total_tokens: 7 },
+          }),
+        ],
+      },
+    ]);
+    const journal = new MemoryJournal();
+    const bus = new LocalEventBus();
+    const inbox = new LocalInbox();
+    const exec = new OpenAIExecutor("exec-cb-1", journal, bus, inbox, {
+      client: asClient(stub),
+      model: "gpt-4o-mini",
+      customBlocks: { citation: {} },
+    });
+    await exec.ready;
+
+    const projected = await exec.project({
+      compiled: emptyTree(),
+      target: mkTarget(),
+    });
+    const stream = exec.executeStream({
+      targetInput: projected,
+      target: mkTarget(),
+    });
+    const events: Array<{ type: string; tag?: string; attrs?: Record<string, string> }> = [];
+    for await (const ev of stream) {
+      events.push(ev as never);
+    }
+    const cbStart = events.find((e) => e.type === "custom-block-start");
+    expect(cbStart).toMatchObject({ tag: "citation", attrs: { source: "wiki" } });
+    expect(events.find((e) => e.type === "custom-block")).toMatchObject({
+      tag: "citation",
+    });
+  });
+
+  it("invokes per-tag handlers on tag close (non-streaming)", async () => {
+    const stub = new StubOpenAIClient([
+      {
+        kind: "non-streaming",
+        completion: mkCompletion({
+          text: 'before <citation source="wiki">cited</citation> after',
+        }),
+      },
+    ]);
+    const journal = new MemoryJournal();
+    const bus = new LocalEventBus();
+    const inbox = new LocalInbox();
+    const captured: Array<{ content: string; attrs: Record<string, string> }> = [];
+    const exec = new OpenAIExecutor("exec-cb-2", journal, bus, inbox, {
+      client: asClient(stub),
+      model: "gpt-4o-mini",
+      customBlocks: {
+        citation: {
+          onContent(content, attrs) {
+            captured.push({ content, attrs: { ...attrs } });
+          },
+        },
+      },
+    });
+    await exec.ready;
+
+    await exec.run({ compiled: emptyTree(), target: mkTarget() });
+    expect(captured).toEqual([{ content: "cited", attrs: { source: "wiki" } }]);
+  });
+
+  it("supports parseThinkTags + customBlocks simultaneously", async () => {
+    const stub = new StubOpenAIClient([
+      {
+        kind: "non-streaming",
+        completion: mkCompletion({
+          text: "<think>reason</think>see <citation>src</citation> done",
+        }),
+      },
+    ]);
+    const journal = new MemoryJournal();
+    const bus = new LocalEventBus();
+    const inbox = new LocalInbox();
+    const onContent = (content: string) => {
+      captured.push(content);
+    };
+    const captured: string[] = [];
+    const exec = new OpenAIExecutor("exec-cb-3", journal, bus, inbox, {
+      client: asClient(stub),
+      model: "gpt-4o-mini",
+      parseThinkTags: true,
+      customBlocks: { citation: { onContent } },
+    });
+    await exec.ready;
+
+    const terminal = await exec.run({
+      compiled: emptyTree(),
+      target: mkTarget(),
+    });
+    if (terminal.outcome !== "succeeded") throw new Error("expected success");
+    // Reasoning block extracted from <think>.
+    expect(terminal.result.output[0]).toMatchObject({
+      type: "reasoning",
+      text: "reason",
+    });
+    // Text contains "see  done" with the citation stripped.
+    expect(terminal.result.output[1]).toMatchObject({
+      type: "text",
+      text: "see  done",
+    });
+    // Custom block handler fired.
+    expect(captured).toEqual(["src"]);
+  });
+});
+
 describe("OpenAIExecutor — journaled lifecycle", () => {
   it("run produces requested + terminal envelopes on the journal", async () => {
     const stub = new StubOpenAIClient([

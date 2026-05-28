@@ -72,7 +72,11 @@ import type {
 } from "@agentick/spec";
 import { SPEC_VERSION } from "@agentick/spec";
 
-import { ThinkTagSplitter, splitThinkTags } from "./think-tag-splitter.js";
+import {
+  StreamTagParser,
+  type StreamTagEvent,
+  type StreamTagHandler,
+} from "./stream-tag-parser.js";
 
 // ============================================================================
 // ProviderOptions augmentation — typed OpenAI escape hatch
@@ -156,12 +160,58 @@ export interface OpenAIExecutorOptions {
    */
   readonly parseThinkTags?: boolean;
   /**
+   * Adopter-declared XML-like tags to extract from the model's text
+   * output. Used for structured outputs the adopter wants surfaced
+   * separately from the text channel — citations, semantic
+   * annotations, completion markers, etc.
+   *
+   * The tags get stripped from the cleaned text stream and surfaced
+   * as `custom-block-*` `AdapterDelta` events. Adopters subscribe via
+   * `app.events({surface: "executor", phase: "delta"})` or via the
+   * session's typed stream handle.
+   *
+   * Built on the same {@link StreamTagParser} primitive as
+   * `parseThinkTags` — adopters can use both simultaneously.
+   *
+   * @example
+   * ```ts
+   * customBlocks: {
+   *   citation: {},               // pass-through
+   *   done: { onSelfClosing: () => stop() },  // <done/> hook
+   *   debug: { tag: "debug-info" },           // map key → XML tag
+   * }
+   * ```
+   */
+  readonly customBlocks?: Readonly<Record<string, CustomBlockDefinition>>;
+  /**
    * Override the self-described target. Defaults to
    * `{ kind: "language-model", provider: "openai", modelId: options.model ?? "gpt-4o-mini", capabilities: {...} }`.
    * Set this when surfacing a non-stock OpenAI-compatible endpoint
    * (vLLM, LM Studio, ollama) or to advertise additional capabilities.
    */
   readonly target?: ExecutionTarget;
+}
+
+/**
+ * Adopter-facing custom block declaration. Sugar over
+ * {@link StreamTagHandler}: lets the config key differ from the
+ * actual XML tag name, and surfaces typed handler hooks.
+ */
+export interface CustomBlockDefinition {
+  /**
+   * XML tag to intercept in the text stream. Defaults to the
+   * surrounding config key when omitted.
+   */
+  readonly tag?: string;
+  /** Called when the opening tag is found, before content arrives. */
+  readonly onStart?: (attrs: Readonly<Record<string, string>>) => void;
+  /** Called with full accumulated content when the closing tag is found. */
+  readonly onContent?: (
+    content: string,
+    attrs: Readonly<Record<string, string>>,
+  ) => void;
+  /** Called for self-closing tags (e.g., `<done/>`). */
+  readonly onSelfClosing?: (attrs: Readonly<Record<string, string>>) => void;
 }
 
 // ============================================================================
@@ -196,6 +246,7 @@ export class OpenAIExecutor extends BaseHarness<"executor"> implements LanguageM
   private readonly defaultModel: string | undefined;
   private readonly streamByDefault: boolean;
   private readonly parseThinkTags: boolean;
+  private readonly customBlocks?: Readonly<Record<string, CustomBlockDefinition>>;
   private readonly inFlight = new Map<string, InFlightEntry>();
   private readonly aborted = new Set<string>();
 
@@ -211,6 +262,7 @@ export class OpenAIExecutor extends BaseHarness<"executor"> implements LanguageM
     this.defaultModel = options.model;
     this.streamByDefault = options.stream ?? false;
     this.parseThinkTags = options.parseThinkTags ?? false;
+    this.customBlocks = options.customBlocks;
     this.target = options.target ?? {
       kind: "language-model",
       provider: "openai",
@@ -348,50 +400,102 @@ export class OpenAIExecutor extends BaseHarness<"executor"> implements LanguageM
         let textAccum = "";
         const reasoningBlockIndex = -1; // sentinel; emitted before text (index 0)
 
-        // Inline `<think>` parser. Active only when the executor was
-        // constructed with `parseThinkTags: true`. Routes text inside
-        // think tags to the reasoning stream and tracks accumulators
-        // for the symmetric summary events.
-        const thinkSplitter = this.parseThinkTags ? new ThinkTagSplitter() : null;
+        // Unified XML-tag parser. Drives BOTH the parseThinkTags preset
+        // (think → reasoning route) and any adopter-declared
+        // customBlocks (each tag → custom-block route). When neither
+        // option is configured, `tagRouter` is null and text flows
+        // through unchanged.
+        const tagRouter = buildTagRouter({
+          parseThinkTags: this.parseThinkTags,
+          customBlocks: this.customBlocks,
+        });
 
-        const emitSegments = (text: string): void => {
-          if (!thinkSplitter) return;
-          for (const seg of thinkSplitter.feed(text)) {
-            if (seg.mode === "text") {
-              if (!textBlockStarted) {
-                emit({ type: "content-start", blockIndex: 0, blockType: "text" });
-                textBlockStarted = true;
-              }
-              emit({ type: "content-delta", blockIndex: 0, delta: seg.content });
-              textAccum += seg.content;
-            } else {
-              if (!reasoningBlockStarted) {
-                emit({ type: "reasoning-start", blockIndex: reasoningBlockIndex });
-                reasoningBlockStarted = true;
-              }
-              emit({
-                type: "reasoning-delta",
-                blockIndex: reasoningBlockIndex,
-                delta: seg.content,
-              });
-              reasoningAccum += seg.content;
+        const emitText = (chunk: string): void => {
+          if (chunk.length === 0) return;
+          if (!textBlockStarted) {
+            emit({ type: "content-start", blockIndex: 0, blockType: "text" });
+            textBlockStarted = true;
+          }
+          emit({ type: "content-delta", blockIndex: 0, delta: chunk });
+          textAccum += chunk;
+        };
+
+        const handleTagEvent = (event: StreamTagEvent): void => {
+          if (event.type === "text") {
+            emitText(event.content);
+            return;
+          }
+          const mode = tagRouter!.modeFor(event.tag);
+          if (mode === "reasoning") {
+            switch (event.type) {
+              case "block-start":
+                if (!reasoningBlockStarted) {
+                  emit({ type: "reasoning-start", blockIndex: reasoningBlockIndex });
+                  reasoningBlockStarted = true;
+                }
+                break;
+              case "block-delta":
+                if (!reasoningBlockStarted) {
+                  emit({ type: "reasoning-start", blockIndex: reasoningBlockIndex });
+                  reasoningBlockStarted = true;
+                }
+                emit({
+                  type: "reasoning-delta",
+                  blockIndex: reasoningBlockIndex,
+                  delta: event.delta,
+                });
+                reasoningAccum += event.delta;
+                break;
+              case "block-end":
+                // Held until the post-stream pass so symmetric closes
+                // arrive after all chunk deltas (matches text+tool
+                // close ordering elsewhere in this body).
+                break;
+              case "block":
+                // Skip the per-block summary — we synthesize one final
+                // reasoning summary from `reasoningAccum` post-stream.
+                break;
             }
+            return;
+          }
+          // mode === "custom-block" — straight passthrough.
+          switch (event.type) {
+            case "block-start":
+              emit({ type: "custom-block-start", tag: event.tag, attrs: event.attrs });
+              break;
+            case "block-delta":
+              emit({ type: "custom-block-delta", tag: event.tag, delta: event.delta });
+              break;
+            case "block-end":
+              emit({ type: "custom-block-end", tag: event.tag });
+              break;
+            case "block":
+              emit({
+                type: "custom-block",
+                tag: event.tag,
+                content: event.content,
+                attrs: event.attrs,
+                ...(event.selfClosing ? { selfClosing: true } : {}),
+              });
+              break;
           }
         };
 
         for await (const chunk of stream) {
           accum.push(chunk);
-          // When parseThinkTags is active, suppress mapChunk's
-          // content-start/content-delta emission and route the raw text
-          // through the splitter instead — the splitter decides what's
-          // text vs reasoning. We do this by lying about textBlockStarted
-          // so mapChunk never emits its content events.
-          const mapState = thinkSplitter
+          // When a tag router is active, suppress mapChunk's
+          // content-start/content-delta emission and route the raw
+          // text through the parser. We do this by lying about
+          // textBlockStarted so mapChunk never emits its content
+          // events.
+          const mapState = tagRouter
             ? { textBlockStarted: true, toolBlockStartedByIndex, reasoningBlockStarted, reasoningBlockIndex }
             : { textBlockStarted, toolBlockStartedByIndex, reasoningBlockStarted, reasoningBlockIndex };
           for (const delta of mapChunkToAdapterDeltas(chunk, mapState)) {
-            if (thinkSplitter && delta.type === "content-delta") {
-              emitSegments(delta.delta);
+            if (tagRouter && delta.type === "content-delta") {
+              for (const ev of tagRouter.parser.process(delta.delta)) {
+                handleTagEvent(ev);
+              }
               continue;
             }
             // Track block-start side effects so mapChunk knows what to
@@ -405,28 +509,10 @@ export class OpenAIExecutor extends BaseHarness<"executor"> implements LanguageM
             emit(delta);
           }
         }
-        // Flush any buffered partial-tag content at stream end.
-        if (thinkSplitter) {
-          for (const seg of thinkSplitter.flush()) {
-            if (seg.mode === "text") {
-              if (!textBlockStarted) {
-                emit({ type: "content-start", blockIndex: 0, blockType: "text" });
-                textBlockStarted = true;
-              }
-              emit({ type: "content-delta", blockIndex: 0, delta: seg.content });
-              textAccum += seg.content;
-            } else {
-              if (!reasoningBlockStarted) {
-                emit({ type: "reasoning-start", blockIndex: reasoningBlockIndex });
-                reasoningBlockStarted = true;
-              }
-              emit({
-                type: "reasoning-delta",
-                blockIndex: reasoningBlockIndex,
-                delta: seg.content,
-              });
-              reasoningAccum += seg.content;
-            }
+        // Drain any buffered partial-tag content at stream end.
+        if (tagRouter) {
+          for (const ev of tagRouter.parser.flush()) {
+            handleTagEvent(ev);
           }
         }
 
@@ -434,12 +520,12 @@ export class OpenAIExecutor extends BaseHarness<"executor"> implements LanguageM
         // We close any open blocks that the provider didn't explicitly
         // close, then emit the summary events.
         const final = accum.toChatCompletion(params.model);
-        // When parseThinkTags is on, the splitter routed text — use the
+        // When a tag router is active, the parser routed text — use the
         // cleaned accumulators instead of the raw message.content
-        // (which still contains the literal <think>...</think>).
-        // Also rewrite the final ChatCompletion's message.content and
-        // attach reasoning_content so normalize() sees the cleaned shape.
-        if (thinkSplitter) {
+        // (which still contains literal tag bytes). Also rewrite the
+        // final ChatCompletion's message.content and attach
+        // reasoning_content so normalize() sees the cleaned shape.
+        if (tagRouter) {
           (final.choices[0]!.message as unknown as Record<string, unknown>).content =
             textAccum.length > 0 ? textAccum : null;
           if (reasoningAccum.length > 0) {
@@ -449,7 +535,7 @@ export class OpenAIExecutor extends BaseHarness<"executor"> implements LanguageM
         }
         const choice = final.choices[0]!;
         const finishReason = choice.finish_reason ?? "stop";
-        const text = thinkSplitter
+        const text = tagRouter
           ? textAccum
           : typeof choice.message.content === "string"
             ? choice.message.content
@@ -777,13 +863,15 @@ export class OpenAIExecutor extends BaseHarness<"executor"> implements LanguageM
         return raw as ExecutorTerminal<LanguageModelExecutionResult>;
       }
 
-      // When parseThinkTags is enabled, rewrite the message content so
-      // normalize() sees the cleaned text + extracted reasoning.
-      // (The streaming path already cleans the synthesized
-      // ChatCompletion before reaching here.)
-      const rawForNormalize = this.parseThinkTags
-        ? applyThinkTagSplitToChatCompletion(raw)
-        : raw;
+      // When any tag-routing option is enabled, rewrite the message
+      // content so normalize() sees cleaned text + extracted
+      // reasoning. (The streaming path already cleans the
+      // synthesized ChatCompletion before reaching here.)
+      const router = buildTagRouter({
+        parseThinkTags: this.parseThinkTags,
+        customBlocks: this.customBlocks,
+      });
+      const rawForNormalize = router ? applyTagRouterToChatCompletion(raw, router) : raw;
 
       // 3. normalize (deterministic)
       const result = yield* Effect.try({
@@ -820,24 +908,87 @@ function buildClientOptions(opts: OpenAIExecutorOptions): ClientOptions {
   return out;
 }
 
+// ============================================================================
+// Tag routing — shared StreamTagParser machinery driving parseThinkTags
+// (think → reasoning) and customBlocks (declared tag → custom-block).
+// ============================================================================
+
+type TagMode = "reasoning" | "custom-block";
+
+interface TagRouter {
+  readonly parser: StreamTagParser;
+  modeFor(tag: string): TagMode;
+}
+
+function buildTagRouter(opts: {
+  parseThinkTags: boolean;
+  customBlocks?: Readonly<Record<string, CustomBlockDefinition>>;
+}): TagRouter | null {
+  const tagModes = new Map<string, TagMode>();
+  const handlers: Record<string, StreamTagHandler> = {};
+
+  if (opts.parseThinkTags) {
+    // Preset: `<think>` always routes to the reasoning stream. No
+    // user handler — adopters can subscribe via the reasoning
+    // AdapterDelta channel.
+    tagModes.set("think", "reasoning");
+    handlers["think"] = {};
+  }
+
+  if (opts.customBlocks) {
+    for (const [key, def] of Object.entries(opts.customBlocks)) {
+      const tagName = def.tag ?? key;
+      tagModes.set(tagName, "custom-block");
+      const h: StreamTagHandler = {};
+      if (def.onStart) h.onStart = def.onStart;
+      if (def.onContent) h.onContent = def.onContent;
+      if (def.onSelfClosing) h.onSelfClosing = def.onSelfClosing;
+      handlers[tagName] = h;
+    }
+  }
+
+  if (tagModes.size === 0) return null;
+  const parser = new StreamTagParser({ tags: handlers });
+  return {
+    parser,
+    modeFor(tag) {
+      return tagModes.get(tag) ?? "custom-block";
+    },
+  };
+}
+
 /**
- * Post-process a non-streaming ChatCompletion through the
- * think-tag splitter. Used when `parseThinkTags: true` and the
- * server didn't stream. Mutates the message in-place: `content`
- * becomes the cleaned text (think tags removed), and
- * `reasoning_content` carries the extracted reasoning. normalize()
- * then surfaces the reasoning as a ReasoningBlock.
+ * Post-process a non-streaming ChatCompletion through the tag
+ * router. Used when the server didn't stream and any tag-routing
+ * option is active. Mutates the message in-place: `content`
+ * becomes the cleaned text (extracted tags removed), and
+ * `reasoning_content` carries any think-tag extraction. Custom
+ * blocks fire their handlers but don't surface in the
+ * `ChatCompletion` (they were emitted as `custom-block` deltas via
+ * the streaming path; for non-streaming we still call handlers but
+ * the structured events don't fire — accepting this trade-off
+ * since non-streaming is rare for these use cases).
  */
-function applyThinkTagSplitToChatCompletion(raw: unknown): unknown {
+function applyTagRouterToChatCompletion(
+  raw: unknown,
+  router: TagRouter,
+): unknown {
   if (!raw || typeof raw !== "object") return raw;
   const r = raw as { choices?: Array<{ message?: Record<string, unknown> }> };
   const message = r.choices?.[0]?.message;
   if (!message || typeof message.content !== "string") return raw;
   let text = "";
   let reasoning = "";
-  for (const seg of splitThinkTags(message.content)) {
-    if (seg.mode === "text") text += seg.content;
-    else reasoning += seg.content;
+  const events = [
+    ...router.parser.process(message.content),
+    ...router.parser.flush(),
+  ];
+  for (const ev of events) {
+    if (ev.type === "text") {
+      text += ev.content;
+    } else if (ev.type === "block-delta") {
+      if (router.modeFor(ev.tag) === "reasoning") reasoning += ev.delta;
+    }
   }
   message.content = text.length > 0 ? text : null;
   if (reasoning.length > 0) message.reasoning_content = reasoning;

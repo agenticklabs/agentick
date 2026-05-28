@@ -8,11 +8,15 @@
  * @see docs/proposals/v2/blueprint/06-executor-harness.md
  */
 
-export { OpenAIExecutor, type OpenAIExecutorOptions } from "./openai-executor.js";
+export {
+  OpenAIExecutor,
+  type OpenAIExecutorOptions,
+  type CustomBlockDefinition,
+} from "./openai-executor.js";
 export { openai, type OpenAIFactoryOptions } from "./openai-factory.js";
 export {
-  ThinkTagSplitter,
-  splitThinkTags,
-  type ThinkSegment,
-  type ThinkSegmentMode,
-} from "./think-tag-splitter.js";
+  StreamTagParser,
+  type StreamTagParserConfig,
+  type StreamTagHandler,
+  type StreamTagEvent,
+} from "./stream-tag-parser.js";

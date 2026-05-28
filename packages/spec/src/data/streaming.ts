@@ -155,6 +155,29 @@ export type AdapterDelta =
   | { readonly type: "reasoning-end"; readonly blockIndex: number }
   | { readonly type: "reasoning"; readonly blockIndex: number; readonly reasoning: string }
 
+  // ─── Custom blocks (XML-like tags extracted from text) ──────────
+  //
+  // Adapter-extracted structured blocks from the model's text stream.
+  // Driven by adopter-declared `customBlocks` config on the executor.
+  // The text outside these tags arrives as normal `content-delta`;
+  // the tag content arrives as `custom-block-delta` and the executor
+  // strips the tags from the text stream so adopters can render
+  // them however they want.
+  | {
+      readonly type: "custom-block-start";
+      readonly tag: string;
+      readonly attrs: Readonly<Record<string, string>>;
+    }
+  | { readonly type: "custom-block-delta"; readonly tag: string; readonly delta: string }
+  | { readonly type: "custom-block-end"; readonly tag: string }
+  | {
+      readonly type: "custom-block";
+      readonly tag: string;
+      readonly content: string;
+      readonly attrs: Readonly<Record<string, string>>;
+      readonly selfClosing?: boolean;
+    }
+
   // ─── Standalone ──────────────────────────────────────────────────
   | { readonly type: "usage"; readonly usage: UsageStats }
   | {
@@ -184,6 +207,10 @@ export const ADAPTER_DELTA_TYPES = [
   "reasoning-delta",
   "reasoning-end",
   "reasoning",
+  "custom-block-start",
+  "custom-block-delta",
+  "custom-block-end",
+  "custom-block",
   "usage",
   "error",
 ] as const satisfies readonly AdapterDeltaType[];
