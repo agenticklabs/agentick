@@ -101,15 +101,12 @@ intentional scope, `[blocked]` waiting on prerequisite.
 
 ### High (close before 1.0)
 
-- [ ] **G7. ThinkTagParser for inline `<think>` tags.**
-      v1 has 108 LOC parser handling LM Studio / ollama / other local
-      servers that emit raw `<think>...</think>` in delta.content
-      instead of separate reasoning fields. Config-gated via
-      `parseThinkTags`. v2 has nothing.
-      - Files: port `packages/adapters/openai/src/think-tag-parser.ts`
-        to v2 (likely `packages/executor-openai/src/think-tag-parser.ts`);
-        adapter-internal transform stage applied to text deltas
-        before they emit.
+- [x] **G7. ThinkTagParser for inline `<think>` tags.** _Closed
+      2026-05-28 (commit landing G7 originally + the G12 refactor)._
+      Now implemented as a preset configuration on the shared
+      `StreamTagParser` primitive — `parseThinkTags: true` is
+      equivalent to declaring a `think` tag that routes to the
+      reasoning stream. Same parser handles both G7 and G12.
 
 - [ ] **G8. Native Anthropic executor / adapter.**
       v1 has full Anthropic adapter; v2 only has the ai-sdk wrapper.
@@ -148,14 +145,16 @@ intentional scope, `[blocked]` waiting on prerequisite.
         `ToolDeclaration`), OpenAI/AI SDK executors merge into
         provider tool shape.
 
-- [ ] **G12. customBlocks parsing from stream.**
-      v1 supports application-level custom block parsing from the
-      text stream — e.g., extracting `<answer>...</answer>` tags as
-      `custom_block_*` events. v2 has the events in the AdapterDelta
-      union (already shipped in Layer 1) but no parser plumbing.
-      - Plan: adapter-internal transform stage. Same plumbing as G7
-        (ThinkTagParser) — both are text-stream-to-extra-deltas
-        transforms.
+- [x] **G12. customBlocks parsing from stream.** _Closed 2026-05-28._
+      Adopter-declared `customBlocks: { tagName: { ... } }` option on
+      OpenAIExecutorOptions extracts XML-like tags from the text
+      stream and emits them as `custom-block-*` AdapterDelta events
+      (newly added to the spec). Built on the shared `StreamTagParser`
+      primitive — same parser drives G7 (`parseThinkTags`).
+      Per-tag handlers (`onStart`/`onContent`/`onSelfClosing`)
+      support side-effecting integration. Both options compose; an
+      executor can run `parseThinkTags: true` AND
+      `customBlocks: { citation: { ... } }` simultaneously.
 
 - [ ] **G13. deltaTransform extension point.**
       v1 lets adopters supply a transform applied to deltas. v2 has
@@ -360,3 +359,9 @@ work happens — does NOT block the parity fixes.
   `declare module "@agentick/spec"`. Commits: `8257bdbf` (G1, G4, G5,
   G15), `10a4d2e2` (ProviderOptions module augmentation), `2b9fabb4`
   (G2, G3, G6). 5337 tests passing, full typecheck clean.
+- 2026-05-28 (later): closed G7 + G12 together via shared
+  StreamTagParser primitive. AdapterDelta gains
+  custom-block-start/-delta/-end/-summary events. parseThinkTags
+  refactored to be a preset configuration on the same parser
+  customBlocks uses (one bug surface, both compose). 5364 tests
+  passing.
