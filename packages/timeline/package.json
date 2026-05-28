@@ -19,6 +19,12 @@
   },
   "type": "module",
   "main": "src/index.ts",
+  "sideEffects": [
+    "./src/index.ts",
+    "./src/augment.ts",
+    "./dist/index.js",
+    "./dist/augment.js"
+  ],
   "exports": {
     ".": {
       "types": "./src/index.ts",
