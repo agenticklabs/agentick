@@ -215,6 +215,13 @@ export interface AppHarnessOptions<P = unknown> {
   readonly initialProps?: P;
   /** Default initial knobs. Equivalent to `session.initialKnobs`. */
   readonly initialKnobs?: Readonly<Record<string, unknown>>;
+  /**
+   * App-level streaming default. Overridden by `CreateSessionInput.streaming`
+   * and `SendInput.stream`. When unset, streaming defaults ON when the
+   * executor exposes `executeStream` AND `target.capabilities.supportsStreaming`
+   * is not explicitly false.
+   */
+  readonly streaming?: boolean;
 
   /**
    * App-level tool handlers shared across sessions. Resolver keys are
@@ -818,6 +825,14 @@ export class AppHarness<P = unknown>
       toolExecutor: tools,
       target: this.target,
       defaultMaxTicks: input.maxTicks ?? this.sessionDefaults.defaultMaxTicks ?? 8,
+      // Streaming cascade: per-session input.streaming > app-level
+      // streamingDefault (sessionDefaults.defaultStreaming) > undefined
+      // (executor-capability default resolved per-send in SessionHarness).
+      ...(input.streaming !== undefined
+        ? { defaultStreaming: input.streaming }
+        : this.sessionDefaults.defaultStreaming !== undefined
+          ? { defaultStreaming: this.sessionDefaults.defaultStreaming }
+          : {}),
       ...(input.initialProps !== undefined
         ? { props: input.initialProps }
         : this.sessionDefaults.props !== undefined
@@ -1144,6 +1159,9 @@ function mergeSessionDefaults<P>(options: AppHarnessOptions<P>): SessionDefaults
   }
   if (fromLong.initialKnobs === undefined && options.initialKnobs !== undefined) {
     merged.initialKnobs = options.initialKnobs;
+  }
+  if (fromLong.defaultStreaming === undefined && options.streaming !== undefined) {
+    merged.defaultStreaming = options.streaming;
   }
   return merged as SessionDefaults<P>;
 }

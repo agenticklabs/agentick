@@ -51,6 +51,12 @@ export interface CreateSessionInput<P = unknown> {
   readonly initialKnobs?: Readonly<Record<string, unknown>>;
   /** Override the app-level default `maxTicks` for this session. */
   readonly maxTicks?: number;
+  /**
+   * Session-level streaming default. Overridden per-call by
+   * `SendInput.stream`. Falls through to the app default + executor
+   * capability default when unset.
+   */
+  readonly streaming?: boolean;
 }
 
 export interface RunOnceInput<P = unknown> {

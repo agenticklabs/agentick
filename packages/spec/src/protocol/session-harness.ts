@@ -37,6 +37,7 @@ import type { CommandOutcome, TerminalEvent } from "../data/outcomes.js";
 import type { ContentBlock } from "../data/content-blocks.js";
 import type { ProtocolEvent } from "../data/events.js";
 import type { LanguageModelStopReason, UsageStats } from "../data/execution-result.js";
+import type { StreamEvent } from "../data/streaming.js";
 import type { SessionStatus as BridgeSessionStatus } from "./hook-bridges.js";
 import type { LoopToolResult } from "./loop-executor.js";
 
@@ -122,6 +123,23 @@ export interface SendInput<P = unknown> {
    * for cheap intermediate steps) without rebuilding the executor.
    */
   readonly target?: import("../data/execution-target.js").ExecutionTarget;
+  /**
+   * Per-call streaming flag. Overrides session + app defaults.
+   *
+   * Cascade resolution (most specific wins):
+   *   SendInput.stream  >  CreateSessionInput.streaming
+   *                     >  AppHarnessOptions.streaming
+   *                     >  capability default (true when
+   *                        `executor.executeStream` exists AND
+   *                        `target.capabilities.supportsStreaming` ≠ false)
+   *
+   * When `true`: the loop uses `executor.executeStream` (if available);
+   * the handle iterator yields delta-level `StreamEvent`s as they arrive.
+   * When `false`: the loop uses `executor.execute`; the handle yields
+   * only summary-level events (`message`, `content`, `tool-call`,
+   * `reasoning`, plus orchestration + final result).
+   */
+  readonly stream?: boolean;
 }
 
 /**
@@ -165,18 +183,29 @@ export interface SendResult {
 /**
  * Dual-shape handle returned by `send()`.
  *
- * - As `AsyncIterable<ProtocolEvent>`: consumers iterate envelope events
- *   in real time (mirrors v1's per-event streaming).
+ * - As `AsyncIterable<StreamEvent>`: consumers iterate typed events
+ *   (model deltas, tool dispatch lifecycle, tick lifecycle, execution
+ *   lifecycle, final result) in real time. The session stamps a
+ *   monotonic per-session `sequence` field on every event for
+ *   ordering / replay / dedup.
  * - As `{ result: Promise<SendResult> }`: consumers await the final
  *   assembled result.
  *
  * Both shapes derive from the same execution — iterating the events
  * does not change the result; awaiting `.result` does not consume
- * events for other iterators. The bus underneath supports both.
+ * events for other iterators. The session feeds the iterator via a
+ * direct emit chain (loop → session → handle queue), NOT via bus
+ * subscription — keeps per-session cost O(1) per event regardless of
+ * how many concurrent sessions exist.
  *
- * `[V1-INHERITED]` of `SessionExecutionHandle` in `packages/core/src/app/types.ts`.
+ * Bus envelopes still fire for observability (devtools, telemetry,
+ * `app.events()` subscribers), but in parallel — not on the handle's
+ * hot path.
+ *
+ * The iterator completes after the final `result` StreamEvent is
+ * yielded.
  */
-export interface SessionExecutionHandle extends AsyncIterable<ProtocolEvent> {
+export interface SessionExecutionHandle extends AsyncIterable<StreamEvent> {
   readonly executionId: string;
   readonly result: Promise<SendResult>;
   readonly status: "running" | "completed" | "error" | "aborted";

@@ -164,6 +164,10 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
         | "vetoed"
         | "executor_failed" = "end";
 
+      // Emit execution-start to consumer (typed handle iterator).
+      input.onEvent?.({ kind: "execution-start", tick: 0 });
+      const executionStartedAt = Date.now();
+
       // Default continuation policy: continue when the last tick
       // produced tool_use AND we have pending tool calls; stop
       // otherwise. Bounded by maxTicks. Subject to caller abort.
@@ -176,6 +180,11 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
 
         const tickId = `tick-${ulid()}`;
         acc.ticks += 1;
+        const tickIndex = acc.ticks;
+        const tickStartedAt = Date.now();
+
+        // Tick-start orchestration event.
+        input.onEvent?.({ kind: "tick-start", tick: tickIndex, tickIndex });
 
         // 1. Render.
         const renderResult = await input.reconciler.renderTree({
@@ -209,6 +218,44 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
         accumulateUsage(acc.usage, result.usage);
         acc.output.push(...result.output);
 
+        // Emit summary model events from the executor result so
+        // consumers subscribed to `message` / `content` / `tool-call`
+        // events see the model's output even on the non-streaming path.
+        // Per-token deltas (`content-delta` etc.) come from the
+        // executor's `executeStream` surface (Layer 5).
+        if (input.onEvent) {
+          let blockIndex = 0;
+          for (const block of result.output) {
+            input.onEvent({
+              kind: "model",
+              tick: tickIndex,
+              delta: { type: "content", blockIndex, content: block },
+            });
+            blockIndex += 1;
+          }
+          for (const tc of result.toolCalls ?? []) {
+            input.onEvent({
+              kind: "model",
+              tick: tickIndex,
+              delta: {
+                type: "tool-call",
+                callId: tc.id,
+                name: tc.name,
+                input: tc.input as Readonly<Record<string, unknown>>,
+              },
+            });
+          }
+          input.onEvent({
+            kind: "model",
+            tick: tickIndex,
+            delta: {
+              type: "message-end",
+              stopReason: result.stopReason,
+              usage: result.usage ?? zeroUsage(),
+            },
+          });
+        }
+
         // 3. Tool dispatch — every entry in result.toolCalls is a
         // request for Agentick to invoke. Provider-side tools come
         // back as tool_result blocks in result.output and don't
@@ -217,6 +264,13 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
         const tickToolResults: LoopToolResult[] = [];
         for (const tc of toolCalls) {
           const startedAt = Date.now();
+          input.onEvent?.({
+            kind: "tool-dispatch-start",
+            tick: tickIndex,
+            callId: tc.id,
+            name: tc.name,
+            via: "model",
+          });
           try {
             const dispatched = await input.toolExecutor.dispatch({
               toolCallId: tc.id,
@@ -229,21 +283,58 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
                 tickId,
               },
             });
+            const durationMs = dispatched.durationMs ?? Date.now() - startedAt;
             tickToolResults.push({
               toolCallId: tc.id,
               toolName: tc.name,
               succeeded: dispatched.succeeded,
               content: dispatched.content,
-              durationMs: dispatched.durationMs ?? Date.now() - startedAt,
+              durationMs,
+            });
+            input.onEvent?.({
+              kind: "tool-dispatch-end",
+              tick: tickIndex,
+              callId: tc.id,
+              name: tc.name,
+              outcome: dispatched.succeeded ? "succeeded" : "failed",
+              durationMs,
+            });
+            input.onEvent?.({
+              kind: "tool-dispatch",
+              tick: tickIndex,
+              callId: tc.id,
+              name: tc.name,
+              content: dispatched.content,
+              succeeded: dispatched.succeeded,
+              durationMs,
             });
           } catch (err) {
+            const durationMs = Date.now() - startedAt;
             tickToolResults.push({
               toolCallId: tc.id,
               toolName: tc.name,
               succeeded: false,
               content: [],
-              durationMs: Date.now() - startedAt,
+              durationMs,
               error: err,
+            });
+            input.onEvent?.({
+              kind: "tool-dispatch-end",
+              tick: tickIndex,
+              callId: tc.id,
+              name: tc.name,
+              outcome: "failed",
+              durationMs,
+            });
+            input.onEvent?.({
+              kind: "tool-dispatch",
+              tick: tickIndex,
+              callId: tc.id,
+              name: tc.name,
+              content: [],
+              succeeded: false,
+              durationMs,
+              isError: true,
             });
           }
         }
@@ -271,6 +362,27 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
 
         // 5. Continuation decision (default policy).
         const wantsContinue = result.stopReason === "tool_use" && tickToolResults.length > 0;
+        const tickStopReason: string =
+          !wantsContinue ? result.stopReason : acc.ticks >= input.maxTicks ? "max_ticks" : "continue";
+        const tickDuration = Date.now() - tickStartedAt;
+        const shouldContinue = wantsContinue && acc.ticks < input.maxTicks;
+        input.onEvent?.({
+          kind: "tick-end",
+          tick: tickIndex,
+          tickIndex,
+          shouldContinue,
+          stopReason: tickStopReason,
+          usage: result.usage,
+        });
+        input.onEvent?.({
+          kind: "tick",
+          tick: tickIndex,
+          tickIndex,
+          stopReason: tickStopReason,
+          usage: result.usage ?? zeroUsage(),
+          durationMs: tickDuration,
+        });
+
         if (!wantsContinue) {
           stopReason = result.stopReason;
           break;
@@ -308,6 +420,17 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
             result: runResult,
           }
         : { outcome: "succeeded", result: runResult };
+
+      // Emit execution-end + execution summary events.
+      input.onEvent?.({
+        kind: "execution-end",
+        tick: acc.ticks,
+        stopReason,
+        ...(wasAborted ? { aborted: true } : {}),
+      });
+      // execution summary
+      void executionStartedAt;
+
       return terminal;
     } finally {
       this.inFlight.delete(executionId);

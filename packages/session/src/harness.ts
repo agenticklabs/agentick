@@ -25,6 +25,7 @@ import type {
   ExecutorProtocol,
   KnobHandle,
   LanguageModelExecutionResult,
+  LoopEmittedEvent,
   MessageEnvelope,
   MessageHandlerError,
   MessageInbox,
@@ -42,6 +43,7 @@ import type {
   SpawnContext,
   SpawnInput,
   StateApplyError,
+  StreamEvent,
   TickEndForwardDecision,
   TimelineEntry,
   ToolExecutorProtocol,
@@ -53,7 +55,7 @@ import type { TimelineHandle } from "@agentick/timeline";
 
 import { buildSessionBridges, type SessionHookBridges } from "./session-bridges.js";
 import { SessionStateStore } from "./session-state.js";
-import { createSessionExecutionHandle } from "./session-execution-handle.js";
+import { createSessionExecutionHandle, type SessionEmitInput } from "./session-execution-handle.js";
 
 // ============================================================================
 // Construction options
@@ -91,6 +93,13 @@ export interface SessionHarnessOptions<P = unknown> {
   readonly target: ExecutionTarget;
   /** Default per-execution max tick bound. Default: 8. */
   readonly defaultMaxTicks?: number;
+  /**
+   * Session-level streaming default. Overridden by `SendInput.stream`
+   * per-call. Falls through to the executor-capability default when
+   * unset (streaming on when `executor.executeStream` exists AND
+   * `target.capabilities.supportsStreaming` ≠ false).
+   */
+  readonly defaultStreaming?: boolean;
   /** Optional initial knob values. */
   readonly initialKnobs?: Readonly<Record<string, unknown>>;
   /** Optional initial session-state values (`useSessionState`). */
@@ -140,6 +149,7 @@ export class SessionHarness<P = unknown>
   private readonly spawnContext: SpawnContext<P> | undefined;
   private readonly parentSessionId: string | undefined;
   private readonly defaultMaxTicks: number;
+  private readonly defaultStreaming: boolean | undefined;
 
   private _closed = false;
   private _mountReady: Promise<void>;
@@ -179,6 +189,7 @@ export class SessionHarness<P = unknown>
     this.spawnContext = options.spawnContext;
     this.parentSessionId = options.parentSessionId;
     this.defaultMaxTicks = options.defaultMaxTicks ?? 8;
+    this.defaultStreaming = options.defaultStreaming;
     this.mountId = `mount:${options.sessionId}`;
 
     // Eagerly mount — the reconciler exposes `.ready` for its own
@@ -571,6 +582,44 @@ export class SessionHarness<P = unknown>
     const executorForCall = input.executor ?? this.executor;
     const targetForCall = input.target ?? this.target;
 
+    // Resolve streaming preference. Cascade:
+    //   SendInput.stream  >  session-level streaming default
+    //                     >  executor capability default
+    // The capability default is true when both:
+    //   - the executor exposes `executeStream`
+    //   - target.capabilities.supportsStreaming is not explicitly false
+    const capabilityStreamDefault =
+      typeof executorForCall.executeStream === "function" &&
+      (targetForCall.capabilities?.supportsStreaming ?? true);
+    const streamForCall =
+      input.stream ?? this.defaultStreaming ?? capabilityStreamDefault;
+
+    // Set up the handle + emit chain BEFORE running the loop so the
+    // loop can pump events into it from the first tick.
+    const resultDeferred = {} as { resolve: (r: SendResult) => void; reject: (e: unknown) => void };
+    const resultPromise = new Promise<SendResult>((resolve, reject) => {
+      resultDeferred.resolve = resolve;
+      resultDeferred.reject = reject;
+    }).finally(() => {
+      this._currentExecution = null;
+      this.store.setCurrentExecutionId(null);
+      this.store.setStatus("idle");
+    });
+    resultPromise.catch(() => {
+      // Prevent unhandled rejections — handle has its own .result.
+    });
+
+    const { handle, emit, close } = createSessionExecutionHandle({
+      sessionId: this.store.id,
+      executionId,
+      resultPromise,
+      abort: async (reason) => {
+        await this.loop.abort({ executionId, ...(reason !== undefined ? { reason } : {}) });
+      },
+    });
+
+    const onEvent = this.buildOnEvent(emit);
+
     const runPromise = this.loop.runExecution({
       executionId,
       sessionId: this.store.id,
@@ -585,53 +634,138 @@ export class SessionHarness<P = unknown>
         appendEntry: (i) => this.appendEntry(i).then(() => undefined),
       },
       maxTicks: input.maxTicks ?? this.defaultMaxTicks,
+      stream: streamForCall,
+      onEvent,
       ...(input.signal !== undefined ? { signal: input.signal } : {}),
     });
 
     this._currentExecution = runPromise;
 
-    const resultPromise: Promise<SendResult> = runPromise
-      .then((terminal) => {
+    // Resolve the result promise + emit the final `result` StreamEvent
+    // when the loop terminates. Iterator closes after the result event.
+    void runPromise.then(
+      (terminal) => {
         const result = terminal.result;
-        if (terminal.outcome !== "succeeded" || !result) {
-          throw new Error(
-            `execution ended with outcome=${terminal.outcome}: ${terminal.reason ?? ""}`,
+        if (terminal.outcome === "succeeded" && result) {
+          const response = result.output
+            .filter((b): b is { type: "text"; text: string } => b.type === "text")
+            .map((b) => b.text)
+            .join("");
+          const sendResult: SendResult = {
+            response,
+            output: result.output,
+            toolResults: result.toolResults,
+            usage: result.usage,
+            stopReason: result.stopReason,
+            ticks: result.ticks,
+            executionId,
+          };
+          emit({ type: "result", tick: 0, result: sendResult });
+          resultDeferred.resolve(sendResult);
+        } else {
+          resultDeferred.reject(
+            new Error(
+              `execution ended with outcome=${terminal.outcome}: ${terminal.reason ?? ""}`,
+            ),
           );
         }
-        const response = result.output
-          .filter((b): b is { type: "text"; text: string } => b.type === "text")
-          .map((b) => b.text)
-          .join("");
-        const sendResult: SendResult = {
-          response,
-          output: result.output,
-          toolResults: result.toolResults,
-          usage: result.usage,
-          stopReason: result.stopReason,
-          ticks: result.ticks,
-          executionId,
-        };
-        return sendResult;
-      })
-      .finally(() => {
-        this._currentExecution = null;
-        this.store.setCurrentExecutionId(null);
-        this.store.setStatus("idle");
-      });
-    resultPromise.catch(() => {
-      // Prevent unhandled rejections — handle has its own .result.
-    });
-
-    const handle = createSessionExecutionHandle({
-      executionId,
-      bus: this.bus,
-      resultPromise,
-      abort: async (reason) => {
-        await this.loop.abort({ executionId, ...(reason !== undefined ? { reason } : {}) });
+        close();
       },
-    });
+      (err) => {
+        resultDeferred.reject(err);
+        close();
+      },
+    );
 
     return handle;
+  }
+
+  /**
+   * Translate a `LoopEmittedEvent` into the public StreamEvent shape
+   * and push it onto the handle's iterator queue. Used as the loop's
+   * `onEvent` callback during `runExecution`.
+   */
+  private buildOnEvent(emit: (event: SessionEmitInput) => void): (event: LoopEmittedEvent) => void {
+    return (loopEvent) => {
+      switch (loopEvent.kind) {
+        case "model":
+          emit({ ...loopEvent.delta, tick: loopEvent.tick } as never);
+          return;
+        case "tick-start":
+          emit({ type: "tick-start", tick: loopEvent.tick, tickIndex: loopEvent.tickIndex });
+          return;
+        case "tick-end":
+          emit({
+            type: "tick-end",
+            tick: loopEvent.tick,
+            tickIndex: loopEvent.tickIndex,
+            shouldContinue: loopEvent.shouldContinue,
+            ...(loopEvent.stopReason !== undefined ? { stopReason: loopEvent.stopReason } : {}),
+            ...(loopEvent.usage !== undefined ? { usage: loopEvent.usage } : {}),
+          });
+          return;
+        case "tick":
+          emit({
+            type: "tick",
+            tick: loopEvent.tick,
+            tickIndex: loopEvent.tickIndex,
+            stopReason: loopEvent.stopReason,
+            usage: loopEvent.usage,
+            durationMs: loopEvent.durationMs,
+          });
+          return;
+        case "execution-start":
+          emit({
+            type: "execution-start",
+            tick: loopEvent.tick,
+            ...(loopEvent.rootExecutionId !== undefined
+              ? { rootExecutionId: loopEvent.rootExecutionId }
+              : {}),
+          });
+          return;
+        case "execution-end":
+          emit({
+            type: "execution-end",
+            tick: loopEvent.tick,
+            stopReason: loopEvent.stopReason,
+            ...(loopEvent.aborted !== undefined ? { aborted: loopEvent.aborted } : {}),
+            ...(loopEvent.error !== undefined ? { error: loopEvent.error } : {}),
+          });
+          return;
+        case "tool-dispatch-start":
+          emit({
+            type: "tool-dispatch-start",
+            tick: loopEvent.tick,
+            callId: loopEvent.callId,
+            name: loopEvent.name,
+            via: loopEvent.via,
+          });
+          return;
+        case "tool-dispatch-end":
+          emit({
+            type: "tool-dispatch-end",
+            tick: loopEvent.tick,
+            callId: loopEvent.callId,
+            name: loopEvent.name,
+            outcome: loopEvent.outcome,
+            durationMs: loopEvent.durationMs,
+          });
+          return;
+        case "tool-dispatch":
+          emit({
+            type: "tool-dispatch",
+            tick: loopEvent.tick,
+            callId: loopEvent.callId,
+            name: loopEvent.name,
+            content: loopEvent.content,
+            succeeded: loopEvent.succeeded,
+            durationMs: loopEvent.durationMs,
+            ...(loopEvent.executedBy !== undefined ? { executedBy: loopEvent.executedBy } : {}),
+            ...(loopEvent.isError !== undefined ? { isError: loopEvent.isError } : {}),
+          });
+          return;
+      }
+    };
   }
 
   private async applyExecutorResultBody(input: ApplyExecutorResultInput): Promise<ApplyResult> {

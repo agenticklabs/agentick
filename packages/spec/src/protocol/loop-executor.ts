@@ -128,7 +128,110 @@ export interface RunExecutionInput {
 
   /** Optional metadata passed through to per-tick lifecycle events. */
   readonly metadata?: Readonly<Record<string, unknown>>;
+
+  /**
+   * When true (and `executor.executeStream` exists + the target's
+   * `capabilities.supportsStreaming` is not explicitly false), the
+   * loop uses streaming execution and forwards every `AdapterDelta`
+   * through `onEvent` as `ModelStreamEvent`s.
+   *
+   * When false (or undefined → falls back to the default), the loop
+   * uses the non-streaming `executor.execute` path; only summary-level
+   * events flow to `onEvent`.
+   *
+   * Default: resolved by the caller (SessionHarness) from the
+   * SendInput / CreateSessionInput / AppHarnessOptions cascade.
+   */
+  readonly stream?: boolean;
+
+  /**
+   * Optional event sink. The loop calls this with PARTIAL
+   * `StreamEvent`s — the consumer (typically the session harness)
+   * stamps the missing context fields (id, sequence, sessionId,
+   * timestamp) and pushes onto the handle's event queue.
+   *
+   * Events emitted via this callback are IN-BAND data flow — direct
+   * call chain from loop → consumer. Bus envelopes (via emitDeltaLazy)
+   * still fire in parallel for observability subscribers (devtools,
+   * telemetry). The two paths are independent.
+   *
+   * When `onEvent` is undefined, the loop simply doesn't pump events
+   * — observability via bus is still available.
+   */
+  readonly onEvent?: (event: LoopEmittedEvent) => void;
 }
+
+/**
+ * Events the loop emits through {@link RunExecutionInput.onEvent}.
+ *
+ * The session-side consumer stamps the missing context fields (`id`,
+ * `sequence`, `timestamp`, `sessionId`, `executionId`, `spawnPath`)
+ * when converting into the public `StreamEvent` shape. The loop owns
+ * `tick` since it controls tick boundaries.
+ */
+export type LoopEmittedEvent =
+  // Model layer — passthrough of the executor's AdapterDelta stream
+  | {
+      readonly kind: "model";
+      readonly tick: number;
+      readonly delta: import("../data/streaming.js").AdapterDelta;
+    }
+  // Orchestration layer — loop's own lifecycle + tool dispatch lifecycle
+  | { readonly kind: "tick-start"; readonly tick: number; readonly tickIndex: number }
+  | {
+      readonly kind: "tick-end";
+      readonly tick: number;
+      readonly tickIndex: number;
+      readonly stopReason?: string;
+      readonly shouldContinue: boolean;
+      readonly usage?: UsageStats;
+    }
+  | {
+      readonly kind: "tick";
+      readonly tick: number;
+      readonly tickIndex: number;
+      readonly stopReason: string;
+      readonly usage: UsageStats;
+      readonly durationMs: number;
+    }
+  | {
+      readonly kind: "execution-start";
+      readonly tick: 0;
+      readonly rootExecutionId?: string;
+    }
+  | {
+      readonly kind: "execution-end";
+      readonly tick: number;
+      readonly stopReason: string;
+      readonly aborted?: boolean;
+      readonly error?: { readonly message: string; readonly name: string };
+    }
+  | {
+      readonly kind: "tool-dispatch-start";
+      readonly tick: number;
+      readonly callId: string;
+      readonly name: string;
+      readonly via: "model" | "dispatch";
+    }
+  | {
+      readonly kind: "tool-dispatch-end";
+      readonly tick: number;
+      readonly callId: string;
+      readonly name: string;
+      readonly outcome: "succeeded" | "failed" | "vetoed" | "aborted";
+      readonly durationMs: number;
+    }
+  | {
+      readonly kind: "tool-dispatch";
+      readonly tick: number;
+      readonly callId: string;
+      readonly name: string;
+      readonly content: readonly import("../data/content-blocks.js").ContentBlock[];
+      readonly succeeded: boolean;
+      readonly durationMs: number;
+      readonly executedBy?: string;
+      readonly isError?: boolean;
+    };
 
 export interface ExecutionRunResult {
   readonly executionId: string;
