@@ -307,14 +307,14 @@ export class OpenAIExecutor extends BaseHarness<"executor"> implements LanguageM
           });
         }
 
-        return yield* this.executeStream(params, signal, op);
+        return yield* this.executeStreamBody(params, signal, op);
       } finally {
         this.inFlight.delete(executionId);
       }
     });
   }
 
-  private executeStream(
+  private executeStreamBody(
     params: ChatCompletionCreateParams,
     signal: AbortSignal | undefined,
     op: Operation<unknown, unknown> | undefined,

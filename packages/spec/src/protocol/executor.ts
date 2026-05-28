@@ -29,6 +29,7 @@ import type {
   ExecutorTerminal,
   LanguageModelExecutionResult,
 } from "../data/execution-result.js";
+import type { AdapterDelta } from "../data/streaming.js";
 
 // ============================================================================
 // Error taxonomies for the per-phase commands
@@ -52,6 +53,35 @@ export type ExecuteError =
   | { readonly _tag: "StreamFailed"; readonly cause: unknown };
 
 export type NormalizeError = { readonly _tag: "NormalizationFailed"; readonly cause: unknown };
+
+// ============================================================================
+// Streaming surface — ExecutorStream returned by `executeStream`
+// ============================================================================
+
+/**
+ * Dual-shape handle returned by {@link ExecutorProtocol.executeStream}.
+ *
+ *   - As `AsyncIterable<AdapterDelta>`: consumers iterate provider
+ *     emissions in real time (content-delta tokens, content/message
+ *     summaries, tool-call deltas + summary, reasoning, usage, errors).
+ *   - As `{ result: Promise<TOutput> }`: consumers await the final
+ *     accumulated raw response (same shape `execute` returns).
+ *
+ * Both shapes derive from the same underlying provider call — iterating
+ * the deltas does not change the final result; awaiting `.result` does
+ * not consume deltas for other iterators (where the underlying impl
+ * supports multi-subscribe — the reference impls expect single-iterator
+ * consumption).
+ *
+ * `abort` cancels the in-flight provider request. Subsequent iterations
+ * MAY yield a final `error` delta before the iterator completes.
+ */
+export interface ExecutorStream<TOutput = unknown> extends AsyncIterable<AdapterDelta> {
+  /** Final accumulated raw response — the same shape `execute` would return. */
+  readonly result: Promise<TOutput>;
+  /** Abort the in-flight stream. Best-effort — provider may have already produced output. */
+  abort(reason?: string): void;
+}
 
 // ============================================================================
 // Command inputs
@@ -220,14 +250,34 @@ export interface ExecutorProtocol<
   project(input: ProjectInput): Promise<TInput>;
 
   /**
-   * Target/provider request execution. May stream — implementations
-   * emit `executor:delta` envelopes through the harness's `emitDelta`
-   * for each chunk. The returned `TOutput` is the accumulated raw
-   * response (kept opaque to consumers other than `normalize`).
+   * Target/provider request execution. Returns the final accumulated
+   * raw response as a Promise. Streaming-capable implementations MAY
+   * still emit `executor:delta` envelopes through the harness's
+   * `emitDelta` for observability — but the typed streaming surface
+   * for consumers that want chunk-by-chunk access is {@link executeStream}.
    *
    * @throws {ExecuteError}
    */
   execute(input: ExecuteInput<TInput>): Promise<TOutput>;
+
+  /**
+   * **Optional** streaming surface. When present and the target's
+   * `capabilities.supportsStreaming` is true, the loop executor
+   * prefers this over {@link execute} so consumers can receive
+   * `AdapterDelta`s as the provider emits them.
+   *
+   * Returns an `ExecutorStream<TOutput>` — an `AsyncIterable<AdapterDelta>`
+   * that ALSO exposes `.result: Promise<TOutput>` for callers that just
+   * want the final assembled output. Both shapes derive from the same
+   * underlying provider call.
+   *
+   * Adopters writing a custom executor for a non-streaming provider
+   * (or who want streaming-disabled) simply omit this method —
+   * `execute` continues to satisfy the protocol.
+   *
+   * @throws {ExecuteError} as Promise rejection on `.result`
+   */
+  executeStream?(input: ExecuteInput<TInput>): ExecutorStream<TOutput>;
 
   /**
    * Target output → canonical `ExecutionResult`. Deterministic.
