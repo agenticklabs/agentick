@@ -56,10 +56,15 @@
     "@agentick/reconciler": "workspace:*",
     "@agentick/reconciler-react": "workspace:*",
     "@agentick/runtime": "workspace:*",
-    "@agentick/spec": "workspace:*",
-    "react": "^19.0.0"
+    "@agentick/spec": "workspace:*"
   },
   "devDependencies": {
     "@types/react": "^19.2.13"
+  },
+  "peerDependencies": {
+    "react": "^19.0.0"
+  },
+  "peerDependenciesMeta": {
+    "react": { "optional": true }
   }
 }
