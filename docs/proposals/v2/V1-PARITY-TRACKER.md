@@ -44,71 +44,60 @@ Confidence: high.
 Status legend: `[ ]` open, `[~]` in progress, `[x]` closed, `[deferred]`
 intentional scope, `[blocked]` waiting on prerequisite.
 
-### Critical (block v1 → v2 migration; close immediately)
+### Critical (block v1 → v2 migration; close immediately) — **ALL CLOSED**
 
-- [ ] **G1. Sampling parameters incomplete.**
-      Spec: `LanguageModelParameters` has `temperature, maxOutputTokens,
-      stopSequences, responseFormat`. Missing: `topP`,
-      `frequencyPenalty`, `presencePenalty`. Plumb through both
-      OpenAI + AI SDK executors. v1 has these on the base ModelInput
-      and every adapter passes them.
-      - Files: `packages/spec/src/protocol/executor.ts` (extend
-        interface), `packages/executor-openai/src/openai-executor.ts`
-        (`toOpenAIParams`), `packages/executor-ai-sdk/src/ai-sdk-executor.ts`
-        (input mapper).
+- [x] **G1. Sampling parameters incomplete.** _Closed 2026-05-28
+      (commit `8257bdbf`)._
+      `LanguageModelParameters` now carries `topP`, `frequencyPenalty`,
+      `presencePenalty`. Plumbed through both OpenAI's `toOpenAIParams`
+      and AI SDK's `toAISDKInput`.
 
-- [ ] **G2. Cache tokens missing on streaming path.**
-      `UsageStats.cachedInputTokens` + `cacheCreationTokens` exist
-      in spec. Non-streaming path in OpenAI executor reads
-      `prompt_tokens_details.cached_tokens` and surfaces it. **The
-      streaming path doesn't.** AI SDK path doesn't surface either.
-      Anthropic adapter (when it ships) MUST surface
-      `cache_read_input_tokens` + `cache_creation_input_tokens`.
-      - Files: OpenAI executor (`executeStream` post-loop usage
-        extraction), AI SDK executor (`finish` event usage).
+- [x] **G2. Cache tokens missing on streaming path.** _Closed
+      2026-05-28 (commit `2b9fabb4`)._ OpenAI executeStream + the
+      StreamAccumulator + mapChunkToAdapterDeltas all forward
+      `prompt_tokens_details.cached_tokens` as `cachedInputTokens`.
+      AI SDK finish event reads `cachedInputTokens` +
+      `cacheCreationTokens`; non-streaming normalize() also picks
+      them up from `raw.usage`.
 
-- [ ] **G3. Reasoning content from non-standard fields.**
-      v1 OpenAI adapter reads `delta.reasoning_content` (vLLM) and
-      `delta.reasoning` (LM Studio) and emits `reasoning` delta.
-      v2 OpenAI executor doesn't. Local-model adopters lose the
-      reasoning stream entirely.
-      - Files: `packages/executor-openai/src/openai-executor.ts`
-        (`mapChunkToAdapterDeltas`).
+- [x] **G3. Reasoning content from non-standard fields.** _Closed
+      2026-05-28 (commit `2b9fabb4`)._ OpenAI reads
+      `delta.reasoning_content` (vLLM) and `delta.reasoning`
+      (LM Studio) via duck-typing — emits
+      reasoning-start/delta/end/summary deltas, accumulates across
+      chunks, normalize() surfaces a `ReasoningBlock` in the
+      ContentBlock output for both streaming and non-streaming paths.
 
-- [ ] **G4. Base64 image source silently broken.**
-      v1 maps `block.source.type === "base64"` to a data URL
-      (`data:${mime};base64,${data}`). v2 OpenAI executor sets
-      `imageUrl: "[binary]"` (placeholder). Same regression in
-      `defineExecutor`'s `defaultProject`. Adopters with base64
-      image inputs silently get text "[binary]" instead of their
-      image.
-      - Files: `packages/executor-openai/src/openai-executor.ts`
-        (`toOpenAIMessages`), `packages/executor/src/define-executor.ts`
-        (`defaultProject` block mapping), shared block→part helper
-        if extracted.
+- [x] **G4. Base64 image source silently broken.** _Closed
+      2026-05-28 (commit `8257bdbf`)._ `defaultProject` in
+      `define-executor.ts` maps `Base64Source` →
+      `data:${mime};base64,${data}` (and S3/GCS/Reference → canonical
+      URIs). OpenAI's `toOpenAIMessages` passes the data URL through.
+      The `[binary]` placeholder is gone.
 
-- [ ] **G5. `providerOptions` spread for adopter escape hatch.**
-      v1 spreads `normalizedInput.providerOptions.openai` (or
-      `.anthropic`, `.google`) onto the base request AFTER our
-      canonical params, letting adopters set provider-specific
-      flags (logprobs, seed, store, n, OpenAI's `prediction`,
-      Anthropic's `system` arrays, etc.). v2 `ExecutionTarget` has
-      `providerOptions: Record<string, unknown>` declared but
-      **neither executor reads it**. Adopters can't escape canonical
-      shape.
-      - Files: `packages/executor-openai/src/openai-executor.ts`
-        (`toOpenAIParams` end-of-function), `packages/executor-ai-sdk/src/ai-sdk-executor.ts`
-        (`toAISDKInput`-equivalent).
+- [x] **G5. `providerOptions` spread for adopter escape hatch.**
+      _Closed 2026-05-28 (commits `8257bdbf` + `10a4d2e2`)._ OpenAI
+      reads `target.providerOptions.openai` and spreads onto the
+      request body. AI SDK forwards `target.providerOptions` directly
+      as the SDK's `providerOptions` (already per-provider keyed by
+      AI SDK convention). **Also**: `ProviderOptions` converted from
+      a flat type alias to an empty seed interface adapter packages
+      augment via `declare module "@agentick/spec"` — matches v1's
+      typed pattern. `executor-openai` contributes the typed `openai`
+      slot.
 
-- [ ] **G6. Bus envelopes for deltas on streaming path.**
-      Real regression vs the run path. v2's `executeStream` impls
-      emit deltas into the iterator queue but **don't also emit
-      through `emitDeltaLazy`**. Observability subscribers (devtools,
-      telemetry, `app.events({surface: "executor", phase: "delta"})`)
-      see nothing on the streaming path.
-      - Files: OpenAI + AI SDK executor `executeStream` —
-        every `emit(delta)` also calls
-        `this.emitDeltaLazy(op, () => delta)`.
+- [x] **G6. Bus envelopes for deltas on streaming path.** _Closed
+      2026-05-28 (commit `2b9fabb4`)._ Both `executeStream` impls
+      construct a per-stream Operation and mirror every emit(delta)
+      through `emitDeltaLazy` (fire-and-forget so iterator hot path
+      isn't gated on subscriber latency). Observability subscribers
+      see the same deltas as iterator consumers.
+
+- [x] **G15. responseFormat.name for json_schema mode.** _Closed
+      2026-05-28 (commit `8257bdbf`, free-ride with G1)._ Spec's
+      `responseFormat` now carries optional `name`. OpenAI executor
+      passes it through (was previously hardcoded to `"response"`).
+      Was Medium priority; folded into the G1 spec touch.
 
 ### High (close before 1.0)
 
@@ -364,3 +353,10 @@ work happens — does NOT block the parity fixes.
 ## Update log
 
 - 2026-05-28: initial audit (this document).
+- 2026-05-28: closed all 6 Critical gaps (G1–G6) plus G15
+  (responseFormat name, free-ride with G1). Spec changes: typed
+  ProviderOptions as module-augmentable interface (matches v1
+  pattern); `executor-openai` contributes its typed slot via
+  `declare module "@agentick/spec"`. Commits: `8257bdbf` (G1, G4, G5,
+  G15), `10a4d2e2` (ProviderOptions module augmentation), `2b9fabb4`
+  (G2, G3, G6). 5337 tests passing, full typecheck clean.
