@@ -276,8 +276,27 @@ export class OpenAIExecutor extends BaseHarness<"executor"> implements LanguageM
         );
     }
 
+    // Per-stream Operation so observability subscribers correlate deltas
+    // to a single executor invocation. The op flows through emitDeltaLazy
+    // alongside the iterator queue — bus subscribers (devtools,
+    // telemetry, `app.events({surface: "executor", phase: "delta"})`)
+    // see the same deltas the consumer reads from the AsyncIterable.
+    const executionId = input.scope?.executionId ?? `exec:${ulid()}`;
+    const streamOp: Operation<ExecuteInput<LanguageModelInput>, ChatCompletion> = {
+      opId: `executor:executeStream:${executionId}:${ulid()}`,
+      surface: "executor",
+      name: "executor:command:execute",
+      scope: input.scope ?? { executionId },
+      input,
+    };
+
     const emit = (delta: AdapterDelta): void => {
       if (done) return;
+      // Mirror to bus envelopes for observability — fire-and-forget so
+      // we don't block the iterator hot path on subscriber latency.
+      void Effect.runPromise(
+        this.emitDeltaLazy(streamOp, () => delta).pipe(Effect.catchAll(() => Effect.void)),
+      );
       const r = resolvers.shift();
       if (r) r({ value: delta, done: false });
       else queue.push(delta);
@@ -303,21 +322,31 @@ export class OpenAIExecutor extends BaseHarness<"executor"> implements LanguageM
         emit({ type: "message-start", role: "assistant", model: params.model });
 
         // Per-block state needed for symmetric start/end emission.
+        // Reasoning lives in its own block — vLLM/LM Studio emit
+        // chain-of-thought BEFORE the assistant content, so it occupies
+        // a lower blockIndex than the text content block.
         let textBlockStarted = false;
         const toolBlockStartedByIndex = new Set<number>();
+        let reasoningBlockStarted = false;
+        let reasoningAccum = "";
+        const reasoningBlockIndex = -1; // sentinel; emitted before text (index 0)
 
         for await (const chunk of stream) {
           accum.push(chunk);
-          for (const delta of mapChunkToAdapterDeltas(
-            chunk,
-            { textBlockStarted, toolBlockStartedByIndex },
-          )) {
+          for (const delta of mapChunkToAdapterDeltas(chunk, {
+            textBlockStarted,
+            toolBlockStartedByIndex,
+            reasoningBlockStarted,
+            reasoningBlockIndex,
+          })) {
             // Track block-start side effects so mapChunk knows what to
             // emit on subsequent chunks.
             if (delta.type === "content-start") textBlockStarted = true;
             if (delta.type === "tool-call-start") {
               toolBlockStartedByIndex.add(delta.blockIndex);
             }
+            if (delta.type === "reasoning-start") reasoningBlockStarted = true;
+            if (delta.type === "reasoning-delta") reasoningAccum += delta.delta;
             emit(delta);
           }
         }
@@ -332,6 +361,14 @@ export class OpenAIExecutor extends BaseHarness<"executor"> implements LanguageM
         const toolCallsRaw = choice.message.tool_calls ?? [];
 
         let blockIndex = 0;
+        if (reasoningBlockStarted && reasoningAccum.length > 0) {
+          emit({ type: "reasoning-end", blockIndex: reasoningBlockIndex });
+          emit({
+            type: "reasoning",
+            blockIndex: reasoningBlockIndex,
+            reasoning: reasoningAccum,
+          });
+        }
         if (textBlockStarted && text.length > 0) {
           emit({ type: "content-end", blockIndex });
           emit({
@@ -375,6 +412,9 @@ export class OpenAIExecutor extends BaseHarness<"executor"> implements LanguageM
           inputTokens: final.usage?.prompt_tokens ?? 0,
           outputTokens: final.usage?.completion_tokens ?? 0,
           totalTokens: final.usage?.total_tokens ?? 0,
+          ...(final.usage?.prompt_tokens_details?.cached_tokens !== undefined
+            ? { cachedInputTokens: final.usage.prompt_tokens_details.cached_tokens }
+            : {}),
         };
         const stopReason = mapFinishReason(finishReason);
         emit({ type: "message-end", stopReason, usage });
@@ -964,6 +1004,19 @@ function normalizeImpl(input: NormalizeInput<unknown>): LanguageModelExecutionRe
   }
 
   const output: ContentBlock[] = [];
+  // Reasoning blocks ride before text — OpenAI-compatible servers
+  // (vLLM `reasoning_content`, LM Studio `reasoning`) expose
+  // chain-of-thought via non-standard message fields. Duck-typed since
+  // neither lives in the SDK's typed shape.
+  {
+    const m = message as unknown as Record<string, unknown>;
+    const rc = m.reasoning_content;
+    const r = m.reasoning;
+    const reasoning = typeof rc === "string" ? rc : typeof r === "string" ? r : undefined;
+    if (reasoning !== undefined && reasoning.length > 0) {
+      output.push({ type: "reasoning", text: reasoning });
+    }
+  }
   if (typeof message.content === "string" && message.content.length > 0) {
     output.push({ type: "text", text: message.content });
   } else if (Array.isArray(message.content)) {
@@ -1053,10 +1106,16 @@ class StreamAccumulator {
   private created = 0;
   private model = "";
   private text = "";
+  private reasoning = "";
   private finishReason: ChatCompletion["choices"][0]["finish_reason"] | null = null;
   private toolCallsByIndex = new Map<number, { id: string; name: string; arguments: string }>();
   private usage:
-    | { prompt_tokens: number; completion_tokens: number; total_tokens: number }
+    | {
+        prompt_tokens: number;
+        completion_tokens: number;
+        total_tokens: number;
+        prompt_tokens_details?: { cached_tokens?: number };
+      }
     | undefined;
 
   push(chunk: ChatCompletionChunk): void {
@@ -1068,6 +1127,13 @@ class StreamAccumulator {
         prompt_tokens: chunk.usage.prompt_tokens ?? 0,
         completion_tokens: chunk.usage.completion_tokens ?? 0,
         total_tokens: chunk.usage.total_tokens ?? 0,
+        ...(chunk.usage.prompt_tokens_details?.cached_tokens !== undefined
+          ? {
+              prompt_tokens_details: {
+                cached_tokens: chunk.usage.prompt_tokens_details.cached_tokens,
+              },
+            }
+          : {}),
       };
     }
     const choice = chunk.choices?.[0];
@@ -1076,6 +1142,15 @@ class StreamAccumulator {
     const delta = choice.delta;
     if (!delta) return;
     if (typeof delta.content === "string") this.text += delta.content;
+    // vLLM `reasoning_content`, LM Studio `reasoning` — duck-typed since
+    // neither field is in the SDK's typed shape.
+    {
+      const d = delta as unknown as Record<string, unknown>;
+      const rc = d.reasoning_content;
+      if (typeof rc === "string") this.reasoning += rc;
+      const r = d.reasoning;
+      if (typeof r === "string") this.reasoning += r;
+    }
     if (Array.isArray(delta.tool_calls)) {
       for (const tc of delta.tool_calls) {
         const idx = tc.index;
@@ -1097,12 +1172,16 @@ class StreamAccumulator {
         function: { name: v.name, arguments: v.arguments },
       }));
 
-    const message: ChatCompletion["choices"][0]["message"] = {
-      role: "assistant",
+    // Reasoning rides as a non-standard field on the synthesized
+    // message — normalize() picks it up via duck-typing, same as the
+    // non-streaming response path.
+    const message = {
+      role: "assistant" as const,
       content: this.text.length > 0 ? this.text : null,
       refusal: null,
       ...(toolCalls.length > 0 ? { tool_calls: toolCalls } : {}),
-    };
+      ...(this.reasoning.length > 0 ? { reasoning_content: this.reasoning } : {}),
+    } as ChatCompletion["choices"][0]["message"];
 
     return {
       id: this.id || `chatcmpl-${Date.now()}`,
@@ -1134,7 +1213,12 @@ class StreamAccumulator {
  */
 function mapChunkToAdapterDeltas(
   chunk: ChatCompletionChunk,
-  state: { textBlockStarted: boolean; toolBlockStartedByIndex: Set<number> },
+  state: {
+    textBlockStarted: boolean;
+    toolBlockStartedByIndex: Set<number>;
+    reasoningBlockStarted: boolean;
+    reasoningBlockIndex: number;
+  },
 ): AdapterDelta[] {
   const out: AdapterDelta[] = [];
   // Usage chunks (some providers emit a standalone trailer with usage).
@@ -1145,6 +1229,9 @@ function mapChunkToAdapterDeltas(
         inputTokens: chunk.usage.prompt_tokens ?? 0,
         outputTokens: chunk.usage.completion_tokens ?? 0,
         totalTokens: chunk.usage.total_tokens ?? 0,
+        ...(chunk.usage.prompt_tokens_details?.cached_tokens !== undefined
+          ? { cachedInputTokens: chunk.usage.prompt_tokens_details.cached_tokens }
+          : {}),
       },
     });
   }
@@ -1152,6 +1239,29 @@ function mapChunkToAdapterDeltas(
   if (!choice) return out;
   const delta = choice.delta;
   if (delta) {
+    // Reasoning content — OpenAI-compatible servers expose chain-of-thought
+    // via non-standard fields: vLLM uses `reasoning_content`, LM Studio
+    // uses `reasoning`. v1 surfaces this through reasoning deltas; we do
+    // the same. Both fields are duck-typed since they aren't in the
+    // OpenAI SDK's typed shape.
+    const reasoningChunk = ((): string | undefined => {
+      const d = delta as unknown as Record<string, unknown>;
+      const rc = d.reasoning_content;
+      if (typeof rc === "string" && rc.length > 0) return rc;
+      const r = d.reasoning;
+      if (typeof r === "string" && r.length > 0) return r;
+      return undefined;
+    })();
+    if (reasoningChunk !== undefined) {
+      if (!state.reasoningBlockStarted) {
+        out.push({ type: "reasoning-start", blockIndex: state.reasoningBlockIndex });
+      }
+      out.push({
+        type: "reasoning-delta",
+        blockIndex: state.reasoningBlockIndex,
+        delta: reasoningChunk,
+      });
+    }
     if (typeof delta.content === "string" && delta.content.length > 0) {
       if (!state.textBlockStarted) {
         out.push({ type: "content-start", blockIndex: 0, blockType: "text" });

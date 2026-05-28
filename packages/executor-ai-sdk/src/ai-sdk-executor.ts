@@ -197,8 +197,22 @@ export class AISDKExecutor extends BaseHarness<"executor"> implements LanguageMo
         );
     }
 
+    // Per-stream Operation so bus observers see the same deltas the
+    // iterator consumer reads. See OpenAI executor for the same pattern.
+    const executionId = input.scope?.executionId ?? `exec:${ulid()}`;
+    const streamOp: Operation<ExecuteInput<LanguageModelInput>, unknown> = {
+      opId: `executor:executeStream:${executionId}:${ulid()}`,
+      surface: "executor",
+      name: "executor:command:execute",
+      scope: input.scope ?? { executionId },
+      input,
+    };
+
     const emit = (delta: AdapterDelta): void => {
       if (done) return;
+      void Effect.runPromise(
+        this.emitDeltaLazy(streamOp, () => delta).pipe(Effect.catchAll(() => Effect.void)),
+      );
       const r = resolvers.shift();
       if (r) r({ value: delta, done: false });
       else queue.push(delta);
@@ -313,7 +327,13 @@ export class AISDKExecutor extends BaseHarness<"executor"> implements LanguageMo
             case "finish-step": {
               const fin = (part.finishReason as FinishReason | undefined);
               const us = part.usage as
-                | { inputTokens?: number; outputTokens?: number; totalTokens?: number }
+                | {
+                    inputTokens?: number;
+                    outputTokens?: number;
+                    totalTokens?: number;
+                    cachedInputTokens?: number;
+                    cacheCreationTokens?: number;
+                  }
                 | undefined;
               if (fin) stopReason = mapFinishReason(fin);
               if (us) {
@@ -321,6 +341,12 @@ export class AISDKExecutor extends BaseHarness<"executor"> implements LanguageMo
                   inputTokens: us.inputTokens ?? 0,
                   outputTokens: us.outputTokens ?? 0,
                   totalTokens: us.totalTokens ?? 0,
+                  ...(us.cachedInputTokens !== undefined
+                    ? { cachedInputTokens: us.cachedInputTokens }
+                    : {}),
+                  ...(us.cacheCreationTokens !== undefined
+                    ? { cacheCreationTokens: us.cacheCreationTokens }
+                    : {}),
                 };
               }
               break;
@@ -863,14 +889,29 @@ function normalizeImpl(input: NormalizeInput<unknown>): LanguageModelExecutionRe
     });
   }
 
+  const rawUsage = raw.usage as
+    | {
+        inputTokens?: number;
+        outputTokens?: number;
+        totalTokens?: number;
+        cachedInputTokens?: number;
+        cacheCreationTokens?: number;
+      }
+    | undefined;
   const result: LanguageModelExecutionResult = {
     specVersion: SPEC_VERSION,
     output,
     stopReason: mapFinishReason(raw.finishReason),
     usage: {
-      inputTokens: raw.usage?.inputTokens ?? 0,
-      outputTokens: raw.usage?.outputTokens ?? 0,
-      totalTokens: raw.usage?.totalTokens ?? 0,
+      inputTokens: rawUsage?.inputTokens ?? 0,
+      outputTokens: rawUsage?.outputTokens ?? 0,
+      totalTokens: rawUsage?.totalTokens ?? 0,
+      ...(rawUsage?.cachedInputTokens !== undefined
+        ? { cachedInputTokens: rawUsage.cachedInputTokens }
+        : {}),
+      ...(rawUsage?.cacheCreationTokens !== undefined
+        ? { cacheCreationTokens: rawUsage.cacheCreationTokens }
+        : {}),
     },
     ...(toolCalls.length > 0 ? { toolCalls } : {}),
     raw,
