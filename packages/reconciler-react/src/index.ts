@@ -85,3 +85,7 @@ export {
 // Layer C — Harness
 export { ReconcilerHarness } from "./harness/reconciler-harness.js";
 export type { ReconcilerHarnessOptions } from "./harness/reconciler-harness.js";
+
+// ReconcilerFactory factory — the canonical way to wire React's
+// reconciler into createApp. Also defaulted by @agentick/app/react.
+export { reactReconciler } from "./factory.js";

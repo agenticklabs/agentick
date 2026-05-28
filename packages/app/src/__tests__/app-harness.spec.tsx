@@ -12,11 +12,12 @@ import { describe, expect, it } from "vitest";
 
 import { MockLanguageModelExecutor } from "@agentick/executor";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
-import { ReconcilerHarness } from "@agentick/reconciler-react";
+import { ReconcilerHarness, reactReconciler } from "@agentick/reconciler-react";
 import { InMemoryHandlerResolver } from "@agentick/tool-executor";
 import type { ContentBlock, ExecutionTarget } from "@agentick/spec";
 
-import { AppHarness, createApp } from "../index.js";
+import { AppHarness } from "../index.js";
+import { createApp } from "../react.js";
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -602,6 +603,7 @@ describe("AppHarness — slot cascade", () => {
     const app = new AppHarness({
       rootElement: React.createElement(MinimalAgent),
       executor,
+      reconciler: reactReconciler(),
       target: mkTarget(),
       defaultMaxTicks: 999, // shorthand
       session: { defaultMaxTicks: 1 }, // longhand — should win
@@ -633,6 +635,7 @@ describe("AppHarness — slot cascade", () => {
     const app = new AppHarness({
       rootElement: React.createElement(MinimalAgent),
       executor,
+      reconciler: reactReconciler(),
       target: mkTarget(),
       defaultMaxTicks: 1, // shorthand
       session: { defaultMaxTicks: 1 }, // longhand
@@ -666,6 +669,7 @@ describe("AppHarness — constructor variant", () => {
     const app = new AppHarness({
       rootElement: React.createElement(MinimalAgent),
       executor,
+      reconciler: reactReconciler(),
       target: mkTarget(),
       toolHandlers: new Map([
         [

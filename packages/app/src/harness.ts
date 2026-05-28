@@ -29,7 +29,6 @@ import {
   ulid,
 } from "@agentick/runtime";
 import { LoopExecutorHarness } from "@agentick/loop-executor";
-import { ReconcilerHarness, type ReconcilerHarnessOptions } from "@agentick/reconciler-react";
 import { SessionHarness, type SessionHarnessOptions } from "@agentick/session";
 import {
   InMemoryHandlerResolver,
@@ -154,12 +153,20 @@ export interface AppHarnessOptions<P = unknown> {
   // ────────── Sub-harness slots (shared across sessions) ──────────
 
   /**
-   * Reconciler slot — pass a pre-built `ReconcilerProtocol` impl (e.g.,
-   * a future Angular reconciler) OR options to construct the bundled
-   * React `ReconcilerHarness` with. Defaults to the bundled React
-   * reconciler with empty options.
+   * Reconciler slot. Required — `@agentick/app` is reconciler-agnostic
+   * by design and does NOT default to any specific reconciler. Pass:
+   *
+   *   - A pre-built `ReconcilerProtocol` instance (e.g., a future
+   *     Angular reconciler).
+   *   - A `ReconcilerFactory` (produced by `defineReconciler(...)` or
+   *     `reactReconciler(...)` etc.). The App calls the factory at
+   *     construction with the shared substrate so reconciler events
+   *     flow through `app.events()`.
+   *
+   * For the React default, use `createApp` from `@agentick/app/react`
+   * which defaults `reconciler: reactReconciler()` automatically.
    */
-  readonly reconciler?: ReconcilerProtocol | ReconcilerHarnessOptions | ReconcilerFactory;
+  readonly reconciler: ReconcilerProtocol | ReconcilerFactory;
 
   /**
    * Loop executor slot. Accepts:
@@ -1085,9 +1092,8 @@ function makeBusAsyncIterator(bus: EventBus, query: EventQuery): AsyncIterator<P
 // ─────────────────────────────────────────────────────────────────────
 
 /**
- * `ReconcilerProtocol` instances expose a `mount()` method;
- * `ReconcilerHarnessOptions` is a plain options object that doesn't.
- * Duck-type to discriminate.
+ * `ReconcilerProtocol` instances expose a `mount()` method; factories
+ * carry the `reconcilerFactory: true` marker. Duck-type to discriminate.
  */
 function isReconcilerInstance(v: unknown): v is ReconcilerProtocol {
   return (
@@ -1096,18 +1102,29 @@ function isReconcilerInstance(v: unknown): v is ReconcilerProtocol {
 }
 
 function resolveReconciler(
-  slot: ReconcilerProtocol | ReconcilerHarnessOptions | ReconcilerFactory | undefined,
+  slot: ReconcilerProtocol | ReconcilerFactory | undefined,
   scopeId: string,
   journal: OperationJournal,
   bus: EventBus,
   inbox: MessageInbox,
 ): ReconcilerProtocol {
+  if (slot === undefined) {
+    throw new Error(
+      "createApp: `reconciler` is required. Import createApp from " +
+        '"@agentick/app/react" for the React default, or pass a ' +
+        "`ReconcilerFactory` (e.g., `reactReconciler()` from " +
+        '"@agentick/reconciler-react").',
+    );
+  }
   if (isReconcilerFactory(slot)) {
     return slot({ scopeId, journal, bus, inbox });
   }
-  if (slot && isReconcilerInstance(slot)) return slot;
-  const opts = (slot as ReconcilerHarnessOptions | undefined) ?? {};
-  return new ReconcilerHarness(scopeId, journal, bus, inbox, opts);
+  if (isReconcilerInstance(slot)) return slot;
+  throw new Error(
+    "createApp: `reconciler` must be a `ReconcilerProtocol` instance " +
+      "or a `ReconcilerFactory` (produced by `defineReconciler(...)` " +
+      "or `reactReconciler(...)` etc.).",
+  );
 }
 
 /**

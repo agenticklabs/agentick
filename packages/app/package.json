@@ -1,7 +1,7 @@
 {
   "name": "@agentick/app",
   "version": "0.0.0",
-  "description": "Reference app harness for Agentick v2. Outermost runtime boundary — owns shared substrate, shared sub-harnesses (reconciler, loop, executor), the session registry, and the createApp ergonomic surface.",
+  "description": "Reference app harness for Agentick v2. Outermost runtime boundary — owns shared substrate, shared sub-harnesses (reconciler, loop, executor), the session registry, and the createApp ergonomic surface. Reconciler-agnostic — adopters writing React agents import from `@agentick/app/react` for the React default.",
   "keywords": [
     "agent",
     "agentick",
@@ -26,6 +26,11 @@
       "types": "./src/index.ts",
       "import": "./src/index.ts",
       "default": "./src/index.ts"
+    },
+    "./react": {
+      "types": "./src/react.ts",
+      "import": "./src/react.ts",
+      "default": "./src/react.ts"
     }
   },
   "publishConfig": {
@@ -34,6 +39,11 @@
         "types": "./dist/index.d.ts",
         "import": "./dist/index.js",
         "default": "./dist/index.js"
+      },
+      "./react": {
+        "types": "./dist/react.d.ts",
+        "import": "./dist/react.js",
+        "default": "./dist/react.js"
       }
     }
   },
@@ -43,7 +53,6 @@
   },
   "dependencies": {
     "@agentick/loop-executor": "workspace:*",
-    "@agentick/reconciler-react": "workspace:*",
     "@agentick/runtime": "workspace:*",
     "@agentick/session": "workspace:*",
     "@agentick/spec": "workspace:*",
@@ -53,7 +62,14 @@
   "devDependencies": {
     "@agentick/executor": "workspace:*",
     "@agentick/knobs": "workspace:*",
+    "@agentick/reconciler-react": "workspace:*",
     "@types/react": "^19.2.5",
     "react": "^19.2.4"
+  },
+  "peerDependencies": {
+    "@agentick/reconciler-react": "workspace:*"
+  },
+  "peerDependenciesMeta": {
+    "@agentick/reconciler-react": { "optional": true }
   }
 }

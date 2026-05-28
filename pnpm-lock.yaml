@@ -460,9 +460,6 @@ importers:
       '@agentick/loop-executor':
         specifier: workspace:*
         version: link:../loop-executor
-      '@agentick/reconciler-react':
-        specifier: workspace:*
-        version: link:../reconciler-react
       '@agentick/runtime':
         specifier: workspace:*
         version: link:../runtime
@@ -485,6 +482,9 @@ importers:
       '@agentick/knobs':
         specifier: workspace:*
         version: link:../knobs
+      '@agentick/reconciler-react':
+        specifier: workspace:*
+        version: link:../reconciler-react
       '@types/react':
         specifier: ^19.2.5
         version: 19.2.13

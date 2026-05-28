@@ -37,7 +37,7 @@ import type {
   RenderedTree,
   ToolDeclaration,
 } from "@agentick/spec";
-import { createApp } from "@agentick/app";
+import { createApp } from "@agentick/app/react";
 import { MockLanguageModelExecutor } from "@agentick/executor";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
 

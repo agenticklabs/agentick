@@ -15,7 +15,7 @@
 import React from "react";
 import { describe, expect, it } from "vitest";
 
-import { createApp } from "../create-app.js";
+import { createApp } from "../react.js";
 import { MockLanguageModelExecutor } from "@agentick/executor";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
 import type { AppExtension, AppInstaller, ContentBlock } from "@agentick/spec";

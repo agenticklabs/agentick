@@ -24,7 +24,7 @@ import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
 import { useKnob } from "@agentick/knobs/react";
 import type { ContentBlock } from "@agentick/spec";
 
-import { createApp } from "../create-app.js";
+import { createApp } from "../react.js";
 
 async function mkExecutor() {
   const exec = new MockLanguageModelExecutor(
