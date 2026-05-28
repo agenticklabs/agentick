@@ -72,6 +72,8 @@ import type {
 } from "@agentick/spec";
 import { SPEC_VERSION } from "@agentick/spec";
 
+import { ThinkTagSplitter, splitThinkTags } from "./think-tag-splitter.js";
+
 // ============================================================================
 // ProviderOptions augmentation — typed OpenAI escape hatch
 // ============================================================================
@@ -142,6 +144,18 @@ export interface OpenAIExecutorOptions {
    */
   readonly stream?: boolean;
   /**
+   * Parse inline `<think>...</think>` tags from `delta.content` and
+   * route them as reasoning deltas. For OpenAI-compatible servers
+   * (LM Studio, ollama, some quantized local models) that don't
+   * extract reasoning server-side and instead emit raw tags in the
+   * content channel. Defaults to `false` — adopters whose server
+   * exposes reasoning via the standard `reasoning_content` /
+   * `reasoning` fields (vLLM, LM Studio recent builds) get reasoning
+   * extraction automatically via {@link mapChunkToAdapterDeltas}
+   * without enabling this option.
+   */
+  readonly parseThinkTags?: boolean;
+  /**
    * Override the self-described target. Defaults to
    * `{ kind: "language-model", provider: "openai", modelId: options.model ?? "gpt-4o-mini", capabilities: {...} }`.
    * Set this when surfacing a non-stock OpenAI-compatible endpoint
@@ -181,6 +195,7 @@ export class OpenAIExecutor extends BaseHarness<"executor"> implements LanguageM
   private readonly client: OpenAI;
   private readonly defaultModel: string | undefined;
   private readonly streamByDefault: boolean;
+  private readonly parseThinkTags: boolean;
   private readonly inFlight = new Map<string, InFlightEntry>();
   private readonly aborted = new Set<string>();
 
@@ -195,6 +210,7 @@ export class OpenAIExecutor extends BaseHarness<"executor"> implements LanguageM
     this.client = options.client ?? new OpenAI(buildClientOptions(options));
     this.defaultModel = options.model;
     this.streamByDefault = options.stream ?? false;
+    this.parseThinkTags = options.parseThinkTags ?? false;
     this.target = options.target ?? {
       kind: "language-model",
       provider: "openai",
@@ -329,16 +345,55 @@ export class OpenAIExecutor extends BaseHarness<"executor"> implements LanguageM
         const toolBlockStartedByIndex = new Set<number>();
         let reasoningBlockStarted = false;
         let reasoningAccum = "";
+        let textAccum = "";
         const reasoningBlockIndex = -1; // sentinel; emitted before text (index 0)
+
+        // Inline `<think>` parser. Active only when the executor was
+        // constructed with `parseThinkTags: true`. Routes text inside
+        // think tags to the reasoning stream and tracks accumulators
+        // for the symmetric summary events.
+        const thinkSplitter = this.parseThinkTags ? new ThinkTagSplitter() : null;
+
+        const emitSegments = (text: string): void => {
+          if (!thinkSplitter) return;
+          for (const seg of thinkSplitter.feed(text)) {
+            if (seg.mode === "text") {
+              if (!textBlockStarted) {
+                emit({ type: "content-start", blockIndex: 0, blockType: "text" });
+                textBlockStarted = true;
+              }
+              emit({ type: "content-delta", blockIndex: 0, delta: seg.content });
+              textAccum += seg.content;
+            } else {
+              if (!reasoningBlockStarted) {
+                emit({ type: "reasoning-start", blockIndex: reasoningBlockIndex });
+                reasoningBlockStarted = true;
+              }
+              emit({
+                type: "reasoning-delta",
+                blockIndex: reasoningBlockIndex,
+                delta: seg.content,
+              });
+              reasoningAccum += seg.content;
+            }
+          }
+        };
 
         for await (const chunk of stream) {
           accum.push(chunk);
-          for (const delta of mapChunkToAdapterDeltas(chunk, {
-            textBlockStarted,
-            toolBlockStartedByIndex,
-            reasoningBlockStarted,
-            reasoningBlockIndex,
-          })) {
+          // When parseThinkTags is active, suppress mapChunk's
+          // content-start/content-delta emission and route the raw text
+          // through the splitter instead — the splitter decides what's
+          // text vs reasoning. We do this by lying about textBlockStarted
+          // so mapChunk never emits its content events.
+          const mapState = thinkSplitter
+            ? { textBlockStarted: true, toolBlockStartedByIndex, reasoningBlockStarted, reasoningBlockIndex }
+            : { textBlockStarted, toolBlockStartedByIndex, reasoningBlockStarted, reasoningBlockIndex };
+          for (const delta of mapChunkToAdapterDeltas(chunk, mapState)) {
+            if (thinkSplitter && delta.type === "content-delta") {
+              emitSegments(delta.delta);
+              continue;
+            }
             // Track block-start side effects so mapChunk knows what to
             // emit on subsequent chunks.
             if (delta.type === "content-start") textBlockStarted = true;
@@ -350,14 +405,55 @@ export class OpenAIExecutor extends BaseHarness<"executor"> implements LanguageM
             emit(delta);
           }
         }
+        // Flush any buffered partial-tag content at stream end.
+        if (thinkSplitter) {
+          for (const seg of thinkSplitter.flush()) {
+            if (seg.mode === "text") {
+              if (!textBlockStarted) {
+                emit({ type: "content-start", blockIndex: 0, blockType: "text" });
+                textBlockStarted = true;
+              }
+              emit({ type: "content-delta", blockIndex: 0, delta: seg.content });
+              textAccum += seg.content;
+            } else {
+              if (!reasoningBlockStarted) {
+                emit({ type: "reasoning-start", blockIndex: reasoningBlockIndex });
+                reasoningBlockStarted = true;
+              }
+              emit({
+                type: "reasoning-delta",
+                blockIndex: reasoningBlockIndex,
+                delta: seg.content,
+              });
+              reasoningAccum += seg.content;
+            }
+          }
+        }
 
         // Symmetric end + summary events from the accumulator state.
         // We close any open blocks that the provider didn't explicitly
         // close, then emit the summary events.
         const final = accum.toChatCompletion(params.model);
+        // When parseThinkTags is on, the splitter routed text — use the
+        // cleaned accumulators instead of the raw message.content
+        // (which still contains the literal <think>...</think>).
+        // Also rewrite the final ChatCompletion's message.content and
+        // attach reasoning_content so normalize() sees the cleaned shape.
+        if (thinkSplitter) {
+          (final.choices[0]!.message as unknown as Record<string, unknown>).content =
+            textAccum.length > 0 ? textAccum : null;
+          if (reasoningAccum.length > 0) {
+            (final.choices[0]!.message as unknown as Record<string, unknown>).reasoning_content =
+              reasoningAccum;
+          }
+        }
         const choice = final.choices[0]!;
         const finishReason = choice.finish_reason ?? "stop";
-        const text = typeof choice.message.content === "string" ? choice.message.content : "";
+        const text = thinkSplitter
+          ? textAccum
+          : typeof choice.message.content === "string"
+            ? choice.message.content
+            : "";
         const toolCallsRaw = choice.message.tool_calls ?? [];
 
         let blockIndex = 0;
@@ -681,9 +777,17 @@ export class OpenAIExecutor extends BaseHarness<"executor"> implements LanguageM
         return raw as ExecutorTerminal<LanguageModelExecutionResult>;
       }
 
+      // When parseThinkTags is enabled, rewrite the message content so
+      // normalize() sees the cleaned text + extracted reasoning.
+      // (The streaming path already cleans the synthesized
+      // ChatCompletion before reaching here.)
+      const rawForNormalize = this.parseThinkTags
+        ? applyThinkTagSplitToChatCompletion(raw)
+        : raw;
+
       // 3. normalize (deterministic)
       const result = yield* Effect.try({
-        try: () => normalizeImpl({ targetOutput: raw, target: input.target }),
+        try: () => normalizeImpl({ targetOutput: rawForNormalize, target: input.target }),
         catch: (cause): ExecutorError => ({
           _tag: "NormalizationFailed",
           cause,
@@ -714,6 +818,30 @@ function buildClientOptions(opts: OpenAIExecutorOptions): ClientOptions {
   if (opts.timeout !== undefined) out.timeout = opts.timeout;
   if (opts.maxRetries !== undefined) out.maxRetries = opts.maxRetries;
   return out;
+}
+
+/**
+ * Post-process a non-streaming ChatCompletion through the
+ * think-tag splitter. Used when `parseThinkTags: true` and the
+ * server didn't stream. Mutates the message in-place: `content`
+ * becomes the cleaned text (think tags removed), and
+ * `reasoning_content` carries the extracted reasoning. normalize()
+ * then surfaces the reasoning as a ReasoningBlock.
+ */
+function applyThinkTagSplitToChatCompletion(raw: unknown): unknown {
+  if (!raw || typeof raw !== "object") return raw;
+  const r = raw as { choices?: Array<{ message?: Record<string, unknown> }> };
+  const message = r.choices?.[0]?.message;
+  if (!message || typeof message.content !== "string") return raw;
+  let text = "";
+  let reasoning = "";
+  for (const seg of splitThinkTags(message.content)) {
+    if (seg.mode === "text") text += seg.content;
+    else reasoning += seg.content;
+  }
+  message.content = text.length > 0 ? text : null;
+  if (reasoning.length > 0) message.reasoning_content = reasoning;
+  return raw;
 }
 
 // ============================================================================
