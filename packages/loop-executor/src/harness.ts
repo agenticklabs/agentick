@@ -193,18 +193,65 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
           executionId,
         });
 
-        // 2. Execute.
-        const executorTerminal: ExecutorTerminal<LanguageModelExecutionResult> =
-          await input.executor.run({
+        // 2. Execute. Streaming path (executeStream) when the caller
+        //    requested streaming AND the executor supports it AND the
+        //    target's capabilities don't explicitly disable it.
+        const wantsStreaming =
+          (input.stream ?? false) &&
+          typeof input.executor.executeStream === "function" &&
+          (input.target.capabilities?.supportsStreaming ?? true);
+
+        let executorTerminal: ExecutorTerminal<LanguageModelExecutionResult>;
+
+        if (wantsStreaming && input.executor.executeStream) {
+          // Streaming path. The adapter emits AdapterDeltas (including
+          // the symmetric summary events: message, content, tool-call,
+          // reasoning, message-end). We forward each delta through
+          // onEvent — NO loop-side synthesis on this path (adapter
+          // already owns symmetric event emission).
+          const projected = await input.executor.project({
+            compiled: renderResult.tree,
+            target: input.target,
+            scope: { sessionId: input.sessionId, executionId, tickId },
+          });
+          const stream = input.executor.executeStream({
+            targetInput: projected,
+            target: input.target,
+            scope: { sessionId: input.sessionId, executionId, tickId },
+            ...(input.signal !== undefined ? { signal: input.signal } : {}),
+          });
+          for await (const delta of stream) {
+            input.onEvent?.({ kind: "model", tick: tickIndex, delta });
+          }
+          let raw: unknown;
+          try {
+            raw = await stream.result;
+          } catch (cause) {
+            // executor.execute rejection — treat as failed terminal.
+            executorTerminal = {
+              outcome: "failed",
+              error: { _tag: "ProviderRejected", cause },
+            };
+            stopReason = "executor_failed";
+            break;
+          }
+          const normalized = await input.executor.normalize({
+            targetOutput: raw,
+            target: input.target,
+            scope: { sessionId: input.sessionId, executionId, tickId },
+          });
+          executorTerminal = { outcome: "succeeded", result: normalized };
+        } else {
+          // Non-streaming path: classic project → execute → normalize via run.
+          executorTerminal = await input.executor.run({
             compiled: renderResult.tree,
             target: input.target,
             scope: { sessionId: input.sessionId, executionId, tickId },
             ...(input.signal !== undefined ? { signal: input.signal } : {}),
           });
+        }
 
         if (executorTerminal.outcome !== "succeeded") {
-          // Mid-tick non-success terminal (failed / canceled / vetoed
-          // / replaced). For 4d we treat these as loop terminators.
           stopReason =
             executorTerminal.outcome === "canceled"
               ? "aborted"
@@ -218,12 +265,11 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
         accumulateUsage(acc.usage, result.usage);
         acc.output.push(...result.output);
 
-        // Emit summary model events from the executor result so
-        // consumers subscribed to `message` / `content` / `tool-call`
-        // events see the model's output even on the non-streaming path.
-        // Per-token deltas (`content-delta` etc.) come from the
-        // executor's `executeStream` surface (Layer 5).
-        if (input.onEvent) {
+        // Non-streaming path: synthesize summary model events from the
+        // result so consumers subscribed to `message` / `content` /
+        // `tool-call` events see the model's output. The streaming
+        // path skips this — the adapter emitted them already.
+        if (!wantsStreaming && input.onEvent) {
           let blockIndex = 0;
           for (const block of result.output) {
             input.onEvent({

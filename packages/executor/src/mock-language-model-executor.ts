@@ -30,6 +30,7 @@ import { Effect } from "effect";
 import { BaseHarness, runHarnessProtocol, ulid } from "@agentick/runtime";
 import type {
   AbortExecutorInput,
+  AdapterDelta,
   ContentBlock,
   ContextEntry,
   EventBus,
@@ -37,6 +38,7 @@ import type {
   ExecuteInput,
   ExecutionTarget,
   ExecutorError,
+  ExecutorStream,
   ExecutorTerminal,
   LanguageModelExecutionResult,
   LanguageModelExecutor,
@@ -68,16 +70,15 @@ export interface MockScriptedRun {
   /** The terminal result the mock executor returns from a `run` call. */
   readonly result: LanguageModelExecutionResult;
   /**
-   * Optional ordered chunks the executor emits as `executor:delta`
-   * envelopes during `execute`. Each chunk becomes one delta. When
-   * omitted, the executor emits a single content_delta with the joined
-   * text of the result's `output[type="text"]` blocks.
+   * Optional ordered `AdapterDelta` events the mock emits via
+   * `executeStream`. Each entry is yielded in order; `.result`
+   * resolves with the scripted `result` after the last delta.
+   * When omitted, `executeStream` synthesizes a sensible default
+   * (message-start → content-start → content-delta(joined text) →
+   * content-end → content(block) → message-end → message) from the
+   * scripted result.
    */
-  readonly stream?: ReadonlyArray<{
-    readonly kind: string;
-    readonly delta?: string;
-    readonly blockIndex?: number;
-  }>;
+  readonly deltas?: ReadonlyArray<AdapterDelta>;
 }
 
 export interface MockLanguageModelExecutorOptions {
@@ -198,6 +199,49 @@ export class MockLanguageModelExecutor
     return runHarnessProtocol(this.runOperation(op, (i) => this.executeBody(i, executionId)));
   }
 
+  executeStream(_input: ExecuteInput<LanguageModelInput>): ExecutorStream<unknown> {
+    const next = this.nextScripted();
+    const scriptedResult = next?.result ?? DEFAULT_REPLY;
+    const scriptedDeltas: ReadonlyArray<AdapterDelta> =
+      next?.deltas ?? defaultDeltasFor(scriptedResult);
+
+    // Yield scripted deltas through an async iterator backed by a queue.
+    // For the mock, deltas are known up-front; we just enqueue them all.
+    const queue: AdapterDelta[] = [...scriptedDeltas];
+    let aborted = false;
+    let abortReason: unknown = null;
+
+    return {
+      result: aborted
+        ? Promise.reject(abortReason ?? new Error("aborted"))
+        : Promise.resolve(scriptedResult),
+      abort(reason) {
+        aborted = true;
+        abortReason = reason ?? "aborted";
+      },
+      [Symbol.asyncIterator]() {
+        let index = 0;
+        return {
+          next: async (): Promise<IteratorResult<AdapterDelta>> => {
+            if (aborted) {
+              return { value: undefined as unknown as AdapterDelta, done: true };
+            }
+            if (index >= queue.length) {
+              return { value: undefined as unknown as AdapterDelta, done: true };
+            }
+            const value = queue[index]!;
+            index += 1;
+            return { value, done: false };
+          },
+          return: async (): Promise<IteratorResult<AdapterDelta>> => {
+            aborted = true;
+            return { value: undefined as unknown as AdapterDelta, done: true };
+          },
+        };
+      },
+    };
+  }
+
   normalize(input: NormalizeInput<unknown>): Promise<LanguageModelExecutionResult> {
     const op: Operation<NormalizeInput<unknown>, LanguageModelExecutionResult> = {
       opId: `executor:normalize:${ulid()}`,
@@ -301,18 +345,13 @@ export class MockLanguageModelExecutor
       // 1. project
       const projected = yield* projectAsEffect(input);
 
-      // 2. emit chunks (lazy — subscribers gate envelope construction).
-      // Journal-write failures during delta emission are substrate-level
-      // catastrophes, not executor errors. Treat them as defects so the
-      // executor's typed `E` channel stays narrow to `ExecutorError`.
-      const stream = next?.stream;
-      if (stream && stream.length > 0) {
-        for (const chunk of stream) {
-          yield* this.emitDeltaLazy(op, () => ({
-            kind: chunk.kind,
-            ...(chunk.blockIndex !== undefined ? { blockIndex: chunk.blockIndex } : {}),
-            ...(chunk.delta !== undefined ? { delta: chunk.delta } : {}),
-          })).pipe(Effect.orDie);
+      // 2. Emit scripted deltas (if any) for bus observability.
+      //    The loop's streaming path uses `executeStream` directly,
+      //    not run, so this is the observability-only mirror.
+      const deltas = next?.deltas;
+      if (deltas && deltas.length > 0) {
+        for (const delta of deltas) {
+          yield* this.emitDeltaLazy(op, () => delta).pipe(Effect.orDie);
         }
       }
 
@@ -480,4 +519,52 @@ function buildParameters(tree: RenderedTree) {
     }
   }
   return Object.keys(params).length > 0 ? params : undefined;
+}
+
+/**
+ * Synthesize a sensible default `AdapterDelta` stream for a scripted
+ * result when the caller didn't supply explicit deltas. Mirrors what a
+ * naive real adapter would emit: message-start → content-start →
+ * content-delta(full text) → content-end → content(block) →
+ * message-end → message.
+ */
+function defaultDeltasFor(result: LanguageModelExecutionResult): readonly AdapterDelta[] {
+  const out: AdapterDelta[] = [{ type: "message-start", role: "assistant" }];
+  let blockIndex = 0;
+  for (const block of result.output) {
+    if (block.type === "text") {
+      out.push({ type: "content-start", blockIndex, blockType: "text" });
+      out.push({ type: "content-delta", blockIndex, delta: block.text });
+      out.push({ type: "content-end", blockIndex });
+      out.push({ type: "content", blockIndex, content: block });
+    } else {
+      // Non-text blocks (image, tool_use, etc.) — emit just the
+      // start/end + summary, no delta (no streaming text).
+      out.push({
+        type: "content-start",
+        blockIndex,
+        blockType: block.type as never,
+      });
+      out.push({ type: "content-end", blockIndex });
+      out.push({ type: "content", blockIndex, content: block });
+    }
+    blockIndex += 1;
+  }
+  for (const tc of result.toolCalls ?? []) {
+    out.push({
+      type: "tool-call",
+      callId: tc.id,
+      name: tc.name,
+      input: tc.input as Readonly<Record<string, unknown>>,
+    });
+  }
+  const usage = result.usage ?? { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
+  out.push({ type: "message-end", stopReason: result.stopReason, usage });
+  out.push({
+    type: "message",
+    message: { role: "assistant", content: result.output },
+    stopReason: result.stopReason,
+    usage,
+  });
+  return out;
 }

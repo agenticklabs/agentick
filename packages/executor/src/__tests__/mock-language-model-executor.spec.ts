@@ -109,10 +109,10 @@ describe("MockLanguageModelExecutor — run + streaming", () => {
           stopReason: "end",
           usage: { inputTokens: 1, outputTokens: 3, totalTokens: 4 },
         },
-        stream: [
-          { kind: "content_delta", delta: "a" },
-          { kind: "content_delta", delta: "b" },
-          { kind: "content_delta", delta: "c" },
+        deltas: [
+          { type: "content-delta", blockIndex: 0, delta: "a" },
+          { type: "content-delta", blockIndex: 0, delta: "b" },
+          { type: "content-delta", blockIndex: 0, delta: "c" },
         ],
       },
     });
@@ -136,11 +136,11 @@ describe("MockLanguageModelExecutor — run + streaming", () => {
     // skips the thunk. Streaming is invisible but the run still
     // succeeds with the scripted terminal.
     let builds = 0;
-    const stream = Array.from({ length: 5 }, (_, i) => ({
-      kind: "content_delta",
-      delta: `tok-${i}`,
-    }));
-    // Patch our scripted stream to count thunk invocations indirectly:
+    const deltas: import("@agentick/spec").AdapterDelta[] = Array.from(
+      { length: 5 },
+      (_, i) => ({ type: "content-delta", blockIndex: 0, delta: `tok-${i}` }),
+    );
+    // Patch our scripted deltas to count thunk invocations indirectly:
     // we observe that builds === 0 means no envelope construction.
     const { exec } = await makeExecutor({
       scripted: {
@@ -150,7 +150,7 @@ describe("MockLanguageModelExecutor — run + streaming", () => {
           stopReason: "end",
           usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
         },
-        stream,
+        deltas,
       },
     });
     const terminal = await exec.run({ compiled: emptyTree(), target: mkTarget() });

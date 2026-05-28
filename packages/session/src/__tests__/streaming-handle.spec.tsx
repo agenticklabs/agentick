@@ -28,7 +28,7 @@ const target: ExecutionTarget = {
   capabilities: { supportsTools: true, supportsStreaming: true },
 };
 
-async function mkSession() {
+async function mkSession(opts: { withDeltas?: boolean } = {}) {
   const journal = new MemoryJournal();
   const bus = new LocalEventBus();
   const inbox = new LocalInbox();
@@ -51,6 +51,29 @@ async function mkSession() {
           stopReason: "end",
           usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
         },
+        ...(opts.withDeltas
+          ? {
+              deltas: [
+                { type: "message-start", role: "assistant" },
+                { type: "content-start", blockIndex: 0, blockType: "text" },
+                { type: "content-delta", blockIndex: 0, delta: "he" },
+                { type: "content-delta", blockIndex: 0, delta: "llo" },
+                { type: "content-end", blockIndex: 0 },
+                { type: "content", blockIndex: 0, content: { type: "text", text: "hello" } },
+                {
+                  type: "message-end",
+                  stopReason: "end",
+                  usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+                },
+                {
+                  type: "message",
+                  message: { role: "assistant", content: [{ type: "text", text: "hello" }] },
+                  stopReason: "end",
+                  usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+                },
+              ],
+            }
+          : {}),
       },
     },
   );
@@ -116,6 +139,43 @@ describe("SessionExecutionHandle — typed streaming events", () => {
       expect(ev.sessionId).toBe("s");
       expect(ev.executionId).toBe(handle.executionId);
     }
+    await session.close();
+  });
+
+  it("streaming path: forwards adapter AdapterDeltas through onEvent when stream=true", async () => {
+    const session = await mkSession({ withDeltas: true });
+    const handle = await session.send({
+      messages: [{ role: "user", content: "hi" }],
+      stream: true,
+    });
+    const events: { type: string; delta?: string }[] = [];
+    for await (const ev of handle) {
+      if (ev.type === "content-delta") events.push({ type: ev.type, delta: ev.delta });
+      else events.push({ type: ev.type });
+    }
+    const deltaTypes = events
+      .filter((e) => e.type === "content-delta")
+      .map((e) => e.delta);
+    expect(deltaTypes).toEqual(["he", "llo"]);
+    const types = events.map((e) => e.type);
+    expect(types).toContain("message-start");
+    expect(types).toContain("content-start");
+    expect(types).toContain("content-end");
+    expect(types).toContain("message");
+    await session.close();
+  });
+
+  it("non-streaming path: synthesizes summary events; no delta events", async () => {
+    const session = await mkSession();
+    const handle = await session.send({
+      messages: [{ role: "user", content: "hi" }],
+      stream: false,
+    });
+    const types: string[] = [];
+    for await (const ev of handle) types.push(ev.type);
+    expect(types).not.toContain("content-delta");
+    expect(types).toContain("content");
+    expect(types).toContain("message-end");
     await session.close();
   });
 });

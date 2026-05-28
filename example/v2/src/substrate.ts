@@ -94,12 +94,12 @@ export async function buildSubstrate(sessionId: string): Promise<Substrate> {
           ],
           usage: { inputTokens: 12, outputTokens: 8, totalTokens: 20 },
         },
-        stream: [
-          { kind: "content_delta", delta: "47" },
-          { kind: "content_delta", delta: " × " },
-          { kind: "content_delta", delta: "23 " },
-          { kind: "content_delta", delta: "= " },
-          { kind: "content_delta", delta: "1081." },
+        deltas: [
+          { type: "content-delta", blockIndex: 0, delta: "47" },
+          { type: "content-delta", blockIndex: 0, delta: " × " },
+          { type: "content-delta", blockIndex: 0, delta: "23 " },
+          { type: "content-delta", blockIndex: 0, delta: "= " },
+          { type: "content-delta", blockIndex: 0, delta: "1081." },
         ],
       },
       {
@@ -152,9 +152,9 @@ export async function buildSubstrate(sessionId: string): Promise<Substrate> {
           ],
           usage: { inputTokens: 15, outputTokens: 8, totalTokens: 23 },
         },
-        stream: [
-          { kind: "content_delta", delta: "Let me compute that — " },
-          { kind: "content_delta", delta: "calling calculator." },
+        deltas: [
+          { type: "content-delta", blockIndex: 0, delta: "Let me compute that — " },
+          { type: "content-delta", blockIndex: 0, delta: "calling calculator." },
         ],
       },
       {
