@@ -58,16 +58,48 @@ export class StubOpenAIClient {
         options?: { signal?: AbortSignal },
       ): Promise<ChatCompletion | AsyncIterable<ChatCompletionChunk>> => {
         this.calls.push({ params, signal: options?.signal });
-        const next = this.next();
-        if (next.kind === "non-streaming") {
-          return Promise.resolve(next.completion);
+        // Dispatch by params.stream so a single stub can satisfy both
+        // streaming and non-streaming code paths. The configured
+        // sequence is treated as a pool: pick the first matching shape
+        // for the current request and advance the pool index.
+        // Fallback (no matching shape in pool): default to the next
+        // entry regardless of stream mode (legacy callers that don't
+        // care about the dispatch).
+        const wantStream = params.stream === true;
+        const matchIdx = this.findMatchingIdx(wantStream);
+        const picked =
+          matchIdx >= 0 ? this.sequence[matchIdx]! : this.next();
+        if (matchIdx >= 0) {
+          // Advance past the matched entry so each call consumes one.
+          this.consumed.add(matchIdx);
+        }
+        if (picked.kind === "non-streaming") {
+          return Promise.resolve(picked.completion);
         }
         // Mirror the real SDK: streaming returns a Promise wrapping an
         // AsyncIterable (the SDK awaits headers + a Stream wrapper).
-        return Promise.resolve(iterableFrom(next.chunks));
+        return Promise.resolve(iterableFrom(picked.chunks));
       },
     },
   };
+
+  private readonly consumed = new Set<number>();
+
+  private findMatchingIdx(wantStream: boolean): number {
+    // Prefer an unconsumed matching entry, then any matching entry,
+    // then -1 to fall back to .next() (clamped-to-last legacy mode).
+    let firstMatch = -1;
+    for (let i = 0; i < this.sequence.length; i++) {
+      const entry = this.sequence[i]!;
+      const matches =
+        (wantStream && entry.kind === "streaming") ||
+        (!wantStream && entry.kind === "non-streaming");
+      if (!matches) continue;
+      if (firstMatch < 0) firstMatch = i;
+      if (!this.consumed.has(i)) return i;
+    }
+    return firstMatch;
+  }
 }
 
 function iterableFrom<T>(items: ReadonlyArray<T>): AsyncIterable<T> {

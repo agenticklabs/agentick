@@ -26,5 +26,5 @@ describe("MockLanguageModelExecutor — ExecutorProtocol conformance", () =>
       scripted !== undefined ? { scripted: { result: scripted } } : {},
     );
     await exec.ready;
-    return exec;
+    return { executor: exec, bus };
   }));

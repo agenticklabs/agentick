@@ -46,6 +46,7 @@ import type {
   LanguageModelMessage,
   LanguageModelMessagePart,
   LanguageModelTool,
+  MediaSource,
   MessageEnvelope,
   MessageHandlerError,
   MessageInbox,
@@ -199,11 +200,28 @@ export class MockLanguageModelExecutor
     return runHarnessProtocol(this.runOperation(op, (i) => this.executeBody(i, executionId)));
   }
 
-  executeStream(_input: ExecuteInput<LanguageModelInput>): ExecutorStream<unknown> {
+  executeStream(input: ExecuteInput<LanguageModelInput>): ExecutorStream<unknown> {
     const next = this.nextScripted();
     const scriptedResult = next?.result ?? DEFAULT_REPLY;
     const scriptedDeltas: ReadonlyArray<AdapterDelta> =
       next?.deltas ?? defaultDeltasFor(scriptedResult);
+
+    // Mirror G6: bus envelopes fire on the streaming path alongside the
+    // iterator queue, so subscribers see the same deltas iterator
+    // consumers do.
+    const executionId = input.scope?.executionId ?? `exec:${ulid()}`;
+    const streamOp: Operation<ExecuteInput<LanguageModelInput>, unknown> = {
+      opId: `executor:executeStream:${executionId}:${ulid()}`,
+      surface: "executor",
+      name: "executor:command:execute",
+      scope: input.scope ?? { executionId },
+      input,
+    };
+    const emitBus = (delta: AdapterDelta): void => {
+      void Effect.runPromise(
+        this.emitDeltaLazy(streamOp, () => delta).pipe(Effect.catchAll(() => Effect.void)),
+      );
+    };
 
     // Yield scripted deltas through an async iterator backed by a queue.
     // For the mock, deltas are known up-front; we just enqueue them all.
@@ -231,6 +249,7 @@ export class MockLanguageModelExecutor
             }
             const value = queue[index]!;
             index += 1;
+            emitBus(value);
             return { value, done: false };
           },
           return: async (): Promise<IteratorResult<AdapterDelta>> => {
@@ -451,6 +470,23 @@ function sectionText(section: SectionEntry): string {
   return head + body;
 }
 
+function imageUrlFromSource(source: MediaSource, mimeType: string | undefined): string {
+  switch (source.type) {
+    case "url":
+      return source.url;
+    case "base64": {
+      const mt = source.mimeType ?? mimeType ?? "image/png";
+      return `data:${mt};base64,${source.data}`;
+    }
+    case "reference":
+      return source.fileId;
+    case "s3":
+      return `s3://${source.bucket}/${source.key}`;
+    case "gcs":
+      return `gs://${source.bucket}/${source.object}`;
+  }
+}
+
 function messagePartFromBlock(block: ContentBlock): LanguageModelMessagePart {
   switch (block.type) {
     case "text":
@@ -458,7 +494,7 @@ function messagePartFromBlock(block: ContentBlock): LanguageModelMessagePart {
     case "image":
       return {
         type: "image",
-        imageUrl: block.source.type === "url" ? block.source.url : "[binary]",
+        imageUrl: imageUrlFromSource(block.source, block.mimeType),
         ...(block.mimeType !== undefined ? { mediaType: block.mimeType } : {}),
       };
     case "tool_use":
