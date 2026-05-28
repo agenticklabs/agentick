@@ -209,9 +209,13 @@ export interface LanguageModelTool {
 export interface LanguageModelParameters {
   readonly temperature?: number;
   readonly maxOutputTokens?: number;
+  readonly topP?: number;
+  readonly frequencyPenalty?: number;
+  readonly presencePenalty?: number;
   readonly stopSequences?: ReadonlyArray<string>;
   readonly responseFormat?: {
     readonly type: "text" | "json" | "json_schema";
+    readonly name?: string;
     readonly schema?: Record<string, unknown>;
   };
 }

@@ -256,7 +256,7 @@ export class OpenAIExecutor extends BaseHarness<"executor"> implements LanguageM
     // returned ExecutorStream's iterator + .result are both backed by it.
     void (async () => {
       try {
-        const params = toOpenAIParams(input.targetInput, this.defaultModel);
+        const params = toOpenAIParams(input.targetInput, input.target, this.defaultModel);
         const stream = (await this.client.chat.completions.create(
           { ...params, stream: true, stream_options: { include_usage: true } },
           { signal: controller.signal },
@@ -491,7 +491,7 @@ export class OpenAIExecutor extends BaseHarness<"executor"> implements LanguageM
       this.inFlight.set(executionId, entry);
 
       try {
-        const params = toOpenAIParams(input.targetInput, this.defaultModel);
+        const params = toOpenAIParams(input.targetInput, input.target, this.defaultModel);
         const wantStream =
           this.streamByDefault && (input.target.capabilities?.supportsStreaming ?? true);
         const signal = mergeSignals(input.signal, controller.signal);
@@ -645,6 +645,7 @@ function buildClientOptions(opts: OpenAIExecutorOptions): ClientOptions {
 
 function toOpenAIParams(
   input: LanguageModelInput,
+  target: ExecutionTarget,
   defaultModel: string | undefined,
 ): ChatCompletionCreateParams {
   const messages: ChatCompletionMessageParam[] = [];
@@ -656,21 +657,19 @@ function toOpenAIParams(
     model: defaultModel ?? "gpt-4o-mini",
     messages,
   };
-  if (input.parameters?.temperature !== undefined) {
-    params.temperature = input.parameters.temperature;
-  }
-  if (input.parameters?.maxOutputTokens !== undefined) {
-    params.max_tokens = input.parameters.maxOutputTokens;
-  }
-  if (input.parameters?.stopSequences !== undefined) {
-    params.stop = input.parameters.stopSequences as string[];
-  }
+  const p = input.parameters;
+  if (p?.temperature !== undefined) params.temperature = p.temperature;
+  if (p?.maxOutputTokens !== undefined) params.max_tokens = p.maxOutputTokens;
+  if (p?.topP !== undefined) params.top_p = p.topP;
+  if (p?.frequencyPenalty !== undefined) params.frequency_penalty = p.frequencyPenalty;
+  if (p?.presencePenalty !== undefined) params.presence_penalty = p.presencePenalty;
+  if (p?.stopSequences !== undefined) params.stop = p.stopSequences as string[];
   if (tools && tools.length > 0) {
     params.tools = tools;
     params.tool_choice = "auto";
   }
-  if (input.parameters?.responseFormat) {
-    const rf = input.parameters.responseFormat;
+  if (p?.responseFormat) {
+    const rf = p.responseFormat;
     if (rf.type === "text") {
       params.response_format = { type: "text" };
     } else if (rf.type === "json") {
@@ -679,12 +678,19 @@ function toOpenAIParams(
       params.response_format = {
         type: "json_schema",
         json_schema: {
-          name: "response",
+          name: rf.name ?? "response",
           schema: rf.schema,
           strict: true,
         },
       };
     }
+  }
+  // Adopter escape hatch — spread provider-specific options after canonical
+  // mapping. Lets callers set logprobs, seed, store, n, prediction, etc.
+  // without us hardcoding every OpenAI knob.
+  const overrides = target.providerOptions?.openai;
+  if (overrides && typeof overrides === "object") {
+    Object.assign(params, overrides);
   }
   return params;
 }

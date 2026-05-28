@@ -111,6 +111,21 @@ interface InFlightEntry {
 interface AISDKProjectedInput {
   readonly messages: ModelMessage[];
   readonly tools?: ToolSet;
+  /**
+   * Generation parameters mapped to AI SDK call-level fields (temperature,
+   * maxOutputTokens, topP, frequencyPenalty, presencePenalty,
+   * stopSequences). Spread onto the streamText/generateText call.
+   */
+  readonly generation: Record<string, unknown>;
+  /**
+   * Forwarded directly as AI SDK's `providerOptions` — adopter escape
+   * hatch for provider-specific knobs (Anthropic cache control, OpenAI
+   * reasoning effort, etc.). Sourced from `target.providerOptions`. Cast
+   * to `never` at call sites — the spec carries the looser
+   * `Record<string, unknown>` shape than AI SDK's strict
+   * `SharedV2ProviderOptions`; runtime shape is the same.
+   */
+  readonly providerOptions?: never;
 }
 
 // ============================================================================
@@ -197,11 +212,15 @@ export class AISDKExecutor extends BaseHarness<"executor"> implements LanguageMo
 
     void (async () => {
       try {
-        const aiSdk = toAISDKInput(input.targetInput);
+        const aiSdk = toAISDKInput(input.targetInput, input.target);
         const stream = streamText({
           model: this.model,
           messages: aiSdk.messages,
           ...(aiSdk.tools !== undefined ? { tools: aiSdk.tools } : {}),
+          ...aiSdk.generation,
+          ...(aiSdk.providerOptions !== undefined
+            ? { providerOptions: aiSdk.providerOptions as never }
+            : {}),
           abortSignal: controller.signal,
         });
 
@@ -526,7 +545,7 @@ export class AISDKExecutor extends BaseHarness<"executor"> implements LanguageMo
         // Translate to AI SDK shape here, inside execute(), so the
         // phase contract holds: project returns canonical, execute
         // consumes canonical and produces provider output.
-        const aiSdk = toAISDKInput(input.targetInput);
+        const aiSdk = toAISDKInput(input.targetInput, input.target);
         const signal = mergeSignals(input.signal, controller.signal);
         return yield* Effect.tryPromise<unknown, ExecuteError>({
           try: () =>
@@ -534,6 +553,10 @@ export class AISDKExecutor extends BaseHarness<"executor"> implements LanguageMo
               model: this.model,
               messages: aiSdk.messages,
               ...(aiSdk.tools !== undefined ? { tools: aiSdk.tools } : {}),
+              ...aiSdk.generation,
+              ...(aiSdk.providerOptions !== undefined
+                ? { providerOptions: aiSdk.providerOptions }
+                : {}),
               ...(signal !== undefined ? { abortSignal: signal } : {}),
             }) as unknown as Promise<unknown>,
           catch: (cause): ExecuteError => mapExecuteError(cause),
@@ -699,12 +722,32 @@ function buildTools(tree: RenderedTree): ReadonlyArray<LanguageModelTool> {
 // LanguageModelInput → AI SDK input
 // ============================================================================
 
-function toAISDKInput(input: LanguageModelInput): AISDKProjectedInput {
+function toAISDKInput(
+  input: LanguageModelInput,
+  target: ExecutionTarget,
+): AISDKProjectedInput {
   const messages: ModelMessage[] = [];
   for (const m of input.messages) {
     messages.push(...toAISDKMessage(m));
   }
-  return { messages };
+  const p = input.parameters;
+  const generation: Record<string, unknown> = {};
+  if (p?.temperature !== undefined) generation.temperature = p.temperature;
+  if (p?.maxOutputTokens !== undefined) generation.maxOutputTokens = p.maxOutputTokens;
+  if (p?.topP !== undefined) generation.topP = p.topP;
+  if (p?.frequencyPenalty !== undefined) generation.frequencyPenalty = p.frequencyPenalty;
+  if (p?.presencePenalty !== undefined) generation.presencePenalty = p.presencePenalty;
+  if (p?.stopSequences !== undefined) {
+    generation.stopSequences = [...p.stopSequences];
+  }
+  const result: AISDKProjectedInput = {
+    messages,
+    generation,
+    ...(target.providerOptions !== undefined
+      ? { providerOptions: target.providerOptions as never }
+      : {}),
+  };
+  return result;
 }
 
 function toAISDKMessage(m: LanguageModelMessage): ModelMessage[] {

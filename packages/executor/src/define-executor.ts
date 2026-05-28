@@ -69,6 +69,7 @@ import type {
   LanguageModelMessage,
   LanguageModelMessagePart,
   LanguageModelTool,
+  MediaSource,
   MessageEnvelope,
   MessageHandlerError,
   MessageInbox,
@@ -516,7 +517,7 @@ function messagePartFromBlock(block: ContentBlock): LanguageModelMessagePart {
     case "image":
       return {
         type: "image",
-        imageUrl: block.source.type === "url" ? block.source.url : "[binary]",
+        imageUrl: imageUrlFromSource(block.source, block.mimeType),
         ...(block.mimeType !== undefined ? { mediaType: block.mimeType } : {}),
       };
     case "tool_use":
@@ -539,6 +540,23 @@ function messagePartFromBlock(block: ContentBlock): LanguageModelMessagePart {
         text:
           "text" in block && typeof block.text === "string" ? block.text : JSON.stringify(block),
       };
+  }
+}
+
+function imageUrlFromSource(source: MediaSource, mimeType: string | undefined): string {
+  switch (source.type) {
+    case "url":
+      return source.url;
+    case "base64": {
+      const mt = source.mimeType ?? mimeType ?? "image/png";
+      return `data:${mt};base64,${source.data}`;
+    }
+    case "reference":
+      return source.fileId;
+    case "s3":
+      return `s3://${source.bucket}/${source.key}`;
+    case "gcs":
+      return `gs://${source.bucket}/${source.object}`;
   }
 }
 
