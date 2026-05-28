@@ -2,7 +2,7 @@
   "name": "@agentick/gates",
   "version": "0.0.0",
   "private": true,
-  "description": "Gates — knob-backed continuation conditions. Pure hook layer over @agentick/knobs + reconciler-react. Not a harness; gates have no independent state — the gate's value IS a knob value. Bundled into the agentick metapackage; not published independently.",
+  "description": "Gates — knob-backed continuation conditions. Reconciler-agnostic descriptor types + factory at the top level; React hook in /react subpath. Not a harness; gates have no independent state — the gate's value IS a knob value. Bundled into the agentick metapackage; not published independently.",
   "keywords": [
     "agent",
     "agentick",
@@ -24,6 +24,11 @@
       "types": "./src/index.ts",
       "import": "./src/index.ts",
       "default": "./src/index.ts"
+    },
+    "./react": {
+      "types": "./src/react/index.ts",
+      "import": "./src/react/index.ts",
+      "default": "./src/react/index.ts"
     }
   },
   "scripts": {

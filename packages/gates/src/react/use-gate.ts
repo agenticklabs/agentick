@@ -1,11 +1,16 @@
 /**
- * Gates — knob-backed continuation conditions.
+ * `useGate` — the React hook for the gate pattern.
  *
  * A gate is a three-state knob (`inactive` / `active` / `deferred`) that
- * blocks loop completion until the model explicitly clears it. Composes
- * existing primitives: `useKnob` for the three-state cell, `useOnTickEnd`
- * for activation + continuation triggers, `useLoopControl` to request a
- * continuation when the model would otherwise stop.
+ * blocks loop completion until the model explicitly clears it. This hook
+ * composes existing primitives: `useKnob` for the three-state cell,
+ * `useOnTickEnd` for activation + continuation triggers, `useLoopControl`
+ * to request a continuation when the model would otherwise stop.
+ *
+ * The descriptor (`GateDescriptor`) and `gate()` factory live in the
+ * reconciler-agnostic top-level of `@agentick/gates`. Non-React
+ * reconcilers (Angular, Vue) would implement their own gate hook
+ * against the same descriptor shape.
  *
  * Activation:
  *   - `activateWhen(result)` is consulted only when the gate is `inactive`.
@@ -46,22 +51,11 @@ import type { TickResult } from "@agentick/spec";
 import { useLoopControl, useOnTickEnd } from "@agentick/reconciler-react";
 import { useKnob, type UseKnobOptions } from "@agentick/knobs/react";
 
-const GATE_OPTIONS: readonly GateValue[] = ["inactive", "active", "deferred"];
+import { GATE_OPTIONS, type GateDescriptor, type GateValue } from "../descriptor.js";
 
 // ============================================================================
-// Types
+// Hook return shape (React-flavored — embeds a ReactElement)
 // ============================================================================
-
-export type GateValue = "inactive" | "active" | "deferred";
-
-export interface GateDescriptor {
-  /** Short human-readable label. Surfaced via the knob bridge. */
-  readonly description: string;
-  /** Instructions shown to the model when the gate is `active`. */
-  readonly instructions: string;
-  /** Predicate that auto-activates the gate at tick-end. */
-  readonly activateWhen: (result: TickResult) => boolean;
-}
 
 export interface GateState {
   readonly active: boolean;
@@ -75,15 +69,6 @@ export interface GateState {
    * the instructions to appear in the model's context.
    */
   readonly element: React.ReactElement | null;
-}
-
-/**
- * Trivial descriptor factory. Exists so authors can declare gates at
- * module scope (`const verificationGate = gate({ … });`) and pass the
- * descriptor into `useGate(name, verificationGate)` inside the component.
- */
-export function gate(opts: GateDescriptor): GateDescriptor {
-  return opts;
 }
 
 // ============================================================================

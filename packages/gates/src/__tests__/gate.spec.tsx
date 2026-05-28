@@ -16,7 +16,8 @@ import { ReconcilerHarness } from "@agentick/reconciler-react";
 import { stubBridges } from "@agentick/reconciler";
 import { stubKnobsHarness } from "@agentick/knobs/testing";
 import { flush } from "@agentick/reconciler-react/testing";
-import { gate, useGate, type GateState } from "../use-gate.js";
+import { gate } from "../descriptor.js";
+import { useGate, type GateState } from "../react/use-gate.js";
 
 async function makeHarness() {
   const harness = new ReconcilerHarness(
