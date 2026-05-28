@@ -21,16 +21,8 @@ async function makeHarness(scope = `snap-${Math.random()}`) {
 describe("InMemoryDataBridge — snapshot/restore unit", () => {
   it("export → import round-trips fulfilled entries", async () => {
     const src = new InMemoryDataBridge();
-    try {
-      src.resolve("user/42", async () => ({ name: "Ryan" }));
-    } catch (p) {
-      await p;
-    }
-    try {
-      src.resolve("config", async () => ({ theme: "dark" }), { tag: "config" });
-    } catch (p) {
-      await p;
-    }
+    await src.fetch("user/42", async () => ({ name: "Ryan" }));
+    await src.fetch("config", async () => ({ theme: "dark" }), { tag: "config" });
 
     const snap = src.exportSnapshot();
     expect(snap).toHaveLength(2);
@@ -38,27 +30,25 @@ describe("InMemoryDataBridge — snapshot/restore unit", () => {
 
     const dest = new InMemoryDataBridge();
     dest.importSnapshot(snap);
-    expect(dest.resolve("user/42", async () => null)).toEqual({ name: "Ryan" });
-    expect(dest.resolve("config", async () => null)).toEqual({ theme: "dark" });
+    expect(dest.peek<{ name: string }>("user/42")).toMatchObject({
+      kind: "value",
+      value: { name: "Ryan" },
+    });
+    expect(dest.peek<{ theme: string }>("config")).toMatchObject({
+      kind: "value",
+      value: { theme: "dark" },
+    });
   });
 
   it("export skips pending entries", () => {
     const bridge = new InMemoryDataBridge();
-    try {
-      bridge.resolve("k", async () => "v");
-    } catch {
-      /* still pending */
-    }
+    void bridge.fetch("k", async () => "v"); // still pending
     expect(bridge.exportSnapshot()).toHaveLength(0);
   });
 
   it("export skips rejected entries", async () => {
     const bridge = new InMemoryDataBridge();
-    try {
-      bridge.resolve("bad", () => Promise.reject(new Error("x")));
-    } catch (p) {
-      await Promise.allSettled([p as Promise<unknown>]);
-    }
+    await bridge.fetch("bad", () => Promise.reject(new Error("x"))).catch(() => {});
     expect(bridge.exportSnapshot()).toHaveLength(0);
   });
 

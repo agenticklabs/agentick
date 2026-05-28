@@ -116,27 +116,36 @@ export interface SnapshotCapable<TSnapshot = unknown> {
  * produced by the harness reflects a fully-resolved view of the
  * application.
  *
+ * **Reconciler-agnostic by design.** The protocol splits cache access
+ * (`peek`) from fetch initiation (`fetch`) so each reconciler can
+ * compose them into its idiom:
+ *
+ *   - React: `useData` throws the pending Promise (Suspense-like).
+ *   - Angular: convert to Observable via `from(promise)` or RxJS.
+ *   - Signal-based: subscribe and re-evaluate the derived signal on
+ *     cache change.
+ *
  * Mechanics:
  *
- *   1. `resolve(key, fetcher)` returns the cached value synchronously
- *      when present.
- *   2. When not cached, the bridge MUST start the fetch and *throw*
- *      the in-flight Promise (same primitive Suspense uses). The
- *      reconciler's render-until-stable loop catches the thrown
- *      Promise, awaits it, caches the result, and re-renders.
- *   3. When the fetcher *rejects*, the rejection is cached as an
- *      error for that key. The next render call to `resolve(key, …)`
- *      throws the underlying error (synchronously). The component
- *      sees a real error — not a "still loading" state.
- *   4. Unhandled render errors propagate to the harness, which
- *      terminates the `renderTree` operation with `outcome: "failed"`
- *      and a `use-data-failed` diagnostic.
- *   5. The loop terminates whenever a render completes without
- *      throwing a Promise. There is no concept of "render with
- *      partial data."
+ *   1. `peek(key)` returns the entry's current state — a tagged
+ *      `DataEntry` (`value` / `pending` / `error`) — or `undefined`
+ *      if no entry exists for `key`. Synchronous; allocates one
+ *      tagged object per call.
+ *   2. `fetch(key, fetcher)` initiates a fetch if no entry exists,
+ *      joins the in-flight Promise if pending, or returns a resolved
+ *      Promise of the cached value if already fulfilled. Always
+ *      returns a Promise.
+ *   3. `subscribe(key, listener)` notifies on any entry state change
+ *      (value, pending, error). Used by reconcilers that need to
+ *      re-render on cache mutation.
+ *   4. When a fetcher rejects, the rejection is cached for that key.
+ *      The next `peek(key)` returns `{ kind: "error", error }`. The
+ *      next `fetch(key, …)` returns the rejected Promise of the
+ *      cached error.
  *
  * Implementations:
- *   - In-memory: a `Map<key, { state: "fulfilled" | "rejected" | "pending"; value | reason | promise }>`.
+ *   - In-memory: a `Map<key, Entry>` where Entry tracks
+ *     pending Promise / fulfilled value / rejected error.
  *   - Durable: write-through to a persistent KV; the cache survives
  *     hibernation via `ReconcilerSnapshot.dataCache`.
  *
@@ -145,24 +154,55 @@ export interface SnapshotCapable<TSnapshot = unknown> {
  */
 export interface DataBridge {
   /**
-   * Resolve `key`. Returns synchronously when cached. Throws an
-   * in-flight Promise when not cached. Throws the cached error when
-   * the prior fetch rejected.
-   *
-   * @throws Promise<T> when a fetch is in flight for `key`
-   * @throws Error when the prior fetch for `key` rejected
+   * Snapshot probe — returns the entry's current cache state for
+   * `key`, or `undefined` when no entry exists. Synchronous. Allocates
+   * one `DataEntry<T>` object per call (the tagged shape).
    */
-  resolve<T>(key: string, fetcher: () => Promise<T>, options?: DataResolveOptions): T;
+  peek<T>(key: string): DataEntry<T> | undefined;
 
-  /** Invalidate a cache entry. Next `resolve(key, …)` re-fetches. */
+  /**
+   * Initiate (or join) a fetch for `key`. Behavior:
+   *
+   *   - No entry exists → call `fetcher()`, cache the promise as
+   *     pending, return the promise.
+   *   - Entry is `pending` → return the in-flight promise (the
+   *     supplied `fetcher` is ignored; idempotent on key).
+   *   - Entry is `value` → return a resolved promise of the cached
+   *     value (`fetcher` ignored).
+   *   - Entry is `error` → return a rejected promise of the cached
+   *     error (`fetcher` ignored).
+   *
+   * Invalidate via `invalidate(key)` first to force a re-fetch.
+   */
+  fetch<T>(key: string, fetcher: () => Promise<T>, options?: DataResolveOptions): Promise<T>;
+
+  /**
+   * Notify when the entry for `key` changes state (value / pending /
+   * error / invalidated). Reconcilers use this to trigger re-render
+   * on cache mutation. Returns an unsubscribe function.
+   */
+  subscribe(key: string, listener: () => void): Unsubscribe;
+
+  /** Invalidate a cache entry. Next `fetch(key, …)` re-fetches. */
   invalidate(key: string): void;
 
   /** Invalidate every entry whose `tag` matches. */
   invalidateTag(tag: string): void;
 
-  /** Cache probe (does not start a fetch). */
+  /** Cache probe (does not start a fetch). True iff a fresh `value` entry exists. */
   has(key: string): boolean;
 }
+
+/**
+ * Tagged-union shape returned by {@link DataBridge.peek}. Reconcilers
+ * dispatch on `kind` to translate cache state into their own
+ * async idiom (throw for React Suspense, wrap in Observable for
+ * Angular, etc.).
+ */
+export type DataEntry<T> =
+  | { readonly kind: "value"; readonly value: T }
+  | { readonly kind: "pending"; readonly promise: Promise<T> }
+  | { readonly kind: "error"; readonly error: unknown };
 
 export interface DataResolveOptions {
   /** Milliseconds; after which `has(key)` returns false. */

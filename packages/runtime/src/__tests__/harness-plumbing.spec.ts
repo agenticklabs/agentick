@@ -454,8 +454,8 @@ describe("harness plumbing — parent/child Operation composition", () => {
     const { journal, bus, inbox } = await makeSubstrate();
 
     class ComposingHarness extends BaseHarness<"tool"> {
-      constructor() {
-        super("tool", "compose-test", journal, bus, inbox);
+      constructor(scopeId: string = "compose-test") {
+        super("tool", scopeId, journal, bus, inbox);
       }
       outerEffect(): Effect.Effect<string, never, never> {
         const outer: Operation<{}, string, never> = {
@@ -463,6 +463,7 @@ describe("harness plumbing — parent/child Operation composition", () => {
           surface: "tool",
           name: "tool:outer",
           input: {},
+          scope: {},
         };
         return this.runOperation(outer, () =>
           Effect.gen(this, function* () {
@@ -471,6 +472,7 @@ describe("harness plumbing — parent/child Operation composition", () => {
               surface: "tool",
               name: "tool:inner",
               input: {},
+              scope: {},
             };
             return yield* this.runOperation(inner, () => Effect.succeed("ok"));
           }),

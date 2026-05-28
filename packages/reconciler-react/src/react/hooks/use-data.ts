@@ -1,13 +1,23 @@
 /**
- * `useData` — blocking async data resolution. NOT React Suspense.
+ * `useData` — blocking async data resolution for the React reconciler.
+ * NOT React Suspense.
  *
- * Returns the cached value synchronously when present; throws the
- * in-flight Promise when not (which the reconciler's
- * render-until-stable loop catches, awaits, and re-renders); throws
- * the underlying error when a prior fetch rejected.
+ * Composes the reconciler-agnostic `DataBridge` primitives
+ * (`peek` + `fetch`) into React's throw-on-pending pattern:
+ *
+ *   - cached value   → returns synchronously
+ *   - cached error   → throws the error synchronously
+ *   - pending fetch  → throws the in-flight Promise (the reconciler's
+ *                      render-until-stable loop catches, awaits, and
+ *                      re-renders — never reaches React Suspense)
+ *   - no entry yet   → initiates the fetch via `fetch`, throws the
+ *                      returned Promise
  *
  * The component sees a real value or a real error — never a "loading"
  * sentinel. The `RenderedTree` reflects fully-resolved state.
+ *
+ * Non-React reconcilers (Angular, Vue, signal-based) compose the same
+ * primitives into their own async idiom.
  *
  * @see packages/spec/src/protocol/hook-bridges.ts §DataBridge
  */
@@ -21,5 +31,10 @@ export function useData<T>(
   options?: DataResolveOptions,
 ): T {
   const { data } = useBridges();
-  return data.resolve(key, fetcher, options);
+  const entry = data.peek<T>(key);
+  if (entry?.kind === "value") return entry.value;
+  if (entry?.kind === "pending") throw entry.promise;
+  if (entry?.kind === "error") throw entry.error;
+  // No entry yet — initiate the fetch and throw the in-flight Promise.
+  throw data.fetch(key, fetcher, options);
 }

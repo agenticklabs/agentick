@@ -1,15 +1,17 @@
 /**
  * Conformance suite for `DataBridge` implementations.
  *
- * Validates the no-Suspense contract documented in
+ * Validates the split-primitive contract documented in
  * `@agentick/spec/protocol/hook-bridges.ts`:
  *
- *   - cached fulfilled  → returns T synchronously
- *   - pending           → throws an in-flight `Promise<T>`
- *   - cached rejected   → throws the underlying Error synchronously
- *   - hasPending()      → true while a fetch is in flight, false after
- *   - invalidate(key)   → next resolve() re-fetches
- *   - invalidateTag(t)  → drops all entries with that tag
+ *   - peek(key) returns the entry's tagged state (value/pending/error)
+ *     or undefined.
+ *   - fetch(key, fetcher) initiates a fetch, joins in-flight ones,
+ *     returns resolved cached values, returns rejected cached errors.
+ *   - subscribe(key, listener) fires on cache state changes.
+ *   - invalidate(key) / invalidateTag(tag) drop entries; next fetch
+ *     re-runs the fetcher.
+ *   - has(key) is true iff a fresh value entry exists.
  *
  * Implementations that pass this suite are interchangeable in any
  * reconciler harness — local in-memory, durable KV-backed, or remote
@@ -20,60 +22,63 @@ import { describe, expect, it } from "vitest";
 import type { DataBridge } from "@agentick/spec";
 
 export function runDataBridgeConformance(factory: () => DataBridge): void {
-  describe("DataBridge — resolve semantics", () => {
-    it("throws the in-flight Promise for uncached keys", async () => {
+  describe("DataBridge — peek / fetch", () => {
+    it("peek returns undefined for unknown keys", () => {
       const bridge = factory();
-      let thrown: unknown;
-      try {
-        bridge.resolve("k", async () => "value");
-      } catch (e) {
-        thrown = e;
-      }
-      expect(thrown).toBeInstanceOf(Promise);
-      const resolved = await (thrown as Promise<unknown>);
-      // Either the bridge's settled Promise (resolves to void) or the
-      // raw fetcher Promise (resolves to "value"). Both are acceptable
-      // — what matters is the throw happened.
-      expect(["value", undefined]).toContain(resolved as unknown);
+      expect(bridge.peek("nope")).toBeUndefined();
     });
 
-    it("returns the cached value synchronously after a fetch settles", async () => {
+    it("fetch initiates a fetch; peek reflects pending then value", async () => {
       const bridge = factory();
-      try {
-        bridge.resolve("k", async () => 42);
-      } catch (p) {
-        await p;
-      }
-      const v = bridge.resolve("k", async () => -1);
+      const promise = bridge.fetch("k", async () => "value");
+      const pending = bridge.peek<string>("k");
+      expect(pending?.kind).toBe("pending");
+      await promise;
+      const resolved = bridge.peek<string>("k");
+      expect(resolved).toMatchObject({ kind: "value", value: "value" });
+    });
+
+    it("fetch joins an in-flight Promise for the same key", () => {
+      const bridge = factory();
+      const first = bridge.fetch("k", async () => "v");
+      const second = bridge.fetch("k", async () => "different");
+      // Same in-flight Promise; second fetcher is ignored.
+      expect(second).toBe(first);
+    });
+
+    it("fetch returns a resolved Promise of the cached value", async () => {
+      const bridge = factory();
+      await bridge.fetch("k", async () => 42);
+      const v = await bridge.fetch("k", async () => -1);
       expect(v).toBe(42);
     });
 
-    it("throws the cached Error when a prior fetch rejected", async () => {
+    it("fetch returns a rejected Promise when the prior fetch errored", async () => {
       const bridge = factory();
-      try {
-        bridge.resolve("bad", () => Promise.reject(new Error("boom")));
-      } catch (p) {
-        await Promise.allSettled([p as Promise<unknown>]);
-      }
-      expect(() => bridge.resolve("bad", async () => "x")).toThrow("boom");
+      await bridge.fetch("bad", () => Promise.reject(new Error("boom"))).catch(() => {});
+      await expect(bridge.fetch("bad", async () => "x")).rejects.toThrow("boom");
+      // peek also sees the error.
+      const peeked = bridge.peek("bad");
+      expect(peeked?.kind).toBe("error");
     });
+  });
 
-    it("re-throws the same in-flight Promise for the same key", () => {
+  describe("DataBridge — subscribe", () => {
+    it("notifies on fetch initiation, fulfillment, invalidation", async () => {
       const bridge = factory();
-      let first: unknown;
-      let second: unknown;
-      try {
-        bridge.resolve("k", async () => "v");
-      } catch (e) {
-        first = e;
-      }
-      try {
-        bridge.resolve("k", async () => "v");
-      } catch (e) {
-        second = e;
-      }
-      expect(first).toBeInstanceOf(Promise);
-      expect(second).toBeInstanceOf(Promise);
+      const events: string[] = [];
+      const unsub = bridge.subscribe("k", () => events.push("changed"));
+      const p = bridge.fetch("k", async () => "v");
+      expect(events.length).toBeGreaterThanOrEqual(1); // pending notification
+      await p;
+      expect(events.length).toBeGreaterThanOrEqual(2); // value notification
+      const beforeInvalidate = events.length;
+      bridge.invalidate("k");
+      expect(events.length).toBe(beforeInvalidate + 1);
+      unsub();
+      bridge.fetch("k", async () => "v2");
+      // No more notifications after unsubscribe.
+      expect(events.length).toBe(beforeInvalidate + 1);
     });
   });
 
@@ -85,55 +90,25 @@ export function runDataBridgeConformance(factory: () => DataBridge): void {
 
     it("has() returns true after a fetch fulfills", async () => {
       const bridge = factory();
-      try {
-        bridge.resolve("k", async () => "v");
-      } catch (p) {
-        await p;
-      }
+      await bridge.fetch("k", async () => "v");
       expect(bridge.has("k")).toBe(true);
     });
 
-    it("invalidate(key) — next resolve() re-fetches", async () => {
+    it("invalidate(key) — next fetch re-runs the fetcher", async () => {
       const bridge = factory();
       let calls = 0;
-      try {
-        bridge.resolve("k", async () => {
-          calls++;
-          return calls;
-        });
-      } catch (p) {
-        await p;
-      }
-      expect(bridge.resolve("k", async () => -1)).toBe(1);
+      await bridge.fetch("k", async () => ++calls);
+      expect(await bridge.fetch("k", async () => -1)).toBe(1);
       bridge.invalidate("k");
-      try {
-        bridge.resolve("k", async () => {
-          calls++;
-          return calls;
-        });
-      } catch (p) {
-        await p;
-      }
-      expect(bridge.resolve("k", async () => -1)).toBe(2);
+      await bridge.fetch("k", async () => ++calls);
+      expect(await bridge.fetch("k", async () => -1)).toBe(2);
     });
 
     it("invalidateTag(tag) — drops every entry with that tag", async () => {
       const bridge = factory();
-      try {
-        bridge.resolve("a", async () => "A", { tag: "group" });
-      } catch (p) {
-        await p;
-      }
-      try {
-        bridge.resolve("b", async () => "B", { tag: "group" });
-      } catch (p) {
-        await p;
-      }
-      try {
-        bridge.resolve("c", async () => "C", { tag: "other" });
-      } catch (p) {
-        await p;
-      }
+      await bridge.fetch("a", async () => "A", { tag: "group" });
+      await bridge.fetch("b", async () => "B", { tag: "group" });
+      await bridge.fetch("c", async () => "C", { tag: "other" });
       bridge.invalidateTag("group");
       expect(bridge.has("a")).toBe(false);
       expect(bridge.has("b")).toBe(false);
@@ -142,30 +117,10 @@ export function runDataBridgeConformance(factory: () => DataBridge): void {
 
     it("ttl: has() returns false after expiry", async () => {
       const bridge = factory();
-      try {
-        bridge.resolve("k", async () => "v", { ttl: 1 });
-      } catch (p) {
-        await p;
-      }
+      await bridge.fetch("k", async () => "v", { ttl: 1 });
       expect(bridge.has("k")).toBe(true);
       await new Promise((r) => setTimeout(r, 5));
       expect(bridge.has("k")).toBe(false);
-    });
-  });
-
-  describe("DataBridge — no-Suspense invariant", () => {
-    it("resolve never returns a Promise (always sync or throw)", async () => {
-      const bridge = factory();
-      // Cached → sync return.
-      try {
-        bridge.resolve("k", async () => "v");
-      } catch (p) {
-        await p;
-      }
-      const sync = bridge.resolve("k", async () => "x");
-      expect(sync).not.toBeInstanceOf(Promise);
-      // Uncached → throws (cannot return at all). The throw IS a
-      // Promise, but resolve() doesn't return one.
     });
   });
 }

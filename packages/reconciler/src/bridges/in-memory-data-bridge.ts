@@ -1,25 +1,27 @@
 /**
  * InMemoryDataBridge — reference `DataBridge` implementation.
  *
- * The no-Suspense contract in concrete form:
+ * Implements the split-primitive contract:
+ *   - `peek(key)` — sync read; returns the entry's current state or undefined
+ *   - `fetch(key, fetcher)` — initiates or joins a fetch; returns Promise
+ *   - `subscribe(key, listener)` — observes cache mutations
+ *   - `invalidate` / `invalidateTag` — drop entries
  *
- *   - cached fulfilled  → returns `T` synchronously
- *   - cached rejected   → throws the underlying `Error` synchronously
- *   - pending           → throws the in-flight `Promise<T>` (the
- *                         reconciler render loop catches, awaits, and
- *                         re-renders — never reaches React Suspense
- *                         boundaries)
- *
- * `resolve` is idempotent on `key` within a single mount session — the
- * same key always returns the same cached entry. Invalidation
- * (`invalidate` / `invalidateTag`) drops entries so the next `resolve`
- * re-fetches.
+ * Reconcilers compose these into their own async idiom. React's `useData`
+ * peeks for a value, throws the pending promise (or cached error), and
+ * initiates `fetch` if no entry exists.
  *
  * @see docs/proposals/v2/blueprint/03-reconciler-harness.md
  * @see packages/spec/src/protocol/hook-bridges.ts
  */
 
-import type { DataBridge, DataCacheEntry, DataResolveOptions } from "@agentick/spec";
+import type {
+  DataBridge,
+  DataCacheEntry,
+  DataEntry,
+  DataResolveOptions,
+  Unsubscribe,
+} from "@agentick/spec";
 
 type Entry =
   | {
@@ -43,8 +45,8 @@ type Entry =
 export interface InMemoryDataBridgeOptions {
   /**
    * Called whenever a fetch transitions to `fulfilled` or `rejected`.
-   * Useful for triggering a re-render from outside React when the
-   * pending Promise the bridge threw resolves.
+   * Useful for triggering a re-render from outside the reconciler when
+   * the pending promise resolves.
    */
   readonly onSettled?: (key: string) => void;
 }
@@ -52,6 +54,7 @@ export interface InMemoryDataBridgeOptions {
 export class InMemoryDataBridge implements DataBridge {
   private readonly cache = new Map<string, Entry>();
   private readonly pendingPromises = new Set<Promise<unknown>>();
+  private readonly listeners = new Map<string, Set<() => void>>();
   private fetchCountTotal = 0;
   private readonly options: InMemoryDataBridgeOptions;
 
@@ -62,6 +65,7 @@ export class InMemoryDataBridge implements DataBridge {
   /**
    * Are any fetches in flight? Used by the reconciler's
    * render-until-stable loop to decide whether to await + retry.
+   * Extension over `DataBridge` — duck-typed by `ReconcilerHarness`.
    */
   hasPending(): boolean {
     return this.pendingPromises.size > 0;
@@ -70,6 +74,7 @@ export class InMemoryDataBridge implements DataBridge {
   /**
    * Snapshot of in-flight Promises. The render-until-stable loop awaits
    * `Promise.allSettled(pending())` before retrying.
+   * Extension over `DataBridge` — duck-typed.
    */
   pending(): readonly Promise<unknown>[] {
     return [...this.pendingPromises];
@@ -91,31 +96,48 @@ export class InMemoryDataBridge implements DataBridge {
     return this.fetchCountTotal;
   }
 
-  resolve<T>(key: string, fetcher: () => Promise<T>, options: DataResolveOptions = {}): T {
-    const entry = this.cache.get(key);
+  // ──────── DataBridge protocol ────────
 
-    // Cache hit: synchronous return or synchronous throw.
-    if (entry) {
-      if (entry.status === "fulfilled") {
-        if (isFresh(entry, Date.now())) return entry.value as T;
+  peek<T>(key: string): DataEntry<T> | undefined {
+    const entry = this.cache.get(key);
+    if (!entry) return undefined;
+    if (entry.status === "fulfilled") {
+      if (!isFresh(entry, Date.now())) {
         this.cache.delete(key);
-      } else if (entry.status === "rejected") {
-        throw entry.error;
-      } else if (entry.status === "pending") {
-        // Same key resolved twice in one render — re-throw the same Promise.
-        throw entry.promise;
+        return undefined;
+      }
+      return { kind: "value", value: entry.value as T };
+    }
+    if (entry.status === "rejected") {
+      return { kind: "error", error: entry.error };
+    }
+    // pending
+    return { kind: "pending", promise: entry.promise as Promise<T> };
+  }
+
+  fetch<T>(
+    key: string,
+    fetcher: () => Promise<T>,
+    options: DataResolveOptions = {},
+  ): Promise<T> {
+    const existing = this.cache.get(key);
+    if (existing) {
+      if (existing.status === "fulfilled") {
+        if (isFresh(existing, Date.now())) return Promise.resolve(existing.value as T);
+        this.cache.delete(key); // stale — fall through to re-fetch
+      } else if (existing.status === "rejected") {
+        return Promise.reject(existing.error);
+      } else if (existing.status === "pending") {
+        return existing.promise as Promise<T>;
       }
     }
 
-    // Cache miss: start the fetch, throw the in-flight Promise. The
-    // reconciler's render-until-stable loop tracks pending state via
-    // hasPending() + pending() — it does NOT need to catch the thrown
-    // value to know a wait is required.
+    // Cache miss (or stale): start the fetch.
     let resolveSettled!: () => void;
     const settled = new Promise<void>((r) => {
       resolveSettled = r;
     });
-    void fetcher().then(
+    const fetchPromise = fetcher().then(
       (value) => {
         this.cache.set(key, {
           status: "fulfilled",
@@ -126,9 +148,11 @@ export class InMemoryDataBridge implements DataBridge {
         });
         this.pendingPromises.delete(settled);
         this.options.onSettled?.(key);
+        this.notifyKey(key);
         resolveSettled();
+        return value;
       },
-      (err) => {
+      (err: unknown) => {
         this.cache.set(key, {
           status: "rejected",
           error: err,
@@ -136,27 +160,51 @@ export class InMemoryDataBridge implements DataBridge {
         });
         this.pendingPromises.delete(settled);
         this.options.onSettled?.(key);
+        this.notifyKey(key);
         resolveSettled();
+        throw err;
       },
     );
     this.pendingPromises.add(settled);
     this.fetchCountTotal++;
     this.cache.set(key, {
       status: "pending",
-      promise: settled,
+      promise: fetchPromise as Promise<unknown>,
       ...(options.tag !== undefined ? { tag: options.tag } : {}),
     });
-    throw settled;
+    this.notifyKey(key);
+    return fetchPromise;
+  }
+
+  subscribe(key: string, listener: () => void): Unsubscribe {
+    let bucket = this.listeners.get(key);
+    if (!bucket) {
+      bucket = new Set();
+      this.listeners.set(key, bucket);
+    }
+    bucket.add(listener);
+    return () => {
+      const b = this.listeners.get(key);
+      if (!b) return;
+      b.delete(listener);
+      if (b.size === 0) this.listeners.delete(key);
+    };
   }
 
   invalidate(key: string): void {
     this.cache.delete(key);
+    this.notifyKey(key);
   }
 
   invalidateTag(tag: string): void {
+    const invalidated: string[] = [];
     for (const [k, e] of this.cache) {
-      if (e.tag === tag) this.cache.delete(k);
+      if (e.tag === tag) {
+        this.cache.delete(k);
+        invalidated.push(k);
+      }
     }
+    for (const k of invalidated) this.notifyKey(k);
   }
 
   has(key: string): boolean {
@@ -165,6 +213,8 @@ export class InMemoryDataBridge implements DataBridge {
     if (e.status !== "fulfilled") return false;
     return isFresh(e, Date.now());
   }
+
+  // ──────── Extensions (duck-typed by ReconcilerHarness etc.) ────────
 
   /** Diagnostic: snapshot of cache state for tests / devtools. */
   entries(): ReadonlyArray<{ readonly key: string; readonly entry: Entry }> {
@@ -175,7 +225,9 @@ export class InMemoryDataBridge implements DataBridge {
 
   /** Clear every entry. */
   clear(): void {
+    const keys = [...this.cache.keys()];
     this.cache.clear();
+    for (const k of keys) this.notifyKey(k);
   }
 
   /**
@@ -204,6 +256,7 @@ export class InMemoryDataBridge implements DataBridge {
    * authoritative state). TTL is honored — stale entries are skipped.
    */
   importSnapshot(entries: readonly DataCacheEntry[]): void {
+    const existingKeys = [...this.cache.keys()];
     this.cache.clear();
     this.pendingPromises.clear();
     const now = Date.now();
@@ -217,6 +270,17 @@ export class InMemoryDataBridge implements DataBridge {
         ...(e.tag !== undefined ? { tag: e.tag } : {}),
       });
     }
+    // Notify keys that changed: union of old keys + new keys.
+    const newKeys = new Set([...existingKeys, ...this.cache.keys()]);
+    for (const k of newKeys) this.notifyKey(k);
+  }
+
+  // ──────── Internals ────────
+
+  private notifyKey(key: string): void {
+    const bucket = this.listeners.get(key);
+    if (!bucket) return;
+    for (const l of bucket) l();
   }
 }
 
