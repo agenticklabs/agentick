@@ -59,10 +59,33 @@ export interface SpecConfig {
 }
 
 /**
- * Provider-specific escapes. Keys SHOULD be provider namespaces:
- * `openai`, `anthropic`, `google`, `ai-sdk`.
+ * Provider-specific escapes. Keys are provider namespaces: `openai`,
+ * `anthropic`, `google`, `ai-sdk`, etc.
+ *
+ * **This is an EMPTY SEED interface.** Adapter packages augment it via
+ * TypeScript module augmentation so call sites get fully-typed
+ * provider knobs without the spec hardcoding every provider's shape:
+ *
+ * ```ts
+ * // in @agentick/executor-openai
+ * declare module "@agentick/spec" {
+ *   interface ProviderOptions {
+ *     readonly openai?: {
+ *       readonly seed?: number;
+ *       readonly logprobs?: boolean;
+ *       readonly store?: boolean;
+ *       // ...
+ *     };
+ *   }
+ * }
+ * ```
+ *
+ * Same pattern as {@link HookBridges} (ADR 26/27): the spec ships an
+ * empty surface, packages contribute slots, no central registry of
+ * "known providers" exists in spec.
  */
-export type ProviderOptions = Record<string, Record<string, unknown>>;
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type
+export interface ProviderOptions {}
 
 // ============================================================================
 // Feature registry (initial set, sign-off pending)

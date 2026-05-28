@@ -8,6 +8,8 @@
  * @see docs/proposals/v2/blueprint/06-executor-harness.md
  */
 
+import type { ProviderOptions } from "./rendered-tree.js";
+
 /**
  * Capabilities advertised by an execution target. Drives loop-executor
  * decisions (tool exposure, streaming opt-in, max-output negotiation).
@@ -32,7 +34,14 @@ export interface ExecutionTarget {
   readonly provider?: string;
   readonly modelId?: string;
   readonly capabilities?: TargetCapabilities;
-  readonly providerOptions?: Record<string, unknown>;
+  /**
+   * Provider-specific escape hatch. Typed via the module-augmentable
+   * {@link ProviderOptions} interface — adapter packages contribute
+   * typed slots (e.g., `openai`, `anthropic`) via `declare module
+   * "@agentick/spec"`. The spec ships an empty seed, so call sites
+   * stay type-safe across provider-specific knobs.
+   */
+  readonly providerOptions?: ProviderOptions;
 }
 
 export interface LanguageModelTarget extends ExecutionTarget {

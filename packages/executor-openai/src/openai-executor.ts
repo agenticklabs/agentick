@@ -73,6 +73,43 @@ import type {
 import { SPEC_VERSION } from "@agentick/spec";
 
 // ============================================================================
+// ProviderOptions augmentation — typed OpenAI escape hatch
+// ============================================================================
+
+/**
+ * Contribute the typed `openai` slot to `@agentick/spec`'s
+ * {@link ProviderOptions}. Importing this package brings these
+ * field types into scope at every `ExecutionTarget.providerOptions`
+ * site. Same pattern as `HookBridges` augmentation (ADR 26/27).
+ *
+ * Fields mirror OpenAI's Chat Completions request body — adopters
+ * can set provider-specific knobs without us hardcoding them in spec.
+ */
+declare module "@agentick/spec" {
+  interface ProviderOptions {
+    readonly openai?: {
+      readonly seed?: number;
+      readonly logprobs?: boolean;
+      readonly top_logprobs?: number;
+      readonly store?: boolean;
+      readonly n?: number;
+      readonly user?: string;
+      readonly metadata?: Record<string, string>;
+      readonly parallel_tool_calls?: boolean;
+      readonly service_tier?: "auto" | "default" | "flex" | "priority" | (string & {});
+      readonly prediction?: {
+        readonly type: "content";
+        readonly content: string | ReadonlyArray<{ readonly type: "text"; readonly text: string }>;
+      };
+      readonly reasoning_effort?: "minimal" | "low" | "medium" | "high" | (string & {});
+      readonly modalities?: ReadonlyArray<"text" | "audio">;
+      readonly web_search_options?: Record<string, unknown>;
+      readonly [key: string]: unknown;
+    };
+  }
+}
+
+// ============================================================================
 // Construction options
 // ============================================================================
 
