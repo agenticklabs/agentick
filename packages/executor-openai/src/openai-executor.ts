@@ -37,6 +37,7 @@ import type {
 import { BaseHarness, runHarnessProtocol, ulid } from "@agentick/runtime";
 import type {
   AbortExecutorInput,
+  AdapterDelta,
   ContentBlock,
   ContextEntry,
   EventBus,
@@ -44,6 +45,7 @@ import type {
   ExecuteInput,
   ExecutionTarget,
   ExecutorError,
+  ExecutorStream,
   ExecutorTerminal,
   LanguageModelExecutionResult,
   LanguageModelExecutor,
@@ -66,6 +68,7 @@ import type {
   SectionEntry,
   ToolCall,
   ToolDeclaration,
+  UsageStats,
 } from "@agentick/spec";
 import { SPEC_VERSION } from "@agentick/spec";
 
@@ -199,6 +202,203 @@ export class OpenAIExecutor extends BaseHarness<"executor"> implements LanguageM
     return runHarnessProtocol(
       this.runOperation(op, (i) => this.executeBody(i, executionId, undefined)),
     );
+  }
+
+  /**
+   * Streaming surface — yields one `AdapterDelta` per provider chunk.
+   * 1:1 translation: OpenAI sends `delta.content` → we emit
+   * `content-delta`; `delta.tool_calls[i].function.name` → `tool-call-start`;
+   * `delta.tool_calls[i].function.arguments` → `tool-call-delta`;
+   * `finish_reason` → `message-end`; usage chunks → `usage`. After the
+   * provider stream completes, we emit the symmetric summary events
+   * (`content`, `tool-call`, `message`) from the accumulator state.
+   *
+   * `.result` resolves with the assembled raw `ChatCompletion` shape —
+   * the same value the non-streaming `execute()` path returns. The
+   * loop hands it to `normalize()` to convert into a
+   * `LanguageModelExecutionResult`.
+   */
+  executeStream(input: ExecuteInput<LanguageModelInput>): ExecutorStream<ChatCompletion> {
+    const queue: AdapterDelta[] = [];
+    const resolvers: Array<(r: IteratorResult<AdapterDelta>) => void> = [];
+    let done = false;
+    let resultResolve!: (v: ChatCompletion) => void;
+    let resultReject!: (e: unknown) => void;
+    const resultPromise = new Promise<ChatCompletion>((res, rej) => {
+      resultResolve = res;
+      resultReject = rej;
+    });
+    const controller = new AbortController();
+    if (input.signal) {
+      if (input.signal.aborted) controller.abort(input.signal.reason);
+      else
+        input.signal.addEventListener(
+          "abort",
+          () => controller.abort(input.signal!.reason),
+          { once: true },
+        );
+    }
+
+    const emit = (delta: AdapterDelta): void => {
+      if (done) return;
+      const r = resolvers.shift();
+      if (r) r({ value: delta, done: false });
+      else queue.push(delta);
+    };
+    const complete = (): void => {
+      done = true;
+      while (resolvers.length > 0) {
+        resolvers.shift()!({ value: undefined as unknown as AdapterDelta, done: true });
+      }
+    };
+
+    // Drive the provider stream + emit chain on a detached promise. The
+    // returned ExecutorStream's iterator + .result are both backed by it.
+    void (async () => {
+      try {
+        const params = toOpenAIParams(input.targetInput, this.defaultModel);
+        const stream = (await this.client.chat.completions.create(
+          { ...params, stream: true, stream_options: { include_usage: true } },
+          { signal: controller.signal },
+        )) as unknown as AsyncIterable<ChatCompletionChunk>;
+
+        const accum = new StreamAccumulator();
+        emit({ type: "message-start", role: "assistant", model: params.model });
+
+        // Per-block state needed for symmetric start/end emission.
+        let textBlockStarted = false;
+        const toolBlockStartedByIndex = new Set<number>();
+
+        for await (const chunk of stream) {
+          accum.push(chunk);
+          for (const delta of mapChunkToAdapterDeltas(
+            chunk,
+            { textBlockStarted, toolBlockStartedByIndex },
+          )) {
+            // Track block-start side effects so mapChunk knows what to
+            // emit on subsequent chunks.
+            if (delta.type === "content-start") textBlockStarted = true;
+            if (delta.type === "tool-call-start") {
+              toolBlockStartedByIndex.add(delta.blockIndex);
+            }
+            emit(delta);
+          }
+        }
+
+        // Symmetric end + summary events from the accumulator state.
+        // We close any open blocks that the provider didn't explicitly
+        // close, then emit the summary events.
+        const final = accum.toChatCompletion(params.model);
+        const choice = final.choices[0]!;
+        const finishReason = choice.finish_reason ?? "stop";
+        const text = typeof choice.message.content === "string" ? choice.message.content : "";
+        const toolCallsRaw = choice.message.tool_calls ?? [];
+
+        let blockIndex = 0;
+        if (textBlockStarted && text.length > 0) {
+          emit({ type: "content-end", blockIndex });
+          emit({
+            type: "content",
+            blockIndex,
+            content: { type: "text", text } as ContentBlock,
+          });
+          blockIndex += 1;
+        }
+        for (const tc of toolCallsRaw) {
+          const fn = (tc as { function?: { name: string; arguments: string } }).function;
+          if (!fn) continue;
+          const idx = blockIndex;
+          if (toolBlockStartedByIndex.has(idx) === false) {
+            // Provider never sent a function-name chunk for this index —
+            // emit a synthetic tool-call-start before close so summary is symmetric.
+            emit({
+              type: "tool-call-start",
+              callId: tc.id,
+              name: fn.name,
+              blockIndex: idx,
+            });
+          }
+          emit({ type: "tool-call-end", callId: tc.id });
+          let parsed: Readonly<Record<string, unknown>> = {};
+          try {
+            parsed = JSON.parse(fn.arguments) as Readonly<Record<string, unknown>>;
+          } catch {
+            /* invalid JSON — emit empty object as input */
+          }
+          emit({
+            type: "tool-call",
+            callId: tc.id,
+            name: fn.name,
+            input: parsed,
+          });
+          blockIndex += 1;
+        }
+
+        const usage: UsageStats = {
+          inputTokens: final.usage?.prompt_tokens ?? 0,
+          outputTokens: final.usage?.completion_tokens ?? 0,
+          totalTokens: final.usage?.total_tokens ?? 0,
+        };
+        const stopReason = mapFinishReason(finishReason);
+        emit({ type: "message-end", stopReason, usage });
+
+        // Assembled assistant message summary.
+        const messageContent: ContentBlock[] = [];
+        if (text.length > 0) messageContent.push({ type: "text", text });
+        for (const tc of toolCallsRaw) {
+          const fn = (tc as { function?: { name: string; arguments: string } }).function;
+          if (!fn) continue;
+          messageContent.push({
+            type: "tool_use",
+            toolUseId: tc.id,
+            name: fn.name,
+            input: ((): Readonly<Record<string, unknown>> => {
+              try {
+                return JSON.parse(fn.arguments) as Readonly<Record<string, unknown>>;
+              } catch {
+                return {};
+              }
+            })(),
+          });
+        }
+        emit({
+          type: "message",
+          message: { role: "assistant", content: messageContent, model: params.model },
+          stopReason,
+          usage,
+        });
+
+        resultResolve(final);
+        complete();
+      } catch (cause) {
+        resultReject(mapExecuteError(cause));
+        complete();
+      }
+    })();
+
+    return {
+      result: resultPromise,
+      abort(reason) {
+        controller.abort(reason ?? "aborted");
+      },
+      [Symbol.asyncIterator]() {
+        return {
+          next(): Promise<IteratorResult<AdapterDelta>> {
+            if (queue.length > 0) {
+              return Promise.resolve({ value: queue.shift()!, done: false });
+            }
+            if (done) {
+              return Promise.resolve({ value: undefined as unknown as AdapterDelta, done: true });
+            }
+            return new Promise((resolve) => resolvers.push(resolve));
+          },
+          return(): Promise<IteratorResult<AdapterDelta>> {
+            complete();
+            return Promise.resolve({ value: undefined as unknown as AdapterDelta, done: true });
+          },
+        };
+      },
+    };
   }
 
   normalize(input: NormalizeInput<unknown>): Promise<LanguageModelExecutionResult> {
@@ -880,6 +1080,81 @@ class StreamAccumulator {
         total_tokens: 0,
       },
     } as ChatCompletion;
+  }
+}
+
+/**
+ * 1:1 translation of an OpenAI `ChatCompletionChunk` to zero-or-more
+ * typed `AdapterDelta` events. State-aware: tracks whether a text
+ * content block has been opened, and whether each tool-call slot has
+ * been opened. The caller maintains the state across chunks.
+ */
+function mapChunkToAdapterDeltas(
+  chunk: ChatCompletionChunk,
+  state: { textBlockStarted: boolean; toolBlockStartedByIndex: Set<number> },
+): AdapterDelta[] {
+  const out: AdapterDelta[] = [];
+  // Usage chunks (some providers emit a standalone trailer with usage).
+  if (chunk.usage && !chunk.choices?.[0]?.delta) {
+    out.push({
+      type: "usage",
+      usage: {
+        inputTokens: chunk.usage.prompt_tokens ?? 0,
+        outputTokens: chunk.usage.completion_tokens ?? 0,
+        totalTokens: chunk.usage.total_tokens ?? 0,
+      },
+    });
+  }
+  const choice = chunk.choices?.[0];
+  if (!choice) return out;
+  const delta = choice.delta;
+  if (delta) {
+    if (typeof delta.content === "string" && delta.content.length > 0) {
+      if (!state.textBlockStarted) {
+        out.push({ type: "content-start", blockIndex: 0, blockType: "text" });
+      }
+      out.push({ type: "content-delta", blockIndex: 0, delta: delta.content });
+    }
+    if (Array.isArray(delta.tool_calls)) {
+      for (const tc of delta.tool_calls) {
+        const idx = tc.index;
+        if (tc.function?.name && !state.toolBlockStartedByIndex.has(idx)) {
+          out.push({
+            type: "tool-call-start",
+            callId: tc.id ?? `tc_${idx}`,
+            name: tc.function.name,
+            blockIndex: idx,
+          });
+        }
+        if (typeof tc.function?.arguments === "string" && tc.function.arguments.length > 0) {
+          out.push({
+            type: "tool-call-delta",
+            callId: tc.id ?? `tc_${idx}`,
+            delta: tc.function.arguments,
+          });
+        }
+      }
+    }
+  }
+  // We don't emit message-end here — the streaming loop emits it from
+  // the accumulator after the iterator completes (so usage is final).
+  return out;
+}
+
+/** Map OpenAI's `finish_reason` to the framework's `LanguageModelStopReason`. */
+function mapFinishReason(reason: string): LanguageModelStopReason {
+  switch (reason) {
+    case "stop":
+      return "end";
+    case "length":
+      return "max_tokens";
+    case "tool_calls":
+    case "function_call":
+      return "tool_use";
+    case "content_filter":
+      return "content_filter";
+    default:
+      return "end";
   }
 }
 

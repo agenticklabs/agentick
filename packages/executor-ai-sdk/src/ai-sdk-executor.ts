@@ -31,6 +31,7 @@
 import { Effect } from "effect";
 import {
   generateText,
+  streamText,
   type GenerateTextResult,
   type LanguageModel,
   type FinishReason,
@@ -41,6 +42,7 @@ import {
 import { BaseHarness, runHarnessProtocol, ulid } from "@agentick/runtime";
 import type {
   AbortExecutorInput,
+  AdapterDelta,
   ContentBlock,
   ContextEntry,
   EventBus,
@@ -48,6 +50,7 @@ import type {
   ExecuteInput,
   ExecutionTarget,
   ExecutorError,
+  ExecutorStream,
   ExecutorTerminal,
   LanguageModelExecutionResult,
   LanguageModelExecutor,
@@ -70,6 +73,7 @@ import type {
   SectionEntry,
   ToolCall,
   ToolDeclaration,
+  UsageStats,
 } from "@agentick/spec";
 import { SPEC_VERSION } from "@agentick/spec";
 
@@ -155,6 +159,277 @@ export class AISDKExecutor extends BaseHarness<"executor"> implements LanguageMo
         }),
       ),
     );
+  }
+
+  executeStream(input: ExecuteInput<LanguageModelInput>): ExecutorStream<unknown> {
+    const queue: AdapterDelta[] = [];
+    const resolvers: Array<(r: IteratorResult<AdapterDelta>) => void> = [];
+    let done = false;
+    let resultResolve!: (v: unknown) => void;
+    let resultReject!: (e: unknown) => void;
+    const resultPromise = new Promise<unknown>((res, rej) => {
+      resultResolve = res;
+      resultReject = rej;
+    });
+    const controller = new AbortController();
+    if (input.signal) {
+      if (input.signal.aborted) controller.abort(input.signal.reason);
+      else
+        input.signal.addEventListener(
+          "abort",
+          () => controller.abort(input.signal!.reason),
+          { once: true },
+        );
+    }
+
+    const emit = (delta: AdapterDelta): void => {
+      if (done) return;
+      const r = resolvers.shift();
+      if (r) r({ value: delta, done: false });
+      else queue.push(delta);
+    };
+    const complete = (): void => {
+      done = true;
+      while (resolvers.length > 0) {
+        resolvers.shift()!({ value: undefined as unknown as AdapterDelta, done: true });
+      }
+    };
+
+    void (async () => {
+      try {
+        const aiSdk = toAISDKInput(input.targetInput);
+        const stream = streamText({
+          model: this.model,
+          messages: aiSdk.messages,
+          ...(aiSdk.tools !== undefined ? { tools: aiSdk.tools } : {}),
+          abortSignal: controller.signal,
+        });
+
+        emit({ type: "message-start", role: "assistant" });
+
+        // Per-block tracking for symmetric start/end emission.
+        let textBlockStarted = false;
+        let textAccum = "";
+        const toolCallStarted = new Set<string>();
+        const toolCallArgsByCallId = new Map<string, string>();
+        const toolCallNameByCallId = new Map<string, string>();
+        let blockIndex = 0;
+        let stopReason: LanguageModelStopReason = "end";
+        let usage: UsageStats = { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
+
+        // AI SDK 5's fullStream events. We narrow with permissive duck-typing
+        // so this stays robust to minor SDK shape changes between releases.
+        for await (const partU of stream.fullStream) {
+          const part = partU as { type: string } & Record<string, unknown>;
+          switch (part.type) {
+            case "text-start": {
+              if (!textBlockStarted) {
+                textBlockStarted = true;
+                emit({ type: "content-start", blockIndex, blockType: "text" });
+              }
+              break;
+            }
+            case "text-delta":
+            case "text": {
+              const delta = (part as { text?: string; delta?: string }).text ??
+                (part as { delta?: string }).delta ?? "";
+              if (!textBlockStarted) {
+                textBlockStarted = true;
+                emit({ type: "content-start", blockIndex, blockType: "text" });
+              }
+              if (delta.length > 0) {
+                textAccum += delta;
+                emit({ type: "content-delta", blockIndex, delta });
+              }
+              break;
+            }
+            case "text-end": {
+              // The text-block close is emitted from the post-loop cleanup
+              // so we always emit content-end+content together symmetrically.
+              break;
+            }
+            case "tool-input-start": {
+              const callId = (part.toolCallId as string | undefined) ?? (part.id as string | undefined) ?? `tc_${ulid()}`;
+              const name = (part.toolName as string | undefined) ?? "";
+              toolCallStarted.add(callId);
+              toolCallNameByCallId.set(callId, name);
+              emit({ type: "tool-call-start", callId, name, blockIndex });
+              break;
+            }
+            case "tool-input-delta": {
+              const callId = (part.toolCallId as string | undefined) ?? (part.id as string | undefined) ?? "";
+              const delta = (part.argsTextDelta as string | undefined) ?? (part.delta as string | undefined) ?? "";
+              if (callId && delta) {
+                const prev = toolCallArgsByCallId.get(callId) ?? "";
+                toolCallArgsByCallId.set(callId, prev + delta);
+                emit({ type: "tool-call-delta", callId, delta });
+              }
+              break;
+            }
+            case "tool-input-end":
+            case "tool-call": {
+              const callId = (part.toolCallId as string | undefined) ?? (part.id as string | undefined) ?? "";
+              const name = (part.toolName as string | undefined) ?? toolCallNameByCallId.get(callId) ?? "";
+              if (!toolCallStarted.has(callId)) {
+                emit({ type: "tool-call-start", callId, name, blockIndex });
+                toolCallStarted.add(callId);
+              }
+              emit({ type: "tool-call-end", callId });
+              const inputObj =
+                (part.input as Readonly<Record<string, unknown>> | undefined) ??
+                (part.args as Readonly<Record<string, unknown>> | undefined) ??
+                ((): Readonly<Record<string, unknown>> => {
+                  try {
+                    return JSON.parse(
+                      toolCallArgsByCallId.get(callId) ?? "{}",
+                    ) as Readonly<Record<string, unknown>>;
+                  } catch {
+                    return {};
+                  }
+                })();
+              emit({ type: "tool-call", callId, name, input: inputObj });
+              break;
+            }
+            case "finish":
+            case "finish-step": {
+              const fin = (part.finishReason as FinishReason | undefined);
+              const us = part.usage as
+                | { inputTokens?: number; outputTokens?: number; totalTokens?: number }
+                | undefined;
+              if (fin) stopReason = mapFinishReason(fin);
+              if (us) {
+                usage = {
+                  inputTokens: us.inputTokens ?? 0,
+                  outputTokens: us.outputTokens ?? 0,
+                  totalTokens: us.totalTokens ?? 0,
+                };
+              }
+              break;
+            }
+            case "error": {
+              const err = part.error;
+              emit({
+                type: "error",
+                error: {
+                  message: err instanceof Error ? err.message : String(err),
+                },
+              });
+              break;
+            }
+            default:
+              // Other AI SDK events (reasoning, files, sources, etc.) —
+              // not yet mapped. Adopters relying on these can subscribe
+              // to the executor's bus envelopes; the typed handle stream
+              // skips them for now.
+              break;
+          }
+        }
+
+        // Close any open text block + emit content summary.
+        if (textBlockStarted) {
+          emit({ type: "content-end", blockIndex });
+          emit({
+            type: "content",
+            blockIndex,
+            content: { type: "text", text: textAccum } as ContentBlock,
+          });
+        }
+
+        emit({ type: "message-end", stopReason, usage });
+
+        // Final assembled message summary.
+        const messageContent: ContentBlock[] = [];
+        if (textAccum.length > 0) messageContent.push({ type: "text", text: textAccum });
+        for (const [callId, name] of toolCallNameByCallId) {
+          let parsed: Readonly<Record<string, unknown>> = {};
+          try {
+            parsed = JSON.parse(
+              toolCallArgsByCallId.get(callId) ?? "{}",
+            ) as Readonly<Record<string, unknown>>;
+          } catch {
+            /* keep empty */
+          }
+          messageContent.push({
+            type: "tool_use",
+            toolUseId: callId,
+            name,
+            input: parsed,
+          });
+        }
+        emit({
+          type: "message",
+          message: { role: "assistant", content: messageContent },
+          stopReason,
+          usage,
+        });
+
+        // Resolve .result with a shape compatible with the non-streaming
+        // path — the normalize() impl narrows generateText-style output.
+        // We pass an object the existing normalize() can consume.
+        const resolved = {
+          text: textAccum,
+          finishReason: (() => {
+            switch (stopReason) {
+              case "end":
+                return "stop";
+              case "tool_use":
+                return "tool-calls";
+              case "max_tokens":
+                return "length";
+              case "content_filter":
+                return "content-filter";
+              default:
+                return "stop";
+            }
+          })() as FinishReason,
+          usage: {
+            inputTokens: usage.inputTokens,
+            outputTokens: usage.outputTokens,
+            totalTokens: usage.totalTokens,
+          },
+          toolCalls: Array.from(toolCallNameByCallId.entries()).map(([callId, name]) => {
+            let parsed: Readonly<Record<string, unknown>> = {};
+            try {
+              parsed = JSON.parse(
+                toolCallArgsByCallId.get(callId) ?? "{}",
+              ) as Readonly<Record<string, unknown>>;
+            } catch {
+              /* keep empty */
+            }
+            return { toolCallId: callId, toolName: name, input: parsed };
+          }),
+        };
+        resultResolve(resolved);
+        complete();
+      } catch (cause) {
+        resultReject(mapExecuteError(cause));
+        complete();
+      }
+    })();
+
+    return {
+      result: resultPromise,
+      abort(reason) {
+        controller.abort(reason ?? "aborted");
+      },
+      [Symbol.asyncIterator]() {
+        return {
+          next(): Promise<IteratorResult<AdapterDelta>> {
+            if (queue.length > 0) {
+              return Promise.resolve({ value: queue.shift()!, done: false });
+            }
+            if (done) {
+              return Promise.resolve({ value: undefined as unknown as AdapterDelta, done: true });
+            }
+            return new Promise((resolve) => resolvers.push(resolve));
+          },
+          return(): Promise<IteratorResult<AdapterDelta>> {
+            complete();
+            return Promise.resolve({ value: undefined as unknown as AdapterDelta, done: true });
+          },
+        };
+      },
+    };
   }
 
   execute(input: ExecuteInput<LanguageModelInput>): Promise<unknown> {
