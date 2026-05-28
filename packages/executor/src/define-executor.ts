@@ -51,6 +51,7 @@ import {
 } from "@agentick/runtime";
 import type {
   AbortExecutorInput,
+  AdapterDelta,
   ContentBlock,
   ContextEntry,
   EventBus,
@@ -60,6 +61,7 @@ import type {
   ExecutorError,
   ExecutorFactory,
   ExecutorFactoryDeps,
+  ExecutorStream,
   ExecutorTerminal,
   LanguageModelExecutionResult,
   LanguageModelExecutor,
@@ -98,8 +100,24 @@ export interface DefineExecutorInput {
   readonly family?: "language-model";
   /**
    * Per-execution callback. Receives the projected `LanguageModelInput`
-   * and a context bag with an optional abort signal. Returns the
-   * canonical `LanguageModelExecutionResult` (or a Promise of one).
+   * and a context bag with an optional abort signal + an `emit`
+   * callback. Returns the canonical `LanguageModelExecutionResult`.
+   *
+   * Streaming-capable adopters call `ctx.emit(delta)` during the run
+   * to emit `AdapterDelta` events. The harness routes emitted deltas
+   * to two places:
+   *
+   *   1. The harness's `emitDeltaLazy` (bus envelope; observability —
+   *      reaches subscribers via `app.events({ surface: "executor",
+   *      phase: "delta" })`).
+   *   2. The active `executeStream` iterator (when present), so
+   *      consumers iterating the stream get deltas as they arrive.
+   *
+   * Adopters with non-streaming providers simply don't call `emit` —
+   * `execute` still works (final-result-only path). The harness
+   * synthesizes `message-start` / `message-end` / `message` summary
+   * events around the run when no deltas were emitted, so consumers
+   * subscribed only to summary events see them either way.
    *
    * Throw to fail the execution — the harness translates exceptions
    * into `ExecutorError` and emits the terminal envelope with
@@ -114,6 +132,8 @@ export interface DefineExecutorInput {
         readonly executionId?: string;
         readonly tickId?: string;
       };
+      /** Emit an `AdapterDelta` during the run. See callback doc. */
+      readonly emit: (delta: AdapterDelta) => void;
     },
   ) => Promise<LanguageModelExecutionResult>;
   /**
@@ -149,6 +169,9 @@ interface InFlightEntry {
   abort?: AbortController;
   abortReason?: string;
 }
+
+/** Internal — routes adapter deltas to the active `executeStream` iterator. */
+type DeltaSink = (delta: AdapterDelta) => void;
 
 class CallbackLanguageModelExecutor
   extends BaseHarness<"executor">
@@ -206,7 +229,81 @@ class CallbackLanguageModelExecutor
       scope: input.scope ?? { executionId },
       input,
     };
-    return runHarnessProtocol(this.runOperation(op, (i) => this.executeBody(i, executionId)));
+    return runHarnessProtocol(this.runOperation(op, (i) => this.executeBody(i, executionId, null)));
+  }
+
+  executeStream(input: ExecuteInput<LanguageModelInput>): ExecutorStream<unknown> {
+    const executionId = input.scope?.executionId ?? `exec:${ulid()}`;
+    const queue: AdapterDelta[] = [];
+    const resolvers: Array<(r: IteratorResult<AdapterDelta>) => void> = [];
+    let done = false;
+    let error: unknown = null;
+    const controller = new AbortController();
+    // Merge caller-supplied signal if present.
+    if (input.signal) {
+      if (input.signal.aborted) controller.abort(input.signal.reason);
+      else input.signal.addEventListener("abort", () => controller.abort(input.signal!.reason), { once: true });
+    }
+
+    const sink: DeltaSink = (delta) => {
+      if (done) return;
+      const r = resolvers.shift();
+      if (r) r({ value: delta, done: false });
+      else queue.push(delta);
+    };
+
+    const completeIteration = (): void => {
+      done = true;
+      while (resolvers.length > 0) {
+        resolvers.shift()!({ value: undefined as unknown as AdapterDelta, done: true });
+      }
+    };
+
+    const op: Operation<ExecuteInput<LanguageModelInput>, unknown> = {
+      opId: `executor:execute:${executionId}:${ulid()}`,
+      surface: "executor",
+      name: "executor:command:execute",
+      scope: input.scope ?? { executionId },
+      input: { ...input, signal: controller.signal },
+    };
+    const resultPromise = runHarnessProtocol(
+      this.runOperation(op, (i) => this.executeBody(i, executionId, sink)),
+    )
+      .then((res) => {
+        completeIteration();
+        return res;
+      })
+      .catch((err) => {
+        error = err;
+        completeIteration();
+        throw err;
+      });
+
+    return {
+      result: resultPromise,
+      abort: (reason) => {
+        controller.abort(reason ?? "aborted");
+      },
+      [Symbol.asyncIterator]() {
+        return {
+          next(): Promise<IteratorResult<AdapterDelta>> {
+            if (queue.length > 0) {
+              return Promise.resolve({ value: queue.shift()!, done: false });
+            }
+            if (done) {
+              return error
+                ? Promise.reject(error)
+                : Promise.resolve({ value: undefined as unknown as AdapterDelta, done: true });
+            }
+            return new Promise((resolve) => resolvers.push(resolve));
+          },
+          return(): Promise<IteratorResult<AdapterDelta>> {
+            completeIteration();
+            return Promise.resolve({ value: undefined as unknown as AdapterDelta, done: true });
+          },
+        };
+      },
+    };
   }
 
   normalize(input: NormalizeInput<unknown>): Promise<LanguageModelExecutionResult> {
@@ -276,6 +373,7 @@ class CallbackLanguageModelExecutor
   private executeBody(
     input: ExecuteInput<LanguageModelInput>,
     executionId: string,
+    sink: DeltaSink | null,
   ): Effect.Effect<unknown, ExecuteError, never> {
     return Effect.gen(this, function* () {
       if (this.aborted.has(executionId)) {
@@ -286,6 +384,23 @@ class CallbackLanguageModelExecutor
       }
       const controller = new AbortController();
       this.inFlight.set(executionId, { executionId, abort: controller });
+      // Build the emit callback: always forward to emitDeltaLazy for
+      // bus observability; additionally push into the iterator sink
+      // when executeStream is the entry point.
+      const harness = this;
+      const op = {
+        opId: `executor:run:emit:${executionId}`,
+        surface: "executor" as const,
+        name: "executor:command:execute",
+        scope: input.scope ?? { executionId },
+        input,
+      } as Operation<unknown, unknown>;
+      const emit = (delta: AdapterDelta): void => {
+        // Bus side — fire-and-forget; ignore subscriber-count drops.
+        void Effect.runPromise(harness.emitDeltaLazy(op, () => delta).pipe(Effect.orDie));
+        // Iterator side — only when a sink is wired (executeStream caller).
+        if (sink) sink(delta);
+      };
       try {
         const result = yield* Effect.tryPromise<LanguageModelExecutionResult, ExecuteError>({
           try: () =>
@@ -296,6 +411,7 @@ class CallbackLanguageModelExecutor
                 executionId,
                 tickId: input.scope?.tickId,
               },
+              emit,
             }),
           catch: (cause): ExecuteError => ({
             _tag: "ProviderRejected",
@@ -331,7 +447,7 @@ class CallbackLanguageModelExecutor
         scope: { ...(input.scope ?? {}), executionId },
         ...(input.signal !== undefined ? { signal: input.signal } : {}),
       };
-      const raw = yield* this.executeBody(executeInput, executionId);
+      const raw = yield* this.executeBody(executeInput, executionId, null);
       const result = raw as LanguageModelExecutionResult;
       const terminal: ExecutorTerminal<LanguageModelExecutionResult> = {
         outcome: "succeeded",

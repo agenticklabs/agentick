@@ -126,3 +126,108 @@ describe("defineExecutor()", () => {
     });
   });
 });
+
+describe("defineExecutor() — executeStream", () => {
+  it("yields emitted AdapterDeltas in order; .result resolves with the final value", async () => {
+    const f = defineExecutor({
+      target: mkTarget(),
+      async run(_input, { emit }) {
+        emit({ type: "message-start", role: "assistant" });
+        emit({ type: "content-start", blockIndex: 0, blockType: "text" });
+        emit({ type: "content-delta", blockIndex: 0, delta: "Hello" });
+        emit({ type: "content-delta", blockIndex: 0, delta: " world" });
+        emit({ type: "content-end", blockIndex: 0 });
+        emit({
+          type: "content",
+          blockIndex: 0,
+          content: { type: "text", text: "Hello world" },
+        });
+        emit({
+          type: "message-end",
+          stopReason: "end",
+          usage: { inputTokens: 1, outputTokens: 2, totalTokens: 3 },
+        });
+        return mkResult("Hello world");
+      },
+    });
+    const exec = f({
+      scopeId: "stream-1",
+      journal: new MemoryJournal(),
+      bus: new LocalEventBus(),
+      inbox: new LocalInbox(),
+    });
+    await exec.ready;
+
+    const stream = exec.executeStream!({
+      targetInput: { messages: [{ role: "user", content: [{ type: "text", text: "x" }] }] },
+      target: mkTarget(),
+    });
+
+    const deltaTypes: string[] = [];
+    for await (const d of stream) deltaTypes.push(d.type);
+    const result = (await stream.result) as LanguageModelExecutionResult;
+
+    expect(deltaTypes).toEqual([
+      "message-start",
+      "content-start",
+      "content-delta",
+      "content-delta",
+      "content-end",
+      "content",
+      "message-end",
+    ]);
+    expect(result.output[0]).toMatchObject({ type: "text", text: "Hello world" });
+  });
+
+  it("non-streaming run (no emit calls) — iterator completes empty; .result still resolves", async () => {
+    const f = defineExecutor({
+      target: mkTarget(),
+      async run() {
+        return mkResult("non-stream");
+      },
+    });
+    const exec = f({
+      scopeId: "stream-2",
+      journal: new MemoryJournal(),
+      bus: new LocalEventBus(),
+      inbox: new LocalInbox(),
+    });
+    await exec.ready;
+    const stream = exec.executeStream!({
+      targetInput: { messages: [] },
+      target: mkTarget(),
+    });
+    const deltas: unknown[] = [];
+    for await (const d of stream) deltas.push(d);
+    const result = (await stream.result) as LanguageModelExecutionResult;
+    expect(deltas).toEqual([]);
+    expect(result.output[0]).toMatchObject({ type: "text", text: "non-stream" });
+  });
+
+  it("abort() interrupts the stream — .result rejects", async () => {
+    const f = defineExecutor({
+      target: mkTarget(),
+      async run(_input, { signal }) {
+        await new Promise<void>((_resolve, reject) => {
+          signal?.addEventListener("abort", () => reject(signal!.reason), { once: true });
+        });
+        return mkResult("unreachable");
+      },
+    });
+    const exec = f({
+      scopeId: "stream-3",
+      journal: new MemoryJournal(),
+      bus: new LocalEventBus(),
+      inbox: new LocalInbox(),
+    });
+    await exec.ready;
+    const stream = exec.executeStream!({
+      targetInput: { messages: [] },
+      target: mkTarget(),
+    });
+    // Abort after a microtask so the run handler has registered its listener.
+    await new Promise<void>((r) => setImmediate(r));
+    stream.abort("test");
+    await expect(stream.result).rejects.toBeDefined();
+  });
+});
