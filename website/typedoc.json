@@ -24,6 +24,7 @@
     "../packages/adapters/openai",
     "../packages/adapters/google",
     "../packages/adapters/ai-sdk",
+    "../packages/executor-anthropic",
     "../packages/tui",
     "../packages/sandbox",
     "../packages/sandbox-local",

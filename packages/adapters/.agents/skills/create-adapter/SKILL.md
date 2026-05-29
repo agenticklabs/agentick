@@ -99,24 +99,30 @@ packages/executor-<provider>/
   "dependencies": {
     "@agentick/runtime": "workspace:*",
     "@agentick/spec": "workspace:*",
-    "effect": "^3.21.2"
-  },
-  "peerDependencies": {
+    "effect": "^3.21.2",
     "<provider-sdk-pkg>": "^<version>"
   },
   "devDependencies": {
-    "@agentick/spec-conformance": "workspace:*",
-    "<provider-sdk-pkg>": "^<version>"
+    "@agentick/spec-conformance": "workspace:*"
   },
   "publishConfig": {
-    "access": "public"
+    "access": "public",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "import": "./dist/index.js",
+        "default": "./dist/index.js"
+      }
+    }
   }
 }
 ```
 
-Match the exact `tsconfig.json`, `tsconfig.build.json`, and
-`publishConfig.exports` shape of `packages/executor-openai/`. No
-customization needed.
+**Note**: the provider SDK goes in `dependencies`, NOT `peerDependencies`.
+Mirror the exact shape of `packages/executor-openai/package.json`.
+
+Match the exact `tsconfig.json` and `tsconfig.build.json` shape of
+`packages/executor-openai/`. No customization needed.
 
 ## Implementation contract
 
@@ -195,9 +201,11 @@ tool-level escape hatches.
 
 ### `to<Provider>Params(input, target, defaultModel) → <SdkRequest>`
 
-Builds the request body. **MUST include all sampling params**
-(G1: temperature, maxOutputTokens, topP, frequencyPenalty,
-presencePenalty, stopSequences, responseFormat). **MUST spread**
+Builds the request body. Honor every sampling param the PROVIDER
+supports (G1: temperature, maxOutputTokens, topP, frequencyPenalty,
+presencePenalty, stopSequences, responseFormat). For params the
+provider doesn't support, silently drop them (see the reasoning
+caveat above for the Anthropic example). **MUST spread**
 `target.providerOptions.<provider>` AFTER canonical params (G5
 adopter escape hatch). Example:
 
@@ -209,13 +217,54 @@ if (overrides && typeof overrides === "object") {
 return params;
 ```
 
+**Provider quirks to verify before writing this function:**
+- Is `max_tokens` REQUIRED or optional? (Anthropic: required,
+  defaults to 4096 in v1. OpenAI: optional.)
+- Is there a system message form vs system content? (Anthropic:
+  separate `system: string | ContentBlock[]` field. OpenAI:
+  system goes in `messages[0]`.)
+- Does the provider require strict user/assistant alternation?
+  (Anthropic: yes, must coalesce same-role consecutive messages.
+  OpenAI: no constraint.)
+- Are empty content arrays allowed? (Anthropic: rejects empty
+  `tool_result.content` — insert a placeholder text part. OpenAI:
+  accepts empty.)
+
+Spend 10 minutes with the v1 adapter at
+`packages/adapters/<provider>/src/<provider>.ts` checking which of
+these quirks apply. Don't skip — provider rejects on these will
+ship as runtime errors.
+
 ### `mapChunkToAdapterDeltas(chunk, state) → AdapterDelta[]`
 
 1:1 translation from provider stream chunk to v2 `AdapterDelta`.
 State carries per-block tracking (text block opened?, tool-call
-block opened by index?, reasoning block started?). **MUST handle**
-reasoning content from non-standard fields where applicable (G3 —
-vLLM `reasoning_content`, LM Studio `reasoning`).
+block opened by index?, reasoning block started?).
+
+**Reasoning extraction (G3) varies by provider** — the OpenAI
+adapter duck-types `delta.reasoning_content` (vLLM) and
+`delta.reasoning` (LM Studio) since OpenAI-compatible servers
+expose reasoning via non-standard fields. **Other providers expose
+reasoning natively** and use different code paths:
+
+- **Anthropic**: `thinking` content blocks arrive as first-class
+  `content_block_*` events; treat them like text blocks but route
+  to reasoning AdapterDeltas.
+- **Google Gemini**: `thought` parts on the candidate; route the
+  same way.
+- **AI SDK passthrough**: AI SDK 5 has a `reasoning-delta` event
+  type; map it directly.
+
+The skill says "MUST handle reasoning content" — pick the right
+code path for YOUR provider, don't blindly copy OpenAI's
+duck-typing.
+
+**Sampling param caveat (G1)**: providers vary on what they
+support. OpenAI honors all of `topP`/`frequencyPenalty`/
+`presencePenalty`. Anthropic supports `topP` + `topK` but NOT
+`frequencyPenalty` / `presencePenalty` — silently drop them with
+a code comment instead of failing. v1 adapters do this; v2 must
+too.
 
 ### Post-stream summary emission
 
@@ -237,6 +286,18 @@ Map provider's finish reason vocabulary to the framework's
 
 Non-streaming path. Same content-block translation as the
 streaming summary emits. Returns the canonical result.
+
+## Picking the SDK's stream entry point
+
+Some SDKs (Anthropic, AWS Bedrock) expose multiple streaming
+surfaces: `client.foo.create({ stream: true })` returning a raw
+async iterable, AND `client.foo.stream(...)` returning a wrapped
+helper with extra events. **Use the `create({ stream: true })`
+form** — same surface as the non-streaming path with one boolean
+flag, easier to stub in tests (dispatch-by-stream-flag pattern in
+the OpenAI stub), and avoids depending on SDK helper APIs that
+vary between provider libraries. The helper form often adds
+provider-specific event types you'd just have to unwrap anyway.
 
 ## Bus envelope mirror (G6)
 
@@ -364,10 +425,17 @@ describe("<Provider>Executor — ExecutorProtocol conformance", () =>
       client: asClient(stub),
       model: "<default>",
     });
-    await exec.ready;
+    await exec.ready; // CRITICAL — BaseHarness construction is async
     return { executor: exec, bus };
   }));
 ```
+
+**`await exec.ready` is non-negotiable.** `BaseHarness` finishes
+substrate setup asynchronously after the constructor returns —
+omitting the await produces races where the first `project()` /
+`execute()` call fires before the FiberRef scope is wired. Every
+existing adapter factory does this. The conformance suite WILL
+catch a missing await but it'll surface as a flaky test.
 
 The stub MUST handle BOTH streaming and non-streaming requests
 (the conformance suite exercises both paths). See
@@ -420,16 +488,64 @@ Pattern: see
 
 After scaffolding:
 
-1. **`.changeset/config.json`**: add the package to `linked[0]`.
-2. **`website/typedoc.json`**: add to `entryPoints`.
-3. **`website/.vitepress/config.mts`**: add to `PACKAGE_GROUPS`.
-4. **`pnpm install`** to register the workspace.
+1. **`.changeset/config.json`**: add the package to **`fixed[0]`**
+   (NOT `linked[0]` — the repo uses fixed-version groups). The
+   array already contains every workspace package; append yours.
+2. **`website/typedoc.json`**: add `"./packages/executor-<provider>/src/index.ts"`
+   to the `entryPoints` array.
+3. **`website/.vitepress/config.mts`**: add the package to the
+   `PACKAGE_GROUPS` constant under the appropriate group
+   (executors live in the same group as `@agentick/executor-openai`).
+4. **`pnpm install`** to register the workspace package symlinks.
 
 ## README.md
 
-Adopt the structure of `packages/executor-openai/README.md`:
-Purpose, Quick Start, Options, Capabilities, Provider-specific
-knobs, Limitations.
+`packages/executor-openai` does not yet ship its own README — you
+need to write yours from scratch. Use this structure:
+
+```markdown
+# @agentick/executor-<provider>
+
+`LanguageModelExecutor` for <Provider>. Streams + non-streaming
+both supported. Conforms to the shared `runExecutorConformance`
+suite.
+
+## Quick start
+
+\`\`\`typescript
+import { createApp } from "@agentick/app";
+import { <provider> } from "@agentick/executor-<provider>";
+
+const app = createApp({
+  executor: <provider>("<model-id>", { apiKey: process.env.<PROVIDER>_API_KEY }),
+});
+\`\`\`
+
+## Options
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `apiKey` | `string` | `process.env.<PROVIDER>_API_KEY` | Provider API key |
+| `baseURL` | `string` | provider default | Override endpoint |
+| `model` | `string` | — | Model id |
+| `stream` | `boolean` | `false` | Stream every execute |
+| ... | | | |
+
+## Capabilities
+
+Lists which features the adapter advertises (`supportsTools`,
+`supportsVision`, etc.) and which it currently doesn't.
+
+## Provider-specific knobs
+
+`target.providerOptions.<provider>` is typed via this package's
+module augmentation. Document every field with type + default.
+
+## Limitations
+
+Anything the v1 adapter does that v2 doesn't (yet), or
+provider-specific features deliberately gapped.
+```
 
 ## Verification checklist — DO NOT MARK COMPLETE WITHOUT THIS
 

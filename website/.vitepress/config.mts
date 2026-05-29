@@ -70,6 +70,7 @@ const PACKAGE_GROUPS: Array<{ label: string; packages: string[] }> = [
       "@agentick/reconciler",
       "@agentick/reconciler-react",
       "@agentick/tool-executor",
+      "@agentick/executor-anthropic",
     ],
   },
 ];

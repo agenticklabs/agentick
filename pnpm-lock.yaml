@@ -706,6 +706,25 @@ importers:
         specifier: ^2.0.0
         version: 2.14.6(@types/node@25.0.9)(typescript@5.9.3)
 
+  packages/executor-anthropic:
+    dependencies:
+      '@agentick/runtime':
+        specifier: workspace:*
+        version: link:../runtime
+      '@agentick/spec':
+        specifier: workspace:*
+        version: link:../spec
+      '@anthropic-ai/sdk':
+        specifier: ^0.39.0
+        version: 0.39.0
+      effect:
+        specifier: ^3.21.2
+        version: 3.21.2
+    devDependencies:
+      '@agentick/spec-conformance':
+        specifier: workspace:*
+        version: link:../spec-conformance
+
   packages/executor-openai:
     dependencies:
       '@agentick/runtime':
