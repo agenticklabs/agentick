@@ -358,6 +358,11 @@ pattern. The tag router translates `block-*` events into either
 `reasoning-*` (for `parseThinkTags`) or `custom-block-*` deltas
 (for adopter-declared `customBlocks`).
 
+**Add `@agentick/executor-openai: "workspace:*"` to `dependencies`**
+when you import `StreamTagParser`. The skill's package.json
+template doesn't include this by default — add it if you wire
+parseThinkTags / customBlocks.
+
 ## Environment variable fallbacks (G16)
 
 Build SDK options from constructor opts with env var fallbacks:
@@ -436,6 +441,15 @@ omitting the await produces races where the first `project()` /
 `execute()` call fires before the FiberRef scope is wired. Every
 existing adapter factory does this. The conformance suite WILL
 catch a missing await but it'll surface as a flaky test.
+
+**Type note**: `LanguageModelExecutor` (the protocol type) does
+NOT declare `ready` — only the concrete class does via
+`BaseHarness`. Conformance test files reference `exec.ready` on
+the concrete class instance returned from the factory closure.
+Your tests' tsconfig excludes the `__tests__` dir from build, so
+the strict-mode `.ready` access works in test files without
+typecheck friction. Don't try to widen the public protocol type
+to expose `ready` — keep it on the implementation.
 
 The stub MUST handle BOTH streaming and non-streaming requests
 (the conformance suite exercises both paths). See

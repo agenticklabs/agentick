@@ -44,6 +44,7 @@
     "typecheck": "tsc -p tsconfig.build.json --noEmit"
   },
   "dependencies": {
+    "@agentick/executor-openai": "workspace:*",
     "@agentick/runtime": "workspace:*",
     "@agentick/spec": "workspace:*",
     "@anthropic-ai/sdk": "^0.39.0",

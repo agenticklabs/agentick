@@ -108,15 +108,23 @@ intentional scope, `[blocked]` waiting on prerequisite.
       equivalent to declaring a `think` tag that routes to the
       reasoning stream. Same parser handles both G7 and G12.
 
-- [ ] **G8. Native Anthropic executor / adapter.**
-      v1 has full Anthropic adapter; v2 only has the ai-sdk wrapper.
-      Adopters wanting tighter envelope fidelity (no AI SDK middleman,
-      direct streaming, native cache control headers) have no path.
-      - Plan: new `@agentick/executor-anthropic` (or `@agentick/anthropic`
-        under ModelAdapter naming). Port from v1's anthropic adapter:
-        chunk mapping, message format, content-block translation
-        including `thinking` block type, cache token surfacing,
-        executeStream.
+- [x] **G8. Native Anthropic executor / adapter.** _Closed 2026-05-28
+      by sub-agent run using `skills/create-adapter`._
+      `@agentick/executor-anthropic` ships full streaming + non-streaming
+      via `client.messages.create({ stream: true })`, cache token
+      surfacing (`cache_read_input_tokens` + `cache_creation_input_tokens`
+      → `cachedInputTokens` + `cacheCreationTokens`), native reasoning
+      via `thinking` blocks, system extraction + alternation coalescing,
+      `max_tokens` defaulting, silent-drop of unsupported sampling
+      params, `target.providerOptions.anthropic` typed via module
+      augmentation, parseThinkTags + customBlocks via shared
+      StreamTagParser. 47/47 tests passing (15 conformance + 28
+      provider-specific + 4 factory). **Deferred from this pass**:
+      multi-turn extended-thinking signature delta round-tripping
+      (single-turn works; multi-turn with tools requires sidecar
+      mechanism), `redacted_thinking` opaque data round-trip (currently
+      surfaces as `[redacted]` placeholder), document blocks (upstream
+      gap — v2 spec doesn't carry them to the executor boundary).
 
 - [ ] **G9. Native Google executor / adapter.**
       Same shape as G8 for Google's Gemini. v1 has it; v2 doesn't.
@@ -365,3 +373,17 @@ work happens — does NOT block the parity fixes.
   refactored to be a preset configuration on the same parser
   customBlocks uses (one bug surface, both compose). 5364 tests
   passing.
+- 2026-05-28 (later still): extended ExecutorProtocol conformance
+  suite with parity tests (base64 image, sampling params,
+  providerOptions, executeStream surface, AdapterDelta type
+  validity, bus envelope dual-emit, result-equivalence). Conformance
+  count went 6 → 15 tests per adapter. Caught real bugs in all
+  three existing executors (duplicate `messagePartFromBlock` with
+  `[binary]` placeholder, mock executor missing emitDeltaLazy,
+  stubs missing streaming path). 5391 tests passing.
+- 2026-05-28 (evening): closed G8 via sub-agent run.
+  `@agentick/executor-anthropic` produced from the
+  `create-adapter` skill. 47/47 tests passing in the new package;
+  no workspace regressions. 5438 tests passing total. Sub-agent
+  flagged 6 additional skill bugs from the first run + a few new
+  ones from this run — fixed in skills/create-adapter/SKILL.md.
