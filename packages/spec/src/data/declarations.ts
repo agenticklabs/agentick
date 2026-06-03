@@ -9,6 +9,7 @@
 
 import type { ContentBlock } from "./content-blocks.js";
 import type { CacheHint } from "./entries.js";
+import type { ProviderToolOptions } from "./rendered-tree.js";
 
 /**
  * Placeholder for JSON Schema documents. The strict shape is intentionally
@@ -76,6 +77,14 @@ export interface ToolDeclaration {
   readonly handlerRef?: string;
   readonly annotations?: ToolAnnotations;
   readonly metadata?: Record<string, unknown>;
+  /**
+   * Per-tool provider-specific options. Adapters merge into the
+   * provider's tool shape (e.g. OpenAI `strict: true` for JSON-schema
+   * mode, Anthropic per-tool `cache_control`). Typed via the
+   * augmentable {@link ProviderToolOptions} interface — each adapter
+   * package contributes its slot.
+   */
+  readonly providerOptions?: ProviderToolOptions;
 }
 
 // ============================================================================

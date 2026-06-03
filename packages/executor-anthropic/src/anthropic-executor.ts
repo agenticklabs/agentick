@@ -36,7 +36,6 @@ import type {
   AbortExecutorInput,
   AdapterDelta,
   ContentBlock,
-  ContextEntry,
   EventBus,
   ExecuteError,
   ExecuteInput,
@@ -80,27 +79,45 @@ import {
 // ProviderOptions augmentation — typed Anthropic escape hatch (G5)
 // ============================================================================
 
+/**
+ * All three v2 provider-option tiers contributed at once via the
+ * SDK's actual types — no hand-rolled subsets.
+ *
+ * - `ProviderClientOptions["anthropic"]`: {@link ClientOptions} —
+ *   every field `@anthropic-ai/sdk`'s `Anthropic` constructor
+ *   accepts (apiKey, baseURL, authToken, defaultHeaders, timeout,
+ *   maxRetries, fetch, httpAgent, …).
+ *
+ * - `ProviderOptions["anthropic"]`: `Partial<MessageCreateParams>` —
+ *   every field the SDK accepts on the Messages request body
+ *   (top_k, top_p, stop_sequences, thinking, tool_choice, metadata,
+ *   service_tier, mcp_servers, container, …). Spread last onto the
+ *   request body so executor-projected canonical knobs can be
+ *   overridden. Fields the executor controls structurally and
+ *   SHOULD NOT be set via providerOptions: `model`, `messages`,
+ *   `system`, `tools`, `max_tokens` (use `maxTokens` constructor
+ *   option), `stream`.
+ *
+ * - `ProviderToolOptions["anthropic"]`: per-tool SDK overrides
+ *   (e.g. `cache_control: { type: "ephemeral" }` to mark a specific
+ *   tool as a prompt-cache breakpoint).
+ *
+ * **Per-block `cache_control` lives on `BaseContentBlock.providerMetadata`,
+ * not here.** Adopters who want to mark THIS message-block as a
+ * cache breakpoint stamp
+ * `providerMetadata.anthropic.cacheControl = { type: "ephemeral" }`
+ * on the specific {@link ContentBlock}. The executor reads it
+ * per-block during projection. No meta-knob policy.
+ */
 declare module "@agentick/spec" {
+  interface ProviderClientOptions {
+    readonly anthropic?: ClientOptions;
+  }
   interface ProviderOptions {
-    readonly anthropic?: {
-      readonly anthropicVersion?: string;
-      readonly betas?: ReadonlyArray<string>;
-      readonly metadata?: { readonly user_id?: string };
-      readonly top_k?: number;
-      readonly stop_sequences?: ReadonlyArray<string>;
-      readonly thinking?:
-        | { readonly type: "enabled"; readonly budget_tokens: number }
-        | { readonly type: "disabled" };
-      readonly tool_choice?: {
-        readonly type: "auto" | "any" | "tool" | "none";
-        readonly name?: string;
-        readonly disable_parallel_tool_use?: boolean;
-      };
-      readonly cacheControl?:
-        | ReadonlyArray<"system" | "tools" | "last-message">
-        | { readonly manual: true };
-      readonly [key: string]: unknown;
-    };
+    readonly anthropic?: Partial<MessageCreateParams>;
+  }
+  interface ProviderToolOptions {
+    readonly anthropic?: Partial<AnthropicTool>;
   }
 }
 
@@ -109,16 +126,25 @@ declare module "@agentick/spec" {
 // ============================================================================
 
 export interface AnthropicExecutorOptions {
+  /** Default model id (e.g. `"claude-3-5-sonnet-latest"`). */
   readonly model?: string;
-  readonly apiKey?: string;
-  readonly baseURL?: string;
-  readonly headers?: Record<string, string>;
-  readonly timeout?: number;
-  readonly maxRetries?: number;
-  /** Default `max_tokens`. Anthropic REQUIRES this. Defaults to 4096. */
-  readonly maxTokens?: number;
+  /**
+   * SDK client construction options — every field
+   * `@anthropic-ai/sdk`'s `Anthropic` constructor accepts (apiKey,
+   * baseURL, authToken, defaultHeaders, timeout, maxRetries, fetch,
+   * httpAgent, …). Typed via the augmentable
+   * {@link import("@agentick/spec").ProviderClientOptions} slot.
+   * Ignored when `client` is supplied.
+   *
+   * Env-var fallbacks (`ANTHROPIC_API_KEY`, `ANTHROPIC_BASE_URL`)
+   * are applied at construction time for any field not present here.
+   */
+  readonly clientOptions?: ClientOptions;
   /** Inject a pre-built Anthropic client (testing, advanced setups). */
   readonly client?: Anthropic;
+  /** Default `max_tokens`. Anthropic REQUIRES this. Defaults to 4096. */
+  readonly maxTokens?: number;
+  /** Whether `run()` streams by default. Per-call wins via the target. */
   readonly stream?: boolean;
   /**
    * Parse inline `<think>...</think>` tags. For Claude, native
@@ -873,15 +899,17 @@ export class AnthropicExecutor
 // ============================================================================
 
 function buildClientOptions(opts: AnthropicExecutorOptions): ClientOptions {
-  const out: ClientOptions = {};
-  const apiKey = opts.apiKey ?? process.env["ANTHROPIC_API_KEY"];
-  if (apiKey !== undefined) out.apiKey = apiKey;
-  const baseURL = opts.baseURL ?? process.env["ANTHROPIC_BASE_URL"];
-  if (baseURL !== undefined) out.baseURL = baseURL;
-  if (opts.headers !== undefined) out.defaultHeaders = opts.headers;
-  if (opts.timeout !== undefined) out.timeout = opts.timeout;
-  if (opts.maxRetries !== undefined) out.maxRetries = opts.maxRetries;
-  return out;
+  // Env-var fallbacks fill in any field absent from explicit
+  // clientOptions. Explicit values win.
+  const base: ClientOptions = {};
+  const envApiKey = process.env["ANTHROPIC_API_KEY"];
+  if (envApiKey !== undefined) base.apiKey = envApiKey;
+  const envBaseURL = process.env["ANTHROPIC_BASE_URL"];
+  if (envBaseURL !== undefined) base.baseURL = envBaseURL;
+  if (opts.clientOptions !== undefined) {
+    return { ...base, ...opts.clientOptions };
+  }
+  return base;
 }
 
 // ============================================================================
@@ -984,13 +1012,9 @@ function toAnthropicParams(
   defaultModel: string | undefined,
   executorMaxTokens: number | undefined,
 ): MessageCreateParams {
-  const overrides = target.providerOptions?.anthropic;
-  const cacheControl = readCacheControl(overrides);
-  const { system, messages } = toAnthropicMessages(input.messages, cacheControl);
+  const { system, messages } = toAnthropicMessages(input.messages);
   const tools =
-    input.tools && input.tools.length > 0
-      ? toAnthropicTools(input.tools, cacheControl)
-      : undefined;
+    input.tools && input.tools.length > 0 ? toAnthropicTools(input.tools) : undefined;
 
   const params: MessageCreateParams = {
     model: target.modelId ?? defaultModel ?? DEFAULT_MODEL,
@@ -1008,59 +1032,46 @@ function toAnthropicParams(
   // Silently drop frequencyPenalty / presencePenalty / responseFormat —
   // Anthropic has no native support (G1 caveat from the skill).
 
-  // G5 — adopter escape hatch. Spread last; strip cacheControl + betas +
-  // anthropicVersion (consumed elsewhere or non-body keys).
+  // Adopter escape hatch — spread last so explicit overrides win.
+  const overrides = target.providerOptions?.anthropic;
   if (overrides && typeof overrides === "object") {
-    const {
-      cacheControl: _cc,
-      betas: _bt,
-      anthropicVersion: _av,
-      ...rest
-    } = overrides;
-    void _cc;
-    void _bt;
-    void _av;
-    Object.assign(params, rest);
+    Object.assign(params, overrides);
   }
   return params;
 }
 
-function readCacheControl(
-  overrides: { cacheControl?: unknown } | undefined,
-): {
-  system: boolean;
-  tools: boolean;
-  lastMessage: boolean;
-} {
-  const out = { system: false, tools: false, lastMessage: false };
-  const cc = overrides?.cacheControl;
-  if (Array.isArray(cc)) {
-    for (const k of cc) {
-      if (k === "system") out.system = true;
-      if (k === "tools") out.tools = true;
-      if (k === "last-message") out.lastMessage = true;
-    }
+/** Read `providerMetadata.anthropic.cacheControl` from a part as a
+ *  validated SDK `cache_control` value, or undefined. */
+function readBlockCacheControl(part: {
+  readonly providerMetadata?: Record<string, Record<string, unknown>>;
+}): { type: "ephemeral" } | undefined {
+  const v = part.providerMetadata?.["anthropic"]?.["cacheControl"];
+  if (v && typeof v === "object" && "type" in v && (v as { type?: unknown }).type === "ephemeral") {
+    return { type: "ephemeral" };
   }
-  return out;
+  return undefined;
 }
 
-function toAnthropicMessages(
-  messages: ReadonlyArray<LanguageModelMessage>,
-  cacheControl: { system: boolean; tools: boolean; lastMessage: boolean },
-): {
+function toAnthropicMessages(messages: ReadonlyArray<LanguageModelMessage>): {
   system: string | Array<TextBlockParam> | undefined;
   messages: Array<MessageParam>;
 } {
-  const systemParts: string[] = [];
+  // Track each collected system text + whether the source part marked
+  // itself ephemeral via providerMetadata. If ANY system part is
+  // marked, emit the array form so cache_control can land on the
+  // right segment.
+  const systemEntries: Array<{ text: string; cache: boolean }> = [];
   const out: Array<MessageParam> = [];
 
   for (const message of messages) {
     if (message.role === "system") {
-      const text = message.content
-        .filter((p): p is { type: "text"; text: string } => p.type === "text")
-        .map((p) => p.text)
-        .join("\n\n");
-      if (text) systemParts.push(text);
+      for (const part of message.content) {
+        if (part.type !== "text" || !part.text) continue;
+        systemEntries.push({
+          text: part.text,
+          cache: readBlockCacheControl(part) !== undefined,
+        });
+      }
       continue;
     }
 
@@ -1069,23 +1080,32 @@ function toAnthropicMessages(
     const content: ContentBlockParam[] = [];
 
     for (const part of message.content) {
+      const cache = readBlockCacheControl(part);
       switch (part.type) {
-        case "text":
-          content.push({ type: "text", text: part.text } as TextBlockParam);
-          break;
-        case "image": {
-          const source = imageSourceFromUrl(part.imageUrl, part.mediaType);
-          content.push({ type: "image", source } as ImageBlockParam);
+        case "text": {
+          const block: TextBlockParam = { type: "text", text: part.text };
+          if (cache) block.cache_control = cache;
+          content.push(block);
           break;
         }
-        case "tool_use":
-          content.push({
+        case "image": {
+          const source = imageSourceFromUrl(part.imageUrl, part.mediaType);
+          const block: ImageBlockParam = { type: "image", source };
+          if (cache) (block as { cache_control?: { type: "ephemeral" } }).cache_control = cache;
+          content.push(block);
+          break;
+        }
+        case "tool_use": {
+          const block: ToolUseBlockParam = {
             type: "tool_use",
             id: part.id,
             name: part.name,
             input: (part.input ?? {}) as Record<string, unknown>,
-          } as ToolUseBlockParam);
+          };
+          if (cache) (block as { cache_control?: { type: "ephemeral" } }).cache_control = cache;
+          content.push(block);
           break;
+        }
         case "tool_result": {
           const inner = toolResultContent(part.content);
           const block: ToolResultBlockParam = {
@@ -1094,6 +1114,7 @@ function toAnthropicMessages(
             content: inner,
             ...(part.isError ? { is_error: true } : {}),
           };
+          if (cache) (block as { cache_control?: { type: "ephemeral" } }).cache_control = cache;
           content.push(block);
           break;
         }
@@ -1107,7 +1128,6 @@ function toAnthropicMessages(
       if (Array.isArray(last.content)) {
         (last.content as ContentBlockParam[]).push(...content);
       } else {
-        // String content — promote to array form before extending.
         last.content = [
           { type: "text", text: last.content } as TextBlockParam,
           ...content,
@@ -1118,33 +1138,19 @@ function toAnthropicMessages(
     }
   }
 
-  // cacheControl: stamp last-message's last text part.
-  if (cacheControl.lastMessage && out.length > 0) {
-    const last = out[out.length - 1]!;
-    if (Array.isArray(last.content)) {
-      for (let i = last.content.length - 1; i >= 0; i--) {
-        const block = last.content[i] as ContentBlockParam;
-        if (block.type === "text") {
-          (block as TextBlockParam).cache_control = { type: "ephemeral" };
-          break;
-        }
-      }
-    }
-  }
-
-  // System param: prefer array form when caching enabled, else string.
+  // System param: array form if any segment marked ephemeral, else
+  // joined string.
   let systemOut: string | Array<TextBlockParam> | undefined;
-  if (systemParts.length === 0) {
+  if (systemEntries.length === 0) {
     systemOut = undefined;
-  } else if (cacheControl.system) {
-    const arr: TextBlockParam[] = systemParts.map((t) => ({
-      type: "text",
-      text: t,
-    }));
-    arr[arr.length - 1]!.cache_control = { type: "ephemeral" };
-    systemOut = arr;
+  } else if (systemEntries.some((e) => e.cache)) {
+    systemOut = systemEntries.map((e) => {
+      const block: TextBlockParam = { type: "text", text: e.text };
+      if (e.cache) block.cache_control = { type: "ephemeral" };
+      return block;
+    });
   } else {
-    systemOut = systemParts.join("\n\n");
+    systemOut = systemEntries.map((e) => e.text).join("\n\n");
   }
   return { system: systemOut, messages: out };
 }
@@ -1173,22 +1179,21 @@ function toolResultContent(
 
 function toAnthropicTools(
   tools: ReadonlyArray<LanguageModelTool>,
-  cacheControl: { tools: boolean },
 ): Array<AnthropicTool> {
-  const out: AnthropicTool[] = tools.map((t) => {
-    const tool: AnthropicTool = {
+  return tools.map((t) => {
+    const base: AnthropicTool = {
       name: t.name,
       input_schema: (t.inputSchema ?? {
         type: "object",
       }) as AnthropicTool["input_schema"],
     };
-    if (t.description !== undefined) tool.description = t.description;
-    return tool;
+    if (t.description !== undefined) base.description = t.description;
+    // Per-tool providerOptions.anthropic — adopter-supplied SDK
+    // overrides (typically `cache_control` for prompt-cache breakpoints)
+    // win over projected defaults.
+    const overrides = t.providerOptions?.anthropic;
+    return overrides ? { ...base, ...overrides } : base;
   });
-  if (cacheControl.tools && out.length > 0) {
-    out[out.length - 1]!.cache_control = { type: "ephemeral" };
-  }
-  return out;
 }
 
 function imageSourceFromUrl(
@@ -1233,12 +1238,25 @@ function projectImpl(input: ProjectInput): LanguageModelInput {
 
 function buildMessages(tree: RenderedTree): ReadonlyArray<LanguageModelMessage> {
   const messages: LanguageModelMessage[] = [];
-  const systemText = collectSectionText(tree.context.entries);
-  if (systemText.length > 0) {
-    messages.push({
-      role: "system",
-      content: [{ type: "text", text: systemText }],
-    });
+  // Emit one text part per section (not a single joined string) so
+  // per-section `metadata.providerMetadata` survives projection. The
+  // executor reads each part's providerMetadata in
+  // `toAnthropicMessages` to decide string vs array system form.
+  const systemParts: LanguageModelMessagePart[] = [];
+  for (const e of tree.context.entries) {
+    if (e.kind !== "section") continue;
+    const text = sectionText(e);
+    if (text.length === 0) continue;
+    const part: LanguageModelMessagePart = { type: "text", text };
+    const pm = e.metadata?.providerMetadata;
+    if (pm !== undefined) {
+      (part as { providerMetadata?: Record<string, Record<string, unknown>> })
+        .providerMetadata = pm;
+    }
+    systemParts.push(part);
+  }
+  if (systemParts.length > 0) {
+    messages.push({ role: "system", content: systemParts });
   }
   for (const entry of tree.context.entries) {
     if (entry.kind !== "message") continue;
@@ -1248,16 +1266,6 @@ function buildMessages(tree: RenderedTree): ReadonlyArray<LanguageModelMessage> 
     });
   }
   return messages;
-}
-
-function collectSectionText(entries: ReadonlyArray<ContextEntry>): string {
-  const parts: string[] = [];
-  for (const e of entries) {
-    if (e.kind !== "section") continue;
-    const text = sectionText(e);
-    if (text.length > 0) parts.push(text);
-  }
-  return parts.join("\n\n");
 }
 
 function sectionText(section: SectionEntry): string {
@@ -1287,14 +1295,19 @@ function imageUrlFromSource(source: MediaSource, mimeType: string | undefined): 
 }
 
 function messagePartFromBlock(block: ContentBlock): LanguageModelMessagePart {
+  const pm =
+    block.providerMetadata !== undefined
+      ? { providerMetadata: block.providerMetadata }
+      : {};
   switch (block.type) {
     case "text":
-      return { type: "text", text: block.text };
+      return { type: "text", text: block.text, ...pm };
     case "image":
       return {
         type: "image",
         imageUrl: imageUrlFromSource(block.source, block.mimeType),
         ...(block.mimeType !== undefined ? { mediaType: block.mimeType } : {}),
+        ...pm,
       };
     case "tool_use":
       return {
@@ -1302,6 +1315,7 @@ function messagePartFromBlock(block: ContentBlock): LanguageModelMessagePart {
         id: block.toolUseId,
         name: block.name,
         input: block.input,
+        ...pm,
       };
     case "tool_result":
       return {
@@ -1309,6 +1323,7 @@ function messagePartFromBlock(block: ContentBlock): LanguageModelMessagePart {
         toolUseId: block.toolUseId,
         content: block.content.map(messagePartFromBlock),
         ...(block.isError !== undefined ? { isError: block.isError } : {}),
+        ...pm,
       };
     default:
       return {
@@ -1329,6 +1344,9 @@ function buildTools(tree: RenderedTree): ReadonlyArray<LanguageModelTool> {
       name: t.name,
       ...(t.description !== undefined ? { description: t.description } : {}),
       inputSchema: t.inputSchema as Record<string, unknown>,
+      ...(t.providerOptions !== undefined
+        ? { providerOptions: t.providerOptions }
+        : {}),
     }));
 }
 

@@ -33,6 +33,7 @@ import type {
   ChatCompletionMessageParam,
   ChatCompletionTool,
 } from "openai/resources/chat/completions";
+import type { FunctionDefinition } from "openai/resources/shared";
 
 import { BaseHarness, runHarnessProtocol, ulid } from "@agentick/runtime";
 import type {
@@ -84,35 +85,37 @@ import {
 // ============================================================================
 
 /**
- * Contribute the typed `openai` slot to `@agentick/spec`'s
- * {@link ProviderOptions}. Importing this package brings these
- * field types into scope at every `ExecutionTarget.providerOptions`
- * site. Same pattern as `HookBridges` augmentation (ADR 26/27).
+ * All three v2 provider-option tiers contributed at once via the
+ * SDK's actual types — no hand-rolled subsets.
  *
- * Fields mirror OpenAI's Chat Completions request body — adopters
- * can set provider-specific knobs without us hardcoding them in spec.
+ * - `ProviderClientOptions["openai"]`: {@link ClientOptions} — every
+ *   field the SDK's `OpenAI` constructor accepts (apiKey, baseURL,
+ *   organization, project, defaultHeaders, timeout, maxRetries,
+ *   fetch, httpAgent, …).
+ *
+ * - `ProviderOptions["openai"]`: `Partial<ChatCompletionCreateParams>`
+ *   — every field the SDK accepts on the Chat Completions request
+ *   body (seed, logprobs, top_logprobs, store, n, user, metadata,
+ *   parallel_tool_calls, service_tier, prediction, reasoning_effort,
+ *   modalities, web_search_options, …). Spread last onto the
+ *   request body so executor-projected canonical knobs can be
+ *   overridden. Fields the executor controls structurally and
+ *   SHOULD NOT be set via providerOptions: `model`, `messages`,
+ *   `tools`, `tool_choice` (declared via spec), `stream`.
+ *
+ * - `ProviderToolOptions["openai"]`: per-tool function-definition
+ *   overrides (e.g. `strict: true` for JSON-schema mode, custom
+ *   `parameters`). Merged into the tool's inner `function` object.
  */
 declare module "@agentick/spec" {
+  interface ProviderClientOptions {
+    readonly openai?: ClientOptions;
+  }
   interface ProviderOptions {
-    readonly openai?: {
-      readonly seed?: number;
-      readonly logprobs?: boolean;
-      readonly top_logprobs?: number;
-      readonly store?: boolean;
-      readonly n?: number;
-      readonly user?: string;
-      readonly metadata?: Record<string, string>;
-      readonly parallel_tool_calls?: boolean;
-      readonly service_tier?: "auto" | "default" | "flex" | "priority" | (string & {});
-      readonly prediction?: {
-        readonly type: "content";
-        readonly content: string | ReadonlyArray<{ readonly type: "text"; readonly text: string }>;
-      };
-      readonly reasoning_effort?: "minimal" | "low" | "medium" | "high" | (string & {});
-      readonly modalities?: ReadonlyArray<"text" | "audio">;
-      readonly web_search_options?: Record<string, unknown>;
-      readonly [key: string]: unknown;
-    };
+    readonly openai?: Partial<ChatCompletionCreateParams>;
+  }
+  interface ProviderToolOptions {
+    readonly openai?: Partial<FunctionDefinition>;
   }
 }
 
@@ -123,22 +126,23 @@ declare module "@agentick/spec" {
 export interface OpenAIExecutorOptions {
   /** Default model id (e.g. `"gpt-4o"`). May be overridden per execution. */
   readonly model?: string;
-  /** OpenAI API key. Falls back to `OPENAI_API_KEY` env var. */
-  readonly apiKey?: string;
-  /** Custom base URL (e.g. for LM Studio, vLLM, ollama). */
-  readonly baseURL?: string;
-  /** OpenAI organization id. */
-  readonly organization?: string;
-  /** Default headers sent with every request. */
-  readonly headers?: Record<string, string>;
-  /** Per-request timeout, ms. */
-  readonly timeout?: number;
-  /** Max retries on transient failures (SDK default: 2). */
-  readonly maxRetries?: number;
+  /**
+   * SDK client construction options — every field `openai`'s `OpenAI`
+   * constructor accepts (apiKey, baseURL, organization, project,
+   * defaultHeaders, timeout, maxRetries, fetch, httpAgent, …). Typed
+   * via the augmentable
+   * {@link import("@agentick/spec").ProviderClientOptions} slot.
+   * Ignored when `client` is supplied.
+   *
+   * Env-var fallbacks (`OPENAI_API_KEY`, `OPENAI_BASE_URL`,
+   * `OPENAI_ORGANIZATION`) are applied at construction time for any
+   * field not present here.
+   */
+  readonly clientOptions?: ClientOptions;
   /**
    * Inject a pre-built `OpenAI` client. Useful for tests (stub the SDK)
    * and for advanced setups (custom dispatcher, mTLS, etc.). When set,
-   * `apiKey` / `baseURL` / `headers` are ignored.
+   * `clientOptions` is ignored.
    */
   readonly client?: OpenAI;
   /**
@@ -897,16 +901,19 @@ export class OpenAIExecutor extends BaseHarness<"executor"> implements LanguageM
 // ============================================================================
 
 function buildClientOptions(opts: OpenAIExecutorOptions): ClientOptions {
-  const out: ClientOptions = {};
-  const apiKey = opts.apiKey ?? process.env["OPENAI_API_KEY"];
-  if (apiKey !== undefined) out.apiKey = apiKey;
-  const baseURL = opts.baseURL ?? process.env["OPENAI_BASE_URL"];
-  if (baseURL !== undefined) out.baseURL = baseURL;
-  if (opts.organization !== undefined) out.organization = opts.organization;
-  if (opts.headers !== undefined) out.defaultHeaders = opts.headers;
-  if (opts.timeout !== undefined) out.timeout = opts.timeout;
-  if (opts.maxRetries !== undefined) out.maxRetries = opts.maxRetries;
-  return out;
+  // Env-var fallbacks fill in any field absent from explicit
+  // clientOptions. Explicit values win.
+  const base: ClientOptions = {};
+  const envApiKey = process.env["OPENAI_API_KEY"];
+  if (envApiKey !== undefined) base.apiKey = envApiKey;
+  const envBaseURL = process.env["OPENAI_BASE_URL"];
+  if (envBaseURL !== undefined) base.baseURL = envBaseURL;
+  const envOrg = process.env["OPENAI_ORGANIZATION"];
+  if (envOrg !== undefined) base.organization = envOrg;
+  if (opts.clientOptions !== undefined) {
+    return { ...base, ...opts.clientOptions };
+  }
+  return base;
 }
 
 // ============================================================================
@@ -1134,11 +1141,22 @@ function toOpenAIMessages(m: LanguageModelMessage): ChatCompletionMessageParam[]
 }
 
 function toOpenAITool(t: LanguageModelTool): ChatCompletionTool {
-  const fn: { name: string; description?: string; parameters: Record<string, unknown> } = {
+  const fn: {
+    name: string;
+    description?: string;
+    parameters: Record<string, unknown>;
+    strict?: boolean;
+  } = {
     name: t.name,
     parameters: t.inputSchema,
   };
   if (t.description !== undefined) fn.description = t.description;
+  // Per-tool providerOptions.openai — merge into the function shape so
+  // adopters can set `strict: true` etc.
+  const overrides = t.providerOptions?.openai;
+  if (overrides !== undefined) {
+    Object.assign(fn, overrides);
+  }
   return { type: "function", function: fn };
 }
 
@@ -1214,14 +1232,19 @@ function imageUrlFromSource(source: MediaSource, mimeType: string | undefined): 
 }
 
 function messagePartFromBlock(block: ContentBlock): LanguageModelMessagePart {
+  const pm =
+    block.providerMetadata !== undefined
+      ? { providerMetadata: block.providerMetadata }
+      : {};
   switch (block.type) {
     case "text":
-      return { type: "text", text: block.text };
+      return { type: "text", text: block.text, ...pm };
     case "image":
       return {
         type: "image",
         imageUrl: imageUrlFromSource(block.source, block.mimeType),
         ...(block.mimeType !== undefined ? { mediaType: block.mimeType } : {}),
+        ...pm,
       };
     case "tool_use":
       return {
@@ -1229,6 +1252,7 @@ function messagePartFromBlock(block: ContentBlock): LanguageModelMessagePart {
         id: block.toolUseId,
         name: block.name,
         input: block.input,
+        ...pm,
       };
     case "tool_result":
       return {
@@ -1236,6 +1260,7 @@ function messagePartFromBlock(block: ContentBlock): LanguageModelMessagePart {
         toolUseId: block.toolUseId,
         content: block.content.map(messagePartFromBlock),
         ...(block.isError !== undefined ? { isError: block.isError } : {}),
+        ...pm,
       };
     default:
       return {
@@ -1254,6 +1279,9 @@ function buildTools(tree: RenderedTree): ReadonlyArray<LanguageModelTool> {
       name: t.name,
       ...(t.description !== undefined ? { description: t.description } : {}),
       inputSchema: t.inputSchema as Record<string, unknown>,
+      ...(t.providerOptions !== undefined
+        ? { providerOptions: t.providerOptions }
+        : {}),
     }));
 }
 

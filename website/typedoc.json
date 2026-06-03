@@ -25,6 +25,7 @@
     "../packages/adapters/google",
     "../packages/adapters/ai-sdk",
     "../packages/executor-anthropic",
+    "../packages/executor-google",
     "../packages/tui",
     "../packages/sandbox",
     "../packages/sandbox-local",

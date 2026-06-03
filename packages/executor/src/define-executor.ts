@@ -511,14 +511,19 @@ function sectionText(section: SectionEntry): string {
 }
 
 function messagePartFromBlock(block: ContentBlock): LanguageModelMessagePart {
+  const pm =
+    block.providerMetadata !== undefined
+      ? { providerMetadata: block.providerMetadata }
+      : {};
   switch (block.type) {
     case "text":
-      return { type: "text", text: block.text };
+      return { type: "text", text: block.text, ...pm };
     case "image":
       return {
         type: "image",
         imageUrl: imageUrlFromSource(block.source, block.mimeType),
         ...(block.mimeType !== undefined ? { mediaType: block.mimeType } : {}),
+        ...pm,
       };
     case "tool_use":
       return {
@@ -526,6 +531,7 @@ function messagePartFromBlock(block: ContentBlock): LanguageModelMessagePart {
         id: block.toolUseId,
         name: block.name,
         input: block.input,
+        ...pm,
       };
     case "tool_result":
       return {
@@ -533,6 +539,7 @@ function messagePartFromBlock(block: ContentBlock): LanguageModelMessagePart {
         toolUseId: block.toolUseId,
         content: block.content.map(messagePartFromBlock),
         ...(block.isError !== undefined ? { isError: block.isError } : {}),
+        ...pm,
       };
     default:
       return {
@@ -568,6 +575,9 @@ function buildTools(tree: RenderedTree): ReadonlyArray<LanguageModelTool> {
       name: t.name,
       ...(t.description !== undefined ? { description: t.description } : {}),
       inputSchema: t.inputSchema as Record<string, unknown>,
+      ...(t.providerOptions !== undefined
+        ? { providerOptions: t.providerOptions }
+        : {}),
     }));
 }
 

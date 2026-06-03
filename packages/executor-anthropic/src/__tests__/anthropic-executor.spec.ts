@@ -420,7 +420,7 @@ describe("AnthropicExecutor — cache tokens (G2)", () => {
     expect(t.result.usage?.cacheCreationTokens).toBe(20);
   });
 
-  it("stamps cache_control on system block when cacheControl includes 'system'", async () => {
+  it("stamps cache_control on system block via per-section providerMetadata", async () => {
     const stub = new StubAnthropicClient([
       { kind: "non-streaming", message: mkMessage({ text: "ok" }) },
     ]);
@@ -434,6 +434,11 @@ describe("AnthropicExecutor — cache tokens (G2)", () => {
             id: "s1",
             title: "Persona",
             content: [{ type: "text", text: "be helpful" }],
+            metadata: {
+              providerMetadata: {
+                anthropic: { cacheControl: { type: "ephemeral" } },
+              },
+            },
           },
           {
             kind: "message",
@@ -444,13 +449,7 @@ describe("AnthropicExecutor — cache tokens (G2)", () => {
         ],
       },
     };
-    await exec.run({
-      compiled: tree,
-      target: {
-        ...mkTarget(),
-        providerOptions: { anthropic: { cacheControl: ["system"] } },
-      },
-    });
+    await exec.run({ compiled: tree, target: mkTarget() });
     const sys = stub.calls[0]!.params.system as Array<{
       type: string;
       cache_control?: { type: string };
@@ -459,7 +458,7 @@ describe("AnthropicExecutor — cache tokens (G2)", () => {
     expect(sys[sys.length - 1]!.cache_control).toEqual({ type: "ephemeral" });
   });
 
-  it("stamps cache_control on last tool when cacheControl includes 'tools'", async () => {
+  it("stamps cache_control on a tool via tool.providerOptions.anthropic", async () => {
     const stub = new StubAnthropicClient([
       { kind: "non-streaming", message: mkMessage({ text: "ok" }) },
     ]);
@@ -484,22 +483,54 @@ describe("AnthropicExecutor — cache tokens (G2)", () => {
             description: "calculator",
             inputSchema: { type: "object" },
             exposure: ["model"],
+            providerOptions: {
+              anthropic: { cache_control: { type: "ephemeral" } },
+            },
           },
         ],
       },
     };
-    await exec.run({
-      compiled: tree,
-      target: {
-        ...mkTarget(),
-        providerOptions: { anthropic: { cacheControl: ["tools"] } },
-      },
-    });
+    await exec.run({ compiled: tree, target: mkTarget() });
     const tools = stub.calls[0]!.params.tools as Array<{
       name: string;
       cache_control?: { type: string };
     }>;
     expect(tools[tools.length - 1]!.cache_control).toEqual({ type: "ephemeral" });
+  });
+
+  it("stamps cache_control on a per-message text block via providerMetadata", async () => {
+    const stub = new StubAnthropicClient([
+      { kind: "non-streaming", message: mkMessage({ text: "ok" }) },
+    ]);
+    const { exec } = await makeExecutor(stub);
+    const tree: RenderedTree = {
+      specVersion: "2026-05-08",
+      context: {
+        entries: [
+          {
+            kind: "message",
+            id: "m1",
+            role: "user",
+            content: [
+              {
+                type: "text",
+                text: "remember this turn",
+                providerMetadata: {
+                  anthropic: { cacheControl: { type: "ephemeral" } },
+                },
+              },
+            ],
+          },
+        ],
+      },
+    };
+    await exec.run({ compiled: tree, target: mkTarget() });
+    const msgs = stub.calls[0]!.params.messages as Array<{
+      role: string;
+      content: Array<{ type: string; cache_control?: { type: string } }>;
+    }>;
+    const lastTextBlock = msgs[msgs.length - 1]!.content.find((b) => b.type === "text");
+    expect(lastTextBlock?.cache_control).toEqual({ type: "ephemeral" });
   });
 });
 
@@ -661,21 +692,6 @@ describe("AnthropicExecutor — providerOptions spread (G5)", () => {
     expect(p.thinking?.budget_tokens).toBe(2048);
   });
 
-  it("does NOT spread cacheControl into the SDK request body", async () => {
-    const stub = new StubAnthropicClient([
-      { kind: "non-streaming", message: mkMessage({ text: "ok" }) },
-    ]);
-    const { exec } = await makeExecutor(stub);
-    await exec.run({
-      compiled: emptyTree(),
-      target: {
-        ...mkTarget(),
-        providerOptions: { anthropic: { cacheControl: ["system"] } },
-      },
-    });
-    const p = stub.calls[0]!.params as unknown as Record<string, unknown>;
-    expect(p.cacheControl).toBeUndefined();
-  });
 });
 
 describe("AnthropicExecutor — parseThinkTags (G7)", () => {

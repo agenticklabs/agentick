@@ -21,7 +21,7 @@
  * @see docs/proposals/v2/blueprint/06-executor-harness.md
  */
 
-import type { RenderedTree } from "../data/rendered-tree.js";
+import type { ProviderToolOptions, RenderedTree } from "../data/rendered-tree.js";
 import type { ExecutionTarget, LanguageModelTarget } from "../data/execution-target.js";
 import type {
   ExecutionResult,
@@ -184,26 +184,53 @@ export interface LanguageModelMessage {
  * boundary; richer types (csv, html, json) flatten to text by the
  * format harness before reaching the executor.
  */
+/**
+ * Per-part provider metadata carrier. Mirrors
+ * {@link BaseContentBlock.providerMetadata} on the executor boundary so
+ * round-trip data (Gemini 3+ `thoughtSignature`, Anthropic
+ * `cache_control` on a specific block, OpenAI logprobs reference, etc.)
+ * survives projection. Keyed by provider namespace.
+ */
+export type ProviderMetadataBag = Record<string, Record<string, unknown>>;
+
 export type LanguageModelMessagePart =
-  | { readonly type: "text"; readonly text: string }
-  | { readonly type: "image"; readonly imageUrl: string; readonly mediaType?: string }
+  | {
+      readonly type: "text";
+      readonly text: string;
+      readonly providerMetadata?: ProviderMetadataBag;
+    }
+  | {
+      readonly type: "image";
+      readonly imageUrl: string;
+      readonly mediaType?: string;
+      readonly providerMetadata?: ProviderMetadataBag;
+    }
   | {
       readonly type: "tool_use";
       readonly id: string;
       readonly name: string;
       readonly input: unknown;
+      readonly providerMetadata?: ProviderMetadataBag;
     }
   | {
       readonly type: "tool_result";
       readonly toolUseId: string;
       readonly content: ReadonlyArray<LanguageModelMessagePart>;
       readonly isError?: boolean;
+      readonly providerMetadata?: ProviderMetadataBag;
     };
 
 export interface LanguageModelTool {
   readonly name: string;
   readonly description?: string;
   readonly inputSchema: Record<string, unknown>;
+  /**
+   * Per-tool provider-specific options. Reads from
+   * {@link ToolDeclaration.providerOptions} during projection. Adapters
+   * merge into the provider's tool shape (e.g. OpenAI `strict: true`
+   * for JSON-schema mode, Anthropic `cache_control` on a specific tool).
+   */
+  readonly providerOptions?: ProviderToolOptions;
 }
 
 export interface LanguageModelParameters {

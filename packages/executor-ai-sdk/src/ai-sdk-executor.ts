@@ -719,14 +719,19 @@ function imageUrlFromSource(source: MediaSource, mimeType: string | undefined): 
 }
 
 function messagePartFromBlock(block: ContentBlock): LanguageModelMessagePart {
+  const pm =
+    block.providerMetadata !== undefined
+      ? { providerMetadata: block.providerMetadata }
+      : {};
   switch (block.type) {
     case "text":
-      return { type: "text", text: block.text };
+      return { type: "text", text: block.text, ...pm };
     case "image":
       return {
         type: "image",
         imageUrl: imageUrlFromSource(block.source, block.mimeType),
         ...(block.mimeType !== undefined ? { mediaType: block.mimeType } : {}),
+        ...pm,
       };
     case "tool_use":
       return {
@@ -734,6 +739,7 @@ function messagePartFromBlock(block: ContentBlock): LanguageModelMessagePart {
         id: block.toolUseId,
         name: block.name,
         input: block.input,
+        ...pm,
       };
     case "tool_result":
       return {
@@ -741,6 +747,7 @@ function messagePartFromBlock(block: ContentBlock): LanguageModelMessagePart {
         toolUseId: block.toolUseId,
         content: block.content.map(messagePartFromBlock),
         ...(block.isError !== undefined ? { isError: block.isError } : {}),
+        ...pm,
       };
     default:
       return {
@@ -759,6 +766,9 @@ function buildTools(tree: RenderedTree): ReadonlyArray<LanguageModelTool> {
       name: t.name,
       ...(t.description !== undefined ? { description: t.description } : {}),
       inputSchema: t.inputSchema as Record<string, unknown>,
+      ...(t.providerOptions !== undefined
+        ? { providerOptions: t.providerOptions }
+        : {}),
     }));
 }
 
@@ -794,6 +804,20 @@ function toAISDKInput(
   return result;
 }
 
+/**
+ * v2 spec carries per-part `providerMetadata` keyed by provider
+ * namespace (`anthropic`, `openai`, `google`). AI SDK 5 accepts the
+ * same per-part shape under the field name `providerOptions`. The
+ * two are 1:1 — forward by renaming the carrier field.
+ */
+function pmToProviderOptions(part: {
+  readonly providerMetadata?: Record<string, Record<string, unknown>>;
+}): { providerOptions: Record<string, Record<string, unknown>> } | object {
+  return part.providerMetadata !== undefined
+    ? { providerOptions: part.providerMetadata }
+    : {};
+}
+
 function toAISDKMessage(m: LanguageModelMessage): ModelMessage[] {
   // AI SDK splits messages by role with specific content shapes.
   switch (m.role) {
@@ -812,12 +836,15 @@ function toAISDKMessage(m: LanguageModelMessage): ModelMessage[] {
         {
           role: "user",
           content: m.content.map((p) => {
-            if (p.type === "text") return { type: "text", text: p.text };
+            if (p.type === "text") {
+              return { type: "text", text: p.text, ...pmToProviderOptions(p) };
+            }
             if (p.type === "image") {
               return {
                 type: "image",
                 image: p.imageUrl,
                 ...(p.mediaType !== undefined ? { mediaType: p.mediaType } : {}),
+                ...pmToProviderOptions(p),
               };
             }
             // Fallback — flatten to text.
@@ -831,13 +858,15 @@ function toAISDKMessage(m: LanguageModelMessage): ModelMessage[] {
     case "assistant": {
       const parts: unknown[] = [];
       for (const p of m.content) {
-        if (p.type === "text") parts.push({ type: "text", text: p.text });
-        else if (p.type === "tool_use") {
+        if (p.type === "text") {
+          parts.push({ type: "text", text: p.text, ...pmToProviderOptions(p) });
+        } else if (p.type === "tool_use") {
           parts.push({
             type: "tool-call",
             toolCallId: p.id,
             toolName: p.name,
             input: p.input,
+            ...pmToProviderOptions(p),
           });
         }
       }
@@ -858,6 +887,7 @@ function toAISDKMessage(m: LanguageModelMessage): ModelMessage[] {
             toolCallId: p.toolUseId,
             toolName: "unknown",
             output: { type: "text", value: textOnly || "[done]" },
+            ...pmToProviderOptions(p),
           });
         }
       }

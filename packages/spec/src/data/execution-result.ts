@@ -102,6 +102,12 @@ export interface ToolCall {
   readonly name: string;
   readonly input: unknown;
   readonly metadata?: Record<string, unknown>;
+  /**
+   * Provider-specific metadata that must round-trip on subsequent
+   * turns (e.g. Gemini 3+ `thoughtSignature`). Keyed by provider
+   * namespace. Distinct from {@link metadata} which is adopter-facing.
+   */
+  readonly providerMetadata?: Record<string, Record<string, unknown>>;
 }
 
 export interface LanguageModelExecutionResult extends ExecutionResult {

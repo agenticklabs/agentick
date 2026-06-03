@@ -10,7 +10,7 @@
  *   - formatter.ts        FormatterRef, FormatInput, FormatResult, FormatScope, FormatTrace
  *   - entries.ts          ContextEntry, MessageEntry, SectionEntry, CacheHint
  *   - declarations.ts     ToolDeclaration, ResourceDeclaration, OutputDeclaration, MCPDeclaration
- *   - rendered-tree.ts    RenderedTree, SpecConfig, ProviderOptions, ModelSelection
+ *   - rendered-tree.ts    RenderedTree, SpecConfig, ProviderClientOptions, ProviderOptions, ProviderToolOptions, ModelSelection
  *   - execution-result.ts ExecutionResult, ExecutorTerminal, LanguageModelExecutionResult, ExecutorDelta
  *   - execution-target.ts ExecutionTarget, LanguageModelTarget, TargetCapabilities
  *

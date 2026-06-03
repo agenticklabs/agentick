@@ -71,6 +71,7 @@ const PACKAGE_GROUPS: Array<{ label: string; packages: string[] }> = [
       "@agentick/reconciler-react",
       "@agentick/tool-executor",
       "@agentick/executor-anthropic",
+      "@agentick/executor-google",
     ],
   },
 ];

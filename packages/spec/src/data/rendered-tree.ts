@@ -59,33 +59,60 @@ export interface SpecConfig {
 }
 
 /**
- * Provider-specific escapes. Keys are provider namespaces: `openai`,
- * `anthropic`, `google`, `ai-sdk`, etc.
+ * Provider-specific escapes — three tiers mirroring v1's
+ * `ProviderClientOptions` / `ProviderGenerationOptions` /
+ * `ProviderToolOptions` augmentable interfaces. All three are
+ * **empty-seed interfaces**: each adapter package augments its own
+ * slot via TypeScript module augmentation. The spec hardcodes no
+ * provider shape.
  *
- * **This is an EMPTY SEED interface.** Adapter packages augment it via
- * TypeScript module augmentation so call sites get fully-typed
- * provider knobs without the spec hardcoding every provider's shape:
+ * Adapters MUST type their slots as the SDK's actual config types —
+ * not hand-rolled subsets. The point is that adopters writing
+ * `target.providerOptions.openai` see the SAME shape they'd see
+ * writing the OpenAI request directly.
  *
  * ```ts
  * // in @agentick/executor-openai
  * declare module "@agentick/spec" {
+ *   interface ProviderClientOptions {
+ *     openai?: OpenAI.ClientOptions;
+ *   }
  *   interface ProviderOptions {
- *     readonly openai?: {
- *       readonly seed?: number;
- *       readonly logprobs?: boolean;
- *       readonly store?: boolean;
- *       // ...
- *     };
+ *     openai?: Partial<OpenAI.Chat.Completions.ChatCompletionCreateParams>;
+ *   }
+ *   interface ProviderToolOptions {
+ *     openai?: { strict?: boolean };
  *   }
  * }
  * ```
  *
- * Same pattern as {@link HookBridges} (ADR 26/27): the spec ships an
- * empty surface, packages contribute slots, no central registry of
- * "known providers" exists in spec.
+ * Three structural levels:
+ * - {@link ProviderClientOptions} — SDK client construction (apiKey,
+ *   baseURL, organization, vertexai/project/location, dispatcher…).
+ *   Consumed at executor construction time. Per-executor, not per-call.
+ * - {@link ProviderOptions} — per-call/generation request shape
+ *   (temperature, seed, safety, thinking, response_format, …). Lives
+ *   on {@link RenderedTree.providerOptions} and
+ *   {@link ExecutionTarget.providerOptions}.
+ * - {@link ProviderToolOptions} — per-tool-definition (OpenAI strict
+ *   mode, Anthropic per-tool cache_control, Gemini function-decl
+ *   overrides). Lives on `ToolDeclaration.providerOptions`.
+ *
+ * For per-block metadata (Anthropic per-block `cache_control`, Gemini
+ * `thoughtSignature` on a functionCall part), use
+ * {@link BaseContentBlock.providerMetadata} — that is the fourth
+ * informal channel and is keyed by the same provider namespaces.
+ *
+ * Same augmentation pattern as {@link HookBridges} (ADR 26/27): the
+ * spec ships an empty surface, packages contribute slots, no central
+ * registry of "known providers" exists in spec.
  */
 // eslint-disable-next-line @typescript-eslint/no-empty-object-type
+export interface ProviderClientOptions {}
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type
 export interface ProviderOptions {}
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type
+export interface ProviderToolOptions {}
 
 // ============================================================================
 // Feature registry (initial set, sign-off pending)

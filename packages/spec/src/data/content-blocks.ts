@@ -93,6 +93,24 @@ export interface BaseContentBlock {
   readonly index?: number;
   readonly metadata?: Record<string, unknown>;
   readonly summary?: string;
+  /**
+   * Provider-specific metadata that must round-trip through the
+   * pipeline on this specific block. Keyed by provider namespace
+   * (`google`, `anthropic`, `openai`).
+   *
+   * Two distinct uses:
+   * 1. **Model-produced opaque data** that has to be sent back
+   *    verbatim on subsequent turns — e.g. Gemini 3+
+   *    `thoughtSignature` on a `tool_use` block.
+   * 2. **Adopter-stamped per-block knobs** that affect how the
+   *    block is rendered to the provider — e.g. Anthropic
+   *    `cacheControl: { type: "ephemeral" }` to mark THIS block as
+   *    a prompt-cache breakpoint.
+   *
+   * Keyed by provider namespace so multiple adapters can decorate
+   * the same block without colliding.
+   */
+  readonly providerMetadata?: Record<string, Record<string, unknown>>;
 }
 
 // ============================================================================
@@ -236,11 +254,6 @@ export interface ToolUseBlock extends BaseContentBlock {
   readonly name: string;
   readonly input: Record<string, unknown>;
   readonly toolResult?: ToolResultBlock;
-  /**
-   * Provider-specific metadata that must round-trip through the pipeline.
-   * Keyed by provider namespace (e.g., `google`, `anthropic`, `openai`).
-   */
-  readonly providerMetadata?: Record<string, Record<string, unknown>>;
 }
 
 export interface ToolResultBlock extends BaseContentBlock {
