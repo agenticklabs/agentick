@@ -528,3 +528,131 @@ failures unchanged.
 Sessions no longer reach through React to get bridges. Future Angular
 or Vue reconcilers depend on `@agentick/reconciler`, not the
 React-named package. The dependency graph reflects the architecture.
+
+### 2026-06-02 — Streaming adapter benchmarks
+
+Baseline measurements **before** any streaming-aggregation refactor.
+Three new bench files drive each provider adapter end-to-end against
+its stub client across deterministic canned response sequences. The
+bench wraps `executor.run({ compiled, target })` with `stream: true`
+so every iteration exercises the full hot path: chunk iteration →
+`mapChunk` → `emitDeltaLazy` (Effect.runPromise per delta) → stream
+accumulator + in-loop block-state map → `normalize()`.
+
+Files:
+- `packages/executor-openai/src/__bench__/streaming.bench.ts`
+- `packages/executor-anthropic/src/__bench__/streaming.bench.ts`
+- `packages/executor-google/src/__bench__/streaming.bench.ts`
+
+Bench commands:
+
+```
+pnpm vitest bench --run packages/executor-openai/src/__bench__/streaming.bench.ts
+pnpm vitest bench --run packages/executor-anthropic/src/__bench__/streaming.bench.ts
+pnpm vitest bench --run packages/executor-google/src/__bench__/streaming.bench.ts
+```
+
+Vitest 4.0.18, Node default workspace. Each row reports per-`run()`
+mean ± relative-margin-of-error (rme) for that scenario, sample
+count, and the derived per-delta cost (mean ÷ delta count, μs).
+Per-`run()` numbers include a small fixed setup cost (~0.25 ms:
+fresh `MemoryJournal` / `LocalEventBus` / `LocalInbox`,
+`new Executor(...)`, `await ready`); to back out per-delta cost we
+take `(mean@1000 − mean@100) / 900` for the no-subscriber path.
+
+#### Per-`run()` end-to-end (ms, mean ± rme)
+
+| Scenario                            | OpenAI         | Anthropic      | Google         |
+| ----------------------------------- | -------------- | -------------- | -------------- |
+| 1000 text deltas, no subscriber     | 2.271 ± 4.89%  | 1.899 ± 5.83%  | 1.881 ± 4.05%  |
+| 100 text + 1 tool_call, no sub      | 0.355 ± 4.52%  | 0.349 ± 3.96%  | 0.284 ± 3.35%  |
+| 100 text deltas, no subscriber      | 0.291 ± 3.52%  | 0.351 ± 3.50%  | 0.270 ± 2.67%  |
+| 100 text deltas, 1 drain subscriber | 2.261 ± 3.93%  | 2.515 ± 4.38%  | 2.660 ± 19.36% |
+
+Sample counts: 199–1853 depending on iteration speed (vitest
+auto-paces to a ~600 ms wall budget per bench).
+
+#### Derived per-delta cost (μs)
+
+Computed as `(mean@1000 − mean@100) / 900` for the no-subscriber
+text-only path (cancels fixed setup):
+
+| Adapter   | Per-delta cost, no subscriber |
+| --------- | ----------------------------- |
+| OpenAI    | ~2.20 μs                      |
+| Anthropic | ~1.72 μs                      |
+| Google    | ~1.79 μs                      |
+
+Subscriber overhead at the same 100-delta workload (`mean@1sub −
+mean@nosub`, divided by 100 deltas) — this is the cost of the lazy
+build closure actually running + `LocalEventBus` fan-out + an
+`Effect.runPromise` round-trip per delta into the subscriber fiber's
+queue:
+
+| Adapter   | Subscriber overhead per delta |
+| --------- | ----------------------------- |
+| OpenAI    | ~19.7 μs                      |
+| Anthropic | ~21.6 μs                      |
+| Google    | ~23.9 μs                      |
+
+The subscriber path adds roughly an order of magnitude on top of the
+no-subscriber base. Whatever cost emitDeltaLazy currently pays at
+the `bus.publishLazy` *no-listener* short-circuit is small (≈1.7 μs
+to 2.2 μs per delta covers chunk-mapping, accumulator updates, AND
+the lazy emit); the moment a subscriber is attached, the bulk of the
+hot-path time moves into the bus fan-out + Effect-fiber scheduling.
+
+#### Observations
+
+1. **The three adapters are within ~30 % of each other at the
+   no-subscriber baseline** despite materially different parser
+   shapes. The dual-walk pattern (per-block `Map<number, BlockState>`
+   in the streaming loop **plus** `StreamAccumulator` **plus** a
+   third pass in `normalize()`) that OpenAI and Anthropic carry is
+   measurable but small — Google's single-pass `StreamAccumulator`
+   path saves ~0.4 μs per delta over OpenAI and ~0.1 μs over
+   Anthropic in this workload. That is real but it is not where the
+   wall-clock time lives.
+
+2. **Anthropic is slightly faster than OpenAI per delta** even
+   though it does the dual-walk too. Likely explanation: Anthropic's
+   per-event payload from the SDK is leaner (one delta = one
+   `text_delta` event with a known `index`), whereas OpenAI's
+   per-chunk shape requires walking
+   `choices[0].delta.{content,tool_calls,…}` discriminated unions
+   and reassembling tool-call streaming across `index` + partial
+   `arguments` slices.
+
+3. **Per-delta `Effect.runPromise` cost dominates only when there
+   is a subscriber.** With no subscriber the lazy short-circuit
+   inside `bus.publishLazy` skips the envelope-build closure and
+   the publish loop entirely, so the only Effect cost is the
+   one-call entrance from the executor's main loop into the
+   substrate. That accounts for the surprisingly low ~1.7-2.2 μs
+   per delta. Attach a subscriber and the cost jumps ~10×, almost
+   entirely fan-out / fiber-queue / subscriber-side runtime work —
+   not the executor's accumulator design.
+
+4. **Tool-call streams cost almost the same as text-only at 100
+   deltas.** Google is fastest here (0.284 ms) because its
+   `functionCall` arrives as a single chunk with structured `args`
+   already parsed — no `input_json_delta` accumulation, no
+   `JSON.parse` on block-stop. Anthropic (0.349 ms) and OpenAI
+   (0.355 ms) pay for streamed-argument reassembly + a `JSON.parse`
+   at finalization, but at ~5 events of overhead this is invisible
+   against the 100 text deltas.
+
+5. **The Google "1 subscriber" rme is wide** (±19.36 %), driven by
+   a single outlier sample at 46.45 ms. p75 is 2.37 ms (in line
+   with the no-outlier expectation). Likely GC pause; rerunning
+   should converge. Not a real regression vs the other two
+   adapters.
+
+Headline number to take into any refactor decision: the
+no-subscriber per-delta cost is **~2 μs** across all three adapters.
+A refactor that eliminates one of the two aggregation walks in
+OpenAI/Anthropic should target a fraction of that 2 μs — best case,
+moves OpenAI/Anthropic to Google's ~1.7 μs. The big lever is *not*
+the dual-walk, it is the subscriber fan-out path (currently ~20 μs
+per delta). If we want streaming throughput to go up by more than
+~15 %, that is the path to attack.

@@ -431,8 +431,13 @@ export class GoogleExecutor
         let stopReason: LanguageModelStopReason = "end";
         let finalUsage: UsageStats | undefined;
 
+        // The standalone executeStream() loop accumulates inline via
+        // startTextBlock/appendText/recordToolCall as it emits
+        // AdapterDeltas. Do NOT call `accum.pushChunk(chunk)` here —
+        // that path is reserved for `executeStreamBody` (the run()
+        // path) which does no emission and uses pushChunk as the sole
+        // accumulator entry point.
         for await (const chunk of stream) {
-          accum.pushChunk(chunk);
           if (chunk.modelVersion && !modelSeen) modelSeen = chunk.modelVersion;
           const candidate = chunk.candidates?.[0];
           if (!candidate) continue;
@@ -1380,9 +1385,54 @@ class GoogleStreamAccumulator {
   private finish: FinishReason | undefined;
   private usage: GenerateContentResponse["usageMetadata"];
 
-  pushChunk(_chunk: GenerateContentResponse): void {
-    // Chunks are consumed by the caller's main loop. The accumulator
-    // tracks content directly via startTextBlock / appendText / etc.
+  /**
+   * Full-walk accumulation used by `executeStreamBody` (the
+   * `run()` path) which does not emit AdapterDeltas itself —
+   * accumulation IS the entire job there. Walks each part and
+   * records text / reasoning / functionCalls / usage / finishReason.
+   * Idempotent on no-op chunks.
+   *
+   * The standalone `executeStream` method instead calls the more
+   * granular `startTextBlock` / `appendText` / etc. directly during
+   * its single-pass emit-and-accumulate loop — DO NOT also call
+   * `pushChunk` there, or content would double-accumulate.
+   */
+  pushChunk(chunk: GenerateContentResponse): void {
+    const candidate = chunk.candidates?.[0];
+    const parts = candidate?.content?.parts ?? [];
+    for (const part of parts) {
+      const isThought = (part as { thought?: boolean }).thought === true;
+      if (typeof part.text === "string" && part.text.length > 0) {
+        if (isThought) {
+          if (this.currentReasoning === null) this.startReasoningBlock();
+          this.appendReasoning(part.text);
+        } else {
+          if (this.currentText === null) this.startTextBlock();
+          this.appendText(part.text);
+        }
+        continue;
+      }
+      if (part.functionCall) {
+        const fc = part.functionCall;
+        this.recordToolCall({
+          callId: fc.id ?? `call_${ulid()}`,
+          name: fc.name ?? "",
+          input: (fc.args ?? {}) as Record<string, unknown>,
+          ...((part as { thoughtSignature?: string }).thoughtSignature !== undefined
+            ? {
+                thoughtSignature: (part as { thoughtSignature?: string })
+                  .thoughtSignature!,
+              }
+            : {}),
+        });
+      }
+    }
+    if (candidate?.finishReason) {
+      this.setFinishReason(candidate.finishReason);
+    }
+    if (chunk.usageMetadata) {
+      this.setUsage(chunk.usageMetadata);
+    }
   }
 
   startTextBlock(): void {

@@ -39,6 +39,7 @@
     }
   },
   "scripts": {
+    "bench": "vitest bench --run",
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.build.json --noEmit"
   },
