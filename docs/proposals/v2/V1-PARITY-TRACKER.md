@@ -126,9 +126,37 @@ intentional scope, `[blocked]` waiting on prerequisite.
       surfaces as `[redacted]` placeholder), document blocks (upstream
       gap — v2 spec doesn't carry them to the executor boundary).
 
-- [ ] **G9. Native Google executor / adapter.**
-      Same shape as G8 for Google's Gemini. v1 has it; v2 doesn't.
-      - Plan: `@agentick/executor-google` (or `@agentick/google`).
+- [x] **G9. Native Google executor / adapter.** _Closed 2026-06-02
+      via `@agentick/executor-google`._ Full streaming + non-streaming
+      via `client.models.generateContentStream` + `generateContent`,
+      Vertex AI + Gemini Developer API paths via
+      `clientOptions: GoogleGenAIOptions`. **thoughtSignature
+      round-trip (Gemini 3+ thinking)** — opaque signature flows
+      `ContentBlock` ↔ SDK part via
+      `providerMetadata.google.thoughtSignature` (required for
+      multi-turn tool use with thinking models — without it Gemini
+      returns `MISSING_THOUGHT_SIGNATURE`). `part.thought === true`
+      (Gemini 2.5+) routes to the reasoning channel. Single-pass
+      stream accumulator builds `ContentBlock[]` directly during
+      streaming (no synthesized-raw → re-walk pattern). Full
+      FinishReason → LanguageModelStopReason map (STOP, MAX_TOKENS,
+      SAFETY, RECITATION, BLOCKLIST, PROHIBITED_CONTENT, SPII,
+      MALFORMED_FUNCTION_CALL, MISSING_THOUGHT_SIGNATURE, IMAGE_*
+      etc.). `thoughtsTokenCount` → `reasoningTokens`,
+      `cachedContentTokenCount` → `cachedInputTokens`.
+      `sanitizeSchemaForGemini` ported from v1 (strips `$ref`,
+      `$defs`, `additionalItems`, `propertyNames`; simplifies mixed
+      `anyOf`/`oneOf`). parseThinkTags + customBlocks via the shared
+      `StreamTagParser`. Env-var fallbacks (`GOOGLE_API_KEY`,
+      `GEMINI_API_KEY`, `GOOGLE_GENAI_BASE_URL`). 54/54 tests in
+      package (35 provider-specific + 15 conformance + 4 factory).
+      **Architecture upgrade landed alongside**: layered
+      providerOptions (three augmentable spec interfaces —
+      `ProviderClientOptions`, `ProviderOptions`,
+      `ProviderToolOptions` — all typed with the SDK's actual config
+      types, not hand-rolled subsets). Adopted across all four
+      executors; Anthropic's `cacheControl` meta-knob removed in
+      favor of per-block `providerMetadata.anthropic.cacheControl`.
 
 - [ ] **G10. Embedding API support.**
       v1 OpenAI adapter exposes `embed()` for text embeddings. v2
@@ -144,14 +172,19 @@ intentional scope, `[blocked]` waiting on prerequisite.
 
 ### Medium (close pre-1.0; not migration-blocking)
 
-- [ ] **G11. Tool definition `providerOptions`.**
-      v1 tool definitions can carry `tool.providerOptions.openai`
-      that merges into the OpenAI tool shape (e.g., for OpenAI's
-      `strict: true` JSON schema mode). v2's `ToolDeclaration` has
-      no equivalent. Adopters using strict-mode tool calls can't.
-      - Files: `packages/spec/src/data/declarations.ts` (extend
-        `ToolDeclaration`), OpenAI/AI SDK executors merge into
-        provider tool shape.
+- [x] **G11. Tool definition `providerOptions`.** _Closed 2026-06-02
+      via the layered providerOptions architecture._ Spec gained
+      `ProviderToolOptions {}` empty-seed interface (sibling to the
+      existing `ProviderOptions` and the new `ProviderClientOptions`);
+      `ToolDeclaration.providerOptions?: ProviderToolOptions` lands
+      on the tool projection. Each adapter contributes its slot via
+      module augmentation typed against the SDK's actual config types
+      (no hand-rolled subsets): OpenAI → `Partial<FunctionDefinition>`
+      so adopters set `strict: true` on the inner function; Anthropic
+      → `Partial<AnthropicTool>` for per-tool `cache_control`; Google
+      → `Partial<FunctionDeclaration>` for SDK-specific overrides.
+      `buildTools` in every executor forwards `t.providerOptions`
+      through projection.
 
 - [x] **G12. customBlocks parsing from stream.** _Closed 2026-05-28._
       Adopter-declared `customBlocks: { tagName: { ... } }` option on
@@ -387,3 +420,25 @@ work happens — does NOT block the parity fixes.
   no workspace regressions. 5438 tests passing total. Sub-agent
   flagged 6 additional skill bugs from the first run + a few new
   ones from this run — fixed in skills/create-adapter/SKILL.md.
+- 2026-06-02: closed G9 (`@agentick/executor-google`) and G11
+  (per-tool providerOptions) via a coordinated layered-providerOptions
+  refactor across all four executors. Spec gained two new empty-seed
+  augmentable interfaces (`ProviderClientOptions`, `ProviderToolOptions`)
+  joining the existing `ProviderOptions`. Each executor's three slots
+  now type to the SDK's actual config types — `OpenAI.ClientOptions` /
+  `Partial<ChatCompletionCreateParams>` / `Partial<FunctionDefinition>`,
+  `Anthropic.ClientOptions` / `Partial<MessageCreateParams>` /
+  `Partial<AnthropicTool>`, `GoogleGenAIOptions` /
+  `GenerateContentConfig` / `Partial<FunctionDeclaration>`.
+  `providerMetadata?` lifted from `ToolUseBlock` onto
+  `BaseContentBlock` so every block carries per-block round-trip
+  data. Anthropic `cacheControl` meta-knob removed entirely in
+  favor of per-block `providerMetadata.anthropic.cacheControl` and
+  per-tool `tool.providerOptions.anthropic.cache_control`. Google
+  ships with thoughtSignature round-trip (Gemini 3+ thinking),
+  `part.thought` → reasoning routing (Gemini 2.5+), single-pass
+  stream accumulator, full FinishReason map, sanitizeSchemaForGemini
+  ported from v1. Adapter benchmarks added at
+  `packages/executor-{openai,anthropic,google}/src/__bench__/streaming.bench.ts`;
+  numbers in REFACTOR-SCRATCHPAD §2026-06-02. 313/313 tests across
+  five executor packages + spec + spec-conformance.
