@@ -17,10 +17,29 @@
  */
 
 import { Effect, Queue, Stream } from "effect";
-import type { EventKey, EventQuery, EventSurface, ProtocolEvent } from "@agentick/spec";
-import type { EventBus, SubscribeOptions, SubscriberOverflow } from "@agentick/spec";
+import type {
+  EventBus,
+  EventBusFactory,
+  EventKey,
+  EventQuery,
+  EventSurface,
+  FactoryDeps,
+  Lifecycle,
+  ProtocolEvent,
+  SubscribeOptions,
+  SubscriberOverflow,
+} from "@agentick/spec";
 import { BufferOverflowError } from "@agentick/spec";
 import { compileQuery, type CompiledMatcher } from "./query.js";
+
+/**
+ * Construction options for {@link LocalEventBus}. Empty placeholder
+ * for v2.0 — defaults work for every current adopter. Forward-compat
+ * slot for buffer-size / overflow-strategy defaults / metrics
+ * intervals as ADR 29 Phase B lands.
+ */
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type
+export interface LocalEventBusOptions {}
 
 interface Subscriber {
   readonly id: number;
@@ -55,6 +74,49 @@ export class LocalEventBus implements EventBus {
    * publish time decides if a specific event matches.
    */
   private broadCount = 0;
+
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  constructor(_options: LocalEventBusOptions = {}) {
+    // Options reserved for ADR 29 Phase B (per-surface batching policy
+    // defaults). Today they're a forward-compat placeholder.
+  }
+
+  /**
+   * Build a per-session factory for {@link LocalEventBus}. The
+   * returned factory is consumed by `AppHarnessOptions.bus` to
+   * construct a fresh bus per session, with the bus's `close()`
+   * auto-registered on the session's `Lifecycle.onClose` so
+   * session-close shuts down the bus.
+   *
+   * Adopters who want a shared bus across sessions pass an instance
+   * directly; this helper covers the per-session case.
+   *
+   * @example default — no config:
+   * ```ts
+   * createApp(<Agent />, { bus: LocalEventBus.createFactory() });
+   * ```
+   *
+   * @example per-session branching via {@link FactoryDeps}:
+   * ```ts
+   * createApp(<Agent />, {
+   *   bus: LocalEventBus.createFactory((deps) => ({
+   *     // future: { bufferSize: deps.sessionId.startsWith("priority:") ? 4096 : 256 }
+   *   })),
+   * });
+   * ```
+   *
+   * @see docs/proposals/v2/blueprint/30-app-as-recipe.md
+   */
+  static createFactory(
+    configFn?: (deps: FactoryDeps) => LocalEventBusOptions,
+  ): EventBusFactory {
+    const factory = (deps: FactoryDeps, lifecycle: Lifecycle): EventBus => {
+      const bus = new LocalEventBus(configFn?.(deps));
+      lifecycle.onClose(() => bus.close());
+      return bus;
+    };
+    return Object.assign(factory, { eventBusFactory: true as const });
+  }
 
   publish(event: ProtocolEvent): Effect.Effect<void, never, never> {
     return Effect.suspend(() => {

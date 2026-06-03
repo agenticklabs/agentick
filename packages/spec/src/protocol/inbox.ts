@@ -96,3 +96,32 @@ export interface MessageInbox {
     options?: AskOptions,
   ): Effect.Effect<R, InboxError | MessageHandlerError, never>;
 }
+
+// ============================================================================
+// MessageInboxFactory — deferred per-session construction (ADR 30)
+// ============================================================================
+
+import type { Factory } from "./factory.js";
+
+/**
+ * Per-session factory shape for {@link MessageInbox}. Adopters supply
+ * the `inbox` slot on `AppHarnessOptions` as either an instance
+ * (shared across sessions) or a factory (constructed per session via
+ * the recipe pattern).
+ *
+ * Use `LocalInbox.createFactory(...)` from `@agentick/runtime` for
+ * ergonomic factory construction with auto-registered close.
+ *
+ * @see docs/proposals/v2/blueprint/30-app-as-recipe.md
+ */
+export interface MessageInboxFactory extends Factory<MessageInbox> {
+  readonly messageInboxFactory: true;
+}
+
+/** Type guard for {@link MessageInboxFactory}. */
+export function isMessageInboxFactory(v: unknown): v is MessageInboxFactory {
+  return (
+    typeof v === "function" &&
+    (v as { messageInboxFactory?: unknown }).messageInboxFactory === true
+  );
+}

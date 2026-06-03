@@ -15,6 +15,7 @@
  * @see docs/proposals/v2/blueprint/01-harness-principle.md
  */
 
+export * from "./factory.js";
 export * from "./journal.js";
 export * from "./bus.js";
 export * from "./inbox.js";

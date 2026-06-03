@@ -11,9 +11,9 @@
  * @see docs/proposals/v2/blueprint/19-foundation.md
  */
 
-export { MemoryJournal } from "./substrate/memory-journal.js";
-export { LocalEventBus } from "./substrate/local-event-bus.js";
-export { LocalInbox } from "./substrate/local-inbox.js";
+export { MemoryJournal, type MemoryJournalOptions } from "./substrate/memory-journal.js";
+export { LocalEventBus, type LocalEventBusOptions } from "./substrate/local-event-bus.js";
+export { LocalInbox, type LocalInboxOptions } from "./substrate/local-inbox.js";
 export {
   LocalChannelPublisher,
   type LocalChannelPublisherOptions,

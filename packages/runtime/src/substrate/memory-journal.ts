@@ -16,9 +16,12 @@
 import { Effect, Stream } from "effect";
 import type { EventQuery, JournalError, ProtocolEvent, TerminalEvent } from "@agentick/spec";
 import type {
+  FactoryDeps,
   JournalReadFrom,
+  Lifecycle,
   Maybe,
   OperationJournal,
+  OperationJournalFactory,
   OrphanedOperation,
   OrphanQuery,
 } from "@agentick/spec";
@@ -76,6 +79,28 @@ export class MemoryJournal implements OperationJournal {
 
   constructor(options: MemoryJournalOptions = {}) {
     this.capacity = options.capacity ?? 10_000;
+  }
+
+  /**
+   * Build a per-session factory for {@link MemoryJournal}. The
+   * returned factory is consumed by `AppHarnessOptions.journal` to
+   * construct a fresh journal per session, with the journal's
+   * `close()` auto-registered on the session's `Lifecycle.onClose`.
+   *
+   * Durable journals (SQLite, Postgres) ship their own `createFactory`
+   * helpers in their respective adapter packages.
+   *
+   * @see docs/proposals/v2/blueprint/30-app-as-recipe.md
+   */
+  static createFactory(
+    configFn?: (deps: FactoryDeps) => MemoryJournalOptions,
+  ): OperationJournalFactory {
+    const factory = (deps: FactoryDeps, lifecycle: Lifecycle): OperationJournal => {
+      const journal = new MemoryJournal(configFn?.(deps));
+      lifecycle.onClose(() => journal.close());
+      return journal;
+    };
+    return Object.assign(factory, { operationJournalFactory: true as const });
   }
 
   append(event: ProtocolEvent): Effect.Effect<void, JournalError, never> {

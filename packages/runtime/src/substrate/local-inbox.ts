@@ -16,12 +16,15 @@
 
 import { Effect, Fiber } from "effect";
 import type {
+  FactoryDeps,
   InboxError,
+  Lifecycle,
   MessageAck,
   MessageEnvelope,
   MessageEnvelopeInput,
   MessageHandler,
   MessageHandlerError,
+  MessageInboxFactory,
 } from "@agentick/spec";
 import type { AskOptions, MessageInbox, Unsubscribe } from "@agentick/spec";
 import { ulid } from "./ulid.js";
@@ -88,6 +91,25 @@ export class LocalInbox implements MessageInbox {
     this.ttlMs = options.idempotencyTtlMs ?? 600_000;
     this.maxEntries = options.idempotencyMaxEntries ?? 10_000;
     this.onTellError = options.onTellError ?? (() => {});
+  }
+
+  /**
+   * Build a per-session factory for {@link LocalInbox}. The returned
+   * factory is consumed by `AppHarnessOptions.inbox` to construct a
+   * fresh inbox per session, with the inbox's `close()`
+   * auto-registered on the session's `Lifecycle.onClose`.
+   *
+   * @see docs/proposals/v2/blueprint/30-app-as-recipe.md
+   */
+  static createFactory(
+    configFn?: (deps: FactoryDeps) => LocalInboxOptions,
+  ): MessageInboxFactory {
+    const factory = (deps: FactoryDeps, lifecycle: Lifecycle): MessageInbox => {
+      const inbox = new LocalInbox(configFn?.(deps));
+      lifecycle.onClose(() => inbox.close());
+      return inbox;
+    };
+    return Object.assign(factory, { messageInboxFactory: true as const });
   }
 
   register<T = unknown, R = unknown>(

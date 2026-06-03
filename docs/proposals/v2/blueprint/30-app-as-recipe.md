@@ -1,6 +1,6 @@
 # ADR 30 — App-as-recipe: sessions own the substrate
 
-**Status:** Proposed · 2026-06-03
+**Status:** Active · 2026-06-03
 **Builds on:** ADR 26 (Harness as the single shape), ADR 27 (Modular built-ins), ADR 29 (Bus overhaul)
 **Touches:** `@agentick/app` (`AppHarness`, `createApp`), `@agentick/session` (`SessionHarness` construction), `@agentick/runtime` (`LocalEventBus`/`LocalInbox`/`MemoryJournal` static `createFactory` helpers), `@agentick/spec` (factory type signatures for the three substrate primitives).
 
@@ -327,45 +327,104 @@ Each phase ships independently.
 
 **Test impact**: `example/v2-real`, `packages/app/src/__tests__/*`, sandbox tests, scenario examples. All go through the public API; should pass after the refactor with no test changes.
 
-## Open design decisions
+## Design decisions (all resolved 2026-06-03)
 
-### 1. Should `app.events()` fan-in or be dropped?
+### 1. `app.events()` — fan-in across live sessions
 
-**Recommendation:** fan-in. Adopters do reach for this in devtools and unified observability flows. Dropping it removes a useful affordance for a small cost in subscriber-registration overhead.
+**Resolved: fan-in.** Adopters reach for this in devtools and unified observability flows. Dropping it removes a useful affordance for a small cost in subscriber-registration overhead.
 
-### 2. Should we preserve the `toolHandlers: Map` app-init seed pattern, or move tool registration fully to session level?
+`app.events(filter)` returns an AsyncIterable that internally tails every live session's bus + auto-subscribes to new sessions as they're created. Lazy — no events flow until an adopter calls `app.events()`. Closes per-session subscriptions on session close. O(N) subscriber registrations per call where N = concurrent sessions.
 
-**Recommendation:** keep the seed. App-level adopter-registered handlers are common (initialization code at boot registers a curated set of tools); requiring re-registration per session is annoying. The seed flows into each new session's resolver at create time; sessions can extend.
+### 2. `toolHandlers` — keep the app-level seed pattern
 
-### 3. Should built-in factories accept a `FactoryDeps` argument with session context?
+**Resolved: keep.** App-level adopter-registered handlers (`toolHandlers: ReadonlyMap`) flow into every session's per-session handler resolver at create time. Each session can extend its resolver via JSX-declared tools without contaminating other sessions.
 
-```ts
-LocalEventBus.createFactory((deps: { sessionId, appId }) => ({ /* ... */ }))
-```
+### 3. Factories receive a `FactoryDeps` argument with session context
 
-vs the simpler form:
+**Resolved: yes, pass `FactoryDeps`.** Adopters need session context for per-tenant routing and per-session config branching.
 
 ```ts
-LocalEventBus.createFactory(() => ({ /* ... */ }))
+LocalEventBus.createFactory((deps) => ({
+  bufferSize: deps.sessionId.startsWith("priority:") ? 4096 : 256,
+}));
 ```
 
-**Recommendation:** **yes, pass `FactoryDeps`**. Adopters need session context for per-tenant routing (`new ClusterBus({ tenant: tenantOf(deps.sessionId) })`). The argument is optional in TS terms; adopters who don't need it can omit.
+`FactoryDeps` carries `sessionId` + `appId` at minimum; may grow to include resolved-tenant-id and other context as cluster work lands. Adopters who don't need it omit the parameter.
 
-### 4. What about app-targeted extensions that need a substrate?
+### 4. App-targeted extensions — install per-session, with the session's substrate
 
-Today, app-targeted extensions install via the `AppInstaller` which exposes `substrate: { journal, bus, inbox }`. Under the new model, app-targeted extensions don't have a substrate to install into (no app bus). Three options:
+**Resolved: per-session install.** Under the new model there's no app substrate for app-targeted extensions to install into. App-`target` extensions auto-install at session-create time, scoped to that session's substrate. The Extension protocol stays unchanged; what changes is when the installer runs and what substrate it sees.
 
-- (a) **App-targeted extensions install at session-create time**, scoped to that session's substrate. Renames the category to "auto-install-per-session extensions."
-- (b) **App keeps a private internal substrate** used only for app-targeted concerns. Extensions install into that.
-- (c) **Drop app-targeted extensions**. Everything is session-targeted.
+In practice this means: Sandbox / MCP / Subscription extensions get one install per session against that session's bus/journal/inbox. Cleanup runs at session-close via the same `lifecycle.onClose` mechanism factories use (§5).
 
-**Recommendation:** **(a)**. Cleanest semantic. App-targeted extensions are rare in practice; mostly Sandbox/MCP/Subscription, which fit "auto-install per session" naturally.
+### 5. Session-close substrate teardown — `Lifecycle` parameter on factories
 
-### 5. Cluster substrate sharing — what's the contract?
+**Resolved: factories receive a `Lifecycle` handle and register `onClose` cleanup if they want it.** No ownership flags, no `SharedRef` primitive, no GC reliance. The factory has full control over what session-close means for the resource it returned.
 
-When a session factory returns a SHARED cluster bus (same instance across all sessions in this app), session-close behavior should NOT shut down the bus. Solution: factories return the resource; sessions close ONLY resources they constructed themselves. Implementation: factories return either a fresh instance (sessions own lifecycle) or a wrapper around a shared resource (`SharedRef<T>`) with ref-counted close.
+```ts
+// @agentick/spec
+export interface Lifecycle {
+  /**
+   * Register a teardown that runs at session-close. Handlers run in
+   * LIFO order against registration. Throwing handlers are logged +
+   * skipped — one failure does NOT block subsequent cleanups.
+   */
+  onClose(handler: () => void | Promise<void>): void;
+}
 
-**Recommendation:** decide during Phase 3 implementation. Likely shape: factories return `{ instance: T, owned: boolean }` so the session knows whether to call close on its own.
+export type Factory<T> =
+  (deps: FactoryDeps, lifecycle: Lifecycle) => T | Promise<T>;
+```
+
+Three usage patterns fall out:
+
+```ts
+// (a) Default — fresh instance, session owns lifecycle.
+//     LocalEventBus.createFactory's emitted factory looks like this:
+const defaultFactory: EventBusFactory = (deps, lifecycle) => {
+  const bus = new LocalEventBus();
+  lifecycle.onClose(() => bus.close());     // register the close
+  return bus;
+};
+
+// (b) Shared resource — session does NOT own lifecycle.
+const sharedBus = new ClusterEventBus(/* … */);
+createApp(<Agent />, {
+  bus: () => sharedBus,    // no lifecycle.onClose — session-close leaves bus alive
+});
+
+// (c) Tenant-scoped wrapper — session unwinds its tenant scope,
+//     leaves the shared cluster resource alive.
+createApp(<Agent />, {
+  bus: (deps, lifecycle) => {
+    const tenantBus = sharedClusterBus.scopeToTenant(tenantOf(deps.sessionId));
+    lifecycle.onClose(() => tenantBus.detachAllSubscribers());
+    return tenantBus;
+  },
+});
+
+// (d) Ref-counted sharing — adopter manages the refcount in the
+//     factory closure.
+let refcount = 0;
+const sharedBus = new LocalEventBus();
+createApp(<Agent />, {
+  bus: (deps, lifecycle) => {
+    refcount++;
+    lifecycle.onClose(() => {
+      if (--refcount === 0) sharedBus.close();
+    });
+    return sharedBus;
+  },
+});
+```
+
+**Implementation note:** `Lifecycle` is backed internally by an `Effect.Scope` attached to the session at construction. `lifecycle.onClose(h)` translates to `Scope.addFinalizer(scope, Effect.promise(() => h()))`. Session-close runs `Scope.close(scope, exit)` which fires every registered finalizer in LIFO order with error isolation. Adopters never see Effect; they see a plain `onClose(() => void | Promise<void>)`.
+
+**Subscriber lifecycle for shared resources:** session-scoped subscriber registrations (subscribers attached via `session.events()` or by harnesses inside the session's emit chain) auto-attach to the session's `Effect.Scope` via `Stream.fromQueue` / `Effect.acquireRelease` — that's already how Effect Streams work. So even a factory that returns a shared bus WITHOUT registering close has its session-scoped subscribers torn down automatically. The factory only needs to opt-in to teardown of the resource INSTANCE itself.
+
+**Why `Lifecycle` is per-session, not the host app harness:** factories produce per-session resources; `onClose` should match the resource's lifetime. The app's close (`closeApp()`) is a separate event that iterates over live sessions and closes each — sessions register on app-close via the app harness's own hooks. Passing the app harness as `lifecycle` would muddy this (which scope does `onClose` fire on?) and creates a chicken-and-egg problem: the session needs the substrate to exist before it can be constructed, so we can't hand the session-yet-to-be to the factory.
+
+The shapes ARE intentionally parallel: app harness has `closeApp()` + `onClose` semantics; session has `close()` + `onClose`. Factories receive the per-session handle.
 
 ## Why now
 

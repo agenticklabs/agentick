@@ -124,3 +124,37 @@ export class BufferOverflowError extends Error {
     this.bufferSize = bufferSize;
   }
 }
+
+// ============================================================================
+// EventBusFactory — deferred per-session construction (ADR 30)
+// ============================================================================
+
+import type { Factory } from "./factory.js";
+
+/**
+ * Per-session factory shape for {@link EventBus}. Adopters supply the
+ * `bus` slot on `AppHarnessOptions` as either an `EventBus` instance
+ * (shared across sessions) or an `EventBusFactory` (constructed per
+ * session via the recipe pattern).
+ *
+ * The marker (`eventBusFactory: true`) lets the slot resolver
+ * disambiguate at runtime; `typeof slot === "function"` is also
+ * sufficient since `EventBus` itself is an object interface and never
+ * callable.
+ *
+ * Use `LocalEventBus.createFactory(...)` from `@agentick/runtime` for
+ * ergonomic factory construction with auto-registered close.
+ *
+ * @see docs/proposals/v2/blueprint/30-app-as-recipe.md
+ */
+export interface EventBusFactory extends Factory<EventBus> {
+  readonly eventBusFactory: true;
+}
+
+/** Type guard for {@link EventBusFactory}. */
+export function isEventBusFactory(v: unknown): v is EventBusFactory {
+  return (
+    typeof v === "function" &&
+    (v as { eventBusFactory?: unknown }).eventBusFactory === true
+  );
+}

@@ -119,3 +119,34 @@ export interface OperationJournal {
     query?: OrphanQuery,
   ): Effect.Effect<readonly OrphanedOperation[], JournalError, never>;
 }
+
+// ============================================================================
+// OperationJournalFactory — deferred per-session construction (ADR 30)
+// ============================================================================
+
+import type { Factory } from "./factory.js";
+
+/**
+ * Per-session factory shape for {@link OperationJournal}. Adopters
+ * supply the `journal` slot on `AppHarnessOptions` as either an
+ * instance (shared across sessions) or a factory (constructed per
+ * session via the recipe pattern).
+ *
+ * Use `MemoryJournal.createFactory(...)` from `@agentick/runtime` for
+ * ergonomic factory construction with auto-registered close. Durable
+ * journals (SQLite, Postgres) ship their own `createFactory` helpers
+ * in their respective adapter packages.
+ *
+ * @see docs/proposals/v2/blueprint/30-app-as-recipe.md
+ */
+export interface OperationJournalFactory extends Factory<OperationJournal> {
+  readonly operationJournalFactory: true;
+}
+
+/** Type guard for {@link OperationJournalFactory}. */
+export function isOperationJournalFactory(v: unknown): v is OperationJournalFactory {
+  return (
+    typeof v === "function" &&
+    (v as { operationJournalFactory?: unknown }).operationJournalFactory === true
+  );
+}
