@@ -1,6 +1,8 @@
 # ADR 30 — App-as-recipe: sessions own the substrate
 
-**Status:** Active · 2026-06-03
+**Status:** Superseded by [ADR 31](./31-harness-hierarchy.md) · 2026-06-03
+
+> **Note:** This ADR's "sessions own all substrate" inversion was the wrong scope. ADR 31's hierarchical slot model achieves the same goals (per-session isolation, multi-tenant cloud, hibernate portability) without forcing the inversion of substrate ownership. Reading this ADR is still useful for the design exploration, but **the active design is ADR 31**.
 **Builds on:** ADR 26 (Harness as the single shape), ADR 27 (Modular built-ins), ADR 29 (Bus overhaul)
 **Touches:** `@agentick/app` (`AppHarness`, `createApp`), `@agentick/session` (`SessionHarness` construction), `@agentick/runtime` (`LocalEventBus`/`LocalInbox`/`MemoryJournal` static `createFactory` helpers), `@agentick/spec` (factory type signatures for the three substrate primitives).
 
