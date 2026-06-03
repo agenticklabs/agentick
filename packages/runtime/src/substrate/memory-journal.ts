@@ -22,10 +22,12 @@ import type {
   OrphanedOperation,
   OrphanQuery,
 } from "@agentick/spec";
-import { matchesQuery } from "./query.js";
+import { compileQuery, type CompiledMatcher } from "./query.js";
 
 interface TailListener {
   readonly query: EventQuery;
+  /** Pre-compiled matcher closure (built at tail-subscribe time). */
+  readonly matcher: CompiledMatcher;
   /** Push a matching event into the consumer's stream. */
   readonly onEvent: (event: ProtocolEvent) => void;
   /** Signal end-of-stream (journal closing). */
@@ -143,7 +145,7 @@ export class MemoryJournal implements OperationJournal {
     }
 
     for (const listener of this.tailListeners) {
-      if (matchesQuery(event, listener.query)) listener.onEvent(event);
+      if (listener.matcher(event)) listener.onEvent(event);
     }
   }
 
@@ -162,9 +164,10 @@ export class MemoryJournal implements OperationJournal {
         );
       }
       const matched: ProtocolEvent[] = [];
+      const matcher = compileQuery(query);
       for (let i = startIndex; i < snapshot.length; i++) {
         const e = snapshot[i]!;
-        if (matchesQuery(e, query)) matched.push(e);
+        if (matcher(e)) matched.push(e);
       }
       return Stream.fromIterable(matched);
     });
@@ -181,6 +184,7 @@ export class MemoryJournal implements OperationJournal {
           }
           const listener: TailListener = {
             query,
+            matcher: compileQuery(query),
             onEvent: (event) => {
               void emit.single(event);
             },

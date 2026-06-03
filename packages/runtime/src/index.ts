@@ -36,7 +36,7 @@ export {
   withContext,
   type RuntimeContext,
 } from "./substrate/runtime-context.js";
-export { matchesQuery } from "./substrate/query.js";
+export { matchesQuery, compileQuery, type CompiledMatcher } from "./substrate/query.js";
 export { ulid } from "./substrate/ulid.js";
 export {
   RequestResponseRegistry,

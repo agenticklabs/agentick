@@ -37,6 +37,7 @@ import { LocalEventBus } from "../substrate/local-event-bus.js";
 import { LocalInbox } from "../substrate/local-inbox.js";
 import { LocalChannelPublisher } from "../substrate/local-channel-publisher.js";
 import { BaseHarness } from "../substrate/base-harness.js";
+import { compileQuery, matchesQuery } from "../substrate/query.js";
 
 function mkEvent(id: string, overrides: Partial<ProtocolEvent> = {}): ProtocolEvent {
   return {
@@ -382,5 +383,77 @@ describe("streaming simulation — 10 ops × 10 deltas", () => {
       ),
     );
     await Promise.all(tasks);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// compileQuery — specialised matcher vs generic walk
+//
+// The generic `matchesQuery` walks the EventQuery union per event.
+// `compileQuery` collapses the query to a closure at subscribe time.
+// This bench measures the per-event filter cost in isolation
+// (no Effect, no Queue, no fan-out) so we can size the savings
+// independent of the bus pipeline. Target: ~10x speedup for typical
+// { surface, phase } shapes.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("compileQuery — typical { surface, phase } shape", () => {
+  const event = mkEvent("e", { surface: "executor", phase: "delta" });
+  const query = { surface: "executor" as const, phase: "delta" as const };
+  const compiled = compileQuery(query);
+
+  bench("matchesQuery (generic walk)", () => {
+    matchesQuery(event, query);
+  });
+
+  bench("compiled closure", () => {
+    compiled(event);
+  });
+});
+
+describe("compileQuery — name prefix + surface", () => {
+  const event = mkEvent("e", {
+    surface: "executor",
+    phase: "delta",
+    name: "executor:command:run",
+  });
+  const query = {
+    surface: "executor" as const,
+    name: { prefix: "executor:" },
+  };
+  const compiled = compileQuery(query);
+
+  bench("matchesQuery (generic walk)", () => {
+    matchesQuery(event, query);
+  });
+
+  bench("compiled closure", () => {
+    compiled(event);
+  });
+});
+
+describe("compileQuery — composite query (all fields)", () => {
+  const event = mkEvent("e", {
+    surface: "executor",
+    phase: "delta",
+    name: "executor:command:run",
+    tags: ["streaming"],
+    scope: { sessionId: "s1", executionId: "e1", tickId: "t1" },
+  });
+  const query = {
+    surface: ["executor", "tool"] as const,
+    phase: "delta" as const,
+    name: { exact: "executor:command:run" },
+    tagsAny: ["streaming"],
+    scope: { sessionId: "s1", executionId: "e1" },
+  };
+  const compiled = compileQuery(query);
+
+  bench("matchesQuery (generic walk)", () => {
+    matchesQuery(event, query);
+  });
+
+  bench("compiled closure", () => {
+    compiled(event);
   });
 });

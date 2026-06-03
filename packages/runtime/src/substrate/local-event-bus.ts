@@ -20,11 +20,17 @@ import { Effect, Queue, Stream } from "effect";
 import type { EventKey, EventQuery, EventSurface, ProtocolEvent } from "@agentick/spec";
 import type { EventBus, SubscribeOptions, SubscriberOverflow } from "@agentick/spec";
 import { BufferOverflowError } from "@agentick/spec";
-import { matchesQuery } from "./query.js";
+import { compileQuery, type CompiledMatcher } from "./query.js";
 
 interface Subscriber {
   readonly id: number;
   readonly query: EventQuery;
+  /**
+   * Pre-compiled matcher closure built at subscribe time. The hot
+   * publish loop calls this per event instead of walking the EventQuery
+   * union via `matchesQuery` on every dispatch.
+   */
+  readonly matcher: CompiledMatcher;
   readonly overflow: SubscriberOverflow;
   readonly queue: Queue.Queue<ProtocolEvent>;
   /** Set to true once the subscribing stream/scope is interrupted. */
@@ -60,7 +66,7 @@ export class LocalEventBus implements EventBus {
       const effects: Effect.Effect<void, never, never>[] = [];
       for (const sub of this.subscribers.values()) {
         if (sub.closed) continue;
-        if (!matchesQuery(event, sub.query)) continue;
+        if (!sub.matcher(event)) continue;
         effects.push(this.deliver(sub, event));
       }
       if (effects.length === 0) return Effect.void;
@@ -109,6 +115,7 @@ export class LocalEventBus implements EventBus {
         const sub: Subscriber = {
           id,
           query,
+          matcher: compileQuery(query),
           overflow,
           queue,
           closed: false,
