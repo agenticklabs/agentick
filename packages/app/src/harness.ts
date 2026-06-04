@@ -82,6 +82,9 @@ import type {
   ToolExecutorFactory,
   ToolExecutorProtocol,
   Unsubscribe,
+  EventBusFactory,
+  MessageInboxFactory,
+  OperationJournalFactory,
 } from "@agentick/spec";
 
 // ============================================================================
@@ -111,6 +114,69 @@ export type SessionDefaults<P = unknown> = Omit<
   SessionHarnessOptions<P>,
   "sessionId" | "agent" | "reconciler" | "loop" | "executor" | "toolExecutor" | "target"
 >;
+
+/**
+ * Forward-reference shell handed to App-level substrate factories. The
+ * App's BaseHarness fields aren't wired yet at substrate-resolution
+ * time (chicken-and-egg — substrate IS what's being constructed), so
+ * factories see a thin shell exposing only what's safe at this phase:
+ * adopter metadata + a buffered `onClose` registration that gets
+ * replayed onto the real harness once construction finishes.
+ *
+ * @see docs/proposals/v2/blueprint/31-harness-hierarchy.md §Two-phase construction
+ */
+export interface AppSubstrateParent {
+  readonly id: string;
+  readonly metadata: Readonly<Record<string, unknown>>;
+  /** No parent substrate at app level (Gateway is Phase 4). */
+  readonly bus?: undefined;
+  readonly inbox?: undefined;
+  readonly journal?: undefined;
+  onClose(handler: () => void | Promise<void>): void;
+}
+
+/**
+ * Resolve an `instance | factory | undefined` slot to a concrete
+ * instance. Factory discrimination is `typeof slot === "function"` —
+ * substrate primitives are object-shaped, so any function is a factory.
+ *
+ * The `parent` argument is passed explicitly so the resolver makes the
+ * parent-child relationship visible at the call site, rather than
+ * implicitly via `this`.
+ *
+ * **App-level substrate factories MUST be synchronous.** `super()`
+ * needs the substrate before any async work can run. Async factories
+ * (returning Promise / Effect) are supported at session level
+ * (ADR 31 Phase 3, where createSession is itself async). At app level
+ * we throw if a factory returns a non-sync value.
+ */
+function resolveSyncSubstrateSlot<R, P, F extends (parent: P) => unknown>(
+  slot: R | F | undefined,
+  parent: P,
+  defaultFn: () => R,
+  slotName: string,
+): R {
+  if (slot === undefined) return defaultFn();
+  if (typeof slot === "function") {
+    const result = (slot as F)(parent);
+    if (
+      result !== null &&
+      typeof result === "object" &&
+      typeof (result as { then?: unknown }).then === "function"
+    ) {
+      throw new Error(
+        `AppHarness '${slotName}' factory returned a Promise — app-level ` +
+          `substrate factories must be synchronous. Use a pre-constructed ` +
+          `instance for the slot, or move async construction to session level.`,
+      );
+    }
+    // Effect values are objects with `_op_layer`/internal symbols, not
+    // Promises. We treat any non-instance return as a programmer error
+    // narrow to R via cast — runtime check above protected us.
+    return result as R;
+  }
+  return slot;
+}
 
 /**
  * Per-session forwarded `ToolExecutorHarness` options. `handlerResolver`
@@ -235,13 +301,30 @@ export interface AppHarnessOptions<P = unknown> {
 
   /**
    * Inject a custom journal/bus/inbox. Defaults to in-memory locals.
+   *
+   * **Instance or factory.** Pass a pre-built `OperationJournal` /
+   * `EventBus` / `MessageInbox` to share across sessions in this app,
+   * or pass a factory (`(parent) => R` — typically built via
+   * `MemoryJournal.factory(opts)` / `LocalEventBus.factory(opts)` /
+   * etc.) to construct fresh for this app with the parent shell.
+   *
    * Persistence is currently the `journal` slot — supply a durable
    * `OperationJournal` impl (e.g., SqlitePersistenceJournal once
    * shipped) for operational durability.
+   *
+   * @see docs/proposals/v2/blueprint/31-harness-hierarchy.md
    */
-  readonly journal?: OperationJournal;
-  readonly bus?: EventBus;
-  readonly inbox?: MessageInbox;
+  readonly journal?: OperationJournal | OperationJournalFactory<AppSubstrateParent>;
+  readonly bus?: EventBus | EventBusFactory<AppSubstrateParent>;
+  readonly inbox?: MessageInbox | MessageInboxFactory<AppSubstrateParent>;
+
+  /**
+   * Adopter-defined metadata bag carried on the App harness instance
+   * and exposed to substrate factories via `parent.metadata`. Framework
+   * defines no keys; adopters stash whatever they want (deployment
+   * tags, request shape, routing hints).
+   */
+  readonly metadata?: Readonly<Record<string, unknown>>;
 
   /**
    * Telemetry `Layer` (Effect). Placeholder slot — defined for forward
@@ -395,11 +478,46 @@ export class AppHarness<P = unknown>
 
   constructor(options: AppHarnessOptions<P>) {
     const appId = options.appId ?? `app:${ulid()}`;
-    const journal = options.journal ?? new MemoryJournal({ capacity: 10_000 });
-    const bus = options.bus ?? new LocalEventBus();
-    const inbox = options.inbox ?? new LocalInbox();
 
-    super("app", appId, journal, bus, inbox);
+    // Resolve substrate via the explicit-parent slot pattern (ADR 31).
+    //
+    // The App's BaseHarness fields aren't wired yet — substrate IS
+    // what's being constructed — so factories see a `parent` shell
+    // that buffers `onClose` registrations for replay onto the real
+    // harness after super() finishes.
+    const pendingCloseHandlers: Array<() => void | Promise<void>> = [];
+    const parent: AppSubstrateParent = {
+      id: appId,
+      metadata: Object.freeze({ ...(options.metadata ?? {}) }),
+      onClose: (h) => pendingCloseHandlers.push(h),
+    };
+    const journal: OperationJournal = resolveSyncSubstrateSlot<
+      OperationJournal,
+      AppSubstrateParent,
+      OperationJournalFactory<AppSubstrateParent>
+    >(
+      options.journal,
+      parent,
+      () => new MemoryJournal({ capacity: 10_000 }),
+      "journal",
+    );
+    const bus: EventBus = resolveSyncSubstrateSlot<
+      EventBus,
+      AppSubstrateParent,
+      EventBusFactory<AppSubstrateParent>
+    >(options.bus, parent, () => new LocalEventBus(), "bus");
+    const inbox: MessageInbox = resolveSyncSubstrateSlot<
+      MessageInbox,
+      AppSubstrateParent,
+      MessageInboxFactory<AppSubstrateParent>
+    >(options.inbox, parent, () => new LocalInbox(), "inbox");
+
+    super("app", appId, journal, bus, inbox, {
+      metadata: options.metadata,
+    });
+    // Replay any close handlers the substrate factories registered
+    // against the shell onto the now-real harness.
+    for (const h of pendingCloseHandlers) this.onClose(h);
 
     this.rootElement = options.rootElement;
     // Executor slot: factory → construct with the app's substrate so
@@ -664,7 +782,14 @@ export class AppHarness<P = unknown>
           catch: (cause): AppError => mapAppError(cause),
         }),
       ),
-    );
+    ).then(async () => {
+      // Run adopter-registered close handlers AFTER the close-app
+      // operation's terminal envelope has been appended to the journal.
+      // If handlers close the journal (the common case via the
+      // `journal: factory` slot), doing this inside the Operation
+      // would close the journal before the terminal envelope writes.
+      await this.runCloseHandlersPostOp();
+    });
   }
 
   /**
@@ -958,7 +1083,22 @@ export class AppHarness<P = unknown>
     // alive while sessions detach. `close()` may not exist on
     // user-supplied impls — guard it.
     await Promise.allSettled([closeOf(this.reconciler), closeOf(this.loop)]);
-    await super.close();
+    // Only the inbox unsubscribe runs INSIDE the close Operation.
+    // Substrate teardown (journal/bus/inbox `close()`) registered by
+    // factories via `parent.onClose(h)` runs AFTER the Operation
+    // completes — see `runCloseHandlersPostOp` below.
+    await this.closeInternal();
+  }
+
+  /**
+   * Run adopter-registered `onClose` handlers after the close-app
+   * Operation's terminal envelope has been appended to the journal.
+   * Substrate factories that registered `() => journal.close()` etc.
+   * fire here, not inside `closeAppBody` — otherwise they'd close the
+   * journal before the Operation framework writes its terminal.
+   */
+  private async runCloseHandlersPostOp(): Promise<void> {
+    await this.runCloseHandlers();
   }
 
   private async disposeSession(sessionId: string): Promise<void> {

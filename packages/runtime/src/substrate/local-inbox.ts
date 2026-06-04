@@ -120,6 +120,21 @@ export class LocalInbox implements MessageInbox {
     };
   }
 
+  /**
+   * Static-options sugar over {@link createFactory}. Use when the
+   * options are the same for every child (no per-child branching).
+   *
+   * @example
+   * ```ts
+   * { inbox: LocalInbox.factory({ idempotencyTtlMs: 60_000 }) }
+   * ```
+   */
+  static factory<P extends LocalInboxFactoryParent>(
+    options: LocalInboxOptions = {},
+  ): MessageInboxFactory<P> {
+    return LocalInbox.createFactory<P>(() => options);
+  }
+
   register<T = unknown, R = unknown>(
     address: string,
     handler: MessageHandler<T, R>,

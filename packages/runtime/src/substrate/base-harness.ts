@@ -702,11 +702,75 @@ export abstract class BaseHarness<
 
   // ──────── lifecycle ────────
 
-  /** Detach this harness from the inbox. */
+  /**
+   * Close handlers registered via {@link onClose}. Fired in LIFO order
+   * during {@link close}; each handler is `await`ed; throws are
+   * caught + logged so one failure doesn't block subsequent cleanups.
+   */
+  private readonly closeHandlers: Array<() => void | Promise<void>> = [];
+
+  /**
+   * Register a teardown that runs at this harness's close. Fires LIFO
+   * against registration. Throws are error-isolated — one failure
+   * does not block subsequent cleanups.
+   *
+   * Factories at slots inside this harness use `parent.onClose(h)` to
+   * register cleanup that fires when the parent closes. The framework
+   * uses this to cascade substrate-close down the hierarchy: when an
+   * AppHarness closes, every factory-registered handler (close the
+   * bus, close the inbox, close the journal, …) fires.
+   *
+   * @see docs/proposals/v2/blueprint/31-harness-hierarchy.md
+   */
+  onClose(handler: () => void | Promise<void>): void {
+    this.closeHandlers.push(handler);
+  }
+
+  /**
+   * Detach this harness from the inbox and fire all registered
+   * `onClose` handlers in LIFO order with error isolation.
+   *
+   * **Note for harness subclasses with a `close*` Operation** (e.g.,
+   * `AppHarness.closeApp`): substrate teardown (closing the journal,
+   * bus, inbox) happens via `onClose` handlers. Running them inside
+   * the close Operation would close the journal before the
+   * Operation's terminal envelope is appended. Subclasses that wrap
+   * `close()` in a runOperation MUST call `closeInternal()` inside
+   * the body and `runCloseHandlers()` AFTER the operation completes,
+   * instead of calling `close()` directly.
+   */
   async close(): Promise<void> {
+    await this.closeInternal();
+    await this.runCloseHandlers();
+  }
+
+  /**
+   * Internal cleanup — inbox unsubscribe only. Safe to call inside a
+   * close Operation; doesn't touch substrate that the Operation
+   * itself depends on (notably, doesn't close the journal).
+   */
+  protected async closeInternal(): Promise<void> {
     if (this.inboxUnsubscribe) {
       this.inboxUnsubscribe();
       this.inboxUnsubscribe = undefined;
+    }
+  }
+
+  /**
+   * Fire all registered `onClose` handlers in LIFO order with error
+   * isolation. Safe to call AFTER the close Operation completes; this
+   * is when substrate-close (journal/bus/inbox) registered via
+   * factory `parent.onClose(h)` actually runs.
+   */
+  protected async runCloseHandlers(): Promise<void> {
+    while (this.closeHandlers.length > 0) {
+      const h = this.closeHandlers.pop()!;
+      try {
+        await h();
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error("BaseHarness onClose handler failed:", err);
+      }
     }
   }
 

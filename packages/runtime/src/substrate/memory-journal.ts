@@ -132,6 +132,21 @@ export class MemoryJournal implements OperationJournal {
     };
   }
 
+  /**
+   * Static-options sugar over {@link createFactory}. Use when the
+   * options are the same for every child (no per-child branching).
+   *
+   * @example
+   * ```ts
+   * { journal: MemoryJournal.factory({ capacity: 50_000 }) }
+   * ```
+   */
+  static factory<P extends MemoryJournalFactoryParent>(
+    options: MemoryJournalOptions = {},
+  ): OperationJournalFactory<P> {
+    return MemoryJournal.createFactory<P>(() => options);
+  }
+
   append(event: ProtocolEvent): Effect.Effect<void, JournalError, never> {
     const local = Effect.try({
       try: () => this.appendSync(event),

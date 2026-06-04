@@ -139,6 +139,35 @@ export class LocalEventBus implements EventBus {
     };
   }
 
+  /**
+   * Static-options sugar over {@link createFactory}. Use when the
+   * options are the same for every child (no per-child branching).
+   *
+   * Equivalent to `LocalEventBus.createFactory(() => options)`, but
+   * shorter and reads as "factory with these options."
+   *
+   * @example
+   * ```ts
+   * { bus: LocalEventBus.factory({ capacity: 1024 }) }
+   * // equivalent to:
+   * { bus: LocalEventBus.createFactory(() => ({ capacity: 1024 })) }
+   * ```
+   *
+   * Note: when used at the App's `bus` slot today, the App has no
+   * parent of its own — the parent passed in is the AppHarness shell.
+   * Adopters who want a leaf bus (no fan-in) pass
+   * `{ parent: undefined }` explicitly in the options, otherwise the
+   * default behavior copies the parent's `.bus` as upstream (which is
+   * undefined at the app level — so this defaults to leaf anyway).
+   *
+   * @see docs/proposals/v2/blueprint/31-harness-hierarchy.md
+   */
+  static factory<P extends LocalEventBusFactoryParent>(
+    options: LocalEventBusOptions = {},
+  ): EventBusFactory<P> {
+    return LocalEventBus.createFactory<P>(() => options);
+  }
+
   publish(event: ProtocolEvent): Effect.Effect<void, never, never> {
     return Effect.suspend(() => {
       if (this.closed) return Effect.void;
