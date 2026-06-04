@@ -37,6 +37,7 @@ import {
   type ToolHandler,
 } from "@agentick/tool-executor";
 import {
+  DEFAULT_JOURNALING_POLICY,
   isExecutorFactory,
   isLoopExecutorFactory,
   isReconcilerFactory,
@@ -512,8 +513,25 @@ export class AppHarness<P = unknown>
       MessageInboxFactory<AppSubstrateParent>
     >(options.inbox, parent, () => new LocalInbox(), "inbox");
 
+    // Mark close-Operation envelopes as bus-only (ADR 31). The
+    // closeApp body runs `onClose` handlers via `super.close()`, which
+    // may close the journal an `onClose` registered against. If close
+    // envelopes were journaled, the framework would append a terminal
+    // envelope to a closed journal and crash. Bus-only routing keeps
+    // the close visible to bus subscribers without journal coupling.
+    //
+    // Adopters who supply a custom `policy` get their override merged
+    // with this rule. Adopters who want to journal close-app events
+    // can flip `app:command:close-app` back to "always" — they accept
+    // responsibility for substrate lifetime.
     super("app", appId, journal, bus, inbox, {
       metadata: options.metadata,
+      policy: {
+        ...DEFAULT_JOURNALING_POLICY,
+        override: {
+          "app:command:close-app": "bus-only",
+        },
+      },
     });
     // Replay any close handlers the substrate factories registered
     // against the shell onto the now-real harness.
@@ -782,14 +800,7 @@ export class AppHarness<P = unknown>
           catch: (cause): AppError => mapAppError(cause),
         }),
       ),
-    ).then(async () => {
-      // Run adopter-registered close handlers AFTER the close-app
-      // operation's terminal envelope has been appended to the journal.
-      // If handlers close the journal (the common case via the
-      // `journal: factory` slot), doing this inside the Operation
-      // would close the journal before the terminal envelope writes.
-      await this.runCloseHandlersPostOp();
-    });
+    );
   }
 
   /**
@@ -1083,22 +1094,13 @@ export class AppHarness<P = unknown>
     // alive while sessions detach. `close()` may not exist on
     // user-supplied impls — guard it.
     await Promise.allSettled([closeOf(this.reconciler), closeOf(this.loop)]);
-    // Only the inbox unsubscribe runs INSIDE the close Operation.
-    // Substrate teardown (journal/bus/inbox `close()`) registered by
-    // factories via `parent.onClose(h)` runs AFTER the Operation
-    // completes — see `runCloseHandlersPostOp` below.
-    await this.closeInternal();
-  }
-
-  /**
-   * Run adopter-registered `onClose` handlers after the close-app
-   * Operation's terminal envelope has been appended to the journal.
-   * Substrate factories that registered `() => journal.close()` etc.
-   * fire here, not inside `closeAppBody` — otherwise they'd close the
-   * journal before the Operation framework writes its terminal.
-   */
-  private async runCloseHandlersPostOp(): Promise<void> {
-    await this.runCloseHandlers();
+    // `super.close()` fires substrate-close handlers registered via
+    // factories' `parent.onClose(h)`. Safe to run here because
+    // `app:command:close-app` is policy-marked `"bus-only"` in the
+    // constructor — the Operation framework writes no envelopes to
+    // the journal for this op, so a handler closing the journal
+    // doesn't break the framework's terminal append.
+    await super.close();
   }
 
   private async disposeSession(sessionId: string): Promise<void> {

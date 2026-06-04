@@ -730,39 +730,21 @@ export abstract class BaseHarness<
    * Detach this harness from the inbox and fire all registered
    * `onClose` handlers in LIFO order with error isolation.
    *
-   * **Note for harness subclasses with a `close*` Operation** (e.g.,
-   * `AppHarness.closeApp`): substrate teardown (closing the journal,
-   * bus, inbox) happens via `onClose` handlers. Running them inside
-   * the close Operation would close the journal before the
-   * Operation's terminal envelope is appended. Subclasses that wrap
-   * `close()` in a runOperation MUST call `closeInternal()` inside
-   * the body and `runCloseHandlers()` AFTER the operation completes,
-   * instead of calling `close()` directly.
+   * **Subclasses that wrap close in a runOperation** (e.g.
+   * `AppHarness.closeApp`) MUST mark their close-Op name as
+   * `"bus-only"` in their {@link JournalingPolicy} `override` map.
+   * Otherwise the framework appends a terminal envelope to a journal
+   * that an `onClose` handler may have closed during the body.
+   * See `AppHarness` constructor for the canonical pattern.
    */
   async close(): Promise<void> {
-    await this.closeInternal();
-    await this.runCloseHandlers();
-  }
-
-  /**
-   * Internal cleanup — inbox unsubscribe only. Safe to call inside a
-   * close Operation; doesn't touch substrate that the Operation
-   * itself depends on (notably, doesn't close the journal).
-   */
-  protected async closeInternal(): Promise<void> {
     if (this.inboxUnsubscribe) {
       this.inboxUnsubscribe();
       this.inboxUnsubscribe = undefined;
     }
-  }
-
-  /**
-   * Fire all registered `onClose` handlers in LIFO order with error
-   * isolation. Safe to call AFTER the close Operation completes; this
-   * is when substrate-close (journal/bus/inbox) registered via
-   * factory `parent.onClose(h)` actually runs.
-   */
-  protected async runCloseHandlers(): Promise<void> {
+    // LIFO unwind. Each handler is awaited so async cleanup completes
+    // before the next runs. Errors logged but never propagated — one
+    // bad handler must not block the rest.
     while (this.closeHandlers.length > 0) {
       const h = this.closeHandlers.pop()!;
       try {

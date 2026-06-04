@@ -174,6 +174,36 @@ A harness exists in two phases:
 
 Children harnesses (slots holding them) follow the same two-phase construction with this harness as their parent. The hierarchy is constructed top-down — parent fully wired before children.
 
+### Close-Operation semantics — bus-only by policy override
+
+Harnesses that wrap close in a `runOperation` (`AppHarness.closeApp`, `SessionHarness.close`, future `GatewayHarness.close`) have a structural tension: the Operation framework writes "requested" and "terminal" envelopes to the journal around the close body, but adopter-registered `onClose` handlers in the close body typically *close the journal itself*. Writing the terminal envelope to a closed journal crashes.
+
+The clean fix: **close-Operation envelopes are routed bus-only via `JournalingPolicy.override`.** The framework's "requested" / "terminal" envelopes for the close-Op skip the journal entirely and publish only to the bus. Bus subscribers (devtools, audit, observability) still see close happen; the journal stays uninvolved.
+
+```ts
+// AppHarness constructor:
+super("app", appId, journal, bus, inbox, {
+  metadata: options.metadata,
+  policy: {
+    ...DEFAULT_JOURNALING_POLICY,
+    override: {
+      "app:command:close-app": "bus-only",
+    },
+  },
+});
+```
+
+This means `BaseHarness.close()` runs in the simple form — `inboxUnsubscribe()` + LIFO unwind of `onClose` handlers — without special-casing close-Operations. Subclasses with a close-Op just mark their op name `"bus-only"` in their construction policy. The journal can be closed by an `onClose` handler inside the body without crashing the framework.
+
+Adopters who *want* close-Op events journaled (durable audit of close lifecycle) can flip the override back to `"always"` — they accept responsibility for keeping the journal alive across the close.
+
+The closed-bus case is harmless: `LocalEventBus.publish` on a closed bus returns `Effect.void` (early-returns). So even if the body closes the bus too, the framework's terminal-envelope publish is a silent no-op rather than a crash.
+
+**Why "close events shouldn't journal" is the correct semantic:**
+- Close is one-shot terminal — there's no replay of close.
+- Close is idempotent at the harness level (`_closed` flag short-circuits double-close).
+- The journal's job is to record operations whose outcomes might need to be retrieved (idempotency, audit, replay). Close doesn't fit that — it destroys the journal as part of its body.
+
 ### Construction input carried on the shell
 
 The harness shell stores its construction input. Factories read it via `parent.input` or the shorter `parent.metadata` (adopter-defined sub-bag of input).
