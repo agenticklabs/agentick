@@ -23,8 +23,6 @@ import type {
   EventKey,
   EventQuery,
   EventSurface,
-  FactoryDeps,
-  Lifecycle,
   ProtocolEvent,
   SubscribeOptions,
   SubscriberOverflow,
@@ -33,13 +31,26 @@ import { BufferOverflowError } from "@agentick/spec";
 import { compileQuery, type CompiledMatcher } from "./query.js";
 
 /**
- * Construction options for {@link LocalEventBus}. Empty placeholder
- * for v2.0 — defaults work for every current adopter. Forward-compat
- * slot for buffer-size / overflow-strategy defaults / metrics
- * intervals as ADR 29 Phase B lands.
+ * Construction options for {@link LocalEventBus}.
+ *
+ * `parent` — when set, this bus becomes a wrapper: writes publish to
+ * BOTH the local subscriber buffer AND the parent bus; subscribers
+ * attached to THIS bus see only local events (not parent-originated
+ * events). **Fan-in writes, isolated reads.** This is the tenant-
+ * scoped composition pattern. When absent, the bus is a leaf — no
+ * upstream coupling.
+ *
+ * @see docs/proposals/v2/blueprint/31-harness-hierarchy.md §Composable substrate primitives
  */
-// eslint-disable-next-line @typescript-eslint/no-empty-object-type
-export interface LocalEventBusOptions {}
+export interface LocalEventBusOptions {
+  readonly parent?: EventBus;
+}
+
+/** Minimal parent-harness shape that `LocalEventBus.createFactory` consumes. */
+export interface LocalEventBusFactoryParent {
+  readonly bus?: EventBus;
+  onClose(handler: () => void | Promise<void>): void;
+}
 
 interface Subscriber {
   readonly id: number;
@@ -75,64 +86,92 @@ export class LocalEventBus implements EventBus {
    */
   private broadCount = 0;
 
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  constructor(_options: LocalEventBusOptions = {}) {
-    // Options reserved for ADR 29 Phase B (per-surface batching policy
-    // defaults). Today they're a forward-compat placeholder.
+  /**
+   * Upstream bus this LocalEventBus fans writes into, if any.
+   * When set, every {@link publish} additionally publishes to the
+   * parent; subscribers attached to THIS bus see only local events.
+   */
+  private readonly upstream?: EventBus;
+
+  constructor(options: LocalEventBusOptions = {}) {
+    this.upstream = options.parent;
   }
 
   /**
-   * Build a per-session factory for {@link LocalEventBus}. The
-   * returned factory is consumed by `AppHarnessOptions.bus` to
-   * construct a fresh bus per session, with the bus's `close()`
-   * auto-registered on the session's `Lifecycle.onClose` so
-   * session-close shuts down the bus.
+   * Build a per-child factory for {@link LocalEventBus}. Consumed by
+   * any harness's `bus` slot in the hierarchy. The factory constructs
+   * a fresh bus per call and auto-registers its `close()` on the
+   * supplied parent's `onClose`.
    *
-   * Adopters who want a shared bus across sessions pass an instance
-   * directly; this helper covers the per-session case.
+   * If the parent harness has a `bus` field, it's threaded through as
+   * the upstream by default — wrapping the parent's bus produces
+   * fan-in writes + isolated reads, the tenant-scoping pattern. To
+   * suppress this and construct a leaf bus, the configFn returns
+   * `{ parent: undefined }` explicitly.
    *
-   * @example default — no config:
+   * @example default — wraps parent.bus when present:
    * ```ts
-   * createApp(<Agent />, { bus: LocalEventBus.createFactory() });
+   * { bus: LocalEventBus.createFactory() }
    * ```
    *
-   * @example per-session branching via {@link FactoryDeps}:
+   * @example per-child branching via parent:
    * ```ts
-   * createApp(<Agent />, {
-   *   bus: LocalEventBus.createFactory((deps) => ({
-   *     // future: { bufferSize: deps.sessionId.startsWith("priority:") ? 4096 : 256 }
+   * {
+   *   bus: LocalEventBus.createFactory((parent) => ({
+   *     parent: parent.bus,
+   *     // future: bufferSize, overflow, etc.
    *   })),
-   * });
+   * }
    * ```
    *
-   * @see docs/proposals/v2/blueprint/30-app-as-recipe.md
+   * @see docs/proposals/v2/blueprint/31-harness-hierarchy.md
    */
-  static createFactory(
-    configFn?: (deps: FactoryDeps) => LocalEventBusOptions,
-  ): EventBusFactory {
-    const factory = (deps: FactoryDeps, lifecycle: Lifecycle): EventBus => {
-      const bus = new LocalEventBus(configFn?.(deps));
-      lifecycle.onClose(() => bus.close());
+  static createFactory<P extends LocalEventBusFactoryParent>(
+    configFn?: (parent: P) => LocalEventBusOptions,
+  ): EventBusFactory<P> {
+    return (parent: P): EventBus => {
+      const options = configFn
+        ? configFn(parent)
+        : ({ parent: parent.bus } as LocalEventBusOptions);
+      const bus = new LocalEventBus(options);
+      parent.onClose(() => bus.close());
       return bus;
     };
-    return Object.assign(factory, { eventBusFactory: true as const });
   }
 
   publish(event: ProtocolEvent): Effect.Effect<void, never, never> {
     return Effect.suspend(() => {
       if (this.closed) return Effect.void;
-      // Fast path: no subscriber wants this surface.
-      if (this.broadCount === 0 && (this.bySurface.get(event.surface) ?? 0) === 0) {
-        return Effect.void;
+
+      // Local fan-out: subscribers attached to THIS bus.
+      const localHasMatchingSurface =
+        this.broadCount !== 0 || (this.bySurface.get(event.surface) ?? 0) !== 0;
+      const localEffects: Effect.Effect<void, never, never>[] = [];
+      if (localHasMatchingSurface) {
+        for (const sub of this.subscribers.values()) {
+          if (sub.closed) continue;
+          if (!sub.matcher(event)) continue;
+          localEffects.push(this.deliver(sub, event));
+        }
       }
-      const effects: Effect.Effect<void, never, never>[] = [];
-      for (const sub of this.subscribers.values()) {
-        if (sub.closed) continue;
-        if (!sub.matcher(event)) continue;
-        effects.push(this.deliver(sub, event));
+
+      // Upstream fan-in: when constructed with a parent, every publish
+      // forwards to it. Parent's subscribers see this event in
+      // addition to local subscribers. Local subscribers do NOT see
+      // parent-originated events (asymmetric — that's the
+      // tenant-scoping semantic).
+      const upstreamEffect = this.upstream?.publish(event);
+
+      if (localEffects.length === 0) {
+        return upstreamEffect ?? Effect.void;
       }
-      if (effects.length === 0) return Effect.void;
-      return Effect.all(effects, { discard: true });
+      const localAll = Effect.all(localEffects, { discard: true });
+      return upstreamEffect
+        ? Effect.all([localAll, upstreamEffect], {
+            discard: true,
+            concurrency: "unbounded",
+          })
+        : localAll;
     });
   }
 
@@ -149,7 +188,11 @@ export class LocalEventBus implements EventBus {
   hasSubscriber(key: EventKey): boolean {
     if (this.closed) return false;
     if (this.broadCount > 0) return true;
-    return (this.bySurface.get(key.surface) ?? 0) > 0;
+    if ((this.bySurface.get(key.surface) ?? 0) > 0) return true;
+    // Upstream might have subscribers for this key — lazy publish must
+    // construct the envelope to reach them.
+    if (this.upstream?.hasSubscriber(key) === true) return true;
+    return false;
   }
 
   subscribe(

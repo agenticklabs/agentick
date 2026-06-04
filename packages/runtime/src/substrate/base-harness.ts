@@ -46,7 +46,32 @@ import type {
 } from "@agentick/spec";
 import { DEFAULT_JOURNALING_POLICY } from "@agentick/spec";
 import { ulid } from "./ulid.js";
-import { getContext, type RuntimeContext, withContext } from "./runtime-context.js";
+import {
+  EMPTY_CONTEXT,
+  getContext,
+  type RuntimeContext,
+  withContext,
+} from "./runtime-context.js";
+
+/**
+ * Sync snapshot of `RuntimeContextRef` for harness-construction-time
+ * capture. Returns the EMPTY context when called outside any active
+ * Effect fiber (top-of-tree adopter construction). Inside a fiber
+ * that has the ref set (a `runOperation` body), returns that value.
+ *
+ * Implementation uses `Effect.runSync(getContext)`. Effect's `runSync`
+ * of a pure FiberRef read is safe — no async, no scope acquisition.
+ */
+function readContextSnapshot(): RuntimeContext {
+  try {
+    return Effect.runSync(getContext);
+  } catch {
+    // Should never happen for a pure FiberRef.get — but if Effect's
+    // runSync changes semantics in a future release, degrade gracefully
+    // to the empty context.
+    return EMPTY_CONTEXT;
+  }
+}
 import { RequestResponseRegistry, type RequestError } from "./request-response-registry.js";
 
 export type { Unsubscribe } from "@agentick/spec";
@@ -165,19 +190,80 @@ export class MiddlewareChain {
 // BaseHarness
 // ============================================================================
 
-export interface BaseHarnessOptions {
+export interface BaseHarnessOptions<P = unknown, I = unknown> {
   readonly policy?: JournalingPolicy;
   /**
    * Auto-register on the inbox at construction. Set false for harnesses
    * that handle their own registration timing. Default: true.
    */
   readonly autoRegisterInbox?: boolean;
+  /**
+   * Parent harness reference. Set by the framework when this harness
+   * is constructed as a child of another (e.g. an AppHarness child
+   * within a Gateway, a SessionHarness child within an App). Top-of-tree
+   * harnesses have `parent === undefined`.
+   *
+   * Factories at slots inside this harness receive `this` as their
+   * own `parent` argument; chain via `parent.parent` for grandparent
+   * access. Typed when known by the harness subclass.
+   *
+   * @see docs/proposals/v2/blueprint/31-harness-hierarchy.md
+   */
+  readonly parent?: P;
+  /**
+   * Construction input as supplied by the caller (or its merged form
+   * after framework defaults). Stored on the harness for factories
+   * inside it to read via `parent.input`. Subclasses narrow the type.
+   *
+   * @see docs/proposals/v2/blueprint/31-harness-hierarchy.md
+   */
+  readonly input?: I;
+  /**
+   * Adopter-defined metadata bag. Framework defines no keys; adopters
+   * stash whatever they want (tenant id, trace id, request shape,
+   * routing hints). Factories inside this harness read via
+   * `parent.metadata`.
+   *
+   * Carried through to the harness instance and exposed as
+   * `harness.metadata`. Immutable post-construction.
+   */
+  readonly metadata?: Readonly<Record<string, unknown>>;
 }
 
-export abstract class BaseHarness<Surface extends EventSurface = EventSurface> {
+export abstract class BaseHarness<
+  Surface extends EventSurface = EventSurface,
+  Parent = unknown,
+  Input = unknown,
+> {
   protected readonly address: string;
   protected readonly handlers = new HandlerRegistry();
   protected readonly middleware = new MiddlewareChain();
+
+  /**
+   * Parent harness reference, if any. Top-of-tree harnesses have
+   * `parent === undefined`. Set from `BaseHarnessOptions.parent` at
+   * construction.
+   */
+  readonly parent: Parent | undefined;
+  /**
+   * Construction input as supplied by the caller. Set from
+   * `BaseHarnessOptions.input` at construction. Factories inside this
+   * harness read via `parent.input`.
+   */
+  readonly input: Input | undefined;
+  /**
+   * Adopter-defined metadata bag. Carried in from
+   * `BaseHarnessOptions.metadata`. Frozen at construction so
+   * downstream readers can rely on stability.
+   */
+  readonly metadata: Readonly<Record<string, unknown>>;
+
+  /**
+   * Snapshot of the {@link RuntimeContext} captured at construction.
+   * Returned by {@link runtimeContext}; reflects the context of the
+   * parent operation that triggered this harness's construction.
+   */
+  private readonly capturedContext: RuntimeContext;
   /**
    * In-flight request/response correlation map. Every BaseHarness can
    * issue `this.request(channel, payload)` and receives `request-response`
@@ -221,10 +307,17 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface> {
     protected readonly journal: OperationJournal,
     protected readonly bus: EventBus,
     protected readonly inbox: MessageInbox,
-    options: BaseHarnessOptions = {},
+    options: BaseHarnessOptions<Parent, Input> = {},
   ) {
     this.address = `${surface}:${scopeId}`;
     this.policy = options.policy ?? DEFAULT_JOURNALING_POLICY;
+    this.parent = options.parent;
+    this.input = options.input;
+    this.metadata = Object.freeze({ ...(options.metadata ?? {}) });
+    // Snapshot the current operation's RuntimeContext at construction.
+    // Empty when constructed outside any active Operation (the common
+    // case for top-of-tree harnesses constructed by adopter code).
+    this.capturedContext = readContextSnapshot();
     if (options.autoRegisterInbox !== false) {
       // Register is async — cluster impls may negotiate across nodes.
       // Local impls resolve immediately. Either way, `ready` is the
@@ -237,6 +330,28 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface> {
     } else {
       this.ready = Promise.resolve();
     }
+  }
+
+  /**
+   * Sync read of the {@link RuntimeContext} captured at this harness's
+   * construction time. Reflects the context of the parent Operation
+   * that triggered construction (sessionId, executionId, tickId, opId,
+   * parentOpId, correlationId — whatever was set on the parent's
+   * fiber when this harness's substrate/slot factories ran).
+   *
+   * Returns an empty context when this harness was constructed outside
+   * any active Operation (the common case for top-of-tree adopter
+   * code).
+   *
+   * Adopters writing substrate or slot factories use
+   * `parent.runtimeContext()` to read this without going Effect-native.
+   * Effect-typed factories may also yield `getContext` for the same
+   * info from inside `Effect.gen`.
+   *
+   * @see docs/proposals/v2/blueprint/31-harness-hierarchy.md
+   */
+  runtimeContext(): RuntimeContext {
+    return this.capturedContext;
   }
 
   // ──────── ① Commands (heavy path) ────────

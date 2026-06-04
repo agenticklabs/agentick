@@ -1,32 +1,29 @@
 /**
  * `createFactory` static helpers on the in-memory substrate built-ins
- * — ADR 30 Phase 1.
+ * — ADR 31 Phase 1'.
  *
  * Each helper produces a typed factory that:
- *   1. Constructs a fresh instance per call (per session in v2.x).
- *   2. Passes `FactoryDeps` into the optional `configFn` so adopters
- *      can branch per-session.
- *   3. Auto-registers `instance.close()` on the supplied `Lifecycle.onClose`
- *      so session-close shuts the resource down.
- *
- * No `AppHarness` change yet — these helpers can be consumed today by
- * adopters wiring `bus`/`inbox`/`journal` factory slots once those
- * land in Phase 2.
+ *   1. Constructs a fresh instance per call (per child in the hierarchy).
+ *   2. Takes the parent harness as a single argument: `(parent) => R`.
+ *   3. Auto-registers `instance.close()` on the parent's `onClose`
+ *      so close cascades naturally.
+ *   4. For bus + journal: when the parent has a corresponding
+ *      substrate field, the factory wraps it (fan-in writes / isolated
+ *      reads). Inbox does NOT compose with a parent inbox (addressing
+ *      semantics make fan-in actively wrong).
  */
 
+import { Effect, Stream, Chunk } from "effect";
 import { describe, expect, it } from "vitest";
 
 import type {
+  EventBus,
   EventBusFactory,
-  FactoryDeps,
-  Lifecycle,
+  MessageInbox,
   MessageInboxFactory,
+  OperationJournal,
   OperationJournalFactory,
-} from "@agentick/spec";
-import {
-  isEventBusFactory,
-  isMessageInboxFactory,
-  isOperationJournalFactory,
+  ProtocolEvent,
 } from "@agentick/spec";
 
 import {
@@ -35,9 +32,25 @@ import {
   MemoryJournal,
 } from "../index.js";
 
-function mockLifecycle(): { lifecycle: Lifecycle; close: () => Promise<void>; handlers: Array<() => void | Promise<void>> } {
+interface MockParent {
+  readonly id: string;
+  readonly bus?: EventBus;
+  readonly inbox?: MessageInbox;
+  readonly journal?: OperationJournal;
+  onClose(handler: () => void | Promise<void>): void;
+}
+
+function mockParent(overrides: Partial<MockParent> = {}): {
+  parent: MockParent;
+  close: () => Promise<void>;
+  handlers: Array<() => void | Promise<void>>;
+} {
   const handlers: Array<() => void | Promise<void>> = [];
-  const lifecycle: Lifecycle = {
+  const parent: MockParent = {
+    id: overrides.id ?? "parent_test",
+    ...(overrides.bus !== undefined ? { bus: overrides.bus } : {}),
+    ...(overrides.inbox !== undefined ? { inbox: overrides.inbox } : {}),
+    ...(overrides.journal !== undefined ? { journal: overrides.journal } : {}),
     onClose: (h) => handlers.push(h),
   };
   const close = async (): Promise<void> => {
@@ -47,222 +60,322 @@ function mockLifecycle(): { lifecycle: Lifecycle; close: () => Promise<void>; ha
       await h();
     }
   };
-  return { lifecycle, close, handlers };
+  return { parent, close, handlers };
 }
 
-function mkDeps(overrides: Partial<FactoryDeps> = {}): FactoryDeps {
+function mkEvent(overrides: Partial<ProtocolEvent> = {}): ProtocolEvent {
   return {
-    sessionId: overrides.sessionId ?? "session_test",
-    appId: overrides.appId ?? "app_test",
-  };
+    id: "ev_1",
+    surface: "tool",
+    phase: "delta",
+    name: "tool:bench",
+    timestamp: 1,
+    scope: {},
+    ...overrides,
+  } as ProtocolEvent;
 }
+
+// ============================================================================
+// LocalEventBus.createFactory
+// ============================================================================
 
 describe("LocalEventBus.createFactory", () => {
-  it("produces an EventBusFactory carrying the type marker", () => {
+  it("is callable with (parent) and returns a fresh bus per call", async () => {
     const factory = LocalEventBus.createFactory();
-    expect(typeof factory).toBe("function");
-    expect(isEventBusFactory(factory)).toBe(true);
+    const { parent: p1 } = mockParent();
+    const { parent: p2 } = mockParent();
+    const b1 = await factory(p1);
+    const b2 = await factory(p2);
+    expect(b1).not.toBe(b2);
+    expect(b1).toBeInstanceOf(LocalEventBus);
   });
 
-  it("constructs a fresh LocalEventBus per call", async () => {
-    const factory = LocalEventBus.createFactory();
-    const { lifecycle: lc1 } = mockLifecycle();
-    const { lifecycle: lc2 } = mockLifecycle();
-    const bus1 = await factory(mkDeps({ sessionId: "s1" }), lc1);
-    const bus2 = await factory(mkDeps({ sessionId: "s2" }), lc2);
-    expect(bus1).not.toBe(bus2);
-    expect(bus1).toBeInstanceOf(LocalEventBus);
-    expect(bus2).toBeInstanceOf(LocalEventBus);
-  });
-
-  it("passes FactoryDeps into configFn", async () => {
-    const seen: FactoryDeps[] = [];
-    const factory = LocalEventBus.createFactory((deps) => {
-      seen.push(deps);
+  it("passes parent to configFn", async () => {
+    const seen: MockParent[] = [];
+    const factory = LocalEventBus.createFactory<MockParent>((parent) => {
+      seen.push(parent);
       return {};
     });
-    const { lifecycle } = mockLifecycle();
-    await factory(mkDeps({ sessionId: "s_unique", appId: "a_unique" }), lifecycle);
+    const { parent } = mockParent({ id: "unique_parent" });
+    await factory(parent);
     expect(seen).toHaveLength(1);
-    expect(seen[0]).toEqual({ sessionId: "s_unique", appId: "a_unique" });
+    expect(seen[0]!.id).toBe("unique_parent");
   });
 
-  it("auto-registers close on the supplied lifecycle", async () => {
+  it("auto-registers close on the parent's onClose", async () => {
     const factory = LocalEventBus.createFactory();
-    const { lifecycle, close, handlers } = mockLifecycle();
-    const bus = await factory(mkDeps(), lifecycle);
+    const { parent, close, handlers } = mockParent();
+    const bus = await factory(parent);
     expect(handlers).toHaveLength(1);
-    expect(bus.subscriberCount()).toBe(0);
     await close();
-    // After lifecycle close, the bus is shut down — no new subscribers accepted.
     expect((bus as unknown as { closed: boolean }).closed).toBe(true);
   });
 
-  it("does NOT call configFn at factory build time, only at invocation", () => {
-    let calls = 0;
-    LocalEventBus.createFactory(() => {
-      calls++;
-      return {};
-    });
-    expect(calls).toBe(0);
+  it("default factory wires parent.bus as upstream (fan-in writes)", async () => {
+    const upstream = new LocalEventBus();
+    const factory = LocalEventBus.createFactory();
+    const { parent } = mockParent({ bus: upstream });
+    const localBus = await factory(parent);
+
+    // Subscribe to upstream — should see local publishes via fan-in.
+    const upstreamFiber = Effect.runFork(
+      Stream.runCollect(
+        Stream.take(upstream.subscribe({ surface: "tool" }), 1),
+      ),
+    );
+    await new Promise((r) => setImmediate(r));
+
+    await Effect.runPromise(localBus.publish(mkEvent()));
+
+    const seenChunk = await Effect.runPromise(
+      Effect.timeout(
+        Effect.flatMap(Effect.scoped(Effect.succeed(undefined)), () =>
+          Effect.fromFiber(upstreamFiber),
+        ),
+        "1 seconds",
+      ),
+    );
+    expect(Chunk.toReadonlyArray(seenChunk).length).toBe(1);
+  });
+
+  it("local subscribers see only local events (isolated reads — not parent writes)", async () => {
+    const upstream = new LocalEventBus();
+    const factory = LocalEventBus.createFactory();
+    const { parent } = mockParent({ bus: upstream });
+    const localBus = await factory(parent);
+
+    // Subscribe locally + publish on upstream — local subscriber must NOT see it.
+    const localSeen: ProtocolEvent[] = [];
+    const localFiber = Effect.runFork(
+      Stream.runForEach(localBus.subscribe({ surface: "tool" }), (e) =>
+        Effect.sync(() => {
+          localSeen.push(e);
+        }),
+      ),
+    );
+    await new Promise((r) => setImmediate(r));
+
+    await Effect.runPromise(upstream.publish(mkEvent({ id: "from_upstream" })));
+    // Yield to give subscribers a chance.
+    await new Promise((r) => setImmediate(r));
+
+    expect(localSeen).toHaveLength(0);
+
+    await Effect.runPromise(Effect.runPromise(Effect.exit(Effect.fromFiber(localFiber))).then(() => Promise.resolve()).catch(() => Promise.resolve()) as unknown as Effect.Effect<unknown, never, never>).catch(() => {});
+    // best-effort cleanup; test is async
+  });
+
+  it("explicit { parent: undefined } in configFn produces a leaf bus (no fan-in)", async () => {
+    const upstream = new LocalEventBus();
+    const factory = LocalEventBus.createFactory<MockParent>(() => ({ parent: undefined }));
+    const { parent } = mockParent({ bus: upstream });
+    const localBus = await factory(parent);
+
+    // Publish locally; upstream MUST NOT see it.
+    const upstreamSeen: ProtocolEvent[] = [];
+    const upstreamFiber = Effect.runFork(
+      Stream.runForEach(upstream.subscribe({ surface: "tool" }), (e) =>
+        Effect.sync(() => {
+          upstreamSeen.push(e);
+        }),
+      ),
+    );
+    await new Promise((r) => setImmediate(r));
+
+    await Effect.runPromise(localBus.publish(mkEvent()));
+    await new Promise((r) => setImmediate(r));
+
+    expect(upstreamSeen).toHaveLength(0);
+    void upstreamFiber;
   });
 });
 
+// ============================================================================
+// LocalInbox.createFactory
+// ============================================================================
+
 describe("LocalInbox.createFactory", () => {
-  it("produces a MessageInboxFactory carrying the type marker", () => {
+  it("returns a factory that constructs a fresh LocalInbox per call", async () => {
     const factory = LocalInbox.createFactory();
-    expect(typeof factory).toBe("function");
-    expect(isMessageInboxFactory(factory)).toBe(true);
+    const { parent: p1 } = mockParent();
+    const { parent: p2 } = mockParent();
+    const i1 = await factory(p1);
+    const i2 = await factory(p2);
+    expect(i1).not.toBe(i2);
+    expect(i1).toBeInstanceOf(LocalInbox);
   });
 
-  it("constructs a fresh LocalInbox per call with options from configFn", async () => {
-    const factory: MessageInboxFactory = LocalInbox.createFactory((deps) => ({
-      idempotencyTtlMs: deps.sessionId === "fast" ? 1_000 : 60_000,
-    }));
-    const { lifecycle: lc1 } = mockLifecycle();
-    const { lifecycle: lc2 } = mockLifecycle();
-    const inbox1 = await factory(mkDeps({ sessionId: "fast" }), lc1);
-    const inbox2 = await factory(mkDeps({ sessionId: "slow" }), lc2);
-    expect(inbox1).not.toBe(inbox2);
-    // ttlMs is private — exercise it via behavior is overkill; the configFn
-    // branching is sufficient evidence.
+  it("configFn receives parent + returns LocalInboxOptions", async () => {
+    let seenParentId = "";
+    const factory = LocalInbox.createFactory<MockParent>((parent) => {
+      seenParentId = parent.id;
+      return { idempotencyTtlMs: 1_000 };
+    });
+    const { parent } = mockParent({ id: "p_test" });
+    await factory(parent);
+    expect(seenParentId).toBe("p_test");
   });
 
-  it("auto-registers close on the supplied lifecycle", async () => {
+  it("auto-registers close on the parent's onClose", async () => {
     const factory = LocalInbox.createFactory();
-    const { lifecycle, close } = mockLifecycle();
-    const inbox = await factory(mkDeps(), lifecycle);
+    const { parent, close } = mockParent();
+    const inbox = await factory(parent);
     await close();
     expect((inbox as unknown as { closed: boolean }).closed).toBe(true);
   });
+
+  it("does NOT compose with parent.inbox — fully isolated", async () => {
+    // Even when parent has an inbox, the factory does not wire any
+    // upstream relationship. Inboxes are addressable; fan-in would
+    // misroute messages.
+    const parentInbox = new LocalInbox();
+    const factory = LocalInbox.createFactory();
+    const { parent } = mockParent({ inbox: parentInbox });
+    const inbox = await factory(parent);
+    // The new inbox is its own thing — register, send, observe.
+    let handlerHit = 0;
+    await Effect.runPromise(
+      inbox.register("local:addr", () => Effect.sync(() => { handlerHit++; })),
+    );
+    await Effect.runPromise(
+      inbox.send("local:addr", { type: "ping", messageId: "m1" }),
+    );
+    expect(handlerHit).toBe(1);
+
+    // Parent inbox should NOT have received anything.
+    let parentHit = 0;
+    await Effect.runPromise(
+      parentInbox.register("local:addr", () => Effect.sync(() => { parentHit++; })),
+    );
+    await Effect.runPromise(
+      inbox.send("local:addr", { type: "ping", messageId: "m2" }),
+    );
+    expect(parentHit).toBe(0);
+    expect(handlerHit).toBe(2);
+  });
 });
 
-describe("MemoryJournal.createFactory", () => {
-  it("produces an OperationJournalFactory carrying the type marker", () => {
-    const factory = MemoryJournal.createFactory();
-    expect(typeof factory).toBe("function");
-    expect(isOperationJournalFactory(factory)).toBe(true);
-  });
+// ============================================================================
+// MemoryJournal.createFactory
+// ============================================================================
 
-  it("constructs a fresh MemoryJournal per call", async () => {
-    const factory: OperationJournalFactory = MemoryJournal.createFactory(() => ({
-      capacity: 100,
-    }));
-    const { lifecycle: lc1 } = mockLifecycle();
-    const { lifecycle: lc2 } = mockLifecycle();
-    const j1 = await factory(mkDeps({ sessionId: "s1" }), lc1);
-    const j2 = await factory(mkDeps({ sessionId: "s2" }), lc2);
+describe("MemoryJournal.createFactory", () => {
+  it("returns a factory that constructs a fresh MemoryJournal per call", async () => {
+    const factory = MemoryJournal.createFactory();
+    const { parent: p1 } = mockParent();
+    const { parent: p2 } = mockParent();
+    const j1 = await factory(p1);
+    const j2 = await factory(p2);
     expect(j1).not.toBe(j2);
     expect(j1).toBeInstanceOf(MemoryJournal);
   });
 
-  it("auto-registers close on the supplied lifecycle", async () => {
+  it("configFn receives parent + returns MemoryJournalOptions", async () => {
+    const factory = MemoryJournal.createFactory<MockParent>((parent) => ({
+      capacity: parent.id === "big" ? 100_000 : 100,
+    }));
+    const { parent: pBig } = mockParent({ id: "big" });
+    const { parent: pSmall } = mockParent({ id: "small" });
+    const j1 = await factory(pBig);
+    const j2 = await factory(pSmall);
+    expect(j1).not.toBe(j2);
+  });
+
+  it("auto-registers close on the parent's onClose", async () => {
     const factory = MemoryJournal.createFactory();
-    const { lifecycle, close } = mockLifecycle();
-    const journal = await factory(mkDeps(), lifecycle);
+    const { parent, close } = mockParent();
+    const journal = await factory(parent);
     await close();
     expect((journal as unknown as { closed: boolean }).closed).toBe(true);
   });
-});
 
-describe("Factory markers — type guards reject non-factories", () => {
-  it("rejects plain functions without markers", () => {
-    const plain = () => new LocalEventBus();
-    expect(isEventBusFactory(plain)).toBe(false);
-    expect(isMessageInboxFactory(plain)).toBe(false);
-    expect(isOperationJournalFactory(plain)).toBe(false);
-  });
+  it("default factory wires parent.journal as upstream (fan-in appends)", async () => {
+    const upstream = new MemoryJournal({ capacity: 100 });
+    const factory = MemoryJournal.createFactory();
+    const { parent } = mockParent({ journal: upstream });
+    const localJournal = await factory(parent);
 
-  it("rejects instances", () => {
-    const bus = new LocalEventBus();
-    const inbox = new LocalInbox();
-    const journal = new MemoryJournal();
-    expect(isEventBusFactory(bus)).toBe(false);
-    expect(isMessageInboxFactory(inbox)).toBe(false);
-    expect(isOperationJournalFactory(journal)).toBe(false);
-  });
+    const event = mkEvent({ opId: "op-1", phase: "requested" });
+    await Effect.runPromise(localJournal.append(event));
 
-  it("rejects undefined / null / primitives", () => {
-    for (const v of [undefined, null, 42, "string", {}, []]) {
-      expect(isEventBusFactory(v)).toBe(false);
-      expect(isMessageInboxFactory(v)).toBe(false);
-      expect(isOperationJournalFactory(v)).toBe(false);
-    }
-  });
-
-  it("accepts the three correct markers and rejects swapped markers", () => {
-    const busFactory = LocalEventBus.createFactory();
-    const inboxFactory = LocalInbox.createFactory();
-    const journalFactory = MemoryJournal.createFactory();
-
-    expect(isEventBusFactory(busFactory)).toBe(true);
-    expect(isMessageInboxFactory(busFactory)).toBe(false);
-    expect(isOperationJournalFactory(busFactory)).toBe(false);
-
-    expect(isEventBusFactory(inboxFactory)).toBe(false);
-    expect(isMessageInboxFactory(inboxFactory)).toBe(true);
-    expect(isOperationJournalFactory(inboxFactory)).toBe(false);
-
-    expect(isEventBusFactory(journalFactory)).toBe(false);
-    expect(isMessageInboxFactory(journalFactory)).toBe(false);
-    expect(isOperationJournalFactory(journalFactory)).toBe(true);
-  });
-});
-
-describe("Hand-rolled factories (without the helper)", () => {
-  it("adopters can write a factory by hand and tag it with the marker", async () => {
-    const factory: EventBusFactory = Object.assign(
-      (_deps: FactoryDeps, lifecycle: Lifecycle): LocalEventBus => {
-        const bus = new LocalEventBus();
-        lifecycle.onClose(() => bus.close());
-        return bus;
-      },
-      { eventBusFactory: true as const },
+    // Upstream should see the event too.
+    const upstreamEvents = await Effect.runPromise(
+      Stream.runCollect(upstream.read({}, { kind: "earliest" })),
     );
-    expect(isEventBusFactory(factory)).toBe(true);
-    const { lifecycle, close } = mockLifecycle();
-    const bus = await factory(mkDeps(), lifecycle);
+    expect(Chunk.toReadonlyArray(upstreamEvents).length).toBe(1);
+
+    // Local journal also has it.
+    const localEvents = await Effect.runPromise(
+      Stream.runCollect(localJournal.read({}, { kind: "earliest" })),
+    );
+    expect(Chunk.toReadonlyArray(localEvents).length).toBe(1);
+  });
+
+  it("explicit { parent: undefined } produces a leaf journal", async () => {
+    const upstream = new MemoryJournal();
+    const factory = MemoryJournal.createFactory<MockParent>(() => ({ parent: undefined }));
+    const { parent } = mockParent({ journal: upstream });
+    const localJournal = await factory(parent);
+
+    await Effect.runPromise(
+      localJournal.append(mkEvent({ opId: "op-x", phase: "requested" })),
+    );
+
+    const upstreamEvents = await Effect.runPromise(
+      Stream.runCollect(upstream.read({}, { kind: "earliest" })),
+    );
+    expect(Chunk.toReadonlyArray(upstreamEvents).length).toBe(0);
+  });
+});
+
+// ============================================================================
+// Hand-rolled factories (without the static helper) — verify the
+// adopter-facing factory shape still works the same way.
+// ============================================================================
+
+describe("Hand-rolled factories", () => {
+  it("adopter can write a factory by hand using (parent) => R", async () => {
+    const factory: EventBusFactory<MockParent> = (parent) => {
+      const bus = new LocalEventBus({ parent: parent.bus });
+      parent.onClose(() => bus.close());
+      return bus;
+    };
+    const { parent, close } = mockParent();
+    const bus = await factory(parent);
     expect(bus).toBeInstanceOf(LocalEventBus);
     await close();
     expect((bus as unknown as { closed: boolean }).closed).toBe(true);
   });
 
-  it("shared-resource factory pattern — no onClose call, no shutdown", async () => {
+  it("shared-instance pattern: factory returns the same instance, no close registered", async () => {
     const sharedBus = new LocalEventBus();
-    const factory: EventBusFactory = Object.assign(
-      (_deps: FactoryDeps, _lifecycle: Lifecycle): LocalEventBus => sharedBus,
-      { eventBusFactory: true as const },
-    );
-    const { lifecycle: lc1, close: close1 } = mockLifecycle();
-    const { lifecycle: lc2, close: close2 } = mockLifecycle();
-    const bus1 = await factory(mkDeps({ sessionId: "s1" }), lc1);
-    const bus2 = await factory(mkDeps({ sessionId: "s2" }), lc2);
-    expect(bus1).toBe(sharedBus);
-    expect(bus2).toBe(sharedBus);
+    const factory: EventBusFactory<MockParent> = () => sharedBus;
+    const { parent: p1, close: close1 } = mockParent();
+    const { parent: p2, close: close2 } = mockParent();
+    const b1 = await factory(p1);
+    const b2 = await factory(p2);
+    expect(b1).toBe(sharedBus);
+    expect(b2).toBe(sharedBus);
     await close1();
     await close2();
-    // Shared resource is NOT closed by any session's lifecycle.
     expect((sharedBus as unknown as { closed: boolean }).closed).toBe(false);
     sharedBus.close();
   });
 
-  it("ref-counted shared resource pattern — close on the last release", async () => {
+  it("ref-counted shared resource pattern via factory closure", async () => {
     let refcount = 0;
     const sharedBus = new LocalEventBus();
-    const factory: EventBusFactory = Object.assign(
-      (_deps: FactoryDeps, lifecycle: Lifecycle): LocalEventBus => {
-        refcount++;
-        lifecycle.onClose(() => {
-          if (--refcount === 0) sharedBus.close();
-        });
-        return sharedBus;
-      },
-      { eventBusFactory: true as const },
-    );
-    const { lifecycle: lc1, close: close1 } = mockLifecycle();
-    const { lifecycle: lc2, close: close2 } = mockLifecycle();
-    await factory(mkDeps({ sessionId: "s1" }), lc1);
-    await factory(mkDeps({ sessionId: "s2" }), lc2);
+    const factory: EventBusFactory<MockParent> = (parent) => {
+      refcount++;
+      parent.onClose(() => {
+        if (--refcount === 0) sharedBus.close();
+      });
+      return sharedBus;
+    };
+    const { parent: p1, close: close1 } = mockParent();
+    const { parent: p2, close: close2 } = mockParent();
+    await factory(p1);
+    await factory(p2);
     expect(refcount).toBe(2);
     await close1();
     expect(refcount).toBe(1);
@@ -270,5 +383,29 @@ describe("Hand-rolled factories (without the helper)", () => {
     await close2();
     expect(refcount).toBe(0);
     expect((sharedBus as unknown as { closed: boolean }).closed).toBe(true);
+  });
+
+  it("typeof slot === \"function\" cleanly distinguishes instance from factory", () => {
+    const instance = new LocalEventBus();
+    const factory: EventBusFactory<MockParent> = () => new LocalEventBus();
+    expect(typeof instance).toBe("object");
+    expect(typeof factory).toBe("function");
+  });
+});
+
+// ============================================================================
+// Factory type signature accepts Effect-typed factories too
+// ============================================================================
+
+describe("Factory<R, P> accepts Effect returns", () => {
+  it("compiles when factory returns Effect", () => {
+    // Compile-time only — verify the type accepts an Effect return.
+    const factory: EventBusFactory<MockParent> = (parent) =>
+      Effect.gen(function* () {
+        const bus = new LocalEventBus();
+        parent.onClose(() => bus.close());
+        return bus;
+      });
+    expect(typeof factory).toBe("function");
   });
 });

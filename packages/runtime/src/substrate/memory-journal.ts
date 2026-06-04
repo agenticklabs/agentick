@@ -16,9 +16,7 @@
 import { Effect, Stream } from "effect";
 import type { EventQuery, JournalError, ProtocolEvent, TerminalEvent } from "@agentick/spec";
 import type {
-  FactoryDeps,
   JournalReadFrom,
-  Lifecycle,
   Maybe,
   OperationJournal,
   OperationJournalFactory,
@@ -26,6 +24,12 @@ import type {
   OrphanQuery,
 } from "@agentick/spec";
 import { compileQuery, type CompiledMatcher } from "./query.js";
+
+/** Minimal parent-harness shape that `MemoryJournal.createFactory` consumes. */
+export interface MemoryJournalFactoryParent {
+  readonly journal?: OperationJournal;
+  onClose(handler: () => void | Promise<void>): void;
+}
 
 interface TailListener {
   readonly query: EventQuery;
@@ -45,6 +49,16 @@ export interface MemoryJournalOptions {
    * Default: 10_000.
    */
   readonly capacity?: number;
+  /**
+   * Upstream journal this MemoryJournal fans appends into, if any.
+   * When set, every {@link append} additionally appends to the parent;
+   * reads from THIS journal return only local entries. **Fan-in
+   * writes, isolated reads.** Same composition semantic as
+   * `LocalEventBus`.
+   *
+   * @see docs/proposals/v2/blueprint/31-harness-hierarchy.md §Composable substrate primitives
+   */
+  readonly parent?: OperationJournal;
 }
 
 export class MemoryJournal implements OperationJournal {
@@ -77,44 +91,66 @@ export class MemoryJournal implements OperationJournal {
 
   private closed = false;
 
+  /**
+   * Upstream journal this MemoryJournal fans appends into, if any.
+   * When set, every append additionally calls the parent's append;
+   * reads on this journal return only local entries.
+   */
+  private readonly upstream?: OperationJournal;
+
   constructor(options: MemoryJournalOptions = {}) {
     this.capacity = options.capacity ?? 10_000;
+    this.upstream = options.parent;
   }
 
   /**
-   * Build a per-session factory for {@link MemoryJournal}. The
-   * returned factory is consumed by `AppHarnessOptions.journal` to
-   * construct a fresh journal per session, with the journal's
-   * `close()` auto-registered on the session's `Lifecycle.onClose`.
+   * Build a per-child factory for {@link MemoryJournal}. Consumed by
+   * any harness's `journal` slot in the hierarchy. The factory
+   * constructs a fresh journal per call and auto-registers its
+   * `close()` on the supplied parent's `onClose`.
+   *
+   * If the parent harness has a `journal` field, it's threaded
+   * through as the upstream by default — appends fan in to the parent;
+   * reads stay local. To suppress this and construct a leaf journal,
+   * the configFn returns `{ parent: undefined }` explicitly.
    *
    * Durable journals (SQLite, Postgres) ship their own `createFactory`
    * helpers in their respective adapter packages.
    *
-   * @see docs/proposals/v2/blueprint/30-app-as-recipe.md
+   * @see docs/proposals/v2/blueprint/31-harness-hierarchy.md
    */
-  static createFactory(
-    configFn?: (deps: FactoryDeps) => MemoryJournalOptions,
-  ): OperationJournalFactory {
-    const factory = (deps: FactoryDeps, lifecycle: Lifecycle): OperationJournal => {
-      const journal = new MemoryJournal(configFn?.(deps));
-      lifecycle.onClose(() => journal.close());
+  static createFactory<P extends MemoryJournalFactoryParent>(
+    configFn?: (parent: P) => MemoryJournalOptions,
+  ): OperationJournalFactory<P> {
+    return (parent: P): OperationJournal => {
+      const options = configFn
+        ? configFn(parent)
+        : ({ parent: parent.journal } as MemoryJournalOptions);
+      const journal = new MemoryJournal(options);
+      parent.onClose(() => journal.close());
       return journal;
     };
-    return Object.assign(factory, { operationJournalFactory: true as const });
   }
 
   append(event: ProtocolEvent): Effect.Effect<void, JournalError, never> {
-    return Effect.try({
+    const local = Effect.try({
       try: () => this.appendSync(event),
       catch: (cause): JournalError => {
         if (isJournalError(cause)) return cause;
         return { _tag: "WriteFailed", cause };
       },
     });
+    // Fan-in to upstream when composed.
+    return this.upstream
+      ? Effect.all([local, this.upstream.append(event)], {
+          discard: true,
+          concurrency: "unbounded",
+        })
+      : local;
   }
 
   appendBatch(events: readonly ProtocolEvent[]): Effect.Effect<void, JournalError, never> {
-    return Effect.try({
+    const local = Effect.try({
       try: () => {
         for (const e of events) this.appendSync(e);
       },
@@ -122,6 +158,17 @@ export class MemoryJournal implements OperationJournal {
         if (isJournalError(cause)) return cause;
         return { _tag: "WriteFailed", cause };
       },
+    });
+    if (!this.upstream) return local;
+    // appendBatch may not be on every OperationJournal impl — fall
+    // back to one-at-a-time for protocols that only expose `append`.
+    const up = this.upstream;
+    const upstreamBatch = up.appendBatch
+      ? up.appendBatch(events)
+      : Effect.forEach(events, (e) => up.append(e), { discard: true });
+    return Effect.all([local, upstreamBatch], {
+      discard: true,
+      concurrency: "unbounded",
     });
   }
 

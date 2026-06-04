@@ -127,26 +127,16 @@ export interface OperationJournal {
 import type { Factory } from "./factory.js";
 
 /**
- * Per-session factory shape for {@link OperationJournal}. Adopters
- * supply the `journal` slot on `AppHarnessOptions` as either an
- * instance (shared across sessions) or a factory (constructed per
- * session via the recipe pattern).
+ * Per-child factory shape for {@link OperationJournal}. Adopters
+ * supply the `journal` slot at any level of the harness hierarchy as
+ * either an instance (shared across children) or a factory
+ * (constructed per child via the recipe pattern).
  *
  * Use `MemoryJournal.createFactory(...)` from `@agentick/runtime` for
  * ergonomic factory construction with auto-registered close. Durable
  * journals (SQLite, Postgres) ship their own `createFactory` helpers
  * in their respective adapter packages.
  *
- * @see docs/proposals/v2/blueprint/30-app-as-recipe.md
+ * @see docs/proposals/v2/blueprint/31-harness-hierarchy.md
  */
-export interface OperationJournalFactory extends Factory<OperationJournal> {
-  readonly operationJournalFactory: true;
-}
-
-/** Type guard for {@link OperationJournalFactory}. */
-export function isOperationJournalFactory(v: unknown): v is OperationJournalFactory {
-  return (
-    typeof v === "function" &&
-    (v as { operationJournalFactory?: unknown }).operationJournalFactory === true
-  );
-}
+export type OperationJournalFactory<P = unknown> = Factory<OperationJournal, P>;

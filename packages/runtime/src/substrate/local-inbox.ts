@@ -16,9 +16,7 @@
 
 import { Effect, Fiber } from "effect";
 import type {
-  FactoryDeps,
   InboxError,
-  Lifecycle,
   MessageAck,
   MessageEnvelope,
   MessageEnvelopeInput,
@@ -27,6 +25,11 @@ import type {
   MessageInboxFactory,
 } from "@agentick/spec";
 import type { AskOptions, MessageInbox, Unsubscribe } from "@agentick/spec";
+
+/** Minimal parent-harness shape that `LocalInbox.createFactory` consumes. */
+export interface LocalInboxFactoryParent {
+  onClose(handler: () => void | Promise<void>): void;
+}
 import { ulid } from "./ulid.js";
 
 /**
@@ -94,22 +97,27 @@ export class LocalInbox implements MessageInbox {
   }
 
   /**
-   * Build a per-session factory for {@link LocalInbox}. The returned
-   * factory is consumed by `AppHarnessOptions.inbox` to construct a
-   * fresh inbox per session, with the inbox's `close()`
-   * auto-registered on the session's `Lifecycle.onClose`.
+   * Build a per-child factory for {@link LocalInbox}. Consumed by any
+   * harness's `inbox` slot in the hierarchy. The factory constructs a
+   * fresh inbox per call and auto-registers its `close()` on the
+   * supplied parent's `onClose`.
    *
-   * @see docs/proposals/v2/blueprint/30-app-as-recipe.md
+   * **Inbox does NOT compose with a parent inbox.** Inboxes are
+   * addressable (callers `send` to a named address), not broadcast —
+   * fan-in to a parent would misroute messages across tenants.
+   * Isolation is the only meaningful semantic, and that's what this
+   * factory produces.
+   *
+   * @see docs/proposals/v2/blueprint/31-harness-hierarchy.md
    */
-  static createFactory(
-    configFn?: (deps: FactoryDeps) => LocalInboxOptions,
-  ): MessageInboxFactory {
-    const factory = (deps: FactoryDeps, lifecycle: Lifecycle): MessageInbox => {
-      const inbox = new LocalInbox(configFn?.(deps));
-      lifecycle.onClose(() => inbox.close());
+  static createFactory<P extends LocalInboxFactoryParent>(
+    configFn?: (parent: P) => LocalInboxOptions,
+  ): MessageInboxFactory<P> {
+    return (parent: P): MessageInbox => {
+      const inbox = new LocalInbox(configFn?.(parent));
+      parent.onClose(() => inbox.close());
       return inbox;
     };
-    return Object.assign(factory, { messageInboxFactory: true as const });
   }
 
   register<T = unknown, R = unknown>(

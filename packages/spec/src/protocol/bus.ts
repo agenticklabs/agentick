@@ -126,35 +126,24 @@ export class BufferOverflowError extends Error {
 }
 
 // ============================================================================
-// EventBusFactory — deferred per-session construction (ADR 30)
+// EventBusFactory — per-child construction (ADR 31)
 // ============================================================================
 
 import type { Factory } from "./factory.js";
 
 /**
- * Per-session factory shape for {@link EventBus}. Adopters supply the
- * `bus` slot on `AppHarnessOptions` as either an `EventBus` instance
- * (shared across sessions) or an `EventBusFactory` (constructed per
- * session via the recipe pattern).
+ * Per-child factory shape for {@link EventBus}. Adopters supply the
+ * `bus` slot at any level of the harness hierarchy as either an
+ * `EventBus` instance (shared across children) or a factory
+ * (constructed per child via the recipe pattern).
  *
- * The marker (`eventBusFactory: true`) lets the slot resolver
- * disambiguate at runtime; `typeof slot === "function"` is also
- * sufficient since `EventBus` itself is an object interface and never
- * callable.
+ * Discrimination at the slot is `typeof slot === "function"`:
+ * `EventBus` is an object interface and never callable, so any
+ * function in the slot is unambiguously a factory.
  *
  * Use `LocalEventBus.createFactory(...)` from `@agentick/runtime` for
  * ergonomic factory construction with auto-registered close.
  *
- * @see docs/proposals/v2/blueprint/30-app-as-recipe.md
+ * @see docs/proposals/v2/blueprint/31-harness-hierarchy.md
  */
-export interface EventBusFactory extends Factory<EventBus> {
-  readonly eventBusFactory: true;
-}
-
-/** Type guard for {@link EventBusFactory}. */
-export function isEventBusFactory(v: unknown): v is EventBusFactory {
-  return (
-    typeof v === "function" &&
-    (v as { eventBusFactory?: unknown }).eventBusFactory === true
-  );
-}
+export type EventBusFactory<P = unknown> = Factory<EventBus, P>;
