@@ -37,6 +37,7 @@ export {
   type RuntimeContext,
 } from "./substrate/runtime-context.js";
 export { matchesQuery, compileQuery, type CompiledMatcher } from "./substrate/query.js";
+export { resolveSyncSubstrateSlot } from "./substrate/resolve-slot.js";
 export { ulid } from "./substrate/ulid.js";
 export {
   RequestResponseRegistry,

@@ -143,29 +143,32 @@ export class LocalEventBus implements EventBus {
    * Static-options sugar over {@link createFactory}. Use when the
    * options are the same for every child (no per-child branching).
    *
-   * Equivalent to `LocalEventBus.createFactory(() => options)`, but
-   * shorter and reads as "factory with these options."
+   * **Default fan-in:** when `parent.bus` is present, it's threaded
+   * through as the upstream automatically (writes fan in, reads stay
+   * local — the tenant-scoping pattern). Adopters pass
+   * `{ parent: undefined }` explicitly to suppress and get a leaf bus.
+   * Adopters who provide other options keep the default upstream too,
+   * unless they override `parent` explicitly.
    *
-   * @example
+   * @example default — fans in to parent.bus when present:
    * ```ts
-   * { bus: LocalEventBus.factory({ capacity: 1024 }) }
-   * // equivalent to:
-   * { bus: LocalEventBus.createFactory(() => ({ capacity: 1024 })) }
+   * { bus: LocalEventBus.factory() }
    * ```
    *
-   * Note: when used at the App's `bus` slot today, the App has no
-   * parent of its own — the parent passed in is the AppHarness shell.
-   * Adopters who want a leaf bus (no fan-in) pass
-   * `{ parent: undefined }` explicitly in the options, otherwise the
-   * default behavior copies the parent's `.bus` as upstream (which is
-   * undefined at the app level — so this defaults to leaf anyway).
+   * @example explicit leaf (no fan-in):
+   * ```ts
+   * { bus: LocalEventBus.factory({ parent: undefined }) }
+   * ```
    *
    * @see docs/proposals/v2/blueprint/31-harness-hierarchy.md
    */
   static factory<P extends LocalEventBusFactoryParent>(
-    options: LocalEventBusOptions = {},
+    options?: LocalEventBusOptions,
   ): EventBusFactory<P> {
-    return LocalEventBus.createFactory<P>(() => options);
+    return LocalEventBus.createFactory<P>((parent) => ({
+      parent: parent.bus,
+      ...(options ?? {}),
+    }));
   }
 
   publish(event: ProtocolEvent): Effect.Effect<void, never, never> {

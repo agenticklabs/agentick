@@ -25,6 +25,9 @@ import type { Layer } from "effect";
 import type { EventQuery, ProtocolEvent } from "../data/events.js";
 import type { SessionStatus } from "./hook-bridges.js";
 import type { ExecutorFactory, ExecutorProtocol, LanguageModelExecutor } from "./executor.js";
+import type { EventBus, EventBusFactory } from "./bus.js";
+import type { MessageInbox, MessageInboxFactory } from "./inbox.js";
+import type { OperationJournal, OperationJournalFactory } from "./journal.js";
 import type {
   SendInput,
   SendResult,
@@ -36,6 +39,22 @@ import type {
 // Command inputs / outputs
 // ============================================================================
 
+/**
+ * Minimal parent-harness shape that session-level substrate factories
+ * see during construction. Mirrors `SessionSubstrateParent` from
+ * `@agentick/session` — exposed in spec so factory types can be
+ * written portably without importing the session impl.
+ */
+export interface CreateSessionFactoryParent {
+  readonly id: string;
+  readonly metadata: Readonly<Record<string, unknown>>;
+  /** App's substrate, exposed as the default upstream for wrapping. */
+  readonly bus: EventBus;
+  readonly inbox: MessageInbox;
+  readonly journal: OperationJournal;
+  onClose(handler: () => void | Promise<void>): void;
+}
+
 export interface CreateSessionInput<P = unknown> {
   /**
    * Stable session id. Generated if omitted. Caller-supplied ids must
@@ -43,7 +62,11 @@ export interface CreateSessionInput<P = unknown> {
    * `SessionAlreadyExistsError`.
    */
   readonly sessionId?: string;
-  /** Optional caller metadata stored on the registry entry. */
+  /**
+   * Adopter-defined metadata bag carried on the session and surfaced
+   * to session-level substrate factories via `parent.metadata`.
+   * Framework defines no keys.
+   */
   readonly metadata?: Readonly<Record<string, unknown>>;
   /** Initial component props injected into the agent root element. */
   readonly initialProps?: P;
@@ -57,6 +80,20 @@ export interface CreateSessionInput<P = unknown> {
    * capability default when unset.
    */
   readonly streaming?: boolean;
+  /**
+   * Per-session substrate overrides — instance or factory. When
+   * omitted, the session inherits the app's substrate directly.
+   *
+   * Factory form is the multi-tenant lever: pass
+   * `bus: LocalEventBus.factory()` to wrap the app's bus per session
+   * (fan-in writes / isolated reads). Adopter routing data flows
+   * through `metadata` and is readable on the factory's `parent`.
+   *
+   * @see docs/proposals/v2/blueprint/31-harness-hierarchy.md
+   */
+  readonly bus?: EventBus | EventBusFactory<CreateSessionFactoryParent>;
+  readonly inbox?: MessageInbox | MessageInboxFactory<CreateSessionFactoryParent>;
+  readonly journal?: OperationJournal | OperationJournalFactory<CreateSessionFactoryParent>;
 }
 
 export interface RunOnceInput<P = unknown> {

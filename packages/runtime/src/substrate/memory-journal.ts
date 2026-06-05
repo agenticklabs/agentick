@@ -133,18 +133,28 @@ export class MemoryJournal implements OperationJournal {
   }
 
   /**
-   * Static-options sugar over {@link createFactory}. Use when the
-   * options are the same for every child (no per-child branching).
+   * Static-options sugar over {@link createFactory}. Default fan-in:
+   * `parent.journal` is threaded through as the upstream automatically
+   * (appends fan in, reads stay local). Adopters pass
+   * `{ parent: undefined }` to suppress.
    *
-   * @example
+   * @example default — fans in to parent.journal:
    * ```ts
    * { journal: MemoryJournal.factory({ capacity: 50_000 }) }
    * ```
+   *
+   * @example explicit leaf (no upstream):
+   * ```ts
+   * { journal: MemoryJournal.factory({ parent: undefined, capacity: 50_000 }) }
+   * ```
    */
   static factory<P extends MemoryJournalFactoryParent>(
-    options: MemoryJournalOptions = {},
+    options?: MemoryJournalOptions,
   ): OperationJournalFactory<P> {
-    return MemoryJournal.createFactory<P>(() => options);
+    return MemoryJournal.createFactory<P>((parent) => ({
+      parent: parent.journal,
+      ...(options ?? {}),
+    }));
   }
 
   append(event: ProtocolEvent): Effect.Effect<void, JournalError, never> {

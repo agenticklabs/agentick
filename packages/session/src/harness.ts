@@ -11,7 +11,12 @@
 
 import { Effect, Fiber, Stream } from "effect";
 
-import { BaseHarness, runHarnessProtocol, ulid } from "@agentick/runtime";
+import {
+  BaseHarness,
+  resolveSyncSubstrateSlot,
+  runHarnessProtocol,
+  ulid,
+} from "@agentick/runtime";
 import type { LoopExecutorProtocol, ReconcilerProtocol } from "@agentick/spec";
 import type {
   AppendEntryInput,
@@ -21,6 +26,7 @@ import type {
   ChannelHandle,
   ContentBlock,
   EventBus,
+  EventBusFactory,
   ExecutionTarget,
   ExecutorProtocol,
   KnobHandle,
@@ -29,9 +35,11 @@ import type {
   MessageEnvelope,
   MessageHandlerError,
   MessageInbox,
+  MessageInboxFactory,
   NotifyTickEndInput,
   Operation,
   OperationJournal,
+  OperationJournalFactory,
   ProtocolEvent,
   SendInput,
   SendMessageInput,
@@ -48,7 +56,7 @@ import type {
   TimelineEntry,
   ToolExecutorProtocol,
 } from "@agentick/spec";
-import { SPEC_VERSION } from "@agentick/spec";
+import { DEFAULT_JOURNALING_POLICY, SPEC_VERSION } from "@agentick/spec";
 import type { KnobsHandle } from "@agentick/knobs";
 import type { StateHandle } from "@agentick/state";
 import type { TimelineHandle } from "@agentick/timeline";
@@ -60,6 +68,26 @@ import { createSessionExecutionHandle, type SessionEmitInput } from "./session-e
 // ============================================================================
 // Construction options
 // ============================================================================
+
+/**
+ * Forward-reference shell handed to session-level substrate factories.
+ * The session's BaseHarness fields aren't wired yet at substrate-
+ * resolution time, so factories see a thin shell exposing only what's
+ * safe at this phase: id, metadata, the *parent* (app) substrate as
+ * default upstream, and a buffered `onClose` that replays onto the
+ * real harness after construction.
+ *
+ * @see docs/proposals/v2/blueprint/31-harness-hierarchy.md §Two-phase construction
+ */
+export interface SessionSubstrateParent {
+  readonly id: string;
+  readonly metadata: Readonly<Record<string, unknown>>;
+  /** App's substrate, exposed as the default upstream for wrapping. */
+  readonly bus: EventBus;
+  readonly inbox: MessageInbox;
+  readonly journal: OperationJournal;
+  onClose(handler: () => void | Promise<void>): void;
+}
 
 export interface SessionHarnessOptions<P = unknown> {
   /** Stable session id. */
@@ -73,6 +101,31 @@ export interface SessionHarnessOptions<P = unknown> {
   readonly agent: unknown;
   /** Initial component props (optional). */
   readonly props?: P;
+  /**
+   * Optional per-session substrate overrides. Each accepts a
+   * pre-built instance (sharing with the app) or a factory
+   * `(parent: SessionSubstrateParent) => R` that constructs a
+   * session-scoped wrapper. When omitted, the session inherits the
+   * app's substrate directly (today's default behavior).
+   *
+   * The factory pattern is how multi-tenant isolation lands:
+   * `bus: LocalEventBus.factory()` returns a fresh bus that wraps the
+   * app's bus (fan-in writes, isolated reads). Adopter metadata flows
+   * through `parent.metadata` so the factory can branch on
+   * per-session context (e.g. an adopter-defined `tenant` key).
+   *
+   * @see docs/proposals/v2/blueprint/31-harness-hierarchy.md
+   */
+  readonly bus?: EventBus | EventBusFactory<SessionSubstrateParent>;
+  readonly inbox?: MessageInbox | MessageInboxFactory<SessionSubstrateParent>;
+  readonly journal?: OperationJournal | OperationJournalFactory<SessionSubstrateParent>;
+  /**
+   * Adopter-defined metadata bag carried on the session and exposed
+   * to substrate factories via `parent.metadata`. Framework defines
+   * no keys; adopters stash whatever they want (tenant id, trace id,
+   * routing hints).
+   */
+  readonly metadata?: Readonly<Record<string, unknown>>;
   /**
    * Reconciler that owns the agent's element tree. Typed as the
    * protocol — any conformant impl (React reconciler, future Angular
@@ -161,11 +214,59 @@ export class SessionHarness<P = unknown>
     inbox: MessageInbox,
     options: SessionHarnessOptions<P>,
   ) {
-    super("session", options.sessionId, journal, bus, inbox);
+    // ADR 31 Phase 3 — session-level substrate slots accept
+    // `instance | factory`. The factory's `parent` is a session shell
+    // exposing the APP'S substrate as default upstream. Factories that
+    // return wrapping primitives (e.g. `LocalEventBus.factory()`) thus
+    // fan in to the app's bus by default — the multi-tenant pattern.
+    // When no factory is supplied, the session inherits the app
+    // substrate directly (today's default behavior).
+    const pendingCloseHandlers: Array<() => void | Promise<void>> = [];
+    const sessionShell: SessionSubstrateParent = {
+      id: options.sessionId,
+      metadata: Object.freeze({ ...(options.metadata ?? {}) }),
+      bus,
+      inbox,
+      journal,
+      onClose: (h) => pendingCloseHandlers.push(h),
+    };
+    const resolvedJournal = resolveSyncSubstrateSlot<
+      OperationJournal,
+      SessionSubstrateParent,
+      OperationJournalFactory<SessionSubstrateParent>
+    >(options.journal, sessionShell, () => journal, "session.journal");
+    const resolvedBus = resolveSyncSubstrateSlot<
+      EventBus,
+      SessionSubstrateParent,
+      EventBusFactory<SessionSubstrateParent>
+    >(options.bus, sessionShell, () => bus, "session.bus");
+    const resolvedInbox = resolveSyncSubstrateSlot<
+      MessageInbox,
+      SessionSubstrateParent,
+      MessageInboxFactory<SessionSubstrateParent>
+    >(options.inbox, sessionShell, () => inbox, "session.inbox");
+
+    // Mark close-Operation envelopes bus-only (ADR 31 §close semantics).
+    // The session's close body fires substrate-close handlers via
+    // `super.close()` — close.body would crash on a closed journal
+    // otherwise. Mirrors the AppHarness pattern.
+    super("session", options.sessionId, resolvedJournal, resolvedBus, resolvedInbox, {
+      metadata: options.metadata,
+      policy: {
+        ...DEFAULT_JOURNALING_POLICY,
+        override: {
+          "session:command:close": "bus-only",
+        },
+      },
+    });
+    // Replay any close handlers session-level factories registered
+    // against the shell onto the now-real harness.
+    for (const h of pendingCloseHandlers) this.onClose(h);
+
     this.store = new SessionStateStore(options.sessionId);
     this.bridges = buildSessionBridges(
       this.store,
-      { journal, bus, inbox },
+      { journal: resolvedJournal, bus: resolvedBus, inbox: resolvedInbox },
       {
         ...(options.toolBridge !== undefined ? { toolBridge: options.toolBridge } : {}),
         ...(options.extensionBridges !== undefined

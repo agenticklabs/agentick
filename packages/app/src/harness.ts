@@ -25,6 +25,7 @@ import {
   LocalEventBus,
   LocalInbox,
   MemoryJournal,
+  resolveSyncSubstrateSlot,
   runHarnessProtocol,
   ulid,
 } from "@agentick/runtime";
@@ -136,48 +137,9 @@ export interface AppSubstrateParent {
   onClose(handler: () => void | Promise<void>): void;
 }
 
-/**
- * Resolve an `instance | factory | undefined` slot to a concrete
- * instance. Factory discrimination is `typeof slot === "function"` —
- * substrate primitives are object-shaped, so any function is a factory.
- *
- * The `parent` argument is passed explicitly so the resolver makes the
- * parent-child relationship visible at the call site, rather than
- * implicitly via `this`.
- *
- * **App-level substrate factories MUST be synchronous.** `super()`
- * needs the substrate before any async work can run. Async factories
- * (returning Promise / Effect) are supported at session level
- * (ADR 31 Phase 3, where createSession is itself async). At app level
- * we throw if a factory returns a non-sync value.
- */
-function resolveSyncSubstrateSlot<R, P, F extends (parent: P) => unknown>(
-  slot: R | F | undefined,
-  parent: P,
-  defaultFn: () => R,
-  slotName: string,
-): R {
-  if (slot === undefined) return defaultFn();
-  if (typeof slot === "function") {
-    const result = (slot as F)(parent);
-    if (
-      result !== null &&
-      typeof result === "object" &&
-      typeof (result as { then?: unknown }).then === "function"
-    ) {
-      throw new Error(
-        `AppHarness '${slotName}' factory returned a Promise — app-level ` +
-          `substrate factories must be synchronous. Use a pre-constructed ` +
-          `instance for the slot, or move async construction to session level.`,
-      );
-    }
-    // Effect values are objects with `_op_layer`/internal symbols, not
-    // Promises. We treat any non-instance return as a programmer error
-    // narrow to R via cast — runtime check above protected us.
-    return result as R;
-  }
-  return slot;
-}
+// `resolveSyncSubstrateSlot` lives in @agentick/runtime so both
+// AppHarness and SessionHarness share the same explicit-parent
+// resolver. See its docstring for the contract.
 
 /**
  * Per-session forwarded `ToolExecutorHarness` options. `handlerResolver`
@@ -979,6 +941,27 @@ export class AppHarness<P = unknown>
         : this.sessionDefaults.initialKnobs !== undefined
           ? { initialKnobs: this.sessionDefaults.initialKnobs }
           : {}),
+      // Per-session substrate overrides (ADR 31 Phase 3). Cascade:
+      // per-call input > app-level session defaults. Omitted → session
+      // inherits the app's substrate directly.
+      ...(input.bus !== undefined
+        ? { bus: input.bus }
+        : this.sessionDefaults.bus !== undefined
+          ? { bus: this.sessionDefaults.bus }
+          : {}),
+      ...(input.inbox !== undefined
+        ? { inbox: input.inbox }
+        : this.sessionDefaults.inbox !== undefined
+          ? { inbox: this.sessionDefaults.inbox }
+          : {}),
+      ...(input.journal !== undefined
+        ? { journal: input.journal }
+        : this.sessionDefaults.journal !== undefined
+          ? { journal: this.sessionDefaults.journal }
+          : {}),
+      // Adopter metadata flows through to session.metadata + to
+      // session-level substrate factories via `parent.metadata`.
+      ...(input.metadata !== undefined ? { metadata: input.metadata } : {}),
       // Inject self as SpawnContext so the child can spawn grandchildren.
       spawnContext: this,
       // Surface the shared handler resolver as a ToolBridge so
