@@ -288,6 +288,82 @@ describe("createSession substrate slots — factory at session level", () => {
   });
 });
 
+describe("createSession close-op semantics (ADR 31 Option G)", () => {
+  it("session.close() runs cleanly even when a factory closes the per-session journal", async () => {
+    const app = await createApp(React.createElement(MinimalAgent), {
+      executor: mkExecutor(),
+      target: mkTarget(),
+    });
+    // Per-session journal that fans in to the app journal. The factory
+    // registers onClose to close the journal — this would crash if
+    // session:command:close wrote a terminal envelope to the journal
+    // after close runs. The policy override ("bus-only" for the close
+    // op) prevents that.
+    const session = await app.createSession({
+      journal: MemoryJournal.factory({ capacity: 50 }),
+    });
+
+    // No throw — close runs cleanly.
+    await session.close();
+
+    // The per-session journal is shut down.
+    const sessionJournal = (session as unknown as { journal: { closed: boolean } }).journal;
+    expect(sessionJournal.closed).toBe(true);
+    // App journal stays alive (different instance).
+    const appJournal = (app as unknown as { journal: { closed: boolean } }).journal;
+    expect(appJournal.closed).toBe(false);
+
+    await app.closeApp();
+  });
+});
+
+describe("createSession input — new fields from ADR 31 Phase 3", () => {
+  it("rootElement override changes the agent for this session", async () => {
+    const OtherAgent = () =>
+      React.createElement("message" as never, { role: "user" }, "alt");
+    const app = await createApp(React.createElement(MinimalAgent), {
+      executor: mkExecutor(),
+      target: mkTarget(),
+    });
+    // We can't trivially observe which JSX renders without exercising
+    // the model, but createSession should not reject — the rootElement
+    // override field is accepted at the API.
+    const session = await app.createSession({
+      rootElement: React.createElement(OtherAgent),
+    });
+    expect(session).toBeDefined();
+    await app.closeApp();
+  });
+
+  it("initialState seeds the session's state handle", async () => {
+    const app = await createApp(React.createElement(MinimalAgent), {
+      executor: mkExecutor(),
+      target: mkTarget(),
+    });
+    const session = await app.createSession({
+      initialState: { adopterKey: "adopterValue" },
+    });
+    // SessionHarness exposes the state handle via `session.state`.
+    const state = (session as unknown as { state: { get(k: string): unknown } }).state;
+    expect(state.get("adopterKey")).toBe("adopterValue");
+    await app.closeApp();
+  });
+
+  it("parentSessionId is stored on the session when supplied", async () => {
+    const app = await createApp(React.createElement(MinimalAgent), {
+      executor: mkExecutor(),
+      target: mkTarget(),
+    });
+    const session = await app.createSession({
+      parentSessionId: "parent-xyz",
+    });
+    const stored = (session as unknown as { parentSessionId: string | undefined })
+      .parentSessionId;
+    expect(stored).toBe("parent-xyz");
+    await app.closeApp();
+  });
+});
+
 describe("createSession substrate slots — instance form (sharing across sessions)", () => {
   it("session uses the same bus instance when passed as an instance", async () => {
     const app = await createApp(React.createElement(MinimalAgent), {

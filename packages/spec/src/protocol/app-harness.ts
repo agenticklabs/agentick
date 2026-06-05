@@ -33,27 +33,12 @@ import type {
   SendResult,
   SessionExecutionHandle,
   SessionHarnessProtocol,
+  SessionSubstrateParent,
 } from "./session-harness.js";
 
 // ============================================================================
 // Command inputs / outputs
 // ============================================================================
-
-/**
- * Minimal parent-harness shape that session-level substrate factories
- * see during construction. Mirrors `SessionSubstrateParent` from
- * `@agentick/session` — exposed in spec so factory types can be
- * written portably without importing the session impl.
- */
-export interface CreateSessionFactoryParent {
-  readonly id: string;
-  readonly metadata: Readonly<Record<string, unknown>>;
-  /** App's substrate, exposed as the default upstream for wrapping. */
-  readonly bus: EventBus;
-  readonly inbox: MessageInbox;
-  readonly journal: OperationJournal;
-  onClose(handler: () => void | Promise<void>): void;
-}
 
 export interface CreateSessionInput<P = unknown> {
   /**
@@ -91,9 +76,34 @@ export interface CreateSessionInput<P = unknown> {
    *
    * @see docs/proposals/v2/blueprint/31-harness-hierarchy.md
    */
-  readonly bus?: EventBus | EventBusFactory<CreateSessionFactoryParent>;
-  readonly inbox?: MessageInbox | MessageInboxFactory<CreateSessionFactoryParent>;
-  readonly journal?: OperationJournal | OperationJournalFactory<CreateSessionFactoryParent>;
+  readonly bus?: EventBus | EventBusFactory<SessionSubstrateParent>;
+  readonly inbox?: MessageInbox | MessageInboxFactory<SessionSubstrateParent>;
+  readonly journal?: OperationJournal | OperationJournalFactory<SessionSubstrateParent>;
+  /**
+   * Override the app's rootElement for this session. Lets adopters
+   * construct sessions with a different agent JSX without instantiating
+   * a separate app.
+   */
+  readonly rootElement?: unknown;
+  /** Per-session abort signal. Closes the session if it fires. */
+  readonly signal?: AbortSignal;
+  /**
+   * Session-scoped additional tools. Merged with app-level tools at
+   * session-create time; session tools take priority on name conflict.
+   * Shape is opaque to spec — concrete tool types live in the tool
+   * executor package.
+   */
+  readonly tools?: ReadonlyArray<unknown>;
+  /**
+   * Initial session-state values (`useSessionState`). Mirrors
+   * `initialKnobs` but writes to the StateHarness instead.
+   */
+  readonly initialState?: Readonly<Record<string, unknown>>;
+  /**
+   * Parent session id when this session is itself a spawned child.
+   * Wired by the spawn flow; rarely supplied directly by adopters.
+   */
+  readonly parentSessionId?: string;
 }
 
 export interface RunOnceInput<P = unknown> {

@@ -40,6 +40,40 @@ import type { LanguageModelStopReason, UsageStats } from "../data/execution-resu
 import type { StreamEvent } from "../data/streaming.js";
 import type { SessionStatus as BridgeSessionStatus } from "./hook-bridges.js";
 import type { LoopToolResult } from "./loop-executor.js";
+import type { EventBus } from "./bus.js";
+import type { MessageInbox } from "./inbox.js";
+import type { OperationJournal } from "./journal.js";
+
+// ============================================================================
+// SessionSubstrateParent — forward-reference shell for factories
+// ============================================================================
+
+/**
+ * Forward-reference shell handed to session-level substrate factories
+ * (`SessionHarnessOptions.bus / inbox / journal` and
+ * `CreateSessionInput.bus / inbox / journal` when given a factory).
+ *
+ * The session's BaseHarness fields aren't wired yet at substrate-
+ * resolution time; the shell exposes only what's safe at this phase:
+ *
+ *   - `id`: the session id (so factories can branch on it)
+ *   - `metadata`: adopter bag (where tenant routing data flows)
+ *   - `bus` / `inbox` / `journal`: the APP'S substrate, exposed as
+ *     the default upstream for wrapping
+ *   - `onClose(h)`: buffered close registration that replays onto
+ *     the real harness after construction completes
+ *
+ * @see docs/proposals/v2/blueprint/31-harness-hierarchy.md §Two-phase construction
+ */
+export interface SessionSubstrateParent {
+  readonly id: string;
+  readonly metadata: Readonly<Record<string, unknown>>;
+  /** App's substrate, exposed as the default upstream for wrapping. */
+  readonly bus: EventBus;
+  readonly inbox: MessageInbox;
+  readonly journal: OperationJournal;
+  onClose(handler: () => void | Promise<void>): void;
+}
 
 // ============================================================================
 // Message + TimelineEntry

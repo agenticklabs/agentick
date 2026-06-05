@@ -916,7 +916,9 @@ export class AppHarness<P = unknown>
     const session = new SessionHarness<P>(this.journal, this.bus, this.inbox, {
       ...this.sessionDefaults,
       sessionId,
-      agent: overrides.agent ?? this.rootElement,
+      // Agent cascade: spawn-supplied (overrides.agent) > per-call
+      // input.rootElement > app's rootElement.
+      agent: overrides.agent ?? input.rootElement ?? this.rootElement,
       reconciler: this.reconciler,
       loop: this.loop,
       executor: this.executor,
@@ -940,6 +942,12 @@ export class AppHarness<P = unknown>
         ? { initialKnobs: input.initialKnobs }
         : this.sessionDefaults.initialKnobs !== undefined
           ? { initialKnobs: this.sessionDefaults.initialKnobs }
+          : {}),
+      // Initial session-state cascade.
+      ...(input.initialState !== undefined
+        ? { initialState: input.initialState }
+        : this.sessionDefaults.initialState !== undefined
+          ? { initialState: this.sessionDefaults.initialState }
           : {}),
       // Per-session substrate overrides (ADR 31 Phase 3). Cascade:
       // per-call input > app-level session defaults. Omitted → session
@@ -970,9 +978,13 @@ export class AppHarness<P = unknown>
       // Extension-provided bridges (installed by extension packages via
       // `AppHarnessOptions.extensions`) flow into every session.
       ...(this.extensionBridges.size > 0 ? { extensionBridges: this.extensionBridges } : {}),
+      // ParentSessionId cascade: spawn-supplied (overrides) wins; adopter
+      // can also wire a non-spawn parent linkage via input.parentSessionId.
       ...(overrides.parentSessionId !== undefined
         ? { parentSessionId: overrides.parentSessionId }
-        : {}),
+        : input.parentSessionId !== undefined
+          ? { parentSessionId: input.parentSessionId }
+          : {}),
     });
 
     // `ready` / `close` aren't on `ToolExecutorProtocol` — duck-type

@@ -48,6 +48,7 @@ import type {
   SessionExecutionHandle,
   SessionHarnessProtocol,
   SessionSnapshot,
+  SessionSubstrateParent,
   SpawnContext,
   SpawnInput,
   StateApplyError,
@@ -70,24 +71,13 @@ import { createSessionExecutionHandle, type SessionEmitInput } from "./session-e
 // ============================================================================
 
 /**
- * Forward-reference shell handed to session-level substrate factories.
- * The session's BaseHarness fields aren't wired yet at substrate-
- * resolution time, so factories see a thin shell exposing only what's
- * safe at this phase: id, metadata, the *parent* (app) substrate as
- * default upstream, and a buffered `onClose` that replays onto the
- * real harness after construction.
+ * Re-export the canonical `SessionSubstrateParent` from spec so
+ * adopters can write portable factory types without importing the
+ * spec package directly.
  *
  * @see docs/proposals/v2/blueprint/31-harness-hierarchy.md §Two-phase construction
  */
-export interface SessionSubstrateParent {
-  readonly id: string;
-  readonly metadata: Readonly<Record<string, unknown>>;
-  /** App's substrate, exposed as the default upstream for wrapping. */
-  readonly bus: EventBus;
-  readonly inbox: MessageInbox;
-  readonly journal: OperationJournal;
-  onClose(handler: () => void | Promise<void>): void;
-}
+export type { SessionSubstrateParent };
 
 export interface SessionHarnessOptions<P = unknown> {
   /** Stable session id. */
@@ -208,6 +198,26 @@ export class SessionHarness<P = unknown>
   private _mountReady: Promise<void>;
   private _currentExecution: Promise<unknown> | null = null;
 
+  /**
+   * Construct a SessionHarness.
+   *
+   * **Substrate parameters (`journal`, `bus`, `inbox`)** carry the
+   * PARENT'S substrate — typically the AppHarness's. They act as
+   * defaults: when `options.bus / inbox / journal` is omitted, the
+   * session inherits these directly (the most common case). When
+   * `options.*` is set (instance or factory), the session uses that
+   * instead, with the parent's substrate available to factories via
+   * the resolution shell as upstream for wrapping.
+   *
+   * **Options bag** carries everything else: id, agent, reconciler,
+   * loop, executor, toolExecutor, target, plus the per-session
+   * substrate overrides and adopter metadata.
+   *
+   * The positional+options shape is intentional — it makes the
+   * "substrate flows from parent by default" semantic visible at
+   * every call site without forcing every adopter to construct the
+   * options bag with substrate fields. ADR 31 Phase 3 documented this.
+   */
   constructor(
     journal: OperationJournal,
     bus: EventBus,

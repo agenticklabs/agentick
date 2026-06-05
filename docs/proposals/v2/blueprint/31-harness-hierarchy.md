@@ -387,16 +387,26 @@ Complete with this update. Code work begins after commit.
 
 2–3 days. Backwards compatible.
 
-### Phase 3 — Session-level substrate slots + `app.createSession` shape
+### Phase 3 — Session-level substrate slots + `app.createSession` shape — SHIPPED
 
-- `AppHarnessOptions.session` slot accepts `SessionDefaults | SessionFactory<P>`.
-- `CreateSessionInput<P>` expanded to full Partial<SessionHarnessOptions<P>> minus `parent`/`sessionId`.
-- Session shell construction stores input + metadata.
-- `app.createSession(input)` merges input with session defaults.
-- Substrate factories at session level run with the SessionHarness shell as parent.
-- v1 callback fields dropped from CreateSessionInput. Migration note in CHANGELOG.
+Landed in commits `2f5b0dfb` (Phase 3) + cleanup follow-up:
 
-3–5 days. Multi-tenant adopters unblocked.
+- `CreateSessionInput<P>` gains `bus / inbox / journal` as `instance | factory`. Factory parent is `SessionSubstrateParent` (the session shell) whose `.bus / .inbox / .journal` expose the APP's substrate as default upstream.
+- `SessionHarnessOptions<P>` gains the same substrate slots + adopter `metadata`.
+- `SessionSubstrateParent` lives in spec at `protocol/session-harness.ts`; session re-exports for convenience.
+- `CreateSessionInput<P>` also gains `rootElement` (per-call agent override), `initialState`, `parentSessionId`, plus `signal` and `tools` (typed but plumbing deferred — see below).
+- `SessionHarness` constructor uses the explicit-parent resolver (from `@agentick/runtime`); per-session close-op envelopes marked `"bus-only"` via `JournalingPolicy.override` so session-level journal factories can close the journal in their `onClose` without crashing the close Operation (Option G).
+- `AppHarness.createSessionBody` cascades: per-call input > app-level `session.*` defaults > inherit.
+- Multi-tenant adopters unblocked. Tenancy is emergent: framework defines no `tenantId`; adopters wire via factory + closure + metadata.
+
+**Deferred from this phase, tracked explicitly:**
+
+- **`SessionFactory<P>` at `AppHarnessOptions.session`** as alternative to the config bag. The config bag (`SessionDefaults<P>`) covers every multi-tenant use case; the full SessionFactory form (`(parent, input) => SessionHarness`) is a power-user customization for adopters who want to fully take over session construction. Tracked for Phase 5 polish.
+- **`signal` plumbing into SessionHarness lifecycle** — the field is accepted at the API but not yet wired to abort a running session when fired. Needs SessionHarness lifecycle work.
+- **`tools` field plumbing into per-session ToolExecutor** — the field is accepted; merging with app-level tools needs ToolExecutor wiring work.
+- **v1 callback field migration note in CHANGELOG** — no CHANGELOG infra yet; deferred until v2.0 RC.
+
+These deferrals don't block multi-tenant adopters and don't compromise the architecture.
 
 ### Phase 4 — `GatewayHarness` lands
 
