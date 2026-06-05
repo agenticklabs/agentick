@@ -63,6 +63,28 @@ export interface EventBus {
   publish(event: ProtocolEvent): Effect.Effect<void, never, never>;
 
   /**
+   * Publish a batch of envelopes. Optional — implementations that
+   * don't support batched publish MAY omit this method; callers fall
+   * back to looping over {@link publish}.
+   *
+   * Semantic guarantees relative to per-event {@link publish}:
+   *   - Subscribers still receive events one at a time. The batch is a
+   *     producer-side amortisation, not a subscriber-side delivery
+   *     change.
+   *   - Ordering within the batch is preserved on delivery.
+   *   - `hasSubscriber` is consulted once per batch (cheapest path) —
+   *     if no subscriber matches any key in the batch, the entire call
+   *     is a no-op.
+   *
+   * Phase B name (pub/sub semantics). When Phase C unifies EventBus +
+   * OperationJournal under `EventLog<E>`, this method becomes
+   * `appendBatch` inherited from the log primitive.
+   *
+   * @see docs/proposals/v2/blueprint/29-bus-overhaul.md §Phase B
+   */
+  publishBatch?(events: ReadonlyArray<ProtocolEvent>): Effect.Effect<void, never, never>;
+
+  /**
    * Construction-on-demand publish. The bus probes its subscriber
    * index against `key` first; only invokes `build` (and routes the
    * resulting envelope) if at least one subscriber's query could

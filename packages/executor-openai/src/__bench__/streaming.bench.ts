@@ -125,10 +125,13 @@ function buildTextPlusToolStream(textCount: number): ChatCompletionChunk[] {
 // the last matching entry once consumed).
 // ─────────────────────────────────────────────────────────────────────────────
 
-async function makeStreamingExecutor(chunks: ReadonlyArray<ChatCompletionChunk>) {
+async function makeStreamingExecutor(
+  chunks: ReadonlyArray<ChatCompletionChunk>,
+  busOpts?: ConstructorParameters<typeof LocalEventBus>[0],
+) {
   const stub = new StubOpenAIClient([{ kind: "streaming", chunks }]);
   const journal = new MemoryJournal({ capacity: 10_000_000 });
-  const bus = new LocalEventBus();
+  const bus = new LocalEventBus(busOpts);
   const inbox = new LocalInbox();
   const exec = new OpenAIExecutor("exec-bench-openai", journal, bus, inbox, {
     client: asClient(stub),
@@ -215,6 +218,72 @@ describe("OpenAIExecutor.run — 100 text deltas (1 subscriber)", () => {
           Stream.runDrain(bus.subscribe({ surface: "executor", phase: "delta" })),
         );
         // Allow the subscriber fiber to register.
+        await new Promise((r) => setImmediate(r));
+      }
+      await exec.run({ compiled: emptyTree(), target: mkTarget() });
+    },
+    { iterations: ITERATIONS },
+  );
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Scenario 5 — Phase B A/B: 100 text deltas + 1 subscriber, batching OFF.
+// Phase B baseline. Pair with Scenario 6 to size the transparent win on
+// the real executor hot path.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("OpenAIExecutor.run — 100 deltas + 1 sub, batching OFF (Phase B baseline)", () => {
+  const chunks = buildTextStream(100);
+  let consumer: Fiber.RuntimeFiber<void, unknown> | undefined;
+  let bus: LocalEventBus | undefined;
+  let exec: OpenAIExecutor | undefined;
+
+  afterAll(async () => {
+    if (consumer) await Effect.runPromise(Fiber.interrupt(consumer));
+  });
+
+  bench(
+    "100 deltas, 1 sub, batching OFF",
+    async () => {
+      if (!exec) {
+        const fixture = await makeStreamingExecutor(chunks, { batch: {} });
+        exec = fixture.exec;
+        bus = fixture.bus;
+        consumer = Effect.runFork(
+          Stream.runDrain(bus.subscribe({ surface: "executor", phase: "delta" })),
+        );
+        await new Promise((r) => setImmediate(r));
+      }
+      await exec.run({ compiled: emptyTree(), target: mkTarget() });
+    },
+    { iterations: ITERATIONS },
+  );
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Scenario 6 — Phase B A/B: 100 text deltas + 1 subscriber, batching ON.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("OpenAIExecutor.run — 100 deltas + 1 sub, batching ON (Phase B default)", () => {
+  const chunks = buildTextStream(100);
+  let consumer: Fiber.RuntimeFiber<void, unknown> | undefined;
+  let bus: LocalEventBus | undefined;
+  let exec: OpenAIExecutor | undefined;
+
+  afterAll(async () => {
+    if (consumer) await Effect.runPromise(Fiber.interrupt(consumer));
+  });
+
+  bench(
+    "100 deltas, 1 sub, batching ON",
+    async () => {
+      if (!exec) {
+        const fixture = await makeStreamingExecutor(chunks); // default policy
+        exec = fixture.exec;
+        bus = fixture.bus;
+        consumer = Effect.runFork(
+          Stream.runDrain(bus.subscribe({ surface: "executor", phase: "delta" })),
+        );
         await new Promise((r) => setImmediate(r));
       }
       await exec.run({ compiled: emptyTree(), target: mkTarget() });

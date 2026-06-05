@@ -226,18 +226,28 @@ The squeeze worth attacking is **per-event `Effect.runPromise` + per-sub `Queue.
 
 Each phase is independently shippable. No phase breaks adopter code.
 
-### Phase A — Easy wins (1-2 days, IN PROGRESS)
+### Phase A — Easy wins (DONE 2026-06-02)
 
-- ✅ Pre-compiled queries (`compileQuery` in runtime, wired into `LocalEventBus` + `MemoryJournal`). **DONE.**
-- Add `appendBatch?` to `EventBus` interface as an optional method (default impl: loop over `append`).
-- Add `SurfaceBatchPolicy` + `SurfaceRetentionPolicy` types to `@agentick/spec/data/journaling-policy.ts`. No consumer yet — just the type surface.
+- ✅ Pre-compiled queries (`compileQuery` in runtime, wired into `LocalEventBus` + `MemoryJournal`).
+- ✅ `SurfaceBatchPolicy` + `SurfaceRetentionPolicy` types in `@agentick/spec/data/journaling-policy.ts`. **Landed 2026-06-05 with Phase B (kept the type surface in scope of B's commit rather than retroactively patching Phase A).**
+- ✅ Optional batched-publish method on `EventBus`. **Named `publishBatch?` not `appendBatch?` — the bus is pub/sub, `append` is log-shape semantics that don't apply until Phase C unifies under `EventLog<E>`. The method renames to `appendBatch` inherited from the log primitive in Phase C.**
 
-### Phase B — Batched LocalEventBus (3-5 days)
+### Phase B — Batched LocalEventBus (DONE 2026-06-05)
 
-- Implement per-surface accumulator in `LocalEventBus`. Fuse via `setTimeout` (or Effect `Schedule`). Drain to current `publish` path in batches.
-- Apply default batch policy: `executor:*:delta` 8ms/4, `session:*:metric` 500ms.
-- Re-run streaming benches; target ~10× per-delta win with one subscriber.
-- Adopter override via `bus = new LocalEventBus({ policy: ... })`.
+- ✅ Per-surface accumulator in `LocalEventBus`. Time trigger via `setTimeout` (not Effect `Schedule` — Schedule adds per-surface fiber overhead the data structure doesn't need; the accumulator's flush is fire-and-forget). Count trigger fires synchronously within `publish` so the caller's Effect carries the actual fan-out (preserves existing publish semantics for awaiting callers).
+- ✅ Default policy: **only `executor:delta` 8ms/4 ships by default.** The draft's `session:metric` 500ms entry was dead config — `metric` is not a member of `EventPhase` (closed union `requested | before | delta | terminal`). Default ships only what actually matches real events; adopters extend via `{ ...DEFAULT_LOCAL_BUS_BATCH_POLICY, "tool:delta": { ... } }`.
+- ✅ Adopter override via `new LocalEventBus({ batch: ... })`. `{}` disables batching entirely.
+- ✅ Streaming benches re-run. **Actual win at 1 sub: 1.72–1.89× transparent, 4.40× via explicit `publishBatch`.** Gap from the 10×-target is explained in `packages/runtime/src/__bench__/substrate-bench-results.md` — Phase A's `compileQuery` already moved the floor; Effect runtime entrance per `publish` is the new dominant cost.
+
+### Phase B — open design decisions resolved
+
+| Decision | Resolution |
+|---|---|
+| Accumulator state scope | Per-`LocalEventBus`-instance. Process-global state has no fiber-safety story and couples bus instances that exist independently in multi-tenant deployments. |
+| Timer mechanism | `setTimeout`. Bus's external Effect surface unchanged; per-surface Effect.Schedule fibers are over-architected for a non-Effect data structure. |
+| Where the batch policy lives | `LocalEventBusOptions.batch?` (constructor option). The spec's `JournalingPolicy.batch?` is the type surface adopters use to compose policies; bus reads its slice via `options.batch`. |
+| Per-surface vs per-subscriber batching | Per-surface. Per-subscriber means N copies of accumulator state for N subscribers — bookkeeping cost defeats the win. |
+| Default policy contents | Ship only `executor:delta` (validated hot path); drop `session:metric` until a metrics surface lands with concrete events that match a real phase. |
 
 ### Phase C — Cursor protocol + ring buffer (1-2 weeks)
 

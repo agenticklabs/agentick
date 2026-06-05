@@ -235,6 +235,45 @@ describe("@agentick/spec — structural smoke tests", () => {
     });
   });
 
+  describe("JournalingPolicy.batch / retention — ADR 29 Phase B", () => {
+    it("accepts a policy with per-surface batch + retention", () => {
+      const p: JournalingPolicy = {
+        ...DEFAULT_JOURNALING_POLICY,
+        batch: {
+          "executor:delta": { flushAfterMs: 8, flushAfterCount: 4 },
+          "session:metric": { flushAfterMs: 500 },
+        },
+        retention: {
+          "executor:delta": { maxEvents: 1024 },
+          "executor:*": { maxAge: 60_000 },
+        },
+      };
+      expect(p.batch?.["executor:delta"]?.flushAfterMs).toBe(8);
+      expect(p.batch?.["executor:delta"]?.flushAfterCount).toBe(4);
+      expect(p.batch?.["session:metric"]?.flushAfterMs).toBe(500);
+      expect(p.retention?.["executor:delta"]?.maxEvents).toBe(1024);
+      expect(p.retention?.["executor:*"]?.maxAge).toBe(60_000);
+    });
+
+    it("batch + retention are optional (omitted = no batching, default retention)", () => {
+      const p: JournalingPolicy = DEFAULT_JOURNALING_POLICY;
+      expect(p.batch).toBeUndefined();
+      expect(p.retention).toBeUndefined();
+    });
+
+    it("a batch entry may set only one trigger", () => {
+      const p: JournalingPolicy = {
+        ...DEFAULT_JOURNALING_POLICY,
+        batch: {
+          "executor:delta": { flushAfterCount: 8 },
+          "session:metric": { flushAfterMs: 250 },
+        },
+      };
+      expect(p.batch?.["executor:delta"]?.flushAfterMs).toBeUndefined();
+      expect(p.batch?.["session:metric"]?.flushAfterCount).toBeUndefined();
+    });
+  });
+
   describe("StandardSchemaV1", () => {
     it("structurally accepts a Zod-shaped validator", () => {
       // Build a minimal fake validator that conforms to the Standard

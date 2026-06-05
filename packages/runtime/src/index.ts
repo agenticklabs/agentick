@@ -12,7 +12,11 @@
  */
 
 export { MemoryJournal, type MemoryJournalOptions } from "./substrate/memory-journal.js";
-export { LocalEventBus, type LocalEventBusOptions } from "./substrate/local-event-bus.js";
+export {
+  LocalEventBus,
+  DEFAULT_LOCAL_BUS_BATCH_POLICY,
+  type LocalEventBusOptions,
+} from "./substrate/local-event-bus.js";
 export { LocalInbox, type LocalInboxOptions } from "./substrate/local-inbox.js";
 export {
   LocalChannelPublisher,

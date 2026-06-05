@@ -397,6 +397,225 @@ describe("streaming simulation — 10 ops × 10 deltas", () => {
 // { surface, phase } shapes.
 // ─────────────────────────────────────────────────────────────────────────────
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Phase B — per-surface batching: publish-call CPU cost
+//
+// Measures the producer-side cost of a single `publish(event)` call on
+// the `executor:delta` hot path. With Phase B's default policy active,
+// matching events accumulate and return immediately; the per-call cost
+// drops because the fan-out is deferred to a flush boundary.
+//
+// The unbatched baseline (`batch: {}`) keeps the rest of the bus shape
+// identical so the comparison isolates the batching effect.
+//
+// Caveat: this is producer-only cost. End-to-end latency to subscribers
+// goes up by up to `flushAfterMs` per batched event. The end-to-end
+// bench below measures the full path.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("Phase B — publish(executor:delta), 1 subscriber, unbatched baseline", () => {
+  const bus = new LocalEventBus({ batch: {} });
+  const event = mkEvent("e", { surface: "executor", phase: "delta" });
+  let consumer: Fiber.RuntimeFiber<void, unknown> | undefined;
+  let started = false;
+
+  afterAll(async () => {
+    if (consumer) await Effect.runPromise(Fiber.interrupt(consumer));
+  });
+
+  bench("publish executor:delta (1 subscriber, batching OFF)", async () => {
+    if (!started) {
+      consumer = Effect.runFork(
+        Stream.runDrain(bus.subscribe({ surface: "executor" })),
+      );
+      await new Promise((r) => setImmediate(r));
+      started = true;
+    }
+    await Effect.runPromise(bus.publish(event));
+  });
+});
+
+describe("Phase B — publish(executor:delta), 1 subscriber, default batching", () => {
+  const bus = new LocalEventBus(); // default policy includes executor:delta
+  const event = mkEvent("e", { surface: "executor", phase: "delta" });
+  let consumer: Fiber.RuntimeFiber<void, unknown> | undefined;
+  let started = false;
+
+  afterAll(async () => {
+    if (consumer) await Effect.runPromise(Fiber.interrupt(consumer));
+  });
+
+  bench("publish executor:delta (1 subscriber, batching ON)", async () => {
+    if (!started) {
+      consumer = Effect.runFork(
+        Stream.runDrain(bus.subscribe({ surface: "executor" })),
+      );
+      await new Promise((r) => setImmediate(r));
+      started = true;
+    }
+    await Effect.runPromise(bus.publish(event));
+  });
+});
+
+describe("Phase B — publish(executor:delta), 3 subscribers, unbatched baseline", () => {
+  const bus = new LocalEventBus({ batch: {} });
+  const event = mkEvent("e", { surface: "executor", phase: "delta" });
+  const consumers: Fiber.RuntimeFiber<void, unknown>[] = [];
+  let started = false;
+
+  afterAll(async () => {
+    await Effect.runPromise(
+      Effect.all(consumers.map((f) => Fiber.interrupt(f)), { discard: true }),
+    );
+  });
+
+  bench("publish executor:delta (3 subscribers, batching OFF)", async () => {
+    if (!started) {
+      for (let i = 0; i < 3; i++) {
+        consumers.push(
+          Effect.runFork(
+            Stream.runDrain(bus.subscribe({ surface: "executor" })),
+          ),
+        );
+      }
+      await new Promise((r) => setImmediate(r));
+      started = true;
+    }
+    await Effect.runPromise(bus.publish(event));
+  });
+});
+
+describe("Phase B — publish(executor:delta), 3 subscribers, default batching", () => {
+  const bus = new LocalEventBus();
+  const event = mkEvent("e", { surface: "executor", phase: "delta" });
+  const consumers: Fiber.RuntimeFiber<void, unknown>[] = [];
+  let started = false;
+
+  afterAll(async () => {
+    await Effect.runPromise(
+      Effect.all(consumers.map((f) => Fiber.interrupt(f)), { discard: true }),
+    );
+  });
+
+  bench("publish executor:delta (3 subscribers, batching ON)", async () => {
+    if (!started) {
+      for (let i = 0; i < 3; i++) {
+        consumers.push(
+          Effect.runFork(
+            Stream.runDrain(bus.subscribe({ surface: "executor" })),
+          ),
+        );
+      }
+      await new Promise((r) => setImmediate(r));
+      started = true;
+    }
+    await Effect.runPromise(bus.publish(event));
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Phase B — publishBatch direct path
+//
+// Adopters who already have N events in hand can call `publishBatch`
+// directly, skipping the accumulator. Measures the cost of one batched
+// fan-out for 8 events through 1 subscriber.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("Phase B — publishBatch(8 events), 1 subscriber", () => {
+  const bus = new LocalEventBus({ batch: {} }); // bypass accumulator's no-op interaction
+  const events = Array.from({ length: 8 }, (_, i) =>
+    mkEvent(`b-${i}`, { surface: "executor", phase: "delta" }),
+  );
+  let consumer: Fiber.RuntimeFiber<void, unknown> | undefined;
+  let started = false;
+
+  afterAll(async () => {
+    if (consumer) await Effect.runPromise(Fiber.interrupt(consumer));
+  });
+
+  bench("publishBatch 8 events, 1 subscriber", async () => {
+    if (!started) {
+      consumer = Effect.runFork(
+        Stream.runDrain(bus.subscribe({ surface: "executor" })),
+      );
+      await new Promise((r) => setImmediate(r));
+      started = true;
+    }
+    await Effect.runPromise(bus.publishBatch(events));
+  });
+});
+
+describe("Phase B — equivalent 8x publish(), 1 subscriber, no batching", () => {
+  const bus = new LocalEventBus({ batch: {} });
+  const events = Array.from({ length: 8 }, (_, i) =>
+    mkEvent(`s-${i}`, { surface: "executor", phase: "delta" }),
+  );
+  let consumer: Fiber.RuntimeFiber<void, unknown> | undefined;
+  let started = false;
+
+  afterAll(async () => {
+    if (consumer) await Effect.runPromise(Fiber.interrupt(consumer));
+  });
+
+  bench("8x publish(), 1 subscriber, no batching", async () => {
+    if (!started) {
+      consumer = Effect.runFork(
+        Stream.runDrain(bus.subscribe({ surface: "executor" })),
+      );
+      await new Promise((r) => setImmediate(r));
+      started = true;
+    }
+    for (const e of events) {
+      await Effect.runPromise(bus.publish(e));
+    }
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Phase B — end-to-end: publish 64 deltas, 3 subscribers consume them all
+//
+// Measures the full producer-to-consumer path. Producer publishes 64
+// `executor:delta` events; three subscribers drain. The bench resolves
+// once all subscribers have observed all 64 events. Captures both the
+// producer-side win AND the latency cost of the flush-window.
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function runEndToEnd(bus: LocalEventBus, count: number, subscriberCount: number) {
+  // Each subscriber drains exactly `count` events via Stream.take and
+  // then completes. Bench resolves when all subscribers + the publisher
+  // loop have finished.
+  const consumerPromises = Array.from({ length: subscriberCount }, () =>
+    Effect.runPromise(
+      Stream.runDrain(Stream.take(bus.subscribe({ surface: "executor" }), count)),
+    ),
+  );
+  // Give subscribers a tick to attach before producer starts.
+  await new Promise((r) => setImmediate(r));
+
+  for (let i = 0; i < count; i++) {
+    await Effect.runPromise(
+      bus.publish(mkEvent(`e-${i}`, { surface: "executor", phase: "delta" })),
+    );
+  }
+  await Promise.all(consumerPromises);
+}
+
+describe("Phase B — end-to-end 64 deltas × 3 subscribers, unbatched", () => {
+  bench("64 publishes × 3 subscribers, batching OFF", async () => {
+    const bus = new LocalEventBus({ batch: {} });
+    await runEndToEnd(bus, 64, 3);
+    bus.close();
+  });
+});
+
+describe("Phase B — end-to-end 64 deltas × 3 subscribers, default batching", () => {
+  bench("64 publishes × 3 subscribers, batching ON", async () => {
+    const bus = new LocalEventBus();
+    await runEndToEnd(bus, 64, 3);
+    bus.close();
+  });
+});
+
 describe("compileQuery — typical { surface, phase } shape", () => {
   const event = mkEvent("e", { surface: "executor", phase: "delta" });
   const query = { surface: "executor" as const, phase: "delta" as const };
