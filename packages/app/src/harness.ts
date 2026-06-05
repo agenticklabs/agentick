@@ -22,10 +22,10 @@ import { Effect, Fiber, Layer, Stream } from "effect";
 
 import {
   BaseHarness,
+  type HarnessShell,
   LocalEventBus,
   LocalInbox,
   MemoryJournal,
-  resolveSyncSubstrateSlot,
   runHarnessProtocol,
   ulid,
 } from "@agentick/runtime";
@@ -117,29 +117,10 @@ export type SessionDefaults<P = unknown> = Omit<
   "sessionId" | "agent" | "reconciler" | "loop" | "executor" | "toolExecutor" | "target"
 >;
 
-/**
- * Forward-reference shell handed to App-level substrate factories. The
- * App's BaseHarness fields aren't wired yet at substrate-resolution
- * time (chicken-and-egg — substrate IS what's being constructed), so
- * factories see a thin shell exposing only what's safe at this phase:
- * adopter metadata + a buffered `onClose` registration that gets
- * replayed onto the real harness once construction finishes.
- *
- * @see docs/proposals/v2/blueprint/31-harness-hierarchy.md §Two-phase construction
- */
-export interface AppSubstrateParent {
-  readonly id: string;
-  readonly metadata: Readonly<Record<string, unknown>>;
-  /** No parent substrate at app level (Gateway is Phase 4). */
-  readonly bus?: undefined;
-  readonly inbox?: undefined;
-  readonly journal?: undefined;
-  onClose(handler: () => void | Promise<void>): void;
-}
-
-// `resolveSyncSubstrateSlot` lives in @agentick/runtime so both
-// AppHarness and SessionHarness share the same explicit-parent
-// resolver. See its docstring for the contract.
+// App-level substrate slots use the framework's `HarnessShell` parent
+// shape — defined on BaseHarness (ADR 31). Lifting the substrate-slot
+// resolution into BaseHarness eliminated this file's bespoke
+// `AppSubstrateParent` + `resolveSyncSubstrateSlot` plumbing.
 
 /**
  * Per-session forwarded `ToolExecutorHarness` options. `handlerResolver`
@@ -277,9 +258,9 @@ export interface AppHarnessOptions<P = unknown> {
    *
    * @see docs/proposals/v2/blueprint/31-harness-hierarchy.md
    */
-  readonly journal?: OperationJournal | OperationJournalFactory<AppSubstrateParent>;
-  readonly bus?: EventBus | EventBusFactory<AppSubstrateParent>;
-  readonly inbox?: MessageInbox | MessageInboxFactory<AppSubstrateParent>;
+  readonly journal?: OperationJournal | OperationJournalFactory<HarnessShell>;
+  readonly bus?: EventBus | EventBusFactory<HarnessShell>;
+  readonly inbox?: MessageInbox | MessageInboxFactory<HarnessShell>;
 
   /**
    * Adopter-defined metadata bag carried on the App harness instance
@@ -442,62 +423,42 @@ export class AppHarness<P = unknown>
   constructor(options: AppHarnessOptions<P>) {
     const appId = options.appId ?? `app:${ulid()}`;
 
-    // Resolve substrate via the explicit-parent slot pattern (ADR 31).
+    // Substrate slot resolution is owned by BaseHarness (ADR 31). The
+    // positional substrate args below are the App's DEFAULTS — used
+    // when `options.{bus,inbox,journal}` is omitted. Factories in
+    // those slots get a HarnessShell whose .bus/.inbox/.journal point
+    // at these defaults (an adopter who passes `LocalEventBus.factory()`
+    // gets a fresh bus wrapping the default — leaf at the app level
+    // since the default has no upstream, but pre-wired for the
+    // hierarchy nonetheless).
     //
-    // The App's BaseHarness fields aren't wired yet — substrate IS
-    // what's being constructed — so factories see a `parent` shell
-    // that buffers `onClose` registrations for replay onto the real
-    // harness after super() finishes.
-    const pendingCloseHandlers: Array<() => void | Promise<void>> = [];
-    const parent: AppSubstrateParent = {
-      id: appId,
-      metadata: Object.freeze({ ...(options.metadata ?? {}) }),
-      onClose: (h) => pendingCloseHandlers.push(h),
-    };
-    const journal: OperationJournal = resolveSyncSubstrateSlot<
-      OperationJournal,
-      AppSubstrateParent,
-      OperationJournalFactory<AppSubstrateParent>
-    >(
-      options.journal,
-      parent,
-      () => new MemoryJournal({ capacity: 10_000 }),
-      "journal",
-    );
-    const bus: EventBus = resolveSyncSubstrateSlot<
-      EventBus,
-      AppSubstrateParent,
-      EventBusFactory<AppSubstrateParent>
-    >(options.bus, parent, () => new LocalEventBus(), "bus");
-    const inbox: MessageInbox = resolveSyncSubstrateSlot<
-      MessageInbox,
-      AppSubstrateParent,
-      MessageInboxFactory<AppSubstrateParent>
-    >(options.inbox, parent, () => new LocalInbox(), "inbox");
-
-    // Mark close-Operation envelopes as bus-only (ADR 31). The
-    // closeApp body runs `onClose` handlers via `super.close()`, which
-    // may close the journal an `onClose` registered against. If close
-    // envelopes were journaled, the framework would append a terminal
-    // envelope to a closed journal and crash. Bus-only routing keeps
-    // the close visible to bus subscribers without journal coupling.
-    //
-    // Adopters who supply a custom `policy` get their override merged
-    // with this rule. Adopters who want to journal close-app events
-    // can flip `app:command:close-app` back to "always" — they accept
-    // responsibility for substrate lifetime.
-    super("app", appId, journal, bus, inbox, {
-      metadata: options.metadata,
-      policy: {
-        ...DEFAULT_JOURNALING_POLICY,
-        override: {
-          "app:command:close-app": "bus-only",
+    // Close-Operation envelopes for `app:command:close-app` are routed
+    // bus-only via policy override — substrate-close handlers fire
+    // inside `super.close()` without crashing the framework (ADR 31
+    // Option G).
+    super(
+      "app",
+      appId,
+      new MemoryJournal({ capacity: 10_000 }),
+      new LocalEventBus(),
+      new LocalInbox(),
+      {
+        metadata: options.metadata,
+        ...(options.journal !== undefined ? { journal: options.journal } : {}),
+        ...(options.bus !== undefined ? { bus: options.bus } : {}),
+        ...(options.inbox !== undefined ? { inbox: options.inbox } : {}),
+        policy: {
+          ...DEFAULT_JOURNALING_POLICY,
+          override: {
+            "app:command:close-app": "bus-only",
+          },
         },
       },
-    });
-    // Replay any close handlers the substrate factories registered
-    // against the shell onto the now-real harness.
-    for (const h of pendingCloseHandlers) this.onClose(h);
+    );
+    // Local aliases for convenience in the rest of the constructor.
+    const journal = this.journal;
+    const bus = this.bus;
+    const inbox = this.inbox;
 
     this.rootElement = options.rootElement;
     // Executor slot: factory → construct with the app's substrate so

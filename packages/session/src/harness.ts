@@ -11,12 +11,7 @@
 
 import { Effect, Fiber, Stream } from "effect";
 
-import {
-  BaseHarness,
-  resolveSyncSubstrateSlot,
-  runHarnessProtocol,
-  ulid,
-} from "@agentick/runtime";
+import { BaseHarness, runHarnessProtocol, ulid } from "@agentick/runtime";
 import type { LoopExecutorProtocol, ReconcilerProtocol } from "@agentick/spec";
 import type {
   AppendEntryInput,
@@ -224,44 +219,21 @@ export class SessionHarness<P = unknown>
     inbox: MessageInbox,
     options: SessionHarnessOptions<P>,
   ) {
-    // ADR 31 Phase 3 — session-level substrate slots accept
-    // `instance | factory`. The factory's `parent` is a session shell
-    // exposing the APP'S substrate as default upstream. Factories that
-    // return wrapping primitives (e.g. `LocalEventBus.factory()`) thus
-    // fan in to the app's bus by default — the multi-tenant pattern.
-    // When no factory is supplied, the session inherits the app
-    // substrate directly (today's default behavior).
-    const pendingCloseHandlers: Array<() => void | Promise<void>> = [];
-    const sessionShell: SessionSubstrateParent = {
-      id: options.sessionId,
-      metadata: Object.freeze({ ...(options.metadata ?? {}) }),
-      bus,
-      inbox,
-      journal,
-      onClose: (h) => pendingCloseHandlers.push(h),
-    };
-    const resolvedJournal = resolveSyncSubstrateSlot<
-      OperationJournal,
-      SessionSubstrateParent,
-      OperationJournalFactory<SessionSubstrateParent>
-    >(options.journal, sessionShell, () => journal, "session.journal");
-    const resolvedBus = resolveSyncSubstrateSlot<
-      EventBus,
-      SessionSubstrateParent,
-      EventBusFactory<SessionSubstrateParent>
-    >(options.bus, sessionShell, () => bus, "session.bus");
-    const resolvedInbox = resolveSyncSubstrateSlot<
-      MessageInbox,
-      SessionSubstrateParent,
-      MessageInboxFactory<SessionSubstrateParent>
-    >(options.inbox, sessionShell, () => inbox, "session.inbox");
-
-    // Mark close-Operation envelopes bus-only (ADR 31 §close semantics).
-    // The session's close body fires substrate-close handlers via
-    // `super.close()` — close.body would crash on a closed journal
-    // otherwise. Mirrors the AppHarness pattern.
-    super("session", options.sessionId, resolvedJournal, resolvedBus, resolvedInbox, {
+    // Substrate slot resolution is owned by BaseHarness (ADR 31). The
+    // positional `journal / bus / inbox` here are the SESSION's DEFAULTS
+    // — typically the APP's substrate. When `options.{bus,inbox,journal}`
+    // is supplied (instance or factory), BaseHarness uses that instead;
+    // factories see a HarnessShell whose .bus/.inbox/.journal point at
+    // these positional defaults, so the fan-in/wrap pattern composes.
+    //
+    // `session:command:close` envelopes are bus-only via policy
+    // override — substrate-close handlers fire inside `super.close()`
+    // without crashing the framework (ADR 31 Option G).
+    super("session", options.sessionId, journal, bus, inbox, {
       metadata: options.metadata,
+      ...(options.journal !== undefined ? { journal: options.journal } : {}),
+      ...(options.bus !== undefined ? { bus: options.bus } : {}),
+      ...(options.inbox !== undefined ? { inbox: options.inbox } : {}),
       policy: {
         ...DEFAULT_JOURNALING_POLICY,
         override: {
@@ -269,9 +241,12 @@ export class SessionHarness<P = unknown>
         },
       },
     });
-    // Replay any close handlers session-level factories registered
-    // against the shell onto the now-real harness.
-    for (const h of pendingCloseHandlers) this.onClose(h);
+    // Local aliases for the resolved substrate. BaseHarness has set
+    // `this.journal / .bus / .inbox` to the resolved instances; we
+    // alias for readability through the rest of the constructor.
+    const resolvedJournal = this.journal;
+    const resolvedBus = this.bus;
+    const resolvedInbox = this.inbox;
 
     this.store = new SessionStateStore(options.sessionId);
     this.bridges = buildSessionBridges(

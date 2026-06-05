@@ -26,6 +26,7 @@ import { Cause, Effect, Exit, Option } from "effect";
 import type {
   CommandOutcome,
   EventBus,
+  EventBusFactory,
   EventPhase,
   EventScope,
   EventSurface,
@@ -37,14 +38,17 @@ import type {
   MessageEnvelope,
   MessageHandlerError,
   MessageInbox,
+  MessageInboxFactory,
   Operation,
   OperationJournal,
+  OperationJournalFactory,
   ProtocolEvent,
   SubstrateError,
   TerminalEvent,
   Unsubscribe,
 } from "@agentick/spec";
 import { DEFAULT_JOURNALING_POLICY } from "@agentick/spec";
+import { resolveSyncSubstrateSlot } from "./resolve-slot.js";
 import { ulid } from "./ulid.js";
 import {
   EMPTY_CONTEXT,
@@ -190,6 +194,29 @@ export class MiddlewareChain {
 // BaseHarness
 // ============================================================================
 
+/**
+ * Forward-reference shell that BaseHarness hands to substrate
+ * factories during its own construction. Exposes the harness's
+ * identity, adopter metadata, the substrate DEFAULTS (positional
+ * args to the constructor — i.e. parent-provided substrate), and
+ * a buffered `onClose` registration that's replayed onto the real
+ * harness once construction completes.
+ *
+ * The same shape every level of the hierarchy sees. Future Gateway
+ * and any other container harness inherit this for free.
+ *
+ * @see docs/proposals/v2/blueprint/31-harness-hierarchy.md §Two-phase construction
+ */
+export interface HarnessShell {
+  readonly id: string;
+  readonly metadata: Readonly<Record<string, unknown>>;
+  /** Substrate defaults (positional ctor args) — the parent's substrate. */
+  readonly bus: EventBus;
+  readonly inbox: MessageInbox;
+  readonly journal: OperationJournal;
+  onClose(handler: () => void | Promise<void>): void;
+}
+
 export interface BaseHarnessOptions<P = unknown, I = unknown> {
   readonly policy?: JournalingPolicy;
   /**
@@ -228,6 +255,27 @@ export interface BaseHarnessOptions<P = unknown, I = unknown> {
    * `harness.metadata`. Immutable post-construction.
    */
   readonly metadata?: Readonly<Record<string, unknown>>;
+  /**
+   * Substrate slot overrides — `instance | factory`. When omitted,
+   * the harness uses the positional substrate constructor args as-is
+   * (the parent-provided defaults, today's behavior preserved).
+   *
+   * Factory form: `(parent: HarnessShell) => R`. The shell exposes
+   * the positional substrate args as `.bus / .inbox / .journal`, so
+   * factories that wrap their parent's substrate (e.g.
+   * `LocalEventBus.factory()` defaults to fan-in via parent.bus)
+   * compose naturally. `parent.onClose(h)` registers cleanup that
+   * fires when THIS harness closes.
+   *
+   * This is the same `instance | factory` shape every level of the
+   * hierarchy sees — Gateway → App → Session → (future). Implemented
+   * once on BaseHarness; inherited by every subclass.
+   *
+   * @see docs/proposals/v2/blueprint/31-harness-hierarchy.md
+   */
+  readonly bus?: EventBus | EventBusFactory<HarnessShell>;
+  readonly inbox?: MessageInbox | MessageInboxFactory<HarnessShell>;
+  readonly journal?: OperationJournal | OperationJournalFactory<HarnessShell>;
 }
 
 export abstract class BaseHarness<
@@ -301,12 +349,21 @@ export abstract class BaseHarness<
     return this.middleware.use(mw as Middleware<unknown, unknown, unknown>);
   }
 
+  /**
+   * Substrate used by this harness. Set from positional defaults
+   * (the parent's substrate, passed in as ctor args) unless an
+   * override is supplied in `options.{bus,inbox,journal}`.
+   */
+  protected readonly journal: OperationJournal;
+  protected readonly bus: EventBus;
+  protected readonly inbox: MessageInbox;
+
   constructor(
     protected readonly surface: Surface,
     protected readonly scopeId: string,
-    protected readonly journal: OperationJournal,
-    protected readonly bus: EventBus,
-    protected readonly inbox: MessageInbox,
+    defaultJournal: OperationJournal,
+    defaultBus: EventBus,
+    defaultInbox: MessageInbox,
     options: BaseHarnessOptions<Parent, Input> = {},
   ) {
     this.address = `${surface}:${scopeId}`;
@@ -314,6 +371,41 @@ export abstract class BaseHarness<
     this.parent = options.parent;
     this.input = options.input;
     this.metadata = Object.freeze({ ...(options.metadata ?? {}) });
+
+    // Substrate slot resolution (ADR 31). Build a shell exposing the
+    // positional substrate defaults as the parent-side upstream, then
+    // resolve each slot. Factories see `parent.bus / .inbox / .journal`
+    // = the defaults, and register `onClose(h)` against a buffer that
+    // replays onto `this.onClose` once the harness's own state is set
+    // up. Subclasses that don't supply substrate options get
+    // today's behavior (use the positional defaults as-is).
+    const pendingCloseHandlers: Array<() => void | Promise<void>> = [];
+    const shell: HarnessShell = {
+      id: scopeId,
+      metadata: this.metadata,
+      bus: defaultBus,
+      inbox: defaultInbox,
+      journal: defaultJournal,
+      onClose: (h) => pendingCloseHandlers.push(h),
+    };
+    this.journal = resolveSyncSubstrateSlot<
+      OperationJournal,
+      HarnessShell,
+      OperationJournalFactory<HarnessShell>
+    >(options.journal, shell, () => defaultJournal, `${surface}.journal`);
+    this.bus = resolveSyncSubstrateSlot<
+      EventBus,
+      HarnessShell,
+      EventBusFactory<HarnessShell>
+    >(options.bus, shell, () => defaultBus, `${surface}.bus`);
+    this.inbox = resolveSyncSubstrateSlot<
+      MessageInbox,
+      HarnessShell,
+      MessageInboxFactory<HarnessShell>
+    >(options.inbox, shell, () => defaultInbox, `${surface}.inbox`);
+    // Replay buffered close handlers onto this (the now-real harness).
+    for (const h of pendingCloseHandlers) this.onClose(h);
+
     // Snapshot the current operation's RuntimeContext at construction.
     // Empty when constructed outside any active Operation (the common
     // case for top-of-tree harnesses constructed by adopter code).

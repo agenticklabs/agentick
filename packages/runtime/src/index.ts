@@ -25,6 +25,8 @@ export {
   OperationOutcomeError,
   mergeVerdict,
   runHarnessProtocol,
+  type BaseHarnessOptions,
+  type HarnessShell,
   type Middleware,
   type LifecycleHandler,
   type Unsubscribe,
