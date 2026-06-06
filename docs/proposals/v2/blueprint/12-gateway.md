@@ -1,422 +1,310 @@
-# 12 — Gateway (Optional Ingress Wrapper)
+# 12 — Gateway (Runtime Root Harness)
 
-**Status:** Synthesized
-`[SOURCE: gateway.md, runtime.md, harness-principle.md]`
+**Status:** Revised 2026-06-06 (rewritten end-to-end after v1 deep-read)
+**Builds on:** ADR 26 (Harness as the single shape), ADR 27 (Modular built-ins), ADR 29 (Bus overhaul), ADR 31 (Self-similar slottable harness hierarchy)
+**Supersedes:** prior "Gateway as stateless front door" framing — v1's `Gateway` was never stateless, and v2's `GatewayHarness` is the harness-shaped continuation of v1's runtime root.
 
-`@agentick/gateway` is the **optional** ingress wrapper. It exposes the
-runtime through network transports (HTTP, WebSocket, SSE, gRPC) without
-redefining harness contracts. It is **not** a cluster member; it does
-not host session entities. It is a stateless front door.
+## TL;DR
 
-```
-                    ┌────────────────────────────────────┐
-                    │              Gateway               │
-                    │                                    │
-   network req ───► │  HTTP / WS / SSE / RPC adapters    │ ───► harness commands
-                    │                                    │
-                    │  auth · rate limit · audit ·       │
-                    │  transport ↔ harness mapping       │
-                    │                                    │
-   network resp ◄── │                                    │ ◄─── events / outcomes
-                    └────────────────────────────────────┘
-                                     │
-                                     ▼
-                            Runtime (in-process or
-                            cluster-routed via 11-cluster.md)
-```
+`GatewayHarness` is the **top-level harness in the v2 hierarchy** —
+`GatewayHarness` → `AppHarness` → `SessionHarness`. It owns the
+substrate (bus/inbox/journal) Apps and Sessions below it inherit or
+wrap. It hosts one or more Apps. It is the lifecycle root.
 
-`[V1-INHERITED, REFINED]` of v1's `@agentick/gateway` and
-`@agentick/express`. Same role, but in v2 it explicitly maps to the
-harness command/event surface rather than exposing custom endpoints per
-operation.
+**Gateway is useful in every deployment tier** — local single-user
+agents (OpenClaw / Hermes style), single-tenant cloud, multi-tenant
+distributed cloud. The harness is the same in every tier; only the
+substrate impl and the extensions differ. **No "stateless front door"
+mode.** The runtime root holds state; that's its job.
 
-## What this layer does
+Network transports (HTTP, WebSocket, SSE, MCP, OpenAI-compat) are
+**extensions** on the Gateway, not the Gateway itself. The Gateway
+runs without any transport (Tier 0 — embedded library); transports
+plug in when adopters need network ingress.
 
-- Transport protocol handling (HTTP/WS/SSE/RPC).
-- Authentication and request admission.
-- Rate limiting and policy enforcement.
-- Client connection lifecycle (connect/disconnect/resume).
-- Projection of harness commands and events to transport formats.
+`@agentick/cluster` provides distributed substrate implementations
+(`ClusterEventBus`, `ClusterInbox`, `ClusterJournal`) that satisfy
+the existing substrate protocols and plug into `GatewayHarness`'s
+substrate slots. **No Gateway-side changes for cluster mode** — just
+swap the substrate factories.
 
-## What it does NOT do
+## Lineage — what `Gateway` actually was in v1
 
-- Own session execution semantics (session harness).
-- Redefine harness contracts (uses them).
-- Embed provider/model logic (executor harness).
-- Force network deployment (library-only users don't depend on gateway).
-- Host session entities (cluster does that, if present).
+v1's `Gateway` class (`packages/gateway/src/gateway.ts`, ~27K LOC
+across 25 files) is the original of this concept. Reading the code,
+v1's Gateway:
 
-## Mapping model
+- **Hosted multiple Apps** via `AppRegistry` — many apps registered,
+  one default, routed by session key.
+- **Managed sessions** across apps (`SessionManager`) — tracked
+  per-client sessions, hibernation, resume.
+- **Plugged in transports**: WebSocket, HTTP, SSE, Unix socket, Local,
+  EmbeddedSSE. Multiple simultaneously.
+- **Plugged in protocol adapters**: `mcp-server`, `openai-compat`,
+  `logging` shipped in-tree; adopters added more via `GatewayPlugin`.
+- **Held a method registry** — RPC-style custom methods with schemas,
+  auth, namespaces.
+- **Bounded auth + config** — credentials extraction, role checks,
+  runtime config store.
+- **Routed events** — per-client event buffers with backpressure,
+  channel subscriptions, devtools shadow channel.
+- **Stateful throughout** — connection tracking, channel
+  subscriptions, plugin methods, client buffers, config store.
 
-```
-Client transport message
-  ──► gateway validation / auth
-  ──► harness command invocation
-  ──► harness result / event projection
-  ──► transport response / stream
-```
+v1's Gateway was the runtime root. v2's `GatewayHarness` is the
+harness-shaped continuation of the same role, reshaped through ADR 26
+(everything is a harness) and ADR 31 (self-similar slottable
+hierarchy).
 
-Every gateway endpoint maps to a harness command or stream subscription.
-The gateway holds no session state of its own.
+The earlier draft of this doc described a "stateless front door"
+shape — that was aspirational and at odds with both v1's reality and
+what adopters want. Rewritten.
 
-## Deployment topologies
+## Deployment tiers — same harness, different substrate + extensions
 
-```
-Tier 0 — embedded library (no gateway)
-  user code calls App.runOnce(...) directly
+Every tier uses the same `GatewayHarness`. What differs:
 
-Tier 1 — co-located gateway
-  gateway and runtime in one Node process; gateway mounts as middleware
-  inside the user's HTTP server (Express, Fastify, etc.)
+| Tier | Use case | Substrate | Extensions | Example |
+|---|---|---|---|---|
+| **0 — Embedded library** | Adopter constructs a Gateway in-process, no transports | `LocalEventBus` + `MemoryJournal` + `LocalInbox` | None | Tests, CLIs, scripts |
+| **1 — Local single-user agent** | Long-running agent on user's machine. Optional local transports (Unix socket, HTTP loopback). Persistent journal. | Local substrate + `SQLiteJournal` (when durable persistence needed) | Sandbox, MCP server-side, scheduler/cron, connectors (Telegram, iMessage), skills | OpenClaw / Hermes style — agent runs on your laptop, persists memory across restarts, schedules autonomous tasks, exposes MCP to other tools |
+| **2 — Single-tenant cloud** | Hosted single-user / single-org agent. Network transports. Co-located with runtime. | Local substrate or single-node durable (`PostgresJournal`) | Transports (WS/HTTP/SSE), auth, rate limit, multi-app | Hosted agent for a single team; gateway IS the runtime node |
+| **3 — Multi-tenant distributed cloud** | Many tenants, gateway fleet, runtime cluster | `@agentick/cluster` substrate (`ClusterEventBus`, `ClusterJournal`, `ClusterInbox` over `@effect/cluster`) | Transports + auth + tenant routing + per-tenant per-session substrate factories | Production multi-tenant SaaS — many gateway pods front a runtime cluster; sessions route to nodes; per-tenant isolation via substrate factories |
 
-Tier 2 — split gateway fleet
-  gateways are a separate fleet, scaling independently from runtime
-  nodes. Each gateway routes into the cluster via the cluster's API.
-```
+**The harness shape is invariant across all four tiers.** What an
+adopter writes in Tier 0 (a few lines of code) generalises to Tier 3
+(distributed deployment) by:
 
-These are deployment choices over the same gateway implementation. The
-wire protocol between client and gateway is identical across tiers.
+1. Swapping the substrate factories at the Gateway slot (cluster
+   substrate replaces local).
+2. Installing transport extensions for network ingress.
+3. Installing auth + tenant-routing extensions.
 
-## Transports supported
+No adopter code changes between tiers beyond construction-time
+configuration.
 
-| Transport                   | Bidirectional                   | Streaming          | Use case                             |
-| --------------------------- | ------------------------------- | ------------------ | ------------------------------------ |
-| HTTP + SSE                  | two channels (POST + SSE)       | server→client only | browsers, simple REST clients        |
-| Streamable HTTP (MCP-style) | one endpoint, upgrades to SSE   | server-streamed    | browsers, MCP clients                |
-| WebSocket                   | native bidirectional            | both directions    | browsers with bidirectional channels |
-| gRPC                        | native bidirectional via HTTP/2 | both directions    | service-to-service, typed            |
-| Unix socket                 | TCP semantics, local            | both directions    | same-machine IPC                     |
-| In-process                  | direct calls                    | both directions    | embedded SDK, tests                  |
-
-`[V1-INHERITED]` from v1's transport list. v2 adds streamable HTTP and
-optionally gRPC.
-
-Each transport is its own package:
-
-```
-@agentick/gateway-http-sse
-@agentick/gateway-streamable-http
-@agentick/gateway-websocket
-@agentick/gateway-grpc
-@agentick/gateway-unix-socket
-@agentick/gateway-local                  // in-process; testing
-@agentick/gateway-express                // [V1-INHERITED] middleware integration
-```
-
-## Wire protocol
-
-Above any transport:
-
-- **Frames**: JSON-shaped events conforming to spec event/channel types.
-- **Sequence**: monotonic per-session sequence numbers; enables resume.
-- **Resume**: client sends last-seen sequence on reconnect; server
-  replays from there (requires bounded server-side buffer).
-- **Compression**: optional per-transport.
-- **Version negotiation**: spec version exchanged at handshake (similar
-  to MCP `initialize`).
-
-`[V1-INHERITED]` from v1's existing transport protocol. v2 formalizes
-the framing in `@agentick/spec` (see `02-data-model.md` §Channel types).
-
-## Framework channels
-
-The seven framework channels are unchanged from v1
-(`packages/shared/src/protocol.ts`):
-
-```
-session:messages          — client → server: SendInput
-session:events            — server → client: ProtocolEvent stream
-session:control           — bidirectional: render command, abort
-session:result            — server → client: SendResult
-session:tool_confirmation — bidirectional: tool confirmation flow
-session:context           — server → client: utilization updates
-```
-
-Plus app-wide:
-
-```
-session:messages         — well, those are per-session
-app:events               — server → client: cross-session ProtocolEvent stream
-                           (subject to gateway authorization)
-```
-
-`[V1-INHERITED]` exactly. The framework channel set didn't change between
-v1 and v2.
-
-User-defined channels (created via `session.channel(name)`) are exposed
-through the same gateway, scoped to authorized clients of that session.
-
-## Gateway commands in (per-transport translation)
-
-The gateway exposes a single internal command surface that transport
-adapters translate to/from:
+## Anatomy
 
 ```ts
-interface GatewayProtocol {
-  authenticate(req: AuthRequest): Effect<AuthResult, AuthError, GatewayEnv>;
+class GatewayHarness extends BaseHarness<"gateway", undefined, GatewayInput> {
+  // Substrate slots — inherited from BaseHarness, accept instance | factory.
+  // Default: LocalEventBus + MemoryJournal + LocalInbox.
+  // Cluster mode: ClusterEventBus + ClusterJournal + ClusterInbox factories.
+  readonly bus: EventBus;
+  readonly inbox: MessageInbox;
+  readonly journal: OperationJournal;
 
-  authorize(ctx: AuthorizedRequest): Effect<AuthorizationResult, AuthorizationError, GatewayEnv>;
+  // Apps — eager list or lazy factory (ADR 31).
+  // Multi-app support is structural; single-app is the trivial case.
+  readonly apps: Map<string, AppHarness>;
 
-  proxyCommand(
-    ctx: AuthorizedRequest,
-    command: HarnessCommand,
-  ): Effect<HarnessResult, HarnessError | GatewayError, GatewayEnv>;
+  // Extensions installed via the gateway's installer
+  // (transport extensions, auth, plugins, methods).
+  readonly extensions: GatewayExtensions;
 
-  subscribeStream(
-    ctx: AuthorizedRequest,
-    query: EventQuery,
-  ): Effect<Stream<ProtocolEvent>, GatewayError, GatewayEnv>;
+  // Lifecycle
+  createApp(element: ReactElement, options?: AppOptions): Promise<AppHarness>;
+  app(id: string): AppHarness | undefined;
+  closeGateway(): Promise<void>;
 
-  publishChannel(
-    ctx: AuthorizedRequest,
-    channel: string,
-    event: ChannelEvent,
-  ): Effect<void, GatewayError, GatewayEnv>;
-
-  closeConnection(connectionId: string): Effect<void, never, GatewayEnv>;
+  // Observation
+  events(filter?: EventQuery, options?: SubscribeOptions): AsyncIterable<ProtocolEvent>;
+  metrics(): LogMetrics;
 }
 ```
 
-`[PLACEHOLDER]` shape — synthesized; sign-off needed.
+The `GatewayHarness` itself ships in `@agentick/gateway` (or the
+`packages/gateway/src/v2/` subfolder during the v1 ⇄ v2 coexistence
+period). It is **pure runtime root** — no transports, no protocol
+adapters, no auth machinery in its core. Those are extensions.
 
-The gateway implementation:
+## What Gateway owns — what it delegates
 
-1. Accepts the transport-specific request.
-2. Authenticates (extracts identity).
-3. Authorizes (checks the request is allowed against the identity).
-4. Translates to harness command (or stream subscription).
-5. Calls into the runtime (in-process) or cluster (Tier 2).
-6. Translates the result/stream back into transport frames.
+| Owned by `GatewayHarness` core | Delegated to extensions |
+|---|---|
+| Apps registry + lifecycle | Network transports (HTTP/WS/SSE/Unix/MCP/OpenAI-compat) |
+| Substrate (bus/inbox/journal) | Auth + identity boundary |
+| Cross-app event observation | Rate limiting + admission control |
+| Operation framework lifecycle | Method registry / RPC surface |
+| Extension installation (`AppExtension`, future `GatewayExtension`) | Per-client event buffers + resume |
+| `events()` + `metrics()` cross-app substrate observability | Plugin system (MCP server, OpenAI-compat, logging) |
+| Per-app substrate scoping (Apps inherit Gateway substrate by default) | Persistent storage adapters (Postgres journal, etc.) |
 
-## Events out
+The runtime-root role is small. The breadth comes from extensions
+hung off it.
 
-```
-gateway:transport:connected           gateway:transport:disconnected
-gateway:auth:terminal                 (with outcome)
-gateway:rate-limit:applied            (when a request is throttled)
-gateway:proxy:requested               gateway:proxy:terminal
-gateway:resume:requested              gateway:resume:terminal
-```
+## Composition with the cluster module
 
-These emit on `surface: "gateway"` and feed into the same event substrate
-as everything else (`10-events-and-interceptors.md`).
-
-## Interceptors
-
-```
-authenticate         authorize         proxyCommand
-subscribeStream      publishChannel    closeConnection
-```
-
-Common uses:
-
-| Interceptor                           | Use case                                            |
-| ------------------------------------- | --------------------------------------------------- |
-| `authenticate` replace                | Test-mode bypass with fixture identity              |
-| `authorize` veto                      | Deny access to a session not owned by this identity |
-| `proxyCommand` proceed (with rewrite) | Inject scope (tenantId from auth) into request      |
-| `subscribeStream` veto                | Hide DevTools events from non-admin clients         |
-| `publishChannel` defer                | Queue if rate-limit hit                             |
-
-## Outcomes and failures
+`@agentick/cluster` is the distributed-substrate package. It implements
+`EventBus`, `MessageInbox`, and `OperationJournal` over
+`@effect/cluster` primitives. **It does not subclass GatewayHarness or
+introduce a separate harness type** — it provides substrate
+implementations that satisfy the same protocols `LocalEventBus` /
+`MemoryJournal` / `LocalInbox` do.
 
 ```ts
-type GatewayError =
-  | TransportError
-  | AuthError
-  | AuthorizationError
-  | RateLimitError
-  | ResumeWindowExceededError
-  | InvalidWireFormatError;
+// Single-node Tier 1/2 (local substrate, default):
+const gateway = createGateway({
+  apps: { /* ... */ },
+});
 
-interface TransportError {
-  _tag: "TransportError";
-  transport: string;
-  cause: unknown;
-}
-
-interface AuthorizationError {
-  _tag: "AuthorizationError";
-  reason: string;
-}
-
-interface ResumeWindowExceededError {
-  _tag: "ResumeWindowExceededError";
-  requestedSequence: number;
-  oldestAvailable: number;
-}
-
-interface InvalidWireFormatError {
-  _tag: "InvalidWireFormatError";
-  reason: string;
-}
+// Tier 3 distributed cluster:
+const gateway = createGateway({
+  apps: { /* ... */ },
+  bus: ClusterEventBus.factory({ /* cluster config */ }),
+  journal: ClusterJournal.factory({ /* cluster config */ }),
+  inbox: ClusterInbox.factory({ /* cluster config */ }),
+});
 ```
 
-## Resume semantics
+Per-tenant isolation in Tier 3 is achieved through the session-level
+substrate slots (ADR 31): each session constructs its own substrate
+wrapping the gateway-level cluster substrate with tenant-scoped
+filtering. No `tenantId` field anywhere in the framework — the pattern
+is emergent from substrate factories + closure capture + the
+`metadata: Record<string, unknown>` bag.
 
-Per `[SOURCE: runtime.md (earlier) §Open Question 16]`:
+## Network transports as extensions
 
-```
-Server-side buffer
-  ──► retains last N events per session (default: 256)
-  ──► or last T seconds (default: 5 minutes)
-       whichever cap hits first
-
-Client reconnect with lastSeenSequence
-  ──► gateway looks up the session's buffer
-  ──► if requested sequence is in buffer:
-        replays events from that point
-  ──► if older than buffer:
-        ResumeWindowExceededError
-        client must initiate fresh subscription (or full timeline read)
-```
-
-`[PROPOSAL]` defaults; sign-off needed.
-
-In cluster mode, the buffer lives on the node currently hosting the
-session entity. Migration carries the buffer (best-effort) but resume
-across migration may require fresh start.
-
-## Authentication
-
-The gateway is the preferred layer for:
-
-- Authentication (validate credentials, extract identity).
-- Authorization (does this identity own this session?).
-- Tenant scoping (set `metadata.tenantId` on session creation).
-- Request quotas and rate limits (pre-runtime).
-- Audit logging at ingress.
-
-The runtime still enforces critical invariants — gateway is not a trust
-bypass. App-level interceptors can re-check authorization.
-
-`[V1-INHERITED, REFINED]` from v1's gateway auth model.
-
-## Session lifecycle through gateway
-
-```
-Client connects                       Gateway                      Runtime
-──────────────                        ───────                      ───────
-WS / HTTP open
-                                      authenticate
-                                      ◄── identity
-
-sendCreateSession({ ... })
-                                      authorize
-                                      proxyCommand:
-                                        app.createSession(...)
-                                                                    creates Session
-                                      ◄── session entity ref
-                                      mapping: connectionId → sessionId
-
-sendMessage({ messages })
-                                      proxyCommand:
-                                        session.send(...)
-                                                                    runs execution
-                                                                    streams events
-                                      ◄── Stream<ProtocolEvent>
-                                      forward as SSE / WS frames
-
-client disconnects
-                                      mark connection idle
-                                      runtime keeps session alive
-                                      (hibernates per policy)
-
-client reconnects
-                                      authenticate (same identity)
-                                      reattach to existing sessionId
-                                      resume from lastSeenSequence
-                                      ◄── replay
-```
-
-The session lives **in the runtime**, not the gateway. Gateways can
-terminate independently (rolling restart, autoscaling) without dropping
-sessions; clients reconnect to any gateway and resume.
-
-## Multiple gateways, one runtime
-
-```
-            ┌─────────┐  ┌─────────┐  ┌─────────┐
-            │Gateway A│  │Gateway B│  │Gateway C│
-            └────┬────┘  └────┬────┘  └────┬────┘
-                 │            │            │
-                 └────────────┼────────────┘
-                              ▼
-                        Runtime (cluster
-                        or single node)
-```
-
-In production, a gateway fleet fronts the runtime/cluster. Each gateway
-is stateless; clients can land on any gateway and the request routes
-correctly into the runtime (via the cluster's routing in Tier 2, or
-directly to the local runtime in Tier 1).
-
-## Composition with cluster
-
-```
-Client → Gateway → Cluster routing → Runtime node hosting session
-                  ──────────────
-                  cluster handles:
-                    - which node hosts session id
-                    - activate if hibernated
-                    - migrate if node leaves
-```
-
-Gateways MAY use the cluster framework for routing (`@effect/cluster`'s
-client API) without becoming cluster members themselves. They consume
-cluster routing as a service.
-
-## Composition with library mode
-
-In Tier 1, the gateway is mounted **inside** the user's HTTP application:
+In v1, transports were first-class on the `Gateway` class. In v2,
+they're `GatewayExtension`s. Each transport package ships its own
+extension factory:
 
 ```ts
-import express from "express";
-import { createApp } from "@agentick/runtime";
 import { createGateway } from "@agentick/gateway";
-import { httpSseTransport } from "@agentick/gateway-http-sse";
+import { withHttpSse } from "@agentick/gateway-http-sse";
+import { withWebSocket } from "@agentick/gateway-ws";
 
-const app = createApp(<MyAgent />, { ... });
-const gateway = createGateway({ app, transports: [httpSseTransport()] });
-
-const server = express();
-server.use("/agent", gateway.middleware());
-server.listen(3000);
+const gateway = await createGateway({
+  apps: { ... },
+  extensions: [
+    withHttpSse({ port: 3000 }),
+    withWebSocket({ port: 3001 }),
+  ],
+});
 ```
 
-`[V1-INHERITED]` of v1's `@agentick/express` integration pattern.
+Each transport extension:
+- Installs at gateway construction time
+- Owns its own network resources (sockets, HTTP server, etc.)
+- Routes incoming requests to gateway methods (or directly to app/session methods)
+- Subscribes to relevant substrate events for outbound streaming
+- Registers `onClose` to clean up
 
-## Streaming and backpressure
+This matches the canonical extension pattern from `create-extension`
++ `create-harness` skills. Transports are big extensions — they may
+own their own substrate (per-connection event buffers, sequence
+counters), but they don't replace the gateway's substrate.
 
-The gateway projects per-session and app-wide event streams to clients.
-Backpressure rules:
+**Transport packages — proposed v2 layout (Phase 5+):**
 
-- Per-connection bounded buffer (default: 256 events).
-- Slow client → buffer fills → connection back-pressures the upstream
-  stream.
-- If buffer overflows, the connection is closed with
-  `BufferOverflowError`; client must reconnect with `lastSeenSequence`.
+```
+@agentick/gateway-http-sse      → HTTP + SSE (browsers, simple REST)
+@agentick/gateway-streamable    → Streamable HTTP (MCP-style)
+@agentick/gateway-ws            → WebSocket (browsers, native)
+@agentick/gateway-grpc          → gRPC (service-to-service)
+@agentick/gateway-unix-socket   → Unix socket (same-machine IPC)
+@agentick/gateway-mcp-server    → Expose Gateway over MCP wire (skip's gateway plugin in v1)
+@agentick/gateway-openai-compat → OpenAI-compatible REST shim (v1 had this as a plugin)
+@agentick/gateway-express       → Express middleware integration (V1-INHERITED naming)
+```
 
-Same backpressure model as `10-events-and-interceptors.md` but applied
-at the connection boundary.
+Each ships independently. Adopters pick what they need. Library users
+(Tier 0) install none.
 
-## Decisions captured
+## Plugin model (post-Phase-4)
 
-- Gateway is an optional ingress wrapper; library users don't depend on
-  it.
-- Maps to harness commands; does not redefine them.
-- Stateless; sessions live in the runtime.
-- Auth/policy at ingress; semantics in runtime.
-- Multiple gateways can front one runtime/cluster.
-- Resume via per-session bounded buffer + sequence numbers.
+V1's plugin system (`GatewayPlugin`) gave adopters a way to:
+- Register custom methods
+- Subscribe to gateway events
+- Add HTTP routes
+- Hold per-plugin state
 
-## Open questions
+In v2, the equivalent is the `GatewayExtension` shape (parallel to
+`AppExtension` / `SessionExtension` per ADR 31). Plugins from v1
+(`mcp-server`, `openai-compat`, `logging`) become extensions. Specific
+extensions are listed in V1-GATEWAY-PARITY-TRACKER.md.
 
-- Default transport set for v2 (lean: HTTP+SSE, WebSocket, in-process).
-- Resume semantics mandatory vs transport-specific.
-- Error envelope standardization (single gateway error schema vs
-  transport-native).
-- Policy plugin API shape.
-- Co-located vs separate fleet operational guidance.
-- `GatewayProtocol` exact shape (placeholder; sign-off).
-- Server-side buffer defaults (lean: 256 events / 5 min).
+## Spec surface (proposed — Phase 4)
+
+```ts
+// @agentick/spec
+
+export interface GatewayHarnessProtocol {
+  readonly id: string;
+  readonly metadata: Readonly<Record<string, unknown>>;
+
+  // Substrate (inherited from BaseHarness)
+  readonly bus: EventBus;
+  readonly inbox: MessageInbox;
+  readonly journal: OperationJournal;
+
+  // Apps
+  createApp<P>(input: CreateAppInput<P>): Promise<AppHarnessProtocol<P>>;
+  app(id: string): AppHarnessProtocol | undefined;
+  apps(): readonly AppHarnessProtocol[];
+
+  // Lifecycle
+  closeGateway(): Promise<void>;
+  close(): Promise<void>; // alias
+
+  // Observation
+  events(
+    filter?: EventQuery,
+    options?: SubscribeOptions,
+  ): AsyncIterable<ProtocolEvent>;
+
+  // Extensions
+  readonly extensions: GatewayExtensions; // typed bag, augmentable via declare module
+}
+
+export interface GatewayExtension extends ExtensionBase {
+  readonly target: "gateway";
+  install(installer: GatewayInstaller): void | Promise<void>;
+}
+
+export interface GatewayInstaller extends BaseInstaller {
+  readonly kind: "gateway";
+  // Per ADR 26 BaseInstaller: hostId, substrate, registerNamespace,
+  // getNamespace, onClose.
+  // Gateway-specific additions TBD during Phase 4 build.
+}
+
+// Module-augmentation slot
+export interface GatewayExtensions {}
+```
+
+This shape lands in Phase 4 alongside the harness impl. Spec changes
+flagged as `[PROPOSAL]` until reviewed.
+
+## Open design questions for Phase 4
+
+1. **App router shape** — eager list vs. lazy factory vs. router predicate. ADR 31 Table line 138 lists all three as options; need to pick the canonical shape for v2 vs. defer.
+2. **Method registry vs. tool dispatch** — v1's method registry overlapped with what tool dispatch does in v2. Drop methods entirely and use session.dispatch / app.dispatch? Or keep methods as gateway-level RPC?
+3. **Session-key routing** — v1 `Gateway` accepted a session key that named the target app. In v2 with `gateway.app(id).createSession()` / `gateway.app(id).session(sid)`, do we keep the session-key concept or expose apps + sessions independently?
+4. **Cluster substrate at gateway slots — defaults?** — should gateway slots default to `LocalEventBus.factory()` or to a "ClusterAware" wrapper that's local-only when no cluster configured?
+5. **What's the runtime entry point?** — `createGateway()` (matches v1) vs. `createApp()` continues to work standalone (no gateway required, per ADR 31).
+
+These are deliberately open in this revision. They get answered during the Phase 4 build with code in hand.
+
+## What's deferred from Phase 4 (and to where)
+
+| Capability | Deferred to | Rationale |
+|---|---|---|
+| Network transports (HTTP/WS/SSE/etc.) | Phase 5+ (per-transport packages) | Each transport is its own package; thin gateway scaffold doesn't need them |
+| MCP server-side (gateway as MCP host) | Phase 5+ | v1 had this as a plugin; v2 will be a transport extension |
+| OpenAI-compat shim | Phase 5+ | v1 had as plugin; v2 transport extension |
+| Auth + identity | Phase 5+ | Cross-cutting; needs its own design pass |
+| Per-client event buffers + resume | Phase 5+ | Tied to transports |
+| Method registry / RPC | Phase 5+ or replaced by dispatch | Open design question |
+| Cluster substrate (`@agentick/cluster`) | Phase D of ADR 29 | Phase 4 builds against `LocalEventBus`; Phase D ships cluster impl |
+| Persistent journals (`SqliteJournal`, `PostgresJournal`) | Per-adapter packages, when needed | Out of gateway scope |
+
+## References
+
+- `docs/proposals/v2/blueprint/31-harness-hierarchy.md` — the harness hierarchy that frames Gateway as the runtime root
+- `docs/proposals/v2/blueprint/29-bus-overhaul.md` — `EventLog<E>` substrate; cluster substrate plugs into Gateway slots
+- `docs/proposals/v2/blueprint/26-harness-api-shape.md` — harness as the single shape (Gateway is one)
+- `docs/proposals/v2/blueprint/27-modular-built-ins.md` — extensions ARE harnesses architecturally
+- `docs/proposals/v2/V1-GATEWAY-PARITY-TRACKER.md` — explicit inventory of v1 Gateway capabilities and v2 disposition (TBD)
+- `packages/gateway/src/gateway.ts` (v1) — the original Gateway implementation; ~27K LOC; read for lessons before reshaping

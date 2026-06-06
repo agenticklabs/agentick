@@ -23,7 +23,7 @@ type Factory<R, P extends BaseHarness> = (parent: P) => R | Promise<R> | Effect<
 No `FactoryDeps`. No `Lifecycle` interface. Parent carries identity, substrate access, lifecycle hook (`onClose`), construction input, runtime-context access.
 
 **Three-level hierarchy in v2:** `GatewayHarness` → `AppHarness` → `SessionHarness`.
-- Gateway: cluster-node level. ADR 29's cluster substrate (`ClusterEventBus`, `ClusterJournal`, …) lives here.
+- **Gateway: runtime root.** Owns the top-level substrate (bus/inbox/journal). Hosts Apps. The lifecycle root. **Useful in every deployment tier** — local single-user agents (OpenClaw / Hermes style), single-tenant cloud, multi-tenant distributed. Cluster mode is a substrate swap (ADR 29's `ClusterEventBus`/`ClusterJournal`/`ClusterInbox` factories at Gateway slots), not a separate harness type. See `blueprint/12-gateway.md` for the full Gateway shape.
 - App: configuration + supervisor. Apps host sessions. Typically passes gateway substrate through.
 - **Session: tenant boundary.** Multi-tenancy is structural at session level via per-session substrate factories wrapping upstream.
 
@@ -31,7 +31,7 @@ No `FactoryDeps`. No `Lifecycle` interface. Parent carries identity, substrate a
 
 **Multi-tenancy is emergent, not a feature.** The framework defines no `tenantId` field anywhere. Adopter wires tenancy via substrate factories + closure capture + the `metadata: Record<string, unknown>` bag the framework hosts on every harness.
 
-This is the v1 mental model returned (engine = supervisor, execution = runtime) — generalized through one more layer (gateway for cluster) and made uniform across every harness.
+This is the v1 mental model returned (engine = supervisor, execution = runtime) — Gateway is the v2 reshape of v1's `Gateway` (multi-app host + runtime root, network transports as extensions), generalized through one more layer and made uniform across every harness.
 
 ## What this fixes
 
@@ -59,7 +59,7 @@ One uniform shape. Every factory takes `parent`. Whether parent is `GatewayHarne
 
 ### 4. Cluster integration has a natural home
 
-ADR 29's batching/cursor/log primitives target Gateway-level substrate. `ClusterEventBus` / `ClusterJournal` / `ClusterInbox` satisfy the existing substrate protocols at the gateway. Apps and sessions below wrap or use directly. No special-case at non-gateway layers.
+ADR 29's batching/cursor/log primitives are the substrate primitives Gateway hosts (along with Apps + Sessions below). `ClusterEventBus` / `ClusterJournal` / `ClusterInbox` from `@agentick/cluster` satisfy the existing substrate protocols and plug into Gateway's substrate slots in Tier 3 deployments. Apps and sessions below wrap or use directly. No special-case at non-gateway layers. **`@agentick/cluster` does not introduce a separate harness type** — it provides substrate implementations, period.
 
 ### 5. v1's mental model returns, generalized
 

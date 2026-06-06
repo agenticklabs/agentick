@@ -29,6 +29,7 @@ export * from "./loop-executor.js";
 export * from "./session-harness.js";
 export * from "./app-harness.js";
 export * from "./app-extension.js";
+export * from "./gateway-harness.js";
 export * from "./knobs-harness.js";
 export * from "./state-harness.js";
 export * from "./timeline-harness.js";

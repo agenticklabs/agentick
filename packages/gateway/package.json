@@ -34,6 +34,11 @@
       "types": "./dist/testing.d.ts",
       "import": "./dist/testing.js",
       "default": "./dist/testing.js"
+    },
+    "./v2": {
+      "types": "./src/v2/index.ts",
+      "import": "./src/v2/index.ts",
+      "default": "./src/v2/index.ts"
     }
   },
   "scripts": {
@@ -46,15 +51,20 @@
     "start": "tsx src/bin.ts"
   },
   "dependencies": {
+    "@agentick/app": "workspace:*",
     "@agentick/core": "workspace:*",
     "@agentick/kernel": "workspace:*",
     "@agentick/mcp": "workspace:*",
+    "@agentick/runtime": "workspace:*",
     "@agentick/server": "workspace:*",
     "@agentick/shared": "workspace:*",
+    "@agentick/spec": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.29.0",
+    "effect": "^3.21.2",
     "ws": "^8.16.0"
   },
   "devDependencies": {
+    "@agentick/spec-conformance": "workspace:*",
     "@types/node": "^22.10.5",
     "@types/ws": "^8.5.10",
     "tsx": "^4.19.2",

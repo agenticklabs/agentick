@@ -1,7 +1,30 @@
 # Agentick v2 — Implementation Status
 
 **Branch:** `feat/v2`
-**Last updated:** 2026-06-06 — **ADR 29 Phase C shipped: `EventLog<E, AppendError>` unified primitive; `LocalEventBus` ring buffer + cursor pull; `MemoryJournal` aligned to the same protocol; `bus.publish` → `bus.append` rename in lockstep with the spec extends; `tail` collapsed to sugar over `read`. Net Phase B+C delivers ~1.5–1.6× on the executor hot path; the cursor pull subsumed most of Phase B's relative win because the per-subscriber Effect.Queue model it replaced was the underlying bottleneck.**
+**Last updated:** 2026-06-06 — **Phase 4 kicked off — thin `GatewayHarness` scaffold shipped in `packages/gateway/src/v2/`. Runtime-root harness; multi-app hosting with substrate inheritance / per-app factory overrides; lifecycle cascade; cross-app event observation. Plus three doc artifacts grounding the v2 Gateway story against v1's actual implementation: rewrite of `blueprint/12-gateway.md` (runtime-root framing, four deployment tiers, transports/plugins as extensions), `V1-GATEWAY-PARITY-TRACKER.md` (42 v1 features inventoried across 12 categories; Phase 4 closes 6 of them, rest deferred / reshaped), and ADR 31 framing clarifications (Gateway useful at all tiers, not just cluster-node level).**
+
+**Phase 4 (this work block — sequenced 4.1 through 4.4):**
+
+- **`blueprint/12-gateway.md` end-to-end rewrite (4.1)** — V1 deep-read revealed the doc's prior "stateless front door" framing didn't match v1's actual `Gateway` (~27K LOC, stateful multi-app host + transports + plugins + auth + sessions). Rewrote around the harness-shape view: Gateway is the runtime root in every tier, cluster substrate is a swap not a separate harness, transports are extensions. Useful for OpenClaw/Hermes-class local agents AND multi-tenant cloud.
+- **ADR 31 framing clarifications (4.2)** — "Gateway: cluster-node level" → "Gateway: runtime root, useful at every deployment tier." `@agentick/cluster` provides substrate impls, not a separate harness type.
+- **`V1-GATEWAY-PARITY-TRACKER.md` (4.3)** — explicit inventory of v1 Gateway capabilities matching the `V1-PARITY-TRACKER.md` pattern. Categories: gateway core (GG1–GG4), extension protocol (GE1–GE2), network transports (GT1–GT7), plugins (GP1–GP3), session management (GS1–GS5), method registry (GM1–GM6), auth (GA1–GA5), config (GC1–GC2), backpressure (GB1–GB3), static (GF1–GF2), tool confirmation (GTC1), devtools (GD1–GD2). Phase 4 closes 6; rest reshape or defer.
+- **`GatewayHarness` scaffold (4.4)** — new files in `packages/spec/src/protocol/gateway-harness.ts` + `packages/gateway/src/v2/`. Spec defines `GatewayHarnessProtocol` (read-side apps surface, lifecycle, events), `GatewaySubstrateParent`, `CreateAppInput`, `GatewayExtension`/`GatewayInstaller`/`GatewayExtensions` for future extension impls. Impl ships `GatewayHarness extends BaseHarness<"gateway">` + `createGateway(options)` factory. Apps inherit gateway substrate by default; per-app substrate overrides supported (instance or factory). Close-op envelopes are bus-only via Option G `JournalingPolicy.override`. Package `./v2` subpath added to `packages/gateway/package.json` (matches sandbox v2 coexistence pattern). 11 tests passing.
+
+**Workspace:** 5615/5615 tests green (was 5604; +11 gateway). Typecheck clean across all 86 packages.
+
+**Phase 4 — engineering decisions made:**
+
+- **`GatewayHarnessProtocol` keeps read-side only for apps.** `createApp(input)` is on the concrete impl (`GatewayHarness` from `@agentick/gateway/v2`), not on the protocol. Reason: typing input opts at the spec level would force pulling `@agentick/app`'s `AppHarnessOptions` into spec or making it opaque (useless for adopters). Concrete impls expose their own typed `createApp`; protocol consumers can enumerate apps but not construct them.
+- **`EventLog<E, AppendError>` parameterised error channel** carried over from Phase C — Gateway uses default `never` (in-memory substrate, infallible appends).
+- **No transports / plugins / auth in Phase 4.** Per ADR 31's "Gateway is optional, plugins reshape into extensions" + the parity tracker's reshape table. Tier 0 only — embedded library shape. Phase 5+ ships per-transport / per-plugin packages.
+- **`gateway:app:created` event** emitted on the gateway bus when an App is registered. Adopters subscribing to `gateway.events({ surface: "gateway" })` see app construction observability without adapter wiring.
+
+**Phase 4 — adopter-surface gaps acknowledged (not blockers):**
+
+- `AppHarnessProtocol` / `SessionHarnessProtocol` don't expose `readonly id: string`. Adopters track app/session ids through the construction-time input (the caller-supplied appId / sessionId). Gateway's `app(id)` lookup works because the gateway tracks its own appId mapping. Worth a follow-up to add `id` to the protocols for symmetry with v1 ergonomics, but not Phase 4 scope.
+- No example/v2-real or new example demonstrating Gateway hosting multiple Apps with per-tenant substrate factories. Worth adding before Phase 5 to exercise the multi-tenant emergent pattern.
+
+**Previously, 2026-06-06 (earlier) — ADR 29 Phase C shipped: `EventLog<E, AppendError>` unified primitive; `LocalEventBus` ring buffer + cursor pull; `MemoryJournal` aligned to the same protocol; `bus.publish` → `bus.append` rename in lockstep with the spec extends; `tail` collapsed to sugar over `read`. Net Phase B+C delivers ~1.5–1.6× on the executor hot path; the cursor pull subsumed most of Phase B's relative win because the per-subscriber Effect.Queue model it replaced was the underlying bottleneck.**
 
 **ADR 29 Phase C (this work block — sequenced C.1 through C.7):**
 
