@@ -7,7 +7,7 @@ import { ReconcilerHarness } from "../harness/reconciler-harness.js";
 import { stubBridges } from "@agentick/reconciler";
 
 async function collectJournal(journal: MemoryJournal): Promise<ProtocolEvent[]> {
-  const chunk = await Effect.runPromise(Stream.runCollect(journal.read({}, "beginning")));
+  const chunk = await Effect.runPromise(Stream.runCollect(journal.readByQuery({}, "beginning")));
   return Array.from(Chunk.toReadonlyArray(chunk));
 }
 

@@ -83,7 +83,7 @@ describe("bus.publish — no subscribers", () => {
   const event = mkEvent("e");
 
   bench("publish, no listeners", async () => {
-    await Effect.runPromise(bus.publish(event));
+    await Effect.runPromise(bus.append(event));
   });
 });
 
@@ -107,7 +107,7 @@ describe("bus.publish — 1 matching subscriber", () => {
       await new Promise((r) => setImmediate(r));
       started = true;
     }
-    await Effect.runPromise(bus.publish(event));
+    await Effect.runPromise(bus.append(event));
   });
 });
 
@@ -131,7 +131,7 @@ describe("bus.publish — 1 non-matching subscriber", () => {
       await new Promise((r) => setImmediate(r));
       started = true;
     }
-    await Effect.runPromise(bus.publish(event));
+    await Effect.runPromise(bus.append(event));
   });
 });
 
@@ -431,7 +431,7 @@ describe("Phase B — publish(executor:delta), 1 subscriber, unbatched baseline"
       await new Promise((r) => setImmediate(r));
       started = true;
     }
-    await Effect.runPromise(bus.publish(event));
+    await Effect.runPromise(bus.append(event));
   });
 });
 
@@ -453,7 +453,7 @@ describe("Phase B — publish(executor:delta), 1 subscriber, default batching", 
       await new Promise((r) => setImmediate(r));
       started = true;
     }
-    await Effect.runPromise(bus.publish(event));
+    await Effect.runPromise(bus.append(event));
   });
 });
 
@@ -481,7 +481,7 @@ describe("Phase B — publish(executor:delta), 3 subscribers, unbatched baseline
       await new Promise((r) => setImmediate(r));
       started = true;
     }
-    await Effect.runPromise(bus.publish(event));
+    await Effect.runPromise(bus.append(event));
   });
 });
 
@@ -509,7 +509,7 @@ describe("Phase B — publish(executor:delta), 3 subscribers, default batching",
       await new Promise((r) => setImmediate(r));
       started = true;
     }
-    await Effect.runPromise(bus.publish(event));
+    await Effect.runPromise(bus.append(event));
   });
 });
 
@@ -541,7 +541,7 @@ describe("Phase B — publishBatch(8 events), 1 subscriber", () => {
       await new Promise((r) => setImmediate(r));
       started = true;
     }
-    await Effect.runPromise(bus.publishBatch(events));
+    await Effect.runPromise(bus.appendBatch(events));
   });
 });
 
@@ -566,7 +566,7 @@ describe("Phase B — equivalent 8x publish(), 1 subscriber, no batching", () =>
       started = true;
     }
     for (const e of events) {
-      await Effect.runPromise(bus.publish(e));
+      await Effect.runPromise(bus.append(e));
     }
   });
 });
@@ -594,7 +594,7 @@ async function runEndToEnd(bus: LocalEventBus, count: number, subscriberCount: n
 
   for (let i = 0; i < count; i++) {
     await Effect.runPromise(
-      bus.publish(mkEvent(`e-${i}`, { surface: "executor", phase: "delta" })),
+      bus.append(mkEvent(`e-${i}`, { surface: "executor", phase: "delta" })),
     );
   }
   await Promise.all(consumerPromises);

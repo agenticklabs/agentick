@@ -402,7 +402,7 @@ async function scenarioBusSubscription(s: Substrate): Promise<void> {
  */
 async function scenarioJournalAudit(s: Substrate): Promise<void> {
   console.log(heading("6. Journal — durable audit log"));
-  const chunk = await Effect.runPromise(Stream.runCollect(s.journal.read({}, "beginning")));
+  const chunk = await Effect.runPromise(Stream.runCollect(s.journal.readByQuery({}, "beginning")));
   const events = Array.from(Chunk.toReadonlyArray(chunk));
   console.log(line(`total journaled envelopes: ${events.length}`));
 

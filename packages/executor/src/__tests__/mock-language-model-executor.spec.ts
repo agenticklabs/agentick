@@ -190,7 +190,7 @@ describe("MockLanguageModelExecutor — terminal envelope journaled", () => {
     const { exec, journal } = await makeExecutor();
     await exec.run({ compiled: emptyTree(), target: mkTarget() });
     const chunk = await Effect.runPromise(
-      Stream.runCollect(journal.read({ surface: "executor" }, "beginning")),
+      Stream.runCollect(journal.readByQuery({ surface: "executor" }, "beginning")),
     );
     const events = Array.from(Chunk.toReadonlyArray(chunk));
     const names = new Set(events.map((e) => `${e.name}.${e.phase}`));

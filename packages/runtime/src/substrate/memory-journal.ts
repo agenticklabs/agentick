@@ -13,8 +13,17 @@
  * @see docs/proposals/v2/blueprint/19-foundation.md §The OperationJournal contract
  */
 
-import { Effect, Stream } from "effect";
-import type { EventQuery, JournalError, ProtocolEvent, TerminalEvent } from "@agentick/spec";
+import { Effect, Option, Stream } from "effect";
+import type {
+  Cursor,
+  EventKey,
+  EventQuery,
+  JournalError,
+  LogMetrics,
+  ProtocolEvent,
+  TerminalEvent,
+} from "@agentick/spec";
+import { CursorEvictedError } from "@agentick/spec";
 import type {
   JournalReadFrom,
   Maybe,
@@ -31,14 +40,21 @@ export interface MemoryJournalFactoryParent {
   onClose(handler: () => void | Promise<void>): void;
 }
 
-interface TailListener {
-  readonly query: EventQuery;
-  /** Pre-compiled matcher closure (built at tail-subscribe time). */
+/**
+ * Cursor-based subscriber state. Phase C of ADR 29 unifies `tail` and
+ * the new `read(cursor, matcher)` under one mechanism — both register
+ * a `CursorSub`, both pull events from the journal's append sequence
+ * via a wake-on-append signal.
+ */
+interface CursorSub {
+  /** Pre-compiled matcher closure (built at subscribe time). */
   readonly matcher: CompiledMatcher;
-  /** Push a matching event into the consumer's stream. */
-  readonly onEvent: (event: ProtocolEvent) => void;
-  /** Signal end-of-stream (journal closing). */
-  readonly onDone: () => void;
+  /** Position of the next event to read. Advances as events are yielded. */
+  cursor: number;
+  /** Resolver for the subscriber's wake. Set when parked at head. */
+  resolveWake?: () => void;
+  /** Once true, the subscriber's read loop terminates on next pull. */
+  closed: boolean;
 }
 
 export interface MemoryJournalOptions {
@@ -87,9 +103,19 @@ export class MemoryJournal implements OperationJournal {
    */
   private inFlight = new Map<string, ProtocolEvent>();
 
-  private tailListeners = new Set<TailListener>();
+  /**
+   * Active cursor-pull subscribers. Phase C — single mechanism for
+   * both {@link tail} (live-from-head) and {@link read} (from any cursor).
+   */
+  private cursorSubs = new Set<CursorSub>();
 
   private closed = false;
+
+  /** Running eviction count for {@link metrics}. */
+  private evictionCount = 0;
+
+  /** Construction time — used by metrics() for the long-run event-rate fallback. */
+  private readonly creationTime = Date.now();
 
   /**
    * Upstream journal this MemoryJournal fans appends into, if any.
@@ -223,6 +249,7 @@ export class MemoryJournal implements OperationJournal {
       const overflow = this.events.length - this.capacity;
       const evicted = this.events.splice(0, overflow);
       this.dropped += overflow;
+      this.evictionCount += overflow;
 
       // L7 — keep idempotency state bounded by the ring's drop point.
       // Each evicted event releases its (opId, phase) key plus the
@@ -241,12 +268,113 @@ export class MemoryJournal implements OperationJournal {
       }
     }
 
-    for (const listener of this.tailListeners) {
-      if (listener.matcher(event)) listener.onEvent(event);
+    // Wake every cursor subscriber. Each will check its cursor against
+    // the new head on its next pullOne step and yield matching events.
+    for (const sub of this.cursorSubs) {
+      if (sub.closed) continue;
+      const fn = sub.resolveWake;
+      if (fn) {
+        sub.resolveWake = undefined;
+        fn();
+      }
     }
   }
 
+  // ============================================================================
+  // EventLog<ProtocolEvent, JournalError>
+  // ============================================================================
+
   read(
+    cursor: Cursor,
+    matcher: CompiledMatcher,
+  ): Stream.Stream<ProtocolEvent, CursorEvictedError, never> {
+    const j = this;
+    return Stream.unwrapScoped(
+      Effect.gen(function* () {
+        if (j.closed) {
+          return Stream.empty as Stream.Stream<ProtocolEvent, CursorEvictedError, never>;
+        }
+
+        // Bounds-check the requested cursor against current retention.
+        // `dropped` is the cursor of the oldest retained event; anything
+        // earlier has been evicted by the ring buffer's sliding window.
+        if (cursor.value < j.dropped) {
+          return Stream.fail(
+            new CursorEvictedError({ value: cursor.value }, { value: j.dropped }),
+          ) as Stream.Stream<ProtocolEvent, CursorEvictedError, never>;
+        }
+
+        const sub: CursorSub = {
+          matcher,
+          cursor: cursor.value,
+          resolveWake: undefined,
+          closed: false,
+        };
+        j.cursorSubs.add(sub);
+
+        yield* Effect.addFinalizer(() =>
+          Effect.sync(() => {
+            sub.closed = true;
+            j.cursorSubs.delete(sub);
+            const wake = sub.resolveWake;
+            sub.resolveWake = undefined;
+            if (wake) wake();
+          }),
+        );
+
+        return Stream.unfoldEffect(undefined as void, () => j.pullOne(sub));
+      }),
+    );
+  }
+
+  hasSubscriberFor(_key: EventKey): boolean {
+    // Journals don't ship a per-surface subscriber index — cursor subs
+    // carry an opaque matcher, not a query shape. Conservative true
+    // when any sub exists (false-negative would be a correctness bug;
+    // conservative true is acceptable per the EventLog contract).
+    if (this.closed) return false;
+    for (const sub of this.cursorSubs) if (!sub.closed) return true;
+    return false;
+  }
+
+  metrics(): LogMetrics {
+    const now = Date.now();
+    const elapsedSec = Math.max((now - this.creationTime) / 1000, 0.001);
+    const headCursor = this.dropped + this.events.length;
+    const eventsPerSecond = headCursor / elapsedSec;
+
+    let activeSubs = 0;
+    const lags: number[] = [];
+    for (const sub of this.cursorSubs) {
+      if (sub.closed) continue;
+      activeSubs++;
+      if (sub.cursor >= headCursor) {
+        lags.push(0);
+        continue;
+      }
+      // True wall-clock lag: now - timestamp of the event at the
+      // subscriber's current cursor.
+      const idx = sub.cursor - this.dropped;
+      const ev = idx >= 0 && idx < this.events.length ? this.events[idx] : undefined;
+      const ts = ev?.timestamp ?? 0;
+      lags.push(ts > 0 ? Math.max(0, now - ts) : 0);
+    }
+    const cursorLagP99 = lags.length === 0 ? 0 : percentile(lags, 0.99);
+
+    return {
+      eventsPerSecond,
+      subscriberCount: activeSubs,
+      cursorLagP99,
+      dropRate: headCursor === 0 ? 0 : this.evictionCount / headCursor,
+      retentionEvents: this.events.length,
+    };
+  }
+
+  // ============================================================================
+  // Journal-specific surface (query-shaped reads + idempotency + orphans)
+  // ============================================================================
+
+  readByQuery(
     query: EventQuery,
     from: JournalReadFrom,
   ): Stream.Stream<ProtocolEvent, JournalError, never> {
@@ -271,29 +399,13 @@ export class MemoryJournal implements OperationJournal {
   }
 
   tail(query: EventQuery): Stream.Stream<ProtocolEvent, JournalError, never> {
-    const journal = this;
-    return Stream.asyncPush<ProtocolEvent>((emit) =>
-      Effect.acquireRelease(
-        Effect.sync(() => {
-          if (journal.closed) {
-            emit.end();
-            return undefined as TailListener | undefined;
-          }
-          const listener: TailListener = {
-            query,
-            matcher: compileQuery(query),
-            onEvent: (event) => {
-              void emit.single(event);
-            },
-            onDone: () => emit.end(),
-          };
-          journal.tailListeners.add(listener);
-          return listener;
-        }),
-        (listener) =>
-          Effect.sync(() => {
-            if (listener) journal.tailListeners.delete(listener);
-          }),
+    // Live tail = cursor-pull from the current head.
+    // Map CursorEvictedError → JournalError so the journal's failure
+    // channel stays uniform.
+    const cursor: Cursor = { value: this.dropped + this.events.length };
+    return this.read(cursor, compileQuery(query)).pipe(
+      Stream.catchAll((err) =>
+        Stream.fail<JournalError>({ _tag: "ReadFailed", cause: err }),
       ),
     );
   }
@@ -355,18 +467,79 @@ export class MemoryJournal implements OperationJournal {
     return 0;
   }
 
-  /** Close the journal — pending tail iterators terminate. Test-friendly. */
+  /**
+   * Close the journal. Pending cursor subscribers' streams terminate
+   * cleanly via `pullOne`'s `closed` check (drains matching events
+   * from cursor → head first, then ends the stream via `Option.none`).
+   */
   close(): void {
     if (this.closed) return;
     this.closed = true;
-    for (const l of this.tailListeners) l.onDone();
-    this.tailListeners.clear();
+    const wakes: (() => void)[] = [];
+    for (const sub of this.cursorSubs) {
+      sub.closed = true;
+      if (sub.resolveWake) {
+        wakes.push(sub.resolveWake);
+        sub.resolveWake = undefined;
+      }
+    }
+    this.cursorSubs.clear();
+    for (const w of wakes) w();
   }
 
   /** Diagnostic: total events ever appended (including dropped). */
   totalAppended(): number {
     return this.dropped + this.events.length;
   }
+
+  /**
+   * One step of a cursor subscriber's read loop. Drains matching events
+   * from `sub.cursor` up to current head; if caught up and closed,
+   * ends the stream via `Option.none`; otherwise parks on wake;
+   * surfaces `CursorEvictedError` if the cursor fell past retention.
+   */
+  private pullOne(
+    sub: CursorSub,
+  ): Effect.Effect<Option.Option<readonly [ProtocolEvent, void]>, CursorEvictedError, never> {
+    const j = this;
+    return Effect.gen(function* () {
+      while (true) {
+        if (sub.cursor < j.dropped) {
+          return yield* Effect.fail(
+            new CursorEvictedError({ value: sub.cursor }, { value: j.dropped }),
+          );
+        }
+
+        const head = j.dropped + j.events.length;
+        while (sub.cursor < head) {
+          const idx = sub.cursor - j.dropped;
+          const event = j.events[idx]!;
+          sub.cursor++;
+          if (sub.matcher(event)) return Option.some([event, undefined] as const);
+        }
+
+        if (sub.closed) return Option.none();
+
+        yield* Effect.async<void, never, never>((resume) => {
+          if (sub.closed || sub.cursor < j.dropped + j.events.length) {
+            resume(Effect.void);
+            return;
+          }
+          sub.resolveWake = () => {
+            sub.resolveWake = undefined;
+            resume(Effect.void);
+          };
+        });
+      }
+    });
+  }
+}
+
+function percentile(values: number[], p: number): number {
+  if (values.length === 0) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  const idx = Math.min(sorted.length - 1, Math.floor(sorted.length * p));
+  return sorted[idx]!;
 }
 
 function extractTerminal(envelope: ProtocolEvent): TerminalEvent | undefined {

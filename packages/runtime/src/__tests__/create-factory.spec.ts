@@ -125,7 +125,7 @@ describe("LocalEventBus.createFactory", () => {
     );
     await new Promise((r) => setImmediate(r));
 
-    await Effect.runPromise(localBus.publish(mkEvent()));
+    await Effect.runPromise(localBus.append(mkEvent()));
 
     const seenChunk = await Effect.runPromise(
       Effect.timeout(
@@ -155,7 +155,7 @@ describe("LocalEventBus.createFactory", () => {
     );
     await new Promise((r) => setImmediate(r));
 
-    await Effect.runPromise(upstream.publish(mkEvent({ id: "from_upstream" })));
+    await Effect.runPromise(upstream.append(mkEvent({ id: "from_upstream" })));
     // Yield to give subscribers a chance.
     await new Promise((r) => setImmediate(r));
 
@@ -182,7 +182,7 @@ describe("LocalEventBus.createFactory", () => {
     );
     await new Promise((r) => setImmediate(r));
 
-    await Effect.runPromise(localBus.publish(mkEvent()));
+    await Effect.runPromise(localBus.append(mkEvent()));
     await new Promise((r) => setImmediate(r));
 
     expect(upstreamSeen).toHaveLength(0);
@@ -300,13 +300,13 @@ describe("MemoryJournal.createFactory", () => {
 
     // Upstream should see the event too.
     const upstreamEvents = await Effect.runPromise(
-      Stream.runCollect(upstream.read({}, { kind: "earliest" })),
+      Stream.runCollect(upstream.readByQuery({}, "beginning")),
     );
     expect(Chunk.toReadonlyArray(upstreamEvents).length).toBe(1);
 
     // Local journal also has it.
     const localEvents = await Effect.runPromise(
-      Stream.runCollect(localJournal.read({}, { kind: "earliest" })),
+      Stream.runCollect(localJournal.readByQuery({}, "beginning")),
     );
     expect(Chunk.toReadonlyArray(localEvents).length).toBe(1);
   });
@@ -322,7 +322,7 @@ describe("MemoryJournal.createFactory", () => {
     );
 
     const upstreamEvents = await Effect.runPromise(
-      Stream.runCollect(upstream.read({}, { kind: "earliest" })),
+      Stream.runCollect(upstream.readByQuery({}, "beginning")),
     );
     expect(Chunk.toReadonlyArray(upstreamEvents).length).toBe(0);
   });

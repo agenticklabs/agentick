@@ -30,6 +30,7 @@ import type { Effect, Stream } from "effect";
 import type { ProtocolEvent, EventQuery, EventSurface } from "../data/events.js";
 import type { TerminalEvent } from "../data/outcomes.js";
 import type { JournalError } from "../data/errors.js";
+import type { EventLog } from "./event-log.js";
 
 /**
  * Read-cursor position for `read()`.
@@ -67,31 +68,41 @@ export type Maybe<T> = { readonly some: true; readonly value: T } | { readonly s
 /**
  * The journal protocol.
  *
- * Errors flow through the Effect `E` channel as tagged-union
- * `JournalError` values.
+ * `OperationJournal extends EventLog<ProtocolEvent>` — the journal is
+ * a specialisation of the append-only log primitive. It inherits the
+ * log methods (`append`, `appendBatch`, `read(cursor, matcher)`,
+ * `hasSubscriberFor`, `metrics`) and adds journal-specific surface:
+ * query-shaped historical reads (`readByQuery`), tail subscriptions
+ * (`tail`), idempotency lookup (`lookupTerminal`), and orphan
+ * discovery (`findOrphaned`).
+ *
+ * Errors on the log-primitive methods flow through their declared
+ * `never` channel (matching the EventLog contract). Journal-specific
+ * methods use `JournalError` as before.
+ *
+ * Phase C of ADR 29 unified the bus and journal under `EventLog<E>`.
  */
-export interface OperationJournal {
+export interface OperationJournal extends EventLog<ProtocolEvent, JournalError> {
   /**
-   * Append an envelope to the journal. Idempotent on
-   * `(opId, phase)` pairs for operation envelopes — appending the same
-   * envelope twice is a no-op.
+   * Idempotency lookup. Returns the cached terminal envelope's payload
+   * if the operation has already terminated; otherwise `{ some: false }`.
+   *
+   * Used at command entry to short-circuit replays.
    */
-  append(event: ProtocolEvent): Effect.Effect<void, JournalError, never>;
-
-  /**
-   * Append a batch atomically. Implementations that support transactional
-   * append SHOULD use a single transaction. Implementations that don't
-   * MAY fall back to sequential append.
-   */
-  appendBatch(events: readonly ProtocolEvent[]): Effect.Effect<void, JournalError, never>;
+  lookupTerminal(opId: string): Effect.Effect<Maybe<TerminalEvent>, JournalError, never>;
 
   /**
    * Read events matching a query starting from a given offset.
    *
    * Returns a `Stream` of envelopes terminating when the journal has no
-   * more matching events at read time.
+   * more matching events at read time. Journal-specific historical-query
+   * sugar over the {@link EventLog.read} cursor primitive — adopters
+   * who already have a cursor pass it directly to `read(cursor, matcher)`.
    */
-  read(query: EventQuery, from: JournalReadFrom): Stream.Stream<ProtocolEvent, JournalError, never>;
+  readByQuery(
+    query: EventQuery,
+    from: JournalReadFrom,
+  ): Stream.Stream<ProtocolEvent, JournalError, never>;
 
   /**
    * Subscribe to ongoing events matching a query.
@@ -100,16 +111,11 @@ export interface OperationJournal {
    * Implementations MUST clean up the subscription when the stream is
    * interrupted (Effect's structured concurrency handles this via
    * scoped finalizers).
+   *
+   * Journal-specific sugar that wraps `read(latest-cursor, matcher)`
+   * with `JournalError` translation.
    */
   tail(query: EventQuery): Stream.Stream<ProtocolEvent, JournalError, never>;
-
-  /**
-   * Idempotency lookup. Returns the cached terminal envelope's payload
-   * if the operation has already terminated; otherwise `{ some: false }`.
-   *
-   * Used at command entry to short-circuit replays.
-   */
-  lookupTerminal(opId: string): Effect.Effect<Maybe<TerminalEvent>, JournalError, never>;
 
   /**
    * Find operations stuck in `requested` (or `before`) without a

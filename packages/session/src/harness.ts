@@ -503,7 +503,7 @@ export class SessionHarness<P = unknown>
           payload,
           ...(metadata !== undefined ? { metadata } : {}),
         } as ProtocolEvent;
-        await Effect.runPromise(bus.publish(ev));
+        await Effect.runPromise(bus.append(ev));
       },
       subscribe: (listener) => {
         // Subscribe is pub/sub only — drop envelopes tagged as

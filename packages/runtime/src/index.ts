@@ -15,6 +15,7 @@ export { MemoryJournal, type MemoryJournalOptions } from "./substrate/memory-jou
 export {
   LocalEventBus,
   DEFAULT_LOCAL_BUS_BATCH_POLICY,
+  DEFAULT_LOCAL_BUS_RETENTION,
   type LocalEventBusOptions,
 } from "./substrate/local-event-bus.js";
 export { LocalInbox, type LocalInboxOptions } from "./substrate/local-inbox.js";

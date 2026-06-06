@@ -63,7 +63,7 @@ export class LocalChannelPublisher implements ChannelPublisher {
       // Probe the bus subscriber index before materializing — channels
       // are a canonical hot path (e.g., tool progress streams) where
       // many emissions will land on no listener.
-      const willEmit = this.bus.hasSubscriber({ surface: "session", name, phase: "terminal" });
+      const willEmit = this.bus.hasSubscriberFor({ surface: "session", name, phase: "terminal" });
       if (!willEmit) {
         // Increment the sequence anyway so replay-from-offset would see
         // a continuous stream when a subscriber later attaches AND
@@ -77,7 +77,7 @@ export class LocalChannelPublisher implements ChannelPublisher {
 
       this.sequences.set(seed.channel, next);
       const envelope = this.buildEnvelope(seed, name, next);
-      return this.bus.publish(envelope);
+      return this.bus.append(envelope);
     });
   }
 

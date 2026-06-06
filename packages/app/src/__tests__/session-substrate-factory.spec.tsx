@@ -128,7 +128,7 @@ describe("createSession substrate slots — factory at session level", () => {
     // Publish on the SESSION bus.
     const sessionBus = (session as unknown as { bus: EventBus }).bus;
     await Effect.runPromise(
-      sessionBus.publish({
+      sessionBus.append({
         id: "ev_test",
         surface: "session",
         phase: "delta",
@@ -171,7 +171,7 @@ describe("createSession substrate slots — factory at session level", () => {
 
     // Publish on the APP bus — should NOT be seen by session subscriber.
     await Effect.runPromise(
-      appBus.publish({
+      appBus.append({
         id: "ev_from_app",
         surface: "session",
         phase: "delta",
@@ -256,8 +256,8 @@ describe("createSession substrate slots — factory at session level", () => {
         scope: { tenant },
       }) as ProtocolEvent;
 
-    await Effect.runPromise(busA.publish(mkEv("tenant-a")));
-    await Effect.runPromise(busB.publish(mkEv("tenant-b")));
+    await Effect.runPromise(busA.append(mkEv("tenant-a")));
+    await Effect.runPromise(busB.append(mkEv("tenant-b")));
     await new Promise((r) => setImmediate(r));
 
     expect(appSeen.sort()).toEqual(["tenant-a", "tenant-b"]);

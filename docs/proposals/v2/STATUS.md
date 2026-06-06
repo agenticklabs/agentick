@@ -1,7 +1,46 @@
 # Agentick v2 — Implementation Status
 
 **Branch:** `feat/v2`
-**Last updated:** 2026-06-05 — **ADR 29 Phase B shipped: per-surface batched LocalEventBus + `publishBatch` direct path. Transparent ~1.7–1.9× win at one subscriber on the full OpenAI streaming path; 4.4× via explicit `publishBatch`. Honest writeup of the gap from ADR 29's 10× target (Phase A's `compileQuery` already moved the floor) in `packages/runtime/src/__bench__/substrate-bench-results.md`.**
+**Last updated:** 2026-06-06 — **ADR 29 Phase C shipped: `EventLog<E, AppendError>` unified primitive; `LocalEventBus` ring buffer + cursor pull; `MemoryJournal` aligned to the same protocol; `bus.publish` → `bus.append` rename in lockstep with the spec extends; `tail` collapsed to sugar over `read`. Net Phase B+C delivers ~1.5–1.6× on the executor hot path; the cursor pull subsumed most of Phase B's relative win because the per-subscriber Effect.Queue model it replaced was the underlying bottleneck.**
+
+**ADR 29 Phase C (this work block — sequenced C.1 through C.7):**
+
+- **Spec — `EventLog<E, AppendError = never>` primitive** (new `packages/spec/src/protocol/event-log.ts`): `Cursor`, `CompiledMatcher<E>` generic, `CursorEvictedError`, `LogMetrics`, `EventLog<E, AppendError>` interface. Parameterised error type so bus uses `never` (in-memory, infallible) and journal uses `JournalError` (storage can fail).
+- **Spec — `EventBus extends EventLog<ProtocolEvent>`**: `append`/`appendBatch`/`read(cursor, matcher)`/`hasSubscriberFor`/`metrics` inherited from the log primitive. `subscribe(query, options?)` is now sugar with `SubscribeOptions { fromCursor?: Cursor }`; failure channel flipped to `CursorEvictedError`. Old `bufferSize`/`overflow`/`SubscriberOverflow`/`BufferOverflowError` dropped (no longer meaningful under cursor pull).
+- **Spec — `OperationJournal extends EventLog<ProtocolEvent, JournalError>`**: same inheritance. Old `OperationJournal.read(query, from)` renamed to `readByQuery(query, from)`; new `read(cursor, matcher)` is the EventLog primitive. `tail(query)` is now sugar over `read(currentHead, compileQuery(query))` with `CursorEvictedError → JournalError` mapping.
+- **Runtime — `LocalEventBus` rewrite**: shared ring buffer (default `capacity: 4096`; configurable via `LocalEventBusOptions.capacity` and `defaultRetention.maxEvents`); per-subscriber cursor + `Promise`-based wake registered via `Effect.async`; `Stream.unfoldEffect` for clean stream-end on close. Phase B's batch accumulator + `publishLazy` + parent fan-in preserved.
+- **Runtime — `MemoryJournal` aligned**: `tailListeners` set replaced by `cursorSubs`. Same `pullOne` pattern as `LocalEventBus`. Sliding-window event-rate metric via cheap two-counter scheme. **True wall-clock `cursorLagP99`** (not eps-approximation) — looks up `event.timestamp` at the subscriber's cursor position.
+- **Audit + rename in lockstep**: every `bus.publish(...)` → `bus.append(...)` across BaseHarness, session-harness, channel-publisher, conformance suite, all tests, all benches. Every `journal.read(query, from)` → `journal.readByQuery(query, from)` across 8 test files + the v2 example. Caught a buggy `{ kind: "earliest" }` in `create-factory.spec.ts` that was passing TypeScript structurally but never matched a real `JournalReadFrom` variant.
+- **C.5 collapsed into C.2**: old per-subscriber `Effect.Queue` path removed entirely — single code path through the ring buffer. No transitional state shipped.
+
+**Phase C — engineering decisions made (documented in `blueprint/29-bus-overhaul.md`):**
+
+- `EventBus`/`OperationJournal` extend `EventLog<E, AppendError>` as **parameterised interface** — bus and journal share the same primitive surface but specialize the append error channel.
+- `LocalEventBusOptions.defaultRetention.maxEvents` defaults to **4096** with per-surface overrides via `LocalEventBusOptions.retention`. Pass `defaultRetention: {}` for unbounded.
+- **Loud-failure backpressure**: cursor past retention → `CursorEvictedError` on the stream's failure channel. No silent skip-ahead. Adopters who want skip-ahead semantics catch the error and resubscribe with `oldestAvailable`.
+- **`tail` is sugar over `read`** on both bus and journal. `tailListeners` removed from MemoryJournal — single cursor-pull mechanism.
+- **`maxAge` retention is reserved by spec but not enforced** by either impl. Time-based eviction requires a periodic sweep; small lift, not Phase-C-critical. Documented as deferred.
+- **Self-instrumentation deferred**: bus emitting its own metrics events would require a new `EventSurface` value or piggybacking on an existing one. Punted to ship alongside the L8 OTel projection.
+
+**Phase C — bench numbers** (full results in `packages/runtime/src/__bench__/substrate-bench-results.md`):
+
+| Path | Pre-Phase-B | Phase B | Phase C |
+|---|---:|---:|---:|
+| `OpenAIExecutor.run` 100 deltas + 1 sub (full hot path) | 1,558 hz | 2,679 hz (1.72×) | 2,448 hz (1.57× vs pre-B) |
+| `bus.publish(executor:delta)` 1 sub batching OFF | — | 175K hz | 299K hz (+70%) |
+| `bus.publish(executor:delta)` 3 subs batching OFF | — | 64K hz | 109K hz (+71%) |
+
+The ring buffer made the unbatched baseline ~70% faster, which means **Phase B's relative batching win shrank from 1.89×/2.26× (Phase B) to 1.05×/1.16× (Phase C)** — but both absolute numbers are higher than Phase B's batched path. Net Phase B+C delivers ~1.5–1.6× on the executor hot path; most of it from Phase C's cursor pull, not Phase B's batching.
+
+**Phase C — adopter-surface gaps acknowledged (not blockers):**
+
+- Events don't carry their own cursor — adopters consuming `app.events(...)` have no way to capture a resume point from events they've already seen. The cursor protocol is wired through `bus.subscribe(query, { fromCursor })` (and `app.events(filter, { fromCursor })` per this commit), but actually using it requires either (a) carrying cursor on the envelope OR (b) emitting a "current cursor" probe. Either is small follow-up work; neither is in Phase C.
+- `metrics()` is exposed on the bus, not on the app/session façade. Adopters who want metrics need bus access.
+- No `example/v2-real` cursor-replay demo was added — the demo would require the adopter-surface work above to be usable. Documented honestly rather than shipping a contrived example.
+
+**Workspace:** 5604/5604 tests green (3 skipped, 5 todo). Typecheck clean across 86 packages.
+
+**Previously, 2026-06-05 — ADR 29 Phase B shipped: per-surface batched LocalEventBus + `publishBatch` direct path. Transparent ~1.7–1.9× win at one subscriber on the full OpenAI streaming path; 4.4× via explicit `publishBatch`. Honest writeup of the gap from ADR 29's 10× target (Phase A's `compileQuery` already moved the floor) in `packages/runtime/src/__bench__/substrate-bench-results.md`.**
 
 **ADR 29 Phase B (this commit)**:
 - **Spec** — `SurfaceBatchPolicy`, `SurfaceRetentionPolicy`, optional `JournalingPolicy.batch?`/`retention?` types added to `@agentick/spec/data/journaling-policy.ts`. Optional `EventBus.publishBatch?` added to `@agentick/spec/protocol/bus.ts` (technically-accurate Phase B name; renames to `appendBatch` when Phase C unifies under `EventLog<E>`).

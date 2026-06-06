@@ -25,7 +25,7 @@ export function runJournalConformance(factory: () => OperationJournal): void {
       const b = mkEvent({ id: "e2", opId: "op-1", phase: "terminal", outcome: "succeeded" });
       await Effect.runPromise(j.append(a));
       await Effect.runPromise(j.append(b));
-      const out = await collect(j.read({}, "beginning"));
+      const out = await collect(j.readByQuery({}, "beginning"));
       expect(out.map((e) => e.id)).toEqual(["e1", "e2"]);
     });
 
@@ -38,7 +38,7 @@ export function runJournalConformance(factory: () => OperationJournal): void {
           mkEvent({ id: "c", surface: "session", phase: "terminal", outcome: "succeeded" }),
         ]),
       );
-      const out = await collect(j.read({ surface: "session" }, "beginning"));
+      const out = await collect(j.readByQuery({ surface: "session" }, "beginning"));
       expect(out.map((e) => e.id)).toEqual(["a", "c"]);
     });
 
@@ -50,7 +50,7 @@ export function runJournalConformance(factory: () => OperationJournal): void {
           mkEvent({ id: "2", name: "session:lifecycle:mount", phase: "requested" }),
         ]),
       );
-      const out = await collect(j.read({ name: { prefix: "tool:" } }, "beginning"));
+      const out = await collect(j.readByQuery({ name: { prefix: "tool:" } }, "beginning"));
       expect(out.map((e) => e.id)).toEqual(["1"]);
     });
 
@@ -62,7 +62,7 @@ export function runJournalConformance(factory: () => OperationJournal): void {
           mkEvent({ id: "2", scope: { sessionId: "s_2" } }),
         ]),
       );
-      const out = await collect(j.read({ scope: { sessionId: "s_1" } }, "beginning"));
+      const out = await collect(j.readByQuery({ scope: { sessionId: "s_1" } }, "beginning"));
       expect(out.map((e) => e.id)).toEqual(["1"]);
     });
   });
@@ -73,7 +73,7 @@ export function runJournalConformance(factory: () => OperationJournal): void {
       const a = mkEvent({ id: "x", opId: "op-1", phase: "requested" });
       await Effect.runPromise(j.append(a));
       await Effect.runPromise(j.append({ ...a, id: "x-dup" }));
-      const out = await collect(j.read({}, "beginning"));
+      const out = await collect(j.readByQuery({}, "beginning"));
       expect(out).toHaveLength(1);
       expect(out[0]!.id).toBe("x");
     });

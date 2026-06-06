@@ -249,14 +249,20 @@ Each phase is independently shippable. No phase breaks adopter code.
 | Per-surface vs per-subscriber batching | Per-surface. Per-subscriber means N copies of accumulator state for N subscribers — bookkeeping cost defeats the win. |
 | Default policy contents | Ship only `executor:delta` (validated hot path); drop `session:metric` until a metrics surface lands with concrete events that match a real phase. |
 
-### Phase C — Cursor protocol + ring buffer (1-2 weeks)
+### Phase C — Cursor protocol + ring buffer (DONE 2026-06-06)
 
-- Define `Cursor`, `CompiledMatcher`, `EventLog<E>` in spec.
-- Refactor `LocalEventBus` internals: replace per-subscriber Effect Queue with a shared ring buffer + per-subscriber cursor. Subscribers pull instead of being pushed to.
-- Add `subscribe(query, { fromCursor })` option. Default: "now" — no replay.
-- Add `metrics()` exposing event rate, subscriber count, p99 cursor lag.
-- Migrate `MemoryJournal` to expose the same cursor protocol (it's already log-shaped — mostly renames).
-- Old per-subscriber Queue path removed (single code path).
+- ✅ Defined `Cursor`, `CompiledMatcher<E>`, `EventLog<E, AppendError = never>`, `LogMetrics`, `CursorEvictedError` in spec.
+- ✅ Refactored `LocalEventBus` internals: per-subscriber Effect Queue replaced by shared ring buffer + per-subscriber cursor. Promise-based wake registered via `Effect.async`. `Stream.unfoldEffect` for clean stream-end on close.
+- ✅ `subscribe(query, { fromCursor })` option. Default: head — no replay.
+- ✅ `metrics()` with true wall-clock `cursorLagP99` (not eps-approximation): `now - timestamp(events[sub.cursor])`.
+- ✅ `MemoryJournal extends EventLog<ProtocolEvent, JournalError>`. `tail()` is now sugar over `read(currentHead, matcher)` with `CursorEvictedError → JournalError` mapping. `tailListeners` removed; single `cursorSubs` mechanism for both `tail` and `read`.
+- ✅ Old per-subscriber Queue path removed entirely (C.5 collapsed into C.2). `bus.publish` → `bus.append` (everywhere), `bus.publishBatch` → `bus.appendBatch`, `bus.hasSubscriber` → `bus.hasSubscriberFor`. `journal.read(query, from)` → `journal.readByQuery(query, from)`; new `journal.read(cursor, matcher)` is the EventLog primitive.
+- ✅ `EventLog<E>` parameterised by `AppendError` — bus uses `never` (in-memory, infallible); journal uses `JournalError` (storage can fail).
+
+**Deferred from Phase C (intentional):**
+
+- **Self-instrumentation** (bus emitting its own metrics events on a periodic timer). Adopters poll `bus.metrics()` directly. Self-instrumentation would require either a new `EventSurface` value (none of the existing values fit), or piggybacking on an existing surface — both are mechanically simple but pollute the existing event taxonomy. Punted to a follow-up that ships alongside the L8 OTel projection (the natural home for periodic substrate metrics).
+- **`maxAge` retention** (time-based eviction). The spec carries the field; `LocalEventBus` and `MemoryJournal` enforce only `maxEvents`. Time-based eviction requires a periodic sweep — small lift, not Phase-C-critical.
 
 ### Phase D — Cluster backend (Phase 5 of v2, 2-4 weeks)
 

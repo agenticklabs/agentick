@@ -1,42 +1,61 @@
 /**
  * EventBus protocol.
  *
- * Live observation channel. Pure pub/sub over `ProtocolEvent`.
- * Multi-subscriber, fire-and-forget. Subscribers cannot affect
- * execution.
+ * Live observation channel + append-only log. `EventBus` is a
+ * specialisation of {@link EventLog} over {@link ProtocolEvent}: it
+ * exposes the log primitives (`append`, `appendBatch`, `read`,
+ * `hasSubscriberFor`, `metrics`) plus bus-specific sugar for the
+ * query-shaped subscriber pattern (`subscribe(query, options)`) and
+ * construction-on-demand publishing (`publishLazy`).
+ *
+ * Phase C of ADR 29 reshapes the subscriber model from push-based
+ * (per-subscriber bounded `Effect.Queue`) to pull-based (shared ring
+ * buffer + per-subscriber cursor). Subscribers pull at their own pace.
+ * Subscribers that fall behind retention surface
+ * {@link CursorEvictedError} on the stream's failure channel —
+ * intentional loud failure (silent skip-ahead is the worse mode for an
+ * audit substrate).
  *
  * Implementations:
- *   - LocalEventBus    (in-process PubSub; Phase 2)
- *   - ClusterEventBus  (distributed via cluster framework; Phase 7)
+ *   - LocalEventBus    (in-process ring buffer + cursor pull; Phases 2/B/C)
+ *   - ClusterEventBus  (distributed via `@effect/cluster`; Phase D)
  *
  * @see docs/proposals/v2/blueprint/19-foundation.md §The PubSub bus
+ * @see docs/proposals/v2/blueprint/29-bus-overhaul.md §Phase C
  */
 
 import type { Effect, Stream } from "effect";
 import type { EventPhase, EventSurface, ProtocolEvent, EventQuery } from "../data/events.js";
-
-/**
- * Bounded buffer overflow strategy for subscriber streams.
- */
-export type SubscriberOverflow = "drop-oldest" | "drop-newest" | "error";
+import type { Cursor, CursorEvictedError, EventLog } from "./event-log.js";
 
 /**
  * Subscription options.
  */
 export interface SubscribeOptions {
-  /** Per-subscriber bounded buffer. Default: 256. */
-  readonly bufferSize?: number;
-  readonly overflow?: SubscriberOverflow;
+  /**
+   * Cursor to start reading from. Omit (default) to read from the
+   * current log head — no replay. `{ value: 0 }` replays everything
+   * still retained. Adopters resuming after disconnect pass the
+   * cursor from the last drained event.
+   *
+   * If the cursor is older than the log's retained range, the
+   * subscribed stream fails with {@link CursorEvictedError} before
+   * yielding any event. The error carries the oldest cursor still
+   * available — adopters can catch and resubscribe from there.
+   *
+   * @see docs/proposals/v2/blueprint/29-bus-overhaul.md §Phase C
+   */
+  readonly fromCursor?: Cursor;
 }
 
 /**
- * Match-key fragment used by `hasSubscriber` and `publishLazy` to
+ * Match-key fragment used by `hasSubscriberFor` and `publishLazy` to
  * decide whether anyone wants an envelope BEFORE constructing it.
  *
  * The fields here are the cheapest-to-compute subset of `ProtocolEvent`
  * — enough for the bus's subscriber index to short-circuit
  * construction. Implementations MAY use less than the full key (e.g.,
- * conservatively returning `true` from `hasSubscriber` if only
+ * conservatively returning `true` from `hasSubscriberFor` if only
  * `surface` is supplied), but they MUST NEVER return `false` for a
  * key that an active subscriber's query would match. False negatives
  * are correctness bugs; false positives are paper-cut over-builds.
@@ -51,39 +70,14 @@ export interface EventKey {
  * The bus protocol.
  *
  * Cost when no subscribers match: zero. Lazy fan-out is structural.
+ *
+ * `EventBus extends EventLog<ProtocolEvent>` — every bus is a log of
+ * `ProtocolEvent`. The `EventLog` methods (`append`, `appendBatch`,
+ * `read`, `hasSubscriberFor`, `metrics`) are the primitive substrate;
+ * `publishLazy` and `subscribe(query, options)` are bus-specific
+ * sugar on top.
  */
-export interface EventBus {
-  /**
-   * Publish an envelope to the bus.
-   *
-   * If no subscribers match the envelope's surface/name/scope, the
-   * call is a no-op (lazy fan-out). Implementations MUST NOT block on
-   * slow subscribers — each subscriber has its own bounded buffer.
-   */
-  publish(event: ProtocolEvent): Effect.Effect<void, never, never>;
-
-  /**
-   * Publish a batch of envelopes. Optional — implementations that
-   * don't support batched publish MAY omit this method; callers fall
-   * back to looping over {@link publish}.
-   *
-   * Semantic guarantees relative to per-event {@link publish}:
-   *   - Subscribers still receive events one at a time. The batch is a
-   *     producer-side amortisation, not a subscriber-side delivery
-   *     change.
-   *   - Ordering within the batch is preserved on delivery.
-   *   - `hasSubscriber` is consulted once per batch (cheapest path) —
-   *     if no subscriber matches any key in the batch, the entire call
-   *     is a no-op.
-   *
-   * Phase B name (pub/sub semantics). When Phase C unifies EventBus +
-   * OperationJournal under `EventLog<E>`, this method becomes
-   * `appendBatch` inherited from the log primitive.
-   *
-   * @see docs/proposals/v2/blueprint/29-bus-overhaul.md §Phase B
-   */
-  publishBatch?(events: ReadonlyArray<ProtocolEvent>): Effect.Effect<void, never, never>;
-
+export interface EventBus extends EventLog<ProtocolEvent> {
   /**
    * Construction-on-demand publish. The bus probes its subscriber
    * index against `key` first; only invokes `build` (and routes the
@@ -94,57 +88,29 @@ export interface EventBus {
    * to typed envelopes: a hot publisher (streaming model tokens, dense
    * sandbox stdout, etc.) avoids paying envelope-construction cost when
    * no observer wants the result. Always-journaled phases SHOULD
-   * continue to use `publish` directly — the journal is not a bus
-   * subscriber and `hasSubscriber` doesn't account for it.
+   * continue to use `append` directly — the journal is not a bus
+   * subscriber and `hasSubscriberFor` doesn't account for it.
    */
   publishLazy(key: EventKey, build: () => ProtocolEvent): Effect.Effect<void, never, never>;
 
   /**
-   * Probe whether any active subscriber's query could match an
-   * envelope with the supplied key. O(1) amortized via the bus's
-   * internal subscriber index.
+   * Subscribe to events matching a query. Bus-specific sugar over
+   * {@link EventLog.read} — `subscribe` is "query the bus by a typed
+   * query shape," `read` is "pull the log from a cursor with an
+   * already-compiled matcher."
    *
-   * Contract:
-   *   - false → no subscriber matches; publishing is safe to skip.
-   *   - true  → at least one subscriber's query MAY match; the
-   *             publisher should construct and call `publish`.
-   *             Implementations MAY return `true` conservatively when
-   *             the query system cannot rule a match out from the key
-   *             alone.
-   *
-   * Implementations MUST NEVER return `false` for a key an active
-   * subscriber's query would match — that is a correctness bug.
-   */
-  hasSubscriber(key: EventKey): boolean;
-
-  /**
-   * Subscribe to events matching a query.
-   *
-   * Returns a `Stream` that yields new envelopes as they're published.
+   * Returns a `Stream` that yields new envelopes as they're appended.
    * Stream interruption (consumer disposes / scope closes) unsubscribes.
    *
-   * Buffer overflow follows `options.overflow`. With `"error"`, the
-   * stream fails with `BufferOverflowError`; with `"drop-*"`, events
-   * are silently dropped per the chosen edge.
+   * Failure channel: {@link CursorEvictedError} when the subscriber's
+   * cursor falls behind retention (either at subscribe time if
+   * `options.fromCursor` is too old, or in-flight if the subscriber
+   * drains slower than retention evicts).
    */
   subscribe(
     query: EventQuery,
     options?: SubscribeOptions,
-  ): Stream.Stream<ProtocolEvent, BufferOverflowError, never>;
-}
-
-/**
- * Surfaced through the subscribe stream's failure channel when the
- * bounded buffer overflows and the configured strategy is `"error"`.
- */
-export class BufferOverflowError extends Error {
-  readonly _tag = "BufferOverflowError" as const;
-  readonly bufferSize: number;
-  constructor(bufferSize: number) {
-    super(`Subscriber buffer overflowed (capacity: ${bufferSize})`);
-    this.name = "BufferOverflowError";
-    this.bufferSize = bufferSize;
-  }
+  ): Stream.Stream<ProtocolEvent, CursorEvictedError, never>;
 }
 
 // ============================================================================

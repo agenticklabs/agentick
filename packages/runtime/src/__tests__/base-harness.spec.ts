@@ -101,7 +101,7 @@ async function harness() {
 }
 
 async function collectJournal(j: MemoryJournal): Promise<ProtocolEvent[]> {
-  const chunk = await Effect.runPromise(Stream.runCollect(j.read({}, "beginning")));
+  const chunk = await Effect.runPromise(Stream.runCollect(j.readByQuery({}, "beginning")));
   return Array.from(Chunk.toReadonlyArray(chunk));
 }
 

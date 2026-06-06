@@ -101,12 +101,20 @@ export function matchesQuery(event: ProtocolEvent, query: EventQuery): boolean {
 // ============================================================================
 
 /**
- * Pre-compiled query matcher. Cheap to invoke (~tens of ns for typical
- * `{ surface, phase }` shapes) because it captures only the fields the
- * query actually constrains. Built once at subscribe time via
- * {@link compileQuery}; invoked on every published event.
+ * Pre-compiled query matcher for protocol events.
+ *
+ * Cheap to invoke (~tens of ns for typical `{ surface, phase }` shapes)
+ * because it captures only the fields the query actually constrains.
+ * Built once at subscribe time via {@link compileQuery}; invoked on
+ * every appended event.
+ *
+ * Alias for the generic `CompiledMatcher<ProtocolEvent>` exported from
+ * `@agentick/spec`. The runtime-local re-export keeps existing imports
+ * stable; new code typed against the generic form should import from
+ * spec.
  */
-export type CompiledMatcher = (event: ProtocolEvent) => boolean;
+import type { CompiledMatcher as GenericCompiledMatcher } from "@agentick/spec";
+export type CompiledMatcher = GenericCompiledMatcher<ProtocolEvent>;
 
 /**
  * Specialise an {@link EventQuery} to a tight predicate closure.

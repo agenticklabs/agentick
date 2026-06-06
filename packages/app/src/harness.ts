@@ -54,6 +54,7 @@ import type {
   CreateSessionInput,
   EventBus,
   EventQuery,
+  SubscribeOptions,
   ExecutionTarget,
   ExecutorFactory,
   HandlerVerdict,
@@ -701,10 +702,13 @@ export class AppHarness<P = unknown>
     return out;
   }
 
-  events(filter: EventQuery = {}): AsyncIterable<ProtocolEvent> {
+  events(
+    filter: EventQuery = {},
+    options: SubscribeOptions = {},
+  ): AsyncIterable<ProtocolEvent> {
     const bus = this.bus;
     return {
-      [Symbol.asyncIterator]: () => makeBusAsyncIterator(bus, filter),
+      [Symbol.asyncIterator]: () => makeBusAsyncIterator(bus, filter, options),
     };
   }
 
@@ -1142,8 +1146,12 @@ function mapAppError(cause: unknown): AppError {
  * Each `for await` creates its own subscription; the substrate bus is
  * multi-subscriber by design.
  */
-function makeBusAsyncIterator(bus: EventBus, query: EventQuery): AsyncIterator<ProtocolEvent> {
-  const stream = bus.subscribe(query);
+function makeBusAsyncIterator(
+  bus: EventBus,
+  query: EventQuery,
+  options: SubscribeOptions = {},
+): AsyncIterator<ProtocolEvent> {
+  const stream = bus.subscribe(query, options);
   const queue: ProtocolEvent[] = [];
   const resolvers: Array<(r: IteratorResult<ProtocolEvent>) => void> = [];
   let done = false;

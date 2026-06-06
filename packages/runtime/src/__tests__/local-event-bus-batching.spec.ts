@@ -66,15 +66,15 @@ describe("LocalEventBus — default batch policy", () => {
     await flush();
 
     // Three publishes do NOT flush yet (count threshold = 4).
-    await Effect.runPromise(bus.publish(ev("1")));
-    await Effect.runPromise(bus.publish(ev("2")));
-    await Effect.runPromise(bus.publish(ev("3")));
+    await Effect.runPromise(bus.append(ev("1")));
+    await Effect.runPromise(bus.append(ev("2")));
+    await Effect.runPromise(bus.append(ev("3")));
     await flush();
     expect(c.received).toHaveLength(0);
     expect(bus.pendingBatchedCount()).toBe(3);
 
     // The fourth publish trips the count trigger and flushes.
-    await Effect.runPromise(bus.publish(ev("4")));
+    await Effect.runPromise(bus.append(ev("4")));
     await flush();
     expect(c.received.map((e) => e.id)).toEqual(["1", "2", "3", "4"]);
     expect(bus.pendingBatchedCount()).toBe(0);
@@ -87,7 +87,7 @@ describe("LocalEventBus — default batch policy", () => {
     const c = collect(bus, "executor");
     await flush();
 
-    await Effect.runPromise(bus.publish(ev("1")));
+    await Effect.runPromise(bus.append(ev("1")));
     await flush();
     // Pending — count threshold (4) not reached; timer set for 8ms.
     expect(c.received).toHaveLength(0);
@@ -110,9 +110,9 @@ describe("LocalEventBus — default batch policy", () => {
     const c = collect(bus, "tool");
     await flush();
 
-    await Effect.runPromise(bus.publish(ev("a", "tool", "terminal")));
-    await Effect.runPromise(bus.publish(ev("b", "tool", "terminal")));
-    await Effect.runPromise(bus.publish(ev("c", "tool", "terminal")));
+    await Effect.runPromise(bus.append(ev("a", "tool", "terminal")));
+    await Effect.runPromise(bus.append(ev("b", "tool", "terminal")));
+    await Effect.runPromise(bus.append(ev("c", "tool", "terminal")));
     await flush();
     expect(c.received).toHaveLength(0);
     expect(bus.pendingBatchedCount()).toBe(3);
@@ -132,11 +132,11 @@ describe("LocalEventBus — adopter policy override", () => {
     const c = collect(bus, "tool");
     await flush();
 
-    await Effect.runPromise(bus.publish(ev("t1", "tool")));
+    await Effect.runPromise(bus.append(ev("t1", "tool")));
     await flush();
     expect(c.received).toHaveLength(0);
 
-    await Effect.runPromise(bus.publish(ev("t2", "tool")));
+    await Effect.runPromise(bus.append(ev("t2", "tool")));
     await flush();
     expect(c.received.map((e) => e.id)).toEqual(["t1", "t2"]);
 
@@ -150,7 +150,7 @@ describe("LocalEventBus — adopter policy override", () => {
     const c = collect(bus, "tool");
     await flush();
 
-    await Effect.runPromise(bus.publish(ev("t1", "tool")));
+    await Effect.runPromise(bus.append(ev("t1", "tool")));
     await flush();
     expect(c.received).toHaveLength(0);
 
@@ -167,12 +167,12 @@ describe("LocalEventBus — adopter policy override", () => {
     const c = collect(bus, "tool");
     await flush();
 
-    await Effect.runPromise(bus.publish(ev("a", "tool", "before")));
-    await Effect.runPromise(bus.publish(ev("b", "tool", "delta")));
+    await Effect.runPromise(bus.append(ev("a", "tool", "before")));
+    await Effect.runPromise(bus.append(ev("b", "tool", "delta")));
     await flush();
     expect(c.received).toHaveLength(0);
 
-    await Effect.runPromise(bus.publish(ev("c", "tool", "terminal")));
+    await Effect.runPromise(bus.append(ev("c", "tool", "terminal")));
     await flush();
     expect(c.received.map((e) => e.id)).toEqual(["a", "b", "c"]);
 
@@ -189,8 +189,8 @@ describe("LocalEventBus — adopter policy override", () => {
     const c = collect(bus, "tool");
     await flush();
 
-    await Effect.runPromise(bus.publish(ev("d1", "tool", "delta")));
-    await Effect.runPromise(bus.publish(ev("d2", "tool", "delta")));
+    await Effect.runPromise(bus.append(ev("d1", "tool", "delta")));
+    await Effect.runPromise(bus.append(ev("d2", "tool", "delta")));
     await flush();
     // Exact policy fired immediately; if wildcard had won we'd still be
     // waiting on the 1s timer.
@@ -204,7 +204,7 @@ describe("LocalEventBus — adopter policy override", () => {
     const c = collect(bus, "executor");
     await flush();
 
-    await Effect.runPromise(bus.publish(ev("x", "executor", "delta")));
+    await Effect.runPromise(bus.append(ev("x", "executor", "delta")));
     await flush();
     // No batching → subscriber sees the event without waiting on a timer
     // or count threshold.
@@ -221,7 +221,7 @@ describe("LocalEventBus — non-batched fast path", () => {
     const c = collect(bus, "session");
     await flush();
 
-    await Effect.runPromise(bus.publish(ev("a", "session", "terminal")));
+    await Effect.runPromise(bus.append(ev("a", "session", "terminal")));
     await flush();
     expect(c.received.map((e) => e.id)).toEqual(["a"]);
   });
@@ -234,7 +234,7 @@ describe("LocalEventBus — publishBatch direct path", () => {
     await flush();
 
     await Effect.runPromise(
-      bus.publishBatch([ev("a"), ev("b"), ev("c"), ev("d"), ev("e")]),
+      bus.appendBatch([ev("a"), ev("b"), ev("c"), ev("d"), ev("e")]),
     );
     await flush();
     // Caller-supplied batch bypasses the accumulator — all 5 events
@@ -248,7 +248,7 @@ describe("LocalEventBus — publishBatch direct path", () => {
     const c = collect(bus, "executor");
     await flush();
 
-    await Effect.runPromise(bus.publishBatch([]));
+    await Effect.runPromise(bus.appendBatch([]));
     await flush();
     expect(c.received).toHaveLength(0);
   });
@@ -272,8 +272,8 @@ describe("LocalEventBus — fan-in to parent under batching", () => {
     );
     await flush();
 
-    await Effect.runPromise(child.publish(ev("1")));
-    await Effect.runPromise(child.publish(ev("2")));
+    await Effect.runPromise(child.append(ev("1")));
+    await Effect.runPromise(child.append(ev("2")));
     await flush();
 
     // Child has batched; parent must not have seen them yet either.
@@ -305,8 +305,8 @@ describe("LocalEventBus — close drains pending batches", () => {
     );
     await flush();
 
-    await Effect.runPromise(bus.publish(ev("a")));
-    await Effect.runPromise(bus.publish(ev("b")));
+    await Effect.runPromise(bus.append(ev("a")));
+    await Effect.runPromise(bus.append(ev("b")));
     await flush();
     expect(received).toHaveLength(0);
     expect(bus.pendingBatchedCount()).toBe(2);
@@ -345,12 +345,12 @@ describe("LocalEventBus — count trigger preserves Effect.publish semantics", (
     const c = collect(bus, "tool");
     await flush();
 
-    await Effect.runPromise(bus.publish(ev("a", "tool")));
+    await Effect.runPromise(bus.append(ev("a", "tool")));
     // The second publish's Effect carries the synchronous flush — by
     // the time `await` returns, the fan-out has happened. (Compare:
     // time-trigger flush completes on a setTimeout callback, so the
     // caller's Effect resolves before subscribers see anything.)
-    await Effect.runPromise(bus.publish(ev("b", "tool")));
+    await Effect.runPromise(bus.append(ev("b", "tool")));
     await flush(); // give subscriber fiber a tick to drain its Queue
     expect(c.received.map((e) => e.id)).toEqual(["a", "b"]);
   });

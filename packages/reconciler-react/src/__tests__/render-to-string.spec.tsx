@@ -226,7 +226,7 @@ describe("renderToString — operation lifecycle", () => {
       bridges: stubBridges(),
     });
     await harness.renderToString({ mountId: "m_lc" });
-    const chunk = await Effect.runPromise(Stream.runCollect(journal.read({}, "beginning")));
+    const chunk = await Effect.runPromise(Stream.runCollect(journal.readByQuery({}, "beginning")));
     const names = new Set<string>();
     for (const ev of Chunk.toReadonlyArray(chunk)) names.add(`${ev.name}.${ev.phase}`);
     expect(names.has("reconciler:command:render-to-string.requested")).toBe(true);

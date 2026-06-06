@@ -641,7 +641,7 @@ export abstract class BaseHarness<
    *
    * Always-journal phases still require an envelope, so we invoke the
    * thunk regardless. Bus-only phases skip the thunk when
-   * `bus.hasSubscriber` is false.
+   * `bus.hasSubscriberFor` is false.
    */
   protected emitLazy(
     key: { readonly name: string; readonly phase: EventPhase },
@@ -656,7 +656,7 @@ export abstract class BaseHarness<
       return this.emit(build());
     }
     // bus-only — probe the subscriber index first.
-    if (!this.bus.hasSubscriber({ surface: this.surface, name: key.name, phase: key.phase })) {
+    if (!this.bus.hasSubscriberFor({ surface: this.surface, name: key.name, phase: key.phase })) {
       return Effect.void;
     }
     return this.emit(build());
@@ -694,7 +694,7 @@ export abstract class BaseHarness<
       return this.publish(this.makeEvent(op, "delta", op.scope ?? {}, { payload: buildPayload() }));
     }
     if (
-      !this.bus.hasSubscriber({
+      !this.bus.hasSubscriberFor({
         surface: op.surface ?? this.surface,
         name: op.name,
         phase: "delta",
@@ -784,7 +784,7 @@ export abstract class BaseHarness<
         replyTo,
       },
     } as ProtocolEvent;
-    return Effect.flatMap(this.bus.publish(envelope), () =>
+    return Effect.flatMap(this.bus.append(envelope), () =>
       Effect.tryPromise<TResp, RequestError>({
         try: () => registered.promise as Promise<TResp>,
         catch: (cause): RequestError => cause as RequestError,
@@ -970,9 +970,9 @@ export abstract class BaseHarness<
     const decision = this.decide(envelope);
     if (decision === "drop") return Effect.void;
     if (decision === "always" || decision === "journal") {
-      return Effect.zipRight(this.bus.publish(envelope), this.journal.append(envelope));
+      return Effect.zipRight(this.bus.append(envelope), this.journal.append(envelope));
     }
-    return this.bus.publish(envelope);
+    return this.bus.append(envelope);
   }
 
   private decide(envelope: ProtocolEvent): "always" | "journal" | "bus-only" | "drop" {

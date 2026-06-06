@@ -184,7 +184,7 @@ describe("BaseHarness substrate slots — factory overrides", () => {
     await new Promise((r) => setImmediate(r));
 
     await Effect.runPromise(
-      h._bus.publish({
+      h._bus.append({
         id: "ev_1",
         surface: "tool",
         phase: "delta",
