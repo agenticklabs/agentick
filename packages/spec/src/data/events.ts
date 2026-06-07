@@ -29,6 +29,7 @@ export type EventSurface =
   | "mcp"
   | "knobs"
   | "state"
+  | "skills"
   | "cluster"
   | "gateway"
   | (string & {});

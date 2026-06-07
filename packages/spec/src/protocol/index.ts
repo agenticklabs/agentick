@@ -31,5 +31,6 @@ export * from "./app-harness.js";
 export * from "./app-extension.js";
 export * from "./gateway-harness.js";
 export * from "./knobs-harness.js";
+export * from "./skills-harness.js";
 export * from "./state-harness.js";
 export * from "./timeline-harness.js";

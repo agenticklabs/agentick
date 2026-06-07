@@ -1316,6 +1316,22 @@ importers:
         specifier: ^14.0.0
         version: 14.0.0
 
+  packages/skills:
+    dependencies:
+      '@agentick/runtime':
+        specifier: workspace:*
+        version: link:../runtime
+      '@agentick/spec':
+        specifier: workspace:*
+        version: link:../spec
+      effect:
+        specifier: ^3.21.2
+        version: 3.21.2
+    devDependencies:
+      '@agentick/spec-conformance':
+        specifier: workspace:*
+        version: link:../spec-conformance
+
   packages/spec:
     dependencies:
       effect:
