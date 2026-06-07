@@ -232,6 +232,7 @@ const ToolCatalogResponse: JSONSchema = {
           name: { type: "string" },
           description: { type: "string" },
           input: { type: "object" },
+          output: { type: "object" },
           type: { type: "string" },
           intent: { type: "string" },
           audience: { type: "string" },
