@@ -334,6 +334,10 @@ export class AppHarness<P = unknown>
   extends BaseHarness<"app">
   implements AppHarnessProtocol<P>, SpawnContext<P>
 {
+  get id(): string {
+    return this.scopeId;
+  }
+
   private readonly rootElement: unknown;
   private readonly executor: LanguageModelExecutor;
   private readonly target: ExecutionTarget;

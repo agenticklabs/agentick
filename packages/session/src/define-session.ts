@@ -133,6 +133,10 @@ class CallbackSessionHarness<P = unknown>
   extends BaseHarness<"session">
   implements SessionHarnessProtocol<P>
 {
+  get id(): string {
+    return this.scopeId;
+  }
+
   private readonly spec: DefineSessionInput<P>;
   readonly timeline: TimelineHandle;
   readonly knobs: KnobsHandle;

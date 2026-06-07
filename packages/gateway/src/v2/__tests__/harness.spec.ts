@@ -87,12 +87,12 @@ describe("GatewayHarness — createApp", () => {
   it("creates an app inheriting gateway substrate by default", async () => {
     const gateway = await createGateway();
     const app = await gateway.createApp({
-      appId: "default-sub",
       rootElement: {} as unknown,
       options: makeAppOptions() as never,
     });
+    expect(app.id).toMatch(/^app:/);
     expect(gateway.apps()).toHaveLength(1);
-    expect(gateway.app("default-sub")).toBe(app);
+    expect(gateway.app(app.id)).toBe(app);
     await gateway.closeGateway();
   });
 
@@ -103,7 +103,8 @@ describe("GatewayHarness — createApp", () => {
       rootElement: {} as unknown,
       options: makeAppOptions() as never,
     });
-    expect(gateway.app("my-app")).toBe(app);
+    expect(app.id).toBe("my-app");
+    expect(gateway.app(app.id)).toBe(app);
     await gateway.closeGateway();
   });
 

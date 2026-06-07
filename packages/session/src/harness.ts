@@ -176,6 +176,10 @@ export class SessionHarness<P = unknown>
   extends BaseHarness<"session">
   implements SessionHarnessProtocol<P>
 {
+  get id(): string {
+    return this.scopeId;
+  }
+
   private readonly store: SessionStateStore;
   private readonly bridges: SessionHookBridges;
   private readonly mountId: string;
