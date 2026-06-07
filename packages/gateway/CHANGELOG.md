@@ -1,5 +1,21 @@
 # @agentick/gateway
 
+## 0.15.0
+
+### Minor Changes
+
+- 45b99a7: Propagate tool `outputSchema` end-to-end when serving MCP. Tools defined with `createTool({ output })` now expose their output schema on `tools/list`, and `MCPServer` emits `outputSchema` for any `MCPToolDefinition` that declares one. The gateway's `tool-catalog` method gained an optional `output` field on each entry, and the `mcpServerPlugin` forwards it (along with a new `outputSchema` field on `MCPStandaloneTool`) into the registered `MCPToolDefinition`. JSON Schema conversion is shared via a new internal `toToolJSONSchema` helper, so input and output schemas go through the same Zod→draft-07 path.
+
+### Patch Changes
+
+- Updated dependencies [45b99a7]
+- Updated dependencies [eca7b3c]
+  - @agentick/mcp@0.15.0
+  - @agentick/core@0.15.0
+  - @agentick/kernel@0.15.0
+  - @agentick/shared@0.15.0
+  - @agentick/server@0.15.0
+
 ## 0.14.68
 
 ### Patch Changes

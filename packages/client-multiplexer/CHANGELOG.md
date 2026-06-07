@@ -1,5 +1,11 @@
 # @agentick/client-multiplexer
 
+## 0.15.0
+
+### Patch Changes
+
+- @agentick/client@0.15.0
+
 ## 0.14.68
 
 ### Patch Changes

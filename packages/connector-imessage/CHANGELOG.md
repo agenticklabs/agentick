@@ -1,5 +1,12 @@
 # @agentick/connector-imessage
 
+## 0.15.0
+
+### Patch Changes
+
+- @agentick/shared@0.15.0
+- @agentick/connector@0.15.0
+
 ## 0.14.68
 
 ### Patch Changes
