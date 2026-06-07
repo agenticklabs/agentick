@@ -39,7 +39,7 @@
     "@agentick/shared": "workspace:*",
     "chalk": "^5.3.0",
     "commander": "^12.1.0",
-    "eventsource": "^2.0.2",
+    "eventsource": "^4.1.0",
     "marked": "^15.0.4",
     "marked-terminal": "^7.2.1"
   },
