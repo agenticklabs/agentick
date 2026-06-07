@@ -1,5 +1,22 @@
 # @agentick/core
 
+## 0.14.68
+
+### Patch Changes
+
+- @agentick/kernel@0.14.68
+- @agentick/shared@0.14.68
+- @agentick/mcp@0.14.68
+
+## 0.14.67
+
+### Patch Changes
+
+- c753f82: Default MCP resources render as a path-grouped tree (bounded size, regardless of resource count) instead of a verbose flat listing. Add `renderResources` prop on `MCPResourceComponent` / `MCPComponent` — a renderer function (not a string preset). Built-in alternates exported: `renderResourceTree` (new default), `renderResourceList` (historical behavior). Pass `() => null` to suppress the orientation Section entirely while keeping `list_resources` / `read_resource` tools registered.
+  - @agentick/kernel@0.14.67
+  - @agentick/shared@0.14.67
+  - @agentick/mcp@0.14.67
+
 ## 0.14.66
 
 ### Patch Changes

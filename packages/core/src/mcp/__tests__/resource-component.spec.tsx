@@ -140,8 +140,8 @@ describe("MCPResourceComponent", () => {
       const lastInput = inputs[inputs.length - 1];
       const toolNames = (lastInput.tools ?? []).map((t: any) => t.name);
 
-      expect(toolNames).toContain("list_resources");
-      expect(toolNames).toContain("read_resource");
+      expect(toolNames).toContain("list_mcp_resources");
+      expect(toolNames).toContain("read_mcp_resource");
     });
 
     it("includes terrain map in compiled context", async () => {
@@ -170,8 +170,8 @@ describe("MCPResourceComponent", () => {
       // The section with terrain map content should be compiled into the model context.
       // Check if tools were registered (confirms component rendered successfully)
       const toolNames = (lastInput.tools ?? []).map((t: any) => t.name);
-      expect(toolNames).toContain("list_resources");
-      expect(toolNames).toContain("read_resource");
+      expect(toolNames).toContain("list_mcp_resources");
+      expect(toolNames).toContain("read_mcp_resource");
 
       // Use list_resources tool to verify the actual resource data is accessible
       // This is the better test — the terrain map is a rendering detail,
@@ -191,7 +191,7 @@ describe("MCPResourceComponent", () => {
       });
 
       const model = createTestAdapter({ defaultResponse: "" });
-      model.respondWith([{ tool: { name: "list_resources", input: {} } }, { text: "Done" }]);
+      model.respondWith([{ tool: { name: "list_mcp_resources", input: {} } }, { text: "Done" }]);
 
       const Agent = createResourceAgent({ mcpClient, servers: { db: dummyConfig("db") } });
       const app = createApp(Agent, { model, maxTicks: 3 });
@@ -219,7 +219,7 @@ describe("MCPResourceComponent", () => {
 
       const model = createTestAdapter({ defaultResponse: "" });
       model.respondWith([
-        { tool: { name: "list_resources", input: { server: "db" } } },
+        { tool: { name: "list_mcp_resources", input: { server: "db" } } },
         { text: "Done" },
       ]);
 
@@ -252,7 +252,7 @@ describe("MCPResourceComponent", () => {
 
       const model = createTestAdapter({ defaultResponse: "" });
       model.respondWith([
-        { tool: { name: "list_resources", input: { pattern: "Order" } } },
+        { tool: { name: "list_mcp_resources", input: { pattern: "Order" } } },
         { text: "Done" },
       ]);
 
@@ -279,7 +279,7 @@ describe("MCPResourceComponent", () => {
 
       const model = createTestAdapter({ defaultResponse: "" });
       model.respondWith([
-        { tool: { name: "list_resources", input: { pattern: "nonexistent" } } },
+        { tool: { name: "list_mcp_resources", input: { pattern: "nonexistent" } } },
         { text: "Done" },
       ]);
 
@@ -311,7 +311,7 @@ describe("MCPResourceComponent", () => {
 
       const model = createTestAdapter({ defaultResponse: "" });
       model.respondWith([
-        { tool: { name: "read_resource", input: { uri: "db://schema/users" } } },
+        { tool: { name: "read_mcp_resource", input: { uri: "db://schema/users" } } },
         { text: "Done" },
       ]);
 
@@ -345,7 +345,7 @@ describe("MCPResourceComponent", () => {
 
       const model = createTestAdapter({ defaultResponse: "" });
       model.respondWith([
-        { tool: { name: "read_resource", input: { uri: "file:///config.json" } } },
+        { tool: { name: "read_mcp_resource", input: { uri: "file:///config.json" } } },
         { text: "Done" },
       ]);
 
@@ -372,7 +372,7 @@ describe("MCPResourceComponent", () => {
 
       const model = createTestAdapter({ defaultResponse: "" });
       model.respondWith([
-        { tool: { name: "read_resource", input: { uri: "db://nonexistent" } } },
+        { tool: { name: "read_mcp_resource", input: { uri: "db://nonexistent" } } },
         { text: "Done" },
       ]);
 
@@ -404,7 +404,7 @@ describe("MCPResourceComponent", () => {
       });
 
       const model = createTestAdapter({ defaultResponse: "" });
-      model.respondWith([{ tool: { name: "list_resources", input: {} } }, { text: "Done" }]);
+      model.respondWith([{ tool: { name: "list_mcp_resources", input: {} } }, { text: "Done" }]);
 
       const Agent = createResourceAgent({
         mcpClient,
@@ -433,7 +433,7 @@ describe("MCPResourceComponent", () => {
 
       const model = createTestAdapter({ defaultResponse: "" });
       model.respondWith([
-        { tool: { name: "list_resources", input: {} } },
+        { tool: { name: "list_mcp_resources", input: {} } },
         { text: "Nothing here" },
       ]);
 
@@ -472,8 +472,8 @@ describe("MCPResourceComponent", () => {
       const toolNames = (inputs[inputs.length - 1].tools ?? []).map((t: any) => t.name);
       expect(toolNames).toContain("browse_schemas");
       expect(toolNames).toContain("fetch_schema");
-      expect(toolNames).not.toContain("list_resources");
-      expect(toolNames).not.toContain("read_resource");
+      expect(toolNames).not.toContain("list_mcp_resources");
+      expect(toolNames).not.toContain("read_mcp_resource");
     });
   });
 
@@ -519,9 +519,10 @@ describe("MCPResourceComponent", () => {
       // Individual schemas NOT listed (they're collapsed under schema/)
       expect(text).not.toContain("projects");
       expect(text).not.toContain("invoices");
-      // Tool guidance present
-      expect(text).toContain("list_resources");
-      expect(text).toContain("read_resource");
+      // Tool guidance present (renderer is tool-name-agnostic — points at
+      // generic phrases since callers can rename via listToolName/readToolName)
+      expect(text).toContain("list-resources");
+      expect(text).toContain("read-resource");
     });
 
     it("attaches a template description to its directory entry", () => {
@@ -666,8 +667,8 @@ describe("MCPResourceComponent", () => {
       expect(sys).not.toContain("Resources:");
       // Tools still registered
       const toolNames = (captured.tools ?? []).map((t: any) => t.name);
-      expect(toolNames).toContain("list_resources");
-      expect(toolNames).toContain("read_resource");
+      expect(toolNames).toContain("list_mcp_resources");
+      expect(toolNames).toContain("read_mcp_resource");
     });
 
     it("invokes a custom renderer with the discovered resources and templates", async () => {

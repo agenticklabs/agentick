@@ -10,10 +10,17 @@ import {
   mapGoogleChunk,
   convertBlocksToGoogleParts,
   mapToolDefinition,
+  toGoogleMessages,
 } from "../google.js";
 import { STOP_REASON_MAP } from "../types.js";
 import { StopReason } from "@agentick/shared";
-import type { ContentBlock, ImageBlock, ToolUseBlock, ToolResultBlock } from "@agentick/shared";
+import type {
+  ContentBlock,
+  ImageBlock,
+  Message,
+  ToolUseBlock,
+  ToolResultBlock,
+} from "@agentick/shared";
 import { StreamAccumulator } from "@agentick/core/model";
 
 // =============================================================================
@@ -1139,5 +1146,146 @@ describe("sanitizeSchemaForGemini", () => {
     expect(sanitizeSchemaForGemini(null)).toBeNull();
     expect(sanitizeSchemaForGemini(undefined)).toBeUndefined();
     expect(sanitizeSchemaForGemini({})).toEqual({});
+  });
+});
+
+// =============================================================================
+// toGoogleMessages — system-instruction accumulation + contents shaping
+// =============================================================================
+
+describe("toGoogleMessages", () => {
+  const sys = (text: string): Message => ({
+    role: "system",
+    content: [{ type: "text", text }],
+  });
+  const user = (text: string): Message => ({
+    role: "user",
+    content: [{ type: "text", text }],
+  });
+  const assistant = (text: string): Message => ({
+    role: "assistant",
+    content: [{ type: "text", text }],
+  });
+
+  describe("systemInstruction accumulation", () => {
+    it("concatenates multiple system messages with a blank-line separator (the bug fix)", () => {
+      // Regression test for: prior implementation reassigned `systemInstruction`
+      // on each iteration, so the LAST system message overwrote earlier ones.
+      // Production case: identity block (1st) + resource-listing block (2nd)
+      // → identity was silently dropped → model lost its persona/primer entirely.
+      const { systemInstruction } = toGoogleMessages([
+        sys("You are Ernesto, Knowify's AI assistant."),
+        sys("Resources: knowify://company, knowify://me"),
+      ]);
+
+      expect(systemInstruction).toBe(
+        "You are Ernesto, Knowify's AI assistant.\n\nResources: knowify://company, knowify://me",
+      );
+    });
+
+    it("preserves the order of system messages in the concatenation", () => {
+      const { systemInstruction } = toGoogleMessages([sys("FIRST"), sys("SECOND"), sys("THIRD")]);
+
+      expect(systemInstruction).toBe("FIRST\n\nSECOND\n\nTHIRD");
+    });
+
+    it("uses a single system message as-is when only one is present", () => {
+      const { systemInstruction } = toGoogleMessages([sys("only-system")]);
+      expect(systemInstruction).toBe("only-system");
+    });
+
+    it("returns undefined when there are no system messages", () => {
+      const { systemInstruction } = toGoogleMessages([user("hi"), assistant("hello")]);
+      expect(systemInstruction).toBeUndefined();
+    });
+
+    it("returns undefined when all system messages have empty text after filtering", () => {
+      const { systemInstruction } = toGoogleMessages([
+        { role: "system", content: [] },
+        { role: "system", content: [{ type: "text", text: "" }] },
+      ]);
+      expect(systemInstruction).toBeUndefined();
+    });
+
+    it("skips empty-text system messages without introducing extra separators", () => {
+      const { systemInstruction } = toGoogleMessages([
+        sys("real-instruction"),
+        { role: "system", content: [{ type: "text", text: "" }] },
+        sys("another-real-instruction"),
+      ]);
+
+      // The empty middle entry must not produce "real-instruction\n\n\n\nanother..."
+      expect(systemInstruction).toBe("real-instruction\n\nanother-real-instruction");
+    });
+
+    it("joins multiple text blocks within a single system message before accumulating", () => {
+      // Within-message join uses "\n\n" (matches the existing per-message
+      // behavior); between-message join also uses "\n\n".
+      const message: Message = {
+        role: "system",
+        content: [
+          { type: "text", text: "part-a" },
+          { type: "text", text: "part-b" },
+        ],
+      };
+      const { systemInstruction } = toGoogleMessages([message]);
+      expect(systemInstruction).toBe("part-a\n\npart-b");
+    });
+
+    it("ignores non-text blocks inside system messages", () => {
+      const message: Message = {
+        role: "system",
+        content: [
+          { type: "text", text: "keep-this" },
+          { type: "image", source: { type: "base64", data: "x", mimeType: "image/png" } } as any,
+        ],
+      };
+      const { systemInstruction } = toGoogleMessages([message]);
+      expect(systemInstruction).toBe("keep-this");
+    });
+  });
+
+  describe("contents shaping", () => {
+    it("routes user/assistant messages into contents (and skips system messages there)", () => {
+      const { contents } = toGoogleMessages([
+        sys("system-only"),
+        user("user-msg"),
+        assistant("assistant-msg"),
+      ]);
+
+      expect(contents).toHaveLength(2);
+      expect(contents[0].role).toBe("user");
+      expect(contents[1].role).toBe("model"); // assistant → model
+    });
+
+    it("maps assistant role to Google's 'model' role", () => {
+      const { contents } = toGoogleMessages([assistant("reply")]);
+      expect(contents[0].role).toBe("model");
+    });
+
+    it("preserves user role as 'user'", () => {
+      const { contents } = toGoogleMessages([user("question")]);
+      expect(contents[0].role).toBe("user");
+    });
+
+    it("drops messages whose content produces zero parts", () => {
+      const empty: Message = { role: "user", content: [] };
+      const { contents } = toGoogleMessages([empty, user("kept")]);
+      expect(contents).toHaveLength(1);
+    });
+
+    it("returns both contents and systemInstruction when mixed", () => {
+      const { contents, systemInstruction } = toGoogleMessages([
+        sys("you are a bot"),
+        user("hi"),
+        sys("additional rule"),
+        assistant("hello"),
+      ]);
+
+      expect(systemInstruction).toBe("you are a bot\n\nadditional rule");
+      expect(contents).toHaveLength(2);
+      expect(contents[0].role).toBe("user");
+      expect(contents[1].role).toBe("model");
+    });
   });
 });

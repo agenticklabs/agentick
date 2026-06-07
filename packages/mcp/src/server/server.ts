@@ -85,6 +85,15 @@ import { toJSONSchemaSync, isJSONSchema } from "@agentick/kernel";
 import { normalizeObjectSchema } from "@modelcontextprotocol/sdk/server/zod-compat.js";
 import { uuidv7 } from "@agentick/shared";
 
+function toToolJSONSchema(
+  schema: z.ZodType | Record<string, unknown> | undefined,
+): Record<string, unknown> | undefined {
+  if (!schema) return undefined;
+  if (isJSONSchema(schema)) return schema as Record<string, unknown>;
+  const normalized = normalizeObjectSchema(schema as any) ?? schema;
+  return toJSONSchemaSync(normalized, { target: "draft-07", stripMeta: false });
+}
+
 // ============================================================================
 // Errors
 // ============================================================================
@@ -931,6 +940,9 @@ export class MCPServer {
             ...(t.definition.title !== undefined && { title: t.definition.title }),
             description: t.definition.description,
             inputSchema: t.jsonSchema,
+            ...(t.definition.outputSchema
+              ? { outputSchema: toToolJSONSchema(t.definition.outputSchema) }
+              : {}),
             annotations: t.definition.annotations,
             ...(t.definition.icons && t.definition.icons.length > 0
               ? { icons: t.definition.icons }
@@ -1278,13 +1290,7 @@ export class MCPServer {
   private addToolToRegistry(tool: MCPToolDefinition): void {
     const definition = normalizeLegacyToolUi(tool);
 
-    let jsonSchema: Record<string, unknown>;
-    if (isJSONSchema(tool.inputSchema)) {
-      jsonSchema = tool.inputSchema as Record<string, unknown>;
-    } else {
-      const normalized = normalizeObjectSchema(tool.inputSchema as any) ?? tool.inputSchema;
-      jsonSchema = toJSONSchemaSync(normalized, { target: "draft-07", stripMeta: false });
-    }
+    let jsonSchema = toToolJSONSchema(tool.inputSchema) ?? {};
 
     // MCP spec: tool inputSchema must be type "object".
     // Also add additionalProperties: false when absent — zod objects are

@@ -1,5 +1,20 @@
 # @agentick/sandbox-secure-exec
 
+## 0.14.68
+
+### Patch Changes
+
+- @agentick/core@0.14.68
+- @agentick/sandbox@0.14.68
+
+## 0.14.67
+
+### Patch Changes
+
+- Updated dependencies [c753f82]
+  - @agentick/core@0.14.67
+  - @agentick/sandbox@0.14.67
+
 ## 0.14.66
 
 ### Patch Changes

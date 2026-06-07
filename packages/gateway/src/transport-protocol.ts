@@ -266,6 +266,7 @@ export interface ToolCatalogPayload {
     name: string;
     description: string;
     input: Record<string, unknown>;
+    output?: Record<string, unknown>;
     type?: string;
     intent?: string;
     audience?: string;

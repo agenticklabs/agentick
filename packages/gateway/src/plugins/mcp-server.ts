@@ -32,6 +32,7 @@ export interface ToolEntry {
   name: string;
   description: string;
   input: Record<string, unknown>;
+  output?: Record<string, unknown>;
   annotations?: Record<string, unknown>;
 }
 
@@ -39,6 +40,7 @@ export interface MCPStandaloneTool {
   name: string;
   description: string;
   inputSchema: unknown;
+  outputSchema?: unknown;
   annotations?: Record<string, unknown>;
   /**
    * MCP Apps linkage — set when this tool renders a `ui://` resource. The
@@ -254,6 +256,7 @@ export function mcpServerPlugin(config: MCPServerPluginConfig): GatewayPlugin {
             name: tool.name,
             description: tool.description,
             inputSchema: tool.input as any,
+            ...(tool.output ? { outputSchema: tool.output as any } : {}),
             annotations: tool.annotations as any,
             handler: async (args) => {
               const result = await ctx.invoke("tool-dispatch", {
@@ -274,6 +277,7 @@ export function mcpServerPlugin(config: MCPServerPluginConfig): GatewayPlugin {
             name: tool.name,
             description: tool.description,
             inputSchema: tool.inputSchema as any,
+            ...(tool.outputSchema ? { outputSchema: tool.outputSchema as any } : {}),
             annotations: tool.annotations as any,
             // MCP Apps metadata — preserve the tool↔view linkage so
             // `tools/list` emits `_meta.ui.resourceUri`. Dropping these here

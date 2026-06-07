@@ -2157,6 +2157,7 @@ export class Gateway extends EventEmitter {
         name: def.name,
         description: def.description,
         input: def.input,
+        ...(def.output ? { output: def.output } : {}),
         type: def.type,
         intent: def.intent,
         audience: def.audience,
