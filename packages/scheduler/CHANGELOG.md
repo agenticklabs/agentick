@@ -1,5 +1,14 @@
 # @agentick/scheduler
 
+## 0.15.0
+
+### Patch Changes
+
+- Updated dependencies [eca7b3c]
+  - @agentick/core@0.15.0
+  - @agentick/shared@0.15.0
+  - @agentick/client@0.15.0
+
 ## 0.14.68
 
 ### Patch Changes
