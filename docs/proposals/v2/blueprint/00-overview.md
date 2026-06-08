@@ -230,16 +230,167 @@ crystallized, awaiting sign-off, or known to be incomplete.
 
 ---
 
-## Diagrams (WORK IN PROGRESS — not source of truth)
+## Focused single-concern diagrams (WORK IN PROGRESS)
 
-> **Caveat.** These diagrams are exploratory drafts produced 2026-06-07
-> while wrapping up Phase 4 + Phase 5 kickoff. They are NOT the
-> authoritative architectural reference. The numbered ADR docs
-> (`01-harness-principle.md` through `32-extension-shape-spectrum.md`)
-> remain the source of truth. The diagrams may be inaccurate, may
-> overstate uniformity that doesn't yet exist in code, may understate
-> v2 features that are deferred. Treat them as visualization aids that
-> need cross-checking against the prose, not as a substitute for it.
+> **Why these instead of one big diagram.** The earlier nested
+> diagrams (kept below as supplementary) tried to show hierarchy,
+> substrate composition, deployment tiers, and extension shapes all
+> at once. The Russian-doll nesting in particular implied
+> *containment* between tiers when they're actually *alternative
+> deployment shapes for the same harness graph*. These focused
+> diagrams each answer ONE question, with minimal nesting. The
+> tradeoff: you need four of them to see the whole picture, but
+> each one is legible on its own.
+>
+> Still WIP. Prose ADRs (`01` through `32`) remain source of truth.
+
+### A. The harness tree — who hosts whom
+
+Answers: "what's the parent-child relationship in the harness graph?"
+
+```mermaid
+graph TB
+  G[GatewayHarness]
+  G --> A1[AppHarness alpha]
+  G --> A2[AppHarness beta]
+  A1 --> S1[SessionHarness s1]
+  A1 --> S2[SessionHarness s2]
+  A2 --> S3[SessionHarness s3]
+  S1 --> H1[Built-in harnesses<br/>Timeline, Knobs, State,<br/>ToolExecutor, LoopExecutor,<br/>ExecutorHarness, Reconciler]
+  S1 --> H2[Opt-in harnesses<br/>Sandbox, MCP, Skills,<br/>Subscriptions, Scheduler]
+```
+
+Reading guide:
+- One Gateway hosts many Apps. Multi-app is structural, not a
+  multi-tenancy feature — same gateway hosts unrelated agent
+  configurations.
+- One App hosts many Sessions. Sessions are units of execution.
+- Per-session harnesses (built-in or opt-in) are owned by the
+  session, not the app. Same session → same harness instances.
+- The single App alpha → Sessions sub-tree is fully expanded; App
+  beta's omitted for clarity (same shape).
+
+### B. Substrate composition — fan-in writes, isolated reads
+
+Answers: "how do bus / inbox / journal compose across levels?"
+
+```mermaid
+graph BT
+  SB[Session bus] -- append fans up --> AB[App bus]
+  AB -- append fans up --> GB[Gateway bus]
+  SJ[Session journal] -- append fans up --> AJ[App journal]
+  AJ -- append fans up --> GJ[Gateway journal]
+  SI[Session inbox]
+  AI[App inbox]
+  GI[Gateway inbox]
+```
+
+Reading guide:
+- **Bus and journal fan in.** Events appended at Session level also
+  appear at App and Gateway level. Subscribers at any level see
+  events from their scope and below.
+- **Inbox does NOT fan in.** Addresses are unique per inbox; fanning
+  in would break delivery semantics.
+- Fan-in is a factory choice. Default behavior is "share the
+  parent's instance" (no fan-in needed because there's one bus).
+  Factories at substrate slots wrap the parent to produce per-level
+  isolation — useful for per-session multi-tenancy.
+
+### C. Extension shape spectrum (table form)
+
+Answers: "what should I build when I want to extend agentick?"
+
+| # | Shape | Cost | Pick when... | Reference |
+|---|---|---|---|---|
+| 1 | Full harness | high (~600-1000 LOC) | audit envelopes, swappable backend, cluster routing, persistence | `knobs`, `state`, `timeline`, `sandbox`, `mcp`, `skills` |
+| 2 | Namespace object | mid (~100-200 LOC) | shared state, no audit needed | (adopter-defined) |
+| 3 | Pure bus subscriber | low (~3-30 LOC) | observe events, write to a destination | `devtools`, OTel exporter, logging |
+| 4 | Reconciler contributor | low-mid | render-time output transform | `formatters`, semantic HTML, content blocks |
+| 5 | Descriptor + hook | low | declarative composition over a primitive | `gates` (over knobs) |
+| 6 | Tool / formatter | low | single function or transform | adopter `createTool`s |
+
+Cost is rough. The "Pick when..." column is the decision criterion
+— if multiple apply, pick the shape that matches the strongest one.
+Full reasoning + worked examples in ADR 32.
+
+### D. Deployment tiers (table form)
+
+Answers: "what changes when I deploy in tier X vs tier Y?"
+
+| Tier | Use case | Substrate impl | Extensions you install | Example |
+|---|---|---|---|---|
+| 0 | Embedded library | `LocalEventBus` + `MemoryJournal` + `LocalInbox` | none | tests, CLIs, scripts |
+| 1 | Local single-user agent | local + `SQLiteJournal` (when durable) | sandbox, MCP, scheduler, skills, connectors (Telegram, iMessage) | OpenClaw / Hermes class |
+| 2 | Single-tenant cloud | local or single-node durable (`PostgresJournal`) | transports (HTTP/WS/SSE), auth, rate limit | hosted agent for one team |
+| 3 | Multi-tenant distributed | `@agentick/cluster` substrate | transports + auth + tenant routing + per-session substrate factories | production SaaS, gateway fleet fronting a cluster |
+
+**The harness shape is invariant across all four tiers.** What
+changes: substrate factories at Gateway slots, and which extensions
+are installed. Adopter code at the app/session level is identical
+between Tier 0 and Tier 3.
+
+### E. Data flow — one session.send round trip
+
+Answers: "what happens when an adopter calls `session.send(...)`?"
+
+```mermaid
+sequenceDiagram
+  participant Adopter
+  participant Sess as SessionHarness
+  participant TL as Timeline
+  participant Rec as Reconciler
+  participant LE as LoopExecutor
+  participant Ex as ExecutorHarness
+  participant TX as ToolExecutor
+  participant Bus
+
+  Adopter->>Sess: send messages
+  Sess->>TL: queue message
+  Sess->>LE: run tick
+
+  loop One tick
+    LE->>Rec: render compiled IR
+    Rec-->>LE: RenderedTree
+    LE->>Ex: run compiled target
+    Ex-->>Bus: append executor delta
+    Bus-->>Adopter: events surface executor
+    Ex-->>LE: result text and tool_calls
+
+    alt has tool_calls
+      LE->>TX: dispatch tool_call
+      TX->>Bus: append tool invocation
+      TX-->>LE: ContentBlock array
+      LE->>TL: append tool_result
+    else final
+      LE->>TL: append assistant_message
+    end
+  end
+
+  LE-->>Sess: SendResult
+  Sess-->>Adopter: SendResult
+```
+
+Reading guide:
+- Streaming deltas (`Ex-->>Bus`) fan out to any subscriber, including
+  the adopter via `session.events()` — that's the live token stream.
+- The tool-dispatch branch runs once per tick when the model emits
+  tool calls. Real model loops can emit N tool calls per tick which
+  all dispatch in parallel; this diagram only shows the single-tool
+  case for legibility.
+- After tool dispatch, the loop re-renders the JSX (the next tick's
+  `LE->>Rec: render`) — that's how mid-conversation state changes
+  reach the model.
+
+---
+
+## Supplementary diagrams (older drafts — kept for reference)
+
+> **Caveat.** These are the original nested drafts produced 2026-06-07.
+> They try to show too much at once and are harder to follow than the
+> focused diagrams above. Kept here so the iteration history is visible.
+> If something in the focused diagrams above is wrong or ambiguous,
+> cross-check against the prose ADRs first; consult these only as a
+> last-resort visual aid.
 >
 > **Known visualization concerns** (the diagram author flagged these):
 > - The hierarchy diagram nests four tiers as a Russian doll, which is
