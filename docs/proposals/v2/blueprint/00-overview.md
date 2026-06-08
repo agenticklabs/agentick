@@ -227,3 +227,274 @@ This is a living document like the source proposals. Sections are marked
 `Status: Synthesized`, `Status: Synthesized with placeholders`, or
 `Status: Gap-noted` so readers can tell at a glance whether a section is
 crystallized, awaiting sign-off, or known to be incomplete.
+
+---
+
+## Diagrams (WORK IN PROGRESS — not source of truth)
+
+> **Caveat.** These diagrams are exploratory drafts produced 2026-06-07
+> while wrapping up Phase 4 + Phase 5 kickoff. They are NOT the
+> authoritative architectural reference. The numbered ADR docs
+> (`01-harness-principle.md` through `32-extension-shape-spectrum.md`)
+> remain the source of truth. The diagrams may be inaccurate, may
+> overstate uniformity that doesn't yet exist in code, may understate
+> v2 features that are deferred. Treat them as visualization aids that
+> need cross-checking against the prose, not as a substitute for it.
+>
+> **Known visualization concerns** (the diagram author flagged these):
+> - The hierarchy diagram nests four tiers as a Russian doll, which is
+>   visually misleading — they're alternative deployment shapes for the
+>   same harness, not enclosing scopes.
+> - The substrate composition diagram implies factory-vs-instance is
+>   always the choice; in reality most adopters pass instances and
+>   only reach for factories for per-session isolation.
+> - The session anatomy diagram lists "auto-installed" vs "opt-in"
+>   harnesses as if the line is sharp; it's actually a policy choice
+>   per session-extensions cascade and may shift with Phase 5+ work.
+> - Several arrow directions on the substrate diagram represent
+>   logical "fan-in" rather than literal Effect data flow.
+>
+> Iterating on these is worthwhile; treating them as canonical is
+> premature.
+
+### 1. Harness hierarchy + deployment tiers
+
+```mermaid
+graph TB
+  subgraph Tier3["Tier 3 — Multi-tenant distributed cloud"]
+    subgraph Tier2["Tier 2 — Single-tenant cloud"]
+      subgraph Tier1["Tier 1 — Local single-user (OpenClaw / Hermes)"]
+        subgraph Tier0["Tier 0 — Embedded library"]
+          subgraph Gateway["GatewayHarness (runtime root)"]
+            GBus[("bus / inbox / journal<br/>Local in Tier 0-2<br/>Cluster in Tier 3")]
+            GExt["GatewayExtensions<br/>(transports, plugins, auth)"]
+            subgraph AppA["AppHarness — tenant alpha"]
+              ABusA[("substrate inherits from Gateway<br/>or per-app factory wraps")]
+              AReconA["Reconciler"]
+              ALoopA["LoopExecutor"]
+              AExecA["Executor (adapter)"]
+              subgraph SessionA["SessionHarness"]
+                SBusA[("substrate inherits or<br/>per-session factory wraps")]
+                STimelineA["Timeline"]
+                SKnobsA["Knobs"]
+                SStateA["State"]
+                SSkillsA["Skills"]
+                SSandboxA["Sandbox"]
+                SToolsA["ToolExecutor"]
+              end
+            end
+            subgraph AppB["AppHarness — tenant beta"]
+              ABusB[("...")]
+              SessionB["SessionHarness..."]
+            end
+          end
+        end
+      end
+    end
+  end
+
+  subgraph Transports["Optional transport extensions (Phase 5+)"]
+    HTTP["@agentick/gateway-http-sse"]
+    WS["@agentick/gateway-ws"]
+    MCP["@agentick/gateway-mcp-server"]
+    OAI["@agentick/gateway-openai-compat"]
+  end
+
+  subgraph ClusterPkg["@agentick/cluster (Phase D of ADR 29)"]
+    CBus[ClusterEventBus]
+    CJournal[ClusterJournal]
+    CInbox[ClusterInbox]
+  end
+
+  Transports -.installs at.-> GExt
+  ClusterPkg -.factories at.-> GBus
+```
+
+### 2. Substrate composition — fan-in writes, isolated reads
+
+```mermaid
+graph TB
+  subgraph G["Gateway substrate"]
+    GB[LocalEventBus<br/>or ClusterEventBus]
+    GJ[MemoryJournal<br/>or PostgresJournal<br/>or ClusterJournal]
+    GI[LocalInbox<br/>or ClusterInbox]
+  end
+
+  subgraph A["App substrate (per-app)"]
+    direction TB
+    AB[LocalEventBus<br/>factory wraps Gateway bus]
+    AJ[MemoryJournal<br/>factory wraps Gateway journal]
+    AI[LocalInbox<br/>independent — addressing semantics]
+  end
+
+  subgraph S["Session substrate (per-session)"]
+    direction TB
+    SB[LocalEventBus<br/>factory wraps App bus]
+    SJ[MemoryJournal<br/>factory wraps App journal]
+    SI[LocalInbox<br/>independent]
+  end
+
+  SB -- "append fans up" --> AB
+  AB -- "append fans up" --> GB
+  SJ -- "append fans up" --> AJ
+  AJ -- "append fans up" --> GJ
+
+  GB -. "subscribers see everything below" .- SubGW[gateway.events]
+  AB -. "subscribers see only app + its sessions" .- SubApp[app.events]
+  SB -. "subscribers see only this session" .- SubS[session bridges]
+
+  Reader1["Tenant alpha observer"] --> AB
+  Reader2["Tenant beta observer"] --> AB
+```
+
+### 3. Extension shape spectrum (per ADR 32)
+
+```mermaid
+graph LR
+  subgraph WeightAxis[" "]
+    direction LR
+    L1["Shape 1<br/>Full harness"] --> L2["Shape 2<br/>Namespace object"] --> L3["Shape 3<br/>Bus subscriber"] --> L4["Shape 4<br/>Reconciler contributor"] --> L5["Shape 5<br/>Descriptor + hook"] --> L6["Shape 6<br/>Tool / formatter"]
+  end
+
+  subgraph Examples[" "]
+    direction LR
+    E1["knobs<br/>state<br/>timeline<br/>sandbox<br/>mcp<br/>skills<br/>tool-executor<br/>loop-executor<br/>executor"]
+    E2["(adopter-defined<br/>memory stash,<br/>session notepad)"]
+    E3["devtools<br/>OTel exporter<br/>logging plugin"]
+    E4["formatters<br/>semantic HTML<br/>content-block parsers"]
+    E5["gates"]
+    E6["createTool<br/>defineFormatter"]
+  end
+
+  L1 --> E1
+  L2 --> E2
+  L3 --> E3
+  L4 --> E4
+  L5 --> E5
+  L6 --> E6
+```
+
+### 4. Inside a Session — the runtime anatomy
+
+```mermaid
+graph TB
+  subgraph Sess["SessionHarness"]
+    subgraph Substrate["Substrate (inherits / wraps App)"]
+      SBus[bus]
+      SInbox[inbox]
+      SJournal[journal]
+    end
+
+    subgraph BuiltIns["Built-in harnesses (auto-installed)"]
+      Timeline["TimelineHarness<br/>log + projection"]
+      Knobs["KnobsHarness<br/>model-visible state"]
+      State["StateHarness<br/>adopter stash"]
+      ToolExec["ToolExecutorHarness<br/>per-session tools"]
+    end
+
+    subgraph OptIns["Opt-in harnesses (withX)"]
+      Sandbox["SandboxHarness<br/>exec/file/net + ACL"]
+      MCP["MCPHarness<br/>per-server connection"]
+      Skills["SkillsHarness<br/>durable library"]
+      Subs["SubscriptionsHarness<br/>intents"]
+      Schedule["SchedulerHarness<br/>(Phase 5+)"]
+    end
+
+    subgraph Compute["Per-session compute"]
+      LE["LoopExecutorHarness<br/>tick loop"]
+      Ex["ExecutorHarness<br/>(adapter)"]
+      Rec["Reconciler<br/>JSX to IR"]
+    end
+
+    BuiltIns --> Substrate
+    OptIns --> Substrate
+    Compute --> Substrate
+    Rec -- "compiled context" --> Ex
+    Ex -- "tool calls" --> ToolExec
+    ToolExec -- "permission requests" --> Sandbox
+    ToolExec -- "skill invocations" --> Skills
+    LE -- "drives" --> Ex
+    LE -- "tick-end" --> Rec
+  end
+
+  subgraph Adapter["Provider adapters"]
+    OAIa[executor-openai]
+    Ana[executor-anthropic]
+    Goo[executor-google]
+    AIa[executor-ai-sdk]
+  end
+
+  Ex -. one of .- OAIa
+  Ex -. one of .- Ana
+  Ex -. one of .- Goo
+  Ex -. one of .- AIa
+```
+
+### 5. Data flow — one session.send round trip
+
+```mermaid
+sequenceDiagram
+  participant Adopter
+  participant Sess as SessionHarness
+  participant TL as Timeline
+  participant Rec as Reconciler
+  participant LE as LoopExecutor
+  participant Ex as ExecutorHarness
+  participant TX as ToolExecutor
+  participant Bus
+
+  Adopter->>Sess: send messages
+  Sess->>TL: queue message
+  Sess->>LE: run tick
+
+  loop One tick
+    LE->>Rec: render compiled IR
+    Rec-->>LE: RenderedTree
+    LE->>Ex: run compiled target
+    Ex-->>Bus: append executor delta
+    Bus-->>Adopter: events surface executor
+    Ex-->>LE: result text and tool_calls
+
+    alt has tool_calls
+      LE->>TX: dispatch tool_call
+      TX->>Bus: append tool invocation
+      TX-->>LE: ContentBlock array
+      LE->>TL: append tool_result
+    else final
+      LE->>TL: append assistant_message
+    end
+  end
+
+  LE-->>Sess: SendResult
+  Sess-->>Adopter: SendResult
+```
+
+### Where the diagrams need rework
+
+If we're committing them as work-in-progress, here are concrete
+items to come back to:
+
+1. **Tier-nesting metaphor.** Russian-doll subgraphs imply containment.
+   Better visualisation: a single Gateway frame with FOUR rendering
+   modes shown side-by-side (one per tier) so the reader sees "same
+   harness, different deployment context."
+2. **Substrate fan-in arrows.** Need a key explaining "logical fan-in"
+   vs literal Effect data flow. Bus subscribers don't see parent
+   events — only events appended at their scope or below.
+3. **Extension spectrum.** The horizontal-shape diagram doesn't really
+   show *cost* or *when to pick*. A radar/quadrant chart (audit need
+   vs persistence need) might communicate the decision better than a
+   linear ordering.
+4. **Session anatomy.** "Built-in" vs "opt-in" is a Phase 4 statement;
+   when the SessionExtension cascade ships (ADR 26 Step 8), the line
+   blurs. Worth re-drawing then.
+5. **Sequence diagram.** Doesn't show the per-tick reconciler-after-
+   tool-result re-render loop accurately — the model can call N
+   tools per tick which all dispatch in parallel, then the loop
+   re-renders before the next tick. Current diagram implies tool
+   dispatch happens inside the same tick the model emitted them
+   from.
+
+Treat these as a backlog. **Source of truth remains the prose ADRs**
+(`01` through `32`) plus `V1-PARITY-TRACKER.md` and
+`V1-GATEWAY-PARITY-TRACKER.md` for v1 → v2 disposition.
