@@ -55,10 +55,10 @@ interfaces.
 Adopt v1's proven shape from `packages/core/src/renderers/base.ts`:
 
 ```ts
-// In @agentick/spec/data/formatter.ts (already mostly there)
+// In @agentick/spec-next/data/formatter.ts (already mostly there)
 type Formatter = (blocks: readonly SemanticContentBlock[]) => readonly ContentBlock[];
 
-// In @agentick/spec/data/semantic.ts — KEEP the sidecar
+// In @agentick/spec-next/data/semantic.ts — KEEP the sidecar
 type SemanticContentBlock = ContentBlock & {
   readonly semanticNode?: SemanticNode;
 };
@@ -83,7 +83,7 @@ interface SemanticNode {
 - Nested formatter switching via `SemanticNode.rendererRef` — the
   reconciler resolves the ref against its formatter registry.
 
-**`defineFormatter` exported from `@agentick/reconciler-react`:**
+**`defineFormatter` exported from `@agentick/reconciler-react-next`:**
 
 ```ts
 interface DefineFormatterInput {
@@ -115,7 +115,7 @@ downstream sees SemanticNode.
 
 ### D3 — Defer reconciler-core extraction
 
-Do not split `@agentick/reconciler-react` into core + driver packages now.
+Do not split `@agentick/reconciler-react-next` into core + driver packages now.
 Refactor when a second concrete reconciler arrives (Angular, Solid) to force
 the boundary. Speculative extraction guesses wrong; refactoring against a
 real second consumer guesses right.
@@ -164,4 +164,4 @@ Total: ~3.5 days.
 
 **E — Drop the sidecar; require formatter to output flat strings only.** Loses the ability to mix native ContentBlocks (images, audio) with formatted text in one pass. v1's `Formatter` returns `ContentBlock[]` precisely so mixed-content stays composable.
 
-**F — Extract `@agentick/reconciler` core now.** Sandi Metz / Kent Beck: refactor against present pressure, not imagined futures. Defer to second concrete consumer.
+**F — Extract `@agentick/reconciler-next` core now.** Sandi Metz / Kent Beck: refactor against present pressure, not imagined futures. Defer to second concrete consumer.

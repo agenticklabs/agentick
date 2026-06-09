@@ -35,7 +35,7 @@ and the rest of the blueprint sits on top of it.
 26-harness-api-shape.md           ADR 26 — harness as the single shape (foundational)
 27-modular-built-ins.md           ADR 27 — bundled built-ins + augmentation (foundational)
 02-data-model.md                  the wire shapes everything else exchanges
-03-reconciler-harness.md            producer of RenderedTree (v2 ships @agentick/reconciler-react)
+03-reconciler-harness.md            producer of RenderedTree (v2 ships @agentick/reconciler-react-next)
 04-formatters.md                   semantic content → rendered content (pure functions, see ADR 22)
 05-loop-executor.md               tick orchestration
 06-executor-harness.md            RenderedTree → provider → result
@@ -52,7 +52,7 @@ and the rest of the blueprint sits on top of it.
 17-open-questions.md              deduped across all source docs
 18-traceability.md                blueprint section → source proposal map
 20-pluggability-charter.md        protocol-first principle in engineering terms
-21-reconciler-implementation.md   low-level shape of @agentick/reconciler-react
+21-reconciler-implementation.md   low-level shape of @agentick/reconciler-react-next
                                   (host config, contributors, hook bridges)
 ```
 

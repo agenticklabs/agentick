@@ -34,9 +34,9 @@ for the full reasoning. Summary:**
   same architectural pattern as optional extensions (sandbox, mcp). The
   metapackage (`agentick`) bundles the built-ins; optionals are
   separate npm installs. No code-level distinction between the two.
-- **`HookBridges` in `@agentick/spec` is an empty seed.** Every harness
+- **`HookBridges` in `@agentick/spec-next` is an empty seed.** Every harness
   package — built-in or optional — augments it via TypeScript module
-  augmentation (`declare module "@agentick/spec"`). Spec does NOT
+  augmentation (`declare module "@agentick/spec-next"`). Spec does NOT
   hardcode foundational slots.
 - **Per-harness package layout (the convention):**
   ```
@@ -52,7 +52,7 @@ for the full reasoning. Summary:**
         harness.spec.ts                       — harness-only tests
         integration-with-reconciler.spec.ts   — uses real ReconcilerHarness
   ```
-- **`@agentick/reconciler-react` has NO dependency on any harness
+- **`@agentick/reconciler-react-next` has NO dependency on any harness
   package.** It owns the JSX → IR pipeline, the bridge context
   (`BridgeProvider` / `useBridges`), and the reference
   `InMemoryDataBridge`. Snapshot/restore iterates `HookBridges`
@@ -60,10 +60,10 @@ for the full reasoning. Summary:**
   slot names. Any harness can add a `/react` subpath that depends on
   reconciler-react WITHOUT creating a cycle.
 - **Tests live where their dependencies live.** A "knobs work with the
-  reconciler" test belongs in `@agentick/knobs/__tests__/`, not in
+  reconciler" test belongs in `@agentick/knobs-next/__tests__/`, not in
   reconciler-react. Reconciler-react's tests test the reconciler
   ITSELF, using protocol mocks where bridges are needed. Cross-harness
-  integration tests live in `@agentick/session` (which depends on all
+  integration tests live in `@agentick/session-next` (which depends on all
   the harnesses it integrates) or in the public metapackage.
 - **Shipping ≠ architecture.** Built-ins ship as private workspace
   packages bundled into the `agentick` metapackage. Optional extensions

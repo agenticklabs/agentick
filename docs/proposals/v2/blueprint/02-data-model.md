@@ -4,13 +4,13 @@
 `[SOURCE: compiled-spec.md, spec-package.md, executor.md, renderer-harness.md, harness-principle.md]`
 
 This doc consolidates every type that crosses a harness boundary in v2:
-the wire shapes that live in `@agentick/spec`. Anything that crosses a
+the wire shapes that live in `@agentick/spec-next`. Anything that crosses a
 boundary is JSON-serializable. Anything else (renderer instances, tool
 handlers, React fibers, Effect refs, provider SDK clients) stays inside
 the harness implementation.
 
 ```
-                          @agentick/spec
+                          @agentick/spec-next
                           ──────────────
             ┌────────────────────────────────────────┐
             │ data/                                  │
@@ -333,7 +333,7 @@ Sign-off needed; tracked in `17-open-questions.md`.
 ## Content blocks `[V1-INHERITED]`
 
 The content block taxonomy is promoted from
-`packages/shared/src/blocks.ts` (~21 variants) into `@agentick/spec`. The
+`packages/shared/src/blocks.ts` (~21 variants) into `@agentick/spec-next`. The
 shape is unchanged but `any` bags are tightened to `unknown` where
 possible (`[SOURCE: spec-package.md §V1 Type Sources]`).
 
@@ -361,7 +361,7 @@ url · base64 · reference (file id) · s3 · gcs
 ```
 
 Buffer ↔ base64 helpers move to `@agentick/shared` (Node `Buffer`-aware,
-not zero-dep). The pure type definitions stay in `@agentick/spec`.
+not zero-dep). The pure type definitions stay in `@agentick/spec-next`.
 
 ### Renderable block extension `[V1-INHERITED, REFINED]`
 
@@ -833,7 +833,7 @@ commands. See per-harness docs (03–09) for the canonical inbox messages.
 
 `ChannelEvent`, `ChannelEventMetadata`, `FrameworkChannels`, framework
 channel payloads from `packages/shared/src/protocol.ts` are promoted to
-`@agentick/spec`. The seven framework channels are unchanged:
+`@agentick/spec-next`. The seven framework channels are unchanged:
 
 ```
 session:messages          → SessionMessagePayload
@@ -850,7 +850,7 @@ internal harness events. Different abstraction layer; same package.
 ## Standard Schema interface (for tool input schemas)
 
 ```ts
-// Inlined from @standard-schema/spec to keep @agentick/spec zero-dep.
+// Inlined from @standard-schema/spec to keep @agentick/spec-next zero-dep.
 interface StandardSchemaV1<Input = unknown, Output = unknown> {
   readonly "~standard": {
     readonly version: 1;
@@ -887,7 +887,7 @@ in v2 proposals; deferred to `17-open-questions.md`.
 ## Validation strategy `[V1-INHERITED]` from spec-package decision log
 
 ```
-Type guards (zero runtime cost) ──► ship in @agentick/spec
+Type guards (zero runtime cost) ──► ship in @agentick/spec-next
 JSON Schema validation (ajv)   ──► @agentick/spec-validator (separate)
 ```
 

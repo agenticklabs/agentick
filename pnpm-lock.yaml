@@ -204,36 +204,36 @@ importers:
 
   example/v2:
     dependencies:
-      '@agentick/app':
+      '@agentick/app-next':
         specifier: workspace:*
-        version: link:../../packages/app
-      '@agentick/executor':
+        version: link:../../packages-next/app
+      '@agentick/executor-ai-sdk-next':
         specifier: workspace:*
-        version: link:../../packages/executor
-      '@agentick/executor-ai-sdk':
+        version: link:../../packages-next/executor-ai-sdk
+      '@agentick/executor-next':
         specifier: workspace:*
-        version: link:../../packages/executor-ai-sdk
-      '@agentick/loop-executor':
+        version: link:../../packages-next/executor
+      '@agentick/loop-executor-next':
         specifier: workspace:*
-        version: link:../../packages/loop-executor
-      '@agentick/reconciler':
+        version: link:../../packages-next/loop-executor
+      '@agentick/reconciler-next':
         specifier: workspace:*
-        version: link:../../packages/reconciler
-      '@agentick/reconciler-react':
+        version: link:../../packages-next/reconciler
+      '@agentick/reconciler-react-next':
         specifier: workspace:*
-        version: link:../../packages/reconciler-react
-      '@agentick/runtime':
+        version: link:../../packages-next/reconciler-react
+      '@agentick/runtime-next':
         specifier: workspace:*
-        version: link:../../packages/runtime
-      '@agentick/session':
+        version: link:../../packages-next/runtime
+      '@agentick/session-next':
         specifier: workspace:*
-        version: link:../../packages/session
-      '@agentick/spec':
+        version: link:../../packages-next/session
+      '@agentick/spec-next':
         specifier: workspace:*
-        version: link:../../packages/spec
-      '@agentick/tool-executor':
+        version: link:../../packages-next/spec
+      '@agentick/tool-executor-next':
         specifier: workspace:*
-        version: link:../../packages/tool-executor
+        version: link:../../packages-next/tool-executor
       '@ai-sdk/provider':
         specifier: ^2.0.0
         version: 2.0.1
@@ -260,29 +260,29 @@ importers:
         specifier: ^5.7.3
         version: 5.9.3
 
-  example/v2-real:
+  example/v2-otto:
     dependencies:
-      '@agentick/app':
+      '@agentick/app-next':
         specifier: workspace:*
-        version: link:../../packages/app
-      '@agentick/executor-ai-sdk':
+        version: link:../../packages-next/app
+      '@agentick/executor-ai-sdk-next':
         specifier: workspace:*
-        version: link:../../packages/executor-ai-sdk
-      '@agentick/knobs':
+        version: link:../../packages-next/executor-ai-sdk
+      '@agentick/knobs-next':
         specifier: workspace:*
-        version: link:../../packages/knobs
-      '@agentick/reconciler-react':
+        version: link:../../packages-next/knobs
+      '@agentick/reconciler-react-next':
         specifier: workspace:*
-        version: link:../../packages/reconciler-react
-      '@agentick/spec':
+        version: link:../../packages-next/reconciler-react
+      '@agentick/spec-next':
         specifier: workspace:*
-        version: link:../../packages/spec
-      '@agentick/state':
+        version: link:../../packages-next/spec
+      '@agentick/state-next':
         specifier: workspace:*
-        version: link:../../packages/state
-      '@agentick/timeline':
+        version: link:../../packages-next/state
+      '@agentick/timeline-next':
         specifier: workspace:*
-        version: link:../../packages/timeline
+        version: link:../../packages-next/timeline
       '@ai-sdk/openai':
         specifier: ^2.0.0
         version: 2.0.89(zod@4.3.6)
@@ -308,6 +308,567 @@ importers:
       typescript:
         specifier: ^5.7.3
         version: 5.9.3
+
+  example/v2-real:
+    dependencies:
+      '@agentick/app-next':
+        specifier: workspace:*
+        version: link:../../packages-next/app
+      '@agentick/executor-ai-sdk-next':
+        specifier: workspace:*
+        version: link:../../packages-next/executor-ai-sdk
+      '@agentick/knobs-next':
+        specifier: workspace:*
+        version: link:../../packages-next/knobs
+      '@agentick/reconciler-react-next':
+        specifier: workspace:*
+        version: link:../../packages-next/reconciler-react
+      '@agentick/spec-next':
+        specifier: workspace:*
+        version: link:../../packages-next/spec
+      '@agentick/state-next':
+        specifier: workspace:*
+        version: link:../../packages-next/state
+      '@agentick/timeline-next':
+        specifier: workspace:*
+        version: link:../../packages-next/timeline
+      '@ai-sdk/openai':
+        specifier: ^2.0.0
+        version: 2.0.89(zod@4.3.6)
+      dotenv:
+        specifier: ^16.4.5
+        version: 16.6.1
+      react:
+        specifier: ^19.2.4
+        version: 19.2.4
+      zod:
+        specifier: ^4.3.6
+        version: 4.3.6
+    devDependencies:
+      '@types/node':
+        specifier: ^22.5.4
+        version: 22.19.7
+      '@types/react':
+        specifier: ^19.2.13
+        version: 19.2.13
+      tsx:
+        specifier: ^4.19.2
+        version: 4.21.0
+      typescript:
+        specifier: ^5.7.3
+        version: 5.9.3
+
+  packages-next/app:
+    dependencies:
+      '@agentick/loop-executor-next':
+        specifier: workspace:*
+        version: link:../loop-executor
+      '@agentick/runtime-next':
+        specifier: workspace:*
+        version: link:../runtime
+      '@agentick/session-next':
+        specifier: workspace:*
+        version: link:../session
+      '@agentick/spec-next':
+        specifier: workspace:*
+        version: link:../spec
+      '@agentick/tool-executor-next':
+        specifier: workspace:*
+        version: link:../tool-executor
+      effect:
+        specifier: ^3.21.2
+        version: 3.21.2
+    devDependencies:
+      '@agentick/executor-next':
+        specifier: workspace:*
+        version: link:../executor
+      '@agentick/knobs-next':
+        specifier: workspace:*
+        version: link:../knobs
+      '@agentick/reconciler-react-next':
+        specifier: workspace:*
+        version: link:../reconciler-react
+      '@types/react':
+        specifier: ^19.2.5
+        version: 19.2.13
+      react:
+        specifier: ^19.2.4
+        version: 19.2.4
+
+  packages-next/executor:
+    dependencies:
+      '@agentick/runtime-next':
+        specifier: workspace:*
+        version: link:../runtime
+      '@agentick/spec-next':
+        specifier: workspace:*
+        version: link:../spec
+      effect:
+        specifier: ^3.21.2
+        version: 3.21.2
+    devDependencies:
+      '@agentick/spec-conformance-next':
+        specifier: workspace:*
+        version: link:../spec-conformance
+
+  packages-next/executor-ai-sdk:
+    dependencies:
+      '@agentick/runtime-next':
+        specifier: workspace:*
+        version: link:../runtime
+      '@agentick/spec-next':
+        specifier: workspace:*
+        version: link:../spec
+      ai:
+        specifier: ^5.0.0
+        version: 5.0.123(zod@4.3.6)
+      effect:
+        specifier: ^3.21.2
+        version: 3.21.2
+    devDependencies:
+      '@agentick/spec-conformance-next':
+        specifier: workspace:*
+        version: link:../spec-conformance
+      msw:
+        specifier: ^2.0.0
+        version: 2.14.6(@types/node@25.0.9)(typescript@5.9.3)
+
+  packages-next/executor-anthropic:
+    dependencies:
+      '@agentick/executor-openai-next':
+        specifier: workspace:*
+        version: link:../executor-openai
+      '@agentick/runtime-next':
+        specifier: workspace:*
+        version: link:../runtime
+      '@agentick/spec-next':
+        specifier: workspace:*
+        version: link:../spec
+      '@anthropic-ai/sdk':
+        specifier: ^0.39.0
+        version: 0.39.0
+      effect:
+        specifier: ^3.21.2
+        version: 3.21.2
+    devDependencies:
+      '@agentick/spec-conformance-next':
+        specifier: workspace:*
+        version: link:../spec-conformance
+
+  packages-next/executor-google:
+    dependencies:
+      '@agentick/executor-openai-next':
+        specifier: workspace:*
+        version: link:../executor-openai
+      '@agentick/runtime-next':
+        specifier: workspace:*
+        version: link:../runtime
+      '@agentick/spec-next':
+        specifier: workspace:*
+        version: link:../spec
+      '@google/genai':
+        specifier: ^1.31.0
+        version: 1.38.0(@modelcontextprotocol/sdk@1.29.0(zod@4.3.6))
+      effect:
+        specifier: ^3.21.2
+        version: 3.21.2
+    devDependencies:
+      '@agentick/spec-conformance-next':
+        specifier: workspace:*
+        version: link:../spec-conformance
+
+  packages-next/executor-openai:
+    dependencies:
+      '@agentick/runtime-next':
+        specifier: workspace:*
+        version: link:../runtime
+      '@agentick/spec-next':
+        specifier: workspace:*
+        version: link:../spec
+      effect:
+        specifier: ^3.21.2
+        version: 3.21.2
+      openai:
+        specifier: ^6.0.0
+        version: 6.16.0(ws@8.19.0)(zod@4.3.6)
+    devDependencies:
+      '@agentick/spec-conformance-next':
+        specifier: workspace:*
+        version: link:../spec-conformance
+
+  packages-next/formatters:
+    dependencies:
+      '@agentick/spec-next':
+        specifier: workspace:*
+        version: link:../spec
+
+  packages-next/gates:
+    dependencies:
+      '@agentick/knobs-next':
+        specifier: workspace:*
+        version: link:../knobs
+      '@agentick/reconciler-next':
+        specifier: workspace:*
+        version: link:../reconciler
+      '@agentick/reconciler-react-next':
+        specifier: workspace:*
+        version: link:../reconciler-react
+      '@agentick/spec-next':
+        specifier: workspace:*
+        version: link:../spec
+      react:
+        specifier: ^19.0.0
+        version: 19.2.4
+    devDependencies:
+      '@agentick/runtime-next':
+        specifier: workspace:*
+        version: link:../runtime
+      '@types/react':
+        specifier: ^19.2.5
+        version: 19.2.13
+
+  packages-next/gateway:
+    dependencies:
+      '@agentick/app-next':
+        specifier: workspace:*
+        version: link:../app
+      '@agentick/runtime-next':
+        specifier: workspace:*
+        version: link:../runtime
+      '@agentick/spec-next':
+        specifier: workspace:*
+        version: link:../spec
+      effect:
+        specifier: ^3.21.2
+        version: 3.21.2
+    devDependencies:
+      '@agentick/spec-conformance-next':
+        specifier: workspace:*
+        version: link:../spec-conformance
+
+  packages-next/knobs:
+    dependencies:
+      '@agentick/reconciler-next':
+        specifier: workspace:*
+        version: link:../reconciler
+      '@agentick/reconciler-react-next':
+        specifier: workspace:*
+        version: link:../reconciler-react
+      '@agentick/runtime-next':
+        specifier: workspace:*
+        version: link:../runtime
+      '@agentick/spec-next':
+        specifier: workspace:*
+        version: link:../spec
+      '@agentick/tool-next':
+        specifier: workspace:*
+        version: link:../tool
+      effect:
+        specifier: ^3.21.2
+        version: 3.21.2
+      react:
+        specifier: ^19.0.0
+        version: 19.2.4
+    devDependencies:
+      '@agentick/spec-conformance-next':
+        specifier: workspace:*
+        version: link:../spec-conformance
+      '@types/react':
+        specifier: ^19.2.5
+        version: 19.2.13
+
+  packages-next/loop-executor:
+    dependencies:
+      '@agentick/runtime-next':
+        specifier: workspace:*
+        version: link:../runtime
+      '@agentick/spec-next':
+        specifier: workspace:*
+        version: link:../spec
+      effect:
+        specifier: ^3.21.2
+        version: 3.21.2
+    devDependencies:
+      '@agentick/spec-conformance-next':
+        specifier: workspace:*
+        version: link:../spec-conformance
+
+  packages-next/reconciler:
+    dependencies:
+      '@agentick/runtime-next':
+        specifier: workspace:*
+        version: link:../runtime
+      '@agentick/spec-next':
+        specifier: workspace:*
+        version: link:../spec
+      effect:
+        specifier: ^3.21.2
+        version: 3.21.2
+
+  packages-next/reconciler-react:
+    dependencies:
+      '@agentick/formatters-next':
+        specifier: workspace:*
+        version: link:../formatters
+      '@agentick/reconciler-next':
+        specifier: workspace:*
+        version: link:../reconciler
+      '@agentick/runtime-next':
+        specifier: workspace:*
+        version: link:../runtime
+      '@agentick/spec-next':
+        specifier: workspace:*
+        version: link:../spec
+      '@agentick/tool-next':
+        specifier: workspace:*
+        version: link:../tool
+      effect:
+        specifier: ^3.21.2
+        version: 3.21.2
+      react:
+        specifier: ^19.2.4
+        version: 19.2.4
+      react-reconciler:
+        specifier: ^0.33.0
+        version: 0.33.0(react@19.2.4)
+    devDependencies:
+      '@agentick/spec-conformance-next':
+        specifier: workspace:*
+        version: link:../spec-conformance
+      '@types/react':
+        specifier: ^19.2.5
+        version: 19.2.13
+      '@types/react-reconciler':
+        specifier: 0.33.0
+        version: 0.33.0(@types/react@19.2.13)
+
+  packages-next/runtime:
+    dependencies:
+      '@agentick/spec-next':
+        specifier: workspace:*
+        version: link:../spec
+      effect:
+        specifier: ^3.21.2
+        version: 3.21.2
+    devDependencies:
+      '@agentick/spec-conformance-next':
+        specifier: workspace:*
+        version: link:../spec-conformance
+
+  packages-next/sandbox:
+    dependencies:
+      '@agentick/reconciler-next':
+        specifier: workspace:*
+        version: link:../reconciler
+      '@agentick/reconciler-react-next':
+        specifier: workspace:*
+        version: link:../reconciler-react
+      '@agentick/runtime-next':
+        specifier: workspace:*
+        version: link:../runtime
+      '@agentick/spec-next':
+        specifier: workspace:*
+        version: link:../spec
+      '@agentick/tool-next':
+        specifier: workspace:*
+        version: link:../tool
+      effect:
+        specifier: ^3.21.2
+        version: 3.21.2
+      react:
+        specifier: ^19.0.0
+        version: 19.2.4
+    devDependencies:
+      '@agentick/spec-conformance-next':
+        specifier: workspace:*
+        version: link:../spec-conformance
+      '@types/react':
+        specifier: ^19.2.5
+        version: 19.2.13
+
+  packages-next/session:
+    dependencies:
+      '@agentick/knobs-next':
+        specifier: workspace:*
+        version: link:../knobs
+      '@agentick/loop-executor-next':
+        specifier: workspace:*
+        version: link:../loop-executor
+      '@agentick/reconciler-next':
+        specifier: workspace:*
+        version: link:../reconciler
+      '@agentick/runtime-next':
+        specifier: workspace:*
+        version: link:../runtime
+      '@agentick/spec-next':
+        specifier: workspace:*
+        version: link:../spec
+      '@agentick/state-next':
+        specifier: workspace:*
+        version: link:../state
+      '@agentick/timeline-next':
+        specifier: workspace:*
+        version: link:../timeline
+      effect:
+        specifier: ^3.21.2
+        version: 3.21.2
+      react:
+        specifier: ^19.2.4
+        version: 19.2.4
+    devDependencies:
+      '@agentick/executor-next':
+        specifier: workspace:*
+        version: link:../executor
+      '@agentick/reconciler-react-next':
+        specifier: workspace:*
+        version: link:../reconciler-react
+      '@agentick/spec-conformance-next':
+        specifier: workspace:*
+        version: link:../spec-conformance
+      '@agentick/tool-executor-next':
+        specifier: workspace:*
+        version: link:../tool-executor
+      '@types/react':
+        specifier: ^19.2.5
+        version: 19.2.13
+
+  packages-next/skills:
+    dependencies:
+      '@agentick/runtime-next':
+        specifier: workspace:*
+        version: link:../runtime
+      '@agentick/spec-next':
+        specifier: workspace:*
+        version: link:../spec
+      effect:
+        specifier: ^3.21.2
+        version: 3.21.2
+    devDependencies:
+      '@agentick/spec-conformance-next':
+        specifier: workspace:*
+        version: link:../spec-conformance
+
+  packages-next/spec:
+    dependencies:
+      effect:
+        specifier: ^3.21.2
+        version: 3.21.2
+
+  packages-next/spec-conformance:
+    dependencies:
+      '@agentick/spec-next':
+        specifier: workspace:*
+        version: link:../spec
+      effect:
+        specifier: ^3.21.2
+        version: 3.21.2
+      vitest:
+        specifier: ^4.0.0
+        version: 4.0.18(@opentelemetry/api@1.9.0)(@types/node@25.0.9)(happy-dom@17.6.3)(jiti@2.6.1)(msw@2.14.6(@types/node@25.0.9)(typescript@5.9.3))(tsx@4.21.0)(yaml@2.8.4)
+
+  packages-next/state:
+    dependencies:
+      '@agentick/reconciler-next':
+        specifier: workspace:*
+        version: link:../reconciler
+      '@agentick/reconciler-react-next':
+        specifier: workspace:*
+        version: link:../reconciler-react
+      '@agentick/runtime-next':
+        specifier: workspace:*
+        version: link:../runtime
+      '@agentick/spec-next':
+        specifier: workspace:*
+        version: link:../spec
+      effect:
+        specifier: ^3.21.2
+        version: 3.21.2
+      react:
+        specifier: ^19.0.0
+        version: 19.2.4
+    devDependencies:
+      '@agentick/spec-conformance-next':
+        specifier: workspace:*
+        version: link:../spec-conformance
+      '@types/react':
+        specifier: ^19.2.5
+        version: 19.2.13
+
+  packages-next/subscriptions:
+    dependencies:
+      '@agentick/reconciler-next':
+        specifier: workspace:*
+        version: link:../reconciler
+      '@agentick/reconciler-react-next':
+        specifier: workspace:*
+        version: link:../reconciler-react
+      '@agentick/runtime-next':
+        specifier: workspace:*
+        version: link:../runtime
+      '@agentick/spec-next':
+        specifier: workspace:*
+        version: link:../spec
+      react:
+        specifier: ^19.0.0
+        version: 19.2.4
+    devDependencies:
+      '@types/react':
+        specifier: ^19.2.13
+        version: 19.2.13
+
+  packages-next/timeline:
+    dependencies:
+      '@agentick/reconciler-next':
+        specifier: workspace:*
+        version: link:../reconciler
+      '@agentick/reconciler-react-next':
+        specifier: workspace:*
+        version: link:../reconciler-react
+      '@agentick/runtime-next':
+        specifier: workspace:*
+        version: link:../runtime
+      '@agentick/spec-next':
+        specifier: workspace:*
+        version: link:../spec
+      effect:
+        specifier: ^3.21.2
+        version: 3.21.2
+      react:
+        specifier: ^19.0.0
+        version: 19.2.4
+    devDependencies:
+      '@agentick/spec-conformance-next':
+        specifier: workspace:*
+        version: link:../spec-conformance
+      '@types/react':
+        specifier: ^19.2.5
+        version: 19.2.13
+
+  packages-next/tool:
+    dependencies:
+      '@agentick/spec-next':
+        specifier: workspace:*
+        version: link:../spec
+    devDependencies:
+      zod:
+        specifier: ^4.3.6
+        version: 4.3.6
+
+  packages-next/tool-executor:
+    dependencies:
+      '@agentick/runtime-next':
+        specifier: workspace:*
+        version: link:../runtime
+      '@agentick/spec-next':
+        specifier: workspace:*
+        version: link:../spec
+      effect:
+        specifier: ^3.21.2
+        version: 3.21.2
+    devDependencies:
+      '@agentick/spec-conformance-next':
+        specifier: workspace:*
+        version: link:../spec-conformance
 
   packages/adapters/ai-sdk:
     dependencies:
@@ -454,43 +1015,6 @@ importers:
       vitest:
         specifier: ^4.0.18
         version: 4.0.18(@opentelemetry/api@1.9.0)(@types/node@22.19.7)(happy-dom@17.6.3)(jiti@2.6.1)(msw@2.14.6(@types/node@22.19.7)(typescript@5.9.3))(tsx@4.21.0)(yaml@2.8.4)
-
-  packages/app:
-    dependencies:
-      '@agentick/loop-executor':
-        specifier: workspace:*
-        version: link:../loop-executor
-      '@agentick/runtime':
-        specifier: workspace:*
-        version: link:../runtime
-      '@agentick/session':
-        specifier: workspace:*
-        version: link:../session
-      '@agentick/spec':
-        specifier: workspace:*
-        version: link:../spec
-      '@agentick/tool-executor':
-        specifier: workspace:*
-        version: link:../tool-executor
-      effect:
-        specifier: ^3.21.2
-        version: 3.21.2
-    devDependencies:
-      '@agentick/executor':
-        specifier: workspace:*
-        version: link:../executor
-      '@agentick/knobs':
-        specifier: workspace:*
-        version: link:../knobs
-      '@agentick/reconciler-react':
-        specifier: workspace:*
-        version: link:../reconciler-react
-      '@types/react':
-        specifier: ^19.2.5
-        version: 19.2.13
-      react:
-        specifier: ^19.2.4
-        version: 19.2.4
 
   packages/cli:
     dependencies:
@@ -668,107 +1192,6 @@ importers:
         specifier: ^6.0.0
         version: 6.4.1(@types/node@22.19.7)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.4)
 
-  packages/executor:
-    dependencies:
-      '@agentick/runtime':
-        specifier: workspace:*
-        version: link:../runtime
-      '@agentick/spec':
-        specifier: workspace:*
-        version: link:../spec
-      effect:
-        specifier: ^3.21.2
-        version: 3.21.2
-    devDependencies:
-      '@agentick/spec-conformance':
-        specifier: workspace:*
-        version: link:../spec-conformance
-
-  packages/executor-ai-sdk:
-    dependencies:
-      '@agentick/runtime':
-        specifier: workspace:*
-        version: link:../runtime
-      '@agentick/spec':
-        specifier: workspace:*
-        version: link:../spec
-      ai:
-        specifier: ^5.0.0
-        version: 5.0.123(zod@4.3.6)
-      effect:
-        specifier: ^3.21.2
-        version: 3.21.2
-    devDependencies:
-      '@agentick/spec-conformance':
-        specifier: workspace:*
-        version: link:../spec-conformance
-      msw:
-        specifier: ^2.0.0
-        version: 2.14.6(@types/node@25.0.9)(typescript@5.9.3)
-
-  packages/executor-anthropic:
-    dependencies:
-      '@agentick/executor-openai':
-        specifier: workspace:*
-        version: link:../executor-openai
-      '@agentick/runtime':
-        specifier: workspace:*
-        version: link:../runtime
-      '@agentick/spec':
-        specifier: workspace:*
-        version: link:../spec
-      '@anthropic-ai/sdk':
-        specifier: ^0.39.0
-        version: 0.39.0
-      effect:
-        specifier: ^3.21.2
-        version: 3.21.2
-    devDependencies:
-      '@agentick/spec-conformance':
-        specifier: workspace:*
-        version: link:../spec-conformance
-
-  packages/executor-google:
-    dependencies:
-      '@agentick/executor-openai':
-        specifier: workspace:*
-        version: link:../executor-openai
-      '@agentick/runtime':
-        specifier: workspace:*
-        version: link:../runtime
-      '@agentick/spec':
-        specifier: workspace:*
-        version: link:../spec
-      '@google/genai':
-        specifier: ^1.31.0
-        version: 1.38.0(@modelcontextprotocol/sdk@1.29.0(zod@4.3.6))
-      effect:
-        specifier: ^3.21.2
-        version: 3.21.2
-    devDependencies:
-      '@agentick/spec-conformance':
-        specifier: workspace:*
-        version: link:../spec-conformance
-
-  packages/executor-openai:
-    dependencies:
-      '@agentick/runtime':
-        specifier: workspace:*
-        version: link:../runtime
-      '@agentick/spec':
-        specifier: workspace:*
-        version: link:../spec
-      effect:
-        specifier: ^3.21.2
-        version: 3.21.2
-      openai:
-        specifier: ^6.0.0
-        version: 6.16.0(ws@8.19.0)(zod@4.3.6)
-    devDependencies:
-      '@agentick/spec-conformance':
-        specifier: workspace:*
-        version: link:../spec-conformance
-
   packages/express:
     dependencies:
       '@agentick/gateway':
@@ -797,42 +1220,8 @@ importers:
         specifier: ^4.0.18
         version: 4.0.18(@opentelemetry/api@1.9.0)(@types/node@22.19.7)(happy-dom@17.6.3)(jiti@2.6.1)(msw@2.14.6(@types/node@22.19.7)(typescript@5.9.3))(tsx@4.21.0)(yaml@2.8.4)
 
-  packages/formatters:
-    dependencies:
-      '@agentick/spec':
-        specifier: workspace:*
-        version: link:../spec
-
-  packages/gates:
-    dependencies:
-      '@agentick/knobs':
-        specifier: workspace:*
-        version: link:../knobs
-      '@agentick/reconciler':
-        specifier: workspace:*
-        version: link:../reconciler
-      '@agentick/reconciler-react':
-        specifier: workspace:*
-        version: link:../reconciler-react
-      '@agentick/spec':
-        specifier: workspace:*
-        version: link:../spec
-      react:
-        specifier: ^19.0.0
-        version: 19.2.4
-    devDependencies:
-      '@agentick/runtime':
-        specifier: workspace:*
-        version: link:../runtime
-      '@types/react':
-        specifier: ^19.2.5
-        version: 19.2.13
-
   packages/gateway:
     dependencies:
-      '@agentick/app':
-        specifier: workspace:*
-        version: link:../app
       '@agentick/core':
         specifier: workspace:*
         version: link:../core
@@ -842,31 +1231,19 @@ importers:
       '@agentick/mcp':
         specifier: workspace:*
         version: link:../mcp
-      '@agentick/runtime':
-        specifier: workspace:*
-        version: link:../runtime
       '@agentick/server':
         specifier: workspace:*
         version: link:../server
       '@agentick/shared':
         specifier: workspace:*
         version: link:../shared
-      '@agentick/spec':
-        specifier: workspace:*
-        version: link:../spec
       '@modelcontextprotocol/sdk':
         specifier: ^1.29.0
         version: 1.29.0(zod@4.3.6)
-      effect:
-        specifier: ^3.21.2
-        version: 3.21.2
       ws:
         specifier: ^8.16.0
         version: 8.19.0
     devDependencies:
-      '@agentick/spec-conformance':
-        specifier: workspace:*
-        version: link:../spec-conformance
       '@types/node':
         specifier: ^22.10.5
         version: 22.19.7
@@ -910,53 +1287,6 @@ importers:
       pino-pretty:
         specifier: ^13.0.0
         version: 13.1.3
-
-  packages/knobs:
-    dependencies:
-      '@agentick/reconciler':
-        specifier: workspace:*
-        version: link:../reconciler
-      '@agentick/reconciler-react':
-        specifier: workspace:*
-        version: link:../reconciler-react
-      '@agentick/runtime':
-        specifier: workspace:*
-        version: link:../runtime
-      '@agentick/spec':
-        specifier: workspace:*
-        version: link:../spec
-      '@agentick/tool':
-        specifier: workspace:*
-        version: link:../tool
-      effect:
-        specifier: ^3.21.2
-        version: 3.21.2
-      react:
-        specifier: ^19.0.0
-        version: 19.2.4
-    devDependencies:
-      '@agentick/spec-conformance':
-        specifier: workspace:*
-        version: link:../spec-conformance
-      '@types/react':
-        specifier: ^19.2.5
-        version: 19.2.13
-
-  packages/loop-executor:
-    dependencies:
-      '@agentick/runtime':
-        specifier: workspace:*
-        version: link:../runtime
-      '@agentick/spec':
-        specifier: workspace:*
-        version: link:../spec
-      effect:
-        specifier: ^3.21.2
-        version: 3.21.2
-    devDependencies:
-      '@agentick/spec-conformance':
-        specifier: workspace:*
-        version: link:../spec-conformance
 
   packages/mcp:
     dependencies:
@@ -1051,91 +1381,14 @@ importers:
         specifier: ^4.0.18
         version: 4.0.18(@opentelemetry/api@1.9.0)(@types/node@22.19.7)(happy-dom@17.6.3)(jiti@2.6.1)(msw@2.14.6(@types/node@22.19.7)(typescript@5.9.3))(tsx@4.21.0)(yaml@2.8.4)
 
-  packages/reconciler:
-    dependencies:
-      '@agentick/runtime':
-        specifier: workspace:*
-        version: link:../runtime
-      '@agentick/spec':
-        specifier: workspace:*
-        version: link:../spec
-      effect:
-        specifier: ^3.21.2
-        version: 3.21.2
-
-  packages/reconciler-react:
-    dependencies:
-      '@agentick/formatters':
-        specifier: workspace:*
-        version: link:../formatters
-      '@agentick/reconciler':
-        specifier: workspace:*
-        version: link:../reconciler
-      '@agentick/runtime':
-        specifier: workspace:*
-        version: link:../runtime
-      '@agentick/spec':
-        specifier: workspace:*
-        version: link:../spec
-      '@agentick/tool':
-        specifier: workspace:*
-        version: link:../tool
-      effect:
-        specifier: ^3.21.2
-        version: 3.21.2
-      react:
-        specifier: ^19.2.4
-        version: 19.2.4
-      react-reconciler:
-        specifier: ^0.33.0
-        version: 0.33.0(react@19.2.4)
-    devDependencies:
-      '@agentick/spec-conformance':
-        specifier: workspace:*
-        version: link:../spec-conformance
-      '@types/react':
-        specifier: ^19.2.5
-        version: 19.2.13
-      '@types/react-reconciler':
-        specifier: 0.33.0
-        version: 0.33.0(@types/react@19.2.13)
-
-  packages/runtime:
-    dependencies:
-      '@agentick/spec':
-        specifier: workspace:*
-        version: link:../spec
-      effect:
-        specifier: ^3.21.2
-        version: 3.21.2
-    devDependencies:
-      '@agentick/spec-conformance':
-        specifier: workspace:*
-        version: link:../spec-conformance
-
   packages/sandbox:
     dependencies:
       '@agentick/core':
         specifier: workspace:*
         version: link:../core
-      '@agentick/reconciler':
-        specifier: workspace:*
-        version: link:../reconciler
-      '@agentick/reconciler-react':
-        specifier: workspace:*
-        version: link:../reconciler-react
-      '@agentick/runtime':
-        specifier: workspace:*
-        version: link:../runtime
-      '@agentick/spec':
-        specifier: workspace:*
-        version: link:../spec
       diff:
         specifier: ^8.0.3
         version: 8.0.3
-      effect:
-        specifier: ^3.21.2
-        version: 3.21.2
       react:
         specifier: ^19.0.0
         version: 19.2.4
@@ -1264,195 +1517,11 @@ importers:
         specifier: ^5.8.3
         version: 5.9.3
 
-  packages/session:
-    dependencies:
-      '@agentick/knobs':
-        specifier: workspace:*
-        version: link:../knobs
-      '@agentick/loop-executor':
-        specifier: workspace:*
-        version: link:../loop-executor
-      '@agentick/reconciler':
-        specifier: workspace:*
-        version: link:../reconciler
-      '@agentick/runtime':
-        specifier: workspace:*
-        version: link:../runtime
-      '@agentick/spec':
-        specifier: workspace:*
-        version: link:../spec
-      '@agentick/state':
-        specifier: workspace:*
-        version: link:../state
-      '@agentick/timeline':
-        specifier: workspace:*
-        version: link:../timeline
-      effect:
-        specifier: ^3.21.2
-        version: 3.21.2
-      react:
-        specifier: ^19.2.4
-        version: 19.2.4
-    devDependencies:
-      '@agentick/executor':
-        specifier: workspace:*
-        version: link:../executor
-      '@agentick/reconciler-react':
-        specifier: workspace:*
-        version: link:../reconciler-react
-      '@agentick/spec-conformance':
-        specifier: workspace:*
-        version: link:../spec-conformance
-      '@agentick/tool-executor':
-        specifier: workspace:*
-        version: link:../tool-executor
-      '@types/react':
-        specifier: ^19.2.5
-        version: 19.2.13
-
   packages/shared:
     dependencies:
       uuid:
         specifier: ^14.0.0
         version: 14.0.0
-
-  packages/skills:
-    dependencies:
-      '@agentick/runtime':
-        specifier: workspace:*
-        version: link:../runtime
-      '@agentick/spec':
-        specifier: workspace:*
-        version: link:../spec
-      effect:
-        specifier: ^3.21.2
-        version: 3.21.2
-    devDependencies:
-      '@agentick/spec-conformance':
-        specifier: workspace:*
-        version: link:../spec-conformance
-
-  packages/spec:
-    dependencies:
-      effect:
-        specifier: ^3.21.2
-        version: 3.21.2
-
-  packages/spec-conformance:
-    dependencies:
-      '@agentick/spec':
-        specifier: workspace:*
-        version: link:../spec
-      effect:
-        specifier: ^3.21.2
-        version: 3.21.2
-      vitest:
-        specifier: ^4.0.0
-        version: 4.0.18(@opentelemetry/api@1.9.0)(@types/node@25.0.9)(happy-dom@17.6.3)(jiti@2.6.1)(msw@2.14.6(@types/node@25.0.9)(typescript@5.9.3))(tsx@4.21.0)(yaml@2.8.4)
-
-  packages/state:
-    dependencies:
-      '@agentick/reconciler':
-        specifier: workspace:*
-        version: link:../reconciler
-      '@agentick/reconciler-react':
-        specifier: workspace:*
-        version: link:../reconciler-react
-      '@agentick/runtime':
-        specifier: workspace:*
-        version: link:../runtime
-      '@agentick/spec':
-        specifier: workspace:*
-        version: link:../spec
-      effect:
-        specifier: ^3.21.2
-        version: 3.21.2
-      react:
-        specifier: ^19.0.0
-        version: 19.2.4
-    devDependencies:
-      '@agentick/spec-conformance':
-        specifier: workspace:*
-        version: link:../spec-conformance
-      '@types/react':
-        specifier: ^19.2.5
-        version: 19.2.13
-
-  packages/subscriptions:
-    dependencies:
-      '@agentick/reconciler':
-        specifier: workspace:*
-        version: link:../reconciler
-      '@agentick/reconciler-react':
-        specifier: workspace:*
-        version: link:../reconciler-react
-      '@agentick/runtime':
-        specifier: workspace:*
-        version: link:../runtime
-      '@agentick/spec':
-        specifier: workspace:*
-        version: link:../spec
-      react:
-        specifier: ^19.0.0
-        version: 19.2.4
-    devDependencies:
-      '@types/react':
-        specifier: ^19.2.13
-        version: 19.2.13
-
-  packages/timeline:
-    dependencies:
-      '@agentick/reconciler':
-        specifier: workspace:*
-        version: link:../reconciler
-      '@agentick/reconciler-react':
-        specifier: workspace:*
-        version: link:../reconciler-react
-      '@agentick/runtime':
-        specifier: workspace:*
-        version: link:../runtime
-      '@agentick/spec':
-        specifier: workspace:*
-        version: link:../spec
-      effect:
-        specifier: ^3.21.2
-        version: 3.21.2
-      react:
-        specifier: ^19.0.0
-        version: 19.2.4
-    devDependencies:
-      '@agentick/spec-conformance':
-        specifier: workspace:*
-        version: link:../spec-conformance
-      '@types/react':
-        specifier: ^19.2.5
-        version: 19.2.13
-
-  packages/tool:
-    dependencies:
-      '@agentick/spec':
-        specifier: workspace:*
-        version: link:../spec
-    devDependencies:
-      zod:
-        specifier: ^4.3.6
-        version: 4.3.6
-
-  packages/tool-executor:
-    dependencies:
-      '@agentick/runtime':
-        specifier: workspace:*
-        version: link:../runtime
-      '@agentick/spec':
-        specifier: workspace:*
-        version: link:../spec
-      effect:
-        specifier: ^3.21.2
-        version: 3.21.2
-    devDependencies:
-      '@agentick/spec-conformance':
-        specifier: workspace:*
-        version: link:../spec-conformance
 
   packages/tui:
     dependencies:

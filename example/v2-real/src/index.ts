@@ -17,8 +17,8 @@
 
 import "dotenv/config";
 import React from "react";
-import { createApp } from "@agentick/app/react";
-import { aisdk } from "@agentick/executor-ai-sdk";
+import { createApp } from "@agentick/app-next/react";
+import { aisdk } from "@agentick/executor-ai-sdk-next";
 import { openai } from "@ai-sdk/openai";
 
 import { Agent } from "./agent.js";

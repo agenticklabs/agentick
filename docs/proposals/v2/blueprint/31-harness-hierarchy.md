@@ -3,7 +3,7 @@
 **Status:** Active · 2026-06-03
 **Builds on:** ADR 26 (Harness as the single shape), ADR 27 (Modular built-ins), ADR 29 (Bus overhaul)
 **Supersedes:** ADR 30 (App-as-recipe — wrong scope; the hierarchy below achieves the same goals without forcing the inversion).
-**Touches:** `@agentick/spec` (factory types, `BaseHarness` protocol additions, `SessionHarnessOptions` expansion), `@agentick/runtime` (substrate primitives gain optional parent constructor + documented composition semantics; `createFactory` static helpers reshaped), `@agentick/app`, `@agentick/session`, future `@agentick/gateway` + `@agentick/skills`.
+**Touches:** `@agentick/spec-next` (factory types, `BaseHarness` protocol additions, `SessionHarnessOptions` expansion), `@agentick/runtime-next` (substrate primitives gain optional parent constructor + documented composition semantics; `createFactory` static helpers reshaped), `@agentick/app-next`, `@agentick/session-next`, future `@agentick/gateway` + `@agentick/skills-next`.
 
 ## TL;DR
 
@@ -351,7 +351,7 @@ Adopters who used callbacks for *steering*: they were stuck in v1; v2 routes the
 
 Skill registry currently lives as an app-level field. Under the harness pattern, it should be its own harness: `SkillsHarness extends BaseHarness<App, SkillsOptions>`. App slot: `skills?: SkillsHarness | SkillsFactory`. Skill registration / lookup goes through the harness; per-session skill scoping becomes possible via session-level overrides.
 
-Plan: build it as a built-in top-level extension (in `@agentick/skills`, bundled into the public metapackage), shipped after the hierarchy lands.
+Plan: build it as a built-in top-level extension (in `@agentick/skills-next`, bundled into the public metapackage), shipped after the hierarchy lands.
 
 ### Cluster harness package
 
@@ -395,7 +395,7 @@ Landed in commits `2f5b0dfb` (Phase 3) + cleanup follow-up:
 - `SessionHarnessOptions<P>` gains the same substrate slots + adopter `metadata`.
 - `SessionSubstrateParent` lives in spec at `protocol/session-harness.ts`; session re-exports for convenience.
 - `CreateSessionInput<P>` also gains `rootElement` (per-call agent override), `initialState`, `parentSessionId`, plus `signal` and `tools` (typed but plumbing deferred — see below).
-- `SessionHarness` constructor uses the explicit-parent resolver (from `@agentick/runtime`); per-session close-op envelopes marked `"bus-only"` via `JournalingPolicy.override` so session-level journal factories can close the journal in their `onClose` without crashing the close Operation (Option G).
+- `SessionHarness` constructor uses the explicit-parent resolver (from `@agentick/runtime-next`); per-session close-op envelopes marked `"bus-only"` via `JournalingPolicy.override` so session-level journal factories can close the journal in their `onClose` without crashing the close Operation (Option G).
 - `AppHarness.createSessionBody` cascades: per-call input > app-level `session.*` defaults > inherit.
 - Multi-tenant adopters unblocked. Tenancy is emergent: framework defines no `tenantId`; adopters wire via factory + closure + metadata.
 
@@ -419,7 +419,7 @@ Depends on ADR 29 Phase B+. 2–4 weeks.
 
 ### Phase 5 — Skills harness + ergonomics polish
 
-- `@agentick/skills` ships SkillsHarness as a built-in top-level extension.
+- `@agentick/skills-next` ships SkillsHarness as a built-in top-level extension.
 - Named ancestor accessors finalized per harness class.
 - Composition primitive helpers if the constructor-parent defaults aren't expressive enough.
 - Documentation + examples.

@@ -60,7 +60,7 @@ bound) closed. Phase 5+ proceeds as below, in this exact order:
 
 3. PHASE 5 — PROVIDER ADAPTER ROW (~1 week)
    ────────────────────────────────────────────────────────────────
-   ✓ Phase5.3        @agentick/executor-ai-sdk — aisdk({ model })
+   ✓ Phase5.3        @agentick/executor-ai-sdk-next — aisdk({ model })
                      bridge. Wraps Vercel AI SDK as our executor;
                      translates LanguageModelInput → ModelMessage[],
                      calls generateText, maps finishReason +
@@ -71,11 +71,11 @@ bound) closed. Phase 5+ proceeds as below, in this exact order:
                      against MockLanguageModelV2.
                      Tool extraction from aisdk({ tools }) deferred —
                      JSX-declared tools work today.
-   □ Phase5.1        @agentick/executor-anthropic — native
+   □ Phase5.1        @agentick/executor-anthropic-next — native
                      anthropic("claude-...") factory (alternative to
                      going through aisdk wrapper; tighter envelope
                      fidelity, no AI SDK dep).
-   □ Phase5.2        @agentick/executor-google — native
+   □ Phase5.2        @agentick/executor-google-next — native
                      google("gemini-...") factory.
 
 4. PHASE 5 — PRODUCTION SUBSTRATE (~2 weeks)
@@ -169,9 +169,9 @@ Per `13-package-graph.md`. Locking the names here for reference:
 
 ```
 NEW:
-  @agentick/spec                        contract types + protocol interfaces
-  @agentick/runtime                     app/session/loop/tool harnesses, BaseHarness, MemoryJournal
-  @agentick/reconciler-react              JSX reconciler harness implementation
+  @agentick/spec-next                        contract types + protocol interfaces
+  @agentick/runtime-next                     app/session/loop/tool harnesses, BaseHarness, MemoryJournal
+  @agentick/reconciler-react-next              JSX reconciler harness implementation
   @agentick/cluster                     optional distributed wrapper
   @agentick/persistence-memory          OperationJournal: in-memory
   @agentick/persistence-sqlite          OperationJournal: SQLite
@@ -186,9 +186,9 @@ RENAMED:
   @agentick/express         → @agentick/server-express
   @agentick/tui             → @agentick/client-tui
   @agentick/devtools        → @agentick/client-devtools
-  @agentick/openai          → @agentick/executor-openai
-  @agentick/google          → @agentick/executor-google
-  @agentick/ai-sdk          → @agentick/executor-ai-sdk
+  @agentick/openai          → @agentick/executor-openai-next
+  @agentick/google          → @agentick/executor-google-next
+  @agentick/ai-sdk          → @agentick/executor-ai-sdk-next
 
 UNCHANGED:
   @agentick/shared          (slimmed; wire types moved to spec)
@@ -205,7 +205,7 @@ REMOVED at v2 cut:
   @agentick/kernel          (folded into runtime + shared)
 
 PRIVATE (not published):
-  @agentick/spec-conformance   conformance test fixtures
+  @agentick/spec-conformance-next   conformance test fixtures
 ```
 
 ## Phasing
@@ -231,9 +231,9 @@ Tasks:
     □ @agentick/express → @agentick/server-express
     □ @agentick/tui → @agentick/client-tui
     □ @agentick/devtools → @agentick/client-devtools
-    □ @agentick/openai → @agentick/executor-openai
-    □ @agentick/google → @agentick/executor-google
-    □ @agentick/ai-sdk → @agentick/executor-ai-sdk
+    □ @agentick/openai → @agentick/executor-openai-next
+    □ @agentick/google → @agentick/executor-google-next
+    □ @agentick/ai-sdk → @agentick/executor-ai-sdk-next
   □ Update all package.json deps that reference renamed packages
   □ Update all imports across the monorepo (find/replace)
   □ Verify pnpm install + pnpm test + pnpm build all green
@@ -251,7 +251,7 @@ verify CI.
 
 ### Phase 1 — Spec package (Layer 1) (~1 week)
 
-**Goal:** `@agentick/spec` compiles and exports the full contract.
+**Goal:** `@agentick/spec-next` compiles and exports the full contract.
 
 ```
 Tasks:
@@ -334,8 +334,8 @@ Tasks:
 
 **Exit criteria:**
 
-- `pnpm --filter @agentick/spec build` green
-- `pnpm --filter @agentick/spec test` green
+- `pnpm --filter @agentick/spec-next build` green
+- `pnpm --filter @agentick/spec-next test` green
 - All wire-format tests ported and green
 - v1 packages compile against spec (via shared re-exports)
 
@@ -344,7 +344,7 @@ against it.
 
 ### Phase 2 — In-memory substrate (Layers 2–3) (~2 weeks)
 
-**Goal:** `@agentick/runtime` has `MemoryJournal`, `LocalInbox`,
+**Goal:** `@agentick/runtime-next` has `MemoryJournal`, `LocalInbox`,
 `LocalEventBus`, and `BaseHarness` working. Conformance tests pass.
 
 ```
@@ -412,7 +412,7 @@ top.
 
 ### Phase 3 — Reconciler harness (Layer 4) (~2–3 weeks)
 
-**Goal:** `ReconcilerHarness` (`@agentick/reconciler-react`) works
+**Goal:** `ReconcilerHarness` (`@agentick/reconciler-react-next`) works
 end-to-end. Proves the substrate AND lands the most foundational piece
 of agentick.
 
@@ -441,12 +441,12 @@ Spec deliverables (lands first; can happen in parallel with Phase 2 tail):
   □ ReconcilerProtocol in spec/protocol/reconciler.ts
   □ FormatterProtocol in spec/protocol/formatter.ts
 
-Reconciler harness implementation (in @agentick/reconciler-react,
-which is Effect-free and depends only on @agentick/spec):
-  □ Move v1 jsx-runtime to @agentick/reconciler-react
+Reconciler harness implementation (in @agentick/reconciler-react-next,
+which is Effect-free and depends only on @agentick/spec-next):
+  □ Move v1 jsx-runtime to @agentick/reconciler-react-next
   □ Move v1 reconciler (react-reconciler host config) to
-    @agentick/reconciler-react
-  □ Move v1 components + hooks to @agentick/reconciler-react
+    @agentick/reconciler-react-next
+  □ Move v1 components + hooks to @agentick/reconciler-react-next
   □ Implement ReconcilerProtocol commands:
     □ mount, rerender, unmount
     □ renderTree (compile-until-stable; hash equality; returns
@@ -464,7 +464,7 @@ which is Effect-free and depends only on @agentick/spec):
   □ useDataCache (Layer 2)
 
 Formatters (downgraded from harness to pure functions per ADR 22):
-  ✓ @agentick/formatters package — defineFormatter, markdownFormatter,
+  ✓ @agentick/formatters-next package — defineFormatter, markdownFormatter,
     xmlFormatter, textFormatter, builtInFormatters()
   ✓ Formatter registry slot on ReconcilerHarnessOptions
   ✓ Per-entry dispatch via FormatterRef (id → format fallback)
@@ -488,7 +488,7 @@ Tests:
 
 **Exit criteria:**
 
-- Reconciler harness ships in `@agentick/reconciler-react`
+- Reconciler harness ships in `@agentick/reconciler-react-next`
 - Formatter harness ships (built-in markdown/xml)
 - All v1 reconciler + compiler + renderer tests pass against v2
 - Substrate properties (durability, idempotency, observability) prove
@@ -545,10 +545,10 @@ Tasks:
   □ aroundProject, aroundExecute, aroundNormalize middleware
 
   □ Port v1 adapter packages to v2 contracts:
-    □ @agentick/executor-anthropic
-    □ @agentick/executor-openai (port from v1 @agentick/openai)
-    □ @agentick/executor-google (port from v1 @agentick/google)
-    □ @agentick/executor-ai-sdk (port from v1 @agentick/ai-sdk)
+    □ @agentick/executor-anthropic-next
+    □ @agentick/executor-openai-next (port from v1 @agentick/openai)
+    □ @agentick/executor-google-next (port from v1 @agentick/google)
+    □ @agentick/executor-ai-sdk-next (port from v1 @agentick/ai-sdk)
     □ @agentick/executor-mock (new; for tests)
 
 Tests:
@@ -713,11 +713,11 @@ Categorize and act per category. Most tests survive.
 ### Wire-format tests → port to spec
 
 ```
-packages/shared/src/__tests__/blocks.spec.ts            → @agentick/spec
-packages/shared/src/__tests__/messages.spec.ts          → @agentick/spec
-packages/shared/src/__tests__/timeline.spec.ts          → @agentick/spec
-packages/shared/src/__tests__/protocol.spec.ts          → @agentick/spec
-packages/shared/src/__tests__/tools.spec.ts             → @agentick/spec
+packages/shared/src/__tests__/blocks.spec.ts            → @agentick/spec-next
+packages/shared/src/__tests__/messages.spec.ts          → @agentick/spec-next
+packages/shared/src/__tests__/timeline.spec.ts          → @agentick/spec-next
+packages/shared/src/__tests__/protocol.spec.ts          → @agentick/spec-next
+packages/shared/src/__tests__/tools.spec.ts             → @agentick/spec-next
 ```
 
 Mostly intact; just import from spec instead of shared.
@@ -780,9 +780,9 @@ Port early; this is the proof harness.
 ### Adapter tests → port to executor packages in Phase 4c
 
 ```
-packages/openai/__tests__/*    → @agentick/executor-openai
-packages/google/__tests__/*    → @agentick/executor-google
-packages/ai-sdk/__tests__/*    → @agentick/executor-ai-sdk
+packages/openai/__tests__/*    → @agentick/executor-openai-next
+packages/google/__tests__/*    → @agentick/executor-google-next
+packages/ai-sdk/__tests__/*    → @agentick/executor-ai-sdk-next
 ```
 
 Update imports + provider call shapes; behavioral fixtures preserved.
@@ -820,7 +820,7 @@ Morning:
         - 'packages/*'
         - 'packages/*'
   □ Update .changeset/config.json: add new packages to linked array
-      (only @agentick/spec for now; others added per phase)
+      (only @agentick/spec-next for now; others added per phase)
   □ pnpm install (verify workspace)
   □ pnpm typecheck (should be green; no behavior change)
 

@@ -231,7 +231,7 @@ Tests should cover:
 
 ## Open Questions
 
-1. **Package home.** Does loop executor live in `@agentick/runtime`, or a lower
+1. **Package home.** Does loop executor live in `@agentick/runtime-next`, or a lower
    `@agentick/loop` / `@agentick/execution` package?
 2. **Public API.** Is loop executor a public advanced primitive or internal
    runtime implementation detail?

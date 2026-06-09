@@ -1,0 +1,57 @@
+{
+  "name": "@agentick/executor-anthropic-next",
+  "version": "0.0.0",
+  "description": "Anthropic provider adapter for Agentick v2 — implements LanguageModelExecutor against the Anthropic Messages API. Companion to @agentick/executor-next (mock + base class).",
+  "keywords": [
+    "agent",
+    "agentick",
+    "ai",
+    "anthropic",
+    "claude",
+    "executor",
+    "harness"
+  ],
+  "license": "MIT",
+  "author": "Ryan Lindgren",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/agenticklabs/agentick.git",
+    "directory": "packages/executor-anthropic"
+  },
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "main": "src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "publishConfig": {
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "import": "./dist/index.js",
+        "default": "./dist/index.js"
+      }
+    }
+  },
+  "scripts": {
+    "bench": "vitest bench --run",
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.build.json --noEmit"
+  },
+  "dependencies": {
+    "@agentick/executor-openai-next": "workspace:*",
+    "@agentick/runtime-next": "workspace:*",
+    "@agentick/spec-next": "workspace:*",
+    "@anthropic-ai/sdk": "^0.39.0",
+    "effect": "^3.21.2"
+  },
+  "devDependencies": {
+    "@agentick/spec-conformance-next": "workspace:*"
+  }
+}

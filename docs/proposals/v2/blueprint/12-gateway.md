@@ -228,7 +228,7 @@ extensions are listed in V1-GATEWAY-PARITY-TRACKER.md.
 ## Spec surface (proposed — Phase 4)
 
 ```ts
-// @agentick/spec
+// @agentick/spec-next
 
 export interface GatewayHarnessProtocol {
   readonly id: string;

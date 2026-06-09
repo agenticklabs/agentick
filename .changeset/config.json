@@ -5,11 +5,6 @@
   "fixed": [
     [
       "agentick",
-      "@agentick/spec",
-      "@agentick/runtime",
-      "@agentick/reconciler",
-      "@agentick/reconciler-react",
-      "@agentick/tool-executor",
       "@agentick/kernel",
       "@agentick/shared",
       "@agentick/core",
@@ -31,8 +26,6 @@
       "@agentick/client-multiplexer",
       "@agentick/openai",
       "@agentick/anthropic",
-      "@agentick/executor-anthropic",
-      "@agentick/executor-google",
       "@agentick/bedrock",
       "@agentick/google",
       "@agentick/ai-sdk",
@@ -44,9 +37,7 @@
       "@agentick/sandbox-secure-exec",
       "@agentick/scheduler",
       "@agentick/secrets",
-      "@agentick/mcp",
-      "@agentick/formatters",
-      "@agentick/subscriptions"
+      "@agentick/mcp"
     ]
   ],
   "linked": [],

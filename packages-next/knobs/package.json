@@ -1,0 +1,67 @@
+{
+  "name": "@agentick/knobs-next",
+  "version": "0.0.0",
+  "private": true,
+  "description": "KnobsHarness — model-visible reactive state with sync reads + async writes. Per ADR 26, this is a harness (extends BaseHarness), not a 'bridge.' Bundled into the agentick metapackage; not published independently.",
+  "keywords": [
+    "agent",
+    "agentick",
+    "ai",
+    "harness",
+    "knobs"
+  ],
+  "license": "MIT",
+  "author": "Ryan Lindgren",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/agenticklabs/agentick.git",
+    "directory": "packages/knobs"
+  },
+  "type": "module",
+  "main": "src/index.ts",
+  "sideEffects": [
+    "./src/index.ts",
+    "./src/augment.ts",
+    "./dist/index.js",
+    "./dist/augment.js"
+  ],
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./react": {
+      "types": "./src/react/index.ts",
+      "import": "./src/react/index.ts",
+      "default": "./src/react/index.ts"
+    },
+    "./testing": {
+      "types": "./src/testing/index.ts",
+      "import": "./src/testing/index.ts",
+      "default": "./src/testing/index.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.build.json --noEmit"
+  },
+  "dependencies": {
+    "@agentick/reconciler-next": "workspace:*",
+    "@agentick/reconciler-react-next": "workspace:*",
+    "@agentick/runtime-next": "workspace:*",
+    "@agentick/spec-next": "workspace:*",
+    "@agentick/tool-next": "workspace:*",
+    "effect": "^3.21.2"
+  },
+  "devDependencies": {
+    "@agentick/spec-conformance-next": "workspace:*",
+    "@types/react": "^19.2.5"
+  },
+  "peerDependencies": {
+    "react": "^19.0.0"
+  },
+  "peerDependenciesMeta": {
+    "react": { "optional": true }
+  }
+}

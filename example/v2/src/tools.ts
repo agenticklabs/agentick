@@ -12,9 +12,9 @@
  */
 
 import { Effect } from "effect";
-import { getContext } from "@agentick/runtime";
-import { InMemoryHandlerResolver } from "@agentick/tool-executor";
-import type { ContentBlock } from "@agentick/spec";
+import { getContext } from "@agentick/runtime-next";
+import { InMemoryHandlerResolver } from "@agentick/tool-executor-next";
+import type { ContentBlock } from "@agentick/spec-next";
 
 export function buildHandlerResolver(): InMemoryHandlerResolver {
   const resolver = new InMemoryHandlerResolver();

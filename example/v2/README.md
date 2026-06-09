@@ -11,8 +11,8 @@ pnpm --filter example-v2 dev
 
 ## What this proves
 
-The substrate (`@agentick/runtime`) and the two harnesses that exist
-today (`@agentick/reconciler-react`, `@agentick/tool-executor`) compose
+The substrate (`@agentick/runtime-next`) and the two harnesses that exist
+today (`@agentick/reconciler-react-next`, `@agentick/tool-executor-next`) compose
 into something an application author can use end-to-end:
 
 1. **Mount a JSX agent** → produce a `RenderedTree` IR
@@ -59,7 +59,7 @@ stabilizes:
 - **No user-facing component wrappers.** `<Section>`, `<Message>`,
   `<H2>`, etc. live in `src/components.tsx` here — they should graduate
   into a v2 package (`@agentick/components` or merge into
-  `@agentick/reconciler-react`).
+  `@agentick/reconciler-react-next`).
 - **`<Tool>` element accepts JSON Schema, not Zod.** The spec firewall
   bans function references on declarations, so Zod schemas need to be
   serialized to JSON Schema before they hit the JSX. v1's `createTool`

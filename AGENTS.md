@@ -17,6 +17,10 @@ pnpm --filter @agentick/kernel typecheck  # Typecheck a specific package
 
 Always run `pnpm typecheck` after modifying interfaces or types. Structural typing means changes propagate through anonymous object literals — grep for property names, not just type names.
 
+## Codex Project Settings
+
+Migrated Claude permissions guidance: `pnpm build`, `pnpm test`, `pnpm typecheck`, `pnpm lint`, and `pnpm format` are normal project maintenance commands. Never read or write `*.env` files, and never run destructive commands such as `rm -rf` or force pushes unless the user explicitly requests and approves that exact action.
+
 ## Package Architecture
 
 ```

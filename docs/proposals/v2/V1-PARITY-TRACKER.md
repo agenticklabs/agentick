@@ -5,7 +5,7 @@
 This document tracks the feature gap between v1's provider adapters
 (`@agentick/openai`, `@agentick/anthropic`, `@agentick/google`,
 `@agentick/ai-sdk` in v1) and v2's executors / adapters
-(`@agentick/executor-openai`, `@agentick/executor-ai-sdk` today;
+(`@agentick/executor-openai-next`, `@agentick/executor-ai-sdk-next` today;
 future `@agentick/anthropic`, `@agentick/google` adapters under the
 ModelAdapter architecture).
 
@@ -22,7 +22,7 @@ Anthropic ~700 LOC, AI SDK ~956 LOC against v2's
 ## Decision: ModelAdapter architecture is NOT a blocker
 
 **Resolved:** the gaps below can land in the current
-`@agentick/executor-openai` / `@agentick/executor-ai-sdk` packages
+`@agentick/executor-openai-next` / `@agentick/executor-ai-sdk-next` packages
 TODAY without waiting for the ModelAdapter rename/reshape. Reason:
 the translation code (provider request → response, chunk → AdapterDelta,
 ContentBlock ↔ provider shapes) is concrete provider-layer work.
@@ -30,7 +30,7 @@ Whether that layer is called `ExecutorOpenAI` today or
 `OpenAIAdapter` tomorrow, the translation logic moves with the
 package when we reshape.
 
-The reshape touches package names + the `@agentick/executor`
+The reshape touches package names + the `@agentick/executor-next`
 consumer (which gets a `ModelAdapter` slot instead of being itself
 the executor). The translation code is invariant. So fix the gaps
 where they live now.
@@ -82,7 +82,7 @@ intentional scope, `[blocked]` waiting on prerequisite.
       as the SDK's `providerOptions` (already per-provider keyed by
       AI SDK convention). **Also**: `ProviderOptions` converted from
       a flat type alias to an empty seed interface adapter packages
-      augment via `declare module "@agentick/spec"` — matches v1's
+      augment via `declare module "@agentick/spec-next"` — matches v1's
       typed pattern. `executor-openai` contributes the typed `openai`
       slot.
 
@@ -110,7 +110,7 @@ intentional scope, `[blocked]` waiting on prerequisite.
 
 - [x] **G8. Native Anthropic executor / adapter.** _Closed 2026-05-28
       by sub-agent run using `skills/create-adapter`._
-      `@agentick/executor-anthropic` ships full streaming + non-streaming
+      `@agentick/executor-anthropic-next` ships full streaming + non-streaming
       via `client.messages.create({ stream: true })`, cache token
       surfacing (`cache_read_input_tokens` + `cache_creation_input_tokens`
       → `cachedInputTokens` + `cacheCreationTokens`), native reasoning
@@ -127,7 +127,7 @@ intentional scope, `[blocked]` waiting on prerequisite.
       gap — v2 spec doesn't carry them to the executor boundary).
 
 - [x] **G9. Native Google executor / adapter.** _Closed 2026-06-02
-      via `@agentick/executor-google`._ Full streaming + non-streaming
+      via `@agentick/executor-google-next`._ Full streaming + non-streaming
       via `client.models.generateContentStream` + `generateContent`,
       Vertex AI + Gemini Developer API paths via
       `clientOptions: GoogleGenAIOptions`. **thoughtSignature
@@ -284,8 +284,8 @@ reasoning blocks, image source quirks, etc.).
 2. **Scaffold the package:**
    - Create `packages/executor-<provider>/` (or
      `packages/<provider>/` under the ModelAdapter naming).
-   - package.json: workspace deps on `@agentick/spec`,
-     `@agentick/runtime`, the provider SDK; optional peer dep on
+   - package.json: workspace deps on `@agentick/spec-next`,
+     `@agentick/runtime-next`, the provider SDK; optional peer dep on
      React only if the adapter has a `/react` subpath.
    - tsconfig.json + tsconfig.build.json extending root.
    - Add to `.changeset/config.json` linked list.
@@ -298,7 +298,7 @@ reasoning blocks, image source quirks, etc.).
    - Required methods: `project`, `execute`, `executeStream`,
      `normalize`, `run`, `abort`.
    - `project` should be reusable via shared `defaultProject` from
-     `@agentick/executor` unless the provider needs custom logic.
+     `@agentick/executor-next` unless the provider needs custom logic.
    - Self-described `target: ExecutionTarget` property with
      `capabilities: { supportsTools, supportsStreaming,
      supportsVision, supportsReasoning, contextWindow,
@@ -348,7 +348,7 @@ reasoning blocks, image source quirks, etc.).
    - Mock-based round-trip test for project → execute → normalize.
    - Optional: msw-backed integration test against the SDK's
      test utilities if available.
-   - Use `runExecutorConformance` from `@agentick/spec-conformance`
+   - Use `runExecutorConformance` from `@agentick/spec-conformance-next`
      (when implemented) for protocol conformance.
 
 8. **Factory function + `ExecutorFactory` marker:**
@@ -397,7 +397,7 @@ work happens — does NOT block the parity fixes.
   (responseFormat name, free-ride with G1). Spec changes: typed
   ProviderOptions as module-augmentable interface (matches v1
   pattern); `executor-openai` contributes its typed slot via
-  `declare module "@agentick/spec"`. Commits: `8257bdbf` (G1, G4, G5,
+  `declare module "@agentick/spec-next"`. Commits: `8257bdbf` (G1, G4, G5,
   G15), `10a4d2e2` (ProviderOptions module augmentation), `2b9fabb4`
   (G2, G3, G6). 5337 tests passing, full typecheck clean.
 - 2026-05-28 (later): closed G7 + G12 together via shared
@@ -415,12 +415,12 @@ work happens — does NOT block the parity fixes.
   `[binary]` placeholder, mock executor missing emitDeltaLazy,
   stubs missing streaming path). 5391 tests passing.
 - 2026-05-28 (evening): closed G8 via sub-agent run.
-  `@agentick/executor-anthropic` produced from the
+  `@agentick/executor-anthropic-next` produced from the
   `create-adapter` skill. 47/47 tests passing in the new package;
   no workspace regressions. 5438 tests passing total. Sub-agent
   flagged 6 additional skill bugs from the first run + a few new
   ones from this run — fixed in skills/create-adapter/SKILL.md.
-- 2026-06-02: closed G9 (`@agentick/executor-google`) and G11
+- 2026-06-02: closed G9 (`@agentick/executor-google-next`) and G11
   (per-tool providerOptions) via a coordinated layered-providerOptions
   refactor across all four executors. Spec gained two new empty-seed
   augmentable interfaces (`ProviderClientOptions`, `ProviderToolOptions`)

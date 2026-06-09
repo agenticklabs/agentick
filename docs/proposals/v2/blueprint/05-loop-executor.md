@@ -525,9 +525,9 @@ public API; promote later if external use cases emerge.
 
 This means:
 
-- The `LoopExecutorProtocol` lives in `@agentick/spec`.
-- The default implementation lives inside `@agentick/runtime`.
-- It is reachable via `@agentick/runtime`'s test harness exports for
+- The `LoopExecutorProtocol` lives in `@agentick/spec-next`.
+- The default implementation lives inside `@agentick/runtime-next`.
+- It is reachable via `@agentick/runtime-next`'s test harness exports for
   integration tests.
 - It is NOT exported from the runtime's public API.
 
@@ -565,5 +565,5 @@ runner becomes a small bundle of interceptors registered with `app.use(...)`.
 - `StateApplicator` shape (placeholder synthesized; sign-off needed).
 - `ContinuationPolicy` named-policy type vs interceptor-only (lean: both).
 - Parallel tool dispatch policy (lean: per-call hint via interceptor).
-- Loop executor package home (lean: `@agentick/runtime` internal).
+- Loop executor package home (lean: `@agentick/runtime-next` internal).
 - Provider-side tool execution opt-out marker shape (open in `executor.md`).

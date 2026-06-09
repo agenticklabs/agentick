@@ -1,7 +1,7 @@
 # ADR 23 — MCP as Harness (per connection)
 
 **Status:** Proposed — 2026-05-20
-**Touches:** `@agentick/mcp` (rework on feat/v2), `@agentick/spec/data/mcp.ts` (already landed in cbb49b6b), `HookBridges` extensibility (ADR 22).
+**Touches:** `@agentick/mcp` (rework on feat/v2), `@agentick/spec-next/data/mcp.ts` (already landed in cbb49b6b), `HookBridges` extensibility (ADR 22).
 **Driver:** Lock in the v2 MCP shape before sandbox implementation, so the pattern for "extension package shipping a harness" is settled.
 
 ## Decision
@@ -364,7 +364,7 @@ The direct-invocation path mostly disappears — the model uses MCP tools as nat
 - **OQ23.2** — When the server changes its tool list mid-session, does the agent's `RuntimeDeclarations` re-collect automatically? _Lean: yes — `mcp:tools:list-updated` event triggers a reconciler rerender via the bridge subscription._
 - **OQ23.3** — Sampling callbacks invoke the executor. If middleware on the executor rate-limits them, what's the error path back to the server? _Lean: middleware rejection → MCP protocol error sent back; document the contract._
 - **OQ23.4** — Should the inbox be ONE inbox shared with the rest of the app, or per-connection? _Lean: per-connection. Inbox is scoped to harness; multi-server isolation is cleaner._
-- **OQ23.5** — Auth storage interface lives in `@agentick/mcp` or `@agentick/spec`? _Lean: `@agentick/mcp`. It's MCP-specific (token shape varies per auth flow); putting it in spec leaks domain detail._
+- **OQ23.5** — Auth storage interface lives in `@agentick/mcp` or `@agentick/spec-next`? _Lean: `@agentick/mcp`. It's MCP-specific (token shape varies per auth flow); putting it in spec leaks domain detail._
 - **OQ23.6** — When `authenticate()` requires user interaction (OAuth redirect), how does the harness surface it in headless / server contexts? _Lean: throws `AuthInteractionRequired` with the redirect URL; adopters either handle interactively (open browser) or via an `MCPAuthStorage` that pre-populates tokens. The `<MCP>` JSX component installs an `onAuthRequired` handler that integrates with the elicitation bridge for UI flows._
 - **OQ23.7** — Auto-reconnect middleware bundled in `@agentick/mcp/react` (default-on) or shipped separately as `@agentick/mcp-auto-reconnect`? _Lean: bundled, default-on; this is what every adopter wants._
 

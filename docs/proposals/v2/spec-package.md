@@ -1,10 +1,10 @@
-# @agentick/spec Package
+# @agentick/spec-next Package
 
 ## Status: Living Draft
 
 Last updated: 2026-05-08
 
-`@agentick/spec` is the canonical package for v2 contracts:
+`@agentick/spec-next` is the canonical package for v2 contracts:
 
 - wire data shapes crossing harness boundaries
 - protocol interfaces for harness-to-harness integration
@@ -285,7 +285,7 @@ implementations.
 ## Decision Log
 
 - **Spec package remains the contract firewall.** (2026-05-08)
-- **Public package name is `@agentick/spec`.** (2026-05-08)
+- **Public package name is `@agentick/spec-next`.** (2026-05-08)
 - **Protocols are harness-shaped by design.** (2026-05-08)
 - **Date-versioned spec with additive evolution.** (2026-05-08)
 - **Forward compatibility requires unknown-field preservation.**

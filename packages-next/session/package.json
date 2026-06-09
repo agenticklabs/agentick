@@ -1,0 +1,65 @@
+{
+  "name": "@agentick/session-next",
+  "version": "0.0.0",
+  "description": "Reference session harness for Agentick v2. Integration site that wires JSX agent + reconciler + loop executor into the user-facing `session.send({ messages })` surface.",
+  "keywords": [
+    "agent",
+    "agentick",
+    "ai",
+    "harness",
+    "session"
+  ],
+  "license": "MIT",
+  "author": "Ryan Lindgren",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/agenticklabs/agentick.git",
+    "directory": "packages/session"
+  },
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "main": "src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "publishConfig": {
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "import": "./dist/index.js",
+        "default": "./dist/index.js"
+      }
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.build.json --noEmit"
+  },
+  "dependencies": {
+    "@agentick/knobs-next": "workspace:*",
+    "@agentick/loop-executor-next": "workspace:*",
+    "@agentick/reconciler-next": "workspace:*",
+    "@agentick/runtime-next": "workspace:*",
+    "@agentick/spec-next": "workspace:*",
+    "@agentick/state-next": "workspace:*",
+    "@agentick/timeline-next": "workspace:*",
+    "effect": "^3.21.2",
+    "react": "^19.2.4"
+  },
+  "devDependencies": {
+    "@agentick/executor-next": "workspace:*",
+    "@agentick/reconciler-react-next": "workspace:*",
+    "@agentick/spec-conformance-next": "workspace:*",
+    "@agentick/tool-executor-next": "workspace:*",
+    "@types/react": "^19.2.5"
+  },
+  "peerDependencies": {
+    "react": "^19.0.0"
+  }
+}

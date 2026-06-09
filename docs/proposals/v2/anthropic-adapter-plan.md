@@ -1,4 +1,4 @@
-# `@agentick/executor-anthropic` — Implementation Plan
+# `@agentick/executor-anthropic-next` — Implementation Plan
 
 **Status:** plan, awaiting review. No executor body implemented yet.
 **Target:** close G8 (native Anthropic executor) in the v1→v2 parity tracker.
@@ -11,7 +11,7 @@
 
 ```jsonc
 {
-  "name": "@agentick/executor-anthropic",
+  "name": "@agentick/executor-anthropic-next",
   "version": "0.0.0",
   "description": "Anthropic provider adapter for Agentick v2 — implements LanguageModelExecutor against the Anthropic Messages API.",
   "keywords": ["agent", "agentick", "ai", "anthropic", "claude", "executor", "harness"],
@@ -34,13 +34,13 @@
     "typecheck": "tsc -p tsconfig.build.json --noEmit"
   },
   "dependencies": {
-    "@agentick/runtime": "workspace:*",
-    "@agentick/spec": "workspace:*",
+    "@agentick/runtime-next": "workspace:*",
+    "@agentick/spec-next": "workspace:*",
     "@anthropic-ai/sdk": "^0.39.0",
     "effect": "^3.21.2"
   },
   "devDependencies": {
-    "@agentick/spec-conformance": "workspace:*"
+    "@agentick/spec-conformance-next": "workspace:*"
   }
 }
 ```
@@ -99,7 +99,7 @@ export interface AnthropicExecutorOptions {
 }
 ```
 
-`CustomBlockDefinition` is re-exported from `@agentick/executor-openai` (same shared `StreamTagParser` primitive — see §6).
+`CustomBlockDefinition` is re-exported from `@agentick/executor-openai-next` (same shared `StreamTagParser` primitive — see §6).
 
 ---
 
@@ -129,7 +129,7 @@ These numbers come from public Anthropic documentation; verified against v1 adap
 Right after imports in `anthropic-executor.ts`:
 
 ```typescript
-declare module "@agentick/spec" {
+declare module "@agentick/spec-next" {
   interface ProviderOptions {
     readonly anthropic?: {
       /** Anthropic API version override (header). */
@@ -523,7 +523,7 @@ Skill instructs "Adopt the structure of `packages/executor-openai/README.md`" bu
 
 ### 11.1 Universal conformance (`__tests__/conformance.spec.ts`)
 
-Drives `runExecutorConformance` from `@agentick/spec-conformance`. Factory mirrors `executor-openai`'s pattern:
+Drives `runExecutorConformance` from `@agentick/spec-conformance-next`. Factory mirrors `executor-openai`'s pattern:
 
 ```typescript
 runExecutorConformance(async ({ harnessId, scripted }) => {
@@ -611,7 +611,7 @@ This is a divergence from v1; the stub then only needs `messages.create`.
 
 ## 12. Verification checklist (post-implementation)
 
-- [ ] `pnpm --filter @agentick/executor-anthropic typecheck` clean
+- [ ] `pnpm --filter @agentick/executor-anthropic-next typecheck` clean
 - [ ] `pnpm exec vitest run packages/executor-anthropic` — conformance + provider-specific pass
 - [ ] `pnpm typecheck` (full workspace) clean
 - [ ] Walk through `V1-PARITY-TRACKER.md` Critical (G1–G6, G15) + High (G7, G12); each addressed or N/A noted

@@ -219,7 +219,7 @@ sessions. In v2, the tool-executor harness owns confirmation flow;
 transport extensions wire client confirmation responses through
 session-level inbox messages.
 
-- [reshape] **GTC1. Tool confirmation routing** — already implemented in v2's `@agentick/tool-executor` (the confirmation flow is a session-level concern, not gateway-level). Transport extensions just pipe client responses to `session.dispatch` or inbox.
+- [reshape] **GTC1. Tool confirmation routing** — already implemented in v2's `@agentick/tool-executor-next` (the confirmation flow is a session-level concern, not gateway-level). Transport extensions just pipe client responses to `session.dispatch` or inbox.
 
 ---
 

@@ -10,14 +10,14 @@
 
 import React from "react";
 
-import { MockLanguageModelExecutor } from "@agentick/executor";
-import { LoopExecutorHarness, NoopStateApplicator } from "@agentick/loop-executor";
-import { LocalChannelPublisher, LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
-import { ReconcilerHarness } from "@agentick/reconciler-react";
-import { stubBridges } from "@agentick/reconciler";
-import { SessionHarness } from "@agentick/session";
-import type { HookBridges } from "@agentick/spec";
-import { InMemoryHandlerResolver, ToolExecutorHarness } from "@agentick/tool-executor";
+import { MockLanguageModelExecutor } from "@agentick/executor-next";
+import { LoopExecutorHarness, NoopStateApplicator } from "@agentick/loop-executor-next";
+import { LocalChannelPublisher, LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
+import { ReconcilerHarness } from "@agentick/reconciler-react-next";
+import { stubBridges } from "@agentick/reconciler-next";
+import { SessionHarness } from "@agentick/session-next";
+import type { HookBridges } from "@agentick/spec-next";
+import { InMemoryHandlerResolver, ToolExecutorHarness } from "@agentick/tool-executor-next";
 
 import { SupportAgent } from "./agent.js";
 import { buildHandlerResolver } from "./tools.js";

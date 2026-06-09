@@ -6,7 +6,7 @@ description: Create a new v2 model adapter for agentick. Use when the user asks 
 # Create a v2 Model Adapter
 
 This skill produces a new `@agentick/executor-<provider>` package that
-implements `LanguageModelExecutor` from `@agentick/spec`. Every new
+implements `LanguageModelExecutor` from `@agentick@agentick/spec-next`. Every new
 adapter must pass the conformance suite AND surface every feature the
 v1 adapters did — the `V1-PARITY-TRACKER.md` document is the gap
 checklist you walk through to confirm parity.
@@ -23,7 +23,7 @@ parity bar.
    API, capability discovery via `/v1/models`) can be skipped only
    if explicitly noted in the tracker.
 
-2. **`packages/spec/src/protocol/executor.ts`** — the
+2. **`packages@agentick/spec-next/src/protocol@agentick/executor-next.ts`** — the
    `LanguageModelExecutor` interface. This is the contract.
    Specifically internalize:
    - `project(input)` is **pure** and deterministic
@@ -34,25 +34,25 @@ parity bar.
    - `run(input)` composes the three above
    - `abort(input)` cancels in-flight executions
 
-3. **`packages/spec/src/data/streaming.ts`** — the `AdapterDelta`
+3. **`packages@agentick/spec-next/src/data/streaming.ts`** — the `AdapterDelta`
    union your `executeStream` produces. Every delta you emit MUST
    be a member of this union. The pattern is symmetric:
    `*-start` → `*-delta?` → `*-end` → `*` (summary). Reasoning,
    tool calls, text content, and custom blocks all follow this
    shape.
 
-4. **`packages/executor-openai/src/openai-executor.ts`** — the
+4. **`packages@agentick/executor-openai-next/src/openai-executor.ts`** — the
    reference implementation. Read it end-to-end. This is what your
    adapter should look like in structure (constructor, target,
    phases, streaming loop, accumulator, normalize).
 
-5. **`packages/executor-ai-sdk/src/ai-sdk-executor.ts`** — the
+5. **`packages@agentick/executor-ai-sdk-next/src/ai-sdk-executor.ts`** — the
    wrapper-style reference. Read this if your provider's SDK has a
    high-level abstraction layer (think Vercel AI SDK pattern).
    Most direct provider adapters (Anthropic, Cohere, Mistral)
    should follow the OpenAI pattern instead.
 
-6. **`packages/spec-conformance/src/executor.ts`** — the suite your
+6. **`packages@agentick/spec-conformance-next/src@agentick/executor-next.ts`** — the suite your
    adapter must pass. Skim the test names to internalize what
    behaviors are required.
 
@@ -97,13 +97,13 @@ packages/executor-<provider>/
     "typecheck": "tsc -p tsconfig.build.json --noEmit"
   },
   "dependencies": {
-    "@agentick/runtime": "workspace:*",
-    "@agentick/spec": "workspace:*",
+    "@agentick@agentick/runtime-next": "workspace:*",
+    "@agentick@agentick/spec-next": "workspace:*",
     "effect": "^3.21.2",
     "<provider-sdk-pkg>": "^<version>"
   },
   "devDependencies": {
-    "@agentick/spec-conformance": "workspace:*"
+    "@agentick@agentick/spec-conformance-next": "workspace:*"
   },
   "publishConfig": {
     "access": "public",
@@ -119,10 +119,10 @@ packages/executor-<provider>/
 ```
 
 **Note**: the provider SDK goes in `dependencies`, NOT `peerDependencies`.
-Mirror the exact shape of `packages/executor-openai/package.json`.
+Mirror the exact shape of `packages@agentick/executor-openai-next/package.json`.
 
 Match the exact `tsconfig.json` and `tsconfig.build.json` shape of
-`packages/executor-openai/`. No customization needed.
+`packages@agentick/executor-openai-next/`. No customization needed.
 
 ## Implementation contract
 
@@ -334,7 +334,7 @@ declaration merging. Right after the imports in
 `<provider>-executor.ts`:
 
 ```typescript
-declare module "@agentick/spec" {
+declare module "@agentick@agentick/spec-next" {
   interface ProviderOptions {
     readonly <provider>?: {
       readonly <provider-specific-knob-1>?: <type>;
@@ -351,14 +351,14 @@ Adopters get full type safety:
 ## Custom block parsing (G7 + G12)
 
 If the adapter wants to support `customBlocks` + `parseThinkTags`,
-import `StreamTagParser` from `@agentick/executor-openai`. **Do
+import `StreamTagParser` from `@agentick@agentick/executor-openai-next`. **Do
 NOT re-port the parser** — it's the shared primitive. See the
 OpenAI adapter's `buildTagRouter` function for the integration
 pattern. The tag router translates `block-*` events into either
 `reasoning-*` (for `parseThinkTags`) or `custom-block-*` deltas
 (for adopter-declared `customBlocks`).
 
-**Add `@agentick/executor-openai: "workspace:*"` to `dependencies`**
+**Add `@agentick@agentick/executor-openai-next: "workspace:*"` to `dependencies`**
 when you import `StreamTagParser`. The skill's package.json
 template doesn't include this by default — add it if you wire
 parseThinkTags / customBlocks.
@@ -414,8 +414,8 @@ the bus the executor was constructed with.
 
 ```typescript
 import { describe } from "vitest";
-import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
-import { runExecutorConformance } from "@agentick/spec-conformance";
+import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick@agentick/runtime-next";
+import { runExecutorConformance } from "@agentick@agentick/spec-conformance-next";
 
 import { <Provider>Executor } from "../<provider>-executor.js";
 import { Stub<Provider>Client, asClient } from "./stub-<provider>-client.js";
@@ -453,7 +453,7 @@ to expose `ready` — keep it on the implementation.
 
 The stub MUST handle BOTH streaming and non-streaming requests
 (the conformance suite exercises both paths). See
-`packages/executor-openai/src/__tests__/stub-openai-client.ts` for
+`packages@agentick/executor-openai-next/src/__tests__/stub-openai-client.ts` for
 the dispatch-by-stream-flag pattern.
 
 ### `__tests__/<provider>-executor.spec.ts` — REQUIRED
@@ -496,7 +496,7 @@ dispatch by the request's stream flag if applicable. Records every
 call's params + abort signal so tests assert request shape.
 
 Pattern: see
-`packages/executor-openai/src/__tests__/stub-openai-client.ts`.
+`packages@agentick/executor-openai-next/src/__tests__/stub-openai-client.ts`.
 
 ## Workspace registration
 
@@ -509,12 +509,12 @@ After scaffolding:
    to the `entryPoints` array.
 3. **`website/.vitepress/config.mts`**: add the package to the
    `PACKAGE_GROUPS` constant under the appropriate group
-   (executors live in the same group as `@agentick/executor-openai`).
+   (executors live in the same group as `@agentick@agentick/executor-openai-next`).
 4. **`pnpm install`** to register the workspace package symlinks.
 
 ## README.md
 
-`packages/executor-openai` does not yet ship its own README — you
+`packages@agentick/executor-openai-next` does not yet ship its own README — you
 need to write yours from scratch. Use this structure:
 
 ```markdown
@@ -527,7 +527,7 @@ suite.
 ## Quick start
 
 \`\`\`typescript
-import { createApp } from "@agentick/app";
+import { createApp } from "@agentick@agentick/app-next";
 import { <provider> } from "@agentick/executor-<provider>";
 
 const app = createApp({

@@ -400,7 +400,7 @@ These v1 concepts MUST NOT appear as top-level compiled protocol concepts:
 
 ## Content Blocks
 
-`content` uses the shared content block taxonomy from `@agentick/spec`.
+`content` uses the shared content block taxonomy from `@agentick/spec-next`.
 
 The protocol SHOULD remain richer than any single provider API. Executors are
 responsible for lossy provider projection when providers cannot represent a
@@ -593,7 +593,7 @@ A section MUST NOT encode placement metadata:
 
 ## Validation and Publication
 
-`@agentick/spec` publishes:
+`@agentick/spec-next` publishes:
 
 - TypeScript contract types
 - JSON Schema artifacts

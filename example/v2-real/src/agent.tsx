@@ -11,8 +11,8 @@
 
 import React from "react";
 import { z } from "zod";
-import { System, createTool } from "@agentick/reconciler-react";
-import { Knobs, useKnob } from "@agentick/knobs/react";
+import { System, createTool } from "@agentick/reconciler-react-next";
+import { Knobs, useKnob } from "@agentick/knobs-next/react";
 
 // ─────────────────────────────────────────────────────────────────────
 // Tool — inline handler, schema-validated input, returns content blocks.

@@ -1,7 +1,7 @@
 /**
  * Minimal JSX wrappers for v2 reconciler intrinsics.
  *
- * `@agentick/reconciler-react` wires lowercase intrinsics — `<section>`,
+ * `@agentick/reconciler-react-next` wires lowercase intrinsics — `<section>`,
  * `<message>`, `<tool>`, content-block elements — via its built-in
  * contributor registry. The v1 user-facing wrappers (`<Section>`, `<H1>`,
  * `<Tool>`, etc.) haven't been promoted into a v2 package yet, so this

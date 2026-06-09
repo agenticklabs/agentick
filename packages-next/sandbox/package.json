@@ -1,0 +1,46 @@
+{
+  "name": "@agentick/sandbox-next",
+  "version": "0.0.0",
+  "private": true,
+  "description": "SandboxHarness — v2 sandbox-as-harness surface (formerly @agentick/sandbox/v2). Per ADR 24, bridges to SandboxProvider impls; each <Sandbox> mount creates one SandboxHarness instance.",
+  "type": "module",
+  "main": "src/index.ts",
+  "sideEffects": [
+    "./src/index.ts",
+    "./src/augment.ts"
+  ],
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./react": {
+      "types": "./src/react/index.ts",
+      "import": "./src/react/index.ts",
+      "default": "./src/react/index.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.build.json --noEmit"
+  },
+  "dependencies": {
+    "@agentick/reconciler-next": "workspace:*",
+    "@agentick/reconciler-react-next": "workspace:*",
+    "@agentick/runtime-next": "workspace:*",
+    "@agentick/spec-next": "workspace:*",
+    "@agentick/tool-next": "workspace:*",
+    "effect": "^3.21.2"
+  },
+  "devDependencies": {
+    "@agentick/spec-conformance-next": "workspace:*",
+    "@types/react": "^19.2.5"
+  },
+  "peerDependencies": {
+    "react": "^19.0.0"
+  },
+  "peerDependenciesMeta": {
+    "react": { "optional": true }
+  }
+}

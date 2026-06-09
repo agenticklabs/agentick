@@ -1,7 +1,7 @@
 # ADR 24 — Sandbox as Harness (per instance)
 
 **Status:** Proposed — 2026-05-20
-**Touches:** `@agentick/sandbox` (rework on feat/v2), `@agentick/spec/data/sandbox.ts` (already landed in cbb49b6b), provider packages (`@agentick/sandbox-local`, `sandbox-docker`, `sandbox-secure-exec`), `HookBridges` extensibility (ADR 22).
+**Touches:** `@agentick/sandbox` (rework on feat/v2), `@agentick/spec-next/data/sandbox.ts` (already landed in cbb49b6b), provider packages (`@agentick/sandbox-local`, `sandbox-docker`, `sandbox-secure-exec`), `HookBridges` extensibility (ADR 22).
 **Driver:** Sandbox operations (shell exec, file IO) are security-critical and benefit from the same audit / observability / middleware story MCP gets. Lock in the harness shape before implementing.
 
 ## Decision

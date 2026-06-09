@@ -36,10 +36,10 @@ import type {
   ReconcilerInboxMessage,
   RenderedTree,
   ToolDeclaration,
-} from "@agentick/spec";
-import { createApp } from "@agentick/app/react";
-import { MockLanguageModelExecutor } from "@agentick/executor";
-import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
+} from "@agentick/spec-next";
+import { createApp } from "@agentick/app-next/react";
+import { MockLanguageModelExecutor } from "@agentick/executor-next";
+import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
 
 import { SupportAgent } from "./agent.js";
 import { buildSubstrate, type Substrate } from "./substrate.js";
@@ -576,7 +576,7 @@ async function scenarioAppHarness(): Promise<void> {
 }
 
 /**
- * AI SDK bridge — drive the loop through `@agentick/executor-ai-sdk`
+ * AI SDK bridge — drive the loop through `@agentick/executor-ai-sdk-next`
  * using an inline `LanguageModelV2` stub. Proves the bridge works
  * end-to-end without needing an API key; swap in `@ai-sdk/anthropic`
  * or `@ai-sdk/google` (and a real model id) and the same code runs
@@ -588,7 +588,7 @@ async function scenarioAppHarness(): Promise<void> {
  * provider implements.
  */
 async function scenarioAISDK(): Promise<void> {
-  const { aisdk } = await import("@agentick/executor-ai-sdk");
+  const { aisdk } = await import("@agentick/executor-ai-sdk-next");
   type LanguageModelV2 = import("@ai-sdk/provider").LanguageModelV2;
 
   console.log(heading("4h. AI SDK bridge — createApp({ executor: aisdk({ model }) })"));

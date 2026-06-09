@@ -1,7 +1,7 @@
 # ADR 26 — Harness as the single shape
 
 **Status:** Proposed — 2026-05-22 (rewritten from the namespacing-focused draft)
-**Touches:** Every harness protocol interface in `@agentick/spec` (`SessionHarnessProtocol`, `AppHarnessProtocol`, `ReconcilerProtocol`, `ToolExecutorProtocol`, `LoopExecutorProtocol`, sandbox + MCP harness protocols), `HookBridges` (which becomes a bag of harnesses), the concrete implementations across the workspace (`@agentick/app`, `@agentick/session`, `@agentick/reconciler-react`, `@agentick/tool-executor`, `@agentick/executor`, `@agentick/loop-executor`, `@agentick/sandbox/v2`), every conformance suite, every example, every test.
+**Touches:** Every harness protocol interface in `@agentick/spec-next` (`SessionHarnessProtocol`, `AppHarnessProtocol`, `ReconcilerProtocol`, `ToolExecutorProtocol`, `LoopExecutorProtocol`, sandbox + MCP harness protocols), `HookBridges` (which becomes a bag of harnesses), the concrete implementations across the workspace (`@agentick/app-next`, `@agentick/session-next`, `@agentick/reconciler-react-next`, `@agentick/tool-executor-next`, `@agentick/executor-next`, `@agentick/loop-executor-next`, `@agentick/sandbox/v2`), every conformance suite, every example, every test.
 **Driver:** v2 grew two parallel concepts — "bridges" (pluggable sync state accessors reached from React) and "harnesses" (substrate-bound operational units with journaled Operations) — and the line between them became friction. Working through the cluster case (admin dashboard mutating a knob on a remote session) showed the bridge concept doesn't survive distributed deployment. Collapsing to one concept resolves the friction and aligns with v2's substrate-uniformity instinct.
 
 ## Decision
@@ -342,7 +342,7 @@ Stepped, bottom-up. Each step is one commit; no flat-method shims (per CLAUDE.md
 Step 0  — This ADR. (Now landing.)
 
 Step 1  — Spec: Extension protocol + per-harness Installer interfaces.
-          New types in @agentick/spec/protocol/extension.ts:
+          New types in @agentick/spec-next/protocol/extension.ts:
             HarnessKind, ExtensionBase, AppExtension, SessionExtension,
             Extension, BaseInstaller, AppInstaller, SessionInstaller,
             AppExtensions, SessionExtensions, SessionHarnessProtocol

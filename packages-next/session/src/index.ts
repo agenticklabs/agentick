@@ -1,0 +1,12 @@
+/**
+ * `@agentick/session-next` — reference session harness.
+ *
+ * The integration site that wires JSX agent + reconciler + loop
+ * executor into the user-facing `session.send({ messages })` surface.
+ *
+ * @see docs/proposals/v2/blueprint/08-session-harness.md
+ */
+
+export { SessionHarness, type SessionHarnessOptions } from "./harness.js";
+export { SessionStateStore } from "./session-state.js";
+export { defineSession, type DefineSessionInput } from "./define-session.js";

@@ -23,7 +23,7 @@ scratchpad gets archived (or rolled into the milestone description).
   log + projection), Step 5a follow-up (pending-messages: queue / drain
   / readPending).
 - I'm in the middle of a doomed pre-ADR-27 refactor that tried to
-  put the Timeline component in `@agentick/timeline/react`. That work
+  put the Timeline component in `@agentick/timeline-next/react`. That work
   created three packages (`@agentick/data`, `@agentick/in-memory-bridges`,
   `@agentick/reconciler-react-tests`) routing around a workspace cycle.
   All three get rolled back as Stage 1 of this refactor — they were
@@ -31,9 +31,9 @@ scratchpad gets archived (or rolled into the milestone description).
 
 **What ADR 27 actually fixes that ADR 26 didn't:**
 ADR 26 made everything a harness but left foundational slots
-(`timeline`, `knobs`, `state`) hardcoded in `@agentick/spec`. That
+(`timeline`, `knobs`, `state`) hardcoded in `@agentick/spec-next`. That
 asymmetry between built-in and optional extensions forced
-`@agentick/reconciler-react` to depend on harness packages, which
+`@agentick/reconciler-react-next` to depend on harness packages, which
 blocked harness packages from adding `/react` subpaths.
 
 ADR 27 makes built-ins follow the same augmentation pattern as
@@ -93,7 +93,7 @@ in the history clutters the log.
 ### 2026-05-26 — Stage 2: augmentation refactor
 
 Added `src/augment.ts` to timeline, knobs, state. Each declares its
-HookBridges slot via `declare module "@agentick/spec"`. Each package's
+HookBridges slot via `declare module "@agentick/spec-next"`. Each package's
 `index.ts` does `import "./augment.js"` for side-effect loading.
 
 Stripped `timeline`, `knobs`, `state` from `HookBridges` in spec.
@@ -135,7 +135,7 @@ related to the fresh pnpm install. All 282 test files pass.
 
 ### 2026-05-26 — Stage 3: generic snapshot iteration
 
-Rewrote `ReconcilerSnapshot` (`@agentick/spec/data/reconciler-snapshot.ts`):
+Rewrote `ReconcilerSnapshot` (`@agentick/spec-next/data/reconciler-snapshot.ts`):
 the hardcoded `knobs` and `state` fields collapse into a generic
 `bridges` map typed as:
 
@@ -204,17 +204,17 @@ per-harness `/testing` subpaths.
 
 **What landed:**
 
-1. **Per-harness `/testing` subpaths** (`@agentick/timeline/testing`,
-   `@agentick/knobs/testing`, `@agentick/state/testing`) — each owns
+1. **Per-harness `/testing` subpaths** (`@agentick/timeline-next/testing`,
+   `@agentick/knobs-next/testing`, `@agentick/state-next/testing`) — each owns
    its `stubXHarness` factory that constructs the real harness on an
    in-memory substrate.
 
 2. **Per-harness `/react` subpaths**:
-   - `@agentick/knobs/react` — `useKnob`, `<Knobs>`, `useKnobsContext`
-   - `@agentick/state/react` — `useSessionState`
-   - `@agentick/timeline/react` — `useTimeline`, `<Timeline>`,
+   - `@agentick/knobs-next/react` — `useKnob`, `<Knobs>`, `useKnobsContext`
+   - `@agentick/state-next/react` — `useSessionState`
+   - `@agentick/timeline-next/react` — `useTimeline`, `<Timeline>`,
      `token-budget`, `compactEntries`
-     Each /react subpath depends on `@agentick/reconciler-react` for
+     Each /react subpath depends on `@agentick/reconciler-react-next` for
      `useBridges` + `BridgeContext`. Each `index.ts` does
      `import "../augment.js"` for side-effect loading of the slot.
 
@@ -226,28 +226,28 @@ per-harness `/testing` subpaths.
    or directly.
 
 4. **Reconciler-react's harness deps dropped.** No more
-   `@agentick/timeline`, `@agentick/knobs`, `@agentick/state` in its
+   `@agentick/timeline-next`, `@agentick/knobs-next`, `@agentick/state-next` in its
    `dependencies`. It's now a true leaf in the workspace harness
    graph (deps: spec, runtime, formatters, tool only). **Real cycle
    break achieved** — turbo no longer detects a cycle.
 
 5. **Integration tests relocated:**
    - `reconciler-react/__tests__/knobs.spec.tsx` →
-     `@agentick/knobs/__tests__/integration-with-reconciler.spec.tsx`
+     `@agentick/knobs-next/__tests__/integration-with-reconciler.spec.tsx`
    - `reconciler-react/__tests__/timeline.spec.tsx` →
-     `@agentick/timeline/__tests__/integration-with-reconciler.spec.tsx`
+     `@agentick/timeline-next/__tests__/integration-with-reconciler.spec.tsx`
    - `reconciler-react/__tests__/use-session-state.spec.tsx` →
-     `@agentick/state/__tests__/integration-with-reconciler.spec.tsx`
+     `@agentick/state-next/__tests__/integration-with-reconciler.spec.tsx`
    - `reconciler-react/__tests__/snapshot-restore.spec.tsx` →
-     `@agentick/session/__tests__/snapshot-restore.spec.tsx`
+     `@agentick/session-next/__tests__/snapshot-restore.spec.tsx`
    - `hooks.spec.tsx`'s `useKnob` block — deleted (coverage moves
      with the hook to knobs's integration test).
 
 6. **Conformance suites move with harnesses.** Reconciler-react's
    `conformance.spec.tsx` drops the `runKnobsHarnessConformance` and
    `runTimelineHarnessConformance` invocations — these already run
-   against the real harness in `@agentick/knobs/src/__tests__/harness.spec.ts`
-   and `@agentick/timeline/__tests__/harness.spec.ts`.
+   against the real harness in `@agentick/knobs-next/src/__tests__/harness.spec.ts`
+   and `@agentick/timeline-next/__tests__/harness.spec.ts`.
 
 **Surprises:**
 
@@ -267,12 +267,12 @@ per-harness `/testing` subpaths.
   acknowledges the type-vs-runtime gap. Adopter test code (which DOES
   import harness packages) sees the augmented HookBridges normally.
 
-- **`gates` needed a regular dep on `@agentick/knobs`** to import
-  `useKnob` from `@agentick/knobs/react`. Was previously fine via
+- **`gates` needed a regular dep on `@agentick/knobs-next`** to import
+  `useKnob` from `@agentick/knobs-next/react`. Was previously fine via
   reconciler-react re-export. Updated.
 
-- **External callers fixed:** `@agentick/app/__tests__/knobs-integration.spec.tsx`
-  now imports `useKnob` from `@agentick/knobs/react` (was reconciler-react).
+- **External callers fixed:** `@agentick/app-next/__tests__/knobs-integration.spec.tsx`
+  now imports `useKnob` from `@agentick/knobs-next/react` (was reconciler-react).
 
 5501 workspace tests green (5312 + 189 tui; was 5358 — we LOST 1 test
 from the useKnob removal in hooks.spec.tsx, GAINED few from the test
@@ -368,7 +368,7 @@ release.
 
 ### 2026-05-27 — Model-catalog / ModelAdapter architecture (design note, deferred)
 
-User flagged a real architectural concern: `@agentick/executor-openai`
+User flagged a real architectural concern: `@agentick/executor-openai-next`
 is named like an executor but is actually a provider impl. The
 conceptual hierarchy is wrong — providers should be ADAPTERS that
 the executor (a higher-level abstraction) consumes. AI SDK is a
@@ -383,14 +383,14 @@ library and `executor-ai-sdk` correctly names that relationship.
                 supportsImages, supportsAudio, supportsReasoning,
                 pricePerInputToken, pricePerOutputToken, ...
 
-@agentick/executor (the native executor, framework-level)
+@agentick/executor-next (the native executor, framework-level)
   Consumes a ModelAdapter (protocol — new, in spec)
   Native adapters: @agentick/openai, @agentick/anthropic,
                    @agentick/google, @agentick/vertex
   Each adapter ships capabilities inline, OR delegates to the catalog
   via (provider, modelId) lookup.
 
-@agentick/executor-ai-sdk (parallel executor)
+@agentick/executor-ai-sdk-next (parallel executor)
   Wraps ai-sdk's LanguageModel
   Looks up capabilities from the catalog via
     (model.provider, model.modelId) — both fields exposed by ai-sdk's
@@ -421,11 +421,11 @@ work uniformly regardless of which executor backs the session.
    extended-thinking turns.
 
 **Renames implied:**
-- `@agentick/executor-openai` → `@agentick/openai` (adapter, not executor)
+- `@agentick/executor-openai-next` → `@agentick/openai` (adapter, not executor)
 - (future) `@agentick/anthropic`, `@agentick/google`, `@agentick/vertex`
-- `@agentick/executor` (currently scaffold + mock + defineExecutor) →
+- `@agentick/executor-next` (currently scaffold + mock + defineExecutor) →
   also bundles the native executor impl that consumes `ModelAdapter`
-- `@agentick/executor-ai-sdk` — stays, name fits
+- `@agentick/executor-ai-sdk-next` — stays, name fits
 
 **Counter-argument considered:** adds indirection; each provider
 impl is just an HTTP wrapper. Rebuttal: the layer IS the value.
@@ -435,12 +435,12 @@ harness — v2 has `session.timeline.compact()`, so capability-aware
 policy now has somewhere to land.
 
 **MVP scope when we pick this up:**
-1. `@agentick/spec`: `ModelAdapter` interface + `ModelCapabilities`
+1. `@agentick/spec-next`: `ModelAdapter` interface + `ModelCapabilities`
 2. `@agentick/model-catalog`: static table seeded with major models
-3. `@agentick/executor`: native executor consuming `ModelAdapter`
+3. `@agentick/executor-next`: native executor consuming `ModelAdapter`
 4. ONE concrete adapter (likely `@agentick/anthropic` first — Claude
    is the assistant building the framework, dogfoods nicely)
-5. `@agentick/executor-ai-sdk`: capability lookup via catalog
+5. `@agentick/executor-ai-sdk-next`: capability lookup via catalog
 6. Rename: `executor-openai` → `openai` adapter
 7. Update example/v2-real to use native + openai adapter
 
@@ -457,17 +457,17 @@ Tracked. Pick up after FAÇADE.6 lands.
 
 ### 2026-05-27 — Reconciler/reconciler-react split completed
 
-After the initial extraction of `@agentick/reconciler` (which only
+After the initial extraction of `@agentick/reconciler-next` (which only
 moved `defineReconciler`), audit revealed ~3000 LOC of
-reconciler-agnostic code still trapped in `@agentick/reconciler-react`.
-Smoking gun: `@agentick/session/src/session-bridges.ts` was importing
-`InMemoryDataBridge` from `@agentick/reconciler-react` — a
+reconciler-agnostic code still trapped in `@agentick/reconciler-react-next`.
+Smoking gun: `@agentick/session-next/src/session-bridges.ts` was importing
+`InMemoryDataBridge` from `@agentick/reconciler-react-next` — a
 reconciler-agnostic Session reaching into a React-named package for a
 generic ref impl.
 
 **This pass: moved the reconciler-agnostic code into its proper home.**
 
-Moved from `@agentick/reconciler-react` → `@agentick/reconciler`:
+Moved from `@agentick/reconciler-react-next` → `@agentick/reconciler-next`:
 - `collect/` (~1800 LOC: walker + 18 contributors)
 - `host/host-instance.ts` (163 LOC)
 - `host/host-context.ts` (123 LOC)
@@ -476,18 +476,18 @@ Moved from `@agentick/reconciler-react` → `@agentick/reconciler`:
 - `bridges/stub-bridges.ts` (375 LOC)
 - `harness/lifecycle-store.ts` → `lifecycle-store.ts` (240 LOC)
 
-Stayed in `@agentick/reconciler-react` (truly React-coupled):
+Stayed in `@agentick/reconciler-react-next` (truly React-coupled):
 - `host/host-config.ts` (the react-reconciler HostConfig)
 - `harness/reconciler-harness.ts` (the React reference impl)
 - `react/` directory (hooks, components, JSX bindings)
 
-Updated consumers in `@agentick/session`, `@agentick/gates`,
-`@agentick/state`, `@agentick/subscriptions`, `@agentick/knobs`,
-`@agentick/timeline`, `@agentick/sandbox`, `example/v2`. All now
-import generic bridges/host/contributors from `@agentick/reconciler`,
-React-specific things from `@agentick/reconciler-react`.
+Updated consumers in `@agentick/session-next`, `@agentick/gates-next`,
+`@agentick/state-next`, `@agentick/subscriptions-next`, `@agentick/knobs-next`,
+`@agentick/timeline-next`, `@agentick/sandbox`, `example/v2`. All now
+import generic bridges/host/contributors from `@agentick/reconciler-next`,
+React-specific things from `@agentick/reconciler-react-next`.
 
-`@agentick/session/package.json` reconciler-react dep moved from
+`@agentick/session-next/package.json` reconciler-react dep moved from
 production `dependencies` to `devDependencies` (used only by tests).
 The production code is now reconciler-agnostic at the package level —
 matches its actual intent.
@@ -502,7 +502,7 @@ Cruft removed:
   reconciler-react cleaned up (those that became empty after moves)
 
 Per CLAUDE.md "no backwards compat" — moved symbols are NOT
-re-exported from `@agentick/reconciler-react`. Consumers retargeted
+re-exported from `@agentick/reconciler-react-next`. Consumers retargeted
 to the canonical package.
 
 **Verification:** workspace typecheck clean across 87 packages.
@@ -512,21 +512,21 @@ failures unchanged.
 **Reflected dependency graph (production-code only, excluding tests):**
 
 ```
-@agentick/spec
+@agentick/spec-next
   ↑
-@agentick/runtime          (substrate primitives)
+@agentick/runtime-next          (substrate primitives)
   ↑
-@agentick/reconciler       (IR collection + bridges + lifecycle)
+@agentick/reconciler-next       (IR collection + bridges + lifecycle)
   ↑
-@agentick/reconciler-react (React-specific binding)
+@agentick/reconciler-react-next (React-specific binding)
   ↑
-@agentick/session, gates, knobs, state, timeline, sandbox, subscriptions
+@agentick/session-next, gates, knobs, state, timeline, sandbox, subscriptions
   ↑
-@agentick/app
+@agentick/app-next
 ```
 
 Sessions no longer reach through React to get bridges. Future Angular
-or Vue reconcilers depend on `@agentick/reconciler`, not the
+or Vue reconcilers depend on `@agentick/reconciler-next`, not the
 React-named package. The dependency graph reflects the architecture.
 
 ### 2026-06-02 — Streaming adapter benchmarks

@@ -37,8 +37,8 @@ The agent answers `"What's 47 * 23, and tell me a fun fact about that number?"`.
 ```tsx
 // src/agent.tsx
 import { z } from "zod";
-import { System, createTool } from "@agentick/reconciler-react";
-import { Knobs, useKnob } from "@agentick/knobs/react";
+import { System, createTool } from "@agentick/reconciler-react-next";
+import { Knobs, useKnob } from "@agentick/knobs-next/react";
 
 const Calculator = createTool({
   name: "calculator",
@@ -74,8 +74,8 @@ export function Agent() {
 // src/index.ts
 import "dotenv/config";
 import React from "react";
-import { createApp } from "@agentick/app";
-import { aisdk } from "@agentick/executor-ai-sdk";
+import { createApp } from "@agentick/app-next";
+import { aisdk } from "@agentick/executor-ai-sdk-next";
 import { openai } from "@ai-sdk/openai";
 import { Agent } from "./agent.js";
 

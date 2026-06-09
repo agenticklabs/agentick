@@ -269,7 +269,7 @@ and target/provider lossiness separate.
 
 ## Open Questions
 
-1. Should renderer implementations live in `@agentick/react`, `@agentick/spec`,
+1. Should renderer implementations live in `@agentick/react`, `@agentick/spec-next`,
    or a separate `@agentick/renderers` package?
 2. Should `renderToText` be a separate command or a `render` mode?
 3. Should streaming renderers be supported in v2, or reserved for later?

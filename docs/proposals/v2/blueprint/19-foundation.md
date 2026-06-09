@@ -912,17 +912,17 @@ Rationale:
   correct**. It's a competitive and engineering asset, not a public
   artifact.
 - Third parties writing journal/harness implementations against
-  `@agentick/spec` cannot run our tests; that's intentional. They
+  `@agentick/spec-next` cannot run our tests; that's intentional. They
   conform by writing their own tests against the published types.
-- Internal packages (`@agentick/runtime`,
+- Internal packages (`@agentick/runtime-next`,
   `@agentick/persistence-postgres`, etc.) depend on
-  `@agentick/spec-conformance` as a `devDependency` to validate
+  `@agentick/spec-conformance-next` as a `devDependency` to validate
   themselves.
 
 A shared fixture, used internally:
 
 ```ts
-import { runJournalConformance } from "@agentick/spec-conformance";
+import { runJournalConformance } from "@agentick/spec-conformance-next";
 
 describe("MemoryJournal", () => {
   runJournalConformance(() => createMemoryJournal());
@@ -982,7 +982,7 @@ Strict dependency order:
   ─ Phase contract
   ─ Outcome vocabulary
 
-[Layer 1] Spec types (in @agentick/spec)
+[Layer 1] Spec types (in @agentick/spec-next)
   ─ Operation<I, R, E> type
   ─ DiscreteEvent type
   ─ ChannelEvent<T> type
@@ -999,14 +999,14 @@ Strict dependency order:
       runInboxConformance(i)
       runHarnessConformance(h)
 
-[Layer 2] In-memory substrates (in @agentick/runtime, internal)
+[Layer 2] In-memory substrates (in @agentick/runtime-next, internal)
   ─ MemoryJournal: ring buffer, no external deps
                    passes runJournalConformance
   ─ LocalInbox:    Map<address, handler> dispatch
                    passes runInboxConformance
   ─ LocalEventBus: Effect PubSub<ProtocolEvent>
 
-[Layer 3] BaseHarness + write-path (in @agentick/runtime, internal)
+[Layer 3] BaseHarness + write-path (in @agentick/runtime-next, internal)
   Five surfaces:
   ─ runOperation         (① heavy path, idempotent, journaled)
   ─ inbox.register       (② addressable inbound dispatch)
@@ -1146,12 +1146,12 @@ above; this list is what's actually outstanding for Layer 1–4.
 ## Where this fits in the dependency story
 
 ```
-@agentick/spec          ← Operation, DiscreteEvent, ChannelEvent,
+@agentick/spec-next          ← Operation, DiscreteEvent, ChannelEvent,
                           OperationJournal, EventBus, TerminalEvent,
                           all envelope shapes
        ▲
        │
-@agentick/runtime       ← MemoryJournal, BaseHarness, EventBus impl,
+@agentick/runtime-next       ← MemoryJournal, BaseHarness, EventBus impl,
                           OTel projection wiring, idempotency table
        ▲
        │
@@ -1161,7 +1161,7 @@ above; this list is what's actually outstanding for Layer 1–4.
        ├──── @agentick/cluster
        │     (cluster-backed OperationJournal Layer)
        │
-       └──── concrete harnesses (in @agentick/runtime, @agentick/react)
+       └──── concrete harnesses (in @agentick/runtime-next, @agentick/react)
              every one extends BaseHarness
 ```
 

@@ -2,7 +2,7 @@
 
 **Status:** Active · 2026-05-26
 **Builds on:** ADR 26 (Harness as the single shape)
-**Touches:** `@agentick/spec/protocol/hook-bridges.ts`, every built-in harness package (timeline, knobs, state, gates, data, ...), `@agentick/reconciler-react`, the public `agentick` metapackage, the test layout across the workspace.
+**Touches:** `@agentick/spec-next/protocol/hook-bridges.ts`, every built-in harness package (timeline, knobs, state, gates, data, ...), `@agentick/reconciler-react-next`, the public `agentick` metapackage, the test layout across the workspace.
 
 ## TL;DR
 
@@ -14,7 +14,7 @@ This is the lever that unlocks real modularity. Without it, you get a framework 
 
 Through ADR 26 we built `KnobsHarness`, `StateHarness`, `TimelineHarness` as full harnesses in their own packages. We added `SandboxHarness` as an optional extension with its own augmentation pattern (`@agentick/sandbox/v2/augment.ts` adds the `sandbox` slot to `HookBridges`).
 
-But for the foundational ones we left their slots **hardcoded in `@agentick/spec/protocol/hook-bridges.ts`**:
+But for the foundational ones we left their slots **hardcoded in `@agentick/spec-next/protocol/hook-bridges.ts`**:
 
 ```ts
 export interface HookBridges {
@@ -27,8 +27,8 @@ export interface HookBridges {
 
 This asymmetry felt natural — "of course timeline is built in." But it caused real problems:
 
-1. **`@agentick/reconciler-react` had to import `TimelineHarness`** (to construct stubs, to do `instanceof` checks on bridges, to use the harness types). That made reconciler-react depend on timeline.
-2. **`@agentick/timeline` therefore could not have a `/react` subpath** that imports `useBridges` from reconciler-react — workspace cycle.
+1. **`@agentick/reconciler-react-next` had to import `TimelineHarness`** (to construct stubs, to do `instanceof` checks on bridges, to use the harness types). That made reconciler-react depend on timeline.
+2. **`@agentick/timeline-next` therefore could not have a `/react` subpath** that imports `useBridges` from reconciler-react — workspace cycle.
 3. **Tests of "knobs work with the reconciler" lived in `reconciler-react/__tests__/`** because that's where the reconciler lived. These tests used real harnesses, which meant reconciler-react had test-time deps on the harness packages — same cycle.
 4. **Each new optional package risked hitting the same wall** if reconciler-react ever needed to know about it.
 
@@ -46,8 +46,8 @@ Every harness that lives on the substrate has the same shape:
 @agentick/<harness>/
   src/
     harness.ts          — the BaseHarness implementation
-    protocol.ts         — types (or in @agentick/spec — TBD per case)
-    augment.ts          — declare module "@agentick/spec" to add the slot
+    protocol.ts         — types (or in @agentick/spec-next — TBD per case)
+    augment.ts          — declare module "@agentick/spec-next" to add the slot
     extension.ts        — the withX() SessionExtension factory
     index.ts            — exports + side-effect import of ./augment.js
     conformance.ts      — runXHarnessConformance() suite
@@ -72,7 +72,7 @@ Every harness that lives on the substrate has the same shape:
 - Its own stub factory for tests
 - Its own tests, including the integration with the reconciler
 
-### `@agentick/spec` has NO hardcoded harness slots
+### `@agentick/spec-next` has NO hardcoded harness slots
 
 ```ts
 // packages/spec/src/protocol/hook-bridges.ts
@@ -86,9 +86,9 @@ Every harness's `augment.ts` adds its slot:
 
 ```ts
 // packages/timeline/src/augment.ts
-import type { TimelineHarnessProtocol } from "@agentick/spec";
+import type { TimelineHarnessProtocol } from "@agentick/spec-next";
 
-declare module "@agentick/spec" {
+declare module "@agentick/spec-next" {
   interface HookBridges {
     readonly timeline: TimelineHarnessProtocol;
   }
@@ -97,7 +97,7 @@ declare module "@agentick/spec" {
 
 Importing the harness package (which the metapackage and any session does) loads the augmentation as a side effect. Consumers see the slot. The augmentation is required for built-ins (no `?:`), optional for optional extensions (`sandbox?:`).
 
-### `@agentick/reconciler-react` has NO harness deps
+### `@agentick/reconciler-react-next` has NO harness deps
 
 ```
 Before:
@@ -131,18 +131,18 @@ After:
                                            bridges are needed.
 ```
 
-The asymmetry that drives this: **integration tests should live where the deps are.** A "knobs + reconciler" test naturally depends on both. The package that already depends on both is `@agentick/knobs` (it adds `@agentick/reconciler-react` as a dep when it needs `useBridges`). Reconciler-react does not — and cannot — depend on knobs.
+The asymmetry that drives this: **integration tests should live where the deps are.** A "knobs + reconciler" test naturally depends on both. The package that already depends on both is `@agentick/knobs-next` (it adds `@agentick/reconciler-react-next` as a dep when it needs `useBridges`). Reconciler-react does not — and cannot — depend on knobs.
 
-Cross-harness integration tests (e.g., "snapshot a session with knobs + state + timeline") live in `@agentick/session` (which depends on all of them) or in a top-level integration test harness in the public metapackage.
+Cross-harness integration tests (e.g., "snapshot a session with knobs + state + timeline") live in `@agentick/session-next` (which depends on all of them) or in a top-level integration test harness in the public metapackage.
 
 ### Shipping model
 
 ```
 Built-in (private, bundled):
-  @agentick/timeline   ← private: true
-  @agentick/knobs      ← private: true
-  @agentick/state      ← private: true
-  @agentick/gates      ← private: true
+  @agentick/timeline-next   ← private: true
+  @agentick/knobs-next      ← private: true
+  @agentick/state-next      ← private: true
+  @agentick/gates-next      ← private: true
   (etc.)
 
          ↓ all bundled by ↓
@@ -185,7 +185,7 @@ The cycle wall we kept hitting was a symptom: any package reconciler-react depen
 
 ### `SnapshotCapable<TSnapshot>` interface
 
-A marker interface in `@agentick/spec` for harnesses with snapshot capability:
+A marker interface in `@agentick/spec-next` for harnesses with snapshot capability:
 
 ```ts
 export interface SnapshotCapable<TSnapshot = unknown> {
@@ -242,7 +242,7 @@ No hardcoded names. Adding a new harness with snapshot support requires zero rec
 Each built-in exports a stub factory:
 
 ```ts
-// @agentick/timeline/src/testing/index.ts
+// @agentick/timeline-next/src/testing/index.ts
 export function stubTimelineHarness(initial?: readonly TimelineEntry[]): TimelineHarness {
   // constructs the harness against in-memory substrate
 }
@@ -251,8 +251,8 @@ export function stubTimelineHarness(initial?: readonly TimelineEntry[]): Timelin
 Adopters' tests:
 
 ```ts
-import { stubTimelineHarness } from "@agentick/timeline/testing";
-import { stubKnobsHarness } from "@agentick/knobs/testing";
+import { stubTimelineHarness } from "@agentick/timeline-next/testing";
+import { stubKnobsHarness } from "@agentick/knobs-next/testing";
 // ...
 ```
 
@@ -260,8 +260,8 @@ Or, for convenience, the metapackage composes them:
 
 ```ts
 // agentick/testing
-export { stubTimelineHarness } from "@agentick/timeline/testing";
-export { stubKnobsHarness } from "@agentick/knobs/testing";
+export { stubTimelineHarness } from "@agentick/timeline-next/testing";
+export { stubKnobsHarness } from "@agentick/knobs-next/testing";
 // ...
 export function stubBridges(options?: StubBridgesOptions): HookBridges {
   /* composes */
@@ -279,7 +279,7 @@ Adopters who want the convenience use `agentick/testing`; adopters who want mini
 
 ## Considered and rejected
 
-### Decompose `@agentick/reconciler-react` into `@agentick/reconciler` (core) + `@agentick/reconciler-react` (React adapter)
+### Decompose `@agentick/reconciler-react-next` into `@agentick/reconciler-next` (core) + `@agentick/reconciler-react-next` (React adapter)
 
 This would mirror the convention that "X-react packages depend on X core packages." It's structurally cleaner — would allow a future Angular or Vue reconciler frontend without disturbing the React one.
 
@@ -295,9 +295,9 @@ If a future need (e.g., a durable DataBridge variant) emerges, the extraction is
 
 Considered when we were chasing the cycle. With the augmentation refactor, the central convenience naturally lives in the public metapackage (`agentick/testing`), which already depends on all built-ins. Adopters who want it import from there; adopters who want minimal imports use per-harness `/testing` subpaths directly.
 
-### Keep tests in `@agentick/reconciler-react/__tests__/` and rewrite them to use protocol mocks
+### Keep tests in `@agentick/reconciler-react-next/__tests__/` and rewrite them to use protocol mocks
 
-This is the principled answer for tests that are TRULY reconciler unit tests. We do this where appropriate. But: tests that exist to verify "knobs work with the reconciler" are not reconciler unit tests — they're knobs-integration tests, and they belong in `@agentick/knobs`. Rewriting them with mocks just hides the true ownership.
+This is the principled answer for tests that are TRULY reconciler unit tests. We do this where appropriate. But: tests that exist to verify "knobs work with the reconciler" are not reconciler unit tests — they're knobs-integration tests, and they belong in `@agentick/knobs-next`. Rewriting them with mocks just hides the true ownership.
 
 ## Where this writes down
 
