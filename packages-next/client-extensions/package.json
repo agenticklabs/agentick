@@ -1,0 +1,70 @@
+{
+  "name": "@agentick/client-extensions-next",
+  "version": "0.0.0",
+  "private": true,
+  "description": "First-party extensions (middleware) for @agentick/client-next. Subpath exports — adopters opt into individual behaviors: retry, telemetry, cache, offline. Tree-shakeable. Same family pattern as Apollo Link / TanStack Query plugins.",
+  "keywords": [
+    "agent",
+    "agentick",
+    "ai",
+    "client",
+    "extension",
+    "middleware",
+    "retry",
+    "telemetry",
+    "cache",
+    "offline"
+  ],
+  "license": "MIT",
+  "author": "Ryan Lindgren",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/agenticklabs/agentick.git",
+    "directory": "packages-next/client-extensions"
+  },
+  "type": "module",
+  "main": "src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./retry": {
+      "types": "./src/retry/index.ts",
+      "import": "./src/retry/index.ts",
+      "default": "./src/retry/index.ts"
+    },
+    "./telemetry": {
+      "types": "./src/telemetry/index.ts",
+      "import": "./src/telemetry/index.ts",
+      "default": "./src/telemetry/index.ts"
+    },
+    "./cache": {
+      "types": "./src/cache/index.ts",
+      "import": "./src/cache/index.ts",
+      "default": "./src/cache/index.ts"
+    },
+    "./offline": {
+      "types": "./src/offline/index.ts",
+      "import": "./src/offline/index.ts",
+      "default": "./src/offline/index.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.build.json --noEmit",
+    "lint": "oxlint src/",
+    "format:check": "oxfmt --check src/",
+    "clean": "rm -rf dist tsconfig.build.tsbuildinfo"
+  },
+  "dependencies": {
+    "@agentick/spec-next": "workspace:*"
+  },
+  "devDependencies": {
+    "@agentick/client-next": "workspace:*",
+    "@agentick/transport-in-process-next": "workspace:*",
+    "typescript": "^5.7.3",
+    "vitest": "^4.0.18"
+  }
+}

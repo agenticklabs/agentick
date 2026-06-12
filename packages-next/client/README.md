@@ -216,7 +216,7 @@ under "Roadmap & known gaps" with an explicit marker.
 | 33.C (done) | WebSocket transport |
 | 33.D | Streamable HTTP transport |
 | 33.E | Unix socket transport |
-| 33.F | `client-retry-next`, `client-telemetry-next`, `client-offline-next`, `client-cache-next` extensions |
+| 33.F | `@agentick/client-extensions-next` bundle with `/retry`, `/telemetry`, `/cache`, `/offline` subpaths |
 | 33.G | Multiplexer (`@agentick/transport-multiplexer-next`) |
 | 33.H | Devtools + mock |
 | 33.I | MCP-bilingual (`@agentick/mcp-surface-next`, `@agentick/transport-mcp-client-next`) |

@@ -72,9 +72,9 @@ const client = createClient({
 ### With extensions
 
 ```ts
-import { retry } from "@agentick/client-retry-next";
-import { telemetry } from "@agentick/client-telemetry-next";
-import { offline } from "@agentick/client-offline-next";
+import { retry } from "@agentick/client-extensions-next/retry";
+import { telemetry } from "@agentick/client-extensions-next/telemetry";
+import { offline } from "@agentick/client-extensions-next/offline";
 
 const client = createClient({
   transport: websocket({ url, auth }),
@@ -1017,10 +1017,10 @@ Shapes correspond to the three surfaces from the middleware section: **middlewar
 | `@agentick/transport-http-next` | transport | framework | Streamable HTTP (MCP 2025-03-26 spec); default for HTTP |
 | `@agentick/transport-http-sse-legacy-next` | transport | framework | dual-endpoint HTTP+SSE for legacy infra |
 | `@agentick/transport-unix-socket-next` | transport | framework | local IPC |
-| `@agentick/client-retry-next` | middleware + handler | framework | exponential backoff, idempotency-key tracking, retryable-error predicate; handler for `connection:lost` votes "reconnect" |
-| `@agentick/client-telemetry-next` | middleware + installer | framework | W3C Trace Context propagation, OTel spans per logical RPC, counters; exposes `client.telemetry` namespace |
-| `@agentick/client-offline-next` | middleware + installer + handler | framework | persistent outbound queue (IndexedDB / SQLite); replay on reconnect; handler for `connection:lost` defers in-flight |
-| `@agentick/client-cache-next` | middleware | framework | read-through cache for idempotent RPCs; event-driven invalidation via bus |
+| `@agentick/client-extensions-next/retry` | middleware + handler | framework | exponential backoff, idempotency-key tracking, retryable-error predicate; handler for `connection:lost` votes "reconnect" |
+| `@agentick/client-extensions-next/telemetry` | middleware + installer | framework | W3C Trace Context propagation, OTel spans per logical RPC, counters; exposes `client.telemetry` namespace |
+| `@agentick/client-extensions-next/offline` | middleware + installer + handler | framework | persistent outbound queue (IndexedDB / SQLite); replay on reconnect; handler for `connection:lost` defers in-flight |
+| `@agentick/client-extensions-next/cache` | middleware | framework | read-through cache for idempotent RPCs; event-driven invalidation via bus |
 | `@agentick/client-devtools-next` | installer (+ `wireMirror`) | framework | devtools panel namespace + wire-firehose |
 | `@agentick/client-mock-next` | transport / middleware | framework | record-replay for tests |
 | Rate limiter | middleware | adopter | trivial — `(input, next) => throttle(input, next, opts)` |
@@ -1065,12 +1065,16 @@ The framework provides the extension shapes (middleware, handler, installer) —
 @agentick/mcp-surface-next             — server-side GatewayExtension: mounts MCP methods
                                           on an agentick gateway. Bilingual server.
 
-@agentick/client-retry-next            — middleware + handler
-@agentick/client-telemetry-next        — middleware + installer
-@agentick/client-offline-next          — middleware + installer + handler
-@agentick/client-cache-next            — middleware
+@agentick/client-extensions-next       — first-party extensions bundle with subpath exports
+  /retry                                  — middleware + handler
+  /telemetry                              — middleware + installer
+  /offline                                — middleware + installer + handler
+  /cache                                  — middleware
 @agentick/client-devtools-next         — installer + wireMirror
 @agentick/client-mock-next             — transport / middleware
+@agentick/client-react-next            — (future) React binding (hooks + context provider)
+@agentick/client-angular-next          — (future) Angular binding
+@agentick/client-vue-next              — (future) Vue binding
 
 (Auth packages — see ADR 34)
 @agentick/auth-next
@@ -1091,7 +1095,7 @@ client-next ──────────────► gateway-next  (gateway
   ↑                                       ↑
 transport-*-next/client    transport-*-next/server
   ↑                                       ↑
-client-retry-next, client-telemetry-next, … (middleware extensions)
+client-extensions-next/{retry,telemetry,cache,offline}  (first-party client extensions, subpath imports)
 ```
 
 ## Open questions
@@ -1147,9 +1151,10 @@ The work is broken into phases that exit cleanly:
 - Required for tentickle migration.
 - Same conformance.
 
-**Phase 33.F — Common middleware**
-- `client-retry-next`, `client-telemetry-next`, `client-offline-next`, `client-cache-next`.
-- Each with its own README + tests.
+**Phase 33.F — Common extensions**
+- `@agentick/client-extensions-next` — subpath bundle with `/retry`, `/telemetry`, `/cache`, `/offline`.
+- Each subpath ships with its own README + test suite + prior-art table.
+- Establishes the `{layer}-extensions-next` naming convention (reserved `{layer}-{framework}-next` for future React/Angular/Vue bindings).
 
 **Phase 33.G — Multiplexer**
 - Web Locks elector + BroadcastChannel bridge.

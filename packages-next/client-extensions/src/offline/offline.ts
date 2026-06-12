@@ -13,7 +13,7 @@
  *
  * Replay safety: the queue must only carry IDEMPOTENT operations (or
  * non-idempotent ones tagged with a stable idempotency key — pair with
- * `@agentick/client-retry-next`'s key emission).
+ * the sibling `retry` extension's key emission).
  *
  * @verifiedBy src/__tests__/offline.spec.ts
  */

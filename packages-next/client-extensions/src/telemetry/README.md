@@ -1,17 +1,20 @@
-# @agentick/client-telemetry-next
+# `@agentick/client-extensions-next/telemetry`
 
-Telemetry middleware for `@agentick/client-next` — span per logical
-RPC, W3C Trace Context propagation, OpenTelemetry RPC semantic
-conventions.
+Telemetry extension for `@agentick/client-next` — span per logical RPC,
+W3C Trace Context propagation, OpenTelemetry RPC semantic conventions.
+
+Subpath of [`@agentick/client-extensions-next`](../../README.md) — the
+first-party client-extension bundle. Adopters import individual
+behaviors via their subpath for tree-shaking + dependency isolation.
 
 ## Prior art
 
-| Library / spec | What it does | Where we match it |
-|---|---|---|
-| OpenTelemetry JS SDK | `@opentelemetry/api` Tracer + Span; RPC semconv | OTel-shaped `TelemetrySpan` interface; attributes match the semconv (`rpc.system`, `rpc.service`, `rpc.method`, `rpc.jsonrpc.version`, `rpc.jsonrpc.error_code`) |
-| W3C Trace Context | `traceparent` / `tracestate` headers | Propagated via the MCP `_meta` slot on every outbound RPC; server extracts to seed its span tree |
-| Datadog dd-trace, Sentry, Honeycomb Beeline | Auto-instrument HTTP / fetch | Adopters BYO Tracer; we don't pin a vendor |
-| OTel JS Meter | Counters / histograms | Deferred; see roadmap |
+| Library / spec                              | What it does                                    | Where we match it                                                                                                                                                |
+| ------------------------------------------- | ----------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| OpenTelemetry JS SDK                        | `@opentelemetry/api` Tracer + Span; RPC semconv | OTel-shaped `TelemetrySpan` interface; attributes match the semconv (`rpc.system`, `rpc.service`, `rpc.method`, `rpc.jsonrpc.version`, `rpc.jsonrpc.error_code`) |
+| W3C Trace Context                           | `traceparent` / `tracestate` headers            | Propagated via the MCP `_meta` slot on every outbound RPC; server extracts to seed its span tree                                                                 |
+| Datadog dd-trace, Sentry, Honeycomb Beeline | Auto-instrument HTTP / fetch                    | Adopters BYO Tracer; we don't pin a vendor                                                                                                                       |
+| OTel JS Meter                               | Counters / histograms                           | Deferred; see roadmap                                                                                                                                            |
 
 ## BYO tracer
 
@@ -23,7 +26,7 @@ opentelemetry-api in.
 ```ts
 import { trace, SpanKind } from "@opentelemetry/api";
 import { createClient } from "@agentick/client-next";
-import { telemetry, type TelemetryAdapter } from "@agentick/client-telemetry-next";
+import { telemetry, type TelemetryAdapter } from "@agentick/client-extensions-next/telemetry";
 
 const tracer = trace.getTracer("@agentick/client-next");
 
@@ -61,7 +64,7 @@ For tests / adopters who only want trace context propagation without
 observation, use `noopAdapter`:
 
 ```ts
-import { telemetry, noopAdapter } from "@agentick/client-telemetry-next";
+import { telemetry, noopAdapter } from "@agentick/client-extensions-next/telemetry";
 client.extensions = [telemetry({ adapter: noopAdapter })];
 ```
 
@@ -69,9 +72,9 @@ client.extensions = [telemetry({ adapter: noopAdapter })];
 
 ```ts
 telemetry({
-  adapter,                       // required — BYO tracer
-  sample: (method) => boolean,   // per-method sampler; default sample all
-  serviceName: "agentick",       // reported as rpc.service; default "agentick"
+  adapter, // required — BYO tracer
+  sample: (method) => boolean, // per-method sampler; default sample all
+  serviceName: "agentick", // reported as rpc.service; default "agentick"
 });
 ```
 
@@ -103,16 +106,16 @@ Phase 33.F of the v2 implementation plan.
 
 ## Verified by
 
-| Concern | Test |
-|---|---|
-| Span opens per RPC with OTel RPC semantic conventions | `src/__tests__/telemetry.spec.ts` |
-| W3C Trace Context propagation via `_meta.traceparent` | `src/__tests__/telemetry.spec.ts` |
-| Traceparent generation when adapter doesn't supply one | `src/__tests__/telemetry.spec.ts` |
+| Concern                                                 | Test                              |
+| ------------------------------------------------------- | --------------------------------- |
+| Span opens per RPC with OTel RPC semantic conventions   | `src/__tests__/telemetry.spec.ts` |
+| W3C Trace Context propagation via `_meta.traceparent`   | `src/__tests__/telemetry.spec.ts` |
+| Traceparent generation when adapter doesn't supply one  | `src/__tests__/telemetry.spec.ts` |
 | Errors recorded with message + `rpc.jsonrpc.error_code` | `src/__tests__/telemetry.spec.ts` |
-| Per-method sampling skips spans for noisy methods | `src/__tests__/telemetry.spec.ts` |
-| Custom serviceName flows into span name + rpc.service | `src/__tests__/telemetry.spec.ts` |
-| noopAdapter still propagates trace context | `src/__tests__/telemetry.spec.ts` |
-| `generateTraceparent` matches W3C format | `src/__tests__/telemetry.spec.ts` |
+| Per-method sampling skips spans for noisy methods       | `src/__tests__/telemetry.spec.ts` |
+| Custom serviceName flows into span name + rpc.service   | `src/__tests__/telemetry.spec.ts` |
+| noopAdapter still propagates trace context              | `src/__tests__/telemetry.spec.ts` |
+| `generateTraceparent` matches W3C format                | `src/__tests__/telemetry.spec.ts` |
 
 ## Roadmap & known gaps
 

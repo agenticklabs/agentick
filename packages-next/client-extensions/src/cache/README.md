@@ -1,23 +1,28 @@
-# @agentick/client-cache-next
+# `@agentick/client-extensions-next/cache`
 
-Read-through cache middleware for `@agentick/client-next`.
+Read-through cache extension for `@agentick/client-next`.
 **Method-explicit-allowlist by default** — most agentick methods are
 stateful (sessions, executions); adopters opt specific read-shaped
 methods into the cache with per-method TTL.
 
+Subpath of [`@agentick/client-extensions-next`](../../README.md) — the
+first-party client-extension bundle. Adopters import individual
+behaviors via their subpath for tree-shaking + dependency isolation.
+
 ## Prior art
 
-| Library | What it does | Where we match it |
-|---|---|---|
-| React Query / TanStack Query | Keyed cache with TTL + GC | TTL per method; LRU eviction |
-| SWR | Stale-while-revalidate, focus revalidate | Roadmap (see below) — not in MVP |
+| Library                        | What it does                                 | Where we match it                                                        |
+| ------------------------------ | -------------------------------------------- | ------------------------------------------------------------------------ |
+| React Query / TanStack Query   | Keyed cache with TTL + GC                    | TTL per method; LRU eviction                                             |
+| SWR                            | Stale-while-revalidate, focus revalidate     | Roadmap (see below) — not in MVP                                         |
 | Apollo Client normalized cache | Cache-and-network, event-driven invalidation | LRU + adopter-supplied event-driven invalidation via `store.delete(key)` |
-| HTTP caching (RFC 7234) | `Cache-Control: max-age` | Per-method `ttlMs` |
-| LRU-cache (npm) | LRU container with eviction | `LruCacheStore` impl |
+| HTTP caching (RFC 7234)        | `Cache-Control: max-age`                     | Per-method `ttlMs`                                                       |
+| LRU-cache (npm)                | LRU container with eviction                  | `LruCacheStore` impl                                                     |
 
 ## Why an explicit allowlist (default = nothing cached)
 
 Most agentick methods mutate state or return per-call-distinct results:
+
 - `session/send` — runs an execution; result is unique per call
 - `session/dispatch` — invokes a tool; side effects matter
 - `app/createSession` — creates state
@@ -27,13 +32,13 @@ Caching these silently would corrupt adopter applications. The cache
 is opt-in per method so adopters think about each one explicitly:
 
 ```ts
-import { cache } from "@agentick/client-cache-next";
+import { cache } from "@agentick/client-extensions-next/cache";
 
 cache({
   methods: {
-    "gateway/listApps":  { ttlMs: 60_000 },   // 1 minute
-    "gateway/getApp":    { ttlMs: 30_000 },
-    "app/listSessions":  { ttlMs:  5_000 },   // 5 seconds (sessions churn)
+    "gateway/listApps": { ttlMs: 60_000 }, // 1 minute
+    "gateway/getApp": { ttlMs: 30_000 },
+    "app/listSessions": { ttlMs: 5_000 }, // 5 seconds (sessions churn)
   },
 });
 ```
@@ -42,7 +47,7 @@ cache({
 
 ```ts
 import { createClient } from "@agentick/client-next";
-import { cache } from "@agentick/client-cache-next";
+import { cache } from "@agentick/client-extensions-next/cache";
 
 const client = await createClient({
   transport: ...,
@@ -79,7 +84,7 @@ For Redis-backed or other durable / cross-process caches, implement
 the `CacheStore` interface:
 
 ```ts
-import type { CacheStore, CacheEntry } from "@agentick/client-cache-next";
+import type { CacheStore, CacheEntry } from "@agentick/client-extensions-next/cache";
 
 class RedisCacheStore implements CacheStore {
   get(key: string): CacheEntry | undefined { ... }
@@ -132,15 +137,15 @@ Phase 33.F of the v2 implementation plan.
 
 ## Verified by
 
-| Concern | Test |
-|---|---|
+| Concern                                      | Test                          |
+| -------------------------------------------- | ----------------------------- |
 | Method allowlist — only listed methods cache | `src/__tests__/cache.spec.ts` |
-| TTL — expired entries refetch | `src/__tests__/cache.spec.ts` |
-| Keys differentiate by params | `src/__tests__/cache.spec.ts` |
-| `_meta` stripped before keying | `src/__tests__/cache.spec.ts` |
-| LRU eviction on capacity | `src/__tests__/cache.spec.ts` |
-| Custom key fn override | `src/__tests__/cache.spec.ts` |
-| Adopter-supplied store used end-to-end | `src/__tests__/cache.spec.ts` |
+| TTL — expired entries refetch                | `src/__tests__/cache.spec.ts` |
+| Keys differentiate by params                 | `src/__tests__/cache.spec.ts` |
+| `_meta` stripped before keying               | `src/__tests__/cache.spec.ts` |
+| LRU eviction on capacity                     | `src/__tests__/cache.spec.ts` |
+| Custom key fn override                       | `src/__tests__/cache.spec.ts` |
+| Adopter-supplied store used end-to-end       | `src/__tests__/cache.spec.ts` |
 
 ## Roadmap & known gaps
 

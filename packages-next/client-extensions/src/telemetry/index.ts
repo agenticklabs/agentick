@@ -1,6 +1,6 @@
 /**
- * `@agentick/client-telemetry-next` — telemetry middleware for
- * `@agentick/client-next`. OpenTelemetry-shaped: span per logical RPC,
+ * `@agentick/client-extensions-next/telemetry` — telemetry extension
+ * for `@agentick/client-next`. OpenTelemetry-shaped: span per logical RPC,
  * W3C Trace Context propagation via the MCP `_meta` slot, OTel RPC
  * semantic conventions.
  *

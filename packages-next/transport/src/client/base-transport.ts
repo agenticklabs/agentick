@@ -194,6 +194,12 @@ export abstract class BaseClientTransport implements ClientTransport {
         reject({ kind: "cancelled", message: "aborted" });
       });
     });
+    // Mark the inner promise's rejection as observed at the Node level so
+    // Node's unhandledRejection hook doesn't fire during the microtask gap
+    // between a synchronous rejection (e.g. abort listener) and the outer
+    // `return promise` adoption. The original `promise` still carries its
+    // rejection state; the outer flow propagates it normally.
+    promise.catch(() => {});
 
     try {
       await this.sendFrame(frame);

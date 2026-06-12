@@ -1,6 +1,6 @@
 /**
- * `@agentick/client-cache-next` — read-through cache middleware for
- * `@agentick/client-next`.
+ * `@agentick/client-extensions-next/cache` — read-through cache
+ * extension for `@agentick/client-next`.
  *
  * Method-explicit-allowlist by default — most agentick methods are
  * stateful (sessions, executions) and MUST NOT be cached. Adopters opt

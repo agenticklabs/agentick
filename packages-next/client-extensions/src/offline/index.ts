@@ -1,5 +1,5 @@
 /**
- * `@agentick/client-offline-next` — offline-queue middleware.
+ * `@agentick/client-extensions-next/offline` — offline-queue extension.
  *
  * Buffers outbound RPCs when the wire is closed; replays FIFO when
  * the transport state transitions back to "open". Pluggable durable
