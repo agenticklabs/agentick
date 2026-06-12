@@ -65,3 +65,14 @@ export {
 // its native codec to prove frames round-trip and the validator accepts
 // what the transport produces.
 export { runWireConformance, type WireCodec } from "./wire.js";
+
+// Transport conformance (Phase 33.C.1) — every ClientTransport impl
+// runs this behavioral suite to prove state-machine transitions, RPC
+// correlation, subscription multiplexing, notification routing, and
+// cancellation emit. Wire-specific tests (subprotocol, peer creds,
+// HTTP topology) live in the per-transport package.
+export {
+  runTransportConformance,
+  type TransportConformanceFactory,
+  type TestHandler,
+} from "./transport.js";

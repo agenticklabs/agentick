@@ -892,11 +892,27 @@ importers:
         specifier: workspace:*
         version: link:../spec-conformance
 
+  packages-next/transport-base:
+    dependencies:
+      '@agentick/spec-next':
+        specifier: workspace:*
+        version: link:../spec
+    devDependencies:
+      typescript:
+        specifier: ^5.7.3
+        version: 5.9.3
+      vitest:
+        specifier: ^4.0.18
+        version: 4.0.18(@opentelemetry/api@1.9.0)(@types/node@25.0.9)(happy-dom@17.6.3)(jiti@2.6.1)(msw@2.14.6(@types/node@25.0.9)(typescript@5.9.3))(tsx@4.21.0)(yaml@2.8.4)
+
   packages-next/transport-in-process:
     dependencies:
       '@agentick/spec-next':
         specifier: workspace:*
         version: link:../spec
+      '@agentick/transport-base-next':
+        specifier: workspace:*
+        version: link:../transport-base
     devDependencies:
       '@agentick/app-next':
         specifier: workspace:*
@@ -928,6 +944,9 @@ importers:
       '@agentick/spec-next':
         specifier: workspace:*
         version: link:../spec
+      '@agentick/transport-base-next':
+        specifier: workspace:*
+        version: link:../transport-base
       ws:
         specifier: ^8.18.0
         version: 8.19.0

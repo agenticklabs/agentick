@@ -37,9 +37,7 @@ export function runEventBusConformance(factory: () => EventBus): void {
   describe("EventBus — keeping-up subscriber receives every appended event", () => {
     it("delivers a sequence of appends in order", async () => {
       const bus = factory();
-      const fiber = Effect.runFork(
-        Stream.runCollect(Stream.take(bus.subscribe({}), 3)),
-      );
+      const fiber = Effect.runFork(Stream.runCollect(Stream.take(bus.subscribe({}), 3)));
       await new Promise((r) => setImmediate(r));
       await Effect.runPromise(bus.append(ev("1")));
       await Effect.runPromise(bus.append(ev("2")));
@@ -53,9 +51,7 @@ export function runEventBusConformance(factory: () => EventBus): void {
   describe("EventBus — appendBatch + hasSubscriberFor", () => {
     it("appendBatch delivers each event in order", async () => {
       const bus = factory();
-      const fiber = Effect.runFork(
-        Stream.runCollect(Stream.take(bus.subscribe({}), 3)),
-      );
+      const fiber = Effect.runFork(Stream.runCollect(Stream.take(bus.subscribe({}), 3)));
       await new Promise((r) => setImmediate(r));
       await Effect.runPromise(bus.appendBatch([ev("1"), ev("2"), ev("3")]));
       const collected = await Effect.runPromise(Fiber.join(fiber));

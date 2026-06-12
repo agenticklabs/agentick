@@ -1,23 +1,21 @@
 {
-  "name": "@agentick/transport-websocket-next",
+  "name": "@agentick/transport-base-next",
   "version": "0.0.0",
   "private": true,
-  "description": "WebSocket transport for agentick — JSON-RPC 2.0 over WS, with subprotocol negotiation (`agentick-rpc-v1`), cursor-aware reconnect, per-message-deflate compression, and bilingual MCP support. Client uses native `globalThis.WebSocket` (Node 22+, browser, Bun, Deno, edge); server uses the `ws` library (no native WS server in Node).",
+  "description": "Shared transport plumbing for every @agentick/transport-* package. Ships BaseClientTransport (abstract; concrete transports subclass), MultiplexedStream (subscription / progress fan-out), the transport-agnostic JSON-RPC dispatcher that routes wire frames to GatewayHarnessProtocol methods, and shared DispatchHost / DispatchSink contract types.",
   "keywords": [
     "agent",
     "agentick",
     "ai",
     "transport",
-    "websocket",
-    "json-rpc",
-    "mcp"
+    "json-rpc"
   ],
   "license": "MIT",
   "author": "Ryan Lindgren",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/agenticklabs/agentick.git",
-    "directory": "packages-next/transport-websocket"
+    "directory": "packages-next/transport-base"
   },
   "type": "module",
   "main": "src/index.ts",
@@ -46,18 +44,9 @@
     "clean": "rm -rf dist tsconfig.build.tsbuildinfo"
   },
   "dependencies": {
-    "@agentick/spec-next": "workspace:*",
-    "@agentick/transport-base-next": "workspace:*",
-    "ws": "^8.18.0"
+    "@agentick/spec-next": "workspace:*"
   },
   "devDependencies": {
-    "@agentick/app-next": "workspace:*",
-    "@agentick/client-next": "workspace:*",
-    "@agentick/gateway-next": "workspace:*",
-    "@agentick/runtime-next": "workspace:*",
-    "@agentick/spec-conformance-next": "workspace:*",
-    "@types/ws": "^8.5.13",
-    "effect": "^3.21.2",
     "typescript": "^5.7.3",
     "vitest": "^4.0.18"
   }

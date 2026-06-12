@@ -62,11 +62,13 @@ export type ExecutorConformanceFactory = (
 
 const SPEC_VERSION_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
-function mkRenderedTree(opts: {
-  imageBlock?: ImageBlock;
-  config?: RenderedTree["config"];
-  providerOptions?: RenderedTree["providerOptions"];
-} = {}): RenderedTree {
+function mkRenderedTree(
+  opts: {
+    imageBlock?: ImageBlock;
+    config?: RenderedTree["config"];
+    providerOptions?: RenderedTree["providerOptions"];
+  } = {},
+): RenderedTree {
   const section: SectionEntry = {
     kind: "section",
     id: "system",

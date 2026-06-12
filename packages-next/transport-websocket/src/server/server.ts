@@ -20,8 +20,8 @@ import {
   type JsonRpcRequest,
   type JsonRpcResponse,
 } from "@agentick/spec-next";
+import { dispatchRequest, type DispatchHost } from "@agentick/transport-base-next";
 import { AGENTICK_SUBPROTOCOL, decodeFrame, encodeFrame } from "../shared/codec.js";
-import { dispatchRequest, type DispatchHost } from "./dispatch.js";
 
 export interface WebSocketServerOptions {
   readonly httpServer: HttpServer;
@@ -230,5 +230,5 @@ class ConnectionContext {
 
 // Re-export the dispatch host shape so adopters can supply their own
 // (e.g., a wrapper that adds auth, telemetry, custom methods).
-export type { DispatchHost } from "./dispatch.js";
+export type { DispatchHost } from "@agentick/transport-base-next";
 export { ErrorCode };

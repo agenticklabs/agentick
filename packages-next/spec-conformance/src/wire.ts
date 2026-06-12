@@ -71,12 +71,7 @@ export function runWireConformance(codec: WireCodec): void {
       params: { requestId: 1 },
     };
 
-    const sampleFrames: ReadonlyArray<JsonRpcFrame> = [
-      request,
-      success,
-      errorRes,
-      notification,
-    ];
+    const sampleFrames: ReadonlyArray<JsonRpcFrame> = [request, success, errorRes, notification];
 
     describe("roundtrip — encode then decode survives validation", () => {
       for (const frame of sampleFrames) {
@@ -94,7 +89,9 @@ export function runWireConformance(codec: WireCodec): void {
 
     describe("validator integration", () => {
       it("rejects a frame missing jsonrpc version after roundtrip", () => {
-        const decoded = codec.decode(codec.encode({ id: 1, method: "ping" } as unknown as JsonRpcFrame));
+        const decoded = codec.decode(
+          codec.encode({ id: 1, method: "ping" } as unknown as JsonRpcFrame),
+        );
         const v = validateJsonRpcFrame(decoded);
         expect(v.ok).toBe(false);
       });
