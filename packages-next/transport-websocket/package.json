@@ -1,0 +1,63 @@
+{
+  "name": "@agentick/transport-websocket-next",
+  "version": "0.0.0",
+  "private": true,
+  "description": "WebSocket transport for agentick — JSON-RPC 2.0 over WS, with subprotocol negotiation (`agentick-rpc-v1`), cursor-aware reconnect, per-message-deflate compression, and bilingual MCP support. Client uses native `globalThis.WebSocket` (Node 22+, browser, Bun, Deno, edge); server uses the `ws` library (no native WS server in Node).",
+  "keywords": [
+    "agent",
+    "agentick",
+    "ai",
+    "transport",
+    "websocket",
+    "json-rpc",
+    "mcp"
+  ],
+  "license": "MIT",
+  "author": "Ryan Lindgren",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/agenticklabs/agentick.git",
+    "directory": "packages-next/transport-websocket"
+  },
+  "type": "module",
+  "main": "src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./client": {
+      "types": "./src/client/index.ts",
+      "import": "./src/client/index.ts",
+      "default": "./src/client/index.ts"
+    },
+    "./server": {
+      "types": "./src/server/index.ts",
+      "import": "./src/server/index.ts",
+      "default": "./src/server/index.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.build.json --noEmit",
+    "lint": "oxlint src/",
+    "format:check": "oxfmt --check src/",
+    "clean": "rm -rf dist tsconfig.build.tsbuildinfo"
+  },
+  "dependencies": {
+    "@agentick/spec-next": "workspace:*",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@agentick/app-next": "workspace:*",
+    "@agentick/client-next": "workspace:*",
+    "@agentick/gateway-next": "workspace:*",
+    "@agentick/runtime-next": "workspace:*",
+    "@agentick/spec-conformance-next": "workspace:*",
+    "@types/ws": "^8.5.13",
+    "effect": "^3.21.2",
+    "typescript": "^5.7.3",
+    "vitest": "^4.0.18"
+  }
+}

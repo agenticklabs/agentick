@@ -56,6 +56,8 @@ export const ErrorCode = {
 
 export type ErrorCode = (typeof ErrorCode)[keyof typeof ErrorCode];
 
+import type { Cursor } from "../protocol/event-log.js";
+
 /**
  * Structured error `data` shapes for specific error codes. Carrying typed
  * data lets clients match on the code and read the data with type safety.
@@ -75,8 +77,8 @@ export interface ErrorData {
   [ErrorCode.AppNotFound]: { readonly appId: string };
   [ErrorCode.SubscriptionNotFound]: { readonly subscriptionId: string };
   [ErrorCode.CursorEvicted]: {
-    readonly requested: import("../protocol/event-log.js").Cursor;
-    readonly oldestAvailable: import("../protocol/event-log.js").Cursor;
+    readonly requested: Cursor;
+    readonly oldestAvailable: Cursor;
   };
   [ErrorCode.ChallengeRequired]: {
     readonly challengeId: string;

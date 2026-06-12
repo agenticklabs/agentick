@@ -923,6 +923,43 @@ importers:
         specifier: ^4.0.18
         version: 4.0.18(@opentelemetry/api@1.9.0)(@types/node@25.0.9)(happy-dom@17.6.3)(jiti@2.6.1)(msw@2.14.6(@types/node@25.0.9)(typescript@5.9.3))(tsx@4.21.0)(yaml@2.8.4)
 
+  packages-next/transport-websocket:
+    dependencies:
+      '@agentick/spec-next':
+        specifier: workspace:*
+        version: link:../spec
+      ws:
+        specifier: ^8.18.0
+        version: 8.19.0
+    devDependencies:
+      '@agentick/app-next':
+        specifier: workspace:*
+        version: link:../app
+      '@agentick/client-next':
+        specifier: workspace:*
+        version: link:../client
+      '@agentick/gateway-next':
+        specifier: workspace:*
+        version: link:../gateway
+      '@agentick/runtime-next':
+        specifier: workspace:*
+        version: link:../runtime
+      '@agentick/spec-conformance-next':
+        specifier: workspace:*
+        version: link:../spec-conformance
+      '@types/ws':
+        specifier: ^8.5.13
+        version: 8.18.1
+      effect:
+        specifier: ^3.21.2
+        version: 3.21.2
+      typescript:
+        specifier: ^5.7.3
+        version: 5.9.3
+      vitest:
+        specifier: ^4.0.18
+        version: 4.0.18(@opentelemetry/api@1.9.0)(@types/node@25.0.9)(happy-dom@17.6.3)(jiti@2.6.1)(msw@2.14.6(@types/node@25.0.9)(typescript@5.9.3))(tsx@4.21.0)(yaml@2.8.4)
+
   packages/adapters/ai-sdk:
     dependencies:
       '@agentick/core':
