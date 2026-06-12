@@ -9,11 +9,17 @@ import {
   isJsonRpcResponse,
   isJsonRpcSuccess,
   isSessionScope,
+  validateJsonRpcFrame,
+  validateJsonRpcInput,
+  type InitializeParams,
+  type InitializeResult,
   type JsonRpcBatch,
+  type JsonRpcErrorResponse,
   type JsonRpcFrame,
   type JsonRpcNotification,
   type JsonRpcRequest,
   type JsonRpcResponse,
+  type JsonRpcSuccessResponse,
   type ProgressNotificationParams,
   type RequestMeta,
   type SessionSendParams,
@@ -31,14 +37,41 @@ import {
 
 describe("@agentick/spec-next — wire structural tests", () => {
   describe("JSON-RPC envelopes", () => {
-    it("constructs a valid request frame", () => {
+    it("constructs a valid request frame with role-bearing messages", () => {
       const req: JsonRpcRequest<SessionSendParams> = {
         jsonrpc: "2.0",
         id: 7,
         method: "session/send",
-        params: { sessionId: "s1", messages: [] },
+        params: {
+          sessionId: "s1",
+          messages: [
+            { role: "user", content: "hello" },
+            { role: "assistant", content: [{ type: "text", text: "hi" }] },
+          ],
+          _meta: { progressToken: "p-1" },
+        },
       };
       expect(req.jsonrpc).toBe("2.0");
+      expect(req.params?.messages?.[0]?.role).toBe("user");
+    });
+
+    it("rejects responses that carry both result and error at the type level", () => {
+      // @ts-expect-error — JsonRpcSuccessResponse forbids `error`
+      const bad1: JsonRpcSuccessResponse = {
+        jsonrpc: "2.0",
+        id: 1,
+        result: {},
+        error: { code: -32000, message: "x" },
+      };
+      void bad1;
+      // @ts-expect-error — JsonRpcErrorResponse forbids `result`
+      const bad2: JsonRpcErrorResponse = {
+        jsonrpc: "2.0",
+        id: 1,
+        result: {},
+        error: { code: -32000, message: "x" },
+      };
+      void bad2;
     });
 
     it("constructs a valid success response", () => {
@@ -179,6 +212,191 @@ describe("@agentick/spec-next — wire structural tests", () => {
     });
   });
 
+  describe("initialize handshake", () => {
+    it("constructs a valid initialize request + response", () => {
+      const req: JsonRpcRequest<InitializeParams> = {
+        jsonrpc: "2.0",
+        id: 0,
+        method: "initialize",
+        params: {
+          protocolVersion: "v1",
+          capabilities: { cursorResume: true, batch: true },
+          clientInfo: { name: "test-client", version: "0.0.1" },
+        },
+      };
+      const res: InitializeResult = {
+        protocolVersion: "v1",
+        capabilities: { cursorResume: true, subscriptions: true, progress: true },
+        serverInfo: { name: "test-gateway", version: "0.0.1" },
+        connectionId: "conn-1",
+      };
+      expect(req.params?.protocolVersion).toBe("v1");
+      expect(res.connectionId).toBe("conn-1");
+    });
+  });
+
+  describe("validator — well-formed frames", () => {
+    it("validates a request", () => {
+      const r = validateJsonRpcFrame({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "ping",
+        params: {},
+      });
+      expect(r.ok).toBe(true);
+      if (r.ok) expect(isJsonRpcRequest(r.value)).toBe(true);
+    });
+
+    it("validates a success response", () => {
+      const r = validateJsonRpcFrame({ jsonrpc: "2.0", id: 1, result: {} });
+      expect(r.ok).toBe(true);
+      if (r.ok) expect(isJsonRpcResponse(r.value)).toBe(true);
+    });
+
+    it("validates an error response", () => {
+      const r = validateJsonRpcFrame({
+        jsonrpc: "2.0",
+        id: 1,
+        error: { code: -32603, message: "boom" },
+      });
+      expect(r.ok).toBe(true);
+    });
+
+    it("validates an error response with null id (for parse errors per spec)", () => {
+      const r = validateJsonRpcFrame({
+        jsonrpc: "2.0",
+        id: null,
+        error: { code: -32700, message: "parse error" },
+      });
+      expect(r.ok).toBe(true);
+    });
+
+    it("validates a notification", () => {
+      const r = validateJsonRpcFrame({
+        jsonrpc: "2.0",
+        method: "notifications/cancelled",
+        params: { requestId: 1 },
+      });
+      expect(r.ok).toBe(true);
+      if (r.ok) expect(isJsonRpcNotification(r.value)).toBe(true);
+    });
+
+    it("validates a batch", () => {
+      const r = validateJsonRpcInput([
+        { jsonrpc: "2.0", id: 1, method: "ping", params: {} },
+        { jsonrpc: "2.0", method: "notifications/cancelled", params: { requestId: 99 } },
+      ]);
+      expect(r.ok).toBe(true);
+      if (r.ok) expect(Array.isArray(r.value)).toBe(true);
+    });
+  });
+
+  describe("validator — malformed input rejected", () => {
+    it("rejects non-objects", () => {
+      expect(validateJsonRpcFrame("not an object").ok).toBe(false);
+      expect(validateJsonRpcFrame(null).ok).toBe(false);
+      expect(validateJsonRpcFrame(42).ok).toBe(false);
+    });
+
+    it("rejects missing or wrong jsonrpc version", () => {
+      const r = validateJsonRpcFrame({ id: 1, method: "ping" });
+      expect(r.ok).toBe(false);
+      if (!r.ok) expect(r.error.code).toBe(ErrorCode.InvalidRequest);
+
+      const r2 = validateJsonRpcFrame({ jsonrpc: "1.0", id: 1, method: "ping" });
+      expect(r2.ok).toBe(false);
+    });
+
+    it("rejects requests with non-string method", () => {
+      const r = validateJsonRpcFrame({ jsonrpc: "2.0", id: 1, method: 42 });
+      expect(r.ok).toBe(false);
+    });
+
+    it("rejects requests with invalid id type", () => {
+      const r = validateJsonRpcFrame({ jsonrpc: "2.0", id: true, method: "ping" });
+      expect(r.ok).toBe(false);
+    });
+
+    it("rejects responses carrying both result and error", () => {
+      const r = validateJsonRpcFrame({
+        jsonrpc: "2.0",
+        id: 1,
+        result: {},
+        error: { code: -32000, message: "x" },
+      });
+      expect(r.ok).toBe(false);
+    });
+
+    it("rejects responses carrying neither result nor error", () => {
+      const r = validateJsonRpcFrame({ jsonrpc: "2.0", id: 1 });
+      expect(r.ok).toBe(false);
+    });
+
+    it("rejects errors without code or message", () => {
+      const r = validateJsonRpcFrame({
+        jsonrpc: "2.0",
+        id: 1,
+        error: { message: "x" },
+      });
+      expect(r.ok).toBe(false);
+
+      const r2 = validateJsonRpcFrame({
+        jsonrpc: "2.0",
+        id: 1,
+        error: { code: -32000 },
+      });
+      expect(r2.ok).toBe(false);
+    });
+
+    it("rejects empty batches", () => {
+      const r = validateJsonRpcInput([]);
+      expect(r.ok).toBe(false);
+    });
+
+    it("rejects params that aren't object or array", () => {
+      const r = validateJsonRpcFrame({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "ping",
+        params: 42,
+      });
+      expect(r.ok).toBe(false);
+    });
+  });
+
+  describe("validator — wire JSON roundtrip", () => {
+    const samples: Array<JsonRpcFrame> = [
+      { jsonrpc: "2.0", id: 1, method: "ping", params: {} },
+      { jsonrpc: "2.0", id: 2, result: { ok: true } },
+      { jsonrpc: "2.0", id: 3, error: { code: -32010, message: "missing" } },
+      {
+        jsonrpc: "2.0",
+        method: "notifications/progress",
+        params: {
+          progressToken: "p1",
+          cursor: { value: 7 },
+          envelope: {
+            id: "e1",
+            surface: "executor",
+            name: "executor:tick:delta",
+            phase: "started",
+            timestamp: 0,
+            scope: {},
+          },
+        },
+      },
+    ];
+
+    it("every frame shape survives JSON.stringify/parse + validation", () => {
+      for (const sample of samples) {
+        const text = JSON.stringify(sample);
+        const parsed = JSON.parse(text);
+        const r = validateJsonRpcFrame(parsed);
+        expect(r.ok).toBe(true);
+      }
+    });
+  });
+
   describe("WireMethods registry", () => {
     it("WireParams<M> resolves params per method", () => {
       expectTypeOf<WireParams<"session/send">>().toEqualTypeOf<SessionSendParams>();
@@ -200,6 +418,7 @@ describe("@agentick/spec-next — wire structural tests", () => {
 
     it("WireMethods exposes the expected method namespace surface", () => {
       // Compile-time: every namespace's first method exists.
+      type _initialize = WireMethods["initialize"];
       type _gateway = WireMethods["gateway/listApps"];
       type _app = WireMethods["app/createSession"];
       type _session = WireMethods["session/send"];

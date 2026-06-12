@@ -1,7 +1,20 @@
 # Agentick v2 — Implementation Status
 
 **Branch:** `feat/v2`
-**Last updated:** 2026-06-10 — **Workspace reorganization: v2 packages relocated to `packages-next/` with `-next` suffix on every package name.** v1 stays untouched in `packages/` so master merges land cleanly. The reorganization is purely packaging; no API or behavior change. At v2.0 cut the suffix strips and `packages-next/` collapses onto `packages/`.
+**Last updated:** 2026-06-11 — **ADR 33 landed + Phase 33.A shipped: wire types in `@agentick/spec-next/wire/`.** ADR 33 (Client + transports) drafted through four revisions: rev-1 initial design, rev-2 ergonomics pass (selector/multiplexer take instances not factories; `client.send()` shortcut; Streamable HTTP), rev-3 `BaseHarness`-parity (client middleware Promise-native with `effectMiddleware` adapter; lifecycle handlers with per-event merge rules; `AuthSource` parameterized per-transport), rev-4 MCP wire alignment (`_meta.progressToken` at MCP-exact location; method separator unified to `/`; `notifications/` prefix; error code table; reserved MCP namespaces; planned `@agentick/mcp-surface-next` + `@agentick/transport-mcp-client-next` bilingual packages). Wire spec types shipped in `@agentick/spec-next/wire/`: JSON-RPC 2.0 envelopes with mutual-exclusion enforcement via `error?: never` / `result?: never`; `ErrorCode` const namespace (-32700/-32603 standard, -32800/-32801 LSP, -32000..-32050 Agentick); `ErrorData` typed-data registry; `SubscriptionScope` discriminator; method-bound param/result shapes for every method including `initialize` handshake (MCP-aligned); `WireMethods` + `WireNotifications` registries for typed dispatch; `validateJsonRpcFrame` + `validateJsonRpcInput` for untrusted-input validation; `runWireConformance` suite in spec-conformance for every transport to verify roundtrip + validator integration.
+
+**Phase 33.A — engineering decisions made (post-review pass against the rev-1 draft):**
+
+- **`SessionSendParams.messages` typed `SendMessageInput[]`**, NOT `ContentBlock[]`. Role + content + metadata cross the wire. Caught in self-review pre-commit; without role the wire cannot represent multi-turn conversation.
+- **`WireRequestParams` base interface** carries `_meta?: RequestMeta` so every request shape can opt into MCP `_meta` hints uniformly — no inconsistent presence per method.
+- **`JsonRpcSuccessResponse` / `JsonRpcErrorResponse` enforce mutual exclusion** via `error?: never` / `result?: never`. TypeScript structural typing made this a real gap; `never`-marker closes it.
+- **`initialize` + `notifications/initialized` handshake added** mirroring MCP. Capability negotiation (cursorResume, batch, streamableHttp, subscriptions, progress, cancellation, mcpSurface) at session start.
+- **`validateJsonRpcFrame` / `validateJsonRpcInput`** validators ship in spec — transports MUST call these on untrusted decoded JSON before treating it as a typed frame. Type guards (which exist alongside) narrow already-well-formed frames; the validators reject malformed input with a structured `JsonRpcError`.
+- **`runWireConformance(codec)` suite** in `@agentick/spec-conformance-next/wire.ts` — every transport's test file calls this with its own encode/decode pair, exercising roundtrip of all four frame kinds + validator integration + batch handling + empty-batch rejection.
+
+**Workspace:** 5686/5686 tests green (+18 from new wire conformance + extended wire spec). Typecheck clean across all packages.
+
+**Previously, 2026-06-10 — Workspace reorganization: v2 packages relocated to `packages-next/` with `-next` suffix on every package name.** v1 stays untouched in `packages/` so master merges land cleanly. The reorganization is purely packaging; no API or behavior change. At v2.0 cut the suffix strips and `packages-next/` collapses onto `packages/`.
 
 **Reorganization (this work block — `f22b3985`):**
 

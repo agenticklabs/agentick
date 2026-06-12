@@ -60,3 +60,8 @@ export {
   type SessionConformanceFactoryInput,
   type SessionConformanceFactoryDeps,
 } from "./session-harness.js";
+
+// Wire conformance (Phase 33.A) — every transport runs this against
+// its native codec to prove frames round-trip and the validator accepts
+// what the transport produces.
+export { runWireConformance, type WireCodec } from "./wire.js";

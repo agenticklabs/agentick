@@ -15,3 +15,4 @@ export * from "./errors.js";
 export * from "./scope.js";
 export * from "./params.js";
 export * from "./notifications.js";
+export * from "./validate.js";

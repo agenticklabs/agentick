@@ -40,12 +40,16 @@ export interface JsonRpcSuccessResponse<R = unknown> {
   readonly jsonrpc: JsonRpcVersion;
   readonly id: JsonRpcId;
   readonly result: R;
+  /** Disallowed — JSON-RPC 2.0 forbids `result` and `error` on the same frame. */
+  readonly error?: never;
 }
 
 export interface JsonRpcErrorResponse {
   readonly jsonrpc: JsonRpcVersion;
   readonly id: JsonRpcId | null;
   readonly error: JsonRpcError;
+  /** Disallowed — JSON-RPC 2.0 forbids `result` and `error` on the same frame. */
+  readonly result?: never;
 }
 
 export type JsonRpcResponse<R = unknown> =

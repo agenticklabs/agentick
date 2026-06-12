@@ -12,6 +12,18 @@ import type { Cursor } from "../protocol/event-log.js";
 import type { JsonRpcId } from "./json-rpc.js";
 
 // ============================================================================
+// notifications/initialized — client → server handshake completion
+// ============================================================================
+
+/**
+ * Sent by the client after a successful `initialize` response. Signals
+ * the server that the client is ready to receive notifications and
+ * issue normal RPCs. Server SHOULD NOT send other notifications before
+ * receiving this. Mirrors MCP's `notifications/initialized`.
+ */
+export type InitializedNotificationParams = Record<string, never>;
+
+// ============================================================================
 // notifications/progress — LSP $/progress pattern for execution-bound streams
 // ============================================================================
 
@@ -87,6 +99,7 @@ export interface AuthChallengeNotificationParams {
  * Adopters extending the wire add entries via declaration merging.
  */
 export interface WireNotifications {
+  "notifications/initialized": InitializedNotificationParams;
   "notifications/progress": ProgressNotificationParams;
   "notifications/subscription/event": SubscriptionEventParams;
   "notifications/subscription/evicted": SubscriptionEvictedParams;
