@@ -64,6 +64,25 @@ export interface ActiveSubscription {
   lastCursor?: Cursor;
 }
 
+/**
+ * Reconnect policy shared by every transport that supports reconnect.
+ * Exponential backoff with full jitter per AWS Builder's Library
+ * "Timeouts, retries, and backoff with jitter".
+ */
+export interface ReconnectPolicy {
+  readonly enabled?: boolean;
+  readonly initialDelayMs?: number;
+  readonly maxDelayMs?: number;
+  readonly maxAttempts?: number;
+}
+
+export const DEFAULT_RECONNECT_POLICY: Required<ReconnectPolicy> = {
+  enabled: true,
+  initialDelayMs: 100,
+  maxDelayMs: 30_000,
+  maxAttempts: Infinity,
+};
+
 export abstract class BaseClientTransport implements ClientTransport {
   abstract readonly id: string;
   abstract readonly capabilities: TransportCapabilities;
@@ -84,6 +103,14 @@ export abstract class BaseClientTransport implements ClientTransport {
 
   // Active subscriptions tracked for cursor-aware resubscribe (subclass uses)
   protected readonly activeSubscriptions = new Map<string, ActiveSubscription>();
+
+  // Reconnect machinery — opt-in. Subclasses that don't reconnect
+  // (in-process) leave `reconnectPolicy.enabled` at default (true) but
+  // never call `handleConnectionDrop()` so reconnect never fires.
+  protected reconnectPolicy: Required<ReconnectPolicy> = DEFAULT_RECONNECT_POLICY;
+  protected explicitClose = false;
+  private reconnectAttempts = 0;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
   get state(): ClientState {
     return this.currentState;
@@ -358,6 +385,83 @@ export abstract class BaseClientTransport implements ClientTransport {
   }
 
   // ── helpers for subclasses with reconnect support ────────────────────
+
+  /**
+   * Subclasses with reconnect support call this when their wire drops.
+   * Decides whether to schedule a reconnect attempt, transition to
+   * closed (if explicit close or reconnect disabled), or move to
+   * failed (if max attempts exhausted).
+   *
+   * Side effects:
+   *   - Rejects all in-flight RPCs with `{ kind: "closed" }`
+   *   - Transitions state to "closed" / "failed" / "reconnecting"
+   *   - On "reconnecting", schedules a backoff-delayed
+   *     `this.openConnection()` call
+   *
+   * Consolidated in Phase 33.C.2 — was duplicated identically in
+   * WS / UDS / HTTP transports.
+   */
+  protected handleConnectionDrop(): void {
+    for (const p of this.pending.values()) {
+      p.reject({ kind: "closed", message: "wire closed mid-request" });
+    }
+    this.pending.clear();
+
+    if (this.explicitClose) {
+      this.setState("closed");
+      return;
+    }
+    if (!this.reconnectPolicy.enabled) {
+      this.setState("closed");
+      return;
+    }
+    if (this.reconnectAttempts >= this.reconnectPolicy.maxAttempts) {
+      this.setState({
+        kind: "failed",
+        error: { kind: "connection", message: "reconnect attempts exhausted" },
+      });
+      return;
+    }
+    this.scheduleReconnect();
+  }
+
+  /** Reset the reconnect attempt counter — call after a successful open. */
+  protected resetReconnectAttempts(): void {
+    this.reconnectAttempts = 0;
+  }
+
+  private scheduleReconnect(): void {
+    this.setState("reconnecting");
+    const delay = this.computeBackoff(this.reconnectAttempts);
+    this.reconnectAttempts++;
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      void this.openConnection().catch(() => {
+        /* subclass's wire close handler retries via handleConnectionDrop */
+      });
+    }, delay);
+  }
+
+  /**
+   * Exponential backoff with full jitter per AWS Builder's Library
+   * "Timeouts, retries, and backoff with jitter". Returns a uniform
+   * random delay in `[0, min(maxDelayMs, initialDelayMs * 2^attempt))`.
+   */
+  protected computeBackoff(attempt: number): number {
+    const exp = Math.min(
+      this.reconnectPolicy.maxDelayMs,
+      this.reconnectPolicy.initialDelayMs * 2 ** attempt,
+    );
+    return Math.random() * exp;
+  }
+
+  /** Cancel any pending reconnect timer. Subclass's `closeConnection` calls this. */
+  protected cancelReconnect(): void {
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+  }
 
   /**
    * Subclasses with reconnect (e.g., WebSocket) call this after the

@@ -12,15 +12,8 @@
 
 import type { Server as HttpServer } from "node:http";
 import { WebSocketServer, type WebSocket as WSConnection } from "ws";
-import {
-  ErrorCode,
-  type JsonRpcError,
-  type JsonRpcFrame,
-  type JsonRpcId,
-  type JsonRpcRequest,
-  type JsonRpcResponse,
-} from "@agentick/spec-next";
-import { dispatchRequest, type DispatchHost } from "@agentick/transport-next";
+import { ErrorCode, type JsonRpcFrame } from "@agentick/spec-next";
+import { BaseConnectionContext, type DispatchHost } from "@agentick/transport-next";
 import { AGENTICK_SUBPROTOCOL, decodeFrame, encodeFrame } from "../shared/codec.js";
 
 export interface WebSocketServerOptions {
@@ -121,21 +114,22 @@ export function websocketServer(options: WebSocketServerOptions): WebSocketServe
 }
 
 // ============================================================================
-// ConnectionContext — per-connection state
+// ConnectionContext — per-WS-connection state.
+//
+// Subscription + in-flight registries, JSON-RPC dispatch, close cleanup
+// all live in the shared `BaseConnectionContext`. This subclass only
+// wires the WS-specific encode + the inbound message decode pipeline.
 // ============================================================================
 
-class ConnectionContext {
-  private readonly subscriptions = new Map<string, { unsubscribe: () => Promise<void> }>();
-  private readonly inFlight = new Map<JsonRpcId, () => void>();
-  private closed = false;
-
+class ConnectionContext extends BaseConnectionContext {
   constructor(
     private readonly ws: WSConnection,
-    private readonly gateway: DispatchHost,
-  ) {}
+    gateway: DispatchHost,
+  ) {
+    super(gateway);
+  }
 
   async handleMessage(raw: unknown): Promise<void> {
-    if (this.closed) return;
     const decoded = decodeFrame(raw as Buffer | string);
     if (!decoded.ok) {
       this.sendError(null, decoded.error);
@@ -143,88 +137,29 @@ class ConnectionContext {
     }
     const frame = decoded.value;
     if (Array.isArray(frame)) {
-      const responses = await Promise.all(frame.map((f) => this.handleFrame(f as JsonRpcFrame)));
-      const filtered = responses.filter((r): r is JsonRpcResponse => r !== null);
-      if (filtered.length > 0) this.send(filtered);
+      const responses = await Promise.all(
+        frame.map((f) => this.dispatchInbound(f as JsonRpcFrame)),
+      );
+      for (const r of responses) {
+        if (r !== null) this.send(r);
+      }
       return;
     }
-    const response = await this.handleFrame(frame as JsonRpcFrame);
+    const response = await this.dispatchInbound(frame as JsonRpcFrame);
     if (response !== null) this.send(response);
   }
 
-  private async handleFrame(frame: JsonRpcFrame): Promise<JsonRpcResponse | null> {
-    if ("method" in frame && !("id" in frame)) {
-      // Notification from client — no response. Currently only
-      // notifications/cancelled is meaningful; route it.
-      this.handleNotification(frame);
-      return null;
-    }
-    if ("id" in frame && "method" in frame) {
-      return this.handleRequest(frame as JsonRpcRequest);
-    }
-    return null;
-  }
-
-  private async handleRequest(req: JsonRpcRequest): Promise<JsonRpcResponse> {
-    return dispatchRequest(this.gateway, req, {
-      sendNotification: (n) => this.send({ jsonrpc: "2.0", method: n.method, params: n.params }),
-      registerSubscription: (subId, unsubscribe) => {
-        this.subscriptions.set(subId, { unsubscribe });
-      },
-      unregisterSubscription: (subId) => {
-        this.subscriptions.delete(subId);
-      },
-      registerInFlight: (id, abort) => {
-        this.inFlight.set(id, abort);
-      },
-      unregisterInFlight: (id) => {
-        this.inFlight.delete(id);
-      },
-    });
-  }
-
-  private handleNotification(frame: JsonRpcFrame): void {
-    if (!("method" in frame)) return;
-    if (frame.method !== "notifications/cancelled") return;
-    const params = frame.params as { requestId?: JsonRpcId } | undefined;
-    if (params?.requestId === undefined) return;
-    const abort = this.inFlight.get(params.requestId);
-    if (abort) abort();
-  }
-
-  send(frame: JsonRpcFrame | readonly JsonRpcFrame[]): void {
-    if (this.closed) return;
+  protected sendFrame(frame: JsonRpcFrame): void {
     if (this.ws.readyState !== 1) return;
     try {
-      this.ws.send(encodeFrame(frame as JsonRpcFrame));
+      this.ws.send(encodeFrame(frame));
     } catch {
       /* swallow — close handler cleans up */
     }
   }
 
-  private sendError(id: JsonRpcId | null, error: JsonRpcError): void {
-    this.send({ jsonrpc: "2.0", id, error } as JsonRpcResponse);
-  }
-
-  async close(): Promise<void> {
-    if (this.closed) return;
-    this.closed = true;
-    for (const { unsubscribe } of this.subscriptions.values()) {
-      try {
-        await unsubscribe();
-      } catch {
-        /* swallow */
-      }
-    }
-    this.subscriptions.clear();
-    for (const abort of this.inFlight.values()) {
-      try {
-        abort();
-      } catch {
-        /* swallow */
-      }
-    }
-    this.inFlight.clear();
+  protected closeWire(): void {
+    /* socket closure is driven by the server-side WS lifecycle */
   }
 }
 

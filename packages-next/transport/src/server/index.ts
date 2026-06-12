@@ -6,3 +6,4 @@
  */
 
 export { dispatchRequest, type DispatchHost, type DispatchSink } from "./dispatch.js";
+export { BaseConnectionContext } from "./connection-context.js";

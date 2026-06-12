@@ -1,21 +1,15 @@
 /**
  * Streamable HTTP `ClientTransport`.
  *
- * Subclasses `BaseClientTransport` and supplies HTTP-specific
- * connection management:
+ * Subclasses `BaseClientTransport` and supplies HTTP-specific connection
+ * management — POST per outbound RPC frame (response is either
+ * `application/json` for non-streaming or `text/event-stream` for
+ * `_meta.progressToken`-bearing requests), persistent GET for the
+ * notification channel, DELETE on close. Reconnect, RPC correlation,
+ * subscription multiplexing, cursor-aware resubscribe all live in the
+ * base.
  *
- *   - `POST <url>` for every outbound JSON-RPC frame. Server responds
- *     with `application/json` (single response) or `text/event-stream`
- *     (streaming notifications followed by final response).
- *   - `GET <url>` with `Accept: text/event-stream` opens a persistent
- *     SSE channel for notifications that aren't bound to any specific
- *     RPC (subscription events, unsolicited auth notifications).
- *   - `DELETE <url>` on close terminates the server-side connection
- *     state (releases per-connection subscriptions, in-flight tracking).
- *
- * Session affinity via the `Mcp-Session-Id` header (MCP convention) —
- * server returns it on the `initialize` response; client echoes it on
- * every subsequent POST. Load balancers sticky-route by header.
+ * Session affinity via the `Mcp-Session-Id` header per MCP convention.
  *
  * Uses universal `fetch` (Node 22+, browser, Bun, Deno, edge).
  *
@@ -23,7 +17,11 @@
  */
 
 import type { ClientTransport, JsonRpcFrame, TransportCapabilities } from "@agentick/spec-next";
-import { BaseClientTransport } from "@agentick/transport-next";
+import {
+  BaseClientTransport,
+  DEFAULT_RECONNECT_POLICY,
+  type ReconnectPolicy,
+} from "@agentick/transport-next";
 import { parseSseFrames } from "../shared/sse.js";
 
 export interface HttpTransportOptions {
@@ -38,25 +36,12 @@ export interface HttpTransportOptions {
   readonly reconnect?: ReconnectPolicy;
   /**
    * Extra headers to attach to every request. Adopters pass auth here
-   * (e.g., `Authorization: Bearer ...`). Mutating returned headers
-   * mid-flight does NOT affect future requests; the constructor snapshots.
+   * (e.g., `Authorization: Bearer ...`). Snapshotted at construction.
    */
   readonly headers?: Record<string, string>;
 }
 
-export interface ReconnectPolicy {
-  readonly enabled?: boolean;
-  readonly initialDelayMs?: number;
-  readonly maxDelayMs?: number;
-  readonly maxAttempts?: number;
-}
-
-const DEFAULT_RECONNECT: Required<ReconnectPolicy> = {
-  enabled: true,
-  initialDelayMs: 100,
-  maxDelayMs: 30_000,
-  maxAttempts: Infinity,
-};
+export type { ReconnectPolicy };
 
 const CAPABILITIES: TransportCapabilities = {
   bidirectional: false,
@@ -80,14 +65,9 @@ class HttpTransport extends BaseClientTransport {
   private readonly url: string;
   private readonly fetchImpl: typeof globalThis.fetch;
   private readonly baseHeaders: Record<string, string>;
-  private readonly reconnect: Required<ReconnectPolicy>;
 
   private sessionId: string | null = null;
-  private notificationStream: ReadableStream<Uint8Array> | null = null;
   private notificationAbort: AbortController | null = null;
-  private reconnectAttempts = 0;
-  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-  private explicitClose = false;
 
   constructor(options: HttpTransportOptions) {
     super();
@@ -95,30 +75,27 @@ class HttpTransport extends BaseClientTransport {
     this.url = options.url;
     this.fetchImpl = options.fetch ?? globalThis.fetch.bind(globalThis);
     this.baseHeaders = { ...(options.headers ?? {}) };
-    this.reconnect = { ...DEFAULT_RECONNECT, ...(options.reconnect ?? {}) };
+    this.reconnectPolicy = { ...DEFAULT_RECONNECT_POLICY, ...(options.reconnect ?? {}) };
   }
 
   protected async openConnection(): Promise<void> {
     this.explicitClose = false;
     this.setState("connecting");
     await this.openNotificationStream();
+    this.resetReconnectAttempts();
     this.setState("open");
+    this.resubscribeAfterReconnect();
   }
 
   protected async closeConnection(): Promise<void> {
     this.explicitClose = true;
-    if (this.reconnectTimer) {
-      clearTimeout(this.reconnectTimer);
-      this.reconnectTimer = null;
-    }
+    this.cancelReconnect();
     if (this.notificationAbort) {
       this.notificationAbort.abort();
       this.notificationAbort = null;
     }
-    this.notificationStream = null;
 
     if (this.sessionId) {
-      // Best-effort DELETE — server cleans up per-connection state.
       try {
         await this.fetchImpl(this.url, {
           method: "DELETE",
@@ -134,19 +111,6 @@ class HttpTransport extends BaseClientTransport {
   protected async sendFrame(frame: JsonRpcFrame): Promise<void> {
     if (this.currentState !== "open") return;
 
-    const isRequestWithProgress =
-      "id" in frame &&
-      "method" in frame &&
-      isObject((frame as { params?: unknown }).params) &&
-      isObject(
-        ((frame as { params: Record<string, unknown> }).params as Record<string, unknown>)._meta,
-      ) &&
-      typeof (
-        (frame as { params: { _meta: Record<string, unknown> } }).params._meta as {
-          progressToken?: unknown;
-        }
-      ).progressToken === "string";
-
     const response = await this.fetchImpl(this.url, {
       method: "POST",
       headers: {
@@ -157,18 +121,12 @@ class HttpTransport extends BaseClientTransport {
       body: JSON.stringify(frame),
     });
 
-    // Capture session id from the initialize response if present.
     const newSessionId = response.headers.get(SESSION_ID_HEADER);
     if (newSessionId && !this.sessionId) this.sessionId = newSessionId;
 
     const contentType = response.headers.get("content-type") ?? "";
     if (contentType.includes("text/event-stream")) {
-      // Streaming response — drain SSE frames as notifications until
-      // the final response arrives.
-      if (!response.body) {
-        // No body — surface as protocol error on the pending RPC.
-        return;
-      }
+      if (!response.body) return;
       for await (const result of parseSseFrames(response.body)) {
         if (!result.ok) continue;
         const f = result.frame;
@@ -178,11 +136,9 @@ class HttpTransport extends BaseClientTransport {
           this.routeFrame(f as JsonRpcFrame);
         }
       }
-      void isRequestWithProgress; // semantic marker; payload-shape decides routing
       return;
     }
 
-    // Single JSON response.
     if (!response.ok && response.status === 204) return;
     let body: unknown;
     try {
@@ -197,7 +153,7 @@ class HttpTransport extends BaseClientTransport {
     }
   }
 
-  // ── notification GET stream ──────────────────────────────────────────
+  // ── persistent notification GET stream ───────────────────────────────
 
   private async openNotificationStream(): Promise<void> {
     const abort = new AbortController();
@@ -219,9 +175,7 @@ class HttpTransport extends BaseClientTransport {
       };
     }
 
-    this.notificationStream = response.body;
-    // Drain in the background — terminates when the wire drops or the
-    // controller aborts. The drain promise's rejection triggers reconnect.
+    // Drain in background — termination triggers reconnect machinery.
     void this.drainNotifications(response.body, abort.signal);
   }
 
@@ -241,64 +195,17 @@ class HttpTransport extends BaseClientTransport {
         }
       }
     } catch {
-      // Network failure or aborted — fall through to reconnect logic.
+      /* fall through to handleConnectionDrop */
     }
 
-    if (signal.aborted || this.explicitClose) return;
-
-    // Connection dropped; reconnect if policy allows.
-    if (!this.reconnect.enabled) {
-      this.setState("closed");
-      return;
-    }
-    if (this.reconnectAttempts >= this.reconnect.maxAttempts) {
-      this.setState({
-        kind: "failed",
-        error: { kind: "connection", message: "reconnect attempts exhausted" },
-      });
-      return;
-    }
-    this.scheduleReconnect();
+    if (signal.aborted) return;
+    // Wire dropped — delegate to the base's shared reconnect machinery.
+    this.handleConnectionDrop();
   }
-
-  private scheduleReconnect(): void {
-    this.setState("reconnecting");
-    const delay = this.computeBackoff(this.reconnectAttempts);
-    this.reconnectAttempts++;
-    this.reconnectTimer = setTimeout(() => {
-      this.reconnectTimer = null;
-      void this.openNotificationStream()
-        .then(() => {
-          this.reconnectAttempts = 0;
-          this.setState("open");
-          this.resubscribeAfterReconnect();
-        })
-        .catch(() => {
-          // openNotificationStream fail → drainNotifications path won't
-          // be reached; schedule another reconnect.
-          if (!this.explicitClose) this.scheduleReconnect();
-        });
-    }, delay);
-  }
-
-  /**
-   * Exponential backoff with full jitter per AWS Builder's Library
-   * "Timeouts, retries, and backoff with jitter".
-   */
-  private computeBackoff(attempt: number): number {
-    const exp = Math.min(this.reconnect.maxDelayMs, this.reconnect.initialDelayMs * 2 ** attempt);
-    return Math.random() * exp;
-  }
-
-  // ── helpers ──────────────────────────────────────────────────────────
 
   private headersWithSession(): Record<string, string> {
     const h: Record<string, string> = { ...this.baseHeaders };
     if (this.sessionId) h[SESSION_ID_HEADER] = this.sessionId;
     return h;
   }
-}
-
-function isObject(v: unknown): v is Record<string, unknown> {
-  return typeof v === "object" && v !== null && !Array.isArray(v);
 }

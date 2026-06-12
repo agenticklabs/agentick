@@ -35,7 +35,11 @@ import {
   type JsonRpcRequest,
   type JsonRpcResponse,
 } from "@agentick/spec-next";
-import { dispatchRequest, type DispatchHost } from "@agentick/transport-next";
+import {
+  BaseConnectionContext,
+  dispatchRequest,
+  type DispatchHost,
+} from "@agentick/transport-next";
 import { encodeSseFrame } from "../shared/sse.js";
 
 export interface HttpServerOptions {
@@ -99,7 +103,7 @@ export function httpServer(options: HttpServerOptions): HttpServerHandle {
         res.end();
         return;
       }
-      handleGet(req, res, sessions, sessionId, heartbeatMs);
+      handleGet(req, res, sessions, sessionId, heartbeatMs, options.gateway);
       return;
     }
     if (req.method === "DELETE") {
@@ -127,21 +131,18 @@ export function httpServer(options: HttpServerOptions): HttpServerHandle {
 // SessionConnection — per-session-id server state
 // ============================================================================
 
-class SessionConnection {
+class SessionConnection extends BaseConnectionContext {
   readonly id: string;
   private notificationStream: ServerResponse | null = null;
-  private readonly subscriptions = new Map<string, { unsubscribe: () => Promise<void> }>();
-  private readonly inFlight = new Map<JsonRpcId, () => void>();
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
-  private closed = false;
 
-  constructor(id: string) {
+  constructor(id: string, gateway: DispatchHost) {
+    super(gateway);
     this.id = id;
   }
 
   attachNotificationStream(res: ServerResponse, heartbeatMs: number): void {
     if (this.notificationStream) {
-      // Replace — client may have reconnected.
       try {
         this.notificationStream.end();
       } catch {
@@ -167,8 +168,13 @@ class SessionConnection {
     }, heartbeatMs);
   }
 
-  sendNotification(notification: { method: string; params?: unknown }): void {
-    if (!this.notificationStream || this.closed) return;
+  /**
+   * HTTP overrides the default notification sink — notifications go on
+   * the persistent GET SSE stream rather than the active wire (which
+   * for HTTP is the per-RPC POST response).
+   */
+  override sendNotification(notification: { method: string; params?: unknown }): void {
+    if (!this.notificationStream) return;
     try {
       this.notificationStream.write(
         encodeSseFrame({
@@ -182,26 +188,16 @@ class SessionConnection {
     }
   }
 
-  registerSubscription(subId: string, unsubscribe: () => Promise<void>): void {
-    this.subscriptions.set(subId, { unsubscribe });
-  }
-  unregisterSubscription(subId: string): void {
-    this.subscriptions.delete(subId);
-  }
-  registerInFlight(id: JsonRpcId, abort: () => void): void {
-    this.inFlight.set(id, abort);
-  }
-  unregisterInFlight(id: JsonRpcId): void {
-    this.inFlight.delete(id);
-  }
-  cancelInFlight(id: JsonRpcId): void {
-    const abort = this.inFlight.get(id);
-    if (abort) abort();
+  /**
+   * HTTP has no single "outbound wire" — each POST writes its own
+   * response. `sendFrame` is unused; we override `sendNotification`
+   * to route via the GET stream.
+   */
+  protected sendFrame(_frame: import("@agentick/spec-next").JsonRpcFrame): void {
+    /* unused for HTTP; sendNotification routes to the GET stream */
   }
 
-  async close(): Promise<void> {
-    if (this.closed) return;
-    this.closed = true;
+  protected closeWire(): void {
     if (this.heartbeatTimer) {
       clearInterval(this.heartbeatTimer);
       this.heartbeatTimer = null;
@@ -214,22 +210,6 @@ class SessionConnection {
       }
       this.notificationStream = null;
     }
-    for (const { unsubscribe } of this.subscriptions.values()) {
-      try {
-        await unsubscribe();
-      } catch {
-        /* swallow */
-      }
-    }
-    this.subscriptions.clear();
-    for (const abort of this.inFlight.values()) {
-      try {
-        abort();
-      } catch {
-        /* swallow */
-      }
-    }
-    this.inFlight.clear();
   }
 }
 
@@ -258,7 +238,7 @@ async function handlePost(
 
   // Acquire / create session.
   const sessionId = sessionIdHeader ?? newSessionId();
-  const session = sessions.get(sessionId) ?? new SessionConnection(sessionId);
+  const session = sessions.get(sessionId) ?? new SessionConnection(sessionId, gateway);
   if (!sessions.has(sessionId)) sessions.set(sessionId, session);
   res.setHeader("Mcp-Session-Id", sessionId);
 
@@ -380,9 +360,10 @@ function handleGet(
   sessions: Map<string, SessionConnection>,
   sessionIdHeader: string | null,
   heartbeatMs: number,
+  gateway: DispatchHost,
 ): void {
   const sessionId = sessionIdHeader ?? newSessionId();
-  const session = sessions.get(sessionId) ?? new SessionConnection(sessionId);
+  const session = sessions.get(sessionId) ?? new SessionConnection(sessionId, gateway);
   if (!sessions.has(sessionId)) sessions.set(sessionId, session);
 
   res.writeHead(200, {

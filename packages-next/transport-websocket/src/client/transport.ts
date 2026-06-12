@@ -1,17 +1,25 @@
 /**
- * WebSocket `ClientTransport` implementation.
+ * WebSocket `ClientTransport`.
  *
- * Subclasses `BaseClientTransport` from `@agentick/transport-next`;
- * supplies WS-specific connection management — subprotocol negotiation,
- * the WebSocket constructor (defaults to `globalThis.WebSocket`),
- * exponential-backoff-with-full-jitter reconnect, and cursor-aware
- * resubscribe after reconnect.
+ * Subclasses `BaseClientTransport` and supplies WS-specific connection
+ * management — subprotocol negotiation, the WebSocket constructor
+ * (defaults to `globalThis.WebSocket`), and decode of inbound frames.
+ *
+ * Reconnect, RPC correlation, subscription multiplexing, cursor-aware
+ * resubscribe all live in the base. Phase 33.C.2 consolidation moved
+ * the reconnect machinery (exponential backoff with full jitter,
+ * scheduleReconnect, computeBackoff, handleConnectionDrop) into the
+ * base so it's shared with the Unix-socket and HTTP transports.
  *
  * @see docs/proposals/v2/blueprint/33-client-and-transports.md
  */
 
 import type { ClientTransport, JsonRpcFrame, TransportCapabilities } from "@agentick/spec-next";
-import { BaseClientTransport } from "@agentick/transport-next";
+import {
+  BaseClientTransport,
+  DEFAULT_RECONNECT_POLICY,
+  type ReconnectPolicy,
+} from "@agentick/transport-next";
 import { AGENTICK_SUBPROTOCOL, decodeFrame, encodeFrame } from "../shared/codec.js";
 
 // ── WebSocket constructor type — matches both browser native and `ws` ─────
@@ -47,19 +55,7 @@ export interface WebSocketTransportOptions {
   readonly id?: string;
 }
 
-export interface ReconnectPolicy {
-  readonly enabled?: boolean;
-  readonly initialDelayMs?: number;
-  readonly maxDelayMs?: number;
-  readonly maxAttempts?: number;
-}
-
-const DEFAULT_RECONNECT: Required<ReconnectPolicy> = {
-  enabled: true,
-  initialDelayMs: 100,
-  maxDelayMs: 30_000,
-  maxAttempts: Infinity,
-};
+export type { ReconnectPolicy };
 
 const CAPABILITIES: TransportCapabilities = {
   bidirectional: true,
@@ -81,12 +77,8 @@ class WebSocketTransport extends BaseClientTransport {
   private readonly url: string;
   private readonly ctor: WebSocketConstructor;
   private readonly subprotocols: readonly string[];
-  private readonly reconnect: Required<ReconnectPolicy>;
 
   private socket: WebSocketLike | null = null;
-  private reconnectAttempts = 0;
-  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-  private explicitClose = false;
 
   constructor(options: WebSocketTransportOptions) {
     super();
@@ -94,7 +86,7 @@ class WebSocketTransport extends BaseClientTransport {
     this.url = options.url;
     this.ctor = options.WebSocket ?? resolveDefaultWebSocketCtor();
     this.subprotocols = [AGENTICK_SUBPROTOCOL, ...(options.extraSubprotocols ?? [])];
-    this.reconnect = { ...DEFAULT_RECONNECT, ...(options.reconnect ?? {}) };
+    this.reconnectPolicy = { ...DEFAULT_RECONNECT_POLICY, ...(options.reconnect ?? {}) };
   }
 
   protected async openConnection(): Promise<void> {
@@ -104,10 +96,7 @@ class WebSocketTransport extends BaseClientTransport {
 
   protected async closeConnection(): Promise<void> {
     this.explicitClose = true;
-    if (this.reconnectTimer) {
-      clearTimeout(this.reconnectTimer);
-      this.reconnectTimer = null;
-    }
+    this.cancelReconnect();
     if (this.socket && this.socket.readyState <= 1) {
       this.socket.close(1000, "client close");
     }
@@ -129,7 +118,7 @@ class WebSocketTransport extends BaseClientTransport {
       this.socket = socket;
 
       socket.addEventListener("open", () => {
-        this.reconnectAttempts = 0;
+        this.resetReconnectAttempts();
         this.setState("open");
         this.resubscribeAfterReconnect();
         resolve();
@@ -143,71 +132,17 @@ class WebSocketTransport extends BaseClientTransport {
         if (this.currentState !== "open") {
           reject({ kind: "connection", message: "WebSocket error before open", cause: err });
         }
-        // While open: errors are logged via state; close event handles cleanup
       });
 
       socket.addEventListener("close", () => {
-        const wasOpen = this.currentState === "open";
-        if (wasOpen) {
-          for (const p of this.pending.values()) {
-            p.reject({ kind: "closed", message: "WebSocket closed mid-request" });
-          }
-          this.pending.clear();
-        }
-        if (this.explicitClose) {
-          this.setState("closed");
-          return;
-        }
-        if (!this.reconnect.enabled) {
-          this.setState("closed");
-          return;
-        }
-        if (this.reconnectAttempts >= this.reconnect.maxAttempts) {
-          this.setState({
-            kind: "failed",
-            error: { kind: "connection", message: "reconnect attempts exhausted" },
-          });
-          return;
-        }
-        this.scheduleReconnect();
+        this.handleConnectionDrop();
       });
     });
   }
 
-  private scheduleReconnect(): void {
-    this.setState("reconnecting");
-    const delay = this.computeBackoff(this.reconnectAttempts);
-    this.reconnectAttempts++;
-    this.reconnectTimer = setTimeout(() => {
-      this.reconnectTimer = null;
-      void this.openSocket().catch(() => {
-        // openSocket's reject path is handled by the close event chain
-      });
-    }, delay);
-  }
-
-  /**
-   * Exponential backoff with full jitter per AWS Builder's Library
-   * "Timeouts, retries, and backoff with jitter". Returns a uniform
-   * random delay in [0, min(maxDelayMs, initialDelayMs * 2^attempt)).
-   *
-   * @verifiedBy src/__tests__/reconnect.spec.ts — reconnect transitions
-   *             through "reconnecting" → "open" after server bounce.
-   *             Jitter distribution properties (uniform [0, exp)) not
-   *             yet under property-based test; deferred.
-   */
-  private computeBackoff(attempt: number): number {
-    const exp = Math.min(this.reconnect.maxDelayMs, this.reconnect.initialDelayMs * 2 ** attempt);
-    return Math.random() * exp;
-  }
-
   private handleMessage(raw: unknown): void {
     const decoded = decodeFrame(raw as string | ArrayBuffer | Buffer);
-    if (!decoded.ok) {
-      // Server sent garbage — swallow. ADR 33 §5 open question on
-      // validator-error notification routing.
-      return;
-    }
+    if (!decoded.ok) return;
     const frame = decoded.value;
     if (Array.isArray(frame)) {
       for (const f of frame) this.routeFrame(f as JsonRpcFrame);
