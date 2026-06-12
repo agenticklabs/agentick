@@ -126,6 +126,7 @@ export function websocketServer(options: WebSocketServerOptions): WebSocketServe
 
 class ConnectionContext {
   private readonly subscriptions = new Map<string, { unsubscribe: () => Promise<void> }>();
+  private readonly inFlight = new Map<JsonRpcId, () => void>();
   private closed = false;
 
   constructor(
@@ -173,13 +174,22 @@ class ConnectionContext {
       unregisterSubscription: (subId) => {
         this.subscriptions.delete(subId);
       },
+      registerInFlight: (id, abort) => {
+        this.inFlight.set(id, abort);
+      },
+      unregisterInFlight: (id) => {
+        this.inFlight.delete(id);
+      },
     });
   }
 
-  private handleNotification(_frame: JsonRpcFrame): void {
-    // TBD — notifications/cancelled requires correlating in-flight
-    // dispatches by JSON-RPC id. Out of scope for the smoke phase;
-    // currently ignored.
+  private handleNotification(frame: JsonRpcFrame): void {
+    if (!("method" in frame)) return;
+    if (frame.method !== "notifications/cancelled") return;
+    const params = frame.params as { requestId?: JsonRpcId } | undefined;
+    if (params?.requestId === undefined) return;
+    const abort = this.inFlight.get(params.requestId);
+    if (abort) abort();
   }
 
   send(frame: JsonRpcFrame | readonly JsonRpcFrame[]): void {
@@ -207,6 +217,14 @@ class ConnectionContext {
       }
     }
     this.subscriptions.clear();
+    for (const abort of this.inFlight.values()) {
+      try {
+        abort();
+      } catch {
+        /* swallow */
+      }
+    }
+    this.inFlight.clear();
   }
 }
 

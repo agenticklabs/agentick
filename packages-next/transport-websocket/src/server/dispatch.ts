@@ -44,6 +44,12 @@ export interface DispatchSink {
   sendNotification(notification: { method: string; params?: unknown }): void;
   registerSubscription(subId: string, unsubscribe: () => Promise<void>): void;
   unregisterSubscription(subId: string): void;
+  /**
+   * Register an in-flight RPC so `notifications/cancelled` can abort it.
+   * Cleared automatically when the dispatch returns.
+   */
+  registerInFlight(id: JsonRpcId, abort: () => void): void;
+  unregisterInFlight(id: JsonRpcId): void;
 }
 
 export async function dispatchRequest(
@@ -170,6 +176,11 @@ async function dispatchSessionSend(
     target: params.target,
   });
 
+  // Register the handle for cancellation via notifications/cancelled.
+  sink.registerInFlight(reqId, () => {
+    void handle.abort("client cancelled");
+  });
+
   if (progressToken) {
     // Drain handle's AsyncIterable; forward each event as
     // notifications/progress with a synthetic cursor counter.
@@ -200,12 +211,16 @@ async function dispatchSessionSend(
     })();
   }
 
-  const result = await handle.result;
-  return success(reqId, {
-    executionId: handle.executionId,
-    finalCursor: { value: 0 },
-    result,
-  });
+  try {
+    const result = await handle.result;
+    return success(reqId, {
+      executionId: handle.executionId,
+      finalCursor: { value: 0 },
+      result,
+    });
+  } finally {
+    sink.unregisterInFlight(reqId);
+  }
 }
 
 // ============================================================================
