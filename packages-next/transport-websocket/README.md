@@ -206,16 +206,22 @@ Phase 33.C of the v2 implementation plan — see
 
 **Done in this phase:**
 
-- ✓ Subprotocol negotiation
-- ✓ Frame multiplexing (N RPC + M subscriptions on one socket)
-- ✓ Exponential backoff + full jitter reconnect with cursor-aware
-  resubscribe
-- ✓ WS-level ping/pong heartbeat (RFC 6455 §5.5.2/3)
-- ✓ Origin validation
-- ✓ `notifications/cancelled` from client + server-side handler abort
-- ✓ Spec-validator integration at the wire boundary
-- ✓ Wire conformance suite passes
-- ✓ Real-WS smoke (8 tests) and reconnect (3 tests)
+- ✓ Subprotocol negotiation — `agentick-rpc-v1` only, server rejects others (`security.spec.ts`)
+- ✓ Frame multiplexing — N concurrent RPCs verified (`smoke.spec.ts`)
+- ✓ Reconnect machinery — server-bounce → reconnect transition, explicit-close suppression, disabled-reconnect → straight to closed (`reconnect.spec.ts`)
+- ✓ Origin validation — disallowed Origin → 403; allowed → accept; no Origin → accept (`security.spec.ts`)
+- ✓ `notifications/cancelled` from client (frame emit on AbortSignal) + server-side ConnectionContext routing (`cancellation.spec.ts`)
+- ✓ Custom `WebSocket` constructor override (e.g., `ws` library) (`custom-ws-ctor.spec.ts`)
+- ✓ Spec-validator integration at the wire boundary (`wire-conformance.spec.ts`)
+- ✓ Wire conformance suite passes (`wire-conformance.spec.ts`)
+
+**Claimed but not yet under test (moved from "done" to here; promoted back when verified):**
+
+- ✗ **Cursor-aware resubscribe under retention.** Reconnect machinery works; the cursor-aware replay path is wired but not exercised under retention pressure. Needs a `LocalEventBus` with a tight `retention.maxEvents`, a subscription that falls behind, and an assertion that the new subscription receives `notifications/subscription/evicted`. Lands in the 33.C hardening pass.
+- ✗ **Full-jitter backoff distribution.** Reconnect happens; the AWS Builder's Library jitter properties (uniform `[0, exp)` distribution) aren't asserted. Property-based test against `computeBackoff` would prove it; deferred.
+- ✗ **WS-level ping/pong heartbeat.** Server schedules pings; client receives them; the "idle client terminated on missed pong" branch is unverified. Needs a misbehaving client that ignores ping. Deferred.
+- ✗ **Bilingual MCP subprotocol negotiation.** Client accepts `extraSubprotocols`; no integration test against a bilingual server. Lands with `@agentick/mcp-surface-next` (Phase 33.I).
+- ✗ **Real `session/send` end-to-end with model adapter.** Wire path is verified; session/send dispatch into a real session with progress events flowing is not (needs a real model adapter). Lands in the hardening pass.
 
 ## Development plan
 
@@ -227,3 +233,21 @@ Phase 33.C of the v2 implementation plan — see
 | `GatewayExtension` wrapper | When the shared `@agentick/gateway-rpc-adapter-next` lands (33.D extraction) |
 | Session affinity | When ADR 29 Phase D cluster substrate lands |
 | Bilingual MCP test | Phase 33.I (`@agentick/mcp-surface-next`) |
+
+## Verified by
+
+Every claim in the **Done in this phase** checklist above is verified by
+tests in `src/__tests__/`. Claims listed in **Claimed but not yet under
+test** sit in the same checklist with an `✗` marker — they document
+behavior the design intends but tests don't yet exercise. The
+discipline: a `✓` claim has a test or it doesn't ship with the `✓`.
+
+| Concern | Test file |
+|---|---|
+| End-to-end smoke (WS connect, ping, listApps, multiplexed RPCs) | `src/__tests__/smoke.spec.ts` |
+| Reconnect state machine | `src/__tests__/reconnect.spec.ts` |
+| Wire conformance (envelope roundtrips, validator integration, batches) | `src/__tests__/wire-conformance.spec.ts` |
+| Subprotocol enforcement (`agentick-rpc-v1`-only) | `src/__tests__/security.spec.ts` |
+| Origin validation (`allowedOrigins`) | `src/__tests__/security.spec.ts` |
+| `notifications/cancelled` client emit + server handle | `src/__tests__/cancellation.spec.ts` |
+| Custom WebSocket constructor (`ws` library) | `src/__tests__/custom-ws-ctor.spec.ts` |

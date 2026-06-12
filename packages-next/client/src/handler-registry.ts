@@ -40,6 +40,12 @@ export class ClientHandlerRegistry {
    * Run every registered handler for `event` and return the merged result
    * per the event's declared `MergeKind`. The framework picks the merge
    * function based on the event spec; adopters never see the merge logic.
+   *
+   * @verifiedBy src/__tests__/handler-registry.spec.ts — observer runs every
+   *             handler and returns null; first-non-null-wins stops at the
+   *             first non-null vote; any-reconnect-wins lets a single
+   *             "reconnect" vote prevail over "give-up"; unknown merge kind
+   *             throws (exhaustiveness guard).
    */
   async run<E extends keyof ClientLifecycleEvents>(
     event: E,

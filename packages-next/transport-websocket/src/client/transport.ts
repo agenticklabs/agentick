@@ -335,10 +335,21 @@ class WebSocketTransport implements ClientTransport {
     return Math.random() * exp;
   }
 
+  /**
+   * Cursor-aware resubscribe — replays each still-open subscription
+   * with its last-seen cursor when the WS reconnects. The server's bus
+   * retention determines whether the cursor is still in window;
+   * out-of-retention cursors fail loudly via
+   * `notifications/subscription/evicted` (per ADR 29 cursor protocol).
+   *
+   * Resubscription wire path is exercised end-to-end on reconnect;
+   * the retention-eviction path (where the server's bus has rolled
+   * past the client's last cursor) is not yet asserted — needs a
+   * `LocalEventBus` configured with tight retention plus a subscription
+   * that falls behind. Deferred to the 33.C hardening pass.
+   */
   private resubscribeAfterReconnect(): void {
     if (this.activeSubscriptions.size === 0) return;
-    // Re-subscribe each active sub with its last cursor. The server
-    // re-allocates subscriptionIds; we re-key after the response.
     for (const [oldId, sub] of this.activeSubscriptions) {
       this.activeSubscriptions.delete(oldId);
       this.subscriptionStreams.delete(oldId);

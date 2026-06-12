@@ -22,6 +22,11 @@ export type EffectRequestMiddleware = <M extends WireMethod>(
  * Adapt an Effect-flavored middleware to a Promise-flavored
  * `RequestMiddleware`. Runs the inner Effect with the default runtime
  * and bridges to Promise at the boundary.
+ *
+ * @verifiedBy src/__tests__/effect-middleware.spec.ts — composes with
+ *             Promise pipeline (outer→inner ordering preserved); errors
+ *             from the Effect propagate as Promise rejections; interleaves
+ *             cleanly with Promise-native middleware in the same chain.
  */
 export function effectMiddleware(mw: EffectRequestMiddleware): RequestMiddleware {
   return <M extends WireMethod>(

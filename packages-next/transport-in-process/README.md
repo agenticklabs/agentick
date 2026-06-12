@@ -116,6 +116,22 @@ would break the moment the code moves to a real wire. `structuredClone`
 is **not** used — it preserves things JSON wouldn't, giving false
 confidence.
 
+## Verified by
+
+| Concern | Test file |
+|---|---|
+| End-to-end `createClient` + `inProcessTransport` + handler stub | `src/__tests__/smoke.spec.ts` |
+| `ping` roundtrip | `src/__tests__/smoke.spec.ts` |
+| `gateway.listApps`, `app.listSessions` returning `SessionEntry[]` | `src/__tests__/smoke.spec.ts` |
+| `session.abort` parameter plumbing | `src/__tests__/smoke.spec.ts` |
+| RPC error propagation as `TransportError { kind: "rpc" }` | `src/__tests__/smoke.spec.ts` |
+| `wireParity: true` JSON roundtrip mode | `src/__tests__/smoke.spec.ts` |
+| Pre-connect request rejection | `src/__tests__/smoke.spec.ts` |
+| Extension `request` middleware observation order | `src/__tests__/smoke.spec.ts` |
+| Extension `install()` namespace registration | `src/__tests__/smoke.spec.ts` |
+| `onClose` handler LIFO order | `src/__tests__/smoke.spec.ts` |
+| Wire conformance (envelope roundtrips, validator integration, batches, empty batch rejection) | `src/__tests__/wire-conformance.spec.ts` |
+
 ## Status
 
 Phase 33.B of the v2 implementation plan — see

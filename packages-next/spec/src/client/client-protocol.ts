@@ -55,7 +55,17 @@ export interface ClientProtocol {
   onStateChange(handler: (state: ClientState) => void): () => void;
 
   // ── generic RPC dispatch (typed via WireMethods) ───────────────────────
-  request<M extends WireMethod>(method: M, params: WireParams<M>): Promise<WireResult<M>>;
+  /**
+   * Issue a single JSON-RPC request. Pass an `AbortSignal` to cancel
+   * in-flight — the client emits a `notifications/cancelled` frame to
+   * the server and rejects the returned Promise with a `cancelled`
+   * `TransportError`.
+   */
+  request<M extends WireMethod>(
+    method: M,
+    params: WireParams<M>,
+    signal?: AbortSignal,
+  ): Promise<WireResult<M>>;
 
   // ── resource handles ───────────────────────────────────────────────────
   gateway(): GatewayHandle;

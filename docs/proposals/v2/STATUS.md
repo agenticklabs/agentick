@@ -1,7 +1,9 @@
 # Agentick v2 — Implementation Status
 
 **Branch:** `feat/v2`
-**Last updated:** 2026-06-12 — **Phase 33.B + 33.C shipped: `ClientProtocol` in spec, `@agentick/client-next`, `@agentick/transport-in-process-next`, `@agentick/transport-websocket-next` (client + server) wired end-to-end against a real `GatewayHarness`.**
+**Last updated:** 2026-06-12 — **Phase 33 README audit pass — every claim in user-facing docs now traces to a verifying test, or sits in "Roadmap & known gaps" with an explicit `✗` marker.** Caught a real API bug along the way: `ClientProtocol.request()` claimed to accept an `AbortSignal` (per the README and ADR 33) but didn't expose the parameter — the test forced the fix. Wire-level `notifications/cancelled` emit + server-side handling is now genuinely verified end-to-end. Added 17 new tests (security 7, cancellation 2, custom-WebSocket-ctor 1, handler-registry 6, effect-middleware 3, send-shortcut 2). Every Phase 33 README has a `## Verified by` section mapping claims → test files; non-obvious code invariants carry `@verifiedBy` JSDoc citations. Saved as memory rule: "Every claim needs a test" — applies to user-facing docs, comments, and code claims going forward.
+
+**Phase 33.B + 33.C — initial ship (previous work blocks):**
 
 **Phase 33.C — WebSocket transport (this work block):**
 

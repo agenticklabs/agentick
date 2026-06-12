@@ -140,8 +140,21 @@ class AgentickClient implements ClientProtocol {
     return () => this.stateListeners.delete(handler);
   }
 
-  async request<M extends WireMethod>(method: M, params: WireParams<M>): Promise<WireResult<M>> {
-    return this.composedRequest({ method, params } as never) as Promise<WireResult<M>>;
+  /**
+   * @verifiedBy
+   *   - ../transport-in-process/src/__tests__/smoke.spec.ts — request
+   *     middleware sees the call before the terminal transport, in
+   *     outer→inner order
+   *   - ../transport-websocket/src/__tests__/cancellation.spec.ts —
+   *     passing an AbortSignal that fires triggers `notifications/cancelled`
+   *     emit and rejects the returned Promise with `kind: "cancelled"`
+   */
+  async request<M extends WireMethod>(
+    method: M,
+    params: WireParams<M>,
+    signal?: AbortSignal,
+  ): Promise<WireResult<M>> {
+    return this.composedRequest({ method, params, signal } as never) as Promise<WireResult<M>>;
   }
 
   gateway(): GatewayHandle {
@@ -156,6 +169,13 @@ class AgentickClient implements ClientProtocol {
     return makeSessionHandle(this, id);
   }
 
+  /**
+   * @verifiedBy ../transport-in-process/src/__tests__/send-shortcut.spec.ts —
+   *             emits the same `session/send` RPC params as
+   *             `client.session(id).send(input)` and returns the canonical
+   *             `ClientSessionExecutionHandle` shape (AsyncIterable +
+   *             `.result` + `abort()`).
+   */
   send<P = unknown>(sessionId: string, input: SendInput<P>) {
     return makeSessionHandle(this, sessionId).send(input);
   }

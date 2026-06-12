@@ -131,6 +131,19 @@ The JSON-RPC dispatcher in `@agentick/transport-websocket-next/server`
 calls into `GatewayHarnessProtocol` methods directly — no adapter
 layer between wire and harness.
 
+## Verified by
+
+| Concern | Test file |
+|---|---|
+| Construction + default in-memory substrate | `src/__tests__/harness.spec.ts` |
+| `createApp` with default gateway-substrate inheritance | `src/__tests__/harness.spec.ts` |
+| `createApp` with per-app substrate factory override | `src/__tests__/harness.spec.ts` |
+| `apps()` / `app(id)` read-side | `src/__tests__/harness.spec.ts` |
+| `closeGateway()` cascades into app closes | `src/__tests__/harness.spec.ts` |
+| `events()` observes app-level events via fan-in | `src/__tests__/harness.spec.ts` |
+| Duplicate `appId` rejection | `src/__tests__/harness.spec.ts` |
+| `GatewayClosedError` after close | `src/__tests__/harness.spec.ts` |
+
 ## Status
 
 Phase 4 (gateway scaffold) and now consumed by Phase 33.C+

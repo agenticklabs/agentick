@@ -184,12 +184,29 @@ real connection; followers proxy via `BroadcastChannel`.
 
 Phase 33.B of the v2 implementation plan — see `docs/proposals/v2/STATUS.md` and `docs/proposals/v2/blueprint/33-client-and-transports.md`.
 
+## Verified by
+
+Every claim in this README has a corresponding test, or appears below
+under "Roadmap & known gaps" with an explicit marker.
+
+| Concern | Test file |
+|---|---|
+| `createClient`, `connect`, `close`, request dispatch | `../transport-in-process/src/__tests__/smoke.spec.ts` |
+| Extension `request` middleware composition (outer→inner) | `../transport-in-process/src/__tests__/smoke.spec.ts` |
+| Extension `install()` namespace registration | `../transport-in-process/src/__tests__/smoke.spec.ts` |
+| `onClose` handler LIFO order | `../transport-in-process/src/__tests__/smoke.spec.ts` |
+| `ClientHandlerRegistry` per-event merge kinds (`observer` / `first-non-null-wins` / `any-reconnect-wins`) | `src/__tests__/handler-registry.spec.ts` |
+| `effectMiddleware` Effect↔Promise adapter, error propagation, interleave with Promise middleware | `src/__tests__/effect-middleware.spec.ts` |
+| `client.send(sessionId, input)` shortcut shape equivalence with `client.session(id).send(input)` | `../transport-in-process/src/__tests__/send-shortcut.spec.ts` |
+
 ## Roadmap & known gaps
 
 - **`client.events()` bus → AsyncIterable adapter** — type surface ships; the iterator emits no events until client event surfaces register on the bus `EventSurface` union. `onStateChange` works end-to-end today.
 - **Auth surface seed** — `client.auth` is a stub (returns `null` / no-op). ADR 34 fills the full subsystem (OAuth 2.1, JWT with JWKS rotation, DPoP, RBAC/ABAC/ReBAC).
 - **`composeSubscribe` is exported but unused by the client itself** — subscriptions flow through the transport directly today. Wire it in when subscription middleware lands a real use case.
 - **`selector()` not yet implemented in this package** — declared in ADR 33 rev-3; lands alongside the second transport (HTTP, Phase 33.D).
+- **Multi-impl `ClientProtocol` conformance suite** — `runClientConformance(factory)` shape declared in ADR 33; not yet shipped. Any TS impl claiming to be a client should pass this. Deferred until a second impl exists (test mock or Worker-thread proxy).
+- **Cross-runtime verification** — "runs in Node 22+, browsers, Bun, Deno, edge runtimes" — tested only against Node 24 today. Browser smoke via headless / Bun / Deno / edge runtimes deferred to integration-test CI.
 
 ## Development plan
 
