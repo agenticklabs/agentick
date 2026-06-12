@@ -1,0 +1,15 @@
+/**
+ * `@agentick/client-cache-next` — read-through cache middleware for
+ * `@agentick/client-next`.
+ *
+ * Method-explicit-allowlist by default — most agentick methods are
+ * stateful (sessions, executions) and MUST NOT be cached. Adopters opt
+ * specific read-shaped methods (`gateway/listApps`, `app/getSession`)
+ * into the cache with per-method TTL.
+ *
+ * Same family as React Query / TanStack Query / SWR / Apollo Client
+ * normalized cache (read-through with TTL + invalidation).
+ */
+
+export { cache, type CacheOptions, type CacheMethodPolicy } from "./cache.js";
+export { LruCacheStore, type CacheStore, type CacheEntry } from "./lru.js";

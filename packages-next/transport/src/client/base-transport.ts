@@ -195,7 +195,18 @@ export abstract class BaseClientTransport implements ClientTransport {
       });
     });
 
-    await this.sendFrame(frame);
+    try {
+      await this.sendFrame(frame);
+    } catch (err) {
+      // Wire-write failed — clean up the pending entry so a later close()
+      // doesn't reject an orphaned Promise that nobody's awaiting.
+      // Otherwise the retry middleware (which sees the sendFrame error and
+      // moves on) leaves the original `promise` behind; close() then fires
+      // `{ kind: "closed" }` rejections with no handler → unhandled
+      // rejection noise.
+      this.pending.delete(id);
+      throw err;
+    }
     return promise;
   }
 
