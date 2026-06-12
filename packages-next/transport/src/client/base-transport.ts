@@ -41,6 +41,7 @@ import type {
   JsonRpcId,
   JsonRpcResponse,
   ProgressStream,
+  SubscribeParams,
   SubscriptionScope,
   SubscriptionStream,
   TransportCapabilities,
@@ -199,8 +200,12 @@ export abstract class BaseClientTransport implements ClientTransport {
     });
     this.subscriptionStreams.set(tentativeId, stream);
 
-    void this.request("subscribe", { scope, query, fromCursor }).then((res) => {
-      const serverId = (res as { subscriptionId: string }).subscriptionId;
+    // CRITICAL: re-key the stream SYNCHRONOUSLY when the subscribe response
+    // arrives — not via `.then()`. EventEmitter delivers WS messages
+    // synchronously in sequence; microtasks don't drain between them, so a
+    // `.then()` re-key runs AFTER any same-tick notification frames have
+    // already missed the stream lookup and been silently dropped.
+    this.dispatchSubscribeFrame({ scope, query, fromCursor }, (serverId) => {
       if (serverId !== tentativeId) {
         this.subscriptionStreams.delete(tentativeId);
         stream.rekey(serverId);
@@ -210,6 +215,49 @@ export abstract class BaseClientTransport implements ClientTransport {
     });
 
     return Object.assign(stream, { subscriptionId: tentativeId });
+  }
+
+  /**
+   * Issue a `subscribe` RPC with a SYNCHRONOUS post-response callback.
+   * The callback fires inside `routeResponse` before the next inbound
+   * frame is dispatched — preventing the back-to-back notification race
+   * that hits when a server emits `[subscribe-response, event, event]`
+   * in one TCP segment.
+   *
+   * The race: WS library emits 'message' events synchronously via
+   * `EventEmitter.emit()`; microtasks don't drain between them. Using
+   * `await req.then(...)` to re-key the stream therefore runs the
+   * re-key AFTER subsequent same-tick events have missed the lookup
+   * by server-allocated id.
+   */
+  private dispatchSubscribeFrame(
+    params: SubscribeParams,
+    onResolved: (serverId: string) => void,
+  ): void {
+    if (this.currentState !== "open") return;
+
+    const id = this.nextRequestId++ as JsonRpcId;
+    const frame: JsonRpcFrame = {
+      jsonrpc: "2.0",
+      id,
+      method: "subscribe",
+      params: params as unknown,
+    };
+
+    this.pending.set(id, {
+      // The synchronous re-key happens HERE — inside routeResponse's
+      // call to pending.resolve, before any subsequent message handler
+      // fires.
+      resolve: (res: unknown) => {
+        const serverId = (res as { subscriptionId?: string } | null | undefined)?.subscriptionId;
+        if (typeof serverId === "string") onResolved(serverId);
+      },
+      reject: () => {
+        /* swallow — caller doesn't wait on this Promise */
+      },
+    });
+
+    void this.sendFrame(frame);
   }
 
   progress(progressToken: string): ProgressStream {
@@ -322,17 +370,17 @@ export abstract class BaseClientTransport implements ClientTransport {
       this.activeSubscriptions.delete(oldId);
       this.subscriptionStreams.delete(oldId);
       this.subscriptionStreams.set(oldId, sub.stream);
-      void this.request("subscribe", {
-        scope: sub.scope,
-        query: sub.query,
-        fromCursor: sub.lastCursor,
-      }).then((res) => {
-        const newId = (res as { subscriptionId: string }).subscriptionId;
-        this.subscriptionStreams.delete(oldId);
-        sub.stream.rekey(newId);
-        this.subscriptionStreams.set(newId, sub.stream);
-        this.activeSubscriptions.set(newId, sub);
-      });
+      // Same synchronous-rekey discipline as subscribe() — see the
+      // comment on dispatchSubscribeFrame.
+      this.dispatchSubscribeFrame(
+        { scope: sub.scope, query: sub.query, fromCursor: sub.lastCursor },
+        (newId) => {
+          this.subscriptionStreams.delete(oldId);
+          sub.stream.rekey(newId);
+          this.subscriptionStreams.set(newId, sub.stream);
+          this.activeSubscriptions.set(newId, sub);
+        },
+      );
     }
   }
 }

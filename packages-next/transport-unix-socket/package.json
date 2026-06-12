@@ -1,0 +1,60 @@
+{
+  "name": "@agentick/transport-unix-socket-next",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Unix-socket transport for agentick — newline-delimited JSON-RPC 2.0 over `net.Server` / `net.Socket`. Required for tentickle-class local-IPC shapes (TUI ↔ same-host daemon). Node-only.",
+  "keywords": [
+    "agent",
+    "agentick",
+    "ai",
+    "transport",
+    "unix-socket",
+    "ipc",
+    "json-rpc"
+  ],
+  "license": "MIT",
+  "author": "Ryan Lindgren",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/agenticklabs/agentick.git",
+    "directory": "packages-next/transport-unix-socket"
+  },
+  "type": "module",
+  "main": "src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./client": {
+      "types": "./src/client/index.ts",
+      "import": "./src/client/index.ts",
+      "default": "./src/client/index.ts"
+    },
+    "./server": {
+      "types": "./src/server/index.ts",
+      "import": "./src/server/index.ts",
+      "default": "./src/server/index.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.build.json --noEmit",
+    "lint": "oxlint src/",
+    "format:check": "oxfmt --check src/",
+    "clean": "rm -rf dist tsconfig.build.tsbuildinfo"
+  },
+  "dependencies": {
+    "@agentick/spec-next": "workspace:*",
+    "@agentick/transport-next": "workspace:*"
+  },
+  "devDependencies": {
+    "@agentick/client-next": "workspace:*",
+    "@agentick/gateway-next": "workspace:*",
+    "@agentick/spec-conformance-next": "workspace:*",
+    "effect": "^3.21.2",
+    "typescript": "^5.7.3",
+    "vitest": "^4.0.18"
+  }
+}
