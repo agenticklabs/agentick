@@ -40,7 +40,9 @@
   "devDependencies": {
     "@agentick/app-next": "workspace:*",
     "@agentick/client-next": "workspace:*",
+    "@agentick/executor-next": "workspace:*",
     "@agentick/gateway-next": "workspace:*",
+    "@agentick/reconciler-next": "workspace:*",
     "@agentick/runtime-next": "workspace:*",
     "@agentick/spec-conformance-next": "workspace:*",
     "effect": "^3.21.2",

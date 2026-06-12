@@ -1,7 +1,15 @@
 # Agentick v2 — Implementation Status
 
 **Branch:** `feat/v2`
-**Last updated:** 2026-06-12 — **Phase 33.F.1 — consolidated the four client-middleware packages into a single `@agentick/client-extensions-next` bundle with subpath exports.** Reason: `@agentick/client-{retry,telemetry,cache,offline}-next` was colliding with the planned `@agentick/client-{react,angular,vue}-next` framework-binding namespace — `client-X` was carrying two semantically different jobs (middleware behavior vs framework binding). The bundled package keeps each behavior in its own subdir with its own README + test suite + JSDoc, but ships under a single layer-disambiguated name. Adopters install one package and opt in per behavior via subpath imports:
+**Last updated:** 2026-06-12 — **Phase 33.C hardening pass — `MultiplexedStream` backpressure + jitter property tests + full client→gateway→executor `session/send` e2e.** Three items flagged in earlier STATUS entries closed:
+
+- **`MultiplexedStream<T>` backpressure** — four explicit policies: `"unbounded"` (default; prior behavior), `"drop-oldest"`, `"drop-newest"`, `"close-on-overflow"`. Bounded policies require a finite positive `capacity`; constructor rejects misconfiguration. `onDrop` / `onOverflow` callbacks let adopters observe loss. AsyncIterator now drains buffered values before surfacing the terminal error so close-on-overflow consumers see what was buffered at the moment of overflow. 9 tests in `transport-next/src/__tests__/multiplexed-stream-backpressure.spec.ts`.
+- **Backoff jitter property tests** — extracted `computeFullJitterBackoff(attempt, policy, random?)` as a pure free function (the `BaseClientTransport.computeBackoff` is now a one-liner over it). 6 tests verify: output in `[0, cap)` for every attempt, cap doubles per attempt until `maxDelayMs`, uniform distribution across `[0, cap)` (10k-sample chi-squared sanity ±15%, bottom-decile within 7-13% to rule out equal-jitter / no-jitter regressions), and deterministic reproducibility via injected RNG.
+- **`session/send` end-to-end** — real `createClient → inProcessTransport → dispatchRequest → GatewayHarness → AppHarness → SessionHarness → MockLanguageModelExecutor` roundtrip in 2 tests. Verifies the wire shape + dispatch + executor wiring all hold together (previous tests stubbed the gateway handler with a switch). Established the pattern adopters use for full-stack tests: `dispatchRequest(gateway, req, sink)` wrapped as an `InProcessGatewayHandler`.
+
+**Workspace:** 1236/1236 tests across `packages-next/*` (+17 from this pass). Typecheck clean.
+
+**Previously, 2026-06-12 — Phase 33.F.1 — consolidated the four client-middleware packages into a single `@agentick/client-extensions-next` bundle with subpath exports.** Reason: `@agentick/client-{retry,telemetry,cache,offline}-next` was colliding with the planned `@agentick/client-{react,angular,vue}-next` framework-binding namespace — `client-X` was carrying two semantically different jobs (middleware behavior vs framework binding). The bundled package keeps each behavior in its own subdir with its own README + test suite + JSDoc, but ships under a single layer-disambiguated name. Adopters install one package and opt in per behavior via subpath imports:
 
 ```ts
 import { retry } from "@agentick/client-extensions-next/retry";

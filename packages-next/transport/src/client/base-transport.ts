@@ -83,6 +83,25 @@ export const DEFAULT_RECONNECT_POLICY: Required<ReconnectPolicy> = {
   maxAttempts: Infinity,
 };
 
+/**
+ * Exponential backoff with full jitter per AWS Builder's Library
+ * "Timeouts, retries, and backoff with jitter" (Marc Brooker).
+ *
+ * Returns a uniform random delay in `[0, min(maxDelayMs, initialDelayMs * 2^attempt))`.
+ * Free function form for property-based testing — the protected
+ * `BaseClientTransport.computeBackoff` is a thin wrapper.
+ *
+ * @verifiedBy src/__tests__/backoff-jitter.spec.ts
+ */
+export function computeFullJitterBackoff(
+  attempt: number,
+  policy: Pick<Required<ReconnectPolicy>, "initialDelayMs" | "maxDelayMs">,
+  random: () => number = Math.random,
+): number {
+  const exp = Math.min(policy.maxDelayMs, policy.initialDelayMs * 2 ** attempt);
+  return random() * exp;
+}
+
 export abstract class BaseClientTransport implements ClientTransport {
   abstract readonly id: string;
   abstract readonly capabilities: TransportCapabilities;
@@ -465,11 +484,7 @@ export abstract class BaseClientTransport implements ClientTransport {
    * random delay in `[0, min(maxDelayMs, initialDelayMs * 2^attempt))`.
    */
   protected computeBackoff(attempt: number): number {
-    const exp = Math.min(
-      this.reconnectPolicy.maxDelayMs,
-      this.reconnectPolicy.initialDelayMs * 2 ** attempt,
-    );
-    return Math.random() * exp;
+    return computeFullJitterBackoff(attempt, this.reconnectPolicy);
   }
 
   /** Cancel any pending reconnect timer. Subclass's `closeConnection` calls this. */

@@ -967,9 +967,15 @@ importers:
       '@agentick/client-next':
         specifier: workspace:*
         version: link:../client
+      '@agentick/executor-next':
+        specifier: workspace:*
+        version: link:../executor
       '@agentick/gateway-next':
         specifier: workspace:*
         version: link:../gateway
+      '@agentick/reconciler-next':
+        specifier: workspace:*
+        version: link:../reconciler
       '@agentick/runtime-next':
         specifier: workspace:*
         version: link:../runtime
