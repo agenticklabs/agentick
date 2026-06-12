@@ -1112,6 +1112,8 @@ client-retry-next, client-telemetry-next, … (middleware extensions)
 
 8. **`agentick-rpc-v1` subprotocol version bumping.** First wire-breaking change forces `v2`. Coordination story with adopters TBD. **Deferred to first wire-breaking change.**
 
+9. **Higher-level web-framework adapters.** Today `@agentick/transport-http-next` and `@agentick/transport-websocket-next` accept a Node `http.Server` instance and attach via `on("upgrade")` / `on("request")`. That's the universal integration point — it works with Express's `app.listen()`-returned server, NestJS's `app.getHttpServer()`, Fastify's `server.server`, and any other framework wrapping `http.Server`. Bare-Node deploys obviously work too. **Bookmark:** ergonomic per-framework adapter packages (`@agentick/express-next`, `@agentick/nestjs-next`, `@agentick/koa-next`, `@agentick/elysia-next`, `@agentick/hono-next`, `@agentick/fastify-next`) would shave 10-20 lines of boilerplate per framework — useful adoption but not blocking. Each is a small wrapper that mounts `httpServer(...)` / `websocketServer(...)` and exposes a framework-idiomatic API (Express middleware shape, NestJS module, Fastify plugin, Hono `app.route(...)`, Elysia `.use(plugin)`, Koa middleware). **Weigh against:** the universal `http.Server` integration path means adopters can use any framework today by passing the underlying server — adapters are pure ergonomics. Defer until adopter requests surface a specific framework or pattern that the universal path doesn't serve cleanly. Track as a roadmap item, not a phased commitment.
+
 ## Sequencing — what ships when
 
 The work is broken into phases that exit cleanly:
