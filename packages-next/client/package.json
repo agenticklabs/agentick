@@ -1,0 +1,47 @@
+{
+  "name": "@agentick/client-next",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Canonical TypeScript implementation of the agentick `ClientProtocol`. Runs in Node, browser, Bun, Deno, and edge runtimes. Wraps any `ClientTransport` (in-process, WebSocket, Streamable HTTP, Unix socket) and exposes `GatewayHandle` / `AppHandle` / `SessionHandle` views over the wire.",
+  "keywords": [
+    "agent",
+    "agentick",
+    "ai",
+    "client",
+    "json-rpc",
+    "mcp"
+  ],
+  "license": "MIT",
+  "author": "Ryan Lindgren",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/agenticklabs/agentick.git",
+    "directory": "packages-next/client"
+  },
+  "type": "module",
+  "main": "src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.build.json --noEmit",
+    "lint": "oxlint src/",
+    "format:check": "oxfmt --check src/",
+    "clean": "rm -rf dist tsconfig.build.tsbuildinfo"
+  },
+  "dependencies": {
+    "@agentick/runtime-next": "workspace:*",
+    "@agentick/spec-next": "workspace:*",
+    "effect": "^3.21.2"
+  },
+  "devDependencies": {
+    "@agentick/spec-conformance-next": "workspace:*",
+    "typescript": "^5.7.3",
+    "vitest": "^4.0.18"
+  }
+}

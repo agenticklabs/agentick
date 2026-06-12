@@ -395,6 +395,28 @@ importers:
         specifier: ^19.2.4
         version: 19.2.4
 
+  packages-next/client:
+    dependencies:
+      '@agentick/runtime-next':
+        specifier: workspace:*
+        version: link:../runtime
+      '@agentick/spec-next':
+        specifier: workspace:*
+        version: link:../spec
+      effect:
+        specifier: ^3.21.2
+        version: 3.21.2
+    devDependencies:
+      '@agentick/spec-conformance-next':
+        specifier: workspace:*
+        version: link:../spec-conformance
+      typescript:
+        specifier: ^5.7.3
+        version: 5.9.3
+      vitest:
+        specifier: ^4.0.18
+        version: 4.0.18(@opentelemetry/api@1.9.0)(@types/node@25.0.9)(happy-dom@17.6.3)(jiti@2.6.1)(msw@2.14.6(@types/node@25.0.9)(typescript@5.9.3))(tsx@4.21.0)(yaml@2.8.4)
+
   packages-next/executor:
     dependencies:
       '@agentick/runtime-next':
@@ -869,6 +891,37 @@ importers:
       '@agentick/spec-conformance-next':
         specifier: workspace:*
         version: link:../spec-conformance
+
+  packages-next/transport-in-process:
+    dependencies:
+      '@agentick/spec-next':
+        specifier: workspace:*
+        version: link:../spec
+    devDependencies:
+      '@agentick/app-next':
+        specifier: workspace:*
+        version: link:../app
+      '@agentick/client-next':
+        specifier: workspace:*
+        version: link:../client
+      '@agentick/gateway-next':
+        specifier: workspace:*
+        version: link:../gateway
+      '@agentick/runtime-next':
+        specifier: workspace:*
+        version: link:../runtime
+      '@agentick/spec-conformance-next':
+        specifier: workspace:*
+        version: link:../spec-conformance
+      effect:
+        specifier: ^3.21.2
+        version: 3.21.2
+      typescript:
+        specifier: ^5.7.3
+        version: 5.9.3
+      vitest:
+        specifier: ^4.0.18
+        version: 4.0.18(@opentelemetry/api@1.9.0)(@types/node@25.0.9)(happy-dom@17.6.3)(jiti@2.6.1)(msw@2.14.6(@types/node@25.0.9)(typescript@5.9.3))(tsx@4.21.0)(yaml@2.8.4)
 
   packages/adapters/ai-sdk:
     dependencies:

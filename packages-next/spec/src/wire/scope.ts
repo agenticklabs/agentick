@@ -18,14 +18,10 @@ export function isGatewayScope(s: SubscriptionScope): s is { kind: "gateway" } {
   return s.kind === "gateway";
 }
 
-export function isAppScope(
-  s: SubscriptionScope,
-): s is { kind: "app"; id: string } {
+export function isAppScope(s: SubscriptionScope): s is { kind: "app"; id: string } {
   return s.kind === "app";
 }
 
-export function isSessionScope(
-  s: SubscriptionScope,
-): s is { kind: "session"; id: string } {
+export function isSessionScope(s: SubscriptionScope): s is { kind: "session"; id: string } {
   return s.kind === "session";
 }

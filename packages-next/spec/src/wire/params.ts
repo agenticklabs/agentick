@@ -12,6 +12,7 @@ import type { ContentBlock } from "../data/content-blocks.js";
 import type { EventQuery } from "../data/events.js";
 import type { ExecutionResult } from "../data/execution-result.js";
 import type { ExecutionTarget } from "../data/execution-target.js";
+import type { SessionEntry, SessionFilter } from "../protocol/app-harness.js";
 import type { Cursor } from "../protocol/event-log.js";
 import type { SendMessageInput } from "../protocol/session-harness.js";
 import type { RequestMeta } from "./json-rpc.js";
@@ -34,7 +35,10 @@ export interface WireRequestParams {
 export interface GatewayListAppsParams extends WireRequestParams {}
 
 export interface GatewayListAppsResult {
-  readonly apps: readonly { readonly id: string; readonly metadata?: Readonly<Record<string, unknown>> }[];
+  readonly apps: readonly {
+    readonly id: string;
+    readonly metadata?: Readonly<Record<string, unknown>>;
+  }[];
 }
 
 export interface GatewayGetAppParams extends WireRequestParams {
@@ -65,19 +69,20 @@ export interface AppGetSessionParams extends WireRequestParams {
   readonly sessionId: string;
 }
 
-export interface AppGetSessionResult {
-  readonly sessionId: string;
-  readonly status: "active" | "closed";
-  readonly metadata?: Readonly<Record<string, unknown>>;
-}
+/**
+ * Wire result reuses the canonical in-process `SessionEntry` type —
+ * the shape is JSON-safe (string id, numeric timestamps, plain object
+ * metadata) so it crosses the wire without translation.
+ */
+export type AppGetSessionResult = SessionEntry;
 
 export interface AppListSessionsParams extends WireRequestParams {
   readonly appId: string;
-  readonly filter?: Readonly<Record<string, unknown>>;
+  readonly filter?: SessionFilter;
 }
 
 export interface AppListSessionsResult {
-  readonly sessions: readonly AppGetSessionResult[];
+  readonly sessions: readonly SessionEntry[];
 }
 
 /**

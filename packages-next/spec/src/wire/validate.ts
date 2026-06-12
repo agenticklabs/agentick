@@ -19,12 +19,7 @@
  */
 
 import { ErrorCode } from "./errors.js";
-import type {
-  JsonRpcBatch,
-  JsonRpcError,
-  JsonRpcFrame,
-  JsonRpcId,
-} from "./json-rpc.js";
+import type { JsonRpcBatch, JsonRpcError, JsonRpcFrame, JsonRpcId } from "./json-rpc.js";
 
 export type ValidateResult<T> =
   | { readonly ok: true; readonly value: T }
@@ -34,9 +29,7 @@ export type ValidateResult<T> =
  * Validate a single frame OR a batch. Per JSON-RPC 2.0, a top-level
  * array is a batch; anything else is a single frame.
  */
-export function validateJsonRpcInput(
-  input: unknown,
-): ValidateResult<JsonRpcFrame | JsonRpcBatch> {
+export function validateJsonRpcInput(input: unknown): ValidateResult<JsonRpcFrame | JsonRpcBatch> {
   if (Array.isArray(input)) {
     if (input.length === 0) {
       return invalidRequest("empty batch");
@@ -60,7 +53,7 @@ export function validateJsonRpcFrame(input: unknown): ValidateResult<JsonRpcFram
     return invalidRequest("frame must be an object");
   }
   if ((input as { jsonrpc?: unknown }).jsonrpc !== "2.0") {
-    return invalidRequest("missing or invalid `jsonrpc: \"2.0\"`");
+    return invalidRequest('missing or invalid `jsonrpc: "2.0"`');
   }
 
   const hasId = "id" in input;
@@ -83,9 +76,7 @@ export function validateJsonRpcFrame(input: unknown): ValidateResult<JsonRpcFram
     return validateNotification(input);
   }
 
-  return invalidRequest(
-    "frame does not match request, response, or notification shape",
-  );
+  return invalidRequest("frame does not match request, response, or notification shape");
 }
 
 function validateRequest(input: Record<string, unknown>): ValidateResult<JsonRpcFrame> {
@@ -113,9 +104,7 @@ function validateRequest(input: Record<string, unknown>): ValidateResult<JsonRpc
   };
 }
 
-function validateNotification(
-  input: Record<string, unknown>,
-): ValidateResult<JsonRpcFrame> {
+function validateNotification(input: Record<string, unknown>): ValidateResult<JsonRpcFrame> {
   if (typeof input.method !== "string") {
     return invalidRequest("notification `method` must be a string");
   }

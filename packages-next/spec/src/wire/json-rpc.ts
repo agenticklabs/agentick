@@ -52,9 +52,7 @@ export interface JsonRpcErrorResponse {
   readonly result?: never;
 }
 
-export type JsonRpcResponse<R = unknown> =
-  | JsonRpcSuccessResponse<R>
-  | JsonRpcErrorResponse;
+export type JsonRpcResponse<R = unknown> = JsonRpcSuccessResponse<R> | JsonRpcErrorResponse;
 
 /**
  * Server → client or client → server notification frame. No `id`; no
@@ -82,10 +80,7 @@ export interface JsonRpcError<D = unknown> {
  * Use `isJsonRpcRequest` / `isJsonRpcResponse` / `isJsonRpcNotification`
  * for narrowing.
  */
-export type JsonRpcFrame =
-  | JsonRpcRequest
-  | JsonRpcResponse
-  | JsonRpcNotification;
+export type JsonRpcFrame = JsonRpcRequest | JsonRpcResponse | JsonRpcNotification;
 
 /**
  * JSON-RPC 2.0 batch — array of frames sent atomically. Server responds
@@ -121,9 +116,7 @@ export function isJsonRpcRequest(frame: JsonRpcFrame): frame is JsonRpcRequest {
   return "id" in frame && "method" in frame && !("result" in frame || "error" in frame);
 }
 
-export function isJsonRpcNotification(
-  frame: JsonRpcFrame,
-): frame is JsonRpcNotification {
+export function isJsonRpcNotification(frame: JsonRpcFrame): frame is JsonRpcNotification {
   return "method" in frame && !("id" in frame);
 }
 
@@ -131,9 +124,7 @@ export function isJsonRpcResponse(frame: JsonRpcFrame): frame is JsonRpcResponse
   return "id" in frame && ("result" in frame || "error" in frame);
 }
 
-export function isJsonRpcSuccess<R>(
-  frame: JsonRpcResponse<R>,
-): frame is JsonRpcSuccessResponse<R> {
+export function isJsonRpcSuccess<R>(frame: JsonRpcResponse<R>): frame is JsonRpcSuccessResponse<R> {
   return "result" in frame;
 }
 
