@@ -1,7 +1,7 @@
 /**
  * WebSocket `ClientTransport` implementation.
  *
- * Subclasses `BaseClientTransport` from `@agentick/transport-base-next`;
+ * Subclasses `BaseClientTransport` from `@agentick/transport-next`;
  * supplies WS-specific connection management — subprotocol negotiation,
  * the WebSocket constructor (defaults to `globalThis.WebSocket`),
  * exponential-backoff-with-full-jitter reconnect, and cursor-aware
@@ -11,7 +11,7 @@
  */
 
 import type { ClientTransport, JsonRpcFrame, TransportCapabilities } from "@agentick/spec-next";
-import { BaseClientTransport } from "@agentick/transport-base-next";
+import { BaseClientTransport } from "@agentick/transport-next";
 import { AGENTICK_SUBPROTOCOL, decodeFrame, encodeFrame } from "../shared/codec.js";
 
 // ── WebSocket constructor type — matches both browser native and `ws` ─────

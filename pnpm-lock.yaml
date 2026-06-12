@@ -892,7 +892,7 @@ importers:
         specifier: workspace:*
         version: link:../spec-conformance
 
-  packages-next/transport-base:
+  packages-next/transport:
     dependencies:
       '@agentick/spec-next':
         specifier: workspace:*
@@ -910,9 +910,9 @@ importers:
       '@agentick/spec-next':
         specifier: workspace:*
         version: link:../spec
-      '@agentick/transport-base-next':
+      '@agentick/transport-next':
         specifier: workspace:*
-        version: link:../transport-base
+        version: link:../transport
     devDependencies:
       '@agentick/app-next':
         specifier: workspace:*
@@ -944,9 +944,9 @@ importers:
       '@agentick/spec-next':
         specifier: workspace:*
         version: link:../spec
-      '@agentick/transport-base-next':
+      '@agentick/transport-next':
         specifier: workspace:*
-        version: link:../transport-base
+        version: link:../transport
       ws:
         specifier: ^8.18.0
         version: 8.19.0

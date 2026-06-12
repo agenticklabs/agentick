@@ -47,7 +47,7 @@
   },
   "dependencies": {
     "@agentick/spec-next": "workspace:*",
-    "@agentick/transport-base-next": "workspace:*",
+    "@agentick/transport-next": "workspace:*",
     "ws": "^8.18.0"
   },
   "devDependencies": {

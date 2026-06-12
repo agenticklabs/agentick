@@ -1,5 +1,5 @@
 /**
- * `@agentick/transport-base-next` — shared plumbing every transport
+ * `@agentick/transport-next` — shared plumbing every transport
  * package depends on.
  *
  *   - `BaseClientTransport` (abstract) — RPC correlation, stream

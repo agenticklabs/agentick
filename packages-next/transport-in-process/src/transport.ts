@@ -1,7 +1,7 @@
 /**
  * In-process `ClientTransport` implementation.
  *
- * Subclasses `BaseClientTransport` from `@agentick/transport-base-next`;
+ * Subclasses `BaseClientTransport` from `@agentick/transport-next`;
  * supplies a synchronous handler that delivers JSON-RPC requests to a
  * server-side function and routes the response (and any notifications
  * the handler emits) back through the base class.
@@ -20,7 +20,7 @@ import type {
   JsonRpcResponse,
   TransportCapabilities,
 } from "@agentick/spec-next";
-import { BaseClientTransport } from "@agentick/transport-base-next";
+import { BaseClientTransport } from "@agentick/transport-next";
 
 export type InProcessGatewayHandler = (
   request: JsonRpcRequest,

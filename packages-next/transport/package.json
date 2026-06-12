@@ -1,5 +1,5 @@
 {
-  "name": "@agentick/transport-base-next",
+  "name": "@agentick/transport-next",
   "version": "0.0.0",
   "private": true,
   "description": "Shared transport plumbing for every @agentick/transport-* package. Ships BaseClientTransport (abstract; concrete transports subclass), MultiplexedStream (subscription / progress fan-out), the transport-agnostic JSON-RPC dispatcher that routes wire frames to GatewayHarnessProtocol methods, and shared DispatchHost / DispatchSink contract types.",

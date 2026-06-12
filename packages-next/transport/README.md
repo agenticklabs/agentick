@@ -1,4 +1,4 @@
-# @agentick/transport-base-next
+# @agentick/transport-next
 
 Shared plumbing every `@agentick/transport-*-next` package depends on.
 
@@ -63,7 +63,7 @@ import {
   type ClientTransport,
   type JsonRpcFrame,
   type TransportCapabilities,
-} from "@agentick/transport-base-next";
+} from "@agentick/transport-next";
 
 const CAPABILITIES: TransportCapabilities = {
   bidirectional: true,
