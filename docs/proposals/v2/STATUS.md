@@ -1,9 +1,24 @@
 # Agentick v2 — Implementation Status
 
 **Branch:** `feat/v2`
-**Last updated:** 2026-06-07 — **ADR 32 landed (Extension shape spectrum — six shapes from full harness to pure descriptor; decision tree + concrete v1 plugin/transport disposition for Phase 5). First Phase 5 deliverable: `SkillsHarness` shape-1 harness scaffold in new `@agentick/skills-next` workspace package (OpenClaw / Hermes style durable, searchable agent skill library). Plus `readonly id: string` exposed on `AppHarnessProtocol` and `SessionHarnessProtocol` (filled the adopter-surface gap from Phase 4).**
+**Last updated:** 2026-06-10 — **Workspace reorganization: v2 packages relocated to `packages-next/` with `-next` suffix on every package name.** v1 stays untouched in `packages/` so master merges land cleanly. The reorganization is purely packaging; no API or behavior change. At v2.0 cut the suffix strips and `packages-next/` collapses onto `packages/`.
 
-**Phase 5 kicked off (this work block):**
+**Reorganization (this work block — `f22b3985`):**
+
+- **`pnpm-workspace.yaml`** — added `packages-next/*` glob.
+- **`git mv`** — 22 v2-pure packages relocated to `packages-next/` with rename detection preserving history: `spec`, `runtime`, `app`, `session`, `reconciler`, `reconciler-react`, `executor`, `executor-openai`, `executor-anthropic`, `executor-google`, `executor-ai-sdk`, `loop-executor`, `tool-executor`, `tool`, `knobs`, `state`, `timeline`, `gates`, `skills`, `formatters`, `subscriptions`, `spec-conformance`.
+- **Sandbox + Gateway extraction** — `packages/sandbox/src/v2/` → `packages-next/sandbox/` and `packages/gateway/src/v2/` → `packages-next/gateway/` as standalone packages with their own `package.json` / `tsconfig.json` / `tsconfig.build.json`. `/v2` exports + v2 deps stripped from v1 sandbox + gateway package manifests so the v1 surfaces are clean.
+- **Rename pass** — `@agentick/<pkg>` → `@agentick/<pkg>-next` across source `.ts`/`.tsx`, every `package.json` / `tsconfig*.json`, examples, blueprint docs, and skill docs (376 files via perl script).
+- **Tooling configs** — `.changeset/config.json` drops v2 names from the `fixed` array (v2 packages re-publish under canonical names at v2.0 cut); `website/typedoc.json` replaces v2 entries with `packages-next/*` paths; `website/.vitepress/config.mts` lists the 24 `-next` packages under the v2 group.
+- **Verification** — `pnpm install` clean; `pnpm -r typecheck` clean across all packages; `pnpm vitest run` clean (4625 tests passing, 1 file skipped).
+
+**Cut-over plan at v2.0** — perl-strip `-next` suffix + `git mv packages-next/* packages/`. Overlapping names collide with v1 — that collision is the migration moment where v1 gets archived.
+
+**Workspace:** 4625/4625 tests green. 87 packages on `feat/v2` (65 v1 + 22 v2-pure + 2 v2-extracted from v1 dual-tree packages).
+
+**Previously, 2026-06-07** — **ADR 32 landed (Extension shape spectrum — six shapes from full harness to pure descriptor; decision tree + concrete v1 plugin/transport disposition for Phase 5). First Phase 5 deliverable: `SkillsHarness` shape-1 harness scaffold in new `@agentick/skills-next` workspace package (OpenClaw / Hermes style durable, searchable agent skill library). Plus `readonly id: string` exposed on `AppHarnessProtocol` and `SessionHarnessProtocol` (filled the adopter-surface gap from Phase 4).**
+
+**Phase 5 kicked off (2026-06-07 work block):**
 
 - **`blueprint/32-extension-shape-spectrum.md`** (new ADR). Documents the spectrum every "extension" lives on: (1) full harness extension, (2) namespace object, (3) pure bus subscriber, (4) reconciler contributor, (5) descriptor + hook (gates pattern), (6) tool / formatter. Each shape has a cost/value calculus. Decision tree adopters or contributors use to pick the right shape. Phase 5+ plugin/transport disposition table — most v1 plugins reshape into shape 1 (mcp-server, openai-compat as harnesses with per-request state) but logging reshapes into shape 3 (pure subscriber, ~3 lines of code). All v1 transports reshape into shape 1 — per-connection state + bidirectional translation justifies the substrate audit cost. Gates is the load-bearing shape-5 counter-example.
 - **`AppHarnessProtocol.id` + `SessionHarnessProtocol.id`** (new spec fields). Filled the gap flagged in Phase 4. Promoted from `protected scopeId` to public via `get id()` getter on `AppHarness`, `SessionHarness`, `CallbackSessionHarness`. Gateway tests now round-trip the auto-generated `app:${ulid()}` id through `gateway.createApp`.

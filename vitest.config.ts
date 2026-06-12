@@ -12,12 +12,14 @@ export default defineConfig({
     include: [
       "packages/*/src/**/*.spec.{ts,tsx}",
       "packages/adapters/*/src/**/*.spec.{ts,tsx}",
+      "packages-next/*/src/**/*.spec.{ts,tsx}",
       "example/*/src/**/*.spec.{ts,tsx}",
     ],
     benchmark: {
       include: [
         "packages/*/src/**/*.bench.{ts,tsx}",
         "packages/adapters/*/src/**/*.bench.{ts,tsx}",
+        "packages-next/*/src/**/*.bench.{ts,tsx}",
       ],
       exclude: ["**/node_modules/**", "**/dist/**"],
     },
@@ -34,7 +36,11 @@ export default defineConfig({
     restoreMocks: true,
     coverage: {
       provider: "v8",
-      include: ["packages/*/src/**/*.{ts,tsx}", "packages/adapters/*/src/**/*.{ts,tsx}"],
+      include: [
+        "packages/*/src/**/*.{ts,tsx}",
+        "packages/adapters/*/src/**/*.{ts,tsx}",
+        "packages-next/*/src/**/*.{ts,tsx}",
+      ],
       exclude: ["**/*.spec.ts", "**/*.spec.tsx", "**/testing/**"],
       reporter: ["text", "json", "html"],
     },
