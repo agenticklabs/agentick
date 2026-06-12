@@ -905,6 +905,34 @@ importers:
         specifier: ^4.0.18
         version: 4.0.18(@opentelemetry/api@1.9.0)(@types/node@25.0.9)(happy-dom@17.6.3)(jiti@2.6.1)(msw@2.14.6(@types/node@25.0.9)(typescript@5.9.3))(tsx@4.21.0)(yaml@2.8.4)
 
+  packages-next/transport-http:
+    dependencies:
+      '@agentick/spec-next':
+        specifier: workspace:*
+        version: link:../spec
+      '@agentick/transport-next':
+        specifier: workspace:*
+        version: link:../transport
+    devDependencies:
+      '@agentick/client-next':
+        specifier: workspace:*
+        version: link:../client
+      '@agentick/gateway-next':
+        specifier: workspace:*
+        version: link:../gateway
+      '@agentick/spec-conformance-next':
+        specifier: workspace:*
+        version: link:../spec-conformance
+      effect:
+        specifier: ^3.21.2
+        version: 3.21.2
+      typescript:
+        specifier: ^5.7.3
+        version: 5.9.3
+      vitest:
+        specifier: ^4.0.18
+        version: 4.0.18(@opentelemetry/api@1.9.0)(@types/node@25.0.9)(happy-dom@17.6.3)(jiti@2.6.1)(msw@2.14.6(@types/node@25.0.9)(typescript@5.9.3))(tsx@4.21.0)(yaml@2.8.4)
+
   packages-next/transport-in-process:
     dependencies:
       '@agentick/spec-next':

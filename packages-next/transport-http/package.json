@@ -1,0 +1,62 @@
+{
+  "name": "@agentick/transport-http-next",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Streamable HTTP transport for agentick per MCP 2025-03-26 — JSON-RPC 2.0 over a single endpoint that serves request/response (application/json) and streaming responses (text/event-stream) on the same POST, plus a persistent GET for notification fan-in. Universal `fetch` on the client (Node 22+, browser, Bun, Deno, edge); Node `http.Server` on the server.",
+  "keywords": [
+    "agent",
+    "agentick",
+    "ai",
+    "transport",
+    "http",
+    "sse",
+    "streamable-http",
+    "json-rpc",
+    "mcp"
+  ],
+  "license": "MIT",
+  "author": "Ryan Lindgren",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/agenticklabs/agentick.git",
+    "directory": "packages-next/transport-http"
+  },
+  "type": "module",
+  "main": "src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./client": {
+      "types": "./src/client/index.ts",
+      "import": "./src/client/index.ts",
+      "default": "./src/client/index.ts"
+    },
+    "./server": {
+      "types": "./src/server/index.ts",
+      "import": "./src/server/index.ts",
+      "default": "./src/server/index.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.build.json --noEmit",
+    "lint": "oxlint src/",
+    "format:check": "oxfmt --check src/",
+    "clean": "rm -rf dist tsconfig.build.tsbuildinfo"
+  },
+  "dependencies": {
+    "@agentick/spec-next": "workspace:*",
+    "@agentick/transport-next": "workspace:*"
+  },
+  "devDependencies": {
+    "@agentick/client-next": "workspace:*",
+    "@agentick/gateway-next": "workspace:*",
+    "@agentick/spec-conformance-next": "workspace:*",
+    "effect": "^3.21.2",
+    "typescript": "^5.7.3",
+    "vitest": "^4.0.18"
+  }
+}
