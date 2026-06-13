@@ -79,7 +79,8 @@ describe("KnobsHarness — session integration", () => {
     const knobs = (session as unknown as { bridges: { knobs: KnobsHarness } }).bridges.knobs;
 
     // Run a tick — the agent's useKnob fires register via useEffect.
-    await session.send({ messages: [{ role: "user", content: "ping" }] }).result;
+    const handle = await session.send({ messages: [{ role: "user", content: "ping" }] });
+    await handle.result;
 
     // Register has reached the harness.
     const mood = knobs.list().find((d) => d.id === "mood");

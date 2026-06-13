@@ -19,6 +19,7 @@ import { createApp } from "../react.js";
 import { MockLanguageModelExecutor } from "@agentick/executor-next";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
 import type { AppExtension, AppInstaller, ContentBlock } from "@agentick/spec-next";
+import type { ToolExecutorProtocol } from "@agentick/spec-next";
 
 const Agent = () => React.createElement("message", { role: "user" }, "hello");
 
@@ -175,8 +176,15 @@ describe("AppExtension — installer surfaces", () => {
       extensions: [ext],
     });
     const session = await app.createSession();
-    // Register a tool with the ext's handlerRef so the executor can find it
-    await session.toolExecutor.register({
+    // Reach the session-internal toolExecutor. The protocol intentionally
+    // doesn't expose imperative tool registration (tools come from JSX
+    // <Tool>); the class field is `private`, so we escape through
+    // `unknown` here.
+    // TODO: move this test to @agentick/session-next/__tests__/ where the
+    // internals are naturally accessible — see CLAUDE.md "tests live
+    // where their dependencies live".
+    const internals = session as unknown as { toolExecutor: ToolExecutorProtocol };
+    await internals.toolExecutor.register({
       registration: {
         declaration: {
           id: "ping",
@@ -210,7 +218,8 @@ describe("AppExtension — installer surfaces", () => {
       extensions: [ext],
     });
     const session = await app.createSession();
-    await session.send({ messages: [{ role: "user", content: "ping" }] }).result;
+    const handle = await session.send({ messages: [{ role: "user", content: "ping" }] });
+    await handle.result;
     // Give the bus subscription a tick to drain
     await new Promise((r) => setTimeout(r, 25));
     expect(events.length).toBeGreaterThan(0);

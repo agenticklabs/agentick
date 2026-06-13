@@ -14,7 +14,7 @@ import { MockLanguageModelExecutor } from "@agentick/executor-next";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
 import { ReconcilerHarness, reactReconciler } from "@agentick/reconciler-react-next";
 import { InMemoryHandlerResolver } from "@agentick/tool-executor-next";
-import type { ContentBlock, ExecutionTarget } from "@agentick/spec-next";
+import type { ContentBlock, ExecutionTarget, ExecutorFactoryDeps } from "@agentick/spec-next";
 
 import { AppHarness } from "../index.js";
 import { createApp } from "../react.js";
@@ -503,16 +503,13 @@ describe("AppHarness — executor factory slot (FAÇADE.3)", () => {
     await executor.ready;
 
     const factory = Object.assign(
-      (deps: {
-        scopeId: string;
-        journal: MemoryJournal;
-        bus: LocalEventBus;
-        inbox: LocalInbox;
-      }) => {
+      (deps: ExecutorFactoryDeps) => {
         calls.push({
           scopeId: deps.scopeId,
-          sharedJournal: deps.journal === journal,
-          sharedBus: deps.bus === bus,
+          // The factory takes protocol-typed deps; we identity-compare
+          // against the concrete substrate instances we passed in.
+          sharedJournal: deps.journal === (journal as unknown),
+          sharedBus: deps.bus === (bus as unknown),
         });
         return executor;
       },
