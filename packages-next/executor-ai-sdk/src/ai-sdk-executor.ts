@@ -39,9 +39,10 @@ import {
 } from "ai";
 
 import { ulid } from "@agentick/runtime-next";
-import { BaseLanguageModelExecutor, type StreamContext } from "@agentick/executor-next";
+import { BaseLanguageModelExecutor, type StreamAccumulator } from "@agentick/executor-next";
 import type { EventBus, MessageInbox, OperationJournal } from "@agentick/spec-next";
 import type {
+  AdapterDelta,
   ContentBlock,
   ExecutionTarget,
   LanguageModelExecutionResult,
@@ -50,7 +51,6 @@ import type {
   LanguageModelStopReason,
   NormalizeInput,
   ToolCall,
-  UsageStats,
 } from "@agentick/spec-next";
 import { SPEC_VERSION } from "@agentick/spec-next";
 
@@ -103,7 +103,31 @@ interface AISDKProjectedInput {
 // AISDKExecutor
 // ============================================================================
 
-export class AISDKExecutor extends BaseLanguageModelExecutor<unknown> {
+/** AI SDK's `fullStream` events — duck-typed for SDK version drift. */
+type AISDKStreamPart = { type: string } & Record<string, unknown>;
+
+interface AISDKStreamState {
+  blockIndex: number;
+  textBlockStarted: boolean;
+  toolCallNameByCallId: Map<string, string>;
+  finishReason: FinishReason | null;
+}
+
+function getAISDKState(accum: StreamAccumulator): AISDKStreamState {
+  let s = accum.providerExtra as AISDKStreamState | undefined;
+  if (!s) {
+    s = {
+      blockIndex: 0,
+      textBlockStarted: false,
+      toolCallNameByCallId: new Map(),
+      finishReason: null,
+    };
+    accum.providerExtra = s;
+  }
+  return s;
+}
+
+export class AISDKExecutor extends BaseLanguageModelExecutor<unknown, AISDKStreamPart> {
   readonly target: ExecutionTarget;
 
   private readonly model: LanguageModel;
@@ -138,7 +162,9 @@ export class AISDKExecutor extends BaseLanguageModelExecutor<unknown> {
     }) as unknown as Promise<unknown>;
   }
 
-  protected async drainStream(params: unknown, ctx: StreamContext): Promise<unknown> {
+  // ──────── Streaming hooks (BaseLanguageModelExecutor) ────────
+
+  protected openStream(params: unknown, signal: AbortSignal): AsyncIterable<AISDKStreamPart> {
     const aiSdk = params as AISDKProjectedInput;
     const stream = streamText({
       model: this.model,
@@ -148,118 +174,119 @@ export class AISDKExecutor extends BaseLanguageModelExecutor<unknown> {
       ...(aiSdk.providerOptions !== undefined
         ? { providerOptions: aiSdk.providerOptions as never }
         : {}),
-      abortSignal: ctx.signal,
+      abortSignal: signal,
     });
+    return stream.fullStream as unknown as AsyncIterable<AISDKStreamPart>;
+  }
 
-    ctx.emit({ type: "message-start", role: "assistant" });
-
-    // Per-block tracking for symmetric start/end emission.
-    let textBlockStarted = false;
-    let textAccum = "";
-    const toolCallStarted = new Set<string>();
-    const toolCallArgsByCallId = new Map<string, string>();
-    const toolCallNameByCallId = new Map<string, string>();
-    const blockIndex = 0;
-    let stopReason: LanguageModelStopReason = "end";
-    let usage: UsageStats = { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
-
-    // AI SDK 5's fullStream events. We narrow with permissive duck-typing
-    // so this stays robust to minor SDK shape changes between releases.
-    for await (const partU of stream.fullStream) {
-      const part = partU as { type: string } & Record<string, unknown>;
-      switch (part.type) {
-        case "text-start": {
-          if (!textBlockStarted) {
-            textBlockStarted = true;
-            ctx.emit({ type: "content-start", blockIndex, blockType: "text" });
-          }
-          break;
+  /**
+   * AI SDK's `fullStream` vocabulary → AdapterDelta. Single text block
+   * + tool calls; minor SDK version drift handled with duck-typing.
+   */
+  protected mapChunk(part: AISDKStreamPart, accum: StreamAccumulator): readonly AdapterDelta[] {
+    const state = getAISDKState(accum);
+    const out: AdapterDelta[] = [];
+    switch (part.type) {
+      case "text-start": {
+        if (!state.textBlockStarted) {
+          state.textBlockStarted = true;
+          out.push({
+            type: "content-start",
+            blockIndex: state.blockIndex,
+            blockType: "text",
+          });
         }
-        case "text-delta":
-        case "text": {
-          const delta =
-            (part as { text?: string; delta?: string }).text ??
-            (part as { delta?: string }).delta ??
-            "";
-          if (!textBlockStarted) {
-            textBlockStarted = true;
-            ctx.emit({ type: "content-start", blockIndex, blockType: "text" });
-          }
-          if (delta.length > 0) {
-            textAccum += delta;
-            ctx.emit({ type: "content-delta", blockIndex, delta });
-          }
-          break;
+        break;
+      }
+      case "text-delta":
+      case "text": {
+        const delta =
+          (part as { text?: string; delta?: string }).text ??
+          (part as { delta?: string }).delta ??
+          "";
+        if (!state.textBlockStarted) {
+          state.textBlockStarted = true;
+          out.push({
+            type: "content-start",
+            blockIndex: state.blockIndex,
+            blockType: "text",
+          });
         }
-        case "text-end": {
-          // The text-block close is emitted from the post-loop cleanup
-          // so we always emit content-end+content together symmetrically.
-          break;
+        if (delta.length > 0) {
+          out.push({ type: "content-delta", blockIndex: state.blockIndex, delta });
         }
-        case "tool-input-start": {
-          const callId =
-            (part.toolCallId as string | undefined) ??
-            (part.id as string | undefined) ??
-            `tc_${ulid()}`;
-          const name = (part.toolName as string | undefined) ?? "";
-          toolCallStarted.add(callId);
-          toolCallNameByCallId.set(callId, name);
-          ctx.emit({ type: "tool-call-start", callId, name, blockIndex });
-          break;
+        break;
+      }
+      case "text-end":
+        // text-end closes a streaming text block; finalize emits the
+        // symmetric content/content-end summary.
+        break;
+      case "tool-input-start": {
+        const callId =
+          (part.toolCallId as string | undefined) ??
+          (part.id as string | undefined) ??
+          `tc_${ulid()}`;
+        const name = (part.toolName as string | undefined) ?? "";
+        state.toolCallNameByCallId.set(callId, name);
+        out.push({
+          type: "tool-call-start",
+          callId,
+          name,
+          blockIndex: state.blockIndex,
+        });
+        break;
+      }
+      case "tool-input-delta": {
+        const callId =
+          (part.toolCallId as string | undefined) ?? (part.id as string | undefined) ?? "";
+        const delta =
+          (part.argsTextDelta as string | undefined) ?? (part.delta as string | undefined) ?? "";
+        if (callId && delta) {
+          out.push({ type: "tool-call-delta", callId, delta });
         }
-        case "tool-input-delta": {
-          const callId =
-            (part.toolCallId as string | undefined) ?? (part.id as string | undefined) ?? "";
-          const delta =
-            (part.argsTextDelta as string | undefined) ?? (part.delta as string | undefined) ?? "";
-          if (callId && delta) {
-            const prev = toolCallArgsByCallId.get(callId) ?? "";
-            toolCallArgsByCallId.set(callId, prev + delta);
-            ctx.emit({ type: "tool-call-delta", callId, delta });
-          }
-          break;
+        break;
+      }
+      case "tool-input-end":
+      case "tool-call": {
+        const callId =
+          (part.toolCallId as string | undefined) ?? (part.id as string | undefined) ?? "";
+        const name =
+          (part.toolName as string | undefined) ?? state.toolCallNameByCallId.get(callId) ?? "";
+        if (!accum.toolCalls.has(callId)) {
+          // Provider skipped tool-input-start; synthesize for symmetry.
+          out.push({ type: "tool-call-start", callId, name, blockIndex: state.blockIndex });
         }
-        case "tool-input-end":
-        case "tool-call": {
-          const callId =
-            (part.toolCallId as string | undefined) ?? (part.id as string | undefined) ?? "";
-          const name =
-            (part.toolName as string | undefined) ?? toolCallNameByCallId.get(callId) ?? "";
-          if (!toolCallStarted.has(callId)) {
-            ctx.emit({ type: "tool-call-start", callId, name, blockIndex });
-            toolCallStarted.add(callId);
-          }
-          ctx.emit({ type: "tool-call-end", callId });
-          const inputObj =
-            (part.input as Readonly<Record<string, unknown>> | undefined) ??
-            (part.args as Readonly<Record<string, unknown>> | undefined) ??
-            ((): Readonly<Record<string, unknown>> => {
-              try {
-                return JSON.parse(toolCallArgsByCallId.get(callId) ?? "{}") as Readonly<
-                  Record<string, unknown>
-                >;
-              } catch {
-                return {};
-              }
-            })();
-          ctx.emit({ type: "tool-call", callId, name, input: inputObj });
-          break;
-        }
-        case "finish":
-        case "finish-step": {
-          const fin = part.finishReason as FinishReason | undefined;
-          const us = part.usage as
-            | {
-                inputTokens?: number;
-                outputTokens?: number;
-                totalTokens?: number;
-                cachedInputTokens?: number;
-                cacheCreationTokens?: number;
-              }
-            | undefined;
-          if (fin) stopReason = mapFinishReason(fin);
-          if (us) {
-            usage = {
+        // tool-call-end + tool-call (with parsed input) — accumulator
+        // resolves input via argsBuffer + the optional `input` field.
+        const inputObj =
+          (part.input as Readonly<Record<string, unknown>> | undefined) ??
+          (part.args as Readonly<Record<string, unknown>> | undefined);
+        out.push({ type: "tool-call-end", callId });
+        out.push({
+          type: "tool-call",
+          callId,
+          name,
+          input: inputObj ?? accum.toolCallInput(callId),
+        });
+        break;
+      }
+      case "finish":
+      case "finish-step": {
+        const fin = part.finishReason as FinishReason | undefined;
+        const us = part.usage as
+          | {
+              inputTokens?: number;
+              outputTokens?: number;
+              totalTokens?: number;
+              cachedInputTokens?: number;
+              cacheCreationTokens?: number;
+            }
+          | undefined;
+        if (fin) state.finishReason = fin;
+        if (us) {
+          out.push({
+            type: "usage",
+            usage: {
               inputTokens: us.inputTokens ?? 0,
               outputTokens: us.outputTokens ?? 0,
               totalTokens: us.totalTokens ?? 0,
@@ -269,101 +296,54 @@ export class AISDKExecutor extends BaseLanguageModelExecutor<unknown> {
               ...(us.cacheCreationTokens !== undefined
                 ? { cacheCreationTokens: us.cacheCreationTokens }
                 : {}),
-            };
-          }
-          break;
-        }
-        case "error": {
-          const err = part.error;
-          ctx.emit({
-            type: "error",
-            error: {
-              message: err instanceof Error ? err.message : String(err),
             },
           });
-          break;
         }
-        default:
-          // Other AI SDK events (reasoning, files, sources, etc.) —
-          // not yet mapped. Adopters relying on these can subscribe
-          // to the executor's bus envelopes; the typed handle stream
-          // skips them for now.
-          break;
+        break;
       }
+      case "error": {
+        const err = part.error;
+        out.push({
+          type: "error",
+          error: { message: err instanceof Error ? err.message : String(err) },
+        });
+        break;
+      }
+      default:
+        // Reasoning, files, sources, source-document — not yet mapped.
+        break;
     }
+    return out;
+  }
 
-    // Close any open text block + emit content summary.
-    if (textBlockStarted) {
-      ctx.emit({ type: "content-end", blockIndex });
-      ctx.emit({
-        type: "content",
-        blockIndex,
-        content: { type: "text", text: textAccum } as ContentBlock,
-      });
-    }
-
-    ctx.emit({ type: "message-end", stopReason, usage });
-
-    // Final assembled message summary.
-    const messageContent: ContentBlock[] = [];
-    if (textAccum.length > 0) messageContent.push({ type: "text", text: textAccum });
-    for (const [callId, name] of toolCallNameByCallId) {
+  /**
+   * Synthesize an AI SDK-compatible result shape from accumulator
+   * state. The non-streaming path returns the real `GenerateTextResult`;
+   * the streaming path synthesizes a duck-compatible one so
+   * `normalizeRaw` narrows uniformly.
+   */
+  protected reconstructRaw(accum: StreamAccumulator, _modelSeen: string | undefined): unknown {
+    const state = getAISDKState(accum);
+    const text = accum.totalText();
+    const toolCalls = Array.from(accum.toolCalls.values()).map((tc) => {
       let parsed: Readonly<Record<string, unknown>> = {};
       try {
-        parsed = JSON.parse(toolCallArgsByCallId.get(callId) ?? "{}") as Readonly<
-          Record<string, unknown>
-        >;
+        parsed =
+          tc.input ?? (JSON.parse(tc.argsBuffer || "{}") as Readonly<Record<string, unknown>>);
       } catch {
-        /* keep empty */
+        parsed = tc.input ?? {};
       }
-      messageContent.push({
-        type: "tool_use",
-        toolUseId: callId,
-        name,
-        input: parsed,
-      });
-    }
-    ctx.emit({
-      type: "message",
-      message: { role: "assistant", content: messageContent },
-      stopReason,
-      usage,
+      return { toolCallId: tc.callId, toolName: tc.name, input: parsed };
     });
-
-    // Return a shape compatible with the non-streaming generateText
-    // result so normalizeRaw narrows uniformly.
     return {
-      text: textAccum,
-      finishReason: (() => {
-        switch (stopReason) {
-          case "end":
-            return "stop";
-          case "tool_use":
-            return "tool-calls";
-          case "max_tokens":
-            return "length";
-          case "content_filter":
-            return "content-filter";
-          default:
-            return "stop";
-        }
-      })() as FinishReason,
+      text,
+      finishReason: (state.finishReason ?? mapBackFinishReason(accum.stopReason)) as FinishReason,
       usage: {
-        inputTokens: usage.inputTokens,
-        outputTokens: usage.outputTokens,
-        totalTokens: usage.totalTokens,
+        inputTokens: accum.usage.inputTokens,
+        outputTokens: accum.usage.outputTokens,
+        totalTokens: accum.usage.totalTokens,
       },
-      toolCalls: Array.from(toolCallNameByCallId.entries()).map(([callId, name]) => {
-        let parsed: Readonly<Record<string, unknown>> = {};
-        try {
-          parsed = JSON.parse(toolCallArgsByCallId.get(callId) ?? "{}") as Readonly<
-            Record<string, unknown>
-          >;
-        } catch {
-          /* keep empty */
-        }
-        return { toolCallId: callId, toolName: name, input: parsed };
-      }),
+      toolCalls,
     };
   }
 
@@ -574,6 +554,21 @@ function mapFinishReason(reason: FinishReason): LanguageModelStopReason {
       return "tool_use";
     default:
       return "other";
+  }
+}
+
+function mapBackFinishReason(reason: LanguageModelStopReason): FinishReason {
+  switch (reason) {
+    case "end":
+      return "stop";
+    case "max_tokens":
+      return "length";
+    case "tool_use":
+      return "tool-calls";
+    case "content_filter":
+      return "content-filter";
+    default:
+      return "stop";
   }
 }
 

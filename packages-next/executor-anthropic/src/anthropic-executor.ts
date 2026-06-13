@@ -31,8 +31,17 @@ import type {
   Usage,
 } from "@anthropic-ai/sdk/resources/messages";
 
-import { BaseLanguageModelExecutor, type StreamContext } from "@agentick/executor-next";
+import {
+  BaseLanguageModelExecutor,
+  type CustomBlockDefinition,
+  type DeltaTransform,
+  type StreamAccumulator,
+  StreamTagParser,
+  type StreamTagHandler,
+  thinkTagTransform,
+} from "@agentick/executor-next";
 import type {
+  AdapterDelta,
   ContentBlock,
   EventBus,
   ExecutionTarget,
@@ -53,12 +62,6 @@ import type {
   UsageStats,
 } from "@agentick/spec-next";
 import { SPEC_VERSION } from "@agentick/spec-next";
-
-import {
-  StreamTagParser,
-  type StreamTagEvent,
-  type StreamTagHandler,
-} from "@agentick/executor-openai-next";
 
 // ============================================================================
 // ProviderOptions augmentation — typed Anthropic escape hatch (G5)
@@ -144,12 +147,9 @@ export interface AnthropicExecutorOptions {
   readonly target?: ExecutionTarget;
 }
 
-export interface CustomBlockDefinition {
-  readonly tag?: string;
-  readonly onStart?: (attrs: Readonly<Record<string, string>>) => void;
-  readonly onContent?: (content: string, attrs: Readonly<Record<string, string>>) => void;
-  readonly onSelfClosing?: (attrs: Readonly<Record<string, string>>) => void;
-}
+// Re-export from @agentick/executor-next so adopters that import from
+// @agentick/executor-anthropic-next keep the same surface.
+export type { CustomBlockDefinition } from "@agentick/executor-next";
 
 // ============================================================================
 // Internals
@@ -163,16 +163,51 @@ const DEFAULT_MODEL = "claude-3-5-sonnet-latest";
 // AnthropicExecutor
 // ============================================================================
 
-export class AnthropicExecutor extends BaseLanguageModelExecutor<AnthropicMessage> {
+/**
+ * Provider-private state stashed on `accum.providerExtra` for
+ * Anthropic. Tracks per-block kind (so `content_block_stop` can
+ * dispatch to the right finalize action), tool callIds keyed by
+ * Anthropic's block index (so `input_json_delta` knows which callId
+ * to use), and the redacted-thinking opaque data blob.
+ */
+interface AnthropicStreamState {
+  id: string;
+  stopSequence: string | null;
+  blockKind: Map<number, "text" | "thinking" | "tool_use" | "redacted_thinking">;
+  toolCallIdByBlock: Map<number, string>;
+  redactedData: Map<number, string>;
+}
+
+function getAnthropicState(accum: StreamAccumulator): AnthropicStreamState {
+  let s = accum.providerExtra as AnthropicStreamState | undefined;
+  if (!s) {
+    s = {
+      id: "",
+      stopSequence: null,
+      blockKind: new Map(),
+      toolCallIdByBlock: new Map(),
+      redactedData: new Map(),
+    };
+    accum.providerExtra = s;
+  }
+  return s;
+}
+
+export class AnthropicExecutor extends BaseLanguageModelExecutor<
+  AnthropicMessage,
+  RawMessageStreamEvent
+> {
   readonly target: ExecutionTarget;
 
   protected override readonly streamByDefault: boolean;
+  protected override readonly customBlocks:
+    | Readonly<Record<string, CustomBlockDefinition>>
+    | undefined;
 
   private readonly client: Anthropic;
   private readonly defaultModel: string | undefined;
   private readonly defaultMaxTokens: number | undefined;
   private readonly parseThinkTags: boolean;
-  private readonly customBlocks?: Readonly<Record<string, CustomBlockDefinition>>;
 
   constructor(
     scopeId: string,
@@ -222,343 +257,348 @@ export class AnthropicExecutor extends BaseLanguageModelExecutor<AnthropicMessag
     ) as unknown as Promise<AnthropicMessage>;
   }
 
-  protected async drainStream(params: unknown, ctx: StreamContext): Promise<AnthropicMessage> {
+  // ──────── Streaming hooks (BaseLanguageModelExecutor) ────────
+
+  protected async openStream(
+    params: unknown,
+    signal: AbortSignal,
+  ): Promise<AsyncIterable<RawMessageStreamEvent>> {
     const cp = params as MessageCreateParams;
-    const stream = (await this.client.messages.create(
-      { ...cp, stream: true } as MessageCreateParamsStreaming,
-      { signal: ctx.signal },
-    )) as unknown as AsyncIterable<RawMessageStreamEvent>;
+    return this.client.messages.create({ ...cp, stream: true } as MessageCreateParamsStreaming, {
+      signal,
+    }) as unknown as Promise<AsyncIterable<RawMessageStreamEvent>>;
+  }
 
-    const accum = new AnthropicStreamAccumulator();
+  /**
+   * Translate one Anthropic stream event into AdapterDeltas. Anthropic's
+   * vocabulary maps almost 1:1 to ours — `message_start` →
+   * `message-start`, `content_block_start`/`_delta`/`_stop` →
+   * `content-*` / `reasoning-*` / `tool-call-*` (dispatched on the
+   * block kind), `message_delta` carries the final usage/stop_reason
+   * into `message-end`. The base's `finalizeStream` emits the assembled
+   * `message` summary from accumulator state.
+   */
+  protected mapChunk(
+    event: RawMessageStreamEvent,
+    accum: StreamAccumulator,
+  ): readonly AdapterDelta[] {
+    const state = getAnthropicState(accum);
+    const out: AdapterDelta[] = [];
 
-    const tagRouter = buildTagRouter({
-      parseThinkTags: this.parseThinkTags,
-      customBlocks: this.customBlocks,
-    });
-
-    // Per-block state. Keyed by Anthropic's block index.
-    interface BlockState {
-      type: "text" | "thinking" | "tool_use" | "redacted_thinking";
-      callId?: string;
-      name?: string;
-      jsonBuffer: string;
-      textBuffer: string;
-    }
-    const blocks = new Map<number, BlockState>();
-    // Track which blocks emitted a *-start so we can emit symmetric closes.
-    const startedTextBlocks = new Set<number>();
-    const startedToolBlocks = new Set<number>(); // by Anthropic block index
-    const startedReasoningBlocks = new Set<number>();
-    // Tag-router auxiliary accumulators (only used when tagRouter is active).
-    let routerReasoningStarted = false;
-    const routerReasoningBlockIndex = -1; // sentinel for tag-router-driven reasoning
-    let routerReasoningAccum = "";
-
-    const handleTagEvent = (event: StreamTagEvent, blockIndex: number): void => {
-      if (event.type === "text") {
-        if (event.content.length === 0) return;
-        if (!startedTextBlocks.has(blockIndex)) {
-          ctx.emit({ type: "content-start", blockIndex, blockType: "text" });
-          startedTextBlocks.add(blockIndex);
-        }
-        ctx.emit({ type: "content-delta", blockIndex, delta: event.content });
-        const st = blocks.get(blockIndex);
-        if (st) st.textBuffer += event.content;
-        return;
-      }
-      const mode = tagRouter!.modeFor(event.tag);
-      if (mode === "reasoning") {
-        switch (event.type) {
-          case "block-start":
-            if (!routerReasoningStarted) {
-              ctx.emit({ type: "reasoning-start", blockIndex: routerReasoningBlockIndex });
-              routerReasoningStarted = true;
-            }
-            break;
-          case "block-delta":
-            if (!routerReasoningStarted) {
-              ctx.emit({ type: "reasoning-start", blockIndex: routerReasoningBlockIndex });
-              routerReasoningStarted = true;
-            }
-            ctx.emit({
-              type: "reasoning-delta",
-              blockIndex: routerReasoningBlockIndex,
-              delta: event.delta,
-            });
-            routerReasoningAccum += event.delta;
-            break;
-          case "block-end":
-          case "block":
-            break;
-        }
-        return;
-      }
-      // custom-block passthrough
-      switch (event.type) {
-        case "block-start":
-          ctx.emit({ type: "custom-block-start", tag: event.tag, attrs: event.attrs });
-          break;
-        case "block-delta":
-          ctx.emit({ type: "custom-block-delta", tag: event.tag, delta: event.delta });
-          break;
-        case "block-end":
-          ctx.emit({ type: "custom-block-end", tag: event.tag });
-          break;
-        case "block":
-          ctx.emit({
-            type: "custom-block",
-            tag: event.tag,
-            content: event.content,
-            attrs: event.attrs,
-            ...(event.selfClosing ? { selfClosing: true } : {}),
+    switch (event.type) {
+      case "message_start": {
+        const msg = event.message;
+        if (msg.id) state.id = msg.id;
+        out.push({ type: "message-start", role: "assistant", model: msg.model });
+        const u = msg.usage;
+        if (u) {
+          out.push({
+            type: "usage",
+            usage: {
+              inputTokens: u.input_tokens ?? 0,
+              outputTokens: u.output_tokens ?? 0,
+              totalTokens: (u.input_tokens ?? 0) + (u.output_tokens ?? 0),
+              ...(u.cache_read_input_tokens != null
+                ? { cachedInputTokens: u.cache_read_input_tokens }
+                : {}),
+            },
           });
-          break;
+        }
+        break;
       }
-    };
-
-    for await (const event of stream) {
-      accum.push(event);
-      switch (event.type) {
-        case "message_start": {
-          ctx.emit({
-            type: "message-start",
-            role: "assistant",
-            model: event.message.model,
+      case "content_block_start": {
+        const block = event.content_block;
+        const idx = event.index;
+        if (block.type === "text") {
+          state.blockKind.set(idx, "text");
+          out.push({ type: "content-start", blockIndex: idx, blockType: "text" });
+        } else if (block.type === "tool_use") {
+          state.blockKind.set(idx, "tool_use");
+          state.toolCallIdByBlock.set(idx, block.id);
+          out.push({
+            type: "tool-call-start",
+            callId: block.id,
+            name: block.name,
+            blockIndex: idx,
           });
-          break;
+        } else if (block.type === "thinking") {
+          state.blockKind.set(idx, "thinking");
+          out.push({ type: "reasoning-start", blockIndex: idx });
+        } else if (block.type === "redacted_thinking") {
+          state.blockKind.set(idx, "redacted_thinking");
+          state.redactedData.set(idx, (block as RedactedThinkingBlock).data);
+          out.push({ type: "reasoning-start", blockIndex: idx });
         }
-        case "content_block_start": {
-          const block = event.content_block;
-          if (block.type === "text") {
-            blocks.set(event.index, {
-              type: "text",
-              jsonBuffer: "",
-              textBuffer: "",
-            });
-            if (!tagRouter) {
-              ctx.emit({
-                type: "content-start",
-                blockIndex: event.index,
-                blockType: "text",
-              });
-              startedTextBlocks.add(event.index);
-            }
-            // With tagRouter, content-start is emitted lazily when the
-            // first non-tag text chunk arrives.
-          } else if (block.type === "tool_use") {
-            blocks.set(event.index, {
-              type: "tool_use",
-              callId: block.id,
-              name: block.name,
-              jsonBuffer: "",
-              textBuffer: "",
-            });
-            ctx.emit({
-              type: "tool-call-start",
-              callId: block.id,
-              name: block.name,
-              blockIndex: event.index,
-            });
-            startedToolBlocks.add(event.index);
-          } else if (block.type === "thinking") {
-            blocks.set(event.index, {
-              type: "thinking",
-              jsonBuffer: "",
-              textBuffer: "",
-            });
-            ctx.emit({ type: "reasoning-start", blockIndex: event.index });
-            startedReasoningBlocks.add(event.index);
-          } else if (block.type === "redacted_thinking") {
-            blocks.set(event.index, {
-              type: "redacted_thinking",
-              jsonBuffer: "",
-              textBuffer: "[redacted]",
-            });
-            // Emit synthetic reasoning start so consumers see a placeholder.
-            ctx.emit({ type: "reasoning-start", blockIndex: event.index });
-            startedReasoningBlocks.add(event.index);
-          }
-          break;
-        }
-        case "content_block_delta": {
-          const idx = event.index;
-          const state = blocks.get(idx);
-          const delta = event.delta;
-          if (delta.type === "text_delta") {
-            if (tagRouter) {
-              for (const ev of tagRouter.parser.process(delta.text)) {
-                handleTagEvent(ev, idx);
-              }
-            } else {
-              ctx.emit({ type: "content-delta", blockIndex: idx, delta: delta.text });
-              if (state) state.textBuffer += delta.text;
-            }
-          } else if (delta.type === "input_json_delta") {
-            if (state) state.jsonBuffer += delta.partial_json;
-            ctx.emit({
-              type: "tool-call-delta",
-              callId: state?.callId ?? "",
-              delta: delta.partial_json,
-            });
-          } else if (delta.type === "thinking_delta") {
-            ctx.emit({
-              type: "reasoning-delta",
-              blockIndex: idx,
-              delta: delta.thinking,
-            });
-            if (state) state.textBuffer += delta.thinking;
-          }
-          // signature_delta + citations_delta: ignored (G3 §10.4/§10.5).
-          break;
-        }
-        case "content_block_stop": {
-          const idx = event.index;
-          const state = blocks.get(idx);
-          if (!state) break;
-          if (state.type === "text") {
-            if (startedTextBlocks.has(idx)) {
-              ctx.emit({ type: "content-end", blockIndex: idx });
-              ctx.emit({
-                type: "content",
-                blockIndex: idx,
-                content: { type: "text", text: state.textBuffer } as ContentBlock,
-              });
-            }
-          } else if (state.type === "tool_use") {
-            let parsed: Readonly<Record<string, unknown>> = {};
-            try {
-              parsed = state.jsonBuffer
-                ? (JSON.parse(state.jsonBuffer) as Readonly<Record<string, unknown>>)
-                : {};
-            } catch {
-              /* invalid JSON — emit empty input */
-            }
-            ctx.emit({ type: "tool-call-end", callId: state.callId ?? "" });
-            ctx.emit({
-              type: "tool-call",
-              callId: state.callId ?? "",
-              name: state.name ?? "",
-              input: parsed,
-            });
-          } else if (state.type === "thinking" || state.type === "redacted_thinking") {
-            ctx.emit({ type: "reasoning-end", blockIndex: idx });
-            ctx.emit({
-              type: "reasoning",
-              blockIndex: idx,
-              reasoning: state.textBuffer,
-            });
-          }
-          break;
-        }
-        case "message_delta":
-        case "message_stop":
-          break;
+        break;
       }
-    }
-    // Drain any partial buffered tag content.
-    if (tagRouter) {
-      for (const ev of tagRouter.parser.flush()) {
-        handleTagEvent(ev, 0);
+      case "content_block_delta": {
+        const idx = event.index;
+        const delta = event.delta;
+        if (delta.type === "text_delta") {
+          out.push({ type: "content-delta", blockIndex: idx, delta: delta.text });
+        } else if (delta.type === "input_json_delta") {
+          const callId = state.toolCallIdByBlock.get(idx) ?? "";
+          out.push({
+            type: "tool-call-delta",
+            callId,
+            delta: delta.partial_json,
+          });
+        } else if (delta.type === "thinking_delta") {
+          out.push({ type: "reasoning-delta", blockIndex: idx, delta: delta.thinking });
+        }
+        // signature_delta + citations_delta: ignored (G3 §10.4/§10.5).
+        break;
       }
-    }
-
-    // If tag-router routed reasoning to its synthetic block, emit close.
-    if (routerReasoningStarted && routerReasoningAccum.length > 0) {
-      ctx.emit({ type: "reasoning-end", blockIndex: routerReasoningBlockIndex });
-      ctx.emit({
-        type: "reasoning",
-        blockIndex: routerReasoningBlockIndex,
-        reasoning: routerReasoningAccum,
-      });
-    }
-
-    const final = accum.toMessage(cp.model);
-
-    // When tagRouter is active, rewrite the synthesized Message so
-    // normalize() picks up cleaned text + extracted reasoning.
-    if (tagRouter) {
-      // Replace each text block's text with its cleaned textBuffer
-      // (already drained through the router via blocks.textBuffer).
-      let textIndex = 0;
-      const cleanedContent: AnthropicMessage["content"] = [];
-      for (const [, st] of [...blocks.entries()].sort((a, b) => a[0] - b[0])) {
-        if (st.type === "text") {
-          if (st.textBuffer.length > 0) {
-            cleanedContent.push({
-              type: "text",
-              text: st.textBuffer,
-              citations: null,
-            } as AnthropicTextBlock);
-          }
-          textIndex++;
-        } else if (st.type === "tool_use") {
-          let parsed: unknown = {};
+      case "content_block_stop": {
+        const idx = event.index;
+        const kind = state.blockKind.get(idx);
+        if (kind === "text") {
+          out.push({ type: "content-end", blockIndex: idx });
+          out.push({
+            type: "content",
+            blockIndex: idx,
+            content: { type: "text", text: accum.textByBlock.get(idx) ?? "" } as ContentBlock,
+          });
+        } else if (kind === "tool_use") {
+          const callId = state.toolCallIdByBlock.get(idx) ?? "";
+          const entry = accum.toolCalls.get(callId);
+          let parsedInput: Readonly<Record<string, unknown>> = {};
           try {
-            parsed = st.jsonBuffer ? JSON.parse(st.jsonBuffer) : {};
+            parsedInput = entry?.argsBuffer
+              ? (JSON.parse(entry.argsBuffer) as Readonly<Record<string, unknown>>)
+              : {};
           } catch {
-            parsed = {};
+            /* invalid JSON */
           }
-          cleanedContent.push({
-            type: "tool_use",
-            id: st.callId ?? "",
-            name: st.name ?? "",
-            input: parsed,
-          } as AnthropicToolUseBlock);
-        } else if (st.type === "thinking") {
-          cleanedContent.push({
-            type: "thinking",
-            thinking: st.textBuffer,
-            signature: "",
-          } as AnthropicThinkingBlock);
+          out.push({ type: "tool-call-end", callId });
+          out.push({
+            type: "tool-call",
+            callId,
+            name: entry?.name ?? "",
+            input: parsedInput,
+          });
+        } else if (kind === "thinking" || kind === "redacted_thinking") {
+          out.push({ type: "reasoning-end", blockIndex: idx });
+          out.push({
+            type: "reasoning",
+            blockIndex: idx,
+            reasoning: accum.reasoningByBlock.get(idx) ?? "",
+          });
         }
+        break;
       }
-      // Surface router-routed reasoning as a synthetic thinking block.
-      if (routerReasoningAccum.length > 0) {
-        cleanedContent.unshift({
+      case "message_delta": {
+        // Carries final stop_reason + last usage update.
+        if (event.delta.stop_sequence != null) state.stopSequence = event.delta.stop_sequence;
+        const u = event.usage;
+        const inputTokens = accum.usage.inputTokens; // already captured at message_start
+        out.push({
+          type: "message-end",
+          stopReason: mapFinishReason(event.delta.stop_reason),
+          usage: {
+            inputTokens,
+            outputTokens: u?.output_tokens ?? accum.usage.outputTokens,
+            totalTokens: inputTokens + (u?.output_tokens ?? accum.usage.outputTokens),
+            ...(accum.usage.cachedInputTokens !== undefined
+              ? { cachedInputTokens: accum.usage.cachedInputTokens }
+              : {}),
+          },
+        });
+        break;
+      }
+      case "message_stop":
+        // Final wire frame — no delta needed, base finalize emits `message`.
+        break;
+    }
+    return out;
+  }
+
+  /**
+   * Synthesize the canonical AnthropicMessage from accumulator state.
+   * Iterates blocks by index (text → text, thinking → thinking,
+   * tool_use → tool_use, redacted_thinking → redacted_thinking from the
+   * private slot) and reassembles a structure normalize() can consume.
+   */
+  protected reconstructRaw(
+    accum: StreamAccumulator,
+    modelSeen: string | undefined,
+  ): AnthropicMessage {
+    const state = getAnthropicState(accum);
+    const content: AnthropicMessage["content"] = [];
+    const allBlockIndices = new Set<number>([
+      ...accum.textByBlock.keys(),
+      ...accum.reasoningByBlock.keys(),
+      ...Array.from(accum.toolCalls.values()).map((c) => c.blockIndex),
+      ...state.redactedData.keys(),
+    ]);
+    const sorted = [...allBlockIndices].sort((a, b) => a - b);
+    for (const idx of sorted) {
+      const kind = state.blockKind.get(idx);
+      if (kind === "redacted_thinking") {
+        content.push({
+          type: "redacted_thinking",
+          data: state.redactedData.get(idx) ?? "",
+        } as RedactedThinkingBlock);
+        continue;
+      }
+      if (kind === "thinking" || accum.reasoningByBlock.has(idx)) {
+        content.push({
           type: "thinking",
-          thinking: routerReasoningAccum,
+          thinking: accum.reasoningByBlock.get(idx) ?? "",
           signature: "",
         } as AnthropicThinkingBlock);
+        continue;
       }
-      (final as { content: AnthropicMessage["content"] }).content = cleanedContent;
-      void textIndex;
+      const tc = [...accum.toolCalls.values()].find((c) => c.blockIndex === idx);
+      if (tc) {
+        let parsed: unknown = {};
+        try {
+          parsed = tc.argsBuffer ? JSON.parse(tc.argsBuffer) : (tc.input ?? {});
+        } catch {
+          parsed = tc.input ?? {};
+        }
+        content.push({
+          type: "tool_use",
+          id: tc.callId,
+          name: tc.name,
+          input: parsed,
+        } as AnthropicToolUseBlock);
+        continue;
+      }
+      if (accum.textByBlock.has(idx)) {
+        const text = accum.textByBlock.get(idx) ?? "";
+        if (text.length > 0) {
+          content.push({
+            type: "text",
+            text,
+            citations: null,
+          } as AnthropicTextBlock);
+        }
+      }
     }
 
-    const stopReason = mapFinishReason(final.stop_reason);
-    const usage = toUsageStats(final.usage);
-    ctx.emit({ type: "message-end", stopReason, usage });
-
-    const messageContent = anthropicContentToContentBlocks(final.content);
-    ctx.emit({
+    const fallbackModel = this.defaultModel ?? this.target.modelId;
+    return {
+      id: state.id || `msg_anthropic`,
       type: "message",
-      message: {
-        role: "assistant",
-        content: messageContent,
-        model: final.model,
+      role: "assistant",
+      model: modelSeen ?? fallbackModel,
+      content,
+      stop_reason: mapBackStopReason(accum.stopReason),
+      stop_sequence: state.stopSequence,
+      usage: {
+        input_tokens: accum.usage.inputTokens,
+        output_tokens: accum.usage.outputTokens,
+        cache_read_input_tokens: accum.usage.cachedInputTokens ?? null,
+        cache_creation_input_tokens: null,
       },
-      stopReason,
-      usage,
-    });
+    } as AnthropicMessage;
+  }
 
-    // Reference unused-but-intentional bookkeeping so the
-    // pre-commit lint pass (unused-vars) stays clean.
-    void startedToolBlocks;
-    void startedReasoningBlocks;
-
-    return final;
+  protected override adapterTransforms(): readonly DeltaTransform[] {
+    return this.parseThinkTags ? [thinkTagTransform()] : [];
   }
 
   protected normalizeRaw(raw: AnthropicMessage): LanguageModelExecutionResult {
     return normalizeImpl({ targetOutput: raw, target: this.target });
   }
 
+  /**
+   * Non-streaming + tag routing: streaming path's transforms didn't
+   * run, so extract tags from the message's text blocks here. Mirrors
+   * the OpenAI executor's postProcessForNormalize.
+   */
   protected override postProcessForNormalize(raw: AnthropicMessage): AnthropicMessage {
-    const router = buildTagRouter({
-      parseThinkTags: this.parseThinkTags,
-      customBlocks: this.customBlocks,
-    });
-    return router ? (applyTagRouterToMessage(raw, router) as AnthropicMessage) : raw;
+    if (!this.parseThinkTags && !this.customBlocks) return raw;
+    if (!Array.isArray(raw.content)) return raw;
+    const newContent: AnthropicMessage["content"] = [];
+    let reasoningCarry = "";
+    for (const block of raw.content) {
+      if (block.type === "text") {
+        const cleaned = applyTagsToText(block.text, this.parseThinkTags, this.customBlocks);
+        if (cleaned) {
+          reasoningCarry += cleaned.reasoning;
+          if (cleaned.text.length > 0) {
+            newContent.push({
+              type: "text",
+              text: cleaned.text,
+              citations: (block as AnthropicTextBlock).citations ?? null,
+            } as AnthropicTextBlock);
+          }
+        } else {
+          newContent.push(block);
+        }
+      } else {
+        newContent.push(block);
+      }
+    }
+    if (reasoningCarry.length > 0) {
+      newContent.unshift({
+        type: "thinking",
+        thinking: reasoningCarry,
+        signature: "",
+      } as AnthropicThinkingBlock);
+    }
+    return { ...raw, content: newContent } as AnthropicMessage;
   }
+}
+
+/**
+ * Map our canonical stop reasons back to Anthropic's enum for the
+ * synthesized AnthropicMessage. The forward mapping (anthropic →
+ * canonical) lives in `mapFinishReason`.
+ */
+function mapBackStopReason(reason: LanguageModelStopReason): AnthropicMessage["stop_reason"] {
+  switch (reason) {
+    case "end":
+      return "end_turn";
+    case "max_tokens":
+      return "max_tokens";
+    case "tool_use":
+      return "tool_use";
+    case "stop_sequence":
+      return "stop_sequence";
+    default:
+      return "end_turn";
+  }
+}
+
+/**
+ * Reuse the OpenAI executor's tag-extraction primitive for the
+ * non-streaming post-process path. Streaming uses the
+ * `adapterTransforms` + `customBlocks` pipeline.
+ */
+function applyTagsToText(
+  text: string,
+  parseThinkTags: boolean,
+  customBlocks: Readonly<Record<string, CustomBlockDefinition>> | undefined,
+): { text: string; reasoning: string } | null {
+  const handlers: Record<string, StreamTagHandler> = {};
+  const reasoningTags = new Set<string>();
+  if (parseThinkTags) {
+    handlers["think"] = {};
+    reasoningTags.add("think");
+  }
+  if (customBlocks) {
+    for (const [key, def] of Object.entries(customBlocks)) {
+      const tagName = def.tag ?? key;
+      const h: StreamTagHandler = {};
+      if (def.onStart) h.onStart = def.onStart;
+      if (def.onContent) h.onContent = def.onContent;
+      if (def.onSelfClosing) h.onSelfClosing = def.onSelfClosing;
+      handlers[tagName] = h;
+    }
+  }
+  if (Object.keys(handlers).length === 0) return null;
+  const parser = new StreamTagParser({ tags: handlers });
+  const events = [...parser.process(text), ...parser.flush()];
+  let cleanText = "";
+  let reasoning = "";
+  for (const ev of events) {
+    if (ev.type === "text") cleanText += ev.content;
+    else if (ev.type === "block" && reasoningTags.has(ev.tag)) reasoning += ev.content;
+  }
+  return { text: cleanText, reasoning };
 }
 
 // ============================================================================
@@ -577,93 +617,6 @@ function buildClientOptions(opts: AnthropicExecutorOptions): ClientOptions {
     return { ...base, ...opts.clientOptions };
   }
   return base;
-}
-
-// ============================================================================
-// Tag routing — shared StreamTagParser machinery (G7 + G12)
-// ============================================================================
-
-type TagMode = "reasoning" | "custom-block";
-
-interface TagRouter {
-  readonly parser: StreamTagParser;
-  modeFor(tag: string): TagMode;
-}
-
-function buildTagRouter(opts: {
-  parseThinkTags: boolean;
-  customBlocks?: Readonly<Record<string, CustomBlockDefinition>>;
-}): TagRouter | null {
-  const tagModes = new Map<string, TagMode>();
-  const handlers: Record<string, StreamTagHandler> = {};
-
-  if (opts.parseThinkTags) {
-    tagModes.set("think", "reasoning");
-    handlers["think"] = {};
-  }
-  if (opts.customBlocks) {
-    for (const [key, def] of Object.entries(opts.customBlocks)) {
-      const tagName = def.tag ?? key;
-      tagModes.set(tagName, "custom-block");
-      const h: StreamTagHandler = {};
-      if (def.onStart) h.onStart = def.onStart;
-      if (def.onContent) h.onContent = def.onContent;
-      if (def.onSelfClosing) h.onSelfClosing = def.onSelfClosing;
-      handlers[tagName] = h;
-    }
-  }
-  if (tagModes.size === 0) return null;
-  const parser = new StreamTagParser({ tags: handlers });
-  return {
-    parser,
-    modeFor(tag) {
-      return tagModes.get(tag) ?? "custom-block";
-    },
-  };
-}
-
-/**
- * Post-process a non-streaming Anthropic Message through the tag router.
- * Each text block's text is replaced with the cleaned version; any
- * reasoning extracted from `<think>` tags is prepended as a synthetic
- * thinking block.
- */
-function applyTagRouterToMessage(raw: unknown, router: TagRouter): unknown {
-  if (!raw || typeof raw !== "object") return raw;
-  const r = raw as AnthropicMessage;
-  if (!Array.isArray(r.content)) return raw;
-  const newContent: AnthropicMessage["content"] = [];
-  let reasoning = "";
-  for (const block of r.content) {
-    if (block.type === "text") {
-      let cleaned = "";
-      const events = [...router.parser.process(block.text), ...router.parser.flush()];
-      for (const ev of events) {
-        if (ev.type === "text") cleaned += ev.content;
-        else if (ev.type === "block-delta") {
-          if (router.modeFor(ev.tag) === "reasoning") reasoning += ev.delta;
-        }
-      }
-      if (cleaned.length > 0) {
-        newContent.push({
-          type: "text",
-          text: cleaned,
-          citations: block.citations ?? null,
-        } as AnthropicTextBlock);
-      }
-    } else {
-      newContent.push(block);
-    }
-  }
-  if (reasoning.length > 0) {
-    newContent.unshift({
-      type: "thinking",
-      thinking: reasoning,
-      signature: "",
-    } as AnthropicThinkingBlock);
-  }
-  (r as { content: AnthropicMessage["content"] }).content = newContent;
-  return raw;
 }
 
 // ============================================================================
@@ -1132,152 +1085,6 @@ function toUsageStats(usage: Usage | undefined | null): UsageStats {
       ? { cacheCreationTokens: usage.cache_creation_input_tokens }
       : {}),
   };
-}
-
-// ============================================================================
-// Streaming accumulator
-// ============================================================================
-
-interface AccumBlockState {
-  type: "text" | "thinking" | "tool_use" | "redacted_thinking";
-  callId?: string;
-  name?: string;
-  textBuffer: string;
-  jsonBuffer: string;
-  data?: string;
-}
-
-class AnthropicStreamAccumulator {
-  private id = "";
-  private model = "";
-  private blocks = new Map<number, AccumBlockState>();
-  private stopReason: AnthropicMessage["stop_reason"] = null;
-  private stopSequence: string | null = null;
-  private inputTokens = 0;
-  private outputTokens = 0;
-  private cacheRead: number | null = null;
-  private cacheCreation: number | null = null;
-
-  push(event: RawMessageStreamEvent): void {
-    switch (event.type) {
-      case "message_start": {
-        if (event.message.id) this.id = event.message.id;
-        if (event.message.model) this.model = event.message.model;
-        const u = event.message.usage;
-        if (u) {
-          if (u.input_tokens != null) this.inputTokens = u.input_tokens;
-          if (u.output_tokens != null) this.outputTokens = u.output_tokens;
-          if (u.cache_read_input_tokens != null) this.cacheRead = u.cache_read_input_tokens;
-          if (u.cache_creation_input_tokens != null)
-            this.cacheCreation = u.cache_creation_input_tokens;
-        }
-        break;
-      }
-      case "content_block_start": {
-        const b = event.content_block;
-        if (b.type === "text") {
-          this.blocks.set(event.index, {
-            type: "text",
-            textBuffer: "",
-            jsonBuffer: "",
-          });
-        } else if (b.type === "tool_use") {
-          this.blocks.set(event.index, {
-            type: "tool_use",
-            callId: b.id,
-            name: b.name,
-            textBuffer: "",
-            jsonBuffer: "",
-          });
-        } else if (b.type === "thinking") {
-          this.blocks.set(event.index, {
-            type: "thinking",
-            textBuffer: "",
-            jsonBuffer: "",
-          });
-        } else if (b.type === "redacted_thinking") {
-          this.blocks.set(event.index, {
-            type: "redacted_thinking",
-            textBuffer: "",
-            jsonBuffer: "",
-            data: (b as RedactedThinkingBlock).data,
-          });
-        }
-        break;
-      }
-      case "content_block_delta": {
-        const s = this.blocks.get(event.index);
-        if (!s) break;
-        const d = event.delta;
-        if (d.type === "text_delta") s.textBuffer += d.text;
-        else if (d.type === "input_json_delta") s.jsonBuffer += d.partial_json;
-        else if (d.type === "thinking_delta") s.textBuffer += d.thinking;
-        break;
-      }
-      case "message_delta": {
-        if (event.delta.stop_reason) this.stopReason = event.delta.stop_reason;
-        if (event.delta.stop_sequence != null) this.stopSequence = event.delta.stop_sequence;
-        if (event.usage?.output_tokens != null) this.outputTokens = event.usage.output_tokens;
-        break;
-      }
-      default:
-        break;
-    }
-  }
-
-  toMessage(modelHint: string): AnthropicMessage {
-    const content: AnthropicMessage["content"] = [];
-    for (const [, s] of [...this.blocks.entries()].sort((a, b) => a[0] - b[0])) {
-      if (s.type === "text") {
-        if (s.textBuffer.length > 0) {
-          content.push({
-            type: "text",
-            text: s.textBuffer,
-            citations: null,
-          } as AnthropicTextBlock);
-        }
-      } else if (s.type === "tool_use") {
-        let parsed: unknown = {};
-        try {
-          parsed = s.jsonBuffer ? JSON.parse(s.jsonBuffer) : {};
-        } catch {
-          parsed = {};
-        }
-        content.push({
-          type: "tool_use",
-          id: s.callId ?? "",
-          name: s.name ?? "",
-          input: parsed,
-        } as AnthropicToolUseBlock);
-      } else if (s.type === "thinking") {
-        content.push({
-          type: "thinking",
-          thinking: s.textBuffer,
-          signature: "",
-        } as AnthropicThinkingBlock);
-      } else if (s.type === "redacted_thinking") {
-        content.push({
-          type: "redacted_thinking",
-          data: s.data ?? "",
-        } as RedactedThinkingBlock);
-      }
-    }
-    return {
-      id: this.id || `msg_${Date.now()}`,
-      type: "message",
-      role: "assistant",
-      model: this.model || modelHint,
-      content,
-      stop_reason: this.stopReason ?? "end_turn",
-      stop_sequence: this.stopSequence,
-      usage: {
-        input_tokens: this.inputTokens,
-        output_tokens: this.outputTokens,
-        cache_read_input_tokens: this.cacheRead,
-        cache_creation_input_tokens: this.cacheCreation,
-      },
-    } as AnthropicMessage;
-  }
 }
 
 // ============================================================================

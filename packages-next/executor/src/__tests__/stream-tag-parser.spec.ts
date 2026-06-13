@@ -222,7 +222,7 @@ describe("StreamTagParser — flush behavior", () => {
     const p = new StreamTagParser({ tags: { citation: {} } });
     p.process("<citation>open");
     const flushed = p.flush();
-    expect(flushed.find((e) => e.type === "block")).toBeDefined();
+    expect(flushed.find((e: StreamTagEvent) => e.type === "block")).toBeDefined();
   });
 });
 

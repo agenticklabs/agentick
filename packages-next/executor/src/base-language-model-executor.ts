@@ -36,7 +36,7 @@
  * @see docs/proposals/v2/blueprint/06-executor-harness.md
  */
 
-import { Effect } from "effect";
+import { Chunk, Effect, Exit, Fiber, Option, Queue, Stream } from "effect";
 
 import { BaseHarness, runHarnessProtocol, ulid } from "@agentick/runtime-next";
 import type {
@@ -65,53 +65,50 @@ import type {
 } from "@agentick/spec-next";
 
 import { defaultProject } from "./canonical-projection.js";
+import { composeTransforms, identityTransform, type DeltaTransform } from "./delta-transform.js";
+import { ExecutorLifecycle, type ExecutorInFlightEntry } from "./executor-lifecycle.js";
+import { StreamAccumulator } from "./stream-accumulator.js";
+import {
+  customBlockTransform,
+  thinkTagTransform,
+  type CustomBlockDefinition,
+} from "./tag-transforms.js";
 
 // Re-export so consumers of the base module can grab the canonical
-// projection without a second import line.
+// projection + pipeline primitives without a second import line.
 export { defaultProject } from "./canonical-projection.js";
-
-// ============================================================================
-// Stream context — what subclasses see during `drainStream`
-// ============================================================================
-
-/**
- * Context passed to `drainStream`. The subclass owns the chunk loop
- * (provider APIs differ too much for a single per-chunk hook); the
- * base owns delta routing.
- */
-export interface StreamContext {
-  /**
-   * Merged abort signal. Subclasses pass this to their provider SDK so
-   * abort() calls propagate.
-   */
-  readonly signal: AbortSignal;
-  /**
-   * Emit an `AdapterDelta`. The base routes it to:
-   *   1. The bus (via `emitDeltaLazy`) for observability subscribers.
-   *   2. The active `executeStream` iterator (when present) so consumers
-   *      iterating the stream get deltas as they arrive.
-   * Fire-and-forget; never throws.
-   */
-  readonly emit: (delta: AdapterDelta) => void;
-  /** The execution id (always populated). */
-  readonly executionId: string;
-}
+export { composeTransforms, identityTransform, type DeltaTransform } from "./delta-transform.js";
+export { StreamAccumulator, type AccumToolCall } from "./stream-accumulator.js";
+export {
+  customBlockTransform,
+  thinkTagTransform,
+  type CustomBlockDefinition,
+} from "./tag-transforms.js";
 
 // ============================================================================
 // Internals
 // ============================================================================
 
-interface InFlightEntry {
-  readonly executionId: string;
-  abort?: AbortController;
-  abortReason?: string;
-}
+/**
+ * Bounded delta-queue capacity for `executeStream`. When the iterator
+ * consumer lags, `Queue.offer` blocks at this depth, which propagates
+ * backpressure up the Effect.Stream and through to the provider SDK's
+ * async iterator (pulling slower in turn). 64 deltas ≈ a few hundred
+ * tokens of upstream slack — enough to absorb GC pauses without
+ * causing memory growth.
+ */
+const STREAM_QUEUE_CAPACITY = 64;
+
+// InFlightEntry shape lives in `executor-lifecycle.ts` as
+// `ExecutorInFlightEntry`. Re-aliased here for backward-compatibility
+// with internal references — same shape, single source of truth.
+type InFlightEntry = ExecutorInFlightEntry;
 
 // ============================================================================
 // BaseLanguageModelExecutor
 // ============================================================================
 
-export abstract class BaseLanguageModelExecutor<TRaw>
+export abstract class BaseLanguageModelExecutor<TRaw, TChunk = unknown>
   extends BaseHarness<"executor">
   implements LanguageModelExecutor
 {
@@ -134,8 +131,14 @@ export abstract class BaseLanguageModelExecutor<TRaw>
    */
   protected readonly supportsRunStreaming: boolean = true;
 
-  private readonly inFlight = new Map<string, InFlightEntry>();
-  private readonly aborted = new Set<string>();
+  private readonly lifecycle = new ExecutorLifecycle();
+  // Backward-compat aliases for refs that haven't been renamed yet.
+  private get inFlight(): Map<string, InFlightEntry> {
+    return this.lifecycle.inFlight;
+  }
+  private get aborted(): Set<string> {
+    return this.lifecycle.aborted;
+  }
 
   constructor(scopeId: string, journal: OperationJournal, bus: EventBus, inbox: MessageInbox) {
     super("executor", scopeId, journal, bus, inbox);
@@ -165,20 +168,59 @@ export abstract class BaseLanguageModelExecutor<TRaw>
   protected abstract callProvider(params: unknown, signal: AbortSignal | undefined): Promise<TRaw>;
 
   /**
-   * Streaming provider call. Subclasses:
-   *   1. Open the provider stream (passing `ctx.signal`).
-   *   2. Iterate chunks.
-   *   3. Per chunk, map to `AdapterDelta`(s) and call `ctx.emit(...)` for each.
-   *   4. Assemble the final raw response and return it.
+   * Open the provider's streaming response. Returns an async-iterable
+   * of provider-specific chunks. The base owns the loop; subclass just
+   * opens the stream.
    *
-   * The base owns the queue/resolver/bus-emit plumbing; the subclass
-   * owns the loop + per-chunk → delta translation (provider APIs vary
-   * enough that a single per-chunk hook doesn't fit).
+   * Subclasses propagate `signal` to the SDK so abort works. Throws on
+   * provider error; base translates via `mapProviderError`.
    *
    * Override `supportsRunStreaming = false` if your provider has no
-   * streaming surface.
+   * streaming surface (and this hook will never be called).
    */
-  protected abstract drainStream(params: unknown, ctx: StreamContext): Promise<TRaw>;
+  protected abstract openStream(
+    params: unknown,
+    signal: AbortSignal,
+  ): Promise<AsyncIterable<TChunk>> | AsyncIterable<TChunk>;
+
+  /**
+   * Translate one provider chunk into zero or more `AdapterDelta`s.
+   *
+   * The base feeds every delta through the transform pipeline
+   * (`adapterTransforms` → `customBlocks` → ...) and then routes the
+   * final deltas to:
+   *   1. The `StreamAccumulator` (the base's stream state)
+   *   2. The bus (via `emitDeltaLazy`) for observability
+   *   3. The active `executeStream` iterator (when present)
+   *
+   * Pure with respect to the accumulator — subclasses do NOT mutate
+   * `accum`; the base updates it from the emitted deltas. The
+   * accumulator is passed for read-only context (e.g. "what's the
+   * current text block index?" via `accum.highWaterBlockIndex`).
+   *
+   * Most providers map one chunk to multiple deltas (content-start +
+   * content-delta + tool-call-delta + ...); return them in order.
+   */
+  protected abstract mapChunk(chunk: TChunk, accum: StreamAccumulator): readonly AdapterDelta[];
+
+  /**
+   * Synthesize the provider's raw response shape from the final
+   * accumulator state. Called once at the end of `drainStream`.
+   *
+   * Examples:
+   *   - OpenAI → `ChatCompletion` (with `choices[0].message.content` =
+   *     `accum.totalText()`, `tool_calls` from `accum.toolCalls`)
+   *   - Anthropic → `Message` (with `content` array assembled from text
+   *     + tool_use blocks)
+   *   - Google → `GenerateContentResponse` (with `candidates[0].content.parts`
+   *     reassembled from text + functionCall parts)
+   *
+   * The `modelSeen` argument is the model id the provider reported
+   * during the stream (when chunk-carried; e.g. OpenAI's `chunk.model`,
+   * Google's `chunk.modelVersion`). Falls back to whatever the
+   * subclass knows.
+   */
+  protected abstract reconstructRaw(accum: StreamAccumulator, modelSeen: string | undefined): TRaw;
 
   /**
    * Convert raw provider response → canonical
@@ -205,11 +247,38 @@ export abstract class BaseLanguageModelExecutor<TRaw>
   }
 
   /**
+   * Provider-internal `DeltaTransform`s applied to chunk-mapped deltas
+   * BEFORE the customBlocks pipeline. Use this for provider-shape
+   * cleanup (e.g. `thinkTagTransform()` for OpenAI-compatible servers
+   * that emit `<think>` tags inline). Default: empty.
+   *
+   * Order matters: chunk → mapChunk → adapterTransforms[0] →
+   * adapterTransforms[1] → ... → customBlocks → emit + accumulate.
+   */
+  protected adapterTransforms(): readonly DeltaTransform[] {
+    return [];
+  }
+
+  /**
+   * Declarative adopter-facing custom-block extraction. The base
+   * compiles this map into a `customBlockTransform` and runs it after
+   * `adapterTransforms`. Text outside the declared tags flows through
+   * as `content-delta`; tag content becomes `custom-block-*` deltas.
+   *
+   * Set as a class field (or via constructor option threaded to a
+   * protected setter). Default: undefined (no custom-block extraction).
+   */
+  protected readonly customBlocks: Readonly<Record<string, CustomBlockDefinition>> | undefined =
+    undefined;
+
+  /**
    * Mutate the raw response between `execute` and `normalize` in the
-   * `run` codepath. Used by OpenAI/Anthropic/Google for the tag-router
-   * (`parseThinkTags` / `customBlocks`) which rewrites the message
-   * content before normalization extracts reasoning blocks. Default:
-   * identity.
+   * `run` codepath. Default: identity. Most providers don't need this
+   * anymore — the streaming pipeline (mapChunk + transforms +
+   * reconstructRaw) already produces the cleaned text. Override only
+   * when the non-streaming path also needs post-processing (e.g.
+   * applyTagRouterToChatCompletion when streamByDefault is false but
+   * tag routing should still apply).
    */
   protected postProcessForNormalize(raw: TRaw): TRaw {
     return raw;
@@ -254,6 +323,90 @@ export abstract class BaseLanguageModelExecutor<TRaw>
       };
     }
     return { _tag: "StreamFailed", cause };
+  }
+
+  /**
+   * Emit gap-filling deltas at end-of-stream: close any blocks the
+   * provider didn't close inline, emit `tool-call-end` + `tool-call`
+   * summaries for any tool calls without an `input` set, and emit
+   * `message-end` + `message` if not yet observed.
+   *
+   * Providers whose chunk vocabulary includes explicit `content-end` /
+   * `tool-call-end` / `message-end` events (Anthropic) emit them via
+   * `mapChunk`; the accumulator records them and this method becomes a
+   * no-op for those slots. Providers without explicit closes (OpenAI,
+   * AI SDK text stream) get the closes synthesized here from accumulator
+   * state.
+   *
+   * Override only if your provider needs a different terminal shape.
+   */
+  protected finalizeStream(accum: StreamAccumulator): readonly AdapterDelta[] {
+    const out: AdapterDelta[] = [];
+
+    // 1. Close any blocks still open + emit per-block summary.
+    const openSorted = Array.from(accum.openBlocks.entries()).sort((a, b) => a[0] - b[0]);
+    for (const [blockIndex, kind] of openSorted) {
+      if (kind === "text") {
+        out.push({ type: "content-end", blockIndex });
+        const text = accum.textByBlock.get(blockIndex) ?? "";
+        out.push({
+          type: "content",
+          blockIndex,
+          content: { type: "text", text },
+        });
+      } else {
+        out.push({ type: "reasoning-end", blockIndex });
+        const reasoning = accum.reasoningByBlock.get(blockIndex) ?? "";
+        out.push({ type: "reasoning", blockIndex, reasoning });
+      }
+    }
+
+    // 2. Close any tool calls without a tool-call summary yet (OpenAI/
+    //    AI SDK don't emit explicit tool-call-end events).
+    for (const entry of accum.toolCalls.values()) {
+      if (entry.input !== undefined) continue;
+      let parsed: Readonly<Record<string, unknown>> = {};
+      try {
+        parsed = JSON.parse(entry.argsBuffer || "{}") as Readonly<Record<string, unknown>>;
+      } catch {
+        parsed = {};
+      }
+      out.push({ type: "tool-call-end", callId: entry.callId });
+      const tc: AdapterDelta = {
+        type: "tool-call",
+        callId: entry.callId,
+        name: entry.name,
+        input: parsed,
+        ...(entry.providerMetadata
+          ? ({ providerMetadata: entry.providerMetadata } as Record<string, unknown>)
+          : {}),
+      } as AdapterDelta;
+      out.push(tc);
+    }
+
+    // 3. message-end (if not already observed in-stream).
+    if (!accum.messageEnded) {
+      out.push({
+        type: "message-end",
+        stopReason: accum.stopReason,
+        usage: accum.usage,
+      });
+    }
+
+    // 4. message summary — always emit (single canonical assistant
+    //    message synthesized from accumulator state).
+    out.push({
+      type: "message",
+      message: {
+        role: "assistant",
+        content: accum.toContentBlocks(),
+        ...(accum.modelSeen ? { model: accum.modelSeen } : {}),
+      },
+      stopReason: accum.stopReason,
+      usage: accum.usage,
+    });
+
+    return out;
   }
 
   /**
@@ -337,90 +490,121 @@ export abstract class BaseLanguageModelExecutor<TRaw>
     }
 
     const executionId = input.scope?.executionId ?? `exec:${ulid()}`;
-    const queue: AdapterDelta[] = [];
-    const resolvers: Array<(r: IteratorResult<AdapterDelta>) => void> = [];
-    let done = false;
-    let resultResolve!: (v: TRaw) => void;
-    let resultReject!: (e: unknown) => void;
-    const resultPromise = new Promise<TRaw>((res, rej) => {
-      resultResolve = res;
-      resultReject = rej;
-    });
-
-    const controller = new AbortController();
-    if (input.signal) {
-      if (input.signal.aborted) controller.abort(input.signal.reason);
-      else
-        input.signal.addEventListener("abort", () => controller.abort(input.signal!.reason), {
-          once: true,
-        });
-    }
-
-    const executeInput: ExecuteInput<LanguageModelInput> = {
-      ...input,
-      signal: controller.signal,
-    };
     const streamOp: Operation<ExecuteInput<LanguageModelInput>, unknown> = {
       opId: `executor:execute:${executionId}:${ulid()}`,
       surface: "executor",
       name: "executor:command:execute",
-      scope: executeInput.scope ?? { executionId },
-      input: executeInput,
+      scope: input.scope ?? { executionId },
+      input,
     };
 
-    const sink = (delta: AdapterDelta): void => {
-      if (done) return;
-      const r = resolvers.shift();
-      if (r) r({ value: delta, done: false });
-      else queue.push(delta);
-    };
+    // Bounded delta queue — provides real backpressure: when the
+    // iterator consumer lags, `Queue.offer` (inside executeBody's
+    // sink-tap) blocks the upstream Stream, which pauses
+    // `Stream.fromAsyncIterable`'s pull from the provider SDK.
+    // None = stream completion sentinel.
+    const harness = this;
+    type QItem = Option.Option<AdapterDelta>;
 
-    const completeIteration = (): void => {
-      done = true;
-      while (resolvers.length > 0) {
-        resolvers.shift()!({ value: undefined as unknown as AdapterDelta, done: true });
-      }
-    };
+    const program = Effect.gen(function* () {
+      const queue = yield* Queue.bounded<QItem>(STREAM_QUEUE_CAPACITY);
 
-    // Drive on a detached promise — both the iterator and `.result`
-    // are backed by it.
-    void runHarnessProtocol(
-      this.runOperation(streamOp, (i) =>
-        this.executeBody(i, executionId, streamOp as Operation<unknown, unknown>, sink),
-      ),
-    )
-      .then((raw) => {
-        resultResolve(raw as TRaw);
-        completeIteration();
-      })
-      .catch((err) => {
-        resultReject(err);
-        done = true;
-        while (resolvers.length > 0) {
-          resolvers.shift()!({ value: undefined as unknown as AdapterDelta, done: true });
-        }
-      });
-    void executeInput; // (the merged-signal copy is what the inner runOperation uses)
+      // Run executeBody to completion inside this fiber. The sink
+      // injects deltas into the queue with backpressure; when the
+      // stream completes we enqueue None as the iterator's terminator.
+      const sink = (delta: AdapterDelta): Effect.Effect<void> =>
+        Queue.offer(queue, Option.some(delta)).pipe(Effect.asVoid);
+
+      const runEffect = harness
+        .runOperation(streamOp, (i) =>
+          harness.executeBody(i, executionId, streamOp as Operation<unknown, unknown>, sink),
+        )
+        .pipe(
+          // Whatever happens (success, error, interrupt), the consumer
+          // gets a terminating None so its iterator drains cleanly.
+          Effect.ensuring(Queue.offer(queue, Option.none<AdapterDelta>())),
+        ) as Effect.Effect<TRaw, unknown>;
+
+      // forkDaemon — the streaming fiber must outlive this setup
+      // Effect's scope; iterator.return() / abort() interrupt it
+      // explicitly via the returned handle.
+      const fiber = yield* Effect.forkDaemon(runEffect);
+      return { queue, fiber };
+    });
+
+    // Forking via runPromise so the iterator and `.result` Promise can
+    // both observe the same fiber outcome.
+    let resolveQueueFiber!: (v: {
+      queue: Queue.Queue<QItem>;
+      fiber: Fiber.RuntimeFiber<TRaw, unknown>;
+    }) => void;
+    let rejectQueueFiber!: (e: unknown) => void;
+    const ready = new Promise<{
+      queue: Queue.Queue<QItem>;
+      fiber: Fiber.RuntimeFiber<TRaw, unknown>;
+    }>((res, rej) => {
+      resolveQueueFiber = res;
+      rejectQueueFiber = rej;
+    });
+
+    void Effect.runPromise(program).then(
+      (qf) =>
+        resolveQueueFiber(
+          qf as { queue: Queue.Queue<QItem>; fiber: Fiber.RuntimeFiber<TRaw, unknown> },
+        ),
+      rejectQueueFiber,
+    );
+
+    const resultPromise: Promise<TRaw> = ready.then(({ fiber }) =>
+      Effect.runPromise(Fiber.await(fiber)).then((exit) => {
+        if (Exit.isSuccess(exit)) return exit.value;
+        throw exit.cause;
+      }),
+    );
+    // Silence Node's unhandled-rejection — the caller may not await .result.
+    resultPromise.catch(() => {});
+
+    // Track the fiber so `abort()` can interrupt it (separate from
+    // executeBody's controller — interrupt the fiber, then let
+    // withExternalAbort surface ProviderAborted).
+    void ready.then(({ fiber }) => {
+      const entry = this.inFlight.get(executionId);
+      if (entry) entry.fiber = fiber as Fiber.RuntimeFiber<unknown, unknown>;
+    });
 
     return {
       result: resultPromise,
       abort: (reason) => {
-        controller.abort(reason ?? "aborted");
+        this.aborted.add(executionId);
+        const r = reason ?? "aborted";
+        void ready.then(({ fiber }) => {
+          const entry = this.inFlight.get(executionId);
+          if (entry) {
+            entry.abortReason = r;
+            entry.abort?.abort(r);
+          }
+          void Effect.runPromise(Fiber.interrupt(fiber));
+        });
       },
       [Symbol.asyncIterator]() {
         return {
-          next: (): Promise<IteratorResult<AdapterDelta>> => {
-            if (queue.length > 0) {
-              return Promise.resolve({ value: queue.shift()!, done: false });
+          next: async (): Promise<IteratorResult<AdapterDelta>> => {
+            const { queue } = await ready;
+            const item = await Effect.runPromise(Queue.take(queue));
+            if (Option.isNone(item)) {
+              return { value: undefined as unknown as AdapterDelta, done: true };
             }
-            if (done) {
-              return Promise.resolve({ value: undefined as unknown as AdapterDelta, done: true });
-            }
-            return new Promise((resolve) => resolvers.push(resolve));
+            return { value: item.value, done: false };
           },
-          return: (): Promise<IteratorResult<AdapterDelta>> => {
-            completeIteration();
-            return Promise.resolve({ value: undefined as unknown as AdapterDelta, done: true });
+          return: async (): Promise<IteratorResult<AdapterDelta>> => {
+            try {
+              const { fiber, queue } = await ready;
+              await Effect.runPromise(Fiber.interrupt(fiber));
+              await Effect.runPromise(Queue.shutdown(queue));
+            } catch {
+              // ignore — caller is closing iteration
+            }
+            return { value: undefined as unknown as AdapterDelta, done: true };
           },
         };
       },
@@ -467,14 +651,7 @@ export abstract class BaseLanguageModelExecutor<TRaw>
 
   abort(input: AbortExecutorInput): Promise<void> {
     return runHarnessProtocol(
-      Effect.sync(() => {
-        const entry = this.inFlight.get(input.executionId);
-        if (entry) {
-          entry.abortReason = input.reason ?? "aborted";
-          entry.abort?.abort(input.reason ?? "aborted");
-        }
-        this.aborted.add(input.executionId);
-      }),
+      Effect.sync(() => this.lifecycle.abortExecution(input.executionId, input.reason)),
     );
   }
 
@@ -486,7 +663,7 @@ export abstract class BaseLanguageModelExecutor<TRaw>
     input: ExecuteInput<LanguageModelInput>,
     executionId: string,
     op: Operation<unknown, unknown>,
-    sink: ((delta: AdapterDelta) => void) | null,
+    sink: ((delta: AdapterDelta) => Effect.Effect<void>) | null,
   ): Effect.Effect<TRaw, ExecuteError, never> {
     return Effect.gen(this, function* () {
       if (this.aborted.has(executionId)) {
@@ -496,13 +673,15 @@ export abstract class BaseLanguageModelExecutor<TRaw>
         });
       }
 
+      // External-abort bridge: the caller's signal + abort() API both
+      // feed this controller; Effect's fiber-interrupt path is layered
+      // on top via Effect.tryPromise's built-in signal arg.
       const controller = new AbortController();
       const entry: InFlightEntry = { executionId, abort: controller };
       this.inFlight.set(executionId, entry);
 
       try {
         const params = this.buildParams(input.targetInput, input.target);
-        const signal = mergeSignals(input.signal, controller.signal);
         // Force streaming when called from executeStream (sink non-null);
         // execute() opts in via streamByDefault. Target capabilities can
         // veto streaming for execute() but not for executeStream() — the
@@ -514,37 +693,166 @@ export abstract class BaseLanguageModelExecutor<TRaw>
             (input.target.capabilities?.supportsStreaming ?? true));
 
         if (!wantStream) {
+          // Non-streaming: Effect.tryPromise's `signal` arg auto-aborts
+          // on fiber interrupt; merge with caller's external signal.
           return yield* Effect.tryPromise<TRaw, ExecuteError>({
-            try: () => this.callProvider(params, signal),
+            try: (fiberSignal) =>
+              this.callProvider(params, mergeSignals(input.signal, fiberSignal)),
             catch: (cause): ExecuteError => this.mapProviderError(cause),
-          });
+          }).pipe(
+            // The external controller (abort() API) feeds the SDK via
+            // the merged signal too — wire it through `Effect.race`
+            // with a watcher that fails on external abort.
+            this.withExternalAbort(controller, input.signal),
+          );
         }
 
-        // Streaming path — base owns the emit construction (bus +
-        // iterator), subclass owns the chunk loop.
-        const harness = this;
-        const emit = (delta: AdapterDelta): void => {
-          // Bus side — fire-and-forget; ignore subscriber-count drops.
-          void Effect.runPromise(
-            harness.emitDeltaLazy(op, () => delta).pipe(Effect.catchAll(() => Effect.void)),
-          );
-          // Iterator side — only when executeStream is the entry point.
-          if (sink) sink(delta);
-        };
+        // Streaming path — Effect.Stream owns the entire pipeline:
+        //   openStream → mapChunk → transforms → accum + bus + sink
+        // All side-effects run inside the fiber's scope; interrupting
+        // the fiber tears down the iterator, the bus tap, and the
+        // bounded queue together.
+        const accum = new StreamAccumulator();
+        const transforms: DeltaTransform[] = [...this.adapterTransforms()];
+        if (this.customBlocks) {
+          transforms.push(customBlockTransform(this.customBlocks));
+        }
+        const pipeline = composeTransforms(transforms);
 
-        return yield* Effect.tryPromise<TRaw, ExecuteError>({
-          try: () =>
-            this.drainStream(params, {
-              signal,
-              emit,
-              executionId,
-            }),
-          catch: (cause): ExecuteError => this.mapProviderError(cause),
-        });
+        const harness = this;
+        const externalSignal = input.signal;
+
+        // Build the data stream — pure deltas, no side-effects yet.
+        const chunkStream: Stream.Stream<AdapterDelta, ExecuteError> = Stream.unwrap(
+          Effect.tryPromise<AsyncIterable<TChunk>, ExecuteError>({
+            try: async (fiberSignal) => {
+              const merged = mergeSignals(externalSignal, fiberSignal);
+              // External controller too — abort() API path.
+              const finalSignal = mergeSignals(controller.signal, merged);
+              const iter = await this.openStream(params, finalSignal);
+              return iter;
+            },
+            catch: (cause): ExecuteError => this.mapProviderError(cause),
+          }).pipe(
+            Effect.map((iter) =>
+              Stream.fromAsyncIterable<TChunk, ExecuteError>(iter, (cause) =>
+                this.mapProviderError(cause),
+              ),
+            ),
+          ),
+        ).pipe(
+          Stream.mapConcat((chunk: TChunk) => this.mapChunk(chunk, accum)),
+          Stream.mapConcat((delta: AdapterDelta) => pipeline.process(delta)),
+        );
+
+        const flushStream: Stream.Stream<AdapterDelta, ExecuteError> = Stream.suspend(() =>
+          Stream.fromIterable(pipeline.flush()),
+        );
+        const finalizeStream: Stream.Stream<AdapterDelta, ExecuteError> = Stream.suspend(() =>
+          Stream.fromIterable(this.finalizeStream(accum)),
+        );
+
+        // Synthetic-message-start guard: if the provider's first delta
+        // is already a message-start, pass it through unchanged.
+        // Otherwise prepend a minimal one. This avoids the double-start
+        // problem (provider emits message-start carrying model + base
+        // synthesizes its own without model).
+        let messageStartEmitted = false;
+        const ensureMessageStart = Stream.mapConcat(
+          (delta: AdapterDelta): readonly AdapterDelta[] => {
+            if (messageStartEmitted || delta.type === "message-start") {
+              messageStartEmitted = true;
+              return [delta];
+            }
+            messageStartEmitted = true;
+            return [{ type: "message-start", role: "assistant" }, delta];
+          },
+        );
+
+        // Concatenate: chunks ++ flush ++ finalize. Inject synthetic
+        // message-start lazily via ensureMessageStart so providers can
+        // carry their own (with model) without doubling up. Finalize
+        // runs after everything else (suspend defers the closure until
+        // upstream is drained).
+        const fullStream: Stream.Stream<AdapterDelta, ExecuteError> = Stream.concatAll(
+          Chunk.make(chunkStream, flushStream, finalizeStream),
+        )
+          .pipe(ensureMessageStart)
+          .pipe(
+            // Accumulator update — synchronous, in-fiber.
+            Stream.tap((delta) => Effect.sync(() => accum.apply(delta))),
+            // Bus emission — runs in-fiber so interrupt tears it down.
+            // emitDeltaLazy publishes to a bounded internal bus; ignore
+            // subscriber-count failures so slow subscribers don't kill
+            // the stream.
+            Stream.tap((delta) =>
+              harness.emitDeltaLazy(op, () => delta).pipe(Effect.catchAll(() => Effect.void)),
+            ),
+          );
+
+        // Sink injection — when executeStream is the entry point, tap
+        // the stream into the bounded queue. Queue.offer blocks when
+        // the queue is full → upstream stream pauses → provider stream
+        // paces. This is the real backpressure win over the previous
+        // unbounded array sink.
+        const finalStream: Stream.Stream<AdapterDelta, ExecuteError> = sink
+          ? Stream.tap(fullStream, sink)
+          : fullStream;
+
+        yield* Stream.runDrain(finalStream).pipe(this.withExternalAbort(controller, input.signal));
+        return this.reconstructRaw(accum, accum.modelSeen);
       } finally {
         this.inFlight.delete(executionId);
       }
     });
+  }
+
+  /**
+   * Wire the external abort path (caller signal + `abort()` API) into
+   * the running Effect. Returns a piped Effect that races the inner
+   * computation against an "external abort" watcher; if either signal
+   * fires, the Effect fails with `ProviderAborted`. The race's
+   * loser-side teardown propagates fiber interrupt to the inner
+   * computation, which collapses through `Effect.tryPromise` into the
+   * provider SDK as an AbortSignal abort.
+   */
+  private withExternalAbort(
+    controller: AbortController,
+    callerSignal: AbortSignal | undefined,
+  ): <A>(self: Effect.Effect<A, ExecuteError>) => Effect.Effect<A, ExecuteError> {
+    return <A>(self: Effect.Effect<A, ExecuteError>) =>
+      Effect.race(
+        self,
+        Effect.async<never, ExecuteError>((resume) => {
+          const fire = (reason: unknown): void =>
+            resume(
+              Effect.fail<ExecuteError>({
+                _tag: "ProviderAborted",
+                reason: typeof reason === "string" ? reason : "aborted",
+              }),
+            );
+          if (controller.signal.aborted) {
+            fire(controller.signal.reason);
+            return;
+          }
+          if (callerSignal?.aborted) {
+            fire(callerSignal.reason);
+            return;
+          }
+          const onCtrl = (): void => fire(controller.signal.reason);
+          controller.signal.addEventListener("abort", onCtrl, { once: true });
+          const onCaller = callerSignal ? (): void => fire(callerSignal.reason) : undefined;
+          if (callerSignal && onCaller) {
+            callerSignal.addEventListener("abort", onCaller, { once: true });
+          }
+          return Effect.sync(() => {
+            controller.signal.removeEventListener("abort", onCtrl);
+            if (callerSignal && onCaller) {
+              callerSignal.removeEventListener("abort", onCaller);
+            }
+          });
+        }),
+      );
   }
 
   private runBody(

@@ -63,6 +63,8 @@ import type {
 } from "@agentick/spec-next";
 import { SPEC_VERSION } from "@agentick/spec-next";
 
+import { ExecutorLifecycle } from "./executor-lifecycle.js";
+
 // ============================================================================
 // Construction options
 // ============================================================================
@@ -105,11 +107,6 @@ export interface FakeLanguageModelExecutorOptions {
 // Internals
 // ============================================================================
 
-interface InFlightEntry {
-  readonly executionId: string;
-  abortReason?: string;
-}
-
 const DEFAULT_REPLY: LanguageModelExecutionResult = {
   specVersion: SPEC_VERSION,
   output: [{ type: "text", text: "hi" }],
@@ -137,8 +134,7 @@ export class FakeLanguageModelExecutor
 
   private readonly scriptedSequence: ReadonlyArray<MockScriptedRun>;
   private scriptIndex = 0;
-  private readonly inFlight = new Map<string, InFlightEntry>();
-  private readonly aborted = new Set<string>();
+  private readonly lifecycle = new ExecutorLifecycle();
 
   constructor(
     scopeId: string,
@@ -308,11 +304,7 @@ export class FakeLanguageModelExecutor
 
   abort(input: AbortExecutorInput): Promise<void> {
     return runHarnessProtocol(
-      Effect.sync(() => {
-        const entry = this.inFlight.get(input.executionId);
-        if (entry) entry.abortReason = input.reason ?? "aborted";
-        this.aborted.add(input.executionId);
-      }),
+      Effect.sync(() => this.lifecycle.abortExecution(input.executionId, input.reason)),
     );
   }
 
@@ -334,19 +326,19 @@ export class FakeLanguageModelExecutor
     executionId: string,
   ): Effect.Effect<unknown, ExecuteError, never> {
     return Effect.gen(this, function* () {
-      if (this.aborted.has(executionId)) {
+      if (this.lifecycle.isAborted(executionId)) {
         return yield* Effect.fail<ExecuteError>({
           _tag: "ProviderAborted",
           reason: "aborted prior to execute",
         });
       }
-      this.inFlight.set(executionId, { executionId });
+      this.lifecycle.register({ executionId });
 
       try {
         const next = this.nextScripted();
         return (next?.result ?? DEFAULT_REPLY) as unknown;
       } finally {
-        this.inFlight.delete(executionId);
+        this.lifecycle.unregister(executionId);
       }
     });
   }
@@ -375,7 +367,7 @@ export class FakeLanguageModelExecutor
       }
 
       // 3. execute
-      if (this.aborted.has(executionId)) {
+      if (this.lifecycle.isAborted(executionId)) {
         const terminal: ExecutorTerminal<LanguageModelExecutionResult> = {
           outcome: "canceled",
           reason: "aborted",

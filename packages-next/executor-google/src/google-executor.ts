@@ -29,7 +29,7 @@ import {
 } from "@google/genai";
 
 import { ulid } from "@agentick/runtime-next";
-import { BaseLanguageModelExecutor, type StreamContext } from "@agentick/executor-next";
+import { BaseLanguageModelExecutor } from "@agentick/executor-next";
 import type { EventBus, MessageInbox, OperationJournal } from "@agentick/spec-next";
 import type {
   ContentBlock,
@@ -47,10 +47,14 @@ import type {
 import { SPEC_VERSION } from "@agentick/spec-next";
 
 import {
+  type CustomBlockDefinition,
+  type DeltaTransform,
+  type StreamAccumulator,
   StreamTagParser,
-  type StreamTagEvent,
   type StreamTagHandler,
-} from "@agentick/executor-openai-next";
+  thinkTagTransform,
+} from "@agentick/executor-next";
+import type { AdapterDelta } from "@agentick/spec-next";
 
 // ============================================================================
 // ProviderOptions augmentation — typed Google escape hatch (G5)
@@ -128,12 +132,7 @@ export interface GoogleExecutorOptions {
   readonly target?: ExecutionTarget;
 }
 
-export interface CustomBlockDefinition {
-  readonly tag?: string;
-  readonly onStart?: (attrs: Readonly<Record<string, string>>) => void;
-  readonly onContent?: (content: string, attrs: Readonly<Record<string, string>>) => void;
-  readonly onSelfClosing?: (attrs: Readonly<Record<string, string>>) => void;
-}
+export type { CustomBlockDefinition } from "@agentick/executor-next";
 
 // ============================================================================
 // Internals
@@ -146,15 +145,48 @@ const DEFAULT_MODEL = "gemini-2.5-flash";
 // GoogleExecutor
 // ============================================================================
 
-export class GoogleExecutor extends BaseLanguageModelExecutor<GenerateContentResponse> {
+/**
+ * Provider-private state for Google's streaming pipeline. Google's
+ * `GenerateContentResponse` chunks don't carry explicit block
+ * boundaries — we infer them by watching the type (text vs thought vs
+ * functionCall) of each `part`. The active block + counter live here.
+ */
+interface GoogleStreamState {
+  blockIndex: number;
+  activeKind: "text" | "reasoning" | null;
+  finishReasonRaw: string | null;
+  /** Per-tool-call thoughtSignature carry (Gemini 2.5+). */
+  thoughtSignatureByCallId: Map<string, string>;
+}
+
+function getGoogleState(accum: StreamAccumulator): GoogleStreamState {
+  let s = accum.providerExtra as GoogleStreamState | undefined;
+  if (!s) {
+    s = {
+      blockIndex: -1,
+      activeKind: null,
+      finishReasonRaw: null,
+      thoughtSignatureByCallId: new Map(),
+    };
+    accum.providerExtra = s;
+  }
+  return s;
+}
+
+export class GoogleExecutor extends BaseLanguageModelExecutor<
+  GenerateContentResponse,
+  GenerateContentResponse
+> {
   readonly target: ExecutionTarget;
 
   protected override readonly streamByDefault: boolean;
+  protected override readonly customBlocks:
+    | Readonly<Record<string, CustomBlockDefinition>>
+    | undefined;
 
   private readonly client: GoogleGenAI;
   private readonly defaultModel: string | undefined;
   private readonly parseThinkTags: boolean;
-  private readonly customBlocks?: Readonly<Record<string, CustomBlockDefinition>>;
 
   constructor(
     scopeId: string,
@@ -202,257 +234,305 @@ export class GoogleExecutor extends BaseLanguageModelExecutor<GenerateContentRes
     return this.client.models.generateContent(params as GenerateContentParameters);
   }
 
-  protected async drainStream(
+  // ──────── Streaming hooks (BaseLanguageModelExecutor) ────────
+
+  protected async openStream(
     params: unknown,
-    ctx: StreamContext,
-  ): Promise<GenerateContentResponse> {
-    const cp = params as GenerateContentParameters;
-    const stream = (await this.client.models.generateContentStream(
-      cp,
-      // SDK doesn't accept abort signal on the call directly; aborts
-      // surface as the stream iterator throwing when ctx.signal fires.
-    )) as unknown as AsyncIterable<GenerateContentResponse>;
+    _signal: AbortSignal,
+  ): Promise<AsyncIterable<GenerateContentResponse>> {
+    // SDK doesn't accept signal here; the iterator throws when the
+    // bridged abort fires.
+    return this.client.models.generateContentStream(
+      params as GenerateContentParameters,
+    ) as unknown as Promise<AsyncIterable<GenerateContentResponse>>;
+  }
 
-    const tagRouter = buildTagRouter({
-      parseThinkTags: this.parseThinkTags,
-      customBlocks: this.customBlocks,
-    });
+  /**
+   * Map a Google chunk's parts to deltas. Gemini doesn't use explicit
+   * block boundaries — we synthesize them: when the kind of content
+   * (text vs reasoning vs functionCall) changes, we close the previous
+   * block and open a new one. State (block index, active kind,
+   * `thoughtSignature`) lives on `accum.providerExtra`.
+   */
+  protected mapChunk(
+    chunk: GenerateContentResponse,
+    accum: StreamAccumulator,
+  ): readonly AdapterDelta[] {
+    const state = getGoogleState(accum);
+    const out: AdapterDelta[] = [];
 
-    // Single-pass aggregation: build the final response shape as we
-    // stream. No second walk in normalize() — see G18 perf notes.
-    const accum = new GoogleStreamAccumulator();
+    // Capture `modelVersion` via synthetic message-start (only first time).
+    if (chunk.modelVersion && !accum.messageStarted) {
+      out.push({ type: "message-start", role: "assistant", model: chunk.modelVersion });
+    }
 
-    // Active-block tracking. Gemini doesn't give us indices, so we
-    // maintain a logical index that bumps when the block type changes.
-    let blockIndex = -1;
-    let activeKind: "text" | "reasoning" | null = null;
-    let routerReasoningStarted = false;
-    let routerReasoningAccum = "";
+    const candidate = chunk.candidates?.[0];
+    if (!candidate) return out;
+    const parts = candidate.content?.parts ?? [];
 
+    // closeActive only fires for mid-chunk block transitions (text →
+    // reasoning, text → functionCall, etc.). For the end-of-stream
+    // close, we let the base's `finalizeStream` handle it — at finalize
+    // time the accumulator is fully consistent. The `content` /
+    // `reasoning` summary deltas are NOT emitted here because
+    // accumulator text isn't applied until AFTER mapChunk returns
+    // (Stream.tap runs per-delta); finalize emits them correctly.
     const closeActive = (): void => {
-      if (activeKind === "text") {
-        ctx.emit({ type: "content-end", blockIndex });
-        const text = accum.currentTextBuffer();
-        ctx.emit({
-          type: "content",
-          blockIndex,
-          content: { type: "text", text } as ContentBlock,
-        });
-      } else if (activeKind === "reasoning") {
-        ctx.emit({ type: "reasoning-end", blockIndex });
-        ctx.emit({
-          type: "reasoning",
-          blockIndex,
-          reasoning: accum.currentReasoningBuffer(),
-        });
+      if (state.activeKind === "text") {
+        out.push({ type: "content-end", blockIndex: state.blockIndex });
+      } else if (state.activeKind === "reasoning") {
+        out.push({ type: "reasoning-end", blockIndex: state.blockIndex });
       }
-      activeKind = null;
+      state.activeKind = null;
     };
 
-    const handleTagEvent = (event: StreamTagEvent): void => {
-      if (event.type === "text") {
-        if (event.content.length === 0) return;
-        if (activeKind !== "text") {
-          closeActive();
-          blockIndex += 1;
-          accum.startTextBlock();
-          ctx.emit({ type: "content-start", blockIndex, blockType: "text" });
-          activeKind = "text";
-        }
-        ctx.emit({ type: "content-delta", blockIndex, delta: event.content });
-        accum.appendText(event.content);
-        return;
-      }
-      const mode = tagRouter!.modeFor(event.tag);
-      if (mode === "reasoning") {
-        switch (event.type) {
-          case "block-start":
-            if (!routerReasoningStarted) {
-              if (activeKind !== null) closeActive();
-              blockIndex += 1;
-              accum.startReasoningBlock();
-              ctx.emit({ type: "reasoning-start", blockIndex });
-              routerReasoningStarted = true;
-              activeKind = "reasoning";
-            }
-            break;
-          case "block-delta":
-            if (!routerReasoningStarted) {
-              if (activeKind !== null) closeActive();
-              blockIndex += 1;
-              accum.startReasoningBlock();
-              ctx.emit({ type: "reasoning-start", blockIndex });
-              routerReasoningStarted = true;
-              activeKind = "reasoning";
-            }
-            ctx.emit({ type: "reasoning-delta", blockIndex, delta: event.delta });
-            accum.appendReasoning(event.delta);
-            routerReasoningAccum += event.delta;
-            break;
-          case "block-end":
-          case "block":
-            // Close handled at next non-tag content or end of stream.
-            break;
-        }
-        return;
-      }
-      switch (event.type) {
-        case "block-start":
-          ctx.emit({ type: "custom-block-start", tag: event.tag, attrs: event.attrs });
-          break;
-        case "block-delta":
-          ctx.emit({ type: "custom-block-delta", tag: event.tag, delta: event.delta });
-          break;
-        case "block-end":
-          ctx.emit({ type: "custom-block-end", tag: event.tag });
-          break;
-        case "block":
-          ctx.emit({
-            type: "custom-block",
-            tag: event.tag,
-            content: event.content,
-            attrs: event.attrs,
-            ...(event.selfClosing ? { selfClosing: true } : {}),
-          });
-          break;
-      }
-    };
+    for (const part of parts) {
+      const isThought = (part as { thought?: boolean }).thought === true;
 
-    let modelSeen: string | undefined;
-    let stopReason: LanguageModelStopReason = "end";
-    let finalUsage: UsageStats | undefined;
-
-    for await (const chunk of stream) {
-      if (chunk.modelVersion && !modelSeen) modelSeen = chunk.modelVersion;
-      const candidate = chunk.candidates?.[0];
-      if (!candidate) continue;
-      const parts = candidate.content?.parts ?? [];
-
-      for (const part of parts) {
-        const isThought = (part as { thought?: boolean }).thought === true;
-
-        // Text path
-        if (typeof part.text === "string" && part.text.length > 0) {
-          if (isThought) {
-            // Native Gemini 2.5+ thinking — route to reasoning channel.
-            if (activeKind !== "reasoning") {
-              closeActive();
-              blockIndex += 1;
-              accum.startReasoningBlock();
-              ctx.emit({ type: "reasoning-start", blockIndex });
-              activeKind = "reasoning";
-            }
-            ctx.emit({ type: "reasoning-delta", blockIndex, delta: part.text });
-            accum.appendReasoning(part.text);
-            continue;
+      // Text path
+      if (typeof part.text === "string" && part.text.length > 0) {
+        if (isThought) {
+          if (state.activeKind !== "reasoning") {
+            closeActive();
+            state.blockIndex += 1;
+            out.push({ type: "reasoning-start", blockIndex: state.blockIndex });
+            state.activeKind = "reasoning";
           }
-          if (tagRouter) {
-            for (const ev of tagRouter.parser.process(part.text)) {
-              handleTagEvent(ev);
-            }
-          } else {
-            if (activeKind !== "text") {
-              closeActive();
-              blockIndex += 1;
-              accum.startTextBlock();
-              ctx.emit({ type: "content-start", blockIndex, blockType: "text" });
-              activeKind = "text";
-            }
-            ctx.emit({ type: "content-delta", blockIndex, delta: part.text });
-            accum.appendText(part.text);
+          out.push({ type: "reasoning-delta", blockIndex: state.blockIndex, delta: part.text });
+        } else {
+          if (state.activeKind !== "text") {
+            closeActive();
+            state.blockIndex += 1;
+            out.push({ type: "content-start", blockIndex: state.blockIndex, blockType: "text" });
+            state.activeKind = "text";
           }
-          continue;
+          out.push({ type: "content-delta", blockIndex: state.blockIndex, delta: part.text });
         }
-
-        // Function call path
-        if (part.functionCall) {
-          closeActive();
-          const fc = part.functionCall;
-          const callId = fc.id ?? `call_${ulid()}`;
-          const name = fc.name ?? "";
-          const args = (fc.args ?? {}) as Record<string, unknown>;
-          const signature = (part as { thoughtSignature?: string }).thoughtSignature;
-          blockIndex += 1;
-          accum.recordToolCall({
-            callId,
-            name,
-            input: args,
-            ...(signature !== undefined ? { thoughtSignature: signature } : {}),
-          });
-          ctx.emit({
-            type: "tool-call-start",
-            callId,
-            name,
-            blockIndex,
-          });
-          const jsonDelta = JSON.stringify(args);
-          if (jsonDelta !== "{}") {
-            ctx.emit({ type: "tool-call-delta", callId, delta: jsonDelta });
-          }
-          ctx.emit({ type: "tool-call-end", callId });
-          ctx.emit({
-            type: "tool-call",
-            callId,
-            name,
-            input: args,
-            ...(signature !== undefined
-              ? {
-                  providerMetadata: {
-                    google: { thoughtSignature: signature },
-                  },
-                }
-              : {}),
-          });
-        }
+        continue;
       }
 
-      if (candidate.finishReason) {
-        stopReason = mapFinishReason(candidate.finishReason);
-        finalUsage = toUsageStats(chunk.usageMetadata);
-        accum.setFinishReason(candidate.finishReason);
-        accum.setUsage(chunk.usageMetadata);
+      // Function call path
+      if (part.functionCall) {
+        closeActive();
+        const fc = part.functionCall;
+        const callId = fc.id ?? `call_${ulid()}`;
+        const name = fc.name ?? "";
+        const args = (fc.args ?? {}) as Record<string, unknown>;
+        const signature = (part as { thoughtSignature?: string }).thoughtSignature;
+        if (signature !== undefined) state.thoughtSignatureByCallId.set(callId, signature);
+        state.blockIndex += 1;
+        out.push({
+          type: "tool-call-start",
+          callId,
+          name,
+          blockIndex: state.blockIndex,
+        });
+        const jsonDelta = JSON.stringify(args);
+        if (jsonDelta !== "{}") {
+          out.push({ type: "tool-call-delta", callId, delta: jsonDelta });
+        }
+        out.push({ type: "tool-call-end", callId });
+        const toolDelta: AdapterDelta = {
+          type: "tool-call",
+          callId,
+          name,
+          input: args,
+          ...(signature !== undefined
+            ? ({ providerMetadata: { google: { thoughtSignature: signature } } } as Record<
+                string,
+                unknown
+              >)
+            : {}),
+        } as AdapterDelta;
+        out.push(toolDelta);
       }
     }
 
-    // Drain tag router's remaining buffer.
-    if (tagRouter) {
-      for (const ev of tagRouter.parser.flush()) {
-        handleTagEvent(ev);
+    if (candidate.finishReason) {
+      state.finishReasonRaw = candidate.finishReason;
+      // Don't close blocks or emit message-end here — `finalizeStream`
+      // does both with consistent accumulator state. We just emit a
+      // `usage` delta so the base's finalize message-end carries the
+      // right token counts.
+      const usage = toUsageStats(chunk.usageMetadata);
+      out.push({ type: "usage", usage });
+    }
+    return out;
+  }
+
+  /**
+   * Override the base's terminal-delta synthesis so the `message-end`
+   * carries Google's mapped stop reason. Without this, the base
+   * defaults to `"end"` because no `message-end` delta carried our
+   * `finishReasonRaw` upstream.
+   */
+  protected override finalizeStream(accum: StreamAccumulator): readonly AdapterDelta[] {
+    const state = getGoogleState(accum);
+    if (state.finishReasonRaw && accum.stopReason === "end") {
+      accum.stopReason = mapFinishReason(state.finishReasonRaw);
+    }
+    return super.finalizeStream(accum);
+  }
+
+  /**
+   * Reconstruct a canonical `GenerateContentResponse` from accumulator
+   * state. Reassembles `candidates[0].content.parts` by walking blocks
+   * in index order; preserves `thoughtSignature` on tool-call parts.
+   */
+  protected reconstructRaw(
+    accum: StreamAccumulator,
+    modelSeen: string | undefined,
+  ): GenerateContentResponse {
+    const state = getGoogleState(accum);
+    const parts: Array<{
+      text?: string;
+      thought?: boolean;
+      functionCall?: { id?: string; name?: string; args?: Record<string, unknown> };
+      thoughtSignature?: string;
+    }> = [];
+
+    const allIndices = new Set<number>([
+      ...accum.textByBlock.keys(),
+      ...accum.reasoningByBlock.keys(),
+      ...Array.from(accum.toolCalls.values()).map((c) => c.blockIndex),
+    ]);
+    const sorted = [...allIndices].sort((a, b) => a - b);
+    for (const idx of sorted) {
+      const text = accum.textByBlock.get(idx);
+      if (text !== undefined && text.length > 0) {
+        parts.push({ text });
+        continue;
+      }
+      const reasoning = accum.reasoningByBlock.get(idx);
+      if (reasoning !== undefined && reasoning.length > 0) {
+        parts.push({ text: reasoning, thought: true });
+        continue;
+      }
+      const tc = [...accum.toolCalls.values()].find((c) => c.blockIndex === idx);
+      if (tc) {
+        let parsed: Record<string, unknown> = {};
+        try {
+          parsed = tc.argsBuffer
+            ? (JSON.parse(tc.argsBuffer) as Record<string, unknown>)
+            : ((tc.input as Record<string, unknown>) ?? {});
+        } catch {
+          parsed = (tc.input as Record<string, unknown>) ?? {};
+        }
+        const sig = state.thoughtSignatureByCallId.get(tc.callId);
+        parts.push({
+          functionCall: { id: tc.callId, name: tc.name, args: parsed },
+          ...(sig !== undefined ? { thoughtSignature: sig } : {}),
+        });
       }
     }
-    closeActive();
-    void routerReasoningAccum; // local-only for parity with OpenAI path
 
-    if (!finalUsage) finalUsage = toUsageStats(undefined);
-
-    ctx.emit({ type: "message-end", stopReason, usage: finalUsage });
-    ctx.emit({
-      type: "message",
-      message: {
-        role: "assistant",
-        content: accum.toContentBlocks(),
-        model: modelSeen ?? cp.model,
+    return {
+      candidates: [
+        {
+          content: { role: "model", parts },
+          finishReason: state.finishReasonRaw ?? "STOP",
+        },
+      ],
+      modelVersion: modelSeen ?? this.defaultModel ?? this.target.modelId,
+      usageMetadata: {
+        promptTokenCount: accum.usage.inputTokens,
+        candidatesTokenCount: accum.usage.outputTokens,
+        totalTokenCount: accum.usage.totalTokens,
+        ...(accum.usage.reasoningTokens !== undefined
+          ? { thoughtsTokenCount: accum.usage.reasoningTokens }
+          : {}),
+        ...(accum.usage.cachedInputTokens !== undefined
+          ? { cachedContentTokenCount: accum.usage.cachedInputTokens }
+          : {}),
       },
-      stopReason,
-      usage: finalUsage,
-    });
+    } as unknown as GenerateContentResponse;
+  }
 
-    return accum.toResponse(modelSeen ?? cp.model);
+  protected override adapterTransforms(): readonly DeltaTransform[] {
+    return this.parseThinkTags ? [thinkTagTransform()] : [];
   }
 
   protected normalizeRaw(raw: GenerateContentResponse): LanguageModelExecutionResult {
     return normalizeImpl({ targetOutput: raw, target: this.target });
   }
 
+  /**
+   * Non-streaming + tag routing: same pattern as OpenAI/Anthropic.
+   * Streaming path's transforms didn't run, so extract tags from each
+   * text part here.
+   */
   protected override postProcessForNormalize(
     raw: GenerateContentResponse,
   ): GenerateContentResponse {
-    const router = buildTagRouter({
-      parseThinkTags: this.parseThinkTags,
-      customBlocks: this.customBlocks,
-    });
-    return router ? (applyTagRouterToResponse(raw, router) as GenerateContentResponse) : raw;
+    if (!this.parseThinkTags && !this.customBlocks) return raw;
+    const candidate = raw.candidates?.[0];
+    const parts = candidate?.content?.parts;
+    if (!parts) return raw;
+    const newParts: typeof parts = [];
+    let reasoningCarry = "";
+    for (const part of parts) {
+      if (typeof part.text === "string" && (part as { thought?: boolean }).thought !== true) {
+        const cleaned = applyTagsToText(part.text, this.parseThinkTags, this.customBlocks);
+        if (cleaned) {
+          reasoningCarry += cleaned.reasoning;
+          if (cleaned.text.length > 0) newParts.push({ ...part, text: cleaned.text });
+        } else {
+          newParts.push(part);
+        }
+      } else {
+        newParts.push(part);
+      }
+    }
+    if (reasoningCarry.length > 0) {
+      newParts.unshift({ text: reasoningCarry, thought: true });
+    }
+    return {
+      ...raw,
+      candidates: [
+        {
+          ...candidate,
+          content: { ...candidate?.content, parts: newParts },
+        },
+      ],
+    } as GenerateContentResponse;
   }
+}
+
+/**
+ * Tag extraction for Google's non-streaming post-process. Same shape
+ * as the OpenAI/Anthropic helpers.
+ */
+function applyTagsToText(
+  text: string,
+  parseThinkTags: boolean,
+  customBlocks: Readonly<Record<string, CustomBlockDefinition>> | undefined,
+): { text: string; reasoning: string } | null {
+  const handlers: Record<string, StreamTagHandler> = {};
+  const reasoningTags = new Set<string>();
+  if (parseThinkTags) {
+    handlers["think"] = {};
+    reasoningTags.add("think");
+  }
+  if (customBlocks) {
+    for (const [key, def] of Object.entries(customBlocks)) {
+      const tagName = def.tag ?? key;
+      const h: StreamTagHandler = {};
+      if (def.onStart) h.onStart = def.onStart;
+      if (def.onContent) h.onContent = def.onContent;
+      if (def.onSelfClosing) h.onSelfClosing = def.onSelfClosing;
+      handlers[tagName] = h;
+    }
+  }
+  if (Object.keys(handlers).length === 0) return null;
+  const parser = new StreamTagParser({ tags: handlers });
+  const events = [...parser.process(text), ...parser.flush()];
+  let cleanText = "";
+  let reasoning = "";
+  for (const ev of events) {
+    if (ev.type === "text") cleanText += ev.content;
+    else if (ev.type === "block" && reasoningTags.has(ev.tag)) reasoning += ev.content;
+  }
+  return { text: cleanText, reasoning };
 }
 
 // ============================================================================
@@ -480,84 +560,6 @@ function buildClientOptions(opts: GoogleExecutorOptions): GoogleGenAIOptions {
     return merged;
   }
   return base;
-}
-
-// ============================================================================
-// Tag routing — shared StreamTagParser machinery (G7 + G12)
-// ============================================================================
-
-type TagMode = "reasoning" | "custom-block";
-
-interface TagRouter {
-  readonly parser: StreamTagParser;
-  modeFor(tag: string): TagMode;
-}
-
-function buildTagRouter(opts: {
-  parseThinkTags: boolean;
-  customBlocks?: Readonly<Record<string, CustomBlockDefinition>>;
-}): TagRouter | null {
-  const tagModes = new Map<string, TagMode>();
-  const handlers: Record<string, StreamTagHandler> = {};
-
-  if (opts.parseThinkTags) {
-    tagModes.set("think", "reasoning");
-    handlers["think"] = {};
-  }
-  if (opts.customBlocks) {
-    for (const [key, def] of Object.entries(opts.customBlocks)) {
-      const tagName = def.tag ?? key;
-      tagModes.set(tagName, "custom-block");
-      const h: StreamTagHandler = {};
-      if (def.onStart) h.onStart = def.onStart;
-      if (def.onContent) h.onContent = def.onContent;
-      if (def.onSelfClosing) h.onSelfClosing = def.onSelfClosing;
-      handlers[tagName] = h;
-    }
-  }
-  if (tagModes.size === 0) return null;
-  const parser = new StreamTagParser({ tags: handlers });
-  return {
-    parser,
-    modeFor(tag) {
-      return tagModes.get(tag) ?? "custom-block";
-    },
-  };
-}
-
-/**
- * Post-process a non-streaming GenerateContentResponse through the tag
- * router. Each text part is replaced with its cleaned version; reasoning
- * extracted from `<think>` tags is prepended as a synthetic
- * `thought`-flagged text part.
- */
-function applyTagRouterToResponse(raw: unknown, router: TagRouter): unknown {
-  if (!raw || typeof raw !== "object") return raw;
-  const r = raw as GenerateContentResponse;
-  const candidate = r.candidates?.[0];
-  if (!candidate?.content?.parts) return raw;
-  const newParts: Part[] = [];
-  let reasoning = "";
-  for (const part of candidate.content.parts) {
-    if (typeof part.text === "string" && !(part as { thought?: boolean }).thought) {
-      let cleaned = "";
-      const events = [...router.parser.process(part.text), ...router.parser.flush()];
-      for (const ev of events) {
-        if (ev.type === "text") cleaned += ev.content;
-        else if (ev.type === "block-delta") {
-          if (router.modeFor(ev.tag) === "reasoning") reasoning += ev.delta;
-        }
-      }
-      if (cleaned.length > 0) newParts.push({ text: cleaned });
-    } else {
-      newParts.push(part);
-    }
-  }
-  if (reasoning.length > 0) {
-    newParts.unshift({ text: reasoning, thought: true } as Part);
-  }
-  (candidate.content as { parts: Part[] }).parts = newParts;
-  return raw;
 }
 
 // ============================================================================
@@ -831,188 +833,6 @@ function toUsageStats(usage: GenerateContentResponse["usageMetadata"]): UsageSta
       ? { cachedInputTokens: usage.cachedContentTokenCount }
       : {}),
   };
-}
-
-// ============================================================================
-// Stream accumulator — single-pass: build ContentBlock[] during streaming.
-// ============================================================================
-
-interface AccumToolCall {
-  callId: string;
-  name: string;
-  input: Record<string, unknown>;
-  thoughtSignature?: string;
-}
-
-type AccumBlock =
-  | { kind: "text"; text: string }
-  | { kind: "reasoning"; text: string }
-  | { kind: "tool_use"; call: AccumToolCall };
-
-/**
- * Single-pass accumulator that builds the IR-shaped `ContentBlock[]`
- * directly during streaming. Avoids the dual-walk pattern in older
- * adapters (provider chunks → synthesized raw → ContentBlock[]).
- * `toResponse` synthesizes a GenerateContentResponse only when callers
- * still need it (non-streaming-path consumers + tests).
- */
-class GoogleStreamAccumulator {
-  private blocks: AccumBlock[] = [];
-  private currentText: AccumBlock | null = null;
-  private currentReasoning: AccumBlock | null = null;
-  private finish: FinishReason | undefined;
-  private usage: GenerateContentResponse["usageMetadata"];
-
-  /**
-   * Full-walk accumulation used by `executeStreamBody` (the
-   * `run()` path) which does not emit AdapterDeltas itself —
-   * accumulation IS the entire job there. Walks each part and
-   * records text / reasoning / functionCalls / usage / finishReason.
-   * Idempotent on no-op chunks.
-   *
-   * The standalone `executeStream` method instead calls the more
-   * granular `startTextBlock` / `appendText` / etc. directly during
-   * its single-pass emit-and-accumulate loop — DO NOT also call
-   * `pushChunk` there, or content would double-accumulate.
-   */
-  pushChunk(chunk: GenerateContentResponse): void {
-    const candidate = chunk.candidates?.[0];
-    const parts = candidate?.content?.parts ?? [];
-    for (const part of parts) {
-      const isThought = (part as { thought?: boolean }).thought === true;
-      if (typeof part.text === "string" && part.text.length > 0) {
-        if (isThought) {
-          if (this.currentReasoning === null) this.startReasoningBlock();
-          this.appendReasoning(part.text);
-        } else {
-          if (this.currentText === null) this.startTextBlock();
-          this.appendText(part.text);
-        }
-        continue;
-      }
-      if (part.functionCall) {
-        const fc = part.functionCall;
-        this.recordToolCall({
-          callId: fc.id ?? `call_${ulid()}`,
-          name: fc.name ?? "",
-          input: (fc.args ?? {}) as Record<string, unknown>,
-          ...((part as { thoughtSignature?: string }).thoughtSignature !== undefined
-            ? {
-                thoughtSignature: (part as { thoughtSignature?: string }).thoughtSignature!,
-              }
-            : {}),
-        });
-      }
-    }
-    if (candidate?.finishReason) {
-      this.setFinishReason(candidate.finishReason);
-    }
-    if (chunk.usageMetadata) {
-      this.setUsage(chunk.usageMetadata);
-    }
-  }
-
-  startTextBlock(): void {
-    const block: AccumBlock = { kind: "text", text: "" };
-    this.blocks.push(block);
-    this.currentText = block;
-    this.currentReasoning = null;
-  }
-
-  appendText(text: string): void {
-    if (!this.currentText) this.startTextBlock();
-    (this.currentText as { text: string }).text += text;
-  }
-
-  startReasoningBlock(): void {
-    const block: AccumBlock = { kind: "reasoning", text: "" };
-    this.blocks.push(block);
-    this.currentReasoning = block;
-    this.currentText = null;
-  }
-
-  appendReasoning(text: string): void {
-    if (!this.currentReasoning) this.startReasoningBlock();
-    (this.currentReasoning as { text: string }).text += text;
-  }
-
-  recordToolCall(call: AccumToolCall): void {
-    this.blocks.push({ kind: "tool_use", call });
-    this.currentText = null;
-    this.currentReasoning = null;
-  }
-
-  currentTextBuffer(): string {
-    return this.currentText?.kind === "text" ? this.currentText.text : "";
-  }
-
-  currentReasoningBuffer(): string {
-    return this.currentReasoning?.kind === "reasoning" ? this.currentReasoning.text : "";
-  }
-
-  setFinishReason(reason: FinishReason): void {
-    this.finish = reason;
-  }
-
-  setUsage(usage: GenerateContentResponse["usageMetadata"]): void {
-    this.usage = usage;
-  }
-
-  toContentBlocks(): ContentBlock[] {
-    const out: ContentBlock[] = [];
-    for (const block of this.blocks) {
-      if (block.kind === "text") {
-        if (block.text.length > 0) out.push({ type: "text", text: block.text });
-      } else if (block.kind === "reasoning") {
-        if (block.text.length > 0) out.push({ type: "reasoning", text: block.text });
-      } else {
-        const { call } = block;
-        const providerMetadata =
-          call.thoughtSignature !== undefined
-            ? { google: { thoughtSignature: call.thoughtSignature } }
-            : undefined;
-        out.push({
-          type: "tool_use",
-          toolUseId: call.callId,
-          name: call.name,
-          input: call.input,
-          ...(providerMetadata !== undefined ? { providerMetadata } : {}),
-        });
-      }
-    }
-    return out;
-  }
-
-  toResponse(modelHint: string): GenerateContentResponse {
-    const parts: Part[] = [];
-    for (const block of this.blocks) {
-      if (block.kind === "text") {
-        if (block.text.length > 0) parts.push({ text: block.text });
-      } else if (block.kind === "reasoning") {
-        if (block.text.length > 0) parts.push({ text: block.text, thought: true } as Part);
-      } else {
-        const { call } = block;
-        const fcPart: Part = {
-          functionCall: { id: call.callId, name: call.name, args: call.input },
-        };
-        if (call.thoughtSignature !== undefined) {
-          (fcPart as { thoughtSignature?: string }).thoughtSignature = call.thoughtSignature;
-        }
-        parts.push(fcPart);
-      }
-    }
-    return {
-      candidates: [
-        {
-          content: { role: "model", parts },
-          finishReason: this.finish ?? FinishReason.STOP,
-          index: 0,
-        },
-      ],
-      modelVersion: modelHint,
-      ...(this.usage !== undefined ? { usageMetadata: this.usage } : {}),
-    } as GenerateContentResponse;
-  }
 }
 
 // ============================================================================

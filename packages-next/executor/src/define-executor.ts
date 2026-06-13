@@ -49,6 +49,8 @@ import {
   runHarnessProtocol,
   ulid,
 } from "@agentick/runtime-next";
+
+import { ExecutorLifecycle } from "./executor-lifecycle.js";
 import type {
   AbortExecutorInput,
   AdapterDelta,
@@ -165,12 +167,6 @@ export function defineExecutor(spec: DefineExecutorInput): ExecutorFactory {
 // CallbackLanguageModelExecutor
 // ============================================================================
 
-interface InFlightEntry {
-  readonly executionId: string;
-  abort?: AbortController;
-  abortReason?: string;
-}
-
 /** Internal — routes adapter deltas to the active `executeStream` iterator. */
 type DeltaSink = (delta: AdapterDelta) => void;
 
@@ -182,8 +178,7 @@ class CallbackLanguageModelExecutor
   readonly target: ExecutionTarget;
 
   private readonly spec: DefineExecutorInput;
-  private readonly inFlight = new Map<string, InFlightEntry>();
-  private readonly aborted = new Set<string>();
+  private readonly lifecycle = new ExecutorLifecycle();
 
   constructor(
     scopeId: string,
@@ -350,14 +345,7 @@ class CallbackLanguageModelExecutor
 
   abort(input: AbortExecutorInput): Promise<void> {
     return runHarnessProtocol(
-      Effect.sync(() => {
-        const entry = this.inFlight.get(input.executionId);
-        if (entry) {
-          entry.abortReason = input.reason ?? "aborted";
-          entry.abort?.abort(input.reason ?? "aborted");
-        }
-        this.aborted.add(input.executionId);
-      }),
+      Effect.sync(() => this.lifecycle.abortExecution(input.executionId, input.reason)),
     );
   }
 
@@ -380,14 +368,14 @@ class CallbackLanguageModelExecutor
     sink: DeltaSink | null,
   ): Effect.Effect<unknown, ExecuteError, never> {
     return Effect.gen(this, function* () {
-      if (this.aborted.has(executionId)) {
+      if (this.lifecycle.isAborted(executionId)) {
         return yield* Effect.fail<ExecuteError>({
           _tag: "ProviderAborted",
           reason: "aborted prior to execute",
         });
       }
       const controller = new AbortController();
-      this.inFlight.set(executionId, { executionId, abort: controller });
+      this.lifecycle.register({ executionId, abort: controller });
       // Build the emit callback: always forward to emitDeltaLazy for
       // bus observability; additionally push into the iterator sink
       // when executeStream is the entry point.
@@ -424,7 +412,7 @@ class CallbackLanguageModelExecutor
         });
         return result as unknown;
       } finally {
-        this.inFlight.delete(executionId);
+        this.lifecycle.unregister(executionId);
       }
     });
   }
@@ -434,10 +422,10 @@ class CallbackLanguageModelExecutor
     executionId: string,
   ): Effect.Effect<ExecutorTerminal<LanguageModelExecutionResult>, ExecutorError, never> {
     return Effect.gen(this, function* () {
-      if (this.aborted.has(executionId)) {
+      if (this.lifecycle.isAborted(executionId)) {
         const terminal: ExecutorTerminal<LanguageModelExecutionResult> = {
           outcome: "canceled",
-          reason: this.inFlight.get(executionId)?.abortReason ?? "aborted",
+          reason: this.lifecycle.abortReasonFor(executionId) ?? "aborted",
         };
         return terminal;
       }

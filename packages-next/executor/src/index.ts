@@ -16,6 +16,10 @@ export {
   type MockScriptedRun,
 } from "./fake-language-model-executor.js";
 export { defineExecutor, type DefineExecutorInput } from "./define-executor.js";
+export {
+  defineLanguageModelExecutor,
+  type DefineLanguageModelExecutorInput,
+} from "./define-language-model-executor.js";
 
 // Abstract base for first-party provider executors. Concrete impls
 // (OpenAI, Anthropic, Google, AI SDK) subclass and implement the
@@ -25,5 +29,18 @@ export {
   BaseLanguageModelExecutor,
   defaultProject,
   mergeSignals,
-  type StreamContext,
 } from "./base-language-model-executor.js";
+export { StreamAccumulator, type AccumToolCall } from "./stream-accumulator.js";
+export { type DeltaTransform, composeTransforms, identityTransform } from "./delta-transform.js";
+export {
+  thinkTagTransform,
+  customBlockTransform,
+  type CustomBlockDefinition,
+} from "./tag-transforms.js";
+export {
+  StreamTagParser,
+  type StreamTagHandler,
+  type StreamTagParserConfig,
+  type StreamTagEvent,
+} from "./stream-tag-parser.js";
+export { ExecutorLifecycle, type ExecutorInFlightEntry } from "./executor-lifecycle.js";
