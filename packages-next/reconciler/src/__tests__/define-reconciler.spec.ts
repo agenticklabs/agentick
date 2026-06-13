@@ -14,6 +14,23 @@ import {
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
 
 import { defineReconciler } from "../define-reconciler.js";
+import { stubBridges } from "../bridges/stub-bridges.js";
+
+// Minimum-required input fixtures for the current spec. Each spec
+// change that adds a required field surfaces here at typecheck time —
+// that's the point of running these inputs through strict tsc.
+const mountInput = () =>
+  ({
+    mountId: "m_1",
+    sessionId: "test-session",
+    element: null,
+    bridges: stubBridges(),
+  }) as const;
+const renderInput = () =>
+  ({
+    mountId: "m_1",
+    sessionId: "test-session",
+  }) as const;
 
 const fakeRenderTreeResult = (_mountId: string): RenderTreeResult => ({
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -53,10 +70,10 @@ describe("defineReconciler — factory shape", () => {
       bus: new LocalEventBus(),
       inbox: new LocalInbox(),
     });
-    const m = await r.mount({ element: null });
+    const m = await r.mount(mountInput());
     expect(m.mountId).toBe("m_1");
     expect(m.restoredFromSnapshot).toBe(false);
-    const tree = await r.renderTree({ mountId: m.mountId });
+    const tree = await r.renderTree(renderInput());
     expect(tree.iterations).toBe(1);
     await r.unmount({ mountId: m.mountId });
     expect(events).toEqual(["mount", "renderTree", "unmount"]);
@@ -76,7 +93,7 @@ describe("defineReconciler — defaults + envelopes", () => {
       bus: new LocalEventBus(),
       inbox: new LocalInbox(),
     });
-    await expect(r.renderToString({ element: null })).rejects.toBeDefined();
+    await expect(r.renderToString({ mountId: "m_1" })).rejects.toBeDefined();
     await expect(r.snapshot({ mountId: "m_1" })).rejects.toBeDefined();
     // No-op defaults resolve without error.
     await expect(r.rerender({ mountId: "m_1", element: null })).resolves.toBeUndefined();
@@ -110,8 +127,8 @@ describe("defineReconciler — defaults + envelopes", () => {
     );
     await new Promise((rs) => setImmediate(rs));
 
-    await r.mount({ element: null });
-    await r.renderTree({ mountId: "m_1" });
+    await r.mount(mountInput());
+    await r.renderTree(renderInput());
     await r.unmount({ mountId: "m_1" });
     await new Promise((rs) => setTimeout(rs, 20));
     await Effect.runPromise(Fiber.interrupt(fiber));
