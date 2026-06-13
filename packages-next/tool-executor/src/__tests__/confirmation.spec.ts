@@ -16,6 +16,7 @@
 
 import { describe, expect, it } from "vitest";
 import { Chunk, Effect, Stream } from "effect";
+import type { LocalEventBus } from "@agentick/runtime-next";
 
 import type {
   DispatchInput,
@@ -60,9 +61,9 @@ function dispatchOf(
  * and return its `correlationId` + `replyTo`. The harness publishes a
  * request envelope when the confirmation gate trips.
  */
-async function captureRequest(bus: {
-  subscribe: (q: unknown) => Stream.Stream<unknown, unknown, never>;
-}): Promise<{ correlationId: string; replyTo: string }> {
+async function captureRequest(
+  bus: LocalEventBus,
+): Promise<{ correlationId: string; replyTo: string }> {
   const chunk = await Effect.runPromise(
     Stream.runCollect(
       Stream.take(
