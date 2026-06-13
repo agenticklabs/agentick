@@ -85,9 +85,9 @@ describe("MockLanguageModelExecutor — project", () => {
           {
             id: "t.priv",
             name: "private",
-            description: "User only",
+            description: "Dispatch only — not exposed to the model",
             inputSchema: { type: "object" },
-            exposure: ["user"],
+            exposure: ["dispatch"],
             handlerRef: "h.priv",
           },
         ],

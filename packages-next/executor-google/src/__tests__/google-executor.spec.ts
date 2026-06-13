@@ -904,7 +904,7 @@ describe("GoogleExecutor — journaled lifecycle", () => {
     const { exec, journal } = await makeExecutor(stub);
     await exec.run({ compiled: emptyTree(), target: mkTarget() });
     const events = await Effect.runPromise(
-      Stream.runCollect(journal.readByQuery({ surface: "executor" })),
+      Stream.runCollect(journal.readByQuery({ surface: "executor" }, "beginning")),
     );
     const phases = Array.from(Chunk.toReadonlyArray(events)).map((e) => e.phase);
     expect(phases).toContain("requested");

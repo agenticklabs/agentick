@@ -154,7 +154,7 @@ export function mkResponse(opts: MkResponseOpts): GenerateContentResponse {
         ? { cachedContentTokenCount: u.cachedContentTokenCount }
         : {}),
     },
-  } as GenerateContentResponse;
+  } as unknown as GenerateContentResponse;
 }
 
 export function mkTextChunk(text: string, model?: string): GenerateContentResponse {
@@ -166,7 +166,7 @@ export function mkTextChunk(text: string, model?: string): GenerateContentRespon
       },
     ],
     modelVersion: model ?? "gemini-2.5-flash",
-  } as GenerateContentResponse;
+  } as unknown as GenerateContentResponse;
 }
 
 export function mkThoughtChunk(text: string): GenerateContentResponse {
@@ -178,7 +178,7 @@ export function mkThoughtChunk(text: string): GenerateContentResponse {
       },
     ],
     modelVersion: "gemini-2.5-flash",
-  } as GenerateContentResponse;
+  } as unknown as GenerateContentResponse;
 }
 
 export function mkFunctionCallChunk(opts: {
@@ -203,7 +203,7 @@ export function mkFunctionCallChunk(opts: {
       },
     ],
     modelVersion: "gemini-2.5-flash",
-  } as GenerateContentResponse;
+  } as unknown as GenerateContentResponse;
 }
 
 export function mkFinishChunk(opts: {
@@ -230,5 +230,5 @@ export function mkFinishChunk(opts: {
         ? { cachedContentTokenCount: u.cachedContentTokenCount }
         : {}),
     },
-  } as GenerateContentResponse;
+  } as unknown as GenerateContentResponse;
 }

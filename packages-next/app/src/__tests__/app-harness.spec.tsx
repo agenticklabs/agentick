@@ -502,11 +502,13 @@ describe("AppHarness — executor factory slot (FAÇADE.3)", () => {
     await executor.ready;
 
     const factory = Object.assign(
-      (deps: ExecutorFactoryDeps) => {
+      (deps?: ExecutorFactoryDeps) => {
+        // The App always supplies deps; this test's contract asserts so.
+        // Defensive guard keeps the type contract (deps optional per spec)
+        // intact while letting the body assume presence.
+        if (!deps) throw new Error("factory invoked without deps");
         calls.push({
           scopeId: deps.scopeId,
-          // The factory takes protocol-typed deps; we identity-compare
-          // against the concrete substrate instances we passed in.
           sharedJournal: deps.journal === (journal as unknown),
           sharedBus: deps.bus === (bus as unknown),
         });
