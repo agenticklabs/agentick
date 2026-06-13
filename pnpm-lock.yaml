@@ -454,6 +454,9 @@ importers:
 
   packages-next/executor-ai-sdk:
     dependencies:
+      '@agentick/executor-next':
+        specifier: workspace:*
+        version: link:../executor
       '@agentick/runtime-next':
         specifier: workspace:*
         version: link:../runtime
