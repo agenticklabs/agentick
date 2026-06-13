@@ -334,7 +334,12 @@ describe("SessionHarness — spawn", () => {
           queue: async () => undefined,
           append: async () => ({ entryId: "" }),
           observe: async () => ({ entryId: "" }),
-        } as SessionHarnessProtocol;
+          // The parent's spawn() returns this child as-is and doesn't
+          // invoke methods on it — the test asserts shape passing only.
+          // Cast through `unknown` since the stub satisfies a narrower
+          // subset than the full protocol (e.g. `timeline` is now a
+          // TimelineHandle object, not a method).
+        } as unknown as SessionHarnessProtocol;
       },
     };
     const { session } = await mkSession({ spawnContext: ctx });

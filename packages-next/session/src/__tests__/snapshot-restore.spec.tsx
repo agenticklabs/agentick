@@ -213,18 +213,19 @@ describe("ReconcilerHarness — snapshot/restore through the harness", () => {
 
   it("snapshot JSON round-trip survives spec firewall", async () => {
     const harness = await makeHarness("firewall");
-    const bridges = stubBridges({ knobs: { n: 42, s: "hi", obj: { a: 1 } } });
+    // KnobPrimitive is string | number | boolean — nested objects are
+    // intentionally rejected at the type level (snapshot wire format
+    // requires JSON-primitive values).
+    const bridges = stubBridges({ knobs: { n: 42, s: "hi", b: true } });
     await harness.mount({
       mountId: "m_fw",
       sessionId: "s",
       element: React.createElement("message", { role: "user" }, "ok"),
       bridges,
     });
-    try {
-      bridges.data.resolve("k", async () => ({ ok: true }));
-    } catch (p) {
-      await (p as Promise<unknown>);
-    }
+    // `fetch(key, fetcher)` is the canonical entry point — `resolve`
+    // was renamed during the bridge consolidation.
+    await bridges.data.fetch("k", async () => ({ ok: true }));
     const snap = await harness.snapshot({ mountId: "m_fw" });
     const round = JSON.parse(JSON.stringify(snap));
     expect(round).toEqual(snap);
@@ -259,7 +260,9 @@ describe("ReconcilerHarness — snapshot/restore through the harness", () => {
     const bridges: HookBridges = {
       ...stubBridges(),
       data: {
-        resolve: <T,>(_k: string, _f: () => Promise<T>): T => "x" as unknown as T,
+        peek: () => undefined,
+        fetch: async <T,>(_k: string, _f: () => Promise<T>): Promise<T> => "x" as unknown as T,
+        subscribe: () => () => {},
         invalidate: () => {},
         invalidateTag: () => {},
         has: () => true,

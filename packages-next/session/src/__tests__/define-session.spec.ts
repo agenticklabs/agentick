@@ -115,7 +115,7 @@ describe("defineSession — defaults", () => {
     expect(session.timeline.read().entries).toEqual([]);
     expect(session.timeline.readPending()).toEqual([]);
     await session.timeline.append();
-    const { ids } = await session.timeline.queue();
+    const { ids } = await session.timeline.queue({ role: "user", content: [] });
     expect(ids).toEqual([]);
     expect(session.knobs.list()).toEqual([]);
     expect(session.state.list()).toEqual([]);

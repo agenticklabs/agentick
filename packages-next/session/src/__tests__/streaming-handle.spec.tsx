@@ -16,7 +16,8 @@ import { MockLanguageModelExecutor } from "@agentick/executor-next";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
 import { InMemoryHandlerResolver, ToolExecutorHarness } from "@agentick/tool-executor-next";
 import { LoopExecutorHarness } from "@agentick/loop-executor-next";
-import { ReconcilerHarness, stubBridges } from "@agentick/reconciler-react-next";
+import { ReconcilerHarness } from "@agentick/reconciler-react-next";
+import { stubBridges } from "@agentick/reconciler-next";
 import type { ExecutionTarget, StreamEvent } from "@agentick/spec-next";
 
 import { SessionHarness } from "../harness.js";
