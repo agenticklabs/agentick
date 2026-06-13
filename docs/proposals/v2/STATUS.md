@@ -38,6 +38,18 @@
 
 **Workspace:** 1260/1260 v2 tests pass. (Full workspace sweep also flagged 5 failures in `packages/gateway/__tests__/unix-socket-transport.spec.ts` — v1 gateway, EADDRINUSE port 18789, transient port-conflict flake unrelated to v2 changes.)
 
+**2026-06-13 (continued) — Effect-primitives audit extended to session / app / gateway / transport; 2 real bugs fixed + helper deduplication.** Same audit pattern applied to the remaining harness layers. Three concrete changes:
+
+1. **`transport-next/src/client/base-transport.ts` — AbortSignal listener leak.** The abort listener attached on every `request()` was never removed after the response arrived. Long-lived signals (the common case — one `AbortController` shared across many requests) accumulated listeners with each call: real memory leak under sustained load. Hoisted the listener out of the Promise constructor so a wrapper `settle()` can detach it on both success AND error before forwarding the value/error to `resolve`/`reject`. The `pending.has(id)` / `pending.delete(id)` ownership-check was already correct (single-threaded JS, no race); the listener-leak was the actual bug.
+
+2. **`app-next/src/harness.ts` — `subscribeBus` microtask leak.** The previous implementation used an `aborted` boolean flag + manual `iter.next()` polling + `iter.return()` on unsubscribe. Between an in-flight `await listener(env)` and the outer `aborted = true` flip, `iter.next()` could already be pending and yield one more value AFTER the unsubscribe call returned. Replaced with `Effect.runFork(Stream.runForEach(bus.subscribe(filter), ...))` + `Fiber.interrupt` on unsubscribe — atomic, no microtask gap. Errors swallowed via `Effect.catchAll(Effect.void)` so one extension can't kill the bus subscription.
+
+3. **`busAsyncIterator` helper deduplicated.** The `makeBusAsyncIterator` (`Stream` → `AsyncIterator<ProtocolEvent>` bridge with fiber-interrupt-based `return()`) was duplicated nearly identically between `AppHarness.events()` (60 LOC) and `GatewayHarness.events()` (60 LOC, with a worse `require()`-based effect import). Extracted to `@agentick/runtime-next/substrate/bus-async-iterator.ts`. Single source of truth; both harnesses delegate.
+
+Skipped (audit said low-urgency or correct as-is): session's single-execution mutex (Promise-null-check is correct in single-threaded JS), MultiplexedStream (correct hand-rolled implementation), BaseConnectionContext (no concurrency hazards), runtime-next event bus / memory-journal wake-resolver patterns (Effect.async + resolver is idiomatic Effect — Deferred would be marginally cleaner but no resilience win).
+
+**Workspace:** 1260/1260 v2 tests still pass after all three changes (and the prior request-response-registry refactor). v1 gateway flake (EADDRINUSE port 18789) attempted but not fixable from this branch (`gateway.start()` hangs for unrelated reasons when port is changed); v1 test left as-is.
+
 **Previously, 2026-06-13 — Strict typecheck on test files + pre-commit hook coverage rolled out across all 30 v2 packages.** Every `pnpm typecheck` script now runs `tsc -p tsconfig.json --noEmit` (which includes `src/**/__tests__/`) instead of `tsconfig.build.json` (which excluded tests). The `lint` + `format:check` + `clean` scripts are now declared in every v2 package's `package.json` so turbo's pre-commit hook runs them symmetrically (was running on 7/30 before).
 
 The strict-typecheck pass surfaced and fixed **~120 stale-fixture drift errors across 18 v2 packages**. Each error was a test asserting against a spec shape that had since narrowed/renamed/dropped a field — passing in vitest because esbuild strips types, failing under strict `tsc`. Highlights:

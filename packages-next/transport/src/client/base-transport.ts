@@ -200,18 +200,39 @@ export abstract class BaseClientTransport implements ClientTransport {
       params: params as unknown,
     };
 
+    // Listener is hoisted so we can remove it after settle — without this,
+    // long-lived signals (e.g. one AbortController shared across many
+    // requests) accumulate listeners with each call. `{ once: true }`
+    // alone isn't enough: the listener must also detach when the response
+    // arrives, not just when the signal fires.
+    let onAbort: (() => void) | undefined;
     const promise = new Promise<WireResult<M>>((resolve, reject) => {
-      this.pending.set(id, { resolve: resolve as (v: unknown) => void, reject });
-      signal?.addEventListener("abort", () => {
-        if (!this.pending.has(id)) return; // already resolved
-        this.pending.delete(id);
-        // MCP convention — see ADR 33 §wire/cancellation.
-        void this.sendNotification("notifications/cancelled", {
-          requestId: id,
-          reason: "aborted",
-        });
-        reject({ kind: "cancelled", message: "aborted" });
+      const settle = (kind: "resolve" | "reject", value: unknown): void => {
+        // Detach the abort listener on settle (success OR error) so it
+        // doesn't outlive the request on a long-lived caller signal.
+        if (signal !== undefined && onAbort !== undefined) {
+          signal.removeEventListener("abort", onAbort);
+        }
+        if (kind === "resolve") resolve(value as WireResult<M>);
+        else reject(value);
+      };
+      this.pending.set(id, {
+        resolve: (v: unknown) => settle("resolve", v),
+        reject: (e: unknown) => settle("reject", e),
       });
+      if (signal !== undefined) {
+        onAbort = (): void => {
+          if (!this.pending.has(id)) return; // already settled
+          this.pending.delete(id);
+          // MCP convention — see ADR 33 §wire/cancellation.
+          void this.sendNotification("notifications/cancelled", {
+            requestId: id,
+            reason: "aborted",
+          });
+          settle("reject", { kind: "cancelled", message: "aborted" });
+        };
+        signal.addEventListener("abort", onAbort, { once: true });
+      }
     });
     // Mark the inner promise's rejection as observed at the Node level so
     // Node's unhandledRejection hook doesn't fire during the microtask gap

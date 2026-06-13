@@ -22,6 +22,7 @@
 import { Effect } from "effect";
 import {
   BaseHarness,
+  busAsyncIterator,
   runHarnessProtocol,
   ulid,
   type BaseHarnessOptions,
@@ -221,7 +222,7 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
   events(filter: EventQuery = {}, options: SubscribeOptions = {}): AsyncIterable<ProtocolEvent> {
     const bus = this.bus;
     return {
-      [Symbol.asyncIterator]: () => makeBusAsyncIterator(bus, filter, options),
+      [Symbol.asyncIterator]: () => busAsyncIterator(bus, filter, options),
     };
   }
 
@@ -259,71 +260,4 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
     void msg;
     return Effect.succeed(undefined);
   }
-}
-
-// ============================================================================
-// Async-iterator bridge (matches AppHarness.events shape)
-// ============================================================================
-
-function makeBusAsyncIterator(
-  bus: EventBus,
-  query: EventQuery,
-  options: SubscribeOptions = {},
-): AsyncIterator<ProtocolEvent> {
-  // Effect-typed Stream → AsyncIterator. Identical to the helper in
-  // @agentick/app-next/harness.ts. Keeping local rather than re-exporting
-  // because the helper is small and an internal concern.
-  const { Effect: Eff, Fiber, Stream } = require("effect") as typeof import("effect");
-  const stream = bus.subscribe(query, options);
-  const queue: ProtocolEvent[] = [];
-  const resolvers: Array<(r: IteratorResult<ProtocolEvent>) => void> = [];
-  let done = false;
-  let error: unknown = null;
-
-  const fiber = Eff.runFork(
-    Stream.runForEach(stream, (event) =>
-      Eff.sync(() => {
-        if (done) return;
-        const r = resolvers.shift();
-        if (r) r({ value: event, done: false });
-        else queue.push(event);
-      }),
-    ).pipe(
-      Eff.catchAll((e) =>
-        Eff.sync(() => {
-          error = e;
-          done = true;
-          for (const r of resolvers.splice(0)) {
-            r({ value: undefined as unknown as ProtocolEvent, done: true });
-          }
-        }),
-      ),
-      Eff.tap(() =>
-        Eff.sync(() => {
-          done = true;
-          for (const r of resolvers.splice(0)) {
-            r({ value: undefined as unknown as ProtocolEvent, done: true });
-          }
-        }),
-      ),
-    ),
-  );
-
-  return {
-    next(): Promise<IteratorResult<ProtocolEvent>> {
-      if (queue.length > 0) {
-        return Promise.resolve({ value: queue.shift()!, done: false });
-      }
-      if (done) {
-        if (error) return Promise.reject(error);
-        return Promise.resolve({ value: undefined as unknown as ProtocolEvent, done: true });
-      }
-      return new Promise((resolve) => resolvers.push(resolve));
-    },
-    return(): Promise<IteratorResult<ProtocolEvent>> {
-      done = true;
-      Eff.runFork(Fiber.interrupt(fiber));
-      return Promise.resolve({ value: undefined as unknown as ProtocolEvent, done: true });
-    },
-  };
 }

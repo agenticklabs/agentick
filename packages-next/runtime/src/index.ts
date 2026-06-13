@@ -52,3 +52,4 @@ export {
   type RegisteredRequest,
   type RequestError,
 } from "./substrate/request-response-registry.js";
+export { busAsyncIterator } from "./substrate/bus-async-iterator.js";

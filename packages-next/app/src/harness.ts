@@ -22,6 +22,7 @@ import { Effect, Fiber, Stream } from "effect";
 
 import {
   BaseHarness,
+  busAsyncIterator,
   type HarnessShell,
   LocalEventBus,
   LocalInbox,
@@ -591,29 +592,27 @@ export class AppHarness<P = unknown>
         return () => self.handlerResolver.unregister(handlerRef);
       },
       subscribeBus(filter, listener): Unsubscribe {
-        // Use the app's bus directly. We need a fiber-like handle to
-        // unsubscribe; the simplest path is Stream.runForEach with a
-        // Fiber.interrupt on cleanup, but our app surface already
-        // exposes `app.events(filter)` as an AsyncIterable — extensions
-        // typically don't need fiber-level granularity. We provide the
-        // simple-bus subscription here; advanced flow uses app.events().
-        const iter = self.events(filter)[Symbol.asyncIterator]();
-        let aborted = false;
-        (async () => {
-          while (!aborted) {
-            const next = await iter.next();
-            if (next.done || aborted) break;
-            try {
-              await listener(next.value);
-            } catch {
-              // Swallow listener errors so one extension can't kill the bus.
-            }
-          }
-          await iter.return?.();
-        })();
+        // Subscribe via the app's bus Stream + `Stream.runForEach`,
+        // forked as a fiber so unsubscribe is a single `Fiber.interrupt`
+        // call. The previous AsyncIterable + `aborted` boolean pattern
+        // had a microtask leak: between an in-flight `await listener(...)`
+        // and the outer `aborted = true` flip, `iter.next()` could
+        // already be pending and yield one more value AFTER the
+        // unsubscribe call returned. `Fiber.interrupt` is atomic —
+        // upon return, the fiber is guaranteed to receive no further
+        // values.
+        const fiber = Effect.runFork(
+          Stream.runForEach(self.bus.subscribe(filter), (env) =>
+            Effect.tryPromise({
+              // Swallow listener errors so one extension can't kill the
+              // bus subscription.
+              try: () => Promise.resolve(listener(env)),
+              catch: () => undefined,
+            }).pipe(Effect.catchAll(() => Effect.void)),
+          ),
+        );
         return () => {
-          aborted = true;
-          iter.return?.();
+          void Effect.runPromise(Fiber.interrupt(fiber));
         };
       },
       substrate: {
@@ -709,7 +708,7 @@ export class AppHarness<P = unknown>
   events(filter: EventQuery = {}, options: SubscribeOptions = {}): AsyncIterable<ProtocolEvent> {
     const bus = this.bus;
     return {
-      [Symbol.asyncIterator]: () => makeBusAsyncIterator(bus, filter, options),
+      [Symbol.asyncIterator]: () => busAsyncIterator(bus, filter, options),
     };
   }
 
@@ -1131,82 +1130,6 @@ function mapAppError(cause: unknown): AppError {
     return cause as AppError;
   }
   return { _tag: "AppExecutionFailed", cause };
-}
-
-// ─────────────────────────────────────────────────────────────────────
-// Bus → AsyncIterable adapter
-// ─────────────────────────────────────────────────────────────────────
-
-/**
- * Adapt a `bus.subscribe(...)` `Stream` into a per-iterator
- * `AsyncIterator<ProtocolEvent>`. Mirrors the pattern used by
- * `SessionExecutionHandle` but without a terminal sentinel — the
- * stream lives until the consumer breaks out (`return()` triggers
- * Fiber.interrupt) or the bus closes (stream completes naturally).
- *
- * Each `for await` creates its own subscription; the substrate bus is
- * multi-subscriber by design.
- */
-function makeBusAsyncIterator(
-  bus: EventBus,
-  query: EventQuery,
-  options: SubscribeOptions = {},
-): AsyncIterator<ProtocolEvent> {
-  const stream = bus.subscribe(query, options);
-  const queue: ProtocolEvent[] = [];
-  const resolvers: Array<(r: IteratorResult<ProtocolEvent>) => void> = [];
-  let done = false;
-  let error: unknown = null;
-
-  const fiber = Effect.runFork(
-    Stream.runForEach(stream, (event) =>
-      Effect.sync(() => {
-        if (done) return;
-        const r = resolvers.shift();
-        if (r) r({ value: event, done: false });
-        else queue.push(event);
-      }),
-    ).pipe(
-      Effect.catchAll((e) =>
-        Effect.sync(() => {
-          error = e;
-          done = true;
-          for (const r of resolvers.splice(0)) {
-            r({ value: undefined as unknown as ProtocolEvent, done: true });
-          }
-        }),
-      ),
-      Effect.tap(() =>
-        Effect.sync(() => {
-          done = true;
-          for (const r of resolvers.splice(0)) {
-            r({ value: undefined as unknown as ProtocolEvent, done: true });
-          }
-        }),
-      ),
-    ),
-  );
-
-  return {
-    async next() {
-      if (queue.length > 0) return { value: queue.shift()!, done: false };
-      if (done) {
-        if (error) throw error;
-        return { value: undefined as unknown as ProtocolEvent, done: true };
-      }
-      return new Promise<IteratorResult<ProtocolEvent>>((resolve) => {
-        resolvers.push(resolve);
-      });
-    },
-    async return() {
-      done = true;
-      await Effect.runPromise(Fiber.interrupt(fiber));
-      for (const r of resolvers.splice(0)) {
-        r({ value: undefined as unknown as ProtocolEvent, done: true });
-      }
-      return { value: undefined as unknown as ProtocolEvent, done: true };
-    },
-  };
 }
 
 // ─────────────────────────────────────────────────────────────────────
