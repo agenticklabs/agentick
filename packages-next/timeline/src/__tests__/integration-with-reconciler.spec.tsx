@@ -7,6 +7,7 @@ import React from "react";
 import { describe, expect, it, vi } from "vitest";
 
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
+import { extractText } from "@agentick/spec-next";
 import type { HookBridges, MessageEntry, TimelineEntry } from "@agentick/spec-next";
 
 import { ReconcilerHarness } from "@agentick/reconciler-react-next";
@@ -59,9 +60,7 @@ function asMessageEntries(entries: readonly unknown[]): readonly MessageEntry[] 
   );
 }
 
-function joinText(content: readonly { text?: string }[]): string {
-  return content.map((c) => c.text ?? "").join("");
-}
+const joinText = extractText;
 
 // ============================================================================
 
@@ -188,10 +187,12 @@ describe("<Timeline> — render prop", () => {
           observed = { count: entries.length, budget };
           return entries.map((e) =>
             React.createElement(
-              "message" as unknown as React.ComponentType<unknown>,
+              // Cast widens to accept the host-element prop shape (role).
+              // Reconciler-host intrinsics aren't in React's JSX namespace.
+              "message" as unknown as React.ComponentType<Record<string, unknown>>,
               { key: e.message.id, role: e.message.role },
               React.createElement(
-                "text" as unknown as React.ComponentType<unknown>,
+                "text" as unknown as React.ComponentType<Record<string, unknown>>,
                 {},
                 `RP:${joinText(e.message.content)}`,
               ),
