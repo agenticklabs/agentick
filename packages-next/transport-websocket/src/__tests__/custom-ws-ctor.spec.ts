@@ -10,6 +10,7 @@ import { WebSocket as WsLib } from "ws";
 import { createGateway } from "@agentick/gateway-next";
 import { createClient } from "@agentick/client-next";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import type { WebSocketTransportOptions } from "../client/transport.js";
 
 import { websocket } from "../client/index.js";
 import { websocketServer } from "../server/index.js";
@@ -40,10 +41,10 @@ describe("WebSocket transport — custom WebSocket constructor", () => {
     const client = await createClient({
       transport: websocket({
         url: `ws://127.0.0.1:${port}`,
-        WebSocket: WsLib as unknown as new (
-          url: string,
-          protocols?: string | readonly string[],
-        ) => InstanceType<typeof WsLib>,
+        // Cast through `unknown` — `ws` library's WebSocket has a more
+        // permissive signature than the global; the transport only uses
+        // the wire-shape subset our `WebSocketLike` declares.
+        WebSocket: WsLib as unknown as WebSocketTransportOptions["WebSocket"],
       }),
     });
     await client.connect();

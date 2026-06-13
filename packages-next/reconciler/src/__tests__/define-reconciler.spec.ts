@@ -15,18 +15,17 @@ import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next
 
 import { defineReconciler } from "../define-reconciler.js";
 
-const fakeRenderTreeResult = (mountId: string): RenderTreeResult => ({
+const fakeRenderTreeResult = (_mountId: string): RenderTreeResult => ({
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   tree: { context: { entries: [] }, declarations: {} } as any,
-  diagnostics: { warnings: [], errors: [] },
-  version: 1,
-  mountId,
+  diagnostics: [],
+  iterations: 1,
 });
 
 describe("defineReconciler — factory shape", () => {
   it("returns a ReconcilerFactory (passes marker)", () => {
     const factory = defineReconciler({
-      mount: async () => ({ mountId: "m_1" }) as MountResult,
+      mount: async () => ({ mountId: "m_1", restoredFromSnapshot: false }) as MountResult,
       unmount: async () => {},
       renderTree: async (i) => fakeRenderTreeResult(i.mountId),
     });
@@ -38,7 +37,7 @@ describe("defineReconciler — factory shape", () => {
     const factory = defineReconciler({
       mount: async () => {
         events.push("mount");
-        return { mountId: "m_1" };
+        return { mountId: "m_1", restoredFromSnapshot: false };
       },
       unmount: async () => {
         events.push("unmount");
@@ -56,8 +55,9 @@ describe("defineReconciler — factory shape", () => {
     });
     const m = await r.mount({ element: null });
     expect(m.mountId).toBe("m_1");
+    expect(m.restoredFromSnapshot).toBe(false);
     const tree = await r.renderTree({ mountId: m.mountId });
-    expect(tree.mountId).toBe("m_1");
+    expect(tree.iterations).toBe(1);
     await r.unmount({ mountId: m.mountId });
     expect(events).toEqual(["mount", "renderTree", "unmount"]);
   });
@@ -66,7 +66,7 @@ describe("defineReconciler — factory shape", () => {
 describe("defineReconciler — defaults + envelopes", () => {
   it("unconfigured snapshot/renderToString reject; rerender/notifyLifecycle/restore no-op", async () => {
     const factory = defineReconciler({
-      mount: async () => ({ mountId: "m_1" }),
+      mount: async () => ({ mountId: "m_1", restoredFromSnapshot: false }),
       unmount: async () => {},
       renderTree: async (i) => fakeRenderTreeResult(i.mountId),
     });
@@ -89,7 +89,7 @@ describe("defineReconciler — defaults + envelopes", () => {
   it("mount + renderTree + unmount emit envelopes on the supplied bus", async () => {
     const bus = new LocalEventBus();
     const factory = defineReconciler({
-      mount: async () => ({ mountId: "m_1" }),
+      mount: async () => ({ mountId: "m_1", restoredFromSnapshot: false }),
       unmount: async () => {},
       renderTree: async (i) => fakeRenderTreeResult(i.mountId),
     });

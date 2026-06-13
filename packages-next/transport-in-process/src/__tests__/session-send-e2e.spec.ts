@@ -13,39 +13,17 @@ import { describe, expect, it } from "vitest";
 import { createClient } from "@agentick/client-next";
 import { MockLanguageModelExecutor } from "@agentick/executor-next";
 import { createGateway } from "@agentick/gateway-next";
-import { defineReconciler } from "@agentick/reconciler-next";
+import { fakeReconciler } from "@agentick/reconciler-next/testing";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
 import {
   type ContentBlock,
   type JsonRpcId,
   type JsonRpcRequest,
   type JsonRpcResponse,
-  type RenderTreeResult,
 } from "@agentick/spec-next";
 import { dispatchRequest, type DispatchSink } from "@agentick/transport-next";
 
 import { inProcessTransport } from "../index.js";
-
-/**
- * Stub reconciler — produces an empty IR. The MockLanguageModelExecutor
- * ignores the prompt and returns scripted output, so the actual tree
- * doesn't matter here. Keeps the test free of any specific JSX runtime
- * dep (React, etc.).
- */
-function stubReconciler() {
-  return defineReconciler({
-    mount: async () => ({ mountId: "stub" }),
-    unmount: async () => {},
-    renderTree: async ({ mountId }) =>
-      ({
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        tree: { context: { entries: [] }, declarations: {} } as any,
-        diagnostics: { warnings: [], errors: [] },
-        version: 1,
-        mountId,
-      }) satisfies RenderTreeResult,
-  });
-}
 
 async function makeStack(replyText: string) {
   const journal = new MemoryJournal();
@@ -68,7 +46,7 @@ async function makeStack(replyText: string) {
   const app = await gateway.createApp({
     appId: "test-app",
     rootElement: null,
-    options: { executor, reconciler: stubReconciler() },
+    options: { executor, reconciler: fakeReconciler() },
   });
   const session = await app.createSession({ sessionId: "test-session" });
 

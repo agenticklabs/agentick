@@ -34,7 +34,7 @@ describe("retry middleware", () => {
     });
     await client.connect();
     const result = await client.request("ping", {});
-    expect((result as { attempts: number }).attempts).toBe(3);
+    expect((result as unknown as { attempts: number }).attempts).toBe(3);
     await client.close();
   });
 

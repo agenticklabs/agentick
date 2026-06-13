@@ -126,11 +126,11 @@ describe("MultiplexedStream backpressure", () => {
       // Buffered values still deliverable before the error surfaces
       expect((await iter.next()).value).toBe(1);
       expect((await iter.next()).value).toBe(2);
-      await expect(iter.next()).rejects.toMatchObject<BackpressureError>({
+      await expect(iter.next()).rejects.toMatchObject({
         kind: "backpressure",
         streamId: "sub-7",
         message: expect.stringContaining("overflowed") as unknown as string,
-      });
+      } satisfies Partial<BackpressureError>);
     });
 
     it("subsequent push() after termination is a no-op", async () => {
