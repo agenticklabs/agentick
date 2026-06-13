@@ -22,7 +22,7 @@ import type {
   ChatCompletionCreateParams,
 } from "openai/resources/chat/completions";
 
-import type OpenAI from "openai";
+import type { OpenAI } from "openai";
 
 export type CannedResponse =
   | { readonly kind: "non-streaming"; readonly completion: ChatCompletion }

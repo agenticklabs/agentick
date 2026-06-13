@@ -16,3 +16,14 @@ export {
   type MockScriptedRun,
 } from "./fake-language-model-executor.js";
 export { defineExecutor, type DefineExecutorInput } from "./define-executor.js";
+
+// Abstract base for first-party provider executors. Concrete impls
+// (OpenAI, Anthropic, Google, AI SDK) subclass and implement the
+// provider-specific hooks. Adopters writing one-off integrations
+// should use `defineExecutor` (callback-style) instead.
+export {
+  BaseLanguageModelExecutor,
+  defaultProject,
+  mergeSignals,
+  type StreamContext,
+} from "./base-language-model-executor.js";

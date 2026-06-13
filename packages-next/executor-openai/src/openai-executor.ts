@@ -24,7 +24,6 @@
  * @see docs/proposals/v2/blueprint/06-executor-harness.md
  */
 
-import { Effect } from "effect";
 import { OpenAI, type ClientOptions } from "openai";
 import type {
   ChatCompletion,
@@ -35,41 +34,19 @@ import type {
 } from "openai/resources/chat/completions";
 import type { FunctionDefinition } from "openai/resources/shared";
 
-import { BaseHarness, runHarnessProtocol, ulid } from "@agentick/runtime-next";
+import { BaseLanguageModelExecutor, type StreamContext } from "@agentick/executor-next";
+import type { EventBus, MessageInbox, OperationJournal } from "@agentick/spec-next";
 import type {
-  AbortExecutorInput,
   AdapterDelta,
   ContentBlock,
-  ContextEntry,
-  EventBus,
-  ExecuteError,
-  ExecuteInput,
   ExecutionTarget,
-  ExecutorError,
-  ExecutorStream,
-  ExecutorTerminal,
   LanguageModelExecutionResult,
-  LanguageModelExecutor,
   LanguageModelInput,
   LanguageModelMessage,
-  LanguageModelMessagePart,
   LanguageModelStopReason,
-  MediaSource,
   LanguageModelTool,
-  MessageEnvelope,
-  MessageHandlerError,
-  MessageInbox,
-  NormalizeError,
   NormalizeInput,
-  Operation,
-  OperationJournal,
-  ProjectInput,
-  ProjectionError,
-  RenderedTree,
-  RunInput,
-  SectionEntry,
   ToolCall,
-  ToolDeclaration,
   UsageStats,
 } from "@agentick/spec-next";
 import { SPEC_VERSION } from "@agentick/spec-next";
@@ -220,12 +197,6 @@ export interface CustomBlockDefinition {
 // Internals
 // ============================================================================
 
-interface InFlightEntry {
-  readonly executionId: string;
-  abort?: AbortController;
-  abortReason?: string;
-}
-
 const SPEC_VERSION_LITERAL = SPEC_VERSION;
 
 const STOP_REASON_MAP: Record<string, LanguageModelStopReason> = {
@@ -240,17 +211,15 @@ const STOP_REASON_MAP: Record<string, LanguageModelStopReason> = {
 // OpenAIExecutor
 // ============================================================================
 
-export class OpenAIExecutor extends BaseHarness<"executor"> implements LanguageModelExecutor {
-  readonly family = "language-model" as const;
+export class OpenAIExecutor extends BaseLanguageModelExecutor<ChatCompletion> {
   readonly target: ExecutionTarget;
+
+  protected override readonly streamByDefault: boolean;
 
   private readonly client: OpenAI;
   private readonly defaultModel: string | undefined;
-  private readonly streamByDefault: boolean;
   private readonly parseThinkTags: boolean;
   private readonly customBlocks?: Readonly<Record<string, CustomBlockDefinition>>;
-  private readonly inFlight = new Map<string, InFlightEntry>();
-  private readonly aborted = new Set<string>();
 
   constructor(
     scopeId: string,
@@ -259,7 +228,7 @@ export class OpenAIExecutor extends BaseHarness<"executor"> implements LanguageM
     inbox: MessageInbox,
     options: OpenAIExecutorOptions = {},
   ) {
-    super("executor", scopeId, journal, bus, inbox);
+    super(scopeId, journal, bus, inbox);
     this.client = options.client ?? new OpenAI(buildClientOptions(options));
     this.defaultModel = options.model;
     this.streamByDefault = options.stream ?? false;
@@ -273,631 +242,291 @@ export class OpenAIExecutor extends BaseHarness<"executor"> implements LanguageM
     };
   }
 
-  // ──────── ExecutorProtocol ────────
+  // ──────── Hooks (BaseLanguageModelExecutor) ────────
 
-  project(input: ProjectInput): Promise<LanguageModelInput> {
-    const op: Operation<ProjectInput, LanguageModelInput> = {
-      opId: `executor:project:${ulid()}`,
-      surface: "executor",
-      name: "executor:command:project",
-      scope: input.scope ?? {},
-      input,
-    };
-    return runHarnessProtocol(
-      this.runOperation(op, (i) =>
-        Effect.try({
-          try: () => projectImpl(i),
-          catch: (cause): ProjectionError => ({
-            _tag: "ProjectionFailed",
-            reason: "projection threw",
-            cause,
-          }),
-        }),
-      ),
-    );
+  protected buildParams(
+    input: LanguageModelInput,
+    target: ExecutionTarget,
+  ): ChatCompletionCreateParams {
+    return toOpenAIParams(input, target, this.defaultModel);
   }
 
-  execute(input: ExecuteInput<LanguageModelInput>): Promise<unknown> {
-    const executionId = input.scope?.executionId ?? `exec:${ulid()}`;
-    const op: Operation<ExecuteInput<LanguageModelInput>, unknown> = {
-      opId: `executor:execute:${executionId}:${ulid()}`,
-      surface: "executor",
-      name: "executor:command:execute",
-      scope: input.scope ?? { executionId },
-      input,
-    };
-    return runHarnessProtocol(
-      this.runOperation(op, (i) => this.executeBody(i, executionId, undefined)),
-    );
+  protected callProvider(
+    params: unknown,
+    signal: AbortSignal | undefined,
+  ): Promise<ChatCompletion> {
+    return this.client.chat.completions.create(
+      { ...(params as ChatCompletionCreateParams), stream: false },
+      { signal },
+    ) as unknown as Promise<ChatCompletion>;
   }
 
-  /**
-   * Streaming surface — yields one `AdapterDelta` per provider chunk.
-   * 1:1 translation: OpenAI sends `delta.content` → we emit
-   * `content-delta`; `delta.tool_calls[i].function.name` → `tool-call-start`;
-   * `delta.tool_calls[i].function.arguments` → `tool-call-delta`;
-   * `finish_reason` → `message-end`; usage chunks → `usage`. After the
-   * provider stream completes, we emit the symmetric summary events
-   * (`content`, `tool-call`, `message`) from the accumulator state.
-   *
-   * `.result` resolves with the assembled raw `ChatCompletion` shape —
-   * the same value the non-streaming `execute()` path returns. The
-   * loop hands it to `normalize()` to convert into a
-   * `LanguageModelExecutionResult`.
-   */
-  executeStream(input: ExecuteInput<LanguageModelInput>): ExecutorStream<ChatCompletion> {
-    const queue: AdapterDelta[] = [];
-    const resolvers: Array<(r: IteratorResult<AdapterDelta>) => void> = [];
-    let done = false;
-    let resultResolve!: (v: ChatCompletion) => void;
-    let resultReject!: (e: unknown) => void;
-    const resultPromise = new Promise<ChatCompletion>((res, rej) => {
-      resultResolve = res;
-      resultReject = rej;
+  protected async drainStream(params: unknown, ctx: StreamContext): Promise<ChatCompletion> {
+    const cp = params as ChatCompletionCreateParams;
+    const stream = (await this.client.chat.completions.create(
+      { ...cp, stream: true, stream_options: { include_usage: true } },
+      { signal: ctx.signal },
+    )) as unknown as AsyncIterable<ChatCompletionChunk>;
+
+    const accum = new StreamAccumulator();
+    ctx.emit({ type: "message-start", role: "assistant", model: cp.model });
+
+    // Per-block state needed for symmetric start/end emission.
+    // Reasoning lives in its own block — vLLM/LM Studio emit
+    // chain-of-thought BEFORE the assistant content, so it occupies
+    // a lower blockIndex than the text content block.
+    let textBlockStarted = false;
+    const toolBlockStartedByIndex = new Set<number>();
+    let reasoningBlockStarted = false;
+    let reasoningAccum = "";
+    let textAccum = "";
+    const reasoningBlockIndex = -1; // sentinel; emitted before text (index 0)
+
+    // Unified XML-tag parser. Drives BOTH the parseThinkTags preset
+    // (think → reasoning route) and any adopter-declared
+    // customBlocks (each tag → custom-block route). When neither
+    // option is configured, `tagRouter` is null and text flows
+    // through unchanged.
+    const tagRouter = buildTagRouter({
+      parseThinkTags: this.parseThinkTags,
+      customBlocks: this.customBlocks,
     });
-    const controller = new AbortController();
-    if (input.signal) {
-      if (input.signal.aborted) controller.abort(input.signal.reason);
-      else
-        input.signal.addEventListener("abort", () => controller.abort(input.signal!.reason), {
-          once: true,
-        });
-    }
 
-    // Per-stream Operation so observability subscribers correlate deltas
-    // to a single executor invocation. The op flows through emitDeltaLazy
-    // alongside the iterator queue — bus subscribers (devtools,
-    // telemetry, `app.events({surface: "executor", phase: "delta"})`)
-    // see the same deltas the consumer reads from the AsyncIterable.
-    const executionId = input.scope?.executionId ?? `exec:${ulid()}`;
-    const streamOp: Operation<ExecuteInput<LanguageModelInput>, ChatCompletion> = {
-      opId: `executor:executeStream:${executionId}:${ulid()}`,
-      surface: "executor",
-      name: "executor:command:execute",
-      scope: input.scope ?? { executionId },
-      input,
+    const emitText = (chunk: string): void => {
+      if (chunk.length === 0) return;
+      if (!textBlockStarted) {
+        ctx.emit({ type: "content-start", blockIndex: 0, blockType: "text" });
+        textBlockStarted = true;
+      }
+      ctx.emit({ type: "content-delta", blockIndex: 0, delta: chunk });
+      textAccum += chunk;
     };
 
-    const emit = (delta: AdapterDelta): void => {
-      if (done) return;
-      // Mirror to bus envelopes for observability — fire-and-forget so
-      // we don't block the iterator hot path on subscriber latency.
-      void Effect.runPromise(
-        this.emitDeltaLazy(streamOp, () => delta).pipe(Effect.catchAll(() => Effect.void)),
-      );
-      const r = resolvers.shift();
-      if (r) r({ value: delta, done: false });
-      else queue.push(delta);
-    };
-    const complete = (): void => {
-      done = true;
-      while (resolvers.length > 0) {
-        resolvers.shift()!({ value: undefined as unknown as AdapterDelta, done: true });
+    const handleTagEvent = (event: StreamTagEvent): void => {
+      if (event.type === "text") {
+        emitText(event.content);
+        return;
+      }
+      const mode = tagRouter!.modeFor(event.tag);
+      if (mode === "reasoning") {
+        switch (event.type) {
+          case "block-start":
+            if (!reasoningBlockStarted) {
+              ctx.emit({ type: "reasoning-start", blockIndex: reasoningBlockIndex });
+              reasoningBlockStarted = true;
+            }
+            break;
+          case "block-delta":
+            if (!reasoningBlockStarted) {
+              ctx.emit({ type: "reasoning-start", blockIndex: reasoningBlockIndex });
+              reasoningBlockStarted = true;
+            }
+            ctx.emit({
+              type: "reasoning-delta",
+              blockIndex: reasoningBlockIndex,
+              delta: event.delta,
+            });
+            reasoningAccum += event.delta;
+            break;
+          case "block-end":
+            // Held until the post-stream pass so symmetric closes
+            // arrive after all chunk deltas.
+            break;
+          case "block":
+            // Skip the per-block summary — we synthesize one final
+            // reasoning summary from `reasoningAccum` post-stream.
+            break;
+        }
+        return;
+      }
+      // mode === "custom-block" — straight passthrough.
+      switch (event.type) {
+        case "block-start":
+          ctx.emit({ type: "custom-block-start", tag: event.tag, attrs: event.attrs });
+          break;
+        case "block-delta":
+          ctx.emit({ type: "custom-block-delta", tag: event.tag, delta: event.delta });
+          break;
+        case "block-end":
+          ctx.emit({ type: "custom-block-end", tag: event.tag });
+          break;
+        case "block":
+          ctx.emit({
+            type: "custom-block",
+            tag: event.tag,
+            content: event.content,
+            attrs: event.attrs,
+            ...(event.selfClosing ? { selfClosing: true } : {}),
+          });
+          break;
       }
     };
 
-    // Drive the provider stream + emit chain on a detached promise. The
-    // returned ExecutorStream's iterator + .result are both backed by it.
-    void (async () => {
-      try {
-        const params = toOpenAIParams(input.targetInput, input.target, this.defaultModel);
-        const stream = (await this.client.chat.completions.create(
-          { ...params, stream: true, stream_options: { include_usage: true } },
-          { signal: controller.signal },
-        )) as unknown as AsyncIterable<ChatCompletionChunk>;
-
-        const accum = new StreamAccumulator();
-        emit({ type: "message-start", role: "assistant", model: params.model });
-
-        // Per-block state needed for symmetric start/end emission.
-        // Reasoning lives in its own block — vLLM/LM Studio emit
-        // chain-of-thought BEFORE the assistant content, so it occupies
-        // a lower blockIndex than the text content block.
-        let textBlockStarted = false;
-        const toolBlockStartedByIndex = new Set<number>();
-        let reasoningBlockStarted = false;
-        let reasoningAccum = "";
-        let textAccum = "";
-        const reasoningBlockIndex = -1; // sentinel; emitted before text (index 0)
-
-        // Unified XML-tag parser. Drives BOTH the parseThinkTags preset
-        // (think → reasoning route) and any adopter-declared
-        // customBlocks (each tag → custom-block route). When neither
-        // option is configured, `tagRouter` is null and text flows
-        // through unchanged.
-        const tagRouter = buildTagRouter({
-          parseThinkTags: this.parseThinkTags,
-          customBlocks: this.customBlocks,
-        });
-
-        const emitText = (chunk: string): void => {
-          if (chunk.length === 0) return;
-          if (!textBlockStarted) {
-            emit({ type: "content-start", blockIndex: 0, blockType: "text" });
-            textBlockStarted = true;
+    for await (const chunk of stream) {
+      accum.push(chunk);
+      // When a tag router is active, suppress mapChunk's
+      // content-start/content-delta emission and route the raw
+      // text through the parser. We do this by lying about
+      // textBlockStarted so mapChunk never emits its content
+      // events.
+      const mapState = tagRouter
+        ? {
+            textBlockStarted: true,
+            toolBlockStartedByIndex,
+            reasoningBlockStarted,
+            reasoningBlockIndex,
           }
-          emit({ type: "content-delta", blockIndex: 0, delta: chunk });
-          textAccum += chunk;
-        };
-
-        const handleTagEvent = (event: StreamTagEvent): void => {
-          if (event.type === "text") {
-            emitText(event.content);
-            return;
-          }
-          const mode = tagRouter!.modeFor(event.tag);
-          if (mode === "reasoning") {
-            switch (event.type) {
-              case "block-start":
-                if (!reasoningBlockStarted) {
-                  emit({ type: "reasoning-start", blockIndex: reasoningBlockIndex });
-                  reasoningBlockStarted = true;
-                }
-                break;
-              case "block-delta":
-                if (!reasoningBlockStarted) {
-                  emit({ type: "reasoning-start", blockIndex: reasoningBlockIndex });
-                  reasoningBlockStarted = true;
-                }
-                emit({
-                  type: "reasoning-delta",
-                  blockIndex: reasoningBlockIndex,
-                  delta: event.delta,
-                });
-                reasoningAccum += event.delta;
-                break;
-              case "block-end":
-                // Held until the post-stream pass so symmetric closes
-                // arrive after all chunk deltas (matches text+tool
-                // close ordering elsewhere in this body).
-                break;
-              case "block":
-                // Skip the per-block summary — we synthesize one final
-                // reasoning summary from `reasoningAccum` post-stream.
-                break;
-            }
-            return;
-          }
-          // mode === "custom-block" — straight passthrough.
-          switch (event.type) {
-            case "block-start":
-              emit({ type: "custom-block-start", tag: event.tag, attrs: event.attrs });
-              break;
-            case "block-delta":
-              emit({ type: "custom-block-delta", tag: event.tag, delta: event.delta });
-              break;
-            case "block-end":
-              emit({ type: "custom-block-end", tag: event.tag });
-              break;
-            case "block":
-              emit({
-                type: "custom-block",
-                tag: event.tag,
-                content: event.content,
-                attrs: event.attrs,
-                ...(event.selfClosing ? { selfClosing: true } : {}),
-              });
-              break;
-          }
-        };
-
-        for await (const chunk of stream) {
-          accum.push(chunk);
-          // When a tag router is active, suppress mapChunk's
-          // content-start/content-delta emission and route the raw
-          // text through the parser. We do this by lying about
-          // textBlockStarted so mapChunk never emits its content
-          // events.
-          const mapState = tagRouter
-            ? {
-                textBlockStarted: true,
-                toolBlockStartedByIndex,
-                reasoningBlockStarted,
-                reasoningBlockIndex,
-              }
-            : {
-                textBlockStarted,
-                toolBlockStartedByIndex,
-                reasoningBlockStarted,
-                reasoningBlockIndex,
-              };
-          for (const delta of mapChunkToAdapterDeltas(chunk, mapState)) {
-            if (tagRouter && delta.type === "content-delta") {
-              for (const ev of tagRouter.parser.process(delta.delta)) {
-                handleTagEvent(ev);
-              }
-              continue;
-            }
-            // Track block-start side effects so mapChunk knows what to
-            // emit on subsequent chunks.
-            if (delta.type === "content-start") textBlockStarted = true;
-            if (delta.type === "tool-call-start") {
-              toolBlockStartedByIndex.add(delta.blockIndex);
-            }
-            if (delta.type === "reasoning-start") reasoningBlockStarted = true;
-            if (delta.type === "reasoning-delta") reasoningAccum += delta.delta;
-            emit(delta);
-          }
-        }
-        // Drain any buffered partial-tag content at stream end.
-        if (tagRouter) {
-          for (const ev of tagRouter.parser.flush()) {
+        : {
+            textBlockStarted,
+            toolBlockStartedByIndex,
+            reasoningBlockStarted,
+            reasoningBlockIndex,
+          };
+      for (const delta of mapChunkToAdapterDeltas(chunk, mapState)) {
+        if (tagRouter && delta.type === "content-delta") {
+          for (const ev of tagRouter.parser.process(delta.delta)) {
             handleTagEvent(ev);
           }
+          continue;
         }
-
-        // Symmetric end + summary events from the accumulator state.
-        // We close any open blocks that the provider didn't explicitly
-        // close, then emit the summary events.
-        const final = accum.toChatCompletion(params.model);
-        // When a tag router is active, the parser routed text — use the
-        // cleaned accumulators instead of the raw message.content
-        // (which still contains literal tag bytes). Also rewrite the
-        // final ChatCompletion's message.content and attach
-        // reasoning_content so normalize() sees the cleaned shape.
-        if (tagRouter) {
-          (final.choices[0]!.message as unknown as Record<string, unknown>).content =
-            textAccum.length > 0 ? textAccum : null;
-          if (reasoningAccum.length > 0) {
-            (final.choices[0]!.message as unknown as Record<string, unknown>).reasoning_content =
-              reasoningAccum;
-          }
+        // Track block-start side effects so mapChunk knows what to
+        // emit on subsequent chunks.
+        if (delta.type === "content-start") textBlockStarted = true;
+        if (delta.type === "tool-call-start") {
+          toolBlockStartedByIndex.add(delta.blockIndex);
         }
-        const choice = final.choices[0]!;
-        const finishReason = choice.finish_reason ?? "stop";
-        const text = tagRouter
-          ? textAccum
-          : typeof choice.message.content === "string"
-            ? choice.message.content
-            : "";
-        const toolCallsRaw = choice.message.tool_calls ?? [];
-
-        let blockIndex = 0;
-        if (reasoningBlockStarted && reasoningAccum.length > 0) {
-          emit({ type: "reasoning-end", blockIndex: reasoningBlockIndex });
-          emit({
-            type: "reasoning",
-            blockIndex: reasoningBlockIndex,
-            reasoning: reasoningAccum,
-          });
-        }
-        if (textBlockStarted && text.length > 0) {
-          emit({ type: "content-end", blockIndex });
-          emit({
-            type: "content",
-            blockIndex,
-            content: { type: "text", text } as ContentBlock,
-          });
-          blockIndex += 1;
-        }
-        for (const tc of toolCallsRaw) {
-          const fn = (tc as { function?: { name: string; arguments: string } }).function;
-          if (!fn) continue;
-          const idx = blockIndex;
-          if (toolBlockStartedByIndex.has(idx) === false) {
-            // Provider never sent a function-name chunk for this index —
-            // emit a synthetic tool-call-start before close so summary is symmetric.
-            emit({
-              type: "tool-call-start",
-              callId: tc.id,
-              name: fn.name,
-              blockIndex: idx,
-            });
-          }
-          emit({ type: "tool-call-end", callId: tc.id });
-          let parsed: Readonly<Record<string, unknown>> = {};
-          try {
-            parsed = JSON.parse(fn.arguments) as Readonly<Record<string, unknown>>;
-          } catch {
-            /* invalid JSON — emit empty object as input */
-          }
-          emit({
-            type: "tool-call",
-            callId: tc.id,
-            name: fn.name,
-            input: parsed,
-          });
-          blockIndex += 1;
-        }
-
-        const usage: UsageStats = {
-          inputTokens: final.usage?.prompt_tokens ?? 0,
-          outputTokens: final.usage?.completion_tokens ?? 0,
-          totalTokens: final.usage?.total_tokens ?? 0,
-          ...(final.usage?.prompt_tokens_details?.cached_tokens !== undefined
-            ? { cachedInputTokens: final.usage.prompt_tokens_details.cached_tokens }
-            : {}),
-        };
-        const stopReason = mapFinishReason(finishReason);
-        emit({ type: "message-end", stopReason, usage });
-
-        // Assembled assistant message summary.
-        const messageContent: ContentBlock[] = [];
-        if (text.length > 0) messageContent.push({ type: "text", text });
-        for (const tc of toolCallsRaw) {
-          const fn = (tc as { function?: { name: string; arguments: string } }).function;
-          if (!fn) continue;
-          messageContent.push({
-            type: "tool_use",
-            toolUseId: tc.id,
-            name: fn.name,
-            input: ((): Readonly<Record<string, unknown>> => {
-              try {
-                return JSON.parse(fn.arguments) as Readonly<Record<string, unknown>>;
-              } catch {
-                return {};
-              }
-            })(),
-          });
-        }
-        emit({
-          type: "message",
-          message: { role: "assistant", content: messageContent, model: params.model },
-          stopReason,
-          usage,
-        });
-
-        resultResolve(final);
-        complete();
-      } catch (cause) {
-        resultReject(mapExecuteError(cause));
-        complete();
+        if (delta.type === "reasoning-start") reasoningBlockStarted = true;
+        if (delta.type === "reasoning-delta") reasoningAccum += delta.delta;
+        ctx.emit(delta);
       }
-    })();
+    }
+    // Drain any buffered partial-tag content at stream end.
+    if (tagRouter) {
+      for (const ev of tagRouter.parser.flush()) {
+        handleTagEvent(ev);
+      }
+    }
 
-    return {
-      result: resultPromise,
-      abort(reason) {
-        controller.abort(reason ?? "aborted");
-      },
-      [Symbol.asyncIterator]() {
-        return {
-          next(): Promise<IteratorResult<AdapterDelta>> {
-            if (queue.length > 0) {
-              return Promise.resolve({ value: queue.shift()!, done: false });
-            }
-            if (done) {
-              return Promise.resolve({ value: undefined as unknown as AdapterDelta, done: true });
-            }
-            return new Promise((resolve) => resolvers.push(resolve));
-          },
-          return(): Promise<IteratorResult<AdapterDelta>> {
-            complete();
-            return Promise.resolve({ value: undefined as unknown as AdapterDelta, done: true });
-          },
-        };
-      },
-    };
-  }
+    // Symmetric end + summary events from the accumulator state.
+    const final = accum.toChatCompletion(cp.model);
+    // When a tag router is active, the parser routed text — use the
+    // cleaned accumulators instead of the raw message.content
+    // (which still contains literal tag bytes).
+    if (tagRouter) {
+      (final.choices[0]!.message as unknown as Record<string, unknown>).content =
+        textAccum.length > 0 ? textAccum : null;
+      if (reasoningAccum.length > 0) {
+        (final.choices[0]!.message as unknown as Record<string, unknown>).reasoning_content =
+          reasoningAccum;
+      }
+    }
+    const choice = final.choices[0]!;
+    const finishReason = choice.finish_reason ?? "stop";
+    const text = tagRouter
+      ? textAccum
+      : typeof choice.message.content === "string"
+        ? choice.message.content
+        : "";
+    const toolCallsRaw = choice.message.tool_calls ?? [];
 
-  normalize(input: NormalizeInput<unknown>): Promise<LanguageModelExecutionResult> {
-    const op: Operation<NormalizeInput<unknown>, LanguageModelExecutionResult> = {
-      opId: `executor:normalize:${ulid()}`,
-      surface: "executor",
-      name: "executor:command:normalize",
-      scope: input.scope ?? {},
-      input,
-    };
-    return runHarnessProtocol(
-      this.runOperation(op, (i) =>
-        Effect.try({
-          try: () => normalizeImpl(i),
-          catch: (cause): NormalizeError => ({
-            _tag: "NormalizationFailed",
-            cause,
-          }),
-        }),
-      ),
-    );
-  }
-
-  run(input: RunInput): Promise<ExecutorTerminal<LanguageModelExecutionResult>> {
-    const executionId = input.scope?.executionId ?? `exec:${ulid()}`;
-    // Per-tick opId composition — see FakeLanguageModelExecutor for the
-    // rationale (substrate idempotency keys must differ per tick).
-    const tickId = input.scope?.tickId;
-    const opId =
-      tickId !== undefined
-        ? `executor:run:${executionId}:${tickId}`
-        : `executor:run:${executionId}:${ulid()}`;
-    const op: Operation<RunInput, ExecutorTerminal<LanguageModelExecutionResult>> = {
-      opId,
-      surface: "executor",
-      name: "executor:command:run",
-      scope: { ...(input.scope ?? {}), executionId },
-      input,
-    };
-    return runHarnessProtocol(this.runOperation(op, (i) => this.runBody(i, executionId, op)));
-  }
-
-  abort(input: AbortExecutorInput): Promise<void> {
-    return runHarnessProtocol(
-      Effect.sync(() => {
-        const entry = this.inFlight.get(input.executionId);
-        if (entry) {
-          entry.abortReason = input.reason ?? "aborted";
-          entry.abort?.abort(input.reason ?? "aborted");
-        }
-        this.aborted.add(input.executionId);
-      }),
-    );
-  }
-
-  // ──────── inbox dispatch ────────
-
-  protected handleMessage(
-    _msg: MessageEnvelope,
-  ): Effect.Effect<unknown, MessageHandlerError, never> {
-    return Effect.fail({
-      _tag: "HandlerError",
-      cause: new Error("openai executor inbox dispatch not yet wired (Phase 4c minimum)"),
-    });
-  }
-
-  // ──────── internals ────────
-
-  /**
-   * Common execute path used by both `execute()` and `run()`. When
-   * `op` is supplied (run path), per-chunk deltas are emitted via
-   * `emitDeltaLazy`. When omitted (execute path), streaming still
-   * accumulates but no deltas are emitted to the bus.
-   */
-  private executeBody(
-    input: ExecuteInput<LanguageModelInput>,
-    executionId: string,
-    op: Operation<unknown, unknown> | undefined,
-  ): Effect.Effect<unknown, ExecuteError, never> {
-    return Effect.gen(this, function* () {
-      if (this.aborted.has(executionId)) {
-        return yield* Effect.fail<ExecuteError>({
-          _tag: "ProviderAborted",
-          reason: "aborted prior to execute",
+    let blockIndex = 0;
+    if (reasoningBlockStarted && reasoningAccum.length > 0) {
+      ctx.emit({ type: "reasoning-end", blockIndex: reasoningBlockIndex });
+      ctx.emit({
+        type: "reasoning",
+        blockIndex: reasoningBlockIndex,
+        reasoning: reasoningAccum,
+      });
+    }
+    if (textBlockStarted && text.length > 0) {
+      ctx.emit({ type: "content-end", blockIndex });
+      ctx.emit({
+        type: "content",
+        blockIndex,
+        content: { type: "text", text } as ContentBlock,
+      });
+      blockIndex += 1;
+    }
+    for (const tc of toolCallsRaw) {
+      const fn = (tc as { function?: { name: string; arguments: string } }).function;
+      if (!fn) continue;
+      const idx = blockIndex;
+      if (toolBlockStartedByIndex.has(idx) === false) {
+        // Provider never sent a function-name chunk for this index —
+        // emit a synthetic tool-call-start before close so summary is symmetric.
+        ctx.emit({
+          type: "tool-call-start",
+          callId: tc.id,
+          name: fn.name,
+          blockIndex: idx,
         });
       }
-
-      const controller = new AbortController();
-      const entry: InFlightEntry = { executionId, abort: controller };
-      this.inFlight.set(executionId, entry);
-
+      ctx.emit({ type: "tool-call-end", callId: tc.id });
+      let parsed: Readonly<Record<string, unknown>> = {};
       try {
-        const params = toOpenAIParams(input.targetInput, input.target, this.defaultModel);
-        const wantStream =
-          this.streamByDefault && (input.target.capabilities?.supportsStreaming ?? true);
-        const signal = mergeSignals(input.signal, controller.signal);
-
-        if (!wantStream) {
-          return yield* Effect.tryPromise<unknown, ExecuteError>({
-            try: () =>
-              this.client.chat.completions.create(
-                { ...params, stream: false },
-                { signal },
-              ) as unknown as Promise<ChatCompletion>,
-            catch: (cause): ExecuteError => mapExecuteError(cause),
-          });
-        }
-
-        return yield* this.executeStreamBody(params, signal, op);
-      } finally {
-        this.inFlight.delete(executionId);
+        parsed = JSON.parse(fn.arguments) as Readonly<Record<string, unknown>>;
+      } catch {
+        /* invalid JSON — emit empty object as input */
       }
+      ctx.emit({
+        type: "tool-call",
+        callId: tc.id,
+        name: fn.name,
+        input: parsed,
+      });
+      blockIndex += 1;
+    }
+
+    const usage: UsageStats = {
+      inputTokens: final.usage?.prompt_tokens ?? 0,
+      outputTokens: final.usage?.completion_tokens ?? 0,
+      totalTokens: final.usage?.total_tokens ?? 0,
+      ...(final.usage?.prompt_tokens_details?.cached_tokens !== undefined
+        ? { cachedInputTokens: final.usage.prompt_tokens_details.cached_tokens }
+        : {}),
+    };
+    const stopReason = mapFinishReason(finishReason);
+    ctx.emit({ type: "message-end", stopReason, usage });
+
+    // Assembled assistant message summary.
+    const messageContent: ContentBlock[] = [];
+    if (text.length > 0) messageContent.push({ type: "text", text });
+    for (const tc of toolCallsRaw) {
+      const fn = (tc as { function?: { name: string; arguments: string } }).function;
+      if (!fn) continue;
+      messageContent.push({
+        type: "tool_use",
+        toolUseId: tc.id,
+        name: fn.name,
+        input: ((): Readonly<Record<string, unknown>> => {
+          try {
+            return JSON.parse(fn.arguments) as Readonly<Record<string, unknown>>;
+          } catch {
+            return {};
+          }
+        })(),
+      });
+    }
+    ctx.emit({
+      type: "message",
+      message: { role: "assistant", content: messageContent, model: cp.model },
+      stopReason,
+      usage,
     });
+
+    return final;
   }
 
-  private executeStreamBody(
-    params: ChatCompletionCreateParams,
-    signal: AbortSignal | undefined,
-    op: Operation<unknown, unknown> | undefined,
-  ): Effect.Effect<ChatCompletion, ExecuteError, never> {
-    return Effect.gen(this, function* () {
-      const stream = yield* Effect.tryPromise<AsyncIterable<ChatCompletionChunk>, ExecuteError>({
-        try: () =>
-          this.client.chat.completions.create(
-            {
-              ...params,
-              stream: true,
-              stream_options: { include_usage: true },
-            },
-            { signal },
-          ) as unknown as Promise<AsyncIterable<ChatCompletionChunk>>,
-        catch: (cause): ExecuteError => mapExecuteError(cause),
-      });
-
-      const iterator = stream[Symbol.asyncIterator]();
-      const accum = new StreamAccumulator();
-      while (true) {
-        const step = yield* Effect.tryPromise<IteratorResult<ChatCompletionChunk>, ExecuteError>({
-          try: () => iterator.next(),
-          catch: (cause): ExecuteError => mapExecuteError(cause),
-        });
-        if (step.done) break;
-        const chunk = step.value;
-        accum.push(chunk);
-        if (op !== undefined) {
-          yield* this.emitDeltaLazy(op, () => mapChunkToDelta(chunk, accum)).pipe(Effect.orDie);
-        }
-      }
-
-      return accum.toChatCompletion(params.model);
-    });
+  protected normalizeRaw(raw: ChatCompletion): LanguageModelExecutionResult {
+    return normalizeImpl({ targetOutput: raw, target: this.target });
   }
 
-  private runBody(
-    input: RunInput,
-    executionId: string,
-    op: Operation<RunInput, ExecutorTerminal<LanguageModelExecutionResult>>,
-  ): Effect.Effect<ExecutorTerminal<LanguageModelExecutionResult>, ExecutorError, never> {
-    return Effect.gen(this, function* () {
-      // Pre-execution abort short-circuit. Mid-stream aborts surface as
-      // `ProviderAborted` from `executeBody` and are caught below.
-      if (this.aborted.has(executionId)) {
-        const terminal: ExecutorTerminal<LanguageModelExecutionResult> = {
-          outcome: "canceled",
-          reason: this.inFlight.get(executionId)?.abortReason ?? "aborted",
-        };
-        return terminal;
-      }
-
-      // 1. project (pure)
-      const projected = projectImpl({
-        compiled: input.compiled,
-        target: input.target,
-      });
-
-      // 2. execute (provider call; may stream + emit deltas)
-      const executeInput: ExecuteInput<LanguageModelInput> = {
-        targetInput: projected,
-        target: input.target,
-        scope: { ...(input.scope ?? {}), executionId },
-        ...(input.signal !== undefined ? { signal: input.signal } : {}),
-      };
-      const raw = yield* this.executeBody(
-        executeInput,
-        executionId,
-        op as Operation<unknown, unknown>,
-      ).pipe(
-        Effect.catchTag("ProviderAborted", (e) =>
-          Effect.succeed<ExecutorTerminal<LanguageModelExecutionResult>>({
-            outcome: "canceled",
-            reason: e.reason ?? "aborted",
-          }),
-        ),
-      );
-
-      // ProviderAborted recovery returned a terminal directly — pass through.
-      if (
-        raw &&
-        typeof raw === "object" &&
-        "outcome" in raw &&
-        (raw as { outcome?: string }).outcome === "canceled"
-      ) {
-        return raw as ExecutorTerminal<LanguageModelExecutionResult>;
-      }
-
-      // When any tag-routing option is enabled, rewrite the message
-      // content so normalize() sees cleaned text + extracted
-      // reasoning. (The streaming path already cleans the
-      // synthesized ChatCompletion before reaching here.)
-      const router = buildTagRouter({
-        parseThinkTags: this.parseThinkTags,
-        customBlocks: this.customBlocks,
-      });
-      const rawForNormalize = router ? applyTagRouterToChatCompletion(raw, router) : raw;
-
-      // 3. normalize (deterministic)
-      const result = yield* Effect.try({
-        try: () => normalizeImpl({ targetOutput: rawForNormalize, target: input.target }),
-        catch: (cause): ExecutorError => ({
-          _tag: "NormalizationFailed",
-          cause,
-        }),
-      });
-
-      const terminal: ExecutorTerminal<LanguageModelExecutionResult> = {
-        outcome: "succeeded",
-        result,
-      };
-      return terminal;
+  protected postProcessForNormalize(raw: ChatCompletion): ChatCompletion {
+    const router = buildTagRouter({
+      parseThinkTags: this.parseThinkTags,
+      customBlocks: this.customBlocks,
     });
+    return router ? (applyTagRouterToChatCompletion(raw, router) as ChatCompletion) : raw;
   }
 }
 
@@ -1163,150 +792,6 @@ function toOpenAITool(t: LanguageModelTool): ChatCompletionTool {
 // IR projection — identical to FakeLanguageModelExecutor (kept local so the
 // adapter does not depend on @agentick/executor-next).
 // ============================================================================
-
-function projectImpl(input: ProjectInput): LanguageModelInput {
-  const messages = buildMessages(input.compiled);
-  const tools = buildTools(input.compiled);
-  const parameters = buildParameters(input.compiled);
-  return {
-    messages,
-    ...(tools.length > 0 ? { tools } : {}),
-    ...(parameters !== undefined ? { parameters } : {}),
-  };
-}
-
-function buildMessages(tree: RenderedTree): ReadonlyArray<LanguageModelMessage> {
-  const messages: LanguageModelMessage[] = [];
-  const systemText = collectSectionText(tree.context.entries);
-  if (systemText.length > 0) {
-    messages.push({
-      role: "system",
-      content: [{ type: "text", text: systemText }],
-    });
-  }
-  for (const entry of tree.context.entries) {
-    if (entry.kind !== "message") continue;
-    messages.push({
-      role: entry.role as LanguageModelMessage["role"],
-      content: entry.content.map(messagePartFromBlock),
-    });
-  }
-  return messages;
-}
-
-function collectSectionText(entries: ReadonlyArray<ContextEntry>): string {
-  const parts: string[] = [];
-  for (const e of entries) {
-    if (e.kind !== "section") continue;
-    const text = sectionText(e);
-    if (text.length > 0) parts.push(text);
-  }
-  return parts.join("\n\n");
-}
-
-function sectionText(section: SectionEntry): string {
-  const head = section.title ? `## ${section.title}\n\n` : "";
-  const body = section.content
-    .map((b) => (b.type === "text" ? b.text : ""))
-    .filter((t) => t.length > 0)
-    .join("\n\n");
-  return head + body;
-}
-
-function imageUrlFromSource(source: MediaSource, mimeType: string | undefined): string {
-  switch (source.type) {
-    case "url":
-      return source.url;
-    case "base64": {
-      const mt = source.mimeType ?? mimeType ?? "image/png";
-      return `data:${mt};base64,${source.data}`;
-    }
-    case "reference":
-      return source.fileId;
-    case "s3":
-      return `s3://${source.bucket}/${source.key}`;
-    case "gcs":
-      return `gs://${source.bucket}/${source.object}`;
-  }
-}
-
-function messagePartFromBlock(block: ContentBlock): LanguageModelMessagePart {
-  const pm =
-    block.providerMetadata !== undefined ? { providerMetadata: block.providerMetadata } : {};
-  switch (block.type) {
-    case "text":
-      return { type: "text", text: block.text, ...pm };
-    case "image":
-      return {
-        type: "image",
-        imageUrl: imageUrlFromSource(block.source, block.mimeType),
-        ...(block.mimeType !== undefined ? { mediaType: block.mimeType } : {}),
-        ...pm,
-      };
-    case "tool_use":
-      return {
-        type: "tool_use",
-        id: block.toolUseId,
-        name: block.name,
-        input: block.input,
-        ...pm,
-      };
-    case "tool_result":
-      return {
-        type: "tool_result",
-        toolUseId: block.toolUseId,
-        content: block.content.map(messagePartFromBlock),
-        ...(block.isError !== undefined ? { isError: block.isError } : {}),
-        ...pm,
-      };
-    default:
-      return {
-        type: "text",
-        text:
-          "text" in block && typeof block.text === "string" ? block.text : JSON.stringify(block),
-      };
-  }
-}
-
-function buildTools(tree: RenderedTree): ReadonlyArray<LanguageModelTool> {
-  const decl = tree.declarations?.tools ?? [];
-  return decl
-    .filter((t: ToolDeclaration) => t.exposure.includes("model"))
-    .map((t) => ({
-      name: t.name,
-      ...(t.description !== undefined ? { description: t.description } : {}),
-      inputSchema: t.inputSchema as Record<string, unknown>,
-      ...(t.providerOptions !== undefined ? { providerOptions: t.providerOptions } : {}),
-    }));
-}
-
-function buildParameters(tree: RenderedTree) {
-  const cfg = tree.config;
-  if (!cfg) return undefined;
-  const params: {
-    temperature?: number;
-    maxOutputTokens?: number;
-    responseFormat?: {
-      type: "text" | "json" | "json_schema";
-      schema?: Record<string, unknown>;
-    };
-  } = {};
-  if (cfg.temperature !== undefined) params.temperature = cfg.temperature;
-  if (cfg.maxOutputTokens !== undefined) {
-    params.maxOutputTokens = cfg.maxOutputTokens;
-  }
-  if (cfg.responseFormat !== undefined) {
-    if (cfg.responseFormat.type === "json_schema") {
-      params.responseFormat = {
-        type: "json_schema",
-        schema: cfg.responseFormat.schema as Record<string, unknown>,
-      };
-    } else {
-      params.responseFormat = { type: cfg.responseFormat.type };
-    }
-  }
-  return Object.keys(params).length > 0 ? params : undefined;
-}
 
 // ============================================================================
 // ChatCompletion → LanguageModelExecutionResult
@@ -1629,85 +1114,4 @@ function mapFinishReason(reason: string): LanguageModelStopReason {
     default:
       return "end";
   }
-}
-
-function mapChunkToDelta(
-  chunk: ChatCompletionChunk,
-  accum: StreamAccumulator,
-): {
-  kind: string;
-  delta?: string;
-  blockIndex?: number;
-  metadata?: Record<string, unknown>;
-} {
-  // Final-chunk indicator (finish_reason + maybe usage)
-  const choice = chunk.choices?.[0];
-  if (choice?.finish_reason) {
-    return {
-      kind: "message_end",
-      metadata: { finishReason: choice.finish_reason },
-    };
-  }
-  const delta = choice?.delta;
-  if (delta?.content) return { kind: "content_delta", delta: delta.content };
-  if (Array.isArray(delta?.tool_calls)) {
-    for (const tc of delta.tool_calls) {
-      if (tc.function?.name) {
-        return {
-          kind: "tool_call_start",
-          metadata: { id: tc.id, name: tc.function.name, index: tc.index },
-        };
-      }
-      if (tc.function?.arguments) {
-        return {
-          kind: "tool_call_delta",
-          delta: tc.function.arguments,
-          blockIndex: tc.index,
-        };
-      }
-    }
-  }
-  if (chunk.usage) {
-    return {
-      kind: "usage",
-      metadata: {
-        inputTokens: chunk.usage.prompt_tokens,
-        outputTokens: chunk.usage.completion_tokens,
-        totalTokens: chunk.usage.total_tokens,
-      },
-    };
-  }
-  // No observable payload — return a kind anyway since emitDeltaLazy is
-  // guarded by hasSubscriber upstream.
-  void accum;
-  return { kind: "noop" };
-}
-
-// ============================================================================
-// Error + signal helpers
-// ============================================================================
-
-function mapExecuteError(cause: unknown): ExecuteError {
-  if (cause instanceof Error) {
-    // OpenAI SDK exposes APIError with a `status` field. Narrow by duck-typing
-    // to avoid a hard runtime dependency on the SDK's error classes here.
-    const status = (cause as { status?: number }).status;
-    if (cause.name === "APIUserAbortError" || /aborted/i.test(cause.message)) {
-      return { _tag: "ProviderAborted", reason: cause.message };
-    }
-    if (typeof status === "number") {
-      return { _tag: "ProviderRejected", status, cause };
-    }
-  }
-  return { _tag: "StreamFailed", cause };
-}
-
-function mergeSignals(a: AbortSignal | undefined, b: AbortSignal): AbortSignal | undefined {
-  if (a === undefined) return b;
-  if (a.aborted) return a;
-  const c = new AbortController();
-  const onAbort = (signal: AbortSignal) => () => c.abort(signal.reason ?? "aborted");
-  a.addEventListener("abort", onAbort(a), { once: true });
-  b.addEventListener("abort", onAbort(b), { once: true });
-  return c.signal;
 }
