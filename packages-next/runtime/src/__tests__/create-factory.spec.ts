@@ -99,7 +99,7 @@ describe("LocalEventBus.createFactory", () => {
   it("auto-registers close on the parent's onClose", async () => {
     const factory = LocalEventBus.createFactory();
     const { parent, close, handlers } = mockParent();
-    const bus = await factory(parent);
+    const bus = (await factory(parent)) as EventBus;
     expect(handlers).toHaveLength(1);
     await close();
     expect((bus as unknown as { closed: boolean }).closed).toBe(true);
@@ -109,7 +109,7 @@ describe("LocalEventBus.createFactory", () => {
     const upstream = new LocalEventBus();
     const factory = LocalEventBus.createFactory();
     const { parent } = mockParent({ bus: upstream });
-    const localBus = await factory(parent);
+    const localBus = (await factory(parent)) as EventBus;
 
     // Subscribe to upstream — should see local publishes via fan-in.
     const upstreamFiber = Effect.runFork(
@@ -134,7 +134,7 @@ describe("LocalEventBus.createFactory", () => {
     const upstream = new LocalEventBus();
     const factory = LocalEventBus.createFactory();
     const { parent } = mockParent({ bus: upstream });
-    const localBus = await factory(parent);
+    const localBus = (await factory(parent)) as EventBus;
 
     // Subscribe locally + publish on upstream — local subscriber must NOT see it.
     const localSeen: ProtocolEvent[] = [];
@@ -165,7 +165,7 @@ describe("LocalEventBus.createFactory", () => {
     const upstream = new LocalEventBus();
     const factory = LocalEventBus.createFactory<MockParent>(() => ({ parent: undefined }));
     const { parent } = mockParent({ bus: upstream });
-    const localBus = await factory(parent);
+    const localBus = (await factory(parent)) as EventBus;
 
     // Publish locally; upstream MUST NOT see it.
     const upstreamSeen: ProtocolEvent[] = [];
@@ -215,7 +215,7 @@ describe("LocalInbox.createFactory", () => {
   it("auto-registers close on the parent's onClose", async () => {
     const factory = LocalInbox.createFactory();
     const { parent, close } = mockParent();
-    const inbox = await factory(parent);
+    const inbox = (await factory(parent)) as MessageInbox;
     await close();
     expect((inbox as unknown as { closed: boolean }).closed).toBe(true);
   });
@@ -227,7 +227,7 @@ describe("LocalInbox.createFactory", () => {
     const parentInbox = new LocalInbox();
     const factory = LocalInbox.createFactory();
     const { parent } = mockParent({ inbox: parentInbox });
-    const inbox = await factory(parent);
+    const inbox = (await factory(parent)) as MessageInbox;
     // The new inbox is its own thing — register, send, observe.
     let handlerHit = 0;
     await Effect.runPromise(
@@ -284,7 +284,7 @@ describe("MemoryJournal.createFactory", () => {
   it("auto-registers close on the parent's onClose", async () => {
     const factory = MemoryJournal.createFactory();
     const { parent, close } = mockParent();
-    const journal = await factory(parent);
+    const journal = (await factory(parent)) as OperationJournal;
     await close();
     expect((journal as unknown as { closed: boolean }).closed).toBe(true);
   });
@@ -293,7 +293,7 @@ describe("MemoryJournal.createFactory", () => {
     const upstream = new MemoryJournal({ capacity: 100 });
     const factory = MemoryJournal.createFactory();
     const { parent } = mockParent({ journal: upstream });
-    const localJournal = await factory(parent);
+    const localJournal = (await factory(parent)) as OperationJournal;
 
     const event = mkEvent({ opId: "op-1", phase: "requested" });
     await Effect.runPromise(localJournal.append(event));
@@ -315,7 +315,7 @@ describe("MemoryJournal.createFactory", () => {
     const upstream = new MemoryJournal();
     const factory = MemoryJournal.createFactory<MockParent>(() => ({ parent: undefined }));
     const { parent } = mockParent({ journal: upstream });
-    const localJournal = await factory(parent);
+    const localJournal = (await factory(parent)) as OperationJournal;
 
     await Effect.runPromise(localJournal.append(mkEvent({ opId: "op-x", phase: "requested" })));
 
@@ -339,7 +339,7 @@ describe("Hand-rolled factories", () => {
       return bus;
     };
     const { parent, close } = mockParent();
-    const bus = await factory(parent);
+    const bus = (await factory(parent)) as EventBus;
     expect(bus).toBeInstanceOf(LocalEventBus);
     await close();
     expect((bus as unknown as { closed: boolean }).closed).toBe(true);

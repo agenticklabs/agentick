@@ -97,9 +97,9 @@ describe("LifecycleStore — dispatch + catch-up unit tests", () => {
       error: { name: "E", message: "x" },
     });
     const seen: string[] = [];
-    store.register("tick-end", () => seen.push("te"));
-    store.register("execution-end", () => seen.push("ee"));
-    store.register("error", () => seen.push("err"));
+    store.register("tick-end", () => void seen.push("te"));
+    store.register("execution-end", () => void seen.push("ee"));
+    store.register("error", () => void seen.push("err"));
     expect(seen).toEqual([]);
   });
 
@@ -432,7 +432,7 @@ describe("Lifecycle hooks — integration through ReconcilerHarness", () => {
     const events: string[] = [];
 
     function App() {
-      useOnTickStart((ev) => events.push(ev.tickId));
+      useOnTickStart((ev) => void events.push(ev.tickId));
       return React.createElement("message", { role: "user" }, "ok");
     }
 

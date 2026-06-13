@@ -39,6 +39,7 @@ import type {
   ProtocolEvent,
 } from "@agentick/spec-next";
 import { BaseHarness, runHarnessProtocol } from "../substrate/base-harness.js";
+import type { SubstrateError } from "@agentick/spec-next";
 import { MemoryJournal } from "../substrate/memory-journal.js";
 import { LocalEventBus } from "../substrate/local-event-bus.js";
 import { LocalInbox } from "../substrate/local-inbox.js";
@@ -457,7 +458,7 @@ describe("harness plumbing — parent/child Operation composition", () => {
       constructor(scopeId: string = "compose-test") {
         super("tool", scopeId, journal, bus, inbox);
       }
-      outerEffect(): Effect.Effect<string, never, never> {
+      outerEffect(): Effect.Effect<string, SubstrateError, never> {
         const outer: Operation<{}, string, never> = {
           opId: `tool:outer:${ulid()}`,
           surface: "tool",

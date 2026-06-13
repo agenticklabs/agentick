@@ -174,7 +174,10 @@ describe("ReconcilerHarness — end-to-end", () => {
     expect(snap.specVersion).toMatch(/^\d{4}-\d{2}-\d{2}$/);
     expect(snap.mountId).toBe("m_5");
     expect(snap.elementVersion).toBe("sha:abc");
-    expect(snap.bridges.knobs).toEqual({ mood: "curious" });
+    // `knobs` slot on bridges is augmented by @agentick/knobs-next.
+    // This test file doesn't import knobs-next, so the augmentation
+    // isn't visible at typecheck — index through the broad shape.
+    expect((snap.bridges as Record<string, unknown>).knobs).toEqual({ mood: "curious" });
     // Round-trips through JSON without losing information (spec firewall).
     const round = JSON.parse(JSON.stringify(snap));
     expect(round).toEqual(snap);

@@ -323,7 +323,10 @@ describe("LocalEventBus — DEFAULT_LOCAL_BUS_BATCH_POLICY shape", () => {
   });
 
   it("adopters can spread defaults and add entries", () => {
-    const policy = {
+    // Anchor the spread to the declared shape — TS narrows on literal
+    // spread otherwise, losing the inherited "executor:delta" key from
+    // the union after pattern-matching.
+    const policy: Readonly<Record<string, { flushAfterCount?: number; flushAfterMs?: number }>> = {
       ...DEFAULT_LOCAL_BUS_BATCH_POLICY,
       "tool:delta": { flushAfterCount: 16 },
     };

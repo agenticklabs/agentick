@@ -56,11 +56,8 @@ class TestHarness extends BaseHarness<"tool"> {
     );
   }
 
-  use(
-    mw: (
-      input: AddInput,
-      next: (i: AddInput) => Effect.Effect<number, never, never>,
-    ) => Effect.Effect<number, never, never>,
+  use<I = AddInput, R = number, E = never>(
+    mw: (input: I, next: (i: I) => Effect.Effect<R, E, never>) => Effect.Effect<R, E, never>,
   ): () => void {
     return this.middleware.use(mw as never);
   }

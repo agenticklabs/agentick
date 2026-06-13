@@ -10,6 +10,7 @@ import { useData } from "../react/hooks/use-data.js";
 // packages/knobs/src/__tests__/integration-with-reconciler.spec.tsx.
 import { useLoopControl } from "../react/hooks/use-loop-control.js";
 import { useSession } from "../react/hooks/use-session.js";
+import { extractText } from "@agentick/spec-next";
 import type { HookBridges } from "@agentick/spec-next";
 
 async function makeHarness() {
@@ -23,9 +24,7 @@ async function makeHarness() {
   return harness;
 }
 
-function textOf(content: readonly { text?: string }[]): string {
-  return content.map((c) => c.text ?? "").join("");
-}
+const textOf = extractText;
 
 describe("useData — no-Suspense blocking resolution", () => {
   it("returns cached value synchronously when present", async () => {

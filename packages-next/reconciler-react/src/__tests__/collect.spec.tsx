@@ -67,9 +67,12 @@ describe("collect — structural primitives", () => {
         React.Fragment,
         null,
         React.createElement(
-          "message",
-          // intentionally missing role
-          { id: "m1" } as React.ComponentProps<"message">,
+          // intentionally missing role — surfaces a diagnostic. Cast
+          // through the broad ComponentType<Record<string, unknown>>
+          // since "message" isn't in JSX.IntrinsicElements yet
+          // (v2 augmentation pending — see jsx-intrinsics.d.ts draft).
+          "message" as unknown as React.ComponentType<Record<string, unknown>>,
+          { id: "m1" },
           "no role",
         ),
         React.createElement("message", { role: "user" }, "hi"),
@@ -112,8 +115,12 @@ describe("collect — declarations", () => {
 
   it("missing tool name emits diagnostic", () => {
     const { diagnostics } = renderAndCollect(
-      // @ts-expect-error — intentionally invalid
-      React.createElement("tool", { inputSchema: { type: "object" } }),
+      // "tool" isn't in JSX.IntrinsicElements yet (v2 augmentation
+      // pending). Cast through ComponentType so the legitimately-
+      // invalid prop (missing name) reaches the contributor.
+      React.createElement("tool" as unknown as React.ComponentType<Record<string, unknown>>, {
+        inputSchema: { type: "object" },
+      }),
     );
     expect(diagnostics.some((d) => d.code === "MISSING_NAME")).toBe(true);
   });
@@ -158,12 +165,18 @@ describe("collect — model + provider options", () => {
         id: "gpt-4o",
         temperature: 0.7,
         maxOutputTokens: 1024,
-        providerOptions: { openai: { user: "abc" } },
+        // ProviderOptions is an empty seed; the "openai" slot exists
+        // only when @agentick/executor-openai-next is imported (module
+        // augmentation). This test verifies threading, not the slot
+        // type — cast through unknown.
+        providerOptions: { openai: { user: "abc" } } as unknown as Record<string, unknown>,
       }),
     );
     expect(tree.config?.model).toEqual({ kind: "by-id", id: "gpt-4o" });
     expect(tree.config?.temperature).toBe(0.7);
-    expect(tree.providerOptions?.openai).toEqual({ user: "abc" });
+    expect((tree.providerOptions as Record<string, unknown> | undefined)?.openai).toEqual({
+      user: "abc",
+    });
     expect(tree.features).toContain("provider-options");
   });
 });

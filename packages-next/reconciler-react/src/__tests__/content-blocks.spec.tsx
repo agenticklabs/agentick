@@ -223,7 +223,10 @@ describe("content blocks — custom + diagnostics", () => {
       React.createElement(
         "section",
         { id: "s" },
-        // @ts-expect-error — intentionally missing source
+        // Intentionally missing the `source` prop — contributor emits
+        // MISSING_SOURCE diagnostic. (Cannot use @ts-expect-error
+        // because v2 JSX.IntrinsicElements isn't augmented yet, so TS
+        // accepts the shape silently.)
         React.createElement("image", {}),
         React.createElement("code", { language: "typescript" }, "ok = 1"),
       ),
@@ -240,7 +243,9 @@ describe("content blocks — custom + diagnostics", () => {
       React.createElement(
         "section",
         { id: "s" },
-        // @ts-expect-error — language required
+        // Intentionally missing the `language` prop — contributor
+        // emits MISSING_LANGUAGE. JSX augmentation pending; @ts-expect-error
+        // would be "unused" since TS accepts arbitrary intrinsics today.
         React.createElement("code", null, "no lang"),
       ),
     );

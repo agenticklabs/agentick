@@ -203,9 +203,12 @@ describe("BaseHarness substrate slots — factory overrides", () => {
     const inbox = new LocalInbox();
 
     expect(() => {
-      new SlotTestHarness("slot-test-6", journal, bus, inbox, {
+      // Constructor side-effects under test — assign to a sink so oxlint's
+      // `no-new` rule doesn't flag the bare `new`.
+      const _h = new SlotTestHarness("slot-test-6", journal, bus, inbox, {
         bus: (async () => new LocalEventBus()) as unknown as EventBusFactory<HarnessShell>,
       });
+      void _h;
     }).toThrow(/synchronous/);
   });
 });

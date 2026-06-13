@@ -60,7 +60,10 @@ const reconcilerFactory: ReconcilerConformanceFactory = {
   },
 
   createBridges(opts?: { sessionId?: string; knobs?: Record<string, unknown> }): HookBridges {
-    return stubBridges(opts);
+    // The conformance suite passes a generic Record<string, unknown> for
+    // knobs; stubBridges expects Record<string, KnobPrimitive>. Cast
+    // through unknown — runtime values are primitive in practice.
+    return stubBridges(opts as unknown as Parameters<typeof stubBridges>[0]);
   },
 
   buildElement(input: ElementInput): unknown {
