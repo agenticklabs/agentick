@@ -521,52 +521,59 @@ export class ToolExecutorHarness extends BaseHarness<"tool"> implements ToolExec
           }
           const handlerResult = entry.handler(validated, { ctx, use: useDeps });
 
+          // Abort watcher — fails the race when the dispatch
+          // controller fires (caller abort or timeout). Shared between
+          // the Effect and Promise handler shapes so both paths get
+          // identical abort semantics.
+          const abortEff: Effect.Effect<never, unknown, never> = Effect.async<
+            never,
+            unknown,
+            never
+          >((resume) => {
+            if (controller.signal.aborted) {
+              resume(
+                Effect.fail(
+                  controller.signal.reason ?? {
+                    _tag: "ToolAbortedError",
+                    toolCallId: input.toolCallId,
+                  },
+                ),
+              );
+              return;
+            }
+            const onAbort = () => {
+              resume(
+                Effect.fail(
+                  controller.signal.reason ?? {
+                    _tag: "ToolAbortedError",
+                    toolCallId: input.toolCallId,
+                  },
+                ),
+              );
+            };
+            controller.signal.addEventListener("abort", onAbort, { once: true });
+            return Effect.sync(() => controller.signal.removeEventListener("abort", onAbort));
+          });
+
           if (isEffect(handlerResult)) {
-            // Effect-typed handler — yields IN the parent fiber so it
+            // Effect-typed handler yields IN the parent fiber so it
             // inherits the `RuntimeContextRef` FiberRef set by
-            // `runOperation`. Abort signals translate to fiber interrupts
-            // via `Effect.race` with an AbortSignal-driven failure.
-            const abortEff: Effect.Effect<never, unknown, never> = Effect.async<
-              never,
-              unknown,
-              never
-            >((resume) => {
-              if (controller.signal.aborted) {
-                resume(
-                  Effect.fail(
-                    controller.signal.reason ?? {
-                      _tag: "ToolAbortedError",
-                      toolCallId: input.toolCallId,
-                    },
-                  ),
-                );
-                return;
-              }
-              const onAbort = () => {
-                resume(
-                  Effect.fail(
-                    controller.signal.reason ?? {
-                      _tag: "ToolAbortedError",
-                      toolCallId: input.toolCallId,
-                    },
-                  ),
-                );
-              };
-              controller.signal.addEventListener("abort", onAbort, { once: true });
-              return Effect.sync(() => controller.signal.removeEventListener("abort", onAbort));
-            });
-            return Effect.race(handlerResult, abortEff);
+            // `runOperation`. `Effect.raceFirst` (not `race`) — settles
+            // on the first to either succeed OR fail. `Effect.race`
+            // waits for a success and would let a finishing handler
+            // beat an already-fired abort.
+            return Effect.raceFirst(handlerResult, abortEff);
           }
 
           if (isPromiseLike(handlerResult)) {
-            return Effect.tryPromise({
-              try: () =>
-                Promise.race([
-                  handlerResult as PromiseLike<readonly ContentBlock[]>,
-                  abortPromise(controller.signal),
-                ]) as Promise<readonly ContentBlock[]>,
+            // Lift the Promise to Effect and race against the same
+            // abort watcher used by the Effect path — eliminates the
+            // hand-rolled `abortPromise` Promise.race bridge.
+            const handlerEff = Effect.tryPromise({
+              try: () => handlerResult as PromiseLike<readonly ContentBlock[]>,
               catch: (cause: unknown) => cause,
             });
+            return Effect.raceFirst(handlerEff, abortEff);
           }
 
           return Effect.succeed(handlerResult);
@@ -630,22 +637,6 @@ function isValidationFailure(
   r: ValidatorResult,
 ): r is { value?: undefined; issues: ValidatorResult extends { issues: infer I } ? I : never } {
   return Array.isArray((r as { issues?: unknown }).issues);
-}
-
-/**
- * Resolves never; rejects with the signal's reason when the signal
- * aborts. Used in `Promise.race` to short-circuit a handler invocation
- * the moment an abort fires.
- */
-function abortPromise(signal: AbortSignal): Promise<never> {
-  if (signal.aborted) {
-    return Promise.reject(signal.reason ?? new Error("aborted"));
-  }
-  return new Promise<never>((_, reject) => {
-    signal.addEventListener("abort", () => reject(signal.reason ?? new Error("aborted")), {
-      once: true,
-    });
-  });
 }
 
 function isTaggedAbort(value: unknown): value is { readonly _tag: string } {

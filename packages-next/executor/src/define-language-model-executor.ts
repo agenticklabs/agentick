@@ -140,6 +140,16 @@ export interface DefineLanguageModelExecutorInput<TRaw, TChunk> {
    * `normalize` (non-streaming path). Default: identity.
    */
   readonly postProcessForNormalize?: (raw: TRaw) => TRaw;
+
+  /**
+   * Optional: extract provider-specific metadata from the raw response.
+   * Returned record is merged into
+   * `LanguageModelExecutionResult.finishMetadata` (last-write-wins per
+   * key). v1 `createAdapter` parity — surface OpenAI
+   * `system_fingerprint`, Google `safetyRatings`, citations, etc.
+   * without rewriting `normalizeRaw`.
+   */
+  readonly extractMetadata?: (raw: TRaw) => Readonly<Record<string, unknown>> | undefined;
 }
 
 /**
@@ -242,6 +252,10 @@ class CallbackBaseLanguageModelExecutor<TRaw, TChunk> extends BaseLanguageModelE
 
   protected override postProcessForNormalize(raw: TRaw): TRaw {
     return this.spec.postProcessForNormalize ? this.spec.postProcessForNormalize(raw) : raw;
+  }
+
+  protected override extractMetadata(raw: TRaw): Readonly<Record<string, unknown>> | undefined {
+    return this.spec.extractMetadata?.(raw);
   }
 
   protected handleMessage(

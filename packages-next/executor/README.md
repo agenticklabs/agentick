@@ -136,6 +136,7 @@ const myExec = defineExecutor({
 | `adapterTransforms()`             | `[]`          | Return `[thinkTagTransform()]` for OpenAI-compatible servers (vLLM, LM Studio) that emit `<think>` tags inline.   |
 | `customBlocks`                    | `undefined`   | Declarative adopter-facing custom XML-tag extraction (citations, semantic markers).                                |
 | `postProcessForNormalize(raw)`    | identity      | Apply tag routing to the **non-streaming** path (streaming path's `adapterTransforms` already extracted them).    |
+| `extractMetadata(raw)`            | `undefined`   | Surface provider-specific fields (OpenAI `system_fingerprint`, Google `safetyRatings`, citations) into `result.finishMetadata` without rewriting `normalizeRaw`. |
 | `finalizeStream(accum)`           | close blocks + emit summaries | Provider needs a custom message-end shape (e.g. Google's `finishReasonRaw` → `stopReason` mapping). |
 | `mapProviderError(cause)`         | abort + status code → typed | Provider surfaces structured errors you can extract more detail from.                                |
 | `isAbortError(cause)`             | `AbortError` + `APIUserAbortError` | SDK throws a non-standard abort error type.                                                |
@@ -302,7 +303,9 @@ Total: **59 tests passing**.
   `defineLanguageModelExecutor` reject inbox messages with
   `HandlerError`. Custom inbox handling requires the class-based
   subclass path.
-- **`extractMetadata` parity with v1's `createAdapter`** — partial:
-  per-tool-call `providerMetadata` is preserved (Google's
-  `thoughtSignature` use case); v1's broader extractMetadata callback
-  isn't exposed yet.
+- **`extractMetadata` parity with v1's `createAdapter`** — landed:
+  optional `extractMetadata(raw)` hook on `BaseLanguageModelExecutor`
+  (and the `defineLanguageModelExecutor` callback bundle). Base merges
+  the returned record into `result.finishMetadata` post-normalize.
+  Per-tool-call `providerMetadata` is preserved separately (Google's
+  `thoughtSignature` use case).

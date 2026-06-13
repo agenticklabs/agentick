@@ -55,91 +55,76 @@ export interface RegisteredRequest<TResp> {
  * Pure bookkeeping. No bus, no inbox. Owners wire transport around it.
  */
 export class RequestResponseRegistry<TResp = unknown> {
-  private readonly pending = new Map<
-    string,
-    {
-      readonly deferred: Deferred.Deferred<TResp, RequestError>;
-      readonly cleanup: () => void;
-    }
-  >();
+  private readonly pending = new Map<string, Deferred.Deferred<TResp, RequestError>>();
 
   /**
    * Register a pending request. Returns a Promise that resolves when
    * `resolve(correlationId, response)` is called with a matching id,
    * or rejects on timeout / signal abort / explicit `cancel`.
+   *
+   * Internally races the registry's deferred against an `Effect.delay`
+   * timeout and an `Effect.async` signal-watcher via `Effect.raceFirst`
+   * (not `race`/`raceAll` — those require a success to settle; the
+   * timeout/abort paths fail-fast and need `raceFirst`). The race
+   * interrupts the losers; their finalizers (`Effect.delay`'s timer
+   * cancellation, `Effect.async`'s cleanup callback) run automatically
+   * — no manual `clearTimeout` / `removeEventListener` bookkeeping.
+   * The registry map entry is removed atomically via `Effect.ensuring`.
    */
   register(opts: RegisterOptions): RegisteredRequest<TResp> {
     const { correlationId, timeoutMs, signal } = opts;
-
-    // Run synchronously to materialize the Deferred + Promise pair.
-    // Deferred.make is itself an Effect; we run it once here.
     const deferred = Effect.runSync(Deferred.make<TResp, RequestError>());
+    this.pending.set(correlationId, deferred);
 
-    let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
-    const cleanups: Array<() => void> = [];
+    // Chain races via Effect.raceFirst — settles on first to either
+    // succeed OR fail. `Effect.raceAll` settles only on first SUCCESS
+    // (waits for the rest to succeed if the first fails) — wrong for
+    // timeout/abort which fail-fast.
+    let program: Effect.Effect<TResp, RequestError, never> = Deferred.await(deferred);
+
     if (timeoutMs !== undefined && timeoutMs > 0) {
-      timeoutHandle = setTimeout(() => {
-        Effect.runFork(
-          Deferred.fail(deferred, {
-            _tag: "RequestTimeoutError",
-            ms: timeoutMs,
-            correlationId,
-          }),
-        );
-        this.pending.delete(correlationId);
-      }, timeoutMs);
-      cleanups.push(() => clearTimeout(timeoutHandle));
+      const ms = timeoutMs;
+      const timeoutEffect: Effect.Effect<TResp, RequestError, never> = Effect.fail<RequestError>({
+        _tag: "RequestTimeoutError",
+        ms,
+        correlationId,
+      }).pipe(Effect.delay(`${ms} millis`)) as Effect.Effect<TResp, RequestError, never>;
+      program = Effect.raceFirst(program, timeoutEffect);
     }
 
     if (signal !== undefined) {
       if (signal.aborted) {
-        Effect.runFork(
-          Deferred.fail(deferred, {
-            _tag: "RequestAbortedError",
-            correlationId,
-            reason: signal.reason ?? "aborted",
-          }),
-        );
+        // Pre-aborted — short-circuit before scheduling anything.
+        program = Effect.fail<RequestError>({
+          _tag: "RequestAbortedError",
+          correlationId,
+          reason: signal.reason ?? "aborted",
+        });
       } else {
-        const onAbort = () => {
-          Effect.runFork(
-            Deferred.fail(deferred, {
-              _tag: "RequestAbortedError",
-              correlationId,
-              reason: signal.reason ?? "aborted",
-            }),
-          );
-          this.pending.delete(correlationId);
-        };
-        signal.addEventListener("abort", onAbort, { once: true });
-        cleanups.push(() => signal.removeEventListener("abort", onAbort));
+        const signalEffect = Effect.async<TResp, RequestError, never>((resume) => {
+          const onAbort = (): void =>
+            resume(
+              Effect.fail<RequestError>({
+                _tag: "RequestAbortedError",
+                correlationId,
+                reason: signal.reason ?? "aborted",
+              }),
+            );
+          signal.addEventListener("abort", onAbort, { once: true });
+          return Effect.sync(() => signal.removeEventListener("abort", onAbort));
+        });
+        program = Effect.raceFirst(program, signalEffect);
       }
     }
 
-    const cleanup = () => {
-      for (const c of cleanups) c();
-    };
-    this.pending.set(correlationId, { deferred, cleanup });
+    program = program.pipe(Effect.ensuring(Effect.sync(() => this.pending.delete(correlationId))));
 
-    // Materialize a Promise that drains the Deferred. Use
-    // `runPromiseExit` so we can extract the raw tagged-union failure
-    // instead of a FiberFailure-wrapped Error.
-    const promise = (async () => {
-      const exit = await Effect.runPromiseExit(
-        Deferred.await(deferred).pipe(
-          Effect.ensuring(
-            Effect.sync(() => {
-              cleanup();
-              this.pending.delete(correlationId);
-            }),
-          ),
-        ),
-      );
+    const promise = Effect.runPromiseExit(program).then((exit) => {
       if (Exit.isSuccess(exit)) return exit.value;
       const failure = Cause.failureOption(exit.cause);
       if (Option.isSome(failure)) throw failure.value;
       throw new Error(Cause.pretty(exit.cause));
-    })();
+    });
 
     return { correlationId, promise };
   }
@@ -151,9 +136,14 @@ export class RequestResponseRegistry<TResp = unknown> {
    * after timeout or cancellation).
    */
   resolve(correlationId: string, response: TResp): boolean {
-    const entry = this.pending.get(correlationId);
-    if (!entry) return false;
-    Effect.runFork(Deferred.succeed(entry.deferred, response));
+    const deferred = this.pending.get(correlationId);
+    if (!deferred) return false;
+    // `Effect.runSync` — Deferred.succeed is a sync operation; running
+    // it on a daemon fiber via `runFork` opens a microtask gap during
+    // which a racing timeout/abort can win incorrectly. Settle the
+    // deferred in the calling stack frame so the awaiting fiber sees
+    // the result before any rescheduling.
+    Effect.runSync(Deferred.succeed(deferred, response));
     return true;
   }
 
@@ -163,10 +153,10 @@ export class RequestResponseRegistry<TResp = unknown> {
    * propagate a specific reason.
    */
   cancel(correlationId: string, reason?: string): boolean {
-    const entry = this.pending.get(correlationId);
-    if (!entry) return false;
-    Effect.runFork(
-      Deferred.fail(entry.deferred, {
+    const deferred = this.pending.get(correlationId);
+    if (!deferred) return false;
+    Effect.runSync(
+      Deferred.fail(deferred, {
         _tag: "RequestCancelledError",
         correlationId,
         ...(reason !== undefined ? { reason } : {}),

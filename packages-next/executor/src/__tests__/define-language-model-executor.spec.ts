@@ -103,6 +103,40 @@ describe("defineLanguageModelExecutor", () => {
     expect(deltas.map((d) => d.type)).toContain("message");
   });
 
+  it("extractMetadata merges into finishMetadata", async () => {
+    const factory = defineLanguageModelExecutor<MyRaw, MyChunk>({
+      target: mkTarget(),
+      streamByDefault: false,
+      buildParams: () => ({}),
+      callProvider: () => Promise.resolve({ text: "hi", model: "v1" }),
+      openStream: async function* () {
+        yield { text: "hi", model: "v1" } as MyChunk;
+      },
+      mapChunk: () => [],
+      reconstructRaw: () => ({ text: "hi", model: "v1" }),
+      normalizeRaw: () => ({
+        specVersion: "2026-05-08",
+        output: [{ type: "text", text: "hi" }],
+        stopReason: "end",
+        usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
+        finishMetadata: { baseline: true },
+      }),
+      extractMetadata: (raw) => ({
+        echoedModel: raw.model,
+        systemFingerprint: "fp_abc",
+      }),
+    });
+    const exec = factory();
+    await exec.ready;
+    const terminal = await exec.run({ compiled: mkTree(), target: mkTarget() });
+    if (terminal.outcome !== "succeeded") throw new Error("expected success");
+    expect(terminal.result.finishMetadata).toEqual({
+      baseline: true,
+      echoedModel: "v1",
+      systemFingerprint: "fp_abc",
+    });
+  });
+
   it("non-streaming path uses callProvider", async () => {
     const factory = makeFactory([{ text: "x" }]);
     const exec = factory();

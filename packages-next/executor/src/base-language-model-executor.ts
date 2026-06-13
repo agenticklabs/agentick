@@ -285,6 +285,22 @@ export abstract class BaseLanguageModelExecutor<TRaw, TChunk = unknown>
   }
 
   /**
+   * Extract provider-specific metadata from the raw response after
+   * `normalizeRaw` runs. The base merges the returned record into
+   * `LanguageModelExecutionResult.finishMetadata` (last-write-wins per
+   * key). v1 `createAdapter` parity — adopters surface fields the
+   * canonical shape doesn't carry (OpenAI `system_fingerprint`, Google
+   * `safetyRatings`, Anthropic `stop_sequence`, provider-specific
+   * citation slots, etc.) without subclassing `normalizeRaw`.
+   *
+   * Default: undefined (no extraction). Return `undefined` to skip;
+   * the base no-ops in that case.
+   */
+  protected extractMetadata(_raw: TRaw): Readonly<Record<string, unknown>> | undefined {
+    return undefined;
+  }
+
+  /**
    * Default abort-detection: matches `AbortError` (Web/Node) and
    * `APIUserAbortError` (OpenAI/Anthropic SDK convention) plus any
    * error message containing "abort". Override for SDKs with
@@ -915,9 +931,20 @@ export abstract class BaseLanguageModelExecutor<TRaw, TChunk = unknown>
         }),
       });
 
+      // 5. merge provider-specific metadata (v1 extractMetadata parity).
+      //    Default `extractMetadata` returns undefined → no-op.
+      const extracted = this.extractMetadata(rawForNormalize);
+      const finalResult: LanguageModelExecutionResult =
+        extracted !== undefined
+          ? {
+              ...result,
+              finishMetadata: { ...(result.finishMetadata ?? {}), ...extracted },
+            }
+          : result;
+
       const terminal: ExecutorTerminal<LanguageModelExecutionResult> = {
         outcome: "succeeded",
-        result,
+        result: finalResult,
       };
       return terminal;
     });

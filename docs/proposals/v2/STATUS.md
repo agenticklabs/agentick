@@ -24,6 +24,20 @@
 
 **Follow-up audit deferred to its own pass:** the user flagged that other layers (`runtime-next`, `tool-executor-next`, `loop-executor-next`) likely have similar hand-rolled streaming/looping code that should be reviewed for Effect-primitive opportunities (Stream, Queue, Fiber). Not in scope for this pass; STATUS entry here to anchor the follow-up.
 
+**2026-06-13 (later that day) — Effect audit landed across runtime + tool-executor; extractMetadata + defineLanguageModelExecutor conformance also landed.** Four follow-ups closed in one pass:
+
+1. **`runtime-next/substrate/request-response-registry.ts`** — replaced the manual `setTimeout` + `clearTimeout` + `signal.addEventListener` + cleanups-array juggling with `Effect.raceFirst(deferred.await, timeoutEffect, signalEffect) + Effect.ensuring`. `Effect.raceFirst` (not `Effect.race`/`raceAll`) settles on first to either succeed OR fail — required for fail-fast timeout/abort semantics. `Effect.delay` and `Effect.async`'s cleanup-return-effect handle timer + listener cleanup automatically on race-loser interrupt. Net: ~40 LOC removed, eliminates the race conditions between timeout/signal fire ordering, no leaked listeners. 8/8 registry tests pass.
+
+2. **`tool-executor-next/src/harness.ts`** — same fix in two places. The Effect-handler branch was using `Effect.race(handlerResult, abortEff)` which only settles on first SUCCESS — a slow-but-eventually-succeeding handler would beat an already-fired abort. Switched to `Effect.raceFirst`. The Promise-handler branch was using `Promise.race([handler, abortPromise])` with a hand-rolled `abortPromise` helper — replaced with `Effect.tryPromise(...).pipe(Effect.raceFirst(abortEff))`; deleted `abortPromise` (~10 LOC). Both handler shapes now share the same abort watcher. 71/71 tool-executor tests pass.
+
+3. **`loop-executor-next`** — audit found NO Effect opportunities. Loop is intentionally sequential (tool dispatch waits for state-applicator ordering); the audit recommended "skip for now". Documented as a future optimization under "Roadmap & known gaps" rather than refactored.
+
+4. **`defineLanguageModelExecutor` conformance** — wired the full 15-test `runExecutorConformance` suite against the callback wrapper. All 15 pass — confirms the callback path is equivalent to subclassing. Translates `scripted: LanguageModelExecutionResult` to a synthetic chunk stream that openStream yields, mapChunk translates to AdapterDeltas, reconstructRaw returns the scripted result.
+
+5. **v1 `extractMetadata` borrow — fully landed.** Added optional `extractMetadata(raw)` hook to `BaseLanguageModelExecutor` + the `defineLanguageModelExecutor` callback bundle. Base merges the returned record into `result.finishMetadata` (last-write-wins per key) after `normalizeRaw`. Adopters can surface OpenAI `system_fingerprint`, Google `safetyRatings`, citation slots, etc. without rewriting `normalizeRaw`. Closes v1 createAdapter parity. New test in `define-language-model-executor.spec.ts` verifies the merge semantics + existing `finishMetadata` keys are preserved.
+
+**Workspace:** 1260/1260 v2 tests pass. (Full workspace sweep also flagged 5 failures in `packages/gateway/__tests__/unix-socket-transport.spec.ts` — v1 gateway, EADDRINUSE port 18789, transient port-conflict flake unrelated to v2 changes.)
+
 **Previously, 2026-06-13 — Strict typecheck on test files + pre-commit hook coverage rolled out across all 30 v2 packages.** Every `pnpm typecheck` script now runs `tsc -p tsconfig.json --noEmit` (which includes `src/**/__tests__/`) instead of `tsconfig.build.json` (which excluded tests). The `lint` + `format:check` + `clean` scripts are now declared in every v2 package's `package.json` so turbo's pre-commit hook runs them symmetrically (was running on 7/30 before).
 
 The strict-typecheck pass surfaced and fixed **~120 stale-fixture drift errors across 18 v2 packages**. Each error was a test asserting against a spec shape that had since narrowed/renamed/dropped a field — passing in vitest because esbuild strips types, failing under strict `tsc`. Highlights:
