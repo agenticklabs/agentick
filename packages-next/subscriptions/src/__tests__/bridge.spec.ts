@@ -5,7 +5,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { SubscriptionIntent } from "@agentick/spec-next";
 
-import { createSubscriptionBridge } from "../bridge.js";
+import { createSubscriptionBridge, type SubscriptionHandler } from "../bridge.js";
 
 const cron = (id: string, expr: string): SubscriptionIntent => ({
   id,
@@ -22,15 +22,15 @@ describe("createSubscriptionBridge — declare/dispatch", () => {
 
   it("dispatch invokes the handler with ctx", async () => {
     const bridge = createSubscriptionBridge({ sessionId: "sess-1" });
-    const handler = vi.fn(async () => {});
+    const handler = vi.fn<SubscriptionHandler>(async () => {});
     bridge.declare(cron("c1", "@daily"), handler);
     await bridge.dispatch("c1", { firedAt: 42 });
     expect(handler).toHaveBeenCalledTimes(1);
     const [event, ctx] = handler.mock.calls[0]!;
     expect(event).toEqual({ firedAt: 42 });
-    expect(ctx.id).toBe("c1");
-    expect(ctx.sessionId).toBe("sess-1");
-    expect(ctx.signal.aborted).toBe(false);
+    expect(ctx!.id).toBe("c1");
+    expect(ctx!.sessionId).toBe("sess-1");
+    expect(ctx!.signal.aborted).toBe(false);
   });
 
   it("dispatch passes metadata into ctx", async () => {
