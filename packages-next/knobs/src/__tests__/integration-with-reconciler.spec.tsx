@@ -13,6 +13,7 @@ import React from "react";
 import { describe, expect, it } from "vitest";
 
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
+import { extractText } from "@agentick/spec-next";
 import type { HookBridges, LifecycleExecutionEnd, SectionEntry } from "@agentick/spec-next";
 
 import { ReconcilerHarness } from "@agentick/reconciler-react-next";
@@ -41,9 +42,10 @@ function sectionOf(
   );
 }
 
-function textOf(content: readonly { text?: string }[]): string {
-  return content.map((c) => c.text ?? "").join("");
-}
+// Local alias for the canonical `extractText` so call sites still read
+// `textOf(section.content)`. Use the canonical helper directly in new
+// tests.
+const textOf = extractText;
 
 // ============================================================================
 
@@ -252,7 +254,7 @@ describe("<Knobs /> — default rendering", () => {
     expect(text).toContain("### output");
     expect(text).toContain("verbose [toggle]");
 
-    const setKnobDecl = tree.declarations.tools.find((t) => t.name === "set_knob");
+    const setKnobDecl = tree.declarations?.tools?.find((t) => t.name === "set_knob");
     expect(setKnobDecl).toBeTruthy();
   });
 
@@ -312,7 +314,7 @@ describe("<Knobs /> — render prop", () => {
     expect(custom).toBeTruthy();
     expect(textOf(custom!.content)).toBe("Got 1 knob(s)");
     expect(sectionOf(tree, "knobs")).toBeUndefined();
-    expect(tree.declarations.tools.some((t) => t.name === "set_knob")).toBe(true);
+    expect(tree.declarations?.tools?.some((t) => t.name === "set_knob")).toBe(true);
   });
 });
 

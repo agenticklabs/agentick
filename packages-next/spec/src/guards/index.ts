@@ -365,3 +365,21 @@ export function isFormatterRef(value: unknown): value is FormatterRef {
     typeof (value as { id?: unknown }).id === "string"
   );
 }
+
+// ============================================================================
+// ContentBlock extraction helpers
+// ============================================================================
+
+/**
+ * Concatenate the `text` of every `TextBlock` in `blocks`, in order.
+ * Non-text blocks (image, code, json, audio, video, …) contribute the
+ * empty string. Used by tests and observability to get a flat text
+ * preview of mixed-modality content.
+ */
+export function extractText(blocks: readonly ContentBlock[]): string {
+  let out = "";
+  for (const b of blocks) {
+    if (isTextBlock(b)) out += b.text;
+  }
+  return out;
+}

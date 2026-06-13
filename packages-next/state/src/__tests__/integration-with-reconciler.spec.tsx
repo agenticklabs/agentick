@@ -11,6 +11,7 @@ import React, { useState } from "react";
 import { describe, expect, it } from "vitest";
 
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
+import { extractText } from "@agentick/spec-next";
 
 import { stubBridges } from "@agentick/reconciler-next";
 import { ReconcilerHarness } from "@agentick/reconciler-react-next";
@@ -22,9 +23,7 @@ async function makeHarness(id = "h_state") {
   return h;
 }
 
-function textOf(content: readonly { text?: string }[]): string {
-  return content.map((c) => c.text ?? "").join("");
-}
+const textOf = extractText;
 
 describe("useSessionState — initial registration", () => {
   it("registers the initial value on first render", async () => {
@@ -104,7 +103,7 @@ describe("useSessionState — persistence across mounts", () => {
 
     // Simulate the agent updating state mid-session
     await bridges.state.set({ key: "count", value: 42 });
-    await harness.unmount({ mountId: "m_a", sessionId: "s" });
+    await harness.unmount({ mountId: "m_a" });
 
     // Remount with the SAME bridges bundle — session-owns-bridge contract.
     await harness.mount({
