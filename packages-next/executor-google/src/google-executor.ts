@@ -15,7 +15,6 @@
  * @see docs/proposals/v2/blueprint/06-executor-harness.md
  */
 
-import { Effect } from "effect";
 import {
   GoogleGenAI,
   FinishReason,
@@ -29,41 +28,20 @@ import {
   type FunctionDeclaration,
 } from "@google/genai";
 
-import { BaseHarness, runHarnessProtocol, ulid } from "@agentick/runtime-next";
+import { ulid } from "@agentick/runtime-next";
+import { BaseLanguageModelExecutor, type StreamContext } from "@agentick/executor-next";
+import type { EventBus, MessageInbox, OperationJournal } from "@agentick/spec-next";
 import type {
-  AbortExecutorInput,
-  AdapterDelta,
   ContentBlock,
-  ContextEntry,
-  EventBus,
-  ExecuteError,
-  ExecuteInput,
   ExecutionTarget,
-  ExecutorError,
-  ExecutorStream,
-  ExecutorTerminal,
   LanguageModelExecutionResult,
-  LanguageModelExecutor,
   LanguageModelInput,
   LanguageModelMessage,
   LanguageModelMessagePart,
   LanguageModelStopReason,
   LanguageModelTool,
-  MediaSource,
-  MessageEnvelope,
-  MessageHandlerError,
-  MessageInbox,
-  NormalizeError,
   NormalizeInput,
-  Operation,
-  OperationJournal,
-  ProjectInput,
-  ProjectionError,
-  RenderedTree,
-  RunInput,
-  SectionEntry,
   ToolCall,
-  ToolDeclaration,
   UsageStats,
 } from "@agentick/spec-next";
 import { SPEC_VERSION } from "@agentick/spec-next";
@@ -161,12 +139,6 @@ export interface CustomBlockDefinition {
 // Internals
 // ============================================================================
 
-interface InFlightEntry {
-  readonly executionId: string;
-  abort?: AbortController;
-  abortReason?: string;
-}
-
 const SPEC_VERSION_LITERAL = SPEC_VERSION;
 const DEFAULT_MODEL = "gemini-2.5-flash";
 
@@ -174,17 +146,15 @@ const DEFAULT_MODEL = "gemini-2.5-flash";
 // GoogleExecutor
 // ============================================================================
 
-export class GoogleExecutor extends BaseHarness<"executor"> implements LanguageModelExecutor {
-  readonly family = "language-model" as const;
+export class GoogleExecutor extends BaseLanguageModelExecutor<GenerateContentResponse> {
   readonly target: ExecutionTarget;
+
+  protected override readonly streamByDefault: boolean;
 
   private readonly client: GoogleGenAI;
   private readonly defaultModel: string | undefined;
-  private readonly streamByDefault: boolean;
   private readonly parseThinkTags: boolean;
   private readonly customBlocks?: Readonly<Record<string, CustomBlockDefinition>>;
-  private readonly inFlight = new Map<string, InFlightEntry>();
-  private readonly aborted = new Set<string>();
 
   constructor(
     scopeId: string,
@@ -193,7 +163,7 @@ export class GoogleExecutor extends BaseHarness<"executor"> implements LanguageM
     inbox: MessageInbox,
     options: GoogleExecutorOptions = {},
   ) {
-    super("executor", scopeId, journal, bus, inbox);
+    super(scopeId, journal, bus, inbox);
     this.client = options.client ?? new GoogleGenAI(buildClientOptions(options));
     this.defaultModel = options.model;
     this.streamByDefault = options.stream ?? false;
@@ -213,577 +183,275 @@ export class GoogleExecutor extends BaseHarness<"executor"> implements LanguageM
     };
   }
 
-  // ──────── ExecutorProtocol ────────
+  // ──────── Hooks (BaseLanguageModelExecutor) ────────
 
-  project(input: ProjectInput): Promise<LanguageModelInput> {
-    const op: Operation<ProjectInput, LanguageModelInput> = {
-      opId: `executor:project:${ulid()}`,
-      surface: "executor",
-      name: "executor:command:project",
-      scope: input.scope ?? {},
-      input,
-    };
-    return runHarnessProtocol(
-      this.runOperation(op, (i) =>
-        Effect.try({
-          try: () => projectImpl(i),
-          catch: (cause): ProjectionError => ({
-            _tag: "ProjectionFailed",
-            reason: "projection threw",
-            cause,
-          }),
-        }),
-      ),
-    );
+  protected buildParams(
+    input: LanguageModelInput,
+    target: ExecutionTarget,
+  ): GenerateContentParameters {
+    return toGoogleParams(input, target, this.defaultModel);
   }
 
-  execute(input: ExecuteInput<LanguageModelInput>): Promise<unknown> {
-    const executionId = input.scope?.executionId ?? `exec:${ulid()}`;
-    const op: Operation<ExecuteInput<LanguageModelInput>, unknown> = {
-      opId: `executor:execute:${executionId}:${ulid()}`,
-      surface: "executor",
-      name: "executor:command:execute",
-      scope: input.scope ?? { executionId },
-      input,
-    };
-    return runHarnessProtocol(
-      this.runOperation(op, (i) => this.executeBody(i, executionId, undefined)),
-    );
+  protected callProvider(
+    params: unknown,
+    _signal: AbortSignal | undefined,
+  ): Promise<GenerateContentResponse> {
+    // Google SDK doesn't accept abort signal on the call directly;
+    // aborts surface as the stream iterator throwing. We rely on the
+    // base's in-flight tracking + the user-supplied AbortController.
+    return this.client.models.generateContent(params as GenerateContentParameters);
   }
 
-  executeStream(input: ExecuteInput<LanguageModelInput>): ExecutorStream<GenerateContentResponse> {
-    const queue: AdapterDelta[] = [];
-    const resolvers: Array<(r: IteratorResult<AdapterDelta>) => void> = [];
-    let done = false;
-    let resultResolve!: (v: GenerateContentResponse) => void;
-    let resultReject!: (e: unknown) => void;
-    const resultPromise = new Promise<GenerateContentResponse>((res, rej) => {
-      resultResolve = res;
-      resultReject = rej;
+  protected async drainStream(
+    params: unknown,
+    ctx: StreamContext,
+  ): Promise<GenerateContentResponse> {
+    const cp = params as GenerateContentParameters;
+    const stream = (await this.client.models.generateContentStream(
+      cp,
+      // SDK doesn't accept abort signal on the call directly; aborts
+      // surface as the stream iterator throwing when ctx.signal fires.
+    )) as unknown as AsyncIterable<GenerateContentResponse>;
+
+    const tagRouter = buildTagRouter({
+      parseThinkTags: this.parseThinkTags,
+      customBlocks: this.customBlocks,
     });
-    const controller = new AbortController();
-    if (input.signal) {
-      if (input.signal.aborted) controller.abort(input.signal.reason);
-      else
-        input.signal.addEventListener("abort", () => controller.abort(input.signal!.reason), {
-          once: true,
+
+    // Single-pass aggregation: build the final response shape as we
+    // stream. No second walk in normalize() — see G18 perf notes.
+    const accum = new GoogleStreamAccumulator();
+
+    // Active-block tracking. Gemini doesn't give us indices, so we
+    // maintain a logical index that bumps when the block type changes.
+    let blockIndex = -1;
+    let activeKind: "text" | "reasoning" | null = null;
+    let routerReasoningStarted = false;
+    let routerReasoningAccum = "";
+
+    const closeActive = (): void => {
+      if (activeKind === "text") {
+        ctx.emit({ type: "content-end", blockIndex });
+        const text = accum.currentTextBuffer();
+        ctx.emit({
+          type: "content",
+          blockIndex,
+          content: { type: "text", text } as ContentBlock,
         });
-    }
-
-    const executionId = input.scope?.executionId ?? `exec:${ulid()}`;
-    const streamOp: Operation<ExecuteInput<LanguageModelInput>, GenerateContentResponse> = {
-      opId: `executor:executeStream:${executionId}:${ulid()}`,
-      surface: "executor",
-      name: "executor:command:execute",
-      scope: input.scope ?? { executionId },
-      input,
+      } else if (activeKind === "reasoning") {
+        ctx.emit({ type: "reasoning-end", blockIndex });
+        ctx.emit({
+          type: "reasoning",
+          blockIndex,
+          reasoning: accum.currentReasoningBuffer(),
+        });
+      }
+      activeKind = null;
     };
 
-    const emit = (delta: AdapterDelta): void => {
-      if (done) return;
-      void Effect.runPromise(
-        this.emitDeltaLazy(streamOp, () => delta).pipe(Effect.catchAll(() => Effect.void)),
-      );
-      const r = resolvers.shift();
-      if (r) r({ value: delta, done: false });
-      else queue.push(delta);
-    };
-    const complete = (): void => {
-      done = true;
-      while (resolvers.length > 0) {
-        resolvers.shift()!({ value: undefined as unknown as AdapterDelta, done: true });
+    const handleTagEvent = (event: StreamTagEvent): void => {
+      if (event.type === "text") {
+        if (event.content.length === 0) return;
+        if (activeKind !== "text") {
+          closeActive();
+          blockIndex += 1;
+          accum.startTextBlock();
+          ctx.emit({ type: "content-start", blockIndex, blockType: "text" });
+          activeKind = "text";
+        }
+        ctx.emit({ type: "content-delta", blockIndex, delta: event.content });
+        accum.appendText(event.content);
+        return;
+      }
+      const mode = tagRouter!.modeFor(event.tag);
+      if (mode === "reasoning") {
+        switch (event.type) {
+          case "block-start":
+            if (!routerReasoningStarted) {
+              if (activeKind !== null) closeActive();
+              blockIndex += 1;
+              accum.startReasoningBlock();
+              ctx.emit({ type: "reasoning-start", blockIndex });
+              routerReasoningStarted = true;
+              activeKind = "reasoning";
+            }
+            break;
+          case "block-delta":
+            if (!routerReasoningStarted) {
+              if (activeKind !== null) closeActive();
+              blockIndex += 1;
+              accum.startReasoningBlock();
+              ctx.emit({ type: "reasoning-start", blockIndex });
+              routerReasoningStarted = true;
+              activeKind = "reasoning";
+            }
+            ctx.emit({ type: "reasoning-delta", blockIndex, delta: event.delta });
+            accum.appendReasoning(event.delta);
+            routerReasoningAccum += event.delta;
+            break;
+          case "block-end":
+          case "block":
+            // Close handled at next non-tag content or end of stream.
+            break;
+        }
+        return;
+      }
+      switch (event.type) {
+        case "block-start":
+          ctx.emit({ type: "custom-block-start", tag: event.tag, attrs: event.attrs });
+          break;
+        case "block-delta":
+          ctx.emit({ type: "custom-block-delta", tag: event.tag, delta: event.delta });
+          break;
+        case "block-end":
+          ctx.emit({ type: "custom-block-end", tag: event.tag });
+          break;
+        case "block":
+          ctx.emit({
+            type: "custom-block",
+            tag: event.tag,
+            content: event.content,
+            attrs: event.attrs,
+            ...(event.selfClosing ? { selfClosing: true } : {}),
+          });
+          break;
       }
     };
 
-    void (async () => {
-      try {
-        const params = toGoogleParams(input.targetInput, input.target, this.defaultModel);
+    let modelSeen: string | undefined;
+    let stopReason: LanguageModelStopReason = "end";
+    let finalUsage: UsageStats | undefined;
 
-        const stream = await this.client.models.generateContentStream({
-          ...params,
-          // The SDK doesn't accept abort signal on the call directly; we
-          // rely on the user-provided AbortController. Aborts surface as
-          // the stream iterator throwing.
-        });
+    for await (const chunk of stream) {
+      if (chunk.modelVersion && !modelSeen) modelSeen = chunk.modelVersion;
+      const candidate = chunk.candidates?.[0];
+      if (!candidate) continue;
+      const parts = candidate.content?.parts ?? [];
 
-        const tagRouter = buildTagRouter({
-          parseThinkTags: this.parseThinkTags,
-          customBlocks: this.customBlocks,
-        });
+      for (const part of parts) {
+        const isThought = (part as { thought?: boolean }).thought === true;
 
-        // Single-pass aggregation: build the final response shape as we
-        // stream. No second walk in normalize() — see G18 perf notes.
-        const accum = new GoogleStreamAccumulator();
-
-        // Active-block tracking. Gemini doesn't give us indices, so we
-        // maintain a logical index that bumps when the block type changes.
-        let blockIndex = -1;
-        let activeKind: "text" | "reasoning" | null = null;
-        let routerReasoningStarted = false;
-        let routerReasoningAccum = "";
-
-        const closeActive = (): void => {
-          if (activeKind === "text") {
-            emit({ type: "content-end", blockIndex });
-            const text = accum.currentTextBuffer();
-            emit({
-              type: "content",
-              blockIndex,
-              content: { type: "text", text } as ContentBlock,
-            });
-          } else if (activeKind === "reasoning") {
-            emit({ type: "reasoning-end", blockIndex });
-            emit({
-              type: "reasoning",
-              blockIndex,
-              reasoning: accum.currentReasoningBuffer(),
-            });
+        // Text path
+        if (typeof part.text === "string" && part.text.length > 0) {
+          if (isThought) {
+            // Native Gemini 2.5+ thinking — route to reasoning channel.
+            if (activeKind !== "reasoning") {
+              closeActive();
+              blockIndex += 1;
+              accum.startReasoningBlock();
+              ctx.emit({ type: "reasoning-start", blockIndex });
+              activeKind = "reasoning";
+            }
+            ctx.emit({ type: "reasoning-delta", blockIndex, delta: part.text });
+            accum.appendReasoning(part.text);
+            continue;
           }
-          activeKind = null;
-        };
-
-        const handleTagEvent = (event: StreamTagEvent): void => {
-          if (event.type === "text") {
-            if (event.content.length === 0) return;
+          if (tagRouter) {
+            for (const ev of tagRouter.parser.process(part.text)) {
+              handleTagEvent(ev);
+            }
+          } else {
             if (activeKind !== "text") {
               closeActive();
               blockIndex += 1;
               accum.startTextBlock();
-              emit({ type: "content-start", blockIndex, blockType: "text" });
+              ctx.emit({ type: "content-start", blockIndex, blockType: "text" });
               activeKind = "text";
             }
-            emit({ type: "content-delta", blockIndex, delta: event.content });
-            accum.appendText(event.content);
-            return;
+            ctx.emit({ type: "content-delta", blockIndex, delta: part.text });
+            accum.appendText(part.text);
           }
-          const mode = tagRouter!.modeFor(event.tag);
-          if (mode === "reasoning") {
-            switch (event.type) {
-              case "block-start":
-                if (!routerReasoningStarted) {
-                  // Logical reasoning block at synthetic index
-                  if (activeKind !== null) closeActive();
-                  blockIndex += 1;
-                  accum.startReasoningBlock();
-                  emit({ type: "reasoning-start", blockIndex });
-                  routerReasoningStarted = true;
-                  activeKind = "reasoning";
-                }
-                break;
-              case "block-delta":
-                if (!routerReasoningStarted) {
-                  if (activeKind !== null) closeActive();
-                  blockIndex += 1;
-                  accum.startReasoningBlock();
-                  emit({ type: "reasoning-start", blockIndex });
-                  routerReasoningStarted = true;
-                  activeKind = "reasoning";
-                }
-                emit({ type: "reasoning-delta", blockIndex, delta: event.delta });
-                accum.appendReasoning(event.delta);
-                routerReasoningAccum += event.delta;
-                break;
-              case "block-end":
-              case "block":
-                // Close handled at next non-tag content or end of stream.
-                break;
-            }
-            return;
-          }
-          switch (event.type) {
-            case "block-start":
-              emit({ type: "custom-block-start", tag: event.tag, attrs: event.attrs });
-              break;
-            case "block-delta":
-              emit({ type: "custom-block-delta", tag: event.tag, delta: event.delta });
-              break;
-            case "block-end":
-              emit({ type: "custom-block-end", tag: event.tag });
-              break;
-            case "block":
-              emit({
-                type: "custom-block",
-                tag: event.tag,
-                content: event.content,
-                attrs: event.attrs,
-                ...(event.selfClosing ? { selfClosing: true } : {}),
-              });
-              break;
-          }
-        };
-
-        let modelSeen: string | undefined;
-        let stopReason: LanguageModelStopReason = "end";
-        let finalUsage: UsageStats | undefined;
-
-        // The standalone executeStream() loop accumulates inline via
-        // startTextBlock/appendText/recordToolCall as it emits
-        // AdapterDeltas. Do NOT call `accum.pushChunk(chunk)` here —
-        // that path is reserved for `executeStreamBody` (the run()
-        // path) which does no emission and uses pushChunk as the sole
-        // accumulator entry point.
-        for await (const chunk of stream) {
-          if (chunk.modelVersion && !modelSeen) modelSeen = chunk.modelVersion;
-          const candidate = chunk.candidates?.[0];
-          if (!candidate) continue;
-          const parts = candidate.content?.parts ?? [];
-
-          for (const part of parts) {
-            const isThought = (part as { thought?: boolean }).thought === true;
-
-            // Text path
-            if (typeof part.text === "string" && part.text.length > 0) {
-              if (isThought) {
-                // Native Gemini 2.5+ thinking — route to reasoning channel.
-                if (activeKind !== "reasoning") {
-                  closeActive();
-                  blockIndex += 1;
-                  accum.startReasoningBlock();
-                  emit({ type: "reasoning-start", blockIndex });
-                  activeKind = "reasoning";
-                }
-                emit({ type: "reasoning-delta", blockIndex, delta: part.text });
-                accum.appendReasoning(part.text);
-                continue;
-              }
-              if (tagRouter) {
-                for (const ev of tagRouter.parser.process(part.text)) {
-                  handleTagEvent(ev);
-                }
-              } else {
-                if (activeKind !== "text") {
-                  closeActive();
-                  blockIndex += 1;
-                  accum.startTextBlock();
-                  emit({ type: "content-start", blockIndex, blockType: "text" });
-                  activeKind = "text";
-                }
-                emit({ type: "content-delta", blockIndex, delta: part.text });
-                accum.appendText(part.text);
-              }
-              continue;
-            }
-
-            // Function call path
-            if (part.functionCall) {
-              closeActive();
-              const fc = part.functionCall;
-              const callId = fc.id ?? `call_${ulid()}`;
-              const name = fc.name ?? "";
-              const args = (fc.args ?? {}) as Record<string, unknown>;
-              const signature = (part as { thoughtSignature?: string }).thoughtSignature;
-              blockIndex += 1;
-              accum.recordToolCall({
-                callId,
-                name,
-                input: args,
-                ...(signature !== undefined ? { thoughtSignature: signature } : {}),
-              });
-              emit({
-                type: "tool-call-start",
-                callId,
-                name,
-                blockIndex,
-              });
-              const jsonDelta = JSON.stringify(args);
-              if (jsonDelta !== "{}") {
-                emit({ type: "tool-call-delta", callId, delta: jsonDelta });
-              }
-              emit({ type: "tool-call-end", callId });
-              emit({
-                type: "tool-call",
-                callId,
-                name,
-                input: args,
-                ...(signature !== undefined
-                  ? {
-                      providerMetadata: {
-                        google: { thoughtSignature: signature },
-                      },
-                    }
-                  : {}),
-              });
-            }
-          }
-
-          if (candidate.finishReason) {
-            stopReason = mapFinishReason(candidate.finishReason);
-            finalUsage = toUsageStats(chunk.usageMetadata);
-            accum.setFinishReason(candidate.finishReason);
-            accum.setUsage(chunk.usageMetadata);
-          }
+          continue;
         }
 
-        // Drain tag router's remaining buffer.
-        if (tagRouter) {
-          for (const ev of tagRouter.parser.flush()) {
-            handleTagEvent(ev);
+        // Function call path
+        if (part.functionCall) {
+          closeActive();
+          const fc = part.functionCall;
+          const callId = fc.id ?? `call_${ulid()}`;
+          const name = fc.name ?? "";
+          const args = (fc.args ?? {}) as Record<string, unknown>;
+          const signature = (part as { thoughtSignature?: string }).thoughtSignature;
+          blockIndex += 1;
+          accum.recordToolCall({
+            callId,
+            name,
+            input: args,
+            ...(signature !== undefined ? { thoughtSignature: signature } : {}),
+          });
+          ctx.emit({
+            type: "tool-call-start",
+            callId,
+            name,
+            blockIndex,
+          });
+          const jsonDelta = JSON.stringify(args);
+          if (jsonDelta !== "{}") {
+            ctx.emit({ type: "tool-call-delta", callId, delta: jsonDelta });
           }
-        }
-        closeActive();
-
-        if (!finalUsage) finalUsage = toUsageStats(undefined);
-
-        emit({ type: "message-end", stopReason, usage: finalUsage });
-        emit({
-          type: "message",
-          message: {
-            role: "assistant",
-            content: accum.toContentBlocks(),
-            model: modelSeen ?? params.model,
-          },
-          stopReason,
-          usage: finalUsage,
-        });
-
-        resultResolve(accum.toResponse(modelSeen ?? params.model));
-        complete();
-      } catch (cause) {
-        resultReject(mapExecuteError(cause));
-        complete();
-      }
-    })();
-
-    return {
-      result: resultPromise,
-      abort(reason) {
-        controller.abort(reason ?? "aborted");
-      },
-      [Symbol.asyncIterator]() {
-        return {
-          next(): Promise<IteratorResult<AdapterDelta>> {
-            if (queue.length > 0) {
-              return Promise.resolve({ value: queue.shift()!, done: false });
-            }
-            if (done) {
-              return Promise.resolve({
-                value: undefined as unknown as AdapterDelta,
-                done: true,
-              });
-            }
-            return new Promise((resolve) => resolvers.push(resolve));
-          },
-          return(): Promise<IteratorResult<AdapterDelta>> {
-            complete();
-            return Promise.resolve({
-              value: undefined as unknown as AdapterDelta,
-              done: true,
-            });
-          },
-        };
-      },
-    };
-  }
-
-  normalize(input: NormalizeInput<unknown>): Promise<LanguageModelExecutionResult> {
-    const op: Operation<NormalizeInput<unknown>, LanguageModelExecutionResult> = {
-      opId: `executor:normalize:${ulid()}`,
-      surface: "executor",
-      name: "executor:command:normalize",
-      scope: input.scope ?? {},
-      input,
-    };
-    return runHarnessProtocol(
-      this.runOperation(op, (i) =>
-        Effect.try({
-          try: () => normalizeImpl(i),
-          catch: (cause): NormalizeError => ({
-            _tag: "NormalizationFailed",
-            cause,
-          }),
-        }),
-      ),
-    );
-  }
-
-  run(input: RunInput): Promise<ExecutorTerminal<LanguageModelExecutionResult>> {
-    const executionId = input.scope?.executionId ?? `exec:${ulid()}`;
-    const tickId = input.scope?.tickId;
-    const opId =
-      tickId !== undefined
-        ? `executor:run:${executionId}:${tickId}`
-        : `executor:run:${executionId}:${ulid()}`;
-    const op: Operation<RunInput, ExecutorTerminal<LanguageModelExecutionResult>> = {
-      opId,
-      surface: "executor",
-      name: "executor:command:run",
-      scope: { ...(input.scope ?? {}), executionId },
-      input,
-    };
-    return runHarnessProtocol(this.runOperation(op, (i) => this.runBody(i, executionId, op)));
-  }
-
-  abort(input: AbortExecutorInput): Promise<void> {
-    return runHarnessProtocol(
-      Effect.sync(() => {
-        const entry = this.inFlight.get(input.executionId);
-        if (entry) {
-          entry.abortReason = input.reason ?? "aborted";
-          entry.abort?.abort(input.reason ?? "aborted");
-        }
-        this.aborted.add(input.executionId);
-      }),
-    );
-  }
-
-  // ──────── inbox dispatch ────────
-
-  protected handleMessage(
-    _msg: MessageEnvelope,
-  ): Effect.Effect<unknown, MessageHandlerError, never> {
-    return Effect.fail({
-      _tag: "HandlerError",
-      cause: new Error("google executor inbox dispatch not yet wired"),
-    });
-  }
-
-  // ──────── internals ────────
-
-  private executeBody(
-    input: ExecuteInput<LanguageModelInput>,
-    executionId: string,
-    op: Operation<unknown, unknown> | undefined,
-  ): Effect.Effect<unknown, ExecuteError, never> {
-    return Effect.gen(this, function* () {
-      if (this.aborted.has(executionId)) {
-        return yield* Effect.fail<ExecuteError>({
-          _tag: "ProviderAborted",
-          reason: "aborted prior to execute",
-        });
-      }
-      const controller = new AbortController();
-      const entry: InFlightEntry = { executionId, abort: controller };
-      this.inFlight.set(executionId, entry);
-
-      try {
-        const params = toGoogleParams(input.targetInput, input.target, this.defaultModel);
-        const wantStream =
-          this.streamByDefault && (input.target.capabilities?.supportsStreaming ?? true);
-
-        if (!wantStream) {
-          return yield* Effect.tryPromise<unknown, ExecuteError>({
-            try: () => this.client.models.generateContent(params),
-            catch: (cause): ExecuteError => mapExecuteError(cause),
+          ctx.emit({ type: "tool-call-end", callId });
+          ctx.emit({
+            type: "tool-call",
+            callId,
+            name,
+            input: args,
+            ...(signature !== undefined
+              ? {
+                  providerMetadata: {
+                    google: { thoughtSignature: signature },
+                  },
+                }
+              : {}),
           });
         }
-
-        return yield* this.executeStreamBody(params, op);
-      } finally {
-        this.inFlight.delete(executionId);
       }
+
+      if (candidate.finishReason) {
+        stopReason = mapFinishReason(candidate.finishReason);
+        finalUsage = toUsageStats(chunk.usageMetadata);
+        accum.setFinishReason(candidate.finishReason);
+        accum.setUsage(chunk.usageMetadata);
+      }
+    }
+
+    // Drain tag router's remaining buffer.
+    if (tagRouter) {
+      for (const ev of tagRouter.parser.flush()) {
+        handleTagEvent(ev);
+      }
+    }
+    closeActive();
+    void routerReasoningAccum; // local-only for parity with OpenAI path
+
+    if (!finalUsage) finalUsage = toUsageStats(undefined);
+
+    ctx.emit({ type: "message-end", stopReason, usage: finalUsage });
+    ctx.emit({
+      type: "message",
+      message: {
+        role: "assistant",
+        content: accum.toContentBlocks(),
+        model: modelSeen ?? cp.model,
+      },
+      stopReason,
+      usage: finalUsage,
     });
+
+    return accum.toResponse(modelSeen ?? cp.model);
   }
 
-  private executeStreamBody(
-    params: GenerateContentParameters,
-    op: Operation<unknown, unknown> | undefined,
-  ): Effect.Effect<GenerateContentResponse, ExecuteError, never> {
-    return Effect.gen(this, function* () {
-      const stream = yield* Effect.tryPromise<AsyncIterable<GenerateContentResponse>, ExecuteError>(
-        {
-          try: () =>
-            this.client.models.generateContentStream(params) as unknown as Promise<
-              AsyncIterable<GenerateContentResponse>
-            >,
-          catch: (cause): ExecuteError => mapExecuteError(cause),
-        },
-      );
-
-      const iterator = stream[Symbol.asyncIterator]();
-      const accum = new GoogleStreamAccumulator();
-      let modelSeen = params.model;
-      while (true) {
-        const step = yield* Effect.tryPromise<
-          IteratorResult<GenerateContentResponse>,
-          ExecuteError
-        >({
-          try: () => iterator.next(),
-          catch: (cause): ExecuteError => mapExecuteError(cause),
-        });
-        if (step.done) break;
-        const chunk = step.value;
-        accum.pushChunk(chunk);
-        if (chunk.modelVersion) modelSeen = chunk.modelVersion;
-        if (op !== undefined) {
-          yield* this.emitDeltaLazy(op, () => summarizeChunk(chunk)).pipe(Effect.orDie);
-        }
-        const cand = chunk.candidates?.[0];
-        if (cand?.finishReason) {
-          accum.setFinishReason(cand.finishReason);
-          accum.setUsage(chunk.usageMetadata);
-        }
-      }
-      return accum.toResponse(modelSeen);
-    });
+  protected normalizeRaw(raw: GenerateContentResponse): LanguageModelExecutionResult {
+    return normalizeImpl({ targetOutput: raw, target: this.target });
   }
 
-  private runBody(
-    input: RunInput,
-    executionId: string,
-    op: Operation<RunInput, ExecutorTerminal<LanguageModelExecutionResult>>,
-  ): Effect.Effect<ExecutorTerminal<LanguageModelExecutionResult>, ExecutorError, never> {
-    return Effect.gen(this, function* () {
-      if (this.aborted.has(executionId)) {
-        const terminal: ExecutorTerminal<LanguageModelExecutionResult> = {
-          outcome: "canceled",
-          reason: this.inFlight.get(executionId)?.abortReason ?? "aborted",
-        };
-        return terminal;
-      }
-
-      const projected = projectImpl({
-        compiled: input.compiled,
-        target: input.target,
-      });
-
-      const executeInput: ExecuteInput<LanguageModelInput> = {
-        targetInput: projected,
-        target: input.target,
-        scope: { ...(input.scope ?? {}), executionId },
-        ...(input.signal !== undefined ? { signal: input.signal } : {}),
-      };
-      const raw = yield* this.executeBody(
-        executeInput,
-        executionId,
-        op as Operation<unknown, unknown>,
-      ).pipe(
-        Effect.catchTag("ProviderAborted", (e) =>
-          Effect.succeed<ExecutorTerminal<LanguageModelExecutionResult>>({
-            outcome: "canceled",
-            reason: e.reason ?? "aborted",
-          }),
-        ),
-      );
-
-      if (
-        raw &&
-        typeof raw === "object" &&
-        "outcome" in raw &&
-        (raw as { outcome?: string }).outcome === "canceled"
-      ) {
-        return raw as ExecutorTerminal<LanguageModelExecutionResult>;
-      }
-
-      const router = buildTagRouter({
-        parseThinkTags: this.parseThinkTags,
-        customBlocks: this.customBlocks,
-      });
-      const rawForNormalize = router ? applyTagRouterToResponse(raw, router) : raw;
-
-      const result = yield* Effect.try({
-        try: () => normalizeImpl({ targetOutput: rawForNormalize, target: input.target }),
-        catch: (cause): ExecutorError => ({
-          _tag: "NormalizationFailed",
-          cause,
-        }),
-      });
-
-      const terminal: ExecutorTerminal<LanguageModelExecutionResult> = {
-        outcome: "succeeded",
-        result,
-      };
-      return terminal;
+  protected override postProcessForNormalize(
+    raw: GenerateContentResponse,
+  ): GenerateContentResponse {
+    const router = buildTagRouter({
+      parseThinkTags: this.parseThinkTags,
+      customBlocks: this.customBlocks,
     });
+    return router ? (applyTagRouterToResponse(raw, router) as GenerateContentResponse) : raw;
   }
 }
 
@@ -1079,152 +747,6 @@ function toGoogleTools(tools: ReadonlyArray<LanguageModelTool>): GoogleTool[] {
 }
 
 // ============================================================================
-// IR projection (executor-agnostic shape)
-// ============================================================================
-
-function projectImpl(input: ProjectInput): LanguageModelInput {
-  const messages = buildMessages(input.compiled);
-  const tools = buildTools(input.compiled);
-  const parameters = buildParameters(input.compiled);
-  return {
-    messages,
-    ...(tools.length > 0 ? { tools } : {}),
-    ...(parameters !== undefined ? { parameters } : {}),
-  };
-}
-
-function buildMessages(tree: RenderedTree): ReadonlyArray<LanguageModelMessage> {
-  const messages: LanguageModelMessage[] = [];
-  const systemText = collectSectionText(tree.context.entries);
-  if (systemText.length > 0) {
-    messages.push({
-      role: "system",
-      content: [{ type: "text", text: systemText }],
-    });
-  }
-  for (const entry of tree.context.entries) {
-    if (entry.kind !== "message") continue;
-    messages.push({
-      role: entry.role as LanguageModelMessage["role"],
-      content: entry.content.map(messagePartFromBlock),
-    });
-  }
-  return messages;
-}
-
-function collectSectionText(entries: ReadonlyArray<ContextEntry>): string {
-  const parts: string[] = [];
-  for (const e of entries) {
-    if (e.kind !== "section") continue;
-    const text = sectionText(e);
-    if (text.length > 0) parts.push(text);
-  }
-  return parts.join("\n\n");
-}
-
-function sectionText(section: SectionEntry): string {
-  const head = section.title ? `## ${section.title}\n\n` : "";
-  const body = section.content
-    .map((b) => (b.type === "text" ? b.text : ""))
-    .filter((t) => t.length > 0)
-    .join("\n\n");
-  return head + body;
-}
-
-function imageUrlFromSource(source: MediaSource, mimeType: string | undefined): string {
-  switch (source.type) {
-    case "url":
-      return source.url;
-    case "base64": {
-      const mt = source.mimeType ?? mimeType ?? "image/png";
-      return `data:${mt};base64,${source.data}`;
-    }
-    case "reference":
-      return source.fileId;
-    case "s3":
-      return `s3://${source.bucket}/${source.key}`;
-    case "gcs":
-      return `gs://${source.bucket}/${source.object}`;
-  }
-}
-
-function messagePartFromBlock(block: ContentBlock): LanguageModelMessagePart {
-  const pm =
-    block.providerMetadata !== undefined ? { providerMetadata: block.providerMetadata } : {};
-  switch (block.type) {
-    case "text":
-      return { type: "text", text: block.text, ...pm };
-    case "image":
-      return {
-        type: "image",
-        imageUrl: imageUrlFromSource(block.source, block.mimeType),
-        ...(block.mimeType !== undefined ? { mediaType: block.mimeType } : {}),
-        ...pm,
-      };
-    case "tool_use":
-      return {
-        type: "tool_use",
-        id: block.toolUseId,
-        name: block.name,
-        input: block.input,
-        ...pm,
-      };
-    case "tool_result":
-      return {
-        type: "tool_result",
-        toolUseId: block.toolUseId,
-        content: block.content.map(messagePartFromBlock),
-        ...(block.isError !== undefined ? { isError: block.isError } : {}),
-        ...pm,
-      };
-    default:
-      return {
-        type: "text",
-        text:
-          "text" in block && typeof block.text === "string" ? block.text : JSON.stringify(block),
-      };
-  }
-}
-
-function buildTools(tree: RenderedTree): ReadonlyArray<LanguageModelTool> {
-  const decl = tree.declarations?.tools ?? [];
-  return decl
-    .filter((t: ToolDeclaration) => t.exposure.includes("model"))
-    .map((t) => ({
-      name: t.name,
-      ...(t.description !== undefined ? { description: t.description } : {}),
-      inputSchema: t.inputSchema as Record<string, unknown>,
-      ...(t.providerOptions !== undefined ? { providerOptions: t.providerOptions } : {}),
-    }));
-}
-
-function buildParameters(tree: RenderedTree) {
-  const cfg = tree.config;
-  if (!cfg) return undefined;
-  const params: {
-    temperature?: number;
-    maxOutputTokens?: number;
-    responseFormat?: {
-      type: "text" | "json" | "json_schema";
-      schema?: Record<string, unknown>;
-    };
-  } = {};
-  if (cfg.temperature !== undefined) params.temperature = cfg.temperature;
-  if (cfg.maxOutputTokens !== undefined) params.maxOutputTokens = cfg.maxOutputTokens;
-  if (cfg.responseFormat !== undefined) {
-    if (cfg.responseFormat.type === "json_schema") {
-      params.responseFormat = {
-        type: "json_schema",
-        schema: cfg.responseFormat.schema as Record<string, unknown>,
-      };
-    } else {
-      params.responseFormat = { type: cfg.responseFormat.type };
-    }
-  }
-  return Object.keys(params).length > 0 ? params : undefined;
-}
-
-// ============================================================================
 // GenerateContentResponse → LanguageModelExecutionResult
 // ============================================================================
 
@@ -1493,20 +1015,6 @@ class GoogleStreamAccumulator {
   }
 }
 
-function summarizeChunk(chunk: GenerateContentResponse): {
-  kind: string;
-  delta?: string;
-  metadata?: Record<string, unknown>;
-} {
-  const cand = chunk.candidates?.[0];
-  if (!cand) return { kind: "noop" };
-  const firstText = cand.content?.parts?.find((p) => typeof p.text === "string");
-  if (firstText) return { kind: "content_delta", delta: firstText.text };
-  if (cand.finishReason)
-    return { kind: "message_delta", metadata: { stopReason: cand.finishReason } };
-  return { kind: "chunk" };
-}
-
 // ============================================================================
 // Stop-reason mapping
 // ============================================================================
@@ -1638,21 +1146,4 @@ function ensureObjectSchema(params: unknown): unknown {
   const obj = params as Record<string, unknown>;
   if (!obj["type"]) return { ...obj, type: "object" };
   return obj;
-}
-
-// ============================================================================
-// Error helpers
-// ============================================================================
-
-function mapExecuteError(cause: unknown): ExecuteError {
-  if (cause instanceof Error) {
-    const status = (cause as { status?: number }).status;
-    if (cause.name === "AbortError" || /abort/i.test(cause.message)) {
-      return { _tag: "ProviderAborted", reason: cause.message };
-    }
-    if (typeof status === "number") {
-      return { _tag: "ProviderRejected", status, cause };
-    }
-  }
-  return { _tag: "StreamFailed", cause };
 }

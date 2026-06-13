@@ -501,6 +501,9 @@ importers:
 
   packages-next/executor-google:
     dependencies:
+      '@agentick/executor-next':
+        specifier: workspace:*
+        version: link:../executor
       '@agentick/executor-openai-next':
         specifier: workspace:*
         version: link:../executor-openai
