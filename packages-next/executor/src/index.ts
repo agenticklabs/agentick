@@ -2,7 +2,7 @@
  * `@agentick/executor-next` — reference executor harness.
  *
  * Implements `ExecutorProtocol` / `LanguageModelExecutor` from
- * `@agentick/spec-next`. Ships `MockLanguageModelExecutor` (scripted, no
+ * `@agentick/spec-next`. Ships `FakeLanguageModelExecutor` (scripted, no
  * wire) for tests, examples, and the v2 substrate proof. Real
  * provider adapters (OpenAI, Anthropic, Google, AI SDK) live in
  * separate packages — Phase 4c.
@@ -11,8 +11,8 @@
  */
 
 export {
-  MockLanguageModelExecutor,
-  type MockLanguageModelExecutorOptions,
+  FakeLanguageModelExecutor,
+  type FakeLanguageModelExecutorOptions,
   type MockScriptedRun,
-} from "./mock-language-model-executor.js";
+} from "./fake-language-model-executor.js";
 export { defineExecutor, type DefineExecutorInput } from "./define-executor.js";

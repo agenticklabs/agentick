@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import React from "react";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
 import { ReconcilerHarness, useData } from "@agentick/reconciler-react-next";
-import { InMemoryDataBridge, stubBridges, mockKnobsHarness } from "@agentick/reconciler-next";
+import { InMemoryDataBridge, fakeBridges, fakeKnobsHarness } from "@agentick/reconciler-next";
 import { useKnob } from "@agentick/knobs-next/react";
 import { flush } from "@agentick/reconciler-react-next/testing";
 import type { HookBridges, ReconcilerSnapshot } from "@agentick/spec-next";
@@ -78,10 +78,10 @@ describe("InMemoryDataBridge — snapshot/restore unit", () => {
 
 describe("KnobsHarness — snapshot/restore unit", () => {
   it("export → import round-trips all values + fires subscribers on changed ids", () => {
-    const src = mockKnobsHarness({ a: 1, b: 2 });
+    const src = fakeKnobsHarness({ a: 1, b: 2 });
     expect(src.exportSnapshot()).toEqual({ a: 1, b: 2 });
 
-    const dest = mockKnobsHarness();
+    const dest = fakeKnobsHarness();
     let aChanges = 0;
     let cChanges = 0;
     dest.subscribe("a", () => aChanges++);
@@ -98,7 +98,7 @@ describe("KnobsHarness — snapshot/restore unit", () => {
 describe("ReconcilerHarness — snapshot/restore through the harness", () => {
   it("snapshot captures data cache + knob values; restore applies them", async () => {
     const harness = await makeHarness();
-    const bridges = stubBridges({ knobs: { mood: "curious" } });
+    const bridges = fakeBridges({ knobs: { mood: "curious" } });
 
     function App() {
       const [mood] = useKnob("mood", "curious");
@@ -129,7 +129,7 @@ describe("ReconcilerHarness — snapshot/restore through the harness", () => {
   it("restore on a fresh mount re-hydrates the data cache (no re-fetch needed)", async () => {
     // First mount: fetch data + take snapshot.
     const harness1 = await makeHarness("snap-h1");
-    const bridges1 = stubBridges();
+    const bridges1 = fakeBridges();
     let fetches1 = 0;
 
     function App1() {
@@ -152,7 +152,7 @@ describe("ReconcilerHarness — snapshot/restore through the harness", () => {
 
     // Second mount on a fresh harness + fresh bridges, with restore.
     const harness2 = await makeHarness("snap-h2");
-    const bridges2 = stubBridges();
+    const bridges2 = fakeBridges();
     let fetches2 = 0;
 
     function App2() {
@@ -183,7 +183,7 @@ describe("ReconcilerHarness — snapshot/restore through the harness", () => {
 
   it("restore on a fresh mount re-hydrates knob values", async () => {
     const harness1 = await makeHarness("knob-h1");
-    const bridges1 = stubBridges({ knobs: { mood: "curious" } });
+    const bridges1 = fakeBridges({ knobs: { mood: "curious" } });
     function App() {
       const [mood] = useKnob("mood", "fallback");
       return React.createElement("message", { role: "user" }, mood);
@@ -200,7 +200,7 @@ describe("ReconcilerHarness — snapshot/restore through the harness", () => {
     expect((snap.bridges.knobs as { mood?: string }).mood).toBe("decisive");
 
     const harness2 = await makeHarness("knob-h2");
-    const bridges2 = stubBridges();
+    const bridges2 = fakeBridges();
     await harness2.mount({
       mountId: "m_k2",
       sessionId: "s",
@@ -216,7 +216,7 @@ describe("ReconcilerHarness — snapshot/restore through the harness", () => {
     // KnobPrimitive is string | number | boolean — nested objects are
     // intentionally rejected at the type level (snapshot wire format
     // requires JSON-primitive values).
-    const bridges = stubBridges({ knobs: { n: 42, s: "hi", b: true } });
+    const bridges = fakeBridges({ knobs: { n: 42, s: "hi", b: true } });
     await harness.mount({
       mountId: "m_fw",
       sessionId: "s",
@@ -233,7 +233,7 @@ describe("ReconcilerHarness — snapshot/restore through the harness", () => {
 
   it("snapshot captures and restores StateBridge values", async () => {
     const harness = await makeHarness("state");
-    const bridges = stubBridges();
+    const bridges = fakeBridges();
     await bridges.state.set({ key: "counter", value: 7 });
     await bridges.state.set({ key: "label", value: "hello" });
     await harness.mount({
@@ -258,7 +258,7 @@ describe("ReconcilerHarness — snapshot/restore through the harness", () => {
   it("custom (non-InMemory) data bridge does not export to snapshot", async () => {
     const harness = await makeHarness("custom-data");
     const bridges: HookBridges = {
-      ...stubBridges(),
+      ...fakeBridges(),
       data: {
         peek: () => undefined,
         fetch: async <T,>(_k: string, _f: () => Promise<T>): Promise<T> => "x" as unknown as T,

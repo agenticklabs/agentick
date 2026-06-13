@@ -8,7 +8,7 @@
  * audio, retrieval) implement the same protocol against different targets.
  *
  * Implementations:
- *   - `MockLanguageModelExecutor` (in `@agentick/executor-next`; reference impl)
+ *   - `FakeLanguageModelExecutor` (in `@agentick/executor-next`; reference impl)
  *   - `@agentick/executor-openai-next`, `-anthropic`, `-google`, `-ai-sdk`
  *     (Phase 4c — real provider adapters)
  *
@@ -354,7 +354,7 @@ export interface ExecutorProtocol<
 
 /**
  * `ExecutorProtocol` narrowed to the language-model family. The
- * shipped reference impl is `MockLanguageModelExecutor` in
+ * shipped reference impl is `FakeLanguageModelExecutor` in
  * `@agentick/executor-next`; provider adapters in Phase 4c.
  */
 export interface LanguageModelExecutor extends ExecutorProtocol<

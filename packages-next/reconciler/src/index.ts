@@ -8,7 +8,7 @@
  *   - Layer B: the contributor protocol + collect walker + built-in
  *     contributors that turn a host tree into the spec's RenderedTree IR.
  *   - Bridges: reference `InMemoryDataBridge` + protocol mocks
- *     (`stubBridges`, `mockTimelineHarness`, etc.) for tests.
+ *     (`fakeBridges`, `fakeTimelineHarness`, etc.) for tests.
  *   - `LifecycleStore` — generic per-mount lifecycle handler registry
  *     used by `useOnX` hooks in any reconciler.
  *   - `defineReconciler` — callback-style `ReconcilerProtocol` factory.
@@ -87,18 +87,22 @@ export {
 export { customBlockContributor } from "./collect/contributors/custom-block.js";
 export { contentPassthroughContributor } from "./collect/contributors/content-passthrough.js";
 
-// Bridges — reference impl + protocol mocks for tests
+// Bridges — reference (production) impl
 export { InMemoryDataBridge } from "./bridges/in-memory-data-bridge.js";
 export type { InMemoryDataBridgeOptions } from "./bridges/in-memory-data-bridge.js";
+
+// Test doubles — re-exported from the package root for ergonomics.
+// Adopters writing new tests should prefer the `@agentick/reconciler-next/testing`
+// subpath import directly per the test-doubles convention.
 export {
-  stubBridges,
+  fakeBridges,
   stubLoopBridge,
   stubSessionBridge,
-  mockTimelineHarness,
-  mockKnobsHarness,
+  fakeTimelineHarness,
+  fakeKnobsHarness,
   mockStateHarness,
-} from "./bridges/stub-bridges.js";
-export type { StubBridgesOptions } from "./bridges/stub-bridges.js";
+} from "./testing/fake-bridges.js";
+export type { FakeBridgesOptions } from "./testing/fake-bridges.js";
 
 // Lifecycle store — per-mount registry used by useOnX hooks
 export { LifecycleStore } from "./lifecycle-store.js";

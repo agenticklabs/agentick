@@ -1,7 +1,7 @@
 {
   "name": "@agentick/executor-next",
   "version": "0.0.0",
-  "description": "Reference executor harness for Agentick v2. Implements ExecutorProtocol from @agentick/spec-next — project / execute / normalize / run / abort. Ships MockLanguageModelExecutor for tests + reference; provider adapters (OpenAI, Anthropic, Google, AI SDK) live in separate packages.",
+  "description": "Reference executor harness for Agentick v2. Implements ExecutorProtocol from @agentick/spec-next — project / execute / normalize / run / abort. Ships FakeLanguageModelExecutor for tests + reference; provider adapters (OpenAI, Anthropic, Google, AI SDK) live in separate packages.",
   "keywords": [
     "agent",
     "agentick",

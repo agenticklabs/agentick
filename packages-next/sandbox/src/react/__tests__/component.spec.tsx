@@ -13,7 +13,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
 import { ReconcilerHarness } from "@agentick/reconciler-react-next";
-import { stubBridges } from "@agentick/reconciler-next";
+import { fakeBridges } from "@agentick/reconciler-next";
 import type { HookBridges, SandboxHandle, SandboxProvider } from "@agentick/spec-next";
 
 import { inMemorySandboxBridge, type SandboxBridge } from "../../bridge.js";
@@ -65,7 +65,7 @@ describe("<Sandbox> — mount/unmount lifecycle", () => {
   it("registers a SandboxHarness with the bridge on mount", async () => {
     const bridge: SandboxBridge = inMemorySandboxBridge();
     const bridges: HookBridges = {
-      ...stubBridges(),
+      ...fakeBridges(),
       sandbox: bridge,
     } as HookBridges;
 
@@ -108,7 +108,7 @@ describe("<Sandbox> — mount/unmount lifecycle", () => {
     const onDestroy = vi.fn();
     const bridge = inMemorySandboxBridge();
     const bridges: HookBridges = {
-      ...stubBridges(),
+      ...fakeBridges(),
       sandbox: bridge,
     } as HookBridges;
 

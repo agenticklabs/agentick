@@ -7,7 +7,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
 import { ReconcilerHarness } from "@agentick/reconciler-react-next";
-import { stubBridges } from "@agentick/reconciler-next";
+import { fakeBridges } from "@agentick/reconciler-next";
 import type { HookBridges } from "@agentick/spec-next";
 
 import { createSubscriptionBridge } from "../../bridge.js";
@@ -28,7 +28,7 @@ describe("<Cron> — declare via bridge", () => {
   it("registers a cron intent on mount and dispatches the handler", async () => {
     const bridge = createSubscriptionBridge();
     const bridges: HookBridges = {
-      ...stubBridges(),
+      ...fakeBridges(),
       subscriptions: bridge,
     } as HookBridges;
     const onTick = vi.fn(async () => {});
@@ -58,7 +58,7 @@ describe("<Webhook> — declare via bridge", () => {
   it("registers a webhook intent with path + method", async () => {
     const bridge = createSubscriptionBridge();
     const bridges: HookBridges = {
-      ...stubBridges(),
+      ...fakeBridges(),
       subscriptions: bridge,
     } as HookBridges;
     const onRequest = vi.fn(async () => {});
@@ -91,7 +91,7 @@ describe("<EventListener> — declare via bridge", () => {
   it("registers an event-listener intent with channel", async () => {
     const bridge = createSubscriptionBridge();
     const bridges: HookBridges = {
-      ...stubBridges(),
+      ...fakeBridges(),
       subscriptions: bridge,
     } as HookBridges;
     const onEvent = vi.fn(async () => {});
@@ -121,7 +121,7 @@ describe("<EventListener> — declare via bridge", () => {
 
 describe("subscription components — error when bridge missing", () => {
   it("throws a clear error if `withSubscriptions()` isn't installed", async () => {
-    const bridges: HookBridges = stubBridges();
+    const bridges: HookBridges = fakeBridges();
     const harness = await makeHarness();
     await harness.mount({
       mountId: "m4",

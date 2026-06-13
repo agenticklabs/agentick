@@ -1,5 +1,5 @@
 /**
- * Implementation-specific behavior tests for MockLanguageModelExecutor.
+ * Implementation-specific behavior tests for FakeLanguageModelExecutor.
  *
  * The conformance suite (`conformance.spec.ts`) covers the protocol
  * contract. These tests cover behavior the mock impl specifically
@@ -12,7 +12,7 @@ import { describe, expect, it } from "vitest";
 import type { LanguageModelTarget, RenderedTree } from "@agentick/spec-next";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
 
-import { MockLanguageModelExecutor } from "../mock-language-model-executor.js";
+import { FakeLanguageModelExecutor } from "../fake-language-model-executor.js";
 
 function emptyTree(): RenderedTree {
   return {
@@ -29,16 +29,16 @@ function mkTarget(): LanguageModelTarget {
   return { kind: "language-model", provider: "mock", modelId: "mock-v1" };
 }
 
-async function makeExecutor(opts: ConstructorParameters<typeof MockLanguageModelExecutor>[4] = {}) {
+async function makeExecutor(opts: ConstructorParameters<typeof FakeLanguageModelExecutor>[4] = {}) {
   const journal = new MemoryJournal();
   const bus = new LocalEventBus();
   const inbox = new LocalInbox();
-  const exec = new MockLanguageModelExecutor("exec-bench", journal, bus, inbox, opts);
+  const exec = new FakeLanguageModelExecutor("exec-bench", journal, bus, inbox, opts);
   await exec.ready;
   return { exec, journal, bus, inbox };
 }
 
-describe("MockLanguageModelExecutor — project", () => {
+describe("FakeLanguageModelExecutor — project", () => {
   it("folds a section into a leading system message", async () => {
     const { exec } = await makeExecutor();
     const tree: RenderedTree = {
@@ -99,7 +99,7 @@ describe("MockLanguageModelExecutor — project", () => {
   });
 });
 
-describe("MockLanguageModelExecutor — run + streaming", () => {
+describe("FakeLanguageModelExecutor — run + streaming", () => {
   it("emits one delta envelope per scripted stream chunk", async () => {
     const { exec, bus } = await makeExecutor({
       scripted: {
@@ -163,7 +163,7 @@ describe("MockLanguageModelExecutor — run + streaming", () => {
   });
 });
 
-describe("MockLanguageModelExecutor — abort", () => {
+describe("FakeLanguageModelExecutor — abort", () => {
   it("subsequent run with the same executionId terminates as 'canceled'", async () => {
     const { exec } = await makeExecutor({
       scripted: {
@@ -185,7 +185,7 @@ describe("MockLanguageModelExecutor — abort", () => {
   });
 });
 
-describe("MockLanguageModelExecutor — terminal envelope journaled", () => {
+describe("FakeLanguageModelExecutor — terminal envelope journaled", () => {
   it("run produces requested + terminal envelopes on the journal", async () => {
     const { exec, journal } = await makeExecutor();
     await exec.run({ compiled: emptyTree(), target: mkTarget() });

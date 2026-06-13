@@ -3,7 +3,7 @@ import React, { useEffect } from "react";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
 import { ReconcilerHarness } from "../harness/reconciler-harness.js";
 import { InMemoryDataBridge } from "@agentick/reconciler-next";
-import { stubBridges } from "@agentick/reconciler-next";
+import { fakeBridges } from "@agentick/reconciler-next";
 import { useData } from "../react/hooks/use-data.js";
 // useKnob moved to @agentick/knobs-next/react per ADR 27.
 // useKnob's integration coverage lives in
@@ -29,7 +29,7 @@ const textOf = extractText;
 describe("useData — no-Suspense blocking resolution", () => {
   it("returns cached value synchronously when present", async () => {
     const data = new InMemoryDataBridge();
-    const bridges: HookBridges = { ...stubBridges(), data };
+    const bridges: HookBridges = { ...fakeBridges(), data };
     const harness = await makeHarness();
 
     function User() {
@@ -60,7 +60,7 @@ describe("useData — no-Suspense blocking resolution", () => {
 
   it("blocks the render loop until the fetcher resolves", async () => {
     const data = new InMemoryDataBridge();
-    const bridges: HookBridges = { ...stubBridges(), data };
+    const bridges: HookBridges = { ...fakeBridges(), data };
     const harness = await makeHarness();
 
     let resolveLater: ((v: string) => void) | null = null;
@@ -96,7 +96,7 @@ describe("useData — no-Suspense blocking resolution", () => {
 
   it("respects awaitTimeoutMs and surfaces a diagnostic", async () => {
     const data = new InMemoryDataBridge();
-    const bridges: HookBridges = { ...stubBridges(), data };
+    const bridges: HookBridges = { ...fakeBridges(), data };
     const harness = await makeHarness();
 
     // Fetcher that never resolves
@@ -127,7 +127,7 @@ describe("useData — no-Suspense blocking resolution", () => {
 
   it("a fetcher rejection propagates as a render error (no loading state)", async () => {
     const data = new InMemoryDataBridge();
-    const bridges: HookBridges = { ...stubBridges(), data };
+    const bridges: HookBridges = { ...fakeBridges(), data };
     const harness = await makeHarness();
 
     function Broken() {
@@ -165,7 +165,7 @@ describe("useLoopControl", () => {
     const stopped: string[] = [];
 
     const bridges: HookBridges = {
-      ...stubBridges(),
+      ...fakeBridges(),
       loop: {
         continueAfterTick: () => stopped.push("continue"),
         stopAfterTick: (reason) => stopped.push(`stop:${reason ?? ""}`),
@@ -196,7 +196,7 @@ describe("useLoopControl", () => {
 
 describe("useSession", () => {
   it("returns the session bridge snapshot", async () => {
-    const bridges = stubBridges({ sessionId: "s_42" });
+    const bridges = fakeBridges({ sessionId: "s_42" });
     const harness = await makeHarness();
 
     function App() {

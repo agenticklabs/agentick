@@ -11,7 +11,7 @@
 import { describe, expect, it } from "vitest";
 
 import { createClient } from "@agentick/client-next";
-import { MockLanguageModelExecutor } from "@agentick/executor-next";
+import { FakeLanguageModelExecutor } from "@agentick/executor-next";
 import { createGateway } from "@agentick/gateway-next";
 import { fakeReconciler } from "@agentick/reconciler-next/testing";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
@@ -29,7 +29,7 @@ async function makeStack(replyText: string) {
   const journal = new MemoryJournal();
   const bus = new LocalEventBus();
   const inbox = new LocalInbox();
-  const executor = new MockLanguageModelExecutor("e2e-exec", journal, bus, inbox, {
+  const executor = new FakeLanguageModelExecutor("e2e-exec", journal, bus, inbox, {
     scripted: [
       {
         result: {

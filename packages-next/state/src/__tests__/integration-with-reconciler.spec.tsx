@@ -13,7 +13,7 @@ import { describe, expect, it } from "vitest";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
 import { extractText } from "@agentick/spec-next";
 
-import { stubBridges } from "@agentick/reconciler-next";
+import { fakeBridges } from "@agentick/reconciler-next";
 import { ReconcilerHarness } from "@agentick/reconciler-react-next";
 import { useSessionState } from "@agentick/state-next/react";
 
@@ -28,7 +28,7 @@ const textOf = extractText;
 describe("useSessionState — initial registration", () => {
   it("registers the initial value on first render", async () => {
     const harness = await makeHarness();
-    const bridges = stubBridges();
+    const bridges = fakeBridges();
 
     function Counter() {
       const [count] = useSessionState("count", 5);
@@ -56,7 +56,7 @@ describe("useSessionState — initial registration", () => {
 
   it("does NOT overwrite an existing value when re-mounting", async () => {
     const harness = await makeHarness();
-    const bridges = stubBridges();
+    const bridges = fakeBridges();
     await bridges.state.set({ key: "count", value: 99 });
 
     function Counter() {
@@ -83,7 +83,7 @@ describe("useSessionState — initial registration", () => {
 describe("useSessionState — persistence across mounts", () => {
   it("survives unmount → remount when the same bridge is reused", async () => {
     const harness = await makeHarness();
-    const bridges = stubBridges();
+    const bridges = fakeBridges();
 
     function Counter() {
       const [count, setCount] = useSessionState("count", 0);
@@ -125,7 +125,7 @@ describe("useSessionState — persistence across mounts", () => {
 describe("useSessionState — reactivity", () => {
   it("triggers re-renders when set() is called externally", async () => {
     const harness = await makeHarness();
-    const bridges = stubBridges();
+    const bridges = fakeBridges();
 
     function Counter() {
       const [count] = useSessionState("count", 0);

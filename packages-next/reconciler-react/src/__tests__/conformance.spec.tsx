@@ -25,7 +25,7 @@ import {
 } from "@agentick/spec-conformance-next";
 import type { HookBridges, ReconcilerProtocol } from "@agentick/spec-next";
 import { InMemoryDataBridge } from "@agentick/reconciler-next";
-import { stubBridges, stubLoopBridge } from "@agentick/reconciler-next";
+import { fakeBridges, stubLoopBridge } from "@agentick/reconciler-next";
 import { ReconcilerHarness } from "../harness/reconciler-harness.js";
 
 // ============================================================================
@@ -61,9 +61,9 @@ const reconcilerFactory: ReconcilerConformanceFactory = {
 
   createBridges(opts?: { sessionId?: string; knobs?: Record<string, unknown> }): HookBridges {
     // The conformance suite passes a generic Record<string, unknown> for
-    // knobs; stubBridges expects Record<string, KnobPrimitive>. Cast
+    // knobs; fakeBridges expects Record<string, KnobPrimitive>. Cast
     // through unknown — runtime values are primitive in practice.
-    return stubBridges(opts as unknown as Parameters<typeof stubBridges>[0]);
+    return fakeBridges(opts as unknown as Parameters<typeof fakeBridges>[0]);
   },
 
   buildElement(input: ElementInput): unknown {

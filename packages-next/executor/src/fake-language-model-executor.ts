@@ -1,5 +1,5 @@
 /**
- * `MockLanguageModelExecutor` — reference implementation of
+ * `FakeLanguageModelExecutor` — reference implementation of
  * `LanguageModelExecutor` for tests, examples, and the v2 substrate
  * proof. Inherits from `BaseHarness<"executor">` for the full phase
  * contract + FiberRef scope + lazy delta emission.
@@ -82,7 +82,7 @@ export interface MockScriptedRun {
   readonly deltas?: ReadonlyArray<AdapterDelta>;
 }
 
-export interface MockLanguageModelExecutorOptions {
+export interface FakeLanguageModelExecutorOptions {
   /**
    * Scripted outcome for `run`. Accepts either a single scripted run
    * (every `run()` returns the same result) or an array of scripted
@@ -118,7 +118,7 @@ const DEFAULT_REPLY: LanguageModelExecutionResult = {
 };
 
 // ============================================================================
-// MockLanguageModelExecutor
+// FakeLanguageModelExecutor
 // ============================================================================
 
 const DEFAULT_MOCK_TARGET: ExecutionTarget = {
@@ -128,7 +128,7 @@ const DEFAULT_MOCK_TARGET: ExecutionTarget = {
   capabilities: { supportsTools: true, supportsStreaming: true },
 };
 
-export class MockLanguageModelExecutor
+export class FakeLanguageModelExecutor
   extends BaseHarness<"executor">
   implements LanguageModelExecutor
 {
@@ -145,7 +145,7 @@ export class MockLanguageModelExecutor
     journal: OperationJournal,
     bus: EventBus,
     inbox: MessageInbox,
-    options: MockLanguageModelExecutorOptions = {},
+    options: FakeLanguageModelExecutorOptions = {},
   ) {
     super("executor", scopeId, journal, bus, inbox);
     this.target = options.target ?? DEFAULT_MOCK_TARGET;

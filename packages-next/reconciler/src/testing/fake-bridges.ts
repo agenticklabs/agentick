@@ -45,7 +45,7 @@ import type {
   CompactStrategy,
   CompactResult,
 } from "@agentick/spec-next";
-import { InMemoryDataBridge } from "./in-memory-data-bridge.js";
+import { InMemoryDataBridge } from "../bridges/in-memory-data-bridge.js";
 
 /**
  * Mock timeline harness — Map + Promise resolvers; satisfies
@@ -53,7 +53,7 @@ import { InMemoryDataBridge } from "./in-memory-data-bridge.js";
  * `@agentick/timeline-next/testing` `stubTimelineHarness` for tests that
  * exercise harness behavior.
  */
-export function mockTimelineHarness(
+export function fakeTimelineHarness(
   initial: readonly TimelineEntry[] = [],
 ): TimelineHarnessProtocol {
   const persisted: TimelineEntry[] = [...initial];
@@ -177,7 +177,7 @@ export function mockTimelineHarness(
  * inbox. Use `@agentick/knobs-next/testing` for tests that exercise harness
  * behavior.
  */
-export function mockKnobsHarness(
+export function fakeKnobsHarness(
   initial: Readonly<Record<string, KnobPrimitive>> = {},
 ): KnobsHarnessProtocol {
   const values = new Map<string, KnobPrimitive>(Object.entries(initial));
@@ -329,7 +329,7 @@ export function stubSessionBridge(id = "s_stub"): SessionBridge {
   return { id, status: "idle" };
 }
 
-export interface StubBridgesOptions {
+export interface FakeBridgesOptions {
   readonly sessionId?: string;
   readonly knobs?: Readonly<Record<string, KnobPrimitive>>;
   readonly state?: Record<string, unknown>;
@@ -350,7 +350,7 @@ export interface StubBridgesOptions {
  *
  * @see docs/proposals/v2/blueprint/27-modular-built-ins.md
  */
-export function stubBridges(options: StubBridgesOptions = {}): HookBridges {
+export function fakeBridges(options: FakeBridgesOptions = {}): HookBridges {
   // `timeline`, `knobs`, `state` are typed onto HookBridges only when
   // their respective packages' `augment.ts` is loaded. This package
   // doesn't depend on those harness packages, so the slots aren't
@@ -361,8 +361,8 @@ export function stubBridges(options: StubBridgesOptions = {}): HookBridges {
     data: new InMemoryDataBridge({ onSettled: options.onDataSettled }),
     loop: stubLoopBridge(),
     session: stubSessionBridge(options.sessionId),
-    timeline: mockTimelineHarness(options.timeline),
-    knobs: mockKnobsHarness(options.knobs),
+    timeline: fakeTimelineHarness(options.timeline),
+    knobs: fakeKnobsHarness(options.knobs),
     state: mockStateHarness(options.state),
   } as unknown as HookBridges;
 }

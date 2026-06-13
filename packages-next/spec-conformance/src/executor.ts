@@ -8,11 +8,11 @@
  * ```ts
  * import { describe } from "vitest";
  * import { runExecutorConformance } from "@agentick/spec-conformance-next";
- * import { MockLanguageModelExecutor } from "@agentick/executor-next";
+ * import { FakeLanguageModelExecutor } from "@agentick/executor-next";
  *
- * describe("MockLanguageModelExecutor", () =>
+ * describe("FakeLanguageModelExecutor", () =>
  *   runExecutorConformance(({ harnessId }) =>
- *     new MockLanguageModelExecutor(harnessId, ...)
+ *     new FakeLanguageModelExecutor(harnessId, ...)
  *   )
  * );
  * ```

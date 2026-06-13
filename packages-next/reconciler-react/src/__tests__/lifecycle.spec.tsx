@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import React, { useState } from "react";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
 import { ReconcilerHarness } from "../harness/reconciler-harness.js";
-import { stubBridges } from "@agentick/reconciler-next";
+import { fakeBridges } from "@agentick/reconciler-next";
 import { useOnTickStart } from "../react/hooks/use-on-tick-start.js";
 import { useOnTickEnd } from "../react/hooks/use-on-tick-end.js";
 import { useOnExecutionStart } from "../react/hooks/use-on-execution-start.js";
@@ -204,7 +204,7 @@ describe("Lifecycle hooks — integration through ReconcilerHarness", () => {
       mountId: "m_ts",
       sessionId: "s",
       element: React.createElement(App),
-      bridges: stubBridges(),
+      bridges: fakeBridges(),
     });
     // useEffect (which registers the lifecycle handlers) runs after
     // commit. Flush to ensure registration completes before dispatch.
@@ -238,7 +238,7 @@ describe("Lifecycle hooks — integration through ReconcilerHarness", () => {
       mountId: "m_late",
       sessionId: "s",
       element: React.createElement(React.Fragment),
-      bridges: stubBridges(),
+      bridges: fakeBridges(),
     });
     await flush();
 
@@ -275,7 +275,7 @@ describe("Lifecycle hooks — integration through ReconcilerHarness", () => {
       mountId: "m_once",
       sessionId: "s",
       element: React.createElement(React.Fragment),
-      bridges: stubBridges(),
+      bridges: fakeBridges(),
     });
     await flush();
 
@@ -316,7 +316,7 @@ describe("Lifecycle hooks — integration through ReconcilerHarness", () => {
       mountId: "m_exec",
       sessionId: "s",
       element: React.createElement(React.Fragment),
-      bridges: stubBridges(),
+      bridges: fakeBridges(),
     });
     await flush();
     await harness.notifyLifecycle({
@@ -346,7 +346,7 @@ describe("Lifecycle hooks — integration through ReconcilerHarness", () => {
       mountId: "m_err",
       sessionId: "s",
       element: React.createElement(App),
-      bridges: stubBridges(),
+      bridges: fakeBridges(),
     });
     await flush();
 
@@ -376,7 +376,7 @@ describe("Lifecycle hooks — integration through ReconcilerHarness", () => {
       mountId: "m_eend",
       sessionId: "s",
       element: React.createElement(App),
-      bridges: stubBridges(),
+      bridges: fakeBridges(),
     });
     await flush();
 
@@ -405,7 +405,7 @@ describe("Lifecycle hooks — integration through ReconcilerHarness", () => {
         mountId: "m_custom",
         sessionId: "s",
         element: React.createElement(App),
-        bridges: stubBridges(),
+        bridges: fakeBridges(),
       });
       await flush();
 
@@ -440,7 +440,7 @@ describe("Lifecycle hooks — integration through ReconcilerHarness", () => {
       mountId: "m_unmount",
       sessionId: "s",
       element: React.createElement(App),
-      bridges: stubBridges(),
+      bridges: fakeBridges(),
     });
     await flush();
 

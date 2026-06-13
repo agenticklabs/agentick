@@ -14,7 +14,7 @@ import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next
 import { defineFormatter, type DefinedFormatter } from "@agentick/formatters-next";
 
 import { ReconcilerHarness } from "../harness/reconciler-harness.js";
-import { stubBridges } from "@agentick/reconciler-next";
+import { fakeBridges } from "@agentick/reconciler-next";
 
 async function makeHarness(options: ConstructorParameters<typeof ReconcilerHarness>[4] = {}) {
   const h = new ReconcilerHarness(
@@ -45,7 +45,7 @@ describe("ReconcilerHarness — formatter registry slot", () => {
       mountId: "m_shout",
       sessionId: "s",
       element: React.createElement("section", { id: "s" }, "hello"),
-      bridges: stubBridges(),
+      bridges: fakeBridges(),
       defaultFormatter: { id: "shout", format: "markdown" },
     });
     const { payload } = await harness.renderToString({ mountId: "m_shout" });
@@ -58,7 +58,7 @@ describe("ReconcilerHarness — formatter registry slot", () => {
       mountId: "m_fallback",
       sessionId: "s",
       element: React.createElement("section", { id: "s" }, "body"),
-      bridges: stubBridges(),
+      bridges: fakeBridges(),
       defaultFormatter: { id: "markdown", format: "markdown" },
     });
     // The caller passes `id: "xml"` — not the canonical `formatter.xml`.
@@ -76,7 +76,7 @@ describe("ReconcilerHarness — formatter registry slot", () => {
       mountId: "m_default",
       sessionId: "s",
       element: React.createElement("section", { id: "s", title: "T" }, "body"),
-      bridges: stubBridges(),
+      bridges: fakeBridges(),
       defaultFormatter: { id: "markdown", format: "markdown" },
     });
     const { payload } = await harness.renderToString({ mountId: "m_default" });

@@ -20,7 +20,7 @@ import type {
 } from "@agentick/spec-next";
 
 import { createTool } from "../react/create-tool.js";
-import { stubBridges } from "@agentick/reconciler-next";
+import { fakeBridges } from "@agentick/reconciler-next";
 import { ReconcilerHarness } from "../harness/reconciler-harness.js";
 
 interface RegisteredHandler {
@@ -86,7 +86,7 @@ describe("reconciler-react createTool — bundle shape", () => {
 describe("reconciler-react createTool — render-time wiring", () => {
   it("contributes a <tool> declaration and registers via ToolBridge", async () => {
     const { bridge, registered } = makeToolBridge();
-    const bridges: HookBridges = { ...stubBridges(), tools: bridge };
+    const bridges: HookBridges = { ...fakeBridges(), tools: bridge };
 
     const tool = createTool({
       name: "echo",
@@ -116,7 +116,7 @@ describe("reconciler-react createTool — render-time wiring", () => {
 
   it("handler sees deps captured by spec.use() during render", async () => {
     const { bridge, registered } = makeToolBridge();
-    const bridges: HookBridges = { ...stubBridges(), tools: bridge };
+    const bridges: HookBridges = { ...fakeBridges(), tools: bridge };
 
     const tool = createTool<{ word: string }, { tag: string }>({
       name: "tagged",
@@ -141,7 +141,7 @@ describe("reconciler-react createTool — render-time wiring", () => {
 
   it("treats omitted use() as empty deps", async () => {
     const { bridge, registered } = makeToolBridge();
-    const bridges: HookBridges = { ...stubBridges(), tools: bridge };
+    const bridges: HookBridges = { ...fakeBridges(), tools: bridge };
 
     const tool = createTool({
       name: "no-deps",
@@ -163,7 +163,7 @@ describe("reconciler-react createTool — render-time wiring", () => {
   });
 
   it("renders the <tool> declaration even when no ToolBridge is wired", async () => {
-    const bridges: HookBridges = stubBridges();
+    const bridges: HookBridges = fakeBridges();
     const tool = createTool({
       name: "stub",
       description: "stub",

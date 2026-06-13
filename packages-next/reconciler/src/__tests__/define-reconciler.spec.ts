@@ -14,7 +14,7 @@ import {
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
 
 import { defineReconciler } from "../define-reconciler.js";
-import { stubBridges } from "../bridges/stub-bridges.js";
+import { fakeBridges } from "../testing/fake-bridges.js";
 
 // Minimum-required input fixtures for the current spec. Each spec
 // change that adds a required field surfaces here at typecheck time —
@@ -24,7 +24,7 @@ const mountInput = () =>
     mountId: "m_1",
     sessionId: "test-session",
     element: null,
-    bridges: stubBridges(),
+    bridges: fakeBridges(),
   }) as const;
 const renderInput = () =>
   ({

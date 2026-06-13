@@ -8,12 +8,12 @@
 
 import { describe, expect, it } from "vitest";
 
-import { MockLanguageModelExecutor } from "@agentick/executor-next";
+import { FakeLanguageModelExecutor } from "@agentick/executor-next";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
 import { InMemoryHandlerResolver, ToolExecutorHarness } from "@agentick/tool-executor-next";
 import { LoopExecutorHarness } from "@agentick/loop-executor-next";
 import { ReconcilerHarness } from "@agentick/reconciler-react-next";
-import { stubBridges } from "@agentick/reconciler-next";
+import { fakeBridges } from "@agentick/reconciler-next";
 import type {
   ContentBlock,
   ExecutionTarget,
@@ -37,7 +37,7 @@ const target: ExecutionTarget = {
 };
 
 const replyExec = (text: string) =>
-  new MockLanguageModelExecutor(
+  new FakeLanguageModelExecutor(
     `exec-${Math.random()}`,
     new MemoryJournal(),
     new LocalEventBus(),
@@ -100,7 +100,7 @@ async function mkSession(
   await session.ready;
   await session.mountReady;
   // Mount a no-op bridges fixture so session sees a known mount.
-  void stubBridges;
+  void fakeBridges;
   return { session, tools, reconciler, loop, journal, bus, inbox };
 }
 

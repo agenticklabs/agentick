@@ -3,7 +3,7 @@ import React from "react";
 import { Chunk, Effect, Stream } from "effect";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
 import { ReconcilerHarness } from "../harness/reconciler-harness.js";
-import { stubBridges } from "@agentick/reconciler-next";
+import { fakeBridges } from "@agentick/reconciler-next";
 import { XML } from "../react/components/format-scope.js";
 
 async function makeHarness(scope = `rts-${Math.random()}`) {
@@ -24,7 +24,7 @@ describe("renderToString — basic markdown serialization", () => {
       mountId: "m1",
       sessionId: "s",
       element: React.createElement("section", { id: "s.intro", title: "Intro" }, "Welcome."),
-      bridges: stubBridges(),
+      bridges: fakeBridges(),
       defaultFormatter: { id: "markdown", format: "markdown" },
     });
     const { payload, diagnostics } = await harness.renderToString({
@@ -42,7 +42,7 @@ describe("renderToString — basic markdown serialization", () => {
       mountId: "m2",
       sessionId: "s",
       element: React.createElement("message", { role: "user" }, "Hello"),
-      bridges: stubBridges(),
+      bridges: fakeBridges(),
       defaultFormatter: { id: "markdown", format: "markdown" },
     });
     const { payload } = await harness.renderToString({ mountId: "m2" });
@@ -60,7 +60,7 @@ describe("renderToString — basic markdown serialization", () => {
         React.createElement("message", { role: "system" }, "You help."),
         React.createElement("section", { id: "s", title: "Tools" }, "echo"),
       ),
-      bridges: stubBridges(),
+      bridges: fakeBridges(),
       defaultFormatter: { id: "markdown", format: "markdown" },
     });
     const { payload } = await harness.renderToString({ mountId: "m3" });
@@ -81,7 +81,7 @@ describe("renderToString — XML format", () => {
         null,
         React.createElement("section", { id: "s", title: "T" }, "body"),
       ),
-      bridges: stubBridges(),
+      bridges: fakeBridges(),
       defaultFormatter: { id: "markdown", format: "markdown" },
     });
     const { payload } = await harness.renderToString({ mountId: "m_xml" });
@@ -99,7 +99,7 @@ describe("renderToString — XML format", () => {
         null,
         React.createElement("section", { id: "s.<>&", title: 'A&B"' }, "body"),
       ),
-      bridges: stubBridges(),
+      bridges: fakeBridges(),
       defaultFormatter: { id: "markdown", format: "markdown" },
     });
     const { payload } = await harness.renderToString({
@@ -115,7 +115,7 @@ describe("renderToString — XML format", () => {
       mountId: "m_override",
       sessionId: "s",
       element: React.createElement("section", { id: "s" }, "body"),
-      bridges: stubBridges(),
+      bridges: fakeBridges(),
       defaultFormatter: { id: "markdown", format: "markdown" },
     });
     const { payload } = await harness.renderToString({
@@ -138,7 +138,7 @@ describe("renderToString — content-block serialization", () => {
         { id: "s" },
         React.createElement("code", { language: "typescript" }, "const x = 1;"),
       ),
-      bridges: stubBridges(),
+      bridges: fakeBridges(),
       defaultFormatter: { id: "markdown", format: "markdown" },
     });
     const { payload } = await harness.renderToString({ mountId: "m_code" });
@@ -160,7 +160,7 @@ describe("renderToString — content-block serialization", () => {
           altText: "alt text",
         }),
       ),
-      bridges: stubBridges(),
+      bridges: fakeBridges(),
       defaultFormatter: { id: "markdown", format: "markdown" },
     });
     const { payload } = await harness.renderToString({ mountId: "m_img" });
@@ -177,7 +177,7 @@ describe("renderToString — content-block serialization", () => {
         { id: "s" },
         React.createElement("json", { data: { ok: true } }),
       ),
-      bridges: stubBridges(),
+      bridges: fakeBridges(),
       defaultFormatter: { id: "markdown", format: "markdown" },
     });
     const { payload } = await harness.renderToString({ mountId: "m_json" });
@@ -199,7 +199,7 @@ describe("renderToString — whole-mount rendering", () => {
         React.createElement("section", { id: "rules", title: "Rules" }, "Be kind."),
         React.createElement("message", { role: "user", id: "m1" }, "Hello"),
       ),
-      bridges: stubBridges(),
+      bridges: fakeBridges(),
       defaultFormatter: { id: "markdown", format: "markdown" },
     });
     const { payload } = await harness.renderToString({ mountId: "m_whole" });
@@ -223,7 +223,7 @@ describe("renderToString — operation lifecycle", () => {
       mountId: "m_lc",
       sessionId: "s",
       element: React.createElement("section", { id: "s" }, "x"),
-      bridges: stubBridges(),
+      bridges: fakeBridges(),
     });
     await harness.renderToString({ mountId: "m_lc" });
     const chunk = await Effect.runPromise(Stream.runCollect(journal.readByQuery({}, "beginning")));
@@ -252,7 +252,7 @@ describe("renderToString — JSON firewall", () => {
         { id: "s", title: "T" },
         React.createElement("code", { language: "typescript" }, "x"),
       ),
-      bridges: stubBridges(),
+      bridges: fakeBridges(),
       defaultFormatter: { id: "markdown", format: "markdown" },
     });
     const result = await harness.renderToString({ mountId: "m_json_safe" });

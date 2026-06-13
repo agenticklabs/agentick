@@ -4,7 +4,7 @@ import { Chunk, Effect, Stream } from "effect";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
 import type { ProtocolEvent } from "@agentick/spec-next";
 import { ReconcilerHarness } from "../harness/reconciler-harness.js";
-import { stubBridges } from "@agentick/reconciler-next";
+import { fakeBridges } from "@agentick/reconciler-next";
 
 async function collectJournal(journal: MemoryJournal): Promise<ProtocolEvent[]> {
   const chunk = await Effect.runPromise(Stream.runCollect(journal.readByQuery({}, "beginning")));
@@ -23,7 +23,7 @@ async function makeHarness() {
 describe("ReconcilerHarness — end-to-end", () => {
   it("mount → renderTree → RenderedTree round-trip", async () => {
     const { harness } = await makeHarness();
-    const bridges = stubBridges({ sessionId: "s_1" });
+    const bridges = fakeBridges({ sessionId: "s_1" });
 
     const Agent = () =>
       React.createElement(
@@ -74,7 +74,7 @@ describe("ReconcilerHarness — end-to-end", () => {
 
   it("emits requested + terminal events into the journal", async () => {
     const { harness, journal } = await makeHarness();
-    const bridges = stubBridges();
+    const bridges = fakeBridges();
 
     await harness.mount({
       mountId: "m_2",
@@ -105,7 +105,7 @@ describe("ReconcilerHarness — end-to-end", () => {
 
   it("rerender swaps the root element", async () => {
     const { harness } = await makeHarness();
-    const bridges = stubBridges();
+    const bridges = fakeBridges();
 
     await harness.mount({
       mountId: "m_3",
@@ -139,7 +139,7 @@ describe("ReconcilerHarness — end-to-end", () => {
 
   it("inbox recompile message triggers a re-render", async () => {
     const { harness, inbox } = await makeHarness();
-    const bridges = stubBridges();
+    const bridges = fakeBridges();
 
     await harness.mount({
       mountId: "m_4",
@@ -161,7 +161,7 @@ describe("ReconcilerHarness — end-to-end", () => {
 
   it("snapshot returns a spec-shaped payload", async () => {
     const { harness } = await makeHarness();
-    const bridges = stubBridges({ knobs: { mood: "curious" } });
+    const bridges = fakeBridges({ knobs: { mood: "curious" } });
     await harness.mount({
       mountId: "m_5",
       sessionId: "s_5",

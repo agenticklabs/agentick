@@ -18,7 +18,7 @@
 import React from "react";
 import { describe, expect, it } from "vitest";
 
-import { MockLanguageModelExecutor } from "@agentick/executor-next";
+import { FakeLanguageModelExecutor } from "@agentick/executor-next";
 import { KnobsHarness } from "@agentick/knobs-next";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
 import { useKnob } from "@agentick/knobs-next/react";
@@ -27,7 +27,7 @@ import type { ContentBlock } from "@agentick/spec-next";
 import { createApp } from "../react.js";
 
 async function mkExecutor() {
-  const exec = new MockLanguageModelExecutor(
+  const exec = new FakeLanguageModelExecutor(
     "knobs-int-exec",
     new MemoryJournal(),
     new LocalEventBus(),

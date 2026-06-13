@@ -10,7 +10,7 @@
  *
  * **YES — orthogonal-to-rendering tests:**
  *   - Wire-path tests that need a session to exist (e.g., session/send
- *     end-to-end against a `MockLanguageModelExecutor` that ignores the
+ *     end-to-end against a `FakeLanguageModelExecutor` that ignores the
  *     prompt — the executor's scripted output drives the test, the
  *     rendered tree is irrelevant).
  *   - Lifecycle tests that observe app/session creation but never call

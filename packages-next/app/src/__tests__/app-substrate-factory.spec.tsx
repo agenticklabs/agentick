@@ -16,7 +16,7 @@
 import React from "react";
 import { describe, expect, it } from "vitest";
 
-import { MockLanguageModelExecutor } from "@agentick/executor-next";
+import { FakeLanguageModelExecutor } from "@agentick/executor-next";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
 import type {
   EventBus,
@@ -32,8 +32,8 @@ function MinimalAgent() {
   return React.createElement("message" as never, { role: "user" }, "ping");
 }
 
-function mkExecutor(): MockLanguageModelExecutor {
-  return new MockLanguageModelExecutor(
+function mkExecutor(): FakeLanguageModelExecutor {
+  return new FakeLanguageModelExecutor(
     "app-substrate-test-exec",
     new MemoryJournal(),
     new LocalEventBus(),

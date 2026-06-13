@@ -1,5 +1,5 @@
 /**
- * Conformance suite invocation for `MockLanguageModelExecutor`.
+ * Conformance suite invocation for `FakeLanguageModelExecutor`.
  *
  * Drives the spec-defined contract through this package's reference
  * implementation. Future provider adapters (`@agentick/executor-openai-next`,
@@ -11,14 +11,14 @@ import { describe } from "vitest";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
 import { runExecutorConformance } from "@agentick/spec-conformance-next";
 
-import { MockLanguageModelExecutor } from "../mock-language-model-executor.js";
+import { FakeLanguageModelExecutor } from "../fake-language-model-executor.js";
 
-describe("MockLanguageModelExecutor — ExecutorProtocol conformance", () => {
+describe("FakeLanguageModelExecutor — ExecutorProtocol conformance", () => {
   runExecutorConformance(async ({ harnessId, scripted }) => {
     const journal = new MemoryJournal();
     const bus = new LocalEventBus();
     const inbox = new LocalInbox();
-    const exec = new MockLanguageModelExecutor(
+    const exec = new FakeLanguageModelExecutor(
       harnessId,
       journal,
       bus,

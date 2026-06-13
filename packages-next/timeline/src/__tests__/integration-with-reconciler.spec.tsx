@@ -11,7 +11,7 @@ import { extractText } from "@agentick/spec-next";
 import type { HookBridges, MessageEntry, TimelineEntry } from "@agentick/spec-next";
 
 import { ReconcilerHarness } from "@agentick/reconciler-react-next";
-import { stubBridges, mockTimelineHarness } from "@agentick/reconciler-next";
+import { fakeBridges, fakeTimelineHarness } from "@agentick/reconciler-next";
 import { Timeline } from "@agentick/timeline-next/react";
 import {
   compactEntries,
@@ -66,8 +66,8 @@ const joinText = extractText;
 
 describe("<Timeline> — default rendering", () => {
   it("emits one <message> per persisted entry with content passed through", async () => {
-    const timeline = mockTimelineHarness([userEntry("e1", "hello"), assistantEntry("e2", "world")]);
-    const bridges: HookBridges = { ...stubBridges(), timeline };
+    const timeline = fakeTimelineHarness([userEntry("e1", "hello"), assistantEntry("e2", "world")]);
+    const bridges: HookBridges = { ...fakeBridges(), timeline };
     const harness = await makeHarness();
 
     await harness.mount({
@@ -87,8 +87,8 @@ describe("<Timeline> — default rendering", () => {
   });
 
   it("renders an empty Fragment when the timeline is empty", async () => {
-    const timeline = mockTimelineHarness();
-    const bridges: HookBridges = { ...stubBridges(), timeline };
+    const timeline = fakeTimelineHarness();
+    const bridges: HookBridges = { ...fakeBridges(), timeline };
     const harness = await makeHarness();
 
     await harness.mount({
@@ -105,12 +105,12 @@ describe("<Timeline> — default rendering", () => {
 
 describe("<Timeline> — filtering", () => {
   it("restricts rendered entries by role", async () => {
-    const timeline = mockTimelineHarness([
+    const timeline = fakeTimelineHarness([
       systemEntry("s1", "you are helpful"),
       userEntry("u1", "hi"),
       assistantEntry("a1", "yo"),
     ]);
-    const bridges: HookBridges = { ...stubBridges(), timeline };
+    const bridges: HookBridges = { ...fakeBridges(), timeline };
     const harness = await makeHarness();
 
     await harness.mount({
@@ -128,8 +128,8 @@ describe("<Timeline> — filtering", () => {
   it("limits to the newest N entries when `limit` is set", async () => {
     const entries: MessageTimelineEntry[] = [];
     for (let i = 0; i < 5; i++) entries.push(userEntry(`e${i}`, `msg-${i}`));
-    const timeline = mockTimelineHarness(entries);
-    const bridges: HookBridges = { ...stubBridges(), timeline };
+    const timeline = fakeTimelineHarness(entries);
+    const bridges: HookBridges = { ...fakeBridges(), timeline };
     const harness = await makeHarness();
 
     await harness.mount({
@@ -147,12 +147,12 @@ describe("<Timeline> — filtering", () => {
   });
 
   it("applies a custom predicate after role filtering", async () => {
-    const timeline = mockTimelineHarness([
+    const timeline = fakeTimelineHarness([
       userEntry("u1", "yes"),
       userEntry("u2", "no"),
       userEntry("u3", "yes"),
     ]);
-    const bridges: HookBridges = { ...stubBridges(), timeline };
+    const bridges: HookBridges = { ...fakeBridges(), timeline };
     const harness = await makeHarness();
 
     await harness.mount({
@@ -173,8 +173,8 @@ describe("<Timeline> — filtering", () => {
 
 describe("<Timeline> — render prop", () => {
   it("receives kept entries and budget info, replacing default rendering", async () => {
-    const timeline = mockTimelineHarness([userEntry("u1", "hello"), assistantEntry("a1", "world")]);
-    const bridges: HookBridges = { ...stubBridges(), timeline };
+    const timeline = fakeTimelineHarness([userEntry("u1", "hello"), assistantEntry("a1", "world")]);
+    const bridges: HookBridges = { ...fakeBridges(), timeline };
     const harness = await makeHarness();
 
     let observed: { count: number; budget: TokenBudgetInfo | null } | null = null;
@@ -186,11 +186,20 @@ describe("<Timeline> — render prop", () => {
         <Timeline>
           {(entries, budget) => {
             observed = { count: entries.length, budget };
-            return entries.map((e) => (
-              <message key={e.message.id} role={e.message.role}>
-                <text>{`RP:${joinText(e.message.content)}`}</text>
-              </message>
-            ));
+            // `<text>` is omitted from the v2 JSX augmentation because
+            // it collides with SVG's <text>. Adopters use `<Text>` (the
+            // uppercase wrapper); this test uses createElement directly.
+            return entries.map((e) =>
+              React.createElement(
+                "message",
+                { key: e.message.id, role: e.message.role },
+                React.createElement(
+                  "text" as unknown as React.ComponentType<Record<string, unknown>>,
+                  {},
+                  `RP:${joinText(e.message.content)}`,
+                ),
+              ),
+            );
           }}
         </Timeline>
       ),
@@ -213,8 +222,8 @@ describe("<Timeline> — token budget", () => {
     const text = "x".repeat(100);
     const entries: MessageTimelineEntry[] = [];
     for (let i = 0; i < 6; i++) entries.push(userEntry(`e${i}`, text));
-    const timeline = mockTimelineHarness(entries);
-    const bridges: HookBridges = { ...stubBridges(), timeline };
+    const timeline = fakeTimelineHarness(entries);
+    const bridges: HookBridges = { ...fakeBridges(), timeline };
     const harness = await makeHarness();
 
     const onEvict = vi.fn();
@@ -254,8 +263,8 @@ describe("<Timeline> — token budget", () => {
       userEntry("u2", text),
       userEntry("u3", text),
     ];
-    const timeline = mockTimelineHarness(entries);
-    const bridges: HookBridges = { ...stubBridges(), timeline };
+    const timeline = fakeTimelineHarness(entries);
+    const bridges: HookBridges = { ...fakeBridges(), timeline };
     const harness = await makeHarness();
 
     const perEntry = getEntryTokens(entries[0]!);

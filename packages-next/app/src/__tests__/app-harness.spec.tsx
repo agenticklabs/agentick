@@ -2,7 +2,7 @@
  * Smoke tests for `AppHarness` / `createApp`.
  *
  * Verifies the user-facing surface end-to-end against the
- * `MockLanguageModelExecutor`: createSession + send + result, runOnce
+ * `FakeLanguageModelExecutor`: createSession + send + result, runOnce
  * (ephemeral registration that auto-disposes), registry filtering,
  * closeApp.
  */
@@ -10,7 +10,7 @@
 import React from "react";
 import { describe, expect, it } from "vitest";
 
-import { MockLanguageModelExecutor } from "@agentick/executor-next";
+import { FakeLanguageModelExecutor } from "@agentick/executor-next";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
 import { ReconcilerHarness, reactReconciler } from "@agentick/reconciler-react-next";
 import type { ContentBlock, ExecutionTarget, ExecutorFactoryDeps } from "@agentick/spec-next";
@@ -52,8 +52,8 @@ function mkExecutor(
   journal = new MemoryJournal(),
   bus = new LocalEventBus(),
   inbox = new LocalInbox(),
-): MockLanguageModelExecutor {
-  return new MockLanguageModelExecutor("app-test-exec", journal, bus, inbox, {
+): FakeLanguageModelExecutor {
+  return new FakeLanguageModelExecutor("app-test-exec", journal, bus, inbox, {
     scripted: [
       {
         result: {

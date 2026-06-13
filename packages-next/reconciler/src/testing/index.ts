@@ -13,3 +13,12 @@
  */
 
 export { fakeReconciler } from "./fake-reconciler.js";
+export {
+  fakeBridges,
+  stubLoopBridge,
+  stubSessionBridge,
+  fakeTimelineHarness,
+  fakeKnobsHarness,
+  mockStateHarness,
+} from "./fake-bridges.js";
+export type { FakeBridgesOptions } from "./fake-bridges.js";

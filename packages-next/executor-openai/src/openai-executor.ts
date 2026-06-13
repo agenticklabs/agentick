@@ -8,7 +8,7 @@
  * `LanguageModelExecutionResult` at the harness boundary.
  *
  * Behavior:
- *   - `project()` is identical in shape to `MockLanguageModelExecutor` —
+ *   - `project()` is identical in shape to `FakeLanguageModelExecutor` —
  *     folds rendered tree → canonical `LanguageModelInput`. Provider
  *     specifics happen later (inside `execute`).
  *   - `execute()` converts to OpenAI params, calls the SDK, returns the
@@ -693,7 +693,7 @@ export class OpenAIExecutor extends BaseHarness<"executor"> implements LanguageM
 
   run(input: RunInput): Promise<ExecutorTerminal<LanguageModelExecutionResult>> {
     const executionId = input.scope?.executionId ?? `exec:${ulid()}`;
-    // Per-tick opId composition — see MockLanguageModelExecutor for the
+    // Per-tick opId composition — see FakeLanguageModelExecutor for the
     // rationale (substrate idempotency keys must differ per tick).
     const tickId = input.scope?.tickId;
     const opId =
@@ -1160,7 +1160,7 @@ function toOpenAITool(t: LanguageModelTool): ChatCompletionTool {
 }
 
 // ============================================================================
-// IR projection — identical to MockLanguageModelExecutor (kept local so the
+// IR projection — identical to FakeLanguageModelExecutor (kept local so the
 // adapter does not depend on @agentick/executor-next).
 // ============================================================================
 

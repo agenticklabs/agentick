@@ -59,8 +59,8 @@ const app = await createApp(myAgent, {
   audio, video, document, code, json, …), event roles, custom blocks,
   and semantic HTML.
 - **Bridges.** `InMemoryDataBridge` (reference impl), plus
-  protocol-conforming mocks (`stubBridges`, `mockTimelineHarness`,
-  `mockKnobsHarness`, `mockStateHarness`) used by tests across the
+  protocol-conforming mocks (`fakeBridges`, `fakeTimelineHarness`,
+  `fakeKnobsHarness`, `mockStateHarness`) used by tests across the
   workspace.
 - **`LifecycleStore`** — generic per-mount lifecycle handler registry.
   Used by `useOnTickStart` / `useOnTickEnd` / `useOnError` / etc. in

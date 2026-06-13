@@ -3,7 +3,7 @@ import React from "react";
 import type { ReactNode } from "react";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
 import { ReconcilerHarness } from "../harness/reconciler-harness.js";
-import { stubBridges } from "@agentick/reconciler-next";
+import { fakeBridges } from "@agentick/reconciler-next";
 import { useData } from "../react/hooks/use-data.js";
 
 async function makeHarness(scope = `bd-${Math.random()}`) {
@@ -44,7 +44,7 @@ describe("boundary diagnostics — baseline", () => {
       mountId: "m_clean",
       sessionId: "s",
       element: React.createElement("message", { role: "user" }, "hi"),
-      bridges: stubBridges(),
+      bridges: fakeBridges(),
     });
     const { diagnostics } = await harness.renderTree({
       mountId: "m_clean",
@@ -63,7 +63,7 @@ describe("boundary diagnostics — baseline", () => {
       mountId: "m_noboundary",
       sessionId: "s",
       element: React.createElement(App),
-      bridges: stubBridges(),
+      bridges: fakeBridges(),
     });
     const { diagnostics } = await harness.renderTree({
       mountId: "m_noboundary",
@@ -90,7 +90,7 @@ describe("error-boundary-active diagnostic", () => {
         },
         React.createElement(Throws),
       ),
-      bridges: stubBridges(),
+      bridges: fakeBridges(),
     });
     const { diagnostics, tree } = await harness.renderTree({
       mountId: "m_eb",
@@ -114,7 +114,7 @@ describe("error-boundary-active diagnostic", () => {
       mountId: "m_no_eb",
       sessionId: "s",
       element: React.createElement(Throws),
-      bridges: stubBridges(),
+      bridges: fakeBridges(),
     });
     await expect(harness.renderTree({ mountId: "m_no_eb", sessionId: "s" })).rejects.toMatchObject({
       _tag: "RenderFailed",
@@ -131,7 +131,7 @@ describe("error-boundary-active diagnostic", () => {
         { fallback: React.createElement("message", { role: "system" }, "x") },
         React.createElement(Throws),
       ),
-      bridges: stubBridges(),
+      bridges: fakeBridges(),
     });
     const { diagnostics } = await harness.renderTree({
       mountId: "m_eb_once",
@@ -155,7 +155,7 @@ describe("Suspense warning heuristic", () => {
           { fallback: React.createElement("message", { role: "system" }, "loading") },
           React.createElement("message", { role: "user" }, "child"),
         ),
-        bridges: stubBridges(),
+        bridges: fakeBridges(),
       });
       expect(warn).toHaveBeenCalledTimes(1);
       expect(warn.mock.calls[0]?.[0]).toContain("Suspense");
@@ -178,7 +178,7 @@ describe("Suspense warning heuristic", () => {
         mountId: "m_susp_rr",
         sessionId: "s",
         element: el,
-        bridges: stubBridges(),
+        bridges: fakeBridges(),
       });
       await harness.rerender({
         mountId: "m_susp_rr",
@@ -202,7 +202,7 @@ describe("Suspense warning heuristic", () => {
         mountId: "m_nosusp",
         sessionId: "s",
         element: React.createElement("message", { role: "user" }, "hi"),
-        bridges: stubBridges(),
+        bridges: fakeBridges(),
       });
       expect(warn).not.toHaveBeenCalled();
     } finally {
@@ -226,7 +226,7 @@ describe("Suspense warning heuristic", () => {
             React.createElement("message", { role: "user" }, "deep"),
           ),
         ),
-        bridges: stubBridges(),
+        bridges: fakeBridges(),
       });
       expect(warn).toHaveBeenCalledTimes(1);
     } finally {

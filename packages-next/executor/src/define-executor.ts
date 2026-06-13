@@ -463,7 +463,7 @@ class CallbackLanguageModelExecutor
 }
 
 // ============================================================================
-// Default projection (same as MockLanguageModelExecutor)
+// Default projection (same as FakeLanguageModelExecutor)
 // ============================================================================
 
 function defaultProject(input: ProjectInput): LanguageModelInput {

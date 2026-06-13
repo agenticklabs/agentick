@@ -88,21 +88,8 @@ declare module "react" {
         readonly key?: ReactKey;
       };
 
-      /**
-       * Named section in the rendered prompt. Adopters typically use
-       * the uppercase `<Section>` wrapper. Merges with HTML's
-       * `<section>` (existing HTML attributes remain valid).
-       */
-      section: {
-        readonly id?: string;
-        readonly audience?: "user" | "model" | "all";
-        readonly title?: string;
-        readonly tags?: readonly string[];
-        readonly visibility?: "model" | "observer" | "log";
-        readonly metadata?: Record<string, unknown>;
-        readonly children?: ReactChildren;
-        readonly key?: ReactKey;
-      };
+      // NOTE: `<section>` is omitted — collides with HTML's `<section>`.
+      // Adopters use `<Section>` (the uppercase wrapper).
 
       /**
        * Tool declaration. Compiles to a `ToolDeclaration` on
@@ -150,18 +137,11 @@ declare module "react" {
         readonly key?: ReactKey;
       };
 
-      /**
-       * Output declaration. Compiles to
-       * `RenderedTree.declarations.outputs`.
-       */
-      output: {
-        readonly id?: string;
-        readonly mode?: "json" | "text" | "tool-only";
-        readonly schema?: Record<string, unknown>;
-        readonly metadata?: Record<string, unknown>;
-        readonly children?: ReactChildren;
-        readonly key?: ReactKey;
-      };
+      // NOTE: `<output>` is also omitted — it collides with HTML's
+      // form-`<output>` element. `<text>` is omitted — collides with
+      // SVG's `<text>` element. Tests for these contributors use
+      // React.createElement directly, and adopters use the uppercase
+      // wrappers (`<Output>`, `<Text>`).
 
       /**
        * MCP server declaration. Compiles to
@@ -178,13 +158,6 @@ declare module "react" {
       };
 
       // ────────── Content block primitives ──────────
-
-      /** Text content block. */
-      text: {
-        readonly text?: string;
-        readonly children?: ReactChildren;
-        readonly key?: ReactKey;
-      };
 
       /** Reasoning content block (thinking / chain-of-thought). */
       reasoning: {

@@ -13,7 +13,7 @@ import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next
 import type { HookBridges, LifecycleTickEnd, TickResult, SectionEntry } from "@agentick/spec-next";
 
 import { ReconcilerHarness } from "@agentick/reconciler-react-next";
-import { stubBridges } from "@agentick/reconciler-next";
+import { fakeBridges } from "@agentick/reconciler-next";
 import { stubKnobsHarness } from "@agentick/knobs-next/testing";
 import { flush } from "@agentick/reconciler-react-next/testing";
 import { gate } from "../descriptor.js";
@@ -76,7 +76,7 @@ function captureGate(name: string, opts: Parameters<typeof gate>[0]) {
 describe("useGate — activation", () => {
   it("flips inactive → active when activateWhen returns true at tick-end", async () => {
     const knobs = stubKnobsHarness();
-    const bridges: HookBridges = { ...stubBridges(), knobs };
+    const bridges: HookBridges = { ...fakeBridges(), knobs };
     const harness = await makeHarness();
     const verification = gate({
       description: "Verification pending",
@@ -118,7 +118,7 @@ describe("useGate — activation", () => {
 
   it("does not activate when activateWhen returns false", async () => {
     const knobs = stubKnobsHarness();
-    const bridges: HookBridges = { ...stubBridges(), knobs };
+    const bridges: HookBridges = { ...fakeBridges(), knobs };
     const harness = await makeHarness();
     const { Probe } = captureGate(
       "verification",
@@ -148,7 +148,7 @@ describe("useGate — activation", () => {
 
   it("does NOT re-activate when state has already been engaged", async () => {
     const knobs = stubKnobsHarness();
-    const bridges: HookBridges = { ...stubBridges(), knobs };
+    const bridges: HookBridges = { ...fakeBridges(), knobs };
     const harness = await makeHarness();
     const activateWhen = vi.fn(() => true);
     const { ref, Probe } = captureGate(
@@ -196,7 +196,7 @@ describe("useGate — continuation blocking", () => {
     const knobs = stubKnobsHarness();
     const continueAfterTick = vi.fn();
     const bridges: HookBridges = {
-      ...stubBridges(),
+      ...fakeBridges(),
       knobs,
       loop: { continueAfterTick, stopAfterTick: vi.fn() },
     };
@@ -228,7 +228,7 @@ describe("useGate — continuation blocking", () => {
     const knobs = stubKnobsHarness();
     const continueAfterTick = vi.fn();
     const bridges: HookBridges = {
-      ...stubBridges(),
+      ...fakeBridges(),
       knobs,
       loop: { continueAfterTick, stopAfterTick: vi.fn() },
     };
@@ -259,7 +259,7 @@ describe("useGate — continuation blocking", () => {
     const knobs = stubKnobsHarness();
     const continueAfterTick = vi.fn();
     const bridges: HookBridges = {
-      ...stubBridges(),
+      ...fakeBridges(),
       knobs,
       loop: { continueAfterTick, stopAfterTick: vi.fn() },
     };
@@ -302,7 +302,7 @@ describe("useGate — continuation blocking", () => {
 describe("useGate — element rendering", () => {
   it("renders a <section> with title + instructions only when active", async () => {
     const knobs = stubKnobsHarness();
-    const bridges: HookBridges = { ...stubBridges(), knobs };
+    const bridges: HookBridges = { ...fakeBridges(), knobs };
     const harness = await makeHarness();
     const { Probe } = captureGate(
       "verification",
@@ -343,7 +343,7 @@ describe("useGate — element rendering", () => {
 describe("useGate — knob descriptor", () => {
   it("registers description + group + three-state options on the knob bridge", async () => {
     const knobs = stubKnobsHarness();
-    const bridges: HookBridges = { ...stubBridges(), knobs };
+    const bridges: HookBridges = { ...fakeBridges(), knobs };
     const harness = await makeHarness();
     const { Probe } = captureGate(
       "verification",
@@ -377,7 +377,7 @@ describe("useGate — knob descriptor", () => {
 describe("useGate — clear / defer", () => {
   it("clear() flips state to inactive", async () => {
     const knobs = stubKnobsHarness();
-    const bridges: HookBridges = { ...stubBridges(), knobs };
+    const bridges: HookBridges = { ...fakeBridges(), knobs };
     const harness = await makeHarness();
     const { ref, Probe } = captureGate(
       "verification",

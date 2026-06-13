@@ -16,7 +16,7 @@ import React from "react";
 import { describe, expect, it } from "vitest";
 
 import { createApp } from "../react.js";
-import { MockLanguageModelExecutor } from "@agentick/executor-next";
+import { FakeLanguageModelExecutor } from "@agentick/executor-next";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
 import type { AppExtension, AppInstaller, ContentBlock } from "@agentick/spec-next";
 import type { ToolExecutorProtocol } from "@agentick/spec-next";
@@ -24,7 +24,7 @@ import type { ToolExecutorProtocol } from "@agentick/spec-next";
 const Agent = () => React.createElement("message", { role: "user" }, "hello");
 
 async function mkExecutor() {
-  const exec = new MockLanguageModelExecutor(
+  const exec = new FakeLanguageModelExecutor(
     "app-ext-exec",
     new MemoryJournal(),
     new LocalEventBus(),

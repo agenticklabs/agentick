@@ -12,12 +12,12 @@
 import React from "react";
 import { describe, expect, it } from "vitest";
 
-import { MockLanguageModelExecutor } from "@agentick/executor-next";
+import { FakeLanguageModelExecutor } from "@agentick/executor-next";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
 import { InMemoryHandlerResolver, ToolExecutorHarness } from "@agentick/tool-executor-next";
 import { LoopExecutorHarness } from "@agentick/loop-executor-next";
 import { ReconcilerHarness } from "@agentick/reconciler-react-next";
-import { stubBridges } from "@agentick/reconciler-next";
+import { fakeBridges } from "@agentick/reconciler-next";
 import type { ExecutionTarget, StreamEvent } from "@agentick/spec-next";
 
 import { SessionHarness } from "../harness.js";
@@ -39,7 +39,7 @@ async function mkSession(opts: { withDeltas?: boolean } = {}) {
   const tools = new ToolExecutorHarness("t", journal, bus, inbox, {
     handlerResolver: resolver,
   });
-  const executor = new MockLanguageModelExecutor(
+  const executor = new FakeLanguageModelExecutor(
     "e",
     new MemoryJournal(),
     new LocalEventBus(),
@@ -90,7 +90,7 @@ async function mkSession(opts: { withDeltas?: boolean } = {}) {
   });
   await session.ready;
   await session.mountReady;
-  void stubBridges;
+  void fakeBridges;
   return session;
 }
 

@@ -4,7 +4,7 @@
  * Per ADR 27, each harness package ships its own `/testing` subpath
  * with a stub factory. Adopters compose their test bridges by importing
  * from each harness's testing subpath, or use the convenience
- * `stubBridges()` from `agentick/testing`.
+ * `fakeBridges()` from `agentick/testing`.
  *
  * @see docs/proposals/v2/blueprint/27-modular-built-ins.md
  */

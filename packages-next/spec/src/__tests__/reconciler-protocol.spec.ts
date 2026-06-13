@@ -33,7 +33,7 @@ describe("@agentick/spec-next — reconciler protocol", () => {
         mountId: "m_1",
         sessionId: "s_1",
         element: { type: "section", props: {} } as unknown,
-        bridges: stubBridges(),
+        bridges: fakeBridges(),
       };
       expect(input.mountId).toBe("m_1");
     });
@@ -324,7 +324,7 @@ describe("@agentick/spec-next — reconciler protocol", () => {
 // helpers
 // ============================================================================
 
-function stubBridges(): HookBridges {
+function fakeBridges(): HookBridges {
   return {
     timeline: {
       read: () => ({ entries: [], version: 0 }),

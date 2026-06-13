@@ -16,7 +16,7 @@ import { describe, expect, it } from "vitest";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
 
 import { ReconcilerHarness } from "../harness/reconciler-harness.js";
-import { stubBridges } from "@agentick/reconciler-next";
+import { fakeBridges } from "@agentick/reconciler-next";
 
 async function makeHarness() {
   const h = new ReconcilerHarness(
@@ -45,7 +45,7 @@ describe("semantic HTML — coalescing", () => {
       mountId: "m_plain",
       sessionId: "s",
       element: React.createElement("message", { role: "user" }, "Hello world"),
-      bridges: stubBridges(),
+      bridges: fakeBridges(),
     });
     const { tree } = await harness.renderTree({
       mountId: "m_plain",
@@ -67,7 +67,7 @@ describe("semantic HTML — coalescing", () => {
         React.createElement("strong", null, "world"),
         "!",
       ),
-      bridges: stubBridges(),
+      bridges: fakeBridges(),
     });
     const { tree } = await harness.renderTree({
       mountId: "m_inline",
@@ -98,7 +98,7 @@ describe("semantic HTML — coalescing", () => {
         }),
         "After.",
       ),
-      bridges: stubBridges(),
+      bridges: fakeBridges(),
     });
     const { tree } = await harness.renderTree({
       mountId: "m_break",
@@ -122,7 +122,7 @@ describe("semantic HTML — coalescing", () => {
         { role: "user" },
         React.createElement("p", null, "Hello ", React.createElement("em", null, "world"), "!"),
       ),
-      bridges: stubBridges(),
+      bridges: fakeBridges(),
     });
     const { tree } = await harness.renderTree({
       mountId: "m_para",
@@ -144,7 +144,7 @@ describe("semantic HTML — element coverage", () => {
         { role: "user" },
         React.createElement("h1", null, "Title"),
       ),
-      bridges: stubBridges(),
+      bridges: fakeBridges(),
     });
     const { tree } = await harness.renderTree({ mountId: "m_h1", sessionId: "s" });
     const msg = getMessage(tree);
@@ -161,7 +161,7 @@ describe("semantic HTML — element coverage", () => {
         { role: "user" },
         React.createElement("h3", null, "Sub"),
       ),
-      bridges: stubBridges(),
+      bridges: fakeBridges(),
     });
     const { tree } = await harness.renderTree({ mountId: "m_h3", sessionId: "s" });
     const msg = getMessage(tree);
@@ -183,7 +183,7 @@ describe("semantic HTML — element coverage", () => {
           React.createElement("li", null, "beta"),
         ),
       ),
-      bridges: stubBridges(),
+      bridges: fakeBridges(),
     });
     const { tree } = await harness.renderTree({ mountId: "m_ul", sessionId: "s" });
     const msg = getMessage(tree);
@@ -205,7 +205,7 @@ describe("semantic HTML — element coverage", () => {
           React.createElement("li", null, "second"),
         ),
       ),
-      bridges: stubBridges(),
+      bridges: fakeBridges(),
     });
     const { tree } = await harness.renderTree({ mountId: "m_ol", sessionId: "s" });
     const msg = getMessage(tree);
@@ -224,7 +224,7 @@ describe("semantic HTML — element coverage", () => {
         React.createElement("a", { href: "https://x.test" }, "the docs"),
         ".",
       ),
-      bridges: stubBridges(),
+      bridges: fakeBridges(),
     });
     const { tree } = await harness.renderTree({ mountId: "m_a", sessionId: "s" });
     const msg = getMessage(tree);
@@ -242,7 +242,7 @@ describe("semantic HTML — element coverage", () => {
         "Look: ",
         React.createElement("img", { src: "https://x.test/p.png", alt: "pic" }),
       ),
-      bridges: stubBridges(),
+      bridges: fakeBridges(),
     });
     const { tree } = await harness.renderTree({ mountId: "m_img", sessionId: "s" });
     const msg = getMessage(tree);
@@ -259,7 +259,7 @@ describe("semantic HTML — element coverage", () => {
         { role: "user" },
         React.createElement("blockquote", null, "a wise saying"),
       ),
-      bridges: stubBridges(),
+      bridges: fakeBridges(),
     });
     const { tree } = await harness.renderTree({ mountId: "m_bq", sessionId: "s" });
     const msg = getMessage(tree);
@@ -285,7 +285,7 @@ describe("semantic HTML — format scope", () => {
           "!",
         ),
       ),
-      bridges: stubBridges(),
+      bridges: fakeBridges(),
     });
     const { tree } = await harness.renderTree({ mountId: "m_xml", sessionId: "s" });
     const msg = getMessage(tree);
@@ -309,7 +309,7 @@ describe("semantic HTML — format scope", () => {
           "!",
         ),
       ),
-      bridges: stubBridges(),
+      bridges: fakeBridges(),
     });
     const { tree } = await harness.renderTree({ mountId: "m_text", sessionId: "s" });
     const msg = getMessage(tree);
