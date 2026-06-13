@@ -115,11 +115,7 @@ export class InMemoryDataBridge implements DataBridge {
     return { kind: "pending", promise: entry.promise as Promise<T> };
   }
 
-  fetch<T>(
-    key: string,
-    fetcher: () => Promise<T>,
-    options: DataResolveOptions = {},
-  ): Promise<T> {
+  fetch<T>(key: string, fetcher: () => Promise<T>, options: DataResolveOptions = {}): Promise<T> {
     const existing = this.cache.get(key);
     if (existing) {
       if (existing.status === "fulfilled") {

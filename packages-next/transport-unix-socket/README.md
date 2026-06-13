@@ -50,7 +50,7 @@ const apps = await client.gateway().listApps();
 
 ```ts
 interface UnixSocketTransportOptions {
-  path: string;                  // absolute path to the Unix socket
+  path: string; // absolute path to the Unix socket
   reconnect?: ReconnectPolicy;
   id?: string;
 }
@@ -120,14 +120,15 @@ Phase 33.E of the v2 implementation plan — see
 
 ## Verified by
 
-| Concern | Test file |
-|---|---|
-| End-to-end ping, listApps, RPC error → TransportError, multiplexed RPCs, close transition | `src/__tests__/smoke.spec.ts` |
+| Concern                                                                                                                                                | Test file                                                                                                            |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------- |
+| End-to-end ping, listApps, RPC error → TransportError, multiplexed RPCs, close transition                                                              | `src/__tests__/smoke.spec.ts`                                                                                        |
 | State machine, RPC correlation, multiplexed concurrent RPCs, `notifications/cancelled` emit, subscription routing + close + eviction, progress streams | `src/__tests__/transport-conformance.spec.ts` (via `runTransportConformance` from `@agentick/spec-conformance-next`) |
 
 ## Roadmap & known gaps
 
 **Done:**
+
 - ✓ NDJSON framing (newline-delimited JSON)
 - ✓ State machine via `BaseClientTransport`
 - ✓ RPC correlation + subscription multiplexing
@@ -136,6 +137,7 @@ Phase 33.E of the v2 implementation plan — see
 - ✓ `notifications/cancelled` client emit + server handle
 
 **Claimed but not yet under test (✗):**
+
 - ✗ **Reconnect over daemon restart** — reconnect machinery is inherited from `BaseClientTransport`; not exercised by a server-bounce test (parallel to WS's `reconnect.spec.ts`).
 - ✗ **`SO_PEERCRED` peer-credential auth** — the `AuthSourceFor<"unix-socket">` type includes `unixPeerCred` for this; not implemented end-to-end. Lands with ADR 34 (auth subsystem).
 - ✗ **Socket file lifecycle helpers** — adopters currently handle `fs.unlink` of stale socket files themselves. A `unixSocketServer({ unlinkBeforeBind: true })` knob would be useful.
@@ -143,9 +145,9 @@ Phase 33.E of the v2 implementation plan — see
 
 ## Development plan
 
-| Step | Lands when |
-|---|---|
-| Phase 33.E MVP | This commit |
-| 33.C hardening pass | After all transports settle so backpressure design covers them consistently |
-| `unixPeerCred` auth | ADR 34 auth subsystem |
-| Reconnect-over-daemon-restart test | Optional; the base-class machinery is the same path WS exercises |
+| Step                               | Lands when                                                                  |
+| ---------------------------------- | --------------------------------------------------------------------------- |
+| Phase 33.E MVP                     | This commit                                                                 |
+| 33.C hardening pass                | After all transports settle so backpressure design covers them consistently |
+| `unixPeerCred` auth                | ADR 34 auth subsystem                                                       |
+| Reconnect-over-daemon-restart test | Optional; the base-class machinery is the same path WS exercises            |

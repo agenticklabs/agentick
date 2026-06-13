@@ -91,7 +91,10 @@ export interface DefineLoopInput {
    * Adopters whose `runExecution` doesn't honor the input's `signal`
    * MUST supply this to route aborts manually.
    */
-  readonly abort?: (input: { readonly executionId: string; readonly reason?: string }) => Promise<void>;
+  readonly abort?: (input: {
+    readonly executionId: string;
+    readonly reason?: string;
+  }) => Promise<void>;
 }
 
 /**

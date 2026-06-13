@@ -6,7 +6,12 @@
  * have it land in the declaration).
  */
 
-import type { JsonSchema, ToolAnnotations, ToolDeclaration, ToolExposure } from "@agentick/spec-next";
+import type {
+  JsonSchema,
+  ToolAnnotations,
+  ToolDeclaration,
+  ToolExposure,
+} from "@agentick/spec-next";
 import type { ElementInstance } from "../../host/host-instance.js";
 import type { CollectContext, Contributor } from "../contributor.js";
 import type { IRFragment } from "../fragments.js";

@@ -9,11 +9,14 @@
 import { describe } from "vitest";
 
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
-import { defaultSessionConformanceDeps, runSessionConformance } from "@agentick/spec-conformance-next";
+import {
+  defaultSessionConformanceDeps,
+  runSessionConformance,
+} from "@agentick/spec-conformance-next";
 
 import { SessionHarness } from "../harness.js";
 
-describe("SessionHarness — SessionHarnessProtocol conformance", () =>
+describe("SessionHarness — SessionHarnessProtocol conformance", () => {
   runSessionConformance(async ({ harnessId, deps }) => {
     // The suite's `defaultSessionConformanceDeps` returns an
     // intentionally minimal substrate (stubs that throw if invoked).
@@ -47,4 +50,5 @@ describe("SessionHarness — SessionHarnessProtocol conformance", () =>
     await session.ready;
     await session.mountReady;
     return session;
-  }));
+  });
+});

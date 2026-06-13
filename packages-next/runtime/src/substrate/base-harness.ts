@@ -50,12 +50,7 @@ import type {
 import { DEFAULT_JOURNALING_POLICY } from "@agentick/spec-next";
 import { resolveSyncSubstrateSlot } from "./resolve-slot.js";
 import { ulid } from "./ulid.js";
-import {
-  EMPTY_CONTEXT,
-  getContext,
-  type RuntimeContext,
-  withContext,
-} from "./runtime-context.js";
+import { EMPTY_CONTEXT, getContext, type RuntimeContext, withContext } from "./runtime-context.js";
 
 /**
  * Sync snapshot of `RuntimeContextRef` for harness-construction-time
@@ -393,11 +388,12 @@ export abstract class BaseHarness<
       HarnessShell,
       OperationJournalFactory<HarnessShell>
     >(options.journal, shell, () => defaultJournal, `${surface}.journal`);
-    this.bus = resolveSyncSubstrateSlot<
-      EventBus,
-      HarnessShell,
-      EventBusFactory<HarnessShell>
-    >(options.bus, shell, () => defaultBus, `${surface}.bus`);
+    this.bus = resolveSyncSubstrateSlot<EventBus, HarnessShell, EventBusFactory<HarnessShell>>(
+      options.bus,
+      shell,
+      () => defaultBus,
+      `${surface}.bus`,
+    );
     this.inbox = resolveSyncSubstrateSlot<
       MessageInbox,
       HarnessShell,

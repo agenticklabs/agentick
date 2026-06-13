@@ -191,6 +191,10 @@ export function runTransportConformance(name: string, factory: TransportConforma
         // Attach the rejection matcher BEFORE calling abort to avoid an
         // unhandled-rejection window.
         const ping = transport.request("ping", {}, controller.signal);
+        // Capture the assertion BEFORE calling abort so the rejection
+        // handler is attached before the sync abort path runs — avoids
+        // an unhandled-rejection window.
+        // oxlint-disable-next-line eslint-plugin-jest/valid-expect
         const assertion = expect(ping).rejects.toMatchObject({ kind: "cancelled" });
         controller.abort();
         await assertion;

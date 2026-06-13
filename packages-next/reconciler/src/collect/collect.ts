@@ -37,12 +37,7 @@ import {
   type FormatterBinding,
   type HostScope,
 } from "../host/host-context.js";
-import {
-  isElementInstance,
-  isTextInstance,
-  type ElementInstance,
-  type HostInstance,
-} from "../host/host-instance.js";
+import { isElementInstance, isTextInstance, type HostInstance } from "../host/host-instance.js";
 import type { CollectContext } from "./contributor.js";
 import type { IRFragment } from "./fragments.js";
 import { ContributorRegistry } from "./registry.js";
@@ -85,7 +80,7 @@ export function collect(input: CollectInput): CollectResult {
 
 function makeContextFactory(
   registry: ContributorRegistry,
-  rootScope: HostScope,
+  _rootScope: HostScope,
 ): (scope: HostScope) => CollectContext {
   function make(scope: HostScope): CollectContext {
     return {

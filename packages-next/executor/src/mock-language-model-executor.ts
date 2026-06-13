@@ -489,9 +489,7 @@ function imageUrlFromSource(source: MediaSource, mimeType: string | undefined): 
 
 function messagePartFromBlock(block: ContentBlock): LanguageModelMessagePart {
   const pm =
-    block.providerMetadata !== undefined
-      ? { providerMetadata: block.providerMetadata }
-      : {};
+    block.providerMetadata !== undefined ? { providerMetadata: block.providerMetadata } : {};
   switch (block.type) {
     case "text":
       return { type: "text", text: block.text, ...pm };
@@ -538,9 +536,7 @@ function buildTools(tree: RenderedTree): ReadonlyArray<LanguageModelTool> {
       name: t.name,
       ...(t.description !== undefined ? { description: t.description } : {}),
       inputSchema: t.inputSchema as Record<string, unknown>,
-      ...(t.providerOptions !== undefined
-        ? { providerOptions: t.providerOptions }
-        : {}),
+      ...(t.providerOptions !== undefined ? { providerOptions: t.providerOptions } : {}),
     }));
 }
 

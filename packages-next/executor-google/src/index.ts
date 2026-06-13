@@ -15,7 +15,4 @@ export {
   type CustomBlockDefinition,
   sanitizeSchemaForGemini,
 } from "./google-executor.js";
-export {
-  google,
-  type GoogleFactoryOptions,
-} from "./google-factory.js";
+export { google, type GoogleFactoryOptions } from "./google-factory.js";

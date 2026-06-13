@@ -13,7 +13,4 @@ export {
   type AnthropicExecutorOptions,
   type CustomBlockDefinition,
 } from "./anthropic-executor.js";
-export {
-  anthropic,
-  type AnthropicFactoryOptions,
-} from "./anthropic-factory.js";
+export { anthropic, type AnthropicFactoryOptions } from "./anthropic-factory.js";

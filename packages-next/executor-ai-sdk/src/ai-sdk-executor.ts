@@ -191,11 +191,9 @@ export class AISDKExecutor extends BaseHarness<"executor"> implements LanguageMo
     if (input.signal) {
       if (input.signal.aborted) controller.abort(input.signal.reason);
       else
-        input.signal.addEventListener(
-          "abort",
-          () => controller.abort(input.signal!.reason),
-          { once: true },
-        );
+        input.signal.addEventListener("abort", () => controller.abort(input.signal!.reason), {
+          once: true,
+        });
     }
 
     // Per-stream Operation so bus observers see the same deltas the
@@ -265,8 +263,10 @@ export class AISDKExecutor extends BaseHarness<"executor"> implements LanguageMo
             }
             case "text-delta":
             case "text": {
-              const delta = (part as { text?: string; delta?: string }).text ??
-                (part as { delta?: string }).delta ?? "";
+              const delta =
+                (part as { text?: string; delta?: string }).text ??
+                (part as { delta?: string }).delta ??
+                "";
               if (!textBlockStarted) {
                 textBlockStarted = true;
                 emit({ type: "content-start", blockIndex, blockType: "text" });
@@ -283,7 +283,10 @@ export class AISDKExecutor extends BaseHarness<"executor"> implements LanguageMo
               break;
             }
             case "tool-input-start": {
-              const callId = (part.toolCallId as string | undefined) ?? (part.id as string | undefined) ?? `tc_${ulid()}`;
+              const callId =
+                (part.toolCallId as string | undefined) ??
+                (part.id as string | undefined) ??
+                `tc_${ulid()}`;
               const name = (part.toolName as string | undefined) ?? "";
               toolCallStarted.add(callId);
               toolCallNameByCallId.set(callId, name);
@@ -291,8 +294,12 @@ export class AISDKExecutor extends BaseHarness<"executor"> implements LanguageMo
               break;
             }
             case "tool-input-delta": {
-              const callId = (part.toolCallId as string | undefined) ?? (part.id as string | undefined) ?? "";
-              const delta = (part.argsTextDelta as string | undefined) ?? (part.delta as string | undefined) ?? "";
+              const callId =
+                (part.toolCallId as string | undefined) ?? (part.id as string | undefined) ?? "";
+              const delta =
+                (part.argsTextDelta as string | undefined) ??
+                (part.delta as string | undefined) ??
+                "";
               if (callId && delta) {
                 const prev = toolCallArgsByCallId.get(callId) ?? "";
                 toolCallArgsByCallId.set(callId, prev + delta);
@@ -302,8 +309,10 @@ export class AISDKExecutor extends BaseHarness<"executor"> implements LanguageMo
             }
             case "tool-input-end":
             case "tool-call": {
-              const callId = (part.toolCallId as string | undefined) ?? (part.id as string | undefined) ?? "";
-              const name = (part.toolName as string | undefined) ?? toolCallNameByCallId.get(callId) ?? "";
+              const callId =
+                (part.toolCallId as string | undefined) ?? (part.id as string | undefined) ?? "";
+              const name =
+                (part.toolName as string | undefined) ?? toolCallNameByCallId.get(callId) ?? "";
               if (!toolCallStarted.has(callId)) {
                 emit({ type: "tool-call-start", callId, name, blockIndex });
                 toolCallStarted.add(callId);
@@ -314,9 +323,9 @@ export class AISDKExecutor extends BaseHarness<"executor"> implements LanguageMo
                 (part.args as Readonly<Record<string, unknown>> | undefined) ??
                 ((): Readonly<Record<string, unknown>> => {
                   try {
-                    return JSON.parse(
-                      toolCallArgsByCallId.get(callId) ?? "{}",
-                    ) as Readonly<Record<string, unknown>>;
+                    return JSON.parse(toolCallArgsByCallId.get(callId) ?? "{}") as Readonly<
+                      Record<string, unknown>
+                    >;
                   } catch {
                     return {};
                   }
@@ -326,7 +335,7 @@ export class AISDKExecutor extends BaseHarness<"executor"> implements LanguageMo
             }
             case "finish":
             case "finish-step": {
-              const fin = (part.finishReason as FinishReason | undefined);
+              const fin = part.finishReason as FinishReason | undefined;
               const us = part.usage as
                 | {
                     inputTokens?: number;
@@ -389,9 +398,9 @@ export class AISDKExecutor extends BaseHarness<"executor"> implements LanguageMo
         for (const [callId, name] of toolCallNameByCallId) {
           let parsed: Readonly<Record<string, unknown>> = {};
           try {
-            parsed = JSON.parse(
-              toolCallArgsByCallId.get(callId) ?? "{}",
-            ) as Readonly<Record<string, unknown>>;
+            parsed = JSON.parse(toolCallArgsByCallId.get(callId) ?? "{}") as Readonly<
+              Record<string, unknown>
+            >;
           } catch {
             /* keep empty */
           }
@@ -436,9 +445,9 @@ export class AISDKExecutor extends BaseHarness<"executor"> implements LanguageMo
           toolCalls: Array.from(toolCallNameByCallId.entries()).map(([callId, name]) => {
             let parsed: Readonly<Record<string, unknown>> = {};
             try {
-              parsed = JSON.parse(
-                toolCallArgsByCallId.get(callId) ?? "{}",
-              ) as Readonly<Record<string, unknown>>;
+              parsed = JSON.parse(toolCallArgsByCallId.get(callId) ?? "{}") as Readonly<
+                Record<string, unknown>
+              >;
             } catch {
               /* keep empty */
             }
@@ -720,9 +729,7 @@ function imageUrlFromSource(source: MediaSource, mimeType: string | undefined): 
 
 function messagePartFromBlock(block: ContentBlock): LanguageModelMessagePart {
   const pm =
-    block.providerMetadata !== undefined
-      ? { providerMetadata: block.providerMetadata }
-      : {};
+    block.providerMetadata !== undefined ? { providerMetadata: block.providerMetadata } : {};
   switch (block.type) {
     case "text":
       return { type: "text", text: block.text, ...pm };
@@ -766,9 +773,7 @@ function buildTools(tree: RenderedTree): ReadonlyArray<LanguageModelTool> {
       name: t.name,
       ...(t.description !== undefined ? { description: t.description } : {}),
       inputSchema: t.inputSchema as Record<string, unknown>,
-      ...(t.providerOptions !== undefined
-        ? { providerOptions: t.providerOptions }
-        : {}),
+      ...(t.providerOptions !== undefined ? { providerOptions: t.providerOptions } : {}),
     }));
 }
 
@@ -776,10 +781,7 @@ function buildTools(tree: RenderedTree): ReadonlyArray<LanguageModelTool> {
 // LanguageModelInput → AI SDK input
 // ============================================================================
 
-function toAISDKInput(
-  input: LanguageModelInput,
-  target: ExecutionTarget,
-): AISDKProjectedInput {
+function toAISDKInput(input: LanguageModelInput, target: ExecutionTarget): AISDKProjectedInput {
   const messages: ModelMessage[] = [];
   for (const m of input.messages) {
     messages.push(...toAISDKMessage(m));
@@ -813,9 +815,7 @@ function toAISDKInput(
 function pmToProviderOptions(part: {
   readonly providerMetadata?: Record<string, Record<string, unknown>>;
 }): { providerOptions: Record<string, Record<string, unknown>> } | object {
-  return part.providerMetadata !== undefined
-    ? { providerOptions: part.providerMetadata }
-    : {};
+  return part.providerMetadata !== undefined ? { providerOptions: part.providerMetadata } : {};
 }
 
 function toAISDKMessage(m: LanguageModelMessage): ModelMessage[] {

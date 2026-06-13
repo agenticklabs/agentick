@@ -13,7 +13,7 @@ import { runExecutorConformance } from "@agentick/spec-conformance-next";
 
 import { MockLanguageModelExecutor } from "../mock-language-model-executor.js";
 
-describe("MockLanguageModelExecutor — ExecutorProtocol conformance", () =>
+describe("MockLanguageModelExecutor — ExecutorProtocol conformance", () => {
   runExecutorConformance(async ({ harnessId, scripted }) => {
     const journal = new MemoryJournal();
     const bus = new LocalEventBus();
@@ -27,4 +27,5 @@ describe("MockLanguageModelExecutor — ExecutorProtocol conformance", () =>
     );
     await exec.ready;
     return { executor: exec, bus };
-  }));
+  });
+});

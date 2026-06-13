@@ -48,7 +48,6 @@ import type {
   RenderedTree,
   SendResult,
   SessionHarnessProtocol,
-  ToolDeclaration,
   ToolExecutorProtocol,
 } from "@agentick/spec-next";
 
@@ -182,6 +181,7 @@ function stubExecutor(): ExecutorProtocol<unknown, unknown, LanguageModelExecuti
     stopReason: "end",
   };
   return {
+    ready: Promise.resolve(),
     project: async () => ({ messages: [] }),
     execute: async () => ({}),
     normalize: async () => result,

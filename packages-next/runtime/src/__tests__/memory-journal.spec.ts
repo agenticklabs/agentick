@@ -3,7 +3,9 @@ import { Chunk, Effect, Stream } from "effect";
 import { runJournalConformance } from "@agentick/spec-conformance-next";
 import { MemoryJournal } from "../substrate/memory-journal.js";
 
-describe("MemoryJournal — conformance", () => runJournalConformance(() => new MemoryJournal()));
+describe("MemoryJournal — conformance", () => {
+  runJournalConformance(() => new MemoryJournal());
+});
 
 describe("MemoryJournal — capacity & overflow", () => {
   it("drops oldest events when capacity exceeded", async () => {
@@ -109,7 +111,12 @@ describe("MemoryJournal — cursor protocol (Phase C)", () => {
       );
     }
     const chunk = await Effect.runPromise(
-      Stream.runCollect(Stream.take(j.read({ value: 0 }, () => true), 5)),
+      Stream.runCollect(
+        Stream.take(
+          j.read({ value: 0 }, () => true),
+          5,
+        ),
+      ),
     );
     expect(Array.from(Chunk.toReadonlyArray(chunk)).map((e) => e.id)).toEqual([
       "e0",
@@ -190,7 +197,10 @@ describe("MemoryJournal — cursor protocol (Phase C)", () => {
     const result = await Effect.runPromise(
       Effect.either(
         Stream.runCollect(
-          Stream.take(j.read({ value: 0 }, () => true), 5),
+          Stream.take(
+            j.read({ value: 0 }, () => true),
+            5,
+          ),
         ),
       ),
     );

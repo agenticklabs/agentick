@@ -12,7 +12,11 @@ import type { HookBridges, MessageEntry, TimelineEntry } from "@agentick/spec-ne
 import { ReconcilerHarness } from "@agentick/reconciler-react-next";
 import { stubBridges, mockTimelineHarness } from "@agentick/reconciler-next";
 import { Timeline } from "@agentick/timeline-next/react";
-import { compactEntries, getEntryTokens, type TokenBudgetInfo } from "@agentick/timeline-next/react";
+import {
+  compactEntries,
+  getEntryTokens,
+  type TokenBudgetInfo,
+} from "@agentick/timeline-next/react";
 
 type MessageTimelineEntry = Extract<TimelineEntry, { kind: "message" }>;
 

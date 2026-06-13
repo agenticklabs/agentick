@@ -69,9 +69,7 @@ function buildTextPlusToolStream(textCount: number): GenerateContentResponse[] {
   for (let i = 0; i < textCount; i++) {
     chunks.push(mkTextChunk("x"));
   }
-  chunks.push(
-    mkFunctionCallChunk({ id: "call_bench_1", name: "calc", args: { a: 2, b: 3 } }),
-  );
+  chunks.push(mkFunctionCallChunk({ id: "call_bench_1", name: "calc", args: { a: 2, b: 3 } }));
   chunks.push(
     mkFinishChunk({
       finishReason: "STOP",

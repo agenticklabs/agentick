@@ -10,10 +10,7 @@
 import { Chunk, Effect, Fiber, Stream } from "effect";
 import { describe, expect, it } from "vitest";
 
-import type {
-  LanguageModelTarget,
-  RenderedTree,
-} from "@agentick/spec-next";
+import type { LanguageModelTarget, RenderedTree } from "@agentick/spec-next";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
 import type { MessageCreateParams } from "@anthropic-ai/sdk/resources/messages";
 
@@ -100,7 +97,10 @@ describe("AnthropicExecutor — non-streaming", () => {
       { kind: "non-streaming", message: mkMessage({ text: "ok" }) },
     ]);
     const { exec } = await makeExecutor(stub, { model: "claude-3-opus-latest" });
-    await exec.run({ compiled: emptyTree(), target: mkTarget({ modelId: "claude-3-opus-latest" }) });
+    await exec.run({
+      compiled: emptyTree(),
+      target: mkTarget({ modelId: "claude-3-opus-latest" }),
+    });
     expect(stub.calls[0]!.params.model).toBe("claude-3-opus-latest");
   });
 
@@ -691,7 +691,6 @@ describe("AnthropicExecutor — providerOptions spread (G5)", () => {
     expect(p.thinking?.type).toBe("enabled");
     expect(p.thinking?.budget_tokens).toBe(2048);
   });
-
 });
 
 describe("AnthropicExecutor — parseThinkTags (G7)", () => {
@@ -733,7 +732,7 @@ describe("AnthropicExecutor — customBlocks (G12)", () => {
         events: [
           mkMessageStartEvent({ inputTokens: 4 }),
           mkContentBlockStartText(0),
-          mkTextDelta(0, 'Found '),
+          mkTextDelta(0, "Found "),
           mkTextDelta(0, '<citation source="wiki">Paris</citation>'),
           mkTextDelta(0, " in docs"),
           mkContentBlockStop(0),

@@ -243,7 +243,10 @@ class CallbackLanguageModelExecutor
     // Merge caller-supplied signal if present.
     if (input.signal) {
       if (input.signal.aborted) controller.abort(input.signal.reason);
-      else input.signal.addEventListener("abort", () => controller.abort(input.signal!.reason), { once: true });
+      else
+        input.signal.addEventListener("abort", () => controller.abort(input.signal!.reason), {
+          once: true,
+        });
     }
 
     const sink: DeltaSink = (delta) => {
@@ -512,9 +515,7 @@ function sectionText(section: SectionEntry): string {
 
 function messagePartFromBlock(block: ContentBlock): LanguageModelMessagePart {
   const pm =
-    block.providerMetadata !== undefined
-      ? { providerMetadata: block.providerMetadata }
-      : {};
+    block.providerMetadata !== undefined ? { providerMetadata: block.providerMetadata } : {};
   switch (block.type) {
     case "text":
       return { type: "text", text: block.text, ...pm };
@@ -575,9 +576,7 @@ function buildTools(tree: RenderedTree): ReadonlyArray<LanguageModelTool> {
       name: t.name,
       ...(t.description !== undefined ? { description: t.description } : {}),
       inputSchema: t.inputSchema as Record<string, unknown>,
-      ...(t.providerOptions !== undefined
-        ? { providerOptions: t.providerOptions }
-        : {}),
+      ...(t.providerOptions !== undefined ? { providerOptions: t.providerOptions } : {}),
     }));
 }
 

@@ -20,7 +20,7 @@
  * @see docs/proposals/v2/blueprint/07-tool-executor.md
  */
 
-import { Cause, Effect, Exit, Fiber, Option } from "effect";
+import { Cause, Effect, Exit, Option } from "effect";
 import { runHarnessProtocol, ulid } from "@agentick/runtime-next";
 import { BaseHarness, type LifecycleHandler, type Unsubscribe } from "@agentick/runtime-next";
 import type { RequestError } from "@agentick/runtime-next";
@@ -49,7 +49,6 @@ import type {
 
 import { InMemoryToolRegistry } from "./registry.js";
 import type {
-  HandlerEntry,
   HandlerResolver,
   HandlerChannelSeed,
   ToolExecutorHarnessOptions,

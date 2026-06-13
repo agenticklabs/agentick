@@ -11,10 +11,10 @@ peer-deps dragged in unless a subpath is imported).
 This package establishes the layer-extension naming convention for the
 v2 ecosystem:
 
-| Pattern | Use |
-|---|---|
-| `@agentick/{layer}-next` | The layer impl (e.g., `client-next`, `gateway-next`) |
-| `@agentick/{layer}-extensions-next` | First-party extensions for that layer |
+| Pattern                              | Use                                                                                |
+| ------------------------------------ | ---------------------------------------------------------------------------------- |
+| `@agentick/{layer}-next`             | The layer impl (e.g., `client-next`, `gateway-next`)                               |
+| `@agentick/{layer}-extensions-next`  | First-party extensions for that layer                                              |
 | `@agentick/{layer}-{framework}-next` | Framework binding for that layer (`client-react-next`, `client-angular-next`, ...) |
 
 Third-party extensions name themselves freely (`@some-org/my-cool-extension`).
@@ -22,12 +22,12 @@ The first-party naming is a convention, not a requirement on adopters.
 
 ## Subpaths
 
-| Subpath | Purpose | Prior art |
-|---|---|---|
-| [`/retry`](src/retry/README.md) | Exponential backoff with full jitter, idempotency-key propagation, per-method overrides | AWS SDK retry, axios-retry, undici-retry-fetch, Polly |
+| Subpath                                 | Purpose                                                                                                 | Prior art                                                         |
+| --------------------------------------- | ------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
+| [`/retry`](src/retry/README.md)         | Exponential backoff with full jitter, idempotency-key propagation, per-method overrides                 | AWS SDK retry, axios-retry, undici-retry-fetch, Polly             |
 | [`/telemetry`](src/telemetry/README.md) | OpenTelemetry-shaped span per logical RPC, W3C Trace Context propagation, OTel RPC semantic conventions | `@opentelemetry/api`, Datadog dd-trace, Sentry, Honeycomb Beeline |
-| [`/cache`](src/cache/README.md) | Method-allowlist read-through cache with per-method TTL + LRU eviction | React Query / TanStack Query, SWR, Apollo Client |
-| [`/offline`](src/offline/README.md) | Outbound queue + FIFO replay on reconnect; pluggable durable store | Workbox BackgroundSync, Apollo Link Queue, Redux Offline |
+| [`/cache`](src/cache/README.md)         | Method-allowlist read-through cache with per-method TTL + LRU eviction                                  | React Query / TanStack Query, SWR, Apollo Client                  |
+| [`/offline`](src/offline/README.md)     | Outbound queue + FIFO replay on reconnect; pluggable durable store                                      | Workbox BackgroundSync, Apollo Link Queue, Redux Offline          |
 
 ## Quick start
 
@@ -55,12 +55,7 @@ If you prefer one-line imports for ergonomics, the root barrel
 re-exports every behavior:
 
 ```ts
-import {
-  retry,
-  telemetry,
-  cache,
-  offline,
-} from "@agentick/client-extensions-next";
+import { retry, telemetry, cache, offline } from "@agentick/client-extensions-next";
 ```
 
 The subpath form remains the recommended pattern — it lets bundlers

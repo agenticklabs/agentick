@@ -7,8 +7,8 @@
     "agent",
     "agentick",
     "ai",
-    "transport",
-    "json-rpc"
+    "json-rpc",
+    "transport"
   ],
   "license": "MIT",
   "author": "Ryan Lindgren",

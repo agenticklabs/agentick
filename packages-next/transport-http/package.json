@@ -7,12 +7,12 @@
     "agent",
     "agentick",
     "ai",
-    "transport",
     "http",
+    "json-rpc",
+    "mcp",
     "sse",
     "streamable-http",
-    "json-rpc",
-    "mcp"
+    "transport"
   ],
   "license": "MIT",
   "author": "Ryan Lindgren",

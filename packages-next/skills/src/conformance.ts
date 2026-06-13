@@ -121,9 +121,10 @@ export function runSkillsHarnessConformance(deps: SkillsHarnessFactoryDeps): voi
 
     it("update() rejects unknown names with SkillNotFound", async () => {
       const h = await deps.make();
-      await expect(
-        h.update({ name: "ghost", description: "new" }),
-      ).rejects.toMatchObject({ _tag: "SkillNotFound", name: "ghost" });
+      await expect(h.update({ name: "ghost", description: "new" })).rejects.toMatchObject({
+        _tag: "SkillNotFound",
+        name: "ghost",
+      });
       await h.close();
     });
 

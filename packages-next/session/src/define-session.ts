@@ -112,9 +112,7 @@ export interface DefineSessionInput<P = unknown> {
   readonly state?: StateHandle;
 }
 
-export function defineSession<P = unknown>(
-  spec: DefineSessionInput<P>,
-): SessionHarnessFactory<P> {
+export function defineSession<P = unknown>(spec: DefineSessionInput<P>): SessionHarnessFactory<P> {
   const factory = (deps?: SessionHarnessFactoryDeps): SessionHarnessProtocol<P> => {
     const scopeId = deps?.scopeId ?? `define-session:${ulid()}`;
     const journal = deps?.journal ?? new MemoryJournal();

@@ -149,10 +149,10 @@ sent under the real id.
 
 ## Verified by
 
-| Concern | Test file |
-|---|---|
-| End-to-end via in-process transport | `../transport-in-process/src/__tests__/transport-conformance.spec.ts` |
-| End-to-end via WebSocket transport | `../transport-websocket/src/__tests__/transport-conformance.spec.ts` |
+| Concern                                                                                         | Test file                                                                                       |
+| ----------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| End-to-end via in-process transport                                                             | `../transport-in-process/src/__tests__/transport-conformance.spec.ts`                           |
+| End-to-end via WebSocket transport                                                              | `../transport-websocket/src/__tests__/transport-conformance.spec.ts`                            |
 | State machine, RPC correlation, multiplex, cancellation, subscription routing, progress streams | `../spec-conformance/src/transport.ts` (`runTransportConformance` — invoked by every transport) |
 
 `runTransportConformance(name, factory)` in
@@ -186,10 +186,10 @@ Phase 33.C.1 of the v2 implementation plan — see
 
 ## Development plan
 
-| Step | Lands when |
-|---|---|
-| Phase 33.C.1 — extraction | This commit |
-| Backpressure on MultiplexedStream | 33.C hardening pass |
-| Phase 33.D — HTTP transport | Subclasses `BaseClientTransport`; reuses `dispatchRequest` |
-| Phase 33.E — Unix-socket transport | Same |
-| Batch request dispatch | When a real workload surfaces the need |
+| Step                               | Lands when                                                 |
+| ---------------------------------- | ---------------------------------------------------------- |
+| Phase 33.C.1 — extraction          | This commit                                                |
+| Backpressure on MultiplexedStream  | 33.C hardening pass                                        |
+| Phase 33.D — HTTP transport        | Subclasses `BaseClientTransport`; reuses `dispatchRequest` |
+| Phase 33.E — Unix-socket transport | Same                                                       |
+| Batch request dispatch             | When a real workload surfaces the need                     |

@@ -43,13 +43,13 @@ Environment variable fallbacks: `ANTHROPIC_API_KEY`, `ANTHROPIC_BASE_URL`.
 
 ## Capabilities
 
-| Model family               | contextWindow | maxOutputTokens | vision | reasoning |
-| -------------------------- | ------------- | --------------- | ------ | --------- |
-| Claude 3.5 Sonnet          | 200K          | 8K              | yes    | no        |
-| Claude 3.5 Haiku           | 200K          | 8K              | no     | no        |
-| Claude 3.7 Sonnet          | 200K          | 8K (64K w/ beta) | yes   | yes       |
-| Claude 3 Opus              | 200K          | 4K              | yes    | no        |
-| Claude 3 Sonnet / Haiku    | 200K          | 4K              | yes    | no        |
+| Model family            | contextWindow | maxOutputTokens  | vision | reasoning |
+| ----------------------- | ------------- | ---------------- | ------ | --------- |
+| Claude 3.5 Sonnet       | 200K          | 8K               | yes    | no        |
+| Claude 3.5 Haiku        | 200K          | 8K               | no     | no        |
+| Claude 3.7 Sonnet       | 200K          | 8K (64K w/ beta) | yes    | yes       |
+| Claude 3 Opus           | 200K          | 4K               | yes    | no        |
+| Claude 3 Sonnet / Haiku | 200K          | 4K               | yes    | no        |
 
 ## Limitations
 

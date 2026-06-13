@@ -97,7 +97,7 @@ function modelFor(scripted: LanguageModelExecutionResult | undefined): MockLangu
   });
 }
 
-describe("AISDKExecutor — ExecutorProtocol conformance", () =>
+describe("AISDKExecutor — ExecutorProtocol conformance", () => {
   runExecutorConformance(async ({ harnessId, scripted }) => {
     const journal = new MemoryJournal();
     const bus = new LocalEventBus();
@@ -107,4 +107,5 @@ describe("AISDKExecutor — ExecutorProtocol conformance", () =>
     });
     await exec.ready;
     return { executor: exec, bus };
-  }));
+  });
+});

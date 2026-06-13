@@ -80,7 +80,7 @@ class GatewayHarness extends BaseHarness<"gateway"> implements GatewayHarnessPro
   createApp<P>(input: CreateGatewayAppInput<P>): Promise<AppHarnessProtocol<P>>;
   events(filter?: EventQuery, options?: SubscribeOptions): AsyncIterable<ProtocolEvent>;
   closeGateway(): Promise<void>;
-  close(): Promise<void>;  // alias for closeGateway
+  close(): Promise<void>; // alias for closeGateway
 }
 ```
 
@@ -133,16 +133,16 @@ layer between wire and harness.
 
 ## Verified by
 
-| Concern | Test file |
-|---|---|
-| Construction + default in-memory substrate | `src/__tests__/harness.spec.ts` |
+| Concern                                                | Test file                       |
+| ------------------------------------------------------ | ------------------------------- |
+| Construction + default in-memory substrate             | `src/__tests__/harness.spec.ts` |
 | `createApp` with default gateway-substrate inheritance | `src/__tests__/harness.spec.ts` |
-| `createApp` with per-app substrate factory override | `src/__tests__/harness.spec.ts` |
-| `apps()` / `app(id)` read-side | `src/__tests__/harness.spec.ts` |
-| `closeGateway()` cascades into app closes | `src/__tests__/harness.spec.ts` |
-| `events()` observes app-level events via fan-in | `src/__tests__/harness.spec.ts` |
-| Duplicate `appId` rejection | `src/__tests__/harness.spec.ts` |
-| `GatewayClosedError` after close | `src/__tests__/harness.spec.ts` |
+| `createApp` with per-app substrate factory override    | `src/__tests__/harness.spec.ts` |
+| `apps()` / `app(id)` read-side                         | `src/__tests__/harness.spec.ts` |
+| `closeGateway()` cascades into app closes              | `src/__tests__/harness.spec.ts` |
+| `events()` observes app-level events via fan-in        | `src/__tests__/harness.spec.ts` |
+| Duplicate `appId` rejection                            | `src/__tests__/harness.spec.ts` |
+| `GatewayClosedError` after close                       | `src/__tests__/harness.spec.ts` |
 
 ## Status
 
@@ -175,12 +175,12 @@ Phase 4 (gateway scaffold) and now consumed by Phase 33.C+
 
 ## Development plan
 
-| Phase | What lands |
-|---|---|
-| Phase 4 (done) | This package — gateway scaffold |
-| Phase 5 (done) | `AppHarnessProtocol.id` / `SessionHarnessProtocol.id` |
-| Phase 33.C–E | Transports mount on `GatewayHarness` (no changes to this package) |
+| Phase                 | What lands                                                                                                                            |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| Phase 4 (done)        | This package — gateway scaffold                                                                                                       |
+| Phase 5 (done)        | `AppHarnessProtocol.id` / `SessionHarnessProtocol.id`                                                                                 |
+| Phase 33.C–E          | Transports mount on `GatewayHarness` (no changes to this package)                                                                     |
 | Phase 33.D extraction | Shared `@agentick/gateway-rpc-adapter-next` extracted from `transport-websocket-next/server/dispatch.ts` — reusable across transports |
-| ADR 34 | `@agentick/auth-next` adds a `GatewayExtension` for auth |
-| Phase 33.I | `@agentick/mcp-surface-next` adds a `GatewayExtension` that mounts MCP method namespaces |
-| ADR 29 Phase D | `@agentick/cluster-next` substrate impl — gateway gets a cluster journal/bus |
+| ADR 34                | `@agentick/auth-next` adds a `GatewayExtension` for auth                                                                              |
+| Phase 33.I            | `@agentick/mcp-surface-next` adds a `GatewayExtension` that mounts MCP method namespaces                                              |
+| ADR 29 Phase D        | `@agentick/cluster-next` substrate impl — gateway gets a cluster journal/bus                                                          |

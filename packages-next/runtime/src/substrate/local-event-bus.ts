@@ -298,10 +298,7 @@ export class LocalEventBus implements EventBus {
       }
       bucket.events.push(event);
 
-      if (
-        policy.flushAfterCount !== undefined &&
-        bucket.events.length >= policy.flushAfterCount
-      ) {
+      if (policy.flushAfterCount !== undefined && bucket.events.length >= policy.flushAfterCount) {
         return this.flushBucketSyncFromTrigger(bucket);
       }
 
@@ -359,8 +356,7 @@ export class LocalEventBus implements EventBus {
     // memoized last-window rate. The partial-window rate stabilises
     // toward the long-run average; the memoized value reflects the
     // most recent complete window.
-    const partialEps =
-      this.rateWindowCount / Math.max((now - this.rateWindowStart) / 1000, 0.001);
+    const partialEps = this.rateWindowCount / Math.max((now - this.rateWindowStart) / 1000, 0.001);
     const eventsPerSecond = this.rateWindowCount === 0 ? this.rateLastEps : partialEps;
 
     const lags: number[] = [];
@@ -675,9 +671,7 @@ export class LocalEventBus implements EventBus {
     return `${surface}:${phase}`;
   }
 
-  private flushBucketSyncFromTrigger(
-    bucket: BatchBucket,
-  ): Effect.Effect<void, never, never> {
+  private flushBucketSyncFromTrigger(bucket: BatchBucket): Effect.Effect<void, never, never> {
     if (bucket.timer !== null) {
       clearTimeout(bucket.timer);
       bucket.timer = null;
@@ -691,9 +685,7 @@ export class LocalEventBus implements EventBus {
    * Append one event to the ring buffer + fan out to upstream. Wakes
    * subscribers exactly once.
    */
-  private dispatchOneInternal(
-    event: ProtocolEvent,
-  ): Effect.Effect<void, never, never> {
+  private dispatchOneInternal(event: ProtocolEvent): Effect.Effect<void, never, never> {
     this.writeRing(event);
     this.wakeSubscribers();
     return this.upstream?.append(event) ?? Effect.void;

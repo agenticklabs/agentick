@@ -56,7 +56,7 @@ describe("TimelineHarness — Operation envelopes", () => {
   it("append() emits requested + terminal envelopes on the timeline surface", async () => {
     const { harness, bus } = await makeHarness();
     const { events, stop } = await subscribeEnvelopes(bus, { surface: "timeline" });
-    await harness.append(messageEntry("e1", "hello") );
+    await harness.append(messageEntry("e1", "hello"));
     await settle();
     await stop();
     const phases = events.map((e) => e.phase);
@@ -68,7 +68,7 @@ describe("TimelineHarness — Operation envelopes", () => {
 
   it("compact() emits envelopes under command:compact", async () => {
     const { harness, bus } = await makeHarness();
-    await harness.append(messageEntry("e1", "a") );
+    await harness.append(messageEntry("e1", "a"));
     const { events, stop } = await subscribeEnvelopes(bus, {
       surface: "timeline",
       name: { exact: "timeline:command:compact" },
@@ -213,8 +213,8 @@ describe("TimelineHarness — pending inbox routing", () => {
 describe("TimelineHarness — snapshot round-trip across instances", () => {
   it("exportSnapshot / importSnapshot preserves log + projection across instances", async () => {
     const { harness } = await makeHarness();
-    await harness.append(messageEntry("e1", "a") );
-    await harness.append(messageEntry("e2", "b") );
+    await harness.append(messageEntry("e1", "a"));
+    await harness.append(messageEntry("e2", "b"));
     await harness.compact(
       withHandler({
         handler: async ({ entries }) => [messageEntry("summary", `count=${entries.length}`)],

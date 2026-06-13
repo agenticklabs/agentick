@@ -211,10 +211,7 @@ export interface CustomBlockDefinition {
   /** Called when the opening tag is found, before content arrives. */
   readonly onStart?: (attrs: Readonly<Record<string, string>>) => void;
   /** Called with full accumulated content when the closing tag is found. */
-  readonly onContent?: (
-    content: string,
-    attrs: Readonly<Record<string, string>>,
-  ) => void;
+  readonly onContent?: (content: string, attrs: Readonly<Record<string, string>>) => void;
   /** Called for self-closing tags (e.g., `<done/>`). */
   readonly onSelfClosing?: (attrs: Readonly<Record<string, string>>) => void;
 }
@@ -342,11 +339,9 @@ export class OpenAIExecutor extends BaseHarness<"executor"> implements LanguageM
     if (input.signal) {
       if (input.signal.aborted) controller.abort(input.signal.reason);
       else
-        input.signal.addEventListener(
-          "abort",
-          () => controller.abort(input.signal!.reason),
-          { once: true },
-        );
+        input.signal.addEventListener("abort", () => controller.abort(input.signal!.reason), {
+          once: true,
+        });
     }
 
     // Per-stream Operation so observability subscribers correlate deltas
@@ -494,8 +489,18 @@ export class OpenAIExecutor extends BaseHarness<"executor"> implements LanguageM
           // textBlockStarted so mapChunk never emits its content
           // events.
           const mapState = tagRouter
-            ? { textBlockStarted: true, toolBlockStartedByIndex, reasoningBlockStarted, reasoningBlockIndex }
-            : { textBlockStarted, toolBlockStartedByIndex, reasoningBlockStarted, reasoningBlockIndex };
+            ? {
+                textBlockStarted: true,
+                toolBlockStartedByIndex,
+                reasoningBlockStarted,
+                reasoningBlockIndex,
+              }
+            : {
+                textBlockStarted,
+                toolBlockStartedByIndex,
+                reasoningBlockStarted,
+                reasoningBlockIndex,
+              };
           for (const delta of mapChunkToAdapterDeltas(chunk, mapState)) {
             if (tagRouter && delta.type === "content-delta") {
               for (const ev of tagRouter.parser.process(delta.delta)) {
@@ -977,20 +982,14 @@ function buildTagRouter(opts: {
  * the structured events don't fire — accepting this trade-off
  * since non-streaming is rare for these use cases).
  */
-function applyTagRouterToChatCompletion(
-  raw: unknown,
-  router: TagRouter,
-): unknown {
+function applyTagRouterToChatCompletion(raw: unknown, router: TagRouter): unknown {
   if (!raw || typeof raw !== "object") return raw;
   const r = raw as { choices?: Array<{ message?: Record<string, unknown> }> };
   const message = r.choices?.[0]?.message;
   if (!message || typeof message.content !== "string") return raw;
   let text = "";
   let reasoning = "";
-  const events = [
-    ...router.parser.process(message.content),
-    ...router.parser.flush(),
-  ];
+  const events = [...router.parser.process(message.content), ...router.parser.flush()];
   for (const ev of events) {
     if (ev.type === "text") {
       text += ev.content;
@@ -1233,9 +1232,7 @@ function imageUrlFromSource(source: MediaSource, mimeType: string | undefined): 
 
 function messagePartFromBlock(block: ContentBlock): LanguageModelMessagePart {
   const pm =
-    block.providerMetadata !== undefined
-      ? { providerMetadata: block.providerMetadata }
-      : {};
+    block.providerMetadata !== undefined ? { providerMetadata: block.providerMetadata } : {};
   switch (block.type) {
     case "text":
       return { type: "text", text: block.text, ...pm };
@@ -1279,9 +1276,7 @@ function buildTools(tree: RenderedTree): ReadonlyArray<LanguageModelTool> {
       name: t.name,
       ...(t.description !== undefined ? { description: t.description } : {}),
       inputSchema: t.inputSchema as Record<string, unknown>,
-      ...(t.providerOptions !== undefined
-        ? { providerOptions: t.providerOptions }
-        : {}),
+      ...(t.providerOptions !== undefined ? { providerOptions: t.providerOptions } : {}),
     }));
 }
 

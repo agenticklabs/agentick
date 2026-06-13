@@ -15,15 +15,9 @@ import type { LanguageModelExecutionResult } from "@agentick/spec-next";
 import type { GenerateContentResponse } from "@google/genai";
 
 import { GoogleExecutor } from "../google-executor.js";
-import {
-  StubGoogleClient,
-  asClient,
-  mkResponse,
-} from "./stub-google-client.js";
+import { StubGoogleClient, asClient, mkResponse } from "./stub-google-client.js";
 
-function responseFor(
-  scripted: LanguageModelExecutionResult | undefined,
-): GenerateContentResponse {
+function responseFor(scripted: LanguageModelExecutionResult | undefined): GenerateContentResponse {
   const text =
     scripted?.output
       .filter((b): b is { type: "text"; text: string } => b.type === "text")
@@ -76,7 +70,7 @@ function streamingChunksFor(
   return [response];
 }
 
-describe("GoogleExecutor — ExecutorProtocol conformance", () =>
+describe("GoogleExecutor — ExecutorProtocol conformance", () => {
   runExecutorConformance(async ({ harnessId, scripted }) => {
     const stub = new StubGoogleClient([
       { kind: "non-streaming", response: responseFor(scripted) },
@@ -91,4 +85,5 @@ describe("GoogleExecutor — ExecutorProtocol conformance", () =>
     });
     await exec.ready;
     return { executor: exec, bus };
-  }));
+  });
+});

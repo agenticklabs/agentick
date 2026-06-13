@@ -213,10 +213,7 @@ export interface LogMetrics {
 export interface EventLog<E, AppendError = never> {
   append(event: E): Effect.Effect<void, AppendError, never>;
   appendBatch(events: ReadonlyArray<E>): Effect.Effect<void, AppendError, never>;
-  read(
-    cursor: Cursor,
-    matcher: CompiledMatcher<E>,
-  ): Stream.Stream<E, CursorEvictedError, never>;
+  read(cursor: Cursor, matcher: CompiledMatcher<E>): Stream.Stream<E, CursorEvictedError, never>;
   hasSubscriberFor(key: EventKey): boolean;
   metrics(): LogMetrics;
 }

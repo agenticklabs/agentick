@@ -17,11 +17,7 @@ import React from "react";
 import { describe, expect, it } from "vitest";
 
 import { MockLanguageModelExecutor } from "@agentick/executor-next";
-import {
-  LocalEventBus,
-  LocalInbox,
-  MemoryJournal,
-} from "@agentick/runtime-next";
+import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
 import type {
   EventBus,
   EventBusFactory,
@@ -33,11 +29,7 @@ import type {
 import { createApp } from "../react.js";
 
 function MinimalAgent() {
-  return React.createElement(
-    "message" as never,
-    { role: "user" },
-    "ping",
-  );
+  return React.createElement("message" as never, { role: "user" }, "ping");
 }
 
 function mkExecutor(): MockLanguageModelExecutor {
@@ -147,9 +139,7 @@ describe("AppHarness substrate slots — factory form (Phase 2)", () => {
       journal: MemoryJournal.factory({ capacity: 100 }),
       inbox: LocalInbox.factory({ idempotencyTtlMs: 1000 }),
     });
-    expect((app as unknown as { journal: OperationJournal }).journal).toBeInstanceOf(
-      MemoryJournal,
-    );
+    expect((app as unknown as { journal: OperationJournal }).journal).toBeInstanceOf(MemoryJournal);
     expect((app as unknown as { inbox: MessageInbox }).inbox).toBeInstanceOf(LocalInbox);
     await app.closeApp();
   });

@@ -47,7 +47,6 @@ import type {
   SpawnContext,
   SpawnInput,
   StateApplyError,
-  StreamEvent,
   TickEndForwardDecision,
   TimelineEntry,
   ToolExecutorProtocol,
@@ -681,8 +680,7 @@ export class SessionHarness<P = unknown>
     const capabilityStreamDefault =
       typeof executorForCall.executeStream === "function" &&
       (targetForCall.capabilities?.supportsStreaming ?? true);
-    const streamForCall =
-      input.stream ?? this.defaultStreaming ?? capabilityStreamDefault;
+    const streamForCall = input.stream ?? this.defaultStreaming ?? capabilityStreamDefault;
 
     // Set up the handle + emit chain BEFORE running the loop so the
     // loop can pump events into it from the first tick.
@@ -754,9 +752,7 @@ export class SessionHarness<P = unknown>
           resultDeferred.resolve(sendResult);
         } else {
           resultDeferred.reject(
-            new Error(
-              `execution ended with outcome=${terminal.outcome}: ${terminal.reason ?? ""}`,
-            ),
+            new Error(`execution ended with outcome=${terminal.outcome}: ${terminal.reason ?? ""}`),
           );
         }
         close();

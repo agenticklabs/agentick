@@ -19,7 +19,6 @@
  * @see docs/proposals/v2/blueprint/03-reconciler-harness.md §Hooks model
  */
 
-import type { ContentBlock } from "../data/content-blocks.js";
 import type { Unsubscribe } from "./inbox.js";
 
 export type { Unsubscribe };

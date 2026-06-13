@@ -113,8 +113,11 @@ const retry: ClientExtension = {
   name: "retry",
   async request(req, next) {
     for (let i = 0; i < 3; i++) {
-      try { return await next(req); }
-      catch (e) { if (i === 2) throw e; }
+      try {
+        return await next(req);
+      } catch (e) {
+        if (i === 2) throw e;
+      }
     }
     throw new Error("unreachable");
   },
@@ -154,10 +157,9 @@ wrappers.
 import { selector } from "@agentick/client-next";
 
 const client = await createClient({
-  transport: selector(
-    [websocket({ url: "wss://..." }), httpTransport({ url: "https://..." })],
-    { policy: "fallback-on-connect-failure" },
-  ),
+  transport: selector([websocket({ url: "wss://..." }), httpTransport({ url: "https://..." })], {
+    policy: "fallback-on-connect-failure",
+  }),
 });
 ```
 
@@ -167,13 +169,10 @@ const client = await createClient({
 import { multiplexer } from "@agentick/transport-multiplexer-next";
 
 const client = await createClient({
-  transport: multiplexer(
-    websocket({ url, auth }),
-    {
-      leader: webLocksLeader("my-app"),
-      bridge: broadcastChannelBridge("my-app"),
-    },
-  ),
+  transport: multiplexer(websocket({ url, auth }), {
+    leader: webLocksLeader("my-app"),
+    bridge: broadcastChannelBridge("my-app"),
+  }),
 });
 ```
 
@@ -189,15 +188,15 @@ Phase 33.B of the v2 implementation plan — see `docs/proposals/v2/STATUS.md` a
 Every claim in this README has a corresponding test, or appears below
 under "Roadmap & known gaps" with an explicit marker.
 
-| Concern | Test file |
-|---|---|
-| `createClient`, `connect`, `close`, request dispatch | `../transport-in-process/src/__tests__/smoke.spec.ts` |
-| Extension `request` middleware composition (outer→inner) | `../transport-in-process/src/__tests__/smoke.spec.ts` |
-| Extension `install()` namespace registration | `../transport-in-process/src/__tests__/smoke.spec.ts` |
-| `onClose` handler LIFO order | `../transport-in-process/src/__tests__/smoke.spec.ts` |
-| `ClientHandlerRegistry` per-event merge kinds (`observer` / `first-non-null-wins` / `any-reconnect-wins`) | `src/__tests__/handler-registry.spec.ts` |
-| `effectMiddleware` Effect↔Promise adapter, error propagation, interleave with Promise middleware | `src/__tests__/effect-middleware.spec.ts` |
-| `client.send(sessionId, input)` shortcut shape equivalence with `client.session(id).send(input)` | `../transport-in-process/src/__tests__/send-shortcut.spec.ts` |
+| Concern                                                                                                   | Test file                                                     |
+| --------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------- |
+| `createClient`, `connect`, `close`, request dispatch                                                      | `../transport-in-process/src/__tests__/smoke.spec.ts`         |
+| Extension `request` middleware composition (outer→inner)                                                  | `../transport-in-process/src/__tests__/smoke.spec.ts`         |
+| Extension `install()` namespace registration                                                              | `../transport-in-process/src/__tests__/smoke.spec.ts`         |
+| `onClose` handler LIFO order                                                                              | `../transport-in-process/src/__tests__/smoke.spec.ts`         |
+| `ClientHandlerRegistry` per-event merge kinds (`observer` / `first-non-null-wins` / `any-reconnect-wins`) | `src/__tests__/handler-registry.spec.ts`                      |
+| `effectMiddleware` Effect↔Promise adapter, error propagation, interleave with Promise middleware          | `src/__tests__/effect-middleware.spec.ts`                     |
+| `client.send(sessionId, input)` shortcut shape equivalence with `client.session(id).send(input)`          | `../transport-in-process/src/__tests__/send-shortcut.spec.ts` |
 
 ## Roadmap & known gaps
 
@@ -210,14 +209,14 @@ under "Roadmap & known gaps" with an explicit marker.
 
 ## Development plan
 
-| Phase | What lands |
-|---|---|
-| 33.B (done) | This package + in-process transport + `ClientProtocol` in spec |
-| 33.C (done) | WebSocket transport |
-| 33.D | Streamable HTTP transport |
-| 33.E | Unix socket transport |
-| 33.F | `@agentick/client-extensions-next` bundle with `/retry`, `/telemetry`, `/cache`, `/offline` subpaths |
-| 33.G | Multiplexer (`@agentick/transport-multiplexer-next`) |
-| 33.H | Devtools + mock |
-| 33.I | MCP-bilingual (`@agentick/mcp-surface-next`, `@agentick/transport-mcp-client-next`) |
-| ADR 34 | Auth subsystem fills `client.auth` |
+| Phase       | What lands                                                                                           |
+| ----------- | ---------------------------------------------------------------------------------------------------- |
+| 33.B (done) | This package + in-process transport + `ClientProtocol` in spec                                       |
+| 33.C (done) | WebSocket transport                                                                                  |
+| 33.D        | Streamable HTTP transport                                                                            |
+| 33.E        | Unix socket transport                                                                                |
+| 33.F        | `@agentick/client-extensions-next` bundle with `/retry`, `/telemetry`, `/cache`, `/offline` subpaths |
+| 33.G        | Multiplexer (`@agentick/transport-multiplexer-next`)                                                 |
+| 33.H        | Devtools + mock                                                                                      |
+| 33.I        | MCP-bilingual (`@agentick/mcp-surface-next`, `@agentick/transport-mcp-client-next`)                  |
+| ADR 34      | Auth subsystem fills `client.auth`                                                                   |

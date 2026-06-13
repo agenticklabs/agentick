@@ -25,7 +25,6 @@ import type { ProviderToolOptions, RenderedTree } from "../data/rendered-tree.js
 import type { ExecutionTarget, LanguageModelTarget } from "../data/execution-target.js";
 import type {
   ExecutionResult,
-  ExecutorError,
   ExecutorTerminal,
   LanguageModelExecutionResult,
 } from "../data/execution-result.js";
@@ -273,6 +272,16 @@ export interface ExecutorProtocol<
   TResult extends ExecutionResult = ExecutionResult,
 > {
   /**
+   * Resolves when the executor's substrate is initialized and the
+   * executor is ready to accept calls. Mirrors the `.ready` shape on
+   * every other v2 harness (`gateway.ready`, `app.ready`, etc.). Callers
+   * MUST await this before invoking `project` / `execute` / `executeStream`
+   * — `BaseHarness` guarantees `ready` resolves before substrate
+   * operations are safe.
+   */
+  readonly ready: Promise<void>;
+
+  /**
    * IR → target input projection. Pure (deterministic for the same
    * inputs). The first phase of an execution.
    *
@@ -394,7 +403,16 @@ export interface ExecutorFactoryDeps {
  */
 export interface ExecutorFactory {
   readonly executorFactory: true;
-  (deps: ExecutorFactoryDeps): LanguageModelExecutor;
+  /**
+   * Construct a `LanguageModelExecutor`. When invoked by a parent
+   * harness (`AppHarness`), `deps` is supplied so the executor shares
+   * the parent's substrate. When invoked standalone (tests, embedded
+   * use), `deps` is omitted and the factory falls back to either
+   * option-provided substrate or a freshly-constructed in-process
+   * substrate. Every shipped factory (`openai`, `anthropic`, `google`,
+   * `aiSdk`) honors this contract.
+   */
+  (deps?: ExecutorFactoryDeps): LanguageModelExecutor;
 }
 
 /** Type guard: distinguishes a factory from a constructed executor. */

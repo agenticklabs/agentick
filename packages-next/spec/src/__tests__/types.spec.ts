@@ -283,7 +283,7 @@ describe("@agentick/spec-next — structural smoke tests", () => {
         "~standard": {
           version: 1,
           vendor: "test",
-          validate: (value: unknown) => ({ value: { ok: true as const } }),
+          validate: (_value: unknown) => ({ value: { ok: true as const } }),
         },
       };
       expect(fakeSchema["~standard"].version).toBe(1);

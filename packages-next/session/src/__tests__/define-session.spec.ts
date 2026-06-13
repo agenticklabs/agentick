@@ -88,9 +88,9 @@ describe("defineSession — defaults", () => {
       bus: new LocalEventBus(),
       inbox: new LocalInbox(),
     });
-    await expect(
-      session.spawn({ agent: null } as never),
-    ).rejects.toMatchObject({ _tag: "ExecutionFailed" });
+    await expect(session.spawn({ agent: null } as never)).rejects.toMatchObject({
+      _tag: "ExecutionFailed",
+    });
     await expect(session.dispatch("anything", {})).rejects.toMatchObject({
       _tag: "ExecutionFailed",
     });

@@ -14,13 +14,9 @@ import type {
   OperationJournal,
 } from "@agentick/spec-next";
 
-import {
-  AnthropicExecutor,
-  type AnthropicExecutorOptions,
-} from "./anthropic-executor.js";
+import { AnthropicExecutor, type AnthropicExecutorOptions } from "./anthropic-executor.js";
 
-export interface AnthropicFactoryOptions
-  extends Omit<AnthropicExecutorOptions, "model"> {
+export interface AnthropicFactoryOptions extends Omit<AnthropicExecutorOptions, "model"> {
   readonly journal?: OperationJournal;
   readonly bus?: EventBus;
   readonly inbox?: MessageInbox;
@@ -29,10 +25,7 @@ export interface AnthropicFactoryOptions
 
 let counter = 0;
 
-export function anthropic(
-  modelId: string,
-  options: AnthropicFactoryOptions = {},
-): ExecutorFactory {
+export function anthropic(modelId: string, options: AnthropicFactoryOptions = {}): ExecutorFactory {
   const factory = (deps?: ExecutorFactoryDeps): AnthropicExecutor => {
     const scopeId = deps?.scopeId ?? options.scopeId ?? `anthropic:${++counter}`;
     const journal = deps?.journal ?? options.journal ?? new MemoryJournal();

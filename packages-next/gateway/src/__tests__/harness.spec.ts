@@ -13,11 +13,11 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { Chunk, Effect, Stream } from "effect";
+import { Effect, Stream } from "effect";
 import { LocalEventBus, MemoryJournal, LocalInbox } from "@agentick/runtime-next";
 import type { ProtocolEvent } from "@agentick/spec-next";
 
-import { GatewayHarness, createGateway } from "../index.js";
+import { createGateway } from "../index.js";
 
 /**
  * Minimal stub reconciler + executor + loop for AppHarness construction.

@@ -13,12 +13,7 @@
  */
 
 import type { Effect } from "effect";
-import type {
-  MessageAck,
-  MessageEnvelope,
-  MessageEnvelopeInput,
-  MessageHandler,
-} from "../data/inbox.js";
+import type { MessageAck, MessageEnvelopeInput, MessageHandler } from "../data/inbox.js";
 import type { InboxError, MessageHandlerError } from "../data/errors.js";
 
 /**

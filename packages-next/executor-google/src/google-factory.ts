@@ -25,10 +25,7 @@ export interface GoogleFactoryOptions extends Omit<GoogleExecutorOptions, "model
 
 let counter = 0;
 
-export function google(
-  modelId: string,
-  options: GoogleFactoryOptions = {},
-): ExecutorFactory {
+export function google(modelId: string, options: GoogleFactoryOptions = {}): ExecutorFactory {
   const factory = (deps?: ExecutorFactoryDeps): GoogleExecutor => {
     const scopeId = deps?.scopeId ?? options.scopeId ?? `google:${++counter}`;
     const journal = deps?.journal ?? options.journal ?? new MemoryJournal();

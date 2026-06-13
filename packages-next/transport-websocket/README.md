@@ -132,6 +132,7 @@ const transport = websocket({
 ```
 
 On connection drop:
+
 1. Transport enters `state: "reconnecting"`
 2. Exponential backoff with full jitter (per AWS Builder's Library
    "Timeouts, retries, and backoff with jitter")
@@ -225,14 +226,14 @@ Phase 33.C of the v2 implementation plan — see
 
 ## Development plan
 
-| Step | Lands when |
-|---|---|
-| Phase 33.C MVP | This commit — `a14670c8` |
-| 33.C hardening pass | After Phase 33.D + 33.E so backpressure design covers all transports; adds bounded streams, real `session/send` test with a model adapter |
-| Compression / max-payload tuning | When a real workload surfaces the need |
-| `GatewayExtension` wrapper | When the shared `@agentick/gateway-rpc-adapter-next` lands (33.D extraction) |
-| Session affinity | When ADR 29 Phase D cluster substrate lands |
-| Bilingual MCP test | Phase 33.I (`@agentick/mcp-surface-next`) |
+| Step                             | Lands when                                                                                                                                |
+| -------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| Phase 33.C MVP                   | This commit — `a14670c8`                                                                                                                  |
+| 33.C hardening pass              | After Phase 33.D + 33.E so backpressure design covers all transports; adds bounded streams, real `session/send` test with a model adapter |
+| Compression / max-payload tuning | When a real workload surfaces the need                                                                                                    |
+| `GatewayExtension` wrapper       | When the shared `@agentick/gateway-rpc-adapter-next` lands (33.D extraction)                                                              |
+| Session affinity                 | When ADR 29 Phase D cluster substrate lands                                                                                               |
+| Bilingual MCP test               | Phase 33.I (`@agentick/mcp-surface-next`)                                                                                                 |
 
 ## Verified by
 
@@ -242,12 +243,12 @@ test** sit in the same checklist with an `✗` marker — they document
 behavior the design intends but tests don't yet exercise. The
 discipline: a `✓` claim has a test or it doesn't ship with the `✓`.
 
-| Concern | Test file |
-|---|---|
-| End-to-end smoke (WS connect, ping, listApps, multiplexed RPCs) | `src/__tests__/smoke.spec.ts` |
-| Reconnect state machine | `src/__tests__/reconnect.spec.ts` |
+| Concern                                                                | Test file                                |
+| ---------------------------------------------------------------------- | ---------------------------------------- |
+| End-to-end smoke (WS connect, ping, listApps, multiplexed RPCs)        | `src/__tests__/smoke.spec.ts`            |
+| Reconnect state machine                                                | `src/__tests__/reconnect.spec.ts`        |
 | Wire conformance (envelope roundtrips, validator integration, batches) | `src/__tests__/wire-conformance.spec.ts` |
-| Subprotocol enforcement (`agentick-rpc-v1`-only) | `src/__tests__/security.spec.ts` |
-| Origin validation (`allowedOrigins`) | `src/__tests__/security.spec.ts` |
-| `notifications/cancelled` client emit + server handle | `src/__tests__/cancellation.spec.ts` |
-| Custom WebSocket constructor (`ws` library) | `src/__tests__/custom-ws-ctor.spec.ts` |
+| Subprotocol enforcement (`agentick-rpc-v1`-only)                       | `src/__tests__/security.spec.ts`         |
+| Origin validation (`allowedOrigins`)                                   | `src/__tests__/security.spec.ts`         |
+| `notifications/cancelled` client emit + server handle                  | `src/__tests__/cancellation.spec.ts`     |
+| Custom WebSocket constructor (`ws` library)                            | `src/__tests__/custom-ws-ctor.spec.ts`   |

@@ -3,14 +3,13 @@ import React, { useEffect } from "react";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
 import { ReconcilerHarness } from "../harness/reconciler-harness.js";
 import { InMemoryDataBridge } from "@agentick/reconciler-next";
-import { stubBridges, mockKnobsHarness } from "@agentick/reconciler-next";
+import { stubBridges } from "@agentick/reconciler-next";
 import { useData } from "../react/hooks/use-data.js";
 // useKnob moved to @agentick/knobs-next/react per ADR 27.
 // useKnob's integration coverage lives in
 // packages/knobs/src/__tests__/integration-with-reconciler.spec.tsx.
 import { useLoopControl } from "../react/hooks/use-loop-control.js";
 import { useSession } from "../react/hooks/use-session.js";
-import { flush } from "../testing/flush.js";
 import type { HookBridges } from "@agentick/spec-next";
 
 async function makeHarness() {

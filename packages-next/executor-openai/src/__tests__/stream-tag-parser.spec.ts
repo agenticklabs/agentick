@@ -9,10 +9,7 @@
 
 import { describe, it, expect, vi } from "vitest";
 
-import {
-  StreamTagParser,
-  type StreamTagEvent,
-} from "../stream-tag-parser.js";
+import { StreamTagParser, type StreamTagEvent } from "../stream-tag-parser.js";
 
 function process(parser: StreamTagParser, chunks: string[]): StreamTagEvent[] {
   const out: StreamTagEvent[] = [];
@@ -24,17 +21,13 @@ function process(parser: StreamTagParser, chunks: string[]): StreamTagEvent[] {
 describe("StreamTagParser — basic passthrough", () => {
   it("emits text for content with no tags", () => {
     const p = new StreamTagParser({ tags: { citation: {} } });
-    expect(process(p, ["hello world"])).toEqual([
-      { type: "text", content: "hello world" },
-    ]);
+    expect(process(p, ["hello world"])).toEqual([{ type: "text", content: "hello world" }]);
   });
 
   it("ignores unregistered tags (passes them through as text)", () => {
     const p = new StreamTagParser({ tags: { citation: {} } });
     const events = process(p, ["<unknown>hello</unknown>"]);
-    expect(events).toEqual([
-      { type: "text", content: "<unknown>hello</unknown>" },
-    ]);
+    expect(events).toEqual([{ type: "text", content: "<unknown>hello</unknown>" }]);
   });
 
   it("buffers across empty chunks", () => {
@@ -169,9 +162,7 @@ describe("StreamTagParser — split across chunks", () => {
     const p = new StreamTagParser({ tags: { citation: {} } });
     const events = process(p, ["<citation>part1 ", "part2 ", "part3</citation>"]);
     const deltas = events.filter((e) => e.type === "block-delta");
-    expect(deltas.map((d) => (d as { delta: string }).delta).join("")).toBe(
-      "part1 part2 part3",
-    );
+    expect(deltas.map((d) => (d as { delta: string }).delta).join("")).toBe("part1 part2 part3");
     const summary = events.find((e) => e.type === "block");
     expect((summary as { content: string }).content).toBe("part1 part2 part3");
   });
@@ -205,9 +196,7 @@ describe("StreamTagParser — non-matching close tags", () => {
 describe("StreamTagParser — multiple registered tags", () => {
   it("intercepts each registered tag independently", () => {
     const p = new StreamTagParser({ tags: { citation: {}, done: {} } });
-    const events = process(p, [
-      "first <citation>x</citation> mid <done/> end",
-    ]);
+    const events = process(p, ["first <citation>x</citation> mid <done/> end"]);
     const blocks = events.filter((e) => e.type === "block");
     expect(blocks).toHaveLength(2);
     expect((blocks[0] as { tag: string }).tag).toBe("citation");

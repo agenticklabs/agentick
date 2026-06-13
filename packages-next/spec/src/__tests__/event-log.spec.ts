@@ -36,8 +36,7 @@ describe("Cursor", () => {
 
 describe("CompiledMatcher<E>", () => {
   it("is a generic per-event predicate", () => {
-    const protocolMatcher: CompiledMatcher<ProtocolEvent> = (e) =>
-      e.surface === "executor";
+    const protocolMatcher: CompiledMatcher<ProtocolEvent> = (e) => e.surface === "executor";
     const stringMatcher: CompiledMatcher<string> = (s) => s.startsWith("ok:");
     expect(stringMatcher("ok:1")).toBe(true);
     expect(stringMatcher("err:1")).toBe(false);

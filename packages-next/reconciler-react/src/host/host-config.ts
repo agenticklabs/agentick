@@ -74,7 +74,7 @@ type HC = ReactReconciler.HostConfig<
 >;
 
 export function createHostConfig(deps: HostConfigDeps): HC {
-  const { container, idPrefix, onUncaughtError, onCaughtError, onRecoverableError } = deps;
+  const { idPrefix, onUncaughtError, onCaughtError, onRecoverableError } = deps;
   void onUncaughtError;
   void onCaughtError;
   void onRecoverableError;

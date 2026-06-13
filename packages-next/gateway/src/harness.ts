@@ -30,19 +30,15 @@ import type {
   AppHarnessProtocol,
   CreateAppInput,
   EventBus,
-  EventBusFactory,
   EventQuery,
   GatewayError,
   GatewayHarnessProtocol,
-  GatewaySubstrateParent,
   JournalingPolicy,
   MessageEnvelope,
   MessageHandlerError,
   MessageInbox,
-  MessageInboxFactory,
   Operation,
   OperationJournal,
-  OperationJournalFactory,
   ProtocolEvent,
   SubscribeOptions,
 } from "@agentick/spec-next";
@@ -60,8 +56,7 @@ import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next
  * `options` opaque (no App-package dep in spec); this alias narrows
  * to the real shape at the gateway impl boundary.
  */
-export interface CreateGatewayAppInput<P = unknown>
-  extends Omit<CreateAppInput<P>, "options"> {
+export interface CreateGatewayAppInput<P = unknown> extends Omit<CreateAppInput<P>, "options"> {
   /**
    * App construction options sans `rootElement` (supplied separately
    * on this input) and sans `appId` (supplied at the gateway level).
@@ -80,15 +75,7 @@ export interface GatewayHarnessOptions extends BaseHarnessOptions {
 
 const SURFACE = "gateway" as const;
 
-type GatewayInboxMessage = {
-  readonly type: "gateway:noop";
-  readonly payload: undefined;
-};
-
-export class GatewayHarness
-  extends BaseHarness<typeof SURFACE>
-  implements GatewayHarnessProtocol
-{
+export class GatewayHarness extends BaseHarness<typeof SURFACE> implements GatewayHarnessProtocol {
   private readonly _apps = new Map<string, AppHarnessProtocol>();
   private gatewayClosed = false;
 
@@ -98,9 +85,13 @@ export class GatewayHarness
 
   constructor(options: GatewayHarnessOptions = {}) {
     const gatewayId = options.gatewayId ?? `gateway:${ulid()}`;
-    const journal = options.journal instanceof Function ? undefined : (options.journal as OperationJournal | undefined);
+    const journal =
+      options.journal instanceof Function
+        ? undefined
+        : (options.journal as OperationJournal | undefined);
     const bus = options.bus instanceof Function ? undefined : (options.bus as EventBus | undefined);
-    const inbox = options.inbox instanceof Function ? undefined : (options.inbox as MessageInbox | undefined);
+    const inbox =
+      options.inbox instanceof Function ? undefined : (options.inbox as MessageInbox | undefined);
 
     // Merge close-op policy override into adopter-supplied policy.
     // `gateway:command:close-gateway` envelopes route bus-only — same
@@ -227,10 +218,7 @@ export class GatewayHarness
     return this.closeGateway();
   }
 
-  events(
-    filter: EventQuery = {},
-    options: SubscribeOptions = {},
-  ): AsyncIterable<ProtocolEvent> {
+  events(filter: EventQuery = {}, options: SubscribeOptions = {}): AsyncIterable<ProtocolEvent> {
     const bus = this.bus;
     return {
       [Symbol.asyncIterator]: () => makeBusAsyncIterator(bus, filter, options),

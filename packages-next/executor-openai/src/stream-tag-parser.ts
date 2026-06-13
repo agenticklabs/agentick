@@ -376,11 +376,7 @@ export class StreamTagParser {
     });
   }
 
-  private callHandler(
-    tag: string,
-    content: string,
-    attrs: Record<string, string>,
-  ): void {
+  private callHandler(tag: string, content: string, attrs: Record<string, string>): void {
     this.tags.get(tag)?.onContent?.(content, attrs);
   }
 

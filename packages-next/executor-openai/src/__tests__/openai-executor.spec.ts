@@ -330,7 +330,7 @@ describe("OpenAIExecutor — customBlocks", () => {
       {
         kind: "streaming",
         chunks: [
-          mkContentChunk({ delta: 'Found ' }),
+          mkContentChunk({ delta: "Found " }),
           mkContentChunk({ delta: '<citation source="wiki">Paris</citation>' }),
           mkContentChunk({ delta: " in the docs" }),
           mkFinishChunk({

@@ -33,15 +33,11 @@ export class StubGoogleClient {
   constructor(private readonly sequence: ReadonlyArray<CannedResponse>) {}
 
   readonly models = {
-    generateContent: (
-      params: GenerateContentParameters,
-    ): Promise<GenerateContentResponse> => {
+    generateContent: (params: GenerateContentParameters): Promise<GenerateContentResponse> => {
       this.calls.push({ params, streaming: false });
       const picked = this.pick(false);
       if (picked.kind !== "non-streaming") {
-        return Promise.reject(
-          new Error("StubGoogleClient: expected non-streaming response"),
-        );
+        return Promise.reject(new Error("StubGoogleClient: expected non-streaming response"));
       }
       return Promise.resolve(picked.response);
     },
@@ -51,9 +47,7 @@ export class StubGoogleClient {
       this.calls.push({ params, streaming: true });
       const picked = this.pick(true);
       if (picked.kind !== "streaming") {
-        return Promise.reject(
-          new Error("StubGoogleClient: expected streaming response"),
-        );
+        return Promise.reject(new Error("StubGoogleClient: expected streaming response"));
       }
       return Promise.resolve(iterableFrom(picked.chunks));
     },
@@ -153,10 +147,9 @@ export function mkResponse(opts: MkResponseOpts): GenerateContentResponse {
     usageMetadata: {
       promptTokenCount: u.promptTokenCount ?? 4,
       candidatesTokenCount: u.candidatesTokenCount ?? 2,
-      totalTokenCount: u.totalTokenCount ?? (u.promptTokenCount ?? 4) + (u.candidatesTokenCount ?? 2),
-      ...(u.thoughtsTokenCount !== undefined
-        ? { thoughtsTokenCount: u.thoughtsTokenCount }
-        : {}),
+      totalTokenCount:
+        u.totalTokenCount ?? (u.promptTokenCount ?? 4) + (u.candidatesTokenCount ?? 2),
+      ...(u.thoughtsTokenCount !== undefined ? { thoughtsTokenCount: u.thoughtsTokenCount } : {}),
       ...(u.cachedContentTokenCount !== undefined
         ? { cachedContentTokenCount: u.cachedContentTokenCount }
         : {}),
@@ -230,10 +223,9 @@ export function mkFinishChunk(opts: {
     usageMetadata: {
       promptTokenCount: u.promptTokenCount ?? 4,
       candidatesTokenCount: u.candidatesTokenCount ?? 2,
-      totalTokenCount: u.totalTokenCount ?? (u.promptTokenCount ?? 4) + (u.candidatesTokenCount ?? 2),
-      ...(u.thoughtsTokenCount !== undefined
-        ? { thoughtsTokenCount: u.thoughtsTokenCount }
-        : {}),
+      totalTokenCount:
+        u.totalTokenCount ?? (u.promptTokenCount ?? 4) + (u.candidatesTokenCount ?? 2),
+      ...(u.thoughtsTokenCount !== undefined ? { thoughtsTokenCount: u.thoughtsTokenCount } : {}),
       ...(u.cachedContentTokenCount !== undefined
         ? { cachedContentTokenCount: u.cachedContentTokenCount }
         : {}),

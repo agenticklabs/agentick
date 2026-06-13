@@ -425,9 +425,7 @@ describe("Phase B — publish(executor:delta), 1 subscriber, unbatched baseline"
 
   bench("publish executor:delta (1 subscriber, batching OFF)", async () => {
     if (!started) {
-      consumer = Effect.runFork(
-        Stream.runDrain(bus.subscribe({ surface: "executor" })),
-      );
+      consumer = Effect.runFork(Stream.runDrain(bus.subscribe({ surface: "executor" })));
       await new Promise((r) => setImmediate(r));
       started = true;
     }
@@ -447,9 +445,7 @@ describe("Phase B — publish(executor:delta), 1 subscriber, default batching", 
 
   bench("publish executor:delta (1 subscriber, batching ON)", async () => {
     if (!started) {
-      consumer = Effect.runFork(
-        Stream.runDrain(bus.subscribe({ surface: "executor" })),
-      );
+      consumer = Effect.runFork(Stream.runDrain(bus.subscribe({ surface: "executor" })));
       await new Promise((r) => setImmediate(r));
       started = true;
     }
@@ -465,18 +461,17 @@ describe("Phase B — publish(executor:delta), 3 subscribers, unbatched baseline
 
   afterAll(async () => {
     await Effect.runPromise(
-      Effect.all(consumers.map((f) => Fiber.interrupt(f)), { discard: true }),
+      Effect.all(
+        consumers.map((f) => Fiber.interrupt(f)),
+        { discard: true },
+      ),
     );
   });
 
   bench("publish executor:delta (3 subscribers, batching OFF)", async () => {
     if (!started) {
       for (let i = 0; i < 3; i++) {
-        consumers.push(
-          Effect.runFork(
-            Stream.runDrain(bus.subscribe({ surface: "executor" })),
-          ),
-        );
+        consumers.push(Effect.runFork(Stream.runDrain(bus.subscribe({ surface: "executor" }))));
       }
       await new Promise((r) => setImmediate(r));
       started = true;
@@ -493,18 +488,17 @@ describe("Phase B — publish(executor:delta), 3 subscribers, default batching",
 
   afterAll(async () => {
     await Effect.runPromise(
-      Effect.all(consumers.map((f) => Fiber.interrupt(f)), { discard: true }),
+      Effect.all(
+        consumers.map((f) => Fiber.interrupt(f)),
+        { discard: true },
+      ),
     );
   });
 
   bench("publish executor:delta (3 subscribers, batching ON)", async () => {
     if (!started) {
       for (let i = 0; i < 3; i++) {
-        consumers.push(
-          Effect.runFork(
-            Stream.runDrain(bus.subscribe({ surface: "executor" })),
-          ),
-        );
+        consumers.push(Effect.runFork(Stream.runDrain(bus.subscribe({ surface: "executor" }))));
       }
       await new Promise((r) => setImmediate(r));
       started = true;
@@ -535,9 +529,7 @@ describe("Phase B — publishBatch(8 events), 1 subscriber", () => {
 
   bench("publishBatch 8 events, 1 subscriber", async () => {
     if (!started) {
-      consumer = Effect.runFork(
-        Stream.runDrain(bus.subscribe({ surface: "executor" })),
-      );
+      consumer = Effect.runFork(Stream.runDrain(bus.subscribe({ surface: "executor" })));
       await new Promise((r) => setImmediate(r));
       started = true;
     }
@@ -559,9 +551,7 @@ describe("Phase B — equivalent 8x publish(), 1 subscriber, no batching", () =>
 
   bench("8x publish(), 1 subscriber, no batching", async () => {
     if (!started) {
-      consumer = Effect.runFork(
-        Stream.runDrain(bus.subscribe({ surface: "executor" })),
-      );
+      consumer = Effect.runFork(Stream.runDrain(bus.subscribe({ surface: "executor" })));
       await new Promise((r) => setImmediate(r));
       started = true;
     }
@@ -585,17 +575,13 @@ async function runEndToEnd(bus: LocalEventBus, count: number, subscriberCount: n
   // then completes. Bench resolves when all subscribers + the publisher
   // loop have finished.
   const consumerPromises = Array.from({ length: subscriberCount }, () =>
-    Effect.runPromise(
-      Stream.runDrain(Stream.take(bus.subscribe({ surface: "executor" }), count)),
-    ),
+    Effect.runPromise(Stream.runDrain(Stream.take(bus.subscribe({ surface: "executor" }), count))),
   );
   // Give subscribers a tick to attach before producer starts.
   await new Promise((r) => setImmediate(r));
 
   for (let i = 0; i < count; i++) {
-    await Effect.runPromise(
-      bus.append(mkEvent(`e-${i}`, { surface: "executor", phase: "delta" })),
-    );
+    await Effect.runPromise(bus.append(mkEvent(`e-${i}`, { surface: "executor", phase: "delta" })));
   }
   await Promise.all(consumerPromises);
 }

@@ -21,13 +21,13 @@
     "dist"
   ],
   "type": "module",
-  "main": "src/index.ts",
   "sideEffects": [
     "./src/index.ts",
     "./src/augment.ts",
     "./dist/index.js",
     "./dist/augment.js"
   ],
+  "main": "src/index.ts",
   "exports": {
     ".": {
       "types": "./src/index.ts",
@@ -56,7 +56,10 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "oxlint src/",
+    "format:check": "oxfmt --check src/",
+    "clean": "rm -rf dist tsconfig.build.tsbuildinfo"
   },
   "dependencies": {
     "@agentick/reconciler-next": "workspace:*",
@@ -71,6 +74,8 @@
     "react": "^19.0.0"
   },
   "peerDependenciesMeta": {
-    "react": { "optional": true }
+    "react": {
+      "optional": true
+    }
   }
 }

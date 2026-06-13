@@ -14,11 +14,7 @@ import { Effect, Stream, Chunk } from "effect";
 import { describe, expect, it } from "vitest";
 
 import { MockLanguageModelExecutor } from "@agentick/executor-next";
-import {
-  LocalEventBus,
-  LocalInbox,
-  MemoryJournal,
-} from "@agentick/runtime-next";
+import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
 import type {
   EventBus,
   EventBusFactory,
@@ -98,9 +94,7 @@ describe("createSession substrate slots — factory at session level", () => {
     expect(seenParents[0]!.id).toMatch(/^session:/);
     // Parent shell's `.bus` is the APP'S bus — what factories wrap to
     // get fan-in to the app level.
-    expect(seenParents[0]!.appBus).toBe(
-      (app as unknown as { bus: EventBus }).bus,
-    );
+    expect(seenParents[0]!.appBus).toBe((app as unknown as { bus: EventBus }).bus);
     void session;
     await app.closeApp();
   });
@@ -116,12 +110,7 @@ describe("createSession substrate slots — factory at session level", () => {
 
     // Subscribe to APP bus, capture envelopes.
     const appEventsFiber = Effect.runFork(
-      Stream.runCollect(
-        Stream.take(
-          (app as unknown as { bus: EventBus }).bus.subscribe({}),
-          1,
-        ),
-      ),
+      Stream.runCollect(Stream.take((app as unknown as { bus: EventBus }).bus.subscribe({}), 1)),
     );
     await new Promise((r) => setImmediate(r));
 
@@ -159,12 +148,10 @@ describe("createSession substrate slots — factory at session level", () => {
     // Subscribe at SESSION level.
     const sessionSeen: ProtocolEvent[] = [];
     const sessionFiber = Effect.runFork(
-      Stream.runForEach(
-        sessionBus.subscribe({ name: { exact: "test:from-app" } }),
-        (e) =>
-          Effect.sync(() => {
-            sessionSeen.push(e);
-          }),
+      Stream.runForEach(sessionBus.subscribe({ name: { exact: "test:from-app" } }), (e) =>
+        Effect.sync(() => {
+          sessionSeen.push(e);
+        }),
       ),
     );
     await new Promise((r) => setImmediate(r));
@@ -236,12 +223,10 @@ describe("createSession substrate slots — factory at session level", () => {
     // App-level subscriber sees events from BOTH tenants (fan-in).
     const appSeen: string[] = [];
     const appFiber = Effect.runFork(
-      Stream.runForEach(
-        appBus.subscribe({ name: { exact: "tenant:event" } }),
-        (e) =>
-          Effect.sync(() => {
-            appSeen.push(String((e.scope as { tenant?: string }).tenant ?? "?"));
-          }),
+      Stream.runForEach(appBus.subscribe({ name: { exact: "tenant:event" } }), (e) =>
+        Effect.sync(() => {
+          appSeen.push(String((e.scope as { tenant?: string }).tenant ?? "?"));
+        }),
       ),
     );
     await new Promise((r) => setImmediate(r));
@@ -319,8 +304,7 @@ describe("createSession close-op semantics (ADR 31 Option G)", () => {
 
 describe("createSession input — new fields from ADR 31 Phase 3", () => {
   it("rootElement override changes the agent for this session", async () => {
-    const OtherAgent = () =>
-      React.createElement("message" as never, { role: "user" }, "alt");
+    const OtherAgent = () => React.createElement("message" as never, { role: "user" }, "alt");
     const app = await createApp(React.createElement(MinimalAgent), {
       executor: mkExecutor(),
       target: mkTarget(),
@@ -357,8 +341,7 @@ describe("createSession input — new fields from ADR 31 Phase 3", () => {
     const session = await app.createSession({
       parentSessionId: "parent-xyz",
     });
-    const stored = (session as unknown as { parentSessionId: string | undefined })
-      .parentSessionId;
+    const stored = (session as unknown as { parentSessionId: string | undefined }).parentSessionId;
     expect(stored).toBe("parent-xyz");
     await app.closeApp();
   });

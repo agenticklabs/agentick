@@ -153,10 +153,7 @@ export interface GoogleExecutorOptions {
 export interface CustomBlockDefinition {
   readonly tag?: string;
   readonly onStart?: (attrs: Readonly<Record<string, string>>) => void;
-  readonly onContent?: (
-    content: string,
-    attrs: Readonly<Record<string, string>>,
-  ) => void;
+  readonly onContent?: (content: string, attrs: Readonly<Record<string, string>>) => void;
   readonly onSelfClosing?: (attrs: Readonly<Record<string, string>>) => void;
 }
 
@@ -177,10 +174,7 @@ const DEFAULT_MODEL = "gemini-2.5-flash";
 // GoogleExecutor
 // ============================================================================
 
-export class GoogleExecutor
-  extends BaseHarness<"executor">
-  implements LanguageModelExecutor
-{
+export class GoogleExecutor extends BaseHarness<"executor"> implements LanguageModelExecutor {
   readonly family = "language-model" as const;
   readonly target: ExecutionTarget;
 
@@ -257,9 +251,7 @@ export class GoogleExecutor
     );
   }
 
-  executeStream(
-    input: ExecuteInput<LanguageModelInput>,
-  ): ExecutorStream<GenerateContentResponse> {
+  executeStream(input: ExecuteInput<LanguageModelInput>): ExecutorStream<GenerateContentResponse> {
     const queue: AdapterDelta[] = [];
     const resolvers: Array<(r: IteratorResult<AdapterDelta>) => void> = [];
     let done = false;
@@ -273,22 +265,19 @@ export class GoogleExecutor
     if (input.signal) {
       if (input.signal.aborted) controller.abort(input.signal.reason);
       else
-        input.signal.addEventListener(
-          "abort",
-          () => controller.abort(input.signal!.reason),
-          { once: true },
-        );
+        input.signal.addEventListener("abort", () => controller.abort(input.signal!.reason), {
+          once: true,
+        });
     }
 
     const executionId = input.scope?.executionId ?? `exec:${ulid()}`;
-    const streamOp: Operation<ExecuteInput<LanguageModelInput>, GenerateContentResponse> =
-      {
-        opId: `executor:executeStream:${executionId}:${ulid()}`,
-        surface: "executor",
-        name: "executor:command:execute",
-        scope: input.scope ?? { executionId },
-        input,
-      };
+    const streamOp: Operation<ExecuteInput<LanguageModelInput>, GenerateContentResponse> = {
+      opId: `executor:executeStream:${executionId}:${ulid()}`,
+      surface: "executor",
+      name: "executor:command:execute",
+      scope: input.scope ?? { executionId },
+      input,
+    };
 
     const emit = (delta: AdapterDelta): void => {
       if (done) return;
@@ -308,11 +297,7 @@ export class GoogleExecutor
 
     void (async () => {
       try {
-        const params = toGoogleParams(
-          input.targetInput,
-          input.target,
-          this.defaultModel,
-        );
+        const params = toGoogleParams(input.targetInput, input.target, this.defaultModel);
 
         const stream = await this.client.models.generateContentStream({
           ...params,
@@ -486,8 +471,7 @@ export class GoogleExecutor
               const callId = fc.id ?? `call_${ulid()}`;
               const name = fc.name ?? "";
               const args = (fc.args ?? {}) as Record<string, unknown>;
-              const signature = (part as { thoughtSignature?: string })
-                .thoughtSignature;
+              const signature = (part as { thoughtSignature?: string }).thoughtSignature;
               blockIndex += 1;
               accum.recordToolCall({
                 callId,
@@ -672,11 +656,7 @@ export class GoogleExecutor
       this.inFlight.set(executionId, entry);
 
       try {
-        const params = toGoogleParams(
-          input.targetInput,
-          input.target,
-          this.defaultModel,
-        );
+        const params = toGoogleParams(input.targetInput, input.target, this.defaultModel);
         const wantStream =
           this.streamByDefault && (input.target.capabilities?.supportsStreaming ?? true);
 
@@ -699,16 +679,15 @@ export class GoogleExecutor
     op: Operation<unknown, unknown> | undefined,
   ): Effect.Effect<GenerateContentResponse, ExecuteError, never> {
     return Effect.gen(this, function* () {
-      const stream = yield* Effect.tryPromise<
-        AsyncIterable<GenerateContentResponse>,
-        ExecuteError
-      >({
-        try: () =>
-          this.client.models.generateContentStream(params) as unknown as Promise<
-            AsyncIterable<GenerateContentResponse>
-          >,
-        catch: (cause): ExecuteError => mapExecuteError(cause),
-      });
+      const stream = yield* Effect.tryPromise<AsyncIterable<GenerateContentResponse>, ExecuteError>(
+        {
+          try: () =>
+            this.client.models.generateContentStream(params) as unknown as Promise<
+              AsyncIterable<GenerateContentResponse>
+            >,
+          catch: (cause): ExecuteError => mapExecuteError(cause),
+        },
+      );
 
       const iterator = stream[Symbol.asyncIterator]();
       const accum = new GoogleStreamAccumulator();
@@ -894,10 +873,7 @@ function applyTagRouterToResponse(raw: unknown, router: TagRouter): unknown {
   for (const part of candidate.content.parts) {
     if (typeof part.text === "string" && !(part as { thought?: boolean }).thought) {
       let cleaned = "";
-      const events = [
-        ...router.parser.process(part.text),
-        ...router.parser.flush(),
-      ];
+      const events = [...router.parser.process(part.text), ...router.parser.flush()];
       for (const ev of events) {
         if (ev.type === "text") cleaned += ev.content;
         else if (ev.type === "block-delta") {
@@ -926,8 +902,7 @@ function toGoogleParams(
   defaultModel: string | undefined,
 ): GenerateContentParameters {
   const { systemInstruction, contents } = toGoogleContents(input.messages);
-  const tools =
-    input.tools && input.tools.length > 0 ? toGoogleTools(input.tools) : undefined;
+  const tools = input.tools && input.tools.length > 0 ? toGoogleTools(input.tools) : undefined;
 
   const config: Record<string, unknown> = {};
   const p = input.parameters;
@@ -962,9 +937,7 @@ function toGoogleParams(
   return params;
 }
 
-function toGoogleContents(
-  messages: ReadonlyArray<LanguageModelMessage>,
-): {
+function toGoogleContents(messages: ReadonlyArray<LanguageModelMessage>): {
   systemInstruction: { parts: Array<{ text: string }> } | undefined;
   contents: Content[];
 } {
@@ -1004,8 +977,7 @@ function toGoogleContents(
             },
           };
           if (typeof signature === "string") {
-            (functionCallPart as { thoughtSignature?: string }).thoughtSignature =
-              signature;
+            (functionCallPart as { thoughtSignature?: string }).thoughtSignature = signature;
           }
           parts.push(functionCallPart);
           break;
@@ -1036,9 +1008,7 @@ function toGoogleContents(
   }
 
   const systemInstruction =
-    systemParts.length > 0
-      ? { parts: [{ text: systemParts.join("\n\n") }] }
-      : undefined;
+    systemParts.length > 0 ? { parts: [{ text: systemParts.join("\n\n") }] } : undefined;
 
   return { systemInstruction, contents: out };
 }
@@ -1071,10 +1041,7 @@ function lookupToolName(contents: ReadonlyArray<Content>, toolUseId: string): st
   return undefined;
 }
 
-function imagePartFromUrl(
-  imageUrl: string,
-  mimeType: string | undefined,
-): Part | null {
+function imagePartFromUrl(imageUrl: string, mimeType: string | undefined): Part | null {
   if (imageUrl.startsWith("data:")) {
     const match = /^data:([^;]+);base64,(.*)$/.exec(imageUrl);
     if (match) {
@@ -1183,9 +1150,7 @@ function imageUrlFromSource(source: MediaSource, mimeType: string | undefined): 
 
 function messagePartFromBlock(block: ContentBlock): LanguageModelMessagePart {
   const pm =
-    block.providerMetadata !== undefined
-      ? { providerMetadata: block.providerMetadata }
-      : {};
+    block.providerMetadata !== undefined ? { providerMetadata: block.providerMetadata } : {};
   switch (block.type) {
     case "text":
       return { type: "text", text: block.text, ...pm };
@@ -1216,9 +1181,7 @@ function messagePartFromBlock(block: ContentBlock): LanguageModelMessagePart {
       return {
         type: "text",
         text:
-          "text" in block && typeof block.text === "string"
-            ? block.text
-            : JSON.stringify(block),
+          "text" in block && typeof block.text === "string" ? block.text : JSON.stringify(block),
       };
   }
 }
@@ -1231,9 +1194,7 @@ function buildTools(tree: RenderedTree): ReadonlyArray<LanguageModelTool> {
       name: t.name,
       ...(t.description !== undefined ? { description: t.description } : {}),
       inputSchema: t.inputSchema as Record<string, unknown>,
-      ...(t.providerOptions !== undefined
-        ? { providerOptions: t.providerOptions }
-        : {}),
+      ...(t.providerOptions !== undefined ? { providerOptions: t.providerOptions } : {}),
     }));
 }
 
@@ -1294,9 +1255,7 @@ function normalizeImpl(input: NormalizeInput<unknown>): LanguageModelExecutionRe
         const args = (fc.args ?? {}) as Record<string, unknown>;
         const signature = (part as { thoughtSignature?: string }).thoughtSignature;
         const providerMetadata =
-          signature !== undefined
-            ? { google: { thoughtSignature: signature } }
-            : undefined;
+          signature !== undefined ? { google: { thoughtSignature: signature } } : undefined;
         output.push({
           type: "tool_use",
           toolUseId: id,
@@ -1340,15 +1299,12 @@ function toUsageStats(usage: GenerateContentResponse["usageMetadata"]): UsageSta
   }
   const inputTokens = usage.promptTokenCount ?? 0;
   const outputTokens = usage.candidatesTokenCount ?? 0;
-  const totalTokens =
-    usage.totalTokenCount ?? inputTokens + outputTokens;
+  const totalTokens = usage.totalTokenCount ?? inputTokens + outputTokens;
   return {
     inputTokens,
     outputTokens,
     totalTokens,
-    ...(usage.thoughtsTokenCount != null
-      ? { reasoningTokens: usage.thoughtsTokenCount }
-      : {}),
+    ...(usage.thoughtsTokenCount != null ? { reasoningTokens: usage.thoughtsTokenCount } : {}),
     ...(usage.cachedContentTokenCount != null
       ? { cachedInputTokens: usage.cachedContentTokenCount }
       : {}),
@@ -1420,8 +1376,7 @@ class GoogleStreamAccumulator {
           input: (fc.args ?? {}) as Record<string, unknown>,
           ...((part as { thoughtSignature?: string }).thoughtSignature !== undefined
             ? {
-                thoughtSignature: (part as { thoughtSignature?: string })
-                  .thoughtSignature!,
+                thoughtSignature: (part as { thoughtSignature?: string }).thoughtSignature!,
               }
             : {}),
         });
@@ -1470,9 +1425,7 @@ class GoogleStreamAccumulator {
   }
 
   currentReasoningBuffer(): string {
-    return this.currentReasoning?.kind === "reasoning"
-      ? this.currentReasoning.text
-      : "";
+    return this.currentReasoning?.kind === "reasoning" ? this.currentReasoning.text : "";
   }
 
   setFinishReason(reason: FinishReason): void {
@@ -1514,16 +1467,14 @@ class GoogleStreamAccumulator {
       if (block.kind === "text") {
         if (block.text.length > 0) parts.push({ text: block.text });
       } else if (block.kind === "reasoning") {
-        if (block.text.length > 0)
-          parts.push({ text: block.text, thought: true } as Part);
+        if (block.text.length > 0) parts.push({ text: block.text, thought: true } as Part);
       } else {
         const { call } = block;
         const fcPart: Part = {
           functionCall: { id: call.callId, name: call.name, args: call.input },
         };
         if (call.thoughtSignature !== undefined) {
-          (fcPart as { thoughtSignature?: string }).thoughtSignature =
-            call.thoughtSignature;
+          (fcPart as { thoughtSignature?: string }).thoughtSignature = call.thoughtSignature;
         }
         parts.push(fcPart);
       }

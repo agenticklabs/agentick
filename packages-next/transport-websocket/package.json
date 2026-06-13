@@ -7,10 +7,10 @@
     "agent",
     "agentick",
     "ai",
-    "transport",
-    "websocket",
     "json-rpc",
-    "mcp"
+    "mcp",
+    "transport",
+    "websocket"
   ],
   "license": "MIT",
   "author": "Ryan Lindgren",

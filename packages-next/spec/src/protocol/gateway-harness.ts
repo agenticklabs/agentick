@@ -24,9 +24,7 @@
  * packages.
  */
 
-import type { Effect, Stream } from "effect";
 import type { EventQuery, ProtocolEvent } from "../data/events.js";
-import type { JournalError } from "../data/errors.js";
 import type { EventBus, EventBusFactory, SubscribeOptions } from "./bus.js";
 import type { OperationJournal, OperationJournalFactory } from "./journal.js";
 import type { MessageInbox, MessageInboxFactory } from "./inbox.js";
@@ -172,10 +170,7 @@ export interface GatewayHarnessProtocol {
    * `app.events(filter, options)` — Phase C's cursor surface
    * (`SubscribeOptions.fromCursor`) flows through.
    */
-  events(
-    filter?: EventQuery,
-    options?: SubscribeOptions,
-  ): AsyncIterable<ProtocolEvent>;
+  events(filter?: EventQuery, options?: SubscribeOptions): AsyncIterable<ProtocolEvent>;
 }
 
 // ============================================================================

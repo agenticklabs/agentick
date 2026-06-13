@@ -24,11 +24,11 @@ wire (POST / GET / DELETE + SSE parsing).
 Streamable HTTP routes everything through one URL using HTTP method
 discrimination:
 
-| Method | Purpose |
-|---|---|
-| `POST <url>` | JSON-RPC request. Response is `application/json` for non-streaming RPCs; `text/event-stream` when the request carries `_meta.progressToken` (server streams `notifications/progress` then the final response). |
-| `GET <url>` with `Accept: text/event-stream` | Persistent SSE channel for notifications outside any specific RPC — subscription events, `notifications/auth/expired`, etc. |
-| `DELETE <url>` | Terminate the server-side session state. |
+| Method                                       | Purpose                                                                                                                                                                                                        |
+| -------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `POST <url>`                                 | JSON-RPC request. Response is `application/json` for non-streaming RPCs; `text/event-stream` when the request carries `_meta.progressToken` (server streams `notifications/progress` then the final response). |
+| `GET <url>` with `Accept: text/event-stream` | Persistent SSE channel for notifications outside any specific RPC — subscription events, `notifications/auth/expired`, etc.                                                                                    |
+| `DELETE <url>`                               | Terminate the server-side session state.                                                                                                                                                                       |
 
 Session affinity via the `Mcp-Session-Id` header — server returns it on
 first response; client echoes on subsequent requests. Load balancers
@@ -137,15 +137,16 @@ Phase 33.D of the v2 implementation plan — see
 Every claim in this README has a corresponding test, or appears below
 under "Roadmap & known gaps" with an explicit marker.
 
-| Concern | Test file |
-|---|---|
-| End-to-end ping, listApps, RPC error → TransportError, multiplexed RPCs, close transition | `src/__tests__/smoke.spec.ts` |
+| Concern                                                                                                                                                | Test file                                                                                                        |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------- |
+| End-to-end ping, listApps, RPC error → TransportError, multiplexed RPCs, close transition                                                              | `src/__tests__/smoke.spec.ts`                                                                                    |
 | State machine, RPC correlation, multiplexed concurrent RPCs, `notifications/cancelled` emit, subscription routing + close + eviction, progress streams | `src/__tests__/transport-conformance.spec.ts` (`runTransportConformance` from `@agentick/spec-conformance-next`) |
-| SSE codec — `encodeSseFrame` + `parseSseFrames` | covered via the conformance suite's streaming-response path |
+| SSE codec — `encodeSseFrame` + `parseSseFrames`                                                                                                        | covered via the conformance suite's streaming-response path                                                      |
 
 ## Roadmap & known gaps
 
 **Done:**
+
 - ✓ Streamable HTTP routing: POST (JSON or SSE response), GET (persistent SSE), DELETE
 - ✓ Session-id propagation via `Mcp-Session-Id` header (sticky-routing-ready)
 - ✓ Universal `fetch` on the client side
@@ -156,6 +157,7 @@ under "Roadmap & known gaps" with an explicit marker.
 - ✓ `notifications/cancelled` client emit + server-side routing into per-session abort callbacks
 
 **Claimed but not yet under test (✗):**
+
 - ✗ **`Mcp-Session-Id` echo on reconnect** — server returns the id; client stores it; client echoes on subsequent POSTs. Wire-tested only by the implicit cookie-shaped behavior; no explicit "client survives a sticky-route shuffle" test.
 - ✗ **Persistent notification GET reconnect under server bounce** — the reconnect machinery is wired; not exercised by a server-bounce test (unlike WS where `reconnect.spec.ts` covers it).
 - ✗ **Per-message-deflate / brotli compression** — not implemented; trivial to add via `Accept-Encoding` + Node `zlib`.
@@ -163,9 +165,9 @@ under "Roadmap & known gaps" with an explicit marker.
 
 ## Development plan
 
-| Step | Lands when |
-|---|---|
-| Phase 33.D MVP | This commit |
-| 33.C hardening pass | After 33.E lands so backpressure design covers all three network transports consistently |
-| Notification-channel reconnect test | When `transport-base-next` ships reconnect coverage that all transports share |
-| Bilingual MCP support | Phase 33.I |
+| Step                                | Lands when                                                                               |
+| ----------------------------------- | ---------------------------------------------------------------------------------------- |
+| Phase 33.D MVP                      | This commit                                                                              |
+| 33.C hardening pass                 | After 33.E lands so backpressure design covers all three network transports consistently |
+| Notification-channel reconnect test | When `transport-base-next` ships reconnect coverage that all transports share            |
+| Bilingual MCP support               | Phase 33.I                                                                               |

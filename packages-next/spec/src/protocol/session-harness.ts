@@ -35,7 +35,6 @@
 
 import type { CommandOutcome, TerminalEvent } from "../data/outcomes.js";
 import type { ContentBlock } from "../data/content-blocks.js";
-import type { ProtocolEvent } from "../data/events.js";
 import type { LanguageModelStopReason, UsageStats } from "../data/execution-result.js";
 import type { StreamEvent } from "../data/streaming.js";
 import type { SessionStatus as BridgeSessionStatus } from "./hook-bridges.js";
@@ -486,9 +485,7 @@ export interface SessionHarnessFactory<P = unknown> {
 }
 
 /** Type guard. */
-export function isSessionHarnessFactory<P = unknown>(
-  v: unknown,
-): v is SessionHarnessFactory<P> {
+export function isSessionHarnessFactory<P = unknown>(v: unknown): v is SessionHarnessFactory<P> {
   return (
     typeof v === "function" &&
     (v as { sessionHarnessFactory?: unknown }).sessionHarnessFactory === true

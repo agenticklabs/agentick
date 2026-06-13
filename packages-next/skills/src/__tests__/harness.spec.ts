@@ -61,9 +61,7 @@ describe("SkillsHarness — impl-specific", () => {
     // Let the bus deliver — wait a tick.
     await new Promise((r) => setTimeout(r, 20));
 
-    const terminalNames = observed
-      .filter((e) => e.phase === "terminal")
-      .map((e) => e.name);
+    const terminalNames = observed.filter((e) => e.phase === "terminal").map((e) => e.name);
     expect(terminalNames).toContain("skills:command:register");
     expect(terminalNames).toContain("skills:command:update");
     expect(terminalNames).toContain("skills:command:remove");

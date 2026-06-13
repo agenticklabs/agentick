@@ -32,10 +32,13 @@ import { ReconcilerHarness } from "../harness/reconciler-harness.js";
 // Bridge conformance
 // ============================================================================
 
-describe("InMemoryDataBridge — conformance", () =>
-  runDataBridgeConformance(() => new InMemoryDataBridge()));
+describe("InMemoryDataBridge — conformance", () => {
+  runDataBridgeConformance(() => new InMemoryDataBridge());
+});
 
-describe("stubLoopBridge — conformance", () => runLoopBridgeConformance(() => stubLoopBridge()));
+describe("stubLoopBridge — conformance", () => {
+  runLoopBridgeConformance(() => stubLoopBridge());
+});
 
 // ============================================================================
 // Reconciler conformance
@@ -65,7 +68,9 @@ const reconcilerFactory: ReconcilerConformanceFactory = {
   },
 };
 
-describe("ReconcilerHarness — conformance", () => runReconcilerConformance(reconcilerFactory));
+describe("ReconcilerHarness — conformance", () => {
+  runReconcilerConformance(reconcilerFactory);
+});
 
 // ============================================================================
 // helpers

@@ -63,7 +63,11 @@ import {
 import { createReconciler, type FiberRoot, type Reconciler } from "../react/reconciler.js";
 import { BridgeContext } from "../react/bridge-context.js";
 import { LifecycleContext } from "../react/lifecycle-context.js";
-import { builtInFormatters, markdownFormatter, type DefinedFormatter } from "@agentick/formatters-next";
+import {
+  builtInFormatters,
+  markdownFormatter,
+  type DefinedFormatter,
+} from "@agentick/formatters-next";
 
 interface MountState {
   readonly mountId: string;
@@ -564,7 +568,9 @@ export class ReconcilerHarness extends BaseHarness<"reconciler"> implements Reco
         ? (() => {
             const ref = tree.renderedWith ?? fallback;
             const fmt = resolveFormatterFromMap(this.formatters, ref, this.defaultFormatterId);
-            return fmt(tree.content as readonly import("@agentick/spec-next").SemanticContentBlock[]);
+            return fmt(
+              tree.content as readonly import("@agentick/spec-next").SemanticContentBlock[],
+            );
           })()
         : tree.content;
     return {

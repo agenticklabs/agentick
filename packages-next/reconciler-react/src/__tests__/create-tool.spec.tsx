@@ -11,7 +11,13 @@ import { describe, expect, it } from "vitest";
 import { z } from "zod";
 
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
-import type { HookBridges, ToolBridge, ToolHandler, Unsubscribe, Validator } from "@agentick/spec-next";
+import type {
+  HookBridges,
+  ToolBridge,
+  ToolHandler,
+  Unsubscribe,
+  Validator,
+} from "@agentick/spec-next";
 
 import { createTool } from "../react/create-tool.js";
 import { stubBridges } from "@agentick/reconciler-next";

@@ -19,10 +19,7 @@ import type {
 } from "@anthropic-ai/sdk/resources/messages";
 
 import { AnthropicExecutor } from "../anthropic-executor.js";
-import {
-  StubAnthropicClient,
-  asClient,
-} from "./stub-anthropic-client.js";
+import { StubAnthropicClient, asClient } from "./stub-anthropic-client.js";
 
 function messageFor(scripted: LanguageModelExecutionResult | undefined): AnthropicMessage {
   const text =
@@ -30,16 +27,17 @@ function messageFor(scripted: LanguageModelExecutionResult | undefined): Anthrop
       .filter((b): b is { type: "text"; text: string } => b.type === "text")
       .map((b) => b.text)
       .join("") ?? "hi";
-  const toolBlocks = scripted?.output.filter(
-    (
-      b,
-    ): b is {
-      type: "tool_use";
-      toolUseId: string;
-      name: string;
-      input: Record<string, unknown>;
-    } => b.type === "tool_use",
-  ) ?? [];
+  const toolBlocks =
+    scripted?.output.filter(
+      (
+        b,
+      ): b is {
+        type: "tool_use";
+        toolUseId: string;
+        name: string;
+        input: Record<string, unknown>;
+      } => b.type === "tool_use",
+    ) ?? [];
   const content: AnthropicMessage["content"] = [];
   if (text.length > 0) {
     content.push({ type: "text", text, citations: null } as AnthropicMessage["content"][number]);
@@ -130,7 +128,7 @@ function streamingEventsFor(
   ];
 }
 
-describe("AnthropicExecutor — ExecutorProtocol conformance", () =>
+describe("AnthropicExecutor — ExecutorProtocol conformance", () => {
   runExecutorConformance(async ({ harnessId, scripted }) => {
     const stub = new StubAnthropicClient([
       { kind: "non-streaming", message: messageFor(scripted) },
@@ -145,4 +143,5 @@ describe("AnthropicExecutor — ExecutorProtocol conformance", () =>
     });
     await exec.ready;
     return { executor: exec, bus };
-  }));
+  });
+});

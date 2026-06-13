@@ -18,7 +18,7 @@
  * @see docs/proposals/v2/blueprint/09-app-harness.md
  */
 
-import { Effect, Fiber, Layer, Stream } from "effect";
+import { Effect, Fiber, Stream } from "effect";
 
 import {
   BaseHarness,
@@ -706,10 +706,7 @@ export class AppHarness<P = unknown>
     return out;
   }
 
-  events(
-    filter: EventQuery = {},
-    options: SubscribeOptions = {},
-  ): AsyncIterable<ProtocolEvent> {
+  events(filter: EventQuery = {}, options: SubscribeOptions = {}): AsyncIterable<ProtocolEvent> {
     const bus = this.bus;
     return {
       [Symbol.asyncIterator]: () => makeBusAsyncIterator(bus, filter, options),

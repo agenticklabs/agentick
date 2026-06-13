@@ -132,8 +132,7 @@ export function mkMessage(opts: {
     model: opts.model ?? "claude-3-5-sonnet-latest",
     content,
     stop_reason:
-      opts.stopReason ??
-      (opts.toolCalls && opts.toolCalls.length > 0 ? "tool_use" : "end_turn"),
+      opts.stopReason ?? (opts.toolCalls && opts.toolCalls.length > 0 ? "tool_use" : "end_turn"),
     stop_sequence: null,
     usage: {
       input_tokens: u.input_tokens ?? 8,

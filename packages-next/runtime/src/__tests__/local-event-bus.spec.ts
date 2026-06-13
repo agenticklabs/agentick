@@ -4,8 +4,9 @@ import type { ProtocolEvent } from "@agentick/spec-next";
 import { runEventBusConformance } from "@agentick/spec-conformance-next";
 import { LocalEventBus } from "../substrate/local-event-bus.js";
 
-describe("LocalEventBus — conformance", () =>
-  runEventBusConformance(() => new LocalEventBus({ batch: {} })));
+describe("LocalEventBus — conformance", () => {
+  runEventBusConformance(() => new LocalEventBus({ batch: {} }));
+});
 
 describe("LocalEventBus — implementation specifics", () => {
   it("subscriber count drops when the consuming stream is interrupted", async () => {
@@ -20,12 +21,8 @@ describe("LocalEventBus — implementation specifics", () => {
 
   it("delivers in-order across multiple subscribers", async () => {
     const bus = new LocalEventBus({ batch: {} });
-    const sub1 = Effect.runFork(
-      Stream.runCollect(Stream.take(bus.subscribe({}), 3)),
-    );
-    const sub2 = Effect.runFork(
-      Stream.runCollect(Stream.take(bus.subscribe({}), 3)),
-    );
+    const sub1 = Effect.runFork(Stream.runCollect(Stream.take(bus.subscribe({}), 3)));
+    const sub2 = Effect.runFork(Stream.runCollect(Stream.take(bus.subscribe({}), 3)));
     await new Promise((r) => setImmediate(r));
 
     await Effect.runPromise(
@@ -94,9 +91,7 @@ describe("LocalEventBus — cursor protocol (Phase C)", () => {
     await Effect.runPromise(bus.append(ev("pre-1")));
     await Effect.runPromise(bus.append(ev("pre-2")));
 
-    const fiber = Effect.runFork(
-      Stream.runCollect(Stream.take(bus.subscribe({}), 2)),
-    );
+    const fiber = Effect.runFork(Stream.runCollect(Stream.take(bus.subscribe({}), 2)));
     await new Promise((r) => setImmediate(r));
 
     await Effect.runPromise(bus.append(ev("live-1")));
@@ -115,9 +110,7 @@ describe("LocalEventBus — cursor protocol (Phase C)", () => {
     await Effect.runPromise(bus.append(ev("c")));
 
     const fiber = Effect.runFork(
-      Stream.runCollect(
-        Stream.take(bus.subscribe({}, { fromCursor: { value: 0 } }), 3),
-      ),
+      Stream.runCollect(Stream.take(bus.subscribe({}, { fromCursor: { value: 0 } }), 3)),
     );
     const collected = await Effect.runPromise(Fiber.join(fiber));
     const ids = Array.from(Chunk.toReadonlyArray(collected)).map((e) => e.id);
@@ -138,9 +131,7 @@ describe("LocalEventBus — cursor protocol (Phase C)", () => {
 
     const result = await Effect.runPromise(
       Effect.either(
-        Stream.runCollect(
-          Stream.take(bus.subscribe({}, { fromCursor: { value: 0 } }), 5),
-        ),
+        Stream.runCollect(Stream.take(bus.subscribe({}, { fromCursor: { value: 0 } }), 5)),
       ),
     );
     expect(result._tag).toBe("Left");
@@ -173,18 +164,14 @@ describe("LocalEventBus — cursor protocol (Phase C)", () => {
   it("multiple subscribers maintain independent cursors", async () => {
     const bus = new LocalEventBus({ batch: {} });
 
-    const sub1 = Effect.runFork(
-      Stream.runCollect(Stream.take(bus.subscribe({}), 3)),
-    );
+    const sub1 = Effect.runFork(Stream.runCollect(Stream.take(bus.subscribe({}), 3)));
     await new Promise((r) => setImmediate(r));
 
     await Effect.runPromise(bus.append(ev("1")));
     await Effect.runPromise(bus.append(ev("2")));
 
     // Attach sub2 AFTER first two events; it should NOT see them (subscribe = tail).
-    const sub2 = Effect.runFork(
-      Stream.runCollect(Stream.take(bus.subscribe({}), 1)),
-    );
+    const sub2 = Effect.runFork(Stream.runCollect(Stream.take(bus.subscribe({}), 1)));
     await new Promise((r) => setImmediate(r));
 
     await Effect.runPromise(bus.append(ev("3")));
@@ -233,9 +220,7 @@ describe("LocalEventBus — metrics", () => {
     // The pull loop is parked in the Effect runtime; we read metrics
     // synchronously before the subscriber drains, so the cursor sits
     // at 0 while the head moves ahead.
-    const fiber = Effect.runFork(
-      Stream.runDrain(bus.subscribe({}, { fromCursor: { value: 0 } })),
-    );
+    const fiber = Effect.runFork(Stream.runDrain(bus.subscribe({}, { fromCursor: { value: 0 } })));
     await new Promise((r) => setImmediate(r));
     // Append an event with a known-old timestamp.
     const oldTs = Date.now() - 250;

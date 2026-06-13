@@ -12,10 +12,7 @@ import { describe } from "vitest";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
 import { runExecutorConformance } from "@agentick/spec-conformance-next";
 import type { LanguageModelExecutionResult } from "@agentick/spec-next";
-import type {
-  ChatCompletion,
-  ChatCompletionChunk,
-} from "openai/resources/chat/completions";
+import type { ChatCompletion, ChatCompletionChunk } from "openai/resources/chat/completions";
 
 import { OpenAIExecutor } from "../openai-executor.js";
 import { StubOpenAIClient, asClient } from "./stub-openai-client.js";
@@ -129,7 +126,7 @@ function streamingChunksFor(
   ];
 }
 
-describe("OpenAIExecutor — ExecutorProtocol conformance", () =>
+describe("OpenAIExecutor — ExecutorProtocol conformance", () => {
   runExecutorConformance(async ({ harnessId, scripted }) => {
     const completion = completionFor(scripted);
     const chunks = streamingChunksFor(scripted);
@@ -153,4 +150,5 @@ describe("OpenAIExecutor — ExecutorProtocol conformance", () =>
     });
     await exec.ready;
     return { executor: exec, bus };
-  }));
+  });
+});

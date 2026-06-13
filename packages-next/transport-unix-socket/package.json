@@ -7,10 +7,10 @@
     "agent",
     "agentick",
     "ai",
-    "transport",
-    "unix-socket",
     "ipc",
-    "json-rpc"
+    "json-rpc",
+    "transport",
+    "unix-socket"
   ],
   "license": "MIT",
   "author": "Ryan Lindgren",

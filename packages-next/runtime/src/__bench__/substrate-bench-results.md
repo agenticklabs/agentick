@@ -17,12 +17,12 @@ batching adds incremental win on top — but most of the speedup at
 
 End-to-end OpenAI executor (100 deltas + 1 subscriber, full hot path):
 
-| Pass | hz | mean (ms/run) | vs prior pass |
-|---|---:|---:|---:|
-| Pre-Phase-B baseline (push-based, no batching) | ~1,558 | 0.64 | — |
-| Phase B (push-based + batching ON) | ~2,679 | 0.37 | 1.72× |
-| **Phase C (cursor-pull + batching ON)** | ~2,448 | 0.41 | (combined 1.57× vs pre-B) |
-| **Phase C (cursor-pull, batching OFF)** | ~2,397 | 0.42 | 1.54× vs pre-B with no batching |
+| Pass                                           |     hz | mean (ms/run) |                   vs prior pass |
+| ---------------------------------------------- | -----: | ------------: | ------------------------------: |
+| Pre-Phase-B baseline (push-based, no batching) | ~1,558 |          0.64 |                               — |
+| Phase B (push-based + batching ON)             | ~2,679 |          0.37 |                           1.72× |
+| **Phase C (cursor-pull + batching ON)**        | ~2,448 |          0.41 |       (combined 1.57× vs pre-B) |
+| **Phase C (cursor-pull, batching OFF)**        | ~2,397 |          0.42 | 1.54× vs pre-B with no batching |
 
 Phase C's ring buffer alone gets you within 2% of Phase B's batched
 number. Batching now provides ~2% on top of cursor pull rather than
@@ -31,42 +31,42 @@ on the executor hot path.
 
 ## Core substrate (unchanged across Phase A/B)
 
-| Bench | hz | mean (μs/op) |
-|---|---:|---:|
-| `bus.publish`, no listeners (lazy fan-out skip) | 1,927,232 | 0.52 |
-| `bus.publish`, 1 matching subscriber | 158,478 | 6.31 |
-| `bus.publish`, 1 non-matching subscriber (index short-circuit) | 1,844,321 | 0.54 |
-| `bus.publishLazy`, no subscribers (build SKIPPED) | 1,940,755 | 0.52 |
-| `bus.publishLazy`, 1 subscriber (build RUNS) | 178,995 | 5.59 |
-| `journal.append`, unique opIds | 699,948 | 1.43 |
-| `journal.append`, repeated (opId, phase) — idempotent dedup | 1,617,820 | 0.62 |
-| `inbox.send`, fresh messageIds | 114,107 | 8.76 |
-| `inbox.send`, same messageId (cache hit) | 1,559,190 | 0.64 |
-| `runOperation`, empty body, fresh opIds | 22,993 | 43.49 |
-| `runOperation`, empty body, idempotent replay | 136,254 | 7.34 |
-| `LocalChannelPublisher`, no subscriber (lazy skip) | 1,903,729 | 0.53 |
-| `LocalChannelPublisher`, 1 subscriber (full envelope) | 155,135 | 6.45 |
+| Bench                                                          |        hz | mean (μs/op) |
+| -------------------------------------------------------------- | --------: | -----------: |
+| `bus.publish`, no listeners (lazy fan-out skip)                | 1,927,232 |         0.52 |
+| `bus.publish`, 1 matching subscriber                           |   158,478 |         6.31 |
+| `bus.publish`, 1 non-matching subscriber (index short-circuit) | 1,844,321 |         0.54 |
+| `bus.publishLazy`, no subscribers (build SKIPPED)              | 1,940,755 |         0.52 |
+| `bus.publishLazy`, 1 subscriber (build RUNS)                   |   178,995 |         5.59 |
+| `journal.append`, unique opIds                                 |   699,948 |         1.43 |
+| `journal.append`, repeated (opId, phase) — idempotent dedup    | 1,617,820 |         0.62 |
+| `inbox.send`, fresh messageIds                                 |   114,107 |         8.76 |
+| `inbox.send`, same messageId (cache hit)                       | 1,559,190 |         0.64 |
+| `runOperation`, empty body, fresh opIds                        |    22,993 |        43.49 |
+| `runOperation`, empty body, idempotent replay                  |   136,254 |         7.34 |
+| `LocalChannelPublisher`, no subscriber (lazy skip)             | 1,903,729 |         0.53 |
+| `LocalChannelPublisher`, 1 subscriber (full envelope)          |   155,135 |         6.45 |
 
 ## Streaming simulation (10 ops × 10 deltas via `runOperation`)
 
-| Bench | hz | mean (μs/op) |
-|---|---:|---:|
-| eager `emitDelta` (no subscriber) | 3,683 | 271.5 |
-| lazy `emitDeltaLazy` (no subscriber) | 4,446 | 224.9 |
+| Bench                                |    hz | mean (μs/op) |
+| ------------------------------------ | ----: | -----------: |
+| eager `emitDelta` (no subscriber)    | 3,683 |        271.5 |
+| lazy `emitDeltaLazy` (no subscriber) | 4,446 |        224.9 |
 
 `lazy` is **1.21× faster** than `eager` here. Build-skip win shows
 because the no-subscriber probe avoids constructing 100 payloads.
 
 ## Phase A — `compileQuery` per-event filter cost
 
-| Bench | hz | mean (μs/op) | vs `matchesQuery` |
-|---|---:|---:|---:|
-| `matchesQuery` (generic walk) — `{surface, phase}` | 29,555,036 | 0.034 | — |
-| compiled closure — same query | 38,292,023 | 0.026 | **1.30× faster** |
-| `matchesQuery` — name-prefix + surface | 25,078,176 | 0.040 | — |
-| compiled closure — same | 38,741,190 | 0.026 | **1.54× faster** |
-| `matchesQuery` — composite (all fields) | 9,232,825 | 0.108 | — |
-| compiled closure — composite | 20,972,710 | 0.048 | **2.27× faster** |
+| Bench                                              |         hz | mean (μs/op) | vs `matchesQuery` |
+| -------------------------------------------------- | ---------: | -----------: | ----------------: |
+| `matchesQuery` (generic walk) — `{surface, phase}` | 29,555,036 |        0.034 |                 — |
+| compiled closure — same query                      | 38,292,023 |        0.026 |  **1.30× faster** |
+| `matchesQuery` — name-prefix + surface             | 25,078,176 |        0.040 |                 — |
+| compiled closure — same                            | 38,741,190 |        0.026 |  **1.54× faster** |
+| `matchesQuery` — composite (all fields)            |  9,232,825 |        0.108 |                 — |
+| compiled closure — composite                       | 20,972,710 |        0.048 |  **2.27× faster** |
 
 Phase A's win is in the filter primitive itself — meaningful at high
 subscriber counts where the matcher walks every event for every sub.
@@ -78,16 +78,16 @@ subscribers attached, batching OFF (`batch: {}`) vs ON (default policy —
 `executor:delta` 8ms/4). Numbers are post-Phase-C ring buffer:
 
 | Subscribers | Batching OFF (hz / μs) | Batching ON (hz / μs) | Speedup from batching |
-|---:|---:|---:|---:|
-| 1 | 299,165 / 3.34 | 314,026 / 3.18 | **1.05×** |
-| 3 | 109,167 / 9.16 | 127,102 / 7.87 | **1.16×** |
+| ----------: | ---------------------: | --------------------: | --------------------: |
+|           1 |         299,165 / 3.34 |        314,026 / 3.18 |             **1.05×** |
+|           3 |         109,167 / 9.16 |        127,102 / 7.87 |             **1.16×** |
 
 Compare to the equivalent Phase B (push-based) numbers:
 
 | Subscribers | Phase B OFF | Phase C OFF | Δ baseline | Phase B ON | Phase C ON | Δ batched |
-|---:|---:|---:|---:|---:|---:|---:|
-| 1 | 175,794 hz | 299,165 hz | **+70%** | 332,572 hz | 314,026 hz | -6% |
-| 3 | 63,801 hz | 109,167 hz | **+71%** | 144,245 hz | 127,102 hz | -12% |
+| ----------: | ----------: | ----------: | ---------: | ---------: | ---------: | --------: |
+|           1 |  175,794 hz |  299,165 hz |   **+70%** | 332,572 hz | 314,026 hz |       -6% |
+|           3 |   63,801 hz |  109,167 hz |   **+71%** | 144,245 hz | 127,102 hz |      -12% |
 
 The ring buffer made the unbatched baseline ~70% faster, which means
 batching's relative win shrinks from 1.89×/2.26× (Phase B) to
@@ -97,10 +97,10 @@ the cursor-pull is the bigger lever.
 
 `appendBatch` direct path vs equivalent loop of single appends:
 
-| Bench | hz | mean (μs / 8-event batch) | vs loop |
-|---|---:|---:|---:|
-| `appendBatch(8 events)`, 1 subscriber | 55,331 | 18.07 | — |
-| `8× append()`, 1 subscriber, no batching | (compute: 1/299K × 8) | 26.74 | **1.48× slower** |
+| Bench                                    |                    hz | mean (μs / 8-event batch) |          vs loop |
+| ---------------------------------------- | --------------------: | ------------------------: | ---------------: |
+| `appendBatch(8 events)`, 1 subscriber    |                55,331 |                     18.07 |                — |
+| `8× append()`, 1 subscriber, no batching | (compute: 1/299K × 8) |                     26.74 | **1.48× slower** |
 
 `appendBatch` saves wake calls + Effect runtime entrances. Phase B
 showed this at 4.40× vs single-publish loop; Phase C narrows to 1.48×
@@ -112,10 +112,10 @@ overhead.
 Full producer-to-consumer path. Producer appends 64 events; three
 subscribers each drain to completion via `Stream.take(64)`.
 
-| Scenario | hz | mean (ms / full run) | Speedup from batching |
-|---|---:|---:|---:|
-| batching OFF (post-Phase-C) | 771 | 1.30 | — |
-| batching ON (post-Phase-C) | 1,008 | 0.99 | **1.31×** |
+| Scenario                    |    hz | mean (ms / full run) | Speedup from batching |
+| --------------------------- | ----: | -------------------: | --------------------: |
+| batching OFF (post-Phase-C) |   771 |                 1.30 |                     — |
+| batching ON (post-Phase-C)  | 1,008 |                 0.99 |             **1.31×** |
 
 Both paths are faster than the Phase B-batched 1,107 hz — the
 unbatched cursor-pull alone now beats the push-batched path.
@@ -127,10 +127,10 @@ text deltas, 1 subscriber draining `{surface: "executor", phase: "delta"}`.
 Captures the executor's full pipeline (chunk iterate → mapChunk →
 `emitDeltaLazy` → `StreamAccumulator` → normalize) AND the bus path.
 
-| Scenario | hz | mean (ms / 100-delta run) | Notes |
-|---|---:|---:|---:|
-| batching OFF (`{ batch: {} }`) | 2,397 | 0.42 | Phase C cursor pull alone |
-| batching ON (default policy) | 2,448 | 0.41 | Phase C + batching |
+| Scenario                       |    hz | mean (ms / 100-delta run) |                     Notes |
+| ------------------------------ | ----: | ------------------------: | ------------------------: |
+| batching OFF (`{ batch: {} }`) | 2,397 |                      0.42 | Phase C cursor pull alone |
+| batching ON (default policy)   | 2,448 |                      0.41 |        Phase C + batching |
 
 Compare to Phase B (push-based + batching ON): 2,679 hz. Phase C's
 unbatched path nearly matches Phase B's batched path because the
@@ -153,7 +153,7 @@ causes, not missing optimisations:
 2. **`Effect.runPromise` runtime entrance is the new floor.** Each
    `await Effect.runPromise(bus.append(event))` pays ~3 μs of Effect
    runtime overhead regardless of what the body does. Batching and
-   cursor pull amortise the bus's *internal* work but not the
+   cursor pull amortise the bus's _internal_ work but not the
    per-call boundary cost.
 
 3. **The cursor pull subsumed most of batching's value.** Phase B

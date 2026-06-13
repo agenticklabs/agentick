@@ -5,7 +5,12 @@
  * structural framing of markdown/XML is noise.
  */
 
-import type { ContentBlock, SemanticContentBlock, SemanticNode, TextBlock } from "@agentick/spec-next";
+import type {
+  ContentBlock,
+  SemanticContentBlock,
+  SemanticNode,
+  TextBlock,
+} from "@agentick/spec-next";
 
 import { defineFormatter } from "./define-formatter.js";
 

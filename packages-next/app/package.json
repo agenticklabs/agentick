@@ -49,7 +49,10 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "oxlint src/",
+    "format:check": "oxfmt --check src/",
+    "clean": "rm -rf dist tsconfig.build.tsbuildinfo"
   },
   "dependencies": {
     "@agentick/loop-executor-next": "workspace:*",
@@ -70,6 +73,8 @@
     "@agentick/reconciler-react-next": "workspace:*"
   },
   "peerDependenciesMeta": {
-    "@agentick/reconciler-react-next": { "optional": true }
+    "@agentick/reconciler-react-next": {
+      "optional": true
+    }
   }
 }

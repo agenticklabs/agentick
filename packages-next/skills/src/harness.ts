@@ -46,10 +46,7 @@ const SURFACE = "skills" as const;
 // now we declare locally as the surface tag used by BaseHarness.
 type SkillsSurface = typeof SURFACE;
 
-export class SkillsHarness
-  extends BaseHarness<SkillsSurface>
-  implements SkillsHarnessProtocol
-{
+export class SkillsHarness extends BaseHarness<SkillsSurface> implements SkillsHarnessProtocol {
   private readonly skills = new Map<string, Skill>();
   private readonly idListeners = new Map<string, Set<() => void>>();
   private readonly wildcards = new Set<() => void>();
@@ -61,12 +58,7 @@ export class SkillsHarness
     return this.scopeId;
   }
 
-  constructor(
-    scopeId: string,
-    journal: OperationJournal,
-    bus: EventBus,
-    inbox: MessageInbox,
-  ) {
+  constructor(scopeId: string, journal: OperationJournal, bus: EventBus, inbox: MessageInbox) {
     super(SURFACE, scopeId, journal, bus, inbox);
   }
 
@@ -146,9 +138,7 @@ export class SkillsHarness
       scope: { sessionId: this.scopeId },
       input,
     };
-    return runHarnessProtocol(
-      this.runOperation(op, (i) => this.applyRegister(i)),
-    );
+    return runHarnessProtocol(this.runOperation(op, (i) => this.applyRegister(i)));
   }
 
   update(input: SkillsUpdateInput): Promise<Skill> {
@@ -159,9 +149,7 @@ export class SkillsHarness
       scope: { sessionId: this.scopeId },
       input,
     };
-    return runHarnessProtocol(
-      this.runOperation(op, (i) => this.applyUpdate(i)),
-    );
+    return runHarnessProtocol(this.runOperation(op, (i) => this.applyUpdate(i)));
   }
 
   remove(input: SkillsRemoveInput): Promise<void> {

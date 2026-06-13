@@ -404,9 +404,7 @@ export class MemoryJournal implements OperationJournal {
     // channel stays uniform.
     const cursor: Cursor = { value: this.dropped + this.events.length };
     return this.read(cursor, compileQuery(query)).pipe(
-      Stream.catchAll((err) =>
-        Stream.fail<JournalError>({ _tag: "ReadFailed", cause: err }),
-      ),
+      Stream.catchAll((err) => Stream.fail<JournalError>({ _tag: "ReadFailed", cause: err })),
     );
   }
 

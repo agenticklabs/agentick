@@ -498,7 +498,6 @@ export interface ReconcilerFactory {
 /** Type guard. */
 export function isReconcilerFactory(v: unknown): v is ReconcilerFactory {
   return (
-    typeof v === "function" &&
-    (v as { reconcilerFactory?: unknown }).reconcilerFactory === true
+    typeof v === "function" && (v as { reconcilerFactory?: unknown }).reconcilerFactory === true
   );
 }

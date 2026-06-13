@@ -153,9 +153,7 @@ describe("SessionExecutionHandle — typed streaming events", () => {
       if (ev.type === "content-delta") events.push({ type: ev.type, delta: ev.delta });
       else events.push({ type: ev.type });
     }
-    const deltaTypes = events
-      .filter((e) => e.type === "content-delta")
-      .map((e) => e.delta);
+    const deltaTypes = events.filter((e) => e.type === "content-delta").map((e) => e.delta);
     expect(deltaTypes).toEqual(["he", "llo"]);
     const types = events.map((e) => e.type);
     expect(types).toContain("message-start");

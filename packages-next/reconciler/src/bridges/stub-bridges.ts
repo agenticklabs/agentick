@@ -44,7 +44,6 @@ import type {
   TimelineHarnessSnapshot,
   CompactStrategy,
   CompactResult,
-  Unsubscribe,
 } from "@agentick/spec-next";
 import { InMemoryDataBridge } from "./in-memory-data-bridge.js";
 

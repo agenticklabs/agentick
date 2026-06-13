@@ -5,5 +5,9 @@
  * for the full Gateway shape across deployment tiers.
  */
 
-export { GatewayHarness, type CreateGatewayAppInput, type GatewayHarnessOptions } from "./harness.js";
+export {
+  GatewayHarness,
+  type CreateGatewayAppInput,
+  type GatewayHarnessOptions,
+} from "./harness.js";
 export { createGateway } from "./create-gateway.js";

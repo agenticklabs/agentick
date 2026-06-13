@@ -162,10 +162,7 @@ export interface AnthropicExecutorOptions {
 export interface CustomBlockDefinition {
   readonly tag?: string;
   readonly onStart?: (attrs: Readonly<Record<string, string>>) => void;
-  readonly onContent?: (
-    content: string,
-    attrs: Readonly<Record<string, string>>,
-  ) => void;
+  readonly onContent?: (content: string, attrs: Readonly<Record<string, string>>) => void;
   readonly onSelfClosing?: (attrs: Readonly<Record<string, string>>) => void;
 }
 
@@ -187,10 +184,7 @@ const DEFAULT_MODEL = "claude-3-5-sonnet-latest";
 // AnthropicExecutor
 // ============================================================================
 
-export class AnthropicExecutor
-  extends BaseHarness<"executor">
-  implements LanguageModelExecutor
-{
+export class AnthropicExecutor extends BaseHarness<"executor"> implements LanguageModelExecutor {
   readonly family = "language-model" as const;
   readonly target: ExecutionTarget;
 
@@ -283,11 +277,9 @@ export class AnthropicExecutor
     if (input.signal) {
       if (input.signal.aborted) controller.abort(input.signal.reason);
       else
-        input.signal.addEventListener(
-          "abort",
-          () => controller.abort(input.signal!.reason),
-          { once: true },
-        );
+        input.signal.addEventListener("abort", () => controller.abort(input.signal!.reason), {
+          once: true,
+        });
     }
 
     const executionId = input.scope?.executionId ?? `exec:${ulid()}`;
@@ -795,20 +787,16 @@ export class AnthropicExecutor
     return Effect.gen(this, function* () {
       const stream = yield* Effect.tryPromise<AsyncIterable<RawMessageStreamEvent>, ExecuteError>({
         try: () =>
-          this.client.messages.create(
-            { ...params, stream: true } as MessageCreateParamsStreaming,
-            { signal },
-          ) as unknown as Promise<AsyncIterable<RawMessageStreamEvent>>,
+          this.client.messages.create({ ...params, stream: true } as MessageCreateParamsStreaming, {
+            signal,
+          }) as unknown as Promise<AsyncIterable<RawMessageStreamEvent>>,
         catch: (cause): ExecuteError => mapExecuteError(cause),
       });
 
       const iterator = stream[Symbol.asyncIterator]();
       const accum = new AnthropicStreamAccumulator();
       while (true) {
-        const step = yield* Effect.tryPromise<
-          IteratorResult<RawMessageStreamEvent>,
-          ExecuteError
-        >({
+        const step = yield* Effect.tryPromise<IteratorResult<RawMessageStreamEvent>, ExecuteError>({
           try: () => iterator.next(),
           catch: (cause): ExecuteError => mapExecuteError(cause),
         });
@@ -970,10 +958,7 @@ function applyTagRouterToMessage(raw: unknown, router: TagRouter): unknown {
   for (const block of r.content) {
     if (block.type === "text") {
       let cleaned = "";
-      const events = [
-        ...router.parser.process(block.text),
-        ...router.parser.flush(),
-      ];
+      const events = [...router.parser.process(block.text), ...router.parser.flush()];
       for (const ev of events) {
         if (ev.type === "text") cleaned += ev.content;
         else if (ev.type === "block-delta") {
@@ -1013,14 +998,12 @@ function toAnthropicParams(
   executorMaxTokens: number | undefined,
 ): MessageCreateParams {
   const { system, messages } = toAnthropicMessages(input.messages);
-  const tools =
-    input.tools && input.tools.length > 0 ? toAnthropicTools(input.tools) : undefined;
+  const tools = input.tools && input.tools.length > 0 ? toAnthropicTools(input.tools) : undefined;
 
   const params: MessageCreateParams = {
     model: target.modelId ?? defaultModel ?? DEFAULT_MODEL,
     messages,
-    max_tokens:
-      input.parameters?.maxOutputTokens ?? executorMaxTokens ?? DEFAULT_MAX_TOKENS,
+    max_tokens: input.parameters?.maxOutputTokens ?? executorMaxTokens ?? DEFAULT_MAX_TOKENS,
   } as MessageCreateParams;
 
   if (system !== undefined) (params as { system?: MessageCreateParams["system"] }).system = system;
@@ -1075,8 +1058,7 @@ function toAnthropicMessages(messages: ReadonlyArray<LanguageModelMessage>): {
       continue;
     }
 
-    const role: "user" | "assistant" =
-      message.role === "assistant" ? "assistant" : "user";
+    const role: "user" | "assistant" = message.role === "assistant" ? "assistant" : "user";
     const content: ContentBlockParam[] = [];
 
     for (const part of message.content) {
@@ -1128,10 +1110,7 @@ function toAnthropicMessages(messages: ReadonlyArray<LanguageModelMessage>): {
       if (Array.isArray(last.content)) {
         (last.content as ContentBlockParam[]).push(...content);
       } else {
-        last.content = [
-          { type: "text", text: last.content } as TextBlockParam,
-          ...content,
-        ];
+        last.content = [{ type: "text", text: last.content } as TextBlockParam, ...content];
       }
     } else {
       out.push({ role, content });
@@ -1177,9 +1156,7 @@ function toolResultContent(
   return result;
 }
 
-function toAnthropicTools(
-  tools: ReadonlyArray<LanguageModelTool>,
-): Array<AnthropicTool> {
+function toAnthropicTools(tools: ReadonlyArray<LanguageModelTool>): Array<AnthropicTool> {
   return tools.map((t) => {
     const base: AnthropicTool = {
       name: t.name,
@@ -1200,7 +1177,11 @@ function imageSourceFromUrl(
   imageUrl: string,
   mimeType: string | undefined,
 ):
-  | { type: "base64"; media_type: "image/jpeg" | "image/png" | "image/gif" | "image/webp"; data: string }
+  | {
+      type: "base64";
+      media_type: "image/jpeg" | "image/png" | "image/gif" | "image/webp";
+      data: string;
+    }
   | { type: "url"; url: string } {
   if (imageUrl.startsWith("data:")) {
     // data:image/png;base64,XXXX
@@ -1250,8 +1231,8 @@ function buildMessages(tree: RenderedTree): ReadonlyArray<LanguageModelMessage> 
     const part: LanguageModelMessagePart = { type: "text", text };
     const pm = e.metadata?.providerMetadata;
     if (pm !== undefined) {
-      (part as { providerMetadata?: Record<string, Record<string, unknown>> })
-        .providerMetadata = pm;
+      (part as { providerMetadata?: Record<string, Record<string, unknown>> }).providerMetadata =
+        pm;
     }
     systemParts.push(part);
   }
@@ -1296,9 +1277,7 @@ function imageUrlFromSource(source: MediaSource, mimeType: string | undefined): 
 
 function messagePartFromBlock(block: ContentBlock): LanguageModelMessagePart {
   const pm =
-    block.providerMetadata !== undefined
-      ? { providerMetadata: block.providerMetadata }
-      : {};
+    block.providerMetadata !== undefined ? { providerMetadata: block.providerMetadata } : {};
   switch (block.type) {
     case "text":
       return { type: "text", text: block.text, ...pm };
@@ -1329,9 +1308,7 @@ function messagePartFromBlock(block: ContentBlock): LanguageModelMessagePart {
       return {
         type: "text",
         text:
-          "text" in block && typeof block.text === "string"
-            ? block.text
-            : JSON.stringify(block),
+          "text" in block && typeof block.text === "string" ? block.text : JSON.stringify(block),
       };
   }
 }
@@ -1344,9 +1321,7 @@ function buildTools(tree: RenderedTree): ReadonlyArray<LanguageModelTool> {
       name: t.name,
       ...(t.description !== undefined ? { description: t.description } : {}),
       inputSchema: t.inputSchema as Record<string, unknown>,
-      ...(t.providerOptions !== undefined
-        ? { providerOptions: t.providerOptions }
-        : {}),
+      ...(t.providerOptions !== undefined ? { providerOptions: t.providerOptions } : {}),
     }));
 }
 

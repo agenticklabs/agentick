@@ -91,7 +91,7 @@ describe("createSubscriptionBridge — snapshot/restore", () => {
   it("pending intents (no handler) reject dispatch", async () => {
     const bridge = createSubscriptionBridge();
     bridge.importSnapshot([cron("c1", "@hourly")]);
-    await expect(bridge.dispatch("c1", null)).rejects.toThrow();
+    await expect(bridge.dispatch("c1", null)).rejects.toThrow(/no handler/i);
   });
 
   it("re-declaring an imported intent promotes pending → live", async () => {

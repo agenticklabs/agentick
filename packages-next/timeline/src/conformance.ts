@@ -64,7 +64,7 @@ export function runTimelineHarnessConformance(deps: TimelineHarnessFactoryDeps):
     it("readPersisted() returns the durable log", async () => {
       const h = await deps.make();
       const e1 = messageEntry("e1", "hello");
-      await h.append(e1 );
+      await h.append(e1);
       expect(h.readPersisted()).toEqual([e1]);
       await h.close();
     });
@@ -73,8 +73,8 @@ export function runTimelineHarnessConformance(deps: TimelineHarnessFactoryDeps):
       const h = await deps.make();
       let count = 0;
       h.subscribe(() => count++);
-      await h.append(messageEntry("e1", "x") );
-      await h.append(messageEntry("e2", "y") );
+      await h.append(messageEntry("e1", "x"));
+      await h.append(messageEntry("e2", "y"));
       expect(count).toBe(2);
       await h.close();
     });
@@ -83,9 +83,9 @@ export function runTimelineHarnessConformance(deps: TimelineHarnessFactoryDeps):
       const h = await deps.make();
       let count = 0;
       const unsub = h.subscribe(() => count++);
-      await h.append(messageEntry("e1", "x") );
+      await h.append(messageEntry("e1", "x"));
       unsub();
-      await h.append(messageEntry("e2", "y") );
+      await h.append(messageEntry("e2", "y"));
       expect(count).toBe(1);
       await h.close();
     });
@@ -93,7 +93,7 @@ export function runTimelineHarnessConformance(deps: TimelineHarnessFactoryDeps):
     it("read() returns a new snapshot reference after each mutation", async () => {
       const h = await deps.make();
       const before = h.read();
-      await h.append(messageEntry("e1", "x") );
+      await h.append(messageEntry("e1", "x"));
       const after = h.read();
       expect(after).not.toBe(before);
       expect(after.entries).not.toBe(before.entries);
@@ -107,8 +107,8 @@ export function runTimelineHarnessConformance(deps: TimelineHarnessFactoryDeps):
       const h = await deps.make();
       const e1 = messageEntry("e1", "a");
       const e2 = messageEntry("e2", "b");
-      await h.append(e1 );
-      await h.append(e2 );
+      await h.append(e1);
+      await h.append(e2);
       expect(h.readPersisted()).toEqual([e1, e2]);
       expect(h.read().entries).toEqual([e1, e2]);
       await h.close();
@@ -118,14 +118,14 @@ export function runTimelineHarnessConformance(deps: TimelineHarnessFactoryDeps):
       const h = await deps.make();
       const e1 = messageEntry("e1", "a");
       const e2 = messageEntry("e2", "b");
-      await h.append(e1 );
-      await h.append(e2 );
+      await h.append(e1);
+      await h.append(e2);
       await h.compact(summarizeCompact());
       const projBefore = h.read().entries;
       expect(projBefore).toHaveLength(1);
 
       const e3 = messageEntry("e3", "c");
-      await h.append(e3 );
+      await h.append(e3);
       const projAfter = h.read().entries;
       expect(projAfter).toHaveLength(2);
       expect(projAfter[1]).toEqual(e3);
@@ -141,9 +141,9 @@ export function runTimelineHarnessConformance(deps: TimelineHarnessFactoryDeps):
       const e1 = messageEntry("e1", "a");
       const e2 = messageEntry("e2", "b");
       const e3 = messageEntry("e3", "c");
-      await h.append(e1 );
-      await h.append(e2 );
-      await h.append(e3 );
+      await h.append(e1);
+      await h.append(e2);
+      await h.append(e3);
 
       const result = await h.compact(summarizeCompact());
       expect(result.entriesBefore).toBe(3);
@@ -159,7 +159,7 @@ export function runTimelineHarnessConformance(deps: TimelineHarnessFactoryDeps):
 
     it("compact() fires subscribers", async () => {
       const h = await deps.make();
-      await h.append(messageEntry("e1", "a") );
+      await h.append(messageEntry("e1", "a"));
       let count = 0;
       h.subscribe(() => count++);
       await h.compact(summarizeCompact());
@@ -169,8 +169,8 @@ export function runTimelineHarnessConformance(deps: TimelineHarnessFactoryDeps):
 
     it("compact() records lastCompaction on the snapshot", async () => {
       const h = await deps.make();
-      await h.append(messageEntry("e1", "a") );
-      await h.append(messageEntry("e2", "b") );
+      await h.append(messageEntry("e1", "a"));
+      await h.append(messageEntry("e2", "b"));
       await h.compact(summarizeCompact());
       const snap = h.exportSnapshot();
       expect(snap.lastCompaction).toBeDefined();
@@ -183,8 +183,8 @@ export function runTimelineHarnessConformance(deps: TimelineHarnessFactoryDeps):
 
     it("compact() with source: 'projection' reads from current projection", async () => {
       const h = await deps.make();
-      await h.append(messageEntry("e1", "a") );
-      await h.append(messageEntry("e2", "b") );
+      await h.append(messageEntry("e1", "a"));
+      await h.append(messageEntry("e2", "b"));
       // First compaction: 2 -> 1
       await h.compact(summarizeCompact());
       // Second compaction sourcing from projection: 1 -> 1 (summary of summary)
@@ -201,8 +201,8 @@ export function runTimelineHarnessConformance(deps: TimelineHarnessFactoryDeps):
   describe("TimelineHarness — replaceProjection / resetProjection", () => {
     it("replaceProjection() overwrites projection; log untouched", async () => {
       const h = await deps.make();
-      await h.append(messageEntry("e1", "a") );
-      await h.append(messageEntry("e2", "b") );
+      await h.append(messageEntry("e1", "a"));
+      await h.append(messageEntry("e2", "b"));
       const replacement = [messageEntry("r1", "replaced")];
       await h.replaceProjection({ entries: replacement });
       expect(h.read().entries).toEqual(replacement);
@@ -214,8 +214,8 @@ export function runTimelineHarnessConformance(deps: TimelineHarnessFactoryDeps):
       const h = await deps.make();
       const e1 = messageEntry("e1", "a");
       const e2 = messageEntry("e2", "b");
-      await h.append(e1 );
-      await h.append(e2 );
+      await h.append(e1);
+      await h.append(e2);
       await h.compact(summarizeCompact());
       expect(h.read().entries).toHaveLength(1);
       await h.resetProjection();
@@ -225,7 +225,7 @@ export function runTimelineHarnessConformance(deps: TimelineHarnessFactoryDeps):
 
     it("resetProjection() clears lastCompaction", async () => {
       const h = await deps.make();
-      await h.append(messageEntry("e1", "a") );
+      await h.append(messageEntry("e1", "a"));
       await h.compact(summarizeCompact());
       expect(h.exportSnapshot().lastCompaction).toBeDefined();
       await h.resetProjection();
@@ -239,8 +239,8 @@ export function runTimelineHarnessConformance(deps: TimelineHarnessFactoryDeps):
       const h = await deps.make();
       const e1 = messageEntry("e1", "a");
       const e2 = messageEntry("e2", "b");
-      await h.append(e1 );
-      await h.append(e2 );
+      await h.append(e1);
+      await h.append(e2);
       await h.compact(summarizeCompact());
 
       const snap = h.exportSnapshot();
@@ -406,7 +406,7 @@ export function runTimelineHarnessConformance(deps: TimelineHarnessFactoryDeps):
     it("queue + append + drain interleave correctly", async () => {
       const h = await deps.make();
       // Direct append (e.g., loop's assistant output) lands in log + projection.
-      await h.append(messageEntry("assistant-1", "first assistant reply") );
+      await h.append(messageEntry("assistant-1", "first assistant reply"));
       expect(h.read().entries).toHaveLength(1);
 
       // Queue (e.g., user input while idle) lands in pending only.

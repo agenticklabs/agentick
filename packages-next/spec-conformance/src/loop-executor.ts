@@ -94,6 +94,7 @@ function stubExecutor(
 ): ExecutorProtocol<unknown, unknown, LanguageModelExecutionResult> {
   let i = 0;
   return {
+    ready: Promise.resolve(),
     project: async () => ({ messages: [] }),
     execute: async () => scripts[Math.min(i, scripts.length - 1)],
     normalize: async (input) => input.targetOutput as LanguageModelExecutionResult,

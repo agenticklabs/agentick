@@ -9,7 +9,7 @@ import { runLoopExecutorConformance } from "@agentick/spec-conformance-next";
 
 import { LoopExecutorHarness } from "../harness.js";
 
-describe("LoopExecutorHarness — LoopExecutorProtocol conformance", () =>
+describe("LoopExecutorHarness — LoopExecutorProtocol conformance", () => {
   runLoopExecutorConformance(async ({ harnessId }) => {
     const journal = new MemoryJournal();
     const bus = new LocalEventBus();
@@ -17,4 +17,5 @@ describe("LoopExecutorHarness — LoopExecutorProtocol conformance", () =>
     const loop = new LoopExecutorHarness(harnessId, journal, bus, inbox);
     await loop.ready;
     return loop;
-  }));
+  });
+});

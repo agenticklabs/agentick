@@ -347,7 +347,7 @@ describe("harness plumbing — middleware on Operations", () => {
     );
     await knobs.set({ id: "verbose", value: true });
     expect(observed.map((o) => o.stage)).toEqual(["before", "after"]);
-    expect((observed[0]?.input as { id: string }).id).toBe("verbose");
+    expect((observed[0]!.input as { id: string }).id).toBe("verbose");
   });
 
   it("middleware wraps inbox-routed Operations too (same code path)", async () => {

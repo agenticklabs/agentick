@@ -20,17 +20,11 @@ import type {
   EventBus,
   EventBusFactory,
   MessageInbox,
-  MessageInboxFactory,
   OperationJournal,
-  OperationJournalFactory,
   ProtocolEvent,
 } from "@agentick/spec-next";
 
-import {
-  LocalEventBus,
-  LocalInbox,
-  MemoryJournal,
-} from "../index.js";
+import { LocalEventBus, LocalInbox, MemoryJournal } from "../index.js";
 
 interface MockParent {
   readonly id: string;
@@ -119,9 +113,7 @@ describe("LocalEventBus.createFactory", () => {
 
     // Subscribe to upstream — should see local publishes via fan-in.
     const upstreamFiber = Effect.runFork(
-      Stream.runCollect(
-        Stream.take(upstream.subscribe({ surface: "tool" }), 1),
-      ),
+      Stream.runCollect(Stream.take(upstream.subscribe({ surface: "tool" }), 1)),
     );
     await new Promise((r) => setImmediate(r));
 
@@ -161,7 +153,11 @@ describe("LocalEventBus.createFactory", () => {
 
     expect(localSeen).toHaveLength(0);
 
-    await Effect.runPromise(Effect.runPromise(Effect.exit(Effect.fromFiber(localFiber))).then(() => Promise.resolve()).catch(() => Promise.resolve()) as unknown as Effect.Effect<unknown, never, never>).catch(() => {});
+    await Effect.runPromise(
+      Effect.runPromise(Effect.exit(Effect.fromFiber(localFiber)))
+        .then(() => Promise.resolve())
+        .catch(() => Promise.resolve()) as unknown as Effect.Effect<unknown, never, never>,
+    ).catch(() => {});
     // best-effort cleanup; test is async
   });
 
@@ -235,21 +231,25 @@ describe("LocalInbox.createFactory", () => {
     // The new inbox is its own thing — register, send, observe.
     let handlerHit = 0;
     await Effect.runPromise(
-      inbox.register("local:addr", () => Effect.sync(() => { handlerHit++; })),
+      inbox.register("local:addr", () =>
+        Effect.sync(() => {
+          handlerHit++;
+        }),
+      ),
     );
-    await Effect.runPromise(
-      inbox.send("local:addr", { type: "ping", messageId: "m1" }),
-    );
+    await Effect.runPromise(inbox.send("local:addr", { type: "ping", messageId: "m1" }));
     expect(handlerHit).toBe(1);
 
     // Parent inbox should NOT have received anything.
     let parentHit = 0;
     await Effect.runPromise(
-      parentInbox.register("local:addr", () => Effect.sync(() => { parentHit++; })),
+      parentInbox.register("local:addr", () =>
+        Effect.sync(() => {
+          parentHit++;
+        }),
+      ),
     );
-    await Effect.runPromise(
-      inbox.send("local:addr", { type: "ping", messageId: "m2" }),
-    );
+    await Effect.runPromise(inbox.send("local:addr", { type: "ping", messageId: "m2" }));
     expect(parentHit).toBe(0);
     expect(handlerHit).toBe(2);
   });
@@ -317,9 +317,7 @@ describe("MemoryJournal.createFactory", () => {
     const { parent } = mockParent({ journal: upstream });
     const localJournal = await factory(parent);
 
-    await Effect.runPromise(
-      localJournal.append(mkEvent({ opId: "op-x", phase: "requested" })),
-    );
+    await Effect.runPromise(localJournal.append(mkEvent({ opId: "op-x", phase: "requested" })));
 
     const upstreamEvents = await Effect.runPromise(
       Stream.runCollect(upstream.readByQuery({}, "beginning")),
@@ -385,7 +383,7 @@ describe("Hand-rolled factories", () => {
     expect((sharedBus as unknown as { closed: boolean }).closed).toBe(true);
   });
 
-  it("typeof slot === \"function\" cleanly distinguishes instance from factory", () => {
+  it('typeof slot === "function" cleanly distinguishes instance from factory', () => {
     const instance = new LocalEventBus();
     const factory: EventBusFactory<MockParent> = () => new LocalEventBus();
     expect(typeof instance).toBe("object");

@@ -144,7 +144,9 @@ describe("SessionHarness — timeline handle (top-level)", () => {
       content: [{ type: "text", text: "hello" }],
     });
     expect(session.timeline.readPending().length).toBe(1);
-    await (await session.send({ messages: [] })).result;
+    await (
+      await session.send({ messages: [] })
+    ).result;
     expect(session.timeline.readPending().length).toBe(0);
 
     const userTexts = session.timeline

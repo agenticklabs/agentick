@@ -67,8 +67,7 @@ export class StubOpenAIClient {
         // care about the dispatch).
         const wantStream = params.stream === true;
         const matchIdx = this.findMatchingIdx(wantStream);
-        const picked =
-          matchIdx >= 0 ? this.sequence[matchIdx]! : this.next();
+        const picked = matchIdx >= 0 ? this.sequence[matchIdx]! : this.next();
         if (matchIdx >= 0) {
           // Advance past the matched entry so each call consumes one.
           this.consumed.add(matchIdx);

@@ -13,7 +13,6 @@ import { describe, expect, it } from "vitest";
 import { MockLanguageModelExecutor } from "@agentick/executor-next";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
 import { ReconcilerHarness, reactReconciler } from "@agentick/reconciler-react-next";
-import { InMemoryHandlerResolver } from "@agentick/tool-executor-next";
 import type { ContentBlock, ExecutionTarget, ExecutorFactoryDeps } from "@agentick/spec-next";
 
 import { AppHarness } from "../index.js";

@@ -12,10 +12,7 @@
 import { describe, expect, it } from "vitest";
 import { Effect, Stream } from "effect";
 import type { EventPhase, EventSurface, ProtocolEvent } from "@agentick/spec-next";
-import {
-  DEFAULT_LOCAL_BUS_BATCH_POLICY,
-  LocalEventBus,
-} from "../substrate/local-event-bus.js";
+import { DEFAULT_LOCAL_BUS_BATCH_POLICY, LocalEventBus } from "../substrate/local-event-bus.js";
 
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const flush = () => new Promise((r) => setImmediate(r));
@@ -233,9 +230,7 @@ describe("LocalEventBus — publishBatch direct path", () => {
     const c = collect(bus, "executor");
     await flush();
 
-    await Effect.runPromise(
-      bus.appendBatch([ev("a"), ev("b"), ev("c"), ev("d"), ev("e")]),
-    );
+    await Effect.runPromise(bus.appendBatch([ev("a"), ev("b"), ev("c"), ev("d"), ev("e")]));
     await flush();
     // Caller-supplied batch bypasses the accumulator — all 5 events
     // delivered immediately, no time-window or count-cap effects.

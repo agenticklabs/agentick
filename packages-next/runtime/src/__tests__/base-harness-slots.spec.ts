@@ -23,10 +23,7 @@ import type {
 } from "@agentick/spec-next";
 import { Effect, Stream } from "effect";
 
-import {
-  BaseHarness,
-  type HarnessShell,
-} from "../substrate/base-harness.js";
+import { BaseHarness, type HarnessShell } from "../substrate/base-harness.js";
 import { LocalEventBus } from "../substrate/local-event-bus.js";
 import { LocalInbox } from "../substrate/local-inbox.js";
 import { MemoryJournal } from "../substrate/memory-journal.js";
@@ -207,7 +204,7 @@ describe("BaseHarness substrate slots — factory overrides", () => {
 
     expect(() => {
       new SlotTestHarness("slot-test-6", journal, bus, inbox, {
-        bus: ((async () => new LocalEventBus()) as unknown) as EventBusFactory<HarnessShell>,
+        bus: (async () => new LocalEventBus()) as unknown as EventBusFactory<HarnessShell>,
       });
     }).toThrow(/synchronous/);
   });

@@ -460,7 +460,6 @@ export interface ToolExecutorFactory {
 /** Type guard. */
 export function isToolExecutorFactory(v: unknown): v is ToolExecutorFactory {
   return (
-    typeof v === "function" &&
-    (v as { toolExecutorFactory?: unknown }).toolExecutorFactory === true
+    typeof v === "function" && (v as { toolExecutorFactory?: unknown }).toolExecutorFactory === true
   );
 }

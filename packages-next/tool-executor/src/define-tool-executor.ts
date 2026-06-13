@@ -181,7 +181,11 @@ class CallbackToolExecutor extends BaseHarness<"tool"> implements ToolExecutorPr
               this.registry.add(i.registration);
             }
           },
-          catch: (cause) => ({ _tag: "ToolHandlerError" as const, toolName: i.registration.declaration.name, cause }),
+          catch: (cause) => ({
+            _tag: "ToolHandlerError" as const,
+            toolName: i.registration.declaration.name,
+            cause,
+          }),
         }),
       ),
     );
@@ -231,9 +235,7 @@ class CallbackToolExecutor extends BaseHarness<"tool"> implements ToolExecutorPr
       },
       input,
     };
-    return runHarnessProtocol(
-      this.runOperation(op, (i) => this.dispatchBody(i)),
-    );
+    return runHarnessProtocol(this.runOperation(op, (i) => this.dispatchBody(i)));
   }
 
   async abort(input: AbortInput): Promise<void> {

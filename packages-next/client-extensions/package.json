@@ -7,13 +7,13 @@
     "agent",
     "agentick",
     "ai",
+    "cache",
     "client",
     "extension",
     "middleware",
+    "offline",
     "retry",
-    "telemetry",
-    "cache",
-    "offline"
+    "telemetry"
   ],
   "license": "MIT",
   "author": "Ryan Lindgren",

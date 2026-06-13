@@ -4,7 +4,7 @@ import { Chunk, Effect, Stream } from "effect";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
 import { ReconcilerHarness } from "../harness/reconciler-harness.js";
 import { stubBridges } from "@agentick/reconciler-next";
-import { Markdown, XML } from "../react/components/format-scope.js";
+import { XML } from "../react/components/format-scope.js";
 
 async function makeHarness(scope = `rts-${Math.random()}`) {
   const harness = new ReconcilerHarness(

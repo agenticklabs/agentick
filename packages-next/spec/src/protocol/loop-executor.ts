@@ -367,7 +367,6 @@ export interface LoopExecutorFactory {
 /** Type guard. */
 export function isLoopExecutorFactory(v: unknown): v is LoopExecutorFactory {
   return (
-    typeof v === "function" &&
-    (v as { loopExecutorFactory?: unknown }).loopExecutorFactory === true
+    typeof v === "function" && (v as { loopExecutorFactory?: unknown }).loopExecutorFactory === true
   );
 }

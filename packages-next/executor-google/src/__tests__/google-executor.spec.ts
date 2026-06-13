@@ -227,18 +227,14 @@ describe("GoogleExecutor — tool-use round-trip", () => {
       {
         kind: "non-streaming",
         response: mkResponse({
-          toolCalls: [
-            { id: "call_1", name: "calc", args: { a: 2, b: 3 } },
-          ],
+          toolCalls: [{ id: "call_1", name: "calc", args: { a: 2, b: 3 } }],
         }),
       },
     ]);
     const { exec } = await makeExecutor(stub);
     const t = await exec.run({ compiled: emptyTree(), target: mkTarget() });
     if (t.outcome !== "succeeded") throw new Error("expected success");
-    expect(t.result.toolCalls).toEqual([
-      { id: "call_1", name: "calc", input: { a: 2, b: 3 } },
-    ]);
+    expect(t.result.toolCalls).toEqual([{ id: "call_1", name: "calc", input: { a: 2, b: 3 } }]);
     expect(t.result.output.find((b) => b.type === "tool_use")).toMatchObject({
       type: "tool_use",
       toolUseId: "call_1",
@@ -296,9 +292,7 @@ describe("GoogleExecutor — tool-use round-trip", () => {
       role: string;
       parts: Array<{ functionResponse?: { id?: string; name?: string; response?: unknown } }>;
     }>;
-    const resultPart = contents
-      .flatMap((c) => c.parts)
-      .find((p) => p.functionResponse);
+    const resultPart = contents.flatMap((c) => c.parts).find((p) => p.functionResponse);
     expect(resultPart?.functionResponse?.id).toBe("call_xyz");
     expect(resultPart?.functionResponse?.name).toBe("calc");
   });
@@ -378,9 +372,7 @@ describe("GoogleExecutor — thoughtSignature round-trip (G18-G)", () => {
         thoughtSignature?: string;
       }>;
     }>;
-    const fcPart = contents
-      .flatMap((c) => c.parts)
-      .find((p) => p.functionCall);
+    const fcPart = contents.flatMap((c) => c.parts).find((p) => p.functionCall);
     expect(fcPart?.thoughtSignature).toBe("SIG_TO_ECHO");
   });
 
@@ -504,19 +496,14 @@ describe("GoogleExecutor — streaming", () => {
     const { exec } = await makeExecutor(stub, { stream: true });
     const t = await exec.run({ compiled: emptyTree(), target: mkTarget() });
     if (t.outcome !== "succeeded") throw new Error("expected success");
-    expect(t.result.toolCalls).toEqual([
-      { id: "c1", name: "calc", input: { a: 1, b: 2 } },
-    ]);
+    expect(t.result.toolCalls).toEqual([{ id: "c1", name: "calc", input: { a: 1, b: 2 } }]);
   });
 
   it("equivalent final result to non-streaming path", async () => {
     const streaming = new StubGoogleClient([
       {
         kind: "streaming",
-        chunks: [
-          mkTextChunk("hello"),
-          mkFinishChunk({ finishReason: "STOP" }),
-        ],
+        chunks: [mkTextChunk("hello"), mkFinishChunk({ finishReason: "STOP" })],
       },
     ]);
     const nonStreaming = new StubGoogleClient([

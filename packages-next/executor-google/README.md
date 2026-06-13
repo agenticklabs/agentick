@@ -61,12 +61,12 @@ transparent to adopter code — the reconciler-collected
 
 ## Capabilities
 
-| Model               | contextWindow | maxOutputTokens | vision | reasoning |
-| ------------------- | ------------- | --------------- | ------ | --------- |
-| Gemini 2.5 Pro      | 2M            | 8K              | yes    | yes       |
-| Gemini 2.5 Flash    | 1M            | 8K              | yes    | yes       |
-| Gemini 1.5 Pro      | 2M            | 8K              | yes    | no        |
-| Gemini 1.5 Flash    | 1M            | 8K              | yes    | no        |
+| Model            | contextWindow | maxOutputTokens | vision | reasoning |
+| ---------------- | ------------- | --------------- | ------ | --------- |
+| Gemini 2.5 Pro   | 2M            | 8K              | yes    | yes       |
+| Gemini 2.5 Flash | 1M            | 8K              | yes    | yes       |
+| Gemini 1.5 Pro   | 2M            | 8K              | yes    | no        |
+| Gemini 1.5 Flash | 1M            | 8K              | yes    | no        |
 
 ## Limitations
 

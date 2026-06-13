@@ -408,8 +408,11 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
 
         // 5. Continuation decision (default policy).
         const wantsContinue = result.stopReason === "tool_use" && tickToolResults.length > 0;
-        const tickStopReason: string =
-          !wantsContinue ? result.stopReason : acc.ticks >= input.maxTicks ? "max_ticks" : "continue";
+        const tickStopReason: string = !wantsContinue
+          ? result.stopReason
+          : acc.ticks >= input.maxTicks
+            ? "max_ticks"
+            : "continue";
         const tickDuration = Date.now() - tickStartedAt;
         const shouldContinue = wantsContinue && acc.ticks < input.maxTicks;
         input.onEvent?.({
