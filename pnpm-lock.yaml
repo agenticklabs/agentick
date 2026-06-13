@@ -476,6 +476,9 @@ importers:
 
   packages-next/executor-anthropic:
     dependencies:
+      '@agentick/executor-next':
+        specifier: workspace:*
+        version: link:../executor
       '@agentick/executor-openai-next':
         specifier: workspace:*
         version: link:../executor-openai

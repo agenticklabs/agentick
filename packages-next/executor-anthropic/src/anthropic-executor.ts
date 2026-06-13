@@ -1,15 +1,15 @@
 /**
  * `AnthropicExecutor` — `LanguageModelExecutor` backed by the Anthropic
- * Messages API. Mirrors `OpenAIExecutor`'s structure with provider-specific
- * translation tables (system extraction, strict user/assistant alternation,
- * native `thinking` blocks for reasoning, separate `cache_*_input_tokens`
- * usage fields).
+ * Messages API. Extends `BaseLanguageModelExecutor<AnthropicMessage>`
+ * (from `@agentick/executor-next`) and supplies provider-specific
+ * translation tables (system extraction, strict user/assistant
+ * alternation, native `thinking` blocks for reasoning, separate
+ * `cache_*_input_tokens` usage fields).
  *
  * @see docs/proposals/v2/anthropic-adapter-plan.md
  * @see docs/proposals/v2/blueprint/06-executor-harness.md
  */
 
-import { Effect } from "effect";
 import Anthropic, { type ClientOptions } from "@anthropic-ai/sdk";
 import type {
   ImageBlockParam,
@@ -31,40 +31,25 @@ import type {
   Usage,
 } from "@anthropic-ai/sdk/resources/messages";
 
-import { BaseHarness, runHarnessProtocol, ulid } from "@agentick/runtime-next";
+import { BaseLanguageModelExecutor, type StreamContext } from "@agentick/executor-next";
 import type {
-  AbortExecutorInput,
-  AdapterDelta,
   ContentBlock,
   EventBus,
-  ExecuteError,
-  ExecuteInput,
   ExecutionTarget,
-  ExecutorError,
-  ExecutorStream,
-  ExecutorTerminal,
   LanguageModelExecutionResult,
-  LanguageModelExecutor,
   LanguageModelInput,
   LanguageModelMessage,
   LanguageModelMessagePart,
   LanguageModelStopReason,
   LanguageModelTool,
   MediaSource,
-  MessageEnvelope,
-  MessageHandlerError,
   MessageInbox,
-  NormalizeError,
   NormalizeInput,
-  Operation,
   OperationJournal,
   ProjectInput,
-  ProjectionError,
   RenderedTree,
-  RunInput,
   SectionEntry,
   ToolCall,
-  ToolDeclaration,
   UsageStats,
 } from "@agentick/spec-next";
 import { SPEC_VERSION } from "@agentick/spec-next";
@@ -170,12 +155,6 @@ export interface CustomBlockDefinition {
 // Internals
 // ============================================================================
 
-interface InFlightEntry {
-  readonly executionId: string;
-  abort?: AbortController;
-  abortReason?: string;
-}
-
 const SPEC_VERSION_LITERAL = SPEC_VERSION;
 const DEFAULT_MAX_TOKENS = 4096;
 const DEFAULT_MODEL = "claude-3-5-sonnet-latest";
@@ -184,18 +163,16 @@ const DEFAULT_MODEL = "claude-3-5-sonnet-latest";
 // AnthropicExecutor
 // ============================================================================
 
-export class AnthropicExecutor extends BaseHarness<"executor"> implements LanguageModelExecutor {
-  readonly family = "language-model" as const;
+export class AnthropicExecutor extends BaseLanguageModelExecutor<AnthropicMessage> {
   readonly target: ExecutionTarget;
+
+  protected override readonly streamByDefault: boolean;
 
   private readonly client: Anthropic;
   private readonly defaultModel: string | undefined;
   private readonly defaultMaxTokens: number | undefined;
-  private readonly streamByDefault: boolean;
   private readonly parseThinkTags: boolean;
   private readonly customBlocks?: Readonly<Record<string, CustomBlockDefinition>>;
-  private readonly inFlight = new Map<string, InFlightEntry>();
-  private readonly aborted = new Set<string>();
 
   constructor(
     scopeId: string,
@@ -204,7 +181,7 @@ export class AnthropicExecutor extends BaseHarness<"executor"> implements Langua
     inbox: MessageInbox,
     options: AnthropicExecutorOptions = {},
   ) {
-    super("executor", scopeId, journal, bus, inbox);
+    super(scopeId, journal, bus, inbox);
     this.client = options.client ?? new Anthropic(buildClientOptions(options));
     this.defaultModel = options.model;
     this.defaultMaxTokens = options.maxTokens;
@@ -225,660 +202,362 @@ export class AnthropicExecutor extends BaseHarness<"executor"> implements Langua
     };
   }
 
-  // ──────── ExecutorProtocol ────────
+  // ──────── Hooks (BaseLanguageModelExecutor) ────────
 
-  project(input: ProjectInput): Promise<LanguageModelInput> {
-    const op: Operation<ProjectInput, LanguageModelInput> = {
-      opId: `executor:project:${ulid()}`,
-      surface: "executor",
-      name: "executor:command:project",
-      scope: input.scope ?? {},
-      input,
-    };
-    return runHarnessProtocol(
-      this.runOperation(op, (i) =>
-        Effect.try({
-          try: () => projectImpl(i),
-          catch: (cause): ProjectionError => ({
-            _tag: "ProjectionFailed",
-            reason: "projection threw",
-            cause,
-          }),
-        }),
-      ),
-    );
+  protected override projectImpl(input: ProjectInput): LanguageModelInput {
+    return anthropicProjectImpl(input);
   }
 
-  execute(input: ExecuteInput<LanguageModelInput>): Promise<unknown> {
-    const executionId = input.scope?.executionId ?? `exec:${ulid()}`;
-    const op: Operation<ExecuteInput<LanguageModelInput>, unknown> = {
-      opId: `executor:execute:${executionId}:${ulid()}`,
-      surface: "executor",
-      name: "executor:command:execute",
-      scope: input.scope ?? { executionId },
-      input,
-    };
-    return runHarnessProtocol(
-      this.runOperation(op, (i) => this.executeBody(i, executionId, undefined)),
-    );
+  protected buildParams(input: LanguageModelInput, target: ExecutionTarget): MessageCreateParams {
+    return toAnthropicParams(input, target, this.defaultModel, this.defaultMaxTokens);
   }
 
-  executeStream(input: ExecuteInput<LanguageModelInput>): ExecutorStream<AnthropicMessage> {
-    const queue: AdapterDelta[] = [];
-    const resolvers: Array<(r: IteratorResult<AdapterDelta>) => void> = [];
-    let done = false;
-    let resultResolve!: (v: AnthropicMessage) => void;
-    let resultReject!: (e: unknown) => void;
-    const resultPromise = new Promise<AnthropicMessage>((res, rej) => {
-      resultResolve = res;
-      resultReject = rej;
+  protected callProvider(
+    params: unknown,
+    signal: AbortSignal | undefined,
+  ): Promise<AnthropicMessage> {
+    return this.client.messages.create(
+      { ...(params as MessageCreateParams), stream: false } as MessageCreateParamsNonStreaming,
+      { signal },
+    ) as unknown as Promise<AnthropicMessage>;
+  }
+
+  protected async drainStream(params: unknown, ctx: StreamContext): Promise<AnthropicMessage> {
+    const cp = params as MessageCreateParams;
+    const stream = (await this.client.messages.create(
+      { ...cp, stream: true } as MessageCreateParamsStreaming,
+      { signal: ctx.signal },
+    )) as unknown as AsyncIterable<RawMessageStreamEvent>;
+
+    const accum = new AnthropicStreamAccumulator();
+
+    const tagRouter = buildTagRouter({
+      parseThinkTags: this.parseThinkTags,
+      customBlocks: this.customBlocks,
     });
-    const controller = new AbortController();
-    if (input.signal) {
-      if (input.signal.aborted) controller.abort(input.signal.reason);
-      else
-        input.signal.addEventListener("abort", () => controller.abort(input.signal!.reason), {
-          once: true,
-        });
+
+    // Per-block state. Keyed by Anthropic's block index.
+    interface BlockState {
+      type: "text" | "thinking" | "tool_use" | "redacted_thinking";
+      callId?: string;
+      name?: string;
+      jsonBuffer: string;
+      textBuffer: string;
+    }
+    const blocks = new Map<number, BlockState>();
+    // Track which blocks emitted a *-start so we can emit symmetric closes.
+    const startedTextBlocks = new Set<number>();
+    const startedToolBlocks = new Set<number>(); // by Anthropic block index
+    const startedReasoningBlocks = new Set<number>();
+    // Tag-router auxiliary accumulators (only used when tagRouter is active).
+    let routerReasoningStarted = false;
+    const routerReasoningBlockIndex = -1; // sentinel for tag-router-driven reasoning
+    let routerReasoningAccum = "";
+
+    const handleTagEvent = (event: StreamTagEvent, blockIndex: number): void => {
+      if (event.type === "text") {
+        if (event.content.length === 0) return;
+        if (!startedTextBlocks.has(blockIndex)) {
+          ctx.emit({ type: "content-start", blockIndex, blockType: "text" });
+          startedTextBlocks.add(blockIndex);
+        }
+        ctx.emit({ type: "content-delta", blockIndex, delta: event.content });
+        const st = blocks.get(blockIndex);
+        if (st) st.textBuffer += event.content;
+        return;
+      }
+      const mode = tagRouter!.modeFor(event.tag);
+      if (mode === "reasoning") {
+        switch (event.type) {
+          case "block-start":
+            if (!routerReasoningStarted) {
+              ctx.emit({ type: "reasoning-start", blockIndex: routerReasoningBlockIndex });
+              routerReasoningStarted = true;
+            }
+            break;
+          case "block-delta":
+            if (!routerReasoningStarted) {
+              ctx.emit({ type: "reasoning-start", blockIndex: routerReasoningBlockIndex });
+              routerReasoningStarted = true;
+            }
+            ctx.emit({
+              type: "reasoning-delta",
+              blockIndex: routerReasoningBlockIndex,
+              delta: event.delta,
+            });
+            routerReasoningAccum += event.delta;
+            break;
+          case "block-end":
+          case "block":
+            break;
+        }
+        return;
+      }
+      // custom-block passthrough
+      switch (event.type) {
+        case "block-start":
+          ctx.emit({ type: "custom-block-start", tag: event.tag, attrs: event.attrs });
+          break;
+        case "block-delta":
+          ctx.emit({ type: "custom-block-delta", tag: event.tag, delta: event.delta });
+          break;
+        case "block-end":
+          ctx.emit({ type: "custom-block-end", tag: event.tag });
+          break;
+        case "block":
+          ctx.emit({
+            type: "custom-block",
+            tag: event.tag,
+            content: event.content,
+            attrs: event.attrs,
+            ...(event.selfClosing ? { selfClosing: true } : {}),
+          });
+          break;
+      }
+    };
+
+    for await (const event of stream) {
+      accum.push(event);
+      switch (event.type) {
+        case "message_start": {
+          ctx.emit({
+            type: "message-start",
+            role: "assistant",
+            model: event.message.model,
+          });
+          break;
+        }
+        case "content_block_start": {
+          const block = event.content_block;
+          if (block.type === "text") {
+            blocks.set(event.index, {
+              type: "text",
+              jsonBuffer: "",
+              textBuffer: "",
+            });
+            if (!tagRouter) {
+              ctx.emit({
+                type: "content-start",
+                blockIndex: event.index,
+                blockType: "text",
+              });
+              startedTextBlocks.add(event.index);
+            }
+            // With tagRouter, content-start is emitted lazily when the
+            // first non-tag text chunk arrives.
+          } else if (block.type === "tool_use") {
+            blocks.set(event.index, {
+              type: "tool_use",
+              callId: block.id,
+              name: block.name,
+              jsonBuffer: "",
+              textBuffer: "",
+            });
+            ctx.emit({
+              type: "tool-call-start",
+              callId: block.id,
+              name: block.name,
+              blockIndex: event.index,
+            });
+            startedToolBlocks.add(event.index);
+          } else if (block.type === "thinking") {
+            blocks.set(event.index, {
+              type: "thinking",
+              jsonBuffer: "",
+              textBuffer: "",
+            });
+            ctx.emit({ type: "reasoning-start", blockIndex: event.index });
+            startedReasoningBlocks.add(event.index);
+          } else if (block.type === "redacted_thinking") {
+            blocks.set(event.index, {
+              type: "redacted_thinking",
+              jsonBuffer: "",
+              textBuffer: "[redacted]",
+            });
+            // Emit synthetic reasoning start so consumers see a placeholder.
+            ctx.emit({ type: "reasoning-start", blockIndex: event.index });
+            startedReasoningBlocks.add(event.index);
+          }
+          break;
+        }
+        case "content_block_delta": {
+          const idx = event.index;
+          const state = blocks.get(idx);
+          const delta = event.delta;
+          if (delta.type === "text_delta") {
+            if (tagRouter) {
+              for (const ev of tagRouter.parser.process(delta.text)) {
+                handleTagEvent(ev, idx);
+              }
+            } else {
+              ctx.emit({ type: "content-delta", blockIndex: idx, delta: delta.text });
+              if (state) state.textBuffer += delta.text;
+            }
+          } else if (delta.type === "input_json_delta") {
+            if (state) state.jsonBuffer += delta.partial_json;
+            ctx.emit({
+              type: "tool-call-delta",
+              callId: state?.callId ?? "",
+              delta: delta.partial_json,
+            });
+          } else if (delta.type === "thinking_delta") {
+            ctx.emit({
+              type: "reasoning-delta",
+              blockIndex: idx,
+              delta: delta.thinking,
+            });
+            if (state) state.textBuffer += delta.thinking;
+          }
+          // signature_delta + citations_delta: ignored (G3 §10.4/§10.5).
+          break;
+        }
+        case "content_block_stop": {
+          const idx = event.index;
+          const state = blocks.get(idx);
+          if (!state) break;
+          if (state.type === "text") {
+            if (startedTextBlocks.has(idx)) {
+              ctx.emit({ type: "content-end", blockIndex: idx });
+              ctx.emit({
+                type: "content",
+                blockIndex: idx,
+                content: { type: "text", text: state.textBuffer } as ContentBlock,
+              });
+            }
+          } else if (state.type === "tool_use") {
+            let parsed: Readonly<Record<string, unknown>> = {};
+            try {
+              parsed = state.jsonBuffer
+                ? (JSON.parse(state.jsonBuffer) as Readonly<Record<string, unknown>>)
+                : {};
+            } catch {
+              /* invalid JSON — emit empty input */
+            }
+            ctx.emit({ type: "tool-call-end", callId: state.callId ?? "" });
+            ctx.emit({
+              type: "tool-call",
+              callId: state.callId ?? "",
+              name: state.name ?? "",
+              input: parsed,
+            });
+          } else if (state.type === "thinking" || state.type === "redacted_thinking") {
+            ctx.emit({ type: "reasoning-end", blockIndex: idx });
+            ctx.emit({
+              type: "reasoning",
+              blockIndex: idx,
+              reasoning: state.textBuffer,
+            });
+          }
+          break;
+        }
+        case "message_delta":
+        case "message_stop":
+          break;
+      }
+    }
+    // Drain any partial buffered tag content.
+    if (tagRouter) {
+      for (const ev of tagRouter.parser.flush()) {
+        handleTagEvent(ev, 0);
+      }
     }
 
-    const executionId = input.scope?.executionId ?? `exec:${ulid()}`;
-    const streamOp: Operation<ExecuteInput<LanguageModelInput>, AnthropicMessage> = {
-      opId: `executor:executeStream:${executionId}:${ulid()}`,
-      surface: "executor",
-      name: "executor:command:execute",
-      scope: input.scope ?? { executionId },
-      input,
-    };
+    // If tag-router routed reasoning to its synthetic block, emit close.
+    if (routerReasoningStarted && routerReasoningAccum.length > 0) {
+      ctx.emit({ type: "reasoning-end", blockIndex: routerReasoningBlockIndex });
+      ctx.emit({
+        type: "reasoning",
+        blockIndex: routerReasoningBlockIndex,
+        reasoning: routerReasoningAccum,
+      });
+    }
 
-    const emit = (delta: AdapterDelta): void => {
-      if (done) return;
-      void Effect.runPromise(
-        this.emitDeltaLazy(streamOp, () => delta).pipe(Effect.catchAll(() => Effect.void)),
-      );
-      const r = resolvers.shift();
-      if (r) r({ value: delta, done: false });
-      else queue.push(delta);
-    };
-    const complete = (): void => {
-      done = true;
-      while (resolvers.length > 0) {
-        resolvers.shift()!({ value: undefined as unknown as AdapterDelta, done: true });
+    const final = accum.toMessage(cp.model);
+
+    // When tagRouter is active, rewrite the synthesized Message so
+    // normalize() picks up cleaned text + extracted reasoning.
+    if (tagRouter) {
+      // Replace each text block's text with its cleaned textBuffer
+      // (already drained through the router via blocks.textBuffer).
+      let textIndex = 0;
+      const cleanedContent: AnthropicMessage["content"] = [];
+      for (const [, st] of [...blocks.entries()].sort((a, b) => a[0] - b[0])) {
+        if (st.type === "text") {
+          if (st.textBuffer.length > 0) {
+            cleanedContent.push({
+              type: "text",
+              text: st.textBuffer,
+              citations: null,
+            } as AnthropicTextBlock);
+          }
+          textIndex++;
+        } else if (st.type === "tool_use") {
+          let parsed: unknown = {};
+          try {
+            parsed = st.jsonBuffer ? JSON.parse(st.jsonBuffer) : {};
+          } catch {
+            parsed = {};
+          }
+          cleanedContent.push({
+            type: "tool_use",
+            id: st.callId ?? "",
+            name: st.name ?? "",
+            input: parsed,
+          } as AnthropicToolUseBlock);
+        } else if (st.type === "thinking") {
+          cleanedContent.push({
+            type: "thinking",
+            thinking: st.textBuffer,
+            signature: "",
+          } as AnthropicThinkingBlock);
+        }
       }
-    };
-
-    void (async () => {
-      try {
-        const params = toAnthropicParams(
-          input.targetInput,
-          input.target,
-          this.defaultModel,
-          this.defaultMaxTokens,
-        );
-        const stream = (await this.client.messages.create(
-          { ...params, stream: true } as MessageCreateParamsStreaming,
-          { signal: controller.signal },
-        )) as unknown as AsyncIterable<RawMessageStreamEvent>;
-
-        const accum = new AnthropicStreamAccumulator();
-
-        const tagRouter = buildTagRouter({
-          parseThinkTags: this.parseThinkTags,
-          customBlocks: this.customBlocks,
-        });
-
-        // Per-block state. Keyed by Anthropic's block index.
-        interface BlockState {
-          type: "text" | "thinking" | "tool_use" | "redacted_thinking";
-          callId?: string;
-          name?: string;
-          jsonBuffer: string;
-          textBuffer: string;
-        }
-        const blocks = new Map<number, BlockState>();
-        // Track which blocks emitted a *-start so we can emit symmetric closes.
-        const startedTextBlocks = new Set<number>();
-        const startedToolBlocks = new Set<number>(); // by Anthropic block index
-        const startedReasoningBlocks = new Set<number>();
-        // Tag-router auxiliary accumulators (only used when tagRouter is active).
-        let routerReasoningStarted = false;
-        let routerReasoningBlockIndex = -1; // sentinel for tag-router-driven reasoning
-        let routerReasoningAccum = "";
-
-        const handleTagEvent = (event: StreamTagEvent, blockIndex: number): void => {
-          if (event.type === "text") {
-            if (event.content.length === 0) return;
-            if (!startedTextBlocks.has(blockIndex)) {
-              emit({ type: "content-start", blockIndex, blockType: "text" });
-              startedTextBlocks.add(blockIndex);
-            }
-            emit({ type: "content-delta", blockIndex, delta: event.content });
-            const st = blocks.get(blockIndex);
-            if (st) st.textBuffer += event.content;
-            return;
-          }
-          const mode = tagRouter!.modeFor(event.tag);
-          if (mode === "reasoning") {
-            switch (event.type) {
-              case "block-start":
-                if (!routerReasoningStarted) {
-                  emit({ type: "reasoning-start", blockIndex: routerReasoningBlockIndex });
-                  routerReasoningStarted = true;
-                }
-                break;
-              case "block-delta":
-                if (!routerReasoningStarted) {
-                  emit({ type: "reasoning-start", blockIndex: routerReasoningBlockIndex });
-                  routerReasoningStarted = true;
-                }
-                emit({
-                  type: "reasoning-delta",
-                  blockIndex: routerReasoningBlockIndex,
-                  delta: event.delta,
-                });
-                routerReasoningAccum += event.delta;
-                break;
-              case "block-end":
-              case "block":
-                break;
-            }
-            return;
-          }
-          // custom-block passthrough
-          switch (event.type) {
-            case "block-start":
-              emit({ type: "custom-block-start", tag: event.tag, attrs: event.attrs });
-              break;
-            case "block-delta":
-              emit({ type: "custom-block-delta", tag: event.tag, delta: event.delta });
-              break;
-            case "block-end":
-              emit({ type: "custom-block-end", tag: event.tag });
-              break;
-            case "block":
-              emit({
-                type: "custom-block",
-                tag: event.tag,
-                content: event.content,
-                attrs: event.attrs,
-                ...(event.selfClosing ? { selfClosing: true } : {}),
-              });
-              break;
-          }
-        };
-
-        for await (const event of stream) {
-          accum.push(event);
-          switch (event.type) {
-            case "message_start": {
-              emit({
-                type: "message-start",
-                role: "assistant",
-                model: event.message.model,
-              });
-              break;
-            }
-            case "content_block_start": {
-              const block = event.content_block;
-              if (block.type === "text") {
-                blocks.set(event.index, {
-                  type: "text",
-                  jsonBuffer: "",
-                  textBuffer: "",
-                });
-                if (!tagRouter) {
-                  emit({
-                    type: "content-start",
-                    blockIndex: event.index,
-                    blockType: "text",
-                  });
-                  startedTextBlocks.add(event.index);
-                }
-                // With tagRouter, content-start is emitted lazily when the
-                // first non-tag text chunk arrives.
-              } else if (block.type === "tool_use") {
-                blocks.set(event.index, {
-                  type: "tool_use",
-                  callId: block.id,
-                  name: block.name,
-                  jsonBuffer: "",
-                  textBuffer: "",
-                });
-                emit({
-                  type: "tool-call-start",
-                  callId: block.id,
-                  name: block.name,
-                  blockIndex: event.index,
-                });
-                startedToolBlocks.add(event.index);
-              } else if (block.type === "thinking") {
-                blocks.set(event.index, {
-                  type: "thinking",
-                  jsonBuffer: "",
-                  textBuffer: "",
-                });
-                emit({ type: "reasoning-start", blockIndex: event.index });
-                startedReasoningBlocks.add(event.index);
-              } else if (block.type === "redacted_thinking") {
-                blocks.set(event.index, {
-                  type: "redacted_thinking",
-                  jsonBuffer: "",
-                  textBuffer: "[redacted]",
-                });
-                // Emit synthetic reasoning start so consumers see a placeholder.
-                emit({ type: "reasoning-start", blockIndex: event.index });
-                startedReasoningBlocks.add(event.index);
-              }
-              break;
-            }
-            case "content_block_delta": {
-              const idx = event.index;
-              const state = blocks.get(idx);
-              const delta = event.delta;
-              if (delta.type === "text_delta") {
-                if (tagRouter) {
-                  for (const ev of tagRouter.parser.process(delta.text)) {
-                    handleTagEvent(ev, idx);
-                  }
-                } else {
-                  emit({ type: "content-delta", blockIndex: idx, delta: delta.text });
-                  if (state) state.textBuffer += delta.text;
-                }
-              } else if (delta.type === "input_json_delta") {
-                if (state) state.jsonBuffer += delta.partial_json;
-                emit({
-                  type: "tool-call-delta",
-                  callId: state?.callId ?? "",
-                  delta: delta.partial_json,
-                });
-              } else if (delta.type === "thinking_delta") {
-                emit({
-                  type: "reasoning-delta",
-                  blockIndex: idx,
-                  delta: delta.thinking,
-                });
-                if (state) state.textBuffer += delta.thinking;
-              }
-              // signature_delta + citations_delta: ignored (G3 §10.4/§10.5).
-              break;
-            }
-            case "content_block_stop": {
-              const idx = event.index;
-              const state = blocks.get(idx);
-              if (!state) break;
-              if (state.type === "text") {
-                if (startedTextBlocks.has(idx)) {
-                  emit({ type: "content-end", blockIndex: idx });
-                  emit({
-                    type: "content",
-                    blockIndex: idx,
-                    content: { type: "text", text: state.textBuffer } as ContentBlock,
-                  });
-                }
-              } else if (state.type === "tool_use") {
-                let parsed: Readonly<Record<string, unknown>> = {};
-                try {
-                  parsed = state.jsonBuffer
-                    ? (JSON.parse(state.jsonBuffer) as Readonly<Record<string, unknown>>)
-                    : {};
-                } catch {
-                  /* invalid JSON — emit empty input */
-                }
-                emit({ type: "tool-call-end", callId: state.callId ?? "" });
-                emit({
-                  type: "tool-call",
-                  callId: state.callId ?? "",
-                  name: state.name ?? "",
-                  input: parsed,
-                });
-              } else if (state.type === "thinking" || state.type === "redacted_thinking") {
-                emit({ type: "reasoning-end", blockIndex: idx });
-                emit({
-                  type: "reasoning",
-                  blockIndex: idx,
-                  reasoning: state.textBuffer,
-                });
-              }
-              break;
-            }
-            case "message_delta":
-            case "message_stop":
-              break;
-          }
-        }
-        // Drain any partial buffered tag content.
-        if (tagRouter) {
-          for (const ev of tagRouter.parser.flush()) {
-            handleTagEvent(ev, 0);
-          }
-        }
-
-        // If tag-router routed reasoning to its synthetic block, emit close.
-        if (routerReasoningStarted && routerReasoningAccum.length > 0) {
-          emit({ type: "reasoning-end", blockIndex: routerReasoningBlockIndex });
-          emit({
-            type: "reasoning",
-            blockIndex: routerReasoningBlockIndex,
-            reasoning: routerReasoningAccum,
-          });
-        }
-
-        const final = accum.toMessage(params.model);
-
-        // When tagRouter is active, rewrite the synthesized Message so
-        // normalize() picks up cleaned text + extracted reasoning.
-        if (tagRouter) {
-          // Replace each text block's text with its cleaned textBuffer
-          // (already drained through the router via blocks.textBuffer).
-          let textIndex = 0;
-          const cleanedContent: AnthropicMessage["content"] = [];
-          for (const [, st] of [...blocks.entries()].sort((a, b) => a[0] - b[0])) {
-            if (st.type === "text") {
-              if (st.textBuffer.length > 0) {
-                cleanedContent.push({
-                  type: "text",
-                  text: st.textBuffer,
-                  citations: null,
-                } as AnthropicTextBlock);
-              }
-              textIndex++;
-            } else if (st.type === "tool_use") {
-              let parsed: unknown = {};
-              try {
-                parsed = st.jsonBuffer ? JSON.parse(st.jsonBuffer) : {};
-              } catch {
-                parsed = {};
-              }
-              cleanedContent.push({
-                type: "tool_use",
-                id: st.callId ?? "",
-                name: st.name ?? "",
-                input: parsed,
-              } as AnthropicToolUseBlock);
-            } else if (st.type === "thinking") {
-              cleanedContent.push({
-                type: "thinking",
-                thinking: st.textBuffer,
-                signature: "",
-              } as AnthropicThinkingBlock);
-            }
-          }
-          // Surface router-routed reasoning as a synthetic thinking block.
-          if (routerReasoningAccum.length > 0) {
-            cleanedContent.unshift({
-              type: "thinking",
-              thinking: routerReasoningAccum,
-              signature: "",
-            } as AnthropicThinkingBlock);
-          }
-          (final as { content: AnthropicMessage["content"] }).content = cleanedContent;
-          void textIndex;
-        }
-
-        const stopReason = mapFinishReason(final.stop_reason);
-        const usage = toUsageStats(final.usage);
-        emit({ type: "message-end", stopReason, usage });
-
-        const messageContent = anthropicContentToContentBlocks(final.content);
-        emit({
-          type: "message",
-          message: {
-            role: "assistant",
-            content: messageContent,
-            model: final.model,
-          },
-          stopReason,
-          usage,
-        });
-
-        resultResolve(final);
-        complete();
-      } catch (cause) {
-        resultReject(mapExecuteError(cause));
-        complete();
+      // Surface router-routed reasoning as a synthetic thinking block.
+      if (routerReasoningAccum.length > 0) {
+        cleanedContent.unshift({
+          type: "thinking",
+          thinking: routerReasoningAccum,
+          signature: "",
+        } as AnthropicThinkingBlock);
       }
-    })();
+      (final as { content: AnthropicMessage["content"] }).content = cleanedContent;
+      void textIndex;
+    }
 
-    return {
-      result: resultPromise,
-      abort(reason) {
-        controller.abort(reason ?? "aborted");
+    const stopReason = mapFinishReason(final.stop_reason);
+    const usage = toUsageStats(final.usage);
+    ctx.emit({ type: "message-end", stopReason, usage });
+
+    const messageContent = anthropicContentToContentBlocks(final.content);
+    ctx.emit({
+      type: "message",
+      message: {
+        role: "assistant",
+        content: messageContent,
+        model: final.model,
       },
-      [Symbol.asyncIterator]() {
-        return {
-          next(): Promise<IteratorResult<AdapterDelta>> {
-            if (queue.length > 0) {
-              return Promise.resolve({ value: queue.shift()!, done: false });
-            }
-            if (done) {
-              return Promise.resolve({
-                value: undefined as unknown as AdapterDelta,
-                done: true,
-              });
-            }
-            return new Promise((resolve) => resolvers.push(resolve));
-          },
-          return(): Promise<IteratorResult<AdapterDelta>> {
-            complete();
-            return Promise.resolve({
-              value: undefined as unknown as AdapterDelta,
-              done: true,
-            });
-          },
-        };
-      },
-    };
-  }
-
-  normalize(input: NormalizeInput<unknown>): Promise<LanguageModelExecutionResult> {
-    const op: Operation<NormalizeInput<unknown>, LanguageModelExecutionResult> = {
-      opId: `executor:normalize:${ulid()}`,
-      surface: "executor",
-      name: "executor:command:normalize",
-      scope: input.scope ?? {},
-      input,
-    };
-    return runHarnessProtocol(
-      this.runOperation(op, (i) =>
-        Effect.try({
-          try: () => normalizeImpl(i),
-          catch: (cause): NormalizeError => ({
-            _tag: "NormalizationFailed",
-            cause,
-          }),
-        }),
-      ),
-    );
-  }
-
-  run(input: RunInput): Promise<ExecutorTerminal<LanguageModelExecutionResult>> {
-    const executionId = input.scope?.executionId ?? `exec:${ulid()}`;
-    const tickId = input.scope?.tickId;
-    const opId =
-      tickId !== undefined
-        ? `executor:run:${executionId}:${tickId}`
-        : `executor:run:${executionId}:${ulid()}`;
-    const op: Operation<RunInput, ExecutorTerminal<LanguageModelExecutionResult>> = {
-      opId,
-      surface: "executor",
-      name: "executor:command:run",
-      scope: { ...(input.scope ?? {}), executionId },
-      input,
-    };
-    return runHarnessProtocol(this.runOperation(op, (i) => this.runBody(i, executionId, op)));
-  }
-
-  abort(input: AbortExecutorInput): Promise<void> {
-    return runHarnessProtocol(
-      Effect.sync(() => {
-        const entry = this.inFlight.get(input.executionId);
-        if (entry) {
-          entry.abortReason = input.reason ?? "aborted";
-          entry.abort?.abort(input.reason ?? "aborted");
-        }
-        this.aborted.add(input.executionId);
-      }),
-    );
-  }
-
-  // ──────── inbox dispatch ────────
-
-  protected handleMessage(
-    _msg: MessageEnvelope,
-  ): Effect.Effect<unknown, MessageHandlerError, never> {
-    return Effect.fail({
-      _tag: "HandlerError",
-      cause: new Error("anthropic executor inbox dispatch not yet wired"),
+      stopReason,
+      usage,
     });
+
+    // Reference unused-but-intentional bookkeeping so the
+    // pre-commit lint pass (unused-vars) stays clean.
+    void startedToolBlocks;
+    void startedReasoningBlocks;
+
+    return final;
   }
 
-  // ──────── internals ────────
-
-  private executeBody(
-    input: ExecuteInput<LanguageModelInput>,
-    executionId: string,
-    op: Operation<unknown, unknown> | undefined,
-  ): Effect.Effect<unknown, ExecuteError, never> {
-    return Effect.gen(this, function* () {
-      if (this.aborted.has(executionId)) {
-        return yield* Effect.fail<ExecuteError>({
-          _tag: "ProviderAborted",
-          reason: "aborted prior to execute",
-        });
-      }
-      const controller = new AbortController();
-      const entry: InFlightEntry = { executionId, abort: controller };
-      this.inFlight.set(executionId, entry);
-
-      try {
-        const params = toAnthropicParams(
-          input.targetInput,
-          input.target,
-          this.defaultModel,
-          this.defaultMaxTokens,
-        );
-        const wantStream =
-          this.streamByDefault && (input.target.capabilities?.supportsStreaming ?? true);
-        const signal = mergeSignals(input.signal, controller.signal);
-
-        if (!wantStream) {
-          return yield* Effect.tryPromise<unknown, ExecuteError>({
-            try: () =>
-              this.client.messages.create(
-                { ...params, stream: false } as MessageCreateParamsNonStreaming,
-                { signal },
-              ) as unknown as Promise<AnthropicMessage>,
-            catch: (cause): ExecuteError => mapExecuteError(cause),
-          });
-        }
-
-        return yield* this.executeStreamBody(params, signal, op);
-      } finally {
-        this.inFlight.delete(executionId);
-      }
-    });
+  protected normalizeRaw(raw: AnthropicMessage): LanguageModelExecutionResult {
+    return normalizeImpl({ targetOutput: raw, target: this.target });
   }
 
-  private executeStreamBody(
-    params: MessageCreateParams,
-    signal: AbortSignal | undefined,
-    op: Operation<unknown, unknown> | undefined,
-  ): Effect.Effect<AnthropicMessage, ExecuteError, never> {
-    return Effect.gen(this, function* () {
-      const stream = yield* Effect.tryPromise<AsyncIterable<RawMessageStreamEvent>, ExecuteError>({
-        try: () =>
-          this.client.messages.create({ ...params, stream: true } as MessageCreateParamsStreaming, {
-            signal,
-          }) as unknown as Promise<AsyncIterable<RawMessageStreamEvent>>,
-        catch: (cause): ExecuteError => mapExecuteError(cause),
-      });
-
-      const iterator = stream[Symbol.asyncIterator]();
-      const accum = new AnthropicStreamAccumulator();
-      while (true) {
-        const step = yield* Effect.tryPromise<IteratorResult<RawMessageStreamEvent>, ExecuteError>({
-          try: () => iterator.next(),
-          catch: (cause): ExecuteError => mapExecuteError(cause),
-        });
-        if (step.done) break;
-        const event = step.value;
-        accum.push(event);
-        if (op !== undefined) {
-          yield* this.emitDeltaLazy(op, () => summarizeEvent(event)).pipe(Effect.orDie);
-        }
-      }
-
-      return accum.toMessage(params.model);
+  protected override postProcessForNormalize(raw: AnthropicMessage): AnthropicMessage {
+    const router = buildTagRouter({
+      parseThinkTags: this.parseThinkTags,
+      customBlocks: this.customBlocks,
     });
-  }
-
-  private runBody(
-    input: RunInput,
-    executionId: string,
-    op: Operation<RunInput, ExecutorTerminal<LanguageModelExecutionResult>>,
-  ): Effect.Effect<ExecutorTerminal<LanguageModelExecutionResult>, ExecutorError, never> {
-    return Effect.gen(this, function* () {
-      if (this.aborted.has(executionId)) {
-        const terminal: ExecutorTerminal<LanguageModelExecutionResult> = {
-          outcome: "canceled",
-          reason: this.inFlight.get(executionId)?.abortReason ?? "aborted",
-        };
-        return terminal;
-      }
-
-      const projected = projectImpl({
-        compiled: input.compiled,
-        target: input.target,
-      });
-
-      const executeInput: ExecuteInput<LanguageModelInput> = {
-        targetInput: projected,
-        target: input.target,
-        scope: { ...(input.scope ?? {}), executionId },
-        ...(input.signal !== undefined ? { signal: input.signal } : {}),
-      };
-      const raw = yield* this.executeBody(
-        executeInput,
-        executionId,
-        op as Operation<unknown, unknown>,
-      ).pipe(
-        Effect.catchTag("ProviderAborted", (e) =>
-          Effect.succeed<ExecutorTerminal<LanguageModelExecutionResult>>({
-            outcome: "canceled",
-            reason: e.reason ?? "aborted",
-          }),
-        ),
-      );
-
-      if (
-        raw &&
-        typeof raw === "object" &&
-        "outcome" in raw &&
-        (raw as { outcome?: string }).outcome === "canceled"
-      ) {
-        return raw as ExecutorTerminal<LanguageModelExecutionResult>;
-      }
-
-      const router = buildTagRouter({
-        parseThinkTags: this.parseThinkTags,
-        customBlocks: this.customBlocks,
-      });
-      const rawForNormalize = router ? applyTagRouterToMessage(raw, router) : raw;
-
-      const result = yield* Effect.try({
-        try: () => normalizeImpl({ targetOutput: rawForNormalize, target: input.target }),
-        catch: (cause): ExecutorError => ({
-          _tag: "NormalizationFailed",
-          cause,
-        }),
-      });
-
-      const terminal: ExecutorTerminal<LanguageModelExecutionResult> = {
-        outcome: "succeeded",
-        result,
-      };
-      return terminal;
-    });
+    return router ? (applyTagRouterToMessage(raw, router) as AnthropicMessage) : raw;
   }
 }
 
@@ -1203,13 +882,16 @@ function imageSourceFromUrl(
 }
 
 // ============================================================================
-// IR projection
+// IR projection — Anthropic-specific: one text part per system section so
+// per-section providerMetadata.anthropic.cacheControl survives projection.
+// (The base's `defaultProject` joins all section text into one string, which
+// would lose per-section cache breakpoints.)
 // ============================================================================
 
-function projectImpl(input: ProjectInput): LanguageModelInput {
-  const messages = buildMessages(input.compiled);
-  const tools = buildTools(input.compiled);
-  const parameters = buildParameters(input.compiled);
+function anthropicProjectImpl(input: ProjectInput): LanguageModelInput {
+  const messages = buildAnthropicMessages(input.compiled);
+  const tools = buildAnthropicTools(input.compiled);
+  const parameters = buildAnthropicParameters(input.compiled);
   return {
     messages,
     ...(tools.length > 0 ? { tools } : {}),
@@ -1217,7 +899,7 @@ function projectImpl(input: ProjectInput): LanguageModelInput {
   };
 }
 
-function buildMessages(tree: RenderedTree): ReadonlyArray<LanguageModelMessage> {
+function buildAnthropicMessages(tree: RenderedTree): ReadonlyArray<LanguageModelMessage> {
   const messages: LanguageModelMessage[] = [];
   // Emit one text part per section (not a single joined string) so
   // per-section `metadata.providerMetadata` survives projection. The
@@ -1226,7 +908,7 @@ function buildMessages(tree: RenderedTree): ReadonlyArray<LanguageModelMessage> 
   const systemParts: LanguageModelMessagePart[] = [];
   for (const e of tree.context.entries) {
     if (e.kind !== "section") continue;
-    const text = sectionText(e);
+    const text = anthropicSectionText(e);
     if (text.length === 0) continue;
     const part: LanguageModelMessagePart = { type: "text", text };
     const pm = e.metadata?.providerMetadata;
@@ -1243,13 +925,13 @@ function buildMessages(tree: RenderedTree): ReadonlyArray<LanguageModelMessage> 
     if (entry.kind !== "message") continue;
     messages.push({
       role: entry.role as LanguageModelMessage["role"],
-      content: entry.content.map(messagePartFromBlock),
+      content: entry.content.map(anthropicMessagePartFromBlock),
     });
   }
   return messages;
 }
 
-function sectionText(section: SectionEntry): string {
+function anthropicSectionText(section: SectionEntry): string {
   const head = section.title ? `## ${section.title}\n\n` : "";
   const body = section.content
     .map((b) => (b.type === "text" ? b.text : ""))
@@ -1258,7 +940,45 @@ function sectionText(section: SectionEntry): string {
   return head + body;
 }
 
-function imageUrlFromSource(source: MediaSource, mimeType: string | undefined): string {
+function anthropicMessagePartFromBlock(block: ContentBlock): LanguageModelMessagePart {
+  const pm =
+    block.providerMetadata !== undefined ? { providerMetadata: block.providerMetadata } : {};
+  switch (block.type) {
+    case "text":
+      return { type: "text", text: block.text, ...pm };
+    case "image":
+      return {
+        type: "image",
+        imageUrl: anthropicImageUrlFromSource(block.source, block.mimeType),
+        ...(block.mimeType !== undefined ? { mediaType: block.mimeType } : {}),
+        ...pm,
+      };
+    case "tool_use":
+      return {
+        type: "tool_use",
+        id: block.toolUseId,
+        name: block.name,
+        input: block.input,
+        ...pm,
+      };
+    case "tool_result":
+      return {
+        type: "tool_result",
+        toolUseId: block.toolUseId,
+        content: block.content.map(anthropicMessagePartFromBlock),
+        ...(block.isError !== undefined ? { isError: block.isError } : {}),
+        ...pm,
+      };
+    default:
+      return {
+        type: "text",
+        text:
+          "text" in block && typeof block.text === "string" ? block.text : JSON.stringify(block),
+      };
+  }
+}
+
+function anthropicImageUrlFromSource(source: MediaSource, mimeType: string | undefined): string {
   switch (source.type) {
     case "url":
       return source.url;
@@ -1275,48 +995,10 @@ function imageUrlFromSource(source: MediaSource, mimeType: string | undefined): 
   }
 }
 
-function messagePartFromBlock(block: ContentBlock): LanguageModelMessagePart {
-  const pm =
-    block.providerMetadata !== undefined ? { providerMetadata: block.providerMetadata } : {};
-  switch (block.type) {
-    case "text":
-      return { type: "text", text: block.text, ...pm };
-    case "image":
-      return {
-        type: "image",
-        imageUrl: imageUrlFromSource(block.source, block.mimeType),
-        ...(block.mimeType !== undefined ? { mediaType: block.mimeType } : {}),
-        ...pm,
-      };
-    case "tool_use":
-      return {
-        type: "tool_use",
-        id: block.toolUseId,
-        name: block.name,
-        input: block.input,
-        ...pm,
-      };
-    case "tool_result":
-      return {
-        type: "tool_result",
-        toolUseId: block.toolUseId,
-        content: block.content.map(messagePartFromBlock),
-        ...(block.isError !== undefined ? { isError: block.isError } : {}),
-        ...pm,
-      };
-    default:
-      return {
-        type: "text",
-        text:
-          "text" in block && typeof block.text === "string" ? block.text : JSON.stringify(block),
-      };
-  }
-}
-
-function buildTools(tree: RenderedTree): ReadonlyArray<LanguageModelTool> {
+function buildAnthropicTools(tree: RenderedTree): ReadonlyArray<LanguageModelTool> {
   const decl = tree.declarations?.tools ?? [];
   return decl
-    .filter((t: ToolDeclaration) => t.exposure.includes("model"))
+    .filter((t) => t.exposure.includes("model"))
     .map((t) => ({
       name: t.name,
       ...(t.description !== undefined ? { description: t.description } : {}),
@@ -1325,7 +1007,7 @@ function buildTools(tree: RenderedTree): ReadonlyArray<LanguageModelTool> {
     }));
 }
 
-function buildParameters(tree: RenderedTree) {
+function buildAnthropicParameters(tree: RenderedTree) {
   const cfg = tree.config;
   if (!cfg) return undefined;
   const params: {
@@ -1598,45 +1280,6 @@ class AnthropicStreamAccumulator {
   }
 }
 
-function summarizeEvent(event: RawMessageStreamEvent): {
-  kind: string;
-  delta?: string;
-  blockIndex?: number;
-  metadata?: Record<string, unknown>;
-} {
-  switch (event.type) {
-    case "message_start":
-      return { kind: "message_start", metadata: { model: event.message.model } };
-    case "content_block_start":
-      return {
-        kind: "content_block_start",
-        blockIndex: event.index,
-        metadata: { blockType: event.content_block.type },
-      };
-    case "content_block_delta": {
-      const d = event.delta;
-      if (d.type === "text_delta")
-        return { kind: "content_delta", delta: d.text, blockIndex: event.index };
-      if (d.type === "input_json_delta")
-        return { kind: "tool_call_delta", delta: d.partial_json, blockIndex: event.index };
-      if (d.type === "thinking_delta")
-        return { kind: "reasoning_delta", delta: d.thinking, blockIndex: event.index };
-      return { kind: "noop" };
-    }
-    case "content_block_stop":
-      return { kind: "content_block_stop", blockIndex: event.index };
-    case "message_delta":
-      return {
-        kind: "message_delta",
-        metadata: { stopReason: event.delta.stop_reason ?? null },
-      };
-    case "message_stop":
-      return { kind: "message_stop" };
-    default:
-      return { kind: "noop" };
-  }
-}
-
 // ============================================================================
 // Stop-reason mapping
 // ============================================================================
@@ -1654,31 +1297,4 @@ function mapFinishReason(reason: string | null | undefined): LanguageModelStopRe
     default:
       return "end";
   }
-}
-
-// ============================================================================
-// Error + signal helpers
-// ============================================================================
-
-function mapExecuteError(cause: unknown): ExecuteError {
-  if (cause instanceof Error) {
-    const status = (cause as { status?: number }).status;
-    if (cause.name === "APIUserAbortError" || /aborted/i.test(cause.message)) {
-      return { _tag: "ProviderAborted", reason: cause.message };
-    }
-    if (typeof status === "number") {
-      return { _tag: "ProviderRejected", status, cause };
-    }
-  }
-  return { _tag: "StreamFailed", cause };
-}
-
-function mergeSignals(a: AbortSignal | undefined, b: AbortSignal): AbortSignal | undefined {
-  if (a === undefined) return b;
-  if (a.aborted) return a;
-  const c = new AbortController();
-  const onAbort = (signal: AbortSignal) => () => c.abort(signal.reason ?? "aborted");
-  a.addEventListener("abort", onAbort(a), { once: true });
-  b.addEventListener("abort", onAbort(b), { once: true });
-  return c.signal;
 }
