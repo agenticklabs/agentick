@@ -219,16 +219,21 @@ describe("content blocks — custom + diagnostics", () => {
   });
 
   it("missing required prop emits a warning diagnostic and skips", () => {
+    // `<image>` and `<code>` collide with React's HTML/SVG intrinsics and
+    // can't be augmented to match v2's prop shape — see
+    // src/react/jsx-intrinsics.d.ts for the omission rationale. Tests for
+    // these contributors use React.createElement directly.
     const { diagnostics, tree } = renderAndCollect(
       React.createElement(
         "section",
         { id: "s" },
-        // Intentionally missing the `source` prop — contributor emits
-        // MISSING_SOURCE diagnostic. (Cannot use @ts-expect-error
-        // because v2 JSX.IntrinsicElements isn't augmented yet, so TS
-        // accepts the shape silently.)
+        // Intentionally missing `source` — emits MISSING_SOURCE.
         React.createElement("image", {}),
-        React.createElement("code", { language: "typescript" }, "ok = 1"),
+        React.createElement(
+          "code",
+          { language: "typescript" } as Record<string, unknown>,
+          "ok = 1",
+        ),
       ),
     );
     expect(diagnostics.some((d) => d.code === "MISSING_SOURCE")).toBe(true);
@@ -243,9 +248,7 @@ describe("content blocks — custom + diagnostics", () => {
       React.createElement(
         "section",
         { id: "s" },
-        // Intentionally missing the `language` prop — contributor
-        // emits MISSING_LANGUAGE. JSX augmentation pending; @ts-expect-error
-        // would be "unused" since TS accepts arbitrary intrinsics today.
+        // Intentionally missing `language` — emits MISSING_LANGUAGE.
         React.createElement("code", null, "no lang"),
       ),
     );

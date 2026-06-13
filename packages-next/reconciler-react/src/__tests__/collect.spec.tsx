@@ -63,20 +63,11 @@ describe("collect — structural primitives", () => {
 
   it("missing message role emits a warning diagnostic and skips", () => {
     const { tree, diagnostics } = renderAndCollect(
-      React.createElement(
-        React.Fragment,
-        null,
-        React.createElement(
-          // intentionally missing role — surfaces a diagnostic. Cast
-          // through the broad ComponentType<Record<string, unknown>>
-          // since "message" isn't in JSX.IntrinsicElements yet
-          // (v2 augmentation pending — see jsx-intrinsics.d.ts draft).
-          "message" as unknown as React.ComponentType<Record<string, unknown>>,
-          { id: "m1" },
-          "no role",
-        ),
-        React.createElement("message", { role: "user" }, "hi"),
-      ),
+      <>
+        {/* @ts-expect-error — role is required; missing it triggers MISSING_ROLE diagnostic */}
+        <message id="m1">no role</message>
+        <message role="user">hi</message>
+      </>,
     );
     expect(diagnostics.some((d) => d.code === "MISSING_ROLE")).toBe(true);
     // The valid message still lands in the tree.
@@ -115,12 +106,8 @@ describe("collect — declarations", () => {
 
   it("missing tool name emits diagnostic", () => {
     const { diagnostics } = renderAndCollect(
-      // "tool" isn't in JSX.IntrinsicElements yet (v2 augmentation
-      // pending). Cast through ComponentType so the legitimately-
-      // invalid prop (missing name) reaches the contributor.
-      React.createElement("tool" as unknown as React.ComponentType<Record<string, unknown>>, {
-        inputSchema: { type: "object" },
-      }),
+      // @ts-expect-error — `name` is required; missing it triggers MISSING_NAME.
+      <tool inputSchema={{ type: "object" }} />,
     );
     expect(diagnostics.some((d) => d.code === "MISSING_NAME")).toBe(true);
   });

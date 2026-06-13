@@ -1,7 +1,7 @@
 /**
  * JSX.IntrinsicElements augmentation for `@agentick/reconciler-react-next`.
  *
- * Declares the v2 reconciler's host intrinsics so adopters (and tests)
+ * Declares the v2 reconciler's host intrinsics so adopters and tests
  * can write JSX like:
  *
  * ```tsx
@@ -14,45 +14,85 @@
  * names with `TS2339: Property 'message' does not exist on type
  * 'JSX.IntrinsicElements'`.
  *
- * Per-prop shapes mirror each contributor's expected `props` interface:
- *   - message → packages-next/reconciler/src/collect/contributors/message.ts
- *   - section → ... /section.ts
- *   - tool    → ... /tool.ts
- *   - etc.
+ * # What's declared here vs not
  *
- * Spec sourced from `@agentick/spec-next` so adding a field to a
- * contributor's props makes the JSX prop bag mirror it at compile time.
+ * Adopters normally write the **uppercase React-component wrappers**
+ * (`<Message>`, `<Tool>`, `<Section>`, `<Code>`, ...) exported from
+ * `@agentick/reconciler-react-next` and friends. Those components are
+ * typed by their own export signatures — they do NOT need any
+ * augmentation here.
+ *
+ * The intrinsics declared here are the **lowercase host primitives**
+ * the reconciler treats as the wire shape: the uppercase wrappers
+ * compile down to them. Tests and adopter code that want to write the
+ * lowercase form directly get type safety via this file.
+ *
+ * Per-prop shapes mirror each contributor's expected `props` interface
+ * in `packages-next/reconciler/src/collect/contributors/`.
+ *
+ * # HTML-overlap policy
+ *
+ * Several intrinsics (`section`, `code`, `audio`, `video`, `image`,
+ * `html`) overlap with React's HTML element names. Interface merging
+ * applies — augmentation here ADDS v2-specific props (like `audience`
+ * on `section`) without removing HTML's existing attributes. Adopters
+ * can pass either set; the reconciler reads the v2 props, HTML attrs
+ * are ignored at the v2 layer.
+ *
+ * # Type discipline
+ *
+ * All prop shapes reference types from `@agentick/spec-next` where
+ * possible. When the spec changes, this file fails to typecheck until
+ * updated — the same drift-detection guarantee the canonical fakes
+ * have.
  *
  * @see docs/proposals/v2/blueprint/03-reconciler-harness.md
+ * @see packages-next/reconciler/src/collect/contributors/
  */
 
 import type {
   ContentBlock,
+  MediaSource,
+  ProviderOptions,
+  ProviderToolOptions,
   SessionMessageRole,
-  ToolDeclaration,
   ToolExposure,
 } from "@agentick/spec-next";
 
-declare global {
+type ReactChildren = import("react").ReactNode;
+type ReactKey = import("react").Key | null;
+
+// React 19 + `jsxImportSource: "react"` puts JSX.IntrinsicElements inside
+// `import("react").JSX`. Module augmentation merges per-key with React's
+// existing IntrinsicElements — HTML keys (`section`, `code`, `image`, ...)
+// pick up our props on top of their HTML attribute shape.
+declare module "react" {
   namespace JSX {
     interface IntrinsicElements {
-      // ────────── Top-level shapes ──────────
+      // ────────── Top-level structural intrinsics ──────────
 
+      /**
+       * Conversation message. Compiles to a `MessageEntry` on
+       * `RenderedTree.context.entries`. Adopters typically use the
+       * uppercase `<Message>` wrapper from `@agentick/reconciler-react-next`.
+       */
       message: {
         readonly id?: string;
         readonly role: SessionMessageRole;
-        /**
-         * Pre-built content blocks. When non-empty, takes precedence
-         * over children — used for re-emitting persisted entries.
-         */
+        /** Pre-built content blocks; takes precedence over children when non-empty. */
         readonly content?: readonly ContentBlock[];
         readonly cache?: Record<string, unknown>;
         readonly providerMetadata?: Record<string, unknown>;
         readonly metadata?: Record<string, unknown>;
-        readonly children?: React.ReactNode;
-        readonly key?: React.Key | null;
+        readonly children?: ReactChildren;
+        readonly key?: ReactKey;
       };
 
+      /**
+       * Named section in the rendered prompt. Adopters typically use
+       * the uppercase `<Section>` wrapper. Merges with HTML's
+       * `<section>` (existing HTML attributes remain valid).
+       */
       section: {
         readonly id?: string;
         readonly audience?: "user" | "model" | "all";
@@ -60,128 +100,201 @@ declare global {
         readonly tags?: readonly string[];
         readonly visibility?: "model" | "observer" | "log";
         readonly metadata?: Record<string, unknown>;
-        readonly children?: React.ReactNode;
-        readonly key?: React.Key | null;
+        readonly children?: ReactChildren;
+        readonly key?: ReactKey;
       };
 
+      /**
+       * Tool declaration. Compiles to a `ToolDeclaration` on
+       * `RenderedTree.declarations.tools`.
+       */
       tool: {
         readonly id?: string;
         readonly name: string;
         readonly description?: string;
-        readonly inputSchema?: ToolDeclaration["inputSchema"];
-        readonly outputSchema?: ToolDeclaration["outputSchema"];
+        readonly inputSchema?: Record<string, unknown>;
+        readonly outputSchema?: Record<string, unknown>;
         readonly exposure?: readonly ToolExposure[];
         readonly handlerRef?: string;
+        readonly providerOptions?: ProviderToolOptions;
         readonly metadata?: Record<string, unknown>;
-        readonly children?: React.ReactNode;
-        readonly key?: React.Key | null;
+        readonly children?: ReactChildren;
+        readonly key?: ReactKey;
+      };
+
+      /**
+       * Model selection + per-call provider options. Compiles to
+       * `RenderedTree.config` + `RenderedTree.providerOptions`.
+       */
+      model: {
+        readonly id?: string;
+        readonly temperature?: number;
+        readonly maxOutputTokens?: number;
+        readonly topP?: number;
+        readonly stopSequences?: readonly string[];
+        readonly providerOptions?: ProviderOptions;
+        readonly metadata?: Record<string, unknown>;
+        readonly key?: ReactKey;
+      };
+
+      /**
+       * Resource declaration. Compiles to
+       * `RenderedTree.declarations.resources`.
+       */
+      resource: {
+        readonly id?: string;
+        readonly uri: string;
+        readonly mimeType?: string;
+        readonly metadata?: Record<string, unknown>;
+        readonly children?: ReactChildren;
+        readonly key?: ReactKey;
+      };
+
+      /**
+       * Output declaration. Compiles to
+       * `RenderedTree.declarations.outputs`.
+       */
+      output: {
+        readonly id?: string;
+        readonly mode?: "json" | "text" | "tool-only";
+        readonly schema?: Record<string, unknown>;
+        readonly metadata?: Record<string, unknown>;
+        readonly children?: ReactChildren;
+        readonly key?: ReactKey;
+      };
+
+      /**
+       * MCP server declaration. Compiles to
+       * `RenderedTree.declarations.mcp`.
+       */
+      mcp: {
+        readonly id?: string;
+        readonly serverName: string;
+        readonly transport: "stdio" | "websocket" | "sse" | (string & {});
+        readonly config?: Record<string, unknown>;
+        readonly exposes?: readonly ("tools" | "resources" | "prompts")[];
+        readonly metadata?: Record<string, unknown>;
+        readonly key?: ReactKey;
       };
 
       // ────────── Content block primitives ──────────
 
+      /** Text content block. */
       text: {
         readonly text?: string;
-        readonly children?: React.ReactNode;
-        readonly key?: React.Key | null;
+        readonly children?: ReactChildren;
+        readonly key?: ReactKey;
       };
 
-      code: {
-        readonly language?: string;
-        readonly children?: React.ReactNode;
-        readonly key?: React.Key | null;
+      /** Reasoning content block (thinking / chain-of-thought). */
+      reasoning: {
+        readonly text?: string;
+        readonly children?: ReactChildren;
+        readonly key?: ReactKey;
       };
 
+      // NOTE: `<code>`, `<image>`, `<audio>`, `<video>`, `<section>`,
+      // `<html>` are intentionally omitted. They collide with React's
+      // pre-typed HTML/SVG intrinsics whose shape we cannot override via
+      // declaration merging (TypeScript keeps the original definition
+      // for already-defined keys). Adopters use the uppercase wrappers
+      // (`<Code>`, `<Image>`, `<Audio>`, `<Section>`) — recommended path
+      // — or `React.createElement("code", { language: "ts" }, ...)` with
+      // a documented cast where the test needs the lowercase form.
+      //
+      // Renaming the contributors to non-HTML names (e.g. `agentick-code`,
+      // `code-block`) would let us declare them here cleanly — flagged as
+      // a separate design discussion.
+
+      /** JSON data block. */
       json: {
         readonly data: unknown;
-        readonly key?: React.Key | null;
+        readonly metadata?: Record<string, unknown>;
+        readonly key?: ReactKey;
       };
 
-      image: {
-        readonly source:
-          | { readonly type: "url"; readonly url: string }
-          | { readonly type: "data"; readonly data: string; readonly mediaType: string };
-        readonly key?: React.Key | null;
+      /** XML data block — distinct from formatter-scope `<XML>`. */
+      "xml-block": {
+        readonly tag?: string;
+        readonly attributes?: Record<string, string>;
+        readonly children?: ReactChildren;
+        readonly key?: ReactKey;
       };
 
-      // ────────── Semantic primitives (markdown / structured prose) ──────────
-
-      header: {
-        readonly level?: 1 | 2 | 3 | 4 | 5 | 6;
-        readonly children?: React.ReactNode;
-        readonly key?: React.Key | null;
-      };
-
-      paragraph: {
-        readonly children?: React.ReactNode;
-        readonly key?: React.Key | null;
-      };
-
-      list: {
-        readonly ordered?: boolean;
-        readonly task?: boolean;
-        readonly children?: React.ReactNode;
-        readonly key?: React.Key | null;
-      };
-
-      listitem: {
-        readonly checked?: boolean;
-        readonly children?: React.ReactNode;
-        readonly key?: React.Key | null;
-      };
-
-      table: {
+      /** CSV data block. */
+      csv: {
+        readonly data: string | readonly (readonly string[])[];
         readonly headers?: readonly string[];
-        readonly rows?: readonly (readonly string[])[];
-        readonly children?: React.ReactNode;
-        readonly key?: React.Key | null;
+        readonly key?: ReactKey;
       };
 
-      row: {
-        readonly header?: boolean;
-        readonly children?: React.ReactNode;
-        readonly key?: React.Key | null;
+      /** Custom content block — adopter-defined kind. */
+      custom: {
+        readonly kind: string;
+        readonly data?: unknown;
+        readonly children?: ReactChildren;
+        readonly key?: ReactKey;
       };
 
-      column: {
-        readonly children?: React.ReactNode;
-        readonly key?: React.Key | null;
+      /**
+       * Content passthrough — flattens children into parent's content
+       * blocks without introducing a wrapping entry.
+       */
+      content: {
+        readonly children?: ReactChildren;
+        readonly key?: ReactKey;
       };
 
-      // ────────── Event blocks ──────────
+      // ────────── Media blocks (only `document` declared) ──────────
+      //
+      // `<image>`, `<audio>`, `<video>` collide with React's HTML/SVG
+      // intrinsics and can't be safely augmented (see omitted-elements
+      // comment above). Adopters use `<Image>`, `<Audio>`, `<Video>`
+      // wrappers from `@agentick/reconciler-react-next`. Only `document`
+      // (no HTML conflict) is declared here.
 
-      useraction: {
+      /** Document attachment. */
+      document: {
+        readonly source: MediaSource;
+        readonly metadata?: Record<string, unknown>;
+        readonly key?: ReactKey;
+      };
+
+      // ────────── Event blocks (snake_case per contributor names) ──────────
+
+      user_action: {
         readonly action: string;
         readonly actor?: string;
         readonly target?: string;
-        readonly children?: React.ReactNode;
-        readonly key?: React.Key | null;
+        readonly metadata?: Record<string, unknown>;
+        readonly children?: ReactChildren;
+        readonly key?: ReactKey;
       };
 
-      systemevent: {
+      system_event: {
         readonly event: string;
         readonly source?: string;
         readonly severity?: "info" | "warning" | "error";
-        readonly children?: React.ReactNode;
-        readonly key?: React.Key | null;
+        readonly metadata?: Record<string, unknown>;
+        readonly children?: ReactChildren;
+        readonly key?: ReactKey;
       };
 
-      statechange: {
+      state_change: {
         readonly entity: string;
         readonly field?: string;
         readonly from: unknown;
         readonly to: unknown;
         readonly trigger?: string;
-        readonly children?: React.ReactNode;
-        readonly key?: React.Key | null;
-      };
-
-      ephemeral: {
-        readonly position?: "before-user" | "after-user" | "end";
-        readonly children?: React.ReactNode;
-        readonly key?: React.Key | null;
+        readonly metadata?: Record<string, unknown>;
+        readonly children?: ReactChildren;
+        readonly key?: ReactKey;
       };
     }
   }
 }
 
+// Marker: this file is a module (not a script). Without it, the
+// `declare module` augmentation could leak into consumer scope as a
+// script-mode side effect.
 export {};

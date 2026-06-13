@@ -1,3 +1,9 @@
+// JSX.IntrinsicElements augmentation is auto-loaded by the tsconfig
+// include glob (src/**) for in-workspace consumers. Downstream package
+// consumers pick it up through the package's `types` entry which
+// resolves to this file; the .d.ts is co-located under src/react/.
+import "./react/jsx-intrinsics.js";
+
 /**
  * @agentick/reconciler-react-next — React reconciler implementation.
  *
@@ -6,6 +12,12 @@
  * `defineReconciler` callback factory). This package binds those
  * generics to `react-reconciler` and ships the JSX components / hooks
  * adopters write agents with.
+ *
+ * The leading `/// <reference>` above pulls in the
+ * `JSX.IntrinsicElements` augmentation so adopters and tests can write
+ * lowercase host intrinsics (`<message>`, `<tool>`, `<section>`, ...)
+ * with proper type checking. See `src/react/jsx-intrinsics.d.ts` for
+ * the full surface and HTML-overlap policy.
  *
  * @see docs/proposals/v2/blueprint/03-reconciler-harness.md
  * @see docs/proposals/v2/blueprint/21-reconciler-implementation.md

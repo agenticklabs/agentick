@@ -182,24 +182,18 @@ describe("<Timeline> — render prop", () => {
     await harness.mount({
       mountId: "m_rp",
       sessionId: "s",
-      element: React.createElement(Timeline, {
-        children: (entries, budget) => {
-          observed = { count: entries.length, budget };
-          return entries.map((e) =>
-            React.createElement(
-              // Cast widens to accept the host-element prop shape (role).
-              // Reconciler-host intrinsics aren't in React's JSX namespace.
-              "message" as unknown as React.ComponentType<Record<string, unknown>>,
-              { key: e.message.id, role: e.message.role },
-              React.createElement(
-                "text" as unknown as React.ComponentType<Record<string, unknown>>,
-                {},
-                `RP:${joinText(e.message.content)}`,
-              ),
-            ),
-          );
-        },
-      }),
+      element: (
+        <Timeline>
+          {(entries, budget) => {
+            observed = { count: entries.length, budget };
+            return entries.map((e) => (
+              <message key={e.message.id} role={e.message.role}>
+                <text>{`RP:${joinText(e.message.content)}`}</text>
+              </message>
+            ));
+          }}
+        </Timeline>
+      ),
       bridges,
     });
     const { tree } = await harness.renderTree({ mountId: "m_rp", sessionId: "s" });
