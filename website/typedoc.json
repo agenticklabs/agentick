@@ -51,6 +51,7 @@
     "../packages-next/timeline",
     "../packages-next/skills",
     "../packages-next/elicitation",
+    "../packages-next/mcp",
     "../packages-next/gates",
     "../packages-next/formatters",
     "../packages-next/subscriptions",

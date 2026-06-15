@@ -665,6 +665,31 @@ importers:
         specifier: workspace:*
         version: link:../spec-conformance
 
+  packages-next/mcp:
+    dependencies:
+      '@agentick/elicitation-next':
+        specifier: workspace:*
+        version: link:../elicitation
+      '@agentick/runtime-next':
+        specifier: workspace:*
+        version: link:../runtime
+      '@agentick/spec-next':
+        specifier: workspace:*
+        version: link:../spec
+      '@agentick/tool-executor-next':
+        specifier: workspace:*
+        version: link:../tool-executor
+      '@modelcontextprotocol/sdk':
+        specifier: ^1.29.0
+        version: 1.29.0(zod@4.3.6)
+      effect:
+        specifier: ^3.21.2
+        version: 3.21.2
+    devDependencies:
+      '@agentick/spec-conformance-next':
+        specifier: workspace:*
+        version: link:../spec-conformance
+
   packages-next/reconciler:
     dependencies:
       '@agentick/runtime-next':

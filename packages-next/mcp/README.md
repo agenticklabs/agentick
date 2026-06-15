@@ -1,0 +1,145 @@
+# @agentick/mcp-next
+
+**MCP client harness** — connects an agentick session to N Model
+Context Protocol servers. Discovered tools register into the local
+`ToolExecutor`; inbound `elicitation/create` from servers routes
+through `bridges.elicitation`. Targets the MCP `draft` spec going
+forward; supports the latest official (`2025-11-25`) via an era-codec
+layer at the wire edge.
+
+Private workspace package. Bundled into the `agentick` metapackage;
+not published independently.
+
+## Status
+
+**Skeleton commit (#1 of 5).** Pure utilities + types ported from v1
+(`packages/mcp/`); no harness yet.
+
+| Phase | Shipping in | Status |
+|---|---|---|
+| #1 Skeleton — OAuth + protocol utilities + in-memory transport | this commit | ✅ |
+| #2 `McpClientHarness` — Transport / Protocol / Auth / Lifecycle | next | ⏳ |
+| #3 `withMCP` extension + ToolBridge integration | follow-up | ⏳ |
+| #4 ElicitationBridge — server-to-client elicit/create routing | follow-up | ⏳ |
+| #5 OAuth + URL-mode elicitation + Streamable HTTP | follow-up | ⏳ |
+
+## Architecture
+
+Per-server harness, **four pluggable layers** inside each:
+
+```
+withMCP({ servers: [...] })  ─── AppExtension
+        │
+        ▼ constructs one per server
+McpClientHarness extends BaseHarness<"mcp">
+  ├ McpTransport    — stdio / streamable-http / sse / ws / in-memory
+  ├ McpAuth         — None / Bearer / OAuth21
+  ├ McpProtocol     — initialize handshake + JSON-RPC correlation
+  └ McpLifecycle    — connection state machine + reconnect + heartbeats
+        │
+        ▼ bridges
+  ToolBridge        — registers discovered MCP tools in session's ToolExecutor;
+                      dispatch routes through tools/call
+  ElicitBridge      — inbound elicit/create routes through
+                      bridges.elicitation.elicit; response sent over MCP wire
+```
+
+## What's in the skeleton commit
+
+### `@agentick/mcp-next/oauth` — OAuth utilities
+
+Generic OAuth glue, framework-agnostic. Ported from v1 with no
+behavioral changes (Logger swapped for `console.warn`/`console.error`).
+
+```ts
+import {
+  DefaultOAuthProvider,
+  OAuthCallbackServer,
+  type OAuthProvider,
+} from "@agentick/mcp-next/oauth";
+
+// CLI / desktop pattern: localhost callback + default provider
+const callback = new OAuthCallbackServer({ port: 0 });
+const redirectUrl = await callback.start();
+
+const provider = new DefaultOAuthProvider({
+  serverName: "linear",
+  serverUrl: "https://mcp.linear.app",
+  redirectUrl,
+  onAuthorizationNeeded: (url) => openInBrowser(url.toString()),
+});
+
+// When the user finishes the OAuth flow in their browser, the
+// callback server resolves with the code, which we hand to the
+// provider to unblock the SDK's pending auth wait.
+const code = await callback.waitForCode();
+if (code) provider.resolveAuthorizationCode(code);
+else provider.cancelAuthorization();
+```
+
+**Replacement when McpClientHarness #5 lands:** the `redirectToAuthorization`
++ `waitForAuthorizationCode` pair becomes a URL-mode elicitation. The
+localhost callback server stays as a fallback for environments without
+a UI (CLI dev loops).
+
+### `@agentick/mcp-next` (protocol utilities)
+
+```ts
+import {
+  toolError,
+  toolResult,
+  toMCPResult,
+  protocolError,
+  ErrorCodes,
+  sanitizeErrorMessage,
+  rethrowAsProtocolError,
+  completeFromList,
+  completeFromEnum,
+  completePrefixMatch,
+  completeDependent,
+  completeFromAsync,
+} from "@agentick/mcp-next";
+```
+
+**Sanitization** strips stack traces, file paths, DB connection
+strings, and `password=`/`token=`/`key=` patterns before they reach
+the client.
+
+**Completion builders** enforce the spec's 100-value cap automatically
+and handle the `string[]` vs `CompletionResult` shape coercion. The
+`CompletionContext` type is narrower than v1's `MCPCompletionContext`
+(server-side handler context like auth/session goes with the future
+MCP server work).
+
+### `@agentick/mcp-next` (in-memory transport)
+
+```ts
+import { InMemoryMcpTransport } from "@agentick/mcp-next";
+
+const [clientSide, serverSide] = InMemoryMcpTransport.createLinkedPair();
+```
+
+Synchronous delivery; preserves real-transport ordering. Useful for
+testing the harness end-to-end without spawning a subprocess.
+
+## Verified by
+
+- `src/__tests__/skeleton.spec.ts` — every ported public export
+  resolves, sanitization patterns catch the documented sensitive
+  shapes, completion builders enforce the 100-cap, in-memory linked
+  pair round-trips a message.
+
+## Roadmap & known gaps
+
+- **No harness yet.** McpClientHarness lands in #2; the
+  `bridges.mcp` slot is typed as `McpHookBridge | undefined` in the
+  augmentation today.
+- **No version negotiation.** The era-codec layer (canonical = draft
+  shape; codecs for 2025-11-25, 2024-11-05) lands with the harness.
+- **OAuth flow is bootstrap-only today.** `DefaultOAuthProvider` logs
+  the authorize URL or invokes `onAuthorizationNeeded`. URL-mode
+  elicitation integration lands with #5.
+- **No stdio / streamable-http transport.** In-memory transport for
+  tests is the only transport here. Real transports land with #2 / #5.
+
+@see [`docs/proposals/v2/blueprint/23-mcp-as-harness.md`](../../docs/proposals/v2/blueprint/23-mcp-as-harness.md)
