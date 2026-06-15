@@ -1,14 +1,23 @@
 /**
- * Module augmentation — adds the `elicitation` slot to
- * `HookBridges` from `@agentick/spec-next`.
+ * Module augmentation — adds the `elicitation` slot to TWO spec
+ * interfaces:
+ *
+ *   1. `HookBridges.elicitation`            → React/render-time access
+ *                                              for in-tree harnesses
+ *                                              calling `elicit(...)`.
+ *   2. `SessionHarnessProtocol.elicitation` → server-side access for
+ *                                              the gateway routing
+ *                                              `session/respondToElicitation`
+ *                                              wire RPCs to
+ *                                              `respond(...)`.
  *
  * Per ADR 27 (modular built-ins): each harness package augments the
  * spec's empty seed with its own slot. The spec itself stays neutral.
  *
- * **Required slot.** Elicitation is a substrate primitive — every
- * session has one. Consumer code reading `bridges.elicitation.elicit(...)`
- * does NOT need a null-check; sessions that don't surface a user end
- * up with a no-op transport, not a missing harness.
+ * **Required slots.** Elicitation is a substrate primitive — every
+ * session has one. Consumer code reads through these slots without a
+ * null check; sessions that don't surface a user end up with a no-op
+ * transport, not a missing harness.
  *
  * Loaded as a side effect when anything imports from
  * `@agentick/elicitation-next`.
@@ -25,6 +34,16 @@ declare module "@agentick/spec-next" {
      * `elicitation/create`, agent-side asks all flow through this one
      * harness so the wire envelope, correlation engine, and
      * timeout/abort semantics live in one place.
+     */
+    readonly elicitation: ElicitationHarnessProtocol;
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  interface SessionHarnessProtocol<P> {
+    /**
+     * The session's elicitation harness. Same instance the per-session
+     * tool executor + `bridges.elicitation` use; clients reach it via
+     * `session/respondToElicitation` to unblock pending elicitations.
      */
     readonly elicitation: ElicitationHarnessProtocol;
   }

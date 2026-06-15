@@ -1007,6 +1007,9 @@ importers:
       '@agentick/client-next':
         specifier: workspace:*
         version: link:../client
+      '@agentick/elicitation-next':
+        specifier: workspace:*
+        version: link:../elicitation
       '@agentick/executor-next':
         specifier: workspace:*
         version: link:../executor

@@ -24,6 +24,7 @@ import {
   type SessionCloseParams,
   type SessionDispatchParams,
   type SessionHarnessProtocol,
+  type SessionRespondToElicitationParams,
   type SessionSendParams,
   type SubscribeParams,
   type UnsubscribeParams,
@@ -134,6 +135,35 @@ export async function dispatchRequest(
         const sess = requireSession(host, params.sessionId);
         if (isError(sess)) return errorResponse(req.id, sess.code, sess.message, sess.data);
         await sess.close();
+        return success(req.id, null);
+      }
+      case "session/respondToElicitation": {
+        const params = req.params as SessionRespondToElicitationParams;
+        const sess = requireSession(host, params.sessionId);
+        if (isError(sess)) return errorResponse(req.id, sess.code, sess.message, sess.data);
+        // The elicitation slot on `SessionHarnessProtocol` is added by
+        // `@agentick/elicitation-next` via module augmentation, but
+        // transport is a foundation-layer package and intentionally
+        // does NOT depend on elicitation-next (would invert the
+        // dependency direction). Cast to a local typed shape that
+        // captures the contract we need — every conforming session
+        // surfaces this slot via the augmentation at adopter-side.
+        const sessElic = sess as SessionHarnessProtocol & {
+          readonly elicitation: {
+            respond(input: {
+              readonly correlationId: string;
+              readonly outcome: "accepted" | "declined" | "cancelled";
+              readonly value?: unknown;
+              readonly reason?: string;
+            }): Promise<void>;
+          };
+        };
+        await sessElic.elicitation.respond({
+          correlationId: params.correlationId,
+          outcome: params.outcome,
+          ...(params.value !== undefined ? { value: params.value } : {}),
+          ...(params.reason !== undefined ? { reason: params.reason } : {}),
+        });
         return success(req.id, null);
       }
       case "subscribe": {

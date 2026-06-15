@@ -316,6 +316,16 @@ export class SessionHarness<P = unknown>
     return this._mountReady;
   }
 
+  /**
+   * The session's elicitation harness — exposed on
+   * `SessionHarnessProtocol.elicitation` (slot added by the elicitation
+   * package's module augmentation). Gateway routes
+   * `session/respondToElicitation` here.
+   */
+  get elicitation(): import("@agentick/spec-next").ElicitationHarnessProtocol {
+    return this.bridges.elicitation;
+  }
+
   // ──────── SessionHarnessProtocol ────────
 
   send(input: SendInput<P>): Promise<SessionExecutionHandle> {

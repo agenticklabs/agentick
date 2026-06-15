@@ -19,6 +19,7 @@ import type {
   AppCreateSessionResult,
   AppRunOnceResult,
 } from "../wire/params.js";
+import type { ClientElicitationStream } from "./elicitation.js";
 import type { SubscriptionStream } from "./transport.js";
 
 // ============================================================================
@@ -80,6 +81,39 @@ export interface SessionHandle extends ResourceHandle {
    */
   rebind(auth: unknown): Promise<void>;
   close(): Promise<void>;
+
+  /**
+   * AsyncIterable of inbound elicitation requests for this session.
+   * Built on top of the existing event subscription — filters bus
+   * envelopes on `session:channel:elicitation` and yields parsed
+   * {@link ClientElicitationHandle} values with typed `.accept` /
+   * `.decline` / `.cancel` convenience methods.
+   *
+   * The iterator stays live until `close()` is called or the
+   * underlying subscription is dropped. Multiple concurrent iterators
+   * are supported — each gets an independent subscription with its
+   * own cursor.
+   */
+  elicitations(opts?: { fromCursor?: Cursor }): ClientElicitationStream;
+
+  /**
+   * Reply to a pending elicitation. Routes through the
+   * `session/respondToElicitation` wire method to the server's
+   * `bridges.elicitation.respond({correlationId, outcome, value?,
+   * reason?})`. Idempotent — unknown / already-resolved correlationIds
+   * are silent no-ops (first-write-wins).
+   *
+   * Prefer the typed `.accept` / `.decline` / `.cancel` methods on
+   * the {@link ClientElicitationHandle} when iterating the
+   * `elicitations()` stream — they thread `correlationId`
+   * automatically.
+   */
+  respondToElicitation(input: {
+    readonly correlationId: string;
+    readonly outcome: "accepted" | "declined" | "cancelled";
+    readonly value?: unknown;
+    readonly reason?: string;
+  }): Promise<void>;
 }
 
 /**

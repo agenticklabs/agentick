@@ -78,6 +78,8 @@ import type {
 import type { KnobsHandle } from "@agentick/knobs-next";
 import type { StateHandle } from "@agentick/state-next";
 import type { TimelineHandle } from "@agentick/timeline-next";
+import { ElicitationHarness } from "@agentick/elicitation-next";
+import type { ElicitationHarnessProtocol } from "@agentick/spec-next";
 
 // ============================================================================
 // Public API
@@ -110,6 +112,13 @@ export interface DefineSessionInput<P = unknown> {
   readonly timeline?: TimelineHandle;
   readonly knobs?: KnobsHandle;
   readonly state?: StateHandle;
+  /**
+   * Pre-constructed elicitation harness for the
+   * `SessionHarnessProtocol.elicitation` slot. Omit to let the
+   * factory spin one up on the supplied substrate (the common case
+   * for tests + ad-hoc harnesses).
+   */
+  readonly elicitation?: ElicitationHarnessProtocol;
 }
 
 export function defineSession<P = unknown>(spec: DefineSessionInput<P>): SessionHarnessFactory<P> {
@@ -139,6 +148,7 @@ class CallbackSessionHarness<P = unknown>
   readonly timeline: TimelineHandle;
   readonly knobs: KnobsHandle;
   readonly state: StateHandle;
+  readonly elicitation: ElicitationHarnessProtocol;
 
   constructor(
     scopeId: string,
@@ -152,6 +162,11 @@ class CallbackSessionHarness<P = unknown>
     this.timeline = spec.timeline ?? noopTimelineHandle();
     this.knobs = spec.knobs ?? noopKnobsHandle();
     this.state = spec.state ?? noopStateHandle();
+    // Adopter-provided elicitation overrides; otherwise spin up a
+    // fresh harness on the same substrate so the SessionHarnessProtocol
+    // slot is honored without forcing test callers to thread one in.
+    this.elicitation =
+      spec.elicitation ?? new ElicitationHarness(`${scopeId}:elicitation`, journal, bus, inbox);
   }
 
   // ──────── SessionHarnessProtocol — core ────────

@@ -194,6 +194,39 @@ export interface SessionCloseParams extends WireRequestParams {
 export type SessionCloseResult = null;
 
 // ============================================================================
+// session/respondToElicitation — client → server elicitation reply
+// ============================================================================
+
+/**
+ * Client → server: delivers a structured response to an in-flight
+ * elicitation prompt the server published on
+ * `session:channel:elicitation`. The gateway routes this RPC to the
+ * session's `ElicitationHarnessProtocol.respond({ correlationId,
+ * outcome, value?, reason? })` — same `request-response` resolution
+ * path cross-process inbox replies use.
+ *
+ * `correlationId` is the value carried on the request envelope's
+ * `metadata.correlationId` field (the elicitation harness exposes it
+ * to subscribers when publishing). `value` is required when
+ * `outcome === "accepted"` for form-mode elicitations; the harness
+ * re-validates it against the request's schema and surfaces schema
+ * violations as `{ outcome: "failed", failure.kind:
+ * "schema_violation" }` on the calling fiber.
+ *
+ * Idempotent: unknown / already-resolved correlationIds are silent
+ * no-ops. First-write-wins on the registry.
+ */
+export interface SessionRespondToElicitationParams extends WireRequestParams {
+  readonly sessionId: string;
+  readonly correlationId: string;
+  readonly outcome: "accepted" | "declined" | "cancelled";
+  readonly value?: unknown;
+  readonly reason?: string;
+}
+
+export type SessionRespondToElicitationResult = null;
+
+// ============================================================================
 // subscribe / unsubscribe — persistent (non-execution-bound) subscriptions
 // ============================================================================
 
@@ -347,6 +380,10 @@ export interface WireMethods {
   "session/snapshot": { params: SessionSnapshotParams; result: SessionSnapshotResult };
   "session/rebind": { params: SessionRebindParams; result: SessionRebindResult };
   "session/close": { params: SessionCloseParams; result: SessionCloseResult };
+  "session/respondToElicitation": {
+    params: SessionRespondToElicitationParams;
+    result: SessionRespondToElicitationResult;
+  };
 
   subscribe: { params: SubscribeParams; result: SubscribeResult };
   unsubscribe: { params: UnsubscribeParams; result: UnsubscribeResult };
