@@ -116,9 +116,10 @@ export interface SandboxResourceLimits {
  * Static access-control config supplied at sandbox construction time
  * (`<Sandbox allow={...}>`). The harness checks every operation
  * against this allow list first; if the target isn't allowed, it
- * issues a `sandbox_permission` request (the same primitive the tool
- * executor uses for confirmation flows). The user / policy decides;
- * the harness remembers the decision for the rest of the session.
+ * delegates to its `ElicitationHarnessProtocol` — the substrate
+ * primitive that backs tool confirmation, MCP elicitation, and any
+ * other "ask user X" step. The user / policy decides; the harness
+ * remembers the decision for the rest of the session.
  *
  * Pattern format:
  *   - bare string or `glob:<pattern>` — glob match (default)
@@ -140,9 +141,20 @@ export interface SandboxACL {
 }
 
 /**
- * Request payload sent via `harness.request("sandbox_permission", payload)`.
- * The session routes this to a configured policy callback or to the
- * user (via TUI / web prompt / etc.).
+ * Telemetry shape — describes the structured permission request the
+ * harness routes through `ElicitationHarness.elicit(...)` when an
+ * operation falls outside the static + session-learned ACL. The
+ * harness stamps this exact value onto the elicitation envelope's
+ * `payload.metadata` field; clients (devtools, MCP hosts, custom
+ * UIs) read it to render a typed prompt. Renderers dispatch on
+ * `payload.hints.kind === "sandbox_permission"`.
+ *
+ * NOT a wire-level message anymore — there is no separate
+ * `sandbox_permission` channel. Every permission round-trip flows
+ * through `session:channel:elicitation` like every other elicitation.
+ *
+ * @see ../../sandbox/src/permission-schema.ts for the response
+ *      Standard-Schema (`SANDBOX_PERMISSION_REPLY_SCHEMA`).
  */
 export type SandboxPermissionRequest =
   | {
@@ -172,10 +184,16 @@ export type SandboxPermissionRequest =
     };
 
 /**
- * Response shape for `sandbox_permission`. The decision is honored by
- * the harness — for the `*-session*` variants, the decision is
- * remembered (in the harness's per-session ACL state) and applied
- * silently to future matching operations.
+ * Telemetry / domain shape for the structured response the harness
+ * applies after a sandbox-permission elicitation resolves with
+ * `outcome: "accepted"`. The Standard-Schema that actually validates
+ * the wire reply lives in `@agentick/sandbox-next` as
+ * `SANDBOX_PERMISSION_REPLY_SCHEMA` — that schema is the source of
+ * truth; this type mirrors it for adopters that need a TS shape.
+ *
+ * Decisions matching the `*-session*` variants are remembered on the
+ * harness's per-session ACL state and applied silently to future
+ * matching operations.
  */
 export type SandboxPermissionResponse =
   | { readonly decision: "allow-once" }

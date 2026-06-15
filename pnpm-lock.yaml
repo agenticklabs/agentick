@@ -729,6 +729,9 @@ importers:
 
   packages-next/sandbox:
     dependencies:
+      '@agentick/elicitation-next':
+        specifier: workspace:*
+        version: link:../elicitation
       '@agentick/reconciler-next':
         specifier: workspace:*
         version: link:../reconciler

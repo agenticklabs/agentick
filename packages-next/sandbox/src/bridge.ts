@@ -19,6 +19,7 @@
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
 import type {
   AppSubstrate,
+  ElicitationHarnessProtocol,
   SandboxACL,
   SandboxCreateOptions,
   SandboxProvider,
@@ -40,6 +41,15 @@ export interface CreateSandboxHarnessInput {
   readonly acl?: SandboxACL;
   readonly permissionTimeoutDecision?: "allow-once" | "deny";
   readonly permissionTimeoutMs?: number;
+  /**
+   * Elicitation harness used by the new sandbox harness's permission
+   * gate. Required: every permission round-trip routes through this
+   * (one wire shape, one channel). The session-scoped elicitation
+   * harness is the canonical source — pull it from
+   * `useBridges().elicitation` in React, or thread it through
+   * explicitly from the constructing context.
+   */
+  readonly elicitation: ElicitationHarnessProtocol;
 }
 
 export interface SandboxBridge {
@@ -86,7 +96,14 @@ export function createSandboxBridge(options: CreateSandboxBridgeOptions): Sandbo
           sandboxId: input.sandboxId,
           provider: input.provider,
           options: input.options,
+          elicitation: input.elicitation,
           ...(input.acl !== undefined ? { acl: input.acl } : {}),
+          ...(input.permissionTimeoutDecision !== undefined
+            ? { permissionTimeoutDecision: input.permissionTimeoutDecision }
+            : {}),
+          ...(input.permissionTimeoutMs !== undefined
+            ? { permissionTimeoutMs: input.permissionTimeoutMs }
+            : {}),
         },
       );
       await harness.ready;

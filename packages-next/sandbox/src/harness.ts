@@ -9,16 +9,22 @@
  *
  * ACL: the harness checks every read/write/exec/mount against the
  * static `acl` config + per-session learned decisions. When neither
- * allows, the harness issues `this.request("sandbox_permission", ...)`
- * — the same primitive the tool executor uses for confirmation flows
- * — and remembers the response for the rest of the session.
+ * allows, the harness delegates to its `ElicitationHarnessProtocol`
+ * — the same substrate primitive that backs tool confirmation, MCP
+ * elicitation, and any other "ask user X" step. The wire envelope
+ * lands on `session:channel:elicitation` with
+ * `hints.kind: "sandbox_permission"`; the reply is validated against
+ * `SANDBOX_PERMISSION_REPLY_SCHEMA`. Decisions matching the
+ * `*-session*` variants are remembered on the session ACL.
  *
  * @see docs/proposals/v2/blueprint/24-sandbox-as-harness.md
+ * @see docs/proposals/v2/blueprint/26-harness-api-shape.md
  */
 
 import { Effect } from "effect";
 import { BaseHarness, runHarnessProtocol } from "@agentick/runtime-next";
 import type {
+  ElicitationHarnessProtocol,
   EventBus,
   MessageEnvelope,
   MessageHandlerError,
@@ -33,7 +39,6 @@ import type {
   SandboxExecResult,
   SandboxHandle,
   SandboxPermissionRequest,
-  SandboxPermissionResponse,
   SandboxProvider,
   SandboxReadFileInput,
   SandboxReaddirInput,
@@ -41,6 +46,12 @@ import type {
   SandboxStatInput,
   SandboxWriteFileInput,
 } from "@agentick/spec-next";
+
+import {
+  SANDBOX_PERMISSION_KIND,
+  SANDBOX_PERMISSION_REPLY_SCHEMA,
+  type SandboxPermissionReply,
+} from "./permission-schema.js";
 
 import { SessionACL, type SessionACLSnapshot } from "./acl.js";
 import {
@@ -65,15 +76,23 @@ export interface SandboxHarnessOptions {
   /** Static ACL config from `<Sandbox allow={...}>`. Optional. */
   readonly acl?: SandboxACL;
   /**
-   * Default decision when `sandbox_permission` request times out
-   * and no policy is configured. Default: `"deny"`.
+   * Default decision when the permission elicitation times out and no
+   * policy answered. Default: `"deny"`.
    */
   readonly permissionTimeoutDecision?: "allow-once" | "deny";
   /**
-   * Permission request timeout. Default: 30s (matches the tool
-   * executor's default confirmation timeout).
+   * Permission elicitation wait bound. Default: 30s (matches the tool
+   * executor's default confirmation timeout). On expiry the harness
+   * falls back to `permissionTimeoutDecision`.
    */
   readonly permissionTimeoutMs?: number;
+  /**
+   * Elicitation harness used by the permission gate. Required: every
+   * permission round-trip goes through `elicitation.elicit(...)`
+   * with `hints.kind: "sandbox_permission"` instead of the harness
+   * rolling its own channel.
+   */
+  readonly elicitation: ElicitationHarnessProtocol;
 }
 
 // ============================================================================
@@ -91,6 +110,7 @@ export class SandboxHarness extends BaseHarness<"sandbox"> {
   private readonly sessionACL = new SessionACL();
   private readonly permissionTimeoutDecision: "allow-once" | "deny";
   private readonly permissionTimeoutMs: number;
+  private readonly elicitation: ElicitationHarnessProtocol;
   private _status: SandboxStatus = "ready";
 
   constructor(
@@ -107,6 +127,7 @@ export class SandboxHarness extends BaseHarness<"sandbox"> {
     this.acl = options.acl;
     this.permissionTimeoutDecision = options.permissionTimeoutDecision ?? "deny";
     this.permissionTimeoutMs = options.permissionTimeoutMs ?? 30_000;
+    this.elicitation = options.elicitation;
   }
 
   /**
@@ -123,6 +144,9 @@ export class SandboxHarness extends BaseHarness<"sandbox"> {
       readonly provider: SandboxProvider;
       readonly options: import("@agentick/spec-next").SandboxCreateOptions;
       readonly acl?: SandboxACL;
+      readonly elicitation: ElicitationHarnessProtocol;
+      readonly permissionTimeoutDecision?: "allow-once" | "deny";
+      readonly permissionTimeoutMs?: number;
     },
   ): Promise<SandboxHarness> {
     const handle = await init.provider.create(init.options);
@@ -130,7 +154,14 @@ export class SandboxHarness extends BaseHarness<"sandbox"> {
       sandboxId: init.sandboxId,
       handle,
       providerName: init.provider.name,
+      elicitation: init.elicitation,
       ...(init.acl !== undefined ? { acl: init.acl } : {}),
+      ...(init.permissionTimeoutDecision !== undefined
+        ? { permissionTimeoutDecision: init.permissionTimeoutDecision }
+        : {}),
+      ...(init.permissionTimeoutMs !== undefined
+        ? { permissionTimeoutMs: init.permissionTimeoutMs }
+        : {}),
     });
   }
 
@@ -385,8 +416,13 @@ export class SandboxHarness extends BaseHarness<"sandbox"> {
       const verdict = this.sessionACL.evaluate(this.acl, kind, target);
       if (verdict === "allow") return true;
       if (verdict === "deny") return false;
-      // Pending — issue a permission request.
-      const payload: SandboxPermissionRequest =
+
+      // Pending — delegate to the elicitation harness. The wire
+      // envelope's `metadata` carries the structured permission
+      // request shape (kind/path/command/sandboxId/rationale) so
+      // clients can render a richly-typed prompt; the `hints.kind`
+      // routes to the sandbox-permission renderer.
+      const telemetry: SandboxPermissionRequest =
         kind === "exec"
           ? {
               kind: "exec",
@@ -400,40 +436,48 @@ export class SandboxHarness extends BaseHarness<"sandbox"> {
               sandboxId: this.sandboxId,
               rationale: "not in static or session-learned allow list",
             };
-      const response = yield* this.request<SandboxPermissionRequest, SandboxPermissionResponse>(
-        "sandbox_permission",
-        payload,
-        {
-          timeoutMs: this.permissionTimeoutMs,
-        },
-      ).pipe(
-        Effect.catchAll(() => {
-          // Request timed out or rejected → fall back to the configured
-          // default (typically deny).
-          const fallback: SandboxPermissionResponse =
-            this.permissionTimeoutDecision === "allow-once"
-              ? { decision: "allow-once" }
-              : { decision: "deny" };
-          return Effect.succeed(fallback);
-        }),
+      const message =
+        kind === "exec"
+          ? `Allow sandbox to execute: ${target}`
+          : `Allow sandbox to ${kind} ${target}?`;
+
+      const elicitResult = yield* Effect.promise(() =>
+        this.elicitation.elicit(
+          {
+            message,
+            schema: SANDBOX_PERMISSION_REPLY_SCHEMA,
+            hints: { kind: SANDBOX_PERMISSION_KIND },
+            metadata: telemetry,
+          },
+          { timeoutMs: this.permissionTimeoutMs },
+        ),
       );
-      return this.applyDecision(kind, target, response);
+
+      const reply = sandboxReplyFromElicitResult(elicitResult, this.permissionTimeoutDecision);
+      return this.applyDecision(kind, target, reply);
     });
   }
 
   private applyDecision(
     kind: "read" | "write" | "exec",
     target: string,
-    response: SandboxPermissionResponse,
+    reply: SandboxPermissionReply,
   ): boolean {
-    switch (response.decision) {
+    switch (reply.decision) {
       case "allow-once":
         return true;
       case "allow-session":
         this.sessionACL.rememberAllow(kind, target);
         return true;
       case "allow-session-pattern":
-        this.sessionACL.rememberAllow(kind, response.pattern);
+        if (typeof reply.pattern === "string") {
+          this.sessionACL.rememberAllow(kind, reply.pattern);
+        } else {
+          // Schema requires `pattern` here, but if a client sends a
+          // malformed reply that bypassed validation, fall back to
+          // the narrower target-only allow.
+          this.sessionACL.rememberAllow(kind, target);
+        }
         return true;
       case "deny":
         return false;
@@ -530,4 +574,18 @@ function applyEditsLocal(
     applied += 1;
   }
   return { applied, skipped, content };
+}
+
+/**
+ * Translate an elicitation result back into a sandbox permission
+ * reply. Accepted+valid → the validated reply. Every other outcome
+ * (declined, cancelled, failed.timeout, failed.aborted,
+ * failed.schema_violation) → the configured fallback decision.
+ */
+function sandboxReplyFromElicitResult(
+  result: import("@agentick/spec-next").ElicitationResult<SandboxPermissionReply>,
+  fallback: "allow-once" | "deny",
+): SandboxPermissionReply {
+  if (result.outcome === "accepted") return result.value;
+  return { decision: fallback };
 }

@@ -46,6 +46,7 @@ export interface SandboxProps {
 export function Sandbox(props: SandboxProps): React.ReactElement {
   const bridges = useBridges();
   const sandboxBridge = bridges.sandbox as SandboxBridge | undefined;
+  const elicitation = bridges.elicitation;
   const id = props.id ?? "primary";
 
   if (!sandboxBridge) {
@@ -54,12 +55,19 @@ export function Sandbox(props: SandboxProps): React.ReactElement {
         "Add `withSandbox()` to `AppHarnessOptions.extensions`.",
     );
   }
+  if (!elicitation) {
+    throw new Error(
+      "<Sandbox> requires `bridges.elicitation`. The session must wire an " +
+        "ElicitationHarness — the permission gate routes through it.",
+    );
+  }
 
   const harness = useData(`sandbox:${id}:${props.provider.name}`, () =>
     sandboxBridge.createHarness({
       sandboxId: id,
       provider: props.provider,
       options: sandboxAsCreateOptions(props),
+      elicitation,
       ...(props.allow !== undefined ? { acl: aclOf(props.allow) } : {}),
       ...(props.onPermissionTimeout !== undefined
         ? { permissionTimeoutDecision: props.onPermissionTimeout }
