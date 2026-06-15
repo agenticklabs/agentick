@@ -73,6 +73,16 @@ export interface ElicitationHarnessOptions {
    * the loop, short enough that a forgotten prompt frees the fiber.
    */
   readonly defaultTimeoutMs?: number;
+  /**
+   * Scope stamped on every published elicitation request envelope.
+   * Session-scoped client subscriptions (`client.session(id).elicitations()`)
+   * filter on `scope.sessionId`, so per-session elicitation harnesses
+   * MUST pass `{ sessionId }` here — otherwise the gateway's
+   * subscription router silently drops the envelope. Construction
+   * sites in production (`AppHarness.createSession`, `withElicitation`,
+   * `buildSessionBridges`) thread the owning session's id through.
+   */
+  readonly parentScope?: import("@agentick/spec-next").EventScope;
 }
 
 // ============================================================================
@@ -84,6 +94,7 @@ export class ElicitationHarness
   implements ElicitationHarnessProtocol
 {
   private readonly defaultTimeoutMs: number;
+  private readonly parentScope: import("@agentick/spec-next").EventScope | undefined;
 
   get id(): string {
     return this.scopeId;
@@ -98,6 +109,7 @@ export class ElicitationHarness
   ) {
     super("elicitation", scopeId, journal, bus, inbox);
     this.defaultTimeoutMs = options.defaultTimeoutMs ?? DEFAULT_TIMEOUT_MS;
+    this.parentScope = options.parentScope;
   }
 
   // ─────────── elicit ───────────
@@ -152,6 +164,7 @@ export class ElicitationHarness
     const effect = this.request<WirePayload, ElicitationResponse>(ELICITATION_CHANNEL, payload, {
       timeoutMs,
       ...(opts.signal !== undefined ? { signal: opts.signal } : {}),
+      ...(this.parentScope !== undefined ? { scope: this.parentScope } : {}),
     });
 
     // `Effect.either` keeps the typed RequestError accessible — bare

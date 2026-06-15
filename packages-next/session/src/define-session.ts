@@ -165,8 +165,13 @@ class CallbackSessionHarness<P = unknown>
     // Adopter-provided elicitation overrides; otherwise spin up a
     // fresh harness on the same substrate so the SessionHarnessProtocol
     // slot is honored without forcing test callers to thread one in.
+    // `parentScope` carries the sessionId so published elicitation
+    // request envelopes match session-scoped client subscriptions.
     this.elicitation =
-      spec.elicitation ?? new ElicitationHarness(`${scopeId}:elicitation`, journal, bus, inbox);
+      spec.elicitation ??
+      new ElicitationHarness(`${scopeId}:elicitation`, journal, bus, inbox, {
+        parentScope: { sessionId: scopeId },
+      });
   }
 
   // ──────── SessionHarnessProtocol — core ────────

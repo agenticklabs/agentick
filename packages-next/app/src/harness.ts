@@ -877,6 +877,7 @@ export class AppHarness<P = unknown>
       this.journal,
       this.bus,
       this.inbox,
+      { parentScope: { sessionId } },
     );
 
     // Per-session tool executor. Two paths:

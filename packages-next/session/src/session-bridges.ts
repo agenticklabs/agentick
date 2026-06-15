@@ -125,6 +125,7 @@ export function buildSessionBridges(
       substrate.journal,
       substrate.bus,
       substrate.inbox,
+      { parentScope: { sessionId: store.id } },
     );
 
   const base: SessionHookBridges = {

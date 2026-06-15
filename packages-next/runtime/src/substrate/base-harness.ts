@@ -830,7 +830,18 @@ export abstract class BaseHarness<
   protected request<TReq, TResp>(
     channel: string,
     payload: TReq,
-    opts: { readonly timeoutMs?: number; readonly signal?: AbortSignal } = {},
+    opts: {
+      readonly timeoutMs?: number;
+      readonly signal?: AbortSignal;
+      /**
+       * Scope stamped on the published envelope. Session-scoped
+       * subscriptions filter on `scope.sessionId` — harnesses that
+       * publish from within a session MUST pass `{ sessionId }` so
+       * the gateway can route the envelope to the right subscribers.
+       * Defaults to the harness's captured RuntimeContext scope.
+       */
+      readonly scope?: EventScope;
+    } = {},
   ): Effect.Effect<TResp, RequestError, never> {
     const correlationId = `req:${ulid()}`;
     const replyTo = this.address;
@@ -839,6 +850,21 @@ export abstract class BaseHarness<
       ...(opts.timeoutMs !== undefined ? { timeoutMs: opts.timeoutMs } : {}),
       ...(opts.signal !== undefined ? { signal: opts.signal } : {}),
     });
+    // Resolve scope precedence: explicit > captured-at-construction.
+    // The captured context carries any RuntimeContext fields the
+    // parent operation set when this harness was constructed; the
+    // explicit override lets per-call code stamp a different scope
+    // (e.g., the elicitation harness stamping its parent sessionId).
+    const ctxScope: EventScope = {
+      ...(this.capturedContext.sessionId !== undefined
+        ? { sessionId: this.capturedContext.sessionId }
+        : {}),
+      ...(this.capturedContext.executionId !== undefined
+        ? { executionId: this.capturedContext.executionId }
+        : {}),
+      ...(this.capturedContext.tickId !== undefined ? { tickId: this.capturedContext.tickId } : {}),
+    };
+    const scope: EventScope = opts.scope ?? ctxScope;
     // Publish the request envelope on the bus. The channel name pattern
     // matches `ChannelHandle.publish` — `session:channel:<channel>`.
     const fullName = `session:channel:${channel}`;
@@ -848,7 +874,7 @@ export abstract class BaseHarness<
       name: fullName,
       phase: "delta",
       timestamp: Date.now(),
-      scope: {},
+      scope,
       payload,
       metadata: {
         requestType: "request",

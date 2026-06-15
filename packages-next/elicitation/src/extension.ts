@@ -37,9 +37,16 @@ export function withElicitation(options: WithElicitationOptions = {}): SessionEx
         installer.substrate.journal,
         installer.substrate.bus,
         installer.substrate.inbox,
-        options.defaultTimeoutMs !== undefined
-          ? { defaultTimeoutMs: options.defaultTimeoutMs }
-          : {},
+        {
+          ...(options.defaultTimeoutMs !== undefined
+            ? { defaultTimeoutMs: options.defaultTimeoutMs }
+            : {}),
+          // The session-extension installer's hostId IS the sessionId.
+          // Stamping it as parentScope ensures published request
+          // envelopes carry `scope.sessionId` so client-side
+          // `session.elicitations()` subscriptions actually match.
+          parentScope: { sessionId: installer.hostId },
+        },
       );
 
       // Register close BEFORE awaiting ready. If `ready` rejects, the
