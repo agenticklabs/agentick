@@ -157,6 +157,16 @@ export interface SessionHarnessOptions<P = unknown> {
    */
   readonly toolBridge?: import("@agentick/spec-next").ToolBridge;
   /**
+   * Optional pre-constructed elicitation harness. When supplied,
+   * `buildSessionBridges` uses this instance for the `elicitation`
+   * slot instead of constructing its own — which lets the AppHarness
+   * share the SAME elicitation harness with the per-session
+   * `ToolExecutorHarness` (the confirmation gate needs to be paired
+   * with the bridges' elicitation so client `respond()` calls reach
+   * the registry the tool-executor is waiting on).
+   */
+  readonly elicitation?: import("@agentick/spec-next").ElicitationHarnessProtocol;
+  /**
    * Spawn context for child sessions. Typically injected by the
    * AppHarness when it constructs a session — the session keeps a
    * narrow back-reference to its parent app so `spawn()` works.
@@ -260,6 +270,7 @@ export class SessionHarness<P = unknown>
         ...(options.extensionBridges !== undefined
           ? { extensionBridges: options.extensionBridges }
           : {}),
+        ...(options.elicitation !== undefined ? { elicitation: options.elicitation } : {}),
       },
     );
     if (options.initialKnobs) {

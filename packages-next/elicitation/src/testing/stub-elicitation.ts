@@ -6,11 +6,11 @@
  * this when the system-under-test interacts with the protocol surface
  * but doesn't need the bus + inbox round-trip exercised.
  *
- * The `elicit` method is properly generic — the caller's
- * `StandardSchemaV1<unknown, TOutput>` flows through to the result's
- * `value` type. The canned `result` is cast at the boundary; callers
- * supplying mismatched fixtures get a type error at the test site
- * (not a silent runtime cast).
+ * The `elicit` method implements the protocol's overloads — both form
+ * mode (returns `ElicitationResult<TInferred>`) and URL mode (returns
+ * `ElicitationResult<undefined>`). The canned `result` is cast at the
+ * boundary; callers supplying mismatched fixtures get a type error at
+ * the test site, not a silent runtime cast.
  */
 
 import type {
@@ -18,7 +18,9 @@ import type {
   ElicitationRequest,
   ElicitationResult,
   ElicitationResponse,
+  FormElicitationRequest,
   StandardSchemaV1,
+  UrlElicitationRequest,
 } from "@agentick/spec-next";
 
 type InferOutput<S extends StandardSchemaV1> =
@@ -53,16 +55,31 @@ export function stubElicitation(options: StubElicitationOptions = {}): Elicitati
     reason: "stub-elicitation default",
   };
 
+  // Single implementation function — the two overload signatures on
+  // the protocol resolve to this one body. The cast at the call site
+  // is honest: the stub returns a canned result regardless of the
+  // request mode, and callers consume it as the type the overload
+  // promises.
+  function elicitImpl<TSchema extends StandardSchemaV1>(
+    request: FormElicitationRequest<TSchema>,
+    opts?: { readonly timeoutMs?: number; readonly signal?: AbortSignal },
+  ): Promise<ElicitationResult<InferOutput<TSchema>>>;
+  function elicitImpl(
+    request: UrlElicitationRequest,
+    opts?: { readonly timeoutMs?: number; readonly signal?: AbortSignal },
+  ): Promise<ElicitationResult<undefined>>;
+  function elicitImpl(
+    request: ElicitationRequest<StandardSchemaV1>,
+    opts: { readonly timeoutMs?: number; readonly signal?: AbortSignal } = {},
+  ): Promise<ElicitationResult<unknown>> {
+    options.onElicit?.(request, opts);
+    return Promise.resolve(cannedResult);
+  }
+
   return {
     id: options.id ?? "stub-elicitation",
     ready: Promise.resolve(),
-    elicit<TSchema extends StandardSchemaV1>(
-      request: ElicitationRequest<TSchema>,
-      opts: { readonly timeoutMs?: number; readonly signal?: AbortSignal } = {},
-    ): Promise<ElicitationResult<InferOutput<TSchema>>> {
-      options.onElicit?.(request as ElicitationRequest<StandardSchemaV1>, opts);
-      return Promise.resolve(cannedResult as ElicitationResult<InferOutput<TSchema>>);
-    },
+    elicit: elicitImpl,
     async respond(_response: ElicitationResponse): Promise<void> {
       // no-op — the stub doesn't track in-flight elicitations.
     },

@@ -2,13 +2,17 @@
  * Test fixtures for the tool executor harness.
  *
  * `createTestHarness({ tools? })` wires up in-memory substrate
- * (journal / bus / inbox) plus the harness and returns a ready bundle.
+ * (journal / bus / inbox), an `ElicitationHarness` for the
+ * confirmation gate, and the tool executor — all on the same
+ * substrate so bus subscriptions see envelopes from both harnesses.
  * Use it from any test that wants to dispatch against the reference
  * impl without spelling out substrate boilerplate.
  */
 
-import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
-import type { ToolRegistration } from "@agentick/spec-next";
+import { LocalEventBus, LocalInbox, MemoryJournal, ulid } from "@agentick/runtime-next";
+import type { ElicitationHarnessProtocol, ToolRegistration } from "@agentick/spec-next";
+import { ElicitationHarness } from "@agentick/elicitation-next";
+
 import { InMemoryHandlerResolver } from "../handler-resolver.js";
 import { ToolExecutorHarness } from "../harness.js";
 import type { ToolExecutorHarnessOptions, ToolHandler, Validator } from "../types.js";
@@ -24,8 +28,17 @@ export interface TestHarnessOptions {
   }>;
   /** Harness-level default timeout. */
   readonly defaultTimeoutMs?: number;
+  /** Default elicitation/confirmation wait bound. */
+  readonly defaultConfirmationTimeoutMs?: number;
   /** Scope ID; defaults to a random ULID-ish string. */
   readonly scopeId?: string;
+  /**
+   * Inject a custom elicitation harness (e.g., a stub). When omitted,
+   * a real `ElicitationHarness` is constructed on the same substrate
+   * so confirmation envelopes appear on `bus` and replies route
+   * through `inbox`.
+   */
+  readonly elicitation?: ElicitationHarnessProtocol;
 }
 
 export interface TestHarnessBundle {
@@ -34,11 +47,18 @@ export interface TestHarnessBundle {
   readonly bus: LocalEventBus;
   readonly inbox: LocalInbox;
   readonly resolver: InMemoryHandlerResolver;
+  /**
+   * The elicitation harness wired to the same substrate. Tests
+   * use this to respond to confirmation prompts —
+   * `await elicitation.respond({ correlationId, outcome, value })`.
+   */
+  readonly elicitation: ElicitationHarnessProtocol;
 }
 
 /**
- * Build and return a ready-to-use tool executor harness. The returned
- * `harness.ready` is already awaited — callers can dispatch immediately.
+ * Build and return a ready-to-use tool executor harness. Both the
+ * tool executor and its elicitation harness are `ready` by the time
+ * this resolves — callers can dispatch immediately.
  */
 export async function createTestHarness(
   options: TestHarnessOptions = {},
@@ -52,22 +72,31 @@ export async function createTestHarness(
     resolver.register(h.handlerRef, h.handler, h.validator);
   }
 
+  const scopeId = options.scopeId ?? `t_${ulid()}`;
+
+  let elicitation: ElicitationHarnessProtocol;
+  if (options.elicitation !== undefined) {
+    elicitation = options.elicitation;
+  } else {
+    const elicHarness = new ElicitationHarness(`${scopeId}:elicitation`, journal, bus, inbox);
+    await elicHarness.ready;
+    elicitation = elicHarness;
+  }
+
   const harnessOptions: ToolExecutorHarnessOptions = {
     handlerResolver: resolver,
+    elicitation,
     ...(options.tools ? { initialTools: options.tools } : {}),
     ...(options.defaultTimeoutMs !== undefined
       ? { defaultTimeoutMs: options.defaultTimeoutMs }
       : {}),
+    ...(options.defaultConfirmationTimeoutMs !== undefined
+      ? { defaultConfirmationTimeoutMs: options.defaultConfirmationTimeoutMs }
+      : {}),
   };
 
-  const harness = new ToolExecutorHarness(
-    options.scopeId ?? `t_${Math.random().toString(36).slice(2)}`,
-    journal,
-    bus,
-    inbox,
-    harnessOptions,
-  );
+  const harness = new ToolExecutorHarness(scopeId, journal, bus, inbox, harnessOptions);
 
   await harness.ready;
-  return { harness, journal, bus, inbox, resolver };
+  return { harness, journal, bus, inbox, resolver, elicitation };
 }

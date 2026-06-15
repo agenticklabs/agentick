@@ -176,6 +176,31 @@ describe("ElicitationHarness — identity + lifecycle", () => {
 });
 
 // ---------------------------------------------------------------------------
+// URL mode — staged on the protocol but not implemented; calls MUST
+// throw UnsupportedElicitationModeError, NOT return a result.
+// ---------------------------------------------------------------------------
+
+describe("ElicitationHarness — URL mode is staged but not implemented", () => {
+  it("throws UnsupportedElicitationModeError when elicit() is called with mode: 'url'", async () => {
+    const b = await fakeElicitation();
+    try {
+      const promise = b.harness.elicit({
+        mode: "url",
+        message: "Open your bank's OAuth page",
+        url: "https://example.com/oauth",
+        elicitationId: "el-1",
+      });
+      await expect(promise).rejects.toMatchObject({
+        _tag: "UnsupportedElicitationModeError",
+        mode: "url",
+      });
+    } finally {
+      await b.close();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
 // respond() routing — verifies the in-process path goes through the inbox
 // ---------------------------------------------------------------------------
 

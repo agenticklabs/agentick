@@ -40,7 +40,7 @@
 import { describe, expect, it } from "vitest";
 import type {
   ElicitationHarnessProtocol,
-  ElicitationRequest,
+  FormElicitationRequest,
   StandardSchemaV1,
 } from "@agentick/spec-next";
 import { jsonSchema } from "@agentick/spec-next";
@@ -145,8 +145,8 @@ function asyncApprovalSchema(): StandardSchemaV1<unknown, { readonly approved: b
 
 function mkRequest<TSchema extends StandardSchemaV1>(
   schema: TSchema,
-  overrides: Partial<ElicitationRequest<TSchema>> = {},
-): ElicitationRequest<TSchema> {
+  overrides: Partial<FormElicitationRequest<TSchema>> = {},
+): FormElicitationRequest<TSchema> {
   return {
     message: "Confirm action",
     schema,

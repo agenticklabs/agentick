@@ -1,29 +1,30 @@
 /**
- * Confirmation flow tests (4a.5 + 4a.7, refactored onto BaseHarness.request).
+ * Confirmation flow tests — refactored onto ElicitationHarness.
  *
  * Tools declared `annotations.requiresConfirmation: true` pause after
- * validation and wait for an inbound `request-response` inbox message
- * routed by correlationId. Tests subscribe to the bus to capture the
- * outbound request envelope (which carries the correlationId in
- * metadata), then deliver a `request-response` to the harness's inbox.
+ * validation and elicit a structured response via the session's
+ * `ElicitationHarness` (wire channel `session:channel:elicitation`).
+ * Tests subscribe to the bus to capture the outbound elicitation
+ * request envelope (which carries the correlationId in metadata),
+ * then deliver the response via `elicitation.respond(...)`.
  *
- * Approve → handler runs (modifiedArguments re-validated when set).
- * Deny    → DispatchResult{ succeeded: false, content: [denial] }.
- * Abort   → denial-shaped result with reason extracted from the abort
- *           reason (controller.signal.reason).
- * Timeout → ToolConfirmationTimeoutError (typed failure).
+ * Approve  → `accepted` with `value.approved: true` → handler runs
+ *            (`modifiedArguments` re-validated when set).
+ * Deny     → `accepted` with `value.approved: false` OR `declined` /
+ *            `cancelled` outcome → DispatchResult{ succeeded: false }.
+ * Abort    → controller signal fires → elicit() resolves to
+ *            `{ outcome: "failed", failure.kind: "aborted" }` →
+ *            denial-shaped result with reason from the failure.
+ * Timeout  → elicit() resolves to `{ outcome: "failed",
+ *            failure.kind: "timeout" }` → `ToolConfirmationTimeoutError`
+ *            (typed failure surfaces to the dispatch caller).
  */
 
 import { describe, expect, it } from "vitest";
 import { Chunk, Effect, Stream } from "effect";
 import type { LocalEventBus } from "@agentick/runtime-next";
 
-import type {
-  DispatchInput,
-  MessageEnvelopeInput,
-  ToolConfirmationResponse,
-  ToolRegistration,
-} from "@agentick/spec-next";
+import type { DispatchInput, ProtocolEvent, ToolRegistration } from "@agentick/spec-next";
 import { jsonSchema } from "@agentick/spec-next";
 
 import { createTestHarness } from "../testing/index.js";
@@ -57,57 +58,42 @@ function dispatchOf(
   };
 }
 
+type EnvelopeWithMetadata = ProtocolEvent & {
+  readonly metadata?: Readonly<Record<string, unknown>>;
+};
+
 /**
- * Wait for the next request envelope on `session:channel:tool_confirmation`
- * and return its `correlationId` + `replyTo`. The harness publishes a
- * request envelope when the confirmation gate trips.
+ * Wait for the next elicitation request envelope on
+ * `session:channel:elicitation` and return its correlationId. The
+ * subscription is hot before this returns — call this BEFORE
+ * `harness.dispatch(...)` so the bus has a subscriber by the time
+ * the confirmation gate publishes.
  */
-async function captureRequest(
-  bus: LocalEventBus,
-): Promise<{ correlationId: string; replyTo: string }> {
-  const chunk = await Effect.runPromise(
+function nextElicitationCorrelationId(bus: LocalEventBus): Promise<string> {
+  return Effect.runPromise(
     Stream.runCollect(
       Stream.take(
         bus.subscribe({
           surface: "session",
-          name: { exact: "session:channel:tool_confirmation" },
-        }) as Stream.Stream<{ metadata?: Record<string, unknown> }, unknown, never>,
+          name: { exact: "session:channel:elicitation" },
+        }) as Stream.Stream<EnvelopeWithMetadata, unknown, never>,
         1,
       ),
     ),
-  );
-  const ev = Array.from(Chunk.toReadonlyArray(chunk))[0]!;
-  const meta = ev.metadata ?? {};
-  return {
-    correlationId: meta.correlationId as string,
-    replyTo: meta.replyTo as string,
-  };
+  ).then((chunk) => {
+    const env = Array.from(Chunk.toReadonlyArray(chunk))[0]!;
+    const id = env.metadata?.correlationId;
+    if (typeof id !== "string") {
+      throw new Error("expected correlationId on elicitation request envelope");
+    }
+    return id;
+  });
 }
 
-/**
- * Deliver a `request-response` inbox message — the generic shape
- * routed by `BaseHarness.dispatchMessage`.
- */
-function deliverResponse(
-  inbox: {
-    send: (addr: string, msg: MessageEnvelopeInput) => Effect.Effect<unknown, unknown, never>;
-  },
-  replyTo: string,
-  correlationId: string,
-  response: ToolConfirmationResponse,
-) {
-  const msg: MessageEnvelopeInput = {
-    type: "request-response",
-    messageId: `m_${correlationId}`,
-    payload: { correlationId, response },
-  };
-  return Effect.runPromise(inbox.send(replyTo, msg));
-}
-
-describe("ToolExecutorHarness — confirmation flow", () => {
-  it("approve: handler runs after request-response arrives", async () => {
+describe("ToolExecutorHarness — confirmation flow (via ElicitationHarness)", () => {
+  it("approve: handler runs after accepted response", async () => {
     let handlerRan = 0;
-    const { harness, inbox, bus } = await createTestHarness({
+    const { harness, bus, elicitation } = await createTestHarness({
       tools: [confirmTool()],
       handlers: [
         {
@@ -120,11 +106,13 @@ describe("ToolExecutorHarness — confirmation flow", () => {
       ],
     });
 
+    const idP = nextElicitationCorrelationId(bus);
     const dispatchP = harness.dispatch(dispatchOf("delete-file", "tc-1"));
-    const { correlationId, replyTo } = await captureRequest(bus);
-    await deliverResponse(inbox, replyTo, correlationId, {
-      toolUseId: "tc-1",
-      approved: true,
+    const correlationId = await idP;
+    await elicitation.respond({
+      correlationId,
+      outcome: "accepted",
+      value: { approved: true },
     });
 
     const result = await dispatchP;
@@ -133,9 +121,9 @@ describe("ToolExecutorHarness — confirmation flow", () => {
     expect((result.content[0] as { text: string }).text).toBe("deleted");
   });
 
-  it("deny: succeeded=false with denial content; handler never runs", async () => {
+  it("deny via accepted+approved:false: succeeded=false; handler never runs", async () => {
     let handlerRan = 0;
-    const { harness, inbox, bus } = await createTestHarness({
+    const { harness, bus, elicitation } = await createTestHarness({
       tools: [confirmTool()],
       handlers: [
         {
@@ -148,12 +136,13 @@ describe("ToolExecutorHarness — confirmation flow", () => {
       ],
     });
 
+    const idP = nextElicitationCorrelationId(bus);
     const dispatchP = harness.dispatch(dispatchOf("delete-file", "tc-2"));
-    const { correlationId, replyTo } = await captureRequest(bus);
-    await deliverResponse(inbox, replyTo, correlationId, {
-      toolUseId: "tc-2",
-      approved: false,
-      reason: "user said no",
+    const correlationId = await idP;
+    await elicitation.respond({
+      correlationId,
+      outcome: "accepted",
+      value: { approved: false, reason: "user said no" },
     });
 
     const result = await dispatchP;
@@ -163,9 +152,39 @@ describe("ToolExecutorHarness — confirmation flow", () => {
     expect((result.content[0] as { text: string }).text).toContain("user said no");
   });
 
+  it("deny via declined outcome: succeeded=false; reason flows through", async () => {
+    let handlerRan = 0;
+    const { harness, bus, elicitation } = await createTestHarness({
+      tools: [confirmTool()],
+      handlers: [
+        {
+          handlerRef: "h.delete-file",
+          handler: async () => {
+            handlerRan++;
+            return [{ type: "text", text: "deleted" }];
+          },
+        },
+      ],
+    });
+
+    const idP = nextElicitationCorrelationId(bus);
+    const dispatchP = harness.dispatch(dispatchOf("delete-file", "tc-decline"));
+    const correlationId = await idP;
+    await elicitation.respond({
+      correlationId,
+      outcome: "declined",
+      reason: "user clicked Deny",
+    });
+
+    const result = await dispatchP;
+    expect(result.succeeded).toBe(false);
+    expect(handlerRan).toBe(0);
+    expect((result.content[0] as { text: string }).text).toContain("user clicked Deny");
+  });
+
   it("modifiedArguments: handler receives the edited input", async () => {
     let receivedInput: unknown = null;
-    const { harness, inbox, bus } = await createTestHarness({
+    const { harness, bus, elicitation } = await createTestHarness({
       tools: [confirmTool()],
       handlers: [
         {
@@ -178,12 +197,13 @@ describe("ToolExecutorHarness — confirmation flow", () => {
       ],
     });
 
+    const idP = nextElicitationCorrelationId(bus);
     const dispatchP = harness.dispatch(dispatchOf("delete-file", "tc-3", { path: "/tmp/risky" }));
-    const { correlationId, replyTo } = await captureRequest(bus);
-    await deliverResponse(inbox, replyTo, correlationId, {
-      toolUseId: "tc-3",
-      approved: true,
-      modifiedArguments: { path: "/tmp/safe" },
+    const correlationId = await idP;
+    await elicitation.respond({
+      correlationId,
+      outcome: "accepted",
+      value: { approved: true, modifiedArguments: { path: "/tmp/safe" } },
     });
 
     await dispatchP;
@@ -192,7 +212,7 @@ describe("ToolExecutorHarness — confirmation flow", () => {
 
   it("always: subsequent dispatches of the same tool skip the gate", async () => {
     let handlerRan = 0;
-    const { harness, inbox, bus } = await createTestHarness({
+    const { harness, bus, elicitation } = await createTestHarness({
       tools: [confirmTool()],
       handlers: [
         {
@@ -205,17 +225,18 @@ describe("ToolExecutorHarness — confirmation flow", () => {
       ],
     });
 
+    const idP = nextElicitationCorrelationId(bus);
     const first = harness.dispatch(dispatchOf("delete-file", "tc-4"));
-    const { correlationId, replyTo } = await captureRequest(bus);
-    await deliverResponse(inbox, replyTo, correlationId, {
-      toolUseId: "tc-4",
-      approved: true,
-      always: true,
+    const correlationId = await idP;
+    await elicitation.respond({
+      correlationId,
+      outcome: "accepted",
+      value: { approved: true, always: true },
     });
     await first;
     expect(handlerRan).toBe(1);
 
-    // No inbox response delivered for the second call — should NOT pause.
+    // No elicit response delivered for the second call — gate skipped.
     const second = await harness.dispatch(dispatchOf("delete-file", "tc-5"));
     expect(second.succeeded).toBe(true);
     expect(handlerRan).toBe(2);
@@ -239,9 +260,10 @@ describe("ToolExecutorHarness — confirmation flow", () => {
 
     const result = await dispatchP;
     expect(result.succeeded).toBe(false);
-    // The denial message carries the abort _tag (extracted by
-    // stringifyAbortReason since reason came in as a tagged object).
-    expect((result.content[0] as { text: string }).text).toContain("ToolAbortedError");
+    // Failure reason comes from the abort signal's reason — a tagged
+    // ToolAbortedError stringified via the elicitation harness's
+    // reason coercion.
+    expect((result.content[0] as { text: string }).text).toContain("denied");
   });
 
   it("timeout: per-dispatch confirmationTimeoutMs trips ToolConfirmationTimeoutError", async () => {
@@ -261,5 +283,54 @@ describe("ToolExecutorHarness — confirmation flow", () => {
       _tag: "ToolConfirmationTimeoutError",
       toolName: "delete-file",
     });
+  });
+
+  it("wire envelope: published with hints.kind=tool_confirmation and metadata fields", async () => {
+    const { harness, bus, elicitation } = await createTestHarness({
+      tools: [confirmTool()],
+      handlers: [
+        {
+          handlerRef: "h.delete-file",
+          handler: async () => [{ type: "text", text: "ok" }],
+        },
+      ],
+    });
+
+    // Capture the full envelope for shape assertions.
+    const envP = Effect.runPromise(
+      Stream.runCollect(
+        Stream.take(
+          bus.subscribe({
+            surface: "session",
+            name: { exact: "session:channel:elicitation" },
+          }) as Stream.Stream<EnvelopeWithMetadata, unknown, never>,
+          1,
+        ),
+      ),
+    ).then((chunk) => Array.from(Chunk.toReadonlyArray(chunk))[0]!);
+
+    const dispatchP = harness.dispatch(dispatchOf("delete-file", "tc-wire", { path: "/x" }));
+    const env = await envP;
+    const payload = env.payload as {
+      mode: string;
+      message: string;
+      hints?: Record<string, unknown>;
+      metadata?: Record<string, unknown>;
+    };
+    expect(payload.mode).toBe("form");
+    expect(payload.message).toContain("delete-file");
+    expect(payload.hints?.kind).toBe("tool_confirmation");
+    expect(payload.metadata).toMatchObject({
+      toolUseId: "tc-wire",
+      toolName: "delete-file",
+      arguments: { path: "/x" },
+    });
+
+    // Clean up the pending dispatch.
+    await elicitation.respond({
+      correlationId: env.metadata!.correlationId as string,
+      outcome: "declined",
+    });
+    await dispatchP;
   });
 });

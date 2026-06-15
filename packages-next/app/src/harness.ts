@@ -30,6 +30,7 @@ import {
   runHarnessProtocol,
   ulid,
 } from "@agentick/runtime-next";
+import { ElicitationHarness } from "@agentick/elicitation-next";
 import { LoopExecutorHarness } from "@agentick/loop-executor-next";
 import { SessionHarness, type SessionHarnessOptions } from "@agentick/session-next";
 import {
@@ -126,9 +127,15 @@ export type SessionDefaults<P = unknown> = Omit<
 
 /**
  * Per-session forwarded `ToolExecutorHarness` options. `handlerResolver`
- * is owned by the App (shared across sessions) and excluded here.
+ * is owned by the App (shared across sessions); `elicitation` is
+ * constructed per-session by the App and threaded into both the tool
+ * executor and the session bridges. Both are excluded from the
+ * adopter-supplied defaults.
  */
-export type ToolExecutorDefaults = Omit<ToolExecutorHarnessOptions, "handlerResolver">;
+export type ToolExecutorDefaults = Omit<
+  ToolExecutorHarnessOptions,
+  "handlerResolver" | "elicitation"
+>;
 
 export interface AppHarnessOptions<P = unknown> {
   /** Stable app id; defaults to `app:${ulid()}`. */
@@ -858,11 +865,26 @@ export class AppHarness<P = unknown>
       throw { _tag: "SessionAlreadyExistsError", sessionId } as AppError;
     }
 
+    // Per-session elicitation harness. Owns the request/response
+    // correlation engine for tool confirmation, MCP elicitation, and
+    // any other "ask user X" step. The same instance is threaded into
+    // BOTH the tool executor (for the confirmation gate) AND the
+    // session bridges (so React-side `bridges.elicitation` and
+    // server-side `bridges.elicitation.respond(...)` from clients
+    // reach the same registry the tool executor is awaiting).
+    const elicitation = new ElicitationHarness(
+      `${sessionId}:elicitation`,
+      this.journal,
+      this.bus,
+      this.inbox,
+    );
+
     // Per-session tool executor. Two paths:
     //   - `toolFactory` set → invoke it with the shared substrate; the
     //     resulting `ToolExecutorProtocol` is opaque to the App.
     //   - Otherwise → construct the bundled `ToolExecutorHarness` from
-    //     `toolDefaults` + the shared `handlerResolver`.
+    //     `toolDefaults` + the shared `handlerResolver` + the
+    //     per-session elicitation harness.
     const tools: ToolExecutorProtocol = this.toolFactory
       ? this.toolFactory({
           scopeId: sessionId,
@@ -873,6 +895,7 @@ export class AppHarness<P = unknown>
       : new ToolExecutorHarness(sessionId, this.journal, this.bus, this.inbox, {
           ...this.toolDefaults,
           handlerResolver: this.handlerResolver,
+          elicitation,
         });
 
     // Cascade: per-call `createSession.*` > per-app `session.*` >
@@ -888,6 +911,7 @@ export class AppHarness<P = unknown>
       loop: this.loop,
       executor: this.executor,
       toolExecutor: tools,
+      elicitation,
       target: this.target,
       defaultMaxTicks: input.maxTicks ?? this.sessionDefaults.defaultMaxTicks ?? 8,
       // Streaming cascade: per-session input.streaming > app-level

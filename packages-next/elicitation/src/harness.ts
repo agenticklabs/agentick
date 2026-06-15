@@ -42,12 +42,15 @@ import type {
   ElicitationResponse,
   ElicitationResult,
   EventBus,
+  FormElicitationRequest,
   MessageEnvelope,
   MessageHandlerError,
   MessageInbox,
   OperationJournal,
   StandardSchemaResult,
   StandardSchemaV1,
+  UnsupportedElicitationModeError,
+  UrlElicitationRequest,
 } from "@agentick/spec-next";
 import { toJsonSchema } from "@agentick/spec-next";
 
@@ -99,21 +102,51 @@ export class ElicitationHarness
 
   // ─────────── elicit ───────────
 
+  elicit<TSchema extends StandardSchemaV1>(
+    request: FormElicitationRequest<TSchema>,
+    opts?: { readonly timeoutMs?: number; readonly signal?: AbortSignal },
+  ): Promise<ElicitationResult<InferOutput<TSchema>>>;
+  elicit(
+    request: UrlElicitationRequest,
+    opts?: { readonly timeoutMs?: number; readonly signal?: AbortSignal },
+  ): Promise<ElicitationResult<undefined>>;
   async elicit<TSchema extends StandardSchemaV1>(
     request: ElicitationRequest<TSchema>,
     opts: { readonly timeoutMs?: number; readonly signal?: AbortSignal } = {},
-  ): Promise<ElicitationResult<InferOutput<TSchema>>> {
+  ): Promise<ElicitationResult<InferOutput<TSchema>> | ElicitationResult<undefined>> {
+    // URL mode is declared in the protocol shape for future MCP
+    // integration but not yet wired. Throw a tagged developer-misuse
+    // error rather than a result-union outcome — "you used a feature
+    // that doesn't exist yet" is not a semantic terminal of an
+    // elicitation; it's a wiring gap that needs developer attention
+    // with a stack trace. When URL-mode lands this branch is replaced
+    // with the real implementation; consumer code pattern-matching
+    // against the result union doesn't need to change.
+    if (request.mode === "url") {
+      throw {
+        _tag: "UnsupportedElicitationModeError",
+        mode: "url",
+        message:
+          "URL-mode elicitation is staged on the protocol surface but not " +
+          "yet wired. Track progress alongside the MCP integration roadmap.",
+      } satisfies UnsupportedElicitationModeError;
+    }
+
+    // Form mode below. The discriminator narrowing above guarantees
+    // `request` is a `FormElicitationRequest<TSchema>`.
+    const formRequest = request;
     const timeoutMs = opts.timeoutMs ?? this.defaultTimeoutMs;
 
     // Project the live StandardSchemaV1 to a JSON Schema on the wire.
     // Functions are not serializable; transports MUST NOT see the
     // validator. Server-side keeps `request.schema` for re-validation.
-    const wireSchema = toJsonSchema(request.schema);
+    const wireSchema = toJsonSchema(formRequest.schema);
     const payload: WirePayload = {
-      message: request.message,
+      mode: "form",
+      message: formRequest.message,
       schema: wireSchema,
-      ...(request.hints !== undefined ? { hints: request.hints } : {}),
-      ...(request.metadata !== undefined ? { metadata: request.metadata } : {}),
+      ...(formRequest.hints !== undefined ? { hints: formRequest.hints } : {}),
+      ...(formRequest.metadata !== undefined ? { metadata: formRequest.metadata } : {}),
     };
 
     const effect = this.request<WirePayload, ElicitationResponse>(ELICITATION_CHANNEL, payload, {
@@ -132,7 +165,7 @@ export class ElicitationHarness
     const response = either.right;
 
     if (response.outcome === "accepted") {
-      return await this.validateAccepted(request.schema, response);
+      return await this.validateAccepted(formRequest.schema, response);
     }
     // declined | cancelled pass through verbatim.
     return {
@@ -249,6 +282,7 @@ export class ElicitationHarness
 // ============================================================================
 
 interface WirePayload {
+  readonly mode: "form";
   readonly message: string;
   readonly schema: Readonly<Record<string, unknown>>;
   readonly hints?: Readonly<Record<string, unknown>>;

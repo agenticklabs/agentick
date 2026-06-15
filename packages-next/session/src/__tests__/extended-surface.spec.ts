@@ -10,6 +10,7 @@ import { describe, expect, it } from "vitest";
 
 import { FakeLanguageModelExecutor } from "@agentick/executor-next";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
+import { ElicitationHarness } from "@agentick/elicitation-next";
 import { InMemoryHandlerResolver, ToolExecutorHarness } from "@agentick/tool-executor-next";
 import { LoopExecutorHarness } from "@agentick/loop-executor-next";
 import { ReconcilerHarness } from "@agentick/reconciler-react-next";
@@ -80,12 +81,14 @@ async function mkSession(
   const loop = new LoopExecutorHarness("test-l", journal, bus, inbox);
   const resolver = new InMemoryHandlerResolver();
   resolver.register("h.calc", async () => [{ type: "text", text: "42" }]);
+  const elicitation = new ElicitationHarness("test-t:elicitation", journal, bus, inbox);
   const tools = new ToolExecutorHarness("test-t", journal, bus, inbox, {
     handlerResolver: resolver,
+    elicitation,
     ...(opts.tools ? { initialTools: opts.tools } : {}),
   });
   const executor = replyExec("ok");
-  await Promise.all([reconciler.ready, loop.ready, tools.ready, executor.ready]);
+  await Promise.all([reconciler.ready, loop.ready, tools.ready, elicitation.ready, executor.ready]);
 
   const session = new SessionHarness(journal, bus, inbox, {
     sessionId: `s-${Math.random()}`,

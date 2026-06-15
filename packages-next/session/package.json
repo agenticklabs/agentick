@@ -45,6 +45,7 @@
     "clean": "rm -rf dist tsconfig.build.tsbuildinfo"
   },
   "dependencies": {
+    "@agentick/elicitation-next": "workspace:*",
     "@agentick/knobs-next": "workspace:*",
     "@agentick/loop-executor-next": "workspace:*",
     "@agentick/reconciler-next": "workspace:*",

@@ -196,11 +196,13 @@ export interface ToolListFilter {
 // ============================================================================
 
 /**
- * `[V1-INHERITED]` Outbound confirmation request emitted by the harness
- * when a tool with `annotations.requiresConfirmation` is about to run.
- * Delivered to the host via the framework channel
- * `session:tool_confirmation`; the host's response is routed back
- * through the harness's inbox.
+ * Telemetry shape — describes a confirmation request the harness is
+ * about to send for a tool annotated `requiresConfirmation`. Surfaced
+ * on the {@link ToolConfirmationRequested} lifecycle event for
+ * observability + audit. NOT a wire payload anymore: the actual wire
+ * format is an elicitation request on `session:channel:elicitation`
+ * (carrying `hints.kind === "tool_confirmation"` and these fields
+ * inside `metadata`).
  */
 export interface ToolConfirmationRequest {
   readonly toolUseId: string;
@@ -212,10 +214,12 @@ export interface ToolConfirmationRequest {
 }
 
 /**
- * `[V1-INHERITED]` Inbound response from the host resolving a pending
- * confirmation. `always: true` is a session-scoped allow-list the
- * harness remembers; `modifiedArguments` triggers a re-validation pass
- * before the handler runs.
+ * Telemetry shape — describes a host's response to a confirmation
+ * request. Surfaced on the {@link ToolConfirmationResolved} lifecycle
+ * event. `always: true` is a session-scoped allow-list the harness
+ * remembers; `modifiedArguments` triggers a re-validation pass before
+ * the handler runs. NOT a wire payload: the actual wire format is an
+ * `ElicitationResponse` carrying these fields inside `value`.
  */
 export interface ToolConfirmationResponse {
   readonly toolUseId: string;
@@ -364,22 +368,22 @@ export type ToolExecutorError =
  * Canonical inbox message types the tool executor harness accepts at
  * its `tool:{sessionId}` address.
  *
- * - `abort`                  cancels an in-flight dispatch.
- * - `confirmation-response`  resolves a pending confirmation prompt.
+ * - `abort`  cancels an in-flight dispatch.
+ *
+ * Confirmation responses retired from this address — they now arrive
+ * on the `elicitation:{scopeId}` harness's inbox as the generic
+ * `request-response` envelope, where `BaseHarness.dispatchMessage`
+ * auto-routes them through the elicitation registry. The tool
+ * executor never sees them.
  *
  * Additional message types MAY be defined as the harness evolves —
  * unknown types route to the default `HandlerError` path.
  */
-export type ToolExecutorInboxMessage =
-  | {
-      readonly type: "abort";
-      readonly toolCallId: string;
-      readonly reason?: string;
-    }
-  | {
-      readonly type: "confirmation-response";
-      readonly response: ToolConfirmationResponse;
-    };
+export type ToolExecutorInboxMessage = {
+  readonly type: "abort";
+  readonly toolCallId: string;
+  readonly reason?: string;
+};
 
 // ============================================================================
 // The protocol

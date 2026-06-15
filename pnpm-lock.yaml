@@ -360,6 +360,9 @@ importers:
 
   packages-next/app:
     dependencies:
+      '@agentick/elicitation-next':
+        specifier: workspace:*
+        version: link:../elicitation
       '@agentick/loop-executor-next':
         specifier: workspace:*
         version: link:../loop-executor
@@ -757,6 +760,9 @@ importers:
 
   packages-next/session:
     dependencies:
+      '@agentick/elicitation-next':
+        specifier: workspace:*
+        version: link:../elicitation
       '@agentick/knobs-next':
         specifier: workspace:*
         version: link:../knobs
@@ -925,6 +931,9 @@ importers:
 
   packages-next/tool-executor:
     dependencies:
+      '@agentick/elicitation-next':
+        specifier: workspace:*
+        version: link:../elicitation
       '@agentick/runtime-next':
         specifier: workspace:*
         version: link:../runtime

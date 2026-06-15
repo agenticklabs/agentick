@@ -18,10 +18,12 @@
  */
 
 import { InMemoryDataBridge } from "@agentick/reconciler-next";
+import { ElicitationHarness } from "@agentick/elicitation-next";
 import { KnobsHarness } from "@agentick/knobs-next";
 import { StateHarness } from "@agentick/state-next";
 import { TimelineHarness } from "@agentick/timeline-next";
 import type {
+  ElicitationHarnessProtocol,
   EventBus,
   HookBridges,
   LoopBridge,
@@ -76,6 +78,16 @@ export interface BuildSessionBridgesOptions {
    * the merged map to every session it constructs.
    */
   readonly extensionBridges?: ReadonlyMap<string, unknown>;
+  /**
+   * Pre-constructed elicitation harness. When supplied, this instance
+   * is used for the `elicitation` slot — letting the AppHarness share
+   * the SAME harness with the per-session `ToolExecutorHarness`'s
+   * confirmation gate. When omitted, a fresh harness is constructed
+   * on the substrate (the tool-executor and bridges then disagree
+   * about which registry to resolve to, so adopters who want the
+   * confirmation gate MUST supply this).
+   */
+  readonly elicitation?: ElicitationHarnessProtocol;
 }
 
 export function buildSessionBridges(
@@ -106,11 +118,20 @@ export function buildSessionBridges(
     substrate.bus,
     substrate.inbox,
   );
+  const elicitation =
+    options.elicitation ??
+    new ElicitationHarness(
+      `${store.id}:elicitation`,
+      substrate.journal,
+      substrate.bus,
+      substrate.inbox,
+    );
 
   const base: SessionHookBridges = {
     timeline,
     knobs,
     state,
+    elicitation,
     data: new InMemoryDataBridge(),
     loop: loopBridgeStub(),
     session: sessionBridgeFor(store),

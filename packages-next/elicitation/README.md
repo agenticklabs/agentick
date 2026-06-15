@@ -235,12 +235,23 @@ import { fakeElicitation, stubElicitation } from "@agentick/elicitation-next/tes
   in-process == cross-process)
 - ✅ `close()` cancels pending; respond-after-close is no-op
 - ✅ Module augmentation (`bridges.elicitation` — required slot)
-- ✅ Conformance suite (13 tests) + harness-specific spec (6 tests)
-  + `stubElicitation` spec (9 tests) — all green
-- ⏳ Tool-confirmation refactor — currently rolls its own
-  `session:channel:tool_confirmation` channel; will delegate to
-  `ElicitationHarness` in a follow-up commit
-- ⏳ MCP server-side mapping (`elicitation/create` → `bridges.elicitation.elicit`)
+- ✅ MCP-aligned protocol shape: `mode: "form" | "url"` discriminated
+  union, three response actions (`accepted` / `declined` / `cancelled`)
+  match MCP's `accept` / `decline` / `cancel` verbatim
+- ✅ Tool-confirmation delegates to `ElicitationHarness` — the parallel
+  `session:channel:tool_confirmation` channel is retired; tool
+  confirmation publishes on `session:channel:elicitation` with
+  `hints.kind: "tool_confirmation"`
+- ✅ Conformance suite (13 tests) + harness-specific spec (7 tests)
+  + `stubElicitation` spec (9 tests) — all green; tool-executor's
+  confirmation flow (8 tests) covers the end-to-end integration
+- ⏳ URL-mode elicitation — protocol shape staged; calling
+  `elicit({ mode: "url", ... })` throws
+  `UnsupportedElicitationModeError` until wired. URL mode lands
+  alongside the MCP server-side mapping.
+- ⏳ MCP server-side mapping (`elicitation/create` →
+  `bridges.elicitation.elicit`); MCP completion notifications
+  (`notifications/elicitation/complete`) for async URL flows
 - ⏳ React surface — `useElicitation()` hook + reference
   `ElicitationPrompt` component
 

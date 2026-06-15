@@ -9,6 +9,13 @@
  * wire envelope, channel name, correlation engine, and timeout/abort
  * semantics live in exactly one place.
  *
+ *   Mode               — `"form"` (default) or `"url"`. Mirrors the
+ *                        MCP draft elicitation spec. **URL mode is
+ *                        declared on the protocol shape but NOT yet
+ *                        implemented.** Calling `elicit({ mode: "url",
+ *                        ... })` throws `UnsupportedElicitationModeError`
+ *                        until URL-mode wiring lands (tracked alongside
+ *                        the MCP integration roadmap).
  *   Wire channel       — published on a well-known channel by the
  *                        concrete impl (the canonical channel name
  *                        lives in the harness package, not spec —
@@ -17,12 +24,12 @@
  *                        projected JSON Schema, NOT the live
  *                        `StandardSchemaV1` (functions are not
  *                        serializable across transports).
- *   Validation         — every request carries a `StandardSchemaV1`
- *                        describing the expected reply value. The
- *                        harness validates incoming responses against
- *                        the schema before resolving the caller's
- *                        promise; invalid replies surface as
- *                        `{ outcome: "failed", failure.kind:
+ *   Validation         — every form-mode request carries a
+ *                        `StandardSchemaV1` describing the expected
+ *                        reply value. The harness validates incoming
+ *                        responses against the schema before resolving
+ *                        the caller's promise; invalid replies surface
+ *                        as `{ outcome: "failed", failure.kind:
  *                        "schema_violation" }` rather than a thrown
  *                        error. Async validators are awaited.
  *   Resolution path    — one code path. `respond()` is a typed
@@ -35,40 +42,86 @@
  *                        responses to a resolved correlationId are
  *                        silent no-ops.
  *
- * MCP alignment — `accepted | declined | cancelled` mirror MCP
- * 2025-11-25 elicitation result outcomes verbatim. `failed` is the
- * agentick-specific terminal for transport/timing/schema failures the
- * MCP spec doesn't surface, discriminated by `failure.kind`.
+ * MCP alignment — `accepted | declined | cancelled` mirror MCP draft
+ * elicitation `accept | decline | cancel` action outcomes verbatim.
+ * The `form` mode and the JSON-Schema-driven request shape match
+ * MCP's `elicitation/create` request directly; transports / adapters
+ * map field names (`outcome` ↔ `action`, `value` ↔ `content`,
+ * `schema` ↔ `requestedSchema`) at the wire edge.
+ * URL mode is a draft-spec feature; protocol shape is staged so the
+ * MCP integration is a wiring change, not an API break.
+ * `failed` is the agentick-specific terminal for transport/timing
+ * /schema failures the MCP spec doesn't surface, discriminated by
+ * `failure.kind`.
  *
  * @see docs/proposals/v2/blueprint/26-harness-api-shape.md
+ * @see https://modelcontextprotocol.io/specification/draft/client/elicitation
  */
 
 import type { StandardSchemaV1 } from "../data/standard-schema.js";
 
 // ============================================================================
-// Request / response shapes
+// Hints — typed convention (open-ended)
 // ============================================================================
 
 /**
- * Wire payload for an outbound elicitation request. Published by the
- * harness on its canonical channel (the envelope's `metadata` carries
- * the `correlationId` + `replyTo` per the request/response substrate
- * contract).
+ * Free-form UX hints the harness passes through to subscribers
+ * verbatim. The fields below are conventions — clients that recognize
+ * them render accordingly; clients that don't ignore them. Always
+ * optional. Always extensible via the index signature.
  *
- * The generic parameter `TSchema` lets the protocol carry the precise
- * Standard-Schema instance through to the caller so the response value
- * is statically typed as `StandardSchemaV1.InferOutput<TSchema>`.
- *
- * Note on UI routing: there is intentionally no `kind?: string` field.
- * Use `hints.kind` if a client-side router needs a discriminator —
- * hints are opaque to the harness and are the right home for
- * client-only metadata. The schema's shape itself is the authoritative
- * description of what is being asked.
+ * The harness itself NEVER inspects these — the typed interface is
+ * here so consumers (`agentick`, devtools, MCP adapters, custom
+ * clients) have something to type against without locking the
+ * protocol to a fixed shape.
  */
-export interface ElicitationRequest<TSchema extends StandardSchemaV1 = StandardSchemaV1> {
+export interface ElicitationHints {
   /**
-   * Human-readable prompt shown to the user. Matches MCP's `message`.
+   * Client-side router key. Examples: `"tool_confirmation"`,
+   * `"mcp_elicitation"`, `"approval_gate"`. Clients dispatch on this
+   * to pick a custom renderer. The schema's shape remains the
+   * authoritative description of WHAT is being asked.
    */
+  readonly kind?: string;
+  /** Heading text shown separately from `message` (subtitle / detail). */
+  readonly title?: string;
+  /** Placeholder rendered on the primary input control. */
+  readonly placeholder?: string;
+  /**
+   * The action label rendered on the primary accept button. Defaults
+   * are client-defined ("Submit", "OK", "Approve"). Servers MAY
+   * override per prompt.
+   */
+  readonly acceptLabel?: string;
+  /** Label on the explicit decline action. */
+  readonly declineLabel?: string;
+  /** Label on the cancel/dismiss action. */
+  readonly cancelLabel?: string;
+  /**
+   * Marks the prompt destructive — clients can use this to render a
+   * red/warning style on the accept button (e.g., "Delete file?").
+   */
+  readonly destructive?: boolean;
+  /** Free-form extension slot for client-specific hints. */
+  readonly [extra: string]: unknown;
+}
+
+// ============================================================================
+// Request shape — discriminated by `mode`
+// ============================================================================
+
+/**
+ * Form-mode elicitation request — the default and only currently
+ * supported mode. Mirrors MCP's `mode: "form"` semantics: the harness
+ * asks for a structured response validated by the request's schema.
+ *
+ * `mode` is OPTIONAL — omitting it defaults to form. This matches
+ * MCP's backwards-compat behavior where a missing `mode` field is
+ * treated as form mode.
+ */
+export interface FormElicitationRequest<TSchema extends StandardSchemaV1 = StandardSchemaV1> {
+  readonly mode?: "form";
+  /** Human-readable prompt shown to the user. Matches MCP's `message`. */
   readonly message: string;
   /**
    * Standard-Schema validator describing the expected reply value.
@@ -79,15 +132,19 @@ export interface ElicitationRequest<TSchema extends StandardSchemaV1 = StandardS
    *     validator function.
    *   - Server-side validation of the incoming response payload before
    *     the calling fiber sees it. Async validators are awaited.
+   *
+   * Note on MCP alignment: MCP restricts `requestedSchema` to flat
+   * objects with primitive properties + enum/oneOf for selects. The
+   * agentick harness does NOT enforce that restriction — adopters
+   * targeting MCP clients are responsible for keeping their schemas
+   * inside MCP's subset.
    */
   readonly schema: TSchema;
   /**
-   * Free-form UX hints (button labels, placeholders, icons, client
-   * router discriminators). Opaque to the harness; passed through to
-   * subscribers verbatim. By convention, `hints.kind` (string) is the
-   * client-side router key.
+   * Free-form UX hints. See {@link ElicitationHints} for documented
+   * conventions (`kind`, `title`, `acceptLabel`, etc.).
    */
-  readonly hints?: Readonly<Record<string, unknown>>;
+  readonly hints?: ElicitationHints;
   /**
    * Domain metadata stamped on the wire envelope. Logging, MCP wire
    * mapping, and audit trails consume this — the harness itself never
@@ -95,6 +152,52 @@ export interface ElicitationRequest<TSchema extends StandardSchemaV1 = StandardS
    */
   readonly metadata?: Readonly<Record<string, unknown>>;
 }
+
+/**
+ * URL-mode elicitation request — directs the user to an external URL
+ * for an out-of-band interaction (OAuth, payment, credential entry).
+ * Mirrors MCP draft `mode: "url"`. **Not yet implemented in this
+ * harness** — calling `elicit({ mode: "url", ... })` throws
+ * {@link UnsupportedElicitationModeError}. Protocol shape is
+ * staged so MCP integration is a wiring change, not an API break.
+ *
+ * URL mode's `accepted` outcome means the user consented to open the
+ * URL — NOT that the out-of-band interaction completed. Completion
+ * arrives later via a separate notification (TBD when URL mode lands).
+ */
+export interface UrlElicitationRequest {
+  readonly mode: "url";
+  /** Human-readable explanation of why the URL is being opened. */
+  readonly message: string;
+  /**
+   * The URL the user should navigate to. MUST be a valid URL. MCP's
+   * draft elicitation spec imposes strict safety requirements
+   * (HTTPS, no pre-authenticated tokens, no end-user PII in the URL) —
+   * URL-mode adopters MUST honor those.
+   */
+  readonly url: string;
+  /**
+   * Stable identifier for the URL flow. Used by completion
+   * notifications to route the out-of-band result back. Distinct from
+   * the registry-level correlationId (which scopes the elicit() Promise).
+   * Mirrors MCP's `elicitationId`.
+   */
+  readonly elicitationId: string;
+  readonly hints?: ElicitationHints;
+  readonly metadata?: Readonly<Record<string, unknown>>;
+}
+
+/**
+ * Discriminated union of supported elicitation request shapes. Form
+ * mode is default; URL mode is staged but not implemented.
+ */
+export type ElicitationRequest<TSchema extends StandardSchemaV1 = StandardSchemaV1> =
+  | FormElicitationRequest<TSchema>
+  | UrlElicitationRequest;
+
+// ============================================================================
+// Response shape
+// ============================================================================
 
 /**
  * Inbound response payload — what a client extension (devtools UI,
@@ -109,12 +212,15 @@ export interface ElicitationResponse {
   readonly correlationId: string;
   /**
    * The client's outcome. `"accepted"` MUST carry a `value` matching
-   * the request's schema; the harness re-validates and downgrades to
-   * `{ outcome: "failed", failure.kind: "schema_violation" }` if
-   * validation fails.
+   * the request's schema (form mode); the harness re-validates and
+   * downgrades to `{ outcome: "failed", failure.kind:
+   * "schema_violation" }` if validation fails. For URL mode (when
+   * implemented), accepted carries no value — the user consented to
+   * the URL open; the actual completion arrives via a separate
+   * notification.
    */
   readonly outcome: "accepted" | "declined" | "cancelled";
-  /** User-supplied value (present iff `outcome === "accepted"`). */
+  /** User-supplied value (form-mode accepted only). */
   readonly value?: unknown;
   /**
    * Human-readable explanation, optional for any outcome. Surfaces on
@@ -161,13 +267,38 @@ export interface ElicitationFailure {
  *
  * The harness never throws for user-driven outcomes (`declined`,
  * `cancelled`) nor for transport/timing/schema failures — every
- * terminal flows through this union.
+ * terminal flows through this union. The single exception is
+ * developer-misuse errors like calling URL mode when it isn't wired
+ * yet — those throw {@link UnsupportedElicitationModeError} because
+ * they're misuse, not semantic outcomes of an elicitation.
  */
 export type ElicitationResult<TValue = unknown> =
   | { readonly outcome: "accepted"; readonly value: TValue }
   | { readonly outcome: "declined"; readonly reason?: string }
   | { readonly outcome: "cancelled"; readonly reason?: string }
   | { readonly outcome: "failed"; readonly failure: ElicitationFailure };
+
+// ============================================================================
+// Developer-misuse errors (thrown, not modeled in the result union)
+// ============================================================================
+
+/**
+ * Thrown by `elicit()` when the caller passes a `mode` the harness
+ * doesn't implement yet. Today only URL mode trips this — form mode
+ * is fully supported. Tagged so consumers can `Effect.catchTag`
+ * /pattern-match alongside the rest of the framework's typed errors.
+ *
+ * Distinct from `ElicitationResult` failure outcomes because this is
+ * developer misuse, not a semantic outcome of an elicitation. When
+ * URL mode lands the throw is replaced; consumer code that was
+ * pattern-matching only against `ElicitationResult` outcomes doesn't
+ * need to change.
+ */
+export interface UnsupportedElicitationModeError {
+  readonly _tag: "UnsupportedElicitationModeError";
+  readonly mode: "url";
+  readonly message: string;
+}
 
 // ============================================================================
 // Protocol
@@ -202,6 +333,12 @@ export interface ElicitationHarnessProtocol {
    * timeout / abort), and validates the reply against the request's
    * schema before resolving.
    *
+   * Form mode (default) returns `ElicitationResult<TValue>` where
+   * `TValue` is inferred from the request's `schema`. URL mode (when
+   * implemented) returns `ElicitationResult<undefined>` because the
+   * `accepted` outcome only signals consent to open the URL — actual
+   * completion arrives via a separate notification.
+   *
    *   timeoutMs   — bound on the wait. Defaults to the harness's
    *                 `defaultTimeoutMs` if omitted. On expiry the
    *                 caller receives
@@ -210,15 +347,20 @@ export interface ElicitationHarnessProtocol {
    *                 `{ outcome: "failed", failure.kind: "aborted",
    *                 failure.reason }` on abort.
    *
-   * Never throws for user-driven outcomes (declined / cancelled) nor
-   * for transport/schema failures — every terminal flows through the
-   * discriminated union so callers do not need try/catch for "user
-   * said no."
+   * Throws {@link UnsupportedElicitationModeError} when called with
+   * `mode: "url"` until URL-mode wiring lands. Never throws for
+   * user-driven outcomes (declined / cancelled) nor for transport/
+   * schema failures — every semantic terminal flows through the
+   * result union.
    */
   elicit<TSchema extends StandardSchemaV1>(
-    request: ElicitationRequest<TSchema>,
+    request: FormElicitationRequest<TSchema>,
     opts?: { readonly timeoutMs?: number; readonly signal?: AbortSignal },
   ): Promise<ElicitationResult<InferOutput<TSchema>>>;
+  elicit(
+    request: UrlElicitationRequest,
+    opts?: { readonly timeoutMs?: number; readonly signal?: AbortSignal },
+  ): Promise<ElicitationResult<undefined>>;
 
   /**
    * Typed convenience for delivering a client's response to a pending

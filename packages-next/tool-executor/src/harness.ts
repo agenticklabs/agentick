@@ -23,13 +23,13 @@
 import { Cause, Effect, Exit, Option } from "effect";
 import { runHarnessProtocol, ulid } from "@agentick/runtime-next";
 import { BaseHarness, type LifecycleHandler, type Unsubscribe } from "@agentick/runtime-next";
-import type { RequestError } from "@agentick/runtime-next";
 import type {
   AbortInput,
   ChannelPublisher,
   ContentBlock,
   DispatchInput,
   DispatchResult,
+  ElicitationHarnessProtocol,
   EventBus,
   MessageEnvelope,
   MessageHandlerError,
@@ -37,8 +37,6 @@ import type {
   Operation,
   OperationJournal,
   RegisterToolInput,
-  ToolConfirmationRequest,
-  ToolConfirmationResponse,
   ToolDeclaration,
   ToolExecutorInboxMessage,
   ToolExecutorProtocol,
@@ -47,6 +45,11 @@ import type {
   UnregisterToolInput,
 } from "@agentick/spec-next";
 
+import {
+  TOOL_CONFIRMATION_KIND,
+  TOOL_CONFIRMATION_REPLY_SCHEMA,
+  type ToolConfirmationReply,
+} from "./confirmation-schema.js";
 import { InMemoryToolRegistry } from "./registry.js";
 import type {
   HandlerResolver,
@@ -71,6 +74,7 @@ export class ToolExecutorHarness extends BaseHarness<"tool"> implements ToolExec
   private readonly defaultTimeoutMs?: number;
   private readonly defaultConfirmationTimeoutMs?: number;
   private readonly channelPublisher?: ChannelPublisher;
+  private readonly elicitation: ElicitationHarnessProtocol;
 
   constructor(
     scopeId: string,
@@ -84,6 +88,7 @@ export class ToolExecutorHarness extends BaseHarness<"tool"> implements ToolExec
     this.defaultTimeoutMs = options.defaultTimeoutMs;
     this.defaultConfirmationTimeoutMs = options.defaultConfirmationTimeoutMs;
     this.channelPublisher = options.channelPublisher;
+    this.elicitation = options.elicitation;
 
     // Eager registrations applied synchronously so callers can dispatch
     // immediately after `await harness.ready`.
@@ -212,10 +217,10 @@ export class ToolExecutorHarness extends BaseHarness<"tool"> implements ToolExec
   // ──────────────────────── inbox dispatch ────────────────────────
 
   /**
-   * Inbox dispatcher. The `confirmation-response` message type is no
-   * longer handled here — it's now a generic `request-response`
-   * routed through BaseHarness's auto-interception (block 5). This
-   * dispatcher only handles `abort`.
+   * Inbox dispatcher. The tool executor handles `abort` only. The
+   * legacy `confirmation-response` message type retired with the
+   * ElicitationHarness refactor — confirmation responses now arrive
+   * on the elicitation harness's address, not here.
    *
    * Unknown message types route to `HandlerError`.
    */
@@ -233,21 +238,6 @@ export class ToolExecutorHarness extends BaseHarness<"tool"> implements ToolExec
       case "abort":
         return Effect.sync(() => {
           this.abortInFlight(payload.toolCallId, payload.reason);
-        });
-      case "confirmation-response":
-        // Backwards-compat: legacy callers that still send the
-        // tool-specific message type. Translate to the generic
-        // request-response shape and route via the registry. New
-        // callers should send the generic shape directly.
-        return Effect.sync(() => {
-          const r = payload.response;
-          // The registry was keyed by correlationId (req:<ulid>) at
-          // request time, but legacy messages reference toolUseId
-          // directly. We can't cleanly bridge here without an
-          // additional toolUseId → correlationId map. Document as a
-          // gap and accept that legacy clients now need to upgrade.
-          if (r.always === true) this.alwaysAllowed.add(payload.response.toolUseId);
-          void r;
         });
       default: {
         const unknownType = (payload as { type: string }).type;
@@ -344,12 +334,14 @@ export class ToolExecutorHarness extends BaseHarness<"tool"> implements ToolExec
       const onCallerAbort = () => controller.abort(callerSignal?.reason);
       callerSignal?.addEventListener("abort", onCallerAbort, { once: true });
 
-      // ─── Confirmation gate (4a.5 + block-5 refactor) ───────────────
-      // Tools annotated `requiresConfirmation: true` pause here. The
-      // pause is now `this.request("tool_confirmation", payload)` from
-      // BaseHarness — generic RPC over channel + inbox. Confirmation-
-      // specific response routing went away; the request/response
-      // primitive is the single mechanism.
+      // ─── Confirmation gate ──────────────────────────────────────────
+      // Tools annotated `requiresConfirmation: true` route through the
+      // ElicitationHarness. The wire envelope is the standard elicitation
+      // shape (session:channel:elicitation, hints.kind ===
+      // "tool_confirmation"); the response is validated against
+      // TOOL_CONFIRMATION_REPLY_SCHEMA. The harness retires its own
+      // `session:channel:tool_confirmation` channel — one substrate
+      // primitive, one wire shape.
       if (
         reg.declaration.annotations?.requiresConfirmation === true &&
         !this.alwaysAllowed.has(input.name)
@@ -359,17 +351,19 @@ export class ToolExecutorHarness extends BaseHarness<"tool"> implements ToolExec
           input.confirmationTimeoutMs ??
           this.defaultConfirmationTimeoutMs;
 
-        // The request fiber inherits the dispatch scope, so fiber
-        // interrupts on abort cancel the wait. We also pass the abort
-        // signal explicitly so external aborts (inbox `abort`,
-        // session close) reject the pending Deferred with
-        // `RequestAbortedError`.
-        const confirmationEffect = this.request<ToolConfirmationRequest, ToolConfirmationResponse>(
-          "tool_confirmation",
+        // The signal flows through to the elicitation registry; an
+        // inbox abort or caller signal abort settles the pending
+        // elicit with `{ outcome: "failed", failure.kind: "aborted" }`.
+        const elicit = this.elicitation.elicit(
           {
-            toolUseId: input.toolCallId,
-            name: input.name,
-            arguments: validated as Record<string, unknown>,
+            message: `Approve tool "${input.name}"?`,
+            schema: TOOL_CONFIRMATION_REPLY_SCHEMA,
+            hints: { kind: TOOL_CONFIRMATION_KIND },
+            metadata: {
+              toolUseId: input.toolCallId,
+              toolName: input.name,
+              arguments: validated as Record<string, unknown>,
+            },
           },
           {
             ...(confirmationTimeoutMs !== undefined ? { timeoutMs: confirmationTimeoutMs } : {}),
@@ -377,37 +371,33 @@ export class ToolExecutorHarness extends BaseHarness<"tool"> implements ToolExec
           },
         );
 
-        // Translate RequestError → confirmation-shaped outcomes that
-        // the existing branches downstream expect.
-        const confirmation = yield* confirmationEffect.pipe(
-          Effect.catchAll((err: RequestError) => {
-            if (err._tag === "RequestTimeoutError") {
-              return Effect.fail({
-                _tag: "ToolConfirmationTimeoutError",
-                toolName: input.name,
-                ms: err.ms,
-              } as const);
-            }
-            // RequestAbortedError / RequestCancelledError → denial-
-            // shaped synthetic response so the existing denial branch
-            // runs unchanged. Reason can be a string, a tagged object
-            // (e.g., ToolAbortedError from controller.abort), or
-            // missing. Normalize to a readable string.
-            const denial: ToolConfirmationResponse = {
-              toolUseId: input.toolCallId,
-              approved: false,
-              reason: stringifyAbortReason("reason" in err ? err.reason : undefined),
-            };
-            return Effect.succeed(denial);
-          }),
-        );
+        // `Effect.promise` bridges the elicit() Promise into the
+        // surrounding Effect generator. elicit() never throws for
+        // form-mode requests; URL-mode would throw but tool
+        // confirmation only ever sends form-mode.
+        const elicitResult = yield* Effect.promise(() => elicit);
 
-        if (!confirmation.approved) {
-          // Cleanup before short-circuit.
+        // Timeout → caller error so the loop sees it via
+        // ToolConfirmationTimeoutError (existing contract).
+        if (elicitResult.outcome === "failed" && elicitResult.failure.kind === "timeout") {
+          return yield* Effect.fail({
+            _tag: "ToolConfirmationTimeoutError",
+            toolName: input.name,
+            ms: confirmationTimeoutMs ?? 0,
+          } as const);
+        }
+
+        // Approval requires accepted + reply.approved === true. Every
+        // other path — declined, cancelled, failed.aborted,
+        // failed.schema_violation, or accepted-with-approved-false —
+        // is a denial.
+        const reply = extractReply(elicitResult);
+        const approved = reply?.approved === true;
+
+        if (!approved) {
           callerSignal?.removeEventListener("abort", onCallerAbort);
           this.inFlight.delete(input.toolCallId);
-          // Denied → return a DispatchResult with succeeded:false +
-          // a denial content block. Matches v1 (no vetoed terminal).
+          const denyReason = denialReason(elicitResult, reply);
           const denialResult: DispatchResult = {
             toolCallId: input.toolCallId,
             name: input.name,
@@ -415,8 +405,8 @@ export class ToolExecutorHarness extends BaseHarness<"tool"> implements ToolExec
             content: [
               {
                 type: "text",
-                text: confirmation.reason
-                  ? `Tool "${input.name}" denied: ${confirmation.reason}`
+                text: denyReason
+                  ? `Tool "${input.name}" denied: ${denyReason}`
                   : `Tool "${input.name}" denied by user.`,
               },
             ],
@@ -425,12 +415,14 @@ export class ToolExecutorHarness extends BaseHarness<"tool"> implements ToolExec
           };
           return denialResult;
         }
-        if (confirmation.always === true) this.alwaysAllowed.add(input.name);
+
+        if (reply!.always === true) this.alwaysAllowed.add(input.name);
+
         // Re-validate when the host returns modifiedArguments — the
         // user may have edited the call before approving.
-        if (confirmation.modifiedArguments !== undefined) {
+        if (reply!.modifiedArguments !== undefined) {
           const revalidated = yield* Effect.tryPromise({
-            try: async () => entry.validator.validate(confirmation.modifiedArguments),
+            try: async () => entry.validator.validate(reply!.modifiedArguments),
             catch: (cause): { readonly _tag: "ToolValidationError"; readonly cause: unknown } => ({
               _tag: "ToolValidationError",
               cause,
@@ -672,19 +664,42 @@ function isTaggedToolError(value: unknown): value is { readonly _tag: string } {
 }
 
 /**
- * Coerce an arbitrary abort reason into a short string the host UI
- * can display. Strings pass through; tagged-object errors return
- * their `_tag`; other objects fall back to a static "aborted" label.
+ * Pull the validated reply out of an `accepted` elicitation result.
+ * Returns `undefined` for any other outcome.
  */
-function stringifyAbortReason(reason: unknown): string {
-  if (typeof reason === "string") return reason;
-  if (reason === undefined || reason === null) return "aborted";
-  if (typeof reason === "object") {
-    const tag = (reason as { _tag?: unknown })._tag;
-    if (typeof tag === "string") return tag;
-    return "aborted";
-  }
-  return String(reason);
+function extractReply(
+  result:
+    | { readonly outcome: "accepted"; readonly value: ToolConfirmationReply }
+    | { readonly outcome: "declined"; readonly reason?: string }
+    | { readonly outcome: "cancelled"; readonly reason?: string }
+    | {
+        readonly outcome: "failed";
+        readonly failure: { readonly kind: string; readonly reason?: string };
+      },
+): ToolConfirmationReply | undefined {
+  return result.outcome === "accepted" ? result.value : undefined;
+}
+
+/**
+ * Compose a denial reason from the available signals: the user's
+ * `accepted+approved:false` reason, declined/cancelled reason, or a
+ * failure-kind label.
+ */
+function denialReason(
+  result:
+    | { readonly outcome: "accepted"; readonly value: ToolConfirmationReply }
+    | { readonly outcome: "declined"; readonly reason?: string }
+    | { readonly outcome: "cancelled"; readonly reason?: string }
+    | {
+        readonly outcome: "failed";
+        readonly failure: { readonly kind: string; readonly reason?: string };
+      },
+  reply: ToolConfirmationReply | undefined,
+): string | undefined {
+  if (reply !== undefined) return reply.reason;
+  if (result.outcome === "declined" || result.outcome === "cancelled") return result.reason;
+  if (result.outcome === "failed") return result.failure.reason ?? result.failure.kind;
+  return undefined;
 }
 
 // Silence unused-import linting until 4a.6+ uses ToolRegistration alias.

@@ -17,6 +17,7 @@
 
 import type {
   ChannelPublisher,
+  ElicitationHarnessProtocol,
   ToolHandler,
   ToolRegistration,
   Validator,
@@ -90,8 +91,20 @@ export interface ToolExecutorHarnessOptions {
   /**
    * Default confirmation-wait timeout (milliseconds) applied when a
    * tool with `annotations.requiresConfirmation` is dispatched and no
-   * tighter override is in scope. `undefined` (the default) means
-   * "wait forever".
+   * tighter override is in scope. `undefined` defers to the
+   * ElicitationHarness's own `defaultTimeoutMs` (5 minutes).
    */
   readonly defaultConfirmationTimeoutMs?: number;
+
+  /**
+   * Elicitation harness used by the confirmation gate. Required:
+   * tools annotated `requiresConfirmation: true` round-trip through
+   * `elicitation.elicit(...)` instead of rolling their own channel.
+   *
+   * Wiring: in production, the session-extension layer constructs the
+   * elicitation harness on the same substrate (shared bus/inbox) and
+   * passes its protocol reference here. In tests, `createTestHarness`
+   * builds both on a shared in-memory substrate.
+   */
+  readonly elicitation: ElicitationHarnessProtocol;
 }
