@@ -61,7 +61,7 @@ import type {
   SectionEntry,
   ToolDeclaration,
 } from "@agentick/spec-next";
-import { SPEC_VERSION } from "@agentick/spec-next";
+import { SPEC_VERSION, toJsonSchema } from "@agentick/spec-next";
 
 import { ExecutorLifecycle } from "./executor-lifecycle.js";
 
@@ -527,7 +527,10 @@ function buildTools(tree: RenderedTree): ReadonlyArray<LanguageModelTool> {
     .map((t) => ({
       name: t.name,
       ...(t.description !== undefined ? { description: t.description } : {}),
-      inputSchema: t.inputSchema as Record<string, unknown>,
+      inputSchema: toJsonSchema(t.inputSchema) as Record<string, unknown>,
+      ...(t.outputSchema !== undefined
+        ? { outputSchema: toJsonSchema(t.outputSchema) as Record<string, unknown> }
+        : {}),
       ...(t.providerOptions !== undefined ? { providerOptions: t.providerOptions } : {}),
     }));
 }

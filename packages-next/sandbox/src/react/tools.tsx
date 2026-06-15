@@ -24,7 +24,7 @@ import { useSandbox } from "./hook.js";
 export const Bash = createTool({
   name: "bash",
   description: "Execute a shell command in the sandbox",
-  input: z.object({
+  inputSchema: z.object({
     command: z.string().describe("The shell command to execute"),
     cwd: z.string().optional().describe("Working directory inside the sandbox"),
     timeoutMs: z.number().int().positive().optional(),
@@ -57,7 +57,7 @@ export const Bash = createTool({
 export const ReadFile = createTool({
   name: "read_file",
   description: "Read a file from the sandbox workspace",
-  input: z.object({
+  inputSchema: z.object({
     path: z.string().describe("Absolute path inside the sandbox"),
   }),
   use: () => ({ sandbox: useSandbox() }),
@@ -76,7 +76,7 @@ export const ReadFile = createTool({
 export const WriteFile = createTool({
   name: "write_file",
   description: "Write a file to the sandbox workspace",
-  input: z.object({
+  inputSchema: z.object({
     path: z.string(),
     content: z.string(),
   }),
@@ -98,7 +98,7 @@ export const EditFile = createTool({
   name: "edit_file",
   description:
     "Apply surgical find/replace edits to a file. Edits run in order; either all apply or the operation reports skipped.",
-  input: z.object({
+  inputSchema: z.object({
     path: z.string(),
     edits: z
       .array(

@@ -224,6 +224,15 @@ export interface LanguageModelTool {
   readonly description?: string;
   readonly inputSchema: Record<string, unknown>;
   /**
+   * Optional structured-output JSON Schema. Mirrors
+   * {@link ToolDeclaration.outputSchema} after wire-projection
+   * (`toJsonSchema()` applied). Adapters that support structured tool
+   * outputs (e.g. OpenAI Responses API `output_format`, Anthropic
+   * structured tools) project this into the provider's tool shape;
+   * providers without first-class structured-output support ignore it.
+   */
+  readonly outputSchema?: Record<string, unknown>;
+  /**
    * Per-tool provider-specific options. Reads from
    * {@link ToolDeclaration.providerOptions} during projection. Adapters
    * merge into the provider's tool shape (e.g. OpenAI `strict: true`

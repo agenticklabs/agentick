@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ToolRegistration } from "@agentick/spec-next";
+import { jsonSchema } from "@agentick/spec-next";
 import { InMemoryToolRegistry } from "../registry.js";
 
 function reg(name: string, overrides: Partial<ToolRegistration> = {}): ToolRegistration {
@@ -8,7 +9,7 @@ function reg(name: string, overrides: Partial<ToolRegistration> = {}): ToolRegis
       id: overrides.declaration?.id ?? name,
       name,
       description: overrides.declaration?.description ?? `tool ${name}`,
-      inputSchema: { type: "object" },
+      inputSchema: jsonSchema({ type: "object" }),
       exposure: ["model", "dispatch"],
       ...(overrides.declaration ?? {}),
     },
@@ -73,7 +74,7 @@ describe("InMemoryToolRegistry", () => {
         declaration: {
           id: "model-only",
           description: "x",
-          inputSchema: {},
+          inputSchema: jsonSchema({}),
           name: "model-only",
           exposure: ["model"],
         },
@@ -84,7 +85,7 @@ describe("InMemoryToolRegistry", () => {
         declaration: {
           id: "dispatch-only",
           description: "x",
-          inputSchema: {},
+          inputSchema: jsonSchema({}),
           name: "dispatch-only",
           exposure: ["dispatch"],
         },
@@ -101,7 +102,7 @@ describe("InMemoryToolRegistry", () => {
         declaration: {
           id: "a",
           description: "x",
-          inputSchema: {},
+          inputSchema: jsonSchema({}),
           name: "a",
           exposure: ["dispatch"],
           annotations: { intent: "render" },

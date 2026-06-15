@@ -29,6 +29,7 @@ import type {
   SectionEntry,
   ToolDeclaration,
 } from "@agentick/spec-next";
+import { toJsonSchema } from "@agentick/spec-next";
 
 export function defaultProject(input: ProjectInput): LanguageModelInput {
   const messages = buildMessages(input.compiled);
@@ -173,7 +174,10 @@ export function buildTools(tree: RenderedTree): ReadonlyArray<LanguageModelTool>
     .map((t) => ({
       name: t.name,
       ...(t.description !== undefined ? { description: t.description } : {}),
-      inputSchema: t.inputSchema as Record<string, unknown>,
+      inputSchema: toJsonSchema(t.inputSchema) as Record<string, unknown>,
+      ...(t.outputSchema !== undefined
+        ? { outputSchema: toJsonSchema(t.outputSchema) as Record<string, unknown> }
+        : {}),
       ...(t.providerOptions !== undefined ? { providerOptions: t.providerOptions } : {}),
     }));
 }

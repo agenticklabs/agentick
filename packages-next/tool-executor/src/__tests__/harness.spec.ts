@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { DispatchInput, ToolRegistration } from "@agentick/spec-next";
+import { jsonSchema } from "@agentick/spec-next";
 import { createTestHarness } from "../testing/index.js";
 import { permissiveValidator } from "../validator.js";
 
@@ -12,7 +13,7 @@ function echoReg(
       id: name,
       name,
       description: "echo",
-      inputSchema: { type: "object" },
+      inputSchema: jsonSchema({ type: "object" }),
       exposure,
     },
     handlerRef: `h.${name}`,

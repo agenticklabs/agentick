@@ -28,7 +28,12 @@
  */
 
 import { useCallback, useEffect, useRef, useSyncExternalStore } from "react";
-import type { KnobPrimitive, KnobRegistration, KnobValueType } from "@agentick/spec-next";
+import type {
+  KnobPrimitive,
+  KnobRegistration,
+  KnobValueType,
+  StandardSchemaV1,
+} from "@agentick/spec-next";
 import { useBridges } from "@agentick/reconciler-react-next";
 import { useOnExecutionEnd } from "@agentick/reconciler-react-next";
 
@@ -46,7 +51,7 @@ export interface UseKnobOptions {
   readonly momentary?: boolean;
   readonly inline?: boolean;
   readonly validate?: (value: KnobPrimitive) => true | string;
-  readonly schema?: unknown;
+  readonly schema?: StandardSchemaV1;
 }
 
 function inferValueType(initial: KnobPrimitive): KnobValueType {

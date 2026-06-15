@@ -51,8 +51,8 @@ import type {
   KnobPrimitive,
   KnobSemanticType,
   KnobsDispatchInput,
-  StandardSchemaV1,
 } from "@agentick/spec-next";
+import { jsonSchema } from "@agentick/spec-next";
 
 import { useBridges } from "@agentick/reconciler-react-next";
 import { createTool } from "@agentick/reconciler-react-next";
@@ -211,11 +211,29 @@ export type SetKnobInput = KnobsDispatchInput;
 // set_knob input schema (hand-rolled Standard Schema validator)
 // ============================================================================
 
-const setKnobSchema: StandardSchemaV1<SetKnobInput> = {
-  "~standard": {
-    version: 1,
+const setKnobSchema = jsonSchema<SetKnobInput>(
+  {
+    type: "object",
+    properties: {
+      name: {
+        type: "string",
+        description: "Name of the knob to set (mutually exclusive with group)",
+      },
+      group: {
+        type: "string",
+        description: "Group name — sets all knobs in the group (mutually exclusive with name)",
+      },
+      value: {
+        anyOf: [{ type: "string" }, { type: "number" }, { type: "boolean" }],
+        description: "New value for the knob(s)",
+      },
+    },
+    required: ["value"],
+    additionalProperties: false,
+  },
+  {
     vendor: "agentick-knobs",
-    validate: (raw) => {
+    validator: (raw) => {
       if (raw === null || typeof raw !== "object") {
         return { issues: [{ message: "set_knob input must be an object" }] };
       }
@@ -243,27 +261,7 @@ const setKnobSchema: StandardSchemaV1<SetKnobInput> = {
       };
     },
   },
-};
-
-const SET_KNOB_JSON_SCHEMA = {
-  type: "object",
-  properties: {
-    name: {
-      type: "string",
-      description: "Name of the knob to set (mutually exclusive with group)",
-    },
-    group: {
-      type: "string",
-      description: "Group name — sets all knobs in the group (mutually exclusive with name)",
-    },
-    value: {
-      anyOf: [{ type: "string" }, { type: "number" }, { type: "boolean" }],
-      description: "New value for the knob(s)",
-    },
-  },
-  required: ["value"],
-  additionalProperties: false,
-} as const;
+);
 
 const SetKnobTool = createTool({
   name: "set_knob",
@@ -271,8 +269,7 @@ const SetKnobTool = createTool({
     "Set a knob value by name, or set every knob in a group at once. " +
     "Provide either name or group, not both. " +
     "Use this to adjust agent behavior knobs surfaced in the Knobs section.",
-  inputSchema: SET_KNOB_JSON_SCHEMA,
-  input: setKnobSchema,
+  inputSchema: setKnobSchema,
   use: () => {
     const { knobs } = useBridges();
     return { knobs };

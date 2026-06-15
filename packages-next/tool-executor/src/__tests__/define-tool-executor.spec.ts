@@ -17,6 +17,7 @@ import { Effect, Stream, Fiber } from "effect";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
 import {
   isToolExecutorFactory,
+  jsonSchema,
   type DispatchInput,
   type ProtocolEvent,
   type ToolRegistration,
@@ -39,7 +40,7 @@ function regOf(name: string): ToolRegistration {
       id: name,
       name,
       description: name,
-      inputSchema: { type: "object" },
+      inputSchema: jsonSchema({ type: "object" }),
       exposure: ["model", "dispatch"],
     },
     handlerRef: `h.${name}`,

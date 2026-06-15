@@ -73,7 +73,7 @@ describe("createTool — Standard Schema runtime validation", () => {
     const t = createTool<Calc>({
       name: "add",
       description: "sum two numbers",
-      input: z.object({ a: z.number(), b: z.number() }),
+      inputSchema: z.object({ a: z.number(), b: z.number() }),
       handler: async ({ a, b }) => [{ type: "text", text: String(a + b) }],
     });
     const ok = await t.validator.validate({ a: 1, b: 2 });

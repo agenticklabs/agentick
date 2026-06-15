@@ -37,6 +37,7 @@ import type {
   ToolExecutorProtocol,
   ToolRegistration,
 } from "@agentick/spec-next";
+import { jsonSchema } from "@agentick/spec-next";
 
 /**
  * Fixture tool description for the conformance factory. The factory
@@ -75,7 +76,7 @@ function echoTool(name = "echo"): FixtureToolSpec {
       id: name,
       name,
       description: "Echo back the JSON-stringified input.",
-      inputSchema: { type: "object" },
+      inputSchema: jsonSchema({ type: "object" }),
       exposure: ["model", "dispatch"],
     },
     behavior: { kind: "echo" },
@@ -88,7 +89,7 @@ function modelOnlyTool(name = "model.only"): FixtureToolSpec {
       id: name,
       name,
       description: "Model-door only.",
-      inputSchema: { type: "object" },
+      inputSchema: jsonSchema({ type: "object" }),
       exposure: ["model"],
     },
     behavior: { kind: "echo" },
@@ -101,7 +102,7 @@ function dispatchOnlyTool(name = "dispatch.only"): FixtureToolSpec {
       id: name,
       name,
       description: "Host-door only.",
-      inputSchema: { type: "object" },
+      inputSchema: jsonSchema({ type: "object" }),
       exposure: ["dispatch"],
     },
     behavior: { kind: "echo" },
@@ -114,11 +115,11 @@ function strictTool(name = "strict"): FixtureToolSpec {
       id: name,
       name,
       description: "Requires { q: string } at minimum.",
-      inputSchema: {
+      inputSchema: jsonSchema({
         type: "object",
         properties: { q: { type: "string" } },
         required: ["q"],
-      },
+      }),
       exposure: ["dispatch"],
     },
     behavior: { kind: "deny-validation" },
@@ -131,7 +132,7 @@ function throwingTool(name = "boom"): FixtureToolSpec {
       id: name,
       name,
       description: "Throws.",
-      inputSchema: { type: "object" },
+      inputSchema: jsonSchema({ type: "object" }),
       exposure: ["dispatch"],
     },
     behavior: { kind: "throw", message: "intentional handler failure" },
@@ -144,7 +145,7 @@ function slowTool(name = "slow"): FixtureToolSpec {
       id: name,
       name,
       description: "Takes 50ms.",
-      inputSchema: { type: "object" },
+      inputSchema: jsonSchema({ type: "object" }),
       exposure: ["dispatch"],
     },
     behavior: { kind: "slow", ms: 50, text: "done" },
@@ -201,7 +202,7 @@ export function runToolExecutorConformance(factory: ToolExecutorConformanceFacto
         id: "added.later",
         name: "added.later",
         description: "Registered through the protocol.",
-        inputSchema: { type: "object" },
+        inputSchema: jsonSchema({ type: "object" }),
         exposure: ["dispatch"],
       };
       const reg: ToolRegistration = {

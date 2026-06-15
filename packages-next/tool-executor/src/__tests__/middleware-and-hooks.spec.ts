@@ -12,6 +12,7 @@ import { describe, expect, it } from "vitest";
 import { Effect } from "effect";
 
 import type { DispatchInput, DispatchResult, ToolRegistration } from "@agentick/spec-next";
+import { jsonSchema } from "@agentick/spec-next";
 
 import { createTestHarness } from "../testing/index.js";
 
@@ -21,7 +22,7 @@ function echoReg(name = "echo"): ToolRegistration {
       id: name,
       name,
       description: "echo",
-      inputSchema: { type: "object" },
+      inputSchema: jsonSchema({ type: "object" }),
       exposure: ["model", "dispatch"],
     },
     handlerRef: `h.${name}`,

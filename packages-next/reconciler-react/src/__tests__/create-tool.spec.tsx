@@ -91,7 +91,7 @@ describe("reconciler-react createTool — render-time wiring", () => {
     const tool = createTool({
       name: "echo",
       description: "echo input",
-      input: z.object({ text: z.string() }),
+      inputSchema: z.object({ text: z.string() }),
       handler: async ({ text }) => [{ type: "text", text }],
     });
 

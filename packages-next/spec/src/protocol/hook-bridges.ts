@@ -295,8 +295,13 @@ export interface KnobRegistration {
    * bridges drop this field.
    */
   readonly validate?: (value: KnobPrimitive) => true | string;
-  /** Standard-Schema-compliant validator (opaque to spec). */
-  readonly schema?: unknown;
+  /**
+   * Standard-Schema-compliant validator. Accepts Zod / Valibot /
+   * ArkType / raw-via-`jsonSchema()` — any library that implements
+   * the `StandardSchemaV1` contract. Used for richer validation
+   * than the field-level constraints above can express.
+   */
+  readonly schema?: import("../data/standard-schema.js").StandardSchemaV1;
 }
 
 /**

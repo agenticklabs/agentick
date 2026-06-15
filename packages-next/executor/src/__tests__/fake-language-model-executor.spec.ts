@@ -10,6 +10,7 @@ import { Chunk, Effect, Fiber, Stream } from "effect";
 import { describe, expect, it } from "vitest";
 
 import type { LanguageModelTarget, RenderedTree } from "@agentick/spec-next";
+import { jsonSchema } from "@agentick/spec-next";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
 
 import { FakeLanguageModelExecutor } from "../fake-language-model-executor.js";
@@ -78,7 +79,7 @@ describe("FakeLanguageModelExecutor — project", () => {
             id: "t.calc",
             name: "calculator",
             description: "Math",
-            inputSchema: { type: "object" },
+            inputSchema: jsonSchema({ type: "object" }),
             exposure: ["model"],
             handlerRef: "h.calc",
           },
@@ -86,7 +87,7 @@ describe("FakeLanguageModelExecutor — project", () => {
             id: "t.priv",
             name: "private",
             description: "Dispatch only — not exposed to the model",
-            inputSchema: { type: "object" },
+            inputSchema: jsonSchema({ type: "object" }),
             exposure: ["dispatch"],
             handlerRef: "h.priv",
           },

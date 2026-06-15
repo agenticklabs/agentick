@@ -11,6 +11,7 @@ import { Chunk, Effect, Fiber, Stream } from "effect";
 import { describe, expect, it } from "vitest";
 
 import type { LanguageModelTarget, RenderedTree } from "@agentick/spec-next";
+import { jsonSchema } from "@agentick/spec-next";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
 import type { MessageCreateParams } from "@anthropic-ai/sdk/resources/messages";
 
@@ -481,7 +482,7 @@ describe("AnthropicExecutor — cache tokens (G2)", () => {
             id: "calc",
             name: "calc",
             description: "calculator",
-            inputSchema: { type: "object" },
+            inputSchema: jsonSchema({ type: "object" }),
             exposure: ["model"],
             providerOptions: {
               anthropic: { cache_control: { type: "ephemeral" } },

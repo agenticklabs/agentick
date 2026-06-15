@@ -61,7 +61,7 @@ import type {
   ToolCall,
   UsageStats,
 } from "@agentick/spec-next";
-import { SPEC_VERSION } from "@agentick/spec-next";
+import { SPEC_VERSION, toJsonSchema } from "@agentick/spec-next";
 
 // ============================================================================
 // ProviderOptions augmentation — typed Anthropic escape hatch (G5)
@@ -955,7 +955,10 @@ function buildAnthropicTools(tree: RenderedTree): ReadonlyArray<LanguageModelToo
     .map((t) => ({
       name: t.name,
       ...(t.description !== undefined ? { description: t.description } : {}),
-      inputSchema: t.inputSchema as Record<string, unknown>,
+      inputSchema: toJsonSchema(t.inputSchema) as Record<string, unknown>,
+      ...(t.outputSchema !== undefined
+        ? { outputSchema: toJsonSchema(t.outputSchema) as Record<string, unknown> }
+        : {}),
       ...(t.providerOptions !== undefined ? { providerOptions: t.providerOptions } : {}),
     }));
 }

@@ -24,6 +24,7 @@ import type {
   ToolConfirmationResponse,
   ToolRegistration,
 } from "@agentick/spec-next";
+import { jsonSchema } from "@agentick/spec-next";
 
 import { createTestHarness } from "../testing/index.js";
 
@@ -33,7 +34,7 @@ function confirmTool(name = "delete-file"): ToolRegistration {
       id: name,
       name,
       description: "risky",
-      inputSchema: { type: "object" },
+      inputSchema: jsonSchema({ type: "object" }),
       exposure: ["model"],
       annotations: { requiresConfirmation: true },
     },

@@ -20,6 +20,7 @@ import { FakeLanguageModelExecutor } from "@agentick/executor-next";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
 import type { AppExtension, AppInstaller, ContentBlock } from "@agentick/spec-next";
 import type { ToolExecutorProtocol } from "@agentick/spec-next";
+import { jsonSchema } from "@agentick/spec-next";
 
 const Agent = () => React.createElement("message", { role: "user" }, "hello");
 
@@ -190,7 +191,7 @@ describe("AppExtension — installer surfaces", () => {
           id: "ping",
           name: "ping",
           description: "ping",
-          inputSchema: { type: "object" },
+          inputSchema: jsonSchema({ type: "object" }),
           exposure: ["dispatch"],
         },
         handlerRef: "ext.handlers/ping",

@@ -23,6 +23,7 @@ import type {
   ToolDeclaration,
   ToolExecutorProtocol,
 } from "@agentick/spec-next";
+import { jsonSchema } from "@agentick/spec-next";
 
 // ============================================================================
 // Factory contract
@@ -212,7 +213,7 @@ export function runLoopExecutorConformance(factory: LoopExecutorConformanceFacto
           id: "t.calc",
           name: "calculator",
           description: "math",
-          inputSchema: { type: "object" },
+          inputSchema: jsonSchema({ type: "object" }),
           exposure: ["model"],
           handlerRef: "h.calc",
         },
@@ -290,7 +291,7 @@ export function runLoopExecutorConformance(factory: LoopExecutorConformanceFacto
               id: "t.calc",
               name: "calculator",
               description: "",
-              inputSchema: { type: "object" },
+              inputSchema: jsonSchema({ type: "object" }),
               exposure: ["model"],
               handlerRef: "h.calc",
             },

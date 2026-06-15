@@ -7,7 +7,7 @@
  */
 
 import type {
-  JsonSchema,
+  StandardSchemaV1,
   ToolAnnotations,
   ToolDeclaration,
   ToolExposure,
@@ -20,7 +20,8 @@ interface ToolProps {
   readonly id?: string;
   readonly name: string;
   readonly description?: string;
-  readonly inputSchema: JsonSchema;
+  readonly inputSchema: StandardSchemaV1;
+  readonly outputSchema?: StandardSchemaV1;
   readonly exposure?: readonly ToolExposure[];
   readonly handlerRef?: string;
   readonly annotations?: ToolAnnotations;
@@ -64,6 +65,7 @@ export const toolContributor: Contributor = {
       name: props.name,
       description,
       inputSchema: props.inputSchema,
+      ...(props.outputSchema !== undefined ? { outputSchema: props.outputSchema } : {}),
       exposure: props.exposure ?? ["model"],
       ...(props.handlerRef !== undefined ? { handlerRef: props.handlerRef } : {}),
       ...(props.annotations !== undefined ? { annotations: props.annotations } : {}),

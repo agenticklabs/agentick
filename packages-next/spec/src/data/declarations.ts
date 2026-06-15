@@ -10,13 +10,16 @@
 import type { ContentBlock } from "./content-blocks.js";
 import type { CacheHint } from "./entries.js";
 import type { ProviderToolOptions } from "./rendered-tree.js";
+import type { StandardSchemaV1 } from "./standard-schema.js";
 
 /**
- * Placeholder for JSON Schema documents. The strict shape is intentionally
- * loose at the spec layer — strict validation lives in
- * `@agentick/spec-validator` (opt-in).
- *
- * `[PLACEHOLDER]` — narrow once a JSON Schema dialect is chosen.
+ * Raw JSON Schema object — retained for WIRE-facing slots only
+ * (`LanguageModelTool.inputSchema` in `protocol/executor.ts`,
+ * `responseFormat.schema` in rendered-tree). Adopter-facing slots
+ * (`ToolDeclaration.inputSchema`, `OutputDeclaration.schema`,
+ * `KnobRegistration.schema`) use `StandardSchemaV1` so adopters can
+ * bring any validator library; the framework projects to JSON Schema
+ * at wire-emission time via `toJsonSchema()`.
  */
 export type JsonSchema = Record<string, unknown>;
 
@@ -68,7 +71,27 @@ export interface ToolDeclaration {
   readonly id: string;
   readonly name: string;
   readonly description: string;
-  readonly inputSchema: JsonSchema;
+  /**
+   * Adopter-supplied input schema. Any Standard-Schema-compliant
+   * validator (Zod 4, Valibot, ArkType, Effect Schema, ...) OR a raw
+   * JSON Schema wrapped via `jsonSchema({ ... })`. Projected to wire
+   * JSON Schema for model providers via `toJsonSchema()` at execution
+   * time.
+   */
+  readonly inputSchema: StandardSchemaV1;
+  /**
+   * Optional output schema. Declares the shape of the tool's
+   * `structuredContent` result. Same Standard-Schema acceptance as
+   * `inputSchema`. When set:
+   *   - Wire emission: included in the model's tool definition under
+   *     `outputSchema` (provider-dependent; OpenAI strict-mode,
+   *     Anthropic, MCP `Tool.outputSchema`).
+   *   - Runtime: the harness MAY validate the handler's
+   *     `structuredContent` against this schema and surface
+   *     `ToolOutputValidationError` on mismatch.
+   * Omit for tools returning unstructured content (text/image/etc).
+   */
+  readonly outputSchema?: StandardSchemaV1;
   readonly exposure: readonly ToolExposure[];
   /**
    * Identifier resolved by the runtime / tool executor to a concrete
@@ -113,7 +136,12 @@ export interface ResourceDeclaration {
  */
 export interface OutputDeclaration {
   readonly id: string;
-  readonly schema?: JsonSchema;
+  /**
+   * Optional output shape validator. Standard-Schema-compliant; same
+   * acceptance as `ToolDeclaration.inputSchema`. Projected to JSON
+   * Schema for `responseFormat.schema` at wire-emission time.
+   */
+  readonly schema?: StandardSchemaV1;
   readonly mode?: "text" | "json" | "json_schema";
   readonly metadata?: Record<string, unknown>;
 }

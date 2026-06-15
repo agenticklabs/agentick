@@ -13,6 +13,7 @@ import { Chunk, Effect, Fiber, Stream } from "effect";
 import { describe, expect, it } from "vitest";
 
 import type { LanguageModelTarget, RenderedTree } from "@agentick/spec-next";
+import { jsonSchema } from "@agentick/spec-next";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
 import type { GenerateContentParameters } from "@google/genai";
 
@@ -651,7 +652,7 @@ describe("GoogleExecutor — per-tool providerOptions.google", () => {
             id: "calc",
             name: "calc",
             description: "calculator",
-            inputSchema: { type: "object", properties: { a: { type: "number" } } },
+            inputSchema: jsonSchema({ type: "object", properties: { a: { type: "number" } } }),
             exposure: ["model"],
             providerOptions: {
               google: { description: "OVERRIDDEN" },

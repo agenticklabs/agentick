@@ -22,6 +22,7 @@ import type {
   SpawnContextChildInput,
   ToolRegistration,
 } from "@agentick/spec-next";
+import { jsonSchema } from "@agentick/spec-next";
 
 import { SessionHarness } from "../harness.js";
 
@@ -59,7 +60,7 @@ const calcTool: ToolRegistration = {
     id: "t.calc",
     name: "calc",
     description: "math",
-    inputSchema: { type: "object" },
+    inputSchema: jsonSchema({ type: "object" }),
     exposure: ["model", "dispatch"],
   },
   handlerRef: "h.calc",

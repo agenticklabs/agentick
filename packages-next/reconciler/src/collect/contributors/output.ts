@@ -6,14 +6,14 @@
  * responseFormat is a generation-time provider directive.
  */
 
-import type { JsonSchema, OutputDeclaration } from "@agentick/spec-next";
+import type { OutputDeclaration, StandardSchemaV1 } from "@agentick/spec-next";
 import type { ElementInstance } from "../../host/host-instance.js";
 import type { CollectContext, Contributor } from "../contributor.js";
 import type { IRFragment } from "../fragments.js";
 
 interface OutputProps {
   readonly id?: string;
-  readonly schema?: JsonSchema;
+  readonly schema?: StandardSchemaV1;
   readonly mode?: OutputDeclaration["mode"];
   readonly metadata?: Record<string, unknown>;
 }

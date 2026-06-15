@@ -31,7 +31,6 @@ import * as React from "react";
 import { createTool as baseCreateTool, type CreatedTool } from "@agentick/tool-next";
 import type {
   ContentBlock,
-  JsonSchema,
   StandardSchemaV1,
   ToolAnnotations,
   ToolExposure,
@@ -50,8 +49,18 @@ export interface ReactToolSpec<
 > {
   readonly name: string;
   readonly description: string;
-  readonly inputSchema?: JsonSchema;
-  readonly input?: StandardSchemaV1<TInput>;
+  /**
+   * Standard-Schema-compliant validator. Drives BOTH runtime
+   * validation and the wire JSON Schema (via `toJsonSchema()`).
+   * Defaults to `jsonSchema({ type: "object" })` when omitted.
+   */
+  readonly inputSchema?: StandardSchemaV1<unknown, TInput>;
+  /**
+   * Optional output schema. Declares the handler's structured result
+   * shape. Same Standard-Schema acceptance as `inputSchema`. Emitted
+   * to the model as `outputSchema` on the tool definition.
+   */
+  readonly outputSchema?: StandardSchemaV1;
   readonly exposure?: readonly ToolExposure[];
   readonly annotations?: ToolAnnotations;
   readonly metadata?: Readonly<Record<string, unknown>>;
@@ -106,7 +115,7 @@ export function createTool<
     name: spec.name,
     description: spec.description,
     ...(spec.inputSchema !== undefined ? { inputSchema: spec.inputSchema } : {}),
-    ...(spec.input !== undefined ? { input: spec.input } : {}),
+    ...(spec.outputSchema !== undefined ? { outputSchema: spec.outputSchema } : {}),
     ...(spec.exposure !== undefined ? { exposure: spec.exposure } : {}),
     ...(spec.annotations !== undefined ? { annotations: spec.annotations } : {}),
     ...(spec.metadata !== undefined ? { metadata: spec.metadata } : {}),
@@ -136,6 +145,9 @@ export function createTool<
       name: base.declaration.name,
       description: base.declaration.description,
       inputSchema: base.declaration.inputSchema,
+      ...(base.declaration.outputSchema !== undefined
+        ? { outputSchema: base.declaration.outputSchema }
+        : {}),
       exposure: base.declaration.exposure,
       handlerRef: base.handlerRef,
       ...(base.declaration.annotations !== undefined
