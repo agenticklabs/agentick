@@ -706,17 +706,83 @@ export abstract class BaseHarness<
   /**
    * Concrete harnesses override this with a typed switch on message.type.
    * Default: reject with `HandlerError`.
+   *
+   * **Resolution order** when an inbox message arrives:
+   *   1. `request-response` → auto-intercepted by `dispatchMessage`,
+   *      routed to the request/response registry. Subclasses never see
+   *      these.
+   *   2. A handler registered via {@link onMessage} for `msg.type` →
+   *      runs *instead of* the subclass's `handleMessage` for that
+   *      type. Lets adopters override built-in message handling per
+   *      type without subclassing.
+   *   3. Otherwise → falls through to `handleMessage` for the typed
+   *      switch the subclass owns.
    */
   protected abstract handleMessage(
     msg: MessageEnvelope,
   ): Effect.Effect<unknown, MessageHandlerError, never>;
 
+  /**
+   * Custom inbox-message handlers registered via {@link onMessage}.
+   * Single handler per type — last registration wins; on `Unsubscribe`
+   * the previously-active handler (if any) is restored. Empty by
+   * default; `dispatchMessage` consults this map after the
+   * `request-response` auto-intercept and before falling through to
+   * `handleMessage`.
+   */
+  private readonly customMessageHandlers = new Map<
+    string,
+    (msg: MessageEnvelope) => Effect.Effect<unknown, MessageHandlerError, never>
+  >();
+
+  /**
+   * Register a handler for a custom inbox message type — the
+   * adopter-facing extension point for "add a handler for a new
+   * message kind" and "override built-in handling for an existing
+   * one."
+   *
+   *   - Single handler per `type`. Re-registering replaces the
+   *     previous handler; the returned `Unsubscribe` restores it (or
+   *     removes the entry entirely if there was no prior handler).
+   *   - Routed BEFORE the subclass's `handleMessage` switch — a
+   *     handler registered for a protocol-defined type (e.g.,
+   *     `"knobs:set"`) silently overrides the built-in dispatch for
+   *     that type as long as it's installed.
+   *   - Errors propagate as {@link MessageHandlerError} the same way
+   *     `handleMessage` returns do. `dispatchMessage` wraps non-tagged
+   *     throws via `Effect.catchAll`.
+   *
+   * Why not `harness.inbox.register(...)`? — `inbox.register` is a
+   * substrate primitive: one handler per address. The harness already
+   * owns its address's handler (the one routing through
+   * `dispatchMessage` so `request-response` auto-intercept,
+   * middleware, lifecycle, journaling all participate). Re-registering
+   * at the same address would clobber that. `onMessage` adds typed
+   * dispatch INSIDE that single inbox subscription, preserving every
+   * harness facility.
+   */
+  onMessage<P = unknown>(
+    type: string,
+    handler: (msg: MessageEnvelope<P>) => Effect.Effect<unknown, MessageHandlerError, never>,
+  ): Unsubscribe {
+    const prev = this.customMessageHandlers.get(type);
+    const erased = handler as (
+      msg: MessageEnvelope,
+    ) => Effect.Effect<unknown, MessageHandlerError, never>;
+    this.customMessageHandlers.set(type, erased);
+    return () => {
+      if (this.customMessageHandlers.get(type) !== erased) return;
+      if (prev !== undefined) this.customMessageHandlers.set(type, prev);
+      else this.customMessageHandlers.delete(type);
+    };
+  }
+
   private dispatchMessage(
     msg: MessageEnvelope,
   ): Effect.Effect<unknown, MessageHandlerError, never> {
-    // Auto-intercept `request-response` messages BEFORE the subclass
-    // sees them. The payload's `correlationId` routes to the pending
-    // Deferred via the registry. Subclasses never see these.
+    // Auto-intercept `request-response` messages BEFORE anything else.
+    // The payload's `correlationId` routes to the pending Deferred via
+    // the registry. Custom handlers + subclasses never see these.
     if (msg.type === "request-response") {
       return Effect.sync(() => {
         const payload = msg.payload as { correlationId?: string; response?: unknown } | undefined;
@@ -731,6 +797,16 @@ export abstract class BaseHarness<
         // timeout or after the registry was cleared. Log-only behavior
         // surfaces via the regular `HandlerError` path in a follow-up.
       });
+    }
+    // Custom handlers (onMessage) take precedence over the subclass's
+    // built-in switch — that's how "override built-in handling" works.
+    const custom = this.customMessageHandlers.get(msg.type);
+    if (custom !== undefined) {
+      return custom(msg).pipe(
+        Effect.catchAll((cause) =>
+          Effect.fail<MessageHandlerError>({ _tag: "HandlerError", cause }),
+        ),
+      );
     }
     return this.handleMessage(msg).pipe(
       Effect.catchAll((cause) => Effect.fail<MessageHandlerError>({ _tag: "HandlerError", cause })),

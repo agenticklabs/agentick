@@ -233,3 +233,109 @@ describe("BaseHarness — inbox dispatch", () => {
     expect(r).toEqual({ ok: true });
   });
 });
+
+describe("BaseHarness — onMessage extension point", () => {
+  it("routes a custom message type to the registered handler", async () => {
+    const { h, inbox } = await harness();
+    let seen: MessageEnvelope | undefined;
+    h.onMessage("custom:ping", (msg) =>
+      Effect.sync(() => {
+        seen = msg;
+        return { pong: true };
+      }),
+    );
+    const r = await Effect.runPromise(
+      inbox.ask("tool:scope-1", {
+        type: "custom:ping",
+        messageId: "m-onmsg-1",
+        payload: { x: 1 },
+      }),
+    );
+    expect(r).toEqual({ pong: true });
+    expect(seen?.type).toBe("custom:ping");
+    expect(seen?.payload).toEqual({ x: 1 });
+  });
+
+  it("custom handler overrides the subclass handleMessage for that type", async () => {
+    const { h, inbox } = await harness();
+    // TestHarness.handleMessage natively returns msg.payload for "echo".
+    // Register an onMessage handler that wraps the payload instead.
+    h.onMessage("echo", (msg) => Effect.succeed({ wrapped: msg.payload }));
+    const r = await Effect.runPromise(
+      inbox.ask("tool:scope-1", {
+        type: "echo",
+        messageId: "m-override-1",
+        payload: { ok: true },
+      }),
+    );
+    expect(r).toEqual({ wrapped: { ok: true } });
+  });
+
+  it("Unsubscribe restores the prior handler (or removes the entry)", async () => {
+    const { h, inbox } = await harness();
+    const unsubscribe = h.onMessage("echo", () => Effect.succeed({ overridden: true }));
+    // While installed: custom handler wins.
+    expect(
+      await Effect.runPromise(
+        inbox.ask("tool:scope-1", { type: "echo", messageId: "m-x1", payload: { ok: true } }),
+      ),
+    ).toEqual({ overridden: true });
+    unsubscribe();
+    // After unsubscribe: falls back to the subclass's handleMessage.
+    expect(
+      await Effect.runPromise(
+        inbox.ask("tool:scope-1", { type: "echo", messageId: "m-x2", payload: { ok: true } }),
+      ),
+    ).toEqual({ ok: true });
+  });
+
+  it("re-registering replaces the prior handler; unsubscribing the second restores the first", async () => {
+    const { h, inbox } = await harness();
+    const off1 = h.onMessage("custom:layer", () => Effect.succeed({ layer: 1 }));
+    const off2 = h.onMessage("custom:layer", () => Effect.succeed({ layer: 2 }));
+    // Second registration wins while installed.
+    expect(
+      await Effect.runPromise(
+        inbox.ask("tool:scope-1", { type: "custom:layer", messageId: "m-l1", payload: {} }),
+      ),
+    ).toEqual({ layer: 2 });
+    // Unsubscribe second → first is restored.
+    off2();
+    expect(
+      await Effect.runPromise(
+        inbox.ask("tool:scope-1", { type: "custom:layer", messageId: "m-l2", payload: {} }),
+      ),
+    ).toEqual({ layer: 1 });
+    // Unsubscribe first → no handler; falls through to handleMessage,
+    // which fails for unknown types.
+    off1();
+    await expect(
+      Effect.runPromise(
+        inbox.ask("tool:scope-1", { type: "custom:layer", messageId: "m-l3", payload: {} }),
+      ),
+    ).rejects.toBeTruthy();
+  });
+
+  it("custom handlers do NOT intercept `request-response` (auto-intercept wins)", async () => {
+    const { h, inbox } = await harness();
+    let customRan = false;
+    h.onMessage("request-response", () =>
+      Effect.sync(() => {
+        customRan = true;
+        return undefined;
+      }),
+    );
+    // request-response is meant for the registry's auto-intercept; an
+    // adopter handler is silently bypassed. We assert by sending the
+    // shape and observing that the registered handler never fires
+    // (the message just no-ops because there's no pending registration).
+    await Effect.runPromise(
+      inbox.send("tool:scope-1", {
+        type: "request-response",
+        messageId: "m-rr-1",
+        payload: { correlationId: "req:nope", response: { ok: true } },
+      }),
+    );
+    expect(customRan).toBe(false);
+  });
+});
