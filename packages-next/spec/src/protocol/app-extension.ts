@@ -167,6 +167,24 @@ export interface AppInstaller extends BaseInstaller {
   registerToolHandler(handlerRef: string, handler: ToolHandler, validator?: Validator): Unsubscribe;
 
   /**
+   * Pre-register a tool declaration so every session the app
+   * constructs auto-installs it into its `ToolExecutor.initialTools`.
+   *
+   * Complement to {@link registerToolHandler} — that registers the
+   * runtime handler on the shared HandlerResolver; this records the
+   * declaration + handlerRef pair so each new session knows the tool
+   * exists. Together they let an extension (e.g., `withMCP()`) expose
+   * tools discovered at app-install time to every session the app
+   * creates afterward.
+   *
+   * Tools registered here are appended to the per-call
+   * `toolDefaults.initialTools` when `app.createSession` constructs
+   * the per-session `ToolExecutor`. Adopter-supplied tools win on
+   * name collision (extension tools install first).
+   */
+  registerExtensionTool(registration: import("./tool-executor.js").ToolRegistration): Unsubscribe;
+
+  /**
    * Subscribe to the app's bus. Used by telemetry / observability /
    * external-driver extensions (e.g., a scheduler listening for
    * subscription-intent events).

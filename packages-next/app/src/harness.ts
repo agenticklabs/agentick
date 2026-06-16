@@ -76,6 +76,7 @@ import type {
   ServiceRegistry,
   SessionEntry,
   TelemetryLayer,
+  ToolRegistration,
   SessionFilter,
   SessionHarnessProtocol,
   SessionListEntry,
@@ -371,6 +372,12 @@ export class AppHarness<P = unknown>
   private readonly reconciler: ReconcilerProtocol;
   private readonly loop: LoopExecutorProtocol;
   private readonly handlerResolver: InMemoryHandlerResolver;
+  // Tools contributed by extensions at install time. Appended to
+  // every session's `ToolExecutor.initialTools` when the session is
+  // constructed. Last-writer-wins on name collision; adopter-supplied
+  // tools take precedence (the extension list installs FIRST, then
+  // adopter `toolDefaults.initialTools` overlays).
+  private readonly extensionTools: ToolRegistration[] = [];
 
   private readonly registry = new Map<string, InternalSessionEntry<P>>();
   private _closed = false;
@@ -597,6 +604,13 @@ export class AppHarness<P = unknown>
       registerToolHandler(handlerRef, handler, validator): Unsubscribe {
         self.handlerResolver.register(handlerRef, handler, validator);
         return () => self.handlerResolver.unregister(handlerRef);
+      },
+      registerExtensionTool(registration): Unsubscribe {
+        self.extensionTools.push(registration);
+        return () => {
+          const idx = self.extensionTools.indexOf(registration);
+          if (idx >= 0) self.extensionTools.splice(idx, 1);
+        };
       },
       subscribeBus(filter, listener): Unsubscribe {
         // Subscribe via the app's bus Stream + `Stream.runForEach`,
@@ -886,6 +900,18 @@ export class AppHarness<P = unknown>
     //   - Otherwise → construct the bundled `ToolExecutorHarness` from
     //     `toolDefaults` + the shared `handlerResolver` + the
     //     per-session elicitation harness.
+    // Merge extension-contributed tools with adopter's
+    // `toolDefaults.initialTools`. Extension tools install FIRST so
+    // adopter-supplied entries can override on name collision (the
+    // registry's add() is idempotent on identical shape and rejects
+    // shape conflicts — adopter overrides come through fine because
+    // they don't share a `name` with the extension tool unless the
+    // adopter is intentionally replacing it).
+    const mergedInitialTools: readonly ToolRegistration[] | undefined =
+      this.extensionTools.length > 0
+        ? [...this.extensionTools, ...(this.toolDefaults.initialTools ?? [])]
+        : this.toolDefaults.initialTools;
+
     const tools: ToolExecutorProtocol = this.toolFactory
       ? this.toolFactory({
           scopeId: sessionId,
@@ -895,6 +921,7 @@ export class AppHarness<P = unknown>
         })
       : new ToolExecutorHarness(sessionId, this.journal, this.bus, this.inbox, {
           ...this.toolDefaults,
+          ...(mergedInitialTools !== undefined ? { initialTools: mergedInitialTools } : {}),
           handlerResolver: this.handlerResolver,
           elicitation,
         });

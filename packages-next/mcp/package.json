@@ -60,6 +60,11 @@
     "effect": "^3.21.2"
   },
   "devDependencies": {
-    "@agentick/spec-conformance-next": "workspace:*"
+    "@agentick/app-next": "workspace:*",
+    "@agentick/executor-next": "workspace:*",
+    "@agentick/reconciler-next": "workspace:*",
+    "@agentick/spec-conformance-next": "workspace:*",
+    "@types/react": "^19.2.5",
+    "react": "^19.2.4"
   }
 }

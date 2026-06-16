@@ -686,9 +686,24 @@ importers:
         specifier: ^3.21.2
         version: 3.21.2
     devDependencies:
+      '@agentick/app-next':
+        specifier: workspace:*
+        version: link:../app
+      '@agentick/executor-next':
+        specifier: workspace:*
+        version: link:../executor
+      '@agentick/reconciler-next':
+        specifier: workspace:*
+        version: link:../reconciler
       '@agentick/spec-conformance-next':
         specifier: workspace:*
         version: link:../spec-conformance
+      '@types/react':
+        specifier: ^19.2.5
+        version: 19.2.13
+      react:
+        specifier: ^19.2.4
+        version: 19.2.4
 
   packages-next/reconciler:
     dependencies:

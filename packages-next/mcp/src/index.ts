@@ -17,7 +17,7 @@
  *   ✅ protocol/errors (sanitization, builders) + completions (sugar) (#1)
  *   ✅ in-memory + stdio transports
  *   ✅ McpClientHarness — Transport / Auth / Protocol / Lifecycle (#2)
- *   ⏳ withMCP extension + ToolBridge (#3)
+ *   ✅ withMCP extension + ToolBridge integration (#3)
  *   ⏳ ElicitationBridge (#4)
  *   ⏳ OAuth + URL-mode elicitation + Streamable HTTP (#5)
  *
@@ -32,6 +32,7 @@ import "./augment.js";
 export * from "./protocol/index.js";
 export * from "./transport/index.js";
 export * from "./client/index.js";
+export * from "./integration/index.js";
 export type { McpHookBridge } from "./bridge-types.js";
 
 // OAuth is also re-exported on the `/oauth` subpath for adopters who

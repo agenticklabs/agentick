@@ -1,23 +1,24 @@
 /**
- * Placeholder types for the `bridges.mcp` slot.
+ * Type for the `bridges.mcp` slot exposed by `withMCP({ servers })`.
  *
- * The full `McpHookBridge` interface lands in McpClientHarness #2 once
- * the harness shape is concrete. Today this is an empty marker so the
- * augment.ts side-effect import compiles and adopters can type-check
- * against the slot's presence (`bridges.mcp` is `McpHookBridge |
- * undefined`).
+ * Lookup by `serverId` returns a typed handle to the per-server
+ * `McpClientHarness`. In-tree JSX consumers reach the harness via
+ * `useBridges().mcp?.client("linear")` and call
+ * `.harness.callTool(...)` directly — though the more common path is
+ * to let the model dispatch the auto-registered local tool name
+ * (`<serverId>__<toolName>`) through the normal tool-executor.
  *
- * When the harness exists, this file gains:
- *   - `McpHookBridge.client(serverId): McpClientHandle`
- *   - `McpHookBridge.clients: ReadonlyArray<McpClientHandle>`
- *   - `McpClientHandle` typed surface (callTool, listTools, etc.)
+ * The `clients` array gives bulk access for surfaces that want to
+ * enumerate (status dashboards, health UIs).
  */
 
+import type { McpClientHandle } from "./integration/with-mcp.js";
+
 export interface McpHookBridge {
-  /**
-   * Reserved for the per-server client lookup, e.g.
-   * `bridges.mcp.client("linear").callTool(...)`. Returns `undefined`
-   * today; replaced with a real handle in McpClientHarness #2.
-   */
-  readonly client?: (serverId: string) => unknown;
+  /** Look up a client by server id. Returns undefined if not registered. */
+  readonly client: (serverId: string) => McpClientHandle | undefined;
+  /** All registered clients (snapshot — not reactive). */
+  readonly clients: ReadonlyArray<McpClientHandle>;
 }
+
+export type { McpClientHandle };
