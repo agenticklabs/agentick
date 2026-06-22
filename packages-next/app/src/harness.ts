@@ -203,7 +203,8 @@ export interface AppHarnessOptions<P = unknown> {
   // ────────── Per-session defaults (constructed per createSession) ──────────
 
   /**
-   * Tool executor slot. Accepts either:
+   * Tool executor slot — configuration for the per-session
+   * ToolExecutorHarness. Accepts either:
    *
    *   - `ToolExecutorDefaults` (options) — forwarded to the App's default
    *     `ToolExecutorHarness` instance. The `handlerResolver` is wired
@@ -212,10 +213,32 @@ export interface AppHarnessOptions<P = unknown> {
    *     The App calls the factory per-session with the shared substrate
    *     so the executor's events flow through `app.events()`.
    *
-   * Cascade: per-call `createSession.tools` (when added) > this >
-   * convenience `toolHandlers` > defaults.
+   * This slot is the EXECUTOR's configuration. For the layered tool
+   * DECLARATION list use {@link AppHarnessOptions.tools}.
    */
-  readonly tools?: ToolExecutorDefaults | ToolExecutorFactory;
+  readonly toolExecutor?: ToolExecutorDefaults | ToolExecutorFactory;
+
+  /**
+   * App-level tool declarations (layered config). Each declaration is
+   * bound at app scope and merged into every session's tool registry
+   * at session-create time. Precedence (slice 2's `compileForTick`):
+   * session > app (this slot) > extension@app > runtime.
+   *
+   * Cascade with per-call inputs:
+   *   `SendInput.tools` (execution scope)        — highest
+   *   `CreateSessionInput.tools` (session scope)
+   *   `AppHarnessOptions.tools` (app scope)      — this slot
+   *   extensions installed at app level
+   *   runtime/programmatic                       — lowest
+   *
+   * Use this when every session of this app should see the same
+   * baseline tool. Per-session overrides flow through
+   * `CreateSessionInput.tools`. Adopters needing dynamic per-tick
+   * tools should declare via JSX (reconciler scope wins everything).
+   *
+   * @see ToolBinding in `@agentick/spec-next` for the precedence ladder.
+   */
+  readonly tools?: ReadonlyArray<import("@agentick/spec-next").ToolDeclaration>;
 
   /**
    * Default `SessionHarness` options forwarded to every session. The
@@ -357,16 +380,22 @@ export class AppHarness<P = unknown>
   /**
    * Options forwarded to the default `ToolExecutorHarness` constructed
    * per-session. Undefined when the caller supplied a
-   * `ToolExecutorFactory` at the `tools` slot — `toolFactory` carries
-   * the factory in that case.
+   * `ToolExecutorFactory` at the `toolExecutor` slot — `toolFactory`
+   * carries the factory in that case.
    */
   private readonly toolDefaults: ToolExecutorDefaults;
   /**
-   * Caller-supplied factory at the `tools` slot. When set, each session's
-   * tool executor is produced by invoking this factory with the shared
-   * substrate; `toolDefaults` is ignored.
+   * Caller-supplied factory at the `toolExecutor` slot. When set, each
+   * session's tool executor is produced by invoking this factory with
+   * the shared substrate; `toolDefaults` is ignored.
    */
   private readonly toolFactory: ToolExecutorFactory | undefined;
+  /**
+   * App-level tool declarations from `AppHarnessOptions.tools`. Wrapped
+   * into `ToolRegistration[]` with `binding: { scope: "app", appId }`
+   * once at construction; merged into every session's initial registry.
+   */
+  private readonly appLevelTools: readonly ToolRegistration[];
 
   // Shared sub-harnesses (one per app, used by every session).
   private readonly reconciler: ReconcilerProtocol;
@@ -501,16 +530,22 @@ export class AppHarness<P = unknown>
     // `options.initialKnobs`). Per-call `createSession.*` wins over both
     // and applies at session construction.
     this.sessionDefaults = mergeSessionDefaults(options);
-    // Tool slot: factory → defer construction to per-session via
-    // `toolFactory`; options/undefined → forward to the bundled
+    // Tool executor slot: factory → defer construction to per-session
+    // via `toolFactory`; options/undefined → forward to the bundled
     // `ToolExecutorHarness` via `toolDefaults`.
-    if (isToolExecutorFactory(options.tools)) {
-      this.toolFactory = options.tools;
+    if (isToolExecutorFactory(options.toolExecutor)) {
+      this.toolFactory = options.toolExecutor;
       this.toolDefaults = {};
     } else {
       this.toolFactory = undefined;
-      this.toolDefaults = options.tools ?? {};
+      this.toolDefaults = options.toolExecutor ?? {};
     }
+    // App-level tools (layered config). Bound once at construction.
+    this.appLevelTools = (options.tools ?? []).map((decl) => ({
+      declaration: decl,
+      handlerRef: decl.handlerRef ?? decl.id,
+      binding: { scope: "app" as const, appId },
+    }));
 
     // Reconciler slot — instance or options.
     this.reconciler = resolveReconciler(options.reconciler, appId, journal, bus, inbox);
@@ -900,21 +935,23 @@ export class AppHarness<P = unknown>
     //   - Otherwise → construct the bundled `ToolExecutorHarness` from
     //     `toolDefaults` + the shared `handlerResolver` + the
     //     per-session elicitation harness.
-    // Merge tools from three sources into the per-session executor's
+    // Merge tools from four sources into the per-session executor's
     // initial registry:
     //   1. extension-contributed tools (e.g. withMCP) — already carry
     //      `binding: { scope: "extension", level: "app" }`
-    //   2. `AppHarnessOptions.toolDefaults.initialTools` — adopter-
-    //      supplied at app construction time; will be tagged at app
-    //      scope in slice 6 (today these come through with whatever
-    //      binding the adopter set, defaulting to runtime)
-    //   3. `CreateSessionInput.tools` — adopter-supplied per-session,
+    //   2. `appLevelTools` — adopter-supplied via `createApp({ tools })`,
+    //      tagged at App construction with
+    //      `binding: { scope: "app", appId }` (slice 6 #140)
+    //   3. `toolDefaults.initialTools` — adopter-supplied executor
+    //      configuration; carries whatever binding the adopter set
+    //      (defaults to runtime)
+    //   4. `CreateSessionInput.tools` — adopter-supplied per-session,
     //      tagged HERE with `binding: { scope: "session", sessionId }`
     //
     // Precedence at compile-time (slice 2's `compileForTick`):
-    // session > extension@app > runtime. The order below is the
-    // INSERTION order — irrelevant to precedence (the registry resolves
-    // by binding rank, not insertion).
+    // session > execution-via-send > {app, extension@app} > runtime.
+    // Insertion order below is irrelevant — the registry resolves by
+    // binding rank, not insertion.
     const sessionScopedTools: readonly ToolRegistration[] = (input.tools ?? []).map((decl) => ({
       declaration: decl,
       handlerRef: decl.handlerRef ?? decl.id,
@@ -922,9 +959,15 @@ export class AppHarness<P = unknown>
     }));
     const mergedInitialTools: readonly ToolRegistration[] | undefined =
       this.extensionTools.length > 0 ||
+      this.appLevelTools.length > 0 ||
       (this.toolDefaults.initialTools !== undefined && this.toolDefaults.initialTools.length > 0) ||
       sessionScopedTools.length > 0
-        ? [...this.extensionTools, ...(this.toolDefaults.initialTools ?? []), ...sessionScopedTools]
+        ? [
+            ...this.extensionTools,
+            ...this.appLevelTools,
+            ...(this.toolDefaults.initialTools ?? []),
+            ...sessionScopedTools,
+          ]
         : undefined;
 
     const tools: ToolExecutorProtocol = this.toolFactory
