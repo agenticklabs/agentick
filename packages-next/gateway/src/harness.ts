@@ -42,8 +42,10 @@ import type {
   OperationJournal,
   ProtocolEvent,
   SubscribeOptions,
+  ToolDeclaration,
+  ToolRegistration,
 } from "@agentick/spec-next";
-import { DEFAULT_JOURNALING_POLICY } from "@agentick/spec-next";
+import { DEFAULT_JOURNALING_POLICY, toRegistration } from "@agentick/spec-next";
 import { AppHarness, type AppHarnessOptions } from "@agentick/app-next";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
 
@@ -68,6 +70,26 @@ export interface CreateGatewayAppInput<P = unknown> extends Omit<CreateAppInput<
 export interface GatewayHarnessOptions extends BaseHarnessOptions {
   /** Stable gateway id; defaults to `gateway:${ulid()}`. */
   readonly gatewayId?: string;
+  /**
+   * Gateway-level tool declarations (layered config). Every app
+   * hosted by this gateway sees these tools in every session, tagged
+   * with `binding: { scope: "gateway" }`.
+   *
+   * The lowest non-`runtime` rung in the precedence ladder — every
+   * app/session/execution/extension/reconciler-scoped tool overrides
+   * gateway-bound tools on name collision. Use this for absolute
+   * baseline tools every agent in the process should reach for
+   * (e.g., process-wide health-check or telemetry tools).
+   *
+   * Propagation: `createApp` pre-tags these as `ToolRegistration[]`
+   * with gateway binding and threads them through
+   * `AppHarnessOptions.inheritedTools`. Adopters who supply a custom
+   * `ToolExecutorFactory` on an app bypass the bundled registry and
+   * MUST thread these tools themselves.
+   *
+   * @see ToolBinding in `@agentick/spec-next` for the precedence ladder.
+   */
+  readonly tools?: ReadonlyArray<ToolDeclaration>;
 }
 
 // ============================================================================
@@ -79,6 +101,13 @@ const SURFACE = "gateway" as const;
 export class GatewayHarness extends BaseHarness<typeof SURFACE> implements GatewayHarnessProtocol {
   private readonly _apps = new Map<string, AppHarnessProtocol>();
   private gatewayClosed = false;
+  /**
+   * Gateway-level tool registrations, pre-tagged with
+   * `binding: { scope: "gateway" }`. Forwarded to every app via
+   * `AppHarnessOptions.inheritedTools`. Empty when
+   * `GatewayHarnessOptions.tools` was omitted.
+   */
+  private readonly gatewayTools: readonly ToolRegistration[];
 
   get id(): string {
     return this.scopeId;
@@ -119,6 +148,13 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
         policy,
       },
     );
+
+    // Pre-tag gateway-level tools once at construction. Every
+    // `createApp` call threads this same array through to the new
+    // app via `AppHarnessOptions.inheritedTools`.
+    this.gatewayTools = (options.tools ?? []).map((decl) =>
+      toRegistration(decl, { scope: "gateway" }),
+    );
   }
 
   // ============================================================================
@@ -152,6 +188,15 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
     const inbox = input.inbox ?? this.inbox;
     const journal = input.journal ?? this.journal;
 
+    // Merge gateway-propagated tools with any inheritedTools the
+    // adopter explicitly passed (adopter-supplied takes second
+    // position; both arrays carry their own bindings so merging is
+    // just concatenation — precedence resolves at compileForTick).
+    const inheritedTools: readonly ToolRegistration[] =
+      this.gatewayTools.length > 0 || (input.options.inheritedTools?.length ?? 0) > 0
+        ? [...this.gatewayTools, ...(input.options.inheritedTools ?? [])]
+        : [];
+
     const appOptions: AppHarnessOptions<P> = {
       ...input.options,
       appId,
@@ -164,6 +209,7 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
       bus: bus as AppHarnessOptions<P>["bus"],
       inbox: inbox as AppHarnessOptions<P>["inbox"],
       journal: journal as AppHarnessOptions<P>["journal"],
+      ...(inheritedTools.length > 0 ? { inheritedTools } : {}),
     };
 
     const app = new AppHarness<P>(appOptions);

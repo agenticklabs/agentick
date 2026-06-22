@@ -26,6 +26,8 @@
     "effect": "^3.21.2"
   },
   "devDependencies": {
+    "@agentick/executor-next": "workspace:*",
+    "@agentick/reconciler-react-next": "workspace:*",
     "@agentick/spec-conformance-next": "workspace:*"
   }
 }

@@ -614,6 +614,12 @@ importers:
         specifier: ^3.21.2
         version: 3.21.2
     devDependencies:
+      '@agentick/executor-next':
+        specifier: workspace:*
+        version: link:../executor
+      '@agentick/reconciler-react-next':
+        specifier: workspace:*
+        version: link:../reconciler-react
       '@agentick/spec-conformance-next':
         specifier: workspace:*
         version: link:../spec-conformance
@@ -670,9 +676,6 @@ importers:
       '@agentick/elicitation-next':
         specifier: workspace:*
         version: link:../elicitation
-      '@agentick/reconciler-react-next':
-        specifier: workspace:*
-        version: link:../reconciler-react
       '@agentick/runtime-next':
         specifier: workspace:*
         version: link:../runtime

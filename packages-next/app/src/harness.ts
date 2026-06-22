@@ -223,13 +223,14 @@ export interface AppHarnessOptions<P = unknown> {
    * App-level tool declarations (layered config). Each declaration is
    * bound at app scope and merged into every session's tool registry
    * at session-create time. Precedence (slice 2's `compileForTick`):
-   * session > app (this slot) > extension@app > runtime.
+   * session > app (this slot) > extension@app > gateway > runtime.
    *
    * Cascade with per-call inputs:
    *   `SendInput.tools` (execution scope)        — highest
    *   `CreateSessionInput.tools` (session scope)
    *   `AppHarnessOptions.tools` (app scope)      — this slot
    *   extensions installed at app level
+   *   `inheritedTools` (gateway-propagated)
    *   runtime/programmatic                       — lowest
    *
    * Use this when every session of this app should see the same
@@ -240,6 +241,23 @@ export interface AppHarnessOptions<P = unknown> {
    * @see ToolBinding in `@agentick/spec-next` for the precedence ladder.
    */
   readonly tools?: ReadonlyArray<import("@agentick/spec-next").ToolDeclaration>;
+  /**
+   * Pre-tagged tool registrations propagated from a parent context
+   * (today: a `Gateway` hosting this app, slice 7 #141). These
+   * registrations carry their OWN binding — they are NOT re-tagged
+   * by the AppHarness. The expected shape is
+   * `binding: { scope: "gateway" }`, but any binding is structurally
+   * valid; the app forwards them verbatim.
+   *
+   * Distinct from `tools` (declarations the app tags with
+   * `{scope:"app", appId}`) and from extension tools (tagged by the
+   * extension installer with `{scope:"extension", level:"app"}`).
+   *
+   * Adopters constructing `AppHarness` directly (no Gateway) ignore
+   * this field. The Gateway's `createApp` populates it from
+   * `GatewayHarnessOptions.tools`.
+   */
+  readonly inheritedTools?: ReadonlyArray<import("@agentick/spec-next").ToolRegistration>;
 
   /**
    * Default `SessionHarness` options forwarded to every session. The
@@ -397,6 +415,12 @@ export class AppHarness<P = unknown>
    * once at construction; merged into every session's initial registry.
    */
   private readonly appLevelTools: readonly ToolRegistration[];
+  /**
+   * Pre-tagged tool registrations from `AppHarnessOptions.inheritedTools`.
+   * Today: gateway-propagated tools (binding `{scope:"gateway"}`).
+   * Captured verbatim — the app does NOT re-tag these.
+   */
+  private readonly inheritedTools: readonly ToolRegistration[];
 
   // Shared sub-harnesses (one per app, used by every session).
   private readonly reconciler: ReconcilerProtocol;
@@ -545,6 +569,8 @@ export class AppHarness<P = unknown>
     this.appLevelTools = (options.tools ?? []).map((decl) =>
       toRegistration(decl, { scope: "app", appId }),
     );
+    // Gateway-propagated tools — pre-tagged, captured verbatim.
+    this.inheritedTools = options.inheritedTools ?? [];
 
     // Reconciler slot — instance or options.
     this.reconciler = resolveReconciler(options.reconciler, appId, journal, bus, inbox);
@@ -934,32 +960,37 @@ export class AppHarness<P = unknown>
     //   - Otherwise → construct the bundled `ToolExecutorHarness` from
     //     `toolDefaults` + the shared `handlerResolver` + the
     //     per-session elicitation harness.
-    // Merge tools from four sources into the per-session executor's
+    // Merge tools from five sources into the per-session executor's
     // initial registry:
-    //   1. extension-contributed tools (e.g. withMCP) — already carry
+    //   1. `inheritedTools` — pre-tagged registrations propagated from
+    //      a parent context (gateway, slice 7 #141). Already carry
+    //      their own binding (typically `{scope:"gateway"}`).
+    //   2. extension-contributed tools (e.g. withMCP) — already carry
     //      `binding: { scope: "extension", level: "app" }`
-    //   2. `appLevelTools` — adopter-supplied via `createApp({ tools })`,
+    //   3. `appLevelTools` — adopter-supplied via `createApp({ tools })`,
     //      tagged at App construction with
     //      `binding: { scope: "app", appId }` (slice 6 #140)
-    //   3. `toolDefaults.initialTools` — adopter-supplied executor
+    //   4. `toolDefaults.initialTools` — adopter-supplied executor
     //      configuration; carries whatever binding the adopter set
     //      (defaults to runtime)
-    //   4. `CreateSessionInput.tools` — adopter-supplied per-session,
+    //   5. `CreateSessionInput.tools` — adopter-supplied per-session,
     //      tagged HERE with `binding: { scope: "session", sessionId }`
     //
     // Precedence at compile-time (slice 2's `compileForTick`):
-    // session > execution-via-send > {app, extension@app} > runtime.
-    // Insertion order below is irrelevant — the registry resolves by
-    // binding rank, not insertion.
+    // session > execution-via-send > {app, extension@app} > gateway >
+    // runtime. Insertion order below is irrelevant — the registry
+    // resolves by binding rank, not insertion.
     const sessionScopedTools: readonly ToolRegistration[] = (input.tools ?? []).map((decl) =>
       toRegistration(decl, { scope: "session", sessionId }),
     );
     const mergedInitialTools: readonly ToolRegistration[] | undefined =
+      this.inheritedTools.length > 0 ||
       this.extensionTools.length > 0 ||
       this.appLevelTools.length > 0 ||
       (this.toolDefaults.initialTools !== undefined && this.toolDefaults.initialTools.length > 0) ||
       sessionScopedTools.length > 0
         ? [
+            ...this.inheritedTools,
             ...this.extensionTools,
             ...this.appLevelTools,
             ...(this.toolDefaults.initialTools ?? []),
