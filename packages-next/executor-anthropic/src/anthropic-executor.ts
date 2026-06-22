@@ -33,6 +33,7 @@ import type {
 
 import {
   BaseLanguageModelExecutor,
+  buildTools,
   type CustomBlockDefinition,
   type DeltaTransform,
   type StreamAccumulator,
@@ -61,7 +62,7 @@ import type {
   ToolCall,
   UsageStats,
 } from "@agentick/spec-next";
-import { SPEC_VERSION, toJsonSchema } from "@agentick/spec-next";
+import { SPEC_VERSION } from "@agentick/spec-next";
 
 // ============================================================================
 // ProviderOptions augmentation — typed Anthropic escape hatch (G5)
@@ -843,7 +844,11 @@ function imageSourceFromUrl(
 
 function anthropicProjectImpl(input: ProjectInput): LanguageModelInput {
   const messages = buildAnthropicMessages(input.compiled);
-  const tools = buildAnthropicTools(input.compiled);
+  // Tool projection is the canonical fold — Anthropic doesn't need a
+  // provider-specific tool shape at this layer. The system-message
+  // override above exists ONLY because Anthropic preserves per-section
+  // cache_control; tools have no such concern.
+  const tools = buildTools(input.tools);
   const parameters = buildAnthropicParameters(input.compiled);
   return {
     messages,
@@ -946,21 +951,6 @@ function anthropicImageUrlFromSource(source: MediaSource, mimeType: string | und
     case "gcs":
       return `gs://${source.bucket}/${source.object}`;
   }
-}
-
-function buildAnthropicTools(tree: RenderedTree): ReadonlyArray<LanguageModelTool> {
-  const decl = tree.declarations?.tools ?? [];
-  return decl
-    .filter((t) => t.exposure.includes("model"))
-    .map((t) => ({
-      name: t.name,
-      ...(t.description !== undefined ? { description: t.description } : {}),
-      inputSchema: toJsonSchema(t.inputSchema) as Record<string, unknown>,
-      ...(t.outputSchema !== undefined
-        ? { outputSchema: toJsonSchema(t.outputSchema) as Record<string, unknown> }
-        : {}),
-      ...(t.providerOptions !== undefined ? { providerOptions: t.providerOptions } : {}),
-    }));
 }
 
 function buildAnthropicParameters(tree: RenderedTree) {

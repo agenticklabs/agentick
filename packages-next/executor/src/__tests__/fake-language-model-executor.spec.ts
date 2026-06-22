@@ -73,28 +73,32 @@ describe("FakeLanguageModelExecutor — project", () => {
     const tree: RenderedTree = {
       specVersion: "2026-05-08",
       context: { entries: [] },
-      declarations: {
-        tools: [
-          {
-            id: "t.calc",
-            name: "calculator",
-            description: "Math",
-            inputSchema: jsonSchema({ type: "object" }),
-            exposure: ["model"],
-            handlerRef: "h.calc",
-          },
-          {
-            id: "t.priv",
-            name: "private",
-            description: "Dispatch only — not exposed to the model",
-            inputSchema: jsonSchema({ type: "object" }),
-            exposure: ["dispatch"],
-            handlerRef: "h.priv",
-          },
-        ],
-      },
     };
-    const input = await exec.project({ compiled: tree, target: mkTarget(), tools: [] });
+    // Tools come through `ProjectInput.tools` — the loop's per-tick
+    // compile result. `compiled.declarations.tools` is the IR's
+    // reconciler record but NOT the projection source.
+    const input = await exec.project({
+      compiled: tree,
+      target: mkTarget(),
+      tools: [
+        {
+          id: "t.calc",
+          name: "calculator",
+          description: "Math",
+          inputSchema: jsonSchema({ type: "object" }),
+          exposure: ["model"],
+          handlerRef: "h.calc",
+        },
+        {
+          id: "t.priv",
+          name: "private",
+          description: "Dispatch only — not exposed to the model",
+          inputSchema: jsonSchema({ type: "object" }),
+          exposure: ["dispatch"],
+          handlerRef: "h.priv",
+        },
+      ],
+    });
     expect(input.tools).toHaveLength(1);
     expect(input.tools![0]!.name).toBe("calculator");
   });

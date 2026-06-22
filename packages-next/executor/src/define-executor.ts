@@ -50,12 +50,11 @@ import {
   ulid,
 } from "@agentick/runtime-next";
 
+import { buildMessages, buildTools } from "./canonical-projection.js";
 import { ExecutorLifecycle } from "./executor-lifecycle.js";
 import type {
   AbortExecutorInput,
   AdapterDelta,
-  ContentBlock,
-  ContextEntry,
   EventBus,
   ExecuteError,
   ExecuteInput,
@@ -68,10 +67,6 @@ import type {
   LanguageModelExecutionResult,
   LanguageModelExecutor,
   LanguageModelInput,
-  LanguageModelMessage,
-  LanguageModelMessagePart,
-  LanguageModelTool,
-  MediaSource,
   MessageEnvelope,
   MessageHandlerError,
   MessageInbox,
@@ -81,12 +76,8 @@ import type {
   OperationJournal,
   ProjectInput,
   ProjectionError,
-  RenderedTree,
   RunInput,
-  SectionEntry,
-  ToolDeclaration,
 } from "@agentick/spec-next";
-import { toJsonSchema } from "@agentick/spec-next";
 
 // ============================================================================
 // Public API
@@ -453,124 +444,22 @@ class CallbackLanguageModelExecutor
 }
 
 // ============================================================================
-// Default projection (same as FakeLanguageModelExecutor)
+// Default projection
 // ============================================================================
+//
+// Projection helpers (`buildMessages` / `buildTools` /
+// `messagePartFromBlock` / `imageUrlFromSource` / etc.) live in
+// `canonical-projection.ts`. Adopters using `defineExecutor` without
+// supplying a `project` callback get this default — identical to
+// `FakeLanguageModelExecutor`'s projection.
 
 function defaultProject(input: ProjectInput): LanguageModelInput {
   const messages = buildMessages(input.compiled);
-  const tools = buildTools(input.compiled);
+  const tools = buildTools(input.tools);
   return {
     messages,
     ...(tools.length > 0 ? { tools } : {}),
   };
-}
-
-function buildMessages(tree: RenderedTree): ReadonlyArray<LanguageModelMessage> {
-  const messages: LanguageModelMessage[] = [];
-  const systemText = collectSectionText(tree.context.entries);
-  if (systemText.length > 0) {
-    messages.push({
-      role: "system",
-      content: [{ type: "text", text: systemText }],
-    });
-  }
-  for (const entry of tree.context.entries) {
-    if (entry.kind !== "message") continue;
-    messages.push({
-      role: entry.role as LanguageModelMessage["role"],
-      content: entry.content.map(messagePartFromBlock),
-    });
-  }
-  return messages;
-}
-
-function collectSectionText(entries: ReadonlyArray<ContextEntry>): string {
-  const parts: string[] = [];
-  for (const e of entries) {
-    if (e.kind !== "section") continue;
-    const text = sectionText(e);
-    if (text.length > 0) parts.push(text);
-  }
-  return parts.join("\n\n");
-}
-
-function sectionText(section: SectionEntry): string {
-  const head = section.title ? `## ${section.title}\n\n` : "";
-  const body = section.content
-    .map((b) => (b.type === "text" ? b.text : ""))
-    .filter((t) => t.length > 0)
-    .join("\n\n");
-  return head + body;
-}
-
-function messagePartFromBlock(block: ContentBlock): LanguageModelMessagePart {
-  const pm =
-    block.providerMetadata !== undefined ? { providerMetadata: block.providerMetadata } : {};
-  switch (block.type) {
-    case "text":
-      return { type: "text", text: block.text, ...pm };
-    case "image":
-      return {
-        type: "image",
-        imageUrl: imageUrlFromSource(block.source, block.mimeType),
-        ...(block.mimeType !== undefined ? { mediaType: block.mimeType } : {}),
-        ...pm,
-      };
-    case "tool_use":
-      return {
-        type: "tool_use",
-        id: block.toolUseId,
-        name: block.name,
-        input: block.input,
-        ...pm,
-      };
-    case "tool_result":
-      return {
-        type: "tool_result",
-        toolUseId: block.toolUseId,
-        content: block.content.map(messagePartFromBlock),
-        ...(block.isError !== undefined ? { isError: block.isError } : {}),
-        ...pm,
-      };
-    default:
-      return {
-        type: "text",
-        text:
-          "text" in block && typeof block.text === "string" ? block.text : JSON.stringify(block),
-      };
-  }
-}
-
-function imageUrlFromSource(source: MediaSource, mimeType: string | undefined): string {
-  switch (source.type) {
-    case "url":
-      return source.url;
-    case "base64": {
-      const mt = source.mimeType ?? mimeType ?? "image/png";
-      return `data:${mt};base64,${source.data}`;
-    }
-    case "reference":
-      return source.fileId;
-    case "s3":
-      return `s3://${source.bucket}/${source.key}`;
-    case "gcs":
-      return `gs://${source.bucket}/${source.object}`;
-  }
-}
-
-function buildTools(tree: RenderedTree): ReadonlyArray<LanguageModelTool> {
-  const decl = tree.declarations?.tools ?? [];
-  return decl
-    .filter((t: ToolDeclaration) => t.exposure.includes("model"))
-    .map((t) => ({
-      name: t.name,
-      ...(t.description !== undefined ? { description: t.description } : {}),
-      inputSchema: toJsonSchema(t.inputSchema) as Record<string, unknown>,
-      ...(t.outputSchema !== undefined
-        ? { outputSchema: toJsonSchema(t.outputSchema) as Record<string, unknown> }
-        : {}),
-      ...(t.providerOptions !== undefined ? { providerOptions: t.providerOptions } : {}),
-    }));
 }
 
 function normalizeImpl(input: NormalizeInput<unknown>): LanguageModelExecutionResult {

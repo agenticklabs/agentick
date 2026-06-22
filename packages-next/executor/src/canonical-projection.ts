@@ -33,7 +33,12 @@ import { toJsonSchema } from "@agentick/spec-next";
 
 export function defaultProject(input: ProjectInput): LanguageModelInput {
   const messages = buildMessages(input.compiled);
-  const tools = buildTools(input.compiled);
+  // Tools come from `input.tools` — the loop's per-tick compile result
+  // (precedence-resolved across gateway/app/session/execution/extension/
+  // reconciler). The IR's `compiled.declarations.tools` records what
+  // the reconciler emitted but is NOT the canonical source for the
+  // model's visible tool list. See `ProjectInput.tools` for context.
+  const tools = buildTools(input.tools);
   const parameters = buildParameters(input.compiled);
   return {
     messages,
@@ -167,10 +172,21 @@ export function imageUrlFromSource(source: MediaSource, mimeType: string | undef
   }
 }
 
-export function buildTools(tree: RenderedTree): ReadonlyArray<LanguageModelTool> {
-  const decl = tree.declarations?.tools ?? [];
-  return decl
-    .filter((t: ToolDeclaration) => t.exposure.includes("model"))
+/**
+ * Project `ToolDeclaration[]` to the wire-shape `LanguageModelTool[]`.
+ * Filters to model-exposed tools and projects `inputSchema` /
+ * `outputSchema` through `toJsonSchema()` for the provider.
+ *
+ * Adopters: prefer the canonical `ProjectInput.tools` source rather
+ * than re-reading `compiled.declarations.tools` — the IR slot is the
+ * reconciler's record; the canonical source is the loop's compile
+ * (which folds gateway/app/session/execution/extension/reconciler
+ * with correct precedence). Provider-specific executors that need to
+ * stay aligned with the canonical fold should call this helper.
+ */
+export function buildTools(tools: readonly ToolDeclaration[]): ReadonlyArray<LanguageModelTool> {
+  return tools
+    .filter((t) => t.exposure.includes("model"))
     .map((t) => ({
       name: t.name,
       ...(t.description !== undefined ? { description: t.description } : {}),

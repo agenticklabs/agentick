@@ -652,22 +652,23 @@ describe("GoogleExecutor — per-tool providerOptions.google", () => {
     const tree: RenderedTree = {
       specVersion: "2026-05-08",
       context: { entries: emptyTree().context.entries },
-      declarations: {
-        tools: [
-          {
-            id: "calc",
-            name: "calc",
-            description: "calculator",
-            inputSchema: jsonSchema({ type: "object", properties: { a: { type: "number" } } }),
-            exposure: ["model"],
-            providerOptions: {
-              google: { description: "OVERRIDDEN" },
-            },
-          },
-        ],
-      },
     };
-    await exec.run({ compiled: tree, target: mkTarget(), tools: [] });
+    await exec.run({
+      compiled: tree,
+      target: mkTarget(),
+      tools: [
+        {
+          id: "calc",
+          name: "calc",
+          description: "calculator",
+          inputSchema: jsonSchema({ type: "object", properties: { a: { type: "number" } } }),
+          exposure: ["model"],
+          providerOptions: {
+            google: { description: "OVERRIDDEN" },
+          },
+        },
+      ],
+    });
     const tools = (stub.calls[0]!.params.config as { tools?: unknown[] }).tools as Array<{
       functionDeclarations: Array<{ name: string; description?: string }>;
     }>;

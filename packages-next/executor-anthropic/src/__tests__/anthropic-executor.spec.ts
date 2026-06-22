@@ -479,22 +479,23 @@ describe("AnthropicExecutor — cache tokens (G2)", () => {
           },
         ],
       },
-      declarations: {
-        tools: [
-          {
-            id: "calc",
-            name: "calc",
-            description: "calculator",
-            inputSchema: jsonSchema({ type: "object" }),
-            exposure: ["model"],
-            providerOptions: {
-              anthropic: { cache_control: { type: "ephemeral" } },
-            },
-          },
-        ],
-      },
     };
-    await exec.run({ compiled: tree, target: mkTarget(), tools: [] });
+    await exec.run({
+      compiled: tree,
+      target: mkTarget(),
+      tools: [
+        {
+          id: "calc",
+          name: "calc",
+          description: "calculator",
+          inputSchema: jsonSchema({ type: "object" }),
+          exposure: ["model"],
+          providerOptions: {
+            anthropic: { cache_control: { type: "ephemeral" } },
+          },
+        },
+      ],
+    });
     const tools = stub.calls[0]!.params.tools as Array<{
       name: string;
       cache_control?: { type: string };

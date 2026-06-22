@@ -30,6 +30,20 @@ export {
   defaultProject,
   mergeSignals,
 } from "./base-language-model-executor.js";
+// Canonical projection helpers — provider adapters that share the
+// canonical fold (Anthropic/OpenAI/Google/AI SDK) reach for these
+// instead of re-rolling. Adopters writing custom adapters extend
+// `BaseLanguageModelExecutor.projectImpl` and compose with the parts
+// they need.
+export {
+  buildTools,
+  buildMessages,
+  buildParameters,
+  collectSectionText,
+  sectionText,
+  messagePartFromBlock,
+  imageUrlFromSource,
+} from "./canonical-projection.js";
 export { StreamAccumulator, type AccumToolCall } from "./stream-accumulator.js";
 export { type DeltaTransform, composeTransforms, identityTransform } from "./delta-transform.js";
 export {
