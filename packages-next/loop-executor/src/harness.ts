@@ -42,6 +42,8 @@ import type {
   OperationJournal,
   RunExecutionInput,
   ToolCall,
+  ToolDeclaration,
+  ToolRegistration,
   UsageStats,
 } from "@agentick/spec-next";
 
@@ -193,7 +195,23 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
           executionId,
         });
 
-        // 2. Execute. Streaming path (executeStream) when the caller
+        // 2. Layered-tools compile (#138).
+        //
+        // The reconciler emitted tool declarations in `renderResult.tree
+        // .declarations.tools` (the IR's record of THIS render's
+        // contribution). Sync that into the tool executor's registry
+        // as the reconciler-bound slice, then ask the registry for the
+        // precedence-resolved model-visible set — the unification of
+        // every layered seam (gateway/app/session/execution/extension/
+        // reconciler). The projection reads that set, not the IR slot.
+        const reconcilerTools = renderResult.tree.declarations?.tools ?? [];
+        await input.toolExecutor.replaceReconcilerTools({
+          mountId: input.mountId,
+          registrations: reconcilerTools.map(toReconcilerRegistration(input.mountId)),
+        });
+        const modelTools = await input.toolExecutor.compileForTick({ exposure: "model" });
+
+        // 3. Execute. Streaming path (executeStream) when the caller
         //    requested streaming AND the executor supports it AND the
         //    target's capabilities don't explicitly disable it.
         const wantsStreaming =
@@ -209,19 +227,11 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
           // reasoning, message-end). We forward each delta through
           // onEvent — NO loop-side synthesis on this path (adapter
           // already owns symmetric event emission).
-          // SLICE 1 PLACEHOLDER: layered-tools slice 4 (#138) replaces
-          // `tools: []` with `await toolExecutor.compileForTick({
-          // exposure: "model" })`, after first calling
-          // `replaceReconcilerTools(mountId, ...)` to sync the IR's
-          // reconciler slice into the registry. Until then, the model
-          // sees zero tools on the loop path — JSX-declared tools are
-          // still in `renderResult.tree.declarations.tools` (slice 3
-          // drops that read in canonical-projection too).
           const projected = await input.executor.project({
             compiled: renderResult.tree,
             target: input.target,
             scope: { sessionId: input.sessionId, executionId, tickId },
-            tools: renderResult.tree.declarations?.tools ?? [],
+            tools: modelTools,
           });
           const stream = input.executor.executeStream({
             targetInput: projected,
@@ -252,12 +262,11 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
           executorTerminal = { outcome: "succeeded", result: normalized };
         } else {
           // Non-streaming path: classic project → execute → normalize via run.
-          // SLICE 1 PLACEHOLDER (same note as the streaming branch).
           executorTerminal = await input.executor.run({
             compiled: renderResult.tree,
             target: input.target,
             scope: { sessionId: input.sessionId, executionId, tickId },
-            tools: renderResult.tree.declarations?.tools ?? [],
+            tools: modelTools,
             ...(input.signal !== undefined ? { signal: input.signal } : {}),
           });
         }
@@ -502,6 +511,26 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
 // ============================================================================
 // helpers
 // ============================================================================
+
+/**
+ * Wrap a `ToolDeclaration` (emitted by the reconciler in the rendered
+ * tree's `declarations.tools`) into a `ToolRegistration` bound to the
+ * reconciler slot for the loop's `mountId`. The result feeds
+ * `toolExecutor.replaceReconcilerTools` each tick — the registry's
+ * reconciler slice mirrors the just-rendered tree.
+ *
+ * `handlerRef` falls back to the declaration's `id` when the
+ * declaration didn't supply one — matches how the reconciler's
+ * default handler resolution works (the resolver looks up by both
+ * `name` and `id` aliases).
+ */
+function toReconcilerRegistration(mountId: string): (decl: ToolDeclaration) => ToolRegistration {
+  return (decl) => ({
+    declaration: decl,
+    handlerRef: decl.handlerRef ?? decl.id,
+    binding: { scope: "reconciler", mountId },
+  });
+}
 
 function accumulateUsage(acc: MutableUsage, add?: UsageStats): void {
   if (!add) return;

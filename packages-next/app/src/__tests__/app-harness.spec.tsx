@@ -178,13 +178,20 @@ describe("AppHarness — events()", () => {
   it("streams envelopes from every session through the app boundary", async () => {
     const app = await mkApp({ shareSubstrate: true });
     const collected: string[] = [];
-    const stopAt = 3; // one dispatch → requested + before + terminal
 
-    const iter = app.events({ surface: "tool" });
+    // Filter by the dispatch op name — the tool surface also carries
+    // per-tick `replace-reconciler-tools` ops now (slice 4 #138);
+    // those legitimately appear in the stream and would race the
+    // count-based cutoff. Subscribing to dispatch-specific names
+    // sidesteps that observability layering.
+    const iter = app.events({
+      surface: "tool",
+      name: { prefix: "tool:command:dispatch" },
+    });
     const collect = (async () => {
       for await (const ev of iter) {
         collected.push(`${ev.name}.${ev.phase}`);
-        if (collected.length >= stopAt) break;
+        if (collected.length >= 3) break;
       }
     })();
 
