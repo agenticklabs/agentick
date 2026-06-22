@@ -88,12 +88,17 @@ export interface CreateSessionInput<P = unknown> {
   /** Per-session abort signal. Closes the session if it fires. */
   readonly signal?: AbortSignal;
   /**
-   * Session-scoped additional tools. Merged with app-level tools at
-   * session-create time; session tools take priority on name conflict.
-   * Shape is opaque to spec — concrete tool types live in the tool
-   * executor package.
+   * Session-scoped tool declarations. Bound at session-create time
+   * with `binding: { scope: "session", sessionId }` and entered into
+   * the tool executor's registry. Participates in the per-tick compile
+   * — sits between app and execution in the precedence ladder, so a
+   * session-level tool overrides an app-level tool of the same name
+   * but is itself overridden by an execution-level or reconciler-
+   * emitted tool of the same name.
+   *
+   * @see ToolBinding in `@agentick/spec-next` for the precedence ladder.
    */
-  readonly tools?: ReadonlyArray<unknown>;
+  readonly tools?: ReadonlyArray<import("../data/declarations.js").ToolDeclaration>;
   /**
    * Initial session-state values (`useSessionState`). Mirrors
    * `initialKnobs` but writes to the StateHarness instead.

@@ -91,7 +91,7 @@ describe("defineLanguageModelExecutor", () => {
     const exec = factory();
     await exec.ready;
     if (!exec.executeStream) throw new Error("expected streaming");
-    const input = await exec.project({ compiled: mkTree(), target: mkTarget() });
+    const input = await exec.project({ compiled: mkTree(), target: mkTarget(), tools: [] });
     const stream = exec.executeStream({ targetInput: input, target: mkTarget() });
     const deltas: AdapterDelta[] = [];
     for await (const d of stream) deltas.push(d);
@@ -128,7 +128,7 @@ describe("defineLanguageModelExecutor", () => {
     });
     const exec = factory();
     await exec.ready;
-    const terminal = await exec.run({ compiled: mkTree(), target: mkTarget() });
+    const terminal = await exec.run({ compiled: mkTree(), target: mkTarget(), tools: [] });
     if (terminal.outcome !== "succeeded") throw new Error("expected success");
     expect(terminal.result.finishMetadata).toEqual({
       baseline: true,
@@ -141,11 +141,11 @@ describe("defineLanguageModelExecutor", () => {
     const factory = makeFactory([{ text: "x" }]);
     const exec = factory();
     await exec.ready;
-    const input = await exec.project({ compiled: mkTree(), target: mkTarget() });
+    const input = await exec.project({ compiled: mkTree(), target: mkTarget(), tools: [] });
     // Force non-streaming by disabling capabilities — but default
     // streamByDefault is true, so the streaming path still wins for
     // run(). Just confirm normalize works.
-    const terminal = await exec.run({ compiled: mkTree(), target: mkTarget() });
+    const terminal = await exec.run({ compiled: mkTree(), target: mkTarget(), tools: [] });
     if (terminal.outcome !== "succeeded") throw new Error("expected success");
     expect(terminal.result.output[0]).toMatchObject({ type: "text" });
     void input;

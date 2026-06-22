@@ -36,6 +36,50 @@ export type JsonSchema = Record<string, unknown>;
  */
 export type ToolExposure = "model" | "dispatch" | "runtime";
 
+/**
+ * Provenance tag attached to every {@link ToolRegistration} in the tool
+ * executor's registry. Records **which layer of the declaration
+ * hierarchy** contributed the registration so the per-tick compile can
+ * resolve name collisions deterministically.
+ *
+ * Internal accounting only — never exposed on the wire, never visible
+ * to model providers, never surfaced through `session.dispatch()`.
+ *
+ * The layered config seams (in increasing specificity) are:
+ *
+ *   1. `runtime`    — direct programmatic register() with no scope context;
+ *                     tests and ad-hoc registrations
+ *   2. `gateway`    — `createGateway({ tools })`, process-wide floor
+ *   3. `app`        — `createApp(component, { tools })`, app-wide default
+ *   4. `session`    — `app.createSession({ tools })`, per-session
+ *   5. `execution`  — `session.send({ tools })`, per-call
+ *   6. `extension`  — installed via the extension protocol; precedence
+ *                     follows the `level` at which it was installed
+ *   7. `reconciler` — contributed by the reconciler from the rendered
+ *                     tree (any reconciler — React/JSX, programmatic,
+ *                     template-based — producing a valid RenderedTree
+ *                     uses this slot); replaced fresh per render, most
+ *                     specific
+ *
+ * Precedence on name collision (low → high): runtime < gateway <
+ * \{app, extension\@app\} < \{session, extension\@session\} < execution <
+ * reconciler.
+ *
+ * @see docs/proposals/v2/blueprint/07-tool-executor.md §Layered config
+ */
+export type ToolBinding =
+  | { readonly scope: "runtime" }
+  | { readonly scope: "gateway" }
+  | { readonly scope: "app"; readonly appId: string }
+  | { readonly scope: "session"; readonly sessionId: string }
+  | { readonly scope: "execution"; readonly executionId: string }
+  | {
+      readonly scope: "extension";
+      readonly extensionName: string;
+      readonly level: "gateway" | "app" | "session";
+    }
+  | { readonly scope: "reconciler"; readonly mountId: string };
+
 export interface ToolAnnotations {
   /** `[V1-INHERITED]` Tool intent hint. */
   readonly intent?: "render" | "action" | "compute";

@@ -15,6 +15,7 @@ function reg(name: string, overrides: Partial<ToolRegistration> = {}): ToolRegis
     },
     handlerRef: overrides.handlerRef ?? `h.${name}`,
     ...(overrides.useDeps ? { useDeps: overrides.useDeps } : {}),
+    binding: overrides.binding ?? { scope: "runtime" },
   };
 }
 

@@ -62,6 +62,7 @@ describe("OpenAIExecutor — non-streaming", () => {
     const terminal = await exec.run({
       compiled: emptyTree(),
       target: mkTarget(),
+      tools: [],
     });
     if (terminal.outcome !== "succeeded") throw new Error("expected success");
     expect(terminal.result.output[0]).toMatchObject({ type: "text", text: "hello" });
@@ -74,7 +75,7 @@ describe("OpenAIExecutor — non-streaming", () => {
       { kind: "non-streaming", completion: mkCompletion({ text: "ok" }) },
     ]);
     const { exec } = await makeExecutor(stub, { model: "gpt-5-mini" });
-    await exec.run({ compiled: emptyTree(), target: mkTarget() });
+    await exec.run({ compiled: emptyTree(), target: mkTarget(), tools: [] });
     expect(stub.calls[0]!.params.model).toBe("gpt-5-mini");
   });
 
@@ -89,6 +90,7 @@ describe("OpenAIExecutor — non-streaming", () => {
     const terminal = await exec.run({
       compiled: emptyTree(),
       target: mkTarget(),
+      tools: [],
     });
     if (terminal.outcome !== "succeeded") throw new Error("expected success");
     expect(terminal.result.stopReason).toBe("max_tokens");
@@ -110,6 +112,7 @@ describe("OpenAIExecutor — tool-use round-trip", () => {
     const terminal = await exec.run({
       compiled: emptyTree(),
       target: mkTarget(),
+      tools: [],
     });
     if (terminal.outcome !== "succeeded") throw new Error("expected success");
     expect(terminal.result.stopReason).toBe("tool_use");
@@ -168,7 +171,7 @@ describe("OpenAIExecutor — tool-use round-trip", () => {
       },
     };
 
-    await exec.run({ compiled: treeWithToolRoundtrip, target: mkTarget() });
+    await exec.run({ compiled: treeWithToolRoundtrip, target: mkTarget(), tools: [] });
     const sent = stub.calls[0]!.params.messages;
     // The tool_result must arrive as a `role: "tool"` entry with matching id.
     const toolMessage = sent.find(
@@ -197,6 +200,7 @@ describe("OpenAIExecutor — abort", () => {
       compiled: emptyTree(),
       target: mkTarget(),
       scope: { executionId: id },
+      tools: [],
     });
     expect(terminal.outcome).toBe("canceled");
   });
@@ -228,6 +232,7 @@ describe("OpenAIExecutor — streaming", () => {
     const terminal = await exec.run({
       compiled: emptyTree(),
       target: mkTarget(),
+      tools: [],
     });
     if (terminal.outcome !== "succeeded") throw new Error("expected success");
     expect(terminal.result.output[0]).toMatchObject({
@@ -265,6 +270,7 @@ describe("OpenAIExecutor — parseThinkTags preset", () => {
     const terminal = await exec.run({
       compiled: emptyTree(),
       target: mkTarget(),
+      tools: [],
     });
     if (terminal.outcome !== "succeeded") throw new Error("expected success");
     // ReasoningBlock should arrive before the text block.
@@ -307,6 +313,7 @@ describe("OpenAIExecutor — parseThinkTags preset", () => {
     const projected = await exec.project({
       compiled: emptyTree(),
       target: mkTarget(),
+      tools: [],
     });
     const stream = exec.executeStream({
       targetInput: projected,
@@ -353,6 +360,7 @@ describe("OpenAIExecutor — customBlocks", () => {
     const projected = await exec.project({
       compiled: emptyTree(),
       target: mkTarget(),
+      tools: [],
     });
     const stream = exec.executeStream({
       targetInput: projected,
@@ -395,7 +403,7 @@ describe("OpenAIExecutor — customBlocks", () => {
     });
     await exec.ready;
 
-    await exec.run({ compiled: emptyTree(), target: mkTarget() });
+    await exec.run({ compiled: emptyTree(), target: mkTarget(), tools: [] });
     expect(captured).toEqual([{ content: "cited", attrs: { source: "wiki" } }]);
   });
 
@@ -426,6 +434,7 @@ describe("OpenAIExecutor — customBlocks", () => {
     const terminal = await exec.run({
       compiled: emptyTree(),
       target: mkTarget(),
+      tools: [],
     });
     if (terminal.outcome !== "succeeded") throw new Error("expected success");
     // Reasoning block extracted from <think>.
@@ -449,7 +458,7 @@ describe("OpenAIExecutor — journaled lifecycle", () => {
       { kind: "non-streaming", completion: mkCompletion({ text: "ok" }) },
     ]);
     const { exec, journal } = await makeExecutor(stub);
-    await exec.run({ compiled: emptyTree(), target: mkTarget() });
+    await exec.run({ compiled: emptyTree(), target: mkTarget(), tools: [] });
     const chunk = await Effect.runPromise(
       Stream.runCollect(journal.readByQuery({ surface: "executor" }, "beginning")),
     );

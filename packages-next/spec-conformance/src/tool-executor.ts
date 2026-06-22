@@ -214,6 +214,7 @@ export function runToolExecutorConformance(factory: ToolExecutorConformanceFacto
         // MAY treat an unknown handlerRef as a no-op handler returning
         // an empty content array — verified only by shape here.
         handlerRef: "h.added.later",
+        binding: { scope: "runtime" },
       };
       await exec.register({ registration: reg });
       const names = (await exec.list()).map((d) => d.name);

@@ -86,6 +86,7 @@ describe("AnthropicExecutor — non-streaming", () => {
     const terminal = await exec.run({
       compiled: emptyTree(),
       target: mkTarget(),
+      tools: [],
     });
     if (terminal.outcome !== "succeeded") throw new Error("expected success");
     expect(terminal.result.output[0]).toMatchObject({ type: "text", text: "hello" });
@@ -101,6 +102,7 @@ describe("AnthropicExecutor — non-streaming", () => {
     await exec.run({
       compiled: emptyTree(),
       target: mkTarget({ modelId: "claude-3-opus-latest" }),
+      tools: [],
     });
     expect(stub.calls[0]!.params.model).toBe("claude-3-opus-latest");
   });
@@ -113,7 +115,7 @@ describe("AnthropicExecutor — non-streaming", () => {
       },
     ]);
     const { exec } = await makeExecutor(stub);
-    const t = await exec.run({ compiled: emptyTree(), target: mkTarget() });
+    const t = await exec.run({ compiled: emptyTree(), target: mkTarget(), tools: [] });
     if (t.outcome !== "succeeded") throw new Error("expected success");
     expect(t.result.stopReason).toBe("max_tokens");
   });
@@ -126,7 +128,7 @@ describe("AnthropicExecutor — non-streaming", () => {
       },
     ]);
     const { exec } = await makeExecutor(stub);
-    const t = await exec.run({ compiled: emptyTree(), target: mkTarget() });
+    const t = await exec.run({ compiled: emptyTree(), target: mkTarget(), tools: [] });
     if (t.outcome !== "succeeded") throw new Error("expected success");
     expect(t.result.stopReason).toBe("stop_sequence");
   });
@@ -157,7 +159,7 @@ describe("AnthropicExecutor — system extraction + alternation", () => {
         ],
       },
     };
-    await exec.run({ compiled: tree, target: mkTarget() });
+    await exec.run({ compiled: tree, target: mkTarget(), tools: [] });
     const params = stub.calls[0]!.params;
     expect(typeof params.system).toBe("string");
     expect(params.system as string).toContain("Persona");
@@ -189,7 +191,7 @@ describe("AnthropicExecutor — system extraction + alternation", () => {
         ],
       },
     };
-    await exec.run({ compiled: tree, target: mkTarget() });
+    await exec.run({ compiled: tree, target: mkTarget(), tools: [] });
     const msgs = stub.calls[0]!.params.messages;
     expect(msgs).toHaveLength(1);
     expect(msgs[0]!.role).toBe("user");
@@ -210,7 +212,7 @@ describe("AnthropicExecutor — tool-use round-trip", () => {
       },
     ]);
     const { exec } = await makeExecutor(stub);
-    const t = await exec.run({ compiled: emptyTree(), target: mkTarget() });
+    const t = await exec.run({ compiled: emptyTree(), target: mkTarget(), tools: [] });
     if (t.outcome !== "succeeded") throw new Error("expected success");
     expect(t.result.stopReason).toBe("tool_use");
     expect(t.result.toolCalls).toHaveLength(1);
@@ -266,7 +268,7 @@ describe("AnthropicExecutor — tool-use round-trip", () => {
         ],
       },
     };
-    await exec.run({ compiled: tree, target: mkTarget() });
+    await exec.run({ compiled: tree, target: mkTarget(), tools: [] });
     const sent = stub.calls[0]!.params.messages;
     // Last message must be user with tool_result block.
     const lastIdx = sent.length - 1;
@@ -307,7 +309,7 @@ describe("AnthropicExecutor — tool-use round-trip", () => {
         ],
       },
     };
-    await exec.run({ compiled: tree, target: mkTarget() });
+    await exec.run({ compiled: tree, target: mkTarget(), tools: [] });
     const sent = stub.calls[0]!.params.messages;
     const content = sent[0]!.content as Array<{
       type: string;
@@ -330,6 +332,7 @@ describe("AnthropicExecutor — abort", () => {
       compiled: emptyTree(),
       target: mkTarget(),
       scope: { executionId: id },
+      tools: [],
     });
     expect(t.outcome).toBe("canceled");
   });
@@ -360,7 +363,7 @@ describe("AnthropicExecutor — streaming", () => {
     );
     await new Promise((r) => setImmediate(r));
 
-    const t = await exec.run({ compiled: emptyTree(), target: mkTarget() });
+    const t = await exec.run({ compiled: emptyTree(), target: mkTarget(), tools: [] });
     if (t.outcome !== "succeeded") throw new Error("expected success");
     expect(t.result.output[0]).toMatchObject({ type: "text", text: "abc" });
 
@@ -388,8 +391,8 @@ describe("AnthropicExecutor — streaming", () => {
     ]);
     const { exec: a } = await makeExecutor(streaming, { stream: true });
     const { exec: b } = await makeExecutor(nonStreaming);
-    const ta = await a.run({ compiled: emptyTree(), target: mkTarget() });
-    const tb = await b.run({ compiled: emptyTree(), target: mkTarget() });
+    const ta = await a.run({ compiled: emptyTree(), target: mkTarget(), tools: [] });
+    const tb = await b.run({ compiled: emptyTree(), target: mkTarget(), tools: [] });
     if (ta.outcome !== "succeeded" || tb.outcome !== "succeeded")
       throw new Error("expected success");
     expect(ta.result.output[0]).toMatchObject({ type: "text", text: "hello" });
@@ -415,7 +418,7 @@ describe("AnthropicExecutor — cache tokens (G2)", () => {
       },
     ]);
     const { exec } = await makeExecutor(stub);
-    const t = await exec.run({ compiled: emptyTree(), target: mkTarget() });
+    const t = await exec.run({ compiled: emptyTree(), target: mkTarget(), tools: [] });
     if (t.outcome !== "succeeded") throw new Error("expected success");
     expect(t.result.usage?.cachedInputTokens).toBe(80);
     expect(t.result.usage?.cacheCreationTokens).toBe(20);
@@ -450,7 +453,7 @@ describe("AnthropicExecutor — cache tokens (G2)", () => {
         ],
       },
     };
-    await exec.run({ compiled: tree, target: mkTarget() });
+    await exec.run({ compiled: tree, target: mkTarget(), tools: [] });
     const sys = stub.calls[0]!.params.system as Array<{
       type: string;
       cache_control?: { type: string };
@@ -491,7 +494,7 @@ describe("AnthropicExecutor — cache tokens (G2)", () => {
         ],
       },
     };
-    await exec.run({ compiled: tree, target: mkTarget() });
+    await exec.run({ compiled: tree, target: mkTarget(), tools: [] });
     const tools = stub.calls[0]!.params.tools as Array<{
       name: string;
       cache_control?: { type: string };
@@ -525,7 +528,7 @@ describe("AnthropicExecutor — cache tokens (G2)", () => {
         ],
       },
     };
-    await exec.run({ compiled: tree, target: mkTarget() });
+    await exec.run({ compiled: tree, target: mkTarget(), tools: [] });
     const msgs = stub.calls[0]!.params.messages as Array<{
       role: string;
       content: Array<{ type: string; cache_control?: { type: string } }>;
@@ -544,7 +547,7 @@ describe("AnthropicExecutor — reasoning (G3 native thinking blocks)", () => {
       },
     ]);
     const { exec } = await makeExecutor(stub);
-    const t = await exec.run({ compiled: emptyTree(), target: mkTarget() });
+    const t = await exec.run({ compiled: emptyTree(), target: mkTarget(), tools: [] });
     if (t.outcome !== "succeeded") throw new Error("expected success");
     expect(t.result.output[0]).toMatchObject({ type: "reasoning", text: "step by step" });
     expect(t.result.output[1]).toMatchObject({ type: "text", text: "Answer: 42" });
@@ -571,6 +574,7 @@ describe("AnthropicExecutor — reasoning (G3 native thinking blocks)", () => {
     const projected = await exec.project({
       compiled: emptyTree(),
       target: mkTarget(),
+      tools: [],
     });
     const stream = exec.executeStream({
       targetInput: projected,
@@ -611,8 +615,8 @@ describe("AnthropicExecutor — sampling params (G1)", () => {
         maxOutputTokens: 200,
       },
     };
-    await exec.project({ compiled: tree, target: mkTarget() });
-    const projected = await exec.project({ compiled: tree, target: mkTarget() });
+    await exec.project({ compiled: tree, target: mkTarget(), tools: [] });
+    const projected = await exec.project({ compiled: tree, target: mkTarget(), tools: [] });
     // Manually call execute since stopSequences/topP aren't in tree.config schema.
     await exec.execute({
       targetInput: {
@@ -646,7 +650,7 @@ describe("AnthropicExecutor — sampling params (G1)", () => {
       { kind: "non-streaming", message: mkMessage({ text: "ok" }) },
     ]);
     const { exec } = await makeExecutor(stub);
-    await exec.run({ compiled: emptyTree(), target: mkTarget() });
+    await exec.run({ compiled: emptyTree(), target: mkTarget(), tools: [] });
     expect(stub.calls[0]!.params.max_tokens).toBe(4096);
   });
 
@@ -655,7 +659,7 @@ describe("AnthropicExecutor — sampling params (G1)", () => {
       { kind: "non-streaming", message: mkMessage({ text: "ok" }) },
     ]);
     const { exec } = await makeExecutor(stub, { maxTokens: 2048 });
-    await exec.run({ compiled: emptyTree(), target: mkTarget() });
+    await exec.run({ compiled: emptyTree(), target: mkTarget(), tools: [] });
     expect(stub.calls[0]!.params.max_tokens).toBe(2048);
   });
 });
@@ -679,6 +683,7 @@ describe("AnthropicExecutor — providerOptions spread (G5)", () => {
           },
         },
       },
+      tools: [],
     });
     const p = stub.calls[0]!.params as MessageCreateParams & {
       top_k?: number;
@@ -713,7 +718,7 @@ describe("AnthropicExecutor — parseThinkTags (G7)", () => {
       },
     ]);
     const { exec } = await makeExecutor(stub, { stream: true, parseThinkTags: true });
-    const projected = await exec.project({ compiled: emptyTree(), target: mkTarget() });
+    const projected = await exec.project({ compiled: emptyTree(), target: mkTarget(), tools: [] });
     const stream = exec.executeStream({ targetInput: projected, target: mkTarget() });
     const seen: string[] = [];
     for await (const ev of stream) {
@@ -746,7 +751,7 @@ describe("AnthropicExecutor — customBlocks (G12)", () => {
       stream: true,
       customBlocks: { citation: {} },
     });
-    const projected = await exec.project({ compiled: emptyTree(), target: mkTarget() });
+    const projected = await exec.project({ compiled: emptyTree(), target: mkTarget(), tools: [] });
     const stream = exec.executeStream({ targetInput: projected, target: mkTarget() });
     const events: Array<{ type: string; tag?: string; attrs?: Record<string, string> }> = [];
     for await (const ev of stream) {
@@ -776,7 +781,7 @@ describe("AnthropicExecutor — tool input json round-trip (streaming)", () => {
       },
     ]);
     const { exec } = await makeExecutor(stub, { stream: true });
-    const t = await exec.run({ compiled: emptyTree(), target: mkTarget() });
+    const t = await exec.run({ compiled: emptyTree(), target: mkTarget(), tools: [] });
     if (t.outcome !== "succeeded") throw new Error("expected success");
     expect(t.result.stopReason).toBe("tool_use");
     expect(t.result.toolCalls).toHaveLength(1);
@@ -813,7 +818,7 @@ describe("AnthropicExecutor — base64 image (G4)", () => {
         ],
       },
     };
-    await exec.run({ compiled: tree, target: mkTarget() });
+    await exec.run({ compiled: tree, target: mkTarget(), tools: [] });
     const msgs = stub.calls[0]!.params.messages;
     const content = msgs[0]!.content as Array<{
       type: string;
@@ -849,7 +854,7 @@ describe("AnthropicExecutor — base64 image (G4)", () => {
         ],
       },
     };
-    await exec.run({ compiled: tree, target: mkTarget() });
+    await exec.run({ compiled: tree, target: mkTarget(), tools: [] });
     const msgs = stub.calls[0]!.params.messages;
     const content = msgs[0]!.content as Array<{
       type: string;
@@ -867,7 +872,7 @@ describe("AnthropicExecutor — journaled lifecycle", () => {
       { kind: "non-streaming", message: mkMessage({ text: "ok" }) },
     ]);
     const { exec, journal } = await makeExecutor(stub);
-    await exec.run({ compiled: emptyTree(), target: mkTarget() });
+    await exec.run({ compiled: emptyTree(), target: mkTarget(), tools: [] });
     const chunk = await Effect.runPromise(
       Stream.runCollect(journal.readByQuery({ surface: "executor" }, "beginning")),
     );

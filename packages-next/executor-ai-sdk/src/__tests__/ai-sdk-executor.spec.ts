@@ -73,7 +73,7 @@ describe("AISDKExecutor — basic", () => {
   it("run() returns succeeded terminal with normalized output", async () => {
     const exec = mkExecutor(mkMockModel("hello back"));
     await exec.ready;
-    const terminal = await exec.run({ compiled: mkTree(), target: mkTarget() });
+    const terminal = await exec.run({ compiled: mkTree(), target: mkTarget(), tools: [] });
     if (terminal.outcome !== "succeeded") throw new Error("expected success");
     expect(terminal.result.output[0]).toMatchObject({
       type: "text",
@@ -96,7 +96,7 @@ describe("AISDKExecutor — basic", () => {
     });
     const exec = mkExecutor(model);
     await exec.ready;
-    const terminal = await exec.run({ compiled: mkTree(), target: mkTarget() });
+    const terminal = await exec.run({ compiled: mkTree(), target: mkTarget(), tools: [] });
     if (terminal.outcome !== "succeeded") throw new Error("expected success");
     expect(terminal.result.stopReason).toBe("max_tokens");
   });
@@ -121,7 +121,7 @@ describe("AISDKExecutor — basic", () => {
     });
     const exec = mkExecutor(model);
     await exec.ready;
-    const terminal = await exec.run({ compiled: mkTree(), target: mkTarget() });
+    const terminal = await exec.run({ compiled: mkTree(), target: mkTarget(), tools: [] });
     if (terminal.outcome !== "succeeded") throw new Error("expected success");
     expect(terminal.result.stopReason).toBe("tool_use");
     expect(terminal.result.toolCalls).toHaveLength(1);
@@ -140,6 +140,7 @@ describe("AISDKExecutor — basic", () => {
       compiled: mkTree(),
       target: mkTarget(),
       scope: { executionId: "abort-target" },
+      tools: [],
     });
     expect(terminal.outcome).toBe("canceled");
   });

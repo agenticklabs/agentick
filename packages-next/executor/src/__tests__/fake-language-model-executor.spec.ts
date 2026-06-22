@@ -61,7 +61,7 @@ describe("FakeLanguageModelExecutor — project", () => {
         ],
       },
     };
-    const input = await exec.project({ compiled: tree, target: mkTarget() });
+    const input = await exec.project({ compiled: tree, target: mkTarget(), tools: [] });
     expect(input.messages[0]!.role).toBe("system");
     expect(input.messages[0]!.content[0]).toMatchObject({ type: "text" });
     expect((input.messages[0]!.content[0] as { text: string }).text).toContain("Persona");
@@ -94,7 +94,7 @@ describe("FakeLanguageModelExecutor — project", () => {
         ],
       },
     };
-    const input = await exec.project({ compiled: tree, target: mkTarget() });
+    const input = await exec.project({ compiled: tree, target: mkTarget(), tools: [] });
     expect(input.tools).toHaveLength(1);
     expect(input.tools![0]!.name).toBe("calculator");
   });
@@ -123,7 +123,7 @@ describe("FakeLanguageModelExecutor — run + streaming", () => {
     );
     await new Promise((r) => setImmediate(r));
 
-    const terminal = await exec.run({ compiled: emptyTree(), target: mkTarget() });
+    const terminal = await exec.run({ compiled: emptyTree(), target: mkTarget(), tools: [] });
     expect(terminal.outcome).toBe("succeeded");
 
     const chunk = await Effect.runPromise(Fiber.join(fiber));
@@ -154,7 +154,7 @@ describe("FakeLanguageModelExecutor — run + streaming", () => {
         deltas,
       },
     });
-    const terminal = await exec.run({ compiled: emptyTree(), target: mkTarget() });
+    const terminal = await exec.run({ compiled: emptyTree(), target: mkTarget(), tools: [] });
     expect(terminal.outcome).toBe("succeeded");
     // Indirect verification: the run completed with no observable side
     // effects on the bus (no subscriber attached). Builds aren't directly
@@ -181,7 +181,8 @@ describe("FakeLanguageModelExecutor — abort", () => {
       compiled: emptyTree(),
       target: mkTarget(),
       scope: { executionId: id },
-    });
+        tools: [],
+});
     expect(terminal.outcome).toBe("canceled");
   });
 });
@@ -189,7 +190,7 @@ describe("FakeLanguageModelExecutor — abort", () => {
 describe("FakeLanguageModelExecutor — terminal envelope journaled", () => {
   it("run produces requested + terminal envelopes on the journal", async () => {
     const { exec, journal } = await makeExecutor();
-    await exec.run({ compiled: emptyTree(), target: mkTarget() });
+    await exec.run({ compiled: emptyTree(), target: mkTarget(), tools: [] });
     const chunk = await Effect.runPromise(
       Stream.runCollect(journal.readByQuery({ surface: "executor" }, "beginning")),
     );

@@ -78,6 +78,7 @@ const factory: ToolExecutorConformanceFactory = {
       tools: fixtures.map((f) => ({
         declaration: f.declaration,
         handlerRef: `h.${f.declaration.name}`,
+        binding: { scope: "runtime" as const },
       })),
       handlers: fixtures.map((f) => {
         const { handler, validator } = makeHandlerForBehavior(f);

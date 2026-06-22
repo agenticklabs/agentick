@@ -104,6 +104,21 @@ export interface ProjectInput {
   readonly compiled: RenderedTree;
   readonly target: ExecutionTarget;
   readonly scope?: ExecutionScope;
+  /**
+   * Tool declarations the model should see this tick. Canonical source
+   * for the projected `tools` list. The loop sources this from
+   * `ToolExecutorProtocol.compileForTick({ exposure: "model" })` —
+   * the precedence-resolved unification of every layered declaration
+   * seam (gateway/app/session/execution/extension/reconciler).
+   *
+   * `compiled.declarations.tools` (the IR's record of tools emitted by
+   * the reconciler this tick) is NOT consulted by projection. The loop
+   * syncs the reconciler slice into the tool executor's registry via
+   * `replaceReconcilerTools` and then queries `compileForTick`, so the
+   * resolved list passed here already includes reconciler-emitted
+   * tools with correct precedence.
+   */
+  readonly tools: readonly import("../data/declarations.js").ToolDeclaration[];
 }
 
 export interface ExecuteInput<TInput = unknown> {
@@ -128,6 +143,12 @@ export interface RunInput {
   readonly target: ExecutionTarget;
   readonly scope?: ExecutionScope;
   readonly signal?: AbortSignal;
+  /**
+   * Tool declarations the model should see this tick. See
+   * {@link ProjectInput.tools} — `run` threads this through to its
+   * internal `project` call.
+   */
+  readonly tools: readonly import("../data/declarations.js").ToolDeclaration[];
 }
 
 export interface AbortExecutorInput {

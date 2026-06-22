@@ -221,6 +221,16 @@ class CallbackToolExecutor extends BaseHarness<"tool"> implements ToolExecutorPr
     return this.registry.list(filter);
   }
 
+  // SLICE 1 PLACEHOLDER — see ToolExecutorHarness for context. Real
+  // impl lands in #136.
+  async replaceReconcilerTools(): Promise<void> {
+    return;
+  }
+  async compileForTick(filter?: ToolListFilter): Promise<readonly ToolDeclaration[]> {
+    if (this.spec.list) return this.spec.list(filter);
+    return this.registry.list(filter);
+  }
+
   dispatch(input: DispatchInput): Promise<DispatchResult> {
     const op: Operation<DispatchInput, DispatchResult> = {
       opId: input.opId ?? `tool:dispatch:${input.toolCallId}`,

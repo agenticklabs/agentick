@@ -123,6 +123,8 @@ function stubToolExecutor(): ToolExecutorProtocol {
       durationMs: 1,
     }),
     abort: async () => undefined,
+    replaceReconcilerTools: async () => undefined,
+    compileForTick: async () => [],
   };
 }
 

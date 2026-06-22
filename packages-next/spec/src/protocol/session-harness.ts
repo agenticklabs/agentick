@@ -173,6 +173,20 @@ export interface SendInput<P = unknown> {
    * `reasoning`, plus orchestration + final result).
    */
   readonly stream?: boolean;
+  /**
+   * Execution-scoped tool declarations. Bound at send-time with
+   * `binding: { scope: "execution", executionId }`, entered into the
+   * tool executor's registry for the duration of this execution, and
+   * removed when the execution closes.
+   *
+   * Sits between session and reconciler in the precedence ladder — an
+   * execution-level tool overrides a session-level (and gateway/app/
+   * extension) tool of the same name but is itself overridden by a
+   * reconciler-emitted tool of the same name in the rendered tree.
+   *
+   * @see ToolBinding in `@agentick/spec-next` for the precedence ladder.
+   */
+  readonly tools?: ReadonlyArray<import("../data/declarations.js").ToolDeclaration>;
 }
 
 /**

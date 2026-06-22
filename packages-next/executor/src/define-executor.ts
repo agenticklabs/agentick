@@ -433,6 +433,7 @@ class CallbackLanguageModelExecutor
       const projected = (this.spec.project ?? defaultProject)({
         compiled: input.compiled,
         target: input.target,
+        tools: input.tools,
       });
       const executeInput: ExecuteInput<LanguageModelInput> = {
         targetInput: projected,

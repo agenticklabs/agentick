@@ -17,6 +17,7 @@ function echoReg(
       exposure,
     },
     handlerRef: `h.${name}`,
+    binding: { scope: "runtime" },
   };
 }
 

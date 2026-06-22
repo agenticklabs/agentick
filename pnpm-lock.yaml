@@ -670,6 +670,9 @@ importers:
       '@agentick/elicitation-next':
         specifier: workspace:*
         version: link:../elicitation
+      '@agentick/reconciler-react-next':
+        specifier: workspace:*
+        version: link:../reconciler-react
       '@agentick/runtime-next':
         specifier: workspace:*
         version: link:../runtime

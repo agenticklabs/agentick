@@ -44,6 +44,7 @@ function regOf(name: string): ToolRegistration {
       exposure: ["model", "dispatch"],
     },
     handlerRef: `h.${name}`,
+    binding: { scope: "runtime" },
   };
 }
 

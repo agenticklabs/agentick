@@ -222,7 +222,16 @@ export function withMCP(options: WithMCPOptions): AppExtension {
               ? { annotations: tool.annotations as ToolDeclaration["annotations"] }
               : {}),
           };
-          const registration: ToolRegistration = { declaration, handlerRef };
+          // withMCP is an app-level extension — tools register at the
+          // extension binding slot, level=app. Slice 8 finalizes the
+          // shape once installer.hostScope context is threaded so
+          // session/gateway-level installs declare their own level
+          // symmetrically.
+          const registration: ToolRegistration = {
+            declaration,
+            handlerRef,
+            binding: { scope: "extension", extensionName: "@agentick/mcp-next", level: "app" },
+          };
           installer.registerExtensionTool(registration);
         }
 

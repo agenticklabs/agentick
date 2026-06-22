@@ -141,6 +141,22 @@ export class ToolExecutorHarness extends BaseHarness<"tool"> implements ToolExec
     return this.registry.list(filter);
   }
 
+  // SLICE 1 PLACEHOLDER (#136 lands the real impl).
+  //
+  // Both methods on `ToolExecutorProtocol` for the layered-tools
+  // unification land in slice 2 — scoped registry with binding tags,
+  // atomic reconciler-slice replacement, and precedence-aware
+  // compileForTick. Until then: replaceReconcilerTools is a no-op and
+  // compileForTick collapses to `list(filter)` (no precedence
+  // resolution; multiple bindings for the same name surface as
+  // duplicates — slice 2 fixes).
+  async replaceReconcilerTools(): Promise<void> {
+    return;
+  }
+  async compileForTick(filter?: ToolListFilter): Promise<readonly ToolDeclaration[]> {
+    return this.registry.list(filter);
+  }
+
   dispatch(input: DispatchInput): Promise<DispatchResult> {
     const op: Operation<DispatchInput, DispatchResult> = {
       opId: input.opId ?? `tool:dispatch:${input.toolCallId}`,

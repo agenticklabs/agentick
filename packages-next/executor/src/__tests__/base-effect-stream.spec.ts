@@ -129,6 +129,7 @@ async function makeStub(chunks: readonly StubChunk[], delayMs = 0) {
 const mkInput = (): {
   compiled: import("@agentick/spec-next").RenderedTree;
   target: ExecutionTarget;
+  tools: readonly import("@agentick/spec-next").ToolDeclaration[];
 } => ({
   compiled: {
     specVersion: "2026-05-08",
@@ -139,6 +140,7 @@ const mkInput = (): {
     },
   },
   target: { kind: "language-model", provider: "stub", modelId: "stub-v1" },
+  tools: [],
 });
 
 describe("BaseLanguageModelExecutor — Effect.Stream pipeline", () => {

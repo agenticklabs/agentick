@@ -85,7 +85,7 @@ describe("GoogleExecutor — non-streaming", () => {
       { kind: "non-streaming", response: mkResponse({ text: "hello" }) },
     ]);
     const { exec } = await makeExecutor(stub);
-    const terminal = await exec.run({ compiled: emptyTree(), target: mkTarget() });
+    const terminal = await exec.run({ compiled: emptyTree(), target: mkTarget(), tools: [] });
     if (terminal.outcome !== "succeeded") throw new Error("expected success");
     expect(terminal.result.output[0]).toMatchObject({ type: "text", text: "hello" });
     expect(terminal.result.stopReason).toBe("end");
@@ -100,6 +100,7 @@ describe("GoogleExecutor — non-streaming", () => {
     await exec.run({
       compiled: emptyTree(),
       target: mkTarget({ modelId: "gemini-1.5-pro" }),
+      tools: [],
     });
     expect(stub.calls[0]!.params.model).toBe("gemini-1.5-pro");
   });
@@ -112,7 +113,7 @@ describe("GoogleExecutor — non-streaming", () => {
       },
     ]);
     const { exec } = await makeExecutor(stub);
-    const t = await exec.run({ compiled: emptyTree(), target: mkTarget() });
+    const t = await exec.run({ compiled: emptyTree(), target: mkTarget(), tools: [] });
     if (t.outcome !== "succeeded") throw new Error("expected success");
     expect(t.result.stopReason).toBe("max_tokens");
   });
@@ -125,7 +126,7 @@ describe("GoogleExecutor — non-streaming", () => {
       },
     ]);
     const { exec } = await makeExecutor(stub);
-    const t = await exec.run({ compiled: emptyTree(), target: mkTarget() });
+    const t = await exec.run({ compiled: emptyTree(), target: mkTarget(), tools: [] });
     if (t.outcome !== "succeeded") throw new Error("expected success");
     expect(t.result.stopReason).toBe("content_filter");
   });
@@ -138,7 +139,7 @@ describe("GoogleExecutor — non-streaming", () => {
       },
     ]);
     const { exec } = await makeExecutor(stub);
-    const t = await exec.run({ compiled: emptyTree(), target: mkTarget() });
+    const t = await exec.run({ compiled: emptyTree(), target: mkTarget(), tools: [] });
     if (t.outcome !== "succeeded") throw new Error("expected success");
     expect(t.result.stopReason).toBe("other");
   });
@@ -173,7 +174,7 @@ describe("GoogleExecutor — system extraction", () => {
         ],
       },
     };
-    await exec.run({ compiled: tree, target: mkTarget() });
+    await exec.run({ compiled: tree, target: mkTarget(), tools: [] });
     const params = stub.calls[0]!.params;
     const config = params.config as Record<string, unknown>;
     expect(config.systemInstruction).toMatchObject({
@@ -207,7 +208,7 @@ describe("GoogleExecutor — system extraction", () => {
         ],
       },
     };
-    await exec.run({ compiled: tree, target: mkTarget() });
+    await exec.run({ compiled: tree, target: mkTarget(), tools: [] });
     const contents = stub.calls[0]!.params.contents as Array<{
       role: string;
       parts: Array<{ text?: string }>;
@@ -233,7 +234,7 @@ describe("GoogleExecutor — tool-use round-trip", () => {
       },
     ]);
     const { exec } = await makeExecutor(stub);
-    const t = await exec.run({ compiled: emptyTree(), target: mkTarget() });
+    const t = await exec.run({ compiled: emptyTree(), target: mkTarget(), tools: [] });
     if (t.outcome !== "succeeded") throw new Error("expected success");
     expect(t.result.toolCalls).toEqual([{ id: "call_1", name: "calc", input: { a: 2, b: 3 } }]);
     expect(t.result.output.find((b) => b.type === "tool_use")).toMatchObject({
@@ -288,7 +289,7 @@ describe("GoogleExecutor — tool-use round-trip", () => {
         ],
       },
     };
-    await exec.run({ compiled: tree, target: mkTarget() });
+    await exec.run({ compiled: tree, target: mkTarget(), tools: [] });
     const contents = stub.calls[0]!.params.contents as Array<{
       role: string;
       parts: Array<{ functionResponse?: { id?: string; name?: string; response?: unknown } }>;
@@ -321,7 +322,7 @@ describe("GoogleExecutor — thoughtSignature round-trip (G18-G)", () => {
       },
     ]);
     const { exec } = await makeExecutor(stub);
-    const t = await exec.run({ compiled: emptyTree(), target: mkTarget() });
+    const t = await exec.run({ compiled: emptyTree(), target: mkTarget(), tools: [] });
     if (t.outcome !== "succeeded") throw new Error("expected success");
     const toolUse = t.result.output.find((b) => b.type === "tool_use");
     expect(toolUse?.providerMetadata?.google).toEqual({
@@ -365,7 +366,7 @@ describe("GoogleExecutor — thoughtSignature round-trip (G18-G)", () => {
         ],
       },
     };
-    await exec.run({ compiled: tree, target: mkTarget() });
+    await exec.run({ compiled: tree, target: mkTarget(), tools: [] });
     const contents = stub.calls[0]!.params.contents as Array<{
       role: string;
       parts: Array<{
@@ -393,7 +394,7 @@ describe("GoogleExecutor — thoughtSignature round-trip (G18-G)", () => {
       },
     ]);
     const { exec } = await makeExecutor(stub, { stream: true });
-    const t = await exec.run({ compiled: emptyTree(), target: mkTarget() });
+    const t = await exec.run({ compiled: emptyTree(), target: mkTarget(), tools: [] });
     if (t.outcome !== "succeeded") throw new Error("expected success");
     const toolUse = t.result.output.find((b) => b.type === "tool_use");
     expect(toolUse?.providerMetadata?.google).toEqual({
@@ -417,6 +418,7 @@ describe("GoogleExecutor — abort", () => {
       compiled: emptyTree(),
       target: mkTarget(),
       scope: { executionId: "exec-canceled" },
+      tools: [],
     });
     expect(t.outcome).toBe("canceled");
   });
@@ -446,7 +448,7 @@ describe("GoogleExecutor — streaming", () => {
     );
     await new Promise((r) => setImmediate(r));
 
-    const t = await exec.run({ compiled: emptyTree(), target: mkTarget() });
+    const t = await exec.run({ compiled: emptyTree(), target: mkTarget(), tools: [] });
     if (t.outcome !== "succeeded") throw new Error("expected success");
     expect(t.result.output[0]).toMatchObject({ type: "text", text: "hello world" });
 
@@ -471,7 +473,7 @@ describe("GoogleExecutor — streaming", () => {
       },
     ]);
     const { exec } = await makeExecutor(stub, { stream: true });
-    const t = await exec.run({ compiled: emptyTree(), target: mkTarget() });
+    const t = await exec.run({ compiled: emptyTree(), target: mkTarget(), tools: [] });
     if (t.outcome !== "succeeded") throw new Error("expected success");
     const reasoning = t.result.output.find((b) => b.type === "reasoning");
     expect(reasoning).toMatchObject({
@@ -495,7 +497,7 @@ describe("GoogleExecutor — streaming", () => {
       },
     ]);
     const { exec } = await makeExecutor(stub, { stream: true });
-    const t = await exec.run({ compiled: emptyTree(), target: mkTarget() });
+    const t = await exec.run({ compiled: emptyTree(), target: mkTarget(), tools: [] });
     if (t.outcome !== "succeeded") throw new Error("expected success");
     expect(t.result.toolCalls).toEqual([{ id: "c1", name: "calc", input: { a: 1, b: 2 } }]);
   });
@@ -512,8 +514,8 @@ describe("GoogleExecutor — streaming", () => {
     ]);
     const { exec: a } = await makeExecutor(streaming, { stream: true });
     const { exec: b } = await makeExecutor(nonStreaming);
-    const ta = await a.run({ compiled: emptyTree(), target: mkTarget() });
-    const tb = await b.run({ compiled: emptyTree(), target: mkTarget() });
+    const ta = await a.run({ compiled: emptyTree(), target: mkTarget(), tools: [] });
+    const tb = await b.run({ compiled: emptyTree(), target: mkTarget(), tools: [] });
     if (ta.outcome !== "succeeded" || tb.outcome !== "succeeded")
       throw new Error("expected success");
     expect(ta.result.output[0]).toMatchObject({ type: "text", text: "hello" });
@@ -549,6 +551,7 @@ describe("GoogleExecutor — sampling params (G1)", () => {
           google: { stopSequences: ["END"] },
         },
       },
+      tools: [],
     });
     const config = stub.calls[0]!.params.config as Record<string, unknown>;
     expect(config.temperature).toBe(0.7);
@@ -567,6 +570,7 @@ describe("GoogleExecutor — sampling params (G1)", () => {
     const projected = await exec.project({
       compiled: emptyTree(),
       target: mkTarget(),
+      tools: [],
     });
     expect(projected).toBeDefined();
     // The executor's projection layer doesn't surface frequency/presence
@@ -598,6 +602,7 @@ describe("GoogleExecutor — providerOptions.google (G5)", () => {
           },
         },
       },
+      tools: [],
     });
     const config = stub.calls[0]!.params.config as Record<string, unknown> & {
       topK?: number;
@@ -627,6 +632,7 @@ describe("GoogleExecutor — providerOptions.google (G5)", () => {
         ...mkTarget(),
         providerOptions: { google: { temperature: 0.95 } },
       },
+      tools: [],
     });
     const config = stub.calls[0]!.params.config as Record<string, unknown>;
     expect(config.temperature).toBe(0.95);
@@ -661,7 +667,7 @@ describe("GoogleExecutor — per-tool providerOptions.google", () => {
         ],
       },
     };
-    await exec.run({ compiled: tree, target: mkTarget() });
+    await exec.run({ compiled: tree, target: mkTarget(), tools: [] });
     const tools = (stub.calls[0]!.params.config as { tools?: unknown[] }).tools as Array<{
       functionDeclarations: Array<{ name: string; description?: string }>;
     }>;
@@ -688,7 +694,7 @@ describe("GoogleExecutor — parseThinkTags (G7)", () => {
       },
     ]);
     const { exec } = await makeExecutor(stub, { stream: true, parseThinkTags: true });
-    const t = await exec.run({ compiled: emptyTree(), target: mkTarget() });
+    const t = await exec.run({ compiled: emptyTree(), target: mkTarget(), tools: [] });
     if (t.outcome !== "succeeded") throw new Error("expected success");
     const reasoning = t.result.output.find((b) => b.type === "reasoning");
     const text = t.result.output.find((b) => b.type === "text");
@@ -720,7 +726,7 @@ describe("GoogleExecutor — customBlocks (G12)", () => {
         citation: { onContent: (c) => captured.push(c) },
       },
     });
-    const t = await exec.run({ compiled: emptyTree(), target: mkTarget() });
+    const t = await exec.run({ compiled: emptyTree(), target: mkTarget(), tools: [] });
     if (t.outcome !== "succeeded") throw new Error("expected success");
     expect(captured.join("")).toContain("source-42");
   });
@@ -754,7 +760,7 @@ describe("GoogleExecutor — images (G4)", () => {
         ],
       },
     };
-    await exec.run({ compiled: tree, target: mkTarget() });
+    await exec.run({ compiled: tree, target: mkTarget(), tools: [] });
     const part = (
       stub.calls[0]!.params.contents as Array<{
         parts: Array<{ inlineData?: { mimeType: string; data: string } }>;
@@ -786,7 +792,7 @@ describe("GoogleExecutor — images (G4)", () => {
         ],
       },
     };
-    await exec.run({ compiled: tree, target: mkTarget() });
+    await exec.run({ compiled: tree, target: mkTarget(), tools: [] });
     const part = (
       stub.calls[0]!.params.contents as Array<{
         parts: Array<{ fileData?: { mimeType: string; fileUri: string } }>;
@@ -816,7 +822,7 @@ describe("GoogleExecutor — usage surfacing (G2/G3)", () => {
       },
     ]);
     const { exec } = await makeExecutor(stub);
-    const t = await exec.run({ compiled: emptyTree(), target: mkTarget() });
+    const t = await exec.run({ compiled: emptyTree(), target: mkTarget(), tools: [] });
     if (t.outcome !== "succeeded") throw new Error("expected success");
     expect(t.result.usage?.cachedInputTokens).toBe(180);
   });
@@ -836,7 +842,7 @@ describe("GoogleExecutor — usage surfacing (G2/G3)", () => {
       },
     ]);
     const { exec } = await makeExecutor(stub);
-    const t = await exec.run({ compiled: emptyTree(), target: mkTarget() });
+    const t = await exec.run({ compiled: emptyTree(), target: mkTarget(), tools: [] });
     if (t.outcome !== "succeeded") throw new Error("expected success");
     expect(t.result.usage?.reasoningTokens).toBe(25);
   });
@@ -903,7 +909,7 @@ describe("GoogleExecutor — journaled lifecycle", () => {
       { kind: "non-streaming", response: mkResponse({ text: "hi" }) },
     ]);
     const { exec, journal } = await makeExecutor(stub);
-    await exec.run({ compiled: emptyTree(), target: mkTarget() });
+    await exec.run({ compiled: emptyTree(), target: mkTarget(), tools: [] });
     const events = await Effect.runPromise(
       Stream.runCollect(journal.readByQuery({ surface: "executor" }, "beginning")),
     );

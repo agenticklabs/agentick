@@ -82,7 +82,7 @@ describe("defineExecutor()", () => {
     });
     await exec.ready;
 
-    const terminal = await exec.run({ compiled: mkTree(), target: mkTarget() });
+    const terminal = await exec.run({ compiled: mkTree(), target: mkTarget(), tools: [] });
     expect(calls).toBe(1);
     expect(receivedInput?.messages.length).toBeGreaterThan(0);
     if (terminal.outcome !== "succeeded") throw new Error("expected success");
@@ -103,7 +103,8 @@ describe("defineExecutor()", () => {
       compiled: mkTree(),
       target: mkTarget(),
       scope: { executionId: "exec-1" },
-    });
+        tools: [],
+});
     expect(terminal.outcome).toBe("canceled");
   });
 
@@ -121,7 +122,7 @@ describe("defineExecutor()", () => {
       inbox: new LocalInbox(),
     });
     await exec.ready;
-    await expect(exec.run({ compiled: mkTree(), target: mkTarget() })).rejects.toMatchObject({
+    await expect(exec.run({ compiled: mkTree(), target: mkTarget(), tools: [] })).rejects.toMatchObject({
       _tag: "ProviderRejected",
     });
   });

@@ -65,6 +65,7 @@ const calcTool: ToolRegistration = {
     exposure: ["model", "dispatch"],
   },
   handlerRef: "h.calc",
+  binding: { scope: "runtime" },
 };
 
 async function mkSession(
@@ -130,6 +131,7 @@ describe("SessionHarness — dispatch (host-side tool invocation)", () => {
         exposure: ["model"], // not "dispatch"
       },
       handlerRef: "h.calc",
+      binding: { scope: "runtime" },
     };
     const { session, tools } = await mkSession({ tools: [modelOnly] });
     await expect(session.dispatch("model-only", {})).rejects.toMatchObject({

@@ -393,7 +393,9 @@ export class FakeLanguageModelExecutor
 // ============================================================================
 
 function projectAsEffect(input: RunInput): Effect.Effect<LanguageModelInput, never, never> {
-  return Effect.sync(() => projectImpl({ compiled: input.compiled, target: input.target }));
+  return Effect.sync(() =>
+    projectImpl({ compiled: input.compiled, target: input.target, tools: input.tools }),
+  );
 }
 
 function projectImpl(input: ProjectInput): LanguageModelInput {

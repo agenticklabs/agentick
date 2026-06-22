@@ -10,12 +10,41 @@
  */
 
 import { LocalEventBus, LocalInbox, MemoryJournal, ulid } from "@agentick/runtime-next";
-import type { ElicitationHarnessProtocol, ToolRegistration } from "@agentick/spec-next";
+import type {
+  ElicitationHarnessProtocol,
+  ToolBinding,
+  ToolDeclaration,
+  ToolRegistration,
+} from "@agentick/spec-next";
 import { ElicitationHarness } from "@agentick/elicitation-next";
 
 import { InMemoryHandlerResolver } from "../handler-resolver.js";
 import { ToolExecutorHarness } from "../harness.js";
 import type { ToolExecutorHarnessOptions, ToolHandler, Validator } from "../types.js";
+
+/**
+ * Build a {@link ToolRegistration} for tests with sensible defaults.
+ *
+ * `binding` defaults to `{ scope: "runtime" }` — provenance for
+ * tests/ad-hoc registrations that aren't bound to a specific
+ * gateway/app/session/execution/reconciler scope. Override when a test
+ * needs to exercise precedence resolution (e.g., pass
+ * `binding: { scope: "session", sessionId }` to verify a session-level
+ * tool wins over a runtime one).
+ */
+export function fakeRegistration(input: {
+  readonly declaration: ToolDeclaration;
+  readonly handlerRef?: string;
+  readonly useDeps?: Readonly<Record<string, unknown>>;
+  readonly binding?: ToolBinding;
+}): ToolRegistration {
+  return {
+    declaration: input.declaration,
+    handlerRef: input.handlerRef ?? `h.${input.declaration.name}`,
+    ...(input.useDeps !== undefined ? { useDeps: input.useDeps } : {}),
+    binding: input.binding ?? { scope: "runtime" },
+  };
+}
 
 export interface TestHarnessOptions {
   /** Pre-registered tool declarations + their handler refs. */

@@ -110,6 +110,7 @@ describe("@agentick/spec-next — tool executor protocol", () => {
         declaration: decl,
         handlerRef: "h.calc.add",
         useDeps: { logger: "opaque" },
+        binding: { scope: "runtime" },
       };
       const input: RegisterToolInput = { registration: reg };
       expect(input.registration.declaration.name).toBe("calc.add");

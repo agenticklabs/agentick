@@ -126,6 +126,7 @@ export function runExecutorConformance(factory: ExecutorConformanceFactory): voi
       const input = await executor.project({
         compiled: mkRenderedTree(),
         target: mkTarget(),
+        tools: [],
       });
       expect(input).toBeDefined();
       const messages = (input as { messages?: ReadonlyArray<unknown> }).messages;
@@ -137,8 +138,8 @@ export function runExecutorConformance(factory: ExecutorConformanceFactory): voi
       const { executor } = await factory({ harnessId: "ex-project-2" });
       const tree = mkRenderedTree();
       const target = mkTarget();
-      const a = await executor.project({ compiled: tree, target });
-      const b = await executor.project({ compiled: tree, target });
+      const a = await executor.project({ compiled: tree, target, tools: [] });
+      const b = await executor.project({ compiled: tree, target, tools: [] });
       expect(JSON.stringify(a)).toEqual(JSON.stringify(b));
     });
   });
@@ -150,6 +151,7 @@ export function runExecutorConformance(factory: ExecutorConformanceFactory): voi
       const terminal = await executor.run({
         compiled: mkRenderedTree(),
         target: mkTarget(),
+        tools: [],
       });
       expect(terminal.outcome).toBe("succeeded");
       if (terminal.outcome === "succeeded") {
@@ -164,6 +166,7 @@ export function runExecutorConformance(factory: ExecutorConformanceFactory): voi
       const terminal = await executor.run({
         compiled: mkRenderedTree(),
         target: mkTarget(),
+        tools: [],
       });
       if (terminal.outcome !== "succeeded") throw new Error("expected success");
       expect(Array.isArray(terminal.result.output)).toBe(true);
@@ -187,11 +190,11 @@ export function runExecutorConformance(factory: ExecutorConformanceFactory): voi
       const tree = mkRenderedTree();
       const target = mkTarget();
 
-      const projected = await executor.project({ compiled: tree, target });
+      const projected = await executor.project({ compiled: tree, target, tools: [] });
       const executed = await executor.execute({ targetInput: projected, target });
       const normalized = await executor.normalize({ targetOutput: executed, target });
 
-      const terminal = await executor.run({ compiled: tree, target });
+      const terminal = await executor.run({ compiled: tree, target, tools: [] });
       if (terminal.outcome !== "succeeded") throw new Error("expected success");
 
       const phaseText = normalized.output
@@ -227,6 +230,7 @@ export function runExecutorConformance(factory: ExecutorConformanceFactory): voi
       const projected = (await executor.project({
         compiled: mkRenderedTree({ imageBlock }),
         target: mkTarget(),
+        tools: [],
       })) as LanguageModelInput;
       const userMsg = projected.messages.find((m) => m.role === "user");
       expect(userMsg).toBeDefined();
@@ -248,6 +252,7 @@ export function runExecutorConformance(factory: ExecutorConformanceFactory): voi
       const projected = (await executor.project({
         compiled: mkRenderedTree({ imageBlock }),
         target: mkTarget(),
+        tools: [],
       })) as LanguageModelInput;
       const userMsg = projected.messages.find((m) => m.role === "user");
       const imgPart = userMsg!.content.find((p) => p.type === "image") as
@@ -265,6 +270,7 @@ export function runExecutorConformance(factory: ExecutorConformanceFactory): voi
           config: { temperature: 0.42, maxOutputTokens: 256 },
         }),
         target: mkTarget(),
+        tools: [],
       })) as LanguageModelInput;
       // Whichever convention the adapter uses (parameters.* field, or
       // some equivalent), the canonical projection MUST expose them.
@@ -291,6 +297,7 @@ export function runExecutorConformance(factory: ExecutorConformanceFactory): voi
       const projected = (await executor.project({
         compiled: mkRenderedTree(),
         target,
+        tools: [],
       })) as LanguageModelInput;
       expect(Array.isArray(projected.messages)).toBe(true);
     });
@@ -312,6 +319,7 @@ export function runExecutorConformance(factory: ExecutorConformanceFactory): voi
       const projected = await executor.project({
         compiled: mkRenderedTree(),
         target: mkTarget(),
+        tools: [],
       });
       const stream = executor.executeStream({
         targetInput: projected,
@@ -336,6 +344,7 @@ export function runExecutorConformance(factory: ExecutorConformanceFactory): voi
       const projected = await executor.project({
         compiled: mkRenderedTree(),
         target: mkTarget(),
+        tools: [],
       });
       const stream = executor.executeStream({
         targetInput: projected,
@@ -375,6 +384,7 @@ export function runExecutorConformance(factory: ExecutorConformanceFactory): voi
       const projected = await executor.project({
         compiled: mkRenderedTree(),
         target: mkTarget(),
+        tools: [],
       });
       const stream = executor.executeStream({
         targetInput: projected,
@@ -399,10 +409,10 @@ export function runExecutorConformance(factory: ExecutorConformanceFactory): voi
       const tree = mkRenderedTree();
       const target = mkTarget();
 
-      const terminal = await executor.run({ compiled: tree, target });
+      const terminal = await executor.run({ compiled: tree, target, tools: [] });
       if (terminal.outcome !== "succeeded") throw new Error("expected success");
 
-      const projected = await executor.project({ compiled: tree, target });
+      const projected = await executor.project({ compiled: tree, target, tools: [] });
       const stream = executor.executeStream({ targetInput: projected, target });
       for await (const _ of stream) {
         void _;

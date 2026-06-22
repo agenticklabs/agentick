@@ -26,6 +26,7 @@ function echoReg(name = "echo"): ToolRegistration {
       exposure: ["model", "dispatch"],
     },
     handlerRef: `h.${name}`,
+    binding: { scope: "runtime" },
   };
 }
 

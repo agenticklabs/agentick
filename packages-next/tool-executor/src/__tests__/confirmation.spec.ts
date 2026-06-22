@@ -40,6 +40,7 @@ function confirmTool(name = "delete-file"): ToolRegistration {
       annotations: { requiresConfirmation: true },
     },
     handlerRef: `h.${name}`,
+    binding: { scope: "runtime" },
   };
 }
 

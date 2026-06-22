@@ -122,7 +122,7 @@ describe("AnthropicExecutor.run — 1000 text deltas (no subscriber)", () => {
     "1000 text deltas",
     async () => {
       const { exec } = await makeStreamingExecutor(events);
-      await exec.run({ compiled: emptyTree(), target: mkTarget() });
+      await exec.run({ compiled: emptyTree(), target: mkTarget(), tools: [] });
     },
     { iterations: ITERATIONS },
   );
@@ -139,7 +139,7 @@ describe("AnthropicExecutor.run — 100 text deltas + 1 tool_call (no subscriber
     "100 text + 1 tool_call",
     async () => {
       const { exec } = await makeStreamingExecutor(events);
-      await exec.run({ compiled: emptyTree(), target: mkTarget() });
+      await exec.run({ compiled: emptyTree(), target: mkTarget(), tools: [] });
     },
     { iterations: ITERATIONS },
   );
@@ -156,7 +156,7 @@ describe("AnthropicExecutor.run — 100 text deltas (no subscriber)", () => {
     "100 text deltas (no subscriber)",
     async () => {
       const { exec } = await makeStreamingExecutor(events);
-      await exec.run({ compiled: emptyTree(), target: mkTarget() });
+      await exec.run({ compiled: emptyTree(), target: mkTarget(), tools: [] });
     },
     { iterations: ITERATIONS },
   );
@@ -188,7 +188,7 @@ describe("AnthropicExecutor.run — 100 text deltas (1 subscriber)", () => {
         );
         await new Promise((r) => setImmediate(r));
       }
-      await exec.run({ compiled: emptyTree(), target: mkTarget() });
+      await exec.run({ compiled: emptyTree(), target: mkTarget(), tools: [] });
     },
     { iterations: ITERATIONS },
   );

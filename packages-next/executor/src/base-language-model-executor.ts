@@ -891,6 +891,7 @@ export abstract class BaseLanguageModelExecutor<TRaw, TChunk = unknown>
       const projected = this.projectImpl({
         compiled: input.compiled,
         target: input.target,
+        tools: input.tools,
       });
 
       // 2. execute (provider call; may stream + emit deltas)

@@ -195,6 +195,7 @@ describe("AppExtension — installer surfaces", () => {
           exposure: ["dispatch"],
         },
         handlerRef: "ext.handlers/ping",
+        binding: { scope: "runtime" },
       },
     });
     const content = await session.dispatch("ping", {});

@@ -40,7 +40,7 @@
  */
 
 import type { ContentBlock } from "../data/content-blocks.js";
-import type { ToolDeclaration, ToolExposure } from "../data/declarations.js";
+import type { ToolBinding, ToolDeclaration, ToolExposure } from "../data/declarations.js";
 import type { StandardSchemaIssue } from "../data/standard-schema.js";
 
 // ============================================================================
@@ -173,6 +173,17 @@ export interface ToolRegistration {
    * Render-time `use:` deps. Opaque values forwarded to the handler.
    */
   readonly useDeps?: Readonly<Record<string, unknown>>;
+  /**
+   * **Provenance.** Which declaration seam contributed this
+   * registration. Drives precedence resolution in
+   * {@link ToolExecutorProtocol.compileForTick} and lifecycle cleanup
+   * (e.g., scope=session entries are removed when their session
+   * closes). Internal to the registry; never exposed on the wire or
+   * to model providers.
+   *
+   * @see ToolBinding for the layered config seams.
+   */
+  readonly binding: ToolBinding;
 }
 
 export interface RegisterToolInput {
@@ -182,6 +193,27 @@ export interface RegisterToolInput {
 
 export interface UnregisterToolInput {
   readonly name: string;
+  readonly opId?: string;
+}
+
+/**
+ * Input for {@link ToolExecutorProtocol.replaceReconcilerTools}.
+ * Atomically swaps the reconciler-bound slice of the registry for a
+ * single `mountId`.
+ *
+ * The loop calls this after each `renderTree()` so the registry's
+ * reconciler slice mirrors the just-rendered tree's tool
+ * declarations. Registrations passed here MUST carry
+ * `binding.scope === "reconciler"` with
+ * `binding.mountId === input.mountId`.
+ *
+ * The "reconciler" slot is reconciler-agnostic — any harness that
+ * produces a valid `RenderedTree` (React/JSX, programmatic builder,
+ * template-based) contributes through this slot.
+ */
+export interface ReplaceReconcilerToolsInput {
+  readonly mountId: string;
+  readonly registrations: readonly ToolRegistration[];
   readonly opId?: string;
 }
 
@@ -428,8 +460,49 @@ export interface ToolExecutorProtocol {
 
   /**
    * List currently-registered tool declarations, optionally filtered.
+   *
+   * Returns one entry per registered name **per binding slice** — i.e.
+   * if the same name is registered under multiple bindings (e.g., once
+   * at session scope and once by the reconciler), `list` returns both.
+   * For the precedence-resolved set the model should see at a given
+   * tick, use {@link compileForTick}.
+   *
+   * Suitable for diagnostics, devtools, and audit. Not for projection.
    */
   list(filter?: ToolListFilter): Promise<readonly ToolDeclaration[]>;
+
+  /**
+   * Atomically replace the reconciler-bound slice of the registry for
+   * the given `mountId`. Every existing registration with
+   * `binding.scope === "reconciler" && binding.mountId === input.mountId`
+   * is removed first; then the supplied registrations are added. Other
+   * binding slices (gateway/app/session/execution/extension/runtime)
+   * are untouched.
+   *
+   * The loop executor calls this immediately after each successful
+   * `renderTree()` so the reconciler slice mirrors the just-rendered
+   * tree. Reconciler-agnostic — any harness that produces a valid
+   * `RenderedTree` flows through this slot.
+   */
+  replaceReconcilerTools(input: ReplaceReconcilerToolsInput): Promise<void>;
+
+  /**
+   * Per-tick compile — returns the **precedence-resolved** set of tool
+   * declarations visible at this tick.
+   *
+   * Resolution rules:
+   * 1. Filter every registration by the supplied {@link ToolListFilter}
+   *    (the common case: `{ exposure: "model" }` for the model's tool
+   *    list).
+   * 2. Dedup by `declaration.name`. On collision, the most-specific
+   *    binding wins. Precedence (low → high):
+   *    `runtime < gateway < \{app, extension@app\} < \{session,
+   *    extension@session\} < execution < reconciler`.
+   *
+   * This is the canonical source for projection — the loop passes the
+   * result as `ProjectInput.tools`.
+   */
+  compileForTick(filter?: ToolListFilter): Promise<readonly ToolDeclaration[]>;
 }
 
 // ============================================================================
