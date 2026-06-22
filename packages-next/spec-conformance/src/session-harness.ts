@@ -205,6 +205,7 @@ function stubToolExecutor(): ToolExecutorProtocol {
     }),
     abort: async () => undefined,
     replaceReconcilerTools: async () => undefined,
+    removeBoundTools: async () => undefined,
     compileForTick: async () => [],
   };
 }

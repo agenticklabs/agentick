@@ -62,6 +62,7 @@ import type {
   Operation,
   OperationJournal,
   RegisterToolInput,
+  RemoveBoundToolsInput,
   ReplaceReconcilerToolsInput,
   ToolDeclaration,
   ToolExecutorFactory,
@@ -71,7 +72,7 @@ import type {
   UnregisterToolInput,
 } from "@agentick/spec-next";
 
-import { InMemoryToolRegistry } from "./registry.js";
+import { InMemoryToolRegistry, sameBindingKey } from "./registry.js";
 
 // ============================================================================
 // Public API
@@ -126,6 +127,12 @@ export interface DefineToolExecutorInput {
    * for fully-custom registry storage.
    */
   readonly replaceReconcilerTools?: (input: ReplaceReconcilerToolsInput) => Promise<void>;
+
+  /**
+   * Optional custom `removeBoundTools` callback. When omitted, the
+   * harness's internal registry handles bulk removal by binding key.
+   */
+  readonly removeBoundTools?: (input: RemoveBoundToolsInput) => Promise<void>;
 
   /**
    * Optional custom `compileForTick` callback. When omitted, the
@@ -236,6 +243,30 @@ class CallbackToolExecutor extends BaseHarness<"tool"> implements ToolExecutorPr
     // Pure read — bypass runOperation. Matches the reference harness.
     if (this.spec.list) return this.spec.list(filter);
     return this.registry.list(filter);
+  }
+
+  removeBoundTools(input: RemoveBoundToolsInput): Promise<void> {
+    const op: Operation<RemoveBoundToolsInput, void> = {
+      opId: input.opId ?? `tool:remove-bound:${input.binding.scope}:${ulid()}`,
+      surface: "tool",
+      name: "tool:command:remove-bound-tools",
+      scope: {},
+      input,
+    };
+    return runHarnessProtocol(
+      this.runOperation(op, (i) =>
+        Effect.tryPromise({
+          try: async () => {
+            if (this.spec.removeBoundTools) {
+              await this.spec.removeBoundTools(i);
+            } else {
+              this.registry.removeWhere((b) => sameBindingKey(b, i.binding));
+            }
+          },
+          catch: (cause) => cause,
+        }),
+      ),
+    );
   }
 
   replaceReconcilerTools(input: ReplaceReconcilerToolsInput): Promise<void> {

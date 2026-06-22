@@ -197,6 +197,24 @@ export interface UnregisterToolInput {
 }
 
 /**
+ * Input for {@link ToolExecutorProtocol.removeBoundTools}. Removes
+ * every registration whose binding key matches the supplied
+ * `binding`. Used by the session/execution lifecycle to clean up
+ * scope-bound tools when their scope closes:
+ *
+ *   - Execution ends → `removeBoundTools({ binding: { scope: "execution", executionId }})`
+ *   - Session ends → `removeBoundTools({ binding: { scope: "session", sessionId }})`
+ *
+ * Equality is by `sameBindingKey` (the identity-defining fields per
+ * variant — see {@link ToolBinding}). Other binding slices are
+ * untouched.
+ */
+export interface RemoveBoundToolsInput {
+  readonly binding: import("../data/declarations.js").ToolBinding;
+  readonly opId?: string;
+}
+
+/**
  * Input for {@link ToolExecutorProtocol.replaceReconcilerTools}.
  * Atomically swaps the reconciler-bound slice of the registry for a
  * single `mountId`.
@@ -470,6 +488,17 @@ export interface ToolExecutorProtocol {
    * Suitable for diagnostics, devtools, and audit. Not for projection.
    */
   list(filter?: ToolListFilter): Promise<readonly ToolDeclaration[]>;
+
+  /**
+   * Bulk-remove every registration whose binding-key equals the
+   * supplied `binding`. Used by scope lifecycle hooks (execution
+   * close, session close). Returns the count of removed entries.
+   *
+   * Distinct from {@link unregister}, which removes every binding
+   * slot for a given name (cross-scope). `removeBoundTools` removes
+   * one scope across all names.
+   */
+  removeBoundTools(input: RemoveBoundToolsInput): Promise<void>;
 
   /**
    * Atomically replace the reconciler-bound slice of the registry for

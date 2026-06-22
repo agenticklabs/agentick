@@ -685,6 +685,28 @@ export class SessionHarness<P = unknown>
     this.store.setCurrentExecutionId(executionId);
     this.store.setStatus("running");
 
+    // Register execution-scoped tools (#139). Each tool declared on
+    // `SendInput.tools` lives in the registry for the duration of this
+    // execution, tagged with `binding: { scope: "execution", executionId }`.
+    // They're removed at execution end (success or failure) by the
+    // `executionScopeCleanup` finally below — see `removeBoundTools`.
+    if (input.tools !== undefined && input.tools.length > 0) {
+      for (const decl of input.tools) {
+        await this.toolExecutor.register({
+          registration: {
+            declaration: decl,
+            handlerRef: decl.handlerRef ?? decl.id,
+            binding: { scope: "execution", executionId },
+          },
+        });
+      }
+    }
+    const executionScopeCleanup = async () => {
+      await this.toolExecutor.removeBoundTools({
+        binding: { scope: "execution", executionId },
+      });
+    };
+
     // Per-call overrides — executor + target — fall through from
     // SendInput. The app-level executor/target is the default; this
     // send swaps in caller-supplied alternatives without changing
@@ -713,6 +735,9 @@ export class SessionHarness<P = unknown>
       this._currentExecution = null;
       this.store.setCurrentExecutionId(null);
       this.store.setStatus("idle");
+      // Fire-and-forget — cleanup failure shouldn't keep the execution
+      // pending. The registry handles unknown bindings as no-ops.
+      void executionScopeCleanup().catch(() => undefined);
     });
     resultPromise.catch(() => {
       // Prevent unhandled rejections — handle has its own .result.

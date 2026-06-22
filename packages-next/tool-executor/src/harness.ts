@@ -37,6 +37,7 @@ import type {
   Operation,
   OperationJournal,
   RegisterToolInput,
+  RemoveBoundToolsInput,
   ReplaceReconcilerToolsInput,
   ToolDeclaration,
   ToolExecutorInboxMessage,
@@ -51,7 +52,7 @@ import {
   TOOL_CONFIRMATION_REPLY_SCHEMA,
   type ToolConfirmationReply,
 } from "./confirmation-schema.js";
-import { InMemoryToolRegistry } from "./registry.js";
+import { InMemoryToolRegistry, sameBindingKey } from "./registry.js";
 import type {
   HandlerResolver,
   HandlerChannelSeed,
@@ -140,6 +141,23 @@ export class ToolExecutorHarness extends BaseHarness<"tool"> implements ToolExec
     // journal with no-op envelopes. Conformance only requires correct
     // shape; the bus / journal don't care about reads.
     return this.registry.list(filter);
+  }
+
+  removeBoundTools(input: RemoveBoundToolsInput): Promise<void> {
+    const op: Operation<RemoveBoundToolsInput, void> = {
+      opId: input.opId ?? `tool:remove-bound:${input.binding.scope}:${ulid()}`,
+      surface: "tool",
+      name: "tool:command:remove-bound-tools",
+      scope: {},
+      input,
+    };
+    return runHarnessProtocol(
+      this.runOperation(op, (i) =>
+        Effect.sync(() => {
+          this.registry.removeWhere((b) => sameBindingKey(b, i.binding));
+        }),
+      ),
+    );
   }
 
   replaceReconcilerTools(input: ReplaceReconcilerToolsInput): Promise<void> {

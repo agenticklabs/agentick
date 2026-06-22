@@ -900,17 +900,32 @@ export class AppHarness<P = unknown>
     //   - Otherwise → construct the bundled `ToolExecutorHarness` from
     //     `toolDefaults` + the shared `handlerResolver` + the
     //     per-session elicitation harness.
-    // Merge extension-contributed tools with adopter's
-    // `toolDefaults.initialTools`. Extension tools install FIRST so
-    // adopter-supplied entries can override on name collision (the
-    // registry's add() is idempotent on identical shape and rejects
-    // shape conflicts — adopter overrides come through fine because
-    // they don't share a `name` with the extension tool unless the
-    // adopter is intentionally replacing it).
+    // Merge tools from three sources into the per-session executor's
+    // initial registry:
+    //   1. extension-contributed tools (e.g. withMCP) — already carry
+    //      `binding: { scope: "extension", level: "app" }`
+    //   2. `AppHarnessOptions.toolDefaults.initialTools` — adopter-
+    //      supplied at app construction time; will be tagged at app
+    //      scope in slice 6 (today these come through with whatever
+    //      binding the adopter set, defaulting to runtime)
+    //   3. `CreateSessionInput.tools` — adopter-supplied per-session,
+    //      tagged HERE with `binding: { scope: "session", sessionId }`
+    //
+    // Precedence at compile-time (slice 2's `compileForTick`):
+    // session > extension@app > runtime. The order below is the
+    // INSERTION order — irrelevant to precedence (the registry resolves
+    // by binding rank, not insertion).
+    const sessionScopedTools: readonly ToolRegistration[] = (input.tools ?? []).map((decl) => ({
+      declaration: decl,
+      handlerRef: decl.handlerRef ?? decl.id,
+      binding: { scope: "session" as const, sessionId },
+    }));
     const mergedInitialTools: readonly ToolRegistration[] | undefined =
-      this.extensionTools.length > 0
-        ? [...this.extensionTools, ...(this.toolDefaults.initialTools ?? [])]
-        : this.toolDefaults.initialTools;
+      this.extensionTools.length > 0 ||
+      (this.toolDefaults.initialTools !== undefined && this.toolDefaults.initialTools.length > 0) ||
+      sessionScopedTools.length > 0
+        ? [...this.extensionTools, ...(this.toolDefaults.initialTools ?? []), ...sessionScopedTools]
+        : undefined;
 
     const tools: ToolExecutorProtocol = this.toolFactory
       ? this.toolFactory({
