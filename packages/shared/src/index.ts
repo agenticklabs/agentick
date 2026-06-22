@@ -63,6 +63,7 @@ export * from "./split-message.js";
 export * from "./embeddings.js";
 export * from "./transport-utils.js";
 export * from "./rpc-transport.js";
+export * from "./utils/predicates.js";
 
 export function uuidv7(opts?: Version7Options, offset?: number): string {
   try {

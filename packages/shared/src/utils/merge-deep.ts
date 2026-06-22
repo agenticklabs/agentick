@@ -1,3 +1,5 @@
+import { isObject } from "./predicates.js";
+
 /**
  * Deep merge utility function that recursively merges objects.
  * Arrays are replaced, not merged.
@@ -25,11 +27,4 @@ export function mergeDeep<T extends Record<string, any>>(
   }
 
   return mergeDeep(target, ...sources);
-}
-
-/**
- * Check if a value is a plain object (not array, null, or other types)
- */
-function isObject(item: any): item is Record<string, any> {
-  return item && typeof item === "object" && !Array.isArray(item);
 }

@@ -309,3 +309,127 @@ describe("ToolExecutorHarness — state store", () => {
 // Suppress unused-symbol warning for permissive validator (verified via
 // resolver tests; harness integration tests use explicit ones).
 void permissiveValidator;
+
+// ============================================================================
+// Slice-2 (#136) — replaceReconcilerTools + compileForTick via the harness
+// ============================================================================
+
+describe("ToolExecutorHarness — replaceReconcilerTools (#136)", () => {
+  function reconcilerReg(name: string, mountId: string): ToolRegistration {
+    return {
+      declaration: {
+        id: name,
+        name,
+        description: name,
+        inputSchema: jsonSchema({ type: "object" }),
+        exposure: ["model"],
+      },
+      handlerRef: `h.${name}`,
+      binding: { scope: "reconciler", mountId },
+    };
+  }
+
+  it("swaps the reconciler slice atomically per mountId", async () => {
+    const { harness } = await createTestHarness();
+    await harness.replaceReconcilerTools({
+      mountId: "m1",
+      registrations: [reconcilerReg("a", "m1"), reconcilerReg("b", "m1")],
+    });
+    expect((await harness.list()).map((d) => d.name).sort()).toEqual(["a", "b"]);
+
+    await harness.replaceReconcilerTools({
+      mountId: "m1",
+      registrations: [reconcilerReg("a", "m1"), reconcilerReg("c", "m1")],
+    });
+    expect((await harness.list()).map((d) => d.name).sort()).toEqual(["a", "c"]);
+  });
+
+  it("does not disturb other binding slices", async () => {
+    const { harness } = await createTestHarness({
+      tools: [echoReg("rt-only", ["model"])], // binding: runtime
+    });
+    await harness.replaceReconcilerTools({
+      mountId: "m1",
+      registrations: [reconcilerReg("rendered", "m1")],
+    });
+    const names = (await harness.list()).map((d) => d.name).sort();
+    expect(names).toEqual(["rendered", "rt-only"]);
+
+    await harness.replaceReconcilerTools({ mountId: "m1", registrations: [] });
+    const after = (await harness.list()).map((d) => d.name).sort();
+    expect(after).toEqual(["rt-only"]);
+  });
+});
+
+describe("ToolExecutorHarness — compileForTick precedence (#136)", () => {
+  it("reconciler binding wins over runtime on name collision", async () => {
+    const { harness } = await createTestHarness({
+      tools: [
+        {
+          declaration: {
+            id: "foo",
+            name: "foo",
+            description: "runtime version",
+            inputSchema: jsonSchema({ type: "object" }),
+            exposure: ["model"],
+          },
+          handlerRef: "h.foo.runtime",
+          binding: { scope: "runtime" },
+        },
+      ],
+    });
+    await harness.replaceReconcilerTools({
+      mountId: "m1",
+      registrations: [
+        {
+          declaration: {
+            id: "foo",
+            name: "foo",
+            description: "reconciler version",
+            inputSchema: jsonSchema({ type: "object" }),
+            exposure: ["model"],
+          },
+          handlerRef: "h.foo.reconciler",
+          binding: { scope: "reconciler", mountId: "m1" },
+        },
+      ],
+    });
+    const compiled = await harness.compileForTick({ exposure: "model" });
+    expect(compiled).toHaveLength(1);
+    expect(compiled[0]!.description).toBe("reconciler version");
+  });
+
+  it("filter applies BEFORE precedence (high-rank failing filter doesn't shadow lower-rank passing)", async () => {
+    const { harness } = await createTestHarness({
+      tools: [
+        {
+          // Higher rank (session) but dispatch-only — should be hidden from model filter
+          declaration: {
+            id: "foo",
+            name: "foo",
+            description: "session dispatch-only",
+            inputSchema: jsonSchema({ type: "object" }),
+            exposure: ["dispatch"],
+          },
+          handlerRef: "h.foo.session",
+          binding: { scope: "session", sessionId: "s1" },
+        },
+        {
+          // Lower rank (runtime) but model-exposed — should win the filter
+          declaration: {
+            id: "foo",
+            name: "foo",
+            description: "runtime model",
+            inputSchema: jsonSchema({ type: "object" }),
+            exposure: ["model"],
+          },
+          handlerRef: "h.foo.runtime",
+          binding: { scope: "runtime" },
+        },
+      ],
+    });
+    const modelView = await harness.compileForTick({ exposure: "model" });
+    expect(modelView).toHaveLength(1);
+    expect(modelView[0]!.description).toBe("runtime model");
+  });
+});

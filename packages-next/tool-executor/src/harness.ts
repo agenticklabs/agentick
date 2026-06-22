@@ -37,6 +37,7 @@ import type {
   Operation,
   OperationJournal,
   RegisterToolInput,
+  ReplaceReconcilerToolsInput,
   ToolDeclaration,
   ToolExecutorInboxMessage,
   ToolExecutorProtocol,
@@ -141,20 +142,36 @@ export class ToolExecutorHarness extends BaseHarness<"tool"> implements ToolExec
     return this.registry.list(filter);
   }
 
-  // SLICE 1 PLACEHOLDER (#136 lands the real impl).
-  //
-  // Both methods on `ToolExecutorProtocol` for the layered-tools
-  // unification land in slice 2 — scoped registry with binding tags,
-  // atomic reconciler-slice replacement, and precedence-aware
-  // compileForTick. Until then: replaceReconcilerTools is a no-op and
-  // compileForTick collapses to `list(filter)` (no precedence
-  // resolution; multiple bindings for the same name surface as
-  // duplicates — slice 2 fixes).
-  async replaceReconcilerTools(): Promise<void> {
-    return;
+  replaceReconcilerTools(input: ReplaceReconcilerToolsInput): Promise<void> {
+    const op: Operation<ReplaceReconcilerToolsInput, void> = {
+      opId: input.opId ?? `tool:replace-reconciler:${input.mountId}:${ulid()}`,
+      surface: "tool",
+      name: "tool:command:replace-reconciler-tools",
+      scope: {},
+      input,
+    };
+    // `Effect.try` (not `.sync`) — binding validation throws on
+    // mismatch; we want those to surface as tagged failures the
+    // caller can catch, not defects that crash the fiber.
+    return runHarnessProtocol(
+      this.runOperation(op, (i) =>
+        Effect.try({
+          try: () => this.registry.replaceReconcilerSlice(i.mountId, i.registrations),
+          catch: (cause) => cause,
+        }),
+      ),
+    );
   }
+
+  /**
+   * Per-tick compile — precedence-resolved tool set. Pure read,
+   * bypasses `runOperation` (no journal pollution). Filter is applied
+   * BEFORE precedence resolution so a high-precedence registration
+   * that fails the filter doesn't shadow a lower-precedence one that
+   * passes — matching only competes among rows the filter admits.
+   */
   async compileForTick(filter?: ToolListFilter): Promise<readonly ToolDeclaration[]> {
-    return this.registry.list(filter);
+    return this.registry.compileForTick(filter);
   }
 
   dispatch(input: DispatchInput): Promise<DispatchResult> {

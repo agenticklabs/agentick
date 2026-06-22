@@ -62,6 +62,7 @@ import type {
   Operation,
   OperationJournal,
   RegisterToolInput,
+  ReplaceReconcilerToolsInput,
   ToolDeclaration,
   ToolExecutorFactory,
   ToolExecutorFactoryDeps,
@@ -117,6 +118,22 @@ export interface DefineToolExecutorInput {
    * via the in-flight controller it tracks per dispatch.
    */
   readonly abort?: (input: AbortInput) => Promise<void>;
+
+  /**
+   * Optional custom `replaceReconcilerTools` callback. When omitted,
+   * the harness's internal registry handles the atomic swap. Provide
+   * together with the storage-set (`list`, `register`, `unregister`)
+   * for fully-custom registry storage.
+   */
+  readonly replaceReconcilerTools?: (input: ReplaceReconcilerToolsInput) => Promise<void>;
+
+  /**
+   * Optional custom `compileForTick` callback. When omitted, the
+   * harness's internal registry resolves precedence. Provide for
+   * fully-custom registry storage that wants to short-circuit the
+   * default resolver.
+   */
+  readonly compileForTick?: (filter?: ToolListFilter) => Promise<readonly ToolDeclaration[]>;
 }
 
 /**
@@ -221,14 +238,33 @@ class CallbackToolExecutor extends BaseHarness<"tool"> implements ToolExecutorPr
     return this.registry.list(filter);
   }
 
-  // SLICE 1 PLACEHOLDER — see ToolExecutorHarness for context. Real
-  // impl lands in #136.
-  async replaceReconcilerTools(): Promise<void> {
-    return;
+  replaceReconcilerTools(input: ReplaceReconcilerToolsInput): Promise<void> {
+    const op: Operation<ReplaceReconcilerToolsInput, void> = {
+      opId: input.opId ?? `tool:replace-reconciler:${input.mountId}:${ulid()}`,
+      surface: "tool",
+      name: "tool:command:replace-reconciler-tools",
+      scope: {},
+      input,
+    };
+    return runHarnessProtocol(
+      this.runOperation(op, (i) =>
+        Effect.tryPromise({
+          try: async () => {
+            if (this.spec.replaceReconcilerTools) {
+              await this.spec.replaceReconcilerTools(i);
+            } else {
+              this.registry.replaceReconcilerSlice(i.mountId, i.registrations);
+            }
+          },
+          catch: (cause) => cause,
+        }),
+      ),
+    );
   }
+
   async compileForTick(filter?: ToolListFilter): Promise<readonly ToolDeclaration[]> {
-    if (this.spec.list) return this.spec.list(filter);
-    return this.registry.list(filter);
+    if (this.spec.compileForTick) return this.spec.compileForTick(filter);
+    return this.registry.compileForTick(filter);
   }
 
   dispatch(input: DispatchInput): Promise<DispatchResult> {

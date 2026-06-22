@@ -1,70 +1,206 @@
 /**
  * In-memory `ToolRegistry` reference implementation.
  *
- * Keyed by `declaration.name`. `add` is idempotent for an identical
- * registration (deep-equal shape on `declaration` + `handlerRef` +
- * `useDeps`) and throws `ToolAlreadyRegistered` on conflict — callers
- * who want last-writer-wins should `remove` first.
+ * **Multi-binding storage.** Each registered name can have several
+ * registrations live simultaneously — one per layered config seam
+ * (gateway, app, session, execution, extension, reconciler, runtime).
+ * Per-tick precedence resolution happens in {@link InMemoryToolRegistry.compileForTick}:
+ * for a given name, the highest-specificity binding's declaration wins.
+ *
+ * **Idempotency** is per binding key, not per name. Re-registering the
+ * same shape (declaration + handlerRef + useDeps) under the same
+ * binding is a no-op. Re-registering a DIFFERENT shape under the same
+ * binding throws `ToolAlreadyRegistered`. Registering the same name
+ * under a DIFFERENT binding just adds a sibling entry.
  *
  * @see docs/proposals/v2/blueprint/07-tool-executor.md §Tool registry
  */
 
 import type {
+  ToolBinding,
   ToolDeclaration,
   ToolExposure,
   ToolListFilter,
   ToolRegistration,
 } from "@agentick/spec-next";
+import { isEqual } from "@agentick/shared";
 
 export class InMemoryToolRegistry {
-  private readonly byName = new Map<string, ToolRegistration>();
+  // name → array of registrations, one per distinct binding slot.
+  // The array is kept short — at most one entry per layered seam.
+  private readonly byName = new Map<string, ToolRegistration[]>();
 
   /**
-   * Add a registration. Idempotent on equal shape; throws
-   * `ToolAlreadyRegistered` (as a tagged-union rejection) on conflict.
-   *
-   * Surfaced via the harness's `register()` command. Direct callers
-   * (tests, hot-paths) may invoke this method directly.
+   * Add a registration. Idempotent on equal shape under the same
+   * binding; throws `ToolAlreadyRegistered` when re-adding a different
+   * shape to the same binding slot. Adds a sibling entry when the
+   * binding slot is new for this name.
    */
   add(registration: ToolRegistration): void {
     const name = registration.declaration.name;
-    const existing = this.byName.get(name);
-    if (existing) {
-      if (areRegistrationsEqual(existing, registration)) {
+    const list = this.byName.get(name);
+    if (!list) {
+      this.byName.set(name, [registration]);
+      return;
+    }
+    const idx = list.findIndex((r) => sameBindingKey(r.binding, registration.binding));
+    if (idx >= 0) {
+      if (areRegistrationsEqual(list[idx]!, registration)) {
         return; // idempotent on identical shape
       }
       throw { _tag: "ToolAlreadyRegistered", name } as const;
     }
-    this.byName.set(name, registration);
+    list.push(registration);
   }
 
-  /** Remove by name. No-op for unknown names. */
+  /**
+   * Remove EVERY registration for `name` (across all binding slots).
+   * For scope-bounded removal use {@link removeWhere}.
+   */
   remove(name: string): void {
     this.byName.delete(name);
   }
 
-  /** Return the registration for a name, or `undefined`. */
-  get(name: string): ToolRegistration | undefined {
-    return this.byName.get(name);
-  }
-
-  /** True if a tool is registered under this name. */
-  has(name: string): boolean {
-    return this.byName.has(name);
+  /**
+   * Bulk-remove every registration whose binding matches `predicate`.
+   * Used by lifecycle hooks — e.g., when a session closes the harness
+   * calls `removeWhere(b => b.scope === "session" && b.sessionId === id)`
+   * to clear that session's slice without touching app/gateway/runtime
+   * registrations.
+   */
+  removeWhere(predicate: (binding: ToolBinding) => boolean): void {
+    for (const [name, list] of this.byName) {
+      const kept = list.filter((r) => !predicate(r.binding));
+      if (kept.length === 0) {
+        this.byName.delete(name);
+      } else if (kept.length !== list.length) {
+        this.byName.set(name, kept);
+      }
+    }
   }
 
   /**
-   * Snapshot the current set of declarations, optionally filtered.
+   * Return the **highest-precedence** registration for `name`, or
+   * `undefined`. Used by the dispatch path — the dispatched handler
+   * matches the one the model saw via {@link compileForTick}.
    */
-  list(filter?: ToolListFilter): readonly ToolDeclaration[] {
-    const all = Array.from(this.byName.values(), (r) => r.declaration);
-    if (!filter) return all;
-    return all.filter((d) => matches(d, filter));
+  get(name: string): ToolRegistration | undefined {
+    const list = this.byName.get(name);
+    if (!list || list.length === 0) return undefined;
+    let best = list[0]!;
+    let bestRank = precedenceOf(best.binding);
+    for (let i = 1; i < list.length; i++) {
+      const cur = list[i]!;
+      const r = precedenceOf(cur.binding);
+      if (r > bestRank) {
+        best = cur;
+        bestRank = r;
+      }
+    }
+    return best;
   }
 
-  /** Current count — useful for tests + diagnostics. */
+  /** True if at least one binding registers this name. */
+  has(name: string): boolean {
+    const list = this.byName.get(name);
+    return list !== undefined && list.length > 0;
+  }
+
+  /**
+   * Snapshot the registered declarations — **one entry per
+   * `(name, binding)` pair**. If the same name is registered under
+   * multiple bindings (e.g., once at session scope and once via
+   * the reconciler), `list` returns both.
+   *
+   * For the per-tick precedence-resolved set the model should see at
+   * a tick, use {@link compileForTick}.
+   */
+  list(filter?: ToolListFilter): readonly ToolDeclaration[] {
+    const out: ToolDeclaration[] = [];
+    for (const list of this.byName.values()) {
+      for (const reg of list) {
+        if (filter === undefined || matchesFilter(reg.declaration, filter)) {
+          out.push(reg.declaration);
+        }
+      }
+    }
+    return out;
+  }
+
+  /**
+   * Per-tick compile — return the precedence-resolved set of tool
+   * declarations.
+   *
+   * Resolution order:
+   * 1. Filter every registration against `filter` (the common case:
+   *    `{ exposure: "model" }`).
+   * 2. Dedup by `declaration.name`. On collision, the highest-
+   *    precedence binding wins. Precedence (low → high):
+   *    `runtime < gateway < {app, extension@app} < {session,
+   *    extension@session} < execution < reconciler`.
+   *
+   * Iteration order is the insertion order of the *winning*
+   * registration's name — i.e., the order in which the first
+   * registration for that name was added. Adopters who care about
+   * order sort by name in projection.
+   */
+  compileForTick(filter?: ToolListFilter): readonly ToolDeclaration[] {
+    const out: ToolDeclaration[] = [];
+    for (const list of this.byName.values()) {
+      let best: ToolRegistration | undefined;
+      let bestRank = -1;
+      for (const reg of list) {
+        if (filter !== undefined && !matchesFilter(reg.declaration, filter)) continue;
+        const r = precedenceOf(reg.binding);
+        if (r > bestRank) {
+          best = reg;
+          bestRank = r;
+        }
+      }
+      if (best !== undefined) out.push(best.declaration);
+    }
+    return out;
+  }
+
+  /**
+   * Atomically replace the reconciler-bound slice for the given
+   * `mountId`. Removes every existing
+   * `binding.scope === "reconciler" && binding.mountId === mountId`
+   * entry first, then adds the supplied registrations. Other binding
+   * slices are untouched.
+   *
+   * Every supplied registration MUST carry a matching
+   * `{ scope: "reconciler", mountId }` binding; throws otherwise.
+   */
+  replaceReconcilerSlice(mountId: string, registrations: readonly ToolRegistration[]): void {
+    // 1. Validate every registration up-front so a bad input doesn't
+    //    leave the registry half-mutated.
+    for (const reg of registrations) {
+      if (reg.binding.scope !== "reconciler" || reg.binding.mountId !== mountId) {
+        throw new Error(
+          `replaceReconcilerSlice: registration "${reg.declaration.name}" has binding ` +
+            `${JSON.stringify(reg.binding)} — expected { scope: "reconciler", mountId: "${mountId}" }`,
+        );
+      }
+    }
+    // 2. Remove the existing slice.
+    this.removeWhere((b) => b.scope === "reconciler" && b.mountId === mountId);
+    // 3. Add the new slice.
+    for (const reg of registrations) {
+      this.add(reg);
+    }
+  }
+
+  /** Count of registered names (NOT registrations). */
   size(): number {
     return this.byName.size;
+  }
+
+  /** Count of registrations across every binding. */
+  totalRegistrations(): number {
+    let n = 0;
+    for (const list of this.byName.values()) n += list.length;
+    return n;
   }
 
   /** All registered tool names, sorted lexicographically. */
@@ -79,10 +215,79 @@ export class InMemoryToolRegistry {
 }
 
 // ============================================================================
-// Helpers
+// Precedence + binding-key helpers
 // ============================================================================
 
-function matches(decl: ToolDeclaration, filter: ToolListFilter): boolean {
+/**
+ * Numeric precedence rank for a binding. Higher wins on name
+ * collision. The ordering implements the layered config story:
+ * gateway is the floor; reconciler is the ceiling; extensions take
+ * the precedence of the level at which they were installed.
+ *
+ * Exported (constants + function) so adopters reading the code see
+ * the ladder as data rather than a switch buried in a helper.
+ */
+export const PRECEDENCE_RANK = {
+  runtime: 0,
+  gateway: 1,
+  app: 2,
+  session: 3,
+  execution: 4,
+  reconciler: 5,
+} as const satisfies Record<Exclude<ToolBinding["scope"], "extension">, number>;
+
+export function precedenceOf(binding: ToolBinding): number {
+  return binding.scope === "extension"
+    ? PRECEDENCE_RANK[binding.level]
+    : PRECEDENCE_RANK[binding.scope];
+}
+
+/**
+ * Stable string key uniquely identifying a binding slot. The
+ * serialization format DOCUMENTS the identity-defining fields per
+ * variant — adding a non-identity field to a binding (telemetry
+ * timestamp, etc.) MUST NOT change this key, so the format is the
+ * authoritative answer to "what makes binding X the same slot as
+ * binding Y."
+ *
+ * Used by {@link sameBindingKey} for `add()`'s "same slot? then
+ * idempotency-check; else sibling" path. Suitable for a `Map` key
+ * too — future refactor could nest registry storage as
+ * `Map<name, Map<bindingKey, ToolRegistration>>` for O(1) slot
+ * lookup, replacing the current linear scan of the inner array.
+ */
+export function bindingKey(b: ToolBinding): string {
+  switch (b.scope) {
+    case "runtime":
+    case "gateway":
+      return b.scope;
+    case "app":
+      return `app:${b.appId}`;
+    case "session":
+      return `session:${b.sessionId}`;
+    case "execution":
+      return `execution:${b.executionId}`;
+    case "reconciler":
+      return `reconciler:${b.mountId}`;
+    case "extension":
+      return `extension:${b.extensionName}:${b.level}`;
+  }
+}
+
+/**
+ * Two bindings refer to the same registry slot when their
+ * {@link bindingKey} serializations are equal. Cheap string compare;
+ * the per-variant identity contract lives in `bindingKey`.
+ */
+export function sameBindingKey(a: ToolBinding, b: ToolBinding): boolean {
+  return bindingKey(a) === bindingKey(b);
+}
+
+// ============================================================================
+// Filter + equality helpers
+// ============================================================================
+
+function matchesFilter(decl: ToolDeclaration, filter: ToolListFilter): boolean {
   if (filter.exposure !== undefined) {
     if (!decl.exposure.includes(filter.exposure as ToolExposure)) return false;
   }
@@ -97,26 +302,15 @@ function matches(decl: ToolDeclaration, filter: ToolListFilter): boolean {
 }
 
 /**
- * Deep structural equality for tool registrations — sufficient for
- * idempotency detection. Compares declaration, handlerRef, and useDeps
- * via JSON shape. Both sides are JSON-firewall-safe by construction.
+ * Structural equality for tool registrations — sufficient for
+ * idempotency detection. Compares declaration, handlerRef, and useDeps.
+ * Bindings are compared via {@link sameBindingKey} at the call site;
+ * equality here is for the shape held in the same slot.
  */
 function areRegistrationsEqual(a: ToolRegistration, b: ToolRegistration): boolean {
   return (
-    jsonEqual(a.declaration, b.declaration) &&
+    isEqual(a.declaration, b.declaration) &&
     a.handlerRef === b.handlerRef &&
-    jsonEqual(a.useDeps ?? {}, b.useDeps ?? {})
+    isEqual(a.useDeps ?? {}, b.useDeps ?? {})
   );
-}
-
-function jsonEqual(a: unknown, b: unknown): boolean {
-  // Cheap-but-correct: stringify and compare. The values flowing through
-  // the registry are JSON-shaped by the spec firewall, so this is
-  // canonical for our purposes.
-  if (a === b) return true;
-  try {
-    return JSON.stringify(a) === JSON.stringify(b);
-  } catch {
-    return false;
-  }
 }

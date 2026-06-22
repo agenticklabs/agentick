@@ -181,8 +181,8 @@ describe("FakeLanguageModelExecutor — abort", () => {
       compiled: emptyTree(),
       target: mkTarget(),
       scope: { executionId: id },
-        tools: [],
-});
+      tools: [],
+    });
     expect(terminal.outcome).toBe("canceled");
   });
 });
