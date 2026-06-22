@@ -45,6 +45,7 @@ import {
   isLoopExecutorFactory,
   isReconcilerFactory,
   isToolExecutorFactory,
+  toRegistration,
 } from "@agentick/spec-next";
 import type {
   AppError,
@@ -541,11 +542,9 @@ export class AppHarness<P = unknown>
       this.toolDefaults = options.toolExecutor ?? {};
     }
     // App-level tools (layered config). Bound once at construction.
-    this.appLevelTools = (options.tools ?? []).map((decl) => ({
-      declaration: decl,
-      handlerRef: decl.handlerRef ?? decl.id,
-      binding: { scope: "app" as const, appId },
-    }));
+    this.appLevelTools = (options.tools ?? []).map((decl) =>
+      toRegistration(decl, { scope: "app", appId }),
+    );
 
     // Reconciler slot — instance or options.
     this.reconciler = resolveReconciler(options.reconciler, appId, journal, bus, inbox);
@@ -952,11 +951,9 @@ export class AppHarness<P = unknown>
     // session > execution-via-send > {app, extension@app} > runtime.
     // Insertion order below is irrelevant — the registry resolves by
     // binding rank, not insertion.
-    const sessionScopedTools: readonly ToolRegistration[] = (input.tools ?? []).map((decl) => ({
-      declaration: decl,
-      handlerRef: decl.handlerRef ?? decl.id,
-      binding: { scope: "session" as const, sessionId },
-    }));
+    const sessionScopedTools: readonly ToolRegistration[] = (input.tools ?? []).map((decl) =>
+      toRegistration(decl, { scope: "session", sessionId }),
+    );
     const mergedInitialTools: readonly ToolRegistration[] | undefined =
       this.extensionTools.length > 0 ||
       this.appLevelTools.length > 0 ||

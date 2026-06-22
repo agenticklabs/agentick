@@ -186,6 +186,30 @@ export interface ToolRegistration {
   readonly binding: ToolBinding;
 }
 
+/**
+ * Wrap a {@link ToolDeclaration} into a {@link ToolRegistration}
+ * tagged with the given binding. The canonical adapter every layer
+ * (gateway/app/session/execution/reconciler/extension) uses when it
+ * turns adopter-supplied declarations into binding-tagged
+ * registrations.
+ *
+ * `handlerRef` falls back to `decl.id` when the declaration doesn't
+ * supply one — matches the reconciler's default resolution
+ * (resolver looks up by both `name` and `id` aliases). Callers
+ * needing a custom `handlerRef` or `useDeps` build the registration
+ * literal directly.
+ */
+export function toRegistration(
+  declaration: ToolDeclaration,
+  binding: ToolBinding,
+): ToolRegistration {
+  return {
+    declaration,
+    handlerRef: declaration.handlerRef ?? declaration.id,
+    binding,
+  };
+}
+
 export interface RegisterToolInput {
   readonly registration: ToolRegistration;
   readonly opId?: string;

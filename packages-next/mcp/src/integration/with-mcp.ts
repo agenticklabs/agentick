@@ -40,7 +40,7 @@
 
 import type { AppExtension, AppInstaller } from "@agentick/spec-next";
 import type { ToolDeclaration, ToolHandler, ToolRegistration } from "@agentick/spec-next";
-import { jsonSchema } from "@agentick/spec-next";
+import { jsonSchema, toRegistration } from "@agentick/spec-next";
 
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 
@@ -227,10 +227,17 @@ export function withMCP(options: WithMCPOptions): AppExtension {
           // shape once installer.hostScope context is threaded so
           // session/gateway-level installs declare their own level
           // symmetrically.
+          //
+          // `handlerRef` from the loop above is the explicit MCP handler
+          // identity (not the declaration's id), so we override the
+          // `toRegistration` default after building the registration.
           const registration: ToolRegistration = {
-            declaration,
+            ...toRegistration(declaration, {
+              scope: "extension",
+              extensionName: "@agentick/mcp-next",
+              level: "app",
+            }),
             handlerRef,
-            binding: { scope: "extension", extensionName: "@agentick/mcp-next", level: "app" },
           };
           installer.registerExtensionTool(registration);
         }

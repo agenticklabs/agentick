@@ -42,10 +42,9 @@ import type {
   OperationJournal,
   RunExecutionInput,
   ToolCall,
-  ToolDeclaration,
-  ToolRegistration,
   UsageStats,
 } from "@agentick/spec-next";
+import { toRegistration } from "@agentick/spec-next";
 
 // ============================================================================
 // Internal types
@@ -205,9 +204,10 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
         // every layered seam (gateway/app/session/execution/extension/
         // reconciler). The projection reads that set, not the IR slot.
         const reconcilerTools = renderResult.tree.declarations?.tools ?? [];
+        const reconcilerBinding = { scope: "reconciler", mountId: input.mountId } as const;
         await input.toolExecutor.replaceReconcilerTools({
           mountId: input.mountId,
-          registrations: reconcilerTools.map(toReconcilerRegistration(input.mountId)),
+          registrations: reconcilerTools.map((d) => toRegistration(d, reconcilerBinding)),
         });
         const modelTools = await input.toolExecutor.compileForTick({ exposure: "model" });
 
@@ -511,26 +511,6 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
 // ============================================================================
 // helpers
 // ============================================================================
-
-/**
- * Wrap a `ToolDeclaration` (emitted by the reconciler in the rendered
- * tree's `declarations.tools`) into a `ToolRegistration` bound to the
- * reconciler slot for the loop's `mountId`. The result feeds
- * `toolExecutor.replaceReconcilerTools` each tick — the registry's
- * reconciler slice mirrors the just-rendered tree.
- *
- * `handlerRef` falls back to the declaration's `id` when the
- * declaration didn't supply one — matches how the reconciler's
- * default handler resolution works (the resolver looks up by both
- * `name` and `id` aliases).
- */
-function toReconcilerRegistration(mountId: string): (decl: ToolDeclaration) => ToolRegistration {
-  return (decl) => ({
-    declaration: decl,
-    handlerRef: decl.handlerRef ?? decl.id,
-    binding: { scope: "reconciler", mountId },
-  });
-}
 
 function accumulateUsage(acc: MutableUsage, add?: UsageStats): void {
   if (!add) return;

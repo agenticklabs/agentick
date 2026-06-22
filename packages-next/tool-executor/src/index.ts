@@ -23,6 +23,11 @@ export { defineToolExecutor, type DefineToolExecutorInput } from "./define-tool-
 // Registry
 export { InMemoryToolRegistry } from "./registry.js";
 
+// Scoped binding lifecycle helper — composes register + cleanup
+// around a caller-supplied async body. The canonical adapter at every
+// scope boundary (execution, future "step" / "subagent" / "draft" scopes).
+export { withScope } from "./with-scope.js";
+
 // Handler resolver
 export { InMemoryHandlerResolver } from "./handler-resolver.js";
 

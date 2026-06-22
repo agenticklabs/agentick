@@ -52,6 +52,7 @@ import type {
   ToolExecutorProtocol,
 } from "@agentick/spec-next";
 import { DEFAULT_JOURNALING_POLICY, SPEC_VERSION } from "@agentick/spec-next";
+import { withScope } from "@agentick/tool-executor-next";
 import type { KnobsHandle } from "@agentick/knobs-next";
 import type { StateHandle } from "@agentick/state-next";
 import type { TimelineHandle } from "@agentick/timeline-next";
@@ -685,28 +686,6 @@ export class SessionHarness<P = unknown>
     this.store.setCurrentExecutionId(executionId);
     this.store.setStatus("running");
 
-    // Register execution-scoped tools (#139). Each tool declared on
-    // `SendInput.tools` lives in the registry for the duration of this
-    // execution, tagged with `binding: { scope: "execution", executionId }`.
-    // They're removed at execution end (success or failure) by the
-    // `executionScopeCleanup` finally below — see `removeBoundTools`.
-    if (input.tools !== undefined && input.tools.length > 0) {
-      for (const decl of input.tools) {
-        await this.toolExecutor.register({
-          registration: {
-            declaration: decl,
-            handlerRef: decl.handlerRef ?? decl.id,
-            binding: { scope: "execution", executionId },
-          },
-        });
-      }
-    }
-    const executionScopeCleanup = async () => {
-      await this.toolExecutor.removeBoundTools({
-        binding: { scope: "execution", executionId },
-      });
-    };
-
     // Per-call overrides — executor + target — fall through from
     // SendInput. The app-level executor/target is the default; this
     // send swaps in caller-supplied alternatives without changing
@@ -735,9 +714,6 @@ export class SessionHarness<P = unknown>
       this._currentExecution = null;
       this.store.setCurrentExecutionId(null);
       this.store.setStatus("idle");
-      // Fire-and-forget — cleanup failure shouldn't keep the execution
-      // pending. The registry handles unknown bindings as no-ops.
-      void executionScopeCleanup().catch(() => undefined);
     });
     resultPromise.catch(() => {
       // Prevent unhandled rejections — handle has its own .result.
@@ -754,24 +730,34 @@ export class SessionHarness<P = unknown>
 
     const onEvent = this.buildOnEvent(emit);
 
-    const runPromise = this.loop.runExecution({
-      executionId,
-      sessionId: this.store.id,
-      reconciler: this.reconciler,
-      mountId: this.mountId,
-      executor: executorForCall,
-      target: targetForCall,
-      toolExecutor: this.toolExecutor,
-      stateApplicator: {
-        applyExecutorResult: (i) => this.applyExecutorResult(i).then(() => undefined),
-        applyToolResults: (i) => this.applyToolResults(i).then(() => undefined),
-        appendEntry: (i) => this.appendEntry(i).then(() => undefined),
-      },
-      maxTicks: input.maxTicks ?? this.defaultMaxTicks,
-      stream: streamForCall,
-      onEvent,
-      ...(input.signal !== undefined ? { signal: input.signal } : {}),
-    });
+    // Execution-scoped tools (#139) are bound for the duration of the
+    // loop run via `withScope`: register each tool, run the loop,
+    // remove the scope's binding in `finally`. Atomic — cleanup runs
+    // on success, failure, or throw.
+    const runPromise = withScope(
+      this.toolExecutor,
+      { scope: "execution", executionId },
+      input.tools ?? [],
+      () =>
+        this.loop.runExecution({
+          executionId,
+          sessionId: this.store.id,
+          reconciler: this.reconciler,
+          mountId: this.mountId,
+          executor: executorForCall,
+          target: targetForCall,
+          toolExecutor: this.toolExecutor,
+          stateApplicator: {
+            applyExecutorResult: (i) => this.applyExecutorResult(i).then(() => undefined),
+            applyToolResults: (i) => this.applyToolResults(i).then(() => undefined),
+            appendEntry: (i) => this.appendEntry(i).then(() => undefined),
+          },
+          maxTicks: input.maxTicks ?? this.defaultMaxTicks,
+          stream: streamForCall,
+          onEvent,
+          ...(input.signal !== undefined ? { signal: input.signal } : {}),
+        }),
+    );
 
     this._currentExecution = runPromise;
 
