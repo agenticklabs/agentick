@@ -39,7 +39,7 @@
  */
 
 import type { AppExtension, AppInstaller } from "@agentick/spec-next";
-import type { ToolDeclaration, ToolHandler, ToolRegistration } from "@agentick/spec-next";
+import type { ToolDeclaration, ToolHandler } from "@agentick/spec-next";
 import { jsonSchema, toRegistration } from "@agentick/spec-next";
 
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
@@ -47,7 +47,7 @@ import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { McpClientHarness } from "../client/harness.js";
 import type { McpAuth } from "../client/auth.js";
 import { NoneAuth } from "../client/auth.js";
-import type { ReconnectPolicy } from "../client/types.js";
+import type { McpToolDescriptor, ReconnectPolicy } from "../client/types.js";
 import type { EraCodec } from "../client/era-codec.js";
 
 import { mcpContentToBlocks } from "./content-mapper.js";
@@ -128,6 +128,118 @@ export interface McpHookBridgeImpl {
 // ============================================================================
 
 /**
+ * Stable extension name — used as the `extensionName` field on every
+ * tool's binding. Sessions that look up bindings by extension reach
+ * MCP-contributed tools via this constant.
+ */
+const EXTENSION_NAME = "@agentick/mcp-next";
+
+/**
+ * Stable `handlerRef` for one MCP tool. Format: `mcp:<serverId>:<toolName>`.
+ * Used by the HandlerResolver to route dispatches back to the right
+ * `McpClientHarness.callTool`.
+ */
+function mcpHandlerRef(serverId: string, toolName: string): string {
+  return `mcp:${serverId}:${toolName}`;
+}
+
+/**
+ * Build the `ToolDeclaration` for one MCP-discovered tool. MCP's raw
+ * JSON Schema is wrapped via `jsonSchema()` so it round-trips through
+ * `StandardSchemaV1`; the executor's `toJsonSchema()` unwraps it at
+ * the wire edge.
+ *
+ * `exposure: ["model", "dispatch"]` — MCP tools are reachable from
+ * both doors. The model can invoke via `tool_use`; the host can
+ * invoke programmatically via `session.dispatch(name, input)`. MCP
+ * servers don't care which door routed the call.
+ */
+function mcpDeclaration(
+  serverId: string,
+  tool: McpToolDescriptor,
+  localName: string,
+): ToolDeclaration {
+  const inputSchema = jsonSchema(tool.inputSchema);
+  const outputSchema = tool.outputSchema !== undefined ? jsonSchema(tool.outputSchema) : undefined;
+  return {
+    id: localName,
+    name: localName,
+    description: tool.description ?? `MCP tool ${serverId}/${tool.name}`,
+    inputSchema,
+    ...(outputSchema !== undefined ? { outputSchema } : {}),
+    exposure: ["model", "dispatch"],
+    handlerRef: mcpHandlerRef(serverId, tool.name),
+    ...(tool.annotations !== undefined
+      ? { annotations: tool.annotations as ToolDeclaration["annotations"] }
+      : {}),
+  };
+}
+
+/**
+ * Construct one `McpClientHarness` for a server config. Awaits its
+ * `.ready` so the caller can invoke methods immediately.
+ */
+async function mkClient(
+  installer: AppInstaller,
+  config: McpServerConfig,
+): Promise<McpClientHarness> {
+  const harness = new McpClientHarness(
+    `${installer.hostId}:mcp:${config.serverId}`,
+    installer.substrate.journal,
+    installer.substrate.bus,
+    installer.substrate.inbox,
+    {
+      serverId: config.serverId,
+      transport: config.transport,
+      auth: config.auth ?? new NoneAuth(),
+      ...(config.codec !== undefined ? { codec: config.codec } : {}),
+      ...(config.reconnect !== undefined ? { reconnect: config.reconnect } : {}),
+      ...(config.capabilities !== undefined ? { capabilities: config.capabilities } : {}),
+      clientInfo: {
+        name: config.clientName ?? config.serverId,
+        version: config.clientVersion ?? "1.0.0",
+      },
+    },
+  );
+  await harness.ready;
+  return harness;
+}
+
+/**
+ * Discover one server's tools and register them with the installer.
+ * Each tool gets:
+ *   1. A dispatch handler in the shared HandlerResolver — proxies
+ *      to `harness.callTool` and maps MCP content → ContentBlock[].
+ *   2. A `ToolRegistration` bound to the extension slot at app level.
+ *      The session's per-tick compile picks them up at the extension
+ *      binding's precedence rank.
+ */
+async function discoverAndRegisterTools(
+  installer: AppInstaller,
+  config: McpServerConfig,
+  harness: McpClientHarness,
+): Promise<void> {
+  const tools = await harness.listTools();
+  const prefix = config.toolPrefix ?? `${config.serverId}__`;
+  for (const tool of tools) {
+    const localName = `${prefix}${tool.name}`;
+    const handlerRef = mcpHandlerRef(config.serverId, tool.name);
+    const handler: ToolHandler = async (input) => {
+      const result = await harness.callTool(tool.name, input as Readonly<Record<string, unknown>>);
+      return mcpContentToBlocks(result.content);
+    };
+    installer.registerToolHandler(handlerRef, handler);
+    installer.registerExtensionTool(
+      toRegistration(mcpDeclaration(config.serverId, tool, localName), {
+        scope: "extension",
+        extensionName: EXTENSION_NAME,
+        level: "app",
+      }),
+    );
+  }
+}
+
+/**
  * `withMCP({ servers })` — app-level extension. See file-header for
  * lifecycle details. Returns a single `AppExtension`; tool
  * registration into per-session ToolExecutors happens via
@@ -136,120 +248,39 @@ export interface McpHookBridgeImpl {
  */
 export function withMCP(options: WithMCPOptions): AppExtension {
   return {
-    name: "@agentick/mcp-next",
+    name: EXTENSION_NAME,
     target: "app",
     async install(installer: AppInstaller): Promise<void> {
+      // `clientsById` is the lookup index — O(1) `bridge.client(id)`.
+      // `handles` is the insertion-ordered enumeration for
+      // `bridge.clients`. Both point at the same `McpClientHandle`
+      // objects — one map, one list, one allocation per client.
+      const clientsById = new Map<string, McpClientHandle>();
       const handles: McpClientHandle[] = [];
 
       for (const config of options.servers) {
-        const harness = new McpClientHarness(
-          `${installer.hostId}:mcp:${config.serverId}`,
-          installer.substrate.journal,
-          installer.substrate.bus,
-          installer.substrate.inbox,
-          {
-            serverId: config.serverId,
-            transport: config.transport,
-            auth: config.auth ?? new NoneAuth(),
-            ...(config.codec !== undefined ? { codec: config.codec } : {}),
-            ...(config.reconnect !== undefined ? { reconnect: config.reconnect } : {}),
-            ...(config.capabilities !== undefined ? { capabilities: config.capabilities } : {}),
-            clientInfo: {
-              name: config.clientName ?? config.serverId,
-              version: config.clientVersion ?? "1.0.0",
-            },
-          },
-        );
-        await harness.ready;
+        const harness = await mkClient(installer, config);
+        const handle: McpClientHandle = { serverId: config.serverId, harness };
+        clientsById.set(config.serverId, handle);
+        handles.push(handle);
+        installer.onClose(() => harness.close());
 
-        // Connect + discover tools. A failure here records the server
-        // as degraded but doesn't block other servers — adopter sees
-        // the state via bridges.mcp.client(id).state or the bus
-        // envelope `mcp:<scopeId>:state`.
+        // Connect + discover. A connect failure records the server as
+        // degraded but doesn't block other servers (the lifecycle FSM
+        // has already transitioned to `degraded` / `reconnecting`;
+        // adopters observe via `bridges.mcp.client(id).state` or the
+        // bus envelope `mcp:<scopeId>:state`). Future-work: re-run
+        // discovery on the next `connected` transition.
         try {
           await harness.connect();
         } catch {
-          // McpLifecycle has already transitioned to `degraded` /
-          // `reconnecting`. Skip discovery; tools register only after
-          // a successful connect. Future-work: re-run discovery on
-          // re-ready transition.
-          handles.push({ serverId: config.serverId, harness });
-          installer.onClose(() => harness.close());
           continue;
         }
-
-        const tools = await harness.listTools();
-        const prefix = config.toolPrefix ?? `${config.serverId}__`;
-
-        for (const tool of tools) {
-          const localName = `${prefix}${tool.name}`;
-          const handlerRef = `mcp:${config.serverId}:${tool.name}`;
-
-          const handler: ToolHandler = async (input) => {
-            const result = await harness.callTool(
-              tool.name,
-              input as Readonly<Record<string, unknown>>,
-            );
-            return mcpContentToBlocks(result.content);
-          };
-
-          installer.registerToolHandler(handlerRef, handler);
-
-          // Wrap MCP's raw JSON Schema as a Standard-Schema carrier
-          // so it round-trips through `ToolDeclaration` cleanly.
-          // Wire-edge projection (`toJsonSchema()` in the executor)
-          // unwraps it back to the same JSON Schema for the model.
-          const inputSchema = jsonSchema(tool.inputSchema);
-          const outputSchema =
-            tool.outputSchema !== undefined ? jsonSchema(tool.outputSchema) : undefined;
-
-          const declaration: ToolDeclaration = {
-            id: localName,
-            name: localName,
-            description: tool.description ?? `MCP tool ${config.serverId}/${tool.name}`,
-            inputSchema,
-            ...(outputSchema !== undefined ? { outputSchema } : {}),
-            // Both doors: the model can call MCP tools via tool_use
-            // (model door) AND the host can call them programmatically
-            // via session.dispatch() (host door). MCP servers don't
-            // care which door routed the call — the dispatch-origin
-            // policy is local-side framework concern, not MCP
-            // semantics. Adopters who want to restrict can override
-            // via metadata + middleware in a follow-up.
-            exposure: ["model", "dispatch"],
-            handlerRef,
-            ...(tool.annotations !== undefined
-              ? { annotations: tool.annotations as ToolDeclaration["annotations"] }
-              : {}),
-          };
-          // withMCP is an app-level extension — tools register at the
-          // extension binding slot, level=app. Slice 8 finalizes the
-          // shape once installer.hostScope context is threaded so
-          // session/gateway-level installs declare their own level
-          // symmetrically.
-          //
-          // `handlerRef` from the loop above is the explicit MCP handler
-          // identity (not the declaration's id), so we override the
-          // `toRegistration` default after building the registration.
-          const registration: ToolRegistration = {
-            ...toRegistration(declaration, {
-              scope: "extension",
-              extensionName: "@agentick/mcp-next",
-              level: "app",
-            }),
-            handlerRef,
-          };
-          installer.registerExtensionTool(registration);
-        }
-
-        handles.push({ serverId: config.serverId, harness });
-        installer.onClose(() => harness.close());
+        await discoverAndRegisterTools(installer, config, harness);
       }
 
       const bridge: McpHookBridgeImpl = {
-        client(serverId: string): McpClientHandle | undefined {
-          return handles.find((h) => h.serverId === serverId);
-        },
+        client: (serverId) => clientsById.get(serverId),
         clients: handles,
       };
       installer.registerNamespace("mcp", bridge);
