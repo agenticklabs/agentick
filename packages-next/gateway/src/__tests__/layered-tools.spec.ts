@@ -22,7 +22,6 @@ import { createGateway } from "../index.js";
 function mkAppOptions() {
   const sub = { journal: new MemoryJournal(), bus: new LocalEventBus(), inbox: new LocalInbox() };
   return {
-    rootElement: null as unknown,
     executor: new FakeLanguageModelExecutor(
       `exec-${Math.random().toString(36).slice(2)}`,
       sub.journal,
@@ -48,6 +47,8 @@ function mkAppOptions() {
   };
 }
 
+const NULL_ROOT = null as unknown;
+
 const tool = (name: string, description = name): ToolDeclaration => ({
   id: `t.${name}`,
   name,
@@ -61,6 +62,7 @@ describe("GatewayHarness — layered tools (#141)", () => {
   it("propagates gateway-level tools to every session of every app it hosts", async () => {
     const gateway = await createGateway({ tools: [tool("health_check")] });
     const app = await gateway.createApp({
+      rootElement: NULL_ROOT,
       options: mkAppOptions(),
     });
     const session = await app.createSession();
@@ -72,8 +74,16 @@ describe("GatewayHarness — layered tools (#141)", () => {
 
   it("gateway tools reach multiple apps under the same gateway", async () => {
     const gateway = await createGateway({ tools: [tool("ping")] });
-    const a = await gateway.createApp({ appId: "a", options: mkAppOptions() });
-    const b = await gateway.createApp({ appId: "b", options: mkAppOptions() });
+    const a = await gateway.createApp({
+      appId: "a",
+      rootElement: NULL_ROOT,
+      options: mkAppOptions(),
+    });
+    const b = await gateway.createApp({
+      appId: "b",
+      rootElement: NULL_ROOT,
+      options: mkAppOptions(),
+    });
     const sA = await a.createSession();
     const sB = await b.createSession();
     const intA = sA as unknown as { toolExecutor: ToolExecutorProtocol };
@@ -92,6 +102,7 @@ describe("GatewayHarness — layered tools (#141)", () => {
       tools: [tool("calc", "gateway calc")],
     });
     const app = await gateway.createApp({
+      rootElement: NULL_ROOT,
       options: { ...mkAppOptions(), tools: [tool("calc", "app calc")] },
     });
     const session = await app.createSession();
@@ -106,7 +117,7 @@ describe("GatewayHarness — layered tools (#141)", () => {
     const gateway = await createGateway({
       tools: [tool("calc", "gateway calc")],
     });
-    const app = await gateway.createApp({ options: mkAppOptions() });
+    const app = await gateway.createApp({ rootElement: NULL_ROOT, options: mkAppOptions() });
     const session = await app.createSession({
       tools: [tool("calc", "session calc")],
     });
@@ -119,7 +130,7 @@ describe("GatewayHarness — layered tools (#141)", () => {
 
   it("omitting gateway.tools yields apps with no gateway-bound tools", async () => {
     const gateway = await createGateway();
-    const app = await gateway.createApp({ options: mkAppOptions() });
+    const app = await gateway.createApp({ rootElement: NULL_ROOT, options: mkAppOptions() });
     const session = await app.createSession();
     const internals = session as unknown as { toolExecutor: ToolExecutorProtocol };
     expect(await internals.toolExecutor.compileForTick({ exposure: "model" })).toEqual([]);

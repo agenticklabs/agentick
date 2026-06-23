@@ -271,6 +271,9 @@ importers:
       '@agentick/knobs-next':
         specifier: workspace:*
         version: link:../../packages-next/knobs
+      '@agentick/mcp-next':
+        specifier: workspace:*
+        version: link:../../packages-next/mcp
       '@agentick/reconciler-react-next':
         specifier: workspace:*
         version: link:../../packages-next/reconciler-react
@@ -286,6 +289,9 @@ importers:
       '@ai-sdk/openai':
         specifier: ^2.0.0
         version: 2.0.89(zod@4.3.6)
+      '@modelcontextprotocol/sdk':
+        specifier: ^1.29.0
+        version: 1.29.0(zod@4.3.6)
       dotenv:
         specifier: ^16.4.5
         version: 16.6.1

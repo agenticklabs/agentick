@@ -1,0 +1,33 @@
+{
+  "name": "example-v2-otto",
+  "version": "0.0.1",
+  "private": true,
+  "description": "End-to-end Agentick v2 example using a REAL model. Provider: OpenAI via the AI SDK adapter. Demonstrates ergonomics: JSX agent, inline createTool, useKnob for runtime knobs, app.send() shortcut.",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx --tsconfig tsconfig.json src/index.ts",
+    "start": "tsx --tsconfig tsconfig.json src/index.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@agentick/app-next": "workspace:*",
+    "@agentick/executor-ai-sdk-next": "workspace:*",
+    "@agentick/knobs-next": "workspace:*",
+    "@agentick/mcp-next": "workspace:*",
+    "@agentick/reconciler-react-next": "workspace:*",
+    "@agentick/spec-next": "workspace:*",
+    "@agentick/state-next": "workspace:*",
+    "@agentick/timeline-next": "workspace:*",
+    "@ai-sdk/openai": "^2.0.0",
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "dotenv": "^16.4.5",
+    "react": "^19.2.4",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@types/node": "^22.5.4",
+    "@types/react": "^19.2.13",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3"
+  }
+}
