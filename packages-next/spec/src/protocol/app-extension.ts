@@ -234,6 +234,17 @@ export interface SessionInstaller extends BaseInstaller {
   readonly sessionId: string;
 
   /**
+   * The session's elicitation harness — constructed by the host
+   * BEFORE session-extension installs run, so extensions that need
+   * cluster-friendly inbox routing to the session's user (MCP,
+   * sampling, roots bridges, OAuth-via-elicit) read its `.address`
+   * directly here. Sessions aren't yet registered in
+   * `app.getSession(...)` at install time; this slot is the
+   * documented seam.
+   */
+  readonly elicitation: import("./elicitation-harness.js").ElicitationHarnessProtocol;
+
+  /**
    * Pre-register a tool handler resolvable from THIS session's
    * dispatch. Routed into the session's tool-executor handler
    * registry. Mirrors {@link AppInstaller.registerToolHandler} but

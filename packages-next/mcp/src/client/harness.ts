@@ -54,7 +54,7 @@ import { McpLifecycle } from "./lifecycle.js";
 import type { McpClientHarnessOptions, McpClientState, McpToolDescriptor } from "./types.js";
 import type { EraCodec } from "./era-codec.js";
 import { DraftPassthroughCodec, selectCodec } from "./era-codec.js";
-import { makeElicitRequestHandler, type ElicitAddressSlot } from "./elicit-bridge.js";
+import { makeElicitRequestHandler } from "./elicit-bridge.js";
 
 // ============================================================================
 // Errors
@@ -90,31 +90,22 @@ export class McpClientHarness extends BaseHarness<"mcp"> {
   private codec: EraCodec;
   private client: Client | undefined;
   /**
-   * Active session id — set+cleared around each {@link callTool}
-   * invocation that passes `opts.elicitSessionId` via
-   * {@link Effect.acquireUseRelease}. The SDK's `ElicitRequestSchema`
-   * handler reads from this slot at inbound-elicit dispatch time and
-   * routes through the substrate's inbox (cluster-friendly).
+   * Fixed elicit-harness inbox address — set at construction by
+   * `withMCP` to the owning session's elicit harness address. The
+   * SDK's `ElicitRequestSchema` handler routes inbound
+   * `elicitation/create` messages here via the substrate's inbox
+   * (cluster-friendly: LocalInbox in-process, ClusterInbox across
+   * nodes).
    *
-   * **v0 caveat (#149)**: single-slot per harness — concurrent
-   * elicit-routed callTool invocations from different sessions race.
-   * Best-effort routing emits `mcp:warning:routing-dropped` envelopes
-   * when ambiguous. The architectural fix (#151) is per-session
-   * harness construction, which collapses the slot to a single
-   * fixed sessionId at construction time.
+   * Per-session construction (#151) means each MCP connection serves
+   * exactly one session. No slot. No cross-session routing.
+   * Concurrent elicits from the same session use the
+   * RequestResponseRegistry's per-correlationId Deferreds.
+   *
+   * `undefined` → inbound elicits cancel cleanly and emit
+   * `mcp:warning:routing-dropped` on the bus.
    */
-  private activeElicitSessionId: string | undefined;
-  private readonly elicitAddressSlot: ElicitAddressSlot = {
-    current: () => this.activeElicitSessionId,
-  };
-  /**
-   * Resolver function from sessionId → elicit harness address.
-   * Supplied by `withMCP` at construction; the SDK elicit handler
-   * uses it to look up the routing target. In-memory: walks
-   * `installer.app.getSession(id)?.elicitation.address`. Cluster
-   * (#151+): would walk a cluster directory keyed by sessionId.
-   */
-  private readonly resolveElicitAddress: (sessionId: string) => string | undefined;
+  private readonly elicitAddress: string | undefined;
 
   constructor(
     scopeId: string,
@@ -127,7 +118,7 @@ export class McpClientHarness extends BaseHarness<"mcp"> {
     this.serverId = options.serverId;
     this.options = options;
     this.codec = options.codec ?? DraftPassthroughCodec;
-    this.resolveElicitAddress = options.resolveElicitAddress ?? ((_sessionId: string) => undefined);
+    this.elicitAddress = options.elicitAddress;
     this.lifecycle = new McpLifecycle({
       ...(options.reconnect !== undefined ? { reconnect: options.reconnect } : {}),
       onReconnect: () => this.reconnect(),
@@ -214,21 +205,12 @@ export class McpClientHarness extends BaseHarness<"mcp"> {
    * SDK shape — the `withMCP` ToolBridge maps it into the local
    * ToolExecutor's `ContentBlock[]` shape.
    *
-   * `opts.elicitSessionId` activates inbound elicit routing for the
-   * duration of this call. When the server fires `elicitation/create`
-   * mid-call, the SDK handler routes the request via inbox to the
-   * session's elicit harness — interrupt-safe via
-   * `Effect.acquireUseRelease`.
-   *
-   * **v0 caveat (#149)**: concurrent calls from different sessions
-   * race on the single slot. Architectural fix is per-session
-   * harness (#151).
+   * Inbound elicits during this call route to the harness's
+   * construction-time `elicitAddress`. Per-session harness
+   * construction (#151) means no slot, no cross-session race —
+   * concurrency is solved by construction.
    */
-  callTool(
-    name: string,
-    args?: Readonly<Record<string, unknown>>,
-    opts?: { readonly elicitSessionId?: string },
-  ): Promise<CallToolResult> {
+  callTool(name: string, args?: Readonly<Record<string, unknown>>): Promise<CallToolResult> {
     const op: Operation<{ name: string; args: typeof args }, CallToolResult> = {
       opId: `mcp:${this.serverId}:call-tool:${ulid()}`,
       surface: "mcp",
@@ -236,10 +218,9 @@ export class McpClientHarness extends BaseHarness<"mcp"> {
       scope: { sessionId: this.scopeId },
       input: { name, args },
     };
-    const incoming = opts?.elicitSessionId;
     return runHarnessProtocol(
-      this.runOperation(op, (i) => {
-        const body = Effect.tryPromise({
+      this.runOperation(op, (i) =>
+        Effect.tryPromise({
           try: async (): Promise<CallToolResult> => {
             const c = this.requireReadyClient();
             // SDK's `callTool` return type is a union covering a legacy
@@ -253,27 +234,8 @@ export class McpClientHarness extends BaseHarness<"mcp"> {
             return res;
           },
           catch: (cause) => cause as McpClientError,
-        });
-        if (incoming === undefined) {
-          return body;
-        }
-        // Effect-native acquire/use/release for the per-call elicit
-        // slot. The release branch fires for normal completion, error,
-        // AND fiber interruption — strictly stronger than the
-        // try/finally + catch-callback shape this replaces.
-        return Effect.acquireUseRelease(
-          Effect.sync((): string | undefined => {
-            const prior = this.activeElicitSessionId;
-            this.activeElicitSessionId = incoming;
-            return prior;
-          }),
-          () => body,
-          (prior) =>
-            Effect.sync(() => {
-              this.activeElicitSessionId = prior;
-            }),
-        );
-      }),
+        }),
+      ),
     );
   }
 
@@ -374,19 +336,18 @@ export class McpClientHarness extends BaseHarness<"mcp"> {
       { capabilities },
     );
     // Bind the inbound `elicitation/create` handler once at client
-    // construction. The handler reads the active sessionId slot at
-    // dispatch time and routes via inbox to the session's elicit
-    // harness — same path in-memory and cluster. Unrouted elicits
-    // (no active session, address lookup miss) cleanly cancel + emit
-    // `mcp:warning:routing-dropped` for observability.
+    // construction. The handler dispatches inbound elicits to the
+    // FIXED `elicitAddress` set at construction — per-session
+    // harness construction (#151) means each McpClientHarness serves
+    // one session; no slot, no cross-session race.
     client.setRequestHandler(
       ElicitRequestSchema,
-      makeElicitRequestHandler(this.elicitAddressSlot, {
+      makeElicitRequestHandler({
+        elicitAddress: this.elicitAddress,
         inbox: this.inbox,
         bus: this.bus,
         replyToAddress: this.address,
         requests: this.requests as RequestResponseRegistry<ElicitationResult<unknown>>,
-        resolveElicitAddress: this.resolveElicitAddress,
         serverId: this.serverId,
         defaultTimeoutMs: this.options.elicitTimeoutMs ?? 5 * 60_000,
       }),

@@ -131,24 +131,16 @@ testing the harness end-to-end without spawning a subprocess.
 
 ## Connection lifecycle
 
-Today `withMCP` is an **AppExtension** — one McpClientHarness per
-server, **shared across every session in the app**. That sharing has
-a known race:
-
-> Concurrent `callTool` invocations from **different sessions**
-> through the same MCP connection share a single elicit resolver
-> slot. Cross-session ambiguous routing is best-effort and emits
-> `mcp:warning:routing-dropped` envelopes when the resolver can't be
-> resolved.
-
-**Architectural fix — per-session McpClientHarness (#151)**. Each
-session owns its connection per server; the elicit address is fixed
-at construction; the slot disappears; concurrent calls from different
-sessions become impossible by construction. This is the **right
-posture** for multi-tenant — the MCP spec binds OAuth tokens, `Mcp-
-Session-Id`, and authorization to the connection. Sharing a
-connection across users is a wire violation; sharing across same-user
-sessions still couples auth contexts that should remain independent.
+`withMCP` is a **SessionExtension** — one McpClientHarness per
+(session, server). Each agentick session owns its own connection to
+each MCP server. Multi-tenant correct from day one (MCP binds OAuth
+tokens, `Mcp-Session-Id`, and authorization to the connection;
+sharing across users is a wire violation). The elicit address is
+fixed at McpClientHarness construction; the SDK elicit handler routes
+inbound `elicitation/create` via the substrate's inbox to that
+address. No slot, no cross-session race, concurrent in-session
+elicits naturally handled by the request-response registry's
+per-correlationId Deferreds.
 
 #### ⚠️ FUTURE OPTIMIZATION — connection pooling (track in coming weeks)
 
@@ -182,8 +174,6 @@ production load demands it; design space documented in
   elicitation integration lands with #5.
 - **No stdio / streamable-http transport.** In-memory transport for
   tests is the only transport here. Real transports land with #2 / #5.
-- **Per-session McpClientHarness (#151)** + **SessionExtension
-  lifecycle (#150)** outstanding. See "Connection lifecycle" above.
 - **Connection pool (deferred, coming weeks)** — see "Connection
   lifecycle".
 

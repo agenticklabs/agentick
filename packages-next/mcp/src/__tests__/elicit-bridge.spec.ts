@@ -331,12 +331,16 @@ describe("ElicitationBridge — capability + concurrency (#149)", () => {
       ],
     });
 
-    // The server's `getClientCapabilities()` reflects what the client
-    // advertised during the initialize handshake. Default should
-    // include both form and url elicitation modes.
+    // #151: withMCP runs at SESSION construction; the initialize
+    // handshake happens when the per-session McpClientHarness
+    // connects. Create a session to trigger it before inspecting
+    // server-side capabilities.
+    const session = await app.createSession();
+
     const caps = server.getClientCapabilities();
     expect(caps?.elicitation).toEqual({ form: {}, url: {} });
 
+    await session.close();
     await app.closeApp();
     await server.close();
   });

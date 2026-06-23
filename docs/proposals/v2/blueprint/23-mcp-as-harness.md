@@ -161,10 +161,10 @@ The TS MCP SDK v2 moved to **Standard-Schema** (Zod / Valibot / ArkType / TypeBo
 
 Each MCP connection is `BaseHarness<"mcp">`. This decision from the original ADR holds against the draft spec — even though the draft removes protocol-level session state, the *client* still has per-connection state (capability cache, pending requests, MRTR-loop state, auth tokens, reconnect bookkeeping). The harness is the right home for that state.
 
-### Scope: per-session (target), per-app (today)
+### Scope: per-session (landed #151)
 
-**Architectural intent: per-session McpClientHarness.** Each agentick
-session owns its connection per server. Reasons:
+`withMCP` is a **SessionExtension**. Each agentick session owns its
+McpClientHarness per server. Reasons:
 
 - **MCP binds auth to the connection.** OAuth tokens, `Mcp-Session-Id`,
   server authorization decisions are per-connection. Different users
@@ -176,17 +176,6 @@ session owns its connection per server. Reasons:
 - **Per-session OAuth scopes / contexts.** Even same-user-different-
   sessions wants isolation (debug session vs prod session shouldn't
   share OAuth scopes).
-
-**Current state (#133, #149):** `withMCP` is an AppExtension that
-constructs one harness per server, shared across sessions. The
-elicit-bridge routes inbound elicits via inbox to the active
-session's elicit address; the slot races on cross-session concurrent
-calls (best-effort, surfaced via `mcp:warning:routing-dropped`).
-This works for single-user CLIs and is the right cleanup posture
-before per-session SessionExtension wiring lands.
-
-**Per-session lands as #150 (SessionExtension lifecycle) + #151
-(per-session McpClientHarness)**.
 
 ### ⚠️ FUTURE OPTIMIZATION — connection pool keyed by auth principal
 

@@ -110,17 +110,18 @@ export interface McpClientHarnessOptions {
   readonly reconnect?: ReconnectPolicy;
 
   /**
-   * Resolver from `sessionId` → that session's elicit-harness inbox
-   * address. Called by the SDK elicit handler at inbound-elicit
-   * dispatch time. In-memory wiring (today): walks the App's session
-   * registry. Cluster wiring (#151+): walks a cluster directory.
+   * Fixed inbox address of the elicit harness this client routes
+   * inbound `elicitation/create` messages to. Per-session
+   * construction (`withMCP` as SessionExtension) wires the session's
+   * elicit harness here — one address per harness, no cross-session
+   * routing, no slot.
    *
-   * Omitted → all inbound elicits resolve to `undefined` and the
-   * SDK handler returns `{ action: "cancel" }`. Safe default; useful
-   * for harness instances that aren't expected to receive
+   * Omitted → inbound elicits cancel cleanly + emit
+   * `mcp:warning:routing-dropped` on the bus. Safe default for
+   * harness instances that aren't expected to receive
    * server-initiated elicits.
    */
-  readonly resolveElicitAddress?: (sessionId: string) => string | undefined;
+  readonly elicitAddress?: string;
 
   /**
    * Default timeout (ms) for inbound elicit round-trips. Bounds the

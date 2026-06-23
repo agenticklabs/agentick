@@ -1,56 +1,84 @@
 /**
- * `withMCP({ servers })` — `AppExtension` that wires N MCP server
- * connections into the app + auto-registers each server's discovered
- * tools into every session the app creates.
+ * `withMCP({ servers })` — `SessionExtension` that wires N MCP server
+ * connections PER SESSION + auto-registers each server's discovered
+ * tools into the session's ToolExecutor.
  *
- * Lifecycle:
- *   1. App install runs `withMCP`'s `install(installer)`.
- *   2. For each server config, the extension constructs an
- *      `McpClientHarness` on the shared substrate, connects, lists
- *      tools, and:
- *        a. Registers a handler closure on the shared `HandlerResolver`
- *           via `installer.registerToolHandler(handlerRef, handler)`.
- *           The closure proxies to `harness.callTool(...)` and maps
- *           the result through {@link mcpContentToBlocks}.
+ * Per-session architecture (#151) — the architectural floor for MCP
+ * in v2. Each (session, server) gets its own `McpClientHarness`:
+ *
+ *   - **Multi-tenant correct**: MCP binds OAuth tokens, Mcp-Session-Id,
+ *     and authorization to the connection. Different users on the
+ *     same agentick host MUST have different connections (different
+ *     tokens). Sharing connections across users is a wire violation.
+ *   - **Concurrent elicits work by construction**: each harness has
+ *     a fixed elicit-address (its session's). No slot, no race,
+ *     no `mcp:warning:routing-ambiguous` heuristics.
+ *   - **Per-session OAuth context**: even same-user-different-sessions
+ *     gets isolated auth scopes (debug vs prod, sandbox vs real).
+ *
+ * ## Lifecycle
+ *
+ *   1. Each session install runs `withMCP`'s `install(installer)`
+ *      against a fresh `SessionInstaller`.
+ *   2. For each server config, the extension constructs a per-session
+ *      `McpClientHarness` on the shared substrate, with the
+ *      installer's elicit harness address fixed at construction.
+ *   3. Connects + discovers tools. For each:
+ *        a. Registers a handler closure via
+ *           `installer.registerToolHandler(handlerRef, handler)`.
+ *           handlerRef includes the sessionId to keep registrations
+ *           unique across sessions on the shared resolver.
  *        b. Records the tool's declaration + handlerRef via
- *           `installer.registerExtensionTool(...)`. AppHarness merges
- *           these into every session's `ToolExecutor.initialTools`.
- *   3. Exposes the per-server clients on the `bridges.mcp` slot via
- *      `installer.registerNamespace("mcp", { client, clients })` so
- *      in-tree JSX (and future bridges) can reach them.
- *   4. `onClose` cascades — each harness's `close()` runs in
- *      registration order.
+ *           `installer.registerExtensionTool(...)` with binding
+ *           `{ scope: "extension", level: "session" }`.
+ *   4. Exposes the per-session clients on the `bridges.mcp` slot via
+ *      `installer.registerNamespace("mcp", { client, clients })`.
+ *   5. `installer.onClose` cascades — each harness's `close()` runs
+ *      when the session closes (NOT when the app closes — each
+ *      session owns its connections).
  *
- * Tool naming: each tool's local name is `<serverId>__<toolName>` by
- * default — namespaces tools to their server and avoids cross-server
- * collisions (Linear + Notion both expose `create_issue` without
- * either winning the registry). Adopters can override per-server via
- * `toolPrefix`.
+ * ## Connection fan-out
  *
- * Failure modes:
- *   - A server failing to connect is recorded but doesn't abort the
- *     other servers — the rest connect and the failed one transitions
- *     to `degraded` (or `reconnecting` if a policy is set).
- *   - A tool name collision across servers WITHIN the same default
+ * N sessions × M servers → N×M connections. Acceptable for
+ * HTTP-remote transports (cheap streams). Wasteful for stateless
+ * local stdio adapters and for high-tenant deployments.
+ *
+ * **FUTURE OPTIMIZATION (track in coming weeks)** — connection pool
+ * keyed by authentication principal sits BENEATH McpClientHarness
+ * via a `connection: McpConnectionRef` indirection. Sessions check
+ * connections OUT for the duration of a tick / callTool, back IN
+ * when done. Same auth principal → connection sharing; different
+ * principals → connection isolation (wire-correct). `Mcp-Session-Id`
+ * makes Streamable HTTP cleanly resumable across check-outs. Nothing
+ * above this file changes when the pool is introduced. Documented
+ * in `packages-next/mcp/README.md` "Connection lifecycle" and
+ * `blueprint/23-mcp-as-harness.md`. Defer until production load
+ * demands it.
+ *
+ * ## Failure modes
+ *
+ *   - A server failing to connect for a given session is recorded
+ *     but doesn't abort the rest of that session's servers — the
+ *     lifecycle FSM transitions to `degraded` (or `reconnecting` if
+ *     a policy is set). Observe via `bridges.mcp.client(id).state`
+ *     or the bus envelope `mcp:<scopeId>:state`.
+ *   - Tool name collision across servers WITHIN the same default
  *     prefix shape is impossible by construction (the serverId
  *     prefix disambiguates).
  *
  * @see ./content-mapper.ts for the CallToolResult → ContentBlock[] mapping
+ * @see docs/proposals/v2/blueprint/23-mcp-as-harness.md
  */
 
-import type { AppExtension, AppInstaller } from "@agentick/spec-next";
-import type {
-  ElicitationHarnessProtocol,
-  SessionHarnessProtocol,
-  ToolDeclaration,
-  ToolHandler,
-} from "@agentick/spec-next";
+import type { SessionExtension, SessionInstaller } from "@agentick/spec-next";
+import type { ToolDeclaration, ToolHandler } from "@agentick/spec-next";
 import { jsonSchema, toRegistration } from "@agentick/spec-next";
 
 // Side-effect import — pulls in the `SessionHarnessProtocol.elicitation`
-// module-augmentation slot so `session.elicitation` types as
-// `ElicitationHarnessProtocol` (with its `address` field) rather than
-// `unknown` when looked up via `installer.app.getSession(id)`.
+// module augmentation. The installer exposes elicit directly today
+// (no `getSession` walk needed), but the augmentation keeps the
+// typed lookup story honest for adopters who reach through
+// `session.elicitation` after the fact.
 import "@agentick/elicitation-next";
 
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
@@ -76,7 +104,16 @@ export interface McpServerConfig {
    */
   readonly serverId: string;
 
-  /** Pre-built transport (stdio / streamable-http / in-memory). */
+  /**
+   * Pre-built transport (stdio / streamable-http / in-memory).
+   *
+   * Per-session harness construction means a single transport
+   * instance can only serve one session — if the adopter passes a
+   * `transport` literal here, it's effectively shared across
+   * sessions and will break under multi-session use. For
+   * single-session use it's fine. For multi-session use, supply a
+   * `transport` FACTORY pattern (a future feature; see ADR-23).
+   */
   readonly transport: Transport;
 
   /** Auth strategy. Defaults to {@link NoneAuth} (stdio default). */
@@ -97,9 +134,9 @@ export interface McpServerConfig {
 
   /**
    * Client capability declaration sent in `initialize`. Defaults to
-   * the minimal substrate set (`elicitation.form`); the
-   * `ElicitationBridge` (#4) augments it with the URL mode and
-   * inbound elicit handling.
+   * `{ elicitation: { form: {}, url: {} } }` — both substrate
+   * elicit modes advertised. Roots / sampling capabilities land as
+   * their bridges ship.
    */
   readonly capabilities?: Readonly<Record<string, unknown>>;
 
@@ -138,20 +175,17 @@ export interface McpHookBridgeImpl {
 // Extension factory
 // ============================================================================
 
-/**
- * Stable extension name — used as the `extensionName` field on every
- * tool's binding. Sessions that look up bindings by extension reach
- * MCP-contributed tools via this constant.
- */
 const EXTENSION_NAME = "@agentick/mcp-next";
 
 /**
- * Stable `handlerRef` for one MCP tool. Format: `mcp:<serverId>:<toolName>`.
- * Used by the HandlerResolver to route dispatches back to the right
- * `McpClientHarness.callTool`.
+ * Stable `handlerRef` for one MCP tool, scoped to its owning session.
+ * Format: `mcp:<sessionId>:<serverId>:<toolName>`. Per-session
+ * handlerRefs keep registrations unique on the shared HandlerResolver
+ * so two sessions running the same server don't overwrite each
+ * other's handlers.
  */
-function mcpHandlerRef(serverId: string, toolName: string): string {
-  return `mcp:${serverId}:${toolName}`;
+function mcpHandlerRef(sessionId: string, serverId: string, toolName: string): string {
+  return `mcp:${sessionId}:${serverId}:${toolName}`;
 }
 
 /**
@@ -161,11 +195,10 @@ function mcpHandlerRef(serverId: string, toolName: string): string {
  * the wire edge.
  *
  * `exposure: ["model", "dispatch"]` — MCP tools are reachable from
- * both doors. The model can invoke via `tool_use`; the host can
- * invoke programmatically via `session.dispatch(name, input)`. MCP
- * servers don't care which door routed the call.
+ * both doors.
  */
 function mcpDeclaration(
+  sessionId: string,
   serverId: string,
   tool: McpToolDescriptor,
   localName: string,
@@ -179,7 +212,7 @@ function mcpDeclaration(
     inputSchema,
     ...(outputSchema !== undefined ? { outputSchema } : {}),
     exposure: ["model", "dispatch"],
-    handlerRef: mcpHandlerRef(serverId, tool.name),
+    handlerRef: mcpHandlerRef(sessionId, serverId, tool.name),
     ...(tool.annotations !== undefined
       ? { annotations: tool.annotations as ToolDeclaration["annotations"] }
       : {}),
@@ -187,28 +220,16 @@ function mcpDeclaration(
 }
 
 /**
- * Construct one `McpClientHarness` for a server config. Awaits its
- * `.ready` so the caller can invoke methods immediately.
+ * Construct one per-session `McpClientHarness` for a server config.
+ * The harness's elicit address is fixed at construction to the
+ * session's elicit harness — no slot, no resolver callback, no race.
  */
 async function mkClient(
-  installer: AppInstaller,
+  installer: SessionInstaller,
   config: McpServerConfig,
 ): Promise<McpClientHarness> {
-  // Closure over installer.app — resolves a session's elicit harness
-  // address at the moment the SDK's elicit handler fires. The lookup
-  // happens lazily because sessions don't exist yet at app-install
-  // time. In-memory: walks the app's session registry. Cluster
-  // (#151+): swaps this resolver for a cluster directory lookup.
-  const resolveElicitAddress = (sessionId: string): string | undefined => {
-    const session = installer.app.getSession?.(sessionId) as
-      | (SessionHarnessProtocol<unknown> & {
-          readonly elicitation?: ElicitationHarnessProtocol;
-        })
-      | undefined;
-    return session?.elicitation?.address;
-  };
   const harness = new McpClientHarness(
-    `${installer.hostId}:mcp:${config.serverId}`,
+    `${installer.sessionId}:mcp:${config.serverId}`,
     installer.substrate.journal,
     installer.substrate.bus,
     installer.substrate.inbox,
@@ -216,7 +237,7 @@ async function mkClient(
       serverId: config.serverId,
       transport: config.transport,
       auth: config.auth ?? new NoneAuth(),
-      resolveElicitAddress,
+      elicitAddress: installer.elicitation.address,
       ...(config.codec !== undefined ? { codec: config.codec } : {}),
       ...(config.reconnect !== undefined ? { reconnect: config.reconnect } : {}),
       ...(config.capabilities !== undefined ? { capabilities: config.capabilities } : {}),
@@ -233,64 +254,47 @@ async function mkClient(
 /**
  * Discover one server's tools and register them with the installer.
  * Each tool gets:
- *   1. A dispatch handler in the shared HandlerResolver — proxies
- *      to `harness.callTool` and maps MCP content → ContentBlock[].
- *   2. A `ToolRegistration` bound to the extension slot at app level.
- *      The session's per-tick compile picks them up at the extension
- *      binding's precedence rank.
+ *   1. A dispatch handler in the shared HandlerResolver, keyed by
+ *      a per-session `handlerRef` so cross-session registrations
+ *      don't collide.
+ *   2. A `ToolRegistration` bound to `{ scope: "extension",
+ *      level: "session" }`. Lands in the session's ToolExecutor
+ *      initialTools by way of `installer.registerExtensionTool`.
  */
 async function discoverAndRegisterTools(
-  installer: AppInstaller,
+  installer: SessionInstaller,
   config: McpServerConfig,
   harness: McpClientHarness,
 ): Promise<void> {
   const tools = await harness.listTools();
   const prefix = config.toolPrefix ?? `${config.serverId}__`;
-  // Capture the installer-host reference so the per-call resolver
-  // lookup can reach the live session registry at dispatch time. App
-  // extensions install BEFORE sessions exist; the closure resolves
-  // sessions lazily.
   for (const tool of tools) {
     const localName = `${prefix}${tool.name}`;
-    const handlerRef = mcpHandlerRef(config.serverId, tool.name);
-    const handler: ToolHandler = async (input, { ctx }) => {
-      // Pass the session id directly. The harness routes inbound
-      // elicits via inbox to whichever address its
-      // `resolveElicitAddress` returns — cluster-friendly seam.
-      const result = await harness.callTool(
-        tool.name,
-        input as Readonly<Record<string, unknown>>,
-        ctx.sessionId !== undefined ? { elicitSessionId: ctx.sessionId } : undefined,
-      );
+    const handlerRef = mcpHandlerRef(installer.sessionId, config.serverId, tool.name);
+    const handler: ToolHandler = async (input) => {
+      const result = await harness.callTool(tool.name, input as Readonly<Record<string, unknown>>);
       return mcpContentToBlocks(result.content);
     };
     installer.registerToolHandler(handlerRef, handler);
     installer.registerExtensionTool(
-      toRegistration(mcpDeclaration(config.serverId, tool, localName), {
+      toRegistration(mcpDeclaration(installer.sessionId, config.serverId, tool, localName), {
         scope: "extension",
         extensionName: EXTENSION_NAME,
-        level: "app",
+        level: "session",
       }),
     );
   }
 }
 
 /**
- * `withMCP({ servers })` — app-level extension. See file-header for
- * lifecycle details. Returns a single `AppExtension`; tool
- * registration into per-session ToolExecutors happens via
- * `installer.registerExtensionTool` so no companion SessionExtension
- * is needed.
+ * `withMCP({ servers })` — per-session SessionExtension. See file
+ * header for the lifecycle + multi-tenant rationale.
  */
-export function withMCP(options: WithMCPOptions): AppExtension {
+export function withMCP(options: WithMCPOptions): SessionExtension {
   return {
     name: EXTENSION_NAME,
-    target: "app",
-    async install(installer: AppInstaller): Promise<void> {
-      // `clientsById` is the lookup index — O(1) `bridge.client(id)`.
-      // `handles` is the insertion-ordered enumeration for
-      // `bridge.clients`. Both point at the same `McpClientHandle`
-      // objects — one map, one list, one allocation per client.
+    target: "session",
+    async install(installer: SessionInstaller): Promise<void> {
       const clientsById = new Map<string, McpClientHandle>();
       const handles: McpClientHandle[] = [];
 
@@ -302,11 +306,10 @@ export function withMCP(options: WithMCPOptions): AppExtension {
         installer.onClose(() => harness.close());
 
         // Connect + discover. A connect failure records the server as
-        // degraded but doesn't block other servers (the lifecycle FSM
-        // has already transitioned to `degraded` / `reconnecting`;
-        // adopters observe via `bridges.mcp.client(id).state` or the
-        // bus envelope `mcp:<scopeId>:state`). Future-work: re-run
-        // discovery on the next `connected` transition.
+        // degraded but doesn't block other servers (the lifecycle
+        // FSM transitions to `degraded` / `reconnecting`; observe
+        // via `bridges.mcp.client(id).state` or the bus envelope
+        // `mcp:<scopeId>:state`).
         try {
           await harness.connect();
         } catch {
