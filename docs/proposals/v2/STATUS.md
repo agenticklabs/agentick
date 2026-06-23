@@ -1190,6 +1190,57 @@ blueprint's design decisions; this is execution-level).
   MCP's per-connection serial-call convention; per-request-id
   correlation deferred until the wire ships stable
   `relatedRequestId` on inbound server-initiated requests.
+- **#149 cluster-friendly elicit routing + URL mode + Effect
+  cleanup.** Substrate-level overhaul of the elicit bridge.
+  `ElicitationHarness` gains an `elicit-request` inbox message
+  handler that runs an elicit locally and routes the result back via
+  `request-response`. `McpClientHarness` slot stores a *sessionId
+  string* (not an object reference); the SDK elicit handler routes
+  via the substrate inbox to the session's elicit address — same
+  protocol in-memory (LocalInbox) and cluster (ClusterInbox). The
+  per-call slot stamp uses `Effect.acquireUseRelease` for
+  interrupt-safe acquire/release. URL mode wired end-to-end:
+  harness publishes URL-mode payload, MCP bridge forwards URL
+  elicits as consent-only terminals. `UnsupportedElicitationModeError`
+  deleted (both modes wired). SDK exported `ElicitRequestFormParams |
+  ElicitRequestURLParams` union used directly (replaces hand-rolled
+  type). `BaseHarness.address` made public — every harness exposes
+  its cluster-portable inbox address. `ElicitationHarnessProtocol`
+  gains `address: string`. Unrouted/ambiguous elicits emit
+  `mcp:warning:routing-dropped` bus envelopes. URL-mode conformance
+  + capability handshake + concurrent in-session tests added.
+- **#150 SessionExtension lifecycle wiring.** The `target: "session"`
+  half of the extension union was a placeholder — AppHarness cached
+  the extensions but never invoked them. Now wired:
+  `createSessionBody` builds a SessionInstaller (sessionId + tool +
+  bridge + bus + onClose registration surface), runs session-target
+  extensions BEFORE constructing the ToolExecutor so contributed
+  tools (binding `{ scope: "extension", level: "session" }`) land in
+  `initialTools`. Per-session bridges overlay app-level. Close
+  handlers + tool-handler unregisters + bus subscriptions fire LIFO
+  at session.close. Foundational for every session-scoped extension
+  — knobs, sandbox-session, mcp-future. 6 conformance tests cover
+  install-once-per-session, dispatch reachability, bridge isolation,
+  LIFO close, no-zombie-handlers, app+session sibling phasing.
+- **#151 withMCP becomes per-session — drops the elicit slot
+  entirely.** Architectural floor for multi-tenant MCP.
+  `McpClientHarness` is now per-(session, server); `elicitAddress`
+  is fixed at construction (set to `SessionInstaller.elicitation
+  .address`). The `activeElicitSessionId` slot, the
+  `Effect.acquireUseRelease` wrapper around `callTool`, the
+  `resolveElicitAddress` callback, the cross-session ambiguity
+  warning path — all gone. handlerRefs are per-session
+  (`mcp:<sessionId>:<serverId>:<toolName>`) to avoid collisions on
+  the shared HandlerResolver. Tools bind with
+  `{ scope: "extension", level: "session" }`. Multi-tenant
+  correctness: MCP binds OAuth tokens + `Mcp-Session-Id` + auth
+  decisions to the connection; sharing across users is a wire
+  violation. **Future optimization (#152, weeks horizon):**
+  connection pool keyed by auth principal — sessions check out /
+  back in. Sits BENEATH McpClientHarness; same auth principal →
+  connection sharing, different principals → isolation. Loud
+  documentation in `packages-next/mcp/README.md` "Connection
+  lifecycle" and `blueprint/23-mcp-as-harness.md`.
 
 ### 2026-05-08
 
