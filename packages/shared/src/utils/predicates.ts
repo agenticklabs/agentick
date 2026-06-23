@@ -57,9 +57,31 @@ export function isArray(v: unknown): v is readonly unknown[] {
 /**
  * Plain object — NOT an array, NOT `null`, NOT a function, NOT a
  * primitive. The everyday "do I have a key/value bag" check.
+ *
+ * Note: returns `true` for class instances and built-ins like `Date`
+ * (they're typeof "object"). Callers wanting "POJO only" (no class
+ * instances) reach for {@link isPlainObject}.
  */
 export function isObject(v: unknown): v is Record<string, unknown> {
   return v !== null && typeof v === "object" && !Array.isArray(v);
+}
+
+/**
+ * Plain Old JavaScript Object — `{}`-literal or `Object.create(null)`.
+ * NOT a class instance, NOT `Date` / `RegExp` / `Map` / `Set`, NOT an
+ * array, NOT `null`.
+ *
+ * Used by deep-merge consumers that need to distinguish "extend this
+ * key-value bag" from "treat this as an opaque value." `Executor`
+ * instances are opaque; `{x:1, y:2}` is mergeable.
+ *
+ * Detects via prototype chain: a value is a plain object iff its
+ * prototype is either `Object.prototype` or `null`.
+ */
+export function isPlainObject(v: unknown): v is Record<string, unknown> {
+  if (v === null || typeof v !== "object" || Array.isArray(v)) return false;
+  const proto = Object.getPrototypeOf(v);
+  return proto === null || proto === Object.prototype;
 }
 
 // ============================================================================

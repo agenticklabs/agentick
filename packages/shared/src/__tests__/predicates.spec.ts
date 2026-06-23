@@ -9,6 +9,7 @@ import {
   isNull,
   isNumber,
   isObject,
+  isPlainObject,
   isString,
   isUndefined,
 } from "../utils/predicates.js";
@@ -96,6 +97,34 @@ describe("predicates", () => {
       expect(isArray("abc")).toBe(false);
       expect(isArray({ length: 0 })).toBe(false);
       expect(isArray(null)).toBe(false);
+    });
+  });
+
+  describe("isPlainObject — POJO only", () => {
+    it("matches object literals and Object.create(null)", () => {
+      expect(isPlainObject({})).toBe(true);
+      expect(isPlainObject({ a: 1 })).toBe(true);
+      expect(isPlainObject(Object.create(null))).toBe(true);
+    });
+    it("rejects class instances", () => {
+      class X {
+        constructor(public n = 1) {}
+      }
+      expect(isPlainObject(new X())).toBe(false);
+    });
+    it("rejects built-ins (Date, RegExp, Map, Set)", () => {
+      expect(isPlainObject(new Date())).toBe(false);
+      expect(isPlainObject(/x/)).toBe(false);
+      expect(isPlainObject(new Map())).toBe(false);
+      expect(isPlainObject(new Set())).toBe(false);
+    });
+    it("rejects arrays, null, primitives, functions", () => {
+      expect(isPlainObject([])).toBe(false);
+      expect(isPlainObject(null)).toBe(false);
+      expect(isPlainObject(undefined)).toBe(false);
+      expect(isPlainObject(0)).toBe(false);
+      expect(isPlainObject("")).toBe(false);
+      expect(isPlainObject(() => 0)).toBe(false);
     });
   });
 

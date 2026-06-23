@@ -1,9 +1,9 @@
 # ADR 34 — Scoped capability cascade: one pattern for layered configuration
 
-**Status:** Active · 2026-06-23
+**Status:** Active · 2026-06-23 (revised 2026-06-23 with Pattern A clarification)
 **Builds on:** ADR 26 (Harness as the single shape), ADR 27 (Modular built-ins), ADR 31 (Harness hierarchy), ADR 32 (Extension shape spectrum)
-**Touches:** `@agentick/spec-next/data/declarations.ts` (`ToolBinding`), `@agentick/spec-next/protocol/tool-executor.ts`, `@agentick/tool-executor-next/src/registry.ts`, `@agentick/tool-executor-next/src/with-scope.ts`, every extension that contributes capability at a layer (`withMCP`, future `withSkills`/`withMemory`/`withAuth`/...)
-**Realized by:** Layered tools epic (#135 – #143), commit range `d161e902` → `7fb75ef2`
+**Touches:** `@agentick/spec-next/data/declarations.ts` (`ToolBinding`), `@agentick/spec-next/protocol/tool-executor.ts`, `@agentick/tool-executor-next/src/registry.ts`, `@agentick/tool-executor-next/src/with-scope.ts`, `@agentick/shared/utils/merge-layered.ts`, every extension that contributes capability at a layer (`withMCP`, future `withSkills`/`withMemory`/`withAuth`/...)
+**Realized by:** Layered tools epic (#135 – #143), commit range `d161e902` → `7fb75ef2`; mergeLayered primitive (#144)
 
 ## TL;DR
 
@@ -12,6 +12,81 @@ The layered-tools work (#135 – #143) introduced a pattern — registry entries
 This ADR names the pattern, sketches the generic primitive, and declares it the canonical model for any cross-cutting capability the framework eventually models: **tools (done), knobs, resources, prompts, skills, credentials, memory stores, telemetry exporters, capability filters, slash commands, routing rules**.
 
 `installer.registerExtensionTool` is the **first thin wrapper** over the generic primitive. The next two domains that need this shape — likely skills and credentials — should be the trigger to **lift `ScopedRegistry<>` into spec** instead of re-rolling.
+
+## Three patterns, three primitives
+
+What we built for tools is one of three sibling cascade patterns in the framework. All three share vocabulary (precedence direction, "most-specific wins", scope-bound provenance) but diverge in machinery. Naming all three explicitly so future cascade work picks the right shape.
+
+| Pattern | What it cascades | Primitive | State |
+|---|---|---|---|
+| **A. Declarative cascade** | Adopter-written config values (`maxTicks`, `executor`, `metadata`, project config) | **`mergeLayered<T>(...layers)`** in `@agentick/shared/utils/merge-layered.ts` | Landed |
+| **A′. Substrate cascade** | One slot per kind, factory-aware (bus/inbox/journal) | `HarnessShell` slot resolver in `BaseHarness` | Landed (ADR 31) |
+| **B. Emitted cascade** | Dynamic multi-entry sources (tools, skills, prompts, resources, ...) | **`ScopedRegistry<Entry, Strategy>`** + `withScope` + `replaceSlice` | Reference impl exists (`@agentick/tool-executor-next`); lifts when third domain lands |
+
+### Pattern A — Declarative cascade (`mergeLayered`)
+
+**When:** adopter writes a config value into options at some layer. Each layer's options carry zero-or-one value per field. Resolution merges all layers with most-specific winning.
+
+**Primitive:** `mergeLayered<T>(...layers: Layer<T>[]): T`. Deep-merge with cascade semantics — `undefined` doesn't override, plain objects deep-merge, arrays / primitives / opaque instances replace by default. Symbol-wrapped strategies (`append` / `prepend` / `replace` / `omit`) opt into per-field semantics at the call site.
+
+```ts
+const config = mergeLayered<SessionConfig>(
+  FRAMEWORK_DEFAULTS,
+  gateway?.config,       // gateway layer
+  app.config,            // app layer
+  session.config,        // session layer
+  sendInput.config,      // per-call layer
+);
+```
+
+**Two consumers in mind, by intent:**
+
+1. **Agentick-internal cascade** — at construction boundaries between harness layers. New harness layer = one new arg. New config field = one new type addition. No per-field resolver code.
+
+2. **Convenience-wrapper authors** (the v2 equivalent of v1's `agent({ ... })` package) — merging framework defaults + env config + project config + adopter call-site into one blob, then translating to agentick's primitives. Agentick is intentionally low-level; the "config file" ergonomics most adopters expect live in the wrapper layer above. `mergeLayered` serves both layers identically.
+
+**Symbol strategies** are the lever that makes per-field semantics expressible at the call site:
+
+```ts
+mergeLayered(
+  { extensions: [existingExt] },
+  { extensions: append([newExt]) },  // → [existingExt, newExt]
+);
+mergeLayered(
+  { a: { x: 1, y: 2 } },
+  { a: replace({ y: 9 }) },          // → { a: { y: 9 } }  (opts out of deep merge)
+);
+```
+
+Adopters writing convenience wrappers — "my framework's default `extensions: [...]` should be appended to by adopter input, not replaced" — express this as data, not custom merger code.
+
+**What `mergeLayered` is NOT:** an inline `??` chain. Early drafts of this ADR described Pattern A as `local ?? parent ?? grandparent ?? default`, which works for **scalars and opaque instances** but fails for **objects** (`{a:1} ?? {b:2}` returns the first object, dropping `b:2` entirely). Existing call sites in `sendBody`/`createSessionBody` use inline `??` chains today; those are correct for the specific fields they cascade (`executor`, `maxTicks`, `streaming` — all scalars). When a new layered field requires object-deep-merge semantics, those call sites should adopt `mergeLayered` rather than expanding the inline chain.
+
+**Migration policy:** the primitive sits in `@agentick/shared` ready for use. Existing inline `??` chains are NOT migrated speculatively — they work and they're correct. The first new layered field that needs object merge (or the first new layer added between gateway and per-call) is the forcing function for migration.
+
+### Pattern A′ — Substrate cascade (already done)
+
+ADR 31 settled this. The harness hierarchy (gateway → app → session) inherits or wraps parent substrate (bus/inbox/journal) via a factory-or-instance slot resolver. Same precedence direction as A and B; specialized to cardinality-1 per (kind, scope) with first-class composition support (factories let a child wrap rather than replace).
+
+No work here. The pattern exists; future harness types inherit it for free.
+
+### Pattern B — Emitted cascade (this ADR's main subject)
+
+**When:** some process emits N entries at a layer dynamically — the reconciler renders and emits tool declarations; MCP discovers and emits tool registrations; the adopter declares tools statically; the per-send call adds more. Multiple sources contribute concurrently per scope.
+
+Resolution can't be a lookup chain because there's no single slot per layer — each layer carries an arbitrary set. You need a registry, provenance tags, a compile step that resolves precedence at consumption time, and scope-bound lifecycle.
+
+This is what the tools work built. The rest of the ADR sketches its generic shape.
+
+### The distinguishing test
+
+Picking which pattern applies to a new concern:
+
+> **"Does the reconciler (or any per-tick dynamic emitter) need to participate in this cascade?"**
+>
+> - **Yes** → Pattern B (`ScopedRegistry`). Tools, sections, skills, resources, prompts, per-tick model selection.
+> - **No, just adopter-written config** → Pattern A (`mergeLayered`). maxTicks, streaming, executor default, metadata, policy.override.
+> - **One slot per kind, child-may-wrap-parent** → Pattern A′ (substrate). bus/inbox/journal.
 
 ## The shape we accidentally formalized
 
