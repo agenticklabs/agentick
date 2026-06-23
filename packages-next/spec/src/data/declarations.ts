@@ -109,6 +109,31 @@ export interface ToolAnnotations {
   };
   readonly cache?: CacheHint;
   readonly providerMetadata?: Record<string, Record<string, unknown>>;
+  /**
+   * Long-running task semantics — `2025-11-25` core / draft extension
+   * (`io.modelcontextprotocol/tasks`).
+   *
+   *   `"unsupported"` (default) — the tool always runs synchronously;
+   *     a `task: {ttl}` opt-in from the caller is rejected.
+   *   `"supported"`             — sync OR task-mode at the caller's
+   *     choosing. The tool handler should be able to return either a
+   *     `ContentBlock[]` (sync) or a `TaskHandle` (task-mode).
+   *   `"required"`              — task-mode is the only option; the
+   *     handler must return a `TaskHandle`. Sync invocation is
+   *     rejected by the executor before the handler runs.
+   *
+   * Wire mapping is era-aware: `2025-11-25` ships this at the tool-
+   * annotation level; draft moves it under the
+   * `io.modelcontextprotocol/tasks` extension. The substrate stays
+   * vocabulary-stable across both.
+   */
+  readonly taskSupport?: "unsupported" | "supported" | "required";
+  /**
+   * Default TTL (ms) for task-mode invocations of this tool. Caller-
+   * supplied `task: { ttl }` overrides. Omitted = no expiry (the
+   * MCP-aligned "null TTL" semantic).
+   */
+  readonly taskTtlMs?: number;
 }
 
 export interface ToolDeclaration {

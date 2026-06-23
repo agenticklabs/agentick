@@ -1,0 +1,141 @@
+/**
+ * `stubTasks()` — canned-answer stub conforming to
+ * {@link TasksHarnessProtocol}. No substrate, no registry. Useful
+ * for tests that need to inject a `tasks` slot without spinning up
+ * a real harness — wire-shape conformance checks, harness-consumer
+ * unit tests, etc.
+ *
+ * Per the test-doubles convention: `stub*` for canned answers.
+ */
+
+import type {
+  ContentBlock,
+  ProgressUpdate,
+  TaskCreationInput,
+  TaskEvent,
+  TaskHandle,
+  TaskInfo,
+  TaskStatus,
+  TaskWorkContext,
+  TasksHarnessProtocol,
+  UnknownTaskError,
+} from "@agentick/spec-next";
+
+export interface StubTasksOptions {
+  /** Identity surfaced as `id` / `scopeId` (`tasks:${id}`). */
+  readonly id?: string;
+  /**
+   * Optional handler invoked whenever a caller calls `submit`. Lets
+   * tests observe the work argument without exercising it.
+   */
+  readonly onSubmit?: <T>(
+    work: (ctx: TaskWorkContext) => Promise<T> | T,
+    opts?: TaskCreationInput,
+  ) => void;
+  /**
+   * Canned result `submit` resolves with. Defaults to an empty
+   * `ContentBlock[]`. Used as the resolved value of `result`.
+   */
+  readonly cannedResult?: readonly ContentBlock[];
+}
+
+export function stubTasks(options: StubTasksOptions = {}): TasksHarnessProtocol {
+  const id = options.id ?? "stub-tasks";
+  const cannedResult = options.cannedResult ?? [];
+  const known = new Map<string, TaskInfo>();
+
+  let counter = 0;
+  const makeId = (): string => `task:stub:${counter++}`;
+
+  function submitImpl<T = readonly ContentBlock[]>(
+    work: (ctx: TaskWorkContext) => Promise<T> | T,
+    opts: TaskCreationInput = {},
+  ): TaskHandle<T> {
+    options.onSubmit?.(work, opts);
+    const taskId = makeId();
+    const now = Date.now();
+    const info: TaskInfo = {
+      taskId,
+      status: "completed",
+      createdAt: now,
+      lastUpdatedAt: now,
+      ttl: opts.ttl ?? null,
+      ...(opts.statusMessage !== undefined ? { statusMessage: opts.statusMessage } : {}),
+      ...(opts.pollInterval !== undefined ? { pollInterval: opts.pollInterval } : {}),
+    };
+    known.set(taskId, info);
+
+    const result = Promise.resolve(cannedResult as unknown as T);
+    return {
+      taskId,
+      initialStatus: "completed",
+      result,
+      info: (): TaskInfo => info,
+      events: (): AsyncIterable<TaskEvent> => ({
+        // Pre-completed task — emit a single status event and close.
+        [Symbol.asyncIterator]: (): AsyncIterator<TaskEvent> => {
+          let yielded = false;
+          return {
+            next: async (): Promise<IteratorResult<TaskEvent>> => {
+              if (!yielded) {
+                yielded = true;
+                return { value: { kind: "status", info } as TaskEvent, done: false };
+              }
+              return { value: undefined, done: true };
+            },
+          };
+        },
+      }),
+      cancel: async (): Promise<void> => {
+        // No-op — the canned task is already terminal.
+      },
+    };
+  }
+
+  // Silence unused-var hints for unused stub features.
+  void ((_p: ProgressUpdate): void => {});
+
+  return {
+    id,
+    address: `tasks:${id}`,
+    ready: Promise.resolve(),
+    submit: submitImpl,
+    get: (taskId: string): TaskInfo | undefined => known.get(taskId),
+    status: (taskId: string): TaskStatus | undefined => known.get(taskId)?.status,
+    async result<T = readonly ContentBlock[]>(taskId: string): Promise<T> {
+      if (!known.has(taskId)) {
+        throw { _tag: "UnknownTaskError", taskId } satisfies UnknownTaskError;
+      }
+      return cannedResult as unknown as T;
+    },
+    async cancel(taskId: string, _reason?: string): Promise<void> {
+      if (!known.has(taskId)) {
+        throw { _tag: "UnknownTaskError", taskId } satisfies UnknownTaskError;
+      }
+      // canned tasks complete immediately — cancel is a no-op.
+    },
+    events(taskId: string): AsyncIterable<TaskEvent> {
+      const info = known.get(taskId);
+      if (!info) {
+        throw { _tag: "UnknownTaskError", taskId } satisfies UnknownTaskError;
+      }
+      return {
+        [Symbol.asyncIterator]: (): AsyncIterator<TaskEvent> => {
+          let yielded = false;
+          return {
+            next: async (): Promise<IteratorResult<TaskEvent>> => {
+              if (!yielded) {
+                yielded = true;
+                return { value: { kind: "status", info } as TaskEvent, done: false };
+              }
+              return { value: undefined, done: true };
+            },
+          };
+        },
+      };
+    },
+    async close(): Promise<void> {
+      // no-op
+    },
+  };
+}

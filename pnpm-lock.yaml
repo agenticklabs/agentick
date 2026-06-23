@@ -955,6 +955,18 @@ importers:
         specifier: ^19.2.13
         version: 19.2.13
 
+  packages-next/tasks:
+    dependencies:
+      '@agentick/runtime-next':
+        specifier: workspace:*
+        version: link:../runtime
+      '@agentick/spec-next':
+        specifier: workspace:*
+        version: link:../spec
+      effect:
+        specifier: ^3.21.2
+        version: 3.21.2
+
   packages-next/timeline:
     dependencies:
       '@agentick/reconciler-next':
