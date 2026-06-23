@@ -1173,6 +1173,23 @@ blueprint's design decisions; this is execution-level).
   `JournalingPolicy` no longer requires touching the three close-op
   override sites. Gateway's adopter-supplied `policy` now deep-merges
   through the cascade rather than per-field copy.
+- **#133 ElicitationBridge landed — MCP server-to-client
+  `elicitation/create` routing.** Closes the MCP-side half of the
+  elicitation chapter. Spec gains an optional
+  `AppInstallerHost.getSession(id)` so app-extensions can reach live
+  session bridges at dispatch time without coupling to
+  `@agentick/app-next`. `withMCP`'s tool-handler closure resolves
+  `installer.app.getSession(ctx.sessionId)?.elicitation` and threads
+  it through `harness.callTool(..., { elicitResolver })`. The MCP
+  SDK's `ElicitRequestSchema` handler routes inbound `elicit/create`
+  through the per-call slot — accept → tool result embeds value,
+  decline/cancel → server sees clean termination. Translation lives
+  in a separate `mcp/client/elicit-bridge.ts` so #134a (URL mode) is
+  a small drop-in. v0 concurrency caveat: single resolver slot per
+  harness; concurrent elicit-routed `callTool`s race. Mitigated by
+  MCP's per-connection serial-call convention; per-request-id
+  correlation deferred until the wire ships stable
+  `relatedRequestId` on inbound server-initiated requests.
 
 ### 2026-05-08
 
