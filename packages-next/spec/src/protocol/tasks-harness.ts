@@ -23,6 +23,8 @@
  * @see docs/proposals/v2/blueprint/23-mcp-as-harness.md §Tasks
  */
 
+import type { Effect } from "effect";
+
 import type { ContentBlock } from "../data/content-blocks.js";
 
 // ============================================================================
@@ -250,9 +252,30 @@ export interface TasksHarnessProtocol {
    * a {@link TaskRejection}.
    * `signal.aborted` → task transitions to `cancelled`; `result`
    * rejects with a `TaskRejection` of status `"cancelled"`.
+   *
+   * **Effect-typed work.** Work may return an `Effect<T, E, never>`.
+   * On the Effect path the harness uses `Effect.runFork` and tracks
+   * the resulting `Fiber`; `cancel()` calls `Fiber.interrupt` so
+   * `Effect.sleep`, `Effect.async`, generator-based work, etc., are
+   * actually interruptible — unlike the Promise path, where the
+   * `AbortSignal` only flips a flag and underlying microtasks keep
+   * running until they observe it. Use the Effect overload whenever
+   * you want hard interruptibility guarantees on cancel; use the
+   * Promise overload for plain async work that's happy to observe the
+   * signal.
+   *
+   * The Effect's success value resolves `handle.result`. A typed
+   * failure (`Effect.fail`) resolves to a `TaskRejection` of status
+   * `"failed"`; a defect (`Effect.die`) likewise. Interruption (via
+   * the cancel path OR an internal `Effect.interrupt`) transitions to
+   * `cancelled`.
    */
   submit<T = readonly ContentBlock[]>(
     work: (ctx: TaskWorkContext) => Promise<T> | T,
+    opts?: TaskCreationInput,
+  ): TaskHandle<T>;
+  submit<T = readonly ContentBlock[], E = unknown>(
+    work: (ctx: TaskWorkContext) => Effect.Effect<T, E, never>,
     opts?: TaskCreationInput,
   ): TaskHandle<T>;
 

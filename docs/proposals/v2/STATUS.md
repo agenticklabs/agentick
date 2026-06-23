@@ -1,7 +1,23 @@
 # Agentick v2 — Implementation Status
 
 **Branch:** `feat/v2`
-**Last updated:** 2026-06-23 (later) — **#157 model-facing `session_tasks_*` tools — `withTasks()` auto-registers list / get / cancel / await so Pattern B is usable end-to-end.** Closes the Pattern B loop opened by #156. Without these the model receives a task-ref content block but has no way to act on it; with them the agent can dispatch concurrent long-running work, continue talking, and reconcile results across ticks. Six parts:
+**Last updated:** 2026-06-23 (later still) — **#155 (Phase D minimal) — `TasksHarness.submit` accepts `Effect<T, E, never>` work; cancel calls `Fiber.interrupt` for real interruptibility.** Closes the Effect-typed work seam called out as a TODO in `harness.ts` and on the #155 backlog item. Five parts:
+
+1. **`TasksHarnessProtocol.submit` overloaded with an Effect work signature.** Spec adds `submit<T, E>(work: (ctx) => Effect.Effect<T, E, never>, opts?)` alongside the existing Promise/sync form. Both surface the same `TaskHandle<T>` — adopters branch purely on work-fn ergonomics, not on a separate API. `TaskWorkContext` (`signal`, `onProgress`, `setStatusMessage`) is unchanged; Effect work calls the imperative callbacks via `Effect.sync(() => ctx.onProgress(...))`.
+
+2. **Runtime branch on `Effect.isEffect(work(ctx))` in `TasksHarness.submit`.** Promise path is unchanged (still `workPromise.then().catch()` + `AbortController.abort()`). Effect path runs `Effect.runFork(effect)`, stores the resulting `Fiber.RuntimeFiber` on the `TaskRecord`, and chains `Fiber.await(fiber).then(handleExit)` to surface Exit→FSM transitions. `Exit.Success` → `completed`; `Cause.failureOption(...)` Some → `failed` with `errorReason(failure)`; `Cause.isInterruptedOnly(cause)` → internally-cancelled path (treated as `cancelled` with `reason: "interrupted"`); otherwise defect → `failed` with first defect's reason.
+
+3. **`Fiber.interrupt` wired into `cancelInternal`.** When a record carries a fiber, `cancel()` calls `Effect.runPromise(Fiber.interrupt(record.fiber)).catch(() => undefined)` fire-and-forget after the cancel transition is already committed. The fiber's Exit.Interrupt is observed by the `runEffectWork` continuation and silently dropped (status already `"cancelled"`). The AbortController is ALSO aborted on the Effect path as defence in depth — any Promise-flavor side-effects embedded inside the Effect still see the abort.
+
+4. **Cause→reason mapping (`causeToReason`).** Effect's `Cause` structure preserves failure shape that a `.catch()` rejection would flatten. The helper walks `Cause.failureOption` first (typed `Effect.fail`), then `Cause.defects` (`Effect.die`), then `Cause.pretty` as a last resort — feeds the existing `errorReason()` consistently. Same `TaskFailure.kind: "error"` is emitted for both typed failures and defects; the reason string distinguishes them.
+
+5. **Tests landed.** Conformance suite gains 4 cross-impl Effect tests (`succeed`, `fail`, `die`, `cancel-interrupts-Effect.sleep`). `harness.spec.ts` gains 6 reference-impl Effect tests including a **zombie-compute test**: an `Effect.gen` `while(true)` loop incrementing a Ref; after `cancel()`, the counter must freeze (verified by reading it twice across a 50ms gap). That test would loop forever without `Fiber.interrupt` — it's the load-bearing assertion for "real interruptibility" vs "AbortSignal flag flipped, microtasks still running."
+
+**What's deliberately NOT in this slice (deferred TODO, separate refactor):** the per-subscriber `Set<Queue<TaskEvent>>` fan-out → `Stream.fromQueue` rewrite. The current Queue pattern is correct; the rewrite is cleanup, not capability. Tracked as a `#155-followup` TODO in `harness.ts`.
+
+**Workspace:** `packages-next/tasks` 61 tests pass (54 prior + 7 new). `tool-executor` + `session` + `app` sweep clean (225 tests). Strict typecheck across spec / runtime / tasks / tool-executor / session / app / mcp all clean.
+
+**Previously, 2026-06-23 (later) — #157 model-facing `session_tasks_*` tools — `withTasks()` auto-registers list / get / cancel / await so Pattern B is usable end-to-end.** Closes the Pattern B loop opened by #156. Without these the model receives a task-ref content block but has no way to act on it; with them the agent can dispatch concurrent long-running work, continue talking, and reconcile results across ticks. Six parts:
 
 1. **`TasksHarnessProtocol.list()` added to the spec.** Returns `readonly TaskInfo[]` — a snapshot of every task known to this harness. Per-session scope (one harness per session via `withTasks()`). Implemented in `TasksHarness` (iterates the internal `tasks` map, calls existing `snapshot()` helper); implemented in `stubTasks` (returns `Array.from(known.values())`); conformance suite extended with one test covering the lifecycle (empty → 2 working → 2 completed).
 
@@ -30,7 +46,7 @@
 
 **What's still missing for the full Pattern B story:**
 
-- **#155** — `Stream<TaskEvent>` from per-subscriber `Queue<TaskEvent>` fan-out, `Effect<TaskHandle>` work overload with real fiber interruptibility. TODO markers already in `harness.ts`.
+- **#155** — `Effect<T>` work overload + `Fiber.interrupt` on cancel (LANDED in the latest entry). `Stream<TaskEvent>` from per-subscriber `Queue<TaskEvent>` fan-out remains a deferred cleanup (TODO `#155-followup` in `harness.ts`).
 - **Phase B (MCP wire codec)** — `mcp-next` translates inbound MCP `tools/call` with `task: { ttl }` into `submit`; outbound MCP wire serializes our TasksHarness state into `notifications/tasks/status` + `notifications/progress`. Tracked separately.
 - **`taskSupport: "supported"`** — caller-choice mode is in the spec annotation but executor doesn't branch on it yet. Land alongside MCP wire codec.
 - **Otto example update** — the otto example doesn't yet exercise the Pattern B path (no tool declares `taskSupport: "required"`). Worth a one-tool addition to demonstrate the model managing background work.
@@ -55,7 +71,7 @@
 **Deferred:**
 
 - **#157** — auto-register `tasks.list / tasks.get / tasks.cancel / tasks.await` model-facing tools when `withTasks()` is installed. Required for Pattern B to be usable — currently the model receives the task-ref content block but has no way to act on it.
-- **#155** — `Stream<TaskEvent>` from per-subscriber `Queue<TaskEvent>` fan-out, `Effect<TaskHandle>` work overload with real fiber interruptibility. TODO markers already in `harness.ts`.
+- **#155** — `Effect<T>` work overload + `Fiber.interrupt` on cancel (LANDED in the latest entry). `Stream<TaskEvent>` from per-subscriber `Queue<TaskEvent>` fan-out remains a deferred cleanup (TODO `#155-followup` in `harness.ts`).
 - **#158** — agent-self-coding via MCP server bridge (design only; no implementation).
 
 **Workspace:** all v2 tests pass (1703/1703 in the full sweep + 6 new task-handle tests). Strict typecheck clean. The full README + status doc sweep adds the test-double accuracy guarantee for `fakeTasks`/`stubTasks` per the [[feedback_test_doubles_meszaros]] convention.

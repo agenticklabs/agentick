@@ -22,21 +22,28 @@
  * `notifications/progress` over the wire. Inbound MCP task ops
  * (`tasks/cancel`) land via the harness's inbox.
  *
- * **Why Promise-flavor work runner, not `Effect.runFork`:** user
- * work is `(ctx) => Promise<T> | T`. Wrapping in `Effect.tryPromise`
- * + `Effect.runFork` would give us a fiber handle, but
- * `Fiber.interrupt` doesn't actually interrupt a Promise — the
- * underlying microtasks keep running until they observe the
- * AbortSignal. The shape costs us a `Cause`-unwrap layer for no
- * real cancellation benefit. Direct `workPromise.then().catch()` +
- * `AbortController.abort()` is the honest implementation. When
- * we add an Effect-typed work overload (`(ctx) => Effect<T, E,
- * never>`), THAT path runs as a fiber with real interruptibility.
+ * **Two work runners — Promise-flavor and Effect-flavor.** Work
+ * may return `Promise<T> | T` OR `Effect<T, E, never>`. The runner
+ * branches on `Effect.isEffect(work(ctx))`:
+ *
+ *   - **Promise path.** Direct `workPromise.then().catch()` +
+ *     `AbortController.abort()`. Honest because `Fiber.interrupt`
+ *     doesn't propagate to a wrapped Promise — the underlying
+ *     microtasks keep running until they observe the AbortSignal.
+ *     Wrapping in `Effect.tryPromise` + `runFork` costs a
+ *     `Cause`-unwrap layer for no cancellation benefit.
+ *
+ *   - **Effect path.** `Effect.runFork` + `Fiber` tracking; cancel
+ *     calls `Fiber.interrupt` for real interruptibility — `Effect.sleep`,
+ *     `Effect.async`, generator-based work, etc., all bail
+ *     synchronously on interruption. Typed failure surfaces as
+ *     `status: "failed"`; defect (`Effect.die`) likewise; interruption
+ *     surfaces as `status: "cancelled"`.
  *
  * @see docs/proposals/v2/blueprint/23-mcp-as-harness.md §Tasks
  */
 
-import { Effect, Queue } from "effect";
+import { Cause, Effect, Exit, Fiber, Option, Queue } from "effect";
 import { BaseHarness, ulid } from "@agentick/runtime-next";
 import type {
   ContentBlock,
@@ -86,8 +93,19 @@ interface TaskRecord {
   /**
    * Drives cancellation for promise-typed work. `signal` is surfaced
    * on {@link TaskWorkContext.signal} so work fns can bail out early.
+   * Also aborted on cancel of an Effect-typed task as defence in
+   * depth (so any embedded Promise-flavor side-effects in the Effect
+   * still see the abort).
    */
   readonly controller: AbortController;
+  /**
+   * Only set on the Effect-flavor work path. `cancel()` calls
+   * `Fiber.interrupt(fiber)` for real interruptibility — `Effect.sleep`,
+   * `Effect.async` registered cleanup, etc., all bail synchronously.
+   * `undefined` on the Promise/sync path (where the AbortController
+   * is the only signal).
+   */
+  fiber: Fiber.RuntimeFiber<unknown, unknown> | undefined;
   /**
    * Per-subscriber Queues of `TaskEvent`. Set, not single-queue,
    * because multiple consumers can call `events(taskId)`
@@ -163,6 +181,14 @@ export class TasksHarness extends BaseHarness<"tasks"> implements TasksHarnessPr
 
   submit<T = readonly ContentBlock[]>(
     work: (ctx: TaskWorkContext) => Promise<T> | T,
+    opts?: TaskCreationInput,
+  ): TaskHandle<T>;
+  submit<T = readonly ContentBlock[], E = unknown>(
+    work: (ctx: TaskWorkContext) => Effect.Effect<T, E, never>,
+    opts?: TaskCreationInput,
+  ): TaskHandle<T>;
+  submit<T = readonly ContentBlock[]>(
+    work: (ctx: TaskWorkContext) => Promise<T> | T | Effect.Effect<T, unknown, never>,
     opts: TaskCreationInput = {},
   ): TaskHandle<T> {
     const taskId = `task:${ulid()}`;
@@ -180,6 +206,7 @@ export class TasksHarness extends BaseHarness<"tasks"> implements TasksHarnessPr
       statusMessage: opts.statusMessage,
       failure: undefined,
       controller,
+      fiber: undefined,
       subscribers: new Set(),
       resultDeferred,
     };
@@ -210,14 +237,25 @@ export class TasksHarness extends BaseHarness<"tasks"> implements TasksHarnessPr
     // abort the signal BEFORE the work has had a chance to register
     // its `signal.addEventListener("abort", ...)` — and AbortSignal
     // listeners do NOT fire when attached post-abort.
-    let workPromise: Promise<T>;
+    let ret: Promise<T> | T | Effect.Effect<T, unknown, never>;
     try {
-      const ret = work(ctx);
-      workPromise = ret instanceof Promise ? ret : Promise.resolve(ret);
+      ret = work(ctx);
     } catch (syncThrow) {
-      workPromise = Promise.reject(syncThrow);
+      this.finishAsFailed(record, syncThrow);
+      return this.makeHandle<T>(record);
     }
 
+    if (Effect.isEffect(ret)) {
+      this.runEffectWork<T>(record, ret as Effect.Effect<T, unknown, never>);
+    } else {
+      const workPromise: Promise<T> = ret instanceof Promise ? ret : Promise.resolve(ret);
+      this.runPromiseWork<T>(record, workPromise);
+    }
+
+    return this.makeHandle<T>(record);
+  }
+
+  private runPromiseWork<T>(record: TaskRecord, workPromise: Promise<T>): void {
     void workPromise
       .then((value) => {
         if (record.status === "cancelled") {
@@ -227,24 +265,62 @@ export class TasksHarness extends BaseHarness<"tasks"> implements TasksHarnessPr
           return;
         }
         this.transition(record, "completed");
-        resultDeferred.resolve(value);
+        record.resultDeferred.resolve(value);
       })
       .catch((cause: unknown) => {
-        if (controller.signal.aborted && record.status === "cancelled") {
+        if (record.controller.signal.aborted && record.status === "cancelled") {
           // Cancel already set status + rejected the deferred via
           // the cancel path. No-op.
           return;
         }
-        const failure: TaskFailure = {
-          kind: "error",
-          reason: errorReason(cause),
-        };
-        record.failure = failure;
-        this.transition(record, "failed");
-        resultDeferred.reject(this.rejectionOf(record, "failed", failure));
+        this.finishAsFailed(record, cause);
       });
+  }
 
-    return this.makeHandle<T>(record);
+  private runEffectWork<T>(record: TaskRecord, effect: Effect.Effect<T, unknown, never>): void {
+    // `runFork` returns a `RuntimeFiber` immediately — work runs in
+    // the Effect runtime. We `Fiber.await` to consume the Exit
+    // without re-throwing into a Promise rejection (which would
+    // collapse Cause structure). The fiber itself is the
+    // interruptibility seam — `cancel()` calls `Fiber.interrupt`.
+    const fiber = Effect.runFork(effect);
+    record.fiber = fiber;
+    void Effect.runPromise(Fiber.await(fiber))
+      .then((exit) => {
+        if (record.status === "cancelled") return; // cancel raced
+        if (Exit.isSuccess(exit)) {
+          this.transition(record, "completed");
+          record.resultDeferred.resolve(exit.value);
+          return;
+        }
+        if (Cause.isInterruptedOnly(exit.cause)) {
+          // Internal `Effect.interrupt` (not via our cancel path) —
+          // treat as cancelled with a synthetic reason. cancel() path
+          // already short-circuits via the `record.status` guard above.
+          this.finishAsCancelled(record, "interrupted");
+          return;
+        }
+        this.finishAsFailed(record, causeToReason(exit.cause));
+      })
+      .catch(() => {
+        // Fiber.await is total — defensive only.
+      });
+  }
+
+  private finishAsFailed(record: TaskRecord, cause: unknown): void {
+    if (this.isTerminal(record.status)) return;
+    const failure: TaskFailure = { kind: "error", reason: errorReason(cause) };
+    record.failure = failure;
+    this.transition(record, "failed");
+    record.resultDeferred.reject(this.rejectionOf(record, "failed", failure));
+  }
+
+  private finishAsCancelled(record: TaskRecord, reason: string): void {
+    if (this.isTerminal(record.status)) return;
+    const failure: TaskFailure = { kind: "aborted", reason };
+    record.failure = failure;
+    this.transition(record, "cancelled");
+    record.resultDeferred.reject(this.rejectionOf(record, "cancelled", failure));
   }
 
   // ─────────── lookups ───────────
@@ -297,6 +373,15 @@ export class TasksHarness extends BaseHarness<"tasks"> implements TasksHarnessPr
     this.transition(record, "cancelled");
     record.resultDeferred.reject(this.rejectionOf(record, "cancelled", record.failure));
     record.controller.abort(reason);
+    if (record.fiber !== undefined) {
+      // Effect path — Fiber.interrupt propagates through Effect.sleep,
+      // Effect.async finalizers, Effect.gen yields, etc. We fire-and-
+      // forget: the cancel transition is already committed, and the
+      // fiber's Exit.Interrupt will be observed (and ignored due to
+      // the `status === "cancelled"` guard) by the runEffectWork
+      // continuation.
+      void Effect.runPromise(Fiber.interrupt(record.fiber)).catch(() => undefined);
+    }
   }
 
   // ─────────── events ───────────
@@ -639,22 +724,31 @@ function errorReason(cause: unknown): string {
   }
 }
 
-// TODO(#155): the per-subscriber Queue + custom AsyncIterator dance
-// in `subscribeToTask` reinvents most of `Stream.toAsyncIterable`.
+/**
+ * Turn an Effect {@link Cause.Cause} into a reason string.
+ *
+ *   - Typed failure (`Effect.fail(E)`) → `errorReason(E)`.
+ *   - Defect (`Effect.die(unknown)`) → `errorReason(defect)`.
+ *   - Multi-cause / interrupt-mixed → `Cause.pretty` first line.
+ */
+function causeToReason(cause: Cause.Cause<unknown>): string {
+  const failure = Cause.failureOption(cause);
+  if (Option.isSome(failure)) return errorReason(failure.value);
+  const defects = Array.from(Cause.defects(cause));
+  if (defects.length > 0) return errorReason(defects[0]);
+  // Fallback — interrupt-only causes are handled before this; this is
+  // for empty or exotic shapes.
+  return Cause.pretty(cause).split("\n")[0] ?? "unknown";
+}
+
+// TODO(#155-followup): the per-subscriber Queue + custom AsyncIterator
+// dance in `subscribeToTask` reinvents most of `Stream.toAsyncIterable`.
 // Adopting Effect's Stream API directly is the cleanup target —
 // blocked on resolving the `Scope.Scope` service requirement that
 // `Stream.fromQueue` / `Stream.toAsyncIterable` impose. When that
 // lands, the iterator body shrinks to a 5-line `Stream.fromQueue`
-// + `Stream.toAsyncIterable` pipeline. Tracked under #155
-// (Effect-native internals refactor).
-//
-// TODO(#155): tool-handler return-type detection. When a tool
-// handler's return is a `TaskHandle`, the ToolExecutor should
-// register the task with this harness AND `await handle.result`
-// transparently (Path A: model-transparent). The integration lives
-// in `@agentick/tool-executor-next`, not here. Once #155 ships and
-// the executor wires this, JSX `<Tool>` consumers gain task-shaped
-// returns by changing one handler return statement.
+// + `Stream.toAsyncIterable` pipeline. Refactor, not capability —
+// landed separately from the Effect work overload that closed #155.
 //
 // TODO(#134b/#134d): MCP wire codec for tasks. The bus channels
 // (`task-status`, `task-progress`) already carry payloads in the

@@ -37,6 +37,7 @@
  * guarantees.
  */
 
+import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
 
 import type { TaskHandle, TasksHarnessProtocol } from "@agentick/spec-next";
@@ -283,6 +284,70 @@ export function runTasksHarnessConformance(factory: TasksConformanceFactory): vo
 
         const progress = collected.filter((e) => e.kind === "progress");
         expect(progress.length).toBeGreaterThanOrEqual(3);
+      } finally {
+        await shell.close();
+      }
+    });
+  });
+
+  describe("TasksHarnessProtocol — Effect-typed work", () => {
+    it("submit accepts Effect work; resolves on Effect.succeed", async () => {
+      const shell = await factory({ harnessId: "conformance-effect-succeed-1" });
+      try {
+        const handle = shell.harness.submit(() => Effect.succeed("effect-value"));
+        expect(await handle.result).toBe("effect-value");
+        expect(shell.harness.status(handle.taskId)).toBe("completed");
+      } finally {
+        await shell.close();
+      }
+    });
+
+    it("Effect.fail surfaces as TaskRejection { status: 'failed' }", async () => {
+      const shell = await factory({ harnessId: "conformance-effect-fail-1" });
+      try {
+        const handle = shell.harness.submit(() => Effect.fail("typed-failure"));
+        await expect(handle.result).rejects.toMatchObject({
+          _tag: "TaskRejection",
+          taskId: handle.taskId,
+          status: "failed",
+          failure: { kind: "error", reason: "typed-failure" },
+        });
+      } finally {
+        await shell.close();
+      }
+    });
+
+    it("Effect.die (defect) surfaces as TaskRejection { status: 'failed' }", async () => {
+      const shell = await factory({ harnessId: "conformance-effect-die-1" });
+      try {
+        const handle = shell.harness.submit(() => Effect.die(new Error("boom-defect")));
+        await expect(handle.result).rejects.toMatchObject({
+          _tag: "TaskRejection",
+          taskId: handle.taskId,
+          status: "failed",
+          failure: { kind: "error", reason: "boom-defect" },
+        });
+      } finally {
+        await shell.close();
+      }
+    });
+
+    it("cancel interrupts a sleeping Effect — work bails synchronously, not after the sleep", async () => {
+      const shell = await factory({ harnessId: "conformance-effect-interrupt-1" });
+      try {
+        // 60-second sleep — if `Fiber.interrupt` weren't wired, this
+        // test would time out.
+        const handle = shell.harness.submit(() => Effect.sleep("60 seconds").pipe(Effect.as("x")));
+        // Give the fiber a tick to actually schedule the sleep.
+        await new Promise((r) => setTimeout(r, 5));
+        const cancelStart = Date.now();
+        await shell.harness.cancel(handle.taskId, "test-interrupt");
+        await expect(handle.result).rejects.toMatchObject({
+          _tag: "TaskRejection",
+          status: "cancelled",
+        });
+        const elapsed = Date.now() - cancelStart;
+        expect(elapsed).toBeLessThan(2000);
       } finally {
         await shell.close();
       }

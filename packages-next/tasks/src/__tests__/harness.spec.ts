@@ -2,7 +2,7 @@
  * TasksHarness — lifecycle, progress, cancel, events, close.
  */
 
-import { Chunk, Effect, Stream } from "effect";
+import { Chunk, Effect, Ref, Stream } from "effect";
 import { afterEach, describe, expect, it } from "vitest";
 
 import type { ProtocolEvent, TaskEvent, TaskInfo, TaskRejection } from "@agentick/spec-next";
@@ -372,6 +372,117 @@ describe("TasksHarness — events()", () => {
     expect(() => bundle!.harness.events("task:nope")).toThrowError(
       expect.objectContaining({ _tag: "UnknownTaskError" }),
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Effect-typed work — Fiber.interrupt, real interruptibility, Cause handling
+// ---------------------------------------------------------------------------
+
+describe("TasksHarness — Effect-typed work", () => {
+  let bundle: FakeTasksBundle | undefined;
+  afterEach(async () => {
+    if (bundle) await bundle.close();
+    bundle = undefined;
+  });
+
+  it("submit accepts Effect work; Effect.succeed resolves handle.result", async () => {
+    bundle = await fakeTasks();
+    const handle = bundle.harness.submit(() => Effect.succeed("effect-value"));
+    expect(await handle.result).toBe("effect-value");
+    expect(bundle.harness.status(handle.taskId)).toBe("completed");
+  });
+
+  it("Effect.fail with a typed error surfaces as TaskRejection { status: 'failed' }", async () => {
+    bundle = await fakeTasks();
+    const handle = bundle.harness.submit(() => Effect.fail({ _tag: "MyDomainError" }));
+    await expect(handle.result).rejects.toMatchObject<Partial<TaskRejection>>({
+      _tag: "TaskRejection",
+      taskId: handle.taskId,
+      status: "failed",
+      failure: { kind: "error", reason: "MyDomainError" },
+    });
+  });
+
+  it("Effect.die (defect) surfaces as TaskRejection { status: 'failed' }", async () => {
+    bundle = await fakeTasks();
+    const handle = bundle.harness.submit(() => Effect.die(new Error("internal-defect")));
+    await expect(handle.result).rejects.toMatchObject<Partial<TaskRejection>>({
+      status: "failed",
+      failure: { kind: "error", reason: "internal-defect" },
+    });
+  });
+
+  it("cancel interrupts a sleeping Effect — finishes in well under the sleep duration", async () => {
+    bundle = await fakeTasks();
+    // 60-second sleep — without Fiber.interrupt this test would time out.
+    const handle = bundle.harness.submit(() =>
+      Effect.sleep("60 seconds").pipe(Effect.as("should-never-resolve")),
+    );
+    await new Promise((r) => setTimeout(r, 5));
+    const cancelStart = Date.now();
+    await bundle.harness.cancel(handle.taskId, "interrupt-me");
+    await expect(handle.result).rejects.toMatchObject<Partial<TaskRejection>>({
+      status: "cancelled",
+      failure: { kind: "aborted", reason: "interrupt-me" },
+    });
+    const elapsed = Date.now() - cancelStart;
+    expect(elapsed).toBeLessThan(500);
+  });
+
+  it("Effect work running concurrent loops bails on interrupt (no zombie compute)", async () => {
+    bundle = await fakeTasks();
+    const counter = Effect.runSync(Ref.make(0));
+    // Tight Effect.gen loop that yields each iteration so the runtime
+    // gets a chance to observe an incoming interrupt. Without
+    // Fiber.interrupt, this loop would run forever; with it, the
+    // counter freezes shortly after cancel.
+    const handle = bundle.harness.submit(() =>
+      Effect.gen(function* () {
+        // eslint-disable-next-line no-constant-condition
+        while (true) {
+          yield* Ref.update(counter, (n) => n + 1);
+          yield* Effect.sleep("1 millis");
+        }
+      }),
+    );
+    await new Promise((r) => setTimeout(r, 25));
+    await bundle.harness.cancel(handle.taskId);
+    await expect(handle.result).rejects.toMatchObject({ status: "cancelled" });
+    const atCancel = Effect.runSync(Ref.get(counter));
+    await new Promise((r) => setTimeout(r, 50));
+    const afterCancel = Effect.runSync(Ref.get(counter));
+    // No further increments after interrupt observed.
+    expect(afterCancel).toBe(atCancel);
+  });
+
+  it("Effect work emits progress via onProgress (imperative side-effect from within Effect)", async () => {
+    bundle = await fakeTasks();
+    const handle = bundle.harness.submit((ctx) =>
+      Effect.gen(function* () {
+        yield* Effect.sync(() => ctx.onProgress({ current: 1, total: 3 }));
+        yield* Effect.sync(() => ctx.onProgress({ current: 2, total: 3 }));
+        yield* Effect.sync(() => ctx.onProgress({ current: 3, total: 3 }));
+        return "done";
+      }),
+    );
+    expect(await handle.result).toBe("done");
+    // Snapshot list of progress events on the bus.
+    // (We only verify here that the path runs end-to-end without
+    // crashing; bus-envelope conformance is covered above.)
+    expect(bundle.harness.status(handle.taskId)).toBe("completed");
+  });
+
+  it("synchronous throw INSIDE the Effect work factory still fails the task (not the call site)", async () => {
+    bundle = await fakeTasks();
+    const handle = bundle.harness.submit(() => {
+      // Author bug: throws before returning an Effect.
+      throw new Error("factory-bug");
+    });
+    await expect(handle.result).rejects.toMatchObject<Partial<TaskRejection>>({
+      status: "failed",
+      failure: { kind: "error", reason: "factory-bug" },
+    });
   });
 });
 
