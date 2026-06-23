@@ -56,10 +56,10 @@ live tree, and `RenderedTree` is the snapshot artifact.
 Two distinct packages share the React substrate but serve different
 roles — easy to confuse, important to keep separate:
 
-| Package                      | Role                                                                                                                                               | Where it runs    |
-| ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------- |
+| Package                           | Role                                                                                                                                               | Where it runs    |
+| --------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------- |
 | `@agentick/reconciler-react-next` | **Reconciler harness implementation.** Takes JSX agent definitions, produces `RenderedTree`. Server-side; runs in the runtime.                     | server / runtime |
-| `@agentick/client-react`     | **Client SDK.** Pure React hooks for connecting a browser app to a session via transport. Inherits behavior unchanged from v1's `@agentick/react`. | browser          |
+| `@agentick/client-react`          | **Client SDK.** Pure React hooks for connecting a browser app to a session via transport. Inherits behavior unchanged from v1's `@agentick/react`. | browser          |
 
 This doc is exclusively about `@agentick/reconciler-react-next`.
 

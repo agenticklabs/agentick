@@ -89,21 +89,21 @@ packages/executor-<provider>/
     ".": {
       "types": "./src/index.ts",
       "import": "./src/index.ts",
-      "default": "./src/index.ts"
-    }
+      "default": "./src/index.ts",
+    },
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
-    "typecheck": "tsc -p tsconfig.build.json --noEmit"
+    "typecheck": "tsc -p tsconfig.build.json --noEmit",
   },
   "dependencies": {
     "@agentick@agentick/runtime-next": "workspace:*",
     "@agentick@agentick/spec-next": "workspace:*",
     "effect": "^3.21.2",
-    "<provider-sdk-pkg>": "^<version>"
+    "<provider-sdk-pkg>": "^<version>",
   },
   "devDependencies": {
-    "@agentick@agentick/spec-conformance-next": "workspace:*"
+    "@agentick@agentick/spec-conformance-next": "workspace:*",
   },
   "publishConfig": {
     "access": "public",
@@ -111,10 +111,10 @@ packages/executor-<provider>/
       ".": {
         "types": "./dist/index.d.ts",
         "import": "./dist/index.js",
-        "default": "./dist/index.js"
-      }
-    }
-  }
+        "default": "./dist/index.js",
+      },
+    },
+  },
 }
 ```
 
@@ -186,6 +186,7 @@ functions with provider-specific ones.
 
 Converts the canonical message + content-part shape into the
 provider's expected message shape. **MUST handle:**
+
 - text parts
 - image parts (URL **AND base64** — G4 in the parity tracker;
   use a helper `imageUrlFromSource(source, mimeType)` that returns
@@ -218,6 +219,7 @@ return params;
 ```
 
 **Provider quirks to verify before writing this function:**
+
 - Is `max_tokens` REQUIRED or optional? (Anthropic: required,
   defaults to 4096 in v1. OpenAI: optional.)
 - Is there a system message form vs system content? (Anthropic:
@@ -269,6 +271,7 @@ too.
 ### Post-stream summary emission
 
 After the provider stream completes, emit (in order):
+
 - `content-end` then `content` (summary) for the text block
 - `tool-call-end` then `tool-call` (summary) for each tool call
 - `message-end` then `message` (summary)
@@ -366,6 +369,7 @@ parseThinkTags / customBlocks.
 ## Environment variable fallbacks (G16)
 
 Build SDK options from constructor opts with env var fallbacks:
+
 - `<PROVIDER>_API_KEY` for the API key
 - `<PROVIDER>_BASE_URL` for custom endpoints
 - `<PROVIDER>_ORGANIZATION` / `<PROVIDER>_PROJECT_ID` if applicable
@@ -531,19 +535,19 @@ import { createApp } from "@agentick@agentick/app-next";
 import { <provider> } from "@agentick/executor-<provider>";
 
 const app = createApp({
-  executor: <provider>("<model-id>", { apiKey: process.env.<PROVIDER>_API_KEY }),
+executor: <provider>("<model-id>", { apiKey: process.env.<PROVIDER>\_API_KEY }),
 });
 \`\`\`
 
 ## Options
 
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `apiKey` | `string` | `process.env.<PROVIDER>_API_KEY` | Provider API key |
-| `baseURL` | `string` | provider default | Override endpoint |
-| `model` | `string` | — | Model id |
-| `stream` | `boolean` | `false` | Stream every execute |
-| ... | | | |
+| Field     | Type      | Default                          | Description          |
+| --------- | --------- | -------------------------------- | -------------------- |
+| `apiKey`  | `string`  | `process.env.<PROVIDER>_API_KEY` | Provider API key     |
+| `baseURL` | `string`  | provider default                 | Override endpoint    |
+| `model`   | `string`  | —                                | Model id             |
+| `stream`  | `boolean` | `false`                          | Stream every execute |
+| ...       |           |                                  |                      |
 
 ## Capabilities
 

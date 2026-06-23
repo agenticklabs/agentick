@@ -30,11 +30,11 @@ import * as React from "react";
 
 import { createTool as baseCreateTool, type CreatedTool } from "@agentick/tool-next";
 import type {
-  ContentBlock,
   StandardSchemaV1,
   ToolAnnotations,
   ToolExposure,
   ToolHandlerCtx,
+  ToolHandlerResult,
 } from "@agentick/spec-next";
 
 import { useToolBridge } from "./hooks/use-tool-bridge.js";
@@ -82,7 +82,7 @@ export interface ReactToolSpec<
   readonly handler: (
     input: TInput,
     deps: { readonly ctx: ToolHandlerCtx; readonly use: TDeps },
-  ) => Promise<readonly ContentBlock[]> | readonly ContentBlock[];
+  ) => ToolHandlerResult;
 }
 
 // ============================================================================
@@ -120,7 +120,7 @@ export function createTool<
     ...(spec.annotations !== undefined ? { annotations: spec.annotations } : {}),
     ...(spec.metadata !== undefined ? { metadata: spec.metadata } : {}),
     ...(spec.handlerRef !== undefined ? { handlerRef: spec.handlerRef } : {}),
-    handler: async (input, { ctx }) => {
+    handler: (input, { ctx }) => {
       const captured = useRef.current ?? ({} as TDeps);
       return spec.handler(input, { ctx, use: captured });
     },

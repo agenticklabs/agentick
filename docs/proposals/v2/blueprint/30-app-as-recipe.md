@@ -3,8 +3,8 @@
 **Status:** Superseded by [ADR 31](./31-harness-hierarchy.md) · 2026-06-03
 
 > **Note:** This ADR's "sessions own all substrate" inversion was the wrong scope. ADR 31's hierarchical slot model achieves the same goals (per-session isolation, multi-tenant cloud, hibernate portability) without forcing the inversion of substrate ownership. Reading this ADR is still useful for the design exploration, but **the active design is ADR 31**.
-**Builds on:** ADR 26 (Harness as the single shape), ADR 27 (Modular built-ins), ADR 29 (Bus overhaul)
-**Touches:** `@agentick/app-next` (`AppHarness`, `createApp`), `@agentick/session-next` (`SessionHarness` construction), `@agentick/runtime-next` (`LocalEventBus`/`LocalInbox`/`MemoryJournal` static `createFactory` helpers), `@agentick/spec-next` (factory type signatures for the three substrate primitives).
+> **Builds on:** ADR 26 (Harness as the single shape), ADR 27 (Modular built-ins), ADR 29 (Bus overhaul)
+> **Touches:** `@agentick/app-next` (`AppHarness`, `createApp`), `@agentick/session-next` (`SessionHarness` construction), `@agentick/runtime-next` (`LocalEventBus`/`LocalInbox`/`MemoryJournal` static `createFactory` helpers), `@agentick/spec-next` (factory type signatures for the three substrate primitives).
 
 ## TL;DR
 
@@ -21,6 +21,7 @@
 ### 1. Asymmetric substrate ownership
 
 Current `AppHarness` constructs:
+
 - **Shared at app init**: `journal`, `bus`, `inbox`, `reconciler`, `loop`, `executor`. Used by every session.
 - **Constructed per session**: `toolExecutor`, `sessionHarness`. Receive references to the shared substrate.
 
@@ -60,10 +61,10 @@ interface AppHarnessOptions<P> {
   tools?: ToolExecutorProtocol | ToolExecutorFactory;
 
   // App-shared (not substrate — adopter-level config)
-  toolHandlers?: ReadonlyMap<string, ToolHandler>;     // seed for new sessions
-  extensions?: Extension[];                            // session-targeted ones forwarded
+  toolHandlers?: ReadonlyMap<string, ToolHandler>; // seed for new sessions
+  extensions?: Extension[]; // session-targeted ones forwarded
   telemetry?: TelemetryLayer;
-  sessionDefaults?: SessionDefaults;                    // streaming, maxTicks, props, knobs
+  sessionDefaults?: SessionDefaults; // streaming, maxTicks, props, knobs
   onSessionCreate?: SessionCreateHandler[];
 
   appId?: string;
@@ -73,7 +74,7 @@ class AppHarness<P> implements AppHarnessProtocol<P> {
   // What the App actually retains at runtime
   private readonly factories: ResolvedFactories<P>;
   private readonly handlerSeed: ReadonlyMap<string, ToolHandler>;
-  private readonly registry: SessionRegistry<P>;      // metadata only: id, status, createdAt
+  private readonly registry: SessionRegistry<P>; // metadata only: id, status, createdAt
   private readonly sessionDefaults: SessionDefaults;
   private readonly hooks: AppHooks<P>;
   private readonly telemetry: TelemetryLayer | undefined;
@@ -167,24 +168,24 @@ Each in-memory built-in ships a static `createFactory`:
 ```ts
 // @agentick/runtime-next
 class LocalEventBus implements EventBus {
-  static createFactory(
-    configFn?: (deps: FactoryDeps) => LocalEventBusOptions
-  ): EventBusFactory {
+  static createFactory(configFn?: (deps: FactoryDeps) => LocalEventBusOptions): EventBusFactory {
     return (deps) => new LocalEventBus(configFn?.(deps));
   }
   // ... rest of the class
 }
 
 class LocalInbox implements MessageInbox {
-  static createFactory(
-    configFn?: (deps: FactoryDeps) => LocalInboxOptions
-  ): MessageInboxFactory { /* ... */ }
+  static createFactory(configFn?: (deps: FactoryDeps) => LocalInboxOptions): MessageInboxFactory {
+    /* ... */
+  }
 }
 
 class MemoryJournal implements OperationJournal {
   static createFactory(
-    configFn?: (deps: FactoryDeps) => MemoryJournalOptions
-  ): OperationJournalFactory { /* ... */ }
+    configFn?: (deps: FactoryDeps) => MemoryJournalOptions,
+  ): OperationJournalFactory {
+    /* ... */
+  }
 }
 ```
 
@@ -238,7 +239,7 @@ Explicit override available:
 
 ```ts
 const child = await parent.spawn(ChildAgent, input, {
-  bus: childSpecificBus,           // child uses a separate bus
+  bus: childSpecificBus, // child uses a separate bus
   // journal, inbox same shape
 });
 ```
@@ -374,8 +375,7 @@ export interface Lifecycle {
   onClose(handler: () => void | Promise<void>): void;
 }
 
-export type Factory<T> =
-  (deps: FactoryDeps, lifecycle: Lifecycle) => T | Promise<T>;
+export type Factory<T> = (deps: FactoryDeps, lifecycle: Lifecycle) => T | Promise<T>;
 ```
 
 Three usage patterns fall out:

@@ -316,9 +316,9 @@ API surface — every awkward seam shows up here first.
 **Ergonomic gaps surfaced + filled:**
 
 - **`app.send(string)` shortcut** — `app.runOnce({ send: { messages:
-  [{ role: "user", content: "..." }] } })` is too verbose for the
+[{ role: "user", content: "..." }] } })` is too verbose for the
   90% path. Added an overload: `app.send(input: string | SendInput<P>):
-  Promise<SendResult>` that unwraps `runOnce` and lets the user pass
+Promise<SendResult>` that unwraps `runOnce` and lets the user pass
   a plain prompt string. Lives on `AppHarness` (see `harness.ts:637`).
   Returns `SendResult` directly (no `{ result, sessionId }` wrapper).
 
@@ -405,7 +405,7 @@ work uniformly regardless of which executor backs the session.
 **Why this matters (the framework value-add):**
 
 1. **Auto-compaction.** Executor tracks `usage.inputTokens /
-   capabilities.contextWindow`. At threshold (e.g., 80%), trigger
+capabilities.contextWindow`. At threshold (e.g., 80%), trigger
    `session.timeline.compact(strategy)` before next tick. Adopter
    writes zero glue.
 2. **Multimodal rejection at the boundary.** Tree has `<Image>` block,
@@ -417,10 +417,11 @@ work uniformly regardless of which executor backs the session.
    follow-ups to cheaper models; framework exposes per-tick cost from
    adapter pricing metadata.
 5. **Reasoning passthrough.** Adapters report `supportsReasoning:
-   true`; framework collects reasoning tokens, preserves Anthropic
+true`; framework collects reasoning tokens, preserves Anthropic
    extended-thinking turns.
 
 **Renames implied:**
+
 - `@agentick/executor-openai-next` → `@agentick/openai` (adapter, not executor)
 - (future) `@agentick/anthropic`, `@agentick/google`, `@agentick/vertex`
 - `@agentick/executor-next` (currently scaffold + mock + defineExecutor) →
@@ -435,6 +436,7 @@ harness — v2 has `session.timeline.compact()`, so capability-aware
 policy now has somewhere to land.
 
 **MVP scope when we pick this up:**
+
 1. `@agentick/spec-next`: `ModelAdapter` interface + `ModelCapabilities`
 2. `@agentick/model-catalog`: static table seeded with major models
 3. `@agentick/executor-next`: native executor consuming `ModelAdapter`
@@ -449,7 +451,7 @@ validation, cost routing. Ship the metadata flow; the policy is
 follow-up.
 
 **Why deferred from FAÇADE.6:** the executor harness PROTOCOL
-doesn't change to support either path. FAÇADE.6 (define___ APIs)
+doesn't change to support either path. FAÇADE.6 (define\_\_\_ APIs)
 is independent and unblocks immediately. Model-catalog/adapter is
 its own pass; capture as a design note here, revisit after FAÇADE.6.
 
@@ -468,6 +470,7 @@ generic ref impl.
 **This pass: moved the reconciler-agnostic code into its proper home.**
 
 Moved from `@agentick/reconciler-react-next` → `@agentick/reconciler-next`:
+
 - `collect/` (~1800 LOC: walker + 18 contributors)
 - `host/host-instance.ts` (163 LOC)
 - `host/host-context.ts` (123 LOC)
@@ -477,6 +480,7 @@ Moved from `@agentick/reconciler-react-next` → `@agentick/reconciler-next`:
 - `harness/lifecycle-store.ts` → `lifecycle-store.ts` (240 LOC)
 
 Stayed in `@agentick/reconciler-react-next` (truly React-coupled):
+
 - `host/host-config.ts` (the react-reconciler HostConfig)
 - `harness/reconciler-harness.ts` (the React reference impl)
 - `react/` directory (hooks, components, JSX bindings)
@@ -493,6 +497,7 @@ The production code is now reconciler-agnostic at the package level —
 matches its actual intent.
 
 Cruft removed:
+
 - `packages/reconciler-react/src/snapshot/` empty directory deleted
   (cruft since May 15)
 - `packages/reconciler-react/src/index.ts` JSDoc updated; outdated
@@ -540,6 +545,7 @@ so every iteration exercises the full hot path: chunk iteration →
 accumulator + in-loop block-state map → `normalize()`.
 
 Files:
+
 - `packages/executor-openai/src/__bench__/streaming.bench.ts`
 - `packages/executor-anthropic/src/__bench__/streaming.bench.ts`
 - `packages/executor-google/src/__bench__/streaming.bench.ts`
@@ -562,12 +568,12 @@ take `(mean@1000 − mean@100) / 900` for the no-subscriber path.
 
 #### Per-`run()` end-to-end (ms, mean ± rme)
 
-| Scenario                            | OpenAI         | Anthropic      | Google         |
-| ----------------------------------- | -------------- | -------------- | -------------- |
-| 1000 text deltas, no subscriber     | 2.271 ± 4.89%  | 1.899 ± 5.83%  | 1.881 ± 4.05%  |
-| 100 text + 1 tool_call, no sub      | 0.355 ± 4.52%  | 0.349 ± 3.96%  | 0.284 ± 3.35%  |
-| 100 text deltas, no subscriber      | 0.291 ± 3.52%  | 0.351 ± 3.50%  | 0.270 ± 2.67%  |
-| 100 text deltas, 1 drain subscriber | 2.261 ± 3.93%  | 2.515 ± 4.38%  | 2.660 ± 19.36% |
+| Scenario                            | OpenAI        | Anthropic     | Google         |
+| ----------------------------------- | ------------- | ------------- | -------------- |
+| 1000 text deltas, no subscriber     | 2.271 ± 4.89% | 1.899 ± 5.83% | 1.881 ± 4.05%  |
+| 100 text + 1 tool_call, no sub      | 0.355 ± 4.52% | 0.349 ± 3.96% | 0.284 ± 3.35%  |
+| 100 text deltas, no subscriber      | 0.291 ± 3.52% | 0.351 ± 3.50% | 0.270 ± 2.67%  |
+| 100 text deltas, 1 drain subscriber | 2.261 ± 3.93% | 2.515 ± 4.38% | 2.660 ± 19.36% |
 
 Sample counts: 199–1853 depending on iteration speed (vitest
 auto-paces to a ~600 ms wall budget per bench).
@@ -597,7 +603,7 @@ queue:
 
 The subscriber path adds roughly an order of magnitude on top of the
 no-subscriber base. Whatever cost emitDeltaLazy currently pays at
-the `bus.publishLazy` *no-listener* short-circuit is small (≈1.7 μs
+the `bus.publishLazy` _no-listener_ short-circuit is small (≈1.7 μs
 to 2.2 μs per delta covers chunk-mapping, accumulator updates, AND
 the lazy emit); the moment a subscriber is attached, the bulk of the
 hot-path time moves into the bus fan-out + Effect-fiber scheduling.
@@ -652,7 +658,7 @@ Headline number to take into any refactor decision: the
 no-subscriber per-delta cost is **~2 μs** across all three adapters.
 A refactor that eliminates one of the two aggregation walks in
 OpenAI/Anthropic should target a fraction of that 2 μs — best case,
-moves OpenAI/Anthropic to Google's ~1.7 μs. The big lever is *not*
+moves OpenAI/Anthropic to Google's ~1.7 μs. The big lever is _not_
 the dual-walk, it is the subscriber fan-out path (currently ~20 μs
 per delta). If we want streaming throughput to go up by more than
 ~15 %, that is the path to attack.

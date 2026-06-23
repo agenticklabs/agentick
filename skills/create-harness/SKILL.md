@@ -28,7 +28,7 @@ Read these end-to-end before writing code. They are the contract.
 
 1. **`docs/proposals/v2/blueprint/26-harness-api-shape.md`** (ADR 26) — "Harness as the single shape." Defines what a harness IS, what it owns, and why bridges-vs-harnesses isn't a meaningful distinction.
 
-2. **`docs/proposals/v2/blueprint/27-modular-built-ins.md`** (ADR 27, foundational) — Built-ins are not "built in," they are *bundled*. Every harness package follows the same architectural pattern. The module-augmentation discipline is non-negotiable. Read every section.
+2. **`docs/proposals/v2/blueprint/27-modular-built-ins.md`** (ADR 27, foundational) — Built-ins are not "built in," they are _bundled_. Every harness package follows the same architectural pattern. The module-augmentation discipline is non-negotiable. Read every section.
 
 3. **`docs/proposals/v2/blueprint/31-harness-hierarchy.md`** (ADR 31) — Self-similar slottable harness hierarchy. Substrate slots (`bus | inbox | journal`) accept `instance | factory` at every level. This is inherited from `BaseHarness` — your harness gets it for free, but you must construct correctly.
 
@@ -163,12 +163,7 @@ The canonical shape — adapt names + scope.
   "license": "MIT",
   "type": "module",
   "main": "src/index.ts",
-  "sideEffects": [
-    "./src/index.ts",
-    "./src/augment.ts",
-    "./dist/index.js",
-    "./dist/augment.js"
-  ],
+  "sideEffects": ["./src/index.ts", "./src/augment.ts", "./dist/index.js", "./dist/augment.js"],
   "exports": {
     ".": {
       "types": "./src/index.ts",
@@ -341,10 +336,7 @@ import type {
   OperationJournal,
 } from "@agentick/spec-next";
 
-export class MyThingHarness
-  extends BaseHarness<"my-thing">
-  implements MyThingHarnessProtocol
-{
+export class MyThingHarness extends BaseHarness<"my-thing"> implements MyThingHarnessProtocol {
   private readonly values = new Map<string, string>();
   private readonly idListeners = new Map<string, Set<() => void>>();
   private readonly wildcards = new Set<() => void>();
@@ -354,12 +346,7 @@ export class MyThingHarness
     return this.scopeId;
   }
 
-  constructor(
-    scopeId: string,
-    journal: OperationJournal,
-    bus: EventBus,
-    inbox: MessageInbox,
-  ) {
+  constructor(scopeId: string, journal: OperationJournal, bus: EventBus, inbox: MessageInbox) {
     super("my-thing", scopeId, journal, bus, inbox);
   }
 
@@ -680,7 +667,9 @@ export function runMyThingHarnessConformance(deps: MyThingHarnessFactoryDeps): v
     it("subscribe() fires per-id", async () => {
       const h = await deps.make();
       let n = 0;
-      const unsub = h.subscribe("k", () => { n++; });
+      const unsub = h.subscribe("k", () => {
+        n++;
+      });
       await h.set({ id: "k", value: "1" });
       await h.set({ id: "k", value: "2" });
       expect(n).toBe(2);
@@ -693,7 +682,9 @@ export function runMyThingHarnessConformance(deps: MyThingHarnessFactoryDeps): v
     it("subscribeAll() fires on any mutation", async () => {
       const h = await deps.make();
       let n = 0;
-      h.subscribeAll(() => { n++; });
+      h.subscribeAll(() => {
+        n++;
+      });
       await h.set({ id: "a", value: "1" });
       await h.set({ id: "b", value: "2" });
       expect(n).toBeGreaterThanOrEqual(2);
@@ -772,9 +763,7 @@ export function useMyThing(id: string): readonly [string | undefined, (value: st
 import { LocalEventBus, LocalInbox, MemoryJournal, ulid } from "@agentick/runtime-next";
 import { MyThingHarness } from "../harness.js";
 
-export function stubMyThingHarness(
-  initial: Readonly<Record<string, string>> = {},
-): MyThingHarness {
+export function stubMyThingHarness(initial: Readonly<Record<string, string>> = {}): MyThingHarness {
   const harness = new MyThingHarness(
     `stub:${ulid()}`,
     new MemoryJournal({ capacity: 1024 }),

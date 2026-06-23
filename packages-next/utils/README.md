@@ -38,14 +38,14 @@ not here.
 ```ts
 import { isPlainObject, isEqual, mergeLayered, append } from "@agentick/utils-next";
 
-isPlainObject({ a: 1 });          // true
-isPlainObject(new Date());        // false  (class instance, not POJO)
-isEqual({ a: 1 }, { a: 1 });      // true   (structural)
+isPlainObject({ a: 1 }); // true
+isPlainObject(new Date()); // false  (class instance, not POJO)
+isEqual({ a: 1 }, { a: 1 }); // true   (structural)
 
 const config = mergeLayered<{ maxTicks: number; tools: string[] }>(
-  { maxTicks: 8, tools: ["fs"] },        // framework defaults
-  { tools: append(["shell"]) },          // app layer extends
-  { maxTicks: 12 },                      // session override
+  { maxTicks: 8, tools: ["fs"] }, // framework defaults
+  { tools: append(["shell"]) }, // app layer extends
+  { maxTicks: 12 }, // session override
 );
 // → { maxTicks: 12, tools: ["fs", "shell"] }
 ```
@@ -58,32 +58,32 @@ Pattern B).
 
 ## API
 
-| Export             | Kind     | Purpose                                                     |
-| ------------------ | -------- | ----------------------------------------------------------- |
-| `isString`         | predicate | `typeof v === "string"`                                     |
-| `isNumber`         | predicate | `typeof v === "number"`                                     |
-| `isBoolean`        | predicate | `typeof v === "boolean"`                                    |
-| `isNull`           | predicate | `v === null`                                                |
-| `isUndefined`      | predicate | `v === undefined`                                           |
-| `isDefined<T>`     | predicate | not `null` and not `undefined`                              |
-| `isFunction`       | predicate | `typeof v === "function"`                                   |
-| `isArray`          | predicate | `Array.isArray(v)`                                          |
-| `isDate`           | predicate | `v instanceof Date`                                         |
-| `isRegExp`         | predicate | `v instanceof RegExp`                                       |
-| `isMap`            | predicate | `v instanceof Map`                                          |
-| `isSet`            | predicate | `v instanceof Set`                                          |
-| `isObject`         | predicate | "everyday" object check (NOT array, NOT null)               |
-| `isPlainObject`    | predicate | POJO only (prototype is `Object.prototype` or `null`)       |
-| `isEqual(a, b)`    | function  | deep structural equality (JSON-shape + `Date` + `RegExp`)   |
-| `mergeLayered<T>`  | function  | variadic cascade deep-merge, left → right                   |
-| `foldLayer<T>`     | function  | single-layer fold (advanced composition)                    |
-| `append<T>(arr)`   | strategy  | array append to parent slot                                 |
-| `prepend<T>(arr)`  | strategy  | array prepend                                               |
-| `replace<T>(v)`    | strategy  | replace parent slot verbatim (opt out of deep merge)        |
-| `omit()`           | strategy  | delete the slot from the merged result                      |
-| `isMergeStrategy`  | guard     | true if a value carries a strategy marker                   |
-| `Layer<T>`         | type      | one partial-config layer in a cascade                       |
-| `MergeStrategy<T>` | type      | symbol-wrapped field strategy                               |
+| Export             | Kind      | Purpose                                                   |
+| ------------------ | --------- | --------------------------------------------------------- |
+| `isString`         | predicate | `typeof v === "string"`                                   |
+| `isNumber`         | predicate | `typeof v === "number"`                                   |
+| `isBoolean`        | predicate | `typeof v === "boolean"`                                  |
+| `isNull`           | predicate | `v === null`                                              |
+| `isUndefined`      | predicate | `v === undefined`                                         |
+| `isDefined<T>`     | predicate | not `null` and not `undefined`                            |
+| `isFunction`       | predicate | `typeof v === "function"`                                 |
+| `isArray`          | predicate | `Array.isArray(v)`                                        |
+| `isDate`           | predicate | `v instanceof Date`                                       |
+| `isRegExp`         | predicate | `v instanceof RegExp`                                     |
+| `isMap`            | predicate | `v instanceof Map`                                        |
+| `isSet`            | predicate | `v instanceof Set`                                        |
+| `isObject`         | predicate | "everyday" object check (NOT array, NOT null)             |
+| `isPlainObject`    | predicate | POJO only (prototype is `Object.prototype` or `null`)     |
+| `isEqual(a, b)`    | function  | deep structural equality (JSON-shape + `Date` + `RegExp`) |
+| `mergeLayered<T>`  | function  | variadic cascade deep-merge, left → right                 |
+| `foldLayer<T>`     | function  | single-layer fold (advanced composition)                  |
+| `append<T>(arr)`   | strategy  | array append to parent slot                               |
+| `prepend<T>(arr)`  | strategy  | array prepend                                             |
+| `replace<T>(v)`    | strategy  | replace parent slot verbatim (opt out of deep merge)      |
+| `omit()`           | strategy  | delete the slot from the merged result                    |
+| `isMergeStrategy`  | guard     | true if a value carries a strategy marker                 |
+| `Layer<T>`         | type      | one partial-config layer in a cascade                     |
+| `MergeStrategy<T>` | type      | symbol-wrapped field strategy                             |
 
 ## What does NOT belong here
 

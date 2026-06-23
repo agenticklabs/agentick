@@ -76,9 +76,15 @@ switch (result.outcome) {
     break;
   case "failed":
     switch (result.failure.kind) {
-      case "timeout": cleanup(); break;
-      case "aborted": abortPath(result.failure.reason); break;
-      case "schema_violation": logSchemaIssues(result.failure.issues); break;
+      case "timeout":
+        cleanup();
+        break;
+      case "aborted":
+        abortPath(result.failure.reason);
+        break;
+      case "schema_violation":
+        logSchemaIssues(result.failure.issues);
+        break;
     }
     break;
 }
@@ -113,18 +119,18 @@ nested discriminator is there when they don't.
 
 The harness publishes a request envelope on the bus:
 
-| Field                    | Value                                                                          |
-| ------------------------ | ------------------------------------------------------------------------------ |
-| `name`                   | `session:channel:elicitation` (exported as `ELICITATION_CHANNEL_FQN`)          |
-| `surface`                | `session`                                                                      |
-| `phase`                  | `delta`                                                                        |
-| `metadata.requestType`   | `"request"`                                                                    |
-| `metadata.correlationId` | `req:<ULID>`                                                                   |
-| `metadata.replyTo`       | The harness's inbox address (`elicitation:<scopeId>`)                          |
-| `payload.message`        | Human-readable prompt                                                          |
+| Field                    | Value                                                                             |
+| ------------------------ | --------------------------------------------------------------------------------- |
+| `name`                   | `session:channel:elicitation` (exported as `ELICITATION_CHANNEL_FQN`)             |
+| `surface`                | `session`                                                                         |
+| `phase`                  | `delta`                                                                           |
+| `metadata.requestType`   | `"request"`                                                                       |
+| `metadata.correlationId` | `req:<ULID>`                                                                      |
+| `metadata.replyTo`       | The harness's inbox address (`elicitation:<scopeId>`)                             |
+| `payload.message`        | Human-readable prompt                                                             |
 | `payload.schema`         | **JSON Schema** (projected from the live `StandardSchemaV1` via `toJsonSchema()`) |
-| `payload.hints?`         | Free-form UX hints — by convention `hints.kind` is the client-side router key  |
-| `payload.metadata?`      | Domain metadata stamped onto the envelope                                      |
+| `payload.hints?`         | Free-form UX hints — by convention `hints.kind` is the client-side router key     |
+| `payload.metadata?`      | Domain metadata stamped onto the envelope                                         |
 
 `payload.schema` is intentionally the wire JSON Schema, **not** the
 live `StandardSchemaV1`. Functions are not serializable across
@@ -169,8 +175,8 @@ Importable conformance suite (vitest). The factory returns a shell:
 ```ts
 interface ElicitationConformanceShell {
   harness: ElicitationHarnessProtocol;
-  nextCorrelationId(): Promise<string>;  // tap the impl's outbound channel
-  close(): Promise<void>;                 // idempotent
+  nextCorrelationId(): Promise<string>; // tap the impl's outbound channel
+  close(): Promise<void>; // idempotent
 }
 ```
 
@@ -243,10 +249,10 @@ import { fakeElicitation, stubElicitation } from "@agentick/elicitation-next/tes
   confirmation publishes on `session:channel:elicitation` with
   `hints.kind: "tool_confirmation"`
 - ✅ Conformance suite (13 tests) + harness-specific spec (7 tests)
-  + `stubElicitation` spec (9 tests) — all green; tool-executor's
-  confirmation flow (8 tests) covers the end-to-end integration
+  - `stubElicitation` spec (9 tests) — all green; tool-executor's
+    confirmation flow (8 tests) covers the end-to-end integration
 - ✅ URL-mode elicitation — `elicit({ mode: "url", url,
-  elicitationId, ... })`. `accepted` outcome signals user consent
+elicitationId, ... })`. `accepted` outcome signals user consent
   to open the URL (consent-only terminal); out-of-band completion
   arrives via a separate notification path (OAuth-via-elicit, #134b).
 - ✅ MCP server-side mapping — `elicitation/create` (form + URL)

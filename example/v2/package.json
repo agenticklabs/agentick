@@ -10,8 +10,8 @@
   },
   "dependencies": {
     "@agentick/app-next": "workspace:*",
-    "@agentick/executor-next": "workspace:*",
     "@agentick/executor-ai-sdk-next": "workspace:*",
+    "@agentick/executor-next": "workspace:*",
     "@agentick/loop-executor-next": "workspace:*",
     "@agentick/reconciler-next": "workspace:*",
     "@agentick/reconciler-react-next": "workspace:*",

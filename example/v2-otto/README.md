@@ -11,6 +11,9 @@ End-to-end Agentick v2 example with a **real model** (OpenAI via the AI SDK adap
   - MCP-discovered tools (in-memory MCP server, `withMCP` extension)
 - **MCP tools without `<MCPTools>`** — discovered tools auto-appear via the layered-tools compile. No JSX ceremony.
 - **`useKnob` reactive state** — the model can flip `verbose` via `set_knob`; the next render's system prompt changes.
+- **Pattern A vs Pattern B background tasks** — `withTasks()` is installed; two task-using tools demonstrate both patterns:
+  - **Pattern A (`slow_compute`)** — submits a `ctx.tasks.submit(...)` task; the executor awaits the handle transparently. The model sees only the final result; never the taskId.
+  - **Pattern B (`deploy_branch`, `taskSupport: "required"`)** — submits a task; the executor returns immediately with a `session_task_ref` JSON content block. The model uses the auto-registered `session_tasks_get / session_tasks_cancel / session_tasks_await` tools to manage the task across subsequent ticks.
 
 ## Run
 
@@ -23,21 +26,12 @@ pnpm --filter example-v2-otto dev
 
 ## What you'll see
 
-The agent answers `"What's 47 * 23? Also use the demo__echo tool to say 'hi'."`. The model:
+The example runs two turns on a shared session to demonstrate Pattern B across ticks:
 
-1. Calls the reconciler-declared `calculator` tool (JSX `<Calculator.Tool />`).
-2. Calls the MCP-discovered `demo__echo` tool (in-memory MCP server, auto-discovered by `withMCP`).
-3. Composes a final reply.
+1. **Turn 1** — asks the model to kick off a `deploy_branch('feat/v2', 'staging')` deployment without waiting. The model calls `deploy_branch`; because the tool is annotated `taskSupport: "required"`, the executor returns a `session_task_ref` content block immediately (the task continues running in the background). The model reports back the task id.
+2. **Turn 2** — asks "is it done yet? if not, await it." The model calls `session_tasks_get` to check status, then `session_tasks_await` to block until the deploy task transitions to `completed` — and reports the final result.
 
-```
-→ User: What's 47 * 23? Also use the demo__echo tool to say 'hi'.
-
-← Assistant: 47 × 23 = 1081. (echo says: hi)
-
-[3 tick(s), 247 tokens, stop=end]
-```
-
-(Exact wording + token counts vary by run.)
+Exact wording + token counts vary by run.
 
 ## The agent
 
@@ -133,19 +127,19 @@ session > execution > {app, extension@app} > gateway > runtime
 
 Each layer accepts the same `tools: ToolDeclaration[]` shape. Layers exercised in this example:
 
-| Layer | Where | Binding |
-|---|---|---|
-| Reconciler | JSX `<Calculator.Tool />` inside `<Agent />` | `{ scope: "reconciler", mountId }` |
-| Extension@app | `withMCP` extension | `{ scope: "extension", level: "app" }` |
-| App | `createApp({ tools: [...] })` | `{ scope: "app", appId }` |
+| Layer         | Where                                        | Binding                                |
+| ------------- | -------------------------------------------- | -------------------------------------- |
+| Reconciler    | JSX `<Calculator.Tool />` inside `<Agent />` | `{ scope: "reconciler", mountId }`     |
+| Extension@app | `withMCP` extension                          | `{ scope: "extension", level: "app" }` |
+| App           | `createApp({ tools: [...] })`                | `{ scope: "app", appId }`              |
 
 Layers not exercised here but available:
 
-| Layer | Where | Binding |
-|---|---|---|
-| Gateway | `createGateway({ tools: [...] })` | `{ scope: "gateway" }` |
-| Session | `app.createSession({ tools: [...] })` | `{ scope: "session", sessionId }` |
-| Execution | `session.send({ tools: [...] })` | `{ scope: "execution", executionId }` |
+| Layer     | Where                                 | Binding                               |
+| --------- | ------------------------------------- | ------------------------------------- |
+| Gateway   | `createGateway({ tools: [...] })`     | `{ scope: "gateway" }`                |
+| Session   | `app.createSession({ tools: [...] })` | `{ scope: "session", sessionId }`     |
+| Execution | `session.send({ tools: [...] })`      | `{ scope: "execution", executionId }` |
 
 If two layers declare a tool with the same `name`, the higher-precedence binding wins. The reconciler binding overrides everything — JSX is the override mechanism for any MCP/app/extension tool.
 
@@ -154,7 +148,7 @@ If two layers declare a tool with the same `name`, the higher-precedence binding
 ```ts
 import { anthropic } from "@ai-sdk/anthropic";
 // ...
-aisdk({ model: anthropic("claude-3-5-sonnet-latest") })
+aisdk({ model: anthropic("claude-3-5-sonnet-latest") });
 ```
 
 Add `ANTHROPIC_API_KEY` to `.env`.

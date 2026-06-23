@@ -25,9 +25,7 @@ import { Agent } from "./agent.js";
 
 async function main(): Promise<void> {
   if (!process.env.OPENAI_API_KEY) {
-    console.error(
-      "OPENAI_API_KEY is not set. Copy .env.example to .env and fill in your key.",
-    );
+    console.error("OPENAI_API_KEY is not set. Copy .env.example to .env and fill in your key.");
     process.exit(1);
   }
 
@@ -43,15 +41,15 @@ async function main(): Promise<void> {
       id: "demo-1",
       ts: Date.now(),
       role: "user",
-      content: [{ type: "text", text: "What's 47 * 23, and tell me a fun fact about that number?" }],
+      content: [
+        { type: "text", text: "What's 47 * 23, and tell me a fun fact about that number?" },
+      ],
     },
   });
 
   try {
     console.log("→ User: What's 47 * 23, and tell me a fun fact about that number?\n");
-    const result = await app.send(
-      "What's 47 * 23, and tell me a fun fact about that number?",
-    );
+    const result = await app.send("What's 47 * 23, and tell me a fun fact about that number?");
     console.log("← Assistant:", result.response);
     console.log(
       `\n[${result.ticks} tick(s), ${result.usage.totalTokens} tokens, stop=${result.stopReason}]`,

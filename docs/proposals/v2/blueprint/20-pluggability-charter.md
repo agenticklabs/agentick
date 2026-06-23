@@ -80,7 +80,7 @@ protocol with one or more reference impls.
 | Durable record      | `OperationJournal`      | `MemoryJournal`                   | `PostgresJournal`, `RedisStreamsJournal`, `SqliteJournal` |
 | Live observation    | `EventBus`              | `LocalEventBus`                   | `ClusterEventBus`, NATS-backed                            |
 | Addressable inbound | `MessageInbox`          | `LocalInbox`                      | `ClusterInbox` (Effect.cluster, etc.)                     |
-| JSX evaluation      | `ReconcilerProtocol`    | `@agentick/reconciler-react-next`      | Vue/Solid hosts (theoretical)                             |
+| JSX evaluation      | `ReconcilerProtocol`    | `@agentick/reconciler-react-next` | Vue/Solid hosts (theoretical)                             |
 | Content formatting  | `FormatterProtocol`     | Markdown / XML / Text             | Custom application formatters                             |
 | Provider execution  | `LanguageModelExecutor` | `@agentick/openai`, etc.          | Any HTTP-shaped LLM API                                   |
 | Tool dispatch       | `ToolExecutorProtocol`  | (Phase 4a)                        | MCP-backed, RPC-backed                                    |

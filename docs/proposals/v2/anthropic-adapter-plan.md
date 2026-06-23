@@ -20,28 +20,36 @@
   "repository": {
     "type": "git",
     "url": "git+https://github.com/agenticklabs/agentick.git",
-    "directory": "packages/executor-anthropic"
+    "directory": "packages/executor-anthropic",
   },
   "files": ["dist"],
   "type": "module",
   "main": "src/index.ts",
-  "exports": { ".": { "types": "./src/index.ts", "import": "./src/index.ts", "default": "./src/index.ts" } },
+  "exports": {
+    ".": { "types": "./src/index.ts", "import": "./src/index.ts", "default": "./src/index.ts" },
+  },
   "publishConfig": {
-    "exports": { ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js", "default": "./dist/index.js" } }
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "import": "./dist/index.js",
+        "default": "./dist/index.js",
+      },
+    },
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
-    "typecheck": "tsc -p tsconfig.build.json --noEmit"
+    "typecheck": "tsc -p tsconfig.build.json --noEmit",
   },
   "dependencies": {
     "@agentick/runtime-next": "workspace:*",
     "@agentick/spec-next": "workspace:*",
     "@anthropic-ai/sdk": "^0.39.0",
-    "effect": "^3.21.2"
+    "effect": "^3.21.2",
   },
   "devDependencies": {
-    "@agentick/spec-conformance-next": "workspace:*"
-  }
+    "@agentick/spec-conformance-next": "workspace:*",
+  },
 }
 ```
 
@@ -107,16 +115,16 @@ export interface AnthropicExecutorOptions {
 
 Default target (when adopter doesn't override) advertises capabilities by **model family heuristic** keyed off the `model` string. Mapping:
 
-| modelId prefix                 | contextWindow | maxOutputTokens | supportsVision | supportsReasoning |
-| ------------------------------ | ------------- | --------------- | -------------- | ----------------- |
-| `claude-3-5-sonnet*`           | 200_000       | 8_192           | true           | false             |
-| `claude-3-5-haiku*`            | 200_000       | 8_192           | false          | false             |
-| `claude-3-7-sonnet*`           | 200_000       | 64_000          | true           | true (extended-thinking) |
-| `claude-3-opus*`               | 200_000       | 4_096           | true           | false             |
-| `claude-3-sonnet*`             | 200_000       | 4_096           | true           | false             |
-| `claude-3-haiku*`              | 200_000       | 4_096           | true           | false             |
-| `claude-2.*`                   | 200_000       | 4_096           | false          | false             |
-| _fallback (unknown / future)_  | 200_000       | 4_096           | true           | false             |
+| modelId prefix                | contextWindow | maxOutputTokens | supportsVision | supportsReasoning        |
+| ----------------------------- | ------------- | --------------- | -------------- | ------------------------ |
+| `claude-3-5-sonnet*`          | 200_000       | 8_192           | true           | false                    |
+| `claude-3-5-haiku*`           | 200_000       | 8_192           | false          | false                    |
+| `claude-3-7-sonnet*`          | 200_000       | 64_000          | true           | true (extended-thinking) |
+| `claude-3-opus*`              | 200_000       | 4_096           | true           | false                    |
+| `claude-3-sonnet*`            | 200_000       | 4_096           | true           | false                    |
+| `claude-3-haiku*`             | 200_000       | 4_096           | true           | false                    |
+| `claude-2.*`                  | 200_000       | 4_096           | false          | false                    |
+| _fallback (unknown / future)_ | 200_000       | 4_096           | true           | false                    |
 
 `supportsTools: true` and `supportsStreaming: true` are unconditional — every shipped Claude supports both.
 
@@ -240,9 +248,8 @@ function toAnthropicParams(
   executorMaxTokens: number | undefined,
 ): MessageCreateParams {
   const { system, messages } = toAnthropicMessages(input.messages, target);
-  const tools = input.tools && input.tools.length > 0
-    ? input.tools.map(toAnthropicTool)
-    : undefined;
+  const tools =
+    input.tools && input.tools.length > 0 ? input.tools.map(toAnthropicTool) : undefined;
 
   const params: MessageCreateParams = {
     model: target.modelId ?? defaultModel ?? "claude-3-5-sonnet-latest",
@@ -282,13 +289,16 @@ This is the largest piece. State carried across chunks:
 ```typescript
 interface AnthropicStreamState {
   // Map of Anthropic block index → block-type + tracking metadata.
-  blocks: Map<number, {
-    type: "text" | "thinking" | "tool_use" | "redacted_thinking";
-    callId?: string;     // tool_use only — the block.id
-    name?: string;       // tool_use only — the block.name
-    jsonBuffer: string;  // tool_use only — input JSON delta accumulator
-    textBuffer: string;  // text/thinking — for end-summary emission
-  }>;
+  blocks: Map<
+    number,
+    {
+      type: "text" | "thinking" | "tool_use" | "redacted_thinking";
+      callId?: string; // tool_use only — the block.id
+      name?: string; // tool_use only — the block.name
+      jsonBuffer: string; // tool_use only — input JSON delta accumulator
+      textBuffer: string; // text/thinking — for end-summary emission
+    }
+  >;
   model?: string;
   messageStarted: boolean;
 }
@@ -296,23 +306,23 @@ interface AnthropicStreamState {
 
 Mapping by event type:
 
-| Anthropic event              | AdapterDeltas emitted                                                                    |
-| ---------------------------- | --------------------------------------------------------------------------------------- |
-| `message_start`              | `message-start` (role: assistant, model). Optionally `usage` if input_tokens present.    |
-| `content_block_start (text)` | `content-start { blockIndex, blockType: "text" }`. State: track index.                  |
-| `content_block_start (tool_use)` | `tool-call-start { callId: block.id, name: block.name, blockIndex }`. State: track. |
-| `content_block_start (thinking)` | `reasoning-start { blockIndex }`. State: track.                                     |
-| `content_block_start (redacted_thinking)` | Skip emission (no AdapterDelta equivalent for opaque thinking). State: track. See §10.5. |
-| `content_block_delta (text_delta)` | `content-delta { blockIndex, delta: delta.text }`.                                |
-| `content_block_delta (input_json_delta)` | `tool-call-delta { callId: state.callId, delta: delta.partial_json }`. Append to state.jsonBuffer. |
-| `content_block_delta (thinking_delta)` | `reasoning-delta { blockIndex, delta: delta.thinking }`.                       |
-| `content_block_delta (signature_delta)` | Skip — opaque signature data used only for tool-use round-tripping. See §10.4. |
-| `content_block_delta (citations_delta)` | Stash in state for `content-end` metadata. (Not in v1 — v2 improvement.)        |
-| `content_block_stop (text)`  | `content-end { blockIndex }` then `content { blockIndex, content: { type: "text", text: state.textBuffer } }` |
-| `content_block_stop (tool_use)` | `tool-call-end { callId }` then `tool-call { callId, name, input: JSON.parse(jsonBuffer) }` |
-| `content_block_stop (thinking)` | `reasoning-end { blockIndex }` then `reasoning { blockIndex, reasoning: state.textBuffer }` |
-| `message_delta`              | Stash `stop_reason` and `usage.output_tokens` in state. (No AdapterDelta yet — held for `message_stop`.) |
-| `message_stop`               | `message-end { stopReason, usage }` then `message { message: assembled, stopReason, usage }` |
+| Anthropic event                           | AdapterDeltas emitted                                                                                         |
+| ----------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `message_start`                           | `message-start` (role: assistant, model). Optionally `usage` if input_tokens present.                         |
+| `content_block_start (text)`              | `content-start { blockIndex, blockType: "text" }`. State: track index.                                        |
+| `content_block_start (tool_use)`          | `tool-call-start { callId: block.id, name: block.name, blockIndex }`. State: track.                           |
+| `content_block_start (thinking)`          | `reasoning-start { blockIndex }`. State: track.                                                               |
+| `content_block_start (redacted_thinking)` | Skip emission (no AdapterDelta equivalent for opaque thinking). State: track. See §10.5.                      |
+| `content_block_delta (text_delta)`        | `content-delta { blockIndex, delta: delta.text }`.                                                            |
+| `content_block_delta (input_json_delta)`  | `tool-call-delta { callId: state.callId, delta: delta.partial_json }`. Append to state.jsonBuffer.            |
+| `content_block_delta (thinking_delta)`    | `reasoning-delta { blockIndex, delta: delta.thinking }`.                                                      |
+| `content_block_delta (signature_delta)`   | Skip — opaque signature data used only for tool-use round-tripping. See §10.4.                                |
+| `content_block_delta (citations_delta)`   | Stash in state for `content-end` metadata. (Not in v1 — v2 improvement.)                                      |
+| `content_block_stop (text)`               | `content-end { blockIndex }` then `content { blockIndex, content: { type: "text", text: state.textBuffer } }` |
+| `content_block_stop (tool_use)`           | `tool-call-end { callId }` then `tool-call { callId, name, input: JSON.parse(jsonBuffer) }`                   |
+| `content_block_stop (thinking)`           | `reasoning-end { blockIndex }` then `reasoning { blockIndex, reasoning: state.textBuffer }`                   |
+| `message_delta`                           | Stash `stop_reason` and `usage.output_tokens` in state. (No AdapterDelta yet — held for `message_stop`.)      |
+| `message_stop`                            | `message-end { stopReason, usage }` then `message { message: assembled, stopReason, usage }`                  |
 
 **Critical preservation from v1's `mapAnthropicChunk` (anthropic.ts:57-186):**
 
@@ -329,11 +339,16 @@ OpenAI duck-types `delta.reasoning_content` / `delta.reasoning` on the content d
 ```typescript
 function mapFinishReason(r: string | null | undefined): LanguageModelStopReason {
   switch (r) {
-    case "end_turn":      return "end";
-    case "max_tokens":    return "max_tokens";
-    case "stop_sequence": return "end";       // canonical "end" — adopter sees in raw if needed
-    case "tool_use":      return "tool_use";
-    default:              return "end";
+    case "end_turn":
+      return "end";
+    case "max_tokens":
+      return "max_tokens";
+    case "stop_sequence":
+      return "end"; // canonical "end" — adopter sees in raw if needed
+    case "tool_use":
+      return "tool_use";
+    default:
+      return "end";
   }
 }
 ```
@@ -414,6 +429,7 @@ reasoning       { blockIndex, reasoning: <accumulated> }
 **Cleaner than OpenAI's duck-typing.** No `parseThinkTags` fallback needed for Claude — extended thinking IS the native API. We still ship `parseThinkTags` as an executor option for completeness, but it's a niche use case for Claude (mainly: running Claude through an OpenAI-compatible proxy that strips the thinking block but leaves a textual `<think>` artifact).
 
 **Open question §10.4 — signature deltas:** Anthropic's extended-thinking API sends `signature_delta` events that carry opaque per-block signatures the API expects echoed back on subsequent turns (when continuing a tool-use loop with a thinking-enabled model). v2's `LanguageModelMessagePart.tool_use` has no signature field. **This is a real gap.** Options:
+
 1. Drop signatures (works for single-turn; breaks multi-turn extended-thinking with tools).
 2. Stash signatures in `providerOptions`-style sidecars on the projected message (invasive — requires spec change).
 3. Stash on the executor instance keyed by `callId`, replay on next `toAnthropicMessages` call.
@@ -424,23 +440,23 @@ Recommend option 3 for v2.0 — keeps spec clean; ugly but localized. **Decision
 
 ## 8. Streaming events table (complete)
 
-| SDK event                                                  | What we do                                                                            |
-| ---------------------------------------------------------- | ------------------------------------------------------------------------------------- |
-| `message_start { message: { id, role, model, usage, ... } }` | emit `message-start { role, model }`; stash usage cache-token fields in state         |
-| `content_block_start { index, content_block: TextBlock }`  | emit `content-start { blockIndex: index, blockType: "text" }`                          |
-| `content_block_start { index, content_block: ToolUseBlock }` | emit `tool-call-start { callId: block.id, name: block.name, blockIndex: index }`     |
-| `content_block_start { index, content_block: ThinkingBlock }` | emit `reasoning-start { blockIndex: index }`                                        |
-| `content_block_start { index, content_block: RedactedThinkingBlock }` | track in state; skip emission OR emit synthetic reasoning (§10.5)            |
-| `content_block_delta { delta: TextDelta }`                 | emit `content-delta { blockIndex, delta: delta.text }`; append to textBuffer          |
-| `content_block_delta { delta: InputJSONDelta }`            | emit `tool-call-delta { callId, delta: delta.partial_json }`; append to jsonBuffer     |
-| `content_block_delta { delta: ThinkingDelta }`             | emit `reasoning-delta { blockIndex, delta: delta.thinking }`; append to textBuffer    |
-| `content_block_delta { delta: SignatureDelta }`            | stash signature on state (for §10.4 multi-turn round-trip)                            |
-| `content_block_delta { delta: CitationsDelta }`            | stash citation on state's metadata; surfaced on `content-end` and `content`           |
-| `content_block_stop { index }` (text)                      | emit `content-end { blockIndex }`, then `content { blockIndex, content: TextBlock }`  |
-| `content_block_stop { index }` (tool_use)                  | emit `tool-call-end { callId }`, then `tool-call { callId, name, input: JSON.parse }` |
-| `content_block_stop { index }` (thinking)                  | emit `reasoning-end { blockIndex }`, then `reasoning { blockIndex, reasoning }`       |
-| `message_delta { delta: { stop_reason }, usage }`          | stash `stop_reason` + `output_tokens` in state                                        |
-| `message_stop`                                             | emit `message-end { stopReason, usage }`, then `message { message: assembled, ... }`  |
+| SDK event                                                             | What we do                                                                            |
+| --------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| `message_start { message: { id, role, model, usage, ... } }`          | emit `message-start { role, model }`; stash usage cache-token fields in state         |
+| `content_block_start { index, content_block: TextBlock }`             | emit `content-start { blockIndex: index, blockType: "text" }`                         |
+| `content_block_start { index, content_block: ToolUseBlock }`          | emit `tool-call-start { callId: block.id, name: block.name, blockIndex: index }`      |
+| `content_block_start { index, content_block: ThinkingBlock }`         | emit `reasoning-start { blockIndex: index }`                                          |
+| `content_block_start { index, content_block: RedactedThinkingBlock }` | track in state; skip emission OR emit synthetic reasoning (§10.5)                     |
+| `content_block_delta { delta: TextDelta }`                            | emit `content-delta { blockIndex, delta: delta.text }`; append to textBuffer          |
+| `content_block_delta { delta: InputJSONDelta }`                       | emit `tool-call-delta { callId, delta: delta.partial_json }`; append to jsonBuffer    |
+| `content_block_delta { delta: ThinkingDelta }`                        | emit `reasoning-delta { blockIndex, delta: delta.thinking }`; append to textBuffer    |
+| `content_block_delta { delta: SignatureDelta }`                       | stash signature on state (for §10.4 multi-turn round-trip)                            |
+| `content_block_delta { delta: CitationsDelta }`                       | stash citation on state's metadata; surfaced on `content-end` and `content`           |
+| `content_block_stop { index }` (text)                                 | emit `content-end { blockIndex }`, then `content { blockIndex, content: TextBlock }`  |
+| `content_block_stop { index }` (tool_use)                             | emit `tool-call-end { callId }`, then `tool-call { callId, name, input: JSON.parse }` |
+| `content_block_stop { index }` (thinking)                             | emit `reasoning-end { blockIndex }`, then `reasoning { blockIndex, reasoning }`       |
+| `message_delta { delta: { stop_reason }, usage }`                     | stash `stop_reason` + `output_tokens` in state                                        |
+| `message_stop`                                                        | emit `message-end { stopReason, usage }`, then `message { message: assembled, ... }`  |
 
 **Final assembled `Anthropic.Message` reconstruction** (for `.result` resolution) mirrors v1's `reconstructRaw` (anthropic.ts:360-421): build `content[]` from per-block buffers, set `stop_reason`, populate `usage` with cache fields.
 
@@ -549,35 +565,35 @@ runExecutorConformance(async ({ harnessId, scripted }) => {
 
 Categories required by the skill + Anthropic-specific:
 
-| Test category                                     | What it asserts                                                          |
-| ------------------------------------------------- | ------------------------------------------------------------------------ |
-| Non-streaming basics                              | `run` returns succeeded terminal; finish reason mapped; model threaded   |
-| System message extraction                         | `role: system` messages collapse to `system` param, not inline           |
-| User/assistant alternation coalescing             | Consecutive same-role messages merge content arrays                      |
-| Tool-use round-trip                               | `tool_use` block → SDK call → `tool_result` echoes back correctly        |
-| Streaming basics                                  | Iterator yields valid AdapterDeltas; `.result` resolves with Message     |
-| Streaming: content-block-state                    | Interleaved text + tool_use blocks track correct blockIndex per stream   |
-| Abort                                             | `abort()` flips next `run()` to `canceled`                               |
-| **Cache tokens (G2)**                             | `cache_read_input_tokens` / `cache_creation_input_tokens` → `cachedInputTokens` / `cacheCreationTokens` on usage |
-| **Cache markers (G2 send-side)**                  | `cacheControl: ["system"]` stamps `cache_control: { type: "ephemeral" }` on last system text block |
-| **Cache markers — tools**                         | `cacheControl: ["tools"]` stamps marker on last tool                     |
-| **Reasoning extraction (G3 — native)**            | Streamed `thinking` blocks → reasoning-start/delta/end/reasoning deltas + ReasoningBlock in normalize output |
-| **Reasoning extraction — non-streaming**          | `Message.content` with `thinking` block → ReasoningBlock                 |
-| **Base64 image (G4)**                             | `data:image/png;base64,...` projected → Anthropic base64 source param    |
-| **URL image (G4)**                                | `https://...` projected → Anthropic url source param                      |
-| Sampling params (G1)                              | `temperature`, `topP`, `stopSequences`, `maxOutputTokens` plumbed to SDK |
-| Sampling params dropped silently                  | `frequencyPenalty` / `presencePenalty` do NOT appear in SDK params       |
-| `max_tokens` required                             | Missing both `parameters.maxOutputTokens` AND `options.maxTokens` → 4096 fallback |
-| providerOptions spread (G5)                       | `target.providerOptions.anthropic.top_k = 40` appears in SDK params      |
-| providerOptions: thinking config                  | `{ thinking: { type: "enabled", budget_tokens: 2048 } }` plumbs through  |
-| providerOptions: tool_choice                      | `{ tool_choice: { type: "any" } }` plumbs through                        |
-| Bus envelope mirror (G6)                          | Streaming path emits ≥1 envelope on bus's `executor:delta` channel       |
-| Custom blocks (G12)                               | `customBlocks: { citation: {} }` extracts inline `<citation>...</citation>` from text |
-| `parseThinkTags` (G7)                             | `parseThinkTags: true` routes `<think>...</think>` to reasoning deltas   |
-| Journaled lifecycle                               | `run` produces `requested` + `terminal` envelopes on the journal         |
-| Env var fallbacks (G16)                           | `ANTHROPIC_API_KEY` / `ANTHROPIC_BASE_URL` honored when options omit them |
-| Stop reason mapping                               | `end_turn` → `end`, `max_tokens` → `max_tokens`, `tool_use` → `tool_use`, `stop_sequence` → `end` |
-| Streaming + non-streaming equivalence             | Both paths produce equivalent normalized result for the same scripted output |
+| Test category                            | What it asserts                                                                                                  |
+| ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| Non-streaming basics                     | `run` returns succeeded terminal; finish reason mapped; model threaded                                           |
+| System message extraction                | `role: system` messages collapse to `system` param, not inline                                                   |
+| User/assistant alternation coalescing    | Consecutive same-role messages merge content arrays                                                              |
+| Tool-use round-trip                      | `tool_use` block → SDK call → `tool_result` echoes back correctly                                                |
+| Streaming basics                         | Iterator yields valid AdapterDeltas; `.result` resolves with Message                                             |
+| Streaming: content-block-state           | Interleaved text + tool_use blocks track correct blockIndex per stream                                           |
+| Abort                                    | `abort()` flips next `run()` to `canceled`                                                                       |
+| **Cache tokens (G2)**                    | `cache_read_input_tokens` / `cache_creation_input_tokens` → `cachedInputTokens` / `cacheCreationTokens` on usage |
+| **Cache markers (G2 send-side)**         | `cacheControl: ["system"]` stamps `cache_control: { type: "ephemeral" }` on last system text block               |
+| **Cache markers — tools**                | `cacheControl: ["tools"]` stamps marker on last tool                                                             |
+| **Reasoning extraction (G3 — native)**   | Streamed `thinking` blocks → reasoning-start/delta/end/reasoning deltas + ReasoningBlock in normalize output     |
+| **Reasoning extraction — non-streaming** | `Message.content` with `thinking` block → ReasoningBlock                                                         |
+| **Base64 image (G4)**                    | `data:image/png;base64,...` projected → Anthropic base64 source param                                            |
+| **URL image (G4)**                       | `https://...` projected → Anthropic url source param                                                             |
+| Sampling params (G1)                     | `temperature`, `topP`, `stopSequences`, `maxOutputTokens` plumbed to SDK                                         |
+| Sampling params dropped silently         | `frequencyPenalty` / `presencePenalty` do NOT appear in SDK params                                               |
+| `max_tokens` required                    | Missing both `parameters.maxOutputTokens` AND `options.maxTokens` → 4096 fallback                                |
+| providerOptions spread (G5)              | `target.providerOptions.anthropic.top_k = 40` appears in SDK params                                              |
+| providerOptions: thinking config         | `{ thinking: { type: "enabled", budget_tokens: 2048 } }` plumbs through                                          |
+| providerOptions: tool_choice             | `{ tool_choice: { type: "any" } }` plumbs through                                                                |
+| Bus envelope mirror (G6)                 | Streaming path emits ≥1 envelope on bus's `executor:delta` channel                                               |
+| Custom blocks (G12)                      | `customBlocks: { citation: {} }` extracts inline `<citation>...</citation>` from text                            |
+| `parseThinkTags` (G7)                    | `parseThinkTags: true` routes `<think>...</think>` to reasoning deltas                                           |
+| Journaled lifecycle                      | `run` produces `requested` + `terminal` envelopes on the journal                                                 |
+| Env var fallbacks (G16)                  | `ANTHROPIC_API_KEY` / `ANTHROPIC_BASE_URL` honored when options omit them                                        |
+| Stop reason mapping                      | `end_turn` → `end`, `max_tokens` → `max_tokens`, `tool_use` → `tool_use`, `stop_sequence` → `end`                |
+| Streaming + non-streaming equivalence    | Both paths produce equivalent normalized result for the same scripted output                                     |
 
 ### 11.3 Factory (`__tests__/anthropic-factory.spec.ts`)
 

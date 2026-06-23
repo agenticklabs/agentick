@@ -36,9 +36,7 @@ const Calculator = createTool({
       return [{ type: "text" as const, text: `${expression} = ${result}` }];
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      return [
-        { type: "text" as const, text: `Error evaluating "${expression}": ${message}` },
-      ];
+      return [{ type: "text" as const, text: `Error evaluating "${expression}": ${message}` }];
     }
   },
 });
@@ -56,8 +54,8 @@ export function Agent() {
   return (
     <>
       <System>
-        You are a concise, helpful assistant. You have access to a calculator tool — use it
-        whenever the user asks for arithmetic.
+        You are a concise, helpful assistant. You have access to a calculator tool — use it whenever
+        the user asks for arithmetic.
         {verbose
           ? " VERBOSE MODE: explain your reasoning step by step and show all intermediate values."
           : " Be terse — give the answer with at most one sentence of context."}

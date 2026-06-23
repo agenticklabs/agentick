@@ -59,12 +59,12 @@ The accessor form `client.session(id).send(...)` stays for the cases where you w
 ### With auth
 
 ```ts
-import { bearer } from "@agentick/client-next";   // auth source helpers
+import { bearer } from "@agentick/client-next"; // auth source helpers
 
 const client = createClient({
   transport: websocket({
     url: "wss://api.example.com",
-    auth: bearer({ token: async () => fetchTokenFromStore() }),  // refresh hook
+    auth: bearer({ token: async () => fetchTokenFromStore() }), // refresh hook
   }),
 });
 ```
@@ -79,9 +79,9 @@ import { offline } from "@agentick/client-extensions-next/offline";
 const client = createClient({
   transport: websocket({ url, auth }),
   extensions: [
-    telemetry({ tracer }),                    // outermost — sees logical request
-    retry({ maxAttempts: 5 }),                // retries actual wire attempts
-    offline({ store: indexedDbStore() }),     // buffers requests when disconnected
+    telemetry({ tracer }), // outermost — sees logical request
+    retry({ maxAttempts: 5 }), // retries actual wire attempts
+    offline({ store: indexedDbStore() }), // buffers requests when disconnected
   ],
 });
 ```
@@ -96,10 +96,9 @@ import { websocket } from "@agentick/transport-websocket-next/client";
 import { http } from "@agentick/transport-http-next/client";
 
 const client = createClient({
-  transport: selector(
-    [websocket({ url: "wss://..." }), http({ url: "https://..." })],
-    { policy: "fallback-on-connect-failure" },
-  ),
+  transport: selector([websocket({ url: "wss://..." }), http({ url: "https://..." })], {
+    policy: "fallback-on-connect-failure",
+  }),
 });
 ```
 
@@ -113,13 +112,10 @@ import { webLocksLeader } from "@agentick/transport-multiplexer-next/web-locks";
 import { broadcastChannelBridge } from "@agentick/transport-multiplexer-next/broadcast-channel";
 
 const client = createClient({
-  transport: multiplexer(
-    websocket({ url, auth }),
-    {
-      leader: webLocksLeader("my-app"),
-      bridge: broadcastChannelBridge("my-app"),
-    },
-  ),
+  transport: multiplexer(websocket({ url, auth }), {
+    leader: webLocksLeader("my-app"),
+    bridge: broadcastChannelBridge("my-app"),
+  }),
 });
 ```
 
@@ -174,21 +170,21 @@ WebSocket transports advertise `agentick-rpc-v1` as a subprotocol per RFC 6455. 
 
 ### Method namespaces (no MCP collisions)
 
-| Namespace | Owner | Methods (illustrative) |
-|---|---|---|
-| `gateway/*` | agentick | `listApps`, `getApp` |
-| `app/*` | agentick | `createSession`, `getSession`, `listSessions`, `runOnce`, `close` |
-| `session/*` | agentick | `send`, `render`, `dispatch`, `abort`, `queue`, `snapshot`, `rebind` |
-| `subscribe`, `unsubscribe` | agentick | general-purpose persistent subscriptions |
-| `auth/*` | agentick | `refresh`, `completeChallenge`, `signOut` (filled by ADR 34) |
-| `ping` | shared with MCP | keepalive |
-| `tools/*` | **reserved for MCP** | agentick servers MAY implement when bundling `@agentick/mcp-surface-next` |
-| `resources/*` | **reserved for MCP** | ditto |
-| `prompts/*` | **reserved for MCP** | ditto |
-| `sampling/*` | **reserved for MCP** | ditto |
-| `completion/*` | **reserved for MCP** | ditto |
-| `logging/*` | **reserved for MCP** | ditto |
-| `initialize`, `initialized` | **reserved for MCP** | ditto |
+| Namespace                   | Owner                | Methods (illustrative)                                                    |
+| --------------------------- | -------------------- | ------------------------------------------------------------------------- |
+| `gateway/*`                 | agentick             | `listApps`, `getApp`                                                      |
+| `app/*`                     | agentick             | `createSession`, `getSession`, `listSessions`, `runOnce`, `close`         |
+| `session/*`                 | agentick             | `send`, `render`, `dispatch`, `abort`, `queue`, `snapshot`, `rebind`      |
+| `subscribe`, `unsubscribe`  | agentick             | general-purpose persistent subscriptions                                  |
+| `auth/*`                    | agentick             | `refresh`, `completeChallenge`, `signOut` (filled by ADR 34)              |
+| `ping`                      | shared with MCP      | keepalive                                                                 |
+| `tools/*`                   | **reserved for MCP** | agentick servers MAY implement when bundling `@agentick/mcp-surface-next` |
+| `resources/*`               | **reserved for MCP** | ditto                                                                     |
+| `prompts/*`                 | **reserved for MCP** | ditto                                                                     |
+| `sampling/*`                | **reserved for MCP** | ditto                                                                     |
+| `completion/*`              | **reserved for MCP** | ditto                                                                     |
+| `logging/*`                 | **reserved for MCP** | ditto                                                                     |
+| `initialize`, `initialized` | **reserved for MCP** | ditto                                                                     |
 
 Reserved namespaces guarantee non-collision: agentick will not define methods in MCP's namespaces. Bilingual servers (`@agentick/mcp-surface-next`) implement the MCP methods natively and route them through the harness substrate.
 
@@ -215,12 +211,15 @@ Reserved namespaces guarantee non-collision: agentick will not define methods in
 
 ```jsonc
 // ← response
-{ "jsonrpc": "2.0", "id": 2,
+{
+  "jsonrpc": "2.0",
+  "id": 2,
   "error": {
     "code": -32010,
     "message": "session not found",
-    "data": { "appId": "app-7", "sessionId": "does-not-exist" }
-  } }
+    "data": { "appId": "app-7", "sessionId": "does-not-exist" },
+  },
+}
 ```
 
 #### 3. Batch (JSON-RPC 2.0 standard)
@@ -356,12 +355,15 @@ The `cursor` field on `notifications/progress.params` is the **agentick-specific
 
 ```jsonc
 // ← server-initiated: token revoked
-{ "jsonrpc": "2.0", "method": "notifications/auth/expired",
+{
+  "jsonrpc": "2.0",
+  "method": "notifications/auth/expired",
   "params": {
     "reason": "token-revoked",
     "renewable": false,
-    "affectedSessions": ["sess-123", "sess-456"]
-  } }
+    "affectedSessions": ["sess-123", "sess-456"],
+  },
+}
 ```
 
 #### 9. Keepalive (MCP convention)
@@ -378,28 +380,28 @@ The `cursor` field on `notifications/progress.params` is the **agentick-specific
 
 Standard JSON-RPC 2.0 reserved codes (-32700 to -32099) for transport / parse / envelope errors. LSP-convention codes (-32800/-32801) for cancellation / content modified. Agentick application codes -32000 to -32099. Codes -32099 to -32050 reserved for adopter overrides.
 
-| Code | Source | Meaning |
-|---|---|---|
-| `-32700` | JSON-RPC 2.0 | Parse error |
-| `-32600` | JSON-RPC 2.0 | Invalid request |
-| `-32601` | JSON-RPC 2.0 | Method not found |
-| `-32602` | JSON-RPC 2.0 | Invalid params |
-| `-32603` | JSON-RPC 2.0 | Internal error |
-| `-32800` | LSP convention | Request cancelled |
-| `-32801` | LSP convention | Content modified |
-| `-32000` | Agentick | Unspecified application error |
-| `-32001` | Agentick | Authentication required |
-| `-32002` | Agentick | Authentication failed |
-| `-32003` | Agentick | Insufficient scope / forbidden |
-| `-32010` | Agentick | Session not found |
-| `-32011` | Agentick | App not found |
-| `-32012` | Agentick | Subscription not found |
-| `-32020` | Agentick | Cursor evicted |
-| `-32021` | Agentick | Operation in progress (conflict) |
-| `-32030` | Agentick | Challenge required (step-up) |
-| `-32031` | Agentick | Token expired |
-| `-32040` | Agentick | Rate limit exceeded |
-| `-32050` | Agentick | Backpressure — try again later |
+| Code     | Source         | Meaning                          |
+| -------- | -------------- | -------------------------------- |
+| `-32700` | JSON-RPC 2.0   | Parse error                      |
+| `-32600` | JSON-RPC 2.0   | Invalid request                  |
+| `-32601` | JSON-RPC 2.0   | Method not found                 |
+| `-32602` | JSON-RPC 2.0   | Invalid params                   |
+| `-32603` | JSON-RPC 2.0   | Internal error                   |
+| `-32800` | LSP convention | Request cancelled                |
+| `-32801` | LSP convention | Content modified                 |
+| `-32000` | Agentick       | Unspecified application error    |
+| `-32001` | Agentick       | Authentication required          |
+| `-32002` | Agentick       | Authentication failed            |
+| `-32003` | Agentick       | Insufficient scope / forbidden   |
+| `-32010` | Agentick       | Session not found                |
+| `-32011` | Agentick       | App not found                    |
+| `-32012` | Agentick       | Subscription not found           |
+| `-32020` | Agentick       | Cursor evicted                   |
+| `-32021` | Agentick       | Operation in progress (conflict) |
+| `-32030` | Agentick       | Challenge required (step-up)     |
+| `-32031` | Agentick       | Token expired                    |
+| `-32040` | Agentick       | Rate limit exceeded              |
+| `-32050` | Agentick       | Backpressure — try again later   |
 
 ### Cursor
 
@@ -502,31 +504,31 @@ export interface AuthExpiredParams {
 
 export const ErrorCode = {
   // JSON-RPC 2.0 standard
-  ParseError:           -32700,
-  InvalidRequest:       -32600,
-  MethodNotFound:       -32601,
-  InvalidParams:        -32602,
-  InternalError:        -32603,
+  ParseError: -32700,
+  InvalidRequest: -32600,
+  MethodNotFound: -32601,
+  InvalidParams: -32602,
+  InternalError: -32603,
   // LSP convention
-  RequestCancelled:     -32800,
-  ContentModified:      -32801,
+  RequestCancelled: -32800,
+  ContentModified: -32801,
   // Agentick application codes
-  AppError:             -32000,
-  AuthRequired:         -32001,
-  AuthFailed:           -32002,
-  Forbidden:            -32003,
-  SessionNotFound:      -32010,
-  AppNotFound:          -32011,
+  AppError: -32000,
+  AuthRequired: -32001,
+  AuthFailed: -32002,
+  Forbidden: -32003,
+  SessionNotFound: -32010,
+  AppNotFound: -32011,
   SubscriptionNotFound: -32012,
-  CursorEvicted:        -32020,
-  Conflict:             -32021,
-  ChallengeRequired:    -32030,
-  TokenExpired:         -32031,
-  RateLimited:          -32040,
-  Backpressure:         -32050,
+  CursorEvicted: -32020,
+  Conflict: -32021,
+  ChallengeRequired: -32030,
+  TokenExpired: -32031,
+  RateLimited: -32040,
+  Backpressure: -32050,
 } as const;
 
-export type ErrorCode = typeof ErrorCode[keyof typeof ErrorCode];
+export type ErrorCode = (typeof ErrorCode)[keyof typeof ErrorCode];
 ```
 
 Spec owns the wire types; transports import; gateway-side extensions import; `@agentick/client-next` imports. Zero cycles.
@@ -535,11 +537,11 @@ Spec owns the wire types; transports import; gateway-side extensions import; `@a
 
 Three planned extensions exploit the wire-compatible-peer relationship:
 
-| Package | Direction | Role |
-|---|---|---|
-| `@agentick/mcp-surface-next` | server-side `GatewayExtension` | mounts MCP methods (`tools/list`, `tools/call`, `resources/list`, `resources/read`, `prompts/*`) onto an agentick gateway and answers them by routing through the active session's harnesses. MCP clients (Claude Desktop, Cline, Continue.dev) see a standard MCP server. |
-| `@agentick/transport-mcp-client-next` | client-side `ClientTransport` | connects to a pure MCP server; exposes `client.mcp.tools`, `client.mcp.resources`, etc. namespaces. Agentick clients gain access to the MCP server ecosystem with no extra library. |
-| Tool projection | shared | tools defined via `createTool({ name, description, input: zodSchema })` project automatically to MCP tool descriptors. Same code, two protocols. |
+| Package                               | Direction                      | Role                                                                                                                                                                                                                                                                       |
+| ------------------------------------- | ------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `@agentick/mcp-surface-next`          | server-side `GatewayExtension` | mounts MCP methods (`tools/list`, `tools/call`, `resources/list`, `resources/read`, `prompts/*`) onto an agentick gateway and answers them by routing through the active session's harnesses. MCP clients (Claude Desktop, Cline, Continue.dev) see a standard MCP server. |
+| `@agentick/transport-mcp-client-next` | client-side `ClientTransport`  | connects to a pure MCP server; exposes `client.mcp.tools`, `client.mcp.resources`, etc. namespaces. Agentick clients gain access to the MCP server ecosystem with no extra library.                                                                                        |
+| Tool projection                       | shared                         | tools defined via `createTool({ name, description, input: zodSchema })` project automatically to MCP tool descriptors. Same code, two protocols.                                                                                                                           |
 
 Sequenced after Phase 33.F (common middleware) to keep the critical path lean.
 
@@ -562,7 +564,7 @@ export interface ClientTransport {
     scope: Scope,
     query?: EventQuery,
     fromCursor?: Cursor,
-  ): AsyncIterable<EventFrame> & { close(): Promise<void>; };
+  ): AsyncIterable<EventFrame> & { close(): Promise<void> };
 
   // Connection lifecycle for selector / multiplexer / extensions
   onStateChange(handler: (state: TransportState) => void): () => void;
@@ -578,10 +580,10 @@ export type TransportState =
   | "closed";
 
 export interface TransportCapabilities {
-  bidirectional: boolean;             // true for WS, Unix socket; false for HTTP+SSE
-  streamingRequest: boolean;          // server can stream notifications during an open RPC
-  reconnectable: boolean;             // self-reconnect supported
-  binaryFrames: boolean;              // future: MessagePack/CBOR
+  bidirectional: boolean; // true for WS, Unix socket; false for HTTP+SSE
+  streamingRequest: boolean; // server can stream notifications during an open RPC
+  reconnectable: boolean; // self-reconnect supported
+  binaryFrames: boolean; // future: MessagePack/CBOR
 }
 ```
 
@@ -589,13 +591,13 @@ Capabilities expose differences without forcing all transports to behave identic
 
 ## The transports
 
-| Package | Wire | When | Capabilities |
-|---|---|---|---|
-| `@agentick/transport-in-process-next` | direct function call | tests, embedded library (one-process gateway), tentickle TUI ↔ same-process daemon | `bidirectional: true`, `streamingRequest: true`, `reconnectable: false`, `binaryFrames: true` |
-| `@agentick/transport-websocket-next` | WebSocket, JSON frames | primary browser + server-to-server | `bidirectional: true`, `streamingRequest: true`, `reconnectable: true`, `binaryFrames: false` (v1) |
-| `@agentick/transport-http-next` | **Streamable HTTP** (MCP 2025-03-26 spec) — single endpoint, POST returns JSON or SSE based on response shape; persistent SSE via `GET` for stand-alone subscriptions | modern HTTP deploys; cooperates with edge/serverless; load-balancer-friendly | `bidirectional: false` (asymmetric), `streamingRequest: true` (SSE response), `reconnectable: true`, `binaryFrames: false` |
-| `@agentick/transport-http-sse-legacy-next` | HTTP+SSE dual-endpoint (`GET /events` for stream + `POST /rpc/<session-token>` for requests, with sticky session affinity) | environments where Streamable HTTP isn't viable (older load balancers, content-type-strict proxies) | `bidirectional: false`, `streamingRequest: true`, `reconnectable: true`, `binaryFrames: false` |
-| `@agentick/transport-unix-socket-next` | newline-delimited JSON over Unix socket | local IPC (TUI ↔ local daemon) | `bidirectional: true`, `streamingRequest: true`, `reconnectable: true`, `binaryFrames: false` |
+| Package                                    | Wire                                                                                                                                                                  | When                                                                                                | Capabilities                                                                                                               |
+| ------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `@agentick/transport-in-process-next`      | direct function call                                                                                                                                                  | tests, embedded library (one-process gateway), tentickle TUI ↔ same-process daemon                  | `bidirectional: true`, `streamingRequest: true`, `reconnectable: false`, `binaryFrames: true`                              |
+| `@agentick/transport-websocket-next`       | WebSocket, JSON frames                                                                                                                                                | primary browser + server-to-server                                                                  | `bidirectional: true`, `streamingRequest: true`, `reconnectable: true`, `binaryFrames: false` (v1)                         |
+| `@agentick/transport-http-next`            | **Streamable HTTP** (MCP 2025-03-26 spec) — single endpoint, POST returns JSON or SSE based on response shape; persistent SSE via `GET` for stand-alone subscriptions | modern HTTP deploys; cooperates with edge/serverless; load-balancer-friendly                        | `bidirectional: false` (asymmetric), `streamingRequest: true` (SSE response), `reconnectable: true`, `binaryFrames: false` |
+| `@agentick/transport-http-sse-legacy-next` | HTTP+SSE dual-endpoint (`GET /events` for stream + `POST /rpc/<session-token>` for requests, with sticky session affinity)                                            | environments where Streamable HTTP isn't viable (older load balancers, content-type-strict proxies) | `bidirectional: false`, `streamingRequest: true`, `reconnectable: true`, `binaryFrames: false`                             |
+| `@agentick/transport-unix-socket-next`     | newline-delimited JSON over Unix socket                                                                                                                               | local IPC (TUI ↔ local daemon)                                                                      | `bidirectional: true`, `streamingRequest: true`, `reconnectable: true`, `binaryFrames: false`                              |
 
 Each package ships both ends:
 
@@ -662,12 +664,12 @@ The canonical pattern on both sides of the wire is **chain of responsibility for
 
 ### Why the client is Promise-native (and the harness isn't)
 
-| | Harness middleware | Client middleware |
-|---|---|---|
-| Substrate | Effect-native (`runOperation`, FiberRef, Layer) | Promise/AsyncIterable native (transports are Promise-based) |
-| Adopter audience | Framework-internal + advanced extension authors | Every adopter writing a `retry()` or `cache()` extension |
-| Composition needs | `Effect.withSpan`, `Effect.retry`, `Effect.timeout`, `FiberRef` propagation | `try`/`catch`, `AbortController`, OTel JS SDK |
-| Right default | Effect — substrate IS Effect | Promise — keeps the install-and-write-three-lines path frictionless |
+|                   | Harness middleware                                                          | Client middleware                                                   |
+| ----------------- | --------------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| Substrate         | Effect-native (`runOperation`, FiberRef, Layer)                             | Promise/AsyncIterable native (transports are Promise-based)         |
+| Adopter audience  | Framework-internal + advanced extension authors                             | Every adopter writing a `retry()` or `cache()` extension            |
+| Composition needs | `Effect.withSpan`, `Effect.retry`, `Effect.timeout`, `FiberRef` propagation | `try`/`catch`, `AbortController`, OTel JS SDK                       |
+| Right default     | Effect — substrate IS Effect                                                | Promise — keeps the install-and-write-three-lines path frictionless |
 
 Forcing client extension authors into Effect for what is typically a 10-line `retry({ maxAttempts })` would be an own-goal. The pattern stays canonical (chain of responsibility, outer→inner composition, identical merge semantics where it makes sense); the **representation** differs because the layer's primitive differs.
 
@@ -680,7 +682,9 @@ import { Effect, Duration } from "effect";
 const extension = {
   name: "fancy-retry",
   request: effectMiddleware((input, next) =>
-    next(input).pipe(Effect.retry({ times: 3, schedule: Schedule.exponential(Duration.millis(50)) })),
+    next(input).pipe(
+      Effect.retry({ times: 3, schedule: Schedule.exponential(Duration.millis(50)) }),
+    ),
   ),
 };
 ```
@@ -734,10 +738,9 @@ export function composeRequest(
 ): (req: RequestInput) => Promise<unknown> {
   return extensions
     .filter((e): e is ClientExtension & { request: RequestMiddleware } => !!e.request)
-    .reduceRight<(req: RequestInput) => Promise<unknown>>(
-      (next, ext) => (req) => ext.request(req, next),
-      terminal,
-    );
+    .reduceRight<
+      (req: RequestInput) => Promise<unknown>
+    >((next, ext) => (req) => ext.request(req, next), terminal);
 }
 ```
 
@@ -752,12 +755,20 @@ Client uses **per-event verdict types** with **per-event merge rules**, declared
 ```ts
 // @agentick/client-next/src/lifecycle.ts
 export interface ClientLifecycleEvents {
-  "connection:opening":     LifecycleEventSpec<{ transport: ClientTransport },     void,                   "observer">;
-  "connection:opened":      LifecycleEventSpec<{ transport: ClientTransport },     void,                   "observer">;
-  "connection:lost":        LifecycleEventSpec<{ reason: TransportError },         ReconnectDecision,      "any-reconnect-wins">;
-  "auth:expired":           LifecycleEventSpec<AuthExpiredInput,                   AuthExpiredDecision,    "first-non-null-wins">;
-  "auth:challenge":         LifecycleEventSpec<AuthChallenge,                      ChallengeProof,         "first-non-null-wins">;
-  "subscription:evicted":   LifecycleEventSpec<EvictionInput,                      EvictionDecision,       "first-non-null-wins">;
+  "connection:opening": LifecycleEventSpec<{ transport: ClientTransport }, void, "observer">;
+  "connection:opened": LifecycleEventSpec<{ transport: ClientTransport }, void, "observer">;
+  "connection:lost": LifecycleEventSpec<
+    { reason: TransportError },
+    ReconnectDecision,
+    "any-reconnect-wins"
+  >;
+  "auth:expired": LifecycleEventSpec<AuthExpiredInput, AuthExpiredDecision, "first-non-null-wins">;
+  "auth:challenge": LifecycleEventSpec<AuthChallenge, ChallengeProof, "first-non-null-wins">;
+  "subscription:evicted": LifecycleEventSpec<
+    EvictionInput,
+    EvictionDecision,
+    "first-non-null-wins"
+  >;
 }
 
 export interface LifecycleEventSpec<TInput, TResult, TMerge extends MergeKind> {
@@ -767,10 +778,10 @@ export interface LifecycleEventSpec<TInput, TResult, TMerge extends MergeKind> {
 }
 
 export type MergeKind =
-  | "observer"             // result is void; multiple handlers all run; no merge needed
-  | "first-non-null-wins"  // first handler returning non-null wins; remaining handlers don't run
-  | "any-reconnect-wins"   // for connection:lost — any "reconnect" vote prevails over "give-up"
-  | "verdict-merge";       // BaseHarness-style merge — for events that genuinely have proceed/veto/replace/defer semantics
+  | "observer" // result is void; multiple handlers all run; no merge needed
+  | "first-non-null-wins" // first handler returning non-null wins; remaining handlers don't run
+  | "any-reconnect-wins" // for connection:lost — any "reconnect" vote prevails over "give-up"
+  | "verdict-merge"; // BaseHarness-style merge — for events that genuinely have proceed/veto/replace/defer semantics
 
 export type ReconnectDecision = "reconnect" | "give-up";
 export type AuthExpiredDecision = "refresh" | "re-authenticate" | "fail";
@@ -783,8 +794,9 @@ export interface ClientExtension {
   };
 }
 
-export type LifecycleHandlerFor<S extends LifecycleEventSpec<unknown, unknown, MergeKind>> =
-  (input: S["input"]) => S["result"] | null | undefined | Promise<S["result"] | null | undefined>;
+export type LifecycleHandlerFor<S extends LifecycleEventSpec<unknown, unknown, MergeKind>> = (
+  input: S["input"],
+) => S["result"] | null | undefined | Promise<S["result"] | null | undefined>;
 ```
 
 The framework picks the merge function based on the event's declared `merge` kind. Adopters never see merge-rule machinery; they return a value (or null to abstain) from their handler. Each event documents its merge rule in the type declaration — no hidden semantics.
@@ -793,11 +805,11 @@ For events that genuinely match `BaseHarness`'s verdict shape (future expansion 
 
 ### Three extension surfaces
 
-| Surface | Use when | Pattern |
-|---|---|---|
-| **Middleware** (`request`, `subscribe`) | Wrap + transform an operation | Chain of responsibility |
-| **Lifecycle handlers** (`handlers`) | Vote on a decision (reconnect, refresh, etc.) | Registered handlers with per-event merge |
-| **Bus subscribers** (`install`) | Pure observation (telemetry, logging, devtools) | Pub/sub |
+| Surface                                 | Use when                                        | Pattern                                  |
+| --------------------------------------- | ----------------------------------------------- | ---------------------------------------- |
+| **Middleware** (`request`, `subscribe`) | Wrap + transform an operation                   | Chain of responsibility                  |
+| **Lifecycle handlers** (`handlers`)     | Vote on a decision (reconnect, refresh, etc.)   | Registered handlers with per-event merge |
+| **Bus subscribers** (`install`)         | Pure observation (telemetry, logging, devtools) | Pub/sub                                  |
 
 Same three surfaces `BaseHarness` exposes (middleware + handler registry + bus). Same canonical patterns. Different representations on each layer because the layer's idioms differ.
 
@@ -833,13 +845,13 @@ Same shape as `AppInstaller` / `SessionInstaller` / `GatewayInstaller` (ADR 31, 
 
 Listed-first = outermost. Same `reduceRight` composition. The convention:
 
-| Extension | Typical position | Why |
-|---|---|---|
-| `telemetry` | first (outermost) | Spans should wrap the logical request, not each wire attempt; metrics see ground truth |
-| `auth` | early | Auth state changes are user-facing concerns; surface before retry buries them |
-| `retry` | middle | Retries actual wire attempts; sees errors `cache` and `offline` couldn't handle |
-| `cache` | middle | Returns cached results without hitting `retry` or `offline` |
-| `offline` | last (innermost before transport) | Sits just above the wire to buffer when disconnected |
+| Extension   | Typical position                  | Why                                                                                    |
+| ----------- | --------------------------------- | -------------------------------------------------------------------------------------- |
+| `telemetry` | first (outermost)                 | Spans should wrap the logical request, not each wire attempt; metrics see ground truth |
+| `auth`      | early                             | Auth state changes are user-facing concerns; surface before retry buries them          |
+| `retry`     | middle                            | Retries actual wire attempts; sees errors `cache` and `offline` couldn't handle        |
+| `cache`     | middle                            | Returns cached results without hitting `retry` or `offline`                            |
+| `offline`   | last (innermost before transport) | Sits just above the wire to buffer when disconnected                                   |
 
 Framework doesn't enforce ordering. Adopters who want different get different.
 
@@ -851,19 +863,19 @@ Two composite-pattern transports for the multi-transport cases. Composed transpo
 
 ```ts
 export function selector(
-  candidates: ClientTransport[],          // array order = priority
+  candidates: ClientTransport[], // array order = priority
   options?: SelectorOptions,
 ): ClientTransport;
 
 export interface SelectorOptions {
-  policy?: SelectorPolicy;                // default: "fallback-on-connect-failure"
+  policy?: SelectorPolicy; // default: "fallback-on-connect-failure"
   healthCheck?: { intervalMs: number; method?: string };
 }
 
 export type SelectorPolicy =
   | "fallback-on-connect-failure"
-  | "fallback-on-disconnect"              // also re-evaluate on transport-state transitions
-  | "round-robin"                         // dev/test only
+  | "fallback-on-disconnect" // also re-evaluate on transport-state transitions
+  | "round-robin" // dev/test only
   | { kind: "custom"; choose: (state: SelectorState) => number /* candidate index */ };
 ```
 
@@ -873,7 +885,7 @@ Candidates are constructed eagerly but `state: "idle"` at start. Selector calls 
 
 ```ts
 export function multiplexer(
-  transport: ClientTransport,             // started in state: "idle"
+  transport: ClientTransport, // started in state: "idle"
   options: MultiplexerOptions,
 ): ClientTransport;
 
@@ -916,14 +928,14 @@ The client gets its own `LocalEventBus` instance — small, in-memory, internal.
 ```ts
 // Client-bus event surfaces (initial set)
 type ClientEventSurface =
-  | "connection"        // connection:state transitions
-  | "request"           // request:sent, request:completed, request:failed
-  | "subscription"      // subscription:opened, subscription:closed, subscription:evicted
-  | "auth"              // auth:changed, auth:refresh-required, auth:expired, auth:challenge
-  | "extension";        // extension-emitted events (free-form)
+  | "connection" // connection:state transitions
+  | "request" // request:sent, request:completed, request:failed
+  | "subscription" // subscription:opened, subscription:closed, subscription:evicted
+  | "auth" // auth:changed, auth:refresh-required, auth:expired, auth:challenge
+  | "extension"; // extension-emitted events (free-form)
 ```
 
-Same `EventBus` interface as server-side (ADR 29). Same cursor protocol. Same `client.events({ fromCursor })` for resume of *client-internal* events across reconnects.
+Same `EventBus` interface as server-side (ADR 29). Same cursor protocol. Same `client.events({ fromCursor })` for resume of _client-internal_ events across reconnects.
 
 ### Wire firehose — opt-in
 
@@ -975,12 +987,15 @@ export interface AuthVariants {
 }
 
 // Each transport declares which variants it accepts
-export type AuthSourceFor<T extends TransportKind> =
-  T extends "websocket"   ? AuthVariantsForKeys<"bearer" | "headers" | "wsInitFrame" | "mtls" | "custom"> :
-  T extends "http"        ? AuthVariantsForKeys<"bearer" | "headers" | "mtls" | "custom"> :
-  T extends "unix-socket" ? AuthVariantsForKeys<"unixPeerCred" | "bearer" | "custom"> :
-  T extends "in-process"  ? AuthVariantsForKeys<"custom"> :
-  never;
+export type AuthSourceFor<T extends TransportKind> = T extends "websocket"
+  ? AuthVariantsForKeys<"bearer" | "headers" | "wsInitFrame" | "mtls" | "custom">
+  : T extends "http"
+    ? AuthVariantsForKeys<"bearer" | "headers" | "mtls" | "custom">
+    : T extends "unix-socket"
+      ? AuthVariantsForKeys<"unixPeerCred" | "bearer" | "custom">
+      : T extends "in-process"
+        ? AuthVariantsForKeys<"custom">
+        : never;
 
 type AuthVariantsForKeys<K extends keyof AuthVariants> = {
   [Key in K]: { kind: Key } & AuthVariants[Key];
@@ -1009,27 +1024,27 @@ Everything else is ADR 34. The variant set may grow as ADR 34 lands (DPoP-bound 
 
 Shapes correspond to the three surfaces from the middleware section: **middleware** (wraps requests / subscribes), **handler** (lifecycle verdicts), **installer** (bus subscriber + namespace registration + onClose). An extension may use any combination.
 
-| Extension | Shape | Provider | Notes |
-|---|---|---|---|
-| `@agentick/transport-multiplexer-next` | composite transport | framework | cross-tab / cross-process leader-election |
-| `@agentick/transport-in-process-next` | transport | framework | direct calls; test mode `{ wireParity: true }` |
-| `@agentick/transport-websocket-next` | transport | framework | primary |
-| `@agentick/transport-http-next` | transport | framework | Streamable HTTP (MCP 2025-03-26 spec); default for HTTP |
-| `@agentick/transport-http-sse-legacy-next` | transport | framework | dual-endpoint HTTP+SSE for legacy infra |
-| `@agentick/transport-unix-socket-next` | transport | framework | local IPC |
-| `@agentick/client-extensions-next/retry` | middleware + handler | framework | exponential backoff, idempotency-key tracking, retryable-error predicate; handler for `connection:lost` votes "reconnect" |
-| `@agentick/client-extensions-next/telemetry` | middleware + installer | framework | W3C Trace Context propagation, OTel spans per logical RPC, counters; exposes `client.telemetry` namespace |
-| `@agentick/client-extensions-next/offline` | middleware + installer + handler | framework | persistent outbound queue (IndexedDB / SQLite); replay on reconnect; handler for `connection:lost` defers in-flight |
-| `@agentick/client-extensions-next/cache` | middleware | framework | read-through cache for idempotent RPCs; event-driven invalidation via bus |
-| `@agentick/client-devtools-next` | installer (+ `wireMirror`) | framework | devtools panel namespace + wire-firehose |
-| `@agentick/client-mock-next` | transport / middleware | framework | record-replay for tests |
-| Rate limiter | middleware | adopter | trivial — `(input, next) => throttle(input, next, opts)` |
-| Compression | middleware | adopter | per-deploy choice of algorithm |
-| E2E encryption envelope | middleware | adopter | adopter key-management |
-| Optimistic updates | installer | adopter | domain-specific reconciliation |
-| Service worker proxy | transport | adopter | browser-specific; survives page refresh |
-| `@agentick/mcp-surface-next` | server-side `GatewayExtension` | framework | mounts MCP methods (`tools/list`, `tools/call`, `resources/*`, `prompts/*`) on an agentick gateway. Makes the gateway an MCP server. |
-| `@agentick/transport-mcp-client-next` | transport | framework | connects to pure MCP servers. Exposes `client.mcp.*` namespaces. |
+| Extension                                    | Shape                            | Provider  | Notes                                                                                                                                |
+| -------------------------------------------- | -------------------------------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `@agentick/transport-multiplexer-next`       | composite transport              | framework | cross-tab / cross-process leader-election                                                                                            |
+| `@agentick/transport-in-process-next`        | transport                        | framework | direct calls; test mode `{ wireParity: true }`                                                                                       |
+| `@agentick/transport-websocket-next`         | transport                        | framework | primary                                                                                                                              |
+| `@agentick/transport-http-next`              | transport                        | framework | Streamable HTTP (MCP 2025-03-26 spec); default for HTTP                                                                              |
+| `@agentick/transport-http-sse-legacy-next`   | transport                        | framework | dual-endpoint HTTP+SSE for legacy infra                                                                                              |
+| `@agentick/transport-unix-socket-next`       | transport                        | framework | local IPC                                                                                                                            |
+| `@agentick/client-extensions-next/retry`     | middleware + handler             | framework | exponential backoff, idempotency-key tracking, retryable-error predicate; handler for `connection:lost` votes "reconnect"            |
+| `@agentick/client-extensions-next/telemetry` | middleware + installer           | framework | W3C Trace Context propagation, OTel spans per logical RPC, counters; exposes `client.telemetry` namespace                            |
+| `@agentick/client-extensions-next/offline`   | middleware + installer + handler | framework | persistent outbound queue (IndexedDB / SQLite); replay on reconnect; handler for `connection:lost` defers in-flight                  |
+| `@agentick/client-extensions-next/cache`     | middleware                       | framework | read-through cache for idempotent RPCs; event-driven invalidation via bus                                                            |
+| `@agentick/client-devtools-next`             | installer (+ `wireMirror`)       | framework | devtools panel namespace + wire-firehose                                                                                             |
+| `@agentick/client-mock-next`                 | transport / middleware           | framework | record-replay for tests                                                                                                              |
+| Rate limiter                                 | middleware                       | adopter   | trivial — `(input, next) => throttle(input, next, opts)`                                                                             |
+| Compression                                  | middleware                       | adopter   | per-deploy choice of algorithm                                                                                                       |
+| E2E encryption envelope                      | middleware                       | adopter   | adopter key-management                                                                                                               |
+| Optimistic updates                           | installer                        | adopter   | domain-specific reconciliation                                                                                                       |
+| Service worker proxy                         | transport                        | adopter   | browser-specific; survives page refresh                                                                                              |
+| `@agentick/mcp-surface-next`                 | server-side `GatewayExtension`   | framework | mounts MCP methods (`tools/list`, `tools/call`, `resources/*`, `prompts/*`) on an agentick gateway. Makes the gateway an MCP server. |
+| `@agentick/transport-mcp-client-next`        | transport                        | framework | connects to pure MCP servers. Exposes `client.mcp.*` namespaces.                                                                     |
 
 The framework provides the extension shapes (middleware, handler, installer) — same shapes as `BaseHarness` — plus the small set of common needs. Everything else is adopter territory.
 
@@ -1123,10 +1138,12 @@ client-extensions-next/{retry,telemetry,cache,offline}  (first-party client exte
 The work is broken into phases that exit cleanly:
 
 **Phase 33.A — Wire + spec types**
+
 - `@agentick/spec-next/wire/` — `WireFrame`, `JsonRpcRequest`, `JsonRpcResponse`, `JsonRpcNotification`, param shapes, `Scope`, `AuthSource`, `TransportCapabilities`, `TransportState`.
 - Test: type-only round-trip tests; no impl.
 
 **Phase 33.B — `@agentick/client-next` skeleton**
+
 - `AgentickClient` + `createClient`.
 - `ClientTransport` interface, `ClientExtension`, `ClientInstaller`, client-bus.
 - Selector transport.
@@ -1136,36 +1153,43 @@ The work is broken into phases that exit cleanly:
 - Conformance suite for `ClientTransport` (any transport must pass).
 
 **Phase 33.C — WebSocket transport**
+
 - Client + server sides.
 - Auth slot wired (default `bearer({ token })`).
 - Pass conformance suite.
 - Pass cursor-resume test.
 
 **Phase 33.D — HTTP transports**
+
 - `@agentick/transport-http-next` (Streamable HTTP, primary).
 - `@agentick/transport-http-sse-legacy-next` (legacy dual-endpoint).
 - Both pass conformance + cursor-resume.
 
 **Phase 33.E — Unix socket transport**
+
 - Client + server sides.
 - Required for tentickle migration.
 - Same conformance.
 
 **Phase 33.F — Common extensions**
+
 - `@agentick/client-extensions-next` — subpath bundle with `/retry`, `/telemetry`, `/cache`, `/offline`.
 - Each subpath ships with its own README + test suite + prior-art table.
 - Establishes the `{layer}-extensions-next` naming convention (reserved `{layer}-{framework}-next` for future React/Angular/Vue bindings).
 
 **Phase 33.G — Multiplexer**
+
 - Web Locks elector + BroadcastChannel bridge.
 - Browser-only first.
 - Node `worker_threads` flavor later if anyone needs it.
 
 **Phase 33.H — Devtools + mock**
+
 - `client-devtools-next` (wire firehose + namespace).
 - `client-mock-next` (record-replay).
 
 **Phase 33.I — MCP interop**
+
 - `@agentick/mcp-surface-next` (server-side `GatewayExtension`): mounts `tools/*`, `resources/*`, `prompts/*` on an agentick gateway. Routes via session's tool executor + reconciler. Agentick gateway becomes an MCP server for any MCP client (Claude Desktop, Cline, Continue.dev, etc.) with one extension install.
 - `@agentick/transport-mcp-client-next`: client-side transport that connects to a pure MCP server. Exposes `client.mcp.tools.call(name, input)`, `client.mcp.resources.read(uri)`, etc. Reuses the same `ClientTransport` interface.
 - Tool projection: `createTool()` descriptors map automatically to MCP tool descriptors (both Zod-schema-based; trivial mapping).
@@ -1174,22 +1198,22 @@ Auth ADR (34) lands in parallel with 33.B/33.C; auth-impl packages ship after 33
 
 ## How this lands in CS / engineering terms
 
-| Design element | Canonical name |
-|---|---|
-| Wire format | JSON-RPC 2.0; agentick is a **wire-compatible peer of MCP** with disjoint method namespace. Same family: LSP, Ethereum RPC. |
-| HTTP topology | Streamable HTTP (MCP 2025-03-26 spec); legacy HTTP+SSE dual-endpoint with sticky-session affinity (RFC 7230) |
-| Long-running RPC | LSP `$/progress` pattern via `_meta.progressToken` + `notifications/progress` (MCP-aligned) |
-| Cancellation | LSP / MCP convention: `notifications/cancelled` with `requestId` |
-| Keepalive | MCP convention: `ping`/pong RPCs |
-| Extension wrapping | **Chain of responsibility** (GoF); aliases: Koa middleware, Express middleware, hapi extensions, Effect Layers |
-| Composing transports | **Composite pattern** (GoF) |
-| Lifecycle decisions | **Observer-with-veto** via `HandlerRegistry` + verdict merge (same as `BaseHarness`) |
-| Cross-tab leadership | **Leader election** via Web Locks API (W3C spec); cross-process variants via Raft / Bully algorithm |
-| Cursor resume | **Loud-failure backpressure** via cursor-pull (Kafka / Redis Streams / event-sourcing pattern) |
-| Client-bus | **Self-similar substrate hierarchy** (ADR 31) carried down to the receive side |
-| Cluster fan-out | **Sticky session affinity + pub/sub fan-out** (Discord gateway fleet, Slack gateway, Phoenix Channels on BEAM) |
-| Telemetry correlation | **W3C Trace Context** propagation (`traceparent` / `tracestate`) across the client/server boundary |
-| Auth handoff | **PEP/PDP separation** per NIST 800-162: transport extension = PEP, Authorizer = PDP; normalized `AuthContext` per Spring Security / Express Passport / NextAuth conventions |
+| Design element        | Canonical name                                                                                                                                                               |
+| --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Wire format           | JSON-RPC 2.0; agentick is a **wire-compatible peer of MCP** with disjoint method namespace. Same family: LSP, Ethereum RPC.                                                  |
+| HTTP topology         | Streamable HTTP (MCP 2025-03-26 spec); legacy HTTP+SSE dual-endpoint with sticky-session affinity (RFC 7230)                                                                 |
+| Long-running RPC      | LSP `$/progress` pattern via `_meta.progressToken` + `notifications/progress` (MCP-aligned)                                                                                  |
+| Cancellation          | LSP / MCP convention: `notifications/cancelled` with `requestId`                                                                                                             |
+| Keepalive             | MCP convention: `ping`/pong RPCs                                                                                                                                             |
+| Extension wrapping    | **Chain of responsibility** (GoF); aliases: Koa middleware, Express middleware, hapi extensions, Effect Layers                                                               |
+| Composing transports  | **Composite pattern** (GoF)                                                                                                                                                  |
+| Lifecycle decisions   | **Observer-with-veto** via `HandlerRegistry` + verdict merge (same as `BaseHarness`)                                                                                         |
+| Cross-tab leadership  | **Leader election** via Web Locks API (W3C spec); cross-process variants via Raft / Bully algorithm                                                                          |
+| Cursor resume         | **Loud-failure backpressure** via cursor-pull (Kafka / Redis Streams / event-sourcing pattern)                                                                               |
+| Client-bus            | **Self-similar substrate hierarchy** (ADR 31) carried down to the receive side                                                                                               |
+| Cluster fan-out       | **Sticky session affinity + pub/sub fan-out** (Discord gateway fleet, Slack gateway, Phoenix Channels on BEAM)                                                               |
+| Telemetry correlation | **W3C Trace Context** propagation (`traceparent` / `tracestate`) across the client/server boundary                                                                           |
+| Auth handoff          | **PEP/PDP separation** per NIST 800-162: transport extension = PEP, Authorizer = PDP; normalized `AuthContext` per Spring Security / Express Passport / NextAuth conventions |
 
 Nothing in this design is novel. The contribution is the **uniform application** of these patterns top-to-bottom (gateway → app → session → client) using the same primitive types (`Middleware`, `HandlerRegistry`, `EventBus`) at every layer.
 

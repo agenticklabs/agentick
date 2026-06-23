@@ -95,7 +95,7 @@ The AI SDK adapter accepts any `ai` package `LanguageModel`. Replace the import 
 ```ts
 import { anthropic } from "@ai-sdk/anthropic";
 // ...
-aisdk({ model: anthropic("claude-3-5-sonnet-latest") })
+aisdk({ model: anthropic("claude-3-5-sonnet-latest") });
 ```
 
 Add the corresponding env var (`ANTHROPIC_API_KEY`) to `.env`.

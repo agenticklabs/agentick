@@ -28,11 +28,9 @@ import type { AppExtension } from "@agentick/spec-next";
 import { jsonSchema } from "@agentick/spec-next";
 
 import { InMemoryMcpTransport, NoneAuth, withMCP } from "@agentick/mcp-next";
+import { withTasks } from "@agentick/tasks-next";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
-import {
-  CallToolRequestSchema,
-  ListToolsRequestSchema,
-} from "@modelcontextprotocol/sdk/types.js";
+import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 
 import { Agent } from "./agent.js";
 
@@ -43,7 +41,10 @@ import { Agent } from "./agent.js";
  * subprocess, no socket, no network. Useful for tests AND for
  * demos like this one.
  */
-function mkMcpEchoServer(): { readonly clientTransport: InMemoryMcpTransport; readonly server: Server } {
+function mkMcpEchoServer(): {
+  readonly clientTransport: InMemoryMcpTransport;
+  readonly server: Server;
+} {
   const [clientTransport, serverTransport] = InMemoryMcpTransport.createLinkedPair();
   const server = new Server(
     { name: "otto-demo-mcp", version: "1.0.0" },
@@ -63,7 +64,9 @@ function mkMcpEchoServer(): { readonly clientTransport: InMemoryMcpTransport; re
     ],
   }));
   server.setRequestHandler(CallToolRequestSchema, async (req) => {
-    const message = String((req.params.arguments as { message?: string } | undefined)?.message ?? "");
+    const message = String(
+      (req.params.arguments as { message?: string } | undefined)?.message ?? "",
+    );
     return { content: [{ type: "text", text: `echo: ${message}` }] };
   });
   void server.connect(serverTransport);
@@ -93,9 +96,7 @@ function timeExtension(): AppExtension {
 
 async function main(): Promise<void> {
   if (!process.env.OPENAI_API_KEY) {
-    console.error(
-      "OPENAI_API_KEY is not set. Copy .env.example to .env and fill in your key.",
-    );
+    console.error("OPENAI_API_KEY is not set. Copy .env.example to .env and fill in your key.");
     process.exit(1);
   }
 
@@ -135,6 +136,12 @@ async function main(): Promise<void> {
     //     them up at every tick.
     extensions: [
       timeExtension(),
+      // `withTasks()` — substrate + per-session TasksHarness + auto-
+      // registered `session_tasks_list / get / cancel / await` tools.
+      // Enables the `taskSupport: "required"` annotation on
+      // `deploy_branch` (Pattern B — task ref returned to the model)
+      // and the transparent task awaiting on `slow_compute` (Pattern A).
+      withTasks(),
       withMCP({
         servers: [
           {
@@ -148,14 +155,32 @@ async function main(): Promise<void> {
   });
 
   try {
-    console.log("→ User: What's 47 * 23? Also use the demo__echo tool to say 'hi'.\n");
-    const result = await app.send(
-      "What's 47 * 23? Also use the demo__echo tool to say 'hi'.",
-    );
-    console.log("← Assistant:", result.response);
-    console.log(
-      `\n[${result.ticks} tick(s), ${result.usage.totalTokens} tokens, stop=${result.stopReason}]`,
-    );
+    // Run two prompts back-to-back on the same session so the Pattern B
+    // task ref persists across ticks — the model kicks off the deploy
+    // in the first turn, then is asked to check on / await it in the
+    // second turn.
+    const session = await app.createSession();
+    try {
+      const turn = async (text: string, label: string): Promise<void> => {
+        console.log(`→ User: ${text}\n`);
+        const handle = await session.send({
+          messages: [{ role: "user", content: [{ type: "text", text }] }],
+        });
+        const result = await handle.result;
+        console.log("← Assistant:", result.response);
+        console.log(
+          `[${label} — ${result.ticks} tick(s), ${result.usage.totalTokens} tokens, stop=${result.stopReason}]\n`,
+        );
+      };
+
+      await turn(
+        "Please deploy the 'feat/v2' branch to staging. Don't wait — just kick it off and tell me the task id.",
+        "tick 1",
+      );
+      await turn("Is it done yet? If not, await it for me.", "tick 2");
+    } finally {
+      await session.close();
+    }
   } finally {
     await app.closeApp();
   }

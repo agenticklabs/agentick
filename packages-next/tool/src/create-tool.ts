@@ -19,13 +19,13 @@
  */
 
 import type {
-  ContentBlock,
   StandardSchemaV1,
   ToolAnnotations,
   ToolDeclaration,
   ToolExposure,
   ToolHandler,
   ToolHandlerCtx,
+  ToolHandlerResult,
   Validator,
 } from "@agentick/spec-next";
 import { jsonSchema } from "@agentick/spec-next";
@@ -69,10 +69,7 @@ export interface ToolSpec<TInput = unknown> {
    * validated input + a `ctx` bundle (toolCallId, sessionId,
    * executionId, abort signal, channel emit).
    */
-  readonly handler: (
-    input: TInput,
-    args: { readonly ctx: ToolHandlerCtx },
-  ) => Promise<readonly ContentBlock[]>;
+  readonly handler: (input: TInput, args: { readonly ctx: ToolHandlerCtx }) => ToolHandlerResult;
   /**
    * Where the tool is reachable from. Defaults to `["model"]`.
    *   - `"model"` — model-callable via function-calling
@@ -134,7 +131,12 @@ export function createTool<TInput = unknown>(spec: ToolSpec<TInput>): CreatedToo
     ...(spec.metadata !== undefined ? { metadata: spec.metadata } : {}),
   };
 
-  const handler: ToolHandler = async (input, { ctx }) => {
+  const handler: ToolHandler = (input, { ctx }) => {
+    // Return shape forwarded as-is — executor accepts every member of
+    // ToolHandlerResult (sync ContentBlock[], Promise, Effect, or
+    // TaskHandle / wrapped TaskHandle). Wrapping in `async` here would
+    // force-Promise TaskHandle returns into Promise<TaskHandle>, which
+    // the executor handles, but stays one indirection cheaper without.
     return spec.handler(input as TInput, { ctx });
   };
 

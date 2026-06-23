@@ -52,7 +52,7 @@ feature reshaped into v2 extension or different harness location ·
       construction OR lazy factory (ADR 31 line 138 lists both as
       options; final shape decided during Phase 4 build).
 - [ ] **GG3. Cross-app event observation.** `gateway.events(filter?,
-      options?)` returns `AsyncIterable<ProtocolEvent>` aggregating
+  options?)` returns `AsyncIterable<ProtocolEvent>` aggregating
       every app the gateway hosts. **Inherits from Phase C bus
       surface.**
 - [ ] **GG4. Lifecycle.** `closeGateway()` / `close()` alias.
@@ -94,20 +94,21 @@ thin scaffold.
 V1's three in-tree plugins each become a v2 extension package.
 
 - [reshape] **GP1. MCP server** (v1's `mcp-server` plugin) →
-      `@agentick/gateway-mcp-server`. Exposes the gateway's
-      apps/methods over the MCP wire protocol.
+  `@agentick/gateway-mcp-server`. Exposes the gateway's
+  apps/methods over the MCP wire protocol.
 - [reshape] **GP2. OpenAI-compat shim** (v1's `openai-compat` plugin)
-      → `@agentick/gateway-openai-compat`. Exposes sessions via the
-      OpenAI Chat Completions wire protocol so OpenAI client SDKs
-      work against agentick.
+  → `@agentick/gateway-openai-compat`. Exposes sessions via the
+  OpenAI Chat Completions wire protocol so OpenAI client SDKs
+  work against agentick.
 - [reshape] **GP3. Logging plugin** (v1's `logging`) →
-      `@agentick/gateway-logging`. Structured logging extension.
+  `@agentick/gateway-logging`. Structured logging extension.
 
 ---
 
 ## Session management (reshape — split between Gateway and Apps)
 
 V1's `SessionManager` lived on Gateway and held:
+
 - per-client session mappings (which client owns which session)
 - session subscriptions (which clients subscribe to which session's events)
 - hibernation timers
@@ -133,6 +134,7 @@ params)`) with schemas, namespaces, roles, guards. Streaming methods
 supported via async generators.
 
 In v2, this could be:
+
 - (a) Kept as a gateway-level concern (method registry extension)
 - (b) Folded into `session.dispatch` / `app.dispatch` (v2's tool-dispatch primitive)
 - (c) Replaced by direct extension RPC (each extension exposes its own surface)
@@ -173,6 +175,7 @@ via `agentick.config.json` and accessed in tools / plugins. Plugins
 declared config schemas; the config was validated at load time.
 
 In v2, this can be:
+
 - (a) Kept as a gateway-level extension (config-store extension)
 - (b) Adopter-owned entirely (v2 doesn't ship a config primitive)
 - (c) Replaced by the `metadata` bag on each harness (lightweight)
@@ -241,21 +244,21 @@ bus directly.
 
 ## Audit summary (after this pass)
 
-| Category | Total | In Phase 4 | Deferred | Reshape | Dropped |
-|---|---:|---:|---:|---:|---:|
-| Gateway core (GG) | 4 | 4 | 0 | 0 | 0 |
-| Extension protocol (GE) | 2 | 2 | 0 | 0 | 0 |
-| Network transports (GT) | 7 | 0 | 7 | 7 | 0 |
-| Plugins (GP) | 3 | 0 | 3 | 3 | 0 |
-| Session management (GS) | 5 | 0 | 2 | 3 | 0 |
-| Method registry (GM) | 6 | 0 | 6 | 5 | 0 |
-| Auth (GA) | 5 | 0 | 5 | 0 | 0 |
-| Configuration (GC) | 2 | 0 | 2 | 0 | 0 |
-| Per-client backpressure (GB) | 3 | 0 | 3 | 3 | 0 |
-| Static file serving (GF) | 2 | 0 | 2 | 2 | 0 |
-| Tool confirmation (GTC) | 1 | 0 | 0 | 1 | 0 |
-| DevTools (GD) | 2 | 0 | 0 | 2 | 0 |
-| **Total** | **42** | **6** | **30** | **26** | **0** |
+| Category                     |  Total | In Phase 4 | Deferred | Reshape | Dropped |
+| ---------------------------- | -----: | ---------: | -------: | ------: | ------: |
+| Gateway core (GG)            |      4 |          4 |        0 |       0 |       0 |
+| Extension protocol (GE)      |      2 |          2 |        0 |       0 |       0 |
+| Network transports (GT)      |      7 |          0 |        7 |       7 |       0 |
+| Plugins (GP)                 |      3 |          0 |        3 |       3 |       0 |
+| Session management (GS)      |      5 |          0 |        2 |       3 |       0 |
+| Method registry (GM)         |      6 |          0 |        6 |       5 |       0 |
+| Auth (GA)                    |      5 |          0 |        5 |       0 |       0 |
+| Configuration (GC)           |      2 |          0 |        2 |       0 |       0 |
+| Per-client backpressure (GB) |      3 |          0 |        3 |       3 |       0 |
+| Static file serving (GF)     |      2 |          0 |        2 |       2 |       0 |
+| Tool confirmation (GTC)      |      1 |          0 |        0 |       1 |       0 |
+| DevTools (GD)                |      2 |          0 |        0 |       2 |       0 |
+| **Total**                    | **42** |      **6** |   **30** |  **26** |   **0** |
 
 (Reshape count overlaps with deferred — items are tagged with their
 final disposition; some appear in both columns.)

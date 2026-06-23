@@ -15,14 +15,14 @@ not published independently.
 **Skeleton commit (#1 of 5).** Pure utilities + types ported from v1
 (`packages/mcp/`); no harness yet.
 
-| Phase | Shipping in | Status |
-|---|---|---|
-| #1 Skeleton — OAuth + protocol utilities + in-memory transport | this commit | ✅ |
-| #2 `McpClientHarness` — Transport / Protocol / Auth / Lifecycle | next | ⏳ |
-| #3 `withMCP` extension + ToolBridge integration | shipped | ✅ |
-| #4 ElicitationBridge — server-to-client elicit/create routing | shipped | ✅ |
-| #134b OAuth-via-elicit — URL-mode elicit on auth-needed | shipped | ✅ |
-| #134c Streamable HTTP transport | follow-up | ⏳ |
+| Phase                                                           | Shipping in | Status |
+| --------------------------------------------------------------- | ----------- | ------ |
+| #1 Skeleton — OAuth + protocol utilities + in-memory transport  | this commit | ✅     |
+| #2 `McpClientHarness` — Transport / Protocol / Auth / Lifecycle | next        | ⏳     |
+| #3 `withMCP` extension + ToolBridge integration                 | shipped     | ✅     |
+| #4 ElicitationBridge — server-to-client elicit/create routing   | shipped     | ✅     |
+| #134b OAuth-via-elicit — URL-mode elicit on auth-needed         | shipped     | ✅     |
+| #134c Streamable HTTP transport                                 | follow-up   | ⏳     |
 
 ## Architecture
 
@@ -79,9 +79,10 @@ else provider.cancelAuthorization();
 ```
 
 **Replacement when McpClientHarness #5 lands:** the `redirectToAuthorization`
-+ `waitForAuthorizationCode` pair becomes a URL-mode elicitation. The
-localhost callback server stays as a fallback for environments without
-a UI (CLI dev loops).
+
+- `waitForAuthorizationCode` pair becomes a URL-mode elicitation. The
+  localhost callback server stays as a fallback for environments without
+  a UI (CLI dev loops).
 
 ### `@agentick/mcp-next` (protocol utilities)
 

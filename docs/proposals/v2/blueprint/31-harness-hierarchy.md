@@ -23,6 +23,7 @@ type Factory<R, P extends BaseHarness> = (parent: P) => R | Promise<R> | Effect<
 No `FactoryDeps`. No `Lifecycle` interface. Parent carries identity, substrate access, lifecycle hook (`onClose`), construction input, runtime-context access.
 
 **Three-level hierarchy in v2:** `GatewayHarness` → `AppHarness` → `SessionHarness`.
+
 - **Gateway: runtime root.** Owns the top-level substrate (bus/inbox/journal). Hosts Apps. The lifecycle root. **Useful in every deployment tier** — local single-user agents (OpenClaw / Hermes style), single-tenant cloud, multi-tenant distributed. Cluster mode is a substrate swap (ADR 29's `ClusterEventBus`/`ClusterJournal`/`ClusterInbox` factories at Gateway slots), not a separate harness type. See `blueprint/12-gateway.md` for the full Gateway shape.
 - App: configuration + supervisor. Apps host sessions. Typically passes gateway substrate through.
 - **Session: tenant boundary.** Multi-tenancy is structural at session level via per-session substrate factories wrapping upstream.
@@ -46,6 +47,7 @@ Phase 1's `Factory<T> = (deps, lifecycle) => T` becomes `Factory<R, P> = (parent
 ADR 30 proposed AppHarness becomes a recipe — sessions construct their own substrate. That solved per-session isolation but required reshaping the entire AppHarness construction story.
 
 The hierarchical model achieves the same goals (per-session isolation, multi-tenant cloud, hibernate portability) without the inversion:
+
 - App keeps its substrate (today's behavior preserved by default).
 - Sessions opt-in to per-session substrate via factory slots.
 - Per-session factories wrap upstream — fan-in to app substrate happens by virtue of the parent constructor.
@@ -77,7 +79,7 @@ abstract class BaseHarness<
   readonly id: string;
   readonly parent: Parent;
   readonly input: Input;
-  readonly metadata: Readonly<Record<string, unknown>>;  // adopter bag
+  readonly metadata: Readonly<Record<string, unknown>>; // adopter bag
 
   // Substrate — uniform across every BaseHarness subclass.
   readonly bus: EventBus;
@@ -106,8 +108,9 @@ The `Parent` type parameter gives compile-time access to grandparents — `sessi
 ### The factory shape — one signature
 
 ```ts
-type Factory<R, P extends BaseHarness<any, any>> =
-  (parent: P) => R | Promise<R> | Effect<R, never, never>;
+type Factory<R, P extends BaseHarness<any, any>> = (
+  parent: P,
+) => R | Promise<R> | Effect<R, never, never>;
 ```
 
 - **Sync return**: construct + return.
@@ -130,12 +133,12 @@ const factory: EventBusFactory = (parent) => {
 
 ### The slot pattern matrix
 
-| Slot type | Forms accepted | Why |
-|---|---|---|
-| Substrate (bus/inbox/journal) | `instance \| factory` | Substrate is infrastructure. Can be shared (instance) or per-session (factory). |
-| Harness slots (executor/loop/reconciler/tools) | `instance \| factory` | Same shape as substrate. Sharing has structural meaning. |
-| Session slot at `AppHarnessOptions.session` | `SessionDefaults \| SessionFactory<P>` | Sessions are units of execution, not infrastructure. Instance-sharing has no meaning. Config-bag form supplies defaults; factory form is full custom construction. |
-| Gateway → apps slot | `AppHarness[] \| AppFactory \| AppRouter` | Eager (list) for fixed app sets; lazy factory or router for on-demand. |
+| Slot type                                      | Forms accepted                            | Why                                                                                                                                                                |
+| ---------------------------------------------- | ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Substrate (bus/inbox/journal)                  | `instance \| factory`                     | Substrate is infrastructure. Can be shared (instance) or per-session (factory).                                                                                    |
+| Harness slots (executor/loop/reconciler/tools) | `instance \| factory`                     | Same shape as substrate. Sharing has structural meaning.                                                                                                           |
+| Session slot at `AppHarnessOptions.session`    | `SessionDefaults \| SessionFactory<P>`    | Sessions are units of execution, not infrastructure. Instance-sharing has no meaning. Config-bag form supplies defaults; factory form is full custom construction. |
+| Gateway → apps slot                            | `AppHarness[] \| AppFactory \| AppRouter` | Eager (list) for fixed app sets; lazy factory or router for on-demand.                                                                                             |
 
 Each slot's pattern reflects what "shared" means for that resource type.
 
@@ -153,7 +156,7 @@ Default composition semantics (concrete per impl, documented in their package RE
 
 - **`LocalEventBus` with parent** — writes publish to BOTH local buffer and parent; subscribers attach to local buffer only. **Fan-in writes / isolated reads.** The tenant-scoped bus pattern.
 - **`MemoryJournal` with parent** — same shape as bus. Writes append to both; reads return local entries.
-- **`LocalInbox` with parent** — **full isolation.** Handlers receive messages from local inbox only; `send` to local routes to local handlers, not parent. This asymmetry vs bus/journal is *deliberate*: inboxes are addressable (you `send` to a named address), not broadcast. Fan-in to a parent inbox would mean every tenant-scoped handler also receives every other tenant's messages — actively wrong, not just leaky. Isolation is the only meaningful default.
+- **`LocalInbox` with parent** — **full isolation.** Handlers receive messages from local inbox only; `send` to local routes to local handlers, not parent. This asymmetry vs bus/journal is _deliberate_: inboxes are addressable (you `send` to a named address), not broadcast. Fan-in to a parent inbox would mean every tenant-scoped handler also receives every other tenant's messages — actively wrong, not just leaky. Isolation is the only meaningful default.
 
 Adopters who want different semantics (strict isolation across all substrate, bidirectional bridging, etc.) write their own composition.
 
@@ -176,7 +179,7 @@ Children harnesses (slots holding them) follow the same two-phase construction w
 
 ### Close-Operation semantics — bus-only by policy override
 
-Harnesses that wrap close in a `runOperation` (`AppHarness.closeApp`, `SessionHarness.close`, future `GatewayHarness.close`) have a structural tension: the Operation framework writes "requested" and "terminal" envelopes to the journal around the close body, but adopter-registered `onClose` handlers in the close body typically *close the journal itself*. Writing the terminal envelope to a closed journal crashes.
+Harnesses that wrap close in a `runOperation` (`AppHarness.closeApp`, `SessionHarness.close`, future `GatewayHarness.close`) have a structural tension: the Operation framework writes "requested" and "terminal" envelopes to the journal around the close body, but adopter-registered `onClose` handlers in the close body typically _close the journal itself_. Writing the terminal envelope to a closed journal crashes.
 
 The clean fix: **close-Operation envelopes are routed bus-only via `JournalingPolicy.override`.** The framework's "requested" / "terminal" envelopes for the close-Op skip the journal entirely and publish only to the bus. Bus subscribers (devtools, audit, observability) still see close happen; the journal stays uninvolved.
 
@@ -195,11 +198,12 @@ super("app", appId, journal, bus, inbox, {
 
 This means `BaseHarness.close()` runs in the simple form — `inboxUnsubscribe()` + LIFO unwind of `onClose` handlers — without special-casing close-Operations. Subclasses with a close-Op just mark their op name `"bus-only"` in their construction policy. The journal can be closed by an `onClose` handler inside the body without crashing the framework.
 
-Adopters who *want* close-Op events journaled (durable audit of close lifecycle) can flip the override back to `"always"` — they accept responsibility for keeping the journal alive across the close.
+Adopters who _want_ close-Op events journaled (durable audit of close lifecycle) can flip the override back to `"always"` — they accept responsibility for keeping the journal alive across the close.
 
 The closed-bus case is harmless: `LocalEventBus.publish` on a closed bus returns `Effect.void` (early-returns). So even if the body closes the bus too, the framework's terminal-envelope publish is a silent no-op rather than a crash.
 
 **Why "close events shouldn't journal" is the correct semantic:**
+
 - Close is one-shot terminal — there's no replay of close.
 - Close is idempotent at the harness level (`_closed` flag short-circuits double-close).
 - The journal's job is to record operations whose outcomes might need to be retrieved (idempotency, audit, replay). Close doesn't fit that — it destroys the journal as part of its body.
@@ -213,18 +217,18 @@ interface CreateSessionInput<P = unknown> {
   // Identity / structure (override-able per call; defaults from app-level config)
   sessionId?: string;
   parentSessionId?: string;
-  rootElement?: unknown;            // overrides app's rootElement (consistent name)
+  rootElement?: unknown; // overrides app's rootElement (consistent name)
 
   // Substrate overrides — instance | factory
-  bus?:     EventBus              | EventBusFactory;
-  inbox?:   MessageInbox          | MessageInboxFactory;
-  journal?: OperationJournal      | OperationJournalFactory;
+  bus?: EventBus | EventBusFactory;
+  inbox?: MessageInbox | MessageInboxFactory;
+  journal?: OperationJournal | OperationJournalFactory;
 
   // Harness slot overrides — instance | factory (rare per-session use)
-  reconciler?:   ReconcilerProtocol     | ReconcilerFactory;
-  loop?:         LoopExecutorProtocol   | LoopExecutorFactory;
-  executor?:     LanguageModelExecutor  | ExecutorFactory;
-  toolExecutor?: ToolExecutorProtocol   | ToolExecutorFactory;
+  reconciler?: ReconcilerProtocol | ReconcilerFactory;
+  loop?: LoopExecutorProtocol | LoopExecutorFactory;
+  executor?: LanguageModelExecutor | ExecutorFactory;
+  toolExecutor?: ToolExecutorProtocol | ToolExecutorFactory;
 
   // Adopter inputs
   initialProps?: P;
@@ -233,7 +237,7 @@ interface CreateSessionInput<P = unknown> {
   maxTicks?: number;
   defaultStreaming?: boolean;
   signal?: AbortSignal;
-  tools?: ReadonlyArray<unknown>;   // session-scoped additional tools
+  tools?: ReadonlyArray<unknown>; // session-scoped additional tools
 
   // Adopter-defined bag. Framework defines no keys. Where
   // tenant-equivalent state lives if adopters want it.
@@ -312,16 +316,16 @@ Steering / control flow uses the reconciler surface:
 
 v1's `onComplete: (result) => void` callbacks were misuse — they couldn't actually steer. v2 drops the callback fields entirely:
 
-| v1 callback | v2 replacement |
-|---|---|
-| `onEvent` | `session.events({})` |
+| v1 callback   | v2 replacement                                                |
+| ------------- | ------------------------------------------------------------- |
+| `onEvent`     | `session.events({})`                                          |
 | `onTickStart` | `session.events({ phase: "tick-start" })` or `useOnTickStart` |
-| `onTickEnd` | `session.events({ phase: "tick-end" })` or `useOnTickEnd` |
-| `onComplete` | `session.events({ phase: "execution-end" })` |
-| `onError` | `session.events({ phase: "error" })` or `useOnError` |
+| `onTickEnd`   | `session.events({ phase: "tick-end" })` or `useOnTickEnd`     |
+| `onComplete`  | `session.events({ phase: "execution-end" })`                  |
+| `onError`     | `session.events({ phase: "error" })` or `useOnError`          |
 
-Adopters who used callbacks for *observation*: switch to `events()`.
-Adopters who used callbacks for *steering*: they were stuck in v1; v2 routes them to the reconciler hooks where steering actually works.
+Adopters who used callbacks for _observation_: switch to `events()`.
+Adopters who used callbacks for _steering_: they were stuck in v1; v2 routes them to the reconciler hooks where steering actually works.
 
 ## Open design questions — resolved
 
@@ -430,14 +434,14 @@ Depends on ADR 29 Phase B+. 2–4 weeks.
 
 Phase 1 of ADR 30 shipped four things; three reshape, one stays:
 
-| Shipped | Status | Reshape |
-| --- | --- | --- |
-| `Factory<T>` typedef in spec | Reshape | Signature → `(parent: P) => R` |
-| `FactoryDeps` interface | Delete | Identity via `parent.id` |
-| `Lifecycle` interface | Delete | `parent.onClose(h)` |
-| `createFactory` static helpers | Reshape | Same name, new factory signature |
-| xFactory marker properties on per-resource factories | Delete | `typeof slot === "function"` suffices |
-| `create-factory.spec.ts` tests | Reshape | `mockLifecycle()` → `mockParent()` |
+| Shipped                                              | Status  | Reshape                               |
+| ---------------------------------------------------- | ------- | ------------------------------------- |
+| `Factory<T>` typedef in spec                         | Reshape | Signature → `(parent: P) => R`        |
+| `FactoryDeps` interface                              | Delete  | Identity via `parent.id`              |
+| `Lifecycle` interface                                | Delete  | `parent.onClose(h)`                   |
+| `createFactory` static helpers                       | Reshape | Same name, new factory signature      |
+| xFactory marker properties on per-resource factories | Delete  | `typeof slot === "function"` suffices |
+| `create-factory.spec.ts` tests                       | Reshape | `mockLifecycle()` → `mockParent()`    |
 
 Half a day of mechanical changes. The Phase 1 commit (`dce217c1`) was internal — no external adopter built against it, so the rewrite is safe.
 

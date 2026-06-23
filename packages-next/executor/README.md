@@ -8,8 +8,9 @@ parser), and a scripted `Fake*` for tests.
 
 The base class owns the entire streaming pipeline (Effect.Stream + bounded
 queue backpressure + fiber-interrupt cancellation + transform composition
-+ bus emission); concrete provider executors write **pure callbacks**
-that produce per-chunk deltas and synthesize a final raw response.
+
+- bus emission); concrete provider executors write **pure callbacks**
+  that produce per-chunk deltas and synthesize a final raw response.
 
 ## Quick Start
 
@@ -18,10 +19,7 @@ that produce per-chunk deltas and synthesize a final raw response.
 For first-party provider adapters and advanced custom integrations.
 
 ```ts
-import {
-  BaseLanguageModelExecutor,
-  type StreamAccumulator,
-} from "@agentick/executor-next";
+import { BaseLanguageModelExecutor, type StreamAccumulator } from "@agentick/executor-next";
 import type {
   AdapterDelta,
   ExecutionTarget,
@@ -29,8 +27,12 @@ import type {
   LanguageModelExecutionResult,
 } from "@agentick/spec-next";
 
-interface MyChunk { /* SDK chunk */ }
-interface MyRaw   { /* SDK final response */ }
+interface MyChunk {
+  /* SDK chunk */
+}
+interface MyRaw {
+  /* SDK final response */
+}
 
 class MyExecutor extends BaseLanguageModelExecutor<MyRaw, MyChunk> {
   readonly target: ExecutionTarget = {
@@ -119,27 +121,27 @@ const myExec = defineExecutor({
 
 ### Required hooks
 
-| Hook                                                                | What it does                                                                                                                |
-| ------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
-| `buildParams(input, target)`                                        | Translate canonical `LanguageModelInput` → provider request shape. Read `target.providerOptions` for per-provider knobs.    |
-| `callProvider(params, signal)`                                      | Non-streaming provider call. Throws on error (base translates to `ProviderRejected` / `ProviderAborted` / `StreamFailed`). |
-| `openStream(params, signal)`                                        | Open the SDK streaming response. Return the async iterable; base owns the loop.                                             |
-| `mapChunk(chunk, accum)`                                            | Pure chunk → `AdapterDelta[]` translation. Read accumulator for derived state; do **not** mutate it.                        |
-| `reconstructRaw(accum, modelSeen)`                                  | Synthesize the canonical provider raw response from final accumulator state. Called once at end of stream.                  |
-| `normalizeRaw(raw)`                                                 | Convert raw provider response → `LanguageModelExecutionResult`. Throw to fail normalization.                                |
+| Hook                               | What it does                                                                                                               |
+| ---------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `buildParams(input, target)`       | Translate canonical `LanguageModelInput` → provider request shape. Read `target.providerOptions` for per-provider knobs.   |
+| `callProvider(params, signal)`     | Non-streaming provider call. Throws on error (base translates to `ProviderRejected` / `ProviderAborted` / `StreamFailed`). |
+| `openStream(params, signal)`       | Open the SDK streaming response. Return the async iterable; base owns the loop.                                            |
+| `mapChunk(chunk, accum)`           | Pure chunk → `AdapterDelta[]` translation. Read accumulator for derived state; do **not** mutate it.                       |
+| `reconstructRaw(accum, modelSeen)` | Synthesize the canonical provider raw response from final accumulator state. Called once at end of stream.                 |
+| `normalizeRaw(raw)`                | Convert raw provider response → `LanguageModelExecutionResult`. Throw to fail normalization.                               |
 
 ### Optional hooks
 
-| Hook                              | Default       | When to override                                                                                                   |
-| --------------------------------- | ------------- | ------------------------------------------------------------------------------------------------------------------ |
-| `projectImpl(input)`              | Canonical fold | Anthropic preserves `cache_control` per system section.                                                            |
-| `adapterTransforms()`             | `[]`          | Return `[thinkTagTransform()]` for OpenAI-compatible servers (vLLM, LM Studio) that emit `<think>` tags inline.   |
-| `customBlocks`                    | `undefined`   | Declarative adopter-facing custom XML-tag extraction (citations, semantic markers).                                |
-| `postProcessForNormalize(raw)`    | identity      | Apply tag routing to the **non-streaming** path (streaming path's `adapterTransforms` already extracted them).    |
-| `extractMetadata(raw)`            | `undefined`   | Surface provider-specific fields (OpenAI `system_fingerprint`, Google `safetyRatings`, citations) into `result.finishMetadata` without rewriting `normalizeRaw`. |
-| `finalizeStream(accum)`           | close blocks + emit summaries | Provider needs a custom message-end shape (e.g. Google's `finishReasonRaw` → `stopReason` mapping). |
-| `mapProviderError(cause)`         | abort + status code → typed | Provider surfaces structured errors you can extract more detail from.                                |
-| `isAbortError(cause)`             | `AbortError` + `APIUserAbortError` | SDK throws a non-standard abort error type.                                                |
+| Hook                           | Default                            | When to override                                                                                                                                                 |
+| ------------------------------ | ---------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `projectImpl(input)`           | Canonical fold                     | Anthropic preserves `cache_control` per system section.                                                                                                          |
+| `adapterTransforms()`          | `[]`                               | Return `[thinkTagTransform()]` for OpenAI-compatible servers (vLLM, LM Studio) that emit `<think>` tags inline.                                                  |
+| `customBlocks`                 | `undefined`                        | Declarative adopter-facing custom XML-tag extraction (citations, semantic markers).                                                                              |
+| `postProcessForNormalize(raw)` | identity                           | Apply tag routing to the **non-streaming** path (streaming path's `adapterTransforms` already extracted them).                                                   |
+| `extractMetadata(raw)`         | `undefined`                        | Surface provider-specific fields (OpenAI `system_fingerprint`, Google `safetyRatings`, citations) into `result.finishMetadata` without rewriting `normalizeRaw`. |
+| `finalizeStream(accum)`        | close blocks + emit summaries      | Provider needs a custom message-end shape (e.g. Google's `finishReasonRaw` → `stopReason` mapping).                                                              |
+| `mapProviderError(cause)`      | abort + status code → typed        | Provider surfaces structured errors you can extract more detail from.                                                                                            |
+| `isAbortError(cause)`          | `AbortError` + `APIUserAbortError` | SDK throws a non-standard abort error type.                                                                                                                      |
 
 ### Streaming pipeline
 
@@ -176,17 +178,17 @@ Centralized streaming-state aggregator. The base creates one per stream
 and feeds it from every `AdapterDelta` flowing through the transform
 pipeline (after `mapChunk` + `adapterTransforms` + `customBlocks`).
 
-| Field                      | What it holds                                                                              |
-| -------------------------- | ------------------------------------------------------------------------------------------ |
-| `textByBlock`              | `Map<blockIndex, string>` — accumulated text per content block.                            |
-| `reasoningByBlock`         | `Map<blockIndex, string>` — accumulated reasoning per block (think-tag / native CoT).      |
-| `toolCalls`                | `Map<callId, AccumToolCall>` — per-call name + blockIndex + argsBuffer + input + metadata. |
-| `usage`                    | `UsageStats` (last-write-wins; `usage` and `message-end` deltas both update).              |
-| `stopReason`               | `LanguageModelStopReason` (set by `message-end` delta).                                    |
-| `modelSeen`                | Model id observed from `message-start` delta.                                              |
-| `openBlocks`               | `Map<blockIndex, "text" | "reasoning">` — blocks awaiting close.                           |
-| `highWaterBlockIndex`      | Max block index seen (for providers without server-allocated indices).                     |
-| `providerExtra`            | Provider-private slot. Stash SDK-specific state (`id`, `created`, etc.) for `reconstructRaw`. |
+| Field                 | What it holds                                                                                 |
+| --------------------- | --------------------------------------------------------------------------------------------- | -------------------------------------- |
+| `textByBlock`         | `Map<blockIndex, string>` — accumulated text per content block.                               |
+| `reasoningByBlock`    | `Map<blockIndex, string>` — accumulated reasoning per block (think-tag / native CoT).         |
+| `toolCalls`           | `Map<callId, AccumToolCall>` — per-call name + blockIndex + argsBuffer + input + metadata.    |
+| `usage`               | `UsageStats` (last-write-wins; `usage` and `message-end` deltas both update).                 |
+| `stopReason`          | `LanguageModelStopReason` (set by `message-end` delta).                                       |
+| `modelSeen`           | Model id observed from `message-start` delta.                                                 |
+| `openBlocks`          | `Map<blockIndex, "text"                                                                       | "reasoning">` — blocks awaiting close. |
+| `highWaterBlockIndex` | Max block index seen (for providers without server-allocated indices).                        |
+| `providerExtra`       | Provider-private slot. Stash SDK-specific state (`id`, `created`, etc.) for `reconstructRaw`. |
 
 Helpers: `totalText()`, `totalReasoning()`, `toolCallInput(callId)`,
 `toContentBlocks()`.

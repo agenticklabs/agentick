@@ -23,18 +23,18 @@
 
 MCP is mid-flux. Adopters today need **`2025-11-25`** (current released — adds Tasks, URL-mode elicitation, sampling-with-tools, OIDC discovery, CIMD, step-up scope). The draft (**`2026-07-28`**) is not an incremental change — it's a re-architecture:
 
-| Aspect | `2025-11-25` | Draft |
-|---|---|---|
-| `initialize` handshake | Required | **Gone.** Every request carries `protocolVersion / clientInfo / capabilities` in `_meta`. |
-| Server-initiated RPC | Yes (sampling, elicitation, roots) | **Gone.** Collapsed into MRTR (Multi Round-Trip Request) pattern. |
-| Session at protocol layer | Yes (`Mcp-Session-Id` header) | **Gone.** Application-layer concept only. |
-| HTTP GET listening channel | Yes | **Gone.** Replaced by `subscriptions/listen`. |
-| `tasks` capability | Core | **Extension** (`io.modelcontextprotocol/tasks`). |
-| `roots` capability | Active | Deprecated (SEP-2577). |
-| `sampling` capability | Active | **Removed from core.** Becomes MRTR `inputRequest`. |
-| `logging` capability | Active | **Removed from core.** Becomes per-request `_meta.logLevel`. |
-| Polymorphic results | `{content, isError?}` | `{resultType: "complete" \| "input_required" \| <ext>, ...}` |
-| Extensions framework | `experimental` flag | First-class reverse-DNS-keyed `extensions` map |
+| Aspect                     | `2025-11-25`                       | Draft                                                                                     |
+| -------------------------- | ---------------------------------- | ----------------------------------------------------------------------------------------- |
+| `initialize` handshake     | Required                           | **Gone.** Every request carries `protocolVersion / clientInfo / capabilities` in `_meta`. |
+| Server-initiated RPC       | Yes (sampling, elicitation, roots) | **Gone.** Collapsed into MRTR (Multi Round-Trip Request) pattern.                         |
+| Session at protocol layer  | Yes (`Mcp-Session-Id` header)      | **Gone.** Application-layer concept only.                                                 |
+| HTTP GET listening channel | Yes                                | **Gone.** Replaced by `subscriptions/listen`.                                             |
+| `tasks` capability         | Core                               | **Extension** (`io.modelcontextprotocol/tasks`).                                          |
+| `roots` capability         | Active                             | Deprecated (SEP-2577).                                                                    |
+| `sampling` capability      | Active                             | **Removed from core.** Becomes MRTR `inputRequest`.                                       |
+| `logging` capability       | Active                             | **Removed from core.** Becomes per-request `_meta.logLevel`.                              |
+| Polymorphic results        | `{content, isError?}`              | `{resultType: "complete" \| "input_required" \| <ext>, ...}`                              |
+| Extensions framework       | `experimental` flag                | First-class reverse-DNS-keyed `extensions` map                                            |
 
 Targeting `2025-11-25` directly means rewriting when draft promotes. Targeting both via separate codebases means maintaining two implementations in perpetuity.
 
@@ -49,6 +49,7 @@ Targeting `2025-11-25` directly means rewriting when draft promotes. Targeting b
 - `wire/draft/` — opt-in via `experimental: true`, used when negotiating with draft-implementing peers.
 
 **Era detection at connect time** per the draft's published fallback chain:
+
 1. Try draft first (send a modern-shaped first request, e.g. `tools/list` with full `_meta`).
 2. On `-32004 UnsupportedProtocolVersionError` → fall back to `2025-11-25` (send `initialize`).
 3. On `2025-11-25` `initialize` response with `protocolVersion: "2025-03-26"` → fall back further.
@@ -62,22 +63,22 @@ Targeting `2025-11-25` directly means rewriting when draft promotes. Targeting b
 
 A table that earns the design's keep. Every native Agentick primitive has a clean MCP analog. Listed both directions:
 
-| Agentick native primitive | MCP concept | Match quality |
-|---|---|---|
-| Tool definition (name + inputSchema + handler) | Tool definition | **Identical shape.** Differ only in schema library — addressed by Standard-Schema adoption. |
-| Tool dispatch | `tools/call` | **Identical semantics.** |
-| Tool confirmation (v1's `audience: "user"`; v2 `confirmable` flag) | `elicitation/create` (form mode, three-action response: accept/decline/cancel) | **Identical pattern.** Pause execution, ask user, accept/decline/cancel, resume. Same primitive, different wire encoding. |
-| Approval flows (sensitive operation gating, possibly out-of-band) | `elicitation/create` (URL mode) | URL mode unlocks Slack/mobile/email approval — superset of v1 approval. |
-| Long-running tools with `ExecutionHandle` (.result/.progress/.abort) | Tasks FSM (`tools/call` with `execution.taskSupport`, `tasks/get/result/cancel`, `notifications/tasks/status`) | **Identical FSM.** MCP defines the wire encoding of substrate's handle semantics. |
-| Streaming progress (`Context.emit("progress", ...)`) | `notifications/progress` | Direct map. |
-| Workspace roots / sandbox boundaries | `roots/list` | Direct map. |
-| Sampling (LLM call) via `session.spawn()` | `sampling/createMessage` | **Identical semantics.** |
-| Resources (read-only context data) | `resources/*` | Direct map. `ResourceDeclaration` already in spec; just needs the `resources/templates/list` semantics. |
-| Prompts (templated conversation starts) | `prompts/*` | Direct map. Needs `PromptDeclaration` to land in spec. |
-| Event bus envelope (`surface / phase / payload`) | `notifications/*` | Direct map; substrate is richer (parentOpId, structured payloads). |
-| Cancellation | `notifications/cancelled` | Direct map. |
-| Logging | `logging/setLevel` + `notifications/message` | Direct map. |
-| Capability negotiation per session-extension installed | MCP capabilities map | **Derived from installed bridges** — capabilities aren't declared explicitly, they fall out of which bridges exist on the session. |
+| Agentick native primitive                                            | MCP concept                                                                                                    | Match quality                                                                                                                      |
+| -------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| Tool definition (name + inputSchema + handler)                       | Tool definition                                                                                                | **Identical shape.** Differ only in schema library — addressed by Standard-Schema adoption.                                        |
+| Tool dispatch                                                        | `tools/call`                                                                                                   | **Identical semantics.**                                                                                                           |
+| Tool confirmation (v1's `audience: "user"`; v2 `confirmable` flag)   | `elicitation/create` (form mode, three-action response: accept/decline/cancel)                                 | **Identical pattern.** Pause execution, ask user, accept/decline/cancel, resume. Same primitive, different wire encoding.          |
+| Approval flows (sensitive operation gating, possibly out-of-band)    | `elicitation/create` (URL mode)                                                                                | URL mode unlocks Slack/mobile/email approval — superset of v1 approval.                                                            |
+| Long-running tools with `ExecutionHandle` (.result/.progress/.abort) | Tasks FSM (`tools/call` with `execution.taskSupport`, `tasks/get/result/cancel`, `notifications/tasks/status`) | **Identical FSM.** MCP defines the wire encoding of substrate's handle semantics.                                                  |
+| Streaming progress (`Context.emit("progress", ...)`)                 | `notifications/progress`                                                                                       | Direct map.                                                                                                                        |
+| Workspace roots / sandbox boundaries                                 | `roots/list`                                                                                                   | Direct map.                                                                                                                        |
+| Sampling (LLM call) via `session.spawn()`                            | `sampling/createMessage`                                                                                       | **Identical semantics.**                                                                                                           |
+| Resources (read-only context data)                                   | `resources/*`                                                                                                  | Direct map. `ResourceDeclaration` already in spec; just needs the `resources/templates/list` semantics.                            |
+| Prompts (templated conversation starts)                              | `prompts/*`                                                                                                    | Direct map. Needs `PromptDeclaration` to land in spec.                                                                             |
+| Event bus envelope (`surface / phase / payload`)                     | `notifications/*`                                                                                              | Direct map; substrate is richer (parentOpId, structured payloads).                                                                 |
+| Cancellation                                                         | `notifications/cancelled`                                                                                      | Direct map.                                                                                                                        |
+| Logging                                                              | `logging/setLevel` + `notifications/message`                                                                   | Direct map.                                                                                                                        |
+| Capability negotiation per session-extension installed               | MCP capabilities map                                                                                           | **Derived from installed bridges** — capabilities aren't declared explicitly, they fall out of which bridges exist on the session. |
 
 **Design law:** the MCP-next package isn't a translation layer over a foreign vocabulary. It's a **wire codec** on top of the substrate's already-MCP-shaped semantics, plus the genuinely MCP-specific concerns (OAuth flow, Streamable HTTP transport binding, `Mcp-Session-Id` header, era-detection fallback chain, URL elicitation phishing mitigations, `requestState` security, JSON Schema 2020-12 elicitation subset, MRTR pattern).
 
@@ -159,7 +160,7 @@ The TS MCP SDK v2 moved to **Standard-Schema** (Zod / Valibot / ArkType / TypeBo
 
 ## Client side: connection-as-harness (preserved + refined)
 
-Each MCP connection is `BaseHarness<"mcp">`. This decision from the original ADR holds against the draft spec — even though the draft removes protocol-level session state, the *client* still has per-connection state (capability cache, pending requests, MRTR-loop state, auth tokens, reconnect bookkeeping). The harness is the right home for that state.
+Each MCP connection is `BaseHarness<"mcp">`. This decision from the original ADR holds against the draft spec — even though the draft removes protocol-level session state, the _client_ still has per-connection state (capability cache, pending requests, MRTR-loop state, auth tokens, reconnect bookkeeping). The harness is the right home for that state.
 
 ### Scope: per-session (landed #151)
 
@@ -193,8 +194,8 @@ adapters) and for huge multi-tenant deployments.
   → isolation (wire-correct).
 - `Mcp-Session-Id` makes Streamable HTTP connections cleanly
   resumable across check-outs.
-- The pool sits *beneath* McpClientHarness — a `connection:
-  McpConnectionRef` indirection — so nothing above the harness
+- The pool sits _beneath_ McpClientHarness — a `connection:
+McpConnectionRef` indirection — so nothing above the harness
   changes when the pool is introduced.
 
 **Defer until production load demands it** (estimated horizon: weeks
@@ -207,14 +208,14 @@ is straightforward; we want real workload numbers before optimizing.
 interface MCPHarness extends BaseHarness<"mcp"> {
   readonly target: MCPDeclaration;
   readonly status: Signal<"idle" | "connecting" | "ready" | "reconnecting" | "failed" | "closed">;
-  readonly wireVersion: Signal<MCPWireVersion | undefined>;    // observable era for telemetry
+  readonly wireVersion: Signal<MCPWireVersion | undefined>; // observable era for telemetry
   readonly capabilities: Signal<MCPCapabilities | undefined>;
-  readonly tools: Signal<readonly ToolDeclaration[]>;          // listChanged-reactive
+  readonly tools: Signal<readonly ToolDeclaration[]>; // listChanged-reactive
   readonly resources: Signal<readonly ResourceDeclaration[]>;
   readonly prompts: Signal<readonly PromptDeclaration[]>;
 
   // Lifecycle
-  connect(): Promise<void>;                                    // includes initial auth handshake
+  connect(): Promise<void>; // includes initial auth handshake
   disconnect(reason?: string): Promise<void>;
   ping(): Promise<MCPPingResult>;
 
@@ -226,7 +227,9 @@ interface MCPHarness extends BaseHarness<"mcp"> {
   // Discovery (cached, listChanged-invalidated)
   listTools(opts?: { refresh?: boolean }): Promise<readonly ToolDeclaration[]>;
   listResources(opts?: { refresh?: boolean }): Promise<readonly ResourceDeclaration[]>;
-  listResourceTemplates(opts?: { refresh?: boolean }): Promise<readonly ResourceTemplateDeclaration[]>;
+  listResourceTemplates(opts?: {
+    refresh?: boolean;
+  }): Promise<readonly ResourceTemplateDeclaration[]>;
   listPrompts(opts?: { refresh?: boolean }): Promise<readonly PromptDeclaration[]>;
 
   // Escape hatch for wire-level access (telemetry, debugging, exotic patterns)
@@ -239,6 +242,7 @@ interface MCPHarness extends BaseHarness<"mcp"> {
 ### MRTR loop owned by harness
 
 `callTool` returns a Promise that resolves only when terminal. If the wire returns `InputRequiredResult`, the harness internally:
+
 1. Dispatches each `inputRequest` to its registered resolver (sampling → executor, elicitation → ElicitationBridge, roots → workspace bridge).
 2. Gathers `inputResponses`.
 3. Retries the original request with a new id, echoing `requestState`.
@@ -318,7 +322,7 @@ interface MCPServerConfig {
   resources?: MCPResource[];
   resourceTemplates?: MCPResourceTemplate[];
   prompts?: MCPPrompt[];
-  apps?: MCPApp[];                          // MCP Apps if applicable
+  apps?: MCPApp[]; // MCP Apps if applicable
 
   // Security pipeline (ConnectionGuard → Authenticator → Authorizer)
   security?: MCPSecurityConfig;
@@ -375,19 +379,24 @@ JSX remains available as **sugar over the same constructor**:
 ```tsx
 const server = createMCPServer({
   name: "my-app",
-  declarations: (                              // reconciler walks, collects declarations
+  // reconciler walks, collects declarations
+  declarations: (
     <>
       <Tool name="lookup" handler={lookup} />
       <Resource uri="customer://{id}" handler={readCustomer} />
     </>
   ),
-  contextProvider, toolFilter, toolTransform, security,
+  contextProvider,
+  toolFilter,
+  toolTransform,
+  security,
 });
 ```
 
 The reconciler is **optional** — adopters in React get JSX sugar; adopters in plain Node use the object form. Both produce the same MCPServer.
 
 **Pros**:
+
 - Lightweight: same minimal ceremony as S2 for the common case.
 - Production-proven: this is the pattern Knowify ships at scale.
 - Flexible: per-request hooks (`contextProvider`, `toolFilter`, `toolTransform`) give S1-flavored integration WHERE NEEDED without forcing it everywhere.
@@ -396,6 +405,7 @@ The reconciler is **optional** — adopters in React get JSX sugar; adopters in 
 - Transport-agnostic: same server, multiple transports, per-transport discrimination via `ctx`.
 
 **Cons**:
+
 - Per-tool integration with elicitation/tasks/approval is more code than S1 would require (because S1 auto-routes everything through a session). Adopters writing a confirmable MCP tool must explicitly emit elicitation requests in their handler. The substrate can provide helpers (`ctx.elicit.form(...)`, `ctx.task(...)`) but the handler is responsible for using them.
 - No "everything is observable via the session bus" — observability is at the MCP-server level, not the substrate level. (Mitigation: the MCP server emits its own events via the bus; substrate-level observers see them with `surface: "mcp"`.)
 - Adopters new to the pattern may not immediately see how to integrate with sessions — needs clear docs and migration examples.
@@ -403,6 +413,7 @@ The reconciler is **optional** — adopters in React get JSX sugar; adopters in 
 ### Resolution: S3 (Knowify pattern) is the provisional lean
 
 S3 dissolves the tensions that S1/S2 each had:
+
 - It's as lightweight as S2 for the standalone case
 - It supports session integration via per-tool-handler delegation (the `ask_knowify` pattern)
 - It supports the "app-as-its-own-MCP-server" dream via multi-transport mounting (no `<MCPSelf>` concept)
@@ -416,12 +427,12 @@ S3 dissolves the tensions that S1/S2 each had:
 
 Reuse `BaseClientTransport` from `@agentick/transport-next` (ADR 33) for the wire-level plumbing (connection state machine, RPC correlation, reconnect-with-backoff). MCP-specific transport bindings layer on top.
 
-| Transport | When | Status |
-|---|---|---|
-| stdio | Local subprocess MCP servers; CLI integrations | Ship in MCP.1 |
-| Streamable HTTP | Remote MCP servers; cloud-hosted; gateway-bridged | Ship in MCP.2 |
-| in-process | When same Agentick app consumes an MCP server it declares locally (`<MCPSelf />`) | Ships with server side (after OQ23.10 resolves) |
-| Legacy HTTP+SSE | Fallback for 2024-11-05-era servers | Ship in MCP.6 (after main transports + auth) |
+| Transport       | When                                                                              | Status                                          |
+| --------------- | --------------------------------------------------------------------------------- | ----------------------------------------------- |
+| stdio           | Local subprocess MCP servers; CLI integrations                                    | Ship in MCP.1                                   |
+| Streamable HTTP | Remote MCP servers; cloud-hosted; gateway-bridged                                 | Ship in MCP.2                                   |
+| in-process      | When same Agentick app consumes an MCP server it declares locally (`<MCPSelf />`) | Ships with server side (after OQ23.10 resolves) |
+| Legacy HTTP+SSE | Fallback for 2024-11-05-era servers                                               | Ship in MCP.6 (after main transports + auth)    |
 
 Stdio is unambiguously transport-level. Streamable HTTP includes the `Mcp-Session-Id` header dance (for `2025-11-25`-era; gone in draft), `MCP-Protocol-Version` header (gone in draft), `Origin` validation, `Last-Event-ID` resume semantics, `text/event-stream` SSE leg for server-initiated messages. These are MCP-specific concerns layered on top of the generic transport.
 
@@ -484,20 +495,20 @@ These are flagged as open questions:
 
 This ADR's implementation lift is significantly larger than the original estimate (~5-6 days). Realistic per-phase estimate:
 
-| Phase | Scope | Estimate |
-|---|---|---|
-| MCP.0 | Spec gaps (ResourceDeclaration, PromptDeclaration, ElicitationBridge, Standard-Schema rollout, MCPCapabilities) | 2-3 days |
-| MCP.1 | Foundation (canonical vocab, v2025-11-25 codec, stdio transport, MCPHarness skeleton, `<MCP>` JSX, conformance against SDK ref server) | 3-4 days |
-| MCP.2 | Streamable HTTP + bearer auth + era detection + reconnect | 2-3 days |
-| MCP.3 | Discovery + caching + listChanged + bridge integration | 1-2 days |
-| MCP.4 | MRTR + sampling + elicitation + roots (form mode) | 2-3 days |
-| MCP.5 | Tasks (with substrate-aware Tasks bridge) | 2-3 days |
-| MCP.6 | Server side (waits on OQ23.10) | 4-6 days |
-| MCP.7 | OAuth 2.1 full (PKCE, RFC 8707, RFC 9728, OIDC, CIMD, step-up) | 4-5 days |
-| MCP.8 | Draft wire codec + era detection extended | 2-3 days |
-| MCP.9 | URL-mode elicitation + phishing mitigations | 1-2 days |
-| MCP.10 | Legacy HTTP+SSE fallback | 1 day |
-| MCP.11 | Polish, docs, migration guide, DX | 2-3 days |
+| Phase  | Scope                                                                                                                                  | Estimate |
+| ------ | -------------------------------------------------------------------------------------------------------------------------------------- | -------- |
+| MCP.0  | Spec gaps (ResourceDeclaration, PromptDeclaration, ElicitationBridge, Standard-Schema rollout, MCPCapabilities)                        | 2-3 days |
+| MCP.1  | Foundation (canonical vocab, v2025-11-25 codec, stdio transport, MCPHarness skeleton, `<MCP>` JSX, conformance against SDK ref server) | 3-4 days |
+| MCP.2  | Streamable HTTP + bearer auth + era detection + reconnect                                                                              | 2-3 days |
+| MCP.3  | Discovery + caching + listChanged + bridge integration                                                                                 | 1-2 days |
+| MCP.4  | MRTR + sampling + elicitation + roots (form mode)                                                                                      | 2-3 days |
+| MCP.5  | Tasks (with substrate-aware Tasks bridge)                                                                                              | 2-3 days |
+| MCP.6  | Server side (waits on OQ23.10)                                                                                                         | 4-6 days |
+| MCP.7  | OAuth 2.1 full (PKCE, RFC 8707, RFC 9728, OIDC, CIMD, step-up)                                                                         | 4-5 days |
+| MCP.8  | Draft wire codec + era detection extended                                                                                              | 2-3 days |
+| MCP.9  | URL-mode elicitation + phishing mitigations                                                                                            | 1-2 days |
+| MCP.10 | Legacy HTTP+SSE fallback                                                                                                               | 1 day    |
+| MCP.11 | Polish, docs, migration guide, DX                                                                                                      | 2-3 days |
 
 **Total: ~26-37 days of focused work**, spread across multiple phases that ship independently. Client-side path (MCP.0 → MCP.5) is ~12-18 days; server-side adds significantly more.
 

@@ -283,6 +283,9 @@ importers:
       '@agentick/state-next':
         specifier: workspace:*
         version: link:../../packages-next/state
+      '@agentick/tasks-next':
+        specifier: workspace:*
+        version: link:../../packages-next/tasks
       '@agentick/timeline-next':
         specifier: workspace:*
         version: link:../../packages-next/timeline

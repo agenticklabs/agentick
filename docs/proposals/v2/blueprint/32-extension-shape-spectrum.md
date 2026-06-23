@@ -8,7 +8,7 @@
 
 **Not every "extension" is a harness.** "Extension" is a participation
 hook — a module that wants to be told when its host (app, session,
-gateway) is constructed. *What that module installs* lives on a
+gateway) is constructed. _What that module installs_ lives on a
 spectrum of six shapes, ordered by weight:
 
 1. **Full harness extension** — BaseHarness subclass with substrate audit
@@ -144,7 +144,7 @@ state visible to the rest of the framework.
 - Logging, telemetry, OTel export, devtools tunnel.
 - Side-effect work that consumes events (write to a log file, push
   to a remote endpoint, emit metrics).
-- No reverse path (nobody calls *into* this thing).
+- No reverse path (nobody calls _into_ this thing).
 
 **Examples in v2.**
 
@@ -173,6 +173,7 @@ or `appOptions.contributors: [...]`.
 
 **What it owns.** Render-time behavior. Contributors plug into the
 JSX → IR pipeline:
+
 - Content-block contributors (parse `<custom-block>` JSX → IR nodes)
 - Semantic HTML contributors (`<h1>` → `{ kind: "heading", level: 1 }`)
 - Formatter contributors (transform IR before compilation)
@@ -231,7 +232,7 @@ KnobsHarness's state model under a different name. No audit gain
 knobs); no cluster gain (knobs handles that). Pure architectural
 churn.
 
-The shape is right when the abstraction is *just* declarative
+The shape is right when the abstraction is _just_ declarative
 composition over an existing primitive. If you find yourself adding
 state to a descriptor-only extension, that's the signal to promote
 to a harness.
@@ -310,11 +311,11 @@ protocol contract).
 The three plugins in v1's gateway (`packages/gateway/src/plugins/`)
 take different shapes:
 
-| V1 plugin | LOC | V2 shape | Reasoning |
-|---|---:|---|---|
-| `mcp-server` | ~400 | Shape 1: harness extension (`MCPServerHarness`) | Per-connection state, request/response routing, resource discovery, tool catalog — substantial audit-worthy state. |
-| `openai-compat` | ~400 | Shape 1: harness extension (`OpenAIShimHarness`) | Same reasoning — per-request translation state, streaming buffer, SSE accumulator. |
-| `logging` | ~270 | Shape 3: pure bus subscriber | Reads events, writes to a destination. No reverse path. ~270 LOC in v1 mostly because it had to integrate with the plugin machinery; in v2 it's actually small. |
+| V1 plugin       |  LOC | V2 shape                                         | Reasoning                                                                                                                                                       |
+| --------------- | ---: | ------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `mcp-server`    | ~400 | Shape 1: harness extension (`MCPServerHarness`)  | Per-connection state, request/response routing, resource discovery, tool catalog — substantial audit-worthy state.                                              |
+| `openai-compat` | ~400 | Shape 1: harness extension (`OpenAIShimHarness`) | Same reasoning — per-request translation state, streaming buffer, SSE accumulator.                                                                              |
+| `logging`       | ~270 | Shape 3: pure bus subscriber                     | Reads events, writes to a destination. No reverse path. ~270 LOC in v1 mostly because it had to integrate with the plugin machinery; in v2 it's actually small. |
 
 ### V1 transports reshape per shape
 
@@ -325,11 +326,11 @@ its own `GatewayExtension` package installing a `TransportHarness`.
 
 ### Skills, scheduler, memory — coming in Phase 5
 
-| Capability | Shape | Reasoning |
-|---|---|---|
-| `SkillsHarness` (OpenClaw / Hermes "skills") | 1 — harness | Skills are searchable, shareable, persistent. Cross-session library. Audit matters (which skill was invoked, when, by whom). Swappable backends (in-memory, sqlite, remote registry). |
-| `SchedulerHarness` (cron / heartbeat for autonomous agents) | 1 — harness | Schedule state persists across restarts. Cross-process routing matters (cluster mode runs schedules on whichever node is up). |
-| Memory extension | 1 if audit matters; 2 if it's a write-through cache | Depends on the design. Persistent memory with embeddings → harness. Per-session prompt-injection cache → namespace object. |
+| Capability                                                  | Shape                                               | Reasoning                                                                                                                                                                             |
+| ----------------------------------------------------------- | --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `SkillsHarness` (OpenClaw / Hermes "skills")                | 1 — harness                                         | Skills are searchable, shareable, persistent. Cross-session library. Audit matters (which skill was invoked, when, by whom). Swappable backends (in-memory, sqlite, remote registry). |
+| `SchedulerHarness` (cron / heartbeat for autonomous agents) | 1 — harness                                         | Schedule state persists across restarts. Cross-process routing matters (cluster mode runs schedules on whichever node is up).                                                         |
+| Memory extension                                            | 1 if audit matters; 2 if it's a write-through cache | Depends on the design. Persistent memory with embeddings → harness. Per-session prompt-injection cache → namespace object.                                                            |
 
 ## What this does NOT propose
 

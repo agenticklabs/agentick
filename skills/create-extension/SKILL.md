@@ -32,32 +32,32 @@ Open the conversation by confirming three things. Use `AskUserQuestion` if runni
 
 ### Question 1 — What are you extending?
 
-| Option | When | Goes to path |
-|---|---|---|
-| "I want new model-visible state or commands the agent can dispatch" | Knobs-style: model writes/reads, audit envelopes, optional UI | **Harness path** |
-| "I want a long-lived resource per session (sandbox provider, MCP connection, scheduler)" | Per-session lifecycle, may need shared app-level pool | **Harness path** (with app+session pair) |
-| "I want to render something new in the model's context (custom format, new content block)" | Reconciler-side: format markdown differently, parse a new content block | **Contributor path** |
-| "I want a new React hook that exposes existing state in a different shape" | No new state owner — just a different view of existing bridges | **Hook-only path** (consume `useBridges()`) |
-| "I want a model-visible gate-style descriptor without a backing harness" | Gates-style: declare a descriptor, React reads it | **Descriptor-only path** |
+| Option                                                                                     | When                                                                    | Goes to path                                |
+| ------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------- | ------------------------------------------- |
+| "I want new model-visible state or commands the agent can dispatch"                        | Knobs-style: model writes/reads, audit envelopes, optional UI           | **Harness path**                            |
+| "I want a long-lived resource per session (sandbox provider, MCP connection, scheduler)"   | Per-session lifecycle, may need shared app-level pool                   | **Harness path** (with app+session pair)    |
+| "I want to render something new in the model's context (custom format, new content block)" | Reconciler-side: format markdown differently, parse a new content block | **Contributor path**                        |
+| "I want a new React hook that exposes existing state in a different shape"                 | No new state owner — just a different view of existing bridges          | **Hook-only path** (consume `useBridges()`) |
+| "I want a model-visible gate-style descriptor without a backing harness"                   | Gates-style: declare a descriptor, React reads it                       | **Descriptor-only path**                    |
 
 If the user can't pick, ask: "Does the thing need to publish audit envelopes, accept inbox messages, or own substrate participation?" If yes → harness path. If no → one of the other three.
 
 ### Question 2 — Local-in-app or published package?
 
-| Option | When |
-|---|---|
-| **Local** (default for proof-of-concept) | Just for this app. Inline files under `src/extensions/` in the adopter's project. No npm publishing. Faster iteration. |
-| **Published** | Adopters outside the project should install it. Goes through full ADR 27 package layout: `sideEffects`, dual subpaths, peerDeps, changeset/typedoc/vitepress if it joins the workspace. |
-| **Local now, graduate later** | Start local; promote to a published package once it stabilizes. Most common for non-trivial extensions. |
+| Option                                   | When                                                                                                                                                                                    |
+| ---------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Local** (default for proof-of-concept) | Just for this app. Inline files under `src/extensions/` in the adopter's project. No npm publishing. Faster iteration.                                                                  |
+| **Published**                            | Adopters outside the project should install it. Goes through full ADR 27 package layout: `sideEffects`, dual subpaths, peerDeps, changeset/typedoc/vitepress if it joins the workspace. |
+| **Local now, graduate later**            | Start local; promote to a published package once it stabilizes. Most common for non-trivial extensions.                                                                                 |
 
 If unsure, default to **local now, graduate later**. Cheaper to start; the mechanical work to graduate is documented at the end of this skill.
 
 ### Question 3 — Does it ship a React surface?
 
-| Option | When |
-|---|---|
-| **Yes** | Adopters consume it from JSX (`useMyThing()`, `<MyThing />`). Most common for harness extensions. |
-| **No** | Pure server-side capability (background scheduler, log shipper). Adopters consume it through `session.myThing` or via direct dispatch. |
+| Option  | When                                                                                                                                   |
+| ------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| **Yes** | Adopters consume it from JSX (`useMyThing()`, `<MyThing />`). Most common for harness extensions.                                      |
+| **No**  | Pure server-side capability (background scheduler, log shipper). Adopters consume it through `session.myThing` or via direct dispatch. |
 
 If yes, the package needs an optional `react` peer dep and a `/react` subpath (published) or a colocated `react.tsx` file (local).
 
@@ -254,14 +254,14 @@ These bite adopters specifically (in addition to the `create-harness` pitfalls):
 
 After clarifying with the user, you'll have:
 
-| | Value |
-|---|---|
-| Path | A (harness) / B (contributor) / C (hook-only) / D (descriptor-only) |
-| Mode | Local / Published / Local-now-graduate-later |
-| React surface | Yes / No |
-| App-scoped or session-scoped | App / Session / Both |
-| Snapshot/restore needed | Yes / No |
-| Conformance suite | Required (published) / Recommended (local) |
+|                              | Value                                                               |
+| ---------------------------- | ------------------------------------------------------------------- |
+| Path                         | A (harness) / B (contributor) / C (hook-only) / D (descriptor-only) |
+| Mode                         | Local / Published / Local-now-graduate-later                        |
+| React surface                | Yes / No                                                            |
+| App-scoped or session-scoped | App / Session / Both                                                |
+| Snapshot/restore needed      | Yes / No                                                            |
+| Conformance suite            | Required (published) / Recommended (local)                          |
 
 Capture these in your first message back to the user as a checklist of what you'll build. Then go.
 

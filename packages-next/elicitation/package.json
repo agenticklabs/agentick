@@ -7,8 +7,8 @@
     "agent",
     "agentick",
     "ai",
-    "harness",
     "elicitation",
+    "harness",
     "request-response"
   ],
   "license": "MIT",

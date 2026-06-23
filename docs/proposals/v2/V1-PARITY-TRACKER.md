@@ -139,9 +139,9 @@ intentional scope, `[blocked]` waiting on prerequisite.
       (Gemini 2.5+) routes to the reasoning channel. Single-pass
       stream accumulator builds `ContentBlock[]` directly during
       streaming (no synthesized-raw → re-walk pattern). Full
-      FinishReason → LanguageModelStopReason map (STOP, MAX_TOKENS,
+      FinishReason → LanguageModelStopReason map (STOP, MAX*TOKENS,
       SAFETY, RECITATION, BLOCKLIST, PROHIBITED_CONTENT, SPII,
-      MALFORMED_FUNCTION_CALL, MISSING_THOUGHT_SIGNATURE, IMAGE_*
+      MALFORMED_FUNCTION_CALL, MISSING_THOUGHT_SIGNATURE, IMAGE*\*
       etc.). `thoughtsTokenCount` → `reasoningTokens`,
       `cachedContentTokenCount` → `cachedInputTokens`.
       `sanitizeSchemaForGemini` ported from v1 (strips `$ref`,
@@ -161,14 +161,12 @@ intentional scope, `[blocked]` waiting on prerequisite.
 - [ ] **G10. Embedding API support.**
       v1 OpenAI adapter exposes `embed()` for text embeddings. v2
       `ExecutorProtocol` has no embedding surface. Adopters building
-      RAG / retrieval can't use the v2 executor for embeddings.
-      - Plan: requires protocol-level work. Either a separate
-        `EmbeddingExecutorProtocol` (cleaner — embeddings ARE a
-        different operation than chat completions) OR a new
-        `kind: "embedding"` `ExecutionTarget` discriminant. Lean
-        toward separate protocol; same package can implement both.
-      - Files: new protocol type in spec; embeddingExecutor surface
-        on adapters that support it (OpenAI, AI SDK, Google).
+      RAG / retrieval can't use the v2 executor for embeddings. - Plan: requires protocol-level work. Either a separate
+      `EmbeddingExecutorProtocol` (cleaner — embeddings ARE a
+      different operation than chat completions) OR a new
+      `kind: "embedding"` `ExecutionTarget` discriminant. Lean
+      toward separate protocol; same package can implement both. - Files: new protocol type in spec; embeddingExecutor surface
+      on adapters that support it (OpenAI, AI SDK, Google).
 
 ### Medium (close pre-1.0; not migration-blocking)
 
@@ -200,58 +198,53 @@ intentional scope, `[blocked]` waiting on prerequisite.
 - [ ] **G13. deltaTransform extension point.**
       v1 lets adopters supply a transform applied to deltas. v2 has
       none. Lower urgency than G7/G12 — explicit extension hook for
-      advanced adopters.
-      - Design needed: where the transform plugs in
-        (executor-package-internal? executor protocol option?).
+      advanced adopters. - Design needed: where the transform plugs in
+      (executor-package-internal? executor protocol option?).
 
 - [ ] **G14. `messageTransformation` capability.**
       v1 has elaborate per-provider role mapping: GPT-4/o1/o3 get
       `developer` role for ephemeral / event messages; Claude gets
       XML-preferred rendering vs Markdown for OpenAI. v2 has nothing
-      — same `system/user/assistant/tool` regardless of provider.
-      - Touches reconciler (it currently produces canonical messages
-        without provider awareness). Bigger architectural piece.
-      - Plan: revisit during ModelAdapter work, where adapter
-        advertises capability metadata that the loop / reconciler
-        consults.
+      — same `system/user/assistant/tool` regardless of provider. - Touches reconciler (it currently produces canonical messages
+      without provider awareness). Bigger architectural piece. - Plan: revisit during ModelAdapter work, where adapter
+      advertises capability metadata that the loop / reconciler
+      consults.
 
 - [ ] **G15. responseFormat `name` for json_schema mode.**
       v1 uses `rf.name ?? "response"`. v2 hardcodes `"response"`.
       Minor — adopters using OpenAI structured outputs can't name
-      their schema.
-      - Files: `packages/spec/src/protocol/executor.ts`
-        (`responseFormat` shape — add `name?: string`),
-        OpenAI + AI SDK executors pass it through.
+      their schema. - Files: `packages/spec/src/protocol/executor.ts`
+      (`responseFormat` shape — add `name?: string`),
+      OpenAI + AI SDK executors pass it through.
 
 - [ ] **G16. `OPENAI_ORGANIZATION` env var fallback.**
       v1 reads `OPENAI_ORGANIZATION` env var alongside the API key.
       v2 doesn't. Minor — affects enterprise adopters using
-      organization-scoped API keys.
-      - Files: `packages/executor-openai/src/openai-executor.ts`
-        client construction.
+      organization-scoped API keys. - Files: `packages/executor-openai/src/openai-executor.ts`
+      client construction.
 
 ### Deferred (intentional scope; revisit later)
 
 - [deferred] **G17. Model capability discovery via /v1/models.**
-      v1 OpenAI's `discoverModels` queries `/v1/models` and registers
-      context window + reasoning type. Connects to the deferred
-      ModelAdapter + model-catalog work. Pick up when the catalog
-      lands. The same architectural pass also picks up auto-compaction
-      (uses context window from the catalog), multimodal validation
-      (uses `supportsVision` from capabilities), cost routing
-      (uses `pricePerInputToken`).
+  v1 OpenAI's `discoverModels` queries `/v1/models` and registers
+  context window + reasoning type. Connects to the deferred
+  ModelAdapter + model-catalog work. Pick up when the catalog
+  lands. The same architectural pass also picks up auto-compaction
+  (uses context window from the catalog), multimodal validation
+  (uses `supportsVision` from capabilities), cost routing
+  (uses `pricePerInputToken`).
 
 - [deferred] **G18. ModelAdapter rename + native executor architecture.**
-      Conceptual reshape from "executor-openai" (provider pretending
-      to be an executor) to "openai adapter consumed by the
-      framework's native executor." Same translation code; cleaner
-      conceptual hierarchy. Captured in REFACTOR-SCRATCHPAD.md
-      "2026-05-27 — Model-catalog / ModelAdapter architecture".
+  Conceptual reshape from "executor-openai" (provider pretending
+  to be an executor) to "openai adapter consumed by the
+  framework's native executor." Same translation code; cleaner
+  conceptual hierarchy. Captured in REFACTOR-SCRATCHPAD.md
+  "2026-05-27 — Model-catalog / ModelAdapter architecture".
 
 - [low-value] **G19. v1's `Logger.for("OpenAIAdapter")` wrapper.**
-      v1 wrapped its own logger abstraction. v2 uses the substrate
-      envelope system + `app.events()` for observability. Different
-      shape, not a real gap — the v2 path is cleaner.
+  v1 wrapped its own logger abstraction. v2 uses the substrate
+  envelope system + `app.events()` for observability. Different
+  shape, not a real gap — the v2 path is cleaner.
 
 ---
 
@@ -301,8 +294,8 @@ reasoning blocks, image source quirks, etc.).
      `@agentick/executor-next` unless the provider needs custom logic.
    - Self-described `target: ExecutionTarget` property with
      `capabilities: { supportsTools, supportsStreaming,
-     supportsVision, supportsReasoning, contextWindow,
-     maxOutputTokens }` populated for the model.
+supportsVision, supportsReasoning, contextWindow,
+maxOutputTokens }` populated for the model.
 
 4. **Translation tables to implement:**
    - `to<Provider>Messages(LanguageModelMessage[])` —

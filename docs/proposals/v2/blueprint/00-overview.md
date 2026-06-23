@@ -236,8 +236,8 @@ crystallized, awaiting sign-off, or known to be incomplete.
 > diagrams (kept below as supplementary) tried to show hierarchy,
 > substrate composition, deployment tiers, and extension shapes all
 > at once. The Russian-doll nesting in particular implied
-> *containment* between tiers when they're actually *alternative
-> deployment shapes for the same harness graph*. These focused
+> _containment_ between tiers when they're actually _alternative
+> deployment shapes for the same harness graph_. These focused
 > diagrams each answer ONE question, with minimal nesting. The
 > tradeoff: you need four of them to see the whole picture, but
 > each one is legible on its own.
@@ -261,6 +261,7 @@ graph TB
 ```
 
 Reading guide:
+
 - One Gateway hosts many Apps. Multi-app is structural, not a
   multi-tenancy feature — same gateway hosts unrelated agent
   configurations.
@@ -286,6 +287,7 @@ graph BT
 ```
 
 Reading guide:
+
 - **Bus and journal fan in.** Events appended at Session level also
   appear at App and Gateway level. Subscribers at any level see
   events from their scope and below.
@@ -300,14 +302,14 @@ Reading guide:
 
 Answers: "what should I build when I want to extend agentick?"
 
-| # | Shape | Cost | Pick when... | Reference |
-|---|---|---|---|---|
-| 1 | Full harness | high (~600-1000 LOC) | audit envelopes, swappable backend, cluster routing, persistence | `knobs`, `state`, `timeline`, `sandbox`, `mcp`, `skills` |
-| 2 | Namespace object | mid (~100-200 LOC) | shared state, no audit needed | (adopter-defined) |
-| 3 | Pure bus subscriber | low (~3-30 LOC) | observe events, write to a destination | `devtools`, OTel exporter, logging |
-| 4 | Reconciler contributor | low-mid | render-time output transform | `formatters`, semantic HTML, content blocks |
-| 5 | Descriptor + hook | low | declarative composition over a primitive | `gates` (over knobs) |
-| 6 | Tool / formatter | low | single function or transform | adopter `createTool`s |
+| #   | Shape                  | Cost                 | Pick when...                                                     | Reference                                                |
+| --- | ---------------------- | -------------------- | ---------------------------------------------------------------- | -------------------------------------------------------- |
+| 1   | Full harness           | high (~600-1000 LOC) | audit envelopes, swappable backend, cluster routing, persistence | `knobs`, `state`, `timeline`, `sandbox`, `mcp`, `skills` |
+| 2   | Namespace object       | mid (~100-200 LOC)   | shared state, no audit needed                                    | (adopter-defined)                                        |
+| 3   | Pure bus subscriber    | low (~3-30 LOC)      | observe events, write to a destination                           | `devtools`, OTel exporter, logging                       |
+| 4   | Reconciler contributor | low-mid              | render-time output transform                                     | `formatters`, semantic HTML, content blocks              |
+| 5   | Descriptor + hook      | low                  | declarative composition over a primitive                         | `gates` (over knobs)                                     |
+| 6   | Tool / formatter       | low                  | single function or transform                                     | adopter `createTool`s                                    |
 
 Cost is rough. The "Pick when..." column is the decision criterion
 — if multiple apply, pick the shape that matches the strongest one.
@@ -317,12 +319,12 @@ Full reasoning + worked examples in ADR 32.
 
 Answers: "what changes when I deploy in tier X vs tier Y?"
 
-| Tier | Use case | Substrate impl | Extensions you install | Example |
-|---|---|---|---|---|
-| 0 | Embedded library | `LocalEventBus` + `MemoryJournal` + `LocalInbox` | none | tests, CLIs, scripts |
-| 1 | Local single-user agent | local + `SQLiteJournal` (when durable) | sandbox, MCP, scheduler, skills, connectors (Telegram, iMessage) | OpenClaw / Hermes class |
-| 2 | Single-tenant cloud | local or single-node durable (`PostgresJournal`) | transports (HTTP/WS/SSE), auth, rate limit | hosted agent for one team |
-| 3 | Multi-tenant distributed | `@agentick/cluster` substrate | transports + auth + tenant routing + per-session substrate factories | production SaaS, gateway fleet fronting a cluster |
+| Tier | Use case                 | Substrate impl                                   | Extensions you install                                               | Example                                           |
+| ---- | ------------------------ | ------------------------------------------------ | -------------------------------------------------------------------- | ------------------------------------------------- |
+| 0    | Embedded library         | `LocalEventBus` + `MemoryJournal` + `LocalInbox` | none                                                                 | tests, CLIs, scripts                              |
+| 1    | Local single-user agent  | local + `SQLiteJournal` (when durable)           | sandbox, MCP, scheduler, skills, connectors (Telegram, iMessage)     | OpenClaw / Hermes class                           |
+| 2    | Single-tenant cloud      | local or single-node durable (`PostgresJournal`) | transports (HTTP/WS/SSE), auth, rate limit                           | hosted agent for one team                         |
+| 3    | Multi-tenant distributed | `@agentick/cluster` substrate                    | transports + auth + tenant routing + per-session substrate factories | production SaaS, gateway fleet fronting a cluster |
 
 **The harness shape is invariant across all four tiers.** What
 changes: substrate factories at Gateway slots, and which extensions
@@ -371,6 +373,7 @@ sequenceDiagram
 ```
 
 Reading guide:
+
 - Streaming deltas (`Ex-->>Bus`) fan out to any subscriber, including
   the adopter via `session.events()` — that's the live token stream.
 - The tool-dispatch branch runs once per tick when the model emits
@@ -393,6 +396,7 @@ Reading guide:
 > last-resort visual aid.
 >
 > **Known visualization concerns** (the diagram author flagged these):
+>
 > - The hierarchy diagram nests four tiers as a Russian doll, which is
 >   visually misleading — they're alternative deployment shapes for the
 >   same harness, not enclosing scopes.
@@ -633,7 +637,7 @@ items to come back to:
    vs literal Effect data flow. Bus subscribers don't see parent
    events — only events appended at their scope or below.
 3. **Extension spectrum.** The horizontal-shape diagram doesn't really
-   show *cost* or *when to pick*. A radar/quadrant chart (audit need
+   show _cost_ or _when to pick_. A radar/quadrant chart (audit need
    vs persistence need) might communicate the decision better than a
    linear ordering.
 4. **Session anatomy.** "Built-in" vs "opt-in" is a Phase 4 statement;

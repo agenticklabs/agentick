@@ -17,11 +17,11 @@ This ADR names the pattern, sketches the generic primitive, and declares it the 
 
 What we built for tools is one of three sibling cascade patterns in the framework. All three share vocabulary (precedence direction, "most-specific wins", scope-bound provenance) but diverge in machinery. Naming all three explicitly so future cascade work picks the right shape.
 
-| Pattern | What it cascades | Primitive | State |
-|---|---|---|---|
-| **A. Declarative cascade** | Adopter-written config values (`maxTicks`, `executor`, `metadata`, project config) | **`mergeLayered<T>(...layers)`** in `@agentick/shared/utils/merge-layered.ts` | Landed |
-| **A′. Substrate cascade** | One slot per kind, factory-aware (bus/inbox/journal) | `HarnessShell` slot resolver in `BaseHarness` | Landed (ADR 31) |
-| **B. Emitted cascade** | Dynamic multi-entry sources (tools, skills, prompts, resources, ...) | **`ScopedRegistry<Entry, Strategy>`** + `withScope` + `replaceSlice` | Reference impl exists (`@agentick/tool-executor-next`); lifts when third domain lands |
+| Pattern                    | What it cascades                                                                   | Primitive                                                                     | State                                                                                 |
+| -------------------------- | ---------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| **A. Declarative cascade** | Adopter-written config values (`maxTicks`, `executor`, `metadata`, project config) | **`mergeLayered<T>(...layers)`** in `@agentick/shared/utils/merge-layered.ts` | Landed                                                                                |
+| **A′. Substrate cascade**  | One slot per kind, factory-aware (bus/inbox/journal)                               | `HarnessShell` slot resolver in `BaseHarness`                                 | Landed (ADR 31)                                                                       |
+| **B. Emitted cascade**     | Dynamic multi-entry sources (tools, skills, prompts, resources, ...)               | **`ScopedRegistry<Entry, Strategy>`** + `withScope` + `replaceSlice`          | Reference impl exists (`@agentick/tool-executor-next`); lifts when third domain lands |
 
 ### Pattern A — Declarative cascade (`mergeLayered`)
 
@@ -32,10 +32,10 @@ What we built for tools is one of three sibling cascade patterns in the framewor
 ```ts
 const config = mergeLayered<SessionConfig>(
   FRAMEWORK_DEFAULTS,
-  gateway?.config,       // gateway layer
-  app.config,            // app layer
-  session.config,        // session layer
-  sendInput.config,      // per-call layer
+  gateway?.config, // gateway layer
+  app.config, // app layer
+  session.config, // session layer
+  sendInput.config, // per-call layer
 );
 ```
 
@@ -50,11 +50,11 @@ const config = mergeLayered<SessionConfig>(
 ```ts
 mergeLayered(
   { extensions: [existingExt] },
-  { extensions: append([newExt]) },  // → [existingExt, newExt]
+  { extensions: append([newExt]) }, // → [existingExt, newExt]
 );
 mergeLayered(
   { a: { x: 1, y: 2 } },
-  { a: replace({ y: 9 }) },          // → { a: { y: 9 } }  (opts out of deep merge)
+  { a: replace({ y: 9 }) }, // → { a: { y: 9 } }  (opts out of deep merge)
 );
 ```
 
@@ -102,13 +102,13 @@ These five form a coherent pattern. We call it the **scoped capability cascade**
 
 It is a well-known shape in systems engineering:
 
-| Domain | Same shape, different name |
-|---|---|
-| CSS | Selector specificity → cascade |
-| Helm / Kubernetes values | Base → env → cluster → release |
-| Spring profiles, OS env vars, lexical scope | Inner shadows outer |
-| Effect `Layer`, React Context | Composable scoped provision |
-| DI containers (Guice, Dagger) | Child container overrides parent |
+| Domain                                      | Same shape, different name       |
+| ------------------------------------------- | -------------------------------- |
+| CSS                                         | Selector specificity → cascade   |
+| Helm / Kubernetes values                    | Base → env → cluster → release   |
+| Spring profiles, OS env vars, lexical scope | Inner shadows outer              |
+| Effect `Layer`, React Context               | Composable scoped provision      |
+| DI containers (Guice, Dagger)               | Child container overrides parent |
 
 What `compileForTick` does is structurally the CSS engine. What `withScope` does is structurally `Effect.scoped`. The vocabulary is new in agentick; the pattern is decades old.
 
@@ -131,7 +131,7 @@ Two layers of generic — a base **`ScopedRegistry<Entry>`** with **`ResolutionS
 
 ### `Binding` — shared discriminator (already in spec)
 
-The discriminator is shared across all domains because it names *which scope owns the entry*, not what kind of entry it is. This already lives in `@agentick/spec-next/data/declarations.ts` as `ToolBinding`; lifting it to a more generic name (`ScopeBinding`?) when the next domain lands is a 30-second rename.
+The discriminator is shared across all domains because it names _which scope owns the entry_, not what kind of entry it is. This already lives in `@agentick/spec-next/data/declarations.ts` as `ToolBinding`; lifting it to a more generic name (`ScopeBinding`?) when the next domain lands is a 30-second rename.
 
 ```ts
 export type ScopeBinding =
@@ -251,17 +251,17 @@ The format is the documentation of identity-defining fields per variant. Already
 
 `@agentick/tool-executor-next` is the reference implementation. Mapping:
 
-| Generic | Tools instance |
-|---|---|
-| `Entry` | `ToolRegistration` |
-| `View` | `readonly ToolDeclaration[]` |
-| `Strategy` | Selection, `identity = decl.name`, filter by `ToolListFilter` |
-| `ScopedRegistry.add` | `InMemoryToolRegistry.add` |
-| `ScopedRegistry.removeWhere` | `InMemoryToolRegistry.removeWhere` |
+| Generic                       | Tools instance                                                         |
+| ----------------------------- | ---------------------------------------------------------------------- |
+| `Entry`                       | `ToolRegistration`                                                     |
+| `View`                        | `readonly ToolDeclaration[]`                                           |
+| `Strategy`                    | Selection, `identity = decl.name`, filter by `ToolListFilter`          |
+| `ScopedRegistry.add`          | `InMemoryToolRegistry.add`                                             |
+| `ScopedRegistry.removeWhere`  | `InMemoryToolRegistry.removeWhere`                                     |
 | `ScopedRegistry.replaceSlice` | `replaceReconcilerSlice` (specialized to `scope:"reconciler"` for now) |
-| `ScopedRegistry.compile` | `compileForTick(filter)` |
-| `withScope` | `withScope(toolExecutor, binding, decls, fn)` |
-| Protocol entry-point | `installer.registerExtensionTool` (thin wrapper) |
+| `ScopedRegistry.compile`      | `compileForTick(filter)`                                               |
+| `withScope`                   | `withScope(toolExecutor, binding, decls, fn)`                          |
+| Protocol entry-point          | `installer.registerExtensionTool` (thin wrapper)                       |
 
 `installer.registerExtensionTool` is a one-line call into the registry's `add`. When `ScopedRegistry<>` lifts, it stays a one-line wrapper — adopters keep the ergonomic API; the machinery underneath becomes shared.
 
@@ -342,7 +342,7 @@ When +2 lands, the lift is one PR: extract `ScopedRegistry`, `withScope`, `bindi
 - The next layered domain is a copy-paste-with-renames exercise. The reference impl in `tool-executor-next` is the template.
 - Extensions writing into layered registries share machinery → consistent semantics for adopters across capability types.
 - `withScope` is the universal escape-hatch for any "register at scope X, cleanup at scope end" need. Adopters writing custom flows reach for it instead of hand-rolling `try/finally`.
-- Scope-bound lifecycle becomes a *contract* the framework enforces, not an *ergonomic suggestion* adopters might forget. This matters most for credentials (security), then memory (resource leaks), then everything else (correctness).
+- Scope-bound lifecycle becomes a _contract_ the framework enforces, not an _ergonomic suggestion_ adopters might forget. This matters most for credentials (security), then memory (resource leaks), then everything else (correctness).
 - Adopters reading the code see one canonical pattern across capability domains. The mental model is one shape, parameterized by domain.
 
 **Negative / caveats:**
@@ -364,7 +364,7 @@ When +2 lands, the lift is one PR: extract `ScopedRegistry`, `withScope`, `bindi
 
 3. **OQ34.3 — Cross-domain interactions.** A tool's handler may need to read from the credentials registry. Are these two registries independent, or does some shared "scoped store" coordinate? Resolution: independent registries per domain, coordinated via the harness substrate. Cross-domain reads happen at handler boundary via `ctx.<domain>.get(...)`. The cascade machinery doesn't enforce cross-domain semantics.
 
-4. **OQ34.4 — Inheritance vs propagation.** Today, gateway tools are explicitly *propagated* into apps via `inheritedTools`. An alternative model: gateway tools live in a shared registry that every app reads. The propagation model is simpler (each registry is local); the shared-registry model is more memory-efficient but adds cross-instance coupling. Resolution: stick with propagation. Memory cost is negligible at realistic scales (tens of tools per layer); simplicity wins.
+4. **OQ34.4 — Inheritance vs propagation.** Today, gateway tools are explicitly _propagated_ into apps via `inheritedTools`. An alternative model: gateway tools live in a shared registry that every app reads. The propagation model is simpler (each registry is local); the shared-registry model is more memory-efficient but adds cross-instance coupling. Resolution: stick with propagation. Memory cost is negligible at realistic scales (tens of tools per layer); simplicity wins.
 
 ## See also
 

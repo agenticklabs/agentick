@@ -23,13 +23,13 @@ not published independently.
 
 🚧 In active development as part of v2 (`feat/v2`).
 
-| Phase | What                                                                                                                                                | Status |
-| ----- | --------------------------------------------------------------------------------------------------------------------------------------------------- | ------ |
-| A     | Substrate primitive — harness, registry, progress, cancel, conformance                                                                              | ✅     |
-| A.1   | ToolExecutor integration — `ctx.tasks` on every handler, TaskHandle-return detection, Pattern A vs B branching on `taskSupport` annotation (#156)   | ✅     |
-| A.2   | Model-facing `session_tasks_*` tools — auto-registered `session_tasks_list / get / cancel / await` so the model can manage Pattern B tasks (#157)   | ✅     |
-| B     | MCP wire codec — `tools/call` task opt-in, `notifications/tasks/status` translation, inbound `tasks/cancel`                                         | ⏳     |
-| D     | Effect-native internals refactor — `Stream<TaskEvent>` for events, `Effect<TaskHandle>` work overload with real fiber interruptibility (#155)       | ⏳     |
+| Phase | What                                                                                                                                              | Status |
+| ----- | ------------------------------------------------------------------------------------------------------------------------------------------------- | ------ |
+| A     | Substrate primitive — harness, registry, progress, cancel, conformance                                                                            | ✅     |
+| A.1   | ToolExecutor integration — `ctx.tasks` on every handler, TaskHandle-return detection, Pattern A vs B branching on `taskSupport` annotation (#156) | ✅     |
+| A.2   | Model-facing `session_tasks_*` tools — auto-registered `session_tasks_list / get / cancel / await` so the model can manage Pattern B tasks (#157) | ✅     |
+| B     | MCP wire codec — `tools/call` task opt-in, `notifications/tasks/status` translation, inbound `tasks/cancel`                                       | ⏳     |
+| D     | Effect-native internals refactor — `Stream<TaskEvent>` for events, `Effect<TaskHandle>` work overload with real fiber interruptibility (#155)     | ⏳     |
 
 ## Quick start
 
@@ -117,12 +117,12 @@ When `withTasks()` is installed, four tools are auto-registered into
 every session so the model can manage Pattern B (`taskSupport:
 "required"`) tasks across ticks:
 
-| Tool                   | Purpose                                                             |
-| ---------------------- | ------------------------------------------------------------------- |
-| `session_tasks_list`   | List every framework background task in this session                |
-| `session_tasks_get`    | Fetch a single task's `TaskInfo` snapshot by id                     |
-| `session_tasks_cancel` | Abort an in-flight task (idempotent)                                |
-| `session_tasks_await`  | Block this tick until a task reaches terminal; return its blocks    |
+| Tool                   | Purpose                                                          |
+| ---------------------- | ---------------------------------------------------------------- |
+| `session_tasks_list`   | List every framework background task in this session             |
+| `session_tasks_get`    | Fetch a single task's `TaskInfo` snapshot by id                  |
+| `session_tasks_cancel` | Abort an in-flight task (idempotent)                             |
+| `session_tasks_await`  | Block this tick until a task reaches terminal; return its blocks |
 
 ### Naming: why `session_*`, why underscores
 
@@ -131,7 +131,7 @@ every session so the model can manage Pattern B (`taskSupport:
   prefix prevents collision with the broad set of user-provided "tasks"
   tools (todos, project trackers, kanban). It also doesn't leak brand
   (`agentick.*`) or jargon (`runtime.*`) — the model doesn't need to
-  know it's in a framework, only that these tools manage *its* in-flight
+  know it's in a framework, only that these tools manage _its_ in-flight
   work.
 - **Underscores, not dots** — some providers historically rejected dots
   in tool names (OpenAI). Underscores work universally across OpenAI,

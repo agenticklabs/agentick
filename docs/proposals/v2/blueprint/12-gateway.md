@@ -64,12 +64,12 @@ what adopters want. Rewritten.
 
 Every tier uses the same `GatewayHarness`. What differs:
 
-| Tier | Use case | Substrate | Extensions | Example |
-|---|---|---|---|---|
-| **0 — Embedded library** | Adopter constructs a Gateway in-process, no transports | `LocalEventBus` + `MemoryJournal` + `LocalInbox` | None | Tests, CLIs, scripts |
-| **1 — Local single-user agent** | Long-running agent on user's machine. Optional local transports (Unix socket, HTTP loopback). Persistent journal. | Local substrate + `SQLiteJournal` (when durable persistence needed) | Sandbox, MCP server-side, scheduler/cron, connectors (Telegram, iMessage), skills | OpenClaw / Hermes style — agent runs on your laptop, persists memory across restarts, schedules autonomous tasks, exposes MCP to other tools |
-| **2 — Single-tenant cloud** | Hosted single-user / single-org agent. Network transports. Co-located with runtime. | Local substrate or single-node durable (`PostgresJournal`) | Transports (WS/HTTP/SSE), auth, rate limit, multi-app | Hosted agent for a single team; gateway IS the runtime node |
-| **3 — Multi-tenant distributed cloud** | Many tenants, gateway fleet, runtime cluster | `@agentick/cluster` substrate (`ClusterEventBus`, `ClusterJournal`, `ClusterInbox` over `@effect/cluster`) | Transports + auth + tenant routing + per-tenant per-session substrate factories | Production multi-tenant SaaS — many gateway pods front a runtime cluster; sessions route to nodes; per-tenant isolation via substrate factories |
+| Tier                                   | Use case                                                                                                          | Substrate                                                                                                  | Extensions                                                                        | Example                                                                                                                                         |
+| -------------------------------------- | ----------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| **0 — Embedded library**               | Adopter constructs a Gateway in-process, no transports                                                            | `LocalEventBus` + `MemoryJournal` + `LocalInbox`                                                           | None                                                                              | Tests, CLIs, scripts                                                                                                                            |
+| **1 — Local single-user agent**        | Long-running agent on user's machine. Optional local transports (Unix socket, HTTP loopback). Persistent journal. | Local substrate + `SQLiteJournal` (when durable persistence needed)                                        | Sandbox, MCP server-side, scheduler/cron, connectors (Telegram, iMessage), skills | OpenClaw / Hermes style — agent runs on your laptop, persists memory across restarts, schedules autonomous tasks, exposes MCP to other tools    |
+| **2 — Single-tenant cloud**            | Hosted single-user / single-org agent. Network transports. Co-located with runtime.                               | Local substrate or single-node durable (`PostgresJournal`)                                                 | Transports (WS/HTTP/SSE), auth, rate limit, multi-app                             | Hosted agent for a single team; gateway IS the runtime node                                                                                     |
+| **3 — Multi-tenant distributed cloud** | Many tenants, gateway fleet, runtime cluster                                                                      | `@agentick/cluster` substrate (`ClusterEventBus`, `ClusterJournal`, `ClusterInbox` over `@effect/cluster`) | Transports + auth + tenant routing + per-tenant per-session substrate factories   | Production multi-tenant SaaS — many gateway pods front a runtime cluster; sessions route to nodes; per-tenant isolation via substrate factories |
 
 **The harness shape is invariant across all four tiers.** What an
 adopter writes in Tier 0 (a few lines of code) generalises to Tier 3
@@ -120,15 +120,15 @@ adapters, no auth machinery in its core. Those are extensions.
 
 ## What Gateway owns — what it delegates
 
-| Owned by `GatewayHarness` core | Delegated to extensions |
-|---|---|
-| Apps registry + lifecycle | Network transports (HTTP/WS/SSE/Unix/MCP/OpenAI-compat) |
-| Substrate (bus/inbox/journal) | Auth + identity boundary |
-| Cross-app event observation | Rate limiting + admission control |
-| Operation framework lifecycle | Method registry / RPC surface |
-| Extension installation (`AppExtension`, future `GatewayExtension`) | Per-client event buffers + resume |
-| `events()` + `metrics()` cross-app substrate observability | Plugin system (MCP server, OpenAI-compat, logging) |
-| Per-app substrate scoping (Apps inherit Gateway substrate by default) | Persistent storage adapters (Postgres journal, etc.) |
+| Owned by `GatewayHarness` core                                        | Delegated to extensions                                 |
+| --------------------------------------------------------------------- | ------------------------------------------------------- |
+| Apps registry + lifecycle                                             | Network transports (HTTP/WS/SSE/Unix/MCP/OpenAI-compat) |
+| Substrate (bus/inbox/journal)                                         | Auth + identity boundary                                |
+| Cross-app event observation                                           | Rate limiting + admission control                       |
+| Operation framework lifecycle                                         | Method registry / RPC surface                           |
+| Extension installation (`AppExtension`, future `GatewayExtension`)    | Per-client event buffers + resume                       |
+| `events()` + `metrics()` cross-app substrate observability            | Plugin system (MCP server, OpenAI-compat, logging)      |
+| Per-app substrate scoping (Apps inherit Gateway substrate by default) | Persistent storage adapters (Postgres journal, etc.)    |
 
 The runtime-root role is small. The breadth comes from extensions
 hung off it.
@@ -145,15 +145,25 @@ implementations that satisfy the same protocols `LocalEventBus` /
 ```ts
 // Single-node Tier 1/2 (local substrate, default):
 const gateway = createGateway({
-  apps: { /* ... */ },
+  apps: {
+    /* ... */
+  },
 });
 
 // Tier 3 distributed cluster:
 const gateway = createGateway({
-  apps: { /* ... */ },
-  bus: ClusterEventBus.factory({ /* cluster config */ }),
-  journal: ClusterJournal.factory({ /* cluster config */ }),
-  inbox: ClusterInbox.factory({ /* cluster config */ }),
+  apps: {
+    /* ... */
+  },
+  bus: ClusterEventBus.factory({
+    /* cluster config */
+  }),
+  journal: ClusterJournal.factory({
+    /* cluster config */
+  }),
+  inbox: ClusterInbox.factory({
+    /* cluster config */
+  }),
 });
 ```
 
@@ -185,6 +195,7 @@ const gateway = await createGateway({
 ```
 
 Each transport extension:
+
 - Installs at gateway construction time
 - Owns its own network resources (sockets, HTTP server, etc.)
 - Routes incoming requests to gateway methods (or directly to app/session methods)
@@ -192,9 +203,10 @@ Each transport extension:
 - Registers `onClose` to clean up
 
 This matches the canonical extension pattern from `create-extension`
-+ `create-harness` skills. Transports are big extensions — they may
-own their own substrate (per-connection event buffers, sequence
-counters), but they don't replace the gateway's substrate.
+
+- `create-harness` skills. Transports are big extensions — they may
+  own their own substrate (per-connection event buffers, sequence
+  counters), but they don't replace the gateway's substrate.
 
 **Transport packages — proposed v2 layout (Phase 5+):**
 
@@ -215,6 +227,7 @@ Each ships independently. Adopters pick what they need. Library users
 ## Plugin model (post-Phase-4)
 
 V1's plugin system (`GatewayPlugin`) gave adopters a way to:
+
 - Register custom methods
 - Subscribe to gateway events
 - Add HTTP routes
@@ -249,10 +262,7 @@ export interface GatewayHarnessProtocol {
   close(): Promise<void>; // alias
 
   // Observation
-  events(
-    filter?: EventQuery,
-    options?: SubscribeOptions,
-  ): AsyncIterable<ProtocolEvent>;
+  events(filter?: EventQuery, options?: SubscribeOptions): AsyncIterable<ProtocolEvent>;
 
   // Extensions
   readonly extensions: GatewayExtensions; // typed bag, augmentable via declare module
@@ -289,16 +299,16 @@ These are deliberately open in this revision. They get answered during the Phase
 
 ## What's deferred from Phase 4 (and to where)
 
-| Capability | Deferred to | Rationale |
-|---|---|---|
-| Network transports (HTTP/WS/SSE/etc.) | Phase 5+ (per-transport packages) | Each transport is its own package; thin gateway scaffold doesn't need them |
-| MCP server-side (gateway as MCP host) | Phase 5+ | v1 had this as a plugin; v2 will be a transport extension |
-| OpenAI-compat shim | Phase 5+ | v1 had as plugin; v2 transport extension |
-| Auth + identity | Phase 5+ | Cross-cutting; needs its own design pass |
-| Per-client event buffers + resume | Phase 5+ | Tied to transports |
-| Method registry / RPC | Phase 5+ or replaced by dispatch | Open design question |
-| Cluster substrate (`@agentick/cluster`) | Phase D of ADR 29 | Phase 4 builds against `LocalEventBus`; Phase D ships cluster impl |
-| Persistent journals (`SqliteJournal`, `PostgresJournal`) | Per-adapter packages, when needed | Out of gateway scope |
+| Capability                                               | Deferred to                       | Rationale                                                                  |
+| -------------------------------------------------------- | --------------------------------- | -------------------------------------------------------------------------- |
+| Network transports (HTTP/WS/SSE/etc.)                    | Phase 5+ (per-transport packages) | Each transport is its own package; thin gateway scaffold doesn't need them |
+| MCP server-side (gateway as MCP host)                    | Phase 5+                          | v1 had this as a plugin; v2 will be a transport extension                  |
+| OpenAI-compat shim                                       | Phase 5+                          | v1 had as plugin; v2 transport extension                                   |
+| Auth + identity                                          | Phase 5+                          | Cross-cutting; needs its own design pass                                   |
+| Per-client event buffers + resume                        | Phase 5+                          | Tied to transports                                                         |
+| Method registry / RPC                                    | Phase 5+ or replaced by dispatch  | Open design question                                                       |
+| Cluster substrate (`@agentick/cluster`)                  | Phase D of ADR 29                 | Phase 4 builds against `LocalEventBus`; Phase D ships cluster impl         |
+| Persistent journals (`SqliteJournal`, `PostgresJournal`) | Per-adapter packages, when needed | Out of gateway scope                                                       |
 
 ## References
 

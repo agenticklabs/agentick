@@ -25,9 +25,7 @@ class LocalEventBus {
   subscribers: Map<number, Subscriber>;
   publish(event) {
     if (!hasSub(event.surface)) return Effect.void;
-    return Effect.all(
-      [...subs].filter(matches).map(sub => Queue.offer(sub.queue, event))
-    );
+    return Effect.all([...subs].filter(matches).map((sub) => Queue.offer(sub.queue, event)));
   }
   subscribe(query) {
     const queue = Queue.sliding(256);
@@ -114,7 +112,7 @@ export interface JournalingPolicy {
   // existing
   readonly alwaysJournal: ReadonlyArray<EventPhase>;
   readonly busOnly: ReadonlyArray<EventPhase>;
-  readonly override?: Readonly<Record<string, /* ... */>>;
+  readonly override?: Readonly<Record<string /* ... */>>;
   // NEW (optional)
   readonly batch?: Readonly<Record<string, SurfaceBatchPolicy>>;
   readonly retention?: Readonly<Record<string, SurfaceRetentionPolicy>>;
@@ -125,12 +123,12 @@ Per-name-prefix policy, longest-prefix match (same shape as the existing `overri
 
 ### Sensible defaults
 
-| Surface : phase pattern | Batch policy | Retention | Notes |
-| --- | --- | --- | --- |
-| `executor:*:delta` | flushAfterMs: 8, count: 4 | 1000 events | Imperceptible window for UI streaming (≤8ms latency); halves bus traffic |
-| `tool:*:terminal` | (none — flush immediately) | 100 events | Low volume, high importance |
-| `session:*:metric` | flushAfterMs: 500 | 10K events | Analytics, no rush |
-| `journal:*` | (none) | unbounded (durable) | Durable journal path |
+| Surface : phase pattern | Batch policy               | Retention           | Notes                                                                    |
+| ----------------------- | -------------------------- | ------------------- | ------------------------------------------------------------------------ |
+| `executor:*:delta`      | flushAfterMs: 8, count: 4  | 1000 events         | Imperceptible window for UI streaming (≤8ms latency); halves bus traffic |
+| `tool:*:terminal`       | (none — flush immediately) | 100 events          | Low volume, high importance                                              |
+| `session:*:metric`      | flushAfterMs: 500          | 10K events          | Analytics, no rush                                                       |
+| `journal:*`             | (none)                     | unbounded (durable) | Durable journal path                                                     |
 
 Adopters override via `JournalingPolicy.batch` at harness construction.
 
@@ -241,13 +239,13 @@ Each phase is independently shippable. No phase breaks adopter code.
 
 ### Phase B — open design decisions resolved
 
-| Decision | Resolution |
-|---|---|
-| Accumulator state scope | Per-`LocalEventBus`-instance. Process-global state has no fiber-safety story and couples bus instances that exist independently in multi-tenant deployments. |
-| Timer mechanism | `setTimeout`. Bus's external Effect surface unchanged; per-surface Effect.Schedule fibers are over-architected for a non-Effect data structure. |
-| Where the batch policy lives | `LocalEventBusOptions.batch?` (constructor option). The spec's `JournalingPolicy.batch?` is the type surface adopters use to compose policies; bus reads its slice via `options.batch`. |
-| Per-surface vs per-subscriber batching | Per-surface. Per-subscriber means N copies of accumulator state for N subscribers — bookkeeping cost defeats the win. |
-| Default policy contents | Ship only `executor:delta` (validated hot path); drop `session:metric` until a metrics surface lands with concrete events that match a real phase. |
+| Decision                               | Resolution                                                                                                                                                                              |
+| -------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Accumulator state scope                | Per-`LocalEventBus`-instance. Process-global state has no fiber-safety story and couples bus instances that exist independently in multi-tenant deployments.                            |
+| Timer mechanism                        | `setTimeout`. Bus's external Effect surface unchanged; per-surface Effect.Schedule fibers are over-architected for a non-Effect data structure.                                         |
+| Where the batch policy lives           | `LocalEventBusOptions.batch?` (constructor option). The spec's `JournalingPolicy.batch?` is the type surface adopters use to compose policies; bus reads its slice via `options.batch`. |
+| Per-surface vs per-subscriber batching | Per-surface. Per-subscriber means N copies of accumulator state for N subscribers — bookkeeping cost defeats the win.                                                                   |
+| Default policy contents                | Ship only `executor:delta` (validated hot path); drop `session:metric` until a metrics surface lands with concrete events that match a real phase.                                      |
 
 ### Phase C — Cursor protocol + ring buffer (DONE 2026-06-06)
 

@@ -17,6 +17,7 @@
     "@agentick/reconciler-react-next": "workspace:*",
     "@agentick/spec-next": "workspace:*",
     "@agentick/state-next": "workspace:*",
+    "@agentick/tasks-next": "workspace:*",
     "@agentick/timeline-next": "workspace:*",
     "@ai-sdk/openai": "^2.0.0",
     "@modelcontextprotocol/sdk": "^1.29.0",
