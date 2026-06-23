@@ -9,12 +9,12 @@ the lifecycle FSM, progress envelope, correlation engine, and
 cancellation semantics live in exactly one place.
 
 Same FSM as MCP's task model (`working / input_required / completed /
-failed / cancelled`); cluster-friendly via inbox-routed cancellation
-and bus-channel status notifications. Per ADR 23 §OQ23.15
-("substrate-aware Tasks bridge"), local invocations and MCP-wire
-invocations of a `taskSupport: required` tool both return the same
-`TaskHandle` shape — the MCP wire codec layers on top via a separate
-phase.
+failed / cancelled`); cluster-friendly via inbox-routed cancel / get /
+result and bus-channel status + progress notifications. Per ADR-23
+§OQ23.15 ("substrate-aware Tasks bridge"), local invocations and
+MCP-wire invocations of a `taskSupport: required` tool both return the
+same `TaskHandle` shape — the MCP wire codec layers on top via a
+separate phase.
 
 Private workspace package. Bundled into the `agentick` metapackage;
 not published independently.
@@ -23,15 +23,20 @@ not published independently.
 
 🚧 In active development as part of v2 (`feat/v2`).
 
-| Phase | What | Status |
-| --- | --- | --- |
-| A | Substrate primitive — harness, registry, progress, cancel, conformance | ✅ |
-| B | MCP wire codec — `tools/call` task opt-in, `notifications/tasks/status` translation, inbound `tasks/cancel` | ⏳ |
-| C | Model-visible task ids — `taskSupport: "required"` tool returns immediately to the model with a task ref instead of awaiting | ⏳ |
+| Phase | What                                                                                                                                              | Status |
+| ----- | ------------------------------------------------------------------------------------------------------------------------------------------------- | ------ |
+| A     | Substrate primitive — harness, registry, progress, cancel, conformance                                                                            | ✅     |
+| A.1   | ToolExecutor integration — `ctx.tasks` on every handler, TaskHandle-return detection, Pattern A vs B branching on `taskSupport` annotation (#156) | ✅     |
+| B     | MCP wire codec — `tools/call` task opt-in, `notifications/tasks/status` translation, inbound `tasks/cancel`                                       | ⏳     |
+| C     | Model-facing `tasks.*` tools — auto-registered `tasks.list / get / cancel / await` so the model can manage Pattern B tasks across ticks (#157)    | ⏳     |
+| D     | Effect-native internals refactor — `Stream<TaskEvent>` for events, `Effect<TaskHandle>` work overload with real fiber interruptibility (#155)     | ⏳     |
 
 ## Quick start
 
+### Install on a session
+
 ```ts
+import { createApp } from "@agentick/app-next";
 import { withTasks } from "@agentick/tasks-next";
 
 const app = await createApp(<Agent />, {
@@ -40,18 +45,81 @@ const app = await createApp(<Agent />, {
 });
 
 const session = await app.createSession();
+```
 
-// Inside a tool handler:
-const handle = session.tasks.submit(async ({ signal, onProgress }) => {
+`withTasks()` constructs a per-session `TasksHarness` at install time
+and registers it under the `tasks` slot — reachable as `session.tasks`,
+`bridges.tasks`, and `ctx.tasks` from any tool handler on that
+session.
+
+> The `agentick` metapackage bundles `withTasks()` automatically.
+> The standalone `withTasks()` import is for adopters wiring `app-next`
+> directly without the metapackage.
+
+### Submit a task from a tool handler
+
+```ts
+import { createTool } from "@agentick/tool-next";
+import { z } from "zod";
+
+const Deploy = createTool({
+  name: "deploy",
+  description: "Deploy the current branch.",
+  input: z.object({ target: z.string() }),
+  annotations: { taskSupport: "required" }, // Pattern B — see below
+  handler: async ({ target }, { ctx }) => {
+    return ctx.tasks!.submit(
+      async ({ signal, onProgress, setStatusMessage }) => {
+        setStatusMessage(`provisioning ${target}`);
+        for (let step = 0; step < 10; step++) {
+          if (signal.aborted) throw new DOMException("aborted", "AbortError");
+          onProgress({ current: step, total: 10, message: `step ${step}` });
+          await doWorkChunk();
+        }
+        return [{ type: "text", text: `deployed to ${target}` }];
+      },
+      { statusMessage: "queued", ttl: 5 * 60_000 },
+    );
+  },
+});
+```
+
+The handler returns the `TaskHandle` directly. What happens next
+depends on the `taskSupport` annotation on the tool:
+
+### Pattern A — model-transparent (default)
+
+`taskSupport: "unsupported"` (or omitted) → the **executor awaits
+`handle.result` transparently**. The model sees the eventual content
+blocks; it never sees a task id. Use this for any tool whose only
+reason to use `submit` is to get progress envelopes / signal-aware
+cancellation — the long-running shape is an implementation detail.
+
+### Pattern B — model-visible task ref
+
+`taskSupport: "required"` → the executor **returns immediately** with a
+typed task-ref content block (`{ _kind: "task-ref", taskId, status,
+statusMessage?, ttl? }`) instead of awaiting. The model now owns the
+task: it'll see status / progress envelopes on the session channel and
+manages the task with the model-facing `tasks.*` tools (Phase C).
+
+This is the MCP `taskSupport: "required"` semantic — bring the model
+into the conversation about long-running work instead of blocking a
+tick on it.
+
+### Observe events directly (advanced)
+
+The `TaskHandle` exposes an event stream and a snapshot accessor:
+
+```ts
+const handle = session.tasks.submit(async ({ onProgress }) => {
   for (let i = 0; i < 10; i++) {
-    if (signal.aborted) throw new DOMException("aborted", "AbortError");
-    onProgress({ current: i, total: 10, message: `step ${i}` });
+    onProgress({ current: i, total: 10 });
     await doWorkChunk();
   }
-  return [{ type: "text", text: "deploy complete" }];
+  return [{ type: "text", text: "done" }];
 });
 
-// Caller can observe / cancel:
 for await (const event of handle.events()) {
   if (event.kind === "progress") {
     console.log(`progress: ${event.current}/${event.total}`);
@@ -60,7 +128,7 @@ for await (const event of handle.events()) {
   }
 }
 
-const result = await handle.result; // ContentBlock[] from the work fn
+const result = await handle.result; // resolves with ContentBlock[]
 ```
 
 ## What this package owns
@@ -68,82 +136,202 @@ const result = await handle.result; // ContentBlock[] from the work fn
 - **`TasksHarness`** — `BaseHarness<"tasks">` impl. Per-session
   registry; cluster-friendly via inbox + bus.
 - **`withTasks()`** — `SessionExtension` factory; constructs the
-  harness on session install.
+  harness on session install and registers the `tasks` namespace.
 - **Bus channels** —
   - `session:channel:task-status` for FSM transitions (payload:
     `TaskInfo`).
   - `session:channel:task-progress` for in-flight updates (payload:
     `{ taskId, current, total?, message? }`).
-- **Test doubles** under `/testing` — `fakeTasks()` (real harness on
-  in-memory substrate) + `stubTasks()` (canned-answer stub).
+- **Inbox message types** — `tasks-cancel`, `tasks-get`,
+  `tasks-result`. Cluster-portable cross-harness operations route
+  through these against `harness.address`.
+- **Conformance suite** — `runTasksHarnessConformance(factory)`
+  exported from the package root. Any impl of
+  `TasksHarnessProtocol` can be driven through the same 12-test
+  battery to prove protocol compliance.
+- **Test doubles** under `/testing` — `fakeTasks()` + `stubTasks()`,
+  per the Meszaros vocabulary (see "Test doubles" below).
 
 ## API
 
 ### `submit(work, opts?)`
 
 ```ts
-submit<T>(
-  work: (ctx: { signal, onProgress, setStatusMessage }) => Promise<T> | T,
-  opts?: { ttl?, pollInterval?, statusMessage? },
+submit<T = readonly ContentBlock[]>(
+  work: (ctx: TaskWorkContext) => Promise<T> | T,
+  opts?: { ttl?: number; pollInterval?: number; statusMessage?: string },
 ): TaskHandle<T>
 ```
 
-Returns immediately. The work fn runs synchronously up to its first
-await — this guarantees `signal.addEventListener("abort", ...)`
-registers BEFORE any concurrent `cancel()`/`close()` could abort the
-signal (AbortSignal listeners don't fire when attached post-abort).
+Returns synchronously. The work fn is invoked **synchronously up to
+its first await** so that `signal.addEventListener("abort", ...)`
+inside the work registers BEFORE any concurrent `cancel()` /
+`close()` could fire — AbortSignal listeners attached post-abort don't
+fire.
+
+`TaskWorkContext`:
+
+- `signal: AbortSignal` — aborts on `cancel()` / harness `close()`.
+- `onProgress(update: ProgressUpdate): void` — emit progress.
+- `setStatusMessage(message: string): void` — update the human-readable
+  status without emitting a progress event.
 
 ### `TaskHandle<T>`
 
-- `taskId`
-- `initialStatus` (snapshot at handle construction)
-- `result: Promise<T>` — resolves on `completed`, rejects with
-  `TaskRejection` on `failed`/`cancelled`.
-- `info()` — current `TaskInfo`.
-- `events()` — `AsyncIterable<TaskEvent>` — emits the current
-  snapshot, then progress + status transitions, closes on terminal.
-- `cancel(reason?)` — abort and transition to `cancelled`.
+- `taskId: string`
+- `initialStatus: TaskStatus` — snapshot at handle construction.
+- `result: Promise<T>` — resolves on `completed` with the work's
+  return value; rejects with `TaskRejection` on `failed` /
+  `cancelled`.
+- `info(): TaskInfo` — live snapshot.
+- `events(): AsyncIterable<TaskEvent>` — emits the current status
+  snapshot, then live progress + status transitions, closes on
+  terminal.
+- `cancel(reason?: string): Promise<void>` — cluster-portable cancel.
+  No-op if already terminal.
 
 ### Lookups by id
 
-`get(taskId)`, `status(taskId)`, `result(taskId)`, `cancel(taskId)`,
-`events(taskId)`. All throw `UnknownTaskError` (`_tag` discriminated)
-for unknown ids.
+`get(id)`, `status(id)`, `result(id)`, `cancel(id, reason?)`,
+`events(id)`. All throw `UnknownTaskError` (`_tag`-discriminated) for
+unknown ids — same shape across local and cluster paths.
+
+### `TaskStatus`
+
+`"working" | "input_required" | "completed" | "failed" | "cancelled"` —
+maps 1:1 to MCP's task FSM. `input_required` is declared for
+forward-compat with MCP but Phase A doesn't auto-transition into it;
+tools that pause on `ctx.elicitation` stay `working` until Phase B's
+auto-pause integration ships.
+
+## Test doubles
+
+Per the test-doubles convention (Meszaros), every layer exports its
+doubles under a `/testing` subpath. For tasks:
+
+### `fakeTasks(options?)` — working impl
+
+A real `TasksHarness` on a fresh in-memory substrate. Returns the
+harness, the substrate primitives (so tests can subscribe to the bus,
+assert journal entries, etc.), and an idempotent `close()`.
+
+```ts
+import { fakeTasks } from "@agentick/tasks-next/testing";
+
+const { harness, bus, journal, inbox, close } = await fakeTasks();
+try {
+  const handle = harness.submit(async () => [{ type: "text", text: "ok" }]);
+  expect(await handle.result).toEqual([{ type: "text", text: "ok" }]);
+} finally {
+  await close();
+}
+```
+
+Options:
+
+- `harnessId?: string` — defaults to `"fake-tasks"`.
+- `sessionId?: string` — stamps `parentScope.sessionId` on every
+  envelope, mirroring the real `withTasks()` install path.
+
+### `stubTasks(options?)` — canned-answer stub
+
+No substrate, no registry, no work runner. Satisfies
+`TasksHarnessProtocol` with `submit` returning a pre-completed
+handle and a single status event. Use when a downstream consumer
+needs to _receive_ a `tasks` slot without exercising the lifecycle.
+
+```ts
+import { stubTasks } from "@agentick/tasks-next/testing";
+
+const tasks = stubTasks({
+  cannedResult: [{ type: "text", text: "pretend done" }],
+  onSubmit: (work, opts) => console.log("submit observed", opts),
+});
+```
+
+Options:
+
+- `id?: string` — defaults to `"stub-tasks"`. Surfaces as `id` /
+  `address` (`tasks:${id}`).
+- `cannedResult?: readonly ContentBlock[]` — what `result` /
+  `handle.result` resolves with. Defaults to `[]`.
+- `onSubmit?: (work, opts) => void` — observe submission args without
+  exercising the work fn.
+
+Both doubles are typed against the spec interface
+(`TasksHarnessProtocol`), so spec changes break stale doubles at
+compile time — no silent drift.
+
+## Conformance
+
+`runTasksHarnessConformance(factory)` drives any
+`TasksHarnessProtocol` impl through a 12-test suite covering: submit
+
+- result, work-fn errors, cancel, progress envelope, events stream,
+  unknown-id errors, harness-close cancellation of in-flight tasks.
+  Lives at the package root so adopter impls (cluster-shimmed variants,
+  custom registries) import it without reaching into `/testing`:
+
+```ts
+import { runTasksHarnessConformance } from "@agentick/tasks-next";
+
+runTasksHarnessConformance(async ({ harnessId }) => {
+  const bundle = await yourFactory(harnessId);
+  return { harness: bundle.harness, close: bundle.close };
+});
+```
 
 ## What does NOT belong here
 
 - **MCP wire encoding** — lives in `@agentick/mcp-next`, layers on top.
   This package's harness is wire-agnostic.
-- **Persistence** — tasks survive the session's process lifetime
-  only. Cross-restart resumption is a substrate concern (future
-  cluster-store integration).
-- **Tool-handler-return integration** — the ToolExecutor's logic for
-  detecting a `TaskHandle` return and awaiting it transparently lives
-  in `@agentick/tool-executor-next` (separate slice).
+- **Persistence across process restart** — tasks survive the
+  session's process lifetime only. Cross-restart resumption is a
+  substrate concern (future cluster-store integration).
+- **ToolExecutor return-shape detection** — the executor's logic for
+  detecting a `TaskHandle` return and branching on `taskSupport`
+  lives in `@agentick/tool-executor-next` (#156).
+- **Model-facing `tasks.*` tools** — the auto-registered
+  `tasks.list / get / cancel / await` set lands in a separate slice
+  (#157) so this package stays handler-runtime-only.
 
 ## Verified by
 
-- `src/__tests__/harness.spec.ts` — 18 tests covering submit / result
-  / progress envelope / cancel / close / events / errors / identity.
+- `src/__tests__/harness.spec.ts` — 18 tests covering submit /
+  result / progress envelope / cancel / close / events / errors /
+  identity / subscriber fan-out / synchronous-first-tick abort
+  semantics.
+- `src/__tests__/cluster-inbox.spec.ts` — 4 tests covering
+  cluster-portable cancel / get / result via inbox addressing.
+- `src/__tests__/conformance.spec.ts` — drives
+  `runTasksHarnessConformance` against `TasksHarness` (12 protocol
+  tests).
+- `packages-next/tool-executor/src/__tests__/task-handle.spec.ts`
+  (sibling package) — 6 tests covering `ctx.tasks` wiring, Pattern A
+  (await transparently), Pattern B (return task-ref), and abort
+  propagation from dispatch into the in-flight task.
 
 ## Roadmap & known gaps
 
 - **Phase B (MCP wire codec)** — `mcp-next` translates inbound MCP
   `tools/call` with `task: {ttl}` into `submit`; outbound MCP wire
-  serializes our TasksHarness state. Tracked separately.
-- **Phase C (model-visible task ids)** — currently the ToolExecutor
-  awaits the handle's `result` transparently (the model sees the
-  eventual result, not the task id). MCP's `taskSupport: required`
-  needs the model to see the task ref so it can cancel / poll
-  explicitly. Needs JSX surface + tool annotation wiring.
+  serializes our TasksHarness state into `notifications/tasks/status`
+  - `notifications/progress`. Tracked separately.
+- **Phase C (`tasks.*` model-facing tools, #157)** — auto-registered
+  `tasks.list / get / cancel / await` so the model can manage
+  Pattern B tasks across ticks without each adopter re-implementing
+  them.
+- **Phase D (Effect-native internals, #155)** — convert the
+  per-subscriber `Queue<TaskEvent>` fan-out to `Stream.fromQueue`,
+  expose an `Effect<TaskHandle>` work overload that runs as a real
+  interruptible fiber.
 - **`input_required` transitions** — declared in `TaskStatus` for
   forward-compat with MCP's FSM, but Phase A doesn't auto-transition
-  into it. When a task's work fn pauses on an elicit/sampling/roots
-  request, Phase B's auto-pause integration will set the status.
-- **Conformance suite** — Phase A ships the impl-specific spec only.
-  A cross-impl `runTasksHarnessConformance(factory)` suite (mirroring
-  the elicitation pattern) lands when a second impl needs to honor
-  the protocol.
+  into it. When a task's work fn pauses on an elicit / sampling /
+  roots request, Phase B's auto-pause integration will set the status.
+- **`taskSupport: "supported"`** — the caller-choice mode declared in
+  the spec annotation but not yet branched on by the executor. Lands
+  alongside Phase C, where the model has the tooling to opt in.
 
 @see [`docs/proposals/v2/blueprint/23-mcp-as-harness.md`](../../docs/proposals/v2/blueprint/23-mcp-as-harness.md) §Tasks
 @see [`docs/proposals/v2/blueprint/26-harness-api-shape.md`](../../docs/proposals/v2/blueprint/26-harness-api-shape.md)

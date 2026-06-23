@@ -12,11 +12,13 @@
 import { LocalEventBus, LocalInbox, MemoryJournal, ulid } from "@agentick/runtime-next";
 import type {
   ElicitationHarnessProtocol,
+  TasksHarnessProtocol,
   ToolBinding,
   ToolDeclaration,
   ToolRegistration,
 } from "@agentick/spec-next";
 import { ElicitationHarness } from "@agentick/elicitation-next";
+import { TasksHarness } from "@agentick/tasks-next";
 
 import { InMemoryHandlerResolver } from "../handler-resolver.js";
 import { ToolExecutorHarness } from "../harness.js";
@@ -68,6 +70,13 @@ export interface TestHarnessOptions {
    * through `inbox`.
    */
   readonly elicitation?: ElicitationHarnessProtocol;
+  /**
+   * Inject a custom tasks harness. When omitted, a real
+   * `TasksHarness` is constructed on the same substrate so
+   * TaskHandle-return integration tests (#156) see live status +
+   * progress envelopes on the bus.
+   */
+  readonly tasks?: TasksHarnessProtocol;
 }
 
 export interface TestHarnessBundle {
@@ -82,6 +91,8 @@ export interface TestHarnessBundle {
    * `await elicitation.respond({ correlationId, outcome, value })`.
    */
   readonly elicitation: ElicitationHarnessProtocol;
+  /** The tasks harness wired to the same substrate. */
+  readonly tasks: TasksHarnessProtocol;
 }
 
 /**
@@ -112,9 +123,19 @@ export async function createTestHarness(
     elicitation = elicHarness;
   }
 
+  let tasks: TasksHarnessProtocol;
+  if (options.tasks !== undefined) {
+    tasks = options.tasks;
+  } else {
+    const tasksHarness = new TasksHarness(`${scopeId}:tasks`, journal, bus, inbox);
+    await tasksHarness.ready;
+    tasks = tasksHarness;
+  }
+
   const harnessOptions: ToolExecutorHarnessOptions = {
     handlerResolver: resolver,
     elicitation,
+    tasks,
     ...(options.tools ? { initialTools: options.tools } : {}),
     ...(options.defaultTimeoutMs !== undefined
       ? { defaultTimeoutMs: options.defaultTimeoutMs }
@@ -127,5 +148,5 @@ export async function createTestHarness(
   const harness = new ToolExecutorHarness(scopeId, journal, bus, inbox, harnessOptions);
 
   await harness.ready;
-  return { harness, journal, bus, inbox, resolver, elicitation };
+  return { harness, journal, bus, inbox, resolver, elicitation, tasks };
 }

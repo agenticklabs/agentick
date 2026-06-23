@@ -39,6 +39,8 @@ import type {
   RegisterToolInput,
   RemoveBoundToolsInput,
   ReplaceReconcilerToolsInput,
+  TaskHandle,
+  TasksHarnessProtocol,
   ToolDeclaration,
   ToolExecutorInboxMessage,
   ToolExecutorProtocol,
@@ -77,6 +79,7 @@ export class ToolExecutorHarness extends BaseHarness<"tool"> implements ToolExec
   private readonly defaultConfirmationTimeoutMs?: number;
   private readonly channelPublisher?: ChannelPublisher;
   private readonly elicitation: ElicitationHarnessProtocol;
+  private readonly tasks: TasksHarnessProtocol | undefined;
 
   constructor(
     scopeId: string,
@@ -91,6 +94,7 @@ export class ToolExecutorHarness extends BaseHarness<"tool"> implements ToolExec
     this.defaultConfirmationTimeoutMs = options.defaultConfirmationTimeoutMs;
     this.channelPublisher = options.channelPublisher;
     this.elicitation = options.elicitation;
+    this.tasks = options.tasks;
 
     // Eager registrations applied synchronously so callers can dispatch
     // immediately after `await harness.ready`.
@@ -514,6 +518,12 @@ export class ToolExecutorHarness extends BaseHarness<"tool"> implements ToolExec
           : {}),
         ...(input.context.tickId !== undefined ? { tickId: input.context.tickId } : {}),
         signal: controller.signal,
+        // Substrate primitives surfaced for ad-hoc handler use
+        // (`ctx.elicitation.elicit(...)`, `ctx.tasks.submit(...)`).
+        // Always present in production; the optional spec field
+        // covers test fixtures that omit them.
+        elicitation: this.elicitation,
+        ...(this.tasks !== undefined ? { tasks: this.tasks } : {}),
         setState: (key: string, value: unknown): void => {
           this.stateStore.set(key, value);
         },
@@ -598,28 +608,95 @@ export class ToolExecutorHarness extends BaseHarness<"tool"> implements ToolExec
             return Effect.sync(() => controller.signal.removeEventListener("abort", onAbort));
           });
 
+          // Branch by handler shape. Effect and Promise paths
+          // resolve to a value that MAY be a `TaskHandle`; we
+          // post-process for the TaskHandle branch below. The sync
+          // path checks isTaskHandle directly.
+          //
+          // For async handlers (the common case) — `handlerResult`
+          // is a `Promise<TaskHandle | ContentBlock[]>`. We await
+          // the promise first via the existing race-with-abort, THEN
+          // dispatch to the TaskHandle branch if the resolved value
+          // is a handle.
+          const supportMode = reg.declaration.annotations?.taskSupport ?? "unsupported";
+
+          const dispatchOnResolved = (
+            resolved: unknown,
+          ): Effect.Effect<readonly ContentBlock[], unknown, never> => {
+            if (isTaskHandle(resolved)) {
+              if (supportMode === "required") {
+                // Wire the dispatch's abort signal to the task's
+                // cancel — caller abort propagates to the task.
+                if (controller.signal.aborted) {
+                  void resolved.cancel("dispatch_aborted");
+                } else {
+                  controller.signal.addEventListener(
+                    "abort",
+                    () => {
+                      void resolved.cancel("dispatch_aborted");
+                    },
+                    { once: true },
+                  );
+                }
+                return Effect.succeed(serializeTaskRef(resolved));
+              }
+              // "unsupported" / "supported" (caller-choice deferred
+              // to #157): await the handle's result. Abort the
+              // task on dispatch abort so we don't orphan in-flight
+              // work.
+              const cancelOnAbort = (): void => {
+                void resolved.cancel("dispatch_aborted");
+              };
+              if (controller.signal.aborted) {
+                cancelOnAbort();
+              } else {
+                controller.signal.addEventListener("abort", cancelOnAbort, { once: true });
+              }
+              const taskAwaitEff = Effect.tryPromise({
+                try: () => resolved.result as Promise<readonly ContentBlock[]>,
+                catch: (cause: unknown) => cause,
+              });
+              return Effect.raceFirst(taskAwaitEff, abortEff);
+            }
+            return Effect.succeed(resolved as readonly ContentBlock[]);
+          };
+
+          if (isTaskHandle(handlerResult)) {
+            // Sync return of a TaskHandle (non-async handler).
+            return dispatchOnResolved(handlerResult);
+          }
+
           if (isEffect(handlerResult)) {
             // Effect-typed handler yields IN the parent fiber so it
             // inherits the `RuntimeContextRef` FiberRef set by
-            // `runOperation`. `Effect.raceFirst` (not `race`) — settles
-            // on the first to either succeed OR fail. `Effect.race`
-            // waits for a success and would let a finishing handler
-            // beat an already-fired abort.
-            return Effect.raceFirst(handlerResult, abortEff);
+            // `runOperation`. `Effect.raceFirst` (not `race`) —
+            // settles on the first to either succeed OR fail.
+            // `flatMap` post-processes the resolved value for the
+            // TaskHandle branch.
+            return Effect.flatMap(
+              Effect.raceFirst(handlerResult as Effect.Effect<unknown, unknown, never>, abortEff),
+              dispatchOnResolved,
+            );
           }
 
           if (isPromiseLike(handlerResult)) {
-            // Lift the Promise to Effect and race against the same
-            // abort watcher used by the Effect path — eliminates the
-            // hand-rolled `abortPromise` Promise.race bridge.
+            // Lift the Promise to Effect, race against the abort
+            // watcher, then dispatch the resolved value (which may
+            // be a TaskHandle from an async handler that
+            // `return ctx.tasks.submit(...)`-ed).
             const handlerEff = Effect.tryPromise({
-              try: () => handlerResult as PromiseLike<readonly ContentBlock[]>,
+              try: () => handlerResult as PromiseLike<unknown>,
               catch: (cause: unknown) => cause,
             });
-            return Effect.raceFirst(handlerEff, abortEff);
+            return Effect.flatMap(Effect.raceFirst(handlerEff, abortEff), dispatchOnResolved);
           }
 
-          return Effect.succeed(handlerResult);
+          // Sync, non-TaskHandle return — pass through. TS can't
+          // narrow across the disjoint branches above, so cast
+          // explicitly: at this point handlerResult is a sync
+          // `readonly ContentBlock[]` (Effect/Promise/TaskHandle
+          // cases already returned).
+          return Effect.succeed(handlerResult as readonly ContentBlock[]);
         },
       );
 
@@ -698,6 +775,55 @@ function isPromiseLike(value: unknown): value is PromiseLike<unknown> {
     (typeof value === "object" || typeof value === "function") &&
     typeof (value as { then?: unknown }).then === "function"
   );
+}
+
+/**
+ * Structural test for a `TaskHandle` return shape. The handle has
+ * `taskId` (string), `initialStatus` (string), and `result`
+ * (Promise) — three required fields rules out plain objects /
+ * ContentBlock arrays / Effects / Promises.
+ *
+ * Promises are excluded explicitly (a Promise has `.then` but no
+ * `.taskId`); the `isPromiseLike` branch downstream handles those.
+ */
+function isTaskHandle(value: unknown): value is TaskHandle<readonly ContentBlock[]> {
+  if (value === null || typeof value !== "object") return false;
+  const v = value as Partial<TaskHandle<readonly ContentBlock[]>>;
+  return (
+    typeof v.taskId === "string" &&
+    typeof v.initialStatus === "string" &&
+    typeof (v as { result?: unknown }).result === "object" &&
+    typeof v.cancel === "function"
+  );
+}
+
+/**
+ * Serialize a task ref into a single content block the model
+ * receives in lieu of the eventual result. JSON payload mirrors
+ * `TaskInfo` plus a `_kind: "task-ref"` discriminator so client
+ * surfaces (UIs, system prompts) can recognize and special-case
+ * task refs vs plain text returns.
+ *
+ * The block type is `text` — universal across model providers; the
+ * `_kind` discriminator lives in the JSON body. When a richer
+ * content block type lands (e.g., `{type: "task-ref"}` in spec), we
+ * upgrade here without breaking adopter code that parses the JSON.
+ */
+function serializeTaskRef(handle: TaskHandle<readonly ContentBlock[]>): readonly ContentBlock[] {
+  const info = handle.info();
+  return [
+    {
+      type: "text",
+      text: JSON.stringify({
+        _kind: "task-ref",
+        taskId: info.taskId,
+        status: info.status,
+        ...(info.statusMessage !== undefined ? { statusMessage: info.statusMessage } : {}),
+        ...(info.ttl !== null ? { ttl: info.ttl } : {}),
+        ...(info.pollInterval !== undefined ? { pollInterval: info.pollInterval } : {}),
+      }),
+    } satisfies ContentBlock,
+  ];
 }
 
 function isTaggedToolError(value: unknown): value is { readonly _tag: string } {

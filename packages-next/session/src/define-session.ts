@@ -79,7 +79,8 @@ import type { KnobsHandle } from "@agentick/knobs-next";
 import type { StateHandle } from "@agentick/state-next";
 import type { TimelineHandle } from "@agentick/timeline-next";
 import { ElicitationHarness } from "@agentick/elicitation-next";
-import type { ElicitationHarnessProtocol } from "@agentick/spec-next";
+import { TasksHarness } from "@agentick/tasks-next";
+import type { ElicitationHarnessProtocol, TasksHarnessProtocol } from "@agentick/spec-next";
 
 // ============================================================================
 // Public API
@@ -119,6 +120,12 @@ export interface DefineSessionInput<P = unknown> {
    * for tests + ad-hoc harnesses).
    */
   readonly elicitation?: ElicitationHarnessProtocol;
+  /**
+   * Pre-constructed tasks harness for the augmented
+   * `SessionHarnessProtocol.tasks` slot (#120 / #156). Same omission
+   * semantics as `elicitation` — factory spins one up if absent.
+   */
+  readonly tasks?: TasksHarnessProtocol;
 }
 
 export function defineSession<P = unknown>(spec: DefineSessionInput<P>): SessionHarnessFactory<P> {
@@ -149,6 +156,7 @@ class CallbackSessionHarness<P = unknown>
   readonly knobs: KnobsHandle;
   readonly state: StateHandle;
   readonly elicitation: ElicitationHarnessProtocol;
+  readonly tasks: TasksHarnessProtocol;
 
   constructor(
     scopeId: string,
@@ -170,6 +178,11 @@ class CallbackSessionHarness<P = unknown>
     this.elicitation =
       spec.elicitation ??
       new ElicitationHarness(`${scopeId}:elicitation`, journal, bus, inbox, {
+        parentScope: { sessionId: scopeId },
+      });
+    this.tasks =
+      spec.tasks ??
+      new TasksHarness(`${scopeId}:tasks`, journal, bus, inbox, {
         parentScope: { sessionId: scopeId },
       });
   }

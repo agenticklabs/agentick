@@ -60,8 +60,9 @@
     "@agentick/runtime-next": "workspace:*",
     "@agentick/session-next": "workspace:*",
     "@agentick/spec-next": "workspace:*",
-    "@agentick/utils-next": "workspace:*",
+    "@agentick/tasks-next": "workspace:*",
     "@agentick/tool-executor-next": "workspace:*",
+    "@agentick/utils-next": "workspace:*",
     "effect": "^3.21.2"
   },
   "devDependencies": {

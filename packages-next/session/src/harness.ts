@@ -173,6 +173,15 @@ export interface SessionHarnessOptions<P = unknown> {
    */
   readonly elicitation?: import("@agentick/spec-next").ElicitationHarnessProtocol;
   /**
+   * Optional pre-constructed tasks harness. Same wiring rationale
+   * as `elicitation` — the AppHarness shares ONE tasks harness
+   * instance between the per-session `ToolExecutorHarness` (so
+   * TaskHandle-return detection routes against the right registry)
+   * and the session bridges (so JSX `bridges.tasks` consumers see
+   * the same in-flight tasks).
+   */
+  readonly tasks?: import("@agentick/spec-next").TasksHarnessProtocol;
+  /**
    * Spawn context for child sessions. Typically injected by the
    * AppHarness when it constructs a session — the session keeps a
    * narrow back-reference to its parent app so `spawn()` works.
@@ -274,6 +283,7 @@ export class SessionHarness<P = unknown>
           ? { extensionBridges: options.extensionBridges }
           : {}),
         ...(options.elicitation !== undefined ? { elicitation: options.elicitation } : {}),
+        ...(options.tasks !== undefined ? { tasks: options.tasks } : {}),
       },
     );
     if (options.initialKnobs) {
@@ -327,6 +337,16 @@ export class SessionHarness<P = unknown>
    */
   get elicitation(): import("@agentick/spec-next").ElicitationHarnessProtocol {
     return this.bridges.elicitation;
+  }
+
+  /**
+   * Per-session tasks harness — same instance the tool-executor's
+   * TaskHandle-return detection routes against (#156) and that
+   * `bridges.tasks` exposes. Augmented onto `SessionHarnessProtocol`
+   * via the `@agentick/tasks-next` package's module augmentation.
+   */
+  get tasks(): import("@agentick/spec-next").TasksHarnessProtocol {
+    return this.bridges.tasks;
   }
 
   // ──────── SessionHarnessProtocol ────────

@@ -52,6 +52,7 @@
     "@agentick/runtime-next": "workspace:*",
     "@agentick/spec-next": "workspace:*",
     "@agentick/state-next": "workspace:*",
+    "@agentick/tasks-next": "workspace:*",
     "@agentick/timeline-next": "workspace:*",
     "@agentick/utils-next": "workspace:*",
     "effect": "^3.21.2",

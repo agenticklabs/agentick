@@ -21,6 +21,7 @@ import { InMemoryDataBridge } from "@agentick/reconciler-next";
 import { ElicitationHarness } from "@agentick/elicitation-next";
 import { KnobsHarness } from "@agentick/knobs-next";
 import { StateHarness } from "@agentick/state-next";
+import { TasksHarness } from "@agentick/tasks-next";
 import { TimelineHarness } from "@agentick/timeline-next";
 import type {
   ElicitationHarnessProtocol,
@@ -30,6 +31,7 @@ import type {
   MessageInbox,
   OperationJournal,
   SessionBridge,
+  TasksHarnessProtocol,
   ToolBridge,
 } from "@agentick/spec-next";
 
@@ -66,6 +68,7 @@ export interface SessionHookBridges extends HookBridges {
   readonly timeline: TimelineHarness;
   readonly knobs: KnobsHarness;
   readonly state: StateHarness;
+  readonly tasks: TasksHarnessProtocol;
   readonly data: InMemoryDataBridge;
 }
 
@@ -88,6 +91,15 @@ export interface BuildSessionBridgesOptions {
    * confirmation gate MUST supply this).
    */
   readonly elicitation?: ElicitationHarnessProtocol;
+  /**
+   * Pre-constructed tasks harness. Same wiring rationale as
+   * `elicitation` — the AppHarness shares ONE instance with the
+   * per-session `ToolExecutorHarness` (so its TaskHandle-return
+   * detection routes against the same registry that JSX
+   * `bridges.tasks` consumers see). When omitted, a fresh harness
+   * is constructed on the substrate.
+   */
+  readonly tasks?: TasksHarnessProtocol;
 }
 
 export function buildSessionBridges(
@@ -127,12 +139,18 @@ export function buildSessionBridges(
       substrate.inbox,
       { parentScope: { sessionId: store.id } },
     );
+  const tasks =
+    options.tasks ??
+    new TasksHarness(`${store.id}:tasks`, substrate.journal, substrate.bus, substrate.inbox, {
+      parentScope: { sessionId: store.id },
+    });
 
   const base: SessionHookBridges = {
     timeline,
     knobs,
     state,
     elicitation,
+    tasks,
     data: new InMemoryDataBridge(),
     loop: loopBridgeStub(),
     session: sessionBridgeFor(store),

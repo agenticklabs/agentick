@@ -8,8 +8,8 @@
     "agentick",
     "ai",
     "harness",
-    "tasks",
-    "long-running"
+    "long-running",
+    "tasks"
   ],
   "license": "MIT",
   "author": "Ryan Lindgren",

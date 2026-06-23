@@ -18,6 +18,7 @@
 import type {
   ChannelPublisher,
   ElicitationHarnessProtocol,
+  TasksHarnessProtocol,
   ToolHandler,
   ToolRegistration,
   Validator,
@@ -101,10 +102,31 @@ export interface ToolExecutorHarnessOptions {
    * tools annotated `requiresConfirmation: true` round-trip through
    * `elicitation.elicit(...)` instead of rolling their own channel.
    *
+   * ALSO surfaced on `ctx.elicitation` for raw tool handlers that
+   * want to ask the user for input mid-handler. Substrate primitive
+   * present on every session — direct access without the JSX
+   * `use:` ceremony.
+   *
    * Wiring: in production, the session-extension layer constructs the
    * elicitation harness on the same substrate (shared bus/inbox) and
    * passes its protocol reference here. In tests, `createTestHarness`
    * builds both on a shared in-memory substrate.
    */
   readonly elicitation: ElicitationHarnessProtocol;
+
+  /**
+   * Tasks harness — optional today (every session has one once
+   * `withTasks()` is in the extension list; gated on adopter
+   * setup). Surfaced on `ctx.tasks` so handlers can `submit()`
+   * long-running work. ToolExecutor also uses it to detect handler
+   * returns of shape `TaskHandle` and branch on `taskSupport` (#156,
+   * Pattern B behavior).
+   *
+   * When omitted: `ctx.tasks` is `undefined`; handlers must
+   * null-coalesce. The `taskSupport` annotation default
+   * (`"unsupported"`) means tasks are never used by sync tool paths,
+   * so omission is safe for adopters who don't need long-running
+   * tools.
+   */
+  readonly tasks?: TasksHarnessProtocol;
 }

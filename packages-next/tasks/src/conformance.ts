@@ -39,7 +39,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import type { TaskHandle, TaskRejection, TasksHarnessProtocol } from "@agentick/spec-next";
+import type { TaskHandle, TasksHarnessProtocol } from "@agentick/spec-next";
 
 // ============================================================================
 // Factory + shell shapes
@@ -99,7 +99,7 @@ export function runTasksHarnessConformance(factory: TasksConformanceFactory): vo
         const handle = shell.harness.submit(async () => {
           throw new Error("kaboom");
         });
-        await expect(handle.result).rejects.toMatchObject<Partial<TaskRejection>>({
+        await expect(handle.result).rejects.toMatchObject({
           _tag: "TaskRejection",
           taskId: handle.taskId,
           status: "failed",
@@ -129,7 +129,7 @@ export function runTasksHarnessConformance(factory: TasksConformanceFactory): vo
         await new Promise((r) => setTimeout(r, 0));
         await shell.harness.cancel(handle.taskId, "user-aborted");
 
-        await expect(handle.result).rejects.toMatchObject<Partial<TaskRejection>>({
+        await expect(handle.result).rejects.toMatchObject({
           _tag: "TaskRejection",
           taskId: handle.taskId,
           status: "cancelled",
@@ -287,7 +287,7 @@ export function runTasksHarnessConformance(factory: TasksConformanceFactory): vo
 
       await shell.close();
 
-      await expect(handle.result).rejects.toMatchObject<Partial<TaskRejection>>({
+      await expect(handle.result).rejects.toMatchObject({
         _tag: "TaskRejection",
         status: "cancelled",
       });

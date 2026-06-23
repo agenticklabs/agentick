@@ -1,7 +1,32 @@
 # Agentick v2 — Implementation Status
 
 **Branch:** `feat/v2`
-**Last updated:** 2026-06-13 — **Executor harness round 2 — Effect.Stream pipeline + declarative hook surface + 4 providers refactored + lifecycle helper extraction + `defineLanguageModelExecutor`.** Second deep pass on the executor layer following round 1 (`BaseLanguageModelExecutor` introduction). This pass swapped the hand-rolled streaming loop for native Effect primitives, factored the v1 `createAdapter` borrowings into per-provider hooks, and consolidated lifecycle bookkeeping into a single shared helper. Four parts:
+**Last updated:** 2026-06-23 — **#156 ToolExecutor task integration + `ctx.tasks` / `ctx.elicitation` on every handler — Pattern A vs Pattern B branching on `taskSupport` annotation.** Closes the wiring loop opened by #120 (TasksHarness substrate primitive) and #119 (ElicitationHarness substrate primitive). Both harnesses now reach the handler via `ctx` instead of the JSX `use:` ceremony — the "substrate primitive on `ctx`" rule from the spec doc. Five parts:
+
+1. **`ToolHandlerCtx` extended with `elicitation` + `tasks` slots.** Both typed against their protocol interfaces in `@agentick/spec-next/protocol/*`; both `?:` optional so substrate-stripped test fixtures can omit them without compile errors, but every real session installs both (the required-set contract). Handlers call `ctx.tasks!.submit(...)` / `ctx.elicitation!.elicit(...)` without ceremony. Substrate-primitive slots vs `use:` slots — the rule: framework-provided harnesses every session has (elicitation, tasks, and future sampling/roots) live on `ctx`; extension-provided / provider-scoped things (sandbox bridge, custom MCP refs) flow through `use:` capture.
+
+2. **`ToolHandlerResult` union extended with TaskHandle return shapes.** `TaskHandle<readonly ContentBlock[]>` + `Promise<TaskHandle<...>>` + `Effect<TaskHandle<...>>`. Async handler bodies wrap returns in Promise, so the executor needs the post-await detection path — handled by `dispatchOnResolved(resolved)` in the executor body (see §3).
+
+3. **Pattern A / Pattern B branching on `taskSupport` annotation.** The executor's handler-result processing was restructured into a `dispatchOnResolved` post-processor invoked after Promise/Effect awaits. If the resolved value is a `TaskHandle` (detected via duck-type guard against `taskId` + `result` + `events` + `cancel`):
+   - `taskSupport: "required"` → **Pattern B**. Executor serializes a typed task-ref content block (`{ _kind: "task-ref", taskId, status, statusMessage?, ttl? }`) and returns it to the model. The task continues running; the model owns it across subsequent ticks. Abort wires to `handle.cancel(reason)`.
+   - `taskSupport: "unsupported"` (default) or undefined → **Pattern A**. Executor awaits `handle.result` transparently via `Effect.raceFirst(taskAwaitEff, abortEff)`. Model sees the eventual content blocks; never sees the taskId. Abort wires to `handle.cancel(reason)` AND short-circuits the await.
+   - `taskSupport: "supported"` → deferred to #157 (caller-choice mode lands alongside the model-facing `tasks.*` tools).
+
+4. **Per-session `TasksHarness` constructed alongside the elicitation harness in `AppHarness`.** Threaded through `SessionHarnessOptions → buildSessionBridges → SessionHookBridges` so `session.tasks` accesses the same instance as `ctx.tasks` and `bridges.tasks`. `CallbackSessionHarness` was extended with the same `readonly tasks` slot for parity. `createTestHarness` (tool-executor's `/testing` subpath) now constructs a real `TasksHarness` on the same in-memory substrate as its elicitation harness and exposes both in the bundle — adopter integration tests get the live status + progress envelopes on the bus for free.
+
+5. **Tasks `README.md` rewritten for the current shape.** Pattern A / Pattern B explained with examples; `withTasks()` install path documented as the standard entrypoint; the `fakeTasks()` / `stubTasks()` doubles documented under their canonical `/testing` subpath with full option surfaces and adopter recipes; "Verified by" updated to point at the actual test files + counts (18 harness + 4 cluster-inbox + 12 conformance + 6 tool-executor task-handle = 40 tests across two packages); roadmap aligned with the live backlog (#157 / #155 / Phase B MCP wire codec). `FakeTasksOptions` added to the `/testing` barrel export.
+
+**Test coverage added in this pass:** `packages-next/tool-executor/src/__tests__/task-handle.spec.ts` — 6 tests covering `ctx.tasks` + `ctx.elicitation` wiring, Pattern A (await transparently), Pattern B (serialize task-ref + task continues post-return), and Pattern A abort-propagation (`AbortController.abort()` on the dispatch routes through to `handle.cancel` and transitions the task to `cancelled`).
+
+**Deferred:**
+
+- **#157** — auto-register `tasks.list / tasks.get / tasks.cancel / tasks.await` model-facing tools when `withTasks()` is installed. Required for Pattern B to be usable — currently the model receives the task-ref content block but has no way to act on it.
+- **#155** — `Stream<TaskEvent>` from per-subscriber `Queue<TaskEvent>` fan-out, `Effect<TaskHandle>` work overload with real fiber interruptibility. TODO markers already in `harness.ts`.
+- **#158** — agent-self-coding via MCP server bridge (design only; no implementation).
+
+**Workspace:** all v2 tests pass (1703/1703 in the full sweep + 6 new task-handle tests). Strict typecheck clean. The full README + status doc sweep adds the test-double accuracy guarantee for `fakeTasks`/`stubTasks` per the [[feedback_test_doubles_meszaros]] convention.
+
+**Previously, 2026-06-13 — Executor harness round 2 — Effect.Stream pipeline + declarative hook surface + 4 providers refactored + lifecycle helper extraction + `defineLanguageModelExecutor`.** Second deep pass on the executor layer following round 1 (`BaseLanguageModelExecutor` introduction). This pass swapped the hand-rolled streaming loop for native Effect primitives, factored the v1 `createAdapter` borrowings into per-provider hooks, and consolidated lifecycle bookkeeping into a single shared helper. Four parts:
 
 1. **Effect.Stream-ified streaming pipeline.** `BaseLanguageModelExecutor.executeBody` now uses `Stream.fromAsyncIterable(providerStream)` + `Stream.mapConcat(mapChunk)` + `Stream.mapConcat(pipeline.process)` + `Stream.tap(accum.apply)` + `Stream.tap(bus emit)` + `Stream.tap(Queue.offer)`. `executeStream` forks the pipeline as a daemon fiber with `Queue.bounded(64)` between producer and iterator — real backpressure: when the consumer lags, `Queue.offer` blocks the upstream Stream, which pauses `Stream.fromAsyncIterable`'s pull from the provider SDK. Cancellation flows via `Fiber.interrupt(fiber)` + `Effect.tryPromise({ try: (signal) => … })`'s fiber-aware AbortSignal; the external `abort()` API + caller signal merge in via `withExternalAbort` (`Effect.race` against a watcher). 5 new tests in `base-effect-stream.spec.ts` verify: pipeline routing order, bounded backpressure (exact delta count N+6 for 200 chunks), `abort()` interruption, iterator `return()` interruption, bus emission.
 
@@ -14,6 +39,7 @@
 **Workspace:** 214/214 executor-layer tests passing (15-test conformance suite × 5 executors + 5 base-pipeline tests + 22 tag-parser tests + define-executor tests + define-language-model-executor tests + fake-language-model-executor tests + per-provider tests). Strict typecheck clean across executor packages. v2 modularity model preserved — no executor-anthropic/google/ai-sdk depends on executor-openai (the shared `StreamTagParser` lives in `@agentick/executor-next`).
 
 **v1 / other-library borrowings explicitly landed:**
+
 - v1 `createAdapter.mapChunk` → `BaseLanguageModelExecutor.mapChunk` (abstract)
 - v1 `createAdapter.reconstructRaw` → `BaseLanguageModelExecutor.reconstructRaw` (abstract)
 - v1 `DeltaTransform` pipeline + declarative `customBlocks` → `delta-transform.ts` + `tag-transforms.ts` + base's `adapterTransforms()` + `customBlocks` field
@@ -66,7 +92,7 @@ The strict-typecheck pass surfaced and fixed **~120 stale-fixture drift errors a
 
 **Workspace:** 1236/1236 v2 tests passing. Strict typecheck clean across all packages-next. Lint + format:check clean across the v2 tree. Pre-commit hook now covers all 30 v2 packages symmetrically.
 
-**Previously, 2026-06-12 — Test-double convention established + `@agentick/reconciler-next/testing` shipped with `fakeReconciler()`.** Per the Meszaros *xUnit Test Patterns* taxonomy: `fake*` for minimal working impls (default), `stub*` for canned answers, `spy*` for call recorders, `mock*` for expectations. Never `test*` — it collapses the taxonomy and loses information. Every layer ships its test doubles under a `/testing` subpath (CLAUDE.md's harness pattern applied across all layers). Doubles are typed against spec interfaces — when the spec changes, the doubles break at compile time. Adding `fakeReconciler` immediately caught two stale-spec drift bugs in the existing `define-reconciler.spec.ts` fake helper (`{warnings,errors}` diagnostics shape that's now `readonly ReconcileDiagnostic[]`, missing `iterations` field, dead `version` field, missing `MountResult.restoredFromSnapshot`) — exactly what the convention is designed to prevent. Fixed in this pass.
+**Previously, 2026-06-12 — Test-double convention established + `@agentick/reconciler-next/testing` shipped with `fakeReconciler()`.** Per the Meszaros _xUnit Test Patterns_ taxonomy: `fake*` for minimal working impls (default), `stub*` for canned answers, `spy*` for call recorders, `mock*` for expectations. Never `test*` — it collapses the taxonomy and loses information. Every layer ships its test doubles under a `/testing` subpath (CLAUDE.md's harness pattern applied across all layers). Doubles are typed against spec interfaces — when the spec changes, the doubles break at compile time. Adding `fakeReconciler` immediately caught two stale-spec drift bugs in the existing `define-reconciler.spec.ts` fake helper (`{warnings,errors}` diagnostics shape that's now `readonly ReconcileDiagnostic[]`, missing `iterations` field, dead `version` field, missing `MountResult.restoredFromSnapshot`) — exactly what the convention is designed to prevent. Fixed in this pass.
 
 **Follow-up (consistency cleanup):** existing test doubles using `Mock` / `mock` / `stub` prefixes are misnamed under the new convention since they're all working-impl shapes (Fakes per Meszaros). Rename in a separate pass: `MockLanguageModelExecutor → FakeLanguageModelExecutor`, `mockTimelineHarness → fakeTimelineHarness`, `stubBridges → fakeBridges`. Also move helpers like `stubBridges` from `bridges/` into `testing/` for consistency.
 
@@ -225,11 +251,11 @@ This establishes the v2 naming convention for first-party extensions: **`{layer}
 
 **Phase C — bench numbers** (full results in `packages/runtime/src/__bench__/substrate-bench-results.md`):
 
-| Path | Pre-Phase-B | Phase B | Phase C |
-|---|---:|---:|---:|
-| `OpenAIExecutor.run` 100 deltas + 1 sub (full hot path) | 1,558 hz | 2,679 hz (1.72×) | 2,448 hz (1.57× vs pre-B) |
-| `bus.publish(executor:delta)` 1 sub batching OFF | — | 175K hz | 299K hz (+70%) |
-| `bus.publish(executor:delta)` 3 subs batching OFF | — | 64K hz | 109K hz (+71%) |
+| Path                                                    | Pre-Phase-B |          Phase B |                   Phase C |
+| ------------------------------------------------------- | ----------: | ---------------: | ------------------------: |
+| `OpenAIExecutor.run` 100 deltas + 1 sub (full hot path) |    1,558 hz | 2,679 hz (1.72×) | 2,448 hz (1.57× vs pre-B) |
+| `bus.publish(executor:delta)` 1 sub batching OFF        |           — |          175K hz |            299K hz (+70%) |
+| `bus.publish(executor:delta)` 3 subs batching OFF       |           — |           64K hz |            109K hz (+71%) |
 
 The ring buffer made the unbatched baseline ~70% faster, which means **Phase B's relative batching win shrank from 1.89×/2.26× (Phase B) to 1.05×/1.16× (Phase C)** — but both absolute numbers are higher than Phase B's batched path. Net Phase B+C delivers ~1.5–1.6× on the executor hot path; most of it from Phase C's cursor pull, not Phase B's batching.
 
@@ -244,6 +270,7 @@ The ring buffer made the unbatched baseline ~70% faster, which means **Phase B's
 **Previously, 2026-06-05 — ADR 29 Phase B shipped: per-surface batched LocalEventBus + `publishBatch` direct path. Transparent ~1.7–1.9× win at one subscriber on the full OpenAI streaming path; 4.4× via explicit `publishBatch`. Honest writeup of the gap from ADR 29's 10× target (Phase A's `compileQuery` already moved the floor) in `packages/runtime/src/__bench__/substrate-bench-results.md`.**
 
 **ADR 29 Phase B (this commit)**:
+
 - **Spec** — `SurfaceBatchPolicy`, `SurfaceRetentionPolicy`, optional `JournalingPolicy.batch?`/`retention?` types added to `@agentick/spec-next/data/journaling-policy.ts`. Optional `EventBus.publishBatch?` added to `@agentick/spec-next/protocol/bus.ts` (technically-accurate Phase B name; renames to `appendBatch` when Phase C unifies under `EventLog<E>`).
 - **Runtime** — `LocalEventBus` gained a per-surface batch accumulator with two flush triggers (time-window via `setTimeout`, count-cap on push). `LocalEventBusOptions.batch?` accepts adopter policy; defaults to `DEFAULT_LOCAL_BUS_BATCH_POLICY` (exported constant — only `executor:delta` 8ms/4 ships by default; ADR 29 draft's `session:metric` was dead config keyed against a non-existent phase, dropped). `publishBatch` direct path bypasses the accumulator entirely. Chained close-drain (caught + fixed a race between `Effect.runFork(dispatch)` and `Effect.runFork(Queue.shutdown)` where queue could shut down first).
 - **Executors** — zero adapter code changes needed. `OpenAIExecutor extends BaseHarness<"executor">` + `emitDeltaLazy(streamOp, () => delta)` → `bus.publish` with `surface=executor phase=delta` automatically hits the batched path.
@@ -257,7 +284,7 @@ The ring buffer made the unbatched baseline ~70% faster, which means **Phase B's
 
 `@agentick/executor-google-next` shipped covering G9: full streaming + non-streaming through `@google/genai`, Vertex AI + Gemini Developer API paths via `clientOptions: GoogleGenAIOptions`, thoughtSignature round-trip for Gemini 3+ thinking (without it, multi-turn tool use returns `MISSING_THOUGHT_SIGNATURE`), `part.thought === true` routing to the reasoning channel (Gemini 2.5+), single-pass stream accumulator that builds `ContentBlock[]` directly during streaming, full 16-entry FinishReason map, `thoughtsTokenCount`/`cachedContentTokenCount` surfacing, `sanitizeSchemaForGemini` ported from v1, parseThinkTags + customBlocks via the shared `StreamTagParser`. 54/54 tests in the package (35 provider-specific + 15 conformance + 4 factory).
 
-**Layered providerOptions** landed across all four executors (closes G11): three new empty-seed augmentable interfaces in `@agentick/spec-next` (`ProviderClientOptions`, `ProviderOptions`, `ProviderToolOptions`) mirroring v1's `ProviderClientOptions`/`ProviderGenerationOptions`/`ProviderToolOptions` triad. Each adapter contributes its slots typed as the SDK's actual config types — no hand-rolled subsets. OpenAI: `OpenAI.ClientOptions` / `Partial<ChatCompletionCreateParams>` / `Partial<FunctionDefinition>`. Anthropic: `Anthropic.ClientOptions` / `Partial<MessageCreateParams>` / `Partial<AnthropicTool>`. Google: `GoogleGenAIOptions` / `GenerateContentConfig` / `Partial<FunctionDeclaration>`. Each executor's construction options now nest SDK config under `clientOptions` (replacing flat `apiKey`/`baseURL`/etc. fields).  `ToolDeclaration.providerOptions?` extends `ToolDeclaration`; `buildTools` in every executor forwards it through projection. **Anthropic `cacheControl` meta-knob removed entirely** — per-block cache control now flows via `BaseContentBlock.providerMetadata.anthropic.cacheControl` (per-block adopter stamps the specific block; executor reads it and stamps SDK `cache_control` on the corresponding param). `providerMetadata?` lifted from `ToolUseBlock` onto `BaseContentBlock` so every block type carries per-block round-trip data (Anthropic cache_control, Gemini thoughtSignature, future OpenAI logprobs).
+**Layered providerOptions** landed across all four executors (closes G11): three new empty-seed augmentable interfaces in `@agentick/spec-next` (`ProviderClientOptions`, `ProviderOptions`, `ProviderToolOptions`) mirroring v1's `ProviderClientOptions`/`ProviderGenerationOptions`/`ProviderToolOptions` triad. Each adapter contributes its slots typed as the SDK's actual config types — no hand-rolled subsets. OpenAI: `OpenAI.ClientOptions` / `Partial<ChatCompletionCreateParams>` / `Partial<FunctionDefinition>`. Anthropic: `Anthropic.ClientOptions` / `Partial<MessageCreateParams>` / `Partial<AnthropicTool>`. Google: `GoogleGenAIOptions` / `GenerateContentConfig` / `Partial<FunctionDeclaration>`. Each executor's construction options now nest SDK config under `clientOptions` (replacing flat `apiKey`/`baseURL`/etc. fields). `ToolDeclaration.providerOptions?` extends `ToolDeclaration`; `buildTools` in every executor forwards it through projection. **Anthropic `cacheControl` meta-knob removed entirely** — per-block cache control now flows via `BaseContentBlock.providerMetadata.anthropic.cacheControl` (per-block adopter stamps the specific block; executor reads it and stamps SDK `cache_control` on the corresponding param). `providerMetadata?` lifted from `ToolUseBlock` onto `BaseContentBlock` so every block type carries per-block round-trip data (Anthropic cache_control, Gemini thoughtSignature, future OpenAI logprobs).
 
 **Streaming adapter benchmarks landed** (`packages/executor-{openai,anthropic,google}/src/__bench__/streaming.bench.ts` + dated entry in REFACTOR-SCRATCHPAD `§2026-06-02`). Numbers: no-subscriber per-delta is ~2 μs across all three adapters (OpenAI 2.20 μs, Anthropic 1.72 μs, Google 1.79 μs); the dual-walk pattern in OpenAI/Anthropic costs only ~0.4 μs more than Google's single-pass. **The real cost is subscriber fan-out: +20 μs per delta the moment ONE subscriber attaches** — 10× the no-sub baseline. Drives ADR 29's prioritization (batching > leaner aggregation).
 
@@ -1169,7 +1196,7 @@ blueprint's design decisions; this is execution-level).
   cascade in App / Gateway / Session harnesses.** Replaced
   `{ ...DEFAULT_JOURNALING_POLICY, override: { ... } }` hand-spreads
   with `mergeLayered<JournalingPolicy>(DEFAULT_JOURNALING_POLICY,
-  options.policy, { override: { ... } })`. Adding fields to
+options.policy, { override: { ... } })`. Adding fields to
   `JournalingPolicy` no longer requires touching the three close-op
   override sites. Gateway's adopter-supplied `policy` now deep-merges
   through the cascade rather than per-field copy.
@@ -1194,8 +1221,8 @@ blueprint's design decisions; this is execution-level).
   cleanup.** Substrate-level overhaul of the elicit bridge.
   `ElicitationHarness` gains an `elicit-request` inbox message
   handler that runs an elicit locally and routes the result back via
-  `request-response`. `McpClientHarness` slot stores a *sessionId
-  string* (not an object reference); the SDK elicit handler routes
+  `request-response`. `McpClientHarness` slot stores a _sessionId
+  string_ (not an object reference); the SDK elicit handler routes
   via the substrate inbox to the session's elicit address — same
   protocol in-memory (LocalInbox) and cluster (ClusterInbox). The
   per-call slot stamp uses `Effect.acquireUseRelease` for
@@ -1203,12 +1230,12 @@ blueprint's design decisions; this is execution-level).
   harness publishes URL-mode payload, MCP bridge forwards URL
   elicits as consent-only terminals. `UnsupportedElicitationModeError`
   deleted (both modes wired). SDK exported `ElicitRequestFormParams |
-  ElicitRequestURLParams` union used directly (replaces hand-rolled
+ElicitRequestURLParams` union used directly (replaces hand-rolled
   type). `BaseHarness.address` made public — every harness exposes
   its cluster-portable inbox address. `ElicitationHarnessProtocol`
   gains `address: string`. Unrouted/ambiguous elicits emit
   `mcp:warning:routing-dropped` bus envelopes. URL-mode conformance
-  + capability handshake + concurrent in-session tests added.
+  - capability handshake + concurrent in-session tests added.
 - **#150 SessionExtension lifecycle wiring.** The `target: "session"`
   half of the extension union was a placeholder — AppHarness cached
   the extensions but never invoked them. Now wired:
@@ -1226,7 +1253,7 @@ blueprint's design decisions; this is execution-level).
   entirely.** Architectural floor for multi-tenant MCP.
   `McpClientHarness` is now per-(session, server); `elicitAddress`
   is fixed at construction (set to `SessionInstaller.elicitation
-  .address`). The `activeElicitSessionId` slot, the
+.address`). The `activeElicitSessionId` slot, the
   `Effect.acquireUseRelease` wrapper around `callTool`, the
   `resolveElicitAddress` callback, the cross-session ambiguity
   warning path — all gone. handlerRefs are per-session

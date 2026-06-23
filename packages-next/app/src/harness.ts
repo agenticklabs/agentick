@@ -31,6 +31,7 @@ import {
   ulid,
 } from "@agentick/runtime-next";
 import { ElicitationHarness } from "@agentick/elicitation-next";
+import { TasksHarness } from "@agentick/tasks-next";
 import { LoopExecutorHarness } from "@agentick/loop-executor-next";
 import { SessionHarness, type SessionHarnessOptions } from "@agentick/session-next";
 import {
@@ -1065,6 +1066,15 @@ export class AppHarness<P = unknown>
       { parentScope: { sessionId } },
     );
 
+    // Per-session tasks harness — substrate-level long-running tool
+    // registry. Surfaced on `ctx.tasks` for handlers, on
+    // `bridges.tasks` for JSX, and routed through the ToolExecutor's
+    // `tasks` slot so handlers returning a TaskHandle branch on the
+    // tool's `taskSupport` annotation (#156).
+    const tasks = new TasksHarness(`${sessionId}:tasks`, this.journal, this.bus, this.inbox, {
+      parentScope: { sessionId },
+    });
+
     // ── Session extension lifecycle (#150) ────────────────────────
     //
     // Run cached session-target extensions BEFORE constructing the
@@ -1158,6 +1168,7 @@ export class AppHarness<P = unknown>
           ...(mergedInitialTools !== undefined ? { initialTools: mergedInitialTools } : {}),
           handlerResolver: this.handlerResolver,
           elicitation,
+          tasks,
         });
 
     // Cascade: per-call `createSession.*` > per-app `session.*` >
@@ -1174,6 +1185,7 @@ export class AppHarness<P = unknown>
       executor: this.executor,
       toolExecutor: tools,
       elicitation,
+      tasks,
       target: this.target,
       defaultMaxTicks: input.maxTicks ?? this.sessionDefaults.defaultMaxTicks ?? 8,
       // Streaming cascade: per-session input.streaming > app-level

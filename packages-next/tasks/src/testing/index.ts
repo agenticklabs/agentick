@@ -10,5 +10,5 @@
  * but don't need a real registry.
  */
 
-export { fakeTasks, type FakeTasksBundle } from "./fake-tasks.js";
+export { fakeTasks, type FakeTasksBundle, type FakeTasksOptions } from "./fake-tasks.js";
 export { stubTasks, type StubTasksOptions } from "./stub-tasks.js";
