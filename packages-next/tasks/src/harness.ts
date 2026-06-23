@@ -287,6 +287,10 @@ export class TasksHarness extends BaseHarness<"tasks"> implements TasksHarnessPr
     record.fiber = fiber;
     void Effect.runPromise(Fiber.await(fiber))
       .then((exit) => {
+        // The fiber has finished one way or another — drop the
+        // reference so terminal records don't carry a dead handle.
+        // (cancel() may have already cleared it; this is idempotent.)
+        record.fiber = undefined;
         if (record.status === "cancelled") return; // cancel raced
         if (Exit.isSuccess(exit)) {
           this.transition(record, "completed");
@@ -375,12 +379,17 @@ export class TasksHarness extends BaseHarness<"tasks"> implements TasksHarnessPr
     record.controller.abort(reason);
     if (record.fiber !== undefined) {
       // Effect path — Fiber.interrupt propagates through Effect.sleep,
-      // Effect.async finalizers, Effect.gen yields, etc. We fire-and-
-      // forget: the cancel transition is already committed, and the
-      // fiber's Exit.Interrupt will be observed (and ignored due to
-      // the `status === "cancelled"` guard) by the runEffectWork
-      // continuation.
-      void Effect.runPromise(Fiber.interrupt(record.fiber)).catch(() => undefined);
+      // Effect.async finalizers, Effect.gen yields, etc. We AWAIT it:
+      // when `await cancel(taskId)` returns, the fiber's finalizers
+      // have run and the runtime has fully detached. This makes
+      // `close()` deterministic (no background fiber cleanup leaking
+      // past the harness shutdown) and gives single-task cancel the
+      // same "settled" guarantee. `.catch` is defensive — Fiber.interrupt
+      // is total in practice but we never want a finalizer defect to
+      // wedge the cancel call.
+      const fiber = record.fiber;
+      record.fiber = undefined;
+      await Effect.runPromise(Fiber.interrupt(fiber)).catch(() => undefined);
     }
   }
 

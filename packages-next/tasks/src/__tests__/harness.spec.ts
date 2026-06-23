@@ -473,6 +473,34 @@ describe("TasksHarness — Effect-typed work", () => {
     expect(bundle.harness.status(handle.taskId)).toBe("completed");
   });
 
+  it("await cancel() waits for the fiber's finalizers to complete (settled cancel)", async () => {
+    bundle = await fakeTasks();
+    const finalizerCalls = Effect.runSync(Ref.make(0));
+    // `acquireUseRelease` registers a release effect that runs on
+    // interrupt OR normal completion. We assert that by the time
+    // `await cancel()` returns, the release has bumped the counter —
+    // i.e., the harness did not return until the fiber was fully
+    // detached. The release intentionally takes 20ms to run, so
+    // fire-and-forget cancel would observe 0 immediately after cancel.
+    const handle = bundle.harness.submit(() =>
+      Effect.acquireUseRelease(
+        Effect.void,
+        () => Effect.sleep("60 seconds"),
+        () =>
+          Ref.update(finalizerCalls, (n) => n + 1).pipe(Effect.zipRight(Effect.sleep("20 millis"))),
+      ),
+    );
+    // Pre-drain the rejection so vitest doesn't flag an "unhandled
+    // rejection" during the awaited Fiber.interrupt window. The
+    // drained promise is held separately; `handle.result` remains the
+    // original rejected promise for the matcher below.
+    const drained = handle.result.catch((e: unknown) => e);
+    await new Promise((r) => setTimeout(r, 10));
+    await bundle.harness.cancel(handle.taskId);
+    expect(Effect.runSync(Ref.get(finalizerCalls))).toBe(1);
+    expect(await drained).toMatchObject({ status: "cancelled" });
+  });
+
   it("internal Effect.interrupt (not via cancel()) surfaces as TaskRejection { status: 'cancelled' }", async () => {
     bundle = await fakeTasks();
     // The work fn self-interrupts — no external cancel() involved.
