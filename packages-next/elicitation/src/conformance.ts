@@ -72,6 +72,19 @@ export interface ElicitationConformanceShell {
    * `metadata.correlationId`. Remote impls tap the outbound transport.
    */
   nextCorrelationId(): Promise<string>;
+  /**
+   * Resolves with the FULL next outbound elicitation request envelope
+   * — payload, metadata, etc. Used by mode-specific tests that need
+   * to assert wire shape (URL-mode field presence, schema-mode
+   * absence-of-schema-for-url, etc.). Same subscription discipline
+   * as {@link nextCorrelationId}: call BEFORE `elicit(...)`.
+   */
+  nextEnvelope(): Promise<
+    Readonly<{
+      readonly payload?: unknown;
+      readonly metadata?: Readonly<{ readonly correlationId?: string; readonly replyTo?: string }>;
+    }>
+  >;
   close(): Promise<void>;
 }
 
@@ -268,6 +281,92 @@ export function runElicitationHarnessConformance(factory: ElicitationConformance
         if (result.outcome === "cancelled") {
           expect(result.reason).toBe("modal dismissed");
         }
+      } finally {
+        await shell.close();
+      }
+    });
+  });
+
+  describe("ElicitationHarnessProtocol — URL mode", () => {
+    it("URL-mode accepted resolves to { outcome: 'accepted', value: undefined } (consent-only)", async () => {
+      const shell = await factory({ harnessId: "elic-url-accept-1" });
+      try {
+        const idP = shell.nextCorrelationId();
+        const pending = shell.harness.elicit({
+          mode: "url",
+          message: "Open OAuth page",
+          url: "https://example.com/oauth?state=abc",
+          elicitationId: "el-url-1",
+        });
+        const correlationId = await idP;
+        // Any value sent is ignored — URL mode is consent-only.
+        await shell.harness.respond({
+          correlationId,
+          outcome: "accepted",
+          value: { ignored: true },
+        });
+        const result = await pending;
+        expect(result.outcome).toBe("accepted");
+        if (result.outcome === "accepted") {
+          expect(result.value).toBeUndefined();
+        }
+      } finally {
+        await shell.close();
+      }
+    });
+
+    it("URL-mode declined / cancelled pass through verbatim", async () => {
+      const shell = await factory({ harnessId: "elic-url-decline-1" });
+      try {
+        const idP = shell.nextCorrelationId();
+        const pending = shell.harness.elicit({
+          mode: "url",
+          message: "Open OAuth page",
+          url: "https://example.com/oauth",
+          elicitationId: "el-url-2",
+        });
+        const correlationId = await idP;
+        await shell.harness.respond({
+          correlationId,
+          outcome: "declined",
+          reason: "user said no",
+        });
+        const result = await pending;
+        expect(result).toEqual({ outcome: "declined", reason: "user said no" });
+      } finally {
+        await shell.close();
+      }
+    });
+
+    it("URL-mode wire payload carries url + elicitationId, NO schema", async () => {
+      const shell = await factory({ harnessId: "elic-url-wire-1" });
+      try {
+        const envP = shell.nextEnvelope();
+        const pending = shell.harness.elicit({
+          mode: "url",
+          message: "Open OAuth page",
+          url: "https://example.com/oauth",
+          elicitationId: "el-url-3",
+          hints: { kind: "oauth" },
+        });
+        const env = await envP;
+        const payload = env.payload as {
+          mode?: string;
+          url?: string;
+          elicitationId?: string;
+          schema?: unknown;
+          hints?: Record<string, unknown>;
+        };
+        expect(payload.mode).toBe("url");
+        expect(payload.url).toBe("https://example.com/oauth");
+        expect(payload.elicitationId).toBe("el-url-3");
+        expect(payload.schema).toBeUndefined();
+        expect(payload.hints).toEqual({ kind: "oauth" });
+        await shell.harness.respond({
+          correlationId: env.metadata!.correlationId as string,
+          outcome: "cancelled",
+        });
+        await pending;
       } finally {
         await shell.close();
       }

@@ -49,12 +49,12 @@ import type {
   OperationJournal,
   StandardSchemaResult,
   StandardSchemaV1,
-  UnsupportedElicitationModeError,
   UrlElicitationRequest,
 } from "@agentick/spec-next";
 import { toJsonSchema } from "@agentick/spec-next";
 
 import { ELICITATION_CHANNEL } from "./channel.js";
+import type { ElicitRequestInboxPayload } from "./inbox-protocol.js";
 
 // ============================================================================
 // Constants
@@ -126,46 +126,39 @@ export class ElicitationHarness
     request: ElicitationRequest<TSchema>,
     opts: { readonly timeoutMs?: number; readonly signal?: AbortSignal } = {},
   ): Promise<ElicitationResult<InferOutput<TSchema>> | ElicitationResult<undefined>> {
-    // URL mode is declared in the protocol shape for future MCP
-    // integration but not yet wired. Throw a tagged developer-misuse
-    // error rather than a result-union outcome — "you used a feature
-    // that doesn't exist yet" is not a semantic terminal of an
-    // elicitation; it's a wiring gap that needs developer attention
-    // with a stack trace. When URL-mode lands this branch is replaced
-    // with the real implementation; consumer code pattern-matching
-    // against the result union doesn't need to change.
     if (request.mode === "url") {
-      throw {
-        _tag: "UnsupportedElicitationModeError",
-        mode: "url",
-        message:
-          "URL-mode elicitation is staged on the protocol surface but not " +
-          "yet wired. Track progress alongside the MCP integration roadmap.",
-      } satisfies UnsupportedElicitationModeError;
+      return await this.elicitUrl(request, opts);
     }
+    return await this.elicitForm(request, opts);
+  }
 
-    // Form mode below. The discriminator narrowing above guarantees
-    // `request` is a `FormElicitationRequest<TSchema>`.
-    const formRequest = request;
+  private async elicitForm<TSchema extends StandardSchemaV1>(
+    request: FormElicitationRequest<TSchema>,
+    opts: { readonly timeoutMs?: number; readonly signal?: AbortSignal },
+  ): Promise<ElicitationResult<InferOutput<TSchema>>> {
     const timeoutMs = opts.timeoutMs ?? this.defaultTimeoutMs;
 
     // Project the live StandardSchemaV1 to a JSON Schema on the wire.
     // Functions are not serializable; transports MUST NOT see the
     // validator. Server-side keeps `request.schema` for re-validation.
-    const wireSchema = toJsonSchema(formRequest.schema);
-    const payload: WirePayload = {
+    const wireSchema = toJsonSchema(request.schema);
+    const payload: FormWirePayload = {
       mode: "form",
-      message: formRequest.message,
+      message: request.message,
       schema: wireSchema,
-      ...(formRequest.hints !== undefined ? { hints: formRequest.hints } : {}),
-      ...(formRequest.metadata !== undefined ? { metadata: formRequest.metadata } : {}),
+      ...(request.hints !== undefined ? { hints: request.hints } : {}),
+      ...(request.metadata !== undefined ? { metadata: request.metadata } : {}),
     };
 
-    const effect = this.request<WirePayload, ElicitationResponse>(ELICITATION_CHANNEL, payload, {
-      timeoutMs,
-      ...(opts.signal !== undefined ? { signal: opts.signal } : {}),
-      ...(this.parentScope !== undefined ? { scope: this.parentScope } : {}),
-    });
+    const effect = this.request<FormWirePayload, ElicitationResponse>(
+      ELICITATION_CHANNEL,
+      payload,
+      {
+        timeoutMs,
+        ...(opts.signal !== undefined ? { signal: opts.signal } : {}),
+        ...(this.parentScope !== undefined ? { scope: this.parentScope } : {}),
+      },
+    );
 
     // `Effect.either` keeps the typed RequestError accessible — bare
     // `Effect.runPromise` would wrap it in a FiberFailure and strip
@@ -178,9 +171,54 @@ export class ElicitationHarness
     const response = either.right;
 
     if (response.outcome === "accepted") {
-      return await this.validateAccepted(formRequest.schema, response);
+      return await this.validateAccepted(request.schema, response);
     }
     // declined | cancelled pass through verbatim.
+    return {
+      outcome: response.outcome,
+      ...(response.reason !== undefined ? { reason: response.reason } : {}),
+    };
+  }
+
+  private async elicitUrl(
+    request: UrlElicitationRequest,
+    opts: { readonly timeoutMs?: number; readonly signal?: AbortSignal },
+  ): Promise<ElicitationResult<undefined>> {
+    const timeoutMs = opts.timeoutMs ?? this.defaultTimeoutMs;
+
+    // URL mode carries no schema. The semantic terminal of "accepted"
+    // is "the user consented to open the URL" — NOT "the out-of-band
+    // interaction completed." Out-of-band completion is a separate
+    // notification (TBD). For now, accepted maps to value=undefined;
+    // adopters wiring OAuth-style flows (#134b) layer a completion
+    // notification on top of this consent signal.
+    const payload: UrlWirePayload = {
+      mode: "url",
+      message: request.message,
+      url: request.url,
+      elicitationId: request.elicitationId,
+      ...(request.hints !== undefined ? { hints: request.hints } : {}),
+      ...(request.metadata !== undefined ? { metadata: request.metadata } : {}),
+    };
+
+    const effect = this.request<UrlWirePayload, ElicitationResponse>(ELICITATION_CHANNEL, payload, {
+      timeoutMs,
+      ...(opts.signal !== undefined ? { signal: opts.signal } : {}),
+      ...(this.parentScope !== undefined ? { scope: this.parentScope } : {}),
+    });
+
+    const either = await Effect.runPromise(effect.pipe(Effect.either));
+    if (Either.isLeft(either)) {
+      return toFailureResult<undefined>(either.left);
+    }
+    const response = either.right;
+
+    if (response.outcome === "accepted") {
+      // No `value` channel — URL-mode accepted means "user consented
+      // to open the URL." Any value the client sent alongside is
+      // ignored; the contract is just consent.
+      return { outcome: "accepted", value: undefined };
+    }
     return {
       outcome: response.outcome,
       ...(response.reason !== undefined ? { reason: response.reason } : {}),
@@ -249,17 +287,65 @@ export class ElicitationHarness
   }
 
   /**
-   * No subclass-specific inbox messages — `request-response`
-   * envelopes are intercepted by `BaseHarness.dispatchMessage` before
-   * this method is consulted, and that's the only message type this
-   * harness expects. Anything else is a routing bug — fail loud.
+   * Inbox dispatch:
+   *
+   *   - `request-response` → auto-intercepted by `BaseHarness`. Not
+   *     seen here.
+   *   - `elicit-request` → cross-harness RPC. Another harness (MCP's
+   *     bridge today; future workspace/roots bridges later) sends
+   *     this to drive a form- or url-mode elicit through THIS
+   *     harness's local code path, then routes the reply back to the
+   *     caller's address as a `request-response` envelope keyed by
+   *     the supplied `correlationId`. Same protocol cluster-side and
+   *     in-process.
+   *   - Anything else → routing bug; fail loud.
    */
   protected handleMessage(
     msg: MessageEnvelope,
   ): Effect.Effect<unknown, MessageHandlerError, never> {
+    if (msg.type === "elicit-request") {
+      return this.handleElicitRequest(msg as MessageEnvelope<ElicitRequestInboxPayload>);
+    }
     return Effect.fail({
       _tag: "HandlerError",
       cause: `Unknown elicitation message type: ${String((msg as { type?: string }).type)}`,
+    });
+  }
+
+  /**
+   * Run an elicit on behalf of another harness reached via inbox.
+   * The caller stamped `replyTo` + `correlationId` on the message;
+   * we route the result back as a `request-response` envelope so the
+   * caller's `BaseHarness.dispatchMessage` auto-intercept resolves
+   * its pending Deferred. Errors during elicit() are mapped to
+   * `outcome: "failed"` so the caller always sees a typed terminal.
+   */
+  private handleElicitRequest(
+    msg: MessageEnvelope<ElicitRequestInboxPayload>,
+  ): Effect.Effect<unknown, MessageHandlerError, never> {
+    if (msg.payload === undefined) {
+      return Effect.fail({
+        _tag: "HandlerError",
+        cause: "elicit-request envelope missing payload",
+      });
+    }
+    const { request, replyTo, correlationId } = msg.payload;
+    return Effect.tryPromise<unknown, MessageHandlerError>({
+      try: async () => {
+        const result =
+          request.mode === "url"
+            ? await this.elicit(request)
+            : await this.elicit(request as FormElicitationRequest<StandardSchemaV1>);
+        await Effect.runPromise(
+          this.inbox.send(replyTo, {
+            type: "request-response",
+            correlationId,
+            payload: { correlationId, response: result },
+          }),
+        );
+        return undefined;
+      },
+      catch: (cause): MessageHandlerError => ({ _tag: "HandlerError", cause }),
     });
   }
 
@@ -294,10 +380,19 @@ export class ElicitationHarness
 // Internal helpers + types
 // ============================================================================
 
-interface WirePayload {
+interface FormWirePayload {
   readonly mode: "form";
   readonly message: string;
   readonly schema: Readonly<Record<string, unknown>>;
+  readonly hints?: Readonly<Record<string, unknown>>;
+  readonly metadata?: Readonly<Record<string, unknown>>;
+}
+
+interface UrlWirePayload {
+  readonly mode: "url";
+  readonly message: string;
+  readonly url: string;
+  readonly elicitationId: string;
   readonly hints?: Readonly<Record<string, unknown>>;
   readonly metadata?: Readonly<Record<string, unknown>>;
 }

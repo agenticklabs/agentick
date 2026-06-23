@@ -76,8 +76,13 @@ export function stubElicitation(options: StubElicitationOptions = {}): Elicitati
     return Promise.resolve(cannedResult);
   }
 
+  const id = options.id ?? "stub-elicitation";
   return {
-    id: options.id ?? "stub-elicitation",
+    id,
+    // Mirrors `BaseHarness.address` convention so the stub satisfies
+    // the protocol's address surface without spinning up a real
+    // substrate.
+    address: `elicitation:${id}`,
     ready: Promise.resolve(),
     elicit: elicitImpl,
     async respond(_response: ElicitationResponse): Promise<void> {

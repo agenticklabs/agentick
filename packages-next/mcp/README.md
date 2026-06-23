@@ -129,11 +129,52 @@ testing the harness end-to-end without spawning a subprocess.
   shapes, completion builders enforce the 100-cap, in-memory linked
   pair round-trips a message.
 
+## Connection lifecycle
+
+Today `withMCP` is an **AppExtension** — one McpClientHarness per
+server, **shared across every session in the app**. That sharing has
+a known race:
+
+> Concurrent `callTool` invocations from **different sessions**
+> through the same MCP connection share a single elicit resolver
+> slot. Cross-session ambiguous routing is best-effort and emits
+> `mcp:warning:routing-dropped` envelopes when the resolver can't be
+> resolved.
+
+**Architectural fix — per-session McpClientHarness (#151)**. Each
+session owns its connection per server; the elicit address is fixed
+at construction; the slot disappears; concurrent calls from different
+sessions become impossible by construction. This is the **right
+posture** for multi-tenant — the MCP spec binds OAuth tokens, `Mcp-
+Session-Id`, and authorization to the connection. Sharing a
+connection across users is a wire violation; sharing across same-user
+sessions still couples auth contexts that should remain independent.
+
+#### ⚠️ FUTURE OPTIMIZATION — connection pooling (track in coming weeks)
+
+Per-session fan-out costs N×M connections for N sessions × M
+servers. Acceptable for HTTP-remote streams; wasteful for stateless
+local stdio servers (mcp-everything, filesystem) and for huge
+multi-tenant deployments.
+
+The follow-up is a **connection pool keyed by authentication
+principal**:
+
+- Pool holds open connections keyed by `(serverId, auth principal)`.
+- Sessions **check connections out** for the duration of a tick / a
+  callTool, and **check them back in** when done.
+- Same principal → connection sharing (cheap). Different principals →
+  isolation (correct).
+- `Mcp-Session-Id` (Streamable HTTP) makes connections cleanly
+  resumable across check-outs.
+
+The pool sits **beneath** McpClientHarness — a `connection:
+McpConnectionRef` indirection — so nothing above changes. Defer until
+production load demands it; design space documented in
+[`docs/proposals/v2/blueprint/23-mcp-as-harness.md`](../../docs/proposals/v2/blueprint/23-mcp-as-harness.md).
+
 ## Roadmap & known gaps
 
-- **No harness yet.** McpClientHarness lands in #2; the
-  `bridges.mcp` slot is typed as `McpHookBridge | undefined` in the
-  augmentation today.
 - **No version negotiation.** The era-codec layer (canonical = draft
   shape; codecs for 2025-11-25, 2024-11-05) lands with the harness.
 - **OAuth flow is bootstrap-only today.** `DefaultOAuthProvider` logs
@@ -141,5 +182,9 @@ testing the harness end-to-end without spawning a subprocess.
   elicitation integration lands with #5.
 - **No stdio / streamable-http transport.** In-memory transport for
   tests is the only transport here. Real transports land with #2 / #5.
+- **Per-session McpClientHarness (#151)** + **SessionExtension
+  lifecycle (#150)** outstanding. See "Connection lifecycle" above.
+- **Connection pool (deferred, coming weeks)** — see "Connection
+  lifecycle".
 
 @see [`docs/proposals/v2/blueprint/23-mcp-as-harness.md`](../../docs/proposals/v2/blueprint/23-mcp-as-harness.md)

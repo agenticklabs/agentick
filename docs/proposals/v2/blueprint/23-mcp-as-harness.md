@@ -161,6 +161,57 @@ The TS MCP SDK v2 moved to **Standard-Schema** (Zod / Valibot / ArkType / TypeBo
 
 Each MCP connection is `BaseHarness<"mcp">`. This decision from the original ADR holds against the draft spec — even though the draft removes protocol-level session state, the *client* still has per-connection state (capability cache, pending requests, MRTR-loop state, auth tokens, reconnect bookkeeping). The harness is the right home for that state.
 
+### Scope: per-session (target), per-app (today)
+
+**Architectural intent: per-session McpClientHarness.** Each agentick
+session owns its connection per server. Reasons:
+
+- **MCP binds auth to the connection.** OAuth tokens, `Mcp-Session-Id`,
+  server authorization decisions are per-connection. Different users
+  on one agentick host MUST have different connections (different
+  tokens). Sharing across users is a wire violation.
+- **Concurrent elicit routing is solved by construction.** A
+  per-session harness's elicit address is fixed at construction; no
+  slot, no cross-session race.
+- **Per-session OAuth scopes / contexts.** Even same-user-different-
+  sessions wants isolation (debug session vs prod session shouldn't
+  share OAuth scopes).
+
+**Current state (#133, #149):** `withMCP` is an AppExtension that
+constructs one harness per server, shared across sessions. The
+elicit-bridge routes inbound elicits via inbox to the active
+session's elicit address; the slot races on cross-session concurrent
+calls (best-effort, surfaced via `mcp:warning:routing-dropped`).
+This works for single-user CLIs and is the right cleanup posture
+before per-session SessionExtension wiring lands.
+
+**Per-session lands as #150 (SessionExtension lifecycle) + #151
+(per-session McpClientHarness)**.
+
+### ⚠️ FUTURE OPTIMIZATION — connection pool keyed by auth principal
+
+Per-session connection fan-out costs N×M connections for N sessions
+× M servers. Acceptable for HTTP-remote streams; wasteful for
+stateless local stdio servers (mcp-everything, filesystem
+adapters) and for huge multi-tenant deployments.
+
+**The follow-up — connection pool layer beneath McpClientHarness:**
+
+- Pool holds open connections keyed by `(serverId, authPrincipal)`.
+- Sessions **check connections out** for the duration of a tick / a
+  callTool, and **check them back in** when done.
+- Same principal → connection sharing (cheap). Different principals
+  → isolation (wire-correct).
+- `Mcp-Session-Id` makes Streamable HTTP connections cleanly
+  resumable across check-outs.
+- The pool sits *beneath* McpClientHarness — a `connection:
+  McpConnectionRef` indirection — so nothing above the harness
+  changes when the pool is introduced.
+
+**Defer until production load demands it** (estimated horizon: weeks
+after #151 lands; track via load-test data). The abstraction layer
+is straightforward; we want real workload numbers before optimizing.
+
 ### `MCPHarness` surface
 
 ```ts

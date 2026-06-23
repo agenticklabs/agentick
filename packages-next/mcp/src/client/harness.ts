@@ -47,13 +47,14 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { ElicitRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
 
-import type { ElicitationHarnessProtocol } from "@agentick/spec-next";
+import type { ElicitationResult } from "@agentick/spec-next";
+import type { RequestResponseRegistry } from "@agentick/runtime-next";
 
 import { McpLifecycle } from "./lifecycle.js";
 import type { McpClientHarnessOptions, McpClientState, McpToolDescriptor } from "./types.js";
 import type { EraCodec } from "./era-codec.js";
 import { DraftPassthroughCodec, selectCodec } from "./era-codec.js";
-import { makeElicitRequestHandler, type ElicitResolverSlot } from "./elicit-bridge.js";
+import { makeElicitRequestHandler, type ElicitAddressSlot } from "./elicit-bridge.js";
 
 // ============================================================================
 // Errors
@@ -89,21 +90,31 @@ export class McpClientHarness extends BaseHarness<"mcp"> {
   private codec: EraCodec;
   private client: Client | undefined;
   /**
-   * Per-call elicit resolver. Set+cleared around each {@link callTool}
-   * invocation that passes `opts.elicitResolver`. The SDK's
-   * `ElicitRequestSchema` handler (installed in {@link makeClient})
-   * reads from this slot when the server fires `elicitation/create`.
+   * Active session id — set+cleared around each {@link callTool}
+   * invocation that passes `opts.elicitSessionId` via
+   * {@link Effect.acquireUseRelease}. The SDK's `ElicitRequestSchema`
+   * handler reads from this slot at inbound-elicit dispatch time and
+   * routes through the substrate's inbox (cluster-friendly).
    *
-   * Single-slot v0 — see `./elicit-bridge.ts` for the concurrency
-   * caveat. Concurrent elicit-routed `callTool` invocations through
-   * the SAME harness instance share this slot; correlation-id
-   * disambiguation is deferred until MCP ships stable
-   * `relatedRequestId` on inbound requests.
+   * **v0 caveat (#149)**: single-slot per harness — concurrent
+   * elicit-routed callTool invocations from different sessions race.
+   * Best-effort routing emits `mcp:warning:routing-dropped` envelopes
+   * when ambiguous. The architectural fix (#151) is per-session
+   * harness construction, which collapses the slot to a single
+   * fixed sessionId at construction time.
    */
-  private activeElicitResolver: ElicitationHarnessProtocol | undefined;
-  private readonly elicitResolverSlot: ElicitResolverSlot = {
-    current: () => this.activeElicitResolver,
+  private activeElicitSessionId: string | undefined;
+  private readonly elicitAddressSlot: ElicitAddressSlot = {
+    current: () => this.activeElicitSessionId,
   };
+  /**
+   * Resolver function from sessionId → elicit harness address.
+   * Supplied by `withMCP` at construction; the SDK elicit handler
+   * uses it to look up the routing target. In-memory: walks
+   * `installer.app.getSession(id)?.elicitation.address`. Cluster
+   * (#151+): would walk a cluster directory keyed by sessionId.
+   */
+  private readonly resolveElicitAddress: (sessionId: string) => string | undefined;
 
   constructor(
     scopeId: string,
@@ -116,6 +127,7 @@ export class McpClientHarness extends BaseHarness<"mcp"> {
     this.serverId = options.serverId;
     this.options = options;
     this.codec = options.codec ?? DraftPassthroughCodec;
+    this.resolveElicitAddress = options.resolveElicitAddress ?? ((_sessionId: string) => undefined);
     this.lifecycle = new McpLifecycle({
       ...(options.reconnect !== undefined ? { reconnect: options.reconnect } : {}),
       onReconnect: () => this.reconnect(),
@@ -199,21 +211,23 @@ export class McpClientHarness extends BaseHarness<"mcp"> {
 
   /**
    * Call a tool on the server. Wraps `tools/call`; result is the raw
-   * SDK shape — the `withMCP` ToolBridge (#3) maps it into the local
+   * SDK shape — the `withMCP` ToolBridge maps it into the local
    * ToolExecutor's `ContentBlock[]` shape.
    *
-   * `opts.elicitResolver` activates inbound elicit routing for the
+   * `opts.elicitSessionId` activates inbound elicit routing for the
    * duration of this call. When the server fires `elicitation/create`
-   * while this call is in flight, the SDK's registered handler routes
-   * the request through the supplied {@link ElicitationHarnessProtocol}.
-   * Single-slot per harness (see {@link activeElicitResolver}) — if
-   * two concurrent elicit-routed calls land on the same harness, the
-   * second one's resolver overwrites the first.
+   * mid-call, the SDK handler routes the request via inbox to the
+   * session's elicit harness — interrupt-safe via
+   * `Effect.acquireUseRelease`.
+   *
+   * **v0 caveat (#149)**: concurrent calls from different sessions
+   * race on the single slot. Architectural fix is per-session
+   * harness (#151).
    */
   callTool(
     name: string,
     args?: Readonly<Record<string, unknown>>,
-    opts?: { readonly elicitResolver?: ElicitationHarnessProtocol },
+    opts?: { readonly elicitSessionId?: string },
   ): Promise<CallToolResult> {
     const op: Operation<{ name: string; args: typeof args }, CallToolResult> = {
       opId: `mcp:${this.serverId}:call-tool:${ulid()}`,
@@ -222,40 +236,44 @@ export class McpClientHarness extends BaseHarness<"mcp"> {
       scope: { sessionId: this.scopeId },
       input: { name, args },
     };
-    const prior = this.activeElicitResolver;
-    if (opts?.elicitResolver !== undefined) {
-      this.activeElicitResolver = opts.elicitResolver;
-    }
-    const restore = (): void => {
-      if (opts?.elicitResolver !== undefined) {
-        this.activeElicitResolver = prior;
-      }
-    };
+    const incoming = opts?.elicitSessionId;
     return runHarnessProtocol(
-      this.runOperation(op, (i) =>
-        Effect.tryPromise({
+      this.runOperation(op, (i) => {
+        const body = Effect.tryPromise({
           try: async (): Promise<CallToolResult> => {
             const c = this.requireReadyClient();
-            try {
-              // SDK's `callTool` return type is a union covering a legacy
-              // `{toolResult}` shape; cast to the modern `{content}`
-              // shape so downstream consumers (ToolBridge in #3) work
-              // against one type.
-              const res = (await c.callTool({
-                name: i.name,
-                arguments: i.args as Record<string, unknown> | undefined,
-              })) as CallToolResult;
-              return res;
-            } finally {
-              restore();
-            }
+            // SDK's `callTool` return type is a union covering a legacy
+            // `{toolResult}` shape; cast to the modern `{content}`
+            // shape so downstream consumers (ToolBridge) work against
+            // one type.
+            const res = (await c.callTool({
+              name: i.name,
+              arguments: i.args as Record<string, unknown> | undefined,
+            })) as CallToolResult;
+            return res;
           },
-          catch: (cause) => {
-            restore();
-            return cause as McpClientError;
-          },
-        }),
-      ),
+          catch: (cause) => cause as McpClientError,
+        });
+        if (incoming === undefined) {
+          return body;
+        }
+        // Effect-native acquire/use/release for the per-call elicit
+        // slot. The release branch fires for normal completion, error,
+        // AND fiber interruption — strictly stronger than the
+        // try/finally + catch-callback shape this replaces.
+        return Effect.acquireUseRelease(
+          Effect.sync((): string | undefined => {
+            const prior = this.activeElicitSessionId;
+            this.activeElicitSessionId = incoming;
+            return prior;
+          }),
+          () => body,
+          (prior) =>
+            Effect.sync(() => {
+              this.activeElicitSessionId = prior;
+            }),
+        );
+      }),
     );
   }
 
@@ -341,11 +359,12 @@ export class McpClientHarness extends BaseHarness<"mcp"> {
 
   private makeClient(): Client {
     const capabilities = (this.options.capabilities ?? {
-      // Substrate-required: elicitation form-mode is always declared
-      // so MCP servers can elicit from the user. URL mode + roots /
-      // sampling capabilities mix in when the corresponding bridge
-      // is wired (#4, #5).
-      elicitation: { form: {} },
+      // Substrate-required: both form and URL elicitation modes are
+      // declared so MCP servers can elicit from the user via either
+      // path. Routing happens at handler dispatch time through the
+      // per-call elicit resolver slot. Roots / sampling capabilities
+      // mix in when those bridges are wired (#5+).
+      elicitation: { form: {}, url: {} },
     }) as Record<string, unknown>;
     const client = new Client(
       {
@@ -355,12 +374,22 @@ export class McpClientHarness extends BaseHarness<"mcp"> {
       { capabilities },
     );
     // Bind the inbound `elicitation/create` handler once at client
-    // construction. The handler reads the per-call resolver slot at
-    // dispatch time; an empty slot returns `{ action: "cancel" }` so
-    // unrouted elicits terminate cleanly on the server's side.
+    // construction. The handler reads the active sessionId slot at
+    // dispatch time and routes via inbox to the session's elicit
+    // harness — same path in-memory and cluster. Unrouted elicits
+    // (no active session, address lookup miss) cleanly cancel + emit
+    // `mcp:warning:routing-dropped` for observability.
     client.setRequestHandler(
       ElicitRequestSchema,
-      makeElicitRequestHandler(this.elicitResolverSlot),
+      makeElicitRequestHandler(this.elicitAddressSlot, {
+        inbox: this.inbox,
+        bus: this.bus,
+        replyToAddress: this.address,
+        requests: this.requests as RequestResponseRegistry<ElicitationResult<unknown>>,
+        resolveElicitAddress: this.resolveElicitAddress,
+        serverId: this.serverId,
+        defaultTimeoutMs: this.options.elicitTimeoutMs ?? 5 * 60_000,
+      }),
     );
     return client;
   }

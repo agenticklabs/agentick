@@ -37,12 +37,8 @@ import { describe, expect, it } from "vitest";
 
 import { createApp } from "@agentick/app-next/react";
 import { FakeLanguageModelExecutor } from "@agentick/executor-next";
-import {
-  LocalEventBus,
-  LocalInbox,
-  MemoryJournal,
-  type EventEnvelope,
-} from "@agentick/runtime-next";
+import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
+import type { EventEnvelope } from "@agentick/spec-next";
 
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
@@ -80,7 +76,7 @@ async function mkElicitingServer(): Promise<{
   const [clientTransport, serverTransport] = InMemoryMcpTransport.createLinkedPair();
   const server = new Server(
     { name: "eliciting-mcp-server", version: "1.0.0" },
-    { capabilities: { tools: {}, elicitation: {} } },
+    { capabilities: { tools: {} } },
   );
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
@@ -268,6 +264,306 @@ describe("ElicitationBridge — server-to-client elicit routing (#133)", () => {
 
     const content = await dispatchP;
     expect((content[0] as { text: string }).text).toBe("no answer (cancel)");
+
+    await session.close();
+    await app.closeApp();
+    await server.close();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// URL-mode bridge (#134a) — server fires `elicitation/create` with
+// `mode: "url"`; the bridge forwards through the harness's URL-mode
+// elicit; user consents (or declines/cancels); the SDK serializes the
+// reply as a three-action ElicitResult.
+// ---------------------------------------------------------------------------
+
+async function mkUrlElicitingServer(): Promise<{
+  readonly server: Server;
+  readonly clientTransport: InMemoryMcpTransport;
+}> {
+  const [clientTransport, serverTransport] = InMemoryMcpTransport.createLinkedPair();
+  const server = new Server(
+    { name: "url-eliciting-mcp-server", version: "1.0.0" },
+    { capabilities: { tools: {} } },
+  );
+
+  server.setRequestHandler(ListToolsRequestSchema, async () => ({
+    tools: [
+      {
+        name: "start_oauth",
+        description: "starts an OAuth flow via a URL-mode elicitation",
+        inputSchema: { type: "object", properties: {} },
+      },
+    ],
+  }));
+
+  server.setRequestHandler(CallToolRequestSchema, async () => {
+    const elicitResult = await server.elicitInput({
+      mode: "url",
+      message: "Open your bank's OAuth page to authorize",
+      url: "https://example.com/oauth?state=abc",
+      elicitationId: "oauth-flow-1",
+    });
+    return {
+      content: [{ type: "text" as const, text: `oauth: ${elicitResult.action}` }],
+    };
+  });
+
+  await server.connect(serverTransport);
+  return { server, clientTransport };
+}
+
+describe("ElicitationBridge — capability + concurrency (#149)", () => {
+  it("client advertises elicitation form + url modes by default", async () => {
+    const bus = new LocalEventBus();
+    const { server, clientTransport } = await mkElicitingServer();
+
+    const app = await createApp(React.createElement(Agent), {
+      executor: await mkExecutor(),
+      bus,
+      journal: new MemoryJournal(),
+      inbox: new LocalInbox(),
+      extensions: [
+        withMCP({
+          servers: [{ serverId: "caps", transport: clientTransport, auth: new NoneAuth() }],
+        }),
+      ],
+    });
+
+    // The server's `getClientCapabilities()` reflects what the client
+    // advertised during the initialize handshake. Default should
+    // include both form and url elicitation modes.
+    const caps = server.getClientCapabilities();
+    expect(caps?.elicitation).toEqual({ form: {}, url: {} });
+
+    await app.closeApp();
+    await server.close();
+  });
+
+  it("two concurrent in-session elicits route by correlationId — no cross-talk", async () => {
+    // Test the within-session concurrent path. Two callTool invocations
+    // from the same session each fire elicits in parallel; harness's
+    // correlation registry MUST route each user response to the right
+    // pending call.
+    const [clientTransport, serverTransport] = InMemoryMcpTransport.createLinkedPair();
+    const server = new Server(
+      { name: "two-elicit-server", version: "1.0.0" },
+      { capabilities: { tools: {} } },
+    );
+    server.setRequestHandler(ListToolsRequestSchema, async () => ({
+      tools: [
+        {
+          name: "ask",
+          inputSchema: {
+            type: "object",
+            properties: { q: { type: "string" } },
+            required: ["q"],
+          },
+        },
+      ],
+    }));
+    server.setRequestHandler(CallToolRequestSchema, async (req) => {
+      const q = (req.params.arguments as { q: string }).q;
+      const r = await server.elicitInput({
+        message: `elicit-for: ${q}`,
+        requestedSchema: {
+          type: "object",
+          properties: { answer: { type: "string" } },
+          required: ["answer"],
+        },
+      });
+      if (r.action !== "accept") return { content: [{ type: "text" as const, text: "no" }] };
+      const answer = (r.content as { answer: string }).answer;
+      return { content: [{ type: "text" as const, text: `${q}=>${answer}` }] };
+    });
+    await server.connect(serverTransport);
+
+    const bus = new LocalEventBus();
+    const app = await createApp(React.createElement(Agent), {
+      executor: await mkExecutor(),
+      bus,
+      journal: new MemoryJournal(),
+      inbox: new LocalInbox(),
+      extensions: [
+        withMCP({
+          servers: [{ serverId: "two", transport: clientTransport, auth: new NoneAuth() }],
+        }),
+      ],
+    });
+    const session = await app.createSession();
+
+    // Subscribe to every elicit envelope BEFORE firing the calls.
+    const envelopes: EnvelopeWithMetadata[] = [];
+    const sub = bus.subscribe({
+      surface: "session",
+      name: { exact: "session:channel:elicitation" },
+    }) as Stream.Stream<EnvelopeWithMetadata, unknown, never>;
+    const collected = Effect.runPromise(Stream.runCollect(Stream.take(sub, 2))).then((c) => {
+      envelopes.push(...Array.from(Chunk.toReadonlyArray(c)));
+    });
+
+    // Fire two parallel dispatches.
+    const dispatchA = session.dispatch("two__ask", { q: "color" });
+    const dispatchB = session.dispatch("two__ask", { q: "fruit" });
+
+    await collected;
+    // Order is racy; correlate by the envelope's payload message.
+    const envFor = (suffix: string): EnvelopeWithMetadata => {
+      const env = envelopes.find(
+        (e) => (e.payload as { message?: string }).message === `elicit-for: ${suffix}`,
+      );
+      if (!env) throw new Error(`no envelope for ${suffix}`);
+      return env;
+    };
+    const envA = envFor("color");
+    const envB = envFor("fruit");
+    expect(envA.metadata?.correlationId).not.toBe(envB.metadata?.correlationId);
+
+    await session.elicitation.respond({
+      correlationId: envA.metadata!.correlationId as string,
+      outcome: "accepted",
+      value: { answer: "blue" },
+    });
+    await session.elicitation.respond({
+      correlationId: envB.metadata!.correlationId as string,
+      outcome: "accepted",
+      value: { answer: "apple" },
+    });
+
+    const [a, b] = await Promise.all([dispatchA, dispatchB]);
+    expect((a[0] as { text: string }).text).toBe("color=>blue");
+    expect((b[0] as { text: string }).text).toBe("fruit=>apple");
+
+    await session.close();
+    await app.closeApp();
+    await server.close();
+  });
+});
+
+describe("ElicitationBridge — URL mode (#134a)", () => {
+  it("forwards URL-mode elicit through harness; accepted maps to action: 'accept'", async () => {
+    const bus = new LocalEventBus();
+    const { server, clientTransport } = await mkUrlElicitingServer();
+
+    const app = await createApp(React.createElement(Agent), {
+      executor: await mkExecutor(),
+      bus,
+      journal: new MemoryJournal(),
+      inbox: new LocalInbox(),
+      extensions: [
+        withMCP({
+          servers: [{ serverId: "oauth", transport: clientTransport, auth: new NoneAuth() }],
+        }),
+      ],
+    });
+
+    const session = await app.createSession();
+
+    const correlationIdP = nextElicitationCorrelationId(bus);
+    const dispatchP = session.dispatch("oauth__start_oauth", {});
+
+    const correlationId = await correlationIdP;
+    // URL-mode accepted = user consented to navigate to the URL. No
+    // value carried (consent-only terminal).
+    await session.elicitation.respond({
+      correlationId,
+      outcome: "accepted",
+    });
+
+    const content = await dispatchP;
+    expect((content[0] as { text: string }).text).toBe("oauth: accept");
+
+    await session.close();
+    await app.closeApp();
+    await server.close();
+  });
+
+  it("URL-mode declined maps to action: 'decline'", async () => {
+    const bus = new LocalEventBus();
+    const { server, clientTransport } = await mkUrlElicitingServer();
+
+    const app = await createApp(React.createElement(Agent), {
+      executor: await mkExecutor(),
+      bus,
+      journal: new MemoryJournal(),
+      inbox: new LocalInbox(),
+      extensions: [
+        withMCP({
+          servers: [{ serverId: "oauth", transport: clientTransport, auth: new NoneAuth() }],
+        }),
+      ],
+    });
+
+    const session = await app.createSession();
+
+    const correlationIdP = nextElicitationCorrelationId(bus);
+    const dispatchP = session.dispatch("oauth__start_oauth", {});
+
+    const correlationId = await correlationIdP;
+    await session.elicitation.respond({
+      correlationId,
+      outcome: "declined",
+    });
+
+    const content = await dispatchP;
+    expect((content[0] as { text: string }).text).toBe("oauth: decline");
+
+    await session.close();
+    await app.closeApp();
+    await server.close();
+  });
+
+  it("URL-mode wire payload carries url + elicitationId on the request envelope", async () => {
+    const bus = new LocalEventBus();
+    const { server, clientTransport } = await mkUrlElicitingServer();
+
+    const app = await createApp(React.createElement(Agent), {
+      executor: await mkExecutor(),
+      bus,
+      journal: new MemoryJournal(),
+      inbox: new LocalInbox(),
+      extensions: [
+        withMCP({
+          servers: [{ serverId: "oauth", transport: clientTransport, auth: new NoneAuth() }],
+        }),
+      ],
+    });
+
+    const session = await app.createSession();
+
+    // Subscribe to the elicit channel directly to capture the envelope
+    // payload — proves the bridge translated the MCP `url` +
+    // `elicitationId` fields onto the wire instead of cancelling.
+    const envP = Effect.runPromise(
+      Stream.runCollect(
+        Stream.take(
+          bus.subscribe({
+            surface: "session",
+            name: { exact: "session:channel:elicitation" },
+          }) as Stream.Stream<EnvelopeWithMetadata, unknown, never>,
+          1,
+        ),
+      ),
+    ).then((c) => Array.from(Chunk.toReadonlyArray(c))[0]!);
+
+    const dispatchP = session.dispatch("oauth__start_oauth", {});
+
+    const env = await envP;
+    const payload = env.payload as {
+      mode: string;
+      url: string;
+      elicitationId: string;
+    };
+    expect(payload.mode).toBe("url");
+    expect(payload.url).toBe("https://example.com/oauth?state=abc");
+    expect(payload.elicitationId).toBe("oauth-flow-1");
+
+    await session.elicitation.respond({
+      correlationId: env.metadata!.correlationId as string,
+      outcome: "cancelled",
+    });
+    await dispatchP;
 
     await session.close();
     await app.closeApp();

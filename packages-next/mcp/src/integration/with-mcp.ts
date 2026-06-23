@@ -49,8 +49,8 @@ import { jsonSchema, toRegistration } from "@agentick/spec-next";
 
 // Side-effect import — pulls in the `SessionHarnessProtocol.elicitation`
 // module-augmentation slot so `session.elicitation` types as
-// `ElicitationHarnessProtocol` instead of `unknown` when looked up via
-// `installer.app.getSession(id)`.
+// `ElicitationHarnessProtocol` (with its `address` field) rather than
+// `unknown` when looked up via `installer.app.getSession(id)`.
 import "@agentick/elicitation-next";
 
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
@@ -194,6 +194,19 @@ async function mkClient(
   installer: AppInstaller,
   config: McpServerConfig,
 ): Promise<McpClientHarness> {
+  // Closure over installer.app — resolves a session's elicit harness
+  // address at the moment the SDK's elicit handler fires. The lookup
+  // happens lazily because sessions don't exist yet at app-install
+  // time. In-memory: walks the app's session registry. Cluster
+  // (#151+): swaps this resolver for a cluster directory lookup.
+  const resolveElicitAddress = (sessionId: string): string | undefined => {
+    const session = installer.app.getSession?.(sessionId) as
+      | (SessionHarnessProtocol<unknown> & {
+          readonly elicitation?: ElicitationHarnessProtocol;
+        })
+      | undefined;
+    return session?.elicitation?.address;
+  };
   const harness = new McpClientHarness(
     `${installer.hostId}:mcp:${config.serverId}`,
     installer.substrate.journal,
@@ -203,6 +216,7 @@ async function mkClient(
       serverId: config.serverId,
       transport: config.transport,
       auth: config.auth ?? new NoneAuth(),
+      resolveElicitAddress,
       ...(config.codec !== undefined ? { codec: config.codec } : {}),
       ...(config.reconnect !== undefined ? { reconnect: config.reconnect } : {}),
       ...(config.capabilities !== undefined ? { capabilities: config.capabilities } : {}),
@@ -236,16 +250,17 @@ async function discoverAndRegisterTools(
   // lookup can reach the live session registry at dispatch time. App
   // extensions install BEFORE sessions exist; the closure resolves
   // sessions lazily.
-  const installerHost = installer.app;
   for (const tool of tools) {
     const localName = `${prefix}${tool.name}`;
     const handlerRef = mcpHandlerRef(config.serverId, tool.name);
     const handler: ToolHandler = async (input, { ctx }) => {
-      const elicitResolver = resolveSessionElicit(installerHost, ctx.sessionId);
+      // Pass the session id directly. The harness routes inbound
+      // elicits via inbox to whichever address its
+      // `resolveElicitAddress` returns — cluster-friendly seam.
       const result = await harness.callTool(
         tool.name,
         input as Readonly<Record<string, unknown>>,
-        elicitResolver !== undefined ? { elicitResolver } : undefined,
+        ctx.sessionId !== undefined ? { elicitSessionId: ctx.sessionId } : undefined,
       );
       return mcpContentToBlocks(result.content);
     };
@@ -258,24 +273,6 @@ async function discoverAndRegisterTools(
       }),
     );
   }
-}
-
-/**
- * Resolve the session's elicitation harness for inbound elicit routing.
- * Walks `installer.app.getSession(sessionId)?.elicitation`; returns
- * `undefined` when any link in the chain is absent — that surfaces as
- * `{ action: "cancel" }` on the wire (see `elicit-bridge.ts`), the
- * correct posture for an unrouted elicit.
- */
-function resolveSessionElicit(
-  installerHost: AppInstaller["app"],
-  sessionId: string | undefined,
-): ElicitationHarnessProtocol | undefined {
-  if (sessionId === undefined) return undefined;
-  const session = installerHost.getSession?.(sessionId) as
-    | (SessionHarnessProtocol<unknown> & { readonly elicitation?: ElicitationHarnessProtocol })
-    | undefined;
-  return session?.elicitation;
 }
 
 /**

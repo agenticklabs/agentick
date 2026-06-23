@@ -176,27 +176,120 @@ describe("ElicitationHarness — identity + lifecycle", () => {
 });
 
 // ---------------------------------------------------------------------------
-// URL mode — staged on the protocol but not implemented; calls MUST
-// throw UnsupportedElicitationModeError, NOT return a result.
+// URL mode — accept/decline/cancel round-trip. URL-accepted means the
+// user consented to navigate to the URL; the harness resolves with
+// `value: undefined` because there's no schema-validated reply value
+// (consent is the terminal — out-of-band completion is layered on top
+// via a separate notification path).
 // ---------------------------------------------------------------------------
 
-describe("ElicitationHarness — URL mode is staged but not implemented", () => {
-  it("throws UnsupportedElicitationModeError when elicit() is called with mode: 'url'", async () => {
-    const b = await fakeElicitation();
-    try {
-      const promise = b.harness.elicit({
+describe("ElicitationHarness — URL mode", () => {
+  let bundle: FakeElicitationBundle | undefined;
+  afterEach(async () => {
+    if (bundle) await bundle.close();
+    bundle = undefined;
+  });
+
+  it("publishes a URL-mode wire payload with url + elicitationId + message", async () => {
+    bundle = await fakeElicitation();
+    const envP = nextRequestEnvelope(bundle.bus);
+    const pending = bundle.harness.elicit(
+      {
         mode: "url",
         message: "Open your bank's OAuth page",
-        url: "https://example.com/oauth",
-        elicitationId: "el-1",
-      });
-      await expect(promise).rejects.toMatchObject({
-        _tag: "UnsupportedElicitationModeError",
-        mode: "url",
-      });
-    } finally {
-      await b.close();
+        url: "https://example.com/oauth?state=abc",
+        elicitationId: "el-oauth-1",
+        hints: { kind: "oauth" },
+        metadata: { server: "linear" },
+      },
+      { timeoutMs: 500 },
+    );
+    const env = await envP;
+    const payload = env.payload as {
+      mode: string;
+      message: string;
+      url: string;
+      elicitationId: string;
+      hints?: Record<string, unknown>;
+      metadata?: Record<string, unknown>;
+      schema?: unknown;
+    };
+    expect(payload.mode).toBe("url");
+    expect(payload.message).toBe("Open your bank's OAuth page");
+    expect(payload.url).toBe("https://example.com/oauth?state=abc");
+    expect(payload.elicitationId).toBe("el-oauth-1");
+    expect(payload.hints).toEqual({ kind: "oauth" });
+    expect(payload.metadata).toEqual({ server: "linear" });
+    // URL mode carries NO `schema` field — there's no reply value to
+    // validate; the consent is the terminal.
+    expect(payload.schema).toBeUndefined();
+
+    await bundle.harness.respond({
+      correlationId: env.metadata!.correlationId as string,
+      outcome: "cancelled",
+    });
+    await pending;
+  });
+
+  it("accepted → { outcome: 'accepted', value: undefined } (consent-only)", async () => {
+    bundle = await fakeElicitation();
+    const envP = nextRequestEnvelope(bundle.bus);
+    const pending = bundle.harness.elicit({
+      mode: "url",
+      message: "Open the page",
+      url: "https://example.com/x",
+      elicitationId: "el-2",
+    });
+    const env = await envP;
+    await bundle.harness.respond({
+      correlationId: env.metadata!.correlationId as string,
+      outcome: "accepted",
+      // Any value the client sends is ignored — URL-mode accepted is
+      // consent-only.
+      value: { ignored: true },
+    });
+    const result = await pending;
+    expect(result.outcome).toBe("accepted");
+    if (result.outcome === "accepted") {
+      expect(result.value).toBeUndefined();
     }
+  });
+
+  it("declined → passes through verbatim with reason", async () => {
+    bundle = await fakeElicitation();
+    const envP = nextRequestEnvelope(bundle.bus);
+    const pending = bundle.harness.elicit({
+      mode: "url",
+      message: "Open the page",
+      url: "https://example.com/x",
+      elicitationId: "el-3",
+    });
+    const env = await envP;
+    await bundle.harness.respond({
+      correlationId: env.metadata!.correlationId as string,
+      outcome: "declined",
+      reason: "user said no",
+    });
+    const result = await pending;
+    expect(result).toEqual({ outcome: "declined", reason: "user said no" });
+  });
+
+  it("cancelled → passes through verbatim", async () => {
+    bundle = await fakeElicitation();
+    const envP = nextRequestEnvelope(bundle.bus);
+    const pending = bundle.harness.elicit({
+      mode: "url",
+      message: "Open the page",
+      url: "https://example.com/x",
+      elicitationId: "el-4",
+    });
+    const env = await envP;
+    await bundle.harness.respond({
+      correlationId: env.metadata!.correlationId as string,
+      outcome: "cancelled",
+    });
+    const result = await pending;
+    expect(result.outcome).toBe("cancelled");
   });
 });
 

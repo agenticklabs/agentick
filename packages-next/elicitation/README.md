@@ -245,13 +245,15 @@ import { fakeElicitation, stubElicitation } from "@agentick/elicitation-next/tes
 - ✅ Conformance suite (13 tests) + harness-specific spec (7 tests)
   + `stubElicitation` spec (9 tests) — all green; tool-executor's
   confirmation flow (8 tests) covers the end-to-end integration
-- ⏳ URL-mode elicitation — protocol shape staged; calling
-  `elicit({ mode: "url", ... })` throws
-  `UnsupportedElicitationModeError` until wired. URL mode lands
-  alongside the MCP server-side mapping.
-- ⏳ MCP server-side mapping (`elicitation/create` →
-  `bridges.elicitation.elicit`); MCP completion notifications
-  (`notifications/elicitation/complete`) for async URL flows
+- ✅ URL-mode elicitation — `elicit({ mode: "url", url,
+  elicitationId, ... })`. `accepted` outcome signals user consent
+  to open the URL (consent-only terminal); out-of-band completion
+  arrives via a separate notification path (OAuth-via-elicit, #134b).
+- ✅ MCP server-side mapping — `elicitation/create` (form + URL)
+  routes via inbox from `McpClientHarness` to the session's
+  `ElicitationHarness` (cluster-friendly seam — see `@agentick/mcp-next`).
+- ⏳ MCP completion notifications (`notifications/elicitation/complete`)
+  for async URL flows (#134b)
 - ⏳ React surface — `useElicitation()` hook + reference
   `ElicitationPrompt` component
 

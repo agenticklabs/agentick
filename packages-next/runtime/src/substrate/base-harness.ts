@@ -278,7 +278,13 @@ export abstract class BaseHarness<
   Parent = unknown,
   Input = unknown,
 > {
-  protected readonly address: string;
+  /**
+   * Cluster-portable inbox address — `${surface}:${scopeId}`. Public
+   * so other harnesses can send `inbox.send(address, ...)` messages
+   * without indirection through protocol-specific accessors.
+   * Cluster-aware inboxes route to whichever node owns the address.
+   */
+  public readonly address: string;
   protected readonly handlers = new HandlerRegistry();
   protected readonly middleware = new MiddlewareChain();
 

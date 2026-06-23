@@ -29,3 +29,8 @@ export {
   ELICITATION_CHANNEL_FQN,
   type ElicitationChannelName,
 } from "./channel.js";
+export {
+  ELICIT_REQUEST_MESSAGE_TYPE,
+  type ElicitRequestInboxPayload,
+  type ElicitRequestMessageType,
+} from "./inbox-protocol.js";

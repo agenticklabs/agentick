@@ -33,28 +33,31 @@ runElicitationHarnessConformance(async ({ harnessId }) => {
   const harness = new ElicitationHarness(harnessId, journal, bus, inbox);
   await harness.ready;
 
+  const nextEnv = (): Promise<EnvelopeWithMetadata> =>
+    Effect.runPromise(
+      Stream.runCollect(
+        Stream.take(
+          bus.subscribe({
+            surface: "session",
+            name: { exact: ELICITATION_CHANNEL_FQN },
+          }) as Stream.Stream<EnvelopeWithMetadata, unknown, never>,
+          1,
+        ),
+      ),
+    ).then((chunk) => Array.from(Chunk.toReadonlyArray(chunk))[0]!);
+
   let closed = false;
   const shell: ElicitationConformanceShell = {
     harness,
     nextCorrelationId: () =>
-      Effect.runPromise(
-        Stream.runCollect(
-          Stream.take(
-            bus.subscribe({
-              surface: "session",
-              name: { exact: ELICITATION_CHANNEL_FQN },
-            }) as Stream.Stream<EnvelopeWithMetadata, unknown, never>,
-            1,
-          ),
-        ),
-      ).then((chunk) => {
-        const env = Array.from(Chunk.toReadonlyArray(chunk))[0]!;
+      nextEnv().then((env) => {
         const id = env.metadata?.correlationId;
         if (typeof id !== "string") {
           throw new Error("expected correlationId on elicitation request envelope");
         }
         return id;
       }),
+    nextEnvelope: () => nextEnv(),
     close: async () => {
       if (closed) return;
       closed = true;

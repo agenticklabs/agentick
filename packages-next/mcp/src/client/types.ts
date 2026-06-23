@@ -108,6 +108,27 @@ export interface McpClientHarnessOptions {
    * extension flips it on.
    */
   readonly reconnect?: ReconnectPolicy;
+
+  /**
+   * Resolver from `sessionId` → that session's elicit-harness inbox
+   * address. Called by the SDK elicit handler at inbound-elicit
+   * dispatch time. In-memory wiring (today): walks the App's session
+   * registry. Cluster wiring (#151+): walks a cluster directory.
+   *
+   * Omitted → all inbound elicits resolve to `undefined` and the
+   * SDK handler returns `{ action: "cancel" }`. Safe default; useful
+   * for harness instances that aren't expected to receive
+   * server-initiated elicits.
+   */
+  readonly resolveElicitAddress?: (sessionId: string) => string | undefined;
+
+  /**
+   * Default timeout (ms) for inbound elicit round-trips. Bounds the
+   * Deferred the SDK handler awaits. Defaults to 5 minutes — long
+   * enough for a human-in-the-loop, short enough to free the call's
+   * fiber on user inactivity.
+   */
+  readonly elicitTimeoutMs?: number;
 }
 
 export interface ReconnectPolicy {

@@ -10,12 +10,14 @@
  * semantics live in exactly one place.
  *
  *   Mode               — `"form"` (default) or `"url"`. Mirrors the
- *                        MCP draft elicitation spec. **URL mode is
- *                        declared on the protocol shape but NOT yet
- *                        implemented.** Calling `elicit({ mode: "url",
- *                        ... })` throws `UnsupportedElicitationModeError`
- *                        until URL-mode wiring lands (tracked alongside
- *                        the MCP integration roadmap).
+ *                        MCP draft elicitation spec. URL mode's
+ *                        `accepted` outcome signals the user
+ *                        consented to navigate to the URL; the actual
+ *                        out-of-band completion arrives via a
+ *                        separate notification (OAuth flow, payment,
+ *                        credential entry) — that completion is the
+ *                        OAuth-via-elicit story (#134b), layered on
+ *                        top of this primitive.
  *   Wire channel       — published on a well-known channel by the
  *                        concrete impl (the canonical channel name
  *                        lives in the harness package, not spec —
@@ -156,14 +158,13 @@ export interface FormElicitationRequest<TSchema extends StandardSchemaV1 = Stand
 /**
  * URL-mode elicitation request — directs the user to an external URL
  * for an out-of-band interaction (OAuth, payment, credential entry).
- * Mirrors MCP draft `mode: "url"`. **Not yet implemented in this
- * harness** — calling `elicit({ mode: "url", ... })` throws
- * {@link UnsupportedElicitationModeError}. Protocol shape is
- * staged so MCP integration is a wiring change, not an API break.
+ * Mirrors MCP draft `mode: "url"`.
  *
  * URL mode's `accepted` outcome means the user consented to open the
  * URL — NOT that the out-of-band interaction completed. Completion
- * arrives later via a separate notification (TBD when URL mode lands).
+ * arrives via a separate notification path layered on top of this
+ * consent signal (OAuth flows wire this via `notifications/elicitation/
+ * complete`-style notifications; #134b).
  */
 export interface UrlElicitationRequest {
   readonly mode: "url";
@@ -189,7 +190,7 @@ export interface UrlElicitationRequest {
 
 /**
  * Discriminated union of supported elicitation request shapes. Form
- * mode is default; URL mode is staged but not implemented.
+ * mode is the default.
  */
 export type ElicitationRequest<TSchema extends StandardSchemaV1 = StandardSchemaV1> =
   | FormElicitationRequest<TSchema>
@@ -267,38 +268,13 @@ export interface ElicitationFailure {
  *
  * The harness never throws for user-driven outcomes (`declined`,
  * `cancelled`) nor for transport/timing/schema failures — every
- * terminal flows through this union. The single exception is
- * developer-misuse errors like calling URL mode when it isn't wired
- * yet — those throw {@link UnsupportedElicitationModeError} because
- * they're misuse, not semantic outcomes of an elicitation.
+ * terminal flows through this union.
  */
 export type ElicitationResult<TValue = unknown> =
   | { readonly outcome: "accepted"; readonly value: TValue }
   | { readonly outcome: "declined"; readonly reason?: string }
   | { readonly outcome: "cancelled"; readonly reason?: string }
   | { readonly outcome: "failed"; readonly failure: ElicitationFailure };
-
-// ============================================================================
-// Developer-misuse errors (thrown, not modeled in the result union)
-// ============================================================================
-
-/**
- * Thrown by `elicit()` when the caller passes a `mode` the harness
- * doesn't implement yet. Today only URL mode trips this — form mode
- * is fully supported. Tagged so consumers can `Effect.catchTag`
- * /pattern-match alongside the rest of the framework's typed errors.
- *
- * Distinct from `ElicitationResult` failure outcomes because this is
- * developer misuse, not a semantic outcome of an elicitation. When
- * URL mode lands the throw is replaced; consumer code that was
- * pattern-matching only against `ElicitationResult` outcomes doesn't
- * need to change.
- */
-export interface UnsupportedElicitationModeError {
-  readonly _tag: "UnsupportedElicitationModeError";
-  readonly mode: "url";
-  readonly message: string;
-}
 
 // ============================================================================
 // Protocol
@@ -328,6 +304,19 @@ export interface ElicitationHarnessProtocol {
   readonly ready: Promise<void>;
 
   /**
+   * Cluster-portable inbox address — `${surface}:${scopeId}` per the
+   * BaseHarness convention. Other harnesses send `elicit-request`
+   * inbox messages here to drive an elicit on this harness without an
+   * in-process object reference; cluster-aware substrates route by
+   * the same address to whichever node owns the harness.
+   *
+   * Exposed on the protocol (not just the concrete class) so adopter
+   * impls — fakes, stubs, future cluster-shimmed variants — carry
+   * the same surface.
+   */
+  readonly address: string;
+
+  /**
    * Ask the user for a structured response. Publishes the request on
    * the harness's canonical channel, awaits a correlated reply (or
    * timeout / abort), and validates the reply against the request's
@@ -347,11 +336,9 @@ export interface ElicitationHarnessProtocol {
    *                 `{ outcome: "failed", failure.kind: "aborted",
    *                 failure.reason }` on abort.
    *
-   * Throws {@link UnsupportedElicitationModeError} when called with
-   * `mode: "url"` until URL-mode wiring lands. Never throws for
-   * user-driven outcomes (declined / cancelled) nor for transport/
-   * schema failures — every semantic terminal flows through the
-   * result union.
+   * Never throws for user-driven outcomes (declined / cancelled) nor
+   * for transport/schema/timing failures — every semantic terminal
+   * flows through the result union.
    */
   elicit<TSchema extends StandardSchemaV1>(
     request: FormElicitationRequest<TSchema>,
