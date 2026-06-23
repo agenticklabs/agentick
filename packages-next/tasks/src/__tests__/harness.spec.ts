@@ -473,6 +473,25 @@ describe("TasksHarness — Effect-typed work", () => {
     expect(bundle.harness.status(handle.taskId)).toBe("completed");
   });
 
+  it("internal Effect.interrupt (not via cancel()) surfaces as TaskRejection { status: 'cancelled' }", async () => {
+    bundle = await fakeTasks();
+    // The work fn self-interrupts — no external cancel() involved.
+    // Exercises the `Cause.isInterruptedOnly` branch in
+    // `runEffectWork`, distinct from the cancel-driven path.
+    const handle = bundle.harness.submit(() =>
+      Effect.gen(function* () {
+        yield* Effect.interrupt;
+        return "unreachable";
+      }),
+    );
+    await expect(handle.result).rejects.toMatchObject<Partial<TaskRejection>>({
+      _tag: "TaskRejection",
+      taskId: handle.taskId,
+      status: "cancelled",
+      failure: { kind: "aborted", reason: "interrupted" },
+    });
+  });
+
   it("synchronous throw INSIDE the Effect work factory still fails the task (not the call site)", async () => {
     bundle = await fakeTasks();
     const handle = bundle.harness.submit(() => {

@@ -8,6 +8,8 @@
  * Per the test-doubles convention: `stub*` for canned answers.
  */
 
+import type { Effect } from "effect";
+
 import type {
   ContentBlock,
   ProgressUpdate,
@@ -26,10 +28,12 @@ export interface StubTasksOptions {
   readonly id?: string;
   /**
    * Optional handler invoked whenever a caller calls `submit`. Lets
-   * tests observe the work argument without exercising it.
+   * tests observe the work argument without exercising it. Receives
+   * the work function as-is — Promise/sync or Effect — so observer
+   * tests can branch on `Effect.isEffect(work)` if needed.
    */
   readonly onSubmit?: <T>(
-    work: (ctx: TaskWorkContext) => Promise<T> | T,
+    work: (ctx: TaskWorkContext) => Promise<T> | T | Effect.Effect<T, unknown, never>,
     opts?: TaskCreationInput,
   ) => void;
   /**
@@ -48,7 +52,7 @@ export function stubTasks(options: StubTasksOptions = {}): TasksHarnessProtocol 
   const makeId = (): string => `task:stub:${counter++}`;
 
   function submitImpl<T = readonly ContentBlock[]>(
-    work: (ctx: TaskWorkContext) => Promise<T> | T,
+    work: (ctx: TaskWorkContext) => Promise<T> | T | Effect.Effect<T, unknown, never>,
     opts: TaskCreationInput = {},
   ): TaskHandle<T> {
     options.onSubmit?.(work, opts);
