@@ -260,6 +260,18 @@ export interface TasksHarnessProtocol {
   get(taskId: string): TaskInfo | undefined;
 
   /**
+   * Snapshot every known task's {@link TaskInfo}. Scoped to this
+   * harness — i.e., per-session when constructed via `withTasks()`.
+   * The returned array is a frozen snapshot; mutations on records
+   * after this call don't appear in the returned shape.
+   *
+   * Used by the model-facing `session_tasks_list` tool (auto-
+   * registered by `withTasks()`) and by adopter code that wants to
+   * surface in-flight work in a UI.
+   */
+  list(): readonly TaskInfo[];
+
+  /**
    * Await a task's terminal state by id. Equivalent to
    * `submit(...).result` for the originator; useful for code paths
    * that received the id second-hand (cross-process, cross-tick).

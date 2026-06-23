@@ -800,9 +800,15 @@ function isTaskHandle(value: unknown): value is TaskHandle<readonly ContentBlock
 /**
  * Serialize a task ref into a single content block the model
  * receives in lieu of the eventual result. JSON payload mirrors
- * `TaskInfo` plus a `_kind: "task-ref"` discriminator so client
- * surfaces (UIs, system prompts) can recognize and special-case
- * task refs vs plain text returns.
+ * `TaskInfo` plus a `_kind: "session_task_ref"` discriminator so
+ * client surfaces (UIs, system prompts) can recognize and
+ * special-case task refs vs plain text returns.
+ *
+ * The discriminator matches the `session_*` namespace used by the
+ * model-facing tools registered by `withTasks()` — `_kind:
+ * "session_task_ref"` ↔ `session_tasks_get`, `session_tasks_cancel`,
+ * `session_tasks_await`. Consistency at the JSON layer lets a model
+ * pattern-match the kind string against the tool name namespace.
  *
  * The block type is `text` — universal across model providers; the
  * `_kind` discriminator lives in the JSON body. When a richer
@@ -815,7 +821,7 @@ function serializeTaskRef(handle: TaskHandle<readonly ContentBlock[]>): readonly
     {
       type: "text",
       text: JSON.stringify({
-        _kind: "task-ref",
+        _kind: "session_task_ref",
         taskId: info.taskId,
         status: info.status,
         ...(info.statusMessage !== undefined ? { statusMessage: info.statusMessage } : {}),

@@ -254,6 +254,14 @@ export class TasksHarness extends BaseHarness<"tasks"> implements TasksHarnessPr
     return record ? this.snapshot(record) : undefined;
   }
 
+  list(): readonly TaskInfo[] {
+    const out: TaskInfo[] = [];
+    for (const record of this.tasks.values()) {
+      out.push(this.snapshot(record));
+    }
+    return out;
+  }
+
   status(taskId: string): TaskStatus | undefined {
     return this.tasks.get(taskId)?.status;
   }

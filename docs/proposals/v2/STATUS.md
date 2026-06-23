@@ -1,7 +1,40 @@
 # Agentick v2 — Implementation Status
 
 **Branch:** `feat/v2`
-**Last updated:** 2026-06-23 — **#156 ToolExecutor task integration + `ctx.tasks` / `ctx.elicitation` on every handler — Pattern A vs Pattern B branching on `taskSupport` annotation.** Closes the wiring loop opened by #120 (TasksHarness substrate primitive) and #119 (ElicitationHarness substrate primitive). Both harnesses now reach the handler via `ctx` instead of the JSX `use:` ceremony — the "substrate primitive on `ctx`" rule from the spec doc. Five parts:
+**Last updated:** 2026-06-23 (later) — **#157 model-facing `session_tasks_*` tools — `withTasks()` auto-registers list / get / cancel / await so Pattern B is usable end-to-end.** Closes the Pattern B loop opened by #156. Without these the model receives a task-ref content block but has no way to act on it; with them the agent can dispatch concurrent long-running work, continue talking, and reconcile results across ticks. Six parts:
+
+1. **`TasksHarnessProtocol.list()` added to the spec.** Returns `readonly TaskInfo[]` — a snapshot of every task known to this harness. Per-session scope (one harness per session via `withTasks()`). Implemented in `TasksHarness` (iterates the internal `tasks` map, calls existing `snapshot()` helper); implemented in `stubTasks` (returns `Array.from(known.values())`); conformance suite extended with one test covering the lifecycle (empty → 2 working → 2 completed).
+
+2. **Four model-facing tools in `packages-next/tasks/src/tools.ts`:**
+   - `session_tasks_list` — `{ tasks: TaskInfo[] }`
+   - `session_tasks_get` — `{ task: TaskInfo }` or `{ error: "unknown_task", taskId }`
+   - `session_tasks_cancel` — `{ cancelled: taskId }` or `{ error: "unknown_task", taskId }`
+   - `session_tasks_await` — content blocks on `completed`; `{ error: "task_failed", status, failure }` on `failed`/`cancelled`; `{ error: "unknown_task", taskId }` for unknown id
+
+   All four are thin handlers over `ctx.tasks` (no closure capture — handler routes through the live harness instance). `session_tasks_await` does **NOT** propagate its own dispatch abort to the underlying task — observation only. Model has to call `session_tasks_cancel` explicitly to actually stop the work.
+
+3. **Naming decision: `session_*` prefix, underscores throughout.** Discussion in conversation log:
+   - `tasks.*` alone collides with the huge namespace of user-defined "tasks" tools (todos, kanban, project trackers). Real ambiguity for the model.
+   - `agentick.*` / `framework.*` leaks brand or implementation detail — the model doesn't know it's in a framework.
+   - `background_tasks.*` / `async_operations.*` work but `session_*` is more accurate (these things ARE per-session) and opens a reserved namespace for future framework-native model-visible primitives: `session_knobs_*`, `session_timeline_*`, etc.
+   - Underscores not dots: OpenAI's function-calling validator historically rejected dots; underscores work universally across OpenAI/Anthropic/Google/MCP.
+   - The `_kind: "task-ref"` discriminator on the Pattern B content block was renamed to `_kind: "session_task_ref"` for consistency with the tool namespace.
+
+4. **`withTasks()` auto-registers the bundle at session-install.** New `WithTasksOptions.registerModelTools` field (defaults to `true`); set `false` to skip the model surface for headless adopters driving tasks from server code with no LLM in the loop. The substrate (`ctx.tasks`, `bridges.tasks`) is wired regardless. Registration walks `installer.registerToolHandler(handlerRef, handler)` for each of the four handlers, then `installer.registerExtensionTool(registration)` for each declaration — same shape `withMCP` uses for its per-server tools. Bindings: `{ scope: "extension", extensionName: "@agentick/tasks-next", level: "session" }`. Handler refs include `installer.sessionId` so cross-session registrations on the shared `HandlerResolver` don't collide.
+
+5. **Tool descriptions actively disclaim user-tool semantics.** Each tool's description starts with: *"Manage framework-spawned background tasks for the current session. These tools operate ONLY on tasks the framework created via long-running tool calls (signalled by a `session_task_ref` content block in the prior tool result). They are NOT for managing user-facing tasks like todos, project tickets, or kanban items..."*. The description carries real weight at inference time — that's where the disambiguation lives for a fine-tuned model that's pattern-matched on millions of productivity tools.
+
+6. **Test coverage added: `packages-next/tasks/src/__tests__/session-tasks-tools.spec.ts` — 16 tests.** Each tool dispatched end-to-end through a real `ToolExecutorHarness` (constructed on the same in-memory substrate as the `TasksHarness`); known + unknown id paths for get / cancel / await; failure-shape coverage for `session_tasks_await` against a cancelled task; bundle structural assertions (4 registrations + 4 handler refs + per-sessionId namespacing + `level: "session"` binding); extension wiring smoke tests (`withTasks()` default vs `registerModelTools: false`). `@agentick/tool-executor-next` added as a `devDependency` per the CLAUDE.md guidance: "tests live where their dependencies live".
+
+**Workspace:** 433/433 tests pass across the five affected packages (`tasks-next` 51 + `tool-executor-next` + `spec-next` + `session-next` + `app-next`). Lint + strict typecheck clean. README + STATUS updated.
+
+**What's still missing for the full Pattern B story:**
+- **#155** — `Stream<TaskEvent>` from per-subscriber `Queue<TaskEvent>` fan-out, `Effect<TaskHandle>` work overload with real fiber interruptibility. TODO markers already in `harness.ts`.
+- **Phase B (MCP wire codec)** — `mcp-next` translates inbound MCP `tools/call` with `task: { ttl }` into `submit`; outbound MCP wire serializes our TasksHarness state into `notifications/tasks/status` + `notifications/progress`. Tracked separately.
+- **`taskSupport: "supported"`** — caller-choice mode is in the spec annotation but executor doesn't branch on it yet. Land alongside MCP wire codec.
+- **Otto example update** — the otto example doesn't yet exercise the Pattern B path (no tool declares `taskSupport: "required"`). Worth a one-tool addition to demonstrate the model managing background work.
+
+**Previously, 2026-06-23 — #156 ToolExecutor task integration + `ctx.tasks` / `ctx.elicitation` on every handler — Pattern A vs Pattern B branching on `taskSupport` annotation.** Closes the wiring loop opened by #120 (TasksHarness substrate primitive) and #119 (ElicitationHarness substrate primitive). Both harnesses now reach the handler via `ctx` instead of the JSX `use:` ceremony — the "substrate primitive on `ctx`" rule from the spec doc. Five parts:
 
 1. **`ToolHandlerCtx` extended with `elicitation` + `tasks` slots.** Both typed against their protocol interfaces in `@agentick/spec-next/protocol/*`; both `?:` optional so substrate-stripped test fixtures can omit them without compile errors, but every real session installs both (the required-set contract). Handlers call `ctx.tasks!.submit(...)` / `ctx.elicitation!.elicit(...)` without ceremony. Substrate-primitive slots vs `use:` slots — the rule: framework-provided harnesses every session has (elicitation, tasks, and future sampling/roots) live on `ctx`; extension-provided / provider-scoped things (sandbox bridge, custom MCP refs) flow through `use:` capture.
 

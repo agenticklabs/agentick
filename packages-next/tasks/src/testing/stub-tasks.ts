@@ -101,6 +101,7 @@ export function stubTasks(options: StubTasksOptions = {}): TasksHarnessProtocol 
     ready: Promise.resolve(),
     submit: submitImpl,
     get: (taskId: string): TaskInfo | undefined => known.get(taskId),
+    list: (): readonly TaskInfo[] => Array.from(known.values()),
     status: (taskId: string): TaskStatus | undefined => known.get(taskId)?.status,
     async result<T = readonly ContentBlock[]>(taskId: string): Promise<T> {
       if (!known.has(taskId)) {

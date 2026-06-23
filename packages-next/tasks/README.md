@@ -23,13 +23,13 @@ not published independently.
 
 🚧 In active development as part of v2 (`feat/v2`).
 
-| Phase | What                                                                                                                                              | Status |
-| ----- | ------------------------------------------------------------------------------------------------------------------------------------------------- | ------ |
-| A     | Substrate primitive — harness, registry, progress, cancel, conformance                                                                            | ✅     |
-| A.1   | ToolExecutor integration — `ctx.tasks` on every handler, TaskHandle-return detection, Pattern A vs B branching on `taskSupport` annotation (#156) | ✅     |
-| B     | MCP wire codec — `tools/call` task opt-in, `notifications/tasks/status` translation, inbound `tasks/cancel`                                       | ⏳     |
-| C     | Model-facing `tasks.*` tools — auto-registered `tasks.list / get / cancel / await` so the model can manage Pattern B tasks across ticks (#157)    | ⏳     |
-| D     | Effect-native internals refactor — `Stream<TaskEvent>` for events, `Effect<TaskHandle>` work overload with real fiber interruptibility (#155)     | ⏳     |
+| Phase | What                                                                                                                                                | Status |
+| ----- | --------------------------------------------------------------------------------------------------------------------------------------------------- | ------ |
+| A     | Substrate primitive — harness, registry, progress, cancel, conformance                                                                              | ✅     |
+| A.1   | ToolExecutor integration — `ctx.tasks` on every handler, TaskHandle-return detection, Pattern A vs B branching on `taskSupport` annotation (#156)   | ✅     |
+| A.2   | Model-facing `session_tasks_*` tools — auto-registered `session_tasks_list / get / cancel / await` so the model can manage Pattern B tasks (#157)   | ✅     |
+| B     | MCP wire codec — `tools/call` task opt-in, `notifications/tasks/status` translation, inbound `tasks/cancel`                                         | ⏳     |
+| D     | Effect-native internals refactor — `Stream<TaskEvent>` for events, `Effect<TaskHandle>` work overload with real fiber interruptibility (#155)       | ⏳     |
 
 ## Quick start
 
@@ -98,14 +98,59 @@ cancellation — the long-running shape is an implementation detail.
 ### Pattern B — model-visible task ref
 
 `taskSupport: "required"` → the executor **returns immediately** with a
-typed task-ref content block (`{ _kind: "task-ref", taskId, status,
-statusMessage?, ttl? }`) instead of awaiting. The model now owns the
-task: it'll see status / progress envelopes on the session channel and
-manages the task with the model-facing `tasks.*` tools (Phase C).
+typed task-ref content block (`{ _kind: "session_task_ref", taskId,
+status, statusMessage?, ttl? }`) instead of awaiting. The model now owns
+the task and manages it via the four auto-registered model-facing
+tools (see [Model-facing tools](#model-facing-tools) below).
 
 This is the MCP `taskSupport: "required"` semantic — bring the model
 into the conversation about long-running work instead of blocking a
 tick on it.
+
+The `_kind: "session_task_ref"` discriminator matches the `session_*`
+namespace used by the model tools — `session_tasks_get`,
+`session_tasks_cancel`, etc. consume the `taskId` from this ref.
+
+## Model-facing tools
+
+When `withTasks()` is installed, four tools are auto-registered into
+every session so the model can manage Pattern B (`taskSupport:
+"required"`) tasks across ticks:
+
+| Tool                   | Purpose                                                             |
+| ---------------------- | ------------------------------------------------------------------- |
+| `session_tasks_list`   | List every framework background task in this session                |
+| `session_tasks_get`    | Fetch a single task's `TaskInfo` snapshot by id                     |
+| `session_tasks_cancel` | Abort an in-flight task (idempotent)                                |
+| `session_tasks_await`  | Block this tick until a task reaches terminal; return its blocks    |
+
+### Naming: why `session_*`, why underscores
+
+- **`session_`** — these tools are scoped to the current conversational
+  session and managed by the framework, not by the user's domain. The
+  prefix prevents collision with the broad set of user-provided "tasks"
+  tools (todos, project trackers, kanban). It also doesn't leak brand
+  (`agentick.*`) or jargon (`runtime.*`) — the model doesn't need to
+  know it's in a framework, only that these tools manage *its* in-flight
+  work.
+- **Underscores, not dots** — some providers historically rejected dots
+  in tool names (OpenAI). Underscores work universally across OpenAI,
+  Anthropic, Google, and MCP.
+
+The same namespace is reserved for future model-visible framework
+primitives: `session_knobs_*`, `session_timeline_*`,
+`session_state_*`, etc.
+
+### Opting out
+
+```ts
+withTasks({ registerModelTools: false });
+```
+
+Skips the model surface. Use this for headless adopters that drive
+tasks from server code with no LLM in the loop — the substrate
+(`ctx.tasks`, `bridges.tasks`) is still wired, but the model doesn't
+see the four tools.
 
 ### Observe events directly (advanced)
 
@@ -291,9 +336,6 @@ runTasksHarnessConformance(async ({ harnessId }) => {
 - **ToolExecutor return-shape detection** — the executor's logic for
   detecting a `TaskHandle` return and branching on `taskSupport`
   lives in `@agentick/tool-executor-next` (#156).
-- **Model-facing `tasks.*` tools** — the auto-registered
-  `tasks.list / get / cancel / await` set lands in a separate slice
-  (#157) so this package stays handler-runtime-only.
 
 ## Verified by
 
@@ -304,8 +346,14 @@ runTasksHarnessConformance(async ({ harnessId }) => {
 - `src/__tests__/cluster-inbox.spec.ts` — 4 tests covering
   cluster-portable cancel / get / result via inbox addressing.
 - `src/__tests__/conformance.spec.ts` — drives
-  `runTasksHarnessConformance` against `TasksHarness` (12 protocol
+  `runTasksHarnessConformance` against `TasksHarness` (13 protocol
   tests).
+- `src/__tests__/session-tasks-tools.spec.ts` — 15 tests covering
+  every model-facing tool's handler directly (no tool-executor in
+  the dep tree to avoid `tasks ↔ tool-executor` cycle): list / get
+  / cancel / await against known + unknown ids, structured failure
+  shape, bundle structural assertions, sessionId-scoped handler
+  refs, extension factory smoke.
 - `packages-next/tool-executor/src/__tests__/task-handle.spec.ts`
   (sibling package) — 6 tests covering `ctx.tasks` wiring, Pattern A
   (await transparently), Pattern B (return task-ref), and abort
@@ -317,10 +365,6 @@ runTasksHarnessConformance(async ({ harnessId }) => {
   `tools/call` with `task: {ttl}` into `submit`; outbound MCP wire
   serializes our TasksHarness state into `notifications/tasks/status`
   - `notifications/progress`. Tracked separately.
-- **Phase C (`tasks.*` model-facing tools, #157)** — auto-registered
-  `tasks.list / get / cancel / await` so the model can manage
-  Pattern B tasks across ticks without each adopter re-implementing
-  them.
 - **Phase D (Effect-native internals, #155)** — convert the
   per-subscriber `Queue<TaskEvent>` fan-out to `Stream.fromQueue`,
   expose an `Effect<TaskHandle>` work overload that runs as a real

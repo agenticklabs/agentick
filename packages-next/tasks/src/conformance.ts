@@ -214,6 +214,24 @@ export function runTasksHarnessConformance(factory: TasksConformanceFactory): vo
         await shell.close();
       }
     });
+
+    it("list() returns a snapshot of every known task scoped to this harness", async () => {
+      const shell = await factory({ harnessId: "conformance-list-1" });
+      try {
+        expect(shell.harness.list()).toEqual([]);
+        const a = shell.harness.submit(async () => "a");
+        const b = shell.harness.submit(async () => "b");
+        const listed = shell.harness.list();
+        expect(listed).toHaveLength(2);
+        const ids = listed.map((t) => t.taskId).sort();
+        expect(ids).toEqual([a.taskId, b.taskId].sort());
+        await Promise.all([a.result, b.result]);
+        const after = shell.harness.list();
+        expect(after.map((t) => t.status).sort()).toEqual(["completed", "completed"]);
+      } finally {
+        await shell.close();
+      }
+    });
   });
 
   describe("TasksHarnessProtocol — events()", () => {

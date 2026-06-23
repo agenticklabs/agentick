@@ -23,6 +23,15 @@ import "./augment.js";
 
 export { TasksHarness, type TasksHarnessOptions } from "./harness.js";
 export { withTasks, type WithTasksOptions } from "./extension.js";
+export { EXTENSION_NAME as TASKS_EXTENSION_NAME } from "./extension-name.js";
+export {
+  SESSION_TASKS_LIST,
+  SESSION_TASKS_GET,
+  SESSION_TASKS_CANCEL,
+  SESSION_TASKS_AWAIT,
+  buildSessionTasksTools,
+  type SessionTasksToolsBundle,
+} from "./tools.js";
 export {
   runTasksHarnessConformance,
   type TasksConformanceFactory,

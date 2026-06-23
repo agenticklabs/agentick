@@ -160,7 +160,7 @@ describe("ToolExecutor — TaskHandle return + taskSupport branching (#156)", ()
       status: string;
       statusMessage?: string;
     };
-    expect(parsed._kind).toBe("task-ref");
+    expect(parsed._kind).toBe("session_task_ref");
     expect(parsed.taskId).toMatch(/^task:/);
     expect(parsed.status).toBe("working");
     expect(parsed.statusMessage).toBe("deploying");

@@ -18,8 +18,23 @@
 
 import type { SessionExtension, SessionInstaller } from "@agentick/spec-next";
 import { TasksHarness } from "./harness.js";
+import { EXTENSION_NAME } from "./extension-name.js";
+import { buildSessionTasksTools } from "./tools.js";
 
 export interface WithTasksOptions {
+  /**
+   * Skip auto-registering the model-facing `session_tasks_*` tools.
+   * Defaults to `false` — by default `withTasks()` registers four
+   * tools that let the model list / get / cancel / await framework
+   * background tasks (required for Pattern B `taskSupport: "required"`
+   * tools to be usable).
+   *
+   * Set to `true` if the adopter wants the harness substrate without
+   * the model surface — e.g., headless servers driving tasks
+   * exclusively from adopter code with no LLM in the loop.
+   */
+  readonly registerModelTools?: boolean;
+
   // TODO(#120-followup): real configuration fields:
   //   - `defaultTtlMs` — default TTL applied when `submit()` opts
   //     omit it.
@@ -27,14 +42,12 @@ export interface WithTasksOptions {
   //     a rejected handle when at cap.
   //   - `retentionMs` — how long to keep terminal task records
   //     reachable via `get(taskId)` before GC.
-  // Empty today — present so adopters can install via `withTasks()`
-  // without parens-vs-options ambiguity later.
-  readonly _placeholder?: never;
 }
 
-export function withTasks(_options: WithTasksOptions = {}): SessionExtension {
+export function withTasks(options: WithTasksOptions = {}): SessionExtension {
+  const registerModelTools = options.registerModelTools !== false;
   return {
-    name: "@agentick/tasks-next",
+    name: EXTENSION_NAME,
     target: "session",
     install: async (installer: SessionInstaller) => {
       const harness = new TasksHarness(
@@ -57,6 +70,20 @@ export function withTasks(_options: WithTasksOptions = {}): SessionExtension {
 
       await harness.ready;
       installer.registerNamespace("tasks", harness);
+
+      if (registerModelTools) {
+        // Auto-register the four model-facing `session_tasks_*` tools
+        // so Pattern B (`taskSupport: "required"`) is usable end-to-end
+        // out of the box. Handlers reach the harness via `ctx.tasks` —
+        // same instance just registered above.
+        const bundle = buildSessionTasksTools(installer.sessionId);
+        for (const { handlerRef, handler } of bundle.handlers) {
+          installer.registerToolHandler(handlerRef, handler);
+        }
+        for (const registration of bundle.registrations) {
+          installer.registerExtensionTool(registration);
+        }
+      }
     },
   };
 }
