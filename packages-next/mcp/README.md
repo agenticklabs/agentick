@@ -21,7 +21,8 @@ not published independently.
 | #2 `McpClientHarness` — Transport / Protocol / Auth / Lifecycle | next | ⏳ |
 | #3 `withMCP` extension + ToolBridge integration | shipped | ✅ |
 | #4 ElicitationBridge — server-to-client elicit/create routing | shipped | ✅ |
-| #5 OAuth + URL-mode elicitation + Streamable HTTP | follow-up | ⏳ |
+| #134b OAuth-via-elicit — URL-mode elicit on auth-needed | shipped | ✅ |
+| #134c Streamable HTTP transport | follow-up | ⏳ |
 
 ## Architecture
 
@@ -169,11 +170,14 @@ production load demands it; design space documented in
 
 - **No version negotiation.** The era-codec layer (canonical = draft
   shape; codecs for 2025-11-25, 2024-11-05) lands with the harness.
-- **OAuth flow is bootstrap-only today.** `DefaultOAuthProvider` logs
-  the authorize URL or invokes `onAuthorizationNeeded`. URL-mode
-  elicitation integration lands with #5.
+- **OAuth-via-elicit** — `DefaultOAuthProvider` accepts an `elicit`
+  slot. When set, `redirectToAuthorization(url)` publishes a URL-mode
+  elicit (consent terminal). The localhost `OAuthCallbackServer`
+  remains the CLI code-capture path; cloud / cluster code capture
+  via a gateway-routed handler is a separate future piece.
 - **No stdio / streamable-http transport.** In-memory transport for
-  tests is the only transport here. Real transports land with #2 / #5.
+  tests is the only transport here. Real transports land with the
+  Streamable HTTP work.
 - **Connection pool (deferred, coming weeks)** — see "Connection
   lifecycle".
 
