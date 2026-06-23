@@ -626,6 +626,7 @@ export class AppHarness<P = unknown>
     const installerHost: AppInstallerHost = {
       appId: this.scopeId,
       metadata: {},
+      getSession: (sessionId) => self.getSession(sessionId),
     };
     return {
       kind: "app",

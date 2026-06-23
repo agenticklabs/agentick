@@ -249,6 +249,21 @@ export interface AppInstallerHost {
    * cron jobs are firing in this app").
    */
   readonly metadata: Readonly<Record<string, unknown>>;
+  /**
+   * Look up a live session by id. Returns `undefined` when no session
+   * is currently registered under that id (including closed-and-removed
+   * sessions). Mirrors {@link AppHarnessProtocol.getSession}.
+   *
+   * Optional because the concrete host may be a non-`AppHarness`
+   * installer (mocks, future hosts that don't keep a session registry).
+   * Extensions reading session-scoped bridges at runtime (e.g. MCP's
+   * `withMCP` routing inbound `elicitation/create` to the in-flight
+   * session's `bridges.elicitation`) should call this through the
+   * optional chain and degrade gracefully when absent.
+   */
+  readonly getSession?: (
+    sessionId: string,
+  ) => import("./session-harness.js").SessionHarnessProtocol<unknown> | undefined;
 }
 
 // ============================================================================

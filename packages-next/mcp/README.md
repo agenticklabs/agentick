@@ -19,8 +19,8 @@ not published independently.
 |---|---|---|
 | #1 Skeleton — OAuth + protocol utilities + in-memory transport | this commit | ✅ |
 | #2 `McpClientHarness` — Transport / Protocol / Auth / Lifecycle | next | ⏳ |
-| #3 `withMCP` extension + ToolBridge integration | follow-up | ⏳ |
-| #4 ElicitationBridge — server-to-client elicit/create routing | follow-up | ⏳ |
+| #3 `withMCP` extension + ToolBridge integration | shipped | ✅ |
+| #4 ElicitationBridge — server-to-client elicit/create routing | shipped | ✅ |
 | #5 OAuth + URL-mode elicitation + Streamable HTTP | follow-up | ⏳ |
 
 ## Architecture

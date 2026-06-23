@@ -39,8 +39,19 @@
  */
 
 import type { AppExtension, AppInstaller } from "@agentick/spec-next";
-import type { ToolDeclaration, ToolHandler } from "@agentick/spec-next";
+import type {
+  ElicitationHarnessProtocol,
+  SessionHarnessProtocol,
+  ToolDeclaration,
+  ToolHandler,
+} from "@agentick/spec-next";
 import { jsonSchema, toRegistration } from "@agentick/spec-next";
+
+// Side-effect import — pulls in the `SessionHarnessProtocol.elicitation`
+// module-augmentation slot so `session.elicitation` types as
+// `ElicitationHarnessProtocol` instead of `unknown` when looked up via
+// `installer.app.getSession(id)`.
+import "@agentick/elicitation-next";
 
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 
@@ -221,11 +232,21 @@ async function discoverAndRegisterTools(
 ): Promise<void> {
   const tools = await harness.listTools();
   const prefix = config.toolPrefix ?? `${config.serverId}__`;
+  // Capture the installer-host reference so the per-call resolver
+  // lookup can reach the live session registry at dispatch time. App
+  // extensions install BEFORE sessions exist; the closure resolves
+  // sessions lazily.
+  const installerHost = installer.app;
   for (const tool of tools) {
     const localName = `${prefix}${tool.name}`;
     const handlerRef = mcpHandlerRef(config.serverId, tool.name);
-    const handler: ToolHandler = async (input) => {
-      const result = await harness.callTool(tool.name, input as Readonly<Record<string, unknown>>);
+    const handler: ToolHandler = async (input, { ctx }) => {
+      const elicitResolver = resolveSessionElicit(installerHost, ctx.sessionId);
+      const result = await harness.callTool(
+        tool.name,
+        input as Readonly<Record<string, unknown>>,
+        elicitResolver !== undefined ? { elicitResolver } : undefined,
+      );
       return mcpContentToBlocks(result.content);
     };
     installer.registerToolHandler(handlerRef, handler);
@@ -237,6 +258,24 @@ async function discoverAndRegisterTools(
       }),
     );
   }
+}
+
+/**
+ * Resolve the session's elicitation harness for inbound elicit routing.
+ * Walks `installer.app.getSession(sessionId)?.elicitation`; returns
+ * `undefined` when any link in the chain is absent — that surfaces as
+ * `{ action: "cancel" }` on the wire (see `elicit-bridge.ts`), the
+ * correct posture for an unrouted elicit.
+ */
+function resolveSessionElicit(
+  installerHost: AppInstaller["app"],
+  sessionId: string | undefined,
+): ElicitationHarnessProtocol | undefined {
+  if (sessionId === undefined) return undefined;
+  const session = installerHost.getSession?.(sessionId) as
+    | (SessionHarnessProtocol<unknown> & { readonly elicitation?: ElicitationHarnessProtocol })
+    | undefined;
+  return session?.elicitation;
 }
 
 /**

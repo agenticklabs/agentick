@@ -18,7 +18,7 @@
  *   ✅ in-memory + stdio transports
  *   ✅ McpClientHarness — Transport / Auth / Protocol / Lifecycle (#2)
  *   ✅ withMCP extension + ToolBridge integration (#3)
- *   ⏳ ElicitationBridge (#4)
+ *   ✅ ElicitationBridge — server-to-client elicit/create routing (#4)
  *   ⏳ OAuth + URL-mode elicitation + Streamable HTTP (#5)
  *
  * @see docs/proposals/v2/blueprint/23-mcp-as-harness.md
