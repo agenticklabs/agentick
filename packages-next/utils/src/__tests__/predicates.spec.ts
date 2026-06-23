@@ -12,7 +12,7 @@ import {
   isPlainObject,
   isString,
   isUndefined,
-} from "../utils/predicates.js";
+} from "../predicates.js";
 
 describe("predicates", () => {
   describe("isString", () => {

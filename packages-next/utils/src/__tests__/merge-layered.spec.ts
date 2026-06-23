@@ -1,13 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  append,
-  isMergeStrategy,
-  mergeLayered,
-  omit,
-  prepend,
-  replace,
-} from "../utils/merge-layered.js";
+import { append, isMergeStrategy, mergeLayered, omit, prepend, replace } from "../merge-layered.js";
 
 describe("mergeLayered — cascade semantics", () => {
   describe("scalars + undefined-filtering", () => {

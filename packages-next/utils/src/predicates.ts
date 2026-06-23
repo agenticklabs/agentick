@@ -54,6 +54,22 @@ export function isArray(v: unknown): v is readonly unknown[] {
   return Array.isArray(v);
 }
 
+export function isDate(v: unknown): v is Date {
+  return v instanceof Date;
+}
+
+export function isRegExp(v: unknown): v is RegExp {
+  return v instanceof RegExp;
+}
+
+export function isMap(v: unknown): v is Map<unknown, unknown> {
+  return v instanceof Map;
+}
+
+export function isSet(v: unknown): v is Set<unknown> {
+  return v instanceof Set;
+}
+
 /**
  * Plain object — NOT an array, NOT `null`, NOT a function, NOT a
  * primitive. The everyday "do I have a key/value bag" check.
@@ -63,7 +79,7 @@ export function isArray(v: unknown): v is readonly unknown[] {
  * instances) reach for {@link isPlainObject}.
  */
 export function isObject(v: unknown): v is Record<string, unknown> {
-  return v !== null && typeof v === "object" && !Array.isArray(v);
+  return !isNull(v) && !isUndefined(v) && typeof v === "object" && !isArray(v);
 }
 
 /**
@@ -79,7 +95,7 @@ export function isObject(v: unknown): v is Record<string, unknown> {
  * prototype is either `Object.prototype` or `null`.
  */
 export function isPlainObject(v: unknown): v is Record<string, unknown> {
-  if (v === null || typeof v !== "object" || Array.isArray(v)) return false;
+  if (isNull(v) || isUndefined(v) || typeof v !== "object" || isArray(v)) return false;
   const proto = Object.getPrototypeOf(v);
   return proto === null || proto === Object.prototype;
 }
@@ -111,37 +127,37 @@ export function isEqual(a: unknown, b: unknown): boolean {
   if (Object.is(a, b)) return true;
 
   // Two functions are equal-by-presence — see header note.
-  if (typeof a === "function" && typeof b === "function") return true;
+  if (isFunction(a) && isFunction(b)) return true;
 
   // One null/undefined, one not — `Object.is` already ruled out both
   // being the same null/undefined.
-  if (a === null || b === null || a === undefined || b === undefined) return false;
+  if (isNull(a) || isNull(b) || isUndefined(a) || isUndefined(b)) return false;
 
   // typeof divergence fast-fails the rest.
   if (typeof a !== typeof b) return false;
   if (typeof a !== "object") return false;
 
   // Date
-  if (a instanceof Date) {
-    return b instanceof Date && a.getTime() === b.getTime();
+  if (isDate(a)) {
+    return isDate(b) && a.getTime() === b.getTime();
   }
-  if (b instanceof Date) return false;
+  if (isDate(b)) return false;
 
   // RegExp
-  if (a instanceof RegExp) {
-    return b instanceof RegExp && a.source === b.source && a.flags === b.flags;
+  if (isRegExp(a)) {
+    return isRegExp(b) && a.source === b.source && a.flags === b.flags;
   }
-  if (b instanceof RegExp) return false;
+  if (isRegExp(b)) return false;
 
   // Array — both must be arrays of equal length with equal elements.
-  if (Array.isArray(a)) {
-    if (!Array.isArray(b) || a.length !== b.length) return false;
+  if (isArray(a)) {
+    if (!isArray(b) || a.length !== b.length) return false;
     for (let i = 0; i < a.length; i++) {
       if (!isEqual(a[i], b[i])) return false;
     }
     return true;
   }
-  if (Array.isArray(b)) return false;
+  if (isArray(b)) return false;
 
   // Plain object — same key set, equal values for every key.
   const ao = a as Record<string, unknown>;

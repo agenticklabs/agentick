@@ -23,7 +23,7 @@ import type {
   ToolListFilter,
   ToolRegistration,
 } from "@agentick/spec-next";
-import { isEqual } from "@agentick/shared";
+import { isEqual } from "@agentick/utils-next";
 
 export class InMemoryToolRegistry {
   // name → array of registrations, one per distinct binding slot.

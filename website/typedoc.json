@@ -57,7 +57,8 @@
     "../packages-next/subscriptions",
     "../packages-next/spec-conformance",
     "../packages-next/sandbox",
-    "../packages-next/gateway"
+    "../packages-next/gateway",
+    "../packages-next/utils"
   ],
   "out": "api",
   "plugin": ["typedoc-plugin-markdown", "typedoc-vitepress-theme"],

@@ -1,5 +1,3 @@
-import { isObject } from "./predicates.js";
-
 /**
  * Deep merge utility function that recursively merges objects.
  * Arrays are replaced, not merged.
@@ -27,4 +25,8 @@ export function mergeDeep<T extends Record<string, any>>(
   }
 
   return mergeDeep(target, ...sources);
+}
+
+function isObject(v: unknown): v is Record<string, unknown> {
+  return v !== null && v !== undefined && typeof v === "object" && !Array.isArray(v);
 }
