@@ -78,8 +78,11 @@ import type {
   SendResult,
   ServiceRegistry,
   SessionEntry,
+  SessionExtension,
+  SessionInstaller,
   TelemetryLayer,
   ToolRegistration,
+  Validator,
   SessionFilter,
   SessionHarnessProtocol,
   SessionListEntry,
@@ -706,6 +709,112 @@ export class AppHarness<P = unknown>
   }
 
   /**
+   * Build a {@link SessionInstaller} bound to a specific session's
+   * id. The installer writes session-scoped registrations into the
+   * supplied mutable buffers, which `createSessionBody` drains into
+   * the session's tool executor + bridges + close handlers AFTER all
+   * session-target extensions complete `install(...)`.
+   *
+   * Mutable-buffer pattern (rather than an immutable build-then-
+   * consume pattern) because extensions may reach into peer slots via
+   * `installer.getNamespace(...)` mid-install — a single shared map
+   * keeps the registration order observable to subsequent extensions
+   * in the same install pass.
+   *
+   * Tool handlers + bus subscriptions register on the SHARED
+   * resolvers / bus today; the returned unsubscribers run at
+   * session.close so the registrations don't outlive the session.
+   * (Per-session HandlerResolver is a #151+ cleanup — handler-ref
+   * collisions across sessions are avoided by construction via
+   * unique-per-session ref strings.)
+   */
+  private makeSessionInstaller(
+    sessionId: string,
+    bridges: Map<string, unknown>,
+    extensionTools: ToolRegistration[],
+    closeHandlers: Array<() => void | Promise<void>>,
+    toolHandlerUnregs: Array<() => void>,
+    busUnregs: Array<() => void>,
+  ): SessionInstaller {
+    const self = this;
+    const installerHost: AppInstallerHost = {
+      appId: this.scopeId,
+      metadata: {},
+      getSession: (id) => self.getSession(id),
+    };
+    return {
+      kind: "session",
+      hostId: sessionId,
+      sessionId,
+      registerNamespace(name, harness): Unsubscribe {
+        const prior = bridges.get(name);
+        bridges.set(name, harness);
+        return () => {
+          if (bridges.get(name) === harness) {
+            if (prior !== undefined) bridges.set(name, prior);
+            else bridges.delete(name);
+          }
+        };
+      },
+      getNamespace<T>(name: string): T | undefined {
+        return bridges.get(name) as T | undefined;
+      },
+      onClose(handler): void {
+        closeHandlers.push(handler);
+      },
+      registerToolHandler(
+        handlerRef: string,
+        handler: ToolHandler,
+        validator?: Validator,
+      ): Unsubscribe {
+        self.handlerResolver.register(handlerRef, handler, validator);
+        const unreg = (): void => self.handlerResolver.unregister(handlerRef);
+        toolHandlerUnregs.push(unreg);
+        return () => {
+          const idx = toolHandlerUnregs.indexOf(unreg);
+          if (idx >= 0) toolHandlerUnregs.splice(idx, 1);
+          unreg();
+        };
+      },
+      registerExtensionTool(registration): Unsubscribe {
+        extensionTools.push(registration);
+        return () => {
+          const idx = extensionTools.indexOf(registration);
+          if (idx >= 0) extensionTools.splice(idx, 1);
+        };
+      },
+      subscribeBus(filter, listener): Unsubscribe {
+        // Mirror AppInstaller's pattern — Stream.runForEach in a
+        // forked fiber; unsubscribe via Fiber.interrupt for atomic
+        // teardown with no microtask leak.
+        const fiber = Effect.runFork(
+          Stream.runForEach(self.bus.subscribe(filter), (env) =>
+            Effect.tryPromise({
+              try: () => Promise.resolve(listener(env)),
+              catch: () => undefined,
+            }).pipe(Effect.catchAll(() => Effect.void)),
+          ),
+        );
+        const unreg = (): void => {
+          void Effect.runPromise(Fiber.interrupt(fiber));
+        };
+        busUnregs.push(unreg);
+        return () => {
+          const idx = busUnregs.indexOf(unreg);
+          if (idx >= 0) busUnregs.splice(idx, 1);
+          unreg();
+        };
+      },
+      substrate: {
+        journal: self.journal,
+        bus: self.bus,
+        inbox: self.inbox,
+      },
+      app: installerHost,
+    };
+  }
+
+  /**
    * Resolves once the app's own sub-harness inbox registrations have
    * settled. The caller-supplied `executor` is expected to be already
    * ready (constructed and its `.ready` awaited) when passed in.
@@ -954,26 +1063,60 @@ export class AppHarness<P = unknown>
       { parentScope: { sessionId } },
     );
 
+    // ── Session extension lifecycle (#150) ────────────────────────
+    //
+    // Run cached session-target extensions BEFORE constructing the
+    // ToolExecutor so extension-contributed tools land in
+    // initialTools (binding tagged `scope: extension` /
+    // `level: session`). Bridges registered via `installer.
+    // registerNamespace` overlay the app-level extension bridges.
+    // Close-handlers fire on session.close.
+    const sessionExtensionBridges = new Map<string, unknown>(this.extensionBridges);
+    const sessionExtensionTools: ToolRegistration[] = [];
+    const sessionCloseHandlers: Array<() => void | Promise<void>> = [];
+    const sessionToolHandlerUnregs: Array<() => void> = [];
+    const sessionBusUnregs: Array<() => void> = [];
+    if (this.sessionExtensions.length > 0) {
+      const installer = this.makeSessionInstaller(
+        sessionId,
+        sessionExtensionBridges,
+        sessionExtensionTools,
+        sessionCloseHandlers,
+        sessionToolHandlerUnregs,
+        sessionBusUnregs,
+      );
+      for (const ext of this.sessionExtensions) {
+        // Type guarantee: `sessionExtensions` was filtered to
+        // `target !== "app"` at app construction (line ~606). The
+        // remaining union is `SessionExtension`; cast for the
+        // narrowing the runtime guarantees.
+        await (ext as SessionExtension).install(installer);
+      }
+    }
+
     // Per-session tool executor. Two paths:
     //   - `toolFactory` set → invoke it with the shared substrate; the
     //     resulting `ToolExecutorProtocol` is opaque to the App.
     //   - Otherwise → construct the bundled `ToolExecutorHarness` from
     //     `toolDefaults` + the shared `handlerResolver` + the
     //     per-session elicitation harness.
-    // Merge tools from five sources into the per-session executor's
+    // Merge tools from six sources into the per-session executor's
     // initial registry:
     //   1. `inheritedTools` — pre-tagged registrations propagated from
     //      a parent context (gateway, slice 7 #141). Already carry
     //      their own binding (typically `{scope:"gateway"}`).
-    //   2. extension-contributed tools (e.g. withMCP) — already carry
-    //      `binding: { scope: "extension", level: "app" }`
-    //   3. `appLevelTools` — adopter-supplied via `createApp({ tools })`,
+    //   2. extension-contributed tools at app level (e.g. withSandbox) —
+    //      already carry `binding: { scope: "extension", level: "app" }`
+    //   3. extension-contributed tools at session level (#150) — carry
+    //      `binding: { scope: "extension", level: "session" }`. Rank
+    //      above app-extension tools per the precedence ladder.
+    //   4. `appLevelTools` — adopter-supplied via `createApp({ tools })`,
     //      tagged at App construction with
     //      `binding: { scope: "app", appId }` (slice 6 #140)
-    //   4. `toolDefaults.initialTools` — adopter-supplied executor
+    //   5. `toolDefaults.initialTools` — adopter-supplied executor
     //      configuration; carries whatever binding the adopter set
     //      (defaults to runtime)
-    //   5. `CreateSessionInput.tools` — adopter-supplied per-session,
+    //   6. `CreateSessionInput.tools` — adopter-supplied per-session,
     //      tagged HERE with `binding: { scope: "session", sessionId }`
     //
     // Precedence at compile-time (slice 2's `compileForTick`):
@@ -986,12 +1129,14 @@ export class AppHarness<P = unknown>
     const mergedInitialTools: readonly ToolRegistration[] | undefined =
       this.inheritedTools.length > 0 ||
       this.extensionTools.length > 0 ||
+      sessionExtensionTools.length > 0 ||
       this.appLevelTools.length > 0 ||
       (this.toolDefaults.initialTools !== undefined && this.toolDefaults.initialTools.length > 0) ||
       sessionScopedTools.length > 0
         ? [
             ...this.inheritedTools,
             ...this.extensionTools,
+            ...sessionExtensionTools,
             ...this.appLevelTools,
             ...(this.toolDefaults.initialTools ?? []),
             ...sessionScopedTools,
@@ -1078,9 +1223,10 @@ export class AppHarness<P = unknown>
       // Surface the shared handler resolver as a ToolBridge so
       // reconciler-side tools register handlers at render time.
       toolBridge: this.toolBridge,
-      // Extension-provided bridges (installed by extension packages via
-      // `AppHarnessOptions.extensions`) flow into every session.
-      ...(this.extensionBridges.size > 0 ? { extensionBridges: this.extensionBridges } : {}),
+      // Extension-provided bridges. App-level bridges are merged in
+      // at `sessionExtensionBridges` construction (above); session-
+      // extensions overlay them via `installer.registerNamespace`.
+      ...(sessionExtensionBridges.size > 0 ? { extensionBridges: sessionExtensionBridges } : {}),
       // ParentSessionId cascade: spawn-supplied (overrides) wins; adopter
       // can also wire a non-spawn parent linkage via input.parentSessionId.
       ...(overrides.parentSessionId !== undefined
@@ -1095,6 +1241,27 @@ export class AppHarness<P = unknown>
     // factory-produced impls work transparently.
     await Promise.all([readyOf(tools), session.ready]);
     await session.mountReady;
+
+    // Wire session-extension teardown: handlers registered via the
+    // SessionInstaller's `onClose` AND any tool-handler / bus
+    // unsubscribers the installer accumulated. Fired LIFO at
+    // session.close (BaseHarness's `onClose` semantics — registration
+    // order reversed; errors swallowed per handler).
+    if (
+      sessionCloseHandlers.length > 0 ||
+      sessionToolHandlerUnregs.length > 0 ||
+      sessionBusUnregs.length > 0
+    ) {
+      const sessionAsHarness = session as unknown as {
+        onClose: (h: () => void | Promise<void>) => void;
+      };
+      // Bus subs first to unregister (innermost), then tool-handler
+      // unregs, then user-supplied onClose handlers reversed. Stacked
+      // pushes give LIFO firing at close time.
+      for (const unreg of sessionBusUnregs) sessionAsHarness.onClose(unreg);
+      for (const unreg of sessionToolHandlerUnregs) sessionAsHarness.onClose(unreg);
+      for (const h of sessionCloseHandlers) sessionAsHarness.onClose(h);
+    }
 
     const entry: InternalSessionEntry<P> = {
       id: sessionId,

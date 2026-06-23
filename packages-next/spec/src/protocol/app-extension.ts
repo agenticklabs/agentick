@@ -207,9 +207,11 @@ export interface AppInstaller extends BaseInstaller {
  * session install runs against a fresh SessionInstaller bound to that
  * session's substrate.
  *
- * Placeholder: SessionExtension support lands in Step 2+ of the ADR 26
- * migration (KnobsHarness extraction onward). The shape is locked in
- * here so extension authors can write against it from day one.
+ * Exposes a tool-registration surface mirroring {@link AppInstaller}'s
+ * but scoped to THIS session — session-level tools land in the
+ * session's ToolExecutor with `binding.scope: "extension"` +
+ * `level: "session"`, placing them above app/extension/gateway tools
+ * in the precedence ladder (`compileForTick`).
  */
 export interface SessionInstaller extends BaseInstaller {
   readonly kind: "session";
@@ -222,6 +224,43 @@ export interface SessionInstaller extends BaseInstaller {
    * closure.
    */
   readonly app: AppInstallerHost;
+
+  /**
+   * The session's id. Same value as `hostId`, surfaced under a more
+   * semantic name for session-extension code that stamps
+   * scope-aware envelopes (`{ sessionId }`) or constructs sub-harness
+   * addresses derived from the sessionId.
+   */
+  readonly sessionId: string;
+
+  /**
+   * Pre-register a tool handler resolvable from THIS session's
+   * dispatch. Routed into the session's tool-executor handler
+   * registry. Mirrors {@link AppInstaller.registerToolHandler} but
+   * scoped to the session.
+   */
+  registerToolHandler(handlerRef: string, handler: ToolHandler, validator?: Validator): Unsubscribe;
+
+  /**
+   * Pre-register a session-level tool declaration. Auto-installed into
+   * the session's `ToolExecutor.initialTools` BEFORE the tool executor
+   * is constructed. Binding shape: `{ scope: "extension",
+   * extensionName, level: "session" }`. Per the layered-tools
+   * precedence ladder, session-extension tools rank above
+   * app-extension tools and below caller-supplied session tools.
+   */
+  registerExtensionTool(registration: import("./tool-executor.js").ToolRegistration): Unsubscribe;
+
+  /**
+   * Subscribe to the session's bus. Wraps the substrate's bus
+   * subscription with the session's scope filter applied by default
+   * (`{ sessionId }`). Extensions building telemetry / observability
+   * over the session's event stream consume this surface.
+   */
+  subscribeBus(
+    filter: EventQuery,
+    listener: (event: ProtocolEvent) => void | Promise<void>,
+  ): Unsubscribe;
 }
 
 /**
