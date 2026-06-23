@@ -46,6 +46,7 @@ import type {
   ToolRegistration,
 } from "@agentick/spec-next";
 import { DEFAULT_JOURNALING_POLICY, toRegistration } from "@agentick/spec-next";
+import { mergeLayered } from "@agentick/utils-next";
 import { AppHarness, type AppHarnessOptions } from "@agentick/app-next";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
 
@@ -127,15 +128,12 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
     // `gateway:command:close-gateway` envelopes route bus-only — same
     // Option G pattern AppHarness/SessionHarness use to prevent
     // "writing to a closed journal" crashes when substrate teardown
-    // handlers fire inside super.close().
-    const basePolicy: JournalingPolicy = options.policy ?? DEFAULT_JOURNALING_POLICY;
-    const policy: JournalingPolicy = {
-      ...basePolicy,
-      override: {
-        ...(basePolicy.override ?? {}),
-        "gateway:command:close-gateway": "bus-only",
-      },
-    };
+    // handlers fire inside super.close(). `mergeLayered` deep-merges
+    // the `override` map automatically; adding fields to
+    // JournalingPolicy doesn't require touching this site.
+    const policy = mergeLayered<JournalingPolicy>(DEFAULT_JOURNALING_POLICY, options.policy, {
+      override: { "gateway:command:close-gateway": "bus-only" },
+    });
 
     super(
       SURFACE,

@@ -53,6 +53,7 @@
     "@agentick/spec-next": "workspace:*",
     "@agentick/state-next": "workspace:*",
     "@agentick/timeline-next": "workspace:*",
+    "@agentick/utils-next": "workspace:*",
     "effect": "^3.21.2",
     "react": "^19.2.4"
   },

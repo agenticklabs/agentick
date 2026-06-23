@@ -47,6 +47,7 @@ import {
   isToolExecutorFactory,
   toRegistration,
 } from "@agentick/spec-next";
+import { mergeLayered } from "@agentick/utils-next";
 import type {
   AppError,
   AppExtension,
@@ -61,6 +62,7 @@ import type {
   ExecutionTarget,
   ExecutorFactory,
   HandlerVerdict,
+  JournalingPolicy,
   LanguageModelExecutor,
   LoopExecutorProtocol,
   MessageEnvelope,
@@ -521,12 +523,9 @@ export class AppHarness<P = unknown>
         ...(options.journal !== undefined ? { journal: options.journal } : {}),
         ...(options.bus !== undefined ? { bus: options.bus } : {}),
         ...(options.inbox !== undefined ? { inbox: options.inbox } : {}),
-        policy: {
-          ...DEFAULT_JOURNALING_POLICY,
-          override: {
-            "app:command:close-app": "bus-only",
-          },
-        },
+        policy: mergeLayered<JournalingPolicy>(DEFAULT_JOURNALING_POLICY, {
+          override: { "app:command:close-app": "bus-only" },
+        }),
       },
     );
     // Local aliases for convenience in the rest of the constructor.

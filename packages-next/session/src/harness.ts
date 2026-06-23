@@ -12,7 +12,11 @@
 import { Effect, Fiber, Stream } from "effect";
 
 import { BaseHarness, runHarnessProtocol, ulid } from "@agentick/runtime-next";
-import type { LoopExecutorProtocol, ReconcilerProtocol } from "@agentick/spec-next";
+import type {
+  JournalingPolicy,
+  LoopExecutorProtocol,
+  ReconcilerProtocol,
+} from "@agentick/spec-next";
 import type {
   AppendEntryInput,
   ApplyExecutorResultInput,
@@ -52,6 +56,7 @@ import type {
   ToolExecutorProtocol,
 } from "@agentick/spec-next";
 import { DEFAULT_JOURNALING_POLICY, SPEC_VERSION } from "@agentick/spec-next";
+import { mergeLayered } from "@agentick/utils-next";
 import { withScope } from "@agentick/tool-executor-next";
 import type { KnobsHandle } from "@agentick/knobs-next";
 import type { StateHandle } from "@agentick/state-next";
@@ -248,12 +253,9 @@ export class SessionHarness<P = unknown>
       ...(options.journal !== undefined ? { journal: options.journal } : {}),
       ...(options.bus !== undefined ? { bus: options.bus } : {}),
       ...(options.inbox !== undefined ? { inbox: options.inbox } : {}),
-      policy: {
-        ...DEFAULT_JOURNALING_POLICY,
-        override: {
-          "session:command:close": "bus-only",
-        },
-      },
+      policy: mergeLayered<JournalingPolicy>(DEFAULT_JOURNALING_POLICY, {
+        override: { "session:command:close": "bus-only" },
+      }),
     });
     // Local aliases for the resolved substrate. BaseHarness has set
     // `this.journal / .bus / .inbox` to the resolved instances; we
