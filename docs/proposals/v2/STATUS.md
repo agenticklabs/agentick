@@ -1149,6 +1149,31 @@ explicit `typescript` + `vitest` devDeps. Both removed:
 Running record of decisions made during execution (separate from the
 blueprint's design decisions; this is execution-level).
 
+### 2026-06-23
+
+- **`@agentick/utils-next` carved out from `@agentick/shared`.** The
+  v1 `@agentick/shared` package is fundamentally a v1-API content bag
+  (block-types, messages, transport, identity, etc.) with a single
+  `utils/` subdirectory of framework-agnostic helpers. Adding new v2
+  utilities (`mergeLayered`, `isEqual`, `isPlainObject`, predicates)
+  there forced every v2 package to import from a v1-coupled package,
+  creating a backwards dep edge from v2-next to v1.
+  Moved predicates + merge-layered + tests into a new private
+  workspace package `@agentick/utils-next` at `packages-next/utils/`.
+  Inlined the tiny `isObject` helper that v1's `mergeDeep` was using
+  so v1 `@agentick/shared` stays self-contained. Updated v2 consumers
+  (`tool-executor-next/registry.ts`, three harness migrations for
+  journalingPolicy) to import from `@agentick/utils-next`.
+  Future v2 framework-agnostic utilities land here, not in v1 shared.
+- **`mergeLayered` first internal demonstration — journalingPolicy
+  cascade in App / Gateway / Session harnesses.** Replaced
+  `{ ...DEFAULT_JOURNALING_POLICY, override: { ... } }` hand-spreads
+  with `mergeLayered<JournalingPolicy>(DEFAULT_JOURNALING_POLICY,
+  options.policy, { override: { ... } })`. Adding fields to
+  `JournalingPolicy` no longer requires touching the three close-op
+  override sites. Gateway's adopter-supplied `policy` now deep-merges
+  through the cascade rather than per-field copy.
+
 ### 2026-05-08
 
 - **Day 1 morning approach:** do additive (new packages) safely first;
