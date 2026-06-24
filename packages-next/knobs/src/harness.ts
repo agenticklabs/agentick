@@ -50,6 +50,7 @@ import type {
   Operation,
   OperationJournal,
 } from "@agentick/spec-next";
+import { createKeyedNotifier, type KeyedNotifier } from "@agentick/utils-next";
 
 // ============================================================================
 // Inbox message types
@@ -67,8 +68,7 @@ type KnobsInboxMessage =
 export class KnobsHarness extends BaseHarness<"knobs"> implements KnobsHarnessProtocol {
   private readonly values = new Map<string, KnobPrimitive>();
   private readonly descriptors = new Map<string, KnobRegistration>();
-  private readonly idListeners = new Map<string, Set<() => void>>();
-  private readonly wildcards = new Set<() => void>();
+  private readonly notifier: KeyedNotifier = createKeyedNotifier();
 
   /**
    * Cached snapshot for `list()`. Invalidated on every mutation so that
@@ -112,22 +112,11 @@ export class KnobsHarness extends BaseHarness<"knobs"> implements KnobsHarnessPr
   }
 
   subscribe(id: string, listener: () => void): Unsubscribe {
-    let set = this.idListeners.get(id);
-    if (!set) {
-      set = new Set();
-      this.idListeners.set(id, set);
-    }
-    set.add(listener);
-    return () => {
-      set!.delete(listener);
-    };
+    return this.notifier.subscribe(id, listener);
   }
 
   subscribeAll(listener: () => void): Unsubscribe {
-    this.wildcards.add(listener);
-    return () => {
-      this.wildcards.delete(listener);
-    };
+    return this.notifier.subscribeAll(listener);
   }
 
   // ─────────── Async surface — full Operations ───────────
@@ -309,8 +298,7 @@ export class KnobsHarness extends BaseHarness<"knobs"> implements KnobsHarnessPr
   }
 
   private fireListeners(id: string): void {
-    this.idListeners.get(id)?.forEach((l) => l());
-    this.wildcards.forEach((l) => l());
+    this.notifier.notify(id);
   }
 }
 

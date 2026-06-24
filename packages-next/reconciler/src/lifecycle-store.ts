@@ -29,6 +29,7 @@ import type {
   LifecycleTickEnd,
   LifecycleTickStart,
 } from "@agentick/spec-next";
+import { createKeyedNotifier, type KeyedNotifier } from "@agentick/utils-next";
 
 /**
  * Kinds the store dispatches and that user hooks register against.
@@ -73,8 +74,15 @@ export class LifecycleStore {
    *
    * Wired via `registerCustom(kind, handler)` (and the public
    * `useOnLifecycleCustom` hook).
+   *
+   * Backed by the shared `KeyedNotifier` primitive — async dispatch
+   * with serial ordering propagates handler errors so the reconciler
+   * can react. `count(kind)` powers the unhandled-warning logic.
    */
-  private readonly customHandlers = new Map<string, Set<AnyHandler>>();
+  private readonly customHandlers: KeyedNotifier<string, LifecycleEvent> = createKeyedNotifier<
+    string,
+    LifecycleEvent
+  >();
 
   /**
    * Track which custom kinds have already produced an "unhandled" warning
@@ -131,19 +139,7 @@ export class LifecycleStore {
     kind: string,
     handler: (event: LifecycleEvent) => void | Promise<void>,
   ): () => void {
-    let bucket = this.customHandlers.get(kind);
-    if (!bucket) {
-      bucket = new Set();
-      this.customHandlers.set(kind, bucket);
-    }
-    const wrapped = handler as AnyHandler;
-    bucket.add(wrapped);
-    return () => {
-      const b = this.customHandlers.get(kind);
-      if (!b) return;
-      b.delete(wrapped);
-      if (b.size === 0) this.customHandlers.delete(kind);
-    };
+    return this.customHandlers.subscribe(kind, handler);
   }
 
   /**
@@ -197,9 +193,8 @@ export class LifecycleStore {
         // nothing is listening, log a one-shot warning so typos surface
         // instead of silently dropping events.
         const kind = event.kind;
-        const bucket = this.customHandlers.get(kind);
-        if (bucket && bucket.size > 0) {
-          for (const h of [...bucket]) await h(event);
+        if (this.customHandlers.count(kind) > 0) {
+          await this.customHandlers.notifyAsync(kind, event);
           return;
         }
         if (!this.warnedUnhandledKinds.has(kind)) {

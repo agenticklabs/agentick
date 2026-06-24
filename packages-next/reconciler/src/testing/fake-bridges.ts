@@ -45,6 +45,7 @@ import type {
   CompactStrategy,
   CompactResult,
 } from "@agentick/spec-next";
+import { createKeyedNotifier, createNotifier } from "@agentick/utils-next";
 import { InMemoryDataBridge } from "../bridges/in-memory-data-bridge.js";
 
 /**
@@ -60,8 +61,8 @@ export function fakeTimelineHarness(
   let projection: TimelineEntry[] = [...initial];
   let pending: PendingEntry[] = [];
   let version = 0;
-  const listeners = new Set<() => void>();
-  const notify = () => listeners.forEach((l) => l());
+  const listeners = createNotifier();
+  const notify = () => listeners.notify();
 
   let snapshot: TimelineSnapshot = { entries: [...projection], version };
   const refresh = () => {
@@ -74,10 +75,7 @@ export function fakeTimelineHarness(
     id: "mock:timeline",
     ready: Promise.resolve(),
     read: () => snapshot,
-    subscribe: (l) => {
-      listeners.add(l);
-      return () => listeners.delete(l) as unknown as void;
-    },
+    subscribe: (l) => listeners.subscribe(l),
     readPending: () => pending,
     readPersisted: () => persisted,
     append: async (...entries: TimelineEntry[]) => {
@@ -185,16 +183,14 @@ export function fakeKnobsHarness(
   for (const [id, value] of values) {
     descriptors.set(id, { id, value, valueType: typeof value as "string" | "number" | "boolean" });
   }
-  const keyListeners = new Map<string, Set<() => void>>();
-  const wildcards = new Set<() => void>();
+  const notifier = createKeyedNotifier();
   // Cached snapshot ref — invalidated on every mutation. Without this
   // `useSyncExternalStore` sees a fresh array on every list() call and
   // loops infinitely. Mirrors the real KnobsHarness's `listCache`.
   let listCache: readonly KnobDescriptor[] | null = null;
   const fire = (id: string) => {
     listCache = null;
-    keyListeners.get(id)?.forEach((l) => l());
-    wildcards.forEach((l) => l());
+    notifier.notify(id);
   };
 
   return {
@@ -207,19 +203,8 @@ export function fakeKnobsHarness(
       listCache = [...descriptors.values()];
       return listCache;
     },
-    subscribe: (id, l) => {
-      let set = keyListeners.get(id);
-      if (!set) {
-        set = new Set();
-        keyListeners.set(id, set);
-      }
-      set.add(l);
-      return () => set!.delete(l) as unknown as void;
-    },
-    subscribeAll: (l) => {
-      wildcards.add(l);
-      return () => wildcards.delete(l) as unknown as void;
-    },
+    subscribe: (id, l) => notifier.subscribe(id, l),
+    subscribeAll: (l) => notifier.subscribeAll(l),
     set: async ({ id, value }: KnobsSetInput) => {
       values.set(id, value);
       const prev = descriptors.get(id);
@@ -267,11 +252,9 @@ export function mockStateHarness(
   initial: Readonly<Record<string, unknown>> = {},
 ): StateHarnessProtocol {
   const values = new Map<string, unknown>(Object.entries(initial));
-  const keyListeners = new Map<string, Set<() => void>>();
-  const wildcards = new Set<() => void>();
+  const notifier = createKeyedNotifier();
   const fire = (key: string) => {
-    keyListeners.get(key)?.forEach((l) => l());
-    wildcards.forEach((l) => l());
+    notifier.notify(key);
   };
 
   return {
@@ -280,19 +263,8 @@ export function mockStateHarness(
     get: (key) => values.get(key),
     has: (key) => values.has(key),
     list: () => [...values.keys()],
-    subscribe: (key, l) => {
-      let set = keyListeners.get(key);
-      if (!set) {
-        set = new Set();
-        keyListeners.set(key, set);
-      }
-      set.add(l);
-      return () => set!.delete(l) as unknown as void;
-    },
-    subscribeAll: (l) => {
-      wildcards.add(l);
-      return () => wildcards.delete(l) as unknown as void;
-    },
+    subscribe: (key, l) => notifier.subscribe(key, l),
+    subscribeAll: (l) => notifier.subscribeAll(l),
     set: async ({ key, value }: StateSetInput) => {
       values.set(key, value);
       fire(key);

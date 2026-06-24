@@ -188,6 +188,23 @@ function isProgressShape(
   );
 }
 
+/**
+ * Extract the related-task `taskId` from a progress notification, or
+ * `null` if absent / malformed. Inspects both `params._meta` and the
+ * top-level `_meta` to mirror {@link matchProgressNotificationForTask}.
+ *
+ * Lets callers publish a notification to a one-shot bus keyed by
+ * taskId without iterating every active subscriber.
+ */
+export function extractRelatedTaskId(raw: unknown): string | null {
+  if (!isProgressShape(raw)) return null;
+  const paramsMeta = readRelatedTaskMeta(raw.params);
+  if (paramsMeta !== undefined) return paramsMeta;
+  const topMeta = readRelatedTaskMeta(raw);
+  if (topMeta !== undefined) return topMeta;
+  return null;
+}
+
 function readRelatedTaskMeta(envelope: unknown): string | undefined {
   if (typeof envelope !== "object" || envelope === null) return undefined;
   const meta = (envelope as { _meta?: unknown })._meta;

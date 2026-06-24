@@ -22,6 +22,7 @@ import type {
   DataResolveOptions,
   Unsubscribe,
 } from "@agentick/spec-next";
+import { createKeyedNotifier, type KeyedNotifier } from "@agentick/utils-next";
 
 type Entry =
   | {
@@ -54,7 +55,7 @@ export interface InMemoryDataBridgeOptions {
 export class InMemoryDataBridge implements DataBridge {
   private readonly cache = new Map<string, Entry>();
   private readonly pendingPromises = new Set<Promise<unknown>>();
-  private readonly listeners = new Map<string, Set<() => void>>();
+  private readonly listeners: KeyedNotifier = createKeyedNotifier();
   private fetchCountTotal = 0;
   private readonly options: InMemoryDataBridgeOptions;
 
@@ -173,18 +174,7 @@ export class InMemoryDataBridge implements DataBridge {
   }
 
   subscribe(key: string, listener: () => void): Unsubscribe {
-    let bucket = this.listeners.get(key);
-    if (!bucket) {
-      bucket = new Set();
-      this.listeners.set(key, bucket);
-    }
-    bucket.add(listener);
-    return () => {
-      const b = this.listeners.get(key);
-      if (!b) return;
-      b.delete(listener);
-      if (b.size === 0) this.listeners.delete(key);
-    };
+    return this.listeners.subscribe(key, listener);
   }
 
   invalidate(key: string): void {
@@ -274,9 +264,7 @@ export class InMemoryDataBridge implements DataBridge {
   // ──────── Internals ────────
 
   private notifyKey(key: string): void {
-    const bucket = this.listeners.get(key);
-    if (!bucket) return;
-    for (const l of bucket) l();
+    this.listeners.notify(key);
   }
 }
 

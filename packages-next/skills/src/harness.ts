@@ -34,6 +34,7 @@ import type {
   SkillsSearchInput,
   SkillsUpdateInput,
 } from "@agentick/spec-next";
+import { createKeyedNotifier, type KeyedNotifier } from "@agentick/utils-next";
 
 // ============================================================================
 // Harness
@@ -48,8 +49,7 @@ type SkillsSurface = typeof SURFACE;
 
 export class SkillsHarness extends BaseHarness<SkillsSurface> implements SkillsHarnessProtocol {
   private readonly skills = new Map<string, Skill>();
-  private readonly idListeners = new Map<string, Set<() => void>>();
-  private readonly wildcards = new Set<() => void>();
+  private readonly notifier: KeyedNotifier = createKeyedNotifier();
 
   /** Cached snapshot for `list()`. Invalidated on every mutation. */
   private listCache: readonly Skill[] | null = null;
@@ -110,22 +110,11 @@ export class SkillsHarness extends BaseHarness<SkillsSurface> implements SkillsH
   }
 
   subscribe(name: string, listener: () => void): Unsubscribe {
-    let set = this.idListeners.get(name);
-    if (!set) {
-      set = new Set();
-      this.idListeners.set(name, set);
-    }
-    set.add(listener);
-    return () => {
-      set!.delete(listener);
-    };
+    return this.notifier.subscribe(name, listener);
   }
 
   subscribeAll(listener: () => void): Unsubscribe {
-    this.wildcards.add(listener);
-    return () => {
-      this.wildcards.delete(listener);
-    };
+    return this.notifier.subscribeAll(listener);
   }
 
   // ─────────── Async surface — full Operations ───────────
@@ -181,7 +170,9 @@ export class SkillsHarness extends BaseHarness<SkillsSurface> implements SkillsH
     this.skills.clear();
     for (const [k, v] of Object.entries(snapshot)) this.skills.set(k, v);
     this.listCache = null;
-    for (const l of this.wildcards) l();
+    // Snapshot import: wildcard-only signal so global views refresh
+    // without per-id firings flooding.
+    this.notifier.notifyAll();
   }
 
   // ─────────── Inbox handler ───────────
@@ -271,8 +262,6 @@ export class SkillsHarness extends BaseHarness<SkillsSurface> implements SkillsH
 
   private invalidateAndNotify(name: string): void {
     this.listCache = null;
-    const set = this.idListeners.get(name);
-    if (set) for (const l of set) l();
-    for (const l of this.wildcards) l();
+    this.notifier.notify(name);
   }
 }

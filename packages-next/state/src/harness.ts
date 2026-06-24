@@ -36,6 +36,7 @@ import type {
   StateHarnessProtocol,
   StateSetInput,
 } from "@agentick/spec-next";
+import { createKeyedNotifier, type KeyedNotifier } from "@agentick/utils-next";
 
 type StateInboxMessage =
   | { readonly type: "state:set"; readonly payload: StateSetInput }
@@ -43,8 +44,7 @@ type StateInboxMessage =
 
 export class StateHarness extends BaseHarness<"state"> implements StateHarnessProtocol {
   private readonly values = new Map<string, unknown>();
-  private readonly keyListeners = new Map<string, Set<() => void>>();
-  private readonly wildcards = new Set<() => void>();
+  private readonly notifier: KeyedNotifier = createKeyedNotifier();
 
   get id(): string {
     return this.scopeId;
@@ -69,22 +69,11 @@ export class StateHarness extends BaseHarness<"state"> implements StateHarnessPr
   }
 
   subscribe(key: string, listener: () => void): Unsubscribe {
-    let set = this.keyListeners.get(key);
-    if (!set) {
-      set = new Set();
-      this.keyListeners.set(key, set);
-    }
-    set.add(listener);
-    return () => {
-      set!.delete(listener);
-    };
+    return this.notifier.subscribe(key, listener);
   }
 
   subscribeAll(listener: () => void): Unsubscribe {
-    this.wildcards.add(listener);
-    return () => {
-      this.wildcards.delete(listener);
-    };
+    return this.notifier.subscribeAll(listener);
   }
 
   // ─────────── Async surface — full Operations ───────────
@@ -179,7 +168,6 @@ export class StateHarness extends BaseHarness<"state"> implements StateHarnessPr
   }
 
   private fireListeners(key: string): void {
-    this.keyListeners.get(key)?.forEach((l) => l());
-    this.wildcards.forEach((l) => l());
+    this.notifier.notify(key);
   }
 }

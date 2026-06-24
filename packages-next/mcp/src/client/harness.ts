@@ -64,7 +64,7 @@ import type {
 import {
   buildCallToolAsTaskParams,
   discriminateCallToolResponse,
-  matchProgressNotificationForTask,
+  extractRelatedTaskId,
   parseTaskPayloadAsCallToolResult,
   TASKS_CANCEL_METHOD,
   TASKS_GET_METHOD,
@@ -75,12 +75,32 @@ import {
 
 import type { ElicitationResult } from "@agentick/spec-next";
 import type { RequestResponseRegistry } from "@agentick/runtime-next";
+import { createLocalPubSub, type LocalPubSub } from "@agentick/utils-next";
 
 import { McpLifecycle } from "./lifecycle.js";
 import type { McpClientHarnessOptions, McpClientState, McpToolDescriptor } from "./types.js";
 import type { EraCodec } from "./era-codec.js";
 import { DraftPassthroughCodec, selectCodec } from "./era-codec.js";
 import { makeElicitRequestHandler } from "./elicit-bridge.js";
+
+/**
+ * Discriminated event published to {@link McpClientHarness.taskNotificationBus}.
+ * Stream subscribers filter on `taskId` (and optionally `kind`) to
+ * receive the slice they care about. Routing the two inbound channels
+ * through one bus avoids the parallel-map drift that ADR-34
+ * consolidation calls out.
+ */
+type TaskNotificationEvent =
+  | {
+      readonly kind: "status";
+      readonly taskId: string;
+      readonly notification: TaskStatusNotification;
+    }
+  | {
+      readonly kind: "progress";
+      readonly taskId: string;
+      readonly notification: ProgressNotification;
+    };
 
 // ============================================================================
 // Errors
@@ -134,18 +154,22 @@ export class McpClientHarness extends BaseHarness<"mcp"> {
   private readonly elicitAddress: string | undefined;
 
   /**
-   * Per-taskId fan-out of inbound task notifications. The map's
-   * lifetime matches in-flight remote tasks: `taskNotifications`
-   * adds; `Stream.async`'s `onCancel` removes. The notification
-   * handlers (registered once at client construction) iterate
-   * matching subscribers and offer the parsed envelope.
+   * Single fan-out bus for inbound task notifications. Each inbound
+   * `notifications/tasks/status` or `notifications/progress` becomes
+   * one published `TaskNotificationEvent`; per-taskId subscribers
+   * filter at subscribe time. Replaces two parallel
+   * `Map<taskId, Set<callback>>` registries with one Stream-shaped
+   * primitive (see `@agentick/utils-next/pubsub`).
    *
-   * Two channels per taskId:
-   *   - `notifications/tasks/status` (status transitions, terminal)
-   *   - `notifications/progress` with related-task meta key
+   * Channels carried:
+   *   - `kind: "status"` — `notifications/tasks/status` (terminal +
+   *     intermediate status transitions). `taskId` is direct.
+   *   - `kind: "progress"` — `notifications/progress` with the
+   *     related-task meta key (`RELATED_TASK_META_KEY`). `taskId` is
+   *     derived via `matchProgressNotificationForTask`.
    */
-  private readonly taskStatusSubs = new Map<string, Set<(n: TaskStatusNotification) => void>>();
-  private readonly taskProgressSubs = new Map<string, Set<(n: ProgressNotification) => void>>();
+  private readonly taskNotificationBus: LocalPubSub<TaskNotificationEvent> =
+    createLocalPubSub<TaskNotificationEvent>();
 
   constructor(
     scopeId: string,
@@ -354,35 +378,16 @@ export class McpClientHarness extends BaseHarness<"mcp"> {
     never,
     never
   > {
-    type N =
+    type Out =
       | { readonly kind: "status"; readonly notification: TaskStatusNotification }
       | { readonly kind: "progress"; readonly notification: ProgressNotification };
-    return Stream.async<N>((emit) => {
-      const onStatus = (note: TaskStatusNotification): void => {
-        void emit.single({ kind: "status", notification: note });
-      };
-      const onProgress = (note: ProgressNotification): void => {
-        void emit.single({ kind: "progress", notification: note });
-      };
-      let statusBucket = this.taskStatusSubs.get(taskId);
-      if (statusBucket === undefined) {
-        statusBucket = new Set();
-        this.taskStatusSubs.set(taskId, statusBucket);
-      }
-      statusBucket.add(onStatus);
-      let progressBucket = this.taskProgressSubs.get(taskId);
-      if (progressBucket === undefined) {
-        progressBucket = new Set();
-        this.taskProgressSubs.set(taskId, progressBucket);
-      }
-      progressBucket.add(onProgress);
-      return Effect.sync(() => {
-        statusBucket?.delete(onStatus);
-        if (statusBucket && statusBucket.size === 0) this.taskStatusSubs.delete(taskId);
-        progressBucket?.delete(onProgress);
-        if (progressBucket && progressBucket.size === 0) this.taskProgressSubs.delete(taskId);
-      });
-    });
+    return Stream.map(
+      this.taskNotificationBus.subscribe((event) => event.taskId === taskId),
+      (event): Out =>
+        event.kind === "status"
+          ? { kind: "status", notification: event.notification }
+          : { kind: "progress", notification: event.notification },
+    );
   }
 
   /**
@@ -490,6 +495,7 @@ export class McpClientHarness extends BaseHarness<"mcp"> {
       }
       this.client = undefined;
     }
+    await this.taskNotificationBus.close();
     await super.close();
   }
 
@@ -594,19 +600,23 @@ export class McpClientHarness extends BaseHarness<"mcp"> {
     // are torn down by the Stream-side `onCancel` in
     // `taskNotifications()` so the maps stay tight.
     client.setNotificationHandler(TaskStatusNotificationSchema, (note) => {
-      const taskId = note.params.taskId;
-      const subs = this.taskStatusSubs.get(taskId);
-      if (subs === undefined) return;
-      for (const sub of subs) sub(note);
+      this.taskNotificationBus.publish({
+        kind: "status",
+        taskId: note.params.taskId,
+        notification: note,
+      });
     });
     client.setNotificationHandler(ProgressNotificationSchema, (note) => {
       // Progress notifications carry a related-task key in either
-      // params._meta or top-level _meta — match across both.
-      for (const [taskId, subs] of this.taskProgressSubs.entries()) {
-        if (matchProgressNotificationForTask(note, taskId) !== null) {
-          for (const sub of subs) sub(note);
-        }
-      }
+      // params._meta or top-level _meta. We extract the taskId once
+      // here; subscribers downstream filter on it via the PubSub.
+      const taskId = extractRelatedTaskId(note);
+      if (taskId === null) return;
+      this.taskNotificationBus.publish({
+        kind: "progress",
+        taskId,
+        notification: note,
+      });
     });
     return client;
   }
