@@ -195,8 +195,12 @@ const result = await handle.result; // resolves with ContentBlock[]
 
 - **`TasksHarness`** — `BaseHarness<"tasks">` impl. Per-session
   registry; cluster-friendly via inbox + bus.
-- **`withTasks()`** — `SessionExtension` factory; constructs the
-  harness on session install and registers the `tasks` namespace.
+- **`withTasks()`** — `SessionExtension` factory; auto-registers the
+  four model-facing `session_tasks_*` tools (list / get / cancel /
+  await) so Pattern B is usable. Does NOT construct the harness —
+  the AppHarness is the single construction site for the per-session
+  `TasksHarness` (#159); this extension reads `installer.tasks` and
+  `ctx.tasks` instead.
 - **Bus channels** —
   - `session:channel:task-status` for FSM transitions (payload:
     `TaskInfo`).

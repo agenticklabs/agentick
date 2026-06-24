@@ -1,23 +1,30 @@
 /**
  * `withTasks()` — `SessionExtension` factory.
  *
- * Constructs a {@link TasksHarness} per-session at session install
- * time, wired to the session's substrate. The required-set contract
- * guarantees this slot exists; adopters who want a custom
- * implementation pass a configured `withTasks({ ... })`.
+ * The AppHarness constructs the per-session {@link TasksHarness} BEFORE
+ * session-extension installs run (single-construction-site, #159) and
+ * exposes it on `installer.tasks`. `withTasks()` therefore does NOT
+ * construct a harness; constructing one against the same substrate
+ * would collide on the inbox address (`tasks:${sessionId}:tasks`) and
+ * cause `bridges.tasks` / `ctx.tasks` / `session.tasks` to resolve to
+ * different instances.
  *
- * **Cleanup-on-failure.** The harness's `ready` promise can reject
- * (inbox registration failure across a cluster substrate). To avoid
- * leaking the harness's daemon fibers + partial inbox subscription,
- * `harness.close()` is registered with the installer BEFORE the
- * `ready` await — so a rejection still routes through the
- * installer's teardown path.
+ * What `withTasks()` still does is auto-register the four
+ * model-facing `session_tasks_*` tools (list / get / cancel / await)
+ * so Pattern B (`taskSupport: "required"`) tools are usable
+ * out-of-the-box. The handlers reach the host's `TasksHarness` via
+ * `ctx.tasks` — the same instance the AppHarness already wired into
+ * the ToolExecutor and the session bridges.
+ *
+ * Lifecycle (`close`, `ready`) is owned by the AppHarness, NOT by
+ * this extension. Don't register `onClose(() => harness.close())`
+ * here — the AppHarness's `close()` path handles it.
  *
  * @see docs/proposals/v2/blueprint/26-harness-api-shape.md
+ * @see docs/proposals/v2/blueprint/27-modular-built-ins.md
  */
 
 import type { SessionExtension, SessionInstaller } from "@agentick/spec-next";
-import { TasksHarness } from "./harness.js";
 import { EXTENSION_NAME } from "./extension-name.js";
 import { buildSessionTasksTools } from "./tools.js";
 
@@ -34,14 +41,6 @@ export interface WithTasksOptions {
    * exclusively from adopter code with no LLM in the loop.
    */
   readonly registerModelTools?: boolean;
-
-  // TODO(#120-followup): real configuration fields:
-  //   - `defaultTtlMs` — default TTL applied when `submit()` opts
-  //     omit it.
-  //   - `maxInFlight` — cap on concurrent tasks; new submits return
-  //     a rejected handle when at cap.
-  //   - `retentionMs` — how long to keep terminal task records
-  //     reachable via `get(taskId)` before GC.
 }
 
 export function withTasks(options: WithTasksOptions = {}): SessionExtension {
@@ -49,40 +48,21 @@ export function withTasks(options: WithTasksOptions = {}): SessionExtension {
   return {
     name: EXTENSION_NAME,
     target: "session",
-    install: async (installer: SessionInstaller) => {
-      const harness = new TasksHarness(
-        `${installer.hostId}:tasks`,
-        installer.substrate.journal,
-        installer.substrate.bus,
-        installer.substrate.inbox,
-        {
-          // Stamp the session id on every published task envelope so
-          // session-scoped subscriptions filter correctly. Mirrors
-          // ElicitationHarness's parentScope wiring.
-          parentScope: { sessionId: installer.hostId },
-        },
-      );
+    install: (installer: SessionInstaller): void => {
+      if (!registerModelTools) return;
 
-      // Register close BEFORE awaiting ready. If `ready` rejects, the
-      // installer's teardown path still calls close() and the
-      // already-constructed harness gets disposed cleanly.
-      installer.onClose(() => harness.close());
-
-      await harness.ready;
-      installer.registerNamespace("tasks", harness);
-
-      if (registerModelTools) {
-        // Auto-register the four model-facing `session_tasks_*` tools
-        // so Pattern B (`taskSupport: "required"`) is usable end-to-end
-        // out of the box. Handlers reach the harness via `ctx.tasks` —
-        // same instance just registered above.
-        const bundle = buildSessionTasksTools(installer.sessionId);
-        for (const { handlerRef, handler } of bundle.handlers) {
-          installer.registerToolHandler(handlerRef, handler);
-        }
-        for (const registration of bundle.registrations) {
-          installer.registerExtensionTool(registration);
-        }
+      // Auto-register the four model-facing `session_tasks_*` tools.
+      // Handlers read `ctx.tasks` at call time — the AppHarness has
+      // already wired its single per-session `TasksHarness` into the
+      // ToolExecutor's `ctx.tasks` slot AND into `bridges.tasks`,
+      // so registering handlers here does not require touching the
+      // harness instance directly.
+      const bundle = buildSessionTasksTools(installer.sessionId);
+      for (const { handlerRef, handler } of bundle.handlers) {
+        installer.registerToolHandler(handlerRef, handler);
+      }
+      for (const registration of bundle.registrations) {
+        installer.registerExtensionTool(registration);
       }
     },
   };

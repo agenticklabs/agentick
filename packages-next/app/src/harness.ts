@@ -732,6 +732,7 @@ export class AppHarness<P = unknown>
   private makeSessionInstaller(
     sessionId: string,
     elicitation: ElicitationHarness,
+    tasks: TasksHarness,
     bridges: Map<string, unknown>,
     extensionTools: ToolRegistration[],
     closeHandlers: Array<() => void | Promise<void>>,
@@ -749,6 +750,7 @@ export class AppHarness<P = unknown>
       hostId: sessionId,
       sessionId,
       elicitation,
+      tasks,
       registerNamespace(name, harness): Unsubscribe {
         const prior = bridges.get(name);
         bridges.set(name, harness);
@@ -1092,6 +1094,7 @@ export class AppHarness<P = unknown>
       const installer = this.makeSessionInstaller(
         sessionId,
         elicitation,
+        tasks,
         sessionExtensionBridges,
         sessionExtensionTools,
         sessionCloseHandlers,

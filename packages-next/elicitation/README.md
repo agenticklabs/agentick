@@ -35,7 +35,7 @@ import { jsonSchema } from "@agentick/spec-next";
 
 const app = createApp(MyAgent, {
   extensions: [
-    withElicitation({ defaultTimeoutMs: 60_000 }),
+    withElicitation(),
     // ...other extensions
   ],
 });
@@ -155,18 +155,30 @@ Implements `ElicitationHarnessProtocol`. Extends
 diagnostic on the concrete class (not on the protocol — clients must
 not depend on it for control flow).
 
-### `withElicitation(options?)` — `SessionExtension`
+### `withElicitation()` — `SessionExtension` (no-op as of #159)
 
-Drop into `createApp({ extensions: [...] })`. Constructs a per-session
-harness wired to the session's substrate; registers as the
-`elicitation` namespace; cleans up on session close. The `onClose`
-handler is registered BEFORE the `ready` await so transient inbox
-failures don't leak the harness.
+Drop into `createApp({ extensions: [...] })`. **Does nothing at
+install time.** The AppHarness is the single construction site for
+per-session `ElicitationHarness` instances (#159) — it constructs
+the harness BEFORE session-extension installs run and exposes it on
+`installer.elicitation`, `ctx.elicitation`, `bridges.elicitation`,
+and `session.elicitation`. Constructing a second instance inside
+this extension would collide on the inbox address
+(`elicitation:${sessionId}:elicitation`) and fork the registry that
+`bridges.*` vs `ctx.*` resolve to.
 
-Options:
+The factory survives as a documented symmetry slot with `withTasks()`
+and as the future seam for per-session elicitation configuration
+hooks. Today it accepts no options; tomorrow it may grow back
+`onElicit`-style middleware once the AppHarness exposes a config seam.
 
-- `defaultTimeoutMs` — wait bound applied when the caller omits
-  `timeoutMs`. Default: 5 minutes.
+Roadmap & known gaps:
+
+- The pre-#159 `defaultTimeoutMs` option was removed — `withElicitation()`
+  no longer constructs the harness, so it can't forward construction
+  config. Reinstating per-app defaults requires a new seam on
+  `createApp({ elicitation: { defaultTimeoutMs } })` and is tracked
+  separately.
 
 ### `runElicitationHarnessConformance(factory)`
 

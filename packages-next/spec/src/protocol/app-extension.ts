@@ -241,8 +241,32 @@ export interface SessionInstaller extends BaseInstaller {
    * directly here. Sessions aren't yet registered in
    * `app.getSession(...)` at install time; this slot is the
    * documented seam.
+   *
+   * Single-construction-site invariant (#159): this is THE SAME
+   * instance used by the session's `ToolExecutor` (`ctx.elicitation`)
+   * and `bridges.elicitation`. Extensions must NOT construct their
+   * own `ElicitationHarness` against the substrate — addresses would
+   * collide and bridges + tool-executor would resolve to different
+   * registries.
    */
   readonly elicitation: import("./elicitation-harness.js").ElicitationHarnessProtocol;
+
+  /**
+   * The session's tasks harness — constructed by the host BEFORE
+   * session-extension installs run, symmetrically with
+   * {@link SessionInstaller.elicitation}. Extensions wiring
+   * model-facing surfaces over the task substrate (`withTasks`,
+   * MCP task-mode tools, etc.) read this instance directly.
+   *
+   * Single-construction-site invariant (#159): this is THE SAME
+   * instance used by the session's `ToolExecutor` (`ctx.tasks`),
+   * `bridges.tasks`, and `session.tasks`. Extensions must NOT
+   * construct their own `TasksHarness` against the substrate —
+   * addresses would collide (both registering `tasks:${sessionId}:tasks`)
+   * and bridges + tool-executor would resolve to different
+   * registries.
+   */
+  readonly tasks: import("./tasks-harness.js").TasksHarnessProtocol;
 
   /**
    * Pre-register a tool handler resolvable from THIS session's
