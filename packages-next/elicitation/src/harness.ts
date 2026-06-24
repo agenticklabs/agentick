@@ -34,6 +34,7 @@
 
 import { Effect, Either } from "effect";
 import { BaseHarness } from "@agentick/runtime-next";
+import { reasonOf } from "@agentick/utils-next";
 import type { RequestError } from "@agentick/runtime-next";
 import type {
   ElicitationFailure,
@@ -411,17 +412,12 @@ function toFailureResult<TValue>(err: RequestError): ElicitationResult<TValue> {
     outcome: "failed",
     failure: {
       kind: "aborted",
-      ...(err.reason !== undefined ? { reason: stringifyReason(err.reason) } : {}),
+      ...(err.reason !== undefined ? { reason: reasonOf(err.reason) } : {}),
     },
   };
 }
 
-function stringifyReason(reason: unknown): string {
-  if (typeof reason === "string") return reason;
-  if (reason instanceof Error) return reason.message;
-  try {
-    return JSON.stringify(reason);
-  } catch {
-    return String(reason);
-  }
-}
+// Reason-string conversion lives in @agentick/utils-next/cause as
+// `reasonOf` — single canonical impl. Aligning here also gains the
+// `{_tag}` extraction branch (Effect tagged errors no longer round-
+// trip as `'{"_tag":"X"}'`).

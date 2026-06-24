@@ -53,5 +53,8 @@
     "lint": "oxlint src/",
     "format:check": "oxfmt --check src/",
     "clean": "rm -rf dist tsconfig.build.tsbuildinfo"
+  },
+  "dependencies": {
+    "effect": "^3.21.2"
   }
 }

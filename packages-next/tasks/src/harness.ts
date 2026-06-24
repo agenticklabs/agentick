@@ -43,8 +43,9 @@
  * @see docs/proposals/v2/blueprint/23-mcp-as-harness.md §Tasks
  */
 
-import { Cause, Effect, Exit, Fiber, Option, Queue } from "effect";
+import { Cause, Effect, Exit, Fiber, Queue } from "effect";
 import { BaseHarness, ulid } from "@agentick/runtime-next";
+import { reasonOf, reasonOfCause } from "@agentick/utils-next";
 import type {
   ContentBlock,
   EventBus,
@@ -304,7 +305,7 @@ export class TasksHarness extends BaseHarness<"tasks"> implements TasksHarnessPr
           this.finishAsCancelled(record, "interrupted");
           return;
         }
-        this.finishAsFailed(record, causeToReason(exit.cause));
+        this.finishAsFailed(record, reasonOfCause(exit.cause));
       })
       .catch(() => {
         // Fiber.await is total — defensive only.
@@ -313,7 +314,7 @@ export class TasksHarness extends BaseHarness<"tasks"> implements TasksHarnessPr
 
   private finishAsFailed(record: TaskRecord, cause: unknown): void {
     if (this.isTerminal(record.status)) return;
-    const failure: TaskFailure = { kind: "error", reason: errorReason(cause) };
+    const failure: TaskFailure = { kind: "error", reason: reasonOf(cause) };
     record.failure = failure;
     this.transition(record, "failed");
     record.resultDeferred.reject(this.rejectionOf(record, "failed", failure));
@@ -716,39 +717,9 @@ export class TasksHarness extends BaseHarness<"tasks"> implements TasksHarnessPr
   }
 }
 
-// ============================================================================
-// Error reason — minimal, mirrors ElicitationHarness's stringifyReason
-// ============================================================================
-
-function errorReason(cause: unknown): string {
-  if (typeof cause === "string") return cause;
-  if (cause instanceof Error) return cause.message;
-  if (typeof cause === "object" && cause !== null && "_tag" in cause) {
-    return String((cause as { _tag: string })._tag);
-  }
-  try {
-    return JSON.stringify(cause);
-  } catch {
-    return String(cause);
-  }
-}
-
-/**
- * Turn an Effect {@link Cause.Cause} into a reason string.
- *
- *   - Typed failure (`Effect.fail(E)`) → `errorReason(E)`.
- *   - Defect (`Effect.die(unknown)`) → `errorReason(defect)`.
- *   - Multi-cause / interrupt-mixed → `Cause.pretty` first line.
- */
-function causeToReason(cause: Cause.Cause<unknown>): string {
-  const failure = Cause.failureOption(cause);
-  if (Option.isSome(failure)) return errorReason(failure.value);
-  const defects = Array.from(Cause.defects(cause));
-  if (defects.length > 0) return errorReason(defects[0]);
-  // Fallback — interrupt-only causes are handled before this; this is
-  // for empty or exotic shapes.
-  return Cause.pretty(cause).split("\n")[0] ?? "unknown";
-}
+// Reason-string helpers (reasonOf / reasonOfCause) live in
+// @agentick/utils-next/cause — single canonical impl shared by every
+// harness. See packages-next/utils/src/cause.ts.
 
 // TODO(#155-followup): the per-subscriber Queue + custom AsyncIterator
 // dance in `subscribeToTask` reinvents most of `Stream.toAsyncIterable`.

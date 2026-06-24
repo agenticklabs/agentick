@@ -15,7 +15,8 @@
  * @see docs/proposals/v2/IMPLEMENTATION-PLAN.md (block 5 — request/response primitive)
  */
 
-import { Cause, Deferred, Effect, Exit, Fiber, Option } from "effect";
+import { Deferred, Effect, Fiber } from "effect";
+import { unwrapExit } from "@agentick/utils-next";
 
 /**
  * Error union surfaced by `RequestResponseRegistry.register(...).promise`.
@@ -119,12 +120,7 @@ export class RequestResponseRegistry<TResp = unknown> {
 
     program = program.pipe(Effect.ensuring(Effect.sync(() => this.pending.delete(correlationId))));
 
-    const promise = Effect.runPromiseExit(program).then((exit) => {
-      if (Exit.isSuccess(exit)) return exit.value;
-      const failure = Cause.failureOption(exit.cause);
-      if (Option.isSome(failure)) throw failure.value;
-      throw new Error(Cause.pretty(exit.cause));
-    });
+    const promise = Effect.runPromiseExit(program).then((exit) => unwrapExit(exit));
 
     return { correlationId, promise };
   }

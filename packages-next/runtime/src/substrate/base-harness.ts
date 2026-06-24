@@ -23,6 +23,7 @@
  */
 
 import { Cause, Effect, Exit, Option } from "effect";
+import { unwrapExit } from "@agentick/utils-next";
 import type {
   CommandOutcome,
   EventBus,
@@ -1160,8 +1161,5 @@ export type { InboxError };
  */
 export async function runHarnessProtocol<R>(eff: Effect.Effect<R, unknown, never>): Promise<R> {
   const exit = await Effect.runPromiseExit(eff);
-  if (Exit.isSuccess(exit)) return exit.value as R;
-  const failure = Cause.failureOption(exit.cause);
-  if (Option.isSome(failure)) throw failure.value;
-  throw new Error(Cause.pretty(exit.cause));
+  return unwrapExit(exit) as R;
 }
