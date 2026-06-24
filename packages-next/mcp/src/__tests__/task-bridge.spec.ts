@@ -96,6 +96,13 @@ interface FakeServerHandle {
 async function mkFakeMcpServer(opts: {
   readonly autoComplete?: boolean;
   readonly autoCompletePayload?: string;
+  /**
+   * MCP wire vocabulary for the tool's `execution.taskSupport`.
+   * Defaults to `"required"` to preserve existing test behavior.
+   * #174 exercises the `"optional"` arm — server may run inline OR
+   * create a task, depending on whether the client passes `task: { ttl }`.
+   */
+  readonly taskSupport?: "required" | "optional";
 }): Promise<FakeServerHandle> {
   const [clientTransport, serverTransport] = InMemoryMcpTransport.createLinkedPair();
   const server = new Server(
@@ -137,7 +144,7 @@ async function mkFakeMcpServer(opts: {
         // `annotations`. SDK ToolSchema strict-strips unknown
         // annotation keys; execution.taskSupport is the canonical
         // home.
-        execution: { taskSupport: "required" },
+        execution: { taskSupport: opts.taskSupport ?? "required" },
       },
     ],
   }));
@@ -479,5 +486,100 @@ describe("withMCP — taskSupport:'required' end-to-end", () => {
     expect(localProgress.length).toBeGreaterThanOrEqual(2);
     expect(localProgress[0]).toMatchObject({ current: 1, total: 3, message: "step 1" });
     expect(localProgress[1]).toMatchObject({ current: 2, total: 3, message: "step 2" });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// #174 — Phase C: `taskSupport: "optional"` (local "supported")
+// Server declares the tool as task-capable but per-call opt-in; the
+// client decides. Default behavior is inline; `task: "ref"` on the
+// dispatch routes through the task wire.
+// ---------------------------------------------------------------------------
+
+describe("withMCP — taskSupport:'optional' / 'supported' per-call opt-in (#174)", () => {
+  const teardown: Array<() => Promise<void> | void> = [];
+
+  beforeEach(() => {
+    teardown.length = 0;
+  });
+
+  afterEach(async () => {
+    for (const fn of teardown.reverse()) await fn();
+  });
+
+  it("default dispatch on a 'supported' tool runs INLINE — no task wire, returns blocks directly", async () => {
+    const fake = await mkFakeMcpServer({ taskSupport: "optional" });
+    teardown.push(() => fake.server.close());
+
+    const app = await createApp(React.createElement(Agent), {
+      executor: await mkExecutor(),
+      extensions: [
+        withMCP({
+          servers: [{ serverId: "opt", transport: fake.clientTransport, auth: new NoneAuth() }],
+        }),
+      ],
+    });
+    teardown.push(() => app.closeApp());
+    const session = await app.createSession();
+    teardown.push(() => session.close());
+
+    // No `task` override — host-side default is "auto", which for a
+    // `supported` tool means the handler stays inline (#174 default).
+    // The fake server's CallToolRequest handler returns
+    // `inline:${label}` when no `task` arg is present, so receiving
+    // exactly that text proves the wire never asked for a task.
+    const blocks = await session.dispatch("opt__slow_task", { label: "x" });
+    expect(blocks).toHaveLength(1);
+    expect((blocks[0] as { type: string; text: string }).text).toBe("inline:x");
+  });
+
+  it("`task: 'ref'` on the same tool opts INTO the task wire — returns a TaskRefBlock", async () => {
+    // Adopter explicit Pattern B opt-in — server sees `task: { ttl }`
+    // in params, creates a task, transitions to completed; the local
+    // dispatch returns a task_ref block immediately and we resolve
+    // the eventual payload via tasks.result(taskId).
+    const fake = await mkFakeMcpServer({
+      taskSupport: "optional",
+      autoComplete: true,
+      autoCompletePayload: "task-ok",
+    });
+    teardown.push(() => fake.server.close());
+
+    const app = await createApp(React.createElement(Agent), {
+      executor: await mkExecutor(),
+      extensions: [
+        withMCP({
+          servers: [
+            {
+              serverId: "opt2",
+              transport: fake.clientTransport,
+              auth: new NoneAuth(),
+              defaultTaskTtl: 60_000,
+            },
+          ],
+        }),
+      ],
+    });
+    teardown.push(() => app.closeApp());
+    const session = await app.createSession();
+    teardown.push(() => session.close());
+
+    const refBlocks = await session.dispatch("opt2__slow_task", { label: "y" }, { task: "ref" });
+    expect(refBlocks).toHaveLength(1);
+    const refBlock = refBlocks[0];
+    if (!isTaskRefBlock(refBlock!)) {
+      throw new Error(`expected task_ref block, got ${refBlock?.type}`);
+    }
+    expect(refBlock.status).toBe("working");
+    expect(typeof refBlock.taskId).toBe("string");
+
+    // The remote task auto-completes via the fake server's microtask.
+    // The local task's `result` resolves once the notification fold
+    // sees terminal + tasks/result returns the payload.
+    const finalBlocks = (await session.tasks.result(refBlock.taskId)) as Array<{
+      type: string;
+      text: string;
+    }>;
+    expect(finalBlocks).toEqual([{ type: "text", text: "task-ok" }]);
   });
 });

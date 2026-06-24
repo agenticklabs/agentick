@@ -81,6 +81,30 @@ export interface ToolHandlerCtx {
    * substrate-stripped test fixtures.
    */
   readonly tasks?: import("../protocol/tasks-harness.js").TasksHarnessProtocol;
+  /**
+   * Caller-resolved task mode for THIS dispatch. Mirrors
+   * `DispatchInput.task` after defaulting (`"auto"` when omitted).
+   * Handlers that have a sync-or-task choice — paradigm case is an
+   * MCP `taskSupport: "supported"` tool whose wire opt-in is per
+   * call — branch on this to route through `ctx.tasks.submit(...)`
+   * versus a sync wire op.
+   *
+   *   `"auto"`   — caller didn't specify; executor's host/model
+   *                heuristics decide the surface (Pattern A vs B).
+   *                For `supported` tools, handler MAY default to
+   *                inline.
+   *   `"ref"`    — caller explicitly asked for Pattern B; handler
+   *                MUST return a `TaskHandle` (executor serializes
+   *                a {@link TaskRefBlock}).
+   *   `"inline"` — caller explicitly forbids task mode; handler
+   *                MUST return blocks (no `TaskHandle`).
+   *
+   * Conflicts (e.g. `"ref"` against an `"unsupported"` tool) are
+   * pre-flight rejected by the executor before the handler runs,
+   * so handlers never see contradictory `task` × `taskSupport`
+   * combinations.
+   */
+  readonly task: "auto" | "ref" | "inline";
 }
 
 // ============================================================================

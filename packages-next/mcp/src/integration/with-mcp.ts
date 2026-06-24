@@ -320,41 +320,50 @@ async function discoverAndRegisterTools(
     const localName = `${prefix}${tool.name}`;
     const handlerRef = mcpHandlerRef(installer.sessionId, config.serverId, tool.name);
     // Detect REMOTE task support from MCP's canonical
-    // `execution.taskSupport === "required"` (per SDK 1.29.0 ToolSchema).
-    // Adopter-side framework tools use our `annotations.taskSupport`
-    // convention; remote tools land here via the MCP wire and we read
-    // the SDK's field directly. mcpDeclaration() bridges both into a
-    // unified `annotations.taskSupport` for the local executor.
-    const taskSupportRequired = tool.execution?.taskSupport === "required";
-    const handler: ToolHandler = taskSupportRequired
-      ? // taskSupport: "required" → route through ctx.tasks.submit so
-        // the local executor's Pattern B path serializes a
-        // session_task_ref to the model. The submitted Effect drives
-        // the full wire dance (task-augmented call → notifications →
-        // tasks/result → cancel-on-interrupt). Local TaskHandle is
-        // returned; the model manages it across ticks via
-        // session_tasks_* tools.
-        (input, { ctx }) =>
-          ctx.tasks!.submit<readonly ContentBlock[]>((workCtx) =>
-            mcpTaskEffect(
-              harness,
-              {
-                name: tool.name,
-                args: input as Readonly<Record<string, unknown>>,
-                taskOptions:
-                  config.defaultTaskTtl !== undefined ? { ttl: config.defaultTaskTtl } : {},
-              },
-              workCtx,
-            ),
-          )
-      : // Standard inline path — current behavior.
-        async (input): Promise<readonly ContentBlock[]> => {
-          const result = await harness.callTool(
-            tool.name,
-            input as Readonly<Record<string, unknown>>,
-          );
-          return mcpContentToBlocks(result.content);
-        };
+    // `execution.taskSupport` (per SDK 1.29.0 ToolSchema), translated
+    // via {@link mapMcpTaskSupport} to our framework vocabulary.
+    // The three branches mirror the three MCP enum values:
+    //
+    //   "required" (= local "required")  — every call goes through the
+    //     task wire. Handler always submits via `ctx.tasks.submit`;
+    //     the executor's Pattern A/B branching governs whether the
+    //     model sees a `task_ref` or the eventual blocks.
+    //   "optional" (= local "supported", #174) — server CAN run as a
+    //     task; client picks per call. Handler reads the resolved
+    //     dispatch task mode from `ctx.task`:
+    //       - `"ref"`              → use task wire + return TaskHandle.
+    //       - `"auto"` / `"inline"` → call inline + return blocks.
+    //     Default behavior is inline — matches the framework-wide
+    //     decision that `supported` tools behave like every other
+    //     tool unless the adopter explicitly opts in.
+    //   "forbidden" / undefined (= local "unsupported" / undefined) —
+    //     handler always calls inline; the task wire is never
+    //     exercised. Pre-flight rejects `task: "ref"` for these.
+    const localTaskSupport = mapMcpTaskSupport(tool.execution?.taskSupport);
+    const handler: ToolHandler =
+      localTaskSupport === "required"
+        ? (input, { ctx }) =>
+            ctx.tasks!.submit<readonly ContentBlock[]>((workCtx) =>
+              mcpTaskEffect(
+                harness,
+                {
+                  name: tool.name,
+                  args: input as Readonly<Record<string, unknown>>,
+                  taskOptions:
+                    config.defaultTaskTtl !== undefined ? { ttl: config.defaultTaskTtl } : {},
+                },
+                workCtx,
+              ),
+            )
+        : localTaskSupport === "supported"
+          ? makeSupportedHandler(harness, tool, config)
+          : async (input): Promise<readonly ContentBlock[]> => {
+              const result = await harness.callTool(
+                tool.name,
+                input as Readonly<Record<string, unknown>>,
+              );
+              return mcpContentToBlocks(result.content);
+            };
     installer.registerToolHandler(handlerRef, handler);
     installer.registerExtensionTool(
       toRegistration(mcpDeclaration(installer.sessionId, config.serverId, tool, localName), {
@@ -364,6 +373,43 @@ async function discoverAndRegisterTools(
       }),
     );
   }
+}
+
+/**
+ * Per-call-opt-in handler for an MCP `taskSupport: "optional"` /
+ * local `"supported"` tool (#174). The dispatch's resolved task mode
+ * (`ctx.task`) decides whether to route through the MCP task wire or
+ * just call the tool inline. Default `"auto"` keeps inline behavior.
+ *
+ * Returns `ToolHandler` typed via assignment so the function's
+ * two-branch return (TaskHandle vs Promise<blocks>) lands inside the
+ * `ToolHandlerResult` union without contextual-typing fights.
+ */
+function makeSupportedHandler(
+  harness: McpClientHarness,
+  tool: { readonly name: string },
+  config: McpServerConfig,
+): ToolHandler {
+  const handler: ToolHandler = (input, { ctx }) => {
+    if (ctx.task === "ref") {
+      return ctx.tasks!.submit<readonly ContentBlock[]>((workCtx) =>
+        mcpTaskEffect(
+          harness,
+          {
+            name: tool.name,
+            args: input as Readonly<Record<string, unknown>>,
+            taskOptions: config.defaultTaskTtl !== undefined ? { ttl: config.defaultTaskTtl } : {},
+          },
+          workCtx,
+        ),
+      );
+    }
+    const inline: Promise<readonly ContentBlock[]> = harness
+      .callTool(tool.name, input as Readonly<Record<string, unknown>>)
+      .then((result) => mcpContentToBlocks(result.content));
+    return inline;
+  };
+  return handler;
 }
 
 /**

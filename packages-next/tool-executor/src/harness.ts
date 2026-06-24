@@ -553,6 +553,14 @@ export class ToolExecutorHarness extends BaseHarness<"tool"> implements ToolExec
           : {}),
         ...(input.context.tickId !== undefined ? { tickId: input.context.tickId } : {}),
         signal: controller.signal,
+        // Resolved task mode for THIS dispatch (#174). Mirrors
+        // `DispatchInput.task` after default → `"auto"`. Handlers
+        // with a sync-or-task choice (MCP `supported` tools) read
+        // this to decide per-call whether to take the task wire.
+        // Pre-flight conflicts (e.g. `"ref"` against `"unsupported"`)
+        // were already rejected above, so this value is always
+        // valid for the resolved tool's `taskSupport`.
+        task: input.task ?? "auto",
         // Substrate primitives surfaced for ad-hoc handler use
         // (`ctx.elicitation.elicit(...)`, `ctx.tasks.submit(...)`).
         // Always present in production; the optional spec field
