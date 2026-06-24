@@ -120,15 +120,44 @@ export type CallToolOrTaskOutcome =
   | { readonly _tag: "inline"; readonly result: CallToolResult }
   | { readonly _tag: "task"; readonly result: CreateTaskResult };
 
+/**
+ * Discriminate a `tools/call` response on its structural shape, then
+ * parse against the matching schema with `parse` (not `safeParse`).
+ *
+ *   - `"task"` field present → must parse as `CreateTaskResult`.
+ *     Malformed shape (e.g. `task` missing required subfields) throws
+ *     with field-level Zod detail.
+ *   - `"content"` field present → must parse as `CallToolResult`.
+ *   - Both present (illegal per spec) → CreateTaskResult wins; an
+ *     adopter-side server bug is more interesting to see than to
+ *     silently accept the content blocks.
+ *   - Neither present → throw with a clear "unrecognized shape" error
+ *     instead of "neither schema matched."
+ *
+ * The earlier impl chained `safeParse(CreateTaskResultSchema)` ->
+ * `safeParse(CallToolResultSchema)` and threw a generic message when
+ * both failed. That swallowed field-level errors and gave adopters
+ * no signal when their server returned something malformed.
+ */
 export function discriminateCallToolResponse(raw: unknown): CallToolOrTaskOutcome {
-  // Try the more specific `CreateTaskResult` shape first — it has a
-  // required `task` object, which `CallToolResult` doesn't.
-  const taskParse = CreateTaskResultSchema.safeParse(raw);
-  if (taskParse.success) return { _tag: "task", result: taskParse.data };
-  const inlineParse = CallToolResultSchema.safeParse(raw);
-  if (inlineParse.success) return { _tag: "inline", result: inlineParse.data };
+  if (typeof raw !== "object" || raw === null) {
+    throw new Error(`MCP task codec: tools/call response is not an object (got ${typeof raw}).`);
+  }
+  const obj = raw as Record<string, unknown>;
+  const hasTask = "task" in obj && typeof obj.task === "object" && obj.task !== null;
+  const hasContent = "content" in obj;
+
+  if (hasTask) {
+    // Strict parse — surfaces field-level errors when `task` is
+    // present but malformed (missing taskId, bad status enum, etc.).
+    return { _tag: "task", result: CreateTaskResultSchema.parse(raw) };
+  }
+  if (hasContent) {
+    return { _tag: "inline", result: CallToolResultSchema.parse(raw) };
+  }
   throw new Error(
-    "MCP task codec: response is neither a valid CallToolResult nor a CreateTaskResult.",
+    "MCP task codec: tools/call response has neither `task` (CreateTaskResult) " +
+      "nor `content` (CallToolResult). Adopter / server bug — check the wire payload.",
   );
 }
 
