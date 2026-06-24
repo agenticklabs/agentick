@@ -17,7 +17,7 @@
  * (mirroring what a Phase B MCP wire codec would do).
  */
 
-import { Effect } from "effect";
+import { Effect, Ref } from "effect";
 import { describe, expect, it } from "vitest";
 
 import { LocalEventBus, LocalInbox, MemoryJournal, ulid } from "@agentick/runtime-next";
@@ -69,6 +69,100 @@ describe("TasksHarness — cluster-friendly inbox protocol", () => {
     } finally {
       await harnessA.close();
       await harnessB.close();
+    }
+  });
+
+  it("tasks-cancel for an Effect-typed task triggers Fiber.interrupt via the inbox path (#170)", async () => {
+    // Pins the cross-product: cluster routing × Effect work overload.
+    // The inbox handler must end up at the same `cancelInternal` that
+    // single-process cancel reaches, so Fiber.interrupt fires for the
+    // Effect path's tracked fiber. Without this test the cluster +
+    // Effect-fiber combination is untested.
+    const journal = new MemoryJournal();
+    const bus = new LocalEventBus();
+    const inbox = new LocalInbox();
+    const harnessA = new TasksHarness("A-effect-cluster", journal, bus, inbox);
+    const harnessB = new TasksHarness("B-effect-cluster", journal, bus, inbox);
+    await Promise.all([harnessA.ready, harnessB.ready]);
+
+    try {
+      // 60-second Effect sleep — if Fiber.interrupt doesn't fire via
+      // the inbox path, vitest's test-level timeout (default 5s) trips
+      // before this resolves.
+      const handle = harnessA.submit(() =>
+        Effect.sleep("60 seconds").pipe(Effect.as("unreachable")),
+      );
+
+      // Give the work a tick to schedule the sleep.
+      await new Promise((r) => setTimeout(r, 5));
+
+      // B addresses A's tasks harness — this is the "cluster" path
+      // (here in-process, but cluster-portable via address string).
+      const cancelStart = performance.now();
+      await Effect.runPromise(
+        inbox.send(harnessA.address, {
+          type: TASKS_CANCEL_MESSAGE_TYPE,
+          payload: { taskId: handle.taskId, reason: "remote-effect-cancel" },
+        }),
+      );
+
+      await expect(handle.result).rejects.toMatchObject({
+        _tag: "TaskRejection",
+        status: "cancelled",
+        failure: { kind: "aborted", reason: "remote-effect-cancel" },
+      });
+      const elapsed = performance.now() - cancelStart;
+      // Cancel + Fiber.interrupt completes in well under the 60s
+      // sleep — proves the fiber was actually interrupted, not waited
+      // out.
+      expect(elapsed).toBeLessThan(2_000);
+    } finally {
+      await harnessA.close();
+      await harnessB.close();
+    }
+  });
+
+  it("tasks-cancel via inbox is settled — Effect finalizers run before the inbox send resolves (#170)", async () => {
+    // The settled-cancel guarantee that cancelInternal() awaits
+    // Fiber.interrupt must hold via the inbox path too. We use a
+    // 20ms release effect; after the inbox send resolves, the
+    // finalizer counter must read 1 (fire-and-forget would observe 0).
+    const journal = new MemoryJournal();
+    const bus = new LocalEventBus();
+    const inbox = new LocalInbox();
+    const harnessA = new TasksHarness("A-effect-settled", journal, bus, inbox);
+    await harnessA.ready;
+
+    try {
+      const finalizerCalls = Effect.runSync(Ref.make(0));
+      const handle = harnessA.submit(() =>
+        Effect.acquireUseRelease(
+          Effect.void,
+          () => Effect.sleep("60 seconds"),
+          () =>
+            Ref.update(finalizerCalls, (n) => n + 1).pipe(
+              Effect.zipRight(Effect.sleep("20 millis")),
+            ),
+        ),
+      );
+      // Pre-drain the rejection so vitest doesn't flag unhandled.
+      const drained = handle.result.catch((e: unknown) => e);
+
+      await new Promise((r) => setTimeout(r, 10));
+
+      // Inbox-routed cancel awaits the handler's cancelInternal,
+      // which awaits Fiber.interrupt, which awaits the release.
+      await Effect.runPromise(
+        inbox.send(harnessA.address, {
+          type: TASKS_CANCEL_MESSAGE_TYPE,
+          payload: { taskId: handle.taskId, reason: "cluster-settled" },
+        }),
+      );
+
+      expect(Effect.runSync(Ref.get(finalizerCalls))).toBe(1);
+      void drained;
+    } finally {
+      await harnessA.close();
     }
   });
 

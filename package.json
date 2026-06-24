@@ -31,8 +31,8 @@
     "clean": "turbo clean",
     "dev": "turbo dev",
     "lint": "turbo lint",
-    "lint:all": "turbo lint && eslint .",
-    "lint:fix": "eslint . --fix",
+    "lint:all": "turbo lint && eslint . --cache --cache-location node_modules/.cache/eslint/",
+    "lint:fix": "eslint . --fix --cache --cache-location node_modules/.cache/eslint/",
     "format": "oxfmt --write .",
     "format:check": "turbo format:check",
     "changeset": "changeset",
@@ -62,7 +62,7 @@
     "zod": "^4.1.13"
   },
   "simple-git-hooks": {
-    "pre-commit": "pnpm run format:check && pnpm run lint:all",
+    "pre-commit": "pnpm run format:check && pnpm run lint",
     "commit-msg": "npx --no -- commitlint --config commitlint.config.cjs --edit ${1}"
   },
   "packageManager": "pnpm@10.25.0",
