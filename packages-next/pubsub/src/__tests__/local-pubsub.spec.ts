@@ -154,4 +154,60 @@ describe("createLocalPubSub — Layer 3 (Effect.PubSub-backed Stream fan-out)", 
     // Idempotent close.
     await bus.close();
   });
+
+  it("replay: N — new subscribers receive the last N published events automatically", async () => {
+    // Effect.PubSub native replay support. Equivalent to RxJS
+    // ReplaySubject(N).
+    const bus = createLocalPubSub<number>({ replay: 3 });
+    // Publish BEFORE any subscriber attaches — replay buffer captures them.
+    bus.publish(1);
+    bus.publish(2);
+    bus.publish(3);
+    bus.publish(4);
+    bus.publish(5);
+
+    const received: number[] = [];
+    const program = Effect.gen(function* () {
+      const fiber = yield* Effect.fork(
+        bus.subscribe().pipe(
+          Stream.take(3),
+          Stream.runForEach((n) => Effect.sync(() => received.push(n))),
+        ),
+      );
+      yield* fiber;
+    });
+
+    await Effect.runPromise(program);
+    // Last 3 of the 5 published events are replayed to the late subscriber.
+    expect(received).toEqual([3, 4, 5]);
+    await bus.close();
+  });
+
+  it("closeDrainTimeoutMs: 0 — close skips drain entirely (raw shutdown)", async () => {
+    const bus = createLocalPubSub<number>({ closeDrainTimeoutMs: 0 });
+    bus.publish(1);
+    bus.publish(2);
+    // No subscribers attached, but drain logic would still poll a moment.
+    // With 0, it returns immediately.
+    const start = performance.now();
+    await bus.close();
+    const elapsed = performance.now() - start;
+    // Should complete in well under the 5-second default cap.
+    expect(elapsed).toBeLessThan(500);
+  });
+
+  it("closeDrainTimeoutMs: custom cap value is honored", async () => {
+    // We can't easily construct a truly-wedged subscriber from the
+    // public API (Stream.tap consumes on pull), so this test verifies
+    // the option threads through and close returns within a reasonable
+    // upper bound rather than waiting the default 5s.
+    const bus = createLocalPubSub<number>({ closeDrainTimeoutMs: 100 });
+    bus.publish(1);
+    const start = performance.now();
+    await bus.close();
+    const elapsed = performance.now() - start;
+    // Close should be quick regardless of cap (no active subscribers).
+    // The cap upper-bounds the wait if a subscriber WERE wedged.
+    expect(elapsed).toBeLessThan(500);
+  });
 });

@@ -61,10 +61,57 @@ interface SubscriberTracker {
   readonly dequeue: Queue.Dequeue<unknown>;
 }
 
-export function createLocalPubSub<T>(): LocalPubSub<T> {
+/**
+ * Construction options for {@link createLocalPubSub}.
+ */
+export interface CreateLocalPubSubOptions {
+  /**
+   * Upper bound (ms) on the close-time drain. After `close()` waits
+   * this long for active subscribers to consume all published events,
+   * it proceeds to shutdown regardless. Defensive backstop against a
+   * wedged downstream consumer — under normal operation drain
+   * completes in microseconds.
+   *
+   * Defaults to 5_000 (5 seconds). Set higher for long-running
+   * subscribers that may legitimately need more time to drain; set
+   * lower (or `0`) to disable the drain wait entirely and behave
+   * like raw `PubSub.shutdown` (buffered events may be dropped).
+   */
+  readonly closeDrainTimeoutMs?: number;
+
+  /**
+   * Replay buffer — number of past events automatically replayed to
+   * every NEW subscriber when they attach. This is the RxJS
+   * `ReplaySubject(n)` analogue and is implemented natively by
+   * Effect's `PubSub.unbounded({ replay })`.
+   *
+   *   - `replay: 1` ≈ RxJS BehaviorSubject (every new subscriber
+   *     immediately sees the latest event).
+   *   - `replay: N` ≈ ReplaySubject(N).
+   *   - Omitted / `0` → no replay (default; new subscribers see
+   *     only future events).
+   *
+   * **Caveat for filtered subscribers.** The replay buffer is a
+   * GLOBAL ring of the last N published events. If subscribers
+   * filter by predicate (`subscribe(e => e.id === "x")`), the
+   * buffer's N items may be drawn from any event — the subscriber
+   * sees only the subset that matches their filter. For per-key
+   * snapshot semantics (e.g. "the latest event for THIS key"),
+   * compose `Stream.concat(snapshot, subscribe())` at the caller
+   * instead of relying on replay.
+   */
+  readonly replay?: number;
+}
+
+export function createLocalPubSub<T>(options: CreateLocalPubSubOptions = {}): LocalPubSub<T> {
+  const closeDrainTimeoutMs = options.closeDrainTimeoutMs ?? 5_000;
   // Allocate the PubSub eagerly via Effect.runSync — unbounded ctor
   // is a pure allocation, no side effects beyond a Queue.
-  const pubsub = Effect.runSync(PubSub.unbounded<T>());
+  const pubsub = Effect.runSync(
+    options.replay !== undefined && options.replay > 0
+      ? PubSub.unbounded<T>({ replay: options.replay })
+      : PubSub.unbounded<T>(),
+  );
 
   // publishedCount is the canonical "high water mark" of events seen
   // by the bus. Each subscriber tracks its own consumed count; close()
@@ -113,15 +160,21 @@ export function createLocalPubSub<T>(): LocalPubSub<T> {
 
   /**
    * Drain by polling: every 1ms, check if every active subscriber's
-   * `consumed >= publishedCount`. Once true, return. Caps at 5s to
+   * `consumed >= publishedCount`. Once true, return. Caps at the
+   * caller-configurable `closeDrainTimeoutMs` (default 5_000) to
    * avoid hanging if a subscriber is permanently stuck (e.g. its
    * downstream consumer is wedged); after the cap, proceed to
-   * shutdown anyway. The 5s cap is a defensive backstop — under
-   * normal operation drain completes in microseconds.
+   * shutdown anyway. The cap is a defensive backstop — under normal
+   * operation drain completes in microseconds.
+   *
+   * Pass `closeDrainTimeoutMs: 0` at construction to skip the wait
+   * entirely (behaves like raw `PubSub.shutdown` — buffered events
+   * may be dropped).
    */
   async function drain(): Promise<void> {
+    if (closeDrainTimeoutMs <= 0) return;
     const start = performance.now();
-    const cap = 5_000; // ms
+    const cap = closeDrainTimeoutMs;
 
     // Snapshot the active trackers — subscribers that detach AFTER
     // close was called shouldn't block drain. But we DO want to wait

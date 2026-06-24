@@ -18,7 +18,7 @@
 
 import type { Stream } from "effect";
 
-import type { LocalPubSub } from "../local-pubsub.js";
+import type { CreateLocalPubSubOptions, LocalPubSub } from "../local-pubsub.js";
 import { createLocalPubSub } from "../local-pubsub.js";
 
 export interface LocalPubSubSpy<T> extends LocalPubSub<T> {
@@ -30,8 +30,8 @@ export interface LocalPubSubSpy<T> extends LocalPubSub<T> {
   reset(): void;
 }
 
-export function spyLocalPubSub<T>(): LocalPubSubSpy<T> {
-  const inner = createLocalPubSub<T>();
+export function spyLocalPubSub<T>(options: CreateLocalPubSubOptions = {}): LocalPubSubSpy<T> {
+  const inner = createLocalPubSub<T>(options);
   const calls: T[] = [];
 
   return {

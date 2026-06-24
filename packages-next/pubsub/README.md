@@ -107,7 +107,16 @@ await bus.close();
 | `close()`            | Drain in-flight to active subscribers, then shut down. Idempotent. |
 | `subscriberCount`    | Diagnostic (best-effort).                                          |
 
-`close()` polls subscribers until each has consumed every event that was published before close started. A 5-second backstop avoids hangs from wedged consumers (defensive — shouldn't trip in practice).
+`close()` polls subscribers until each has consumed every event that was published before close started. A configurable backstop (`closeDrainTimeoutMs`, default 5 seconds) avoids hangs from wedged consumers (defensive — shouldn't trip in practice).
+
+### Options
+
+| Option | Default | Purpose |
+| --- | --- | --- |
+| `closeDrainTimeoutMs` | `5_000` | Upper bound (ms) on close-time drain. Set to `0` to skip drain (behaves like raw `PubSub.shutdown`). |
+| `replay` | `0` (none) | Replay buffer — number of past events automatically replayed to NEW subscribers (RxJS `ReplaySubject(N)` analogue). `replay: 1` ≈ RxJS `BehaviorSubject`. Implemented via Effect's native `PubSub.unbounded({ replay })`. |
+
+**Caveat for filtered subscribers + replay:** the replay buffer is GLOBAL across all events. If subscribers filter by predicate, the buffer's N items may be drawn from any event — the filtered subscriber sees only the subset that matches their filter. For per-key snapshot semantics ("the latest event for THIS key"), compose `Stream.concat(snapshot, subscribe())` at the caller or reach for `SubscriptionRef` (the per-state primitive).
 
 ## Testing subpath — `@agentick/pubsub-next/testing`
 
