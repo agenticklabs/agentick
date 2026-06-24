@@ -338,6 +338,55 @@ export function runElicitationHarnessConformance(factory: ElicitationConformance
       }
     });
 
+    it("wire payload carries `relatedTaskId` when the request sets it (#173)", async () => {
+      // Per-task UI surfaces (devtools task panels, agentick-react
+      // task hooks) filter elicits by `payload.relatedTaskId`. The
+      // contract is: whatever a caller passes on the request lands
+      // verbatim on the published envelope. Conformance because every
+      // ElicitationHarness impl — including future remote / cluster-
+      // shimmed variants — must honor this.
+      const shell = await factory({ harnessId: "elic-related-task-1" });
+      try {
+        const envP = shell.nextEnvelope();
+        const pending = shell.harness.elicit({
+          message: "Confirm?",
+          schema: objectSchema(),
+          relatedTaskId: "task:abc",
+        });
+        const env = await envP;
+        const payload = env.payload as { relatedTaskId?: string };
+        expect(payload.relatedTaskId).toBe("task:abc");
+        await shell.harness.respond({
+          correlationId: env.metadata!.correlationId as string,
+          outcome: "cancelled",
+        });
+        await pending;
+      } finally {
+        await shell.close();
+      }
+    });
+
+    it("wire payload omits `relatedTaskId` when the request does not set it (#173)", async () => {
+      const shell = await factory({ harnessId: "elic-no-related-task-1" });
+      try {
+        const envP = shell.nextEnvelope();
+        const pending = shell.harness.elicit({
+          message: "Plain elicit",
+          schema: objectSchema(),
+        });
+        const env = await envP;
+        const payload = env.payload as { relatedTaskId?: string };
+        expect(payload.relatedTaskId).toBeUndefined();
+        await shell.harness.respond({
+          correlationId: env.metadata!.correlationId as string,
+          outcome: "cancelled",
+        });
+        await pending;
+      } finally {
+        await shell.close();
+      }
+    });
+
     it("URL-mode wire payload carries url + elicitationId, NO schema", async () => {
       const shell = await factory({ harnessId: "elic-url-wire-1" });
       try {

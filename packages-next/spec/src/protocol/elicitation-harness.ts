@@ -153,6 +153,22 @@ export interface FormElicitationRequest<TSchema extends StandardSchemaV1 = Stand
    * inspects it.
    */
   readonly metadata?: Readonly<Record<string, unknown>>;
+  /**
+   * Optional back-reference to a {@link TasksHarnessProtocol} task id
+   * that owns this elicit. When set, the published wire envelope
+   * carries the same field so per-task UI surfaces (devtools task
+   * panels, agentick-react task hooks) can filter elicits by
+   * association rather than seeing a global firehose.
+   *
+   * Mirrors MCP's `_meta["io.modelcontextprotocol/related-task"].taskId`
+   * convention (#173) — the MCP bridge extracts inbound elicits'
+   * related-task meta and stamps this field on the harness request.
+   *
+   * Pure routing hint; the harness performs no lifetime coupling
+   * (the elicit does NOT auto-cancel if the task terminates — that
+   * coupling is the caller's policy decision).
+   */
+  readonly relatedTaskId?: string;
 }
 
 /**
@@ -186,6 +202,14 @@ export interface UrlElicitationRequest {
   readonly elicitationId: string;
   readonly hints?: ElicitationHints;
   readonly metadata?: Readonly<Record<string, unknown>>;
+  /**
+   * Optional back-reference to a {@link TasksHarnessProtocol} task id
+   * that owns this elicit — same semantics as the form-mode field.
+   * URL-mode elicits originating from a task (e.g. OAuth prompted by
+   * a long-running tool task) carry this so per-task surfaces can
+   * surface the consent prompt inline.
+   */
+  readonly relatedTaskId?: string;
 }
 
 /**

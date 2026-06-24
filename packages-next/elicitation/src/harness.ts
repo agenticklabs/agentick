@@ -149,6 +149,7 @@ export class ElicitationHarness
       schema: wireSchema,
       ...(request.hints !== undefined ? { hints: request.hints } : {}),
       ...(request.metadata !== undefined ? { metadata: request.metadata } : {}),
+      ...(request.relatedTaskId !== undefined ? { relatedTaskId: request.relatedTaskId } : {}),
     };
 
     const effect = this.request<FormWirePayload, ElicitationResponse>(
@@ -200,6 +201,7 @@ export class ElicitationHarness
       elicitationId: request.elicitationId,
       ...(request.hints !== undefined ? { hints: request.hints } : {}),
       ...(request.metadata !== undefined ? { metadata: request.metadata } : {}),
+      ...(request.relatedTaskId !== undefined ? { relatedTaskId: request.relatedTaskId } : {}),
     };
 
     const effect = this.request<UrlWirePayload, ElicitationResponse>(ELICITATION_CHANNEL, payload, {
@@ -387,6 +389,7 @@ interface FormWirePayload {
   readonly schema: Readonly<Record<string, unknown>>;
   readonly hints?: Readonly<Record<string, unknown>>;
   readonly metadata?: Readonly<Record<string, unknown>>;
+  readonly relatedTaskId?: string;
 }
 
 interface UrlWirePayload {
@@ -396,6 +399,7 @@ interface UrlWirePayload {
   readonly elicitationId: string;
   readonly hints?: Readonly<Record<string, unknown>>;
   readonly metadata?: Readonly<Record<string, unknown>>;
+  readonly relatedTaskId?: string;
 }
 
 type InferOutput<S extends StandardSchemaV1> =

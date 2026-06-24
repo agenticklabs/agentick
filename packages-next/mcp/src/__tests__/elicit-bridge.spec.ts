@@ -445,6 +445,137 @@ describe("ElicitationBridge — capability + concurrency (#149)", () => {
   });
 });
 
+describe("ElicitationBridge — related-task routing (#173)", () => {
+  it("inbound elicit carrying `_meta[RELATED_TASK_META_KEY]` stamps `relatedTaskId` on the bus envelope", async () => {
+    // The MCP draft tasks extension defines
+    // `_meta["io.modelcontextprotocol/related-task"].taskId` as the
+    // standardized way for a server to associate an elicit with a
+    // task in flight. The bridge extracts that, the harness publishes
+    // it on the request envelope, and a per-task UI (devtools task
+    // panel, agentick-react task hook) subscribes filtering on the
+    // field so each task surfaces its own elicits inline rather than
+    // pulling from a global tray.
+    const [clientTransport, serverTransport] = InMemoryMcpTransport.createLinkedPair();
+    const server = new Server(
+      { name: "related-task-eliciting-server", version: "1.0.0" },
+      { capabilities: { tools: {} } },
+    );
+    server.setRequestHandler(ListToolsRequestSchema, async () => ({
+      tools: [{ name: "ask_with_task", inputSchema: { type: "object", properties: {} } }],
+    }));
+    server.setRequestHandler(CallToolRequestSchema, async () => {
+      const r = await server.elicitInput({
+        message: "Confirm shell command?",
+        requestedSchema: {
+          type: "object",
+          properties: { ok: { type: "boolean" } },
+          required: ["ok"],
+        },
+        _meta: {
+          "io.modelcontextprotocol/related-task": { taskId: "task:long-running-shell-7" },
+        },
+      });
+      if (r.action !== "accept") return { content: [{ type: "text" as const, text: "no" }] };
+      return { content: [{ type: "text" as const, text: "did it" }] };
+    });
+    await server.connect(serverTransport);
+
+    const bus = new LocalEventBus();
+    const app = await createApp(React.createElement(Agent), {
+      executor: await mkExecutor(),
+      bus,
+      journal: new MemoryJournal(),
+      inbox: new LocalInbox(),
+      extensions: [
+        withMCP({
+          servers: [{ serverId: "rt", transport: clientTransport, auth: new NoneAuth() }],
+        }),
+      ],
+    });
+    const session = await app.createSession();
+
+    // Capture the elicit envelope BEFORE dispatching so the stamped
+    // relatedTaskId is observable.
+    const envP = Effect.runPromise(
+      Stream.runCollect(
+        Stream.take(
+          bus.subscribe({
+            surface: "session",
+            name: { exact: "session:channel:elicitation" },
+          }) as Stream.Stream<EnvelopeWithMetadata, unknown, never>,
+          1,
+        ),
+      ),
+    );
+    const dispatchP = session.dispatch("rt__ask_with_task", {});
+    const env = Array.from(Chunk.toReadonlyArray(await envP))[0]!;
+    // The published payload mirrors the FormWirePayload shape — the
+    // relatedTaskId travels alongside `mode`, `message`, `schema`.
+    expect((env.payload as { relatedTaskId?: string }).relatedTaskId).toBe(
+      "task:long-running-shell-7",
+    );
+
+    // Unblock the elicit so the dispatch terminates cleanly.
+    await session.elicitation.respond({
+      correlationId: env.metadata!.correlationId as string,
+      outcome: "accepted",
+      value: { ok: true },
+    });
+    await dispatchP;
+
+    await session.close();
+    await app.closeApp();
+    await server.close();
+  });
+
+  it("inbound elicit without related-task meta omits `relatedTaskId` (no false routing)", async () => {
+    // Default case — server fires elicit with no related-task. The
+    // bus envelope MUST NOT carry `relatedTaskId`; a leaked field
+    // would cause a task panel to grab elicits that don't belong to
+    // it.
+    const bus = new LocalEventBus();
+    const { server, clientTransport } = await mkElicitingServer();
+    const app = await createApp(React.createElement(Agent), {
+      executor: await mkExecutor(),
+      bus,
+      journal: new MemoryJournal(),
+      inbox: new LocalInbox(),
+      extensions: [
+        withMCP({
+          servers: [{ serverId: "plain", transport: clientTransport, auth: new NoneAuth() }],
+        }),
+      ],
+    });
+    const session = await app.createSession();
+
+    const envP = Effect.runPromise(
+      Stream.runCollect(
+        Stream.take(
+          bus.subscribe({
+            surface: "session",
+            name: { exact: "session:channel:elicitation" },
+          }) as Stream.Stream<EnvelopeWithMetadata, unknown, never>,
+          1,
+        ),
+      ),
+    );
+    const dispatchP = session.dispatch("plain__ask_name", {});
+    const env = Array.from(Chunk.toReadonlyArray(await envP))[0]!;
+    expect((env.payload as { relatedTaskId?: string }).relatedTaskId).toBeUndefined();
+
+    await session.elicitation.respond({
+      correlationId: env.metadata!.correlationId as string,
+      outcome: "accepted",
+      value: { name: "x" },
+    });
+    await dispatchP;
+
+    await session.close();
+    await app.closeApp();
+    await server.close();
+  });
+});
+
 describe("ElicitationBridge — URL mode (#134a)", () => {
   it("forwards URL-mode elicit through harness; accepted maps to action: 'accept'", async () => {
     const bus = new LocalEventBus();

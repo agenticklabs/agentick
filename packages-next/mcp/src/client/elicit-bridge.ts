@@ -66,6 +66,8 @@ import type {
   ElicitResult,
 } from "@modelcontextprotocol/sdk/types.js";
 
+import { RELATED_TASK_META_KEY } from "../wire/task-codec.js";
+
 // ============================================================================
 // Inbox dispatch — the cluster-friendly seam
 // ============================================================================
@@ -155,12 +157,19 @@ function translateMcpToHarness(
   request: ElicitRequest,
 ): ElicitationRequest<StandardSchemaV1> | undefined {
   const params = request.params as ElicitRequestFormParams | ElicitRequestURLParams;
+  // Inbound `params._meta["io.modelcontextprotocol/related-task"].taskId`
+  // associates the elicit with a local task (#173). Per-task UI
+  // surfaces filter on this field. The MCP request envelope places
+  // `_meta` on `params` only (no top-level `_meta` on the request),
+  // so a single lookup suffices.
+  const relatedTaskId = readRelatedTaskMeta(params._meta);
   if (params.mode === "url") {
     return {
       mode: "url",
       message: params.message,
       url: params.url,
       elicitationId: params.elicitationId,
+      ...(relatedTaskId !== undefined ? { relatedTaskId } : {}),
     };
   }
   return {
@@ -170,7 +179,16 @@ function translateMcpToHarness(
     // Standard-Schema. Functions are not serializable; this is what
     // the harness keeps for re-validation server-side.
     schema: jsonSchema(params.requestedSchema as Readonly<Record<string, unknown>>),
+    ...(relatedTaskId !== undefined ? { relatedTaskId } : {}),
   };
+}
+
+function readRelatedTaskMeta(envelope: unknown): string | undefined {
+  if (typeof envelope !== "object" || envelope === null) return undefined;
+  const related = (envelope as Record<string, unknown>)[RELATED_TASK_META_KEY];
+  if (typeof related !== "object" || related === null) return undefined;
+  const taskId = (related as { taskId?: unknown }).taskId;
+  return typeof taskId === "string" ? taskId : undefined;
 }
 
 function emitRoutingWarning(
