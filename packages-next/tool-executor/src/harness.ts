@@ -353,6 +353,41 @@ export class ToolExecutorHarness extends BaseHarness<"tool"> implements ToolExec
         } as const);
       }
 
+      // Pre-flight: explicit `task` overrides that contradict the
+      // tool's declared `taskSupport` are surfaced as
+      // `ToolTaskModeConflictError` before the handler runs. The
+      // matrix:
+      //
+      //   - `"ref"` + supportMode "unsupported" — the handler is not
+      //     expected to produce a TaskHandle; there is no ref to
+      //     return.
+      //   - `"inline"` + supportMode "required" — the contract says
+      //     the tool must run as a task across ticks; awaiting it
+      //     inline defeats the point.
+      //
+      // `"auto"` never conflicts at pre-flight; the executor resolves
+      // it on the resolved-value side.
+      {
+        const supportMode = reg.declaration.annotations?.taskSupport ?? "unsupported";
+        const requestedTaskMode = input.task ?? "auto";
+        if (requestedTaskMode === "ref" && supportMode === "unsupported") {
+          return yield* Effect.fail({
+            _tag: "ToolTaskModeConflictError",
+            toolName: input.name,
+            requestedTaskMode: "ref",
+            supportMode: "unsupported",
+          } as const);
+        }
+        if (requestedTaskMode === "inline" && supportMode === "required") {
+          return yield* Effect.fail({
+            _tag: "ToolTaskModeConflictError",
+            toolName: input.name,
+            requestedTaskMode: "inline",
+            supportMode: "required",
+          } as const);
+        }
+      }
+
       const entry = this.handlerResolver.resolve(reg.handlerRef);
       if (!entry) {
         return yield* Effect.fail({
@@ -618,47 +653,70 @@ export class ToolExecutorHarness extends BaseHarness<"tool"> implements ToolExec
           // the promise first via the existing race-with-abort, THEN
           // dispatch to the TaskHandle branch if the resolved value
           // is a handle.
+          //
+          // Pattern A vs Pattern B is decided by combining the
+          // tool's declared `taskSupport` with the caller's `task`
+          // option (default `"auto"`):
+          //
+          //   - explicit `"ref"`  → Pattern B (returns
+          //     `session_task_ref`). Pre-flight rejects when
+          //     supportMode === "unsupported".
+          //   - explicit `"inline"` → Pattern A (await handle). Pre-
+          //     flight rejects when supportMode === "required".
+          //   - `"auto"` + `via: "model"` + supportMode "required"
+          //     → Pattern B (the model-tick path keeps required
+          //     tools async across ticks).
+          //   - every other `"auto"` combination → Pattern A
+          //     (host-side default; Phase C #174 refines the
+          //     "supported" branch with capability negotiation).
           const supportMode = reg.declaration.annotations?.taskSupport ?? "unsupported";
+          const requestedTaskMode = input.task ?? "auto";
 
           const dispatchOnResolved = (
             resolved: unknown,
           ): Effect.Effect<readonly ContentBlock[], unknown, never> => {
-            if (isTaskHandle(resolved)) {
-              if (supportMode === "required") {
-                // Wire the dispatch's abort signal to the task's
-                // cancel — caller abort propagates to the task.
-                if (controller.signal.aborted) {
-                  void resolved.cancel("dispatch_aborted");
-                } else {
-                  controller.signal.addEventListener(
-                    "abort",
-                    () => {
-                      void resolved.cancel("dispatch_aborted");
-                    },
-                    { once: true },
-                  );
-                }
-                return Effect.succeed(serializeTaskRef(resolved));
-              }
-              // "unsupported" / "supported" (caller-choice deferred
-              // to #157): await the handle's result. Abort the
-              // task on dispatch abort so we don't orphan in-flight
-              // work.
-              const cancelOnAbort = (): void => {
-                void resolved.cancel("dispatch_aborted");
-              };
-              if (controller.signal.aborted) {
-                cancelOnAbort();
-              } else {
-                controller.signal.addEventListener("abort", cancelOnAbort, { once: true });
-              }
-              const taskAwaitEff = Effect.tryPromise({
-                try: () => resolved.result as Promise<readonly ContentBlock[]>,
-                catch: (cause: unknown) => cause,
-              });
-              return Effect.raceFirst(taskAwaitEff, abortEff);
+            if (!isTaskHandle(resolved)) {
+              return Effect.succeed(resolved as readonly ContentBlock[]);
             }
-            return Effect.succeed(resolved as readonly ContentBlock[]);
+
+            const usePatternB =
+              requestedTaskMode === "ref" ||
+              (requestedTaskMode === "auto" &&
+                input.context.via === "model" &&
+                supportMode === "required");
+
+            if (usePatternB) {
+              // Wire the dispatch's abort signal to the task's
+              // cancel — caller abort propagates to the task.
+              if (controller.signal.aborted) {
+                void resolved.cancel("dispatch_aborted");
+              } else {
+                controller.signal.addEventListener(
+                  "abort",
+                  () => {
+                    void resolved.cancel("dispatch_aborted");
+                  },
+                  { once: true },
+                );
+              }
+              return Effect.succeed(serializeTaskRef(resolved));
+            }
+
+            // Pattern A — await the handle's result. Abort the task
+            // on dispatch abort so we don't orphan in-flight work.
+            const cancelOnAbort = (): void => {
+              void resolved.cancel("dispatch_aborted");
+            };
+            if (controller.signal.aborted) {
+              cancelOnAbort();
+            } else {
+              controller.signal.addEventListener("abort", cancelOnAbort, { once: true });
+            }
+            const taskAwaitEff = Effect.tryPromise({
+              try: () => resolved.result as Promise<readonly ContentBlock[]>,
+              catch: (cause: unknown) => cause,
+            });
+            return Effect.raceFirst(taskAwaitEff, abortEff);
           };
 
           if (isTaskHandle(handlerResult)) {

@@ -517,16 +517,25 @@ export class SessionHarness<P = unknown>
     return child;
   }
 
-  async dispatch(name: string, input: Record<string, unknown>): Promise<readonly ContentBlock[]> {
+  async dispatch(
+    name: string,
+    input: Record<string, unknown>,
+    options?: import("@agentick/spec-next").DispatchOptions,
+  ): Promise<readonly ContentBlock[]> {
     if (this._closed) {
       throw { _tag: "SessionClosedError", attemptedCommand: "dispatch" } satisfies SessionError;
     }
     await this._mountReady;
+    // Defaults to Pattern A — when the tool returns a TaskHandle, the
+    // executor awaits the handle's result and the caller observes
+    // final blocks. Opt into Pattern B with `{ task: "ref" }`; see
+    // `DispatchOptions`.
     const result = await this.toolExecutor.dispatch({
       toolCallId: `host:${ulid()}`,
       name,
       input,
       context: { via: "dispatch", sessionId: this.store.id },
+      ...(options?.task !== undefined ? { task: options.task } : {}),
     });
     return result.content;
   }

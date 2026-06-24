@@ -281,6 +281,29 @@ export interface ApplyToolResultsInput {
   readonly results: readonly LoopToolResult[];
 }
 
+/**
+ * Options for {@link SessionHarnessProtocol.dispatch}.
+ *
+ * `task` selects how the executor handles a tool that returns a
+ * `TaskHandle` (i.e. tools with
+ * `annotations.taskSupport === "supported" | "required"`). It mirrors
+ * the `task` field on `DispatchInput` — see that JSDoc for the full
+ * matrix. Briefly:
+ *
+ *   - `"auto"` (default) — Pattern A for host callers (await the
+ *     handle, return its blocks); the model-tick path's executor
+ *     branch still surfaces Pattern B refs for `required` tools.
+ *   - `"ref"` — force Pattern B (return a `session_task_ref` block).
+ *     Rejects with `ToolTaskModeConflictError` when the tool's
+ *     `taskSupport === "unsupported"`.
+ *   - `"inline"` — force Pattern A (await the handle). Rejects with
+ *     `ToolTaskModeConflictError` when the tool's
+ *     `taskSupport === "required"`.
+ */
+export interface DispatchOptions {
+  readonly task?: "auto" | "ref" | "inline";
+}
+
 export interface AppendEntryInput {
   readonly sessionId: string;
   readonly entry: {
@@ -454,8 +477,18 @@ export interface SessionHarnessProtocol<P = unknown> {
    * Returns the tool's content blocks. Throws `ToolExecutorError`
    * (validation failure, permission denied, handler failure, etc.)
    * surfaced from the harness.
+   *
+   * Defaults to Pattern A — when the dispatched tool returns a
+   * `TaskHandle`, the executor awaits the handle's `result` and the
+   * caller observes the final blocks directly. Opt in to Pattern B
+   * (immediate `session_task_ref` block) by passing
+   * `{ task: "ref" }`; see {@link DispatchOptions}.
    */
-  dispatch(name: string, input: Record<string, unknown>): Promise<readonly ContentBlock[]>;
+  dispatch(
+    name: string,
+    input: Record<string, unknown>,
+    options?: DispatchOptions,
+  ): Promise<readonly ContentBlock[]>;
 
   /**
    * Return a programmatic handle for a named channel. Each call

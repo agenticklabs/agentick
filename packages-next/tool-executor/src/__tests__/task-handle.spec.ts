@@ -41,12 +41,17 @@ function makeTool(opts: {
   };
 }
 
-function dispatchOf(name: string, toolCallId: string) {
+function dispatchOf(
+  name: string,
+  toolCallId: string,
+  opts?: { readonly task?: "auto" | "ref" | "inline" },
+) {
   return {
     name,
     toolCallId,
     input: {},
     context: { via: "dispatch" as const },
+    ...(opts?.task !== undefined ? { task: opts.task } : {}),
   };
 }
 
@@ -121,7 +126,7 @@ describe("ToolExecutor — TaskHandle return + taskSupport branching (#156)", ()
     expect((result.content[0] as { text: string }).text).toBe("done");
   });
 
-  it("taskSupport: 'required' → returns task-ref JSON content block (Pattern B)", async () => {
+  it("taskSupport: 'required' + task: 'ref' → returns task-ref JSON content block (Pattern B)", async () => {
     const { harness, tasks } = await createTestHarness({
       tools: [makeTool({ name: "deploy", handlerRef: "h.deploy", taskSupport: "required" })],
       handlers: [
@@ -150,7 +155,9 @@ describe("ToolExecutor — TaskHandle return + taskSupport branching (#156)", ()
         },
       ],
     });
-    const result = await harness.dispatch(dispatchOf("deploy", "tc-4"));
+    // #164: host-side `via: "dispatch"` defaults to Pattern A; pass
+    // `task: "ref"` to keep Pattern B semantics for this assertion.
+    const result = await harness.dispatch(dispatchOf("deploy", "tc-4", { task: "ref" }));
     expect(result.succeeded).toBe(true);
     expect(result.content).toHaveLength(1);
     const text = (result.content[0] as { text: string }).text;
@@ -195,7 +202,7 @@ describe("ToolExecutor — TaskHandle return + taskSupport branching (#156)", ()
         },
       ],
     });
-    const result = await harness.dispatch(dispatchOf("slow", "tc-5"));
+    const result = await harness.dispatch(dispatchOf("slow", "tc-5", { task: "ref" }));
     const parsed = JSON.parse((result.content[0] as { text: string }).text) as {
       taskId: string;
     };

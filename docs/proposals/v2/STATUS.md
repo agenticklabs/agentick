@@ -1,7 +1,35 @@
 # Agentick v2 — Implementation Status
 
 **Branch:** `feat/v2`
-**Last updated:** 2026-06-23 (later still + Phase B) — **Phase B (#158) — MCP wire codec for tasks: outbound client honors server-broadcast `tool.execution.taskSupport === "required"` by routing through `ctx.tasks.submit(mcpTaskEffect(...))`.** Closes the Pattern B over-MCP loop. Six parts:
+**Last updated:** 2026-06-23 (later still + #164) — **#164 — `session.dispatch(...)` defaults to Pattern A for host-side callers; Pattern B is opt-in via `{ task: "ref" }`.** Pre-#164, dispatching a `taskSupport: "required"` tool from the host returned a `session_task_ref` content block — adopters had to `JSON.parse` the ref and then call `session.tasks.result(localId)` themselves. That was the right shape for the model-tick path (the model needs the ref to manage the task across ticks) but hostile for host callers who expect "I called dispatch, I get blocks." This change makes the host-side default await the local TaskHandle and return its final blocks. Four parts:
+
+1. **Spec — `DispatchInput.task: "auto" | "ref" | "inline"`** added to `@agentick/spec-next/protocol/tool-executor`, alongside a new `DispatchOptions` (`task` only) on `SessionHarnessProtocol.dispatch(name, input, options?)`. `"auto"` is the default; `"ref"` and `"inline"` are explicit overrides. A new tagged error `ToolTaskModeConflictError` is added to `ToolExecutorError` for the two contradictory pre-flight cases (`{ task: "ref" } + taskSupport: "unsupported"` or `{ task: "inline" } + taskSupport: "required"`).
+
+2. **ToolExecutorHarness matrix.** `dispatchOnResolved` no longer reads `supportMode === "required"` in isolation. It computes `usePatternB = requestedTaskMode === "ref" || (requestedTaskMode === "auto" && via === "model" && supportMode === "required")`. Everything else awaits the handle. The pre-flight conflict check runs before the handler executes — `(ref, unsupported)` and `(inline, required)` reject immediately with `ToolTaskModeConflictError` instead of dispatching nonsense handler shapes.
+
+3. **`SessionHarness.dispatch` threads the option** through to the executor via `task: options.task` on the dispatch input; `defineSession`'s `SessionSpec.dispatch` signature widened to `(name, input, options?)` so adopter-provided session specs can forward the option. The model-tick path in `LoopExecutorHarness` is unchanged — it passes `via: "model"` and gets the `(required, auto, model) → Pattern B` matrix cell. Verified: the executor's existing `via: "model"` branching IS the model-tick path, so we don't need the loop-executor to look up declarations or pass `{ task: "ref" }` explicitly.
+
+4. **Tests + adopter-visible reset.** New `packages-next/tool-executor/src/__tests__/dispatch-task-mode-matrix.spec.ts` covers the full 3×3 matrix (`supportMode` × `task`) plus the `via: "model"` cells for `"auto"` resolution — 12 tests, every cell asserted. `task-handle.spec.ts` (the #156 spec) flipped the two `taskSupport: "required"` host-dispatch tests to pass `{ task: "ref" }` so they still cover Pattern B serialization. `mcp/src/__tests__/task-bridge.spec.ts` — the first test ("auto-completes a task") now asserts Pattern A (host-side dispatch returns the remote payload directly); a new second test covers Pattern B opt-in via `{ task: "ref" }`. The `withMCP` integration didn't need any code change: the matrix lives entirely in the executor; the MCP tool's `annotations.taskSupport: "required"` (bridged from `execution.taskSupport`) still drives the model-tick path's `(required, auto, model) → ref` cell unchanged.
+
+**Workspace:** 245/245 across session + mcp + app + tasks; 120/120 across tool-executor (12 new in the matrix spec). Typecheck + oxlint clean across spec / tool-executor / session / mcp.
+
+**Adopter-visible diff:**
+
+```ts
+// before — host caller had to JSON.parse the ref + chase tasks.result
+const ref = JSON.parse((await session.dispatch("deploy", input))[0].text);
+const blocks = await session.tasks.result(ref.taskId);
+
+// after — same code path, blocks come back directly
+const blocks = await session.dispatch("deploy", input);
+
+// still available — Pattern B is one option flag away
+const refBlocks = await session.dispatch("deploy", input, { task: "ref" });
+```
+
+**Deferred:** Phase C (#174) refines the `(supported, auto)` cell with capability negotiation + per-call `task: { ttl }` opt-in. This pass treats `(supported, auto)` as Pattern A everywhere (host AND model) so `withMCP`'s framework→server-side bridging stays uniform; `#174` adds the per-call escape hatch.
+
+**Previously, 2026-06-23 (later still + Phase B) — Phase B (#158) — MCP wire codec for tasks: outbound client honors server-broadcast `tool.execution.taskSupport === "required"` by routing through `ctx.tasks.submit(mcpTaskEffect(...))`.** Closes the Pattern B over-MCP loop. Six parts:
 
 1. **Wire codec primitives** in `packages-next/mcp/src/wire/task-codec.ts`. Pure helpers built on the SDK's exported schemas: `buildCallToolAsTaskParams` (assembles `tools/call` params with `task: { ttl }`), `discriminateCallToolResponse` (distinguishes `CallToolResult` vs `CreateTaskResult` on the wire), `matchProgressNotificationForTask` (filters `notifications/progress` by `_meta["io.modelcontextprotocol/related-task"].taskId` via the SDK's `RELATED_TASK_META_KEY` constant). Pass-through re-exports of the SDK's task types so consumers don't reach into `@modelcontextprotocol/sdk` directly.
 

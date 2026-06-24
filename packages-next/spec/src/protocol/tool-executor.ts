@@ -111,6 +111,29 @@ export interface DispatchInput extends ToolCallScopedInput {
    * `defaultConfirmationTimeoutMs` (which defaults to "wait forever").
    */
   readonly confirmationTimeoutMs?: number;
+  /**
+   * Pattern selector for tools that may produce a `TaskHandle`
+   * (`annotations.taskSupport === "supported" | "required"`).
+   *
+   *   - `"auto"` (default) — `via: "model"` + `taskSupport: "required"`
+   *     yields Pattern B (returns a `session_task_ref` block); every
+   *     other combination yields Pattern A (awaits the handle's
+   *     `result` and returns its blocks). The model-tick path relies on
+   *     this default to keep `required` tools async across ticks;
+   *     host-side dispatch gets Pattern A blocks transparently.
+   *   - `"ref"` — force Pattern B. Rejects with `ToolTaskModeConflictError`
+   *     when the tool's `taskSupport === "unsupported"` (the handler is
+   *     not expected to produce a handle).
+   *   - `"inline"` — force Pattern A. Rejects with
+   *     `ToolTaskModeConflictError` when the tool's
+   *     `taskSupport === "required"` (the handler contract requires
+   *     ref-mode; awaiting would defeat the purpose).
+   *
+   * The matrix is resolved inside the harness; callers do not have to
+   * inspect the declaration. Phase C (#174) refines the "supported"
+   * branch with capability negotiation.
+   */
+  readonly task?: "auto" | "ref" | "inline";
 }
 
 /**
@@ -432,7 +455,24 @@ export type ToolExecutorError =
     }
   | { readonly _tag: "ToolAbortedError"; readonly toolCallId: string; readonly reason?: string }
   | { readonly _tag: "ToolAlreadyRegistered"; readonly name: string }
-  | { readonly _tag: "ToolHandlerMissing"; readonly toolName: string; readonly handlerRef: string };
+  | { readonly _tag: "ToolHandlerMissing"; readonly toolName: string; readonly handlerRef: string }
+  | {
+      /**
+       * The caller's `task` option conflicts with the tool's
+       * `taskSupport` annotation. Emitted by the executor BEFORE the
+       * handler runs:
+       *
+       *   - `task: "ref"` + `taskSupport: "unsupported"` — the tool
+       *     never produces a handle; there's no ref to return.
+       *   - `task: "inline"` + `taskSupport: "required"` — the tool
+       *     contract requires async-ref semantics; awaiting it inline
+       *     defeats the point.
+       */
+      readonly _tag: "ToolTaskModeConflictError";
+      readonly toolName: string;
+      readonly requestedTaskMode: "ref" | "inline";
+      readonly supportMode: "unsupported" | "supported" | "required";
+    };
 
 // ============================================================================
 // Inbox messages

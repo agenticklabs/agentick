@@ -97,15 +97,30 @@ cancellation — the long-running shape is an implementation detail.
 
 ### Pattern B — model-visible task ref
 
-`taskSupport: "required"` → the executor **returns immediately** with a
-typed task-ref content block (`{ _kind: "session_task_ref", taskId,
-status, statusMessage?, ttl? }`) instead of awaiting. The model now owns
-the task and manages it via the four auto-registered model-facing
-tools (see [Model-facing tools](#model-facing-tools) below).
+`taskSupport: "required"` → on the **model-tick path** the executor
+**returns immediately** with a typed task-ref content block
+(`{ _kind: "session_task_ref", taskId, status, statusMessage?, ttl? }`)
+instead of awaiting. The model now owns the task and manages it via
+the four auto-registered model-facing tools (see
+[Model-facing tools](#model-facing-tools) below).
 
 This is the MCP `taskSupport: "required"` semantic — bring the model
 into the conversation about long-running work instead of blocking a
 tick on it.
+
+**Host-side `session.dispatch` defaults to Pattern A** even for
+`taskSupport: "required"` tools (#164) — the host caller usually just
+wants the final blocks. Pass `{ task: "ref" }` to opt in to Pattern B:
+
+```ts
+// host-side — awaits transparently, returns final blocks
+const blocks = await session.dispatch("deploy_branch", input);
+
+// host-side — opt in to Pattern B, returns the task-ref block
+const refBlocks = await session.dispatch("deploy_branch", input, {
+  task: "ref",
+});
+```
 
 The `_kind: "session_task_ref"` discriminator matches the `session_*`
 namespace used by the model tools — `session_tasks_get`,

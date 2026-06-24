@@ -105,6 +105,7 @@ export interface DefineSessionInput<P = unknown> {
   readonly dispatch?: (
     name: string,
     input: Record<string, unknown>,
+    options?: import("@agentick/spec-next").DispatchOptions,
   ) => Promise<readonly ContentBlock[]>;
   readonly channel?: <T = unknown>(name: string) => ChannelHandle<T>;
   readonly knob?: <T = unknown>(name: string) => KnobHandle<T>;
@@ -245,8 +246,12 @@ class CallbackSessionHarness<P = unknown>
     } satisfies SessionError);
   }
 
-  dispatch(name: string, input: Record<string, unknown>): Promise<readonly ContentBlock[]> {
-    if (this.spec.dispatch) return this.spec.dispatch(name, input);
+  dispatch(
+    name: string,
+    input: Record<string, unknown>,
+    options?: import("@agentick/spec-next").DispatchOptions,
+  ): Promise<readonly ContentBlock[]> {
+    if (this.spec.dispatch) return this.spec.dispatch(name, input, options);
     return Promise.reject({
       _tag: "ExecutionFailed",
       cause: new Error("defineSession: dispatch() not configured"),

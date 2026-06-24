@@ -276,12 +276,13 @@ describe("withMCP — taskSupport:'required' end-to-end", () => {
     for (const fn of teardown.reverse()) await fn().catch(() => undefined);
   });
 
-  it("auto-completes a task: dispatch returns a session_task_ref; tasks.result resolves to remote payload", async () => {
-    // taskSupport:"required" routes dispatch through Pattern B —
-    // executor returns a session_task_ref content block immediately;
-    // the local TaskHandle continues running in the background. The
-    // caller fetches the final payload via session.tasks.result(...)
-    // which awaits the remote tasks/result fetch.
+  it("auto-completes a task: host-side dispatch awaits the remote task and returns its blocks (#164 Pattern A default)", async () => {
+    // #164: host-side `session.dispatch` defaults to Pattern A — for
+    // a `taskSupport: "required"` MCP tool, the executor awaits the
+    // local TaskHandle (which itself awaits the remote tasks/result
+    // fetch driven by mcpTaskEffect) and returns the final blocks
+    // directly. No more JSON-parse-the-ref → poll-tasks/result dance
+    // for callers that just want the payload.
     const fake = await mkFakeMcpServer({ autoComplete: true, autoCompletePayload: "ok" });
     teardown.push(() => fake.server.close());
 
@@ -305,7 +306,41 @@ describe("withMCP — taskSupport:'required' end-to-end", () => {
     const session = await app.createSession();
     teardown.push(() => session.close());
 
-    const refBlocks = await session.dispatch("tasksvr__slow_task", { label: "x" });
+    const blocks = (await session.dispatch("tasksvr__slow_task", { label: "x" })) as Array<{
+      type: string;
+      text: string;
+    }>;
+    expect(blocks).toEqual([{ type: "text", text: "ok" }]);
+  });
+
+  it("opt-in Pattern B: `{ task: 'ref' }` returns a session_task_ref; remote payload resolved via tasks.result(...)", async () => {
+    // The escape hatch for callers that want the ref. Mirrors the
+    // pre-#164 host-side default and the model-tick path's default
+    // behavior for `taskSupport: "required"` tools.
+    const fake = await mkFakeMcpServer({ autoComplete: true, autoCompletePayload: "ok" });
+    teardown.push(() => fake.server.close());
+
+    const app = await createApp(React.createElement(Agent), {
+      executor: await mkExecutor(),
+      extensions: [
+        withMCP({
+          servers: [
+            {
+              serverId: "tasksvr",
+              transport: fake.clientTransport,
+              auth: new NoneAuth(),
+              defaultTaskTtl: 60_000,
+            },
+          ],
+        }),
+      ],
+    });
+    teardown.push(() => app.closeApp());
+
+    const session = await app.createSession();
+    teardown.push(() => session.close());
+
+    const refBlocks = await session.dispatch("tasksvr__slow_task", { label: "x" }, { task: "ref" });
     expect(refBlocks).toHaveLength(1);
     const refBlock = refBlocks[0] as { type: "text"; text: string };
     const ref = JSON.parse(refBlock.text) as {
@@ -317,10 +352,6 @@ describe("withMCP — taskSupport:'required' end-to-end", () => {
     expect(ref.status).toBe("working");
     expect(typeof ref.taskId).toBe("string");
 
-    // Wait for the remote task to complete + the local handle to
-    // resolve via `tasks/result`. The TasksHarness.result() awaits
-    // the handle's deferred → which is resolved by mcpTaskEffect's
-    // foldUntilTerminal + tasks/result fetch.
     const finalBlocks = (await session.tasks.result(ref.taskId)) as Array<{
       type: string;
       text: string;
