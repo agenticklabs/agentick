@@ -49,5 +49,8 @@
     "@agentick/runtime-next": "workspace:*",
     "@agentick/spec-next": "workspace:*",
     "effect": "^3.21.2"
+  },
+  "devDependencies": {
+    "@agentick/utils-next": "workspace:*"
   }
 }

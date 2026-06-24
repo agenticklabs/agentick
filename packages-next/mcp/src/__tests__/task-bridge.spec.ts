@@ -32,6 +32,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createApp } from "@agentick/app-next/react";
 import { FakeLanguageModelExecutor } from "@agentick/executor-next";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
+import { drainRejection } from "@agentick/utils-next/testing";
 // AppHarness installs a TasksHarness per session by default — no need
 // to install `withTasks()` here. session.tasks (via SessionHarness
 // augmentation in @agentick/tasks-next) gives access to the harness
@@ -170,12 +171,12 @@ async function mkFakeMcpServer(opts: {
       void Promise.resolve().then(async () => {
         // working → completed in two transitions so we exercise the
         // notification fold loop with a non-terminal transition.
-        await server
-          .notification({
+        await drainRejection(
+          server.notification({
             method: "notifications/tasks/status",
             params: { ...snapshot(task), statusMessage: "in-progress" },
-          })
-          .catch(() => undefined);
+          }),
+        );
         await new Promise((r) => setTimeout(r, 5));
         const completed: Task = {
           ...task,
@@ -183,9 +184,12 @@ async function mkFakeMcpServer(opts: {
           lastUpdatedAt: new Date().toISOString(),
         };
         tasks.set(taskId, { task: completed, payload });
-        await server
-          .notification({ method: "notifications/tasks/status", params: snapshot(completed) })
-          .catch(() => undefined);
+        await drainRejection(
+          server.notification({
+            method: "notifications/tasks/status",
+            params: snapshot(completed),
+          }),
+        );
       });
     }
 
@@ -219,9 +223,12 @@ async function mkFakeMcpServer(opts: {
       };
       tasks.set(req.params.taskId, { ...entry, task: cancelled });
       // Notify the client that the task transitioned.
-      void server
-        .notification({ method: "notifications/tasks/status", params: snapshot(cancelled) })
-        .catch(() => undefined);
+      void drainRejection(
+        server.notification({
+          method: "notifications/tasks/status",
+          params: snapshot(cancelled),
+        }),
+      );
       cancelResolve(req.params.taskId);
       return { ...snapshot(cancelled) };
     }
@@ -273,7 +280,7 @@ describe("withMCP — taskSupport:'required' end-to-end", () => {
     teardown = [];
   });
   afterEach(async () => {
-    for (const fn of teardown.reverse()) await fn().catch(() => undefined);
+    for (const fn of teardown.reverse()) await drainRejection(fn());
   });
 
   it("auto-completes a task: host-side dispatch awaits the remote task and returns its blocks (#164 Pattern A default)", async () => {
@@ -386,7 +393,7 @@ describe("withMCP — taskSupport:'required' end-to-end", () => {
     // Kick off the dispatch — it'll block since autoComplete=false.
     // Pre-drain the rejection so vitest doesn't flag it.
     const dispatchP = session.dispatch("tasksvr__slow_task", { label: "y" });
-    const drained = dispatchP.catch((e: unknown) => e);
+    const drained = drainRejection(dispatchP);
 
     // Wait for the server to observe a task creation (the
     // CreateTaskResult was sent + the task is in-memory). Without a
@@ -402,7 +409,7 @@ describe("withMCP — taskSupport:'required' end-to-end", () => {
     // Pre-drain the local TaskHandle's rejection — cancel rejects
     // result deferreds; without an attached handler vitest flags an
     // unhandled rejection.
-    const drainedTaskResult = session.tasks.result(localTaskId).catch((e: unknown) => e);
+    const drainedTaskResult = drainRejection(session.tasks.result(localTaskId));
     await session.tasks.cancel(localTaskId, "test-cancel");
     void drainedTaskResult;
 
@@ -443,7 +450,7 @@ describe("withMCP — taskSupport:'required' end-to-end", () => {
     // Track local progress events on the TasksHarness's bus.
     const localProgress: Array<{ current: number; total?: number; message?: string }> = [];
     const dispatchP = session.dispatch("tasksvr__slow_task", { label: "z" });
-    void dispatchP.catch(() => undefined);
+    void drainRejection(dispatchP);
 
     await new Promise((r) => setTimeout(r, 25));
     const localTaskId = session.tasks.list()[0]!.taskId;
@@ -466,10 +473,10 @@ describe("withMCP — taskSupport:'required' end-to-end", () => {
     await fake.emitProgress(remoteTaskId, 2, 3, "step 2");
     await fake.completeTask(remoteTaskId, "done");
 
-    await dispatchP.catch(() => undefined);
+    await drainRejection(dispatchP);
     // Give the events iterator time to drain the terminal frame.
     await new Promise((r) => setTimeout(r, 10));
-    await eventStreamP.catch(() => undefined);
+    await drainRejection(eventStreamP);
 
     expect(localProgress.length).toBeGreaterThanOrEqual(2);
     expect(localProgress[0]).toMatchObject({ current: 1, total: 3, message: "step 1" });

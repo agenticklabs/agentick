@@ -13,6 +13,7 @@ import { describe, expect, it } from "vitest";
 
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
 import type { ContentBlock, ToolHandlerCtx } from "@agentick/spec-next";
+import { drainRejection } from "@agentick/utils-next/testing";
 
 import { TasksHarness } from "../harness.js";
 import {
@@ -160,7 +161,7 @@ describe("session_tasks_cancel", () => {
       });
       expect(parseJsonBlock(blocks)).toEqual({ cancelled: handle.taskId });
       // Drain the rejected handle.result so vitest doesn't flag it as unhandled.
-      await handle.result.catch(() => undefined);
+      await drainRejection(handle.result);
       expect(fx.tasks.get(handle.taskId)?.status).toBe("cancelled");
     } finally {
       await fx.close();
@@ -207,7 +208,7 @@ describe("session_tasks_await", () => {
       });
       // Cancel after the await tool begins waiting.
       setTimeout(() => {
-        fx.tasks.cancel(handle.taskId, "outside_cancel").catch(() => undefined);
+        void drainRejection(fx.tasks.cancel(handle.taskId, "outside_cancel"));
       }, 10);
       const blocks = await fx.handlerOf(SESSION_TASKS_AWAIT)({ taskId: handle.taskId });
       const payload = parseJsonBlock(blocks) as { error?: string; status?: string };

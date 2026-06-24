@@ -26,6 +26,7 @@ import type {
   LanguageModelInput,
 } from "@agentick/spec-next";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
+import { drainRejection } from "@agentick/utils-next/testing";
 
 import { BaseLanguageModelExecutor } from "../base-language-model-executor.js";
 import type { StreamAccumulator } from "../stream-accumulator.js";
@@ -211,7 +212,7 @@ describe("BaseLanguageModelExecutor — Effect.Stream pipeline", () => {
       await new Promise((r) => setTimeout(r, 50));
     } finally {
       bus.close();
-      await Effect.runPromise(subFiber.await).catch(() => {});
+      await drainRejection(Effect.runPromise(subFiber.await));
     }
 
     // Pipeline did not crash. If timing permitted, we also saw deltas

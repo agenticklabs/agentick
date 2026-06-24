@@ -22,6 +22,7 @@ import { Effect, Stream } from "effect";
 import { describe, expect, it } from "vitest";
 
 import { ADAPTER_DELTA_TYPES } from "@agentick/spec-next";
+import { drainRejection } from "@agentick/utils-next/testing";
 import type {
   AdapterDeltaType,
   EventBus,
@@ -331,7 +332,7 @@ export function runExecutorConformance(factory: ExecutorConformanceFactory): voi
       for await (const _ of stream) {
         void _;
       }
-      await stream.result.catch(() => undefined);
+      await drainRejection(stream.result);
     });
 
     it("every yielded delta has a valid AdapterDelta type", async () => {
@@ -356,7 +357,7 @@ export function runExecutorConformance(factory: ExecutorConformanceFactory): voi
         seenAny = true;
         expect(knownTypes.has(delta.type)).toBe(true);
       }
-      await stream.result.catch(() => undefined);
+      await drainRejection(stream.result);
       expect(seenAny).toBe(true);
     });
 
@@ -393,7 +394,7 @@ export function runExecutorConformance(factory: ExecutorConformanceFactory): voi
       for await (const _ of stream) {
         void _;
       }
-      await stream.result.catch(() => undefined);
+      await drainRejection(stream.result);
       await new Promise((r) => setTimeout(r, 50));
 
       expect(collected.length).toBeGreaterThan(0);

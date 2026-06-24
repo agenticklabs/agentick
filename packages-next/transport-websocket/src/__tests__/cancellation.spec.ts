@@ -18,6 +18,7 @@ import type { AddressInfo } from "node:net";
 import { WebSocket, WebSocketServer } from "ws";
 import { createClient } from "@agentick/client-next";
 import { createGateway } from "@agentick/gateway-next";
+import { drainRejection } from "@agentick/utils-next/testing";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { websocket } from "../client/index.js";
@@ -84,7 +85,7 @@ describe("WebSocket transport — notifications/cancelled", () => {
       const controller = new AbortController();
       const ping = client.request("ping", {}, controller.signal);
       controller.abort();
-      await ping.catch(() => undefined);
+      await drainRejection(ping);
 
       // Allow microtasks for the cancel frame to flush over WS
       await new Promise((r) => setTimeout(r, 50));

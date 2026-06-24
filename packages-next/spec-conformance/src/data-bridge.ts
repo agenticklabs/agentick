@@ -20,6 +20,7 @@
 
 import { describe, expect, it } from "vitest";
 import type { DataBridge } from "@agentick/spec-next";
+import { drainRejection } from "@agentick/utils-next/testing";
 
 export function runDataBridgeConformance(factory: () => DataBridge): void {
   describe("DataBridge — peek / fetch", () => {
@@ -55,7 +56,7 @@ export function runDataBridgeConformance(factory: () => DataBridge): void {
 
     it("fetch returns a rejected Promise when the prior fetch errored", async () => {
       const bridge = factory();
-      await bridge.fetch("bad", () => Promise.reject(new Error("boom"))).catch(() => {});
+      await drainRejection(bridge.fetch("bad", () => Promise.reject(new Error("boom"))));
       await expect(bridge.fetch("bad", async () => "x")).rejects.toThrow("boom");
       // peek also sees the error.
       const peeked = bridge.peek("bad");

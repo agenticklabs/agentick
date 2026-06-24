@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import type { ProtocolEvent, TaskEvent, TaskInfo, TaskRejection } from "@agentick/spec-next";
 import type { LocalEventBus } from "@agentick/runtime-next";
+import { drainRejection } from "@agentick/utils-next/testing";
 
 import { TASK_PROGRESS_CHANNEL_FQN, TASK_STATUS_CHANNEL_FQN } from "../channel.js";
 import { fakeTasks, type FakeTasksBundle } from "../testing/fake-tasks.js";
@@ -494,7 +495,7 @@ describe("TasksHarness — Effect-typed work", () => {
     // rejection" during the awaited Fiber.interrupt window. The
     // drained promise is held separately; `handle.result` remains the
     // original rejected promise for the matcher below.
-    const drained = handle.result.catch((e: unknown) => e);
+    const drained = drainRejection(handle.result);
     await new Promise((r) => setTimeout(r, 10));
     await bundle.harness.cancel(handle.taskId);
     expect(Effect.runSync(Ref.get(finalizerCalls))).toBe(1);

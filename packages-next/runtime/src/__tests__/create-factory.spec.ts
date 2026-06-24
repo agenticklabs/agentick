@@ -24,6 +24,8 @@ import type {
   ProtocolEvent,
 } from "@agentick/spec-next";
 
+import { drainRejection } from "@agentick/utils-next/testing";
+
 import { LocalEventBus, LocalInbox, MemoryJournal } from "../index.js";
 
 interface MockParent {
@@ -153,11 +155,13 @@ describe("LocalEventBus.createFactory", () => {
 
     expect(localSeen).toHaveLength(0);
 
-    await Effect.runPromise(
-      Effect.runPromise(Effect.exit(Effect.fromFiber(localFiber)))
-        .then(() => Promise.resolve())
-        .catch(() => Promise.resolve()) as unknown as Effect.Effect<unknown, never, never>,
-    ).catch(() => {});
+    await drainRejection(
+      Effect.runPromise(
+        Effect.runPromise(Effect.exit(Effect.fromFiber(localFiber)))
+          .then(() => Promise.resolve())
+          .catch(() => Promise.resolve()) as unknown as Effect.Effect<unknown, never, never>,
+      ),
+    );
     // best-effort cleanup; test is async
   });
 

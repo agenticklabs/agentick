@@ -13,6 +13,7 @@ import type {
   ToolDeclaration,
   ToolRegistration,
 } from "@agentick/spec-next";
+import { drainRejection } from "@agentick/utils-next/testing";
 
 import { createTestHarness } from "../testing/index.js";
 
@@ -176,7 +177,7 @@ describe("ToolExecutor — TaskHandle return + taskSupport branching (#156)", ()
     // rejection (the task's `result` promise rejects with
     // TaskRejection on cancel; nobody awaits it in the test, so
     // vitest sees an unhandled rejection without this).
-    const cleanupResult = tasks.result(parsed.taskId).catch(() => undefined);
+    const cleanupResult = drainRejection(tasks.result(parsed.taskId));
     await tasks.cancel(parsed.taskId, "test_cleanup");
     await cleanupResult;
   });

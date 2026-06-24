@@ -85,6 +85,32 @@ Pattern B).
 | `Layer<T>`         | type      | one partial-config layer in a cascade                     |
 | `MergeStrategy<T>` | type      | symbol-wrapped field strategy                             |
 
+## Testing subpath — `@agentick/utils-next/testing`
+
+Test-only helpers. Importable from any package's `__tests__/` without
+polluting the production import graph.
+
+| Export                 | Kind   | Purpose                                                                                                                |
+| ---------------------- | ------ | ---------------------------------------------------------------------------------------------------------------------- |
+| `drainRejection<T>(p)` | helper | Eagerly attach a no-op catch handler so a Promise's rejection is observed, returning the value or the rejection reason |
+
+```ts
+import { drainRejection } from "@agentick/utils-next/testing";
+
+// Replaces hand-rolled `.catch((e) => e)` / `.catch(() => undefined)`
+// at test sites where a Promise will reject but the test body awaits
+// something else first. Attaching at construction is what makes the
+// drain "pre-": vitest never sees the rejection as unhandled.
+const drained = drainRejection(handle.result);
+await session.tasks.cancel(handle.taskId);
+expect(await drained).toMatchObject({ status: "cancelled" });
+```
+
+**Not for production code.** Fire-and-forget sites in long-lived
+harnesses / transports that intentionally swallow rejections have
+different semantics — the name signals test-only intent at the call
+site.
+
 ## What does NOT belong here
 
 - Anything that imports from `@agentick/spec-next`, a harness, or a
@@ -102,6 +128,9 @@ Pattern B).
 - Predicates incl. `isPlainObject` prototype-chain check, `isEqual` for
   primitives / arrays / objects / `Date` / `RegExp` —
   `src/__tests__/predicates.spec.ts`
+- `drainRejection` resolution / rejection pass-through + eager
+  unhandled-rejection observability —
+  `src/__tests__/drain-rejection.spec.ts`
 
 ## Roadmap & known gaps
 

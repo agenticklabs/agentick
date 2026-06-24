@@ -485,6 +485,9 @@ importers:
       '@agentick/spec-conformance-next':
         specifier: workspace:*
         version: link:../spec-conformance
+      '@agentick/utils-next':
+        specifier: workspace:*
+        version: link:../utils
 
   packages-next/executor-ai-sdk:
     dependencies:
@@ -725,6 +728,9 @@ importers:
       '@agentick/tasks-next':
         specifier: workspace:*
         version: link:../tasks
+      '@agentick/utils-next':
+        specifier: workspace:*
+        version: link:../utils
       '@types/react':
         specifier: ^19.2.5
         version: 19.2.13
@@ -793,6 +799,9 @@ importers:
       '@agentick/spec-conformance-next':
         specifier: workspace:*
         version: link:../spec-conformance
+      '@agentick/utils-next':
+        specifier: workspace:*
+        version: link:../utils
 
   packages-next/sandbox:
     dependencies:
@@ -910,6 +919,9 @@ importers:
       '@agentick/spec-next':
         specifier: workspace:*
         version: link:../spec
+      '@agentick/utils-next':
+        specifier: workspace:*
+        version: link:../utils
       effect:
         specifier: ^3.21.2
         version: 3.21.2
@@ -978,6 +990,10 @@ importers:
       effect:
         specifier: ^3.21.2
         version: 3.21.2
+    devDependencies:
+      '@agentick/utils-next':
+        specifier: workspace:*
+        version: link:../utils
 
   packages-next/timeline:
     dependencies:
@@ -1181,6 +1197,9 @@ importers:
       '@agentick/spec-conformance-next':
         specifier: workspace:*
         version: link:../spec-conformance
+      '@agentick/utils-next':
+        specifier: workspace:*
+        version: link:../utils
       '@types/ws':
         specifier: ^8.5.13
         version: 8.18.1
@@ -9890,14 +9909,14 @@ snapshots:
       chai: 6.2.2
       tinyrainbow: 3.0.3
 
-  '@vitest/mocker@4.0.18(msw@2.14.6(@types/node@22.19.7)(typescript@5.9.3))(vite@6.4.1(@types/node@22.19.7)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.4))':
+  '@vitest/mocker@4.0.18(msw@2.14.6(@types/node@22.19.7)(typescript@5.9.3))(vite@6.4.1(@types/node@25.0.9)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.4))':
     dependencies:
       '@vitest/spy': 4.0.18
       estree-walker: 3.0.3
       magic-string: 0.30.21
     optionalDependencies:
       msw: 2.14.6(@types/node@22.19.7)(typescript@5.9.3)
-      vite: 6.4.1(@types/node@22.19.7)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.4)
+      vite: 6.4.1(@types/node@25.0.9)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.4)
 
   '@vitest/mocker@4.0.18(msw@2.14.6(@types/node@25.0.9)(typescript@5.9.3))(vite@6.4.1(@types/node@25.0.9)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.4))':
     dependencies:
@@ -13387,7 +13406,7 @@ snapshots:
   vitest@4.0.18(@opentelemetry/api@1.9.0)(@types/node@22.19.7)(happy-dom@17.6.3)(jiti@2.6.1)(msw@2.14.6(@types/node@22.19.7)(typescript@5.9.3))(tsx@4.21.0)(yaml@2.8.4):
     dependencies:
       '@vitest/expect': 4.0.18
-      '@vitest/mocker': 4.0.18(msw@2.14.6(@types/node@22.19.7)(typescript@5.9.3))(vite@6.4.1(@types/node@22.19.7)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.4))
+      '@vitest/mocker': 4.0.18(msw@2.14.6(@types/node@22.19.7)(typescript@5.9.3))(vite@6.4.1(@types/node@25.0.9)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.4))
       '@vitest/pretty-format': 4.0.18
       '@vitest/runner': 4.0.18
       '@vitest/snapshot': 4.0.18
