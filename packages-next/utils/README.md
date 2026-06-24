@@ -8,7 +8,7 @@ no protocol coupling. Anything in this package can be lifted into any
 runtime — Node, Deno, the browser, the edge — without dragging a single
 agentick concept along.
 
-Two things live here today:
+Three things live here today:
 
 - **Type predicates and structural equality** —
   `isString` / `isNumber` / `isBoolean` / `isNull` / `isUndefined` /
@@ -22,6 +22,12 @@ Two things live here today:
   session → per-call) into a typed merged config with cascade
   semantics. Ships with four symbol-wrapped field strategies:
   `append`, `prepend`, `replace`, `omit`.
+- **Local pub/sub primitives** — three layered observer abstractions
+  (`Notifier<T>`, `KeyedNotifier<K, T>`, `LocalPubSub<T>`) that replace
+  the hand-rolled `Set<() => void>` fan-out at every harness, bridge,
+  transport, and reconciler test double. Layer 1 + 2 are sync `Set`-of-
+  callbacks with listener-error isolation; Layer 3 is built on Effect's
+  `PubSub.unbounded()` and returns a fully-scoped `Stream.Stream`.
 
 ## Status
 
@@ -36,7 +42,15 @@ not here.
 ## Quick start
 
 ```ts
-import { isPlainObject, isEqual, mergeLayered, append } from "@agentick/utils-next";
+import {
+  isPlainObject,
+  isEqual,
+  mergeLayered,
+  append,
+  createNotifier,
+  createKeyedNotifier,
+  createLocalPubSub,
+} from "@agentick/utils-next";
 
 isPlainObject({ a: 1 }); // true
 isPlainObject(new Date()); // false  (class instance, not POJO)
@@ -48,6 +62,29 @@ const config = mergeLayered<{ maxTicks: number; tools: string[] }>(
   { maxTicks: 12 }, // session override
 );
 // → { maxTicks: 12, tools: ["fs", "shell"] }
+
+// Single-channel observer (replaces `Set<() => void>` + manual fan-out).
+const n = createNotifier();
+const off = n.subscribe(() => console.log("changed"));
+n.notify();
+off();
+
+// Typed payload variant — transport state, etc.
+const stateBus = createNotifier<"idle" | "ready">();
+stateBus.subscribe((s) => console.log("state →", s));
+stateBus.notify("ready");
+
+// Keyed observer with wildcards — knobs / state / skills harnesses.
+const keyed = createKeyedNotifier();
+keyed.subscribe("counter", () => render());
+keyed.subscribeAll(() => bumpVersion());
+keyed.notify("counter");
+keyed.notifyAll(); // wildcard-only signal ("everything changed")
+
+// Stream-based fan-out — MCP task notifications, future #162 tasks bus.
+const bus = createLocalPubSub<TaskEvent>();
+bus.publish({ kind: "started", taskId: "t1" });
+const stream = bus.subscribe((e) => e.taskId === "t1");
 ```
 
 See [`merge-layered.ts`](./src/merge-layered.ts) for the cascade
@@ -84,6 +121,14 @@ Pattern B).
 | `isMergeStrategy`  | guard     | true if a value carries a strategy marker                 |
 | `Layer<T>`         | type      | one partial-config layer in a cascade                     |
 | `MergeStrategy<T>` | type      | symbol-wrapped field strategy                             |
+| `createNotifier<T>`         | factory   | Layer 1 — single-channel observer; `T = void` ⇒ parameterless `notify()` |
+| `Notifier<T>`               | interface | `subscribe / notify / size / clear` (returns `Unsubscribe`)             |
+| `createKeyedNotifier<K, T>` | factory   | Layer 2 — keyed observer + wildcard channel + `notifyAsync` for serial dispatch |
+| `KeyedNotifier<K, T>`       | interface | `subscribe(key) / subscribeAll / notify / notifyAll / notifyAsync / count / clear` |
+| `createLocalPubSub<T>`      | factory   | Layer 3 — Effect.PubSub-backed Stream fan-out with `Scope` wrapped internally |
+| `LocalPubSub<T>`            | interface | `publish / subscribe(filter?) / close / subscriberCount`                      |
+| `Listener<T>`               | type      | computed listener signature; void → `() => void`, else `(v: T) => void`   |
+| `Unsubscribe`               | type      | `() => void` — cancellation token returned by every subscribe             |
 
 ## Testing subpath — `@agentick/utils-next/testing`
 
@@ -131,6 +176,11 @@ site.
 - `drainRejection` resolution / rejection pass-through + eager
   unhandled-rejection observability —
   `src/__tests__/drain-rejection.spec.ts`
+- `Notifier` / `KeyedNotifier` / `LocalPubSub` — subscribe/notify/unsubscribe
+  semantics, listener-error isolation, mid-iteration unsubscribe, async
+  serial dispatch, wildcard-only `notifyAll`, filtered Stream subscribers,
+  multi-subscriber fan-out, and `close()` idempotence —
+  `src/__tests__/pubsub.spec.ts`
 
 ## Roadmap & known gaps
 

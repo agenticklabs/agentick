@@ -2,11 +2,13 @@
   "name": "@agentick/utils-next",
   "version": "0.0.0",
   "private": true,
-  "description": "Framework-agnostic bedrock utilities for Agentick v2 — type predicates, deep equality, and the `mergeLayered` cascade primitive. No reconciler, harness, or protocol coupling; pure functions over plain values.",
+  "description": "Framework-agnostic bedrock utilities for Agentick v2 — type predicates, deep equality, the `mergeLayered` cascade primitive, and local pub/sub primitives (`Notifier` / `KeyedNotifier` / `LocalPubSub`). No reconciler, harness, or protocol coupling; pure functions over plain values.",
   "keywords": [
     "agentick",
     "merge",
+    "notifier",
     "predicates",
+    "pubsub",
     "utilities"
   ],
   "license": "MIT",
