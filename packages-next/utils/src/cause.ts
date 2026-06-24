@@ -104,6 +104,37 @@ export function reasonOfCause<E>(cause: Cause.Cause<E>): string {
 }
 
 // ============================================================================
+// Cause-of-cause — extract the originating value WITHOUT stringifying
+// ============================================================================
+
+/**
+ * Extract the originating value from an Effect {@link Cause.Cause}
+ * WITHOUT stringifying. Mirrors {@link reasonOfCause}'s precedence
+ * but returns the typed value (or the defect) so adopters can branch
+ * on structured failure shapes (`_tag` discrimination, error payloads,
+ * etc.) at the consumer boundary.
+ *
+ * Resolution order:
+ *
+ *   1. Typed failure (`Effect.fail(E)`) — `Cause.failureOption(cause)`.
+ *      Returns `E` AS-IS so callers retain pattern-match identity.
+ *   2. Defect (`Effect.die(unknown)`) — first defect via
+ *      `Cause.defects(cause)`.
+ *   3. Otherwise (interrupt-only, empty, exotic) — returns `undefined`.
+ *      Callers wanting a string fall back to {@link reasonOfCause}.
+ *
+ * Use {@link reasonOfCause} when you need a string summary; use this
+ * when you need the structured value for downstream pattern matching.
+ */
+export function causeValue<E>(cause: Cause.Cause<E>): unknown | undefined {
+  const failure = Cause.failureOption(cause);
+  if (Option.isSome(failure)) return failure.value;
+  const defects = Array.from(Cause.defects(cause));
+  if (defects.length > 0) return defects[0];
+  return undefined;
+}
+
+// ============================================================================
 // Exit unwrap
 // ============================================================================
 

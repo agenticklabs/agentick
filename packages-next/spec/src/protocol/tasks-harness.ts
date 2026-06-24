@@ -88,7 +88,32 @@ export interface TaskInfo {
 
 export interface TaskFailure {
   readonly kind: "error" | "timeout" | "aborted";
+  /**
+   * Single-line summary suitable for UI / logs. Derived from `cause`
+   * when present (typed E's `_tag`, Error.message, etc.) — see
+   * `reasonOf` / `reasonOfCause` in `@agentick/utils-next`. Adopters
+   * branching on structured failure should read `cause` instead.
+   */
   readonly reason?: string;
+  /**
+   * Original failure value, preserved verbatim. For Effect-typed work:
+   * the typed `E` extracted via `Cause.failureOption(cause)`, or the
+   * defect from `Cause.defects(cause)` for `Effect.die`. For Promise-
+   * typed work: the value passed to `Promise.reject` (or thrown).
+   *
+   * `unknown` because the harness doesn't know what shape the adopter's
+   * failure type is. Adopters branching on structured failures (e.g.,
+   * `if (info.failure?.cause && "_tag" in info.failure.cause && ...)`)
+   * reach through here. UIs that only need a human-readable line use
+   * `reason`.
+   *
+   * **Wire boundary:** `cause` does NOT round-trip over the MCP wire
+   * (MCP's `Task` schema has no structured-cause field). Cross-system
+   * tasks lossy-encode to the `reason` string. Adopters relying on
+   * structured cause should plan for this asymmetry at the codec
+   * boundary.
+   */
+  readonly cause?: unknown;
 }
 
 /**

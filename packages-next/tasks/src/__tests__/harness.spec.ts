@@ -414,6 +414,41 @@ describe("TasksHarness — Effect-typed work", () => {
     });
   });
 
+  it("TaskFailure.cause preserves typed Effect.fail value verbatim (#165)", async () => {
+    bundle = await fakeTasks();
+    // Domain-shaped failure with structured payload — the kind adopters
+    // pattern-match on `_tag` and read `detail` from.
+    const domainErr = { _tag: "PaymentDeclined", amount: 4200, currency: "USD" };
+    const handle = bundle.harness.submit(() => Effect.fail(domainErr));
+    const rejection = await handle.result.catch((e: unknown) => e);
+    // The typed Rejection's `failure.cause` IS the original value
+    // (structural equality; identity-preserving by construction).
+    expect((rejection as TaskRejection).failure?.cause).toEqual(domainErr);
+    // Same value reachable via TaskInfo snapshot.
+    const info = bundle.harness.get(handle.taskId);
+    expect(info?.failure?.cause).toEqual(domainErr);
+    // `reason` stays as the single-line summary (the _tag).
+    expect(info?.failure?.reason).toBe("PaymentDeclined");
+  });
+
+  it("TaskFailure.cause preserves Effect.die defect verbatim (#165)", async () => {
+    bundle = await fakeTasks();
+    const defect = new Error("kaboom");
+    const handle = bundle.harness.submit(() => Effect.die(defect));
+    const info = await handle.result.catch(() => bundle!.harness.get(handle.taskId));
+    expect((info as { failure?: { cause?: unknown } }).failure?.cause).toBe(defect);
+  });
+
+  it("Promise-path TaskFailure.cause preserves the rejected value (#165)", async () => {
+    bundle = await fakeTasks();
+    const thrown = { code: "ETIMEDOUT", detail: "upstream slow" };
+    const handle = bundle.harness.submit(async () => {
+      throw thrown;
+    });
+    const rejection = await handle.result.catch((e: unknown) => e);
+    expect((rejection as TaskRejection).failure?.cause).toBe(thrown);
+  });
+
   it("cancel interrupts a sleeping Effect — finishes in well under the sleep duration", async () => {
     bundle = await fakeTasks();
     // 60-second sleep — without Fiber.interrupt this test would time out.

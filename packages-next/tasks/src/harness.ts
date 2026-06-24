@@ -45,7 +45,7 @@
 
 import { Cause, Effect, Fiber, Queue } from "effect";
 import { BaseHarness, ulid } from "@agentick/runtime-next";
-import { reasonOf, reasonOfCause } from "@agentick/utils-next";
+import { causeValue, reasonOf } from "@agentick/utils-next";
 import type {
   ContentBlock,
   EventBus,
@@ -308,7 +308,13 @@ export class TasksHarness extends BaseHarness<"tasks"> implements TasksHarnessPr
               this.finishAsCancelled(record, "interrupted");
               return;
             }
-            this.finishAsFailed(record, reasonOfCause(cause));
+            // Extract the originating value from the Cause so
+            // `failure.cause` carries the typed E (Effect.fail) or the
+            // defect (Effect.die) verbatim. `finishAsFailed` derives
+            // `failure.reason` from this same value via `reasonOf`.
+            // Falls back to the Cause itself for empty / exotic shapes
+            // so adopters still get _something_ inspectable.
+            this.finishAsFailed(record, causeValue(cause) ?? cause);
           }),
       }),
     );
@@ -325,7 +331,15 @@ export class TasksHarness extends BaseHarness<"tasks"> implements TasksHarnessPr
 
   private finishAsFailed(record: TaskRecord, cause: unknown): void {
     if (this.isTerminal(record.status)) return;
-    const failure: TaskFailure = { kind: "error", reason: reasonOf(cause) };
+    // Preserve the original failure value on `cause` so adopters
+    // branching on structured E (`_tag` discrimination, error payloads,
+    // etc.) keep access to the full shape. `reason` stays as the
+    // single-line summary derived via `reasonOf`.
+    const failure: TaskFailure = {
+      kind: "error",
+      reason: reasonOf(cause),
+      cause,
+    };
     record.failure = failure;
     this.transition(record, "failed");
     record.resultDeferred.reject(this.rejectionOf(record, "failed", failure));
