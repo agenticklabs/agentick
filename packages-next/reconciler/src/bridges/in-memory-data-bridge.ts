@@ -22,7 +22,7 @@ import type {
   DataResolveOptions,
   Unsubscribe,
 } from "@agentick/spec-next";
-import { createKeyedNotifier, type KeyedNotifier } from "@agentick/utils-next";
+import { createKeyedNotifier, type KeyedNotifier } from "@agentick/pubsub-next";
 
 type Entry =
   | {

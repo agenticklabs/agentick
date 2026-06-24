@@ -1,20 +1,21 @@
 {
-  "name": "@agentick/reconciler-next",
+  "name": "@agentick/pubsub-next",
   "version": "0.0.0",
-  "description": "Reconciler-agnostic base for Agentick v2. Owns the callback-style `defineReconciler` factory and reconciler-flavored utilities that don't depend on a specific JSX runtime. Concrete reconcilers (React, Angular, …) depend on this and ship as separate packages.",
+  "private": true,
+  "description": "Local observer / pub-sub primitives for Agentick v2 — `Notifier`, `KeyedNotifier`, and `LocalPubSub`. Consolidates ~16 hand-rolled fan-out implementations across harnesses, bridges, transports, and reconciler test doubles into one canonical set. Effect.PubSub-backed for the Stream-flavored variant.",
   "keywords": [
-    "agent",
     "agentick",
-    "ai",
-    "harness",
-    "reconciler"
+    "fan-out",
+    "notifier",
+    "observer",
+    "pubsub"
   ],
   "license": "MIT",
   "author": "Ryan Lindgren",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/agenticklabs/agentick.git",
-    "directory": "packages/reconciler"
+    "directory": "packages-next/pubsub"
   },
   "files": [
     "dist"
@@ -26,11 +27,6 @@
       "types": "./src/index.ts",
       "import": "./src/index.ts",
       "default": "./src/index.ts"
-    },
-    "./testing": {
-      "types": "./src/testing/index.ts",
-      "import": "./src/testing/index.ts",
-      "default": "./src/testing/index.ts"
     }
   },
   "publishConfig": {
@@ -39,11 +35,6 @@
         "types": "./dist/index.d.ts",
         "import": "./dist/index.js",
         "default": "./dist/index.js"
-      },
-      "./testing": {
-        "types": "./dist/testing/index.d.ts",
-        "import": "./dist/testing/index.js",
-        "default": "./dist/testing/index.js"
       }
     }
   },
@@ -55,9 +46,6 @@
     "clean": "rm -rf dist tsconfig.build.tsbuildinfo"
   },
   "dependencies": {
-    "@agentick/pubsub-next": "workspace:*",
-    "@agentick/runtime-next": "workspace:*",
-    "@agentick/spec-next": "workspace:*",
     "effect": "^3.21.2"
   }
 }

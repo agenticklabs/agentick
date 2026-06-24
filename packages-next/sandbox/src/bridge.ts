@@ -25,7 +25,7 @@ import type {
   SandboxProvider,
   Unsubscribe,
 } from "@agentick/spec-next";
-import { createNotifier } from "@agentick/utils-next";
+import { createNotifier } from "@agentick/pubsub-next";
 
 import { SandboxHarness } from "./harness.js";
 

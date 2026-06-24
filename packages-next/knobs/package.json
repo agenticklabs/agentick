@@ -50,12 +50,12 @@
     "clean": "rm -rf dist tsconfig.build.tsbuildinfo"
   },
   "dependencies": {
+    "@agentick/pubsub-next": "workspace:*",
     "@agentick/reconciler-next": "workspace:*",
     "@agentick/reconciler-react-next": "workspace:*",
     "@agentick/runtime-next": "workspace:*",
     "@agentick/spec-next": "workspace:*",
     "@agentick/tool-next": "workspace:*",
-    "@agentick/utils-next": "workspace:*",
     "effect": "^3.21.2"
   },
   "devDependencies": {

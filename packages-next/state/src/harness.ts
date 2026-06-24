@@ -36,7 +36,7 @@ import type {
   StateHarnessProtocol,
   StateSetInput,
 } from "@agentick/spec-next";
-import { createKeyedNotifier, type KeyedNotifier } from "@agentick/utils-next";
+import { createKeyedNotifier, type KeyedNotifier } from "@agentick/pubsub-next";
 
 type StateInboxMessage =
   | { readonly type: "state:set"; readonly payload: StateSetInput }

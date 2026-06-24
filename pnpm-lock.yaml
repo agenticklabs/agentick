@@ -415,15 +415,15 @@ importers:
 
   packages-next/client:
     dependencies:
+      '@agentick/pubsub-next':
+        specifier: workspace:*
+        version: link:../pubsub
       '@agentick/runtime-next':
         specifier: workspace:*
         version: link:../runtime
       '@agentick/spec-next':
         specifier: workspace:*
         version: link:../spec
-      '@agentick/utils-next':
-        specifier: workspace:*
-        version: link:../utils
       effect:
         specifier: ^3.21.2
         version: 3.21.2
@@ -653,6 +653,9 @@ importers:
 
   packages-next/knobs:
     dependencies:
+      '@agentick/pubsub-next':
+        specifier: workspace:*
+        version: link:../pubsub
       '@agentick/reconciler-next':
         specifier: workspace:*
         version: link:../reconciler
@@ -668,9 +671,6 @@ importers:
       '@agentick/tool-next':
         specifier: workspace:*
         version: link:../tool
-      '@agentick/utils-next':
-        specifier: workspace:*
-        version: link:../utils
       effect:
         specifier: ^3.21.2
         version: 3.21.2
@@ -706,6 +706,9 @@ importers:
       '@agentick/elicitation-next':
         specifier: workspace:*
         version: link:../elicitation
+      '@agentick/pubsub-next':
+        specifier: workspace:*
+        version: link:../pubsub
       '@agentick/runtime-next':
         specifier: workspace:*
         version: link:../runtime
@@ -715,9 +718,6 @@ importers:
       '@agentick/tool-executor-next':
         specifier: workspace:*
         version: link:../tool-executor
-      '@agentick/utils-next':
-        specifier: workspace:*
-        version: link:../utils
       '@modelcontextprotocol/sdk':
         specifier: ^1.29.0
         version: 1.29.0(zod@4.3.6)
@@ -750,17 +750,23 @@ importers:
         specifier: ^19.2.4
         version: 19.2.4
 
+  packages-next/pubsub:
+    dependencies:
+      effect:
+        specifier: ^3.21.2
+        version: 3.21.2
+
   packages-next/reconciler:
     dependencies:
+      '@agentick/pubsub-next':
+        specifier: workspace:*
+        version: link:../pubsub
       '@agentick/runtime-next':
         specifier: workspace:*
         version: link:../runtime
       '@agentick/spec-next':
         specifier: workspace:*
         version: link:../spec
-      '@agentick/utils-next':
-        specifier: workspace:*
-        version: link:../utils
       effect:
         specifier: ^3.21.2
         version: 3.21.2
@@ -817,15 +823,15 @@ importers:
       '@agentick/spec-conformance-next':
         specifier: workspace:*
         version: link:../spec-conformance
-      '@agentick/utils-next':
-        specifier: workspace:*
-        version: link:../utils
 
   packages-next/sandbox:
     dependencies:
       '@agentick/elicitation-next':
         specifier: workspace:*
         version: link:../elicitation
+      '@agentick/pubsub-next':
+        specifier: workspace:*
+        version: link:../pubsub
       '@agentick/reconciler-next':
         specifier: workspace:*
         version: link:../reconciler
@@ -841,9 +847,6 @@ importers:
       '@agentick/tool-next':
         specifier: workspace:*
         version: link:../tool
-      '@agentick/utils-next':
-        specifier: workspace:*
-        version: link:../utils
       effect:
         specifier: ^3.21.2
         version: 3.21.2
@@ -869,6 +872,9 @@ importers:
       '@agentick/loop-executor-next':
         specifier: workspace:*
         version: link:../loop-executor
+      '@agentick/pubsub-next':
+        specifier: workspace:*
+        version: link:../pubsub
       '@agentick/reconciler-next':
         specifier: workspace:*
         version: link:../reconciler
@@ -915,15 +921,15 @@ importers:
 
   packages-next/skills:
     dependencies:
+      '@agentick/pubsub-next':
+        specifier: workspace:*
+        version: link:../pubsub
       '@agentick/runtime-next':
         specifier: workspace:*
         version: link:../runtime
       '@agentick/spec-next':
         specifier: workspace:*
         version: link:../spec
-      '@agentick/utils-next':
-        specifier: workspace:*
-        version: link:../utils
       effect:
         specifier: ^3.21.2
         version: 3.21.2
@@ -955,6 +961,9 @@ importers:
 
   packages-next/state:
     dependencies:
+      '@agentick/pubsub-next':
+        specifier: workspace:*
+        version: link:../pubsub
       '@agentick/reconciler-next':
         specifier: workspace:*
         version: link:../reconciler
@@ -967,9 +976,6 @@ importers:
       '@agentick/spec-next':
         specifier: workspace:*
         version: link:../spec
-      '@agentick/utils-next':
-        specifier: workspace:*
-        version: link:../utils
       effect:
         specifier: ^3.21.2
         version: 3.21.2
@@ -986,6 +992,9 @@ importers:
 
   packages-next/subscriptions:
     dependencies:
+      '@agentick/pubsub-next':
+        specifier: workspace:*
+        version: link:../pubsub
       '@agentick/reconciler-next':
         specifier: workspace:*
         version: link:../reconciler
@@ -998,9 +1007,6 @@ importers:
       '@agentick/spec-next':
         specifier: workspace:*
         version: link:../spec
-      '@agentick/utils-next':
-        specifier: workspace:*
-        version: link:../utils
       react:
         specifier: ^19.0.0
         version: 19.2.4
@@ -1023,13 +1029,12 @@ importers:
       effect:
         specifier: ^3.21.2
         version: 3.21.2
-    devDependencies:
-      '@agentick/utils-next':
-        specifier: workspace:*
-        version: link:../utils
 
   packages-next/timeline:
     dependencies:
+      '@agentick/pubsub-next':
+        specifier: workspace:*
+        version: link:../pubsub
       '@agentick/reconciler-next':
         specifier: workspace:*
         version: link:../reconciler
@@ -1042,9 +1047,6 @@ importers:
       '@agentick/spec-next':
         specifier: workspace:*
         version: link:../spec
-      '@agentick/utils-next':
-        specifier: workspace:*
-        version: link:../utils
       effect:
         specifier: ^3.21.2
         version: 3.21.2
@@ -1096,12 +1098,12 @@ importers:
 
   packages-next/transport:
     dependencies:
+      '@agentick/pubsub-next':
+        specifier: workspace:*
+        version: link:../pubsub
       '@agentick/spec-next':
         specifier: workspace:*
         version: link:../spec
-      '@agentick/utils-next':
-        specifier: workspace:*
-        version: link:../utils
     devDependencies:
       typescript:
         specifier: ^5.7.3
@@ -9952,14 +9954,14 @@ snapshots:
       chai: 6.2.2
       tinyrainbow: 3.0.3
 
-  '@vitest/mocker@4.0.18(msw@2.14.6(@types/node@22.19.7)(typescript@5.9.3))(vite@6.4.1(@types/node@25.0.9)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.4))':
+  '@vitest/mocker@4.0.18(msw@2.14.6(@types/node@22.19.7)(typescript@5.9.3))(vite@6.4.1(@types/node@22.19.7)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.4))':
     dependencies:
       '@vitest/spy': 4.0.18
       estree-walker: 3.0.3
       magic-string: 0.30.21
     optionalDependencies:
       msw: 2.14.6(@types/node@22.19.7)(typescript@5.9.3)
-      vite: 6.4.1(@types/node@25.0.9)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.4)
+      vite: 6.4.1(@types/node@22.19.7)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.4)
 
   '@vitest/mocker@4.0.18(msw@2.14.6(@types/node@25.0.9)(typescript@5.9.3))(vite@6.4.1(@types/node@25.0.9)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.4))':
     dependencies:
@@ -13449,7 +13451,7 @@ snapshots:
   vitest@4.0.18(@opentelemetry/api@1.9.0)(@types/node@22.19.7)(happy-dom@17.6.3)(jiti@2.6.1)(msw@2.14.6(@types/node@22.19.7)(typescript@5.9.3))(tsx@4.21.0)(yaml@2.8.4):
     dependencies:
       '@vitest/expect': 4.0.18
-      '@vitest/mocker': 4.0.18(msw@2.14.6(@types/node@22.19.7)(typescript@5.9.3))(vite@6.4.1(@types/node@25.0.9)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.4))
+      '@vitest/mocker': 4.0.18(msw@2.14.6(@types/node@22.19.7)(typescript@5.9.3))(vite@6.4.1(@types/node@22.19.7)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.4))
       '@vitest/pretty-format': 4.0.18
       '@vitest/runner': 4.0.18
       '@vitest/snapshot': 4.0.18

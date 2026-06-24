@@ -44,8 +44,8 @@
     "clean": "rm -rf dist tsconfig.build.tsbuildinfo"
   },
   "dependencies": {
-    "@agentick/spec-next": "workspace:*",
-    "@agentick/utils-next": "workspace:*"
+    "@agentick/pubsub-next": "workspace:*",
+    "@agentick/spec-next": "workspace:*"
   },
   "devDependencies": {
     "typescript": "^5.7.3",

@@ -18,7 +18,7 @@
  */
 
 import type { SubscriptionIntent, Unsubscribe } from "@agentick/spec-next";
-import { createNotifier } from "@agentick/utils-next";
+import { createNotifier } from "@agentick/pubsub-next";
 
 // ============================================================================
 // Surface

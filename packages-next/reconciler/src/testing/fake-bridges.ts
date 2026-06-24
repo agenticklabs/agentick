@@ -45,7 +45,7 @@ import type {
   CompactStrategy,
   CompactResult,
 } from "@agentick/spec-next";
-import { createKeyedNotifier, createNotifier } from "@agentick/utils-next";
+import { createKeyedNotifier, createNotifier } from "@agentick/pubsub-next";
 import { InMemoryDataBridge } from "../bridges/in-memory-data-bridge.js";
 
 /**

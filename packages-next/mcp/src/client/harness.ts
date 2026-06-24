@@ -75,7 +75,7 @@ import {
 
 import type { ElicitationResult } from "@agentick/spec-next";
 import type { RequestResponseRegistry } from "@agentick/runtime-next";
-import { createLocalPubSub, type LocalPubSub } from "@agentick/utils-next";
+import { createLocalPubSub, type LocalPubSub } from "@agentick/pubsub-next";
 
 import { McpLifecycle } from "./lifecycle.js";
 import type { McpClientHarnessOptions, McpClientState, McpToolDescriptor } from "./types.js";
@@ -159,7 +159,7 @@ export class McpClientHarness extends BaseHarness<"mcp"> {
    * one published `TaskNotificationEvent`; per-taskId subscribers
    * filter at subscribe time. Replaces two parallel
    * `Map<taskId, Set<callback>>` registries with one Stream-shaped
-   * primitive (see `@agentick/utils-next/pubsub`).
+   * primitive (see `@agentick/pubsub-next`).
    *
    * Channels carried:
    *   - `kind: "status"` — `notifications/tasks/status` (terminal +

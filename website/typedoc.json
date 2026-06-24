@@ -59,6 +59,7 @@
     "../packages-next/sandbox",
     "../packages-next/gateway",
     "../packages-next/utils",
+    "../packages-next/pubsub",
     "../packages-next/tasks"
   ],
   "out": "api",

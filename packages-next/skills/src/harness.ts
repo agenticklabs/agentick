@@ -34,7 +34,7 @@ import type {
   SkillsSearchInput,
   SkillsUpdateInput,
 } from "@agentick/spec-next";
-import { createKeyedNotifier, type KeyedNotifier } from "@agentick/utils-next";
+import { createKeyedNotifier, type KeyedNotifier } from "@agentick/pubsub-next";
 
 // ============================================================================
 // Harness

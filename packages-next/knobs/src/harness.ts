@@ -50,7 +50,7 @@ import type {
   Operation,
   OperationJournal,
 } from "@agentick/spec-next";
-import { createKeyedNotifier, type KeyedNotifier } from "@agentick/utils-next";
+import { createKeyedNotifier, type KeyedNotifier } from "@agentick/pubsub-next";
 
 // ============================================================================
 // Inbox message types

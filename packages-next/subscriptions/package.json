@@ -62,11 +62,11 @@
     "clean": "rm -rf dist tsconfig.build.tsbuildinfo"
   },
   "dependencies": {
+    "@agentick/pubsub-next": "workspace:*",
     "@agentick/reconciler-next": "workspace:*",
     "@agentick/reconciler-react-next": "workspace:*",
     "@agentick/runtime-next": "workspace:*",
-    "@agentick/spec-next": "workspace:*",
-    "@agentick/utils-next": "workspace:*"
+    "@agentick/spec-next": "workspace:*"
   },
   "devDependencies": {
     "@types/react": "^19.2.13"

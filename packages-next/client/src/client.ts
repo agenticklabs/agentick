@@ -30,7 +30,7 @@ import type {
   WireParams,
   WireResult,
 } from "@agentick/spec-next";
-import { createNotifier } from "@agentick/utils-next";
+import { createNotifier } from "@agentick/pubsub-next";
 import { ClientHandlerRegistry } from "./handler-registry.js";
 import { makeAppHandle, makeGatewayHandle, makeSessionHandle } from "./handles.js";
 import { composeRequest } from "./pipeline.js";

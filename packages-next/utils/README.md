@@ -8,7 +8,7 @@ no protocol coupling. Anything in this package can be lifted into any
 runtime — Node, Deno, the browser, the edge — without dragging a single
 agentick concept along.
 
-Three things live here today:
+Five things live here today:
 
 - **Type predicates and structural equality** —
   `isString` / `isNumber` / `isBoolean` / `isNull` / `isUndefined` /
@@ -22,12 +22,21 @@ Three things live here today:
   session → per-call) into a typed merged config with cascade
   semantics. Ships with four symbol-wrapped field strategies:
   `append`, `prepend`, `replace`, `omit`.
-- **Local pub/sub primitives** — three layered observer abstractions
-  (`Notifier<T>`, `KeyedNotifier<K, T>`, `LocalPubSub<T>`) that replace
-  the hand-rolled `Set<() => void>` fan-out at every harness, bridge,
-  transport, and reconciler test double. Layer 1 + 2 are sync `Set`-of-
-  callbacks with listener-error isolation; Layer 3 is built on Effect's
-  `PubSub.unbounded()` and returns a fully-scoped `Stream.Stream`.
+- **Effect Cause helpers** — `reasonOf(unknown)` / `reasonOfCause<E>` /
+  `unwrapExit<A, E>`. Consolidate seven hand-rolled "unknown error /
+  Cause → reason string" sites into one canonical reducer; `unwrapExit`
+  preserves typed-failure identity so downstream `_tag` discrimination
+  keeps working.
+- **`drainRejection<T>(p)`** (testing subpath) — eagerly attaches a
+  no-op catch handler to a Promise so its rejection is observed (no
+  vitest "unhandled rejection" warning) and returns a Promise that
+  resolves with the rejection reason or the value. Standardizes the
+  ~20 sites that needed the pre-drain pattern.
+
+The in-process observer primitives (`Notifier`, `KeyedNotifier`,
+`LocalPubSub`) live in
+[`@agentick/pubsub-next`](../pubsub) — they belong with the
+harness-internal fan-out concern, not in the bedrock-utility package.
 
 ## Status
 
@@ -42,15 +51,7 @@ not here.
 ## Quick start
 
 ```ts
-import {
-  isPlainObject,
-  isEqual,
-  mergeLayered,
-  append,
-  createNotifier,
-  createKeyedNotifier,
-  createLocalPubSub,
-} from "@agentick/utils-next";
+import { isPlainObject, isEqual, mergeLayered, append } from "@agentick/utils-next";
 
 isPlainObject({ a: 1 }); // true
 isPlainObject(new Date()); // false  (class instance, not POJO)
@@ -62,29 +63,6 @@ const config = mergeLayered<{ maxTicks: number; tools: string[] }>(
   { maxTicks: 12 }, // session override
 );
 // → { maxTicks: 12, tools: ["fs", "shell"] }
-
-// Single-channel observer (replaces `Set<() => void>` + manual fan-out).
-const n = createNotifier();
-const off = n.subscribe(() => console.log("changed"));
-n.notify();
-off();
-
-// Typed payload variant — transport state, etc.
-const stateBus = createNotifier<"idle" | "ready">();
-stateBus.subscribe((s) => console.log("state →", s));
-stateBus.notify("ready");
-
-// Keyed observer with wildcards — knobs / state / skills harnesses.
-const keyed = createKeyedNotifier();
-keyed.subscribe("counter", () => render());
-keyed.subscribeAll(() => bumpVersion());
-keyed.notify("counter");
-keyed.notifyAll(); // wildcard-only signal ("everything changed")
-
-// Stream-based fan-out — MCP task notifications, future #162 tasks bus.
-const bus = createLocalPubSub<TaskEvent>();
-bus.publish({ kind: "started", taskId: "t1" });
-const stream = bus.subscribe((e) => e.taskId === "t1");
 ```
 
 See [`merge-layered.ts`](./src/merge-layered.ts) for the cascade
@@ -95,40 +73,35 @@ Pattern B).
 
 ## API
 
-| Export             | Kind      | Purpose                                                   |
-| ------------------ | --------- | --------------------------------------------------------- |
-| `isString`         | predicate | `typeof v === "string"`                                   |
-| `isNumber`         | predicate | `typeof v === "number"`                                   |
-| `isBoolean`        | predicate | `typeof v === "boolean"`                                  |
-| `isNull`           | predicate | `v === null`                                              |
-| `isUndefined`      | predicate | `v === undefined`                                         |
-| `isDefined<T>`     | predicate | not `null` and not `undefined`                            |
-| `isFunction`       | predicate | `typeof v === "function"`                                 |
-| `isArray`          | predicate | `Array.isArray(v)`                                        |
-| `isDate`           | predicate | `v instanceof Date`                                       |
-| `isRegExp`         | predicate | `v instanceof RegExp`                                     |
-| `isMap`            | predicate | `v instanceof Map`                                        |
-| `isSet`            | predicate | `v instanceof Set`                                        |
-| `isObject`         | predicate | "everyday" object check (NOT array, NOT null)             |
-| `isPlainObject`    | predicate | POJO only (prototype is `Object.prototype` or `null`)     |
-| `isEqual(a, b)`    | function  | deep structural equality (JSON-shape + `Date` + `RegExp`) |
-| `mergeLayered<T>`  | function  | variadic cascade deep-merge, left → right                 |
-| `foldLayer<T>`     | function  | single-layer fold (advanced composition)                  |
-| `append<T>(arr)`   | strategy  | array append to parent slot                               |
-| `prepend<T>(arr)`  | strategy  | array prepend                                             |
-| `replace<T>(v)`    | strategy  | replace parent slot verbatim (opt out of deep merge)      |
-| `omit()`           | strategy  | delete the slot from the merged result                    |
-| `isMergeStrategy`  | guard     | true if a value carries a strategy marker                 |
-| `Layer<T>`         | type      | one partial-config layer in a cascade                     |
-| `MergeStrategy<T>` | type      | symbol-wrapped field strategy                             |
-| `createNotifier<T>`         | factory   | Layer 1 — single-channel observer; `T = void` ⇒ parameterless `notify()` |
-| `Notifier<T>`               | interface | `subscribe / notify / size / clear` (returns `Unsubscribe`)             |
-| `createKeyedNotifier<K, T>` | factory   | Layer 2 — keyed observer + wildcard channel + `notifyAsync` for serial dispatch |
-| `KeyedNotifier<K, T>`       | interface | `subscribe(key) / subscribeAll / notify / notifyAll / notifyAsync / count / clear` |
-| `createLocalPubSub<T>`      | factory   | Layer 3 — Effect.PubSub-backed Stream fan-out with `Scope` wrapped internally |
-| `LocalPubSub<T>`            | interface | `publish / subscribe(filter?) / close / subscriberCount`                      |
-| `Listener<T>`               | type      | computed listener signature; void → `() => void`, else `(v: T) => void`   |
-| `Unsubscribe`               | type      | `() => void` — cancellation token returned by every subscribe             |
+| Export                    | Kind      | Purpose                                                   |
+| ------------------------- | --------- | --------------------------------------------------------- |
+| `isString`                | predicate | `typeof v === "string"`                                   |
+| `isNumber`                | predicate | `typeof v === "number"`                                   |
+| `isBoolean`               | predicate | `typeof v === "boolean"`                                  |
+| `isNull`                  | predicate | `v === null`                                              |
+| `isUndefined`             | predicate | `v === undefined`                                         |
+| `isDefined<T>`            | predicate | not `null` and not `undefined`                            |
+| `isFunction`              | predicate | `typeof v === "function"`                                 |
+| `isArray`                 | predicate | `Array.isArray(v)`                                        |
+| `isDate`                  | predicate | `v instanceof Date`                                       |
+| `isRegExp`                | predicate | `v instanceof RegExp`                                     |
+| `isMap`                   | predicate | `v instanceof Map`                                        |
+| `isSet`                   | predicate | `v instanceof Set`                                        |
+| `isObject`                | predicate | "everyday" object check (NOT array, NOT null)             |
+| `isPlainObject`           | predicate | POJO only (prototype is `Object.prototype` or `null`)     |
+| `isEqual(a, b)`           | function  | deep structural equality (JSON-shape + `Date` + `RegExp`) |
+| `mergeLayered<T>`         | function  | variadic cascade deep-merge, left → right                 |
+| `foldLayer<T>`            | function  | single-layer fold (advanced composition)                  |
+| `append<T>(arr)`          | strategy  | array append to parent slot                               |
+| `prepend<T>(arr)`         | strategy  | array prepend                                             |
+| `replace<T>(v)`           | strategy  | replace parent slot verbatim (opt out of deep merge)      |
+| `omit()`                  | strategy  | delete the slot from the merged result                    |
+| `isMergeStrategy`         | guard     | true if a value carries a strategy marker                 |
+| `Layer<T>`                | type      | one partial-config layer in a cascade                     |
+| `MergeStrategy<T>`        | type      | symbol-wrapped field strategy                             |
+| `reasonOf(cause)`         | function  | unknown value → single-line reason string                 |
+| `reasonOfCause<E>(cause)` | function  | Effect.Cause → single-line reason string                  |
+| `unwrapExit<A, E>(exit)`  | function  | Exit → value or throw (preserves typed failure identity)  |
 
 ## Testing subpath — `@agentick/utils-next/testing`
 
@@ -176,11 +149,14 @@ site.
 - `drainRejection` resolution / rejection pass-through + eager
   unhandled-rejection observability —
   `src/__tests__/drain-rejection.spec.ts`
-- `Notifier` / `KeyedNotifier` / `LocalPubSub` — subscribe/notify/unsubscribe
-  semantics, listener-error isolation, mid-iteration unsubscribe, async
-  serial dispatch, wildcard-only `notifyAll`, filtered Stream subscribers,
-  multi-subscriber fan-out, and `close()` idempotence —
-  `src/__tests__/pubsub.spec.ts`
+- `reasonOf` / `reasonOfCause` / `unwrapExit` — table-driven coverage of
+  string / Error / `{_tag}` / JSON / die / interrupted / composite cause
+  shapes, and the typed-failure-identity preservation — `src/__tests__/cause.spec.ts`
+
+The in-process observer primitives (`Notifier` / `KeyedNotifier` /
+`LocalPubSub`) moved to
+[`@agentick/pubsub-next`](../pubsub) — see that package's "Verified by"
+section for its test coverage.
 
 ## Roadmap & known gaps
 

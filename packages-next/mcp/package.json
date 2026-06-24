@@ -53,10 +53,10 @@
   },
   "dependencies": {
     "@agentick/elicitation-next": "workspace:*",
+    "@agentick/pubsub-next": "workspace:*",
     "@agentick/runtime-next": "workspace:*",
     "@agentick/spec-next": "workspace:*",
     "@agentick/tool-executor-next": "workspace:*",
-    "@agentick/utils-next": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "effect": "^3.21.2"
   },

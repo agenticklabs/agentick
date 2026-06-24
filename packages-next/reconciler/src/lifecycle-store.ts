@@ -29,7 +29,7 @@ import type {
   LifecycleTickEnd,
   LifecycleTickStart,
 } from "@agentick/spec-next";
-import { createKeyedNotifier, type KeyedNotifier } from "@agentick/utils-next";
+import { createKeyedNotifier, type KeyedNotifier } from "@agentick/pubsub-next";
 
 /**
  * Kinds the store dispatches and that user hooks register against.

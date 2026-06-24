@@ -49,7 +49,7 @@ import type {
   WireParams,
   WireResult,
 } from "@agentick/spec-next";
-import { createNotifier } from "@agentick/utils-next";
+import { createNotifier } from "@agentick/pubsub-next";
 
 import { MultiplexedStream } from "./multiplexed-stream.js";
 

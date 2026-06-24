@@ -15,7 +15,7 @@
  */
 
 import type { SessionStatus, UsageStats } from "@agentick/spec-next";
-import { createNotifier, type Notifier } from "@agentick/utils-next";
+import { createNotifier, type Notifier } from "@agentick/pubsub-next";
 
 export class SessionStateStore {
   readonly id: string;

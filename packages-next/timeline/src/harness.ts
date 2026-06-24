@@ -32,7 +32,7 @@
 
 import { Effect } from "effect";
 import { BaseHarness, runHarnessProtocol, ulid, type Unsubscribe } from "@agentick/runtime-next";
-import { createNotifier, type Notifier } from "@agentick/utils-next";
+import { createNotifier, type Notifier } from "@agentick/pubsub-next";
 import type {
   CompactResult,
   CompactStrategy,
