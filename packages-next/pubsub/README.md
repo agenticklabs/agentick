@@ -109,9 +109,56 @@ await bus.close();
 
 `close()` polls subscribers until each has consumed every event that was published before close started. A 5-second backstop avoids hangs from wedged consumers (defensive — shouldn't trip in practice).
 
+## Testing subpath — `@agentick/pubsub-next/testing`
+
+Spy doubles per the Meszaros test-double convention. Each spy wraps
+the real primitive — listeners still fire — and records every notify
+/ publish call for assertion.
+
+```ts
+import { spyNotifier, spyKeyedNotifier, spyLocalPubSub } from "@agentick/pubsub-next/testing";
+
+const spy = spyNotifier<{ tick: number }>();
+harness.attachNotifier(spy);
+harness.someMethodThatNotifies();
+expect(spy.calls).toEqual([{ tick: 1 }]);
+expect(spy.callCount).toBe(1);
+spy.reset(); // clear recorded calls; subscribers stay
+
+const keyedSpy = spyKeyedNotifier<string, MyEvent>();
+keyedSpy.notify("knob:verbose", { value: true });
+keyedSpy.notifyAll();
+expect(keyedSpy.calls).toEqual([
+  { kind: "notify", key: "knob:verbose", value: { value: true } },
+  { kind: "notifyAll", value: undefined },
+]);
+expect(keyedSpy.callsFor("knob:verbose")).toHaveLength(1);
+
+const busSpy = spyLocalPubSub<TaskEvent>();
+busSpy.publish({ taskId: "t1", kind: "progress" });
+expect(busSpy.publishCalls).toEqual([{ taskId: "t1", kind: "progress" }]);
+```
+
+Why only spies (no `fake*` / `stub*`)? The real implementations are
+deterministic, in-memory, and fast — there's nothing to fake
+(`fakeNotifier()` would be `createNotifier()`), nothing to stub (no
+canned data), and no canned-answer use case. Spies cover the only
+real testing need: asserting call patterns from collaborators.
+
+| Export                   | Kind   | Purpose                                                                             |
+| ------------------------ | ------ | ----------------------------------------------------------------------------------- |
+| `spyNotifier<T>`         | helper | Working notifier that records every `notify` call in `.calls` + `.callCount`.       |
+| `NotifierSpy<T>`         | type   | `Notifier<T>` extended with `calls` / `callCount` / `reset()`.                      |
+| `spyKeyedNotifier<K,T>`  | helper | Working keyed notifier; records `notify` / `notifyAll` / `notifyAsync` distinctly.  |
+| `KeyedNotifierSpy<K,T>`  | type   | `KeyedNotifier<K, T>` extended with `calls` / `callCount` / `callsFor` / `reset()`. |
+| `KeyedNotifierCall<K,T>` | type   | Discriminated record of a single keyed notify call.                                 |
+| `spyLocalPubSub<T>`      | helper | Working local pubsub that records every `publish` call.                             |
+| `LocalPubSubSpy<T>`      | type   | `LocalPubSub<T>` extended with `publishCalls` / `publishCallCount` / `reset()`.     |
+
 ## Status
 
 - Layer 1 / Layer 2 / Layer 3 — landed
+- Spy doubles for all three primitives — landed under `/testing`
 - 16 sweep sites migrated across knobs, state, skills, timeline, sandbox, subscriptions, session-state, client, transport-next, mcp, reconciler (in-memory data bridge, lifecycle store, three test bridges)
 
 ## Roadmap & known gaps
@@ -125,3 +172,4 @@ await bus.close();
 - `createNotifier` — subscribe/notify/unsubscribe semantics, listener-error isolation, mid-iteration unsubscribe, typed-payload variant — `src/__tests__/notifier.spec.ts`
 - `createKeyedNotifier` — keyed dispatch, wildcards, `notifyAll`, `notifyAsync` error propagation, auto-collection of empty buckets, diagnostic `count`/`wildcardCount`/`size` — `src/__tests__/keyed-notifier.spec.ts`
 - `createLocalPubSub` — multi-subscriber fan-out, subscribe-time filter, `close()` drain semantics (slow subscriber receives every event), idempotent close — `src/__tests__/local-pubsub.spec.ts`
+- `spyNotifier` / `spyKeyedNotifier` / `spyLocalPubSub` — call recording, listener delivery preserved, `reset()` semantics, typed-payload + void variants — `src/__tests__/testing-spies.spec.ts`
