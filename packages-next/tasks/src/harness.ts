@@ -6,9 +6,24 @@
  *
  *   - The in-process task registry (taskId → live record).
  *   - The Promise that drives each task's work function.
- *   - A per-task `Queue<TaskEvent>` for each active subscriber —
- *     fan-out is "publish iterates the set and offers to each
- *     queue"; subscribers consume via `Queue.take`.
+ *   - Per-task fan-out via a single `LocalPubSub<TaskEvent>`. All
+ *     status transitions AND progress updates flow through this one
+ *     bus, preserving CAUSAL ORDER across the two event kinds.
+ *     `events(taskId)` synthesizes the initial snapshot at subscribe
+ *     time (`Stream.concat(Stream.make(snapshot), bus.subscribe())`)
+ *     then closes on the terminal status frame via
+ *     `Stream.takeUntil`, materialized to `AsyncIterable<TaskEvent>`
+ *     via `Stream.toAsyncIterable`.
+ *
+ *     (An earlier #162 attempt split state from events via
+ *     `SubscriptionRef<TaskInfo>` + a progress-only `LocalPubSub`
+ *     and merged them with `Stream.merge`. `Stream.merge`'s fair
+ *     scheduling between sources DROPS events when both have items
+ *     pending — the progress-then-terminal sequence is the textbook
+ *     hit. Single-bus + synthesized snapshot is the correct
+ *     primitive composition for this use case; we lose
+ *     "replay-via-SubscriptionRef" but gain causal ordering, which
+ *     adopters depend on.)
  *   - The bus channels (`task-status`, `task-progress`) that surface
  *     state transitions and progress updates to subscribers across
  *     the substrate.
@@ -43,8 +58,9 @@
  * @see docs/proposals/v2/blueprint/23-mcp-as-harness.md §Tasks
  */
 
-import { Cause, Effect, Fiber, Queue } from "effect";
+import { Cause, Effect, Fiber, Stream } from "effect";
 import { BaseHarness, ulid } from "@agentick/runtime-next";
+import { createLocalPubSub, type LocalPubSub } from "@agentick/pubsub-next";
 import { causeValue, reasonOf } from "@agentick/utils-next";
 import type {
   ContentBlock,
@@ -108,11 +124,14 @@ interface TaskRecord {
    */
   fiber: Fiber.RuntimeFiber<unknown, unknown> | undefined;
   /**
-   * Per-subscriber Queues of `TaskEvent`. Set, not single-queue,
-   * because multiple consumers can call `events(taskId)`
-   * concurrently. Publish iterates and offers to each.
+   * Single fan-out channel — all task events (status transitions +
+   * progress updates) flow through this one bus. One queue per
+   * subscriber means causal order is preserved across event kinds.
+   * `subscribeToTask` synthesizes the initial snapshot via
+   * `Stream.concat(Stream.make(snapshot), bus.subscribe())` so late
+   * subscribers see the current state before live events.
    */
-  readonly subscribers: Set<Queue.Queue<TaskEvent>>;
+  readonly eventBus: LocalPubSub<TaskEvent>;
   /**
    * Resolves with the work's return value on `completed`. Rejects
    * with a `TaskRejection` on `failed` / `cancelled`. Hand-rolled
@@ -208,7 +227,7 @@ export class TasksHarness extends BaseHarness<"tasks"> implements TasksHarnessPr
       failure: undefined,
       controller,
       fiber: undefined,
-      subscribers: new Set(),
+      eventBus: createLocalPubSub<TaskEvent>(),
       resultDeferred,
     };
     this.tasks.set(taskId, record);
@@ -434,13 +453,23 @@ export class TasksHarness extends BaseHarness<"tasks"> implements TasksHarnessPr
   override async close(): Promise<void> {
     // Cancel every in-flight task BEFORE the inbox subscription is
     // torn down so subscribers see the terminal state through the
-    // normal failure path.
+    // normal failure path. The cancel cascade transitions records to
+    // "cancelled" which propagates via SubscriptionRef.changes —
+    // events() subscribers see the terminal frame and their streams
+    // close via Stream.takeUntil.
     const pending: Array<Promise<void>> = [];
     for (const record of this.tasks.values()) {
       if (this.isTerminal(record.status)) continue;
       pending.push(this.cancelInternal(record, "harness_closed"));
     }
     await Promise.all(pending);
+    // Drain + shut down each task's event bus. The cancel cascade
+    // above already published terminal status frames, so subscriber
+    // streams should already be closing via Stream.takeUntil; the
+    // bus.close() backs up the cleanup deterministically.
+    for (const record of this.tasks.values()) {
+      await record.eventBus.close();
+    }
     await super.close();
   }
 
@@ -579,16 +608,14 @@ export class TasksHarness extends BaseHarness<"tasks"> implements TasksHarnessPr
     if (this.isTerminal(record.status)) return;
     record.status = next;
     record.lastUpdatedAt = Date.now();
+    // Update the SubscriptionRef — every active subscriber sees the
+    // new TaskInfo on their .changes stream. Terminal frames trigger
+    // Stream.takeUntil in subscribeToTask, ending the merged stream
+    // cleanly without a manual close-and-race-the-pending-event
+    // dance. The progress bus stays open until harness.close()
+    // drains it (no terminal-cascade shutdown needed — Stream.merge
+    // closes its sources when the consumed stream ends).
     this.publishStatus(record);
-    // NOTE on subscriber-queue cleanup: we intentionally do NOT
-    // shut down subscriber queues here. `Queue.shutdown` discards
-    // pending items, which would race the consumer's pull of the
-    // terminal event we just published. Consumer iterators detect
-    // terminal status in their `next()` body (sets a local `closed`
-    // flag) and close on the FOLLOWING pull; the iterator's
-    // `return()` (auto-called by `for await ... break` and friends)
-    // drains and shuts down the queue. Queues whose consumer never
-    // returns linger until `harness.close()` cleans them up.
   }
 
   private snapshot(record: TaskRecord): TaskInfo {
@@ -622,8 +649,9 @@ export class TasksHarness extends BaseHarness<"tasks"> implements TasksHarnessPr
     void Effect.runPromise(this.publishOnChannel(TASK_STATUS_CHANNEL, info)).catch(() => {
       // Substrate emit failures are not actionable here.
     });
-    const event: TaskEvent = { kind: "status", info };
-    this.fanoutToSubscribers(record, event);
+    // Single bus — all subscribers see this status event in the
+    // same causal slot as any preceding progress events.
+    record.eventBus.publish({ kind: "status", info });
   }
 
   private publishProgress(record: TaskRecord, update: ProgressUpdate): void {
@@ -634,20 +662,13 @@ export class TasksHarness extends BaseHarness<"tasks"> implements TasksHarnessPr
       ...(update.message !== undefined ? { message: update.message } : {}),
     };
     void Effect.runPromise(this.publishOnChannel(TASK_PROGRESS_CHANNEL, payload)).catch(() => {});
-    const event: TaskEvent = {
+    record.eventBus.publish({
       kind: "progress",
       taskId: record.taskId,
       current: update.current,
       ...(update.total !== undefined ? { total: update.total } : {}),
       ...(update.message !== undefined ? { message: update.message } : {}),
-    };
-    this.fanoutToSubscribers(record, event);
-  }
-
-  private fanoutToSubscribers(record: TaskRecord, event: TaskEvent): void {
-    for (const q of record.subscribers) {
-      Effect.runSync(Queue.offer(q, event));
-    }
+    });
   }
 
   private publishOnChannel(channel: string, payload: unknown): Effect.Effect<void, unknown, never> {
@@ -674,71 +695,26 @@ export class TasksHarness extends BaseHarness<"tasks"> implements TasksHarnessPr
   }
 
   /**
-   * Subscribe to a task's event stream — initial snapshot, then
-   * future events from a per-subscriber `Queue<TaskEvent>`. The
-   * iterator's `return()` shuts down the queue and removes it from
-   * the task's subscriber set; terminal status (`completed` /
-   * `failed` / `cancelled`) shuts down every subscriber queue
-   * centrally in `transition()` so consumers see a clean close.
+   * Subscribe to a task's event stream.
+   *
+   *   - Initial frame: `Stream.make` synthesizes a `status` event
+   *     from the current `TaskInfo` snapshot at subscribe time.
+   *     Subscribers attaching after terminal still see the terminal
+   *     snapshot before the stream closes.
+   *   - Live frames: `record.eventBus.subscribe()` streams every
+   *     `TaskEvent` published after subscription. The bus is a
+   *     single channel so status and progress events preserve
+   *     causal order (no Stream.merge fairness-induced drops).
+   *   - Termination: `Stream.takeUntil` (inclusive — emits the
+   *     matching item then closes) on the first terminal status
+   *     frame ends the stream.
    */
   private subscribeToTask(record: TaskRecord): AsyncIterable<TaskEvent> {
-    return {
-      [Symbol.asyncIterator]: () => {
-        const initial: TaskEvent = { kind: "status", info: this.snapshot(record) };
-        let yieldedInitial = false;
-        let q: Queue.Queue<TaskEvent> | undefined;
-        let closed = false;
-
-        const ensureQueue = (): void => {
-          if (q !== undefined || closed) return;
-          if (this.isTerminal(record.status)) {
-            // Pre-terminal subscribe — yield the initial snapshot
-            // then close on next pull.
-            closed = true;
-            return;
-          }
-          q = Effect.runSync(Queue.unbounded<TaskEvent>());
-          record.subscribers.add(q);
-        };
-
-        return {
-          next: async (): Promise<IteratorResult<TaskEvent>> => {
-            if (!yieldedInitial) {
-              yieldedInitial = true;
-              ensureQueue();
-              return { value: initial, done: false };
-            }
-            if (closed) return { value: undefined, done: true };
-            if (q === undefined) {
-              closed = true;
-              return { value: undefined, done: true };
-            }
-            try {
-              const event = await Effect.runPromise(Queue.take(q));
-              if (event.kind === "status" && this.isTerminal(event.info.status)) {
-                // Terminal frame — yield it; next pull closes.
-                closed = true;
-              }
-              return { value: event, done: false };
-            } catch {
-              // Queue shut down (terminal status cascade or
-              // explicit return()). Treat as iterator end.
-              closed = true;
-              return { value: undefined, done: true };
-            }
-          },
-          return: async (): Promise<IteratorResult<TaskEvent>> => {
-            closed = true;
-            if (q !== undefined) {
-              record.subscribers.delete(q);
-              await Effect.runPromise(Queue.shutdown(q));
-              q = undefined;
-            }
-            return { value: undefined, done: true };
-          },
-        };
-      },
-    };
+    const initial: TaskEvent = { kind: "status", info: this.snapshot(record) };
+    const stream = Stream.concat(Stream.make(initial), record.eventBus.subscribe()).pipe(
+      Stream.takeUntil((event) => event.kind === "status" && this.isTerminal(event.info.status)),
+    );
+    return Stream.toAsyncIterable(stream);
   }
 }
 
@@ -746,15 +722,6 @@ export class TasksHarness extends BaseHarness<"tasks"> implements TasksHarnessPr
 // @agentick/utils-next/cause — single canonical impl shared by every
 // harness. See packages-next/utils/src/cause.ts.
 
-// TODO(#155-followup): the per-subscriber Queue + custom AsyncIterator
-// dance in `subscribeToTask` reinvents most of `Stream.toAsyncIterable`.
-// Adopting Effect's Stream API directly is the cleanup target —
-// blocked on resolving the `Scope.Scope` service requirement that
-// `Stream.fromQueue` / `Stream.toAsyncIterable` impose. When that
-// lands, the iterator body shrinks to a 5-line `Stream.fromQueue`
-// + `Stream.toAsyncIterable` pipeline. Refactor, not capability —
-// landed separately from the Effect work overload that closed #155.
-//
 // TODO(#134b/#134d): MCP wire codec for tasks. The bus channels
 // (`task-status`, `task-progress`) already carry payloads in the
 // shape MCP's `notifications/tasks/status` + `notifications/progress`
