@@ -22,7 +22,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { jsonSchema } from "@agentick/spec-next";
+import { isTaskRefBlock, jsonSchema } from "@agentick/spec-next";
 import type { ContentBlock, ToolDeclaration, ToolRegistration } from "@agentick/spec-next";
 
 import { createTestHarness } from "../testing/index.js";
@@ -127,7 +127,7 @@ describe("dispatch task mode matrix — task: 'ref'", () => {
     });
   });
 
-  it("(supported, 'ref') → returns session_task_ref (Pattern B)", async () => {
+  it("(supported, 'ref') → returns TaskRefBlock (Pattern B, #160)", async () => {
     const { harness, tasks } = await createTestHarness({
       tools: [makeTool({ name: "s", handlerRef: "h.s", taskSupport: "supported" })],
       handlers: [{ handlerRef: "h.s", handler: longRunningHandler() }],
@@ -135,22 +135,18 @@ describe("dispatch task mode matrix — task: 'ref'", () => {
     const result = await harness.dispatch(
       dispatchOf({ name: "s", toolCallId: "tc-s-ref", via: "dispatch", task: "ref" }),
     );
-    const parsed = JSON.parse((result.content[0] as { text: string }).text) as {
-      _kind: string;
-      taskId: string;
-      status: string;
-    };
-    expect(parsed._kind).toBe("session_task_ref");
-    expect(parsed.status).toBe("working");
+    const block = result.content[0];
+    if (!isTaskRefBlock(block!)) throw new Error(`expected task_ref, got ${block?.type}`);
+    expect(block.status).toBe("working");
 
     // Drain the background task — cancel the local handle and swallow
     // the rejection that bubbles through `tasks.result`.
-    const drained = tasks.result(parsed.taskId).catch(() => undefined);
-    await tasks.cancel(parsed.taskId, "test_cleanup");
+    const drained = tasks.result(block.taskId).catch(() => undefined);
+    await tasks.cancel(block.taskId, "test_cleanup");
     await drained;
   });
 
-  it("(required, 'ref') → returns session_task_ref (Pattern B)", async () => {
+  it("(required, 'ref') → returns TaskRefBlock (Pattern B, #160)", async () => {
     const { harness, tasks } = await createTestHarness({
       tools: [makeTool({ name: "r", handlerRef: "h.r", taskSupport: "required" })],
       handlers: [{ handlerRef: "h.r", handler: longRunningHandler() }],
@@ -158,15 +154,11 @@ describe("dispatch task mode matrix — task: 'ref'", () => {
     const result = await harness.dispatch(
       dispatchOf({ name: "r", toolCallId: "tc-r-ref", via: "dispatch", task: "ref" }),
     );
-    const parsed = JSON.parse((result.content[0] as { text: string }).text) as {
-      _kind: string;
-      taskId: string;
-      status: string;
-    };
-    expect(parsed._kind).toBe("session_task_ref");
+    const block = result.content[0];
+    if (!isTaskRefBlock(block!)) throw new Error(`expected task_ref, got ${block?.type}`);
 
-    const drained = tasks.result(parsed.taskId).catch(() => undefined);
-    await tasks.cancel(parsed.taskId, "test_cleanup");
+    const drained = tasks.result(block.taskId).catch(() => undefined);
+    await tasks.cancel(block.taskId, "test_cleanup");
     await drained;
   });
 });
@@ -304,16 +296,12 @@ describe("dispatch task mode matrix — task: 'auto' (model-tick path)", () => {
     const result = await harness.dispatch(
       dispatchOf({ name: "r", toolCallId: "tc-r-auto-m", via: "model" }),
     );
-    const parsed = JSON.parse((result.content[0] as { text: string }).text) as {
-      _kind: string;
-      taskId: string;
-      status: string;
-    };
-    expect(parsed._kind).toBe("session_task_ref");
-    expect(parsed.status).toBe("working");
+    const block = result.content[0];
+    if (!isTaskRefBlock(block!)) throw new Error(`expected task_ref, got ${block?.type}`);
+    expect(block.status).toBe("working");
 
-    const drained = tasks.result(parsed.taskId).catch(() => undefined);
-    await tasks.cancel(parsed.taskId, "test_cleanup");
+    const drained = tasks.result(block.taskId).catch(() => undefined);
+    await tasks.cancel(block.taskId, "test_cleanup");
     await drained;
   });
 });

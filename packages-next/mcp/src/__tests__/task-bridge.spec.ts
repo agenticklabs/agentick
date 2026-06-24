@@ -32,6 +32,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createApp } from "@agentick/app-next/react";
 import { FakeLanguageModelExecutor } from "@agentick/executor-next";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
+import { isTaskRefBlock } from "@agentick/spec-next";
 import { drainRejection } from "@agentick/utils-next/testing";
 // AppHarness installs a TasksHarness per session by default — no need
 // to install `withTasks()` here. session.tasks (via SessionHarness
@@ -349,17 +350,14 @@ describe("withMCP — taskSupport:'required' end-to-end", () => {
 
     const refBlocks = await session.dispatch("tasksvr__slow_task", { label: "x" }, { task: "ref" });
     expect(refBlocks).toHaveLength(1);
-    const refBlock = refBlocks[0] as { type: "text"; text: string };
-    const ref = JSON.parse(refBlock.text) as {
-      _kind: string;
-      taskId: string;
-      status: string;
-    };
-    expect(ref._kind).toBe("session_task_ref");
-    expect(ref.status).toBe("working");
-    expect(typeof ref.taskId).toBe("string");
+    const refBlock = refBlocks[0];
+    if (!isTaskRefBlock(refBlock!)) {
+      throw new Error(`expected task_ref block, got ${refBlock?.type}`);
+    }
+    expect(refBlock.status).toBe("working");
+    expect(typeof refBlock.taskId).toBe("string");
 
-    const finalBlocks = (await session.tasks.result(ref.taskId)) as Array<{
+    const finalBlocks = (await session.tasks.result(refBlock.taskId)) as Array<{
       type: string;
       text: string;
     }>;

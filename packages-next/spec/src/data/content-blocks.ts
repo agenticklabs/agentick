@@ -25,6 +25,7 @@ export type BlockType =
   | "video"
   | "tool_use"
   | "tool_result"
+  | "task_ref"
   | "json"
   | "xml"
   | "csv"
@@ -265,6 +266,48 @@ export interface ToolResultBlock extends BaseContentBlock {
   readonly executedBy?: ToolExecutor;
 }
 
+/**
+ * Structured reference to a {@link TasksHarnessProtocol} task,
+ * emitted by the tool executor when a tool resolves to a task handle
+ * rather than a terminal value (Pattern B — the model receives the
+ * ref immediately and follows up via `session_tasks_get` /
+ * `session_tasks_await` / `session_tasks_cancel`).
+ *
+ * **Why a first-class block type and not text-with-JSON?**
+ * The framework's primitives table treats tasks as a foundational
+ * concept; their wire representation deserves a typed slot. Adopters
+ * inspect blocks via the `type` discriminator (devtools UI rendering,
+ * substrate journaling, gateway projection, MCP outbound translation)
+ * — text-with-JSON forces every consumer to `JSON.parse` and sniff
+ * for a magic `_kind` field. The block-type discriminator collapses
+ * that to a normal switch.
+ *
+ * Adapter projections fall back to a text block carrying the
+ * historical JSON payload (`{ _kind: "session_task_ref", taskId,
+ * status, … }`) so models continue to see drop-in-compatible content
+ * until providers learn task-aware projections.
+ *
+ * @see canonical-projection.ts (`messagePartFromBlock`) for the
+ *      drop-in text fallback.
+ */
+export interface TaskRefBlock extends BaseContentBlock {
+  readonly type: "task_ref";
+  readonly taskId: string;
+  /**
+   * Lifecycle status of the referenced task at the moment the block
+   * was emitted. Mirrors `TaskInfo.status` (working / completed /
+   * failed / cancelled / input_required). The model uses this to
+   * decide whether to await, get, or cancel.
+   */
+  readonly status: string;
+  /** Human-readable status hint, mirrors `TaskInfo.statusMessage`. */
+  readonly statusMessage?: string;
+  /** Server-declared TTL (ms) before the task expires. `null` = none. */
+  readonly ttl?: number;
+  /** Suggested minimum gap (ms) between `tasks/get` polls. */
+  readonly pollInterval?: number;
+}
+
 // ============================================================================
 // AI-generated blocks
 // ============================================================================
@@ -356,6 +399,7 @@ export type ContentBlock =
   | VideoBlock
   | ToolUseBlock
   | ToolResultBlock
+  | TaskRefBlock
   | JsonBlock
   | XmlBlock
   | CsvBlock

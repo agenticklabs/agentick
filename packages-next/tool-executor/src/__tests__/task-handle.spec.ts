@@ -6,7 +6,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { jsonSchema } from "@agentick/spec-next";
+import { isTaskRefBlock, jsonSchema } from "@agentick/spec-next";
 import type {
   ContentBlock,
   TaskHandle,
@@ -127,7 +127,7 @@ describe("ToolExecutor — TaskHandle return + taskSupport branching (#156)", ()
     expect((result.content[0] as { text: string }).text).toBe("done");
   });
 
-  it("taskSupport: 'required' + task: 'ref' → returns task-ref JSON content block (Pattern B)", async () => {
+  it("taskSupport: 'required' + task: 'ref' → returns TaskRefBlock (Pattern B, #160)", async () => {
     const { harness, tasks } = await createTestHarness({
       tools: [makeTool({ name: "deploy", handlerRef: "h.deploy", taskSupport: "required" })],
       handlers: [
@@ -161,24 +161,18 @@ describe("ToolExecutor — TaskHandle return + taskSupport branching (#156)", ()
     const result = await harness.dispatch(dispatchOf("deploy", "tc-4", { task: "ref" }));
     expect(result.succeeded).toBe(true);
     expect(result.content).toHaveLength(1);
-    const text = (result.content[0] as { text: string }).text;
-    const parsed = JSON.parse(text) as {
-      _kind: string;
-      taskId: string;
-      status: string;
-      statusMessage?: string;
-    };
-    expect(parsed._kind).toBe("session_task_ref");
-    expect(parsed.taskId).toMatch(/^task:/);
-    expect(parsed.status).toBe("working");
-    expect(parsed.statusMessage).toBe("deploying");
+    const block = result.content[0];
+    if (!isTaskRefBlock(block!)) throw new Error(`expected task_ref, got ${block?.type}`);
+    expect(block.taskId).toMatch(/^task:/);
+    expect(block.status).toBe("working");
+    expect(block.statusMessage).toBe("deploying");
 
     // Clean up — cancel the task and swallow the resulting
     // rejection (the task's `result` promise rejects with
     // TaskRejection on cancel; nobody awaits it in the test, so
     // vitest sees an unhandled rejection without this).
-    const cleanupResult = drainRejection(tasks.result(parsed.taskId));
-    await tasks.cancel(parsed.taskId, "test_cleanup");
+    const cleanupResult = drainRejection(tasks.result(block.taskId));
+    await tasks.cancel(block.taskId, "test_cleanup");
     await cleanupResult;
   });
 
@@ -204,12 +198,11 @@ describe("ToolExecutor — TaskHandle return + taskSupport branching (#156)", ()
       ],
     });
     const result = await harness.dispatch(dispatchOf("slow", "tc-5", { task: "ref" }));
-    const parsed = JSON.parse((result.content[0] as { text: string }).text) as {
-      taskId: string;
-    };
+    const block = result.content[0];
+    if (!isTaskRefBlock(block!)) throw new Error(`expected task_ref, got ${block?.type}`);
     // Task is still running at this point — the executor returned the
     // ref without awaiting. Await via the tasks harness.
-    const finalBlocks = await tasks.result<readonly ContentBlock[]>(parsed.taskId);
+    const finalBlocks = await tasks.result<readonly ContentBlock[]>(block.taskId);
     expect((finalBlocks[0] as { text: string }).text).toBe("finished");
   });
 });

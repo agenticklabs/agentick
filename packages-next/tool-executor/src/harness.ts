@@ -856,36 +856,28 @@ function isTaskHandle(value: unknown): value is TaskHandle<readonly ContentBlock
 }
 
 /**
- * Serialize a task ref into a single content block the model
- * receives in lieu of the eventual result. JSON payload mirrors
- * `TaskInfo` plus a `_kind: "session_task_ref"` discriminator so
- * client surfaces (UIs, system prompts) can recognize and
- * special-case task refs vs plain text returns.
+ * Build the first-class {@link TaskRefBlock} the model receives in
+ * lieu of the eventual result when a tool resolves to a task handle
+ * (Pattern B). The block-type discriminator (`type: "task_ref"`)
+ * lives on the block itself — consumers pattern-match via `block.type`
+ * rather than JSON-parsing a text body for a magic `_kind` field.
  *
- * The discriminator matches the `session_*` namespace used by the
- * model-facing tools registered by `withTasks()` — `_kind:
- * "session_task_ref"` ↔ `session_tasks_get`, `session_tasks_cancel`,
- * `session_tasks_await`. Consistency at the JSON layer lets a model
- * pattern-match the kind string against the tool name namespace.
- *
- * The block type is `text` — universal across model providers; the
- * `_kind` discriminator lives in the JSON body. When a richer
- * content block type lands (e.g., `{type: "task-ref"}` in spec), we
- * upgrade here without breaking adopter code that parses the JSON.
+ * The framework-side projection to text-JSON (drop-in compatibility
+ * with the prior `_kind: "session_task_ref"` JSON shape) happens at
+ * the executor boundary in `messagePartFromBlock`. That keeps the
+ * block-type first-class WITHIN the framework while preserving the
+ * exact wire shape adopters parse today.
  */
 function serializeTaskRef(handle: TaskHandle<readonly ContentBlock[]>): readonly ContentBlock[] {
   const info = handle.info();
   return [
     {
-      type: "text",
-      text: JSON.stringify({
-        _kind: "session_task_ref",
-        taskId: info.taskId,
-        status: info.status,
-        ...(info.statusMessage !== undefined ? { statusMessage: info.statusMessage } : {}),
-        ...(info.ttl !== null ? { ttl: info.ttl } : {}),
-        ...(info.pollInterval !== undefined ? { pollInterval: info.pollInterval } : {}),
-      }),
+      type: "task_ref",
+      taskId: info.taskId,
+      status: info.status,
+      ...(info.statusMessage !== undefined ? { statusMessage: info.statusMessage } : {}),
+      ...(info.ttl !== null && info.ttl !== undefined ? { ttl: info.ttl } : {}),
+      ...(info.pollInterval !== undefined ? { pollInterval: info.pollInterval } : {}),
     } satisfies ContentBlock,
   ];
 }

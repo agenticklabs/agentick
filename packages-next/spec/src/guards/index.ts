@@ -56,6 +56,7 @@ import type {
   SpecFeatureName,
   StateChangeBlock,
   SystemEventBlock,
+  TaskRefBlock,
   TerminalEvent,
   TextBlock,
   ToolBlock,
@@ -94,6 +95,9 @@ export function isToolUseBlock(b: ContentBlock): b is ToolUseBlock {
 }
 export function isToolResultBlock(b: ContentBlock): b is ToolResultBlock {
   return b.type === "tool_result";
+}
+export function isTaskRefBlock(b: ContentBlock): b is TaskRefBlock {
+  return b.type === "task_ref";
 }
 export function isJsonBlock(b: ContentBlock): b is JsonBlock {
   return b.type === "json";

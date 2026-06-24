@@ -146,6 +146,26 @@ export function messagePartFromBlock(block: ContentBlock): LanguageModelMessageP
         ...(block.isError !== undefined ? { isError: block.isError } : {}),
         ...pm,
       };
+    case "task_ref":
+      // Drop-in projection — the executor surface still only knows
+      // text/image/tool_use/tool_result, so a task_ref lands as a
+      // text block whose body is the historical JSON shape with the
+      // `_kind: "session_task_ref"` discriminator. Adopters that
+      // already parse this JSON continue to work; consumers that
+      // pattern-match on `block.type === "task_ref"` operate on the
+      // structured block BEFORE this projection.
+      return {
+        type: "text",
+        text: JSON.stringify({
+          _kind: "session_task_ref",
+          taskId: block.taskId,
+          status: block.status,
+          ...(block.statusMessage !== undefined ? { statusMessage: block.statusMessage } : {}),
+          ...(block.ttl !== undefined ? { ttl: block.ttl } : {}),
+          ...(block.pollInterval !== undefined ? { pollInterval: block.pollInterval } : {}),
+        }),
+        ...pm,
+      };
     default:
       return {
         type: "text",
