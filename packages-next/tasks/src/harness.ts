@@ -43,7 +43,7 @@
  * @see docs/proposals/v2/blueprint/23-mcp-as-harness.md §Tasks
  */
 
-import { Cause, Effect, Exit, Fiber, Queue } from "effect";
+import { Cause, Effect, Fiber, Queue } from "effect";
 import { BaseHarness, ulid } from "@agentick/runtime-next";
 import { reasonOf, reasonOfCause } from "@agentick/utils-next";
 import type {
@@ -279,37 +279,48 @@ export class TasksHarness extends BaseHarness<"tasks"> implements TasksHarnessPr
   }
 
   private runEffectWork<T>(record: TaskRecord, effect: Effect.Effect<T, unknown, never>): void {
-    // `runFork` returns a `RuntimeFiber` immediately — work runs in
-    // the Effect runtime. We `Fiber.await` to consume the Exit
-    // without re-throwing into a Promise rejection (which would
-    // collapse Cause structure). The fiber itself is the
-    // interruptibility seam — `cancel()` calls `Fiber.interrupt`.
-    const fiber = Effect.runFork(effect);
-    record.fiber = fiber;
-    void Effect.runPromise(Fiber.await(fiber))
-      .then((exit) => {
-        // The fiber has finished one way or another — drop the
-        // reference so terminal records don't carry a dead handle.
-        // (cancel() may have already cleared it; this is idempotent.)
-        record.fiber = undefined;
-        if (record.status === "cancelled") return; // cancel raced
-        if (Exit.isSuccess(exit)) {
-          this.transition(record, "completed");
-          record.resultDeferred.resolve(exit.value);
-          return;
-        }
-        if (Cause.isInterruptedOnly(exit.cause)) {
-          // Internal `Effect.interrupt` (not via our cancel path) —
-          // treat as cancelled with a synthetic reason. cancel() path
-          // already short-circuits via the `record.status` guard above.
-          this.finishAsCancelled(record, "interrupted");
-          return;
-        }
-        this.finishAsFailed(record, reasonOfCause(exit.cause));
-      })
-      .catch(() => {
-        // Fiber.await is total — defensive only.
-      });
+    // Pure-Effect runner — no Promise bridge. `matchCauseEffect` runs
+    // onSuccess / onFailure INSIDE the forked program, so the
+    // imperative side-effects (transition / resolve / finishAs*)
+    // live in `Effect.sync` blocks instead of a `.then` callback.
+    //
+    // Race semantics preserved from the prior impl: if `cancel()`
+    // already set `status === "cancelled"`, the handler short-
+    // circuits without overriding the cancel state. External
+    // `Fiber.interrupt` (from cancelInternal) AND internal
+    // `Effect.interrupt` both surface as interrupt-only causes;
+    // `Cause.isInterruptedOnly` distinguishes them from typed
+    // failures + defects.
+    const program = effect.pipe(
+      Effect.matchCauseEffect({
+        onSuccess: (value) =>
+          Effect.sync(() => {
+            record.fiber = undefined;
+            if (record.status === "cancelled") return;
+            this.transition(record, "completed");
+            record.resultDeferred.resolve(value);
+          }),
+        onFailure: (cause) =>
+          Effect.sync(() => {
+            record.fiber = undefined;
+            if (record.status === "cancelled") return;
+            if (Cause.isInterruptedOnly(cause)) {
+              this.finishAsCancelled(record, "interrupted");
+              return;
+            }
+            this.finishAsFailed(record, reasonOfCause(cause));
+          }),
+      }),
+    );
+    const fiber = Effect.runFork(program);
+    // For sync-completing work (e.g. `Effect.succeed(x)`), the
+    // handler above may have already run before `runFork` returns —
+    // setting `record.fiber = undefined` and transitioning to
+    // terminal. Only stash the fiber handle if work is still live;
+    // otherwise we'd hold a dead handle on a terminal record.
+    if (!this.isTerminal(record.status)) {
+      record.fiber = fiber;
+    }
   }
 
   private finishAsFailed(record: TaskRecord, cause: unknown): void {
