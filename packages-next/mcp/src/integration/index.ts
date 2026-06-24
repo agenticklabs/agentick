@@ -10,3 +10,9 @@ export {
   type McpClientHandle,
   type McpHookBridgeImpl,
 } from "./with-mcp.js";
+export {
+  mcpTaskEffect,
+  type McpTaskEffectInput,
+  type McpRemoteTaskNonCompletedError,
+} from "./task-bridge.js";
+export * from "../wire/task-codec.js";

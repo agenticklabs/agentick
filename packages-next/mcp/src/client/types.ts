@@ -162,4 +162,20 @@ export interface McpToolDescriptor {
   readonly inputSchema: Readonly<Record<string, unknown>>;
   readonly outputSchema?: Readonly<Record<string, unknown>>;
   readonly annotations?: Readonly<Record<string, unknown>>;
+  /**
+   * Execution annotations — `taskSupport` lives here per MCP 2025-11-25
+   * (and 2026-07-28). Values:
+   *   - `"optional"` — task creation allowed but not required.
+   *   - `"required"` — task creation mandatory; server returns
+   *     `CreateTaskResult` on `tools/call`.
+   *   - `"forbidden"` — task creation not allowed; server always
+   *     returns `CallToolResult` inline.
+   *
+   * Distinct from the `annotations` field (which the SDK's
+   * `ToolSchema` strict-strips to a fixed set of hint fields).
+   * Adopters honoring task support read this field.
+   */
+  readonly execution?: {
+    readonly taskSupport?: "optional" | "required" | "forbidden";
+  };
 }

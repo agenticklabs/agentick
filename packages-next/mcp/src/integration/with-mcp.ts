@@ -71,7 +71,7 @@
  */
 
 import type { SessionExtension, SessionInstaller } from "@agentick/spec-next";
-import type { ToolDeclaration, ToolHandler } from "@agentick/spec-next";
+import type { ContentBlock, ToolDeclaration, ToolHandler } from "@agentick/spec-next";
 import { jsonSchema, toRegistration } from "@agentick/spec-next";
 
 // Side-effect import — pulls in the `SessionHarnessProtocol.elicitation`
@@ -90,6 +90,7 @@ import type { McpToolDescriptor, ReconnectPolicy } from "../client/types.js";
 import type { EraCodec } from "../client/era-codec.js";
 
 import { mcpContentToBlocks } from "./content-mapper.js";
+import { mcpTaskEffect } from "./task-bridge.js";
 
 // ============================================================================
 // Options
@@ -151,6 +152,18 @@ export interface McpServerConfig {
    * to `1.0.0`.
    */
   readonly clientVersion?: string;
+
+  /**
+   * Default TTL (ms) used when calling this server's `taskSupport:
+   * "required"` tools via the task-augmented wire (`tools/call` with
+   * `task: { ttl }`). The server may clamp or override. Omit to leave
+   * the field off the wire — server's own default applies.
+   *
+   * Per-tool override is not exposed in Phase B; if a future tool
+   * needs a different ttl, add the field on the tool annotation and
+   * have `taskSupport` carry the override at registration time.
+   */
+  readonly defaultTaskTtl?: number;
 }
 
 export interface WithMCPOptions {
@@ -205,6 +218,17 @@ function mcpDeclaration(
 ): ToolDeclaration {
   const inputSchema = jsonSchema(tool.inputSchema);
   const outputSchema = tool.outputSchema !== undefined ? jsonSchema(tool.outputSchema) : undefined;
+  // Bridge MCP's `tool.execution.taskSupport` vocabulary to our
+  // framework-local `annotations.taskSupport` convention so the
+  // executor's Pattern A/B branching sees a uniform shape regardless
+  // of tool origin. MCP enum: optional|required|forbidden. Local
+  // enum: supported|required|unsupported (matches earlier framework
+  // shape predating the SDK revision).
+  const mappedTaskSupport = mapMcpTaskSupport(tool.execution?.taskSupport);
+  const annotations: Readonly<Record<string, unknown>> | undefined =
+    mappedTaskSupport !== undefined
+      ? { ...(tool.annotations ?? {}), taskSupport: mappedTaskSupport }
+      : tool.annotations;
   return {
     id: localName,
     name: localName,
@@ -213,10 +237,34 @@ function mcpDeclaration(
     ...(outputSchema !== undefined ? { outputSchema } : {}),
     exposure: ["model", "dispatch"],
     handlerRef: mcpHandlerRef(sessionId, serverId, tool.name),
-    ...(tool.annotations !== undefined
-      ? { annotations: tool.annotations as ToolDeclaration["annotations"] }
+    ...(annotations !== undefined
+      ? { annotations: annotations as ToolDeclaration["annotations"] }
       : {}),
   };
+}
+
+/**
+ * Translate MCP's `execution.taskSupport` enum to our local
+ * `annotations.taskSupport` convention. Mapping:
+ *
+ *   MCP "required"  → local "required"   (server WILL create a task)
+ *   MCP "optional"  → local "supported"  (caller chooses per-call)
+ *   MCP "forbidden" → local "unsupported"
+ *   undefined       → undefined          (tool stays inline)
+ */
+function mapMcpTaskSupport(
+  v: "optional" | "required" | "forbidden" | undefined,
+): "required" | "supported" | "unsupported" | undefined {
+  switch (v) {
+    case "required":
+      return "required";
+    case "optional":
+      return "supported";
+    case "forbidden":
+      return "unsupported";
+    default:
+      return undefined;
+  }
 }
 
 /**
@@ -271,10 +319,42 @@ async function discoverAndRegisterTools(
   for (const tool of tools) {
     const localName = `${prefix}${tool.name}`;
     const handlerRef = mcpHandlerRef(installer.sessionId, config.serverId, tool.name);
-    const handler: ToolHandler = async (input) => {
-      const result = await harness.callTool(tool.name, input as Readonly<Record<string, unknown>>);
-      return mcpContentToBlocks(result.content);
-    };
+    // Detect REMOTE task support from MCP's canonical
+    // `execution.taskSupport === "required"` (per SDK 1.29.0 ToolSchema).
+    // Adopter-side framework tools use our `annotations.taskSupport`
+    // convention; remote tools land here via the MCP wire and we read
+    // the SDK's field directly. mcpDeclaration() bridges both into a
+    // unified `annotations.taskSupport` for the local executor.
+    const taskSupportRequired = tool.execution?.taskSupport === "required";
+    const handler: ToolHandler = taskSupportRequired
+      ? // taskSupport: "required" → route through ctx.tasks.submit so
+        // the local executor's Pattern B path serializes a
+        // session_task_ref to the model. The submitted Effect drives
+        // the full wire dance (task-augmented call → notifications →
+        // tasks/result → cancel-on-interrupt). Local TaskHandle is
+        // returned; the model manages it across ticks via
+        // session_tasks_* tools.
+        (input, { ctx }) =>
+          ctx.tasks!.submit<readonly ContentBlock[]>((workCtx) =>
+            mcpTaskEffect(
+              harness,
+              {
+                name: tool.name,
+                args: input as Readonly<Record<string, unknown>>,
+                taskOptions:
+                  config.defaultTaskTtl !== undefined ? { ttl: config.defaultTaskTtl } : {},
+              },
+              workCtx,
+            ),
+          )
+      : // Standard inline path — current behavior.
+        async (input): Promise<readonly ContentBlock[]> => {
+          const result = await harness.callTool(
+            tool.name,
+            input as Readonly<Record<string, unknown>>,
+          );
+          return mcpContentToBlocks(result.content);
+        };
     installer.registerToolHandler(handlerRef, handler);
     installer.registerExtensionTool(
       toRegistration(mcpDeclaration(installer.sessionId, config.serverId, tool, localName), {

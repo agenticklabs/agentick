@@ -32,7 +32,7 @@
  * @see docs/proposals/v2/blueprint/23-mcp-as-harness.md
  */
 
-import { Effect } from "effect";
+import { Effect, Stream } from "effect";
 import { BaseHarness, runHarnessProtocol, ulid } from "@agentick/runtime-next";
 import type {
   EventBus,
@@ -44,8 +44,34 @@ import type {
 } from "@agentick/spec-next";
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { ElicitRequestSchema } from "@modelcontextprotocol/sdk/types.js";
-import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
+import {
+  CallToolResultSchema,
+  CancelTaskResultSchema,
+  ElicitRequestSchema,
+  GetTaskResultSchema,
+  ProgressNotificationSchema,
+  TaskStatusNotificationSchema,
+} from "@modelcontextprotocol/sdk/types.js";
+import type {
+  CallToolResult,
+  CancelTaskResult,
+  GetTaskResult,
+  ProgressNotification,
+  TaskStatusNotification,
+  Tool,
+} from "@modelcontextprotocol/sdk/types.js";
+
+import {
+  buildCallToolAsTaskParams,
+  discriminateCallToolResponse,
+  matchProgressNotificationForTask,
+  parseTaskPayloadAsCallToolResult,
+  TASKS_CANCEL_METHOD,
+  TASKS_GET_METHOD,
+  TASKS_RESULT_METHOD,
+  type CallToolAsTaskOptions,
+  type CallToolOrTaskOutcome,
+} from "../wire/task-codec.js";
 
 import type { ElicitationResult } from "@agentick/spec-next";
 import type { RequestResponseRegistry } from "@agentick/runtime-next";
@@ -106,6 +132,20 @@ export class McpClientHarness extends BaseHarness<"mcp"> {
    * `mcp:warning:routing-dropped` on the bus.
    */
   private readonly elicitAddress: string | undefined;
+
+  /**
+   * Per-taskId fan-out of inbound task notifications. The map's
+   * lifetime matches in-flight remote tasks: `taskNotifications`
+   * adds; `Stream.async`'s `onCancel` removes. The notification
+   * handlers (registered once at client construction) iterate
+   * matching subscribers and offer the parsed envelope.
+   *
+   * Two channels per taskId:
+   *   - `notifications/tasks/status` (status transitions, terminal)
+   *   - `notifications/progress` with related-task meta key
+   */
+  private readonly taskStatusSubs = new Map<string, Set<(n: TaskStatusNotification) => void>>();
+  private readonly taskProgressSubs = new Map<string, Set<(n: ProgressNotification) => void>>();
 
   constructor(
     scopeId: string,
@@ -239,6 +279,202 @@ export class McpClientHarness extends BaseHarness<"mcp"> {
     );
   }
 
+  // ─────────── Task wire (draft tasks/* extension) ───────────
+
+  /**
+   * Call a tool with task-augmented params (`task: { ttl?, pollInterval? }`).
+   * The server may honor by returning a `CreateTaskResult` (task
+   * created; lifecycle proceeds via `notifications/tasks/status` +
+   * `tasks/result`) OR execute inline by returning a regular
+   * `CallToolResult`.
+   *
+   * Both shapes are normalized into a single discriminated outcome —
+   * callers branch on `_tag`. The codec uses the SDK's
+   * `CreateTaskResultSchema` / `CallToolResultSchema` for parsing, so
+   * the outcome's payload is fully typed.
+   *
+   * Inbound elicits during the call route to the harness's
+   * construction-time `elicitAddress` (same as `callTool`).
+   */
+  callToolAsTask(
+    name: string,
+    args: Readonly<Record<string, unknown>> | undefined,
+    opts: CallToolAsTaskOptions = {},
+  ): Promise<CallToolOrTaskOutcome> {
+    const params = buildCallToolAsTaskParams(name, args, opts);
+    const op: Operation<typeof params, CallToolOrTaskOutcome> = {
+      opId: `mcp:${this.serverId}:call-tool-as-task:${ulid()}`,
+      surface: "mcp",
+      name: "mcp:command:call-tool-as-task",
+      scope: { sessionId: this.scopeId },
+      input: params,
+    };
+    return runHarnessProtocol(
+      this.runOperation(op, (i) =>
+        Effect.tryPromise({
+          try: async (): Promise<CallToolOrTaskOutcome> => {
+            const c = this.requireReadyClient();
+            // We can't use `c.callTool(...)` here — its SDK signature
+            // strips the `task` param. Use the underlying request()
+            // with the SDK's CallToolResult schema; the server's
+            // response may match either CreateTaskResult or
+            // CallToolResult, so we re-discriminate against the
+            // codec.
+            const raw = await c.request(
+              { method: "tools/call", params: i as Record<string, unknown> },
+              CallToolResultSchema.passthrough(),
+            );
+            return discriminateCallToolResponse(raw);
+          },
+          catch: (cause) => cause as McpClientError,
+        }),
+      ),
+    );
+  }
+
+  /**
+   * Subscribe to inbound notifications scoped to `taskId`. Returns an
+   * Effect Stream of either status or progress notifications; the
+   * stream stays open until the consumer detaches (via `Stream.take`,
+   * `Fiber.interrupt`, etc.) or the harness closes.
+   *
+   * Status notifications match by `params.taskId` (per
+   * `TaskStatusNotificationParamsSchema`); progress notifications
+   * match via the `_meta["io.modelcontextprotocol/related-task"]`
+   * association (per `RELATED_TASK_META_KEY`).
+   *
+   * Discriminated by `kind` so adopters fold into local state without
+   * a second runtime type check.
+   */
+  taskNotifications(
+    taskId: string,
+  ): Stream.Stream<
+    | { readonly kind: "status"; readonly notification: TaskStatusNotification }
+    | { readonly kind: "progress"; readonly notification: ProgressNotification },
+    never,
+    never
+  > {
+    type N =
+      | { readonly kind: "status"; readonly notification: TaskStatusNotification }
+      | { readonly kind: "progress"; readonly notification: ProgressNotification };
+    return Stream.async<N>((emit) => {
+      const onStatus = (note: TaskStatusNotification): void => {
+        void emit.single({ kind: "status", notification: note });
+      };
+      const onProgress = (note: ProgressNotification): void => {
+        void emit.single({ kind: "progress", notification: note });
+      };
+      let statusBucket = this.taskStatusSubs.get(taskId);
+      if (statusBucket === undefined) {
+        statusBucket = new Set();
+        this.taskStatusSubs.set(taskId, statusBucket);
+      }
+      statusBucket.add(onStatus);
+      let progressBucket = this.taskProgressSubs.get(taskId);
+      if (progressBucket === undefined) {
+        progressBucket = new Set();
+        this.taskProgressSubs.set(taskId, progressBucket);
+      }
+      progressBucket.add(onProgress);
+      return Effect.sync(() => {
+        statusBucket?.delete(onStatus);
+        if (statusBucket && statusBucket.size === 0) this.taskStatusSubs.delete(taskId);
+        progressBucket?.delete(onProgress);
+        if (progressBucket && progressBucket.size === 0) this.taskProgressSubs.delete(taskId);
+      });
+    });
+  }
+
+  /**
+   * Send `tasks/get` for a snapshot of the remote task's state.
+   */
+  getTask(taskId: string): Promise<GetTaskResult> {
+    const op: Operation<{ taskId: string }, GetTaskResult> = {
+      opId: `mcp:${this.serverId}:get-task:${ulid()}`,
+      surface: "mcp",
+      name: "mcp:command:get-task",
+      scope: { sessionId: this.scopeId },
+      input: { taskId },
+    };
+    return runHarnessProtocol(
+      this.runOperation(op, (i) =>
+        Effect.tryPromise({
+          try: async (): Promise<GetTaskResult> => {
+            const c = this.requireReadyClient();
+            return await c.request(
+              { method: TASKS_GET_METHOD, params: { taskId: i.taskId } },
+              GetTaskResultSchema,
+            );
+          },
+          catch: (cause) => cause as McpClientError,
+        }),
+      ),
+    );
+  }
+
+  /**
+   * Send `tasks/result` to retrieve the final payload of a completed
+   * `tools/call` task. The payload IS the original `CallToolResult`
+   * shape; this method parses against `CallToolResultSchema` for
+   * type-safe content blocks.
+   */
+  getTaskResult(taskId: string): Promise<CallToolResult> {
+    const op: Operation<{ taskId: string }, CallToolResult> = {
+      opId: `mcp:${this.serverId}:get-task-result:${ulid()}`,
+      surface: "mcp",
+      name: "mcp:command:get-task-result",
+      scope: { sessionId: this.scopeId },
+      input: { taskId },
+    };
+    return runHarnessProtocol(
+      this.runOperation(op, (i) =>
+        Effect.tryPromise({
+          try: async (): Promise<CallToolResult> => {
+            const c = this.requireReadyClient();
+            // tasks/result returns the original request's result shape
+            // (loose); for tools/call tasks that means the payload IS
+            // a CallToolResult. Re-parse via the codec for type safety.
+            const raw = await c.request(
+              { method: TASKS_RESULT_METHOD, params: { taskId: i.taskId } },
+              CallToolResultSchema.passthrough(),
+            );
+            return parseTaskPayloadAsCallToolResult(raw);
+          },
+          catch: (cause) => cause as McpClientError,
+        }),
+      ),
+    );
+  }
+
+  /**
+   * Send `tasks/cancel`. Idempotent on the server side per spec —
+   * cancelling an already-terminal task returns the current task
+   * snapshot without effect.
+   */
+  cancelTask(taskId: string): Promise<CancelTaskResult> {
+    const op: Operation<{ taskId: string }, CancelTaskResult> = {
+      opId: `mcp:${this.serverId}:cancel-task:${ulid()}`,
+      surface: "mcp",
+      name: "mcp:command:cancel-task",
+      scope: { sessionId: this.scopeId },
+      input: { taskId },
+    };
+    return runHarnessProtocol(
+      this.runOperation(op, (i) =>
+        Effect.tryPromise({
+          try: async (): Promise<CancelTaskResult> => {
+            const c = this.requireReadyClient();
+            return await c.request(
+              { method: TASKS_CANCEL_METHOD, params: { taskId: i.taskId } },
+              CancelTaskResultSchema,
+            );
+          },
+          catch: (cause) => cause as McpClientError,
+        }),
+      ),
+    );
+  }
+
   /**
    * Terminal shutdown. Cancels any pending reconnect, closes the SDK
    * client + transport, transitions lifecycle to `closed`. Idempotent.
@@ -352,6 +588,26 @@ export class McpClientHarness extends BaseHarness<"mcp"> {
         defaultTimeoutMs: this.options.elicitTimeoutMs ?? 5 * 60_000,
       }),
     );
+    // Task notification fan-out — once registered, every inbound
+    // `notifications/tasks/status` is matched against active task
+    // subscribers (keyed by taskId) and offered to each. Subscribers
+    // are torn down by the Stream-side `onCancel` in
+    // `taskNotifications()` so the maps stay tight.
+    client.setNotificationHandler(TaskStatusNotificationSchema, (note) => {
+      const taskId = note.params.taskId;
+      const subs = this.taskStatusSubs.get(taskId);
+      if (subs === undefined) return;
+      for (const sub of subs) sub(note);
+    });
+    client.setNotificationHandler(ProgressNotificationSchema, (note) => {
+      // Progress notifications carry a related-task key in either
+      // params._meta or top-level _meta — match across both.
+      for (const [taskId, subs] of this.taskProgressSubs.entries()) {
+        if (matchProgressNotificationForTask(note, taskId) !== null) {
+          for (const sub of subs) sub(note);
+        }
+      }
+    });
     return client;
   }
 

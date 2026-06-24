@@ -63,6 +63,7 @@ export const DraftPassthroughCodec: EraCodec = {
       inputSchema?: Readonly<Record<string, unknown>>;
       outputSchema?: Readonly<Record<string, unknown>>;
       annotations?: Readonly<Record<string, unknown>>;
+      execution?: { taskSupport?: "optional" | "required" | "forbidden" };
     };
     if (typeof r.name !== "string") {
       throw new Error("McpToolDescriptor: missing required `name`");
@@ -73,6 +74,7 @@ export const DraftPassthroughCodec: EraCodec = {
       inputSchema: (r.inputSchema as Readonly<Record<string, unknown>>) ?? { type: "object" },
       ...(r.outputSchema !== undefined ? { outputSchema: r.outputSchema } : {}),
       ...(r.annotations !== undefined ? { annotations: r.annotations } : {}),
+      ...(r.execution !== undefined ? { execution: r.execution } : {}),
     };
   },
 };
