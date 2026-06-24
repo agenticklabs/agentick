@@ -32,6 +32,7 @@
 
 import { Effect } from "effect";
 import { BaseHarness, runHarnessProtocol, ulid, type Unsubscribe } from "@agentick/runtime-next";
+import { createNotifier, type Notifier } from "@agentick/utils-next";
 import type {
   CompactResult,
   CompactStrategy,
@@ -77,7 +78,7 @@ export class TimelineHarness extends BaseHarness<"timeline"> implements Timeline
   // Re-allocated only when the projection mutates.
   private _snapshot: TimelineSnapshot = { entries: [], version: 0 };
 
-  private readonly listeners = new Set<() => void>();
+  private readonly listeners: Notifier = createNotifier();
 
   get id(): string {
     return this.scopeId;
@@ -94,10 +95,7 @@ export class TimelineHarness extends BaseHarness<"timeline"> implements Timeline
   }
 
   subscribe(listener: () => void): Unsubscribe {
-    this.listeners.add(listener);
-    return () => {
-      this.listeners.delete(listener);
-    };
+    return this.listeners.subscribe(listener);
   }
 
   // ─────────── Sync surface — pending (queued, awaiting drain) ───────────
@@ -436,6 +434,6 @@ export class TimelineHarness extends BaseHarness<"timeline"> implements Timeline
   }
 
   private notify(): void {
-    this.listeners.forEach((l) => l());
+    this.listeners.notify();
   }
 }

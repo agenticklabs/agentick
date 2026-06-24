@@ -18,6 +18,7 @@
  */
 
 import type { SubscriptionIntent, Unsubscribe } from "@agentick/spec-next";
+import { createNotifier } from "@agentick/utils-next";
 
 // ============================================================================
 // Surface
@@ -76,10 +77,10 @@ export function createSubscriptionBridge(
 ): SubscriptionBridge {
   const live = new Map<string, LiveEntry>();
   const pending = new Map<string, SubscriptionIntent>();
-  const listeners = new Set<() => void>();
+  const listeners = createNotifier();
   const sessionId = options.sessionId ?? "app";
 
-  const notify = (): void => listeners.forEach((l) => l());
+  const notify = (): void => listeners.notify();
 
   return {
     declare(intent, handler): Unsubscribe {
@@ -120,10 +121,7 @@ export function createSubscriptionBridge(
       await entry.handler(event, ctx);
     },
     subscribe(listener): Unsubscribe {
-      listeners.add(listener);
-      return () => {
-        listeners.delete(listener);
-      };
+      return listeners.subscribe(listener);
     },
     exportSnapshot(): readonly SubscriptionIntent[] {
       const seen = new Set<string>();

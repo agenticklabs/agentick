@@ -65,7 +65,8 @@
     "@agentick/reconciler-next": "workspace:*",
     "@agentick/reconciler-react-next": "workspace:*",
     "@agentick/runtime-next": "workspace:*",
-    "@agentick/spec-next": "workspace:*"
+    "@agentick/spec-next": "workspace:*",
+    "@agentick/utils-next": "workspace:*"
   },
   "devDependencies": {
     "@types/react": "^19.2.13"

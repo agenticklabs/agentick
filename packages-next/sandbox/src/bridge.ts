@@ -25,6 +25,7 @@ import type {
   SandboxProvider,
   Unsubscribe,
 } from "@agentick/spec-next";
+import { createNotifier } from "@agentick/utils-next";
 
 import { SandboxHarness } from "./harness.js";
 
@@ -83,8 +84,8 @@ export interface CreateSandboxBridgeOptions {
 
 export function createSandboxBridge(options: CreateSandboxBridgeOptions): SandboxBridge {
   const harnesses = new Map<string, SandboxHarness>();
-  const listeners = new Set<() => void>();
-  const notify = (): void => listeners.forEach((l) => l());
+  const listeners = createNotifier();
+  const notify = (): void => listeners.notify();
 
   const bridge: SandboxBridge = {
     async createHarness(input): Promise<SandboxHarness> {
@@ -135,10 +136,7 @@ export function createSandboxBridge(options: CreateSandboxBridgeOptions): Sandbo
       return out;
     },
     subscribe(listener): Unsubscribe {
-      listeners.add(listener);
-      return () => {
-        listeners.delete(listener);
-      };
+      return listeners.subscribe(listener);
     },
   };
   return bridge;

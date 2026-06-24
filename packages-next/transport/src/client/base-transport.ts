@@ -49,6 +49,7 @@ import type {
   WireParams,
   WireResult,
 } from "@agentick/spec-next";
+import { createNotifier } from "@agentick/utils-next";
 
 import { MultiplexedStream } from "./multiplexed-stream.js";
 
@@ -107,7 +108,7 @@ export abstract class BaseClientTransport implements ClientTransport {
   abstract readonly capabilities: TransportCapabilities;
 
   protected currentState: ClientState = "idle";
-  private readonly stateListeners = new Set<(s: ClientState) => void>();
+  private readonly stateListeners = createNotifier<ClientState>();
 
   // RPC correlation
   private nextRequestId = 1;
@@ -136,13 +137,12 @@ export abstract class BaseClientTransport implements ClientTransport {
   }
 
   onStateChange(handler: (s: ClientState) => void): () => void {
-    this.stateListeners.add(handler);
-    return () => this.stateListeners.delete(handler);
+    return this.stateListeners.subscribe(handler);
   }
 
   protected setState(s: ClientState): void {
     this.currentState = s;
-    for (const l of this.stateListeners) l(s);
+    this.stateListeners.notify(s);
   }
 
   // ── lifecycle (subclass-provided) ────────────────────────────────────

@@ -15,6 +15,7 @@
  */
 
 import type { SessionStatus, UsageStats } from "@agentick/spec-next";
+import { createNotifier, type Notifier } from "@agentick/utils-next";
 
 export class SessionStateStore {
   readonly id: string;
@@ -22,7 +23,7 @@ export class SessionStateStore {
   private _status: SessionStatus = "idle";
   private _currentTick = 0;
   private _currentExecutionId: string | null = null;
-  private readonly _listeners = new Set<() => void>();
+  private readonly _listeners: Notifier = createNotifier();
   private readonly _usage: UsageStats = {
     inputTokens: 0,
     outputTokens: 0,
@@ -86,17 +87,11 @@ export class SessionStateStore {
   // ────────── subscriptions (status / metadata changes only) ──────────
 
   subscribeMetadata(listener: () => void): () => void {
-    this._listeners.add(listener);
-    return () => this._listeners.delete(listener);
+    return this._listeners.subscribe(listener);
   }
 
   private notify(): void {
-    for (const l of this._listeners) {
-      try {
-        l();
-      } catch {
-        // Listener errors must not corrupt store state.
-      }
-    }
+    // Notifier isolates listener errors so store state can't be corrupted.
+    this._listeners.notify();
   }
 }

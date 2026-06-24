@@ -30,6 +30,7 @@ import type {
   WireParams,
   WireResult,
 } from "@agentick/spec-next";
+import { createNotifier } from "@agentick/utils-next";
 import { ClientHandlerRegistry } from "./handler-registry.js";
 import { makeAppHandle, makeGatewayHandle, makeSessionHandle } from "./handles.js";
 import { composeRequest } from "./pipeline.js";
@@ -66,7 +67,7 @@ class AgentickClient implements ClientProtocol {
   private readonly handlerRegistry = new ClientHandlerRegistry();
   private readonly clientBus: LocalEventBus;
   private readonly composedRequest: ReturnType<typeof composeRequest>;
-  private readonly stateListeners = new Set<(s: ClientState) => void>();
+  private readonly stateListeners = createNotifier<ClientState>();
   private readonly closeHandlers: Array<() => void | Promise<void>> = [];
   private readonly namespaces = new Map<string, unknown>();
 
@@ -92,7 +93,7 @@ class AgentickClient implements ClientProtocol {
       const previous = this.currentState;
       this.currentState = s;
       this.publishConnectionEvent(previous, s);
-      for (const l of this.stateListeners) l(s);
+      this.stateListeners.notify(s);
     });
 
     // Auth surface seed — ADR 34 fills this in.
@@ -136,8 +137,7 @@ class AgentickClient implements ClientProtocol {
   }
 
   onStateChange(handler: (state: ClientState) => void): () => void {
-    this.stateListeners.add(handler);
-    return () => this.stateListeners.delete(handler);
+    return this.stateListeners.subscribe(handler);
   }
 
   /**
