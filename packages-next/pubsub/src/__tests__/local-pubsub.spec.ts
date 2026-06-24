@@ -196,6 +196,87 @@ describe("createLocalPubSub — Layer 3 (Effect.PubSub-backed Stream fan-out)", 
     expect(elapsed).toBeLessThan(500);
   });
 
+  it("onPublish: fires synchronously for every publish, AFTER subscribers see the event", async () => {
+    const seen: Array<{ event: number; sub: number; hook: number }> = [];
+    let counter = 0;
+    const subReceived: number[] = [];
+    const hookReceived: number[] = [];
+
+    const bus = createLocalPubSub<number>({
+      onPublish: (event) => {
+        const order = ++counter;
+        hookReceived.push(event);
+        seen.push({ event, sub: -1, hook: order });
+      },
+    });
+
+    const program = Effect.gen(function* () {
+      const fiber = yield* Effect.fork(
+        bus.subscribe().pipe(
+          Stream.take(3),
+          Stream.runForEach((n) =>
+            Effect.sync(() => {
+              subReceived.push(n);
+            }),
+          ),
+        ),
+      );
+      yield* Effect.sleep("10 millis");
+      bus.publish(1);
+      bus.publish(2);
+      bus.publish(3);
+      yield* fiber;
+    });
+
+    await Effect.runPromise(program);
+    expect(hookReceived).toEqual([1, 2, 3]);
+    expect(subReceived).toEqual([1, 2, 3]);
+    await bus.close();
+    void seen;
+  });
+
+  it("onPublish: throws from the hook are isolated (subscribers still receive)", async () => {
+    const received: number[] = [];
+    const bus = createLocalPubSub<number>({
+      onPublish: () => {
+        throw new Error("hook-boom");
+      },
+    });
+
+    const program = Effect.gen(function* () {
+      const fiber = yield* Effect.fork(
+        bus.subscribe().pipe(
+          Stream.take(2),
+          Stream.runForEach((n) => Effect.sync(() => received.push(n))),
+        ),
+      );
+      yield* Effect.sleep("10 millis");
+      // Both calls must succeed despite the hook throwing.
+      expect(() => bus.publish(1)).not.toThrow();
+      expect(() => bus.publish(2)).not.toThrow();
+      yield* fiber;
+    });
+
+    await Effect.runPromise(program);
+    expect(received).toEqual([1, 2]);
+    await bus.close();
+  });
+
+  it("onPublish: NOT fired after close()", async () => {
+    let hookCount = 0;
+    const bus = createLocalPubSub<number>({
+      onPublish: () => {
+        hookCount += 1;
+      },
+    });
+    bus.publish(1);
+    bus.publish(2);
+    expect(hookCount).toBe(2);
+    await bus.close();
+    bus.publish(3); // no-op after close
+    expect(hookCount).toBe(2);
+  });
+
   it("closeDrainTimeoutMs: custom cap value is honored", async () => {
     // We can't easily construct a truly-wedged subscriber from the
     // public API (Stream.tap consumes on pull), so this test verifies

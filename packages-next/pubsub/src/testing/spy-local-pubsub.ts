@@ -30,7 +30,7 @@ export interface LocalPubSubSpy<T> extends LocalPubSub<T> {
   reset(): void;
 }
 
-export function spyLocalPubSub<T>(options: CreateLocalPubSubOptions = {}): LocalPubSubSpy<T> {
+export function spyLocalPubSub<T>(options: CreateLocalPubSubOptions<T> = {}): LocalPubSubSpy<T> {
   const inner = createLocalPubSub<T>(options);
   const calls: T[] = [];
 

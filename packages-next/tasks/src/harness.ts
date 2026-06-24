@@ -227,7 +227,14 @@ export class TasksHarness extends BaseHarness<"tasks"> implements TasksHarnessPr
       failure: undefined,
       controller,
       fiber: undefined,
-      eventBus: createLocalPubSub<TaskEvent>(),
+      // Fan-out + substrate fan-in in one primitive. The onPublish
+      // hook translates each TaskEvent into the appropriate substrate
+      // channel envelope; harness owns the translation, pubsub-next
+      // stays agnostic. Errors in onPublish are isolated by the bus
+      // — a substrate emit failure CANNOT block in-process subscribers.
+      eventBus: createLocalPubSub<TaskEvent>({
+        onPublish: (event) => this.fanOutToSubstrate(event),
+      }),
       resultDeferred,
     };
     this.tasks.set(taskId, record);
@@ -645,23 +652,13 @@ export class TasksHarness extends BaseHarness<"tasks"> implements TasksHarnessPr
   }
 
   private publishStatus(record: TaskRecord): void {
-    const info = this.snapshot(record);
-    void Effect.runPromise(this.publishOnChannel(TASK_STATUS_CHANNEL, info)).catch(() => {
-      // Substrate emit failures are not actionable here.
-    });
-    // Single bus — all subscribers see this status event in the
-    // same causal slot as any preceding progress events.
-    record.eventBus.publish({ kind: "status", info });
+    // Single call site — eventBus.publish fans out to in-process
+    // subscribers AND, via the onPublish hook wired at bus
+    // construction, into the substrate's protocol bus.
+    record.eventBus.publish({ kind: "status", info: this.snapshot(record) });
   }
 
   private publishProgress(record: TaskRecord, update: ProgressUpdate): void {
-    const payload = {
-      taskId: record.taskId,
-      current: update.current,
-      ...(update.total !== undefined ? { total: update.total } : {}),
-      ...(update.message !== undefined ? { message: update.message } : {}),
-    };
-    void Effect.runPromise(this.publishOnChannel(TASK_PROGRESS_CHANNEL, payload)).catch(() => {});
     record.eventBus.publish({
       kind: "progress",
       taskId: record.taskId,
@@ -669,6 +666,36 @@ export class TasksHarness extends BaseHarness<"tasks"> implements TasksHarnessPr
       ...(update.total !== undefined ? { total: update.total } : {}),
       ...(update.message !== undefined ? { message: update.message } : {}),
     });
+  }
+
+  /**
+   * Substrate fan-in hook — runs synchronously on every event the
+   * task's eventBus publishes. Translates each `TaskEvent` to its
+   * canonical substrate channel envelope and emits via
+   * `publishOnChannel`. Errors are swallowed by the bus's onPublish
+   * isolation; logged here for diagnostic visibility.
+   *
+   * Centralizing the translation here means a single call site for
+   * "publish a task event" (`record.eventBus.publish(...)`) handles
+   * both in-process fan-out AND substrate journaling. The bus stays
+   * agnostic about substrate shape; the harness owns the codec.
+   */
+  private fanOutToSubstrate(event: TaskEvent): void {
+    if (event.kind === "status") {
+      void Effect.runPromise(this.publishOnChannel(TASK_STATUS_CHANNEL, event.info)).catch(
+        () => undefined,
+      );
+      return;
+    }
+    // progress event
+    void Effect.runPromise(
+      this.publishOnChannel(TASK_PROGRESS_CHANNEL, {
+        taskId: event.taskId,
+        current: event.current,
+        ...(event.total !== undefined ? { total: event.total } : {}),
+        ...(event.message !== undefined ? { message: event.message } : {}),
+      }),
+    ).catch(() => undefined);
   }
 
   private publishOnChannel(channel: string, payload: unknown): Effect.Effect<void, unknown, never> {

@@ -33,6 +33,7 @@
  */
 
 import { Effect, Fiber, type Queue, PubSub, Ref, Stream, type Scope } from "effect";
+import { isFunction, isUndefined } from "@agentick/utils-next";
 
 export interface LocalPubSub<T> {
   /** Publish an event. Sync from the caller's POV (unbounded queue). */
@@ -64,7 +65,7 @@ interface SubscriberTracker {
 /**
  * Construction options for {@link createLocalPubSub}.
  */
-export interface CreateLocalPubSubOptions {
+export interface CreateLocalPubSubOptions<T> {
   /**
    * Upper bound (ms) on the close-time drain. After `close()` waits
    * this long for active subscribers to consume all published events,
@@ -101,14 +102,38 @@ export interface CreateLocalPubSubOptions {
    * instead of relying on replay.
    */
   readonly replay?: number;
+
+  /**
+   * Side-effect hook invoked synchronously on every successful
+   * `publish(event)`, after the event has been offered to the
+   * underlying PubSub (so in-process subscribers see it first).
+   * Use for FAN-IN to upstream sinks the bus itself shouldn't know
+   * about — e.g., a harness routing every publish into the
+   * substrate's protocol bus via its own envelope translator.
+   *
+   * **Layering rationale.** Keeping the hook generic preserves
+   * pubsub-next's independence from spec-next's `EventBus` (which
+   * would invert the dep graph). Callers own the translation
+   * (event → wire envelope, substrate emit, journaling, etc.) and
+   * provide it as a closure.
+   *
+   * **Error isolation.** Throws from `onPublish` are swallowed —
+   * a buggy fan-in sink CANNOT block in-process subscribers from
+   * seeing the event. Adopters that need to observe sink failures
+   * must wrap with their own try/catch + logging.
+   *
+   * Not fired when `publish` is called after `close()` (the
+   * publish is a no-op in that case).
+   */
+  readonly onPublish?: (event: T) => void;
 }
 
-export function createLocalPubSub<T>(options: CreateLocalPubSubOptions = {}): LocalPubSub<T> {
+export function createLocalPubSub<T>(options: CreateLocalPubSubOptions<T> = {}): LocalPubSub<T> {
   const closeDrainTimeoutMs = options.closeDrainTimeoutMs ?? 5_000;
   // Allocate the PubSub eagerly via Effect.runSync — unbounded ctor
   // is a pure allocation, no side effects beyond a Queue.
   const pubsub = Effect.runSync(
-    options.replay !== undefined && options.replay > 0
+    !isUndefined(options.replay) && options.replay > 0
       ? PubSub.unbounded<T>({ replay: options.replay })
       : PubSub.unbounded<T>(),
   );
@@ -204,6 +229,16 @@ export function createLocalPubSub<T>(options: CreateLocalPubSubOptions = {}): Lo
       // `subscriber.consumed >= publishedCount` after drain is honest.
       Effect.runSync(Ref.update(publishedCount, (n) => n + 1));
       Effect.runSync(PubSub.publish(pubsub, event));
+      // Fan-in hook runs AFTER the in-process publish so subscribers
+      // observe the event before any upstream sink does. Errors are
+      // isolated — a buggy translator MUST NOT block subscribers.
+      if (isFunction(options.onPublish)) {
+        try {
+          options.onPublish(event);
+        } catch {
+          /* isolate */
+        }
+      }
     },
     subscribe(filter) {
       return subscribeStream(filter);
