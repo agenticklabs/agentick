@@ -14,6 +14,9 @@
  * @see docs/proposals/v2/blueprint/36-define-vs-create-convention.md
  */
 
+import { Effect } from "effect";
+import { ulid } from "@agentick/utils-next";
+
 import { consistentHashPartitioning } from "./builtins/consistent-hash-partitioning.js";
 import { jsonCodec } from "./builtins/json-codec.js";
 import type { Cluster, ClusterFactory, ClusterParent } from "./cluster.js";
@@ -240,14 +243,50 @@ export function defineCluster(spec: DefineClusterConfig): ClusterFactory {
       transport,
       partitioning,
       currentNode: nodeId,
+      // Wrap diagnostics on the LOCAL bus, not the cluster-wrapped one.
+      // Emitting a "broadcast failed" diagnostic via the cluster bus
+      // would itself trigger another broadcast attempt — feedback loop
+      // and noise. Local bus is the source of truth for this node's
+      // operational state.
+      localBus: parent.bus,
+    });
+
+    // Phase 3.1: wire membership reactivity. defineCluster owns the
+    // long-lived onChange subscription so topology changes emit on
+    // the (LOCAL) bus regardless of which wrappers are present. Emit
+    // to local — same rationale as inbox diagnostics. The subscription
+    // is registered with parent.onClose so it tears down in the LIFO
+    // chain.
+    const membershipUnsub = membership.onChange((change) => {
+      void Effect.runPromise(
+        parent.bus.append({
+          id: membershipDiagId(),
+          surface: "cluster",
+          name:
+            change.kind === "joined"
+              ? "cluster:membership:joined"
+              : change.kind === "lost"
+                ? "cluster:membership:lost"
+                : "cluster:membership:snapshot",
+          phase: "terminal",
+          timestamp: Date.now(),
+          scope: { nodeId },
+          payload: change,
+        }),
+      );
     });
 
     // Register wrapper closes with the parent so they tear down in
-    // the same LIFO chain as the underlying seams. Order: inbox →
-    // bus (mirror of construction). Transport and membership are
-    // closed via their own defineClusterX onClose registration.
+    // the same LIFO chain as the underlying seams. Order at teardown
+    // (LIFO): membership-sub → inbox → bus → membership/transport
+    // (via their own defineClusterX onClose). Transport and
+    // membership impl close()s registered themselves earlier via
+    // defineClusterTransport/defineClusterMembership.
     parent.onClose(() => bus.close());
     parent.onClose(() => inbox.close());
+    parent.onClose(async () => {
+      await membershipUnsub();
+    });
 
     const cluster: Cluster = {
       bus,
@@ -276,6 +315,11 @@ export function defineCluster(spec: DefineClusterConfig): ClusterFactory {
 // Re-export Cluster so adopters importing from `@agentick/cluster-next`
 // see the materialized type alongside the helpers.
 export type { Cluster };
+
+/** ULID-shaped id for membership diagnostic events. */
+function membershipDiagId(): string {
+  return ulid();
+}
 
 // ============================================================================
 // Internal: factory invocation

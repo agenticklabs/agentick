@@ -15,18 +15,26 @@
  *     into the inner bus; subscribers see the cluster's combined stream.
  *   - `node-local-default` — inbound remote events are dropped at the
  *     wrapper boundary; subscribers only see events originating on this
- *     node. (Phase 3 limitation: a future "cluster-wide subscriber"
- *     opt-in path will let select subscribers see remote events even
- *     in node-local-default mode. For now, switch the mode if you need
- *     remote visibility.)
+ *     node. (Phase 3 limitation: a future per-subscription `scope:
+ *     "cluster-wide"` opt-in path will let select subscribers see remote
+ *     events even in node-local-default mode. For now, switch the mode
+ *     if you need remote visibility.)
  *
  * Loop avoidance:
  *   - The transport contract promises "broadcast does NOT echo back to
  *     the sending node" (see conformance). As a defense-in-depth, the
  *     wrapper also drops inbound events whose `scope.nodeId === currentNode`.
  *
- * Diagnostic events: emits `surface: "cluster"` lifecycle events on
- * the inner bus so operators can observe the wrapper's state.
+ * Transport failures:
+ *   - `transport.broadcast` rejections emit
+ *     `cluster:transport:broadcast:failed` on the local bus; the local
+ *     `append` still completes successfully (the broadcast contract is
+ *     best-effort). Adopters who need stricter delivery semantics
+ *     subscribe to the diagnostic.
+ *
+ * Diagnostic events (see {@link DiagnosticEmitter}): emits
+ * `cluster:wrap:installed` / `cluster:wrap:disposed` /
+ * `cluster:transport:broadcast:failed`.
  *
  * @see docs/proposals/v2/blueprint/35-cluster-protocol.md §6
  */
@@ -46,17 +54,7 @@ import type {
 
 import type { ClusterTransport } from "../transport.js";
 import type { NodeId } from "../types.js";
-
-/**
- * Lightweight id generator for diagnostic events. Not a true ULID —
- * deliberate, to keep the wrapper free of runtime-next dependencies.
- * Diagnostic ids only need to be locally-unique for log correlation.
- */
-function diagId(): string {
-  const t = Date.now().toString(36);
-  const r = Math.floor(Math.random() * 0xffffff).toString(36);
-  return `cluster-diag-${t}-${r}`;
-}
+import { DiagnosticEmitter, makeDiagnostics } from "./diagnostics.js";
 
 export interface ClusterEventBusOptions {
   /** Inner local bus — the wrapper composes its EventBus contract from this. */
@@ -77,6 +75,7 @@ export class ClusterEventBus implements EventBus {
   private readonly transport: ClusterTransport;
   private readonly currentNode: NodeId;
   private readonly fanoutMode: ClusterEventBusOptions["fanoutMode"];
+  private readonly diag: DiagnosticEmitter;
 
   /** Transport-level unsubscribe; runs on close(). */
   private inboundUnsubscribe: (() => Promise<void>) | null = null;
@@ -87,6 +86,7 @@ export class ClusterEventBus implements EventBus {
     this.transport = opts.transport;
     this.currentNode = opts.currentNode;
     this.fanoutMode = opts.fanoutMode;
+    this.diag = makeDiagnostics({ localBus: opts.local, currentNode: opts.currentNode });
 
     // Wire inbound republish. The transport contract promises no
     // self-echo on broadcast; we still gate on scope.nodeId for
@@ -95,19 +95,7 @@ export class ClusterEventBus implements EventBus {
       void this.onRemoteEvent(env);
     });
 
-    // Diagnostic: announce the wrap on the local bus so observers can
-    // see when cluster mode is active for this node.
-    Effect.runFork(
-      this.local.append({
-        id: diagId(),
-        surface: "cluster",
-        name: "cluster:wrap:installed",
-        phase: "terminal",
-        timestamp: Date.now(),
-        scope: { nodeId: this.currentNode },
-        payload: { fanoutMode: this.fanoutMode },
-      }),
-    );
+    this.diag.emit("cluster:wrap:installed", { kind: "bus", fanoutMode: this.fanoutMode });
   }
 
   // ============================================================================
@@ -118,7 +106,9 @@ export class ClusterEventBus implements EventBus {
     if (this.closed) return Effect.void;
     const stamped = this.stamp(event);
     return Effect.flatMap(this.local.append(stamped), () =>
-      Effect.promise(() => this.transport.broadcast(stamped).catch(() => {})),
+      Effect.sync(() => {
+        this.broadcastWithDiag(stamped);
+      }),
     );
   }
 
@@ -126,12 +116,12 @@ export class ClusterEventBus implements EventBus {
     if (this.closed || events.length === 0) return Effect.void;
     const stamped = events.map((e) => this.stamp(e));
     return Effect.flatMap(this.local.appendBatch(stamped), () =>
-      Effect.promise(async () => {
+      Effect.sync(() => {
         // Per-event broadcast — the transport's per-source FIFO
-        // contract preserves order within a batch.
-        for (const e of stamped) {
-          await this.transport.broadcast(e).catch(() => {});
-        }
+        // contract preserves order within a batch. A future
+        // `transport.broadcastBatch` seam would let adapters bulk-
+        // ship; tracked for Phase 4's adapter design.
+        for (const e of stamped) this.broadcastWithDiag(e);
       }),
     );
   }
@@ -163,6 +153,9 @@ export class ClusterEventBus implements EventBus {
       return Effect.void;
     }
     // In cluster-wide mode, remote subscribers MAY care. Build + append.
+    // Known limitation: we can't probe remote subscriber indexes from
+    // here, so this over-builds when no node has a matching subscriber.
+    // Phase 5+ may gossip subscriber indexes; tracked in README.
     return this.append(build());
   }
 
@@ -187,16 +180,7 @@ export class ClusterEventBus implements EventBus {
 
     // Emit BEFORE tearing down the inbound subscription so observers
     // see the disposal even if they're inspecting via the local bus.
-    await Effect.runPromise(
-      this.local.append({
-        id: diagId(),
-        surface: "cluster",
-        name: "cluster:wrap:disposed",
-        phase: "terminal",
-        timestamp: Date.now(),
-        scope: { nodeId: this.currentNode },
-      }),
-    );
+    this.diag.emit("cluster:wrap:disposed", { kind: "bus" });
 
     const unsub = this.inboundUnsubscribe;
     this.inboundUnsubscribe = null;
@@ -213,6 +197,21 @@ export class ClusterEventBus implements EventBus {
       ...event,
       scope: { ...event.scope, nodeId: this.currentNode },
     };
+  }
+
+  /**
+   * Best-effort broadcast with diagnostic emission on failure. The
+   * surrounding local `append` already succeeded; broadcast failures
+   * are reported but never bubble up.
+   */
+  private broadcastWithDiag(event: ProtocolEvent): void {
+    void this.transport.broadcast(event).catch((cause) => {
+      this.diag.emit("cluster:transport:broadcast:failed", {
+        eventId: event.id,
+        eventName: event.name,
+        reason: cause instanceof Error ? cause.message : String(cause),
+      });
+    });
   }
 
   private async onRemoteEvent(env: ProtocolEvent): Promise<void> {

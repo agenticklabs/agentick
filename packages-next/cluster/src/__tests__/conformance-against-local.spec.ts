@@ -18,7 +18,6 @@ import { runClusterTransportConformance } from "../conformance.js";
 import { createLocalClusterRegistry, localClusterTransport } from "../testing/index.js";
 
 runClusterTransportConformance({
-  label: "ClusterTransport conformance — localClusterTransport",
   async setup() {
     // Per-test fresh registry → no cross-test leakage.
     const registry = createLocalClusterRegistry();

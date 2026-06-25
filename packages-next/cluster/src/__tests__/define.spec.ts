@@ -200,14 +200,16 @@ describe("defineCluster — adapter onClose registration", () => {
     });
     await factory(parent);
 
-    // Four handlers registered: transport, membership, bus wrapper,
-    // inbox wrapper. (Partitioning and codec have no lifecycle.)
-    expect(handlers.length).toBe(4);
+    // Five handlers registered: transport, membership, bus wrapper,
+    // inbox wrapper, membership.onChange unsubscribe. (Partitioning
+    // and codec have no lifecycle.)
+    expect(handlers.length).toBe(5);
     // Fire them in registration order — defineCluster registers
-    // transport first, then membership, then bus, then inbox.
+    // transport, then membership, then bus wrapper, then inbox
+    // wrapper, then membership-onChange unsubscribe.
     for (const h of handlers) await h();
-    // Only the adapters announce themselves; bus/inbox wrappers
-    // close silently (their cleanup is unwiring transport subs).
+    // Only the adapters announce themselves via closeCalls; bus /
+    // inbox / membership-sub close silently.
     expect(closeCalls).toEqual(["transport", "membership"]);
   });
 });

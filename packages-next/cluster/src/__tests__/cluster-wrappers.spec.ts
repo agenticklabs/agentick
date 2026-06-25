@@ -11,12 +11,13 @@
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { Effect, Stream } from "effect";
+import { Cause, Effect, Stream } from "effect";
 import { LocalEventBus, LocalInbox, MemoryJournal, compileQuery } from "@agentick/runtime-next";
 import type { EventQuery, MessageHandlerError, ProtocolEvent } from "@agentick/spec-next";
+import type { MembershipChange } from "../types.js";
 
 import type { ClusterParent } from "../cluster.js";
-import { defineCluster, defineClusterMembership } from "../define.js";
+import { defineCluster, defineClusterMembership, defineClusterTransport } from "../define.js";
 import {
   createLocalClusterRegistry,
   localClusterTransport,
@@ -340,24 +341,6 @@ describe("ClusterInbox — inbox wrapping", () => {
     expect(onB).toEqual([{ type: "cancel", from: "node:node-A" }]);
   });
 
-  it("remote ask is not supported in Phase 3 — fails with a clear pointer", async () => {
-    const partitioning = {
-      shardKeyFor: (address: string): string => address,
-      nodeFor: async (): Promise<string> => "node-B",
-    };
-    const clusterA = await defineCluster({
-      nodeId: "node-A",
-      transport: localClusterTransport({ registry, nodeId: "node-A" }),
-      membership: staticMembership(["node-A", "node-B"], "node-A"),
-      partitioning: () => partitioning,
-    })(nodeA.parent);
-
-    const exit = await Effect.runPromiseExit(
-      clusterA.inbox.ask("tasks:s-remote", { type: "query" }),
-    );
-    expect(exit._tag).toBe("Failure");
-  });
-
   it("local ask: address owned by current node returns the handler's value", async () => {
     const cluster = await defineCluster({
       nodeId: "node-A",
@@ -380,7 +363,297 @@ describe("ClusterInbox — inbox wrapping", () => {
     );
     expect(result).toBe(10);
   });
+
+  // ----------------- Phase 3.1: cross-node ask -----------------
+
+  it("remote ask: address owned by node B is dispatched via transport; handler value returns to A", async () => {
+    const partitioning = {
+      shardKeyFor: (address: string): string => address,
+      nodeFor: async (): Promise<string> => "node-B",
+    };
+    const clusterA = await defineCluster({
+      nodeId: "node-A",
+      transport: localClusterTransport({ registry, nodeId: "node-A" }),
+      membership: staticMembership(["node-A", "node-B"], "node-A"),
+      partitioning: () => partitioning,
+    })(nodeA.parent);
+    const clusterB = await defineCluster({
+      nodeId: "node-B",
+      transport: localClusterTransport({ registry, nodeId: "node-B" }),
+      membership: staticMembership(["node-A", "node-B"], "node-B"),
+      partitioning: () => partitioning,
+    })(nodeB.parent);
+
+    // Register a handler on node B (the partition owner).
+    await Effect.runPromise(
+      clusterB.inbox.register<{ x: number }, number>("calc:remote-doubler", (env) =>
+        Effect.sync(() => (env.payload?.x ?? 0) * 2),
+      ),
+    );
+
+    // Ask from node A — wrapper routes via transport to B; B's handler
+    // runs; response envelope returns to A; A's wrapper resolves the
+    // pending Deferred.
+    const result = await Effect.runPromise<number, never>(
+      clusterA.inbox
+        .ask<{ x: number }, number>("calc:remote-doubler", {
+          type: "double",
+          payload: { x: 7 },
+        })
+        .pipe(Effect.orDie) as unknown as Effect.Effect<number, never, never>,
+    );
+    expect(result).toBe(14);
+  });
+
+  it("remote ask: handler-side typed failure round-trips as MessageHandlerError", async () => {
+    const partitioning = {
+      shardKeyFor: (address: string): string => address,
+      nodeFor: async (): Promise<string> => "node-B",
+    };
+    const clusterA = await defineCluster({
+      nodeId: "node-A",
+      transport: localClusterTransport({ registry, nodeId: "node-A" }),
+      membership: staticMembership(["node-A", "node-B"], "node-A"),
+      partitioning: () => partitioning,
+    })(nodeA.parent);
+    const clusterB = await defineCluster({
+      nodeId: "node-B",
+      transport: localClusterTransport({ registry, nodeId: "node-B" }),
+      membership: staticMembership(["node-A", "node-B"], "node-B"),
+      partitioning: () => partitioning,
+    })(nodeB.parent);
+
+    await Effect.runPromise(
+      clusterB.inbox.register("calc:always-fails", () =>
+        Effect.fail({ _tag: "InvalidPayload", reason: "test-failure" } as MessageHandlerError),
+      ),
+    );
+
+    const exit = await Effect.runPromiseExit(
+      clusterA.inbox.ask("calc:always-fails", { type: "query" }),
+    );
+    expect(exit._tag).toBe("Failure");
+    if (exit._tag === "Failure") {
+      // The handler-side typed `MessageHandlerError` must survive the
+      // round trip — it should NOT have collapsed to RoutingFailed or
+      // some stringly-typed error.
+      const failureOpt = Cause.failureOption(exit.cause);
+      expect(failureOpt._tag).toBe("Some");
+      if (failureOpt._tag === "Some") {
+        const err = failureOpt.value as MessageHandlerError;
+        expect(err._tag).toBe("InvalidPayload");
+        if (err._tag === "InvalidPayload") {
+          expect(err.reason).toBe("test-failure");
+        }
+      }
+    }
+  });
+
+  it("remote ask: timeout fires AskTimeout when the owner doesn't reply", async () => {
+    const partitioning = {
+      shardKeyFor: (address: string): string => address,
+      nodeFor: async (): Promise<string> => "node-B",
+    };
+    const clusterA = await defineCluster({
+      nodeId: "node-A",
+      transport: localClusterTransport({ registry, nodeId: "node-A" }),
+      membership: staticMembership(["node-A", "node-B"], "node-A"),
+      partitioning: () => partitioning,
+    })(nodeA.parent);
+    // Node B exists but has no registered handler at the queried
+    // address — local.ask on B will fail with AddressNotFound, which
+    // round-trips back to A as a HandlerError wrapping the routing
+    // error. We bound timeoutMs short so the test runs quickly.
+    await defineCluster({
+      nodeId: "node-B",
+      transport: localClusterTransport({ registry, nodeId: "node-B" }),
+      membership: staticMembership(["node-A", "node-B"], "node-B"),
+      partitioning: () => partitioning,
+    })(nodeB.parent);
+
+    const exit = await Effect.runPromiseExit(
+      clusterA.inbox.ask("calc:no-handler-anywhere", { type: "query" }, { timeoutMs: 100 }),
+    );
+    expect(exit._tag).toBe("Failure");
+  });
+
+  // ----------------- Phase 3.1: diagnostic events -----------------
+
+  it("emits cluster:transport:send:failed when transport.send rejects", async () => {
+    // Custom transport whose `send` always rejects so we observe the
+    // diagnostic. Subscribe on the LOCAL bus to see it without
+    // depending on fanout mode.
+    const failingTransport = defineFailingTransport();
+
+    const seen: string[] = [];
+    const fiber = Effect.runFork(
+      nodeA.parent.bus
+        .subscribe({ surface: "cluster", name: { exact: "cluster:transport:send:failed" } })
+        .pipe(
+          Stream.take(1),
+          Stream.tap((env) => Effect.sync(() => seen.push(env.name))),
+          Stream.runDrain,
+        ),
+    );
+    await flushMicrotasks();
+
+    const partitioning = {
+      shardKeyFor: (address: string): string => address,
+      nodeFor: async (): Promise<string> => "node-B",
+    };
+    const clusterA = await defineCluster({
+      nodeId: "node-A",
+      transport: failingTransport,
+      membership: staticMembership(["node-A", "node-B"], "node-A"),
+      partitioning: () => partitioning,
+    })(nodeA.parent);
+
+    // Fire a remote send; transport.send rejects; wrapper emits diag.
+    const exit = await Effect.runPromiseExit(clusterA.inbox.send("calc:remote", { type: "x" }));
+    expect(exit._tag).toBe("Failure");
+    await flushMicrotasks();
+    await Effect.runPromise(Effect.fromFiber(fiber));
+    expect(seen).toEqual(["cluster:transport:send:failed"]);
+  });
+
+  it("emits cluster:routing:address-not-found when inbound tell hits an unregistered address", async () => {
+    const partitioning = {
+      shardKeyFor: (address: string): string => address,
+      nodeFor: async (): Promise<string> => "node-B",
+    };
+    const clusterA = await defineCluster({
+      nodeId: "node-A",
+      transport: localClusterTransport({ registry, nodeId: "node-A" }),
+      membership: staticMembership(["node-A", "node-B"], "node-A"),
+      partitioning: () => partitioning,
+    })(nodeA.parent);
+    await defineCluster({
+      nodeId: "node-B",
+      transport: localClusterTransport({ registry, nodeId: "node-B" }),
+      membership: staticMembership(["node-A", "node-B"], "node-B"),
+      partitioning: () => partitioning,
+    })(nodeB.parent);
+
+    const seen: string[] = [];
+    const fiber = Effect.runFork(
+      nodeB.parent.bus
+        .subscribe({
+          surface: "cluster",
+          name: { exact: "cluster:routing:address-not-found" },
+        })
+        .pipe(
+          Stream.take(1),
+          Stream.tap((env) => Effect.sync(() => seen.push(env.name))),
+          Stream.runDrain,
+        ),
+    );
+    await flushMicrotasks();
+
+    // Send to an unregistered address on node B.
+    await Effect.runPromise(clusterA.inbox.send("never:registered", { type: "tell" }));
+    await flushMicrotasks();
+    await flushMicrotasks();
+    await Effect.runPromise(Effect.fromFiber(fiber));
+    expect(seen).toEqual(["cluster:routing:address-not-found"]);
+  });
 });
 
-// Silence the unused-import lint — Effect.fromFiber is used above.
+// ---------------------------------------------------------------------------
+// Phase 3.1: membership reactivity
+// ---------------------------------------------------------------------------
+
+describe("defineCluster — membership reactivity", () => {
+  let registry: LocalClusterRegistry;
+  let nodeA: NodeRig;
+
+  beforeEach(() => {
+    registry = createLocalClusterRegistry();
+    nodeA = mkNode("node-A");
+  });
+
+  afterEach(async () => {
+    await teardownNode(nodeA);
+  });
+
+  it("emits cluster:membership:* events when the membership impl signals changes", async () => {
+    // Wire a controllable membership so we can fire arbitrary changes.
+    const handlers: Array<(c: MembershipChange) => void> = [];
+    const membershipFactory = defineClusterMembership({
+      currentNode: "node-A",
+      async nodes() {
+        return ["node-A"];
+      },
+      onChange(handler) {
+        handlers.push(handler);
+        // Issue an initial snapshot, mirroring the contract that
+        // implementations MUST emit at least one snapshot per
+        // subscription.
+        handler({ kind: "snapshot", nodes: ["node-A"], at: "0" });
+        return async () => {};
+      },
+      async close() {},
+    });
+
+    const seen: string[] = [];
+    const fiber = Effect.runFork(
+      nodeA.parent.bus
+        .subscribe({ surface: "cluster", name: { prefix: "cluster:membership:" } })
+        .pipe(
+          Stream.take(3),
+          Stream.tap((env) => Effect.sync(() => seen.push(env.name))),
+          Stream.runDrain,
+        ),
+    );
+    await flushMicrotasks();
+
+    await defineCluster({
+      nodeId: "node-A",
+      transport: localClusterTransport({ registry, nodeId: "node-A" }),
+      membership: membershipFactory,
+    })(nodeA.parent);
+
+    // Fire two more transitions from the membership impl.
+    for (const handler of handlers) {
+      handler({ kind: "joined", node: "node-X", at: "1" });
+      handler({ kind: "lost", node: "node-X", at: "2", reason: "graceful" });
+    }
+    await flushMicrotasks();
+    await Effect.runPromise(Effect.fromFiber(fiber));
+
+    expect(seen).toEqual([
+      "cluster:membership:snapshot",
+      "cluster:membership:joined",
+      "cluster:membership:lost",
+    ]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Test helpers — failing transport for diagnostic coverage
+// ---------------------------------------------------------------------------
+
+/**
+ * Transport whose `send` and `broadcast` always reject. Used to drive
+ * the diagnostic-emission paths without needing real I/O failures.
+ */
+function defineFailingTransport() {
+  return defineClusterTransport({
+    async send(): Promise<void> {
+      throw new Error("transport-send-disabled-for-test");
+    },
+    async broadcast(): Promise<void> {
+      throw new Error("transport-broadcast-disabled-for-test");
+    },
+    subscribeInbox() {
+      return async () => {};
+    },
+    subscribeBus() {
+      return async () => {};
+    },
+    async close() {},
+  });
+}
+
+// Silence the unused-import lint — these types are used in inferred
+// generic positions above.
 type _MHE = MessageHandlerError;

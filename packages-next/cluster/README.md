@@ -6,12 +6,19 @@ transport implementations. Adapter packages
 (`@agentick/cluster-ipc-next`, `@agentick/cluster-redis-next`, etc.)
 provide the actual wire.
 
-**Status:** Phase 3 — wrappers landed. `ClusterEventBus` /
-`ClusterInbox` wrap the parent's local substrate and route across the
-cluster transport. Diagnostic `cluster:wrap:*` events emit on the
-wrapped bus at construction/teardown. Phase 4 (`@agentick/cluster-ipc-next`,
-first real adapter) and Phase 5 (createGateway/createApp substrate-seam
-integration) are next.
+**Status:** Phase 3.1 — wrappers + cross-node ask + diagnostics
+landed. `ClusterEventBus` / `ClusterInbox` wrap the parent's local
+substrate and route across the cluster transport. Remote `ask` works
+end-to-end via a cluster-internal `@cluster/ask` / `@cluster/ask-response`
+wire framing with correlationId-keyed pending-deferred registry; typed
+`MessageHandlerError` survives the round-trip. `defineCluster`
+subscribes `membership.onChange` and emits `cluster:membership:*`
+diagnostics on every topology transition. Transport failures
+(`broadcast`, `send`) emit `cluster:transport:*:failed` diagnostics
+instead of vanishing. Inbound routes to unregistered addresses emit
+`cluster:routing:address-not-found` instead of silent drop. Phase 4
+(`@agentick/cluster-ipc-next`, first real adapter) and Phase 5
+(createGateway / createApp substrate-seam integration) are next.
 
 **Design:** [ADR 35 — cluster protocol](../../docs/proposals/v2/blueprint/35-cluster-protocol.md) ·
 [ADR 11 — cluster vision](../../docs/proposals/v2/blueprint/11-cluster.md)
@@ -61,6 +68,7 @@ today — pure local substrate, zero overhead.
 | 1 | Protocol scaffold — types, factory shapes, helper signatures | **shipped** |
 | 2 | `defineCluster*` impls + JSON codec + `LocalClusterTransport` fixture + conformance suite | **shipped** |
 | 3 | `ClusterEventBus` / `ClusterInbox` wrapper impls + diagnostic event emission | **shipped** |
+| 3.1 | Cross-node `ask` + membership reactivity + transport diagnostics + loud routing | **shipped** |
 | 4 | `@agentick/cluster-ipc-next` — cross-runtime broker (first real adapter) | pending |
 | 5 | Gateway/App substrate-seam integration + Otto cluster demo | pending |
 | 6 | `@agentick/cluster-redis-next` — cross-machine via Redis | pending |
@@ -146,17 +154,13 @@ adopter monitoring) sees them through the standard subscription path.
 
 ## Roadmap & known gaps
 
-- **Cross-node `ask` is not yet supported** — request/response
-  correlation across the cluster requires the
-  `RequestResponseRegistry` pattern wired through the transport.
-  Phase 3b lands this. Until then: keep `ask` partitions node-local.
 - **`subscribe` always returns the LOCAL bus stream.** In
   `node-local-default` mode this is correct — only local events are
   visible. In `cluster-wide-default` it works because remote events
   are re-appended into the local bus. A future "cluster-wide
   subscriber opt-in" path (per-subscription cross-cluster flag)
   would let a single bus serve both audiences without flipping the
-  global default. Phase 3+.
+  global default. Phase 5+.
 - **`publishLazy` over-builds in `cluster-wide-default` mode.** The
   wrapper can't probe remote nodes' subscriber indexes from here, so
   it always builds when fan-out crosses the wire. Adopters with hot
