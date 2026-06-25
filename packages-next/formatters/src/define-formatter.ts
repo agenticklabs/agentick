@@ -7,8 +7,10 @@
  * formatter registry can dispatch by {@link FormatterRef} and so traces
  * can record which formatter ran.
  *
- * Mirrors `defineExecutor` / `defineApp` in the v2 `define__` family
- * (see `FAÇADE.6` in `IMPLEMENTATION-PLAN.md`).
+ * Mirrors `createTool` in the v2 `create__` family — formatters need
+ * no parent-substrate to construct, so per ADR 36 the verb is `create`,
+ * not `define`. This file's rename (define-formatter.ts → create-formatter.ts)
+ * lands in the next slice.
  *
  * @see docs/proposals/v2/blueprint/22-state-formatters-reconciler-shape.md §D2 + §D6
  */

@@ -42,11 +42,6 @@ export async function createApp<P = unknown>(
   } as Omit<AppHarnessOptions<P>, "rootElement">);
 }
 
-// `defineApp` is the naming-consistent twin of `createApp` — same
-// function, both names available for adopters who prefer one verb
-// over the other.
-export { createApp as defineApp };
-
 // Re-export the rest of the public surface so adopters can pull
 // everything from this subpath.
 export { AppHarness, type AppHarnessOptions } from "./harness.js";
