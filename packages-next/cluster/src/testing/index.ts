@@ -1,16 +1,26 @@
 /**
- * Cluster testing fixtures — Meszaros doubles, used by the
- * conformance suite and by adopters writing cross-cluster
- * integration tests without infrastructure.
+ * Cluster testing fixtures — Meszaros doubles for the
+ * conformance suite + adopter integration tests that need
+ * cross-cluster behavior without infrastructure.
  *
- * Phase 1 ships an empty re-export. Phase 2 lands:
- *   - `localClusterTransport()` — in-memory multi-node simulator
- *     routing via shared `LocalEventBus` between fake nodes
- *   - `localClusterMembership()` — in-memory membership tracker
- *   - `spyClusterTransport(...)` — recorder spy wrapping any
- *     transport factory, for assertion-friendly tests
+ *   - `createLocalClusterRegistry()` — shared in-memory routing state
+ *   - `localClusterTransport(opts)` — fake `ClusterTransport` backed
+ *     by the registry; pure JS, no I/O, microtask-scheduled delivery
+ *     for deterministic ordering
+ *   - `localClusterMembership(opts)` — fake `ClusterMembership` backed
+ *     by the same registry; emits snapshot + transition deltas
  *
- * @phase Phase 2.
+ * Use these in tests that need REAL transport behavior (subscription
+ * lifecycle, ordering, filter matching) without standing up real
+ * infrastructure. Adapter packages also use them as the peer
+ * transport in their conformance tests.
  */
 
-export {};
+export type { LocalClusterRegistry } from "./local-cluster-registry.js";
+export { createLocalClusterRegistry } from "./local-cluster-registry.js";
+
+export type { LocalClusterTransportOptions } from "./local-cluster-transport.js";
+export { localClusterTransport } from "./local-cluster-transport.js";
+
+export type { LocalClusterMembershipOptions } from "./local-cluster-membership.js";
+export { localClusterMembership } from "./local-cluster-membership.js";
