@@ -62,6 +62,10 @@ export {
   type DefineClusterConfig,
 } from "./define.js";
 
+// ────────── Bundled built-in adapters ──────────
+export { jsonCodec } from "./builtins/json-codec.js";
+export { consistentHashPartitioning } from "./builtins/consistent-hash-partitioning.js";
+
 // ────────── Conformance suite (Phase 2 impl) ──────────
 export {
   runClusterTransportConformance,

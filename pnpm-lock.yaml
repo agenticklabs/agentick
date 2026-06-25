@@ -468,6 +468,10 @@ importers:
       effect:
         specifier: ^3.21.2
         version: 3.21.2
+    devDependencies:
+      '@agentick/runtime-next':
+        specifier: workspace:*
+        version: link:../runtime
 
   packages-next/elicitation:
     dependencies:
