@@ -1,0 +1,73 @@
+{
+  "name": "@agentick/cluster-next",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Cluster protocol for Agentick v2 — typed seams (`ClusterTransport`, `ClusterMembership`, `ClusterPartitioning`, `ClusterCodec`, optional `DurableJournal`) + `defineCluster*` adapter-authoring helpers + conformance suite. Sits at the substrate-wrapping seam in `createGateway` / `createApp`; adapters ship separately (`@agentick/cluster-ipc-next`, `@agentick/cluster-redis-next`, etc.). Effect-internal, Promise/callback adapter surface.",
+  "keywords": [
+    "agentick",
+    "cluster",
+    "distributed",
+    "ipc",
+    "substrate"
+  ],
+  "license": "MIT",
+  "author": "Ryan Lindgren",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/agenticklabs/agentick.git",
+    "directory": "packages-next/cluster"
+  },
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "main": "src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./testing": {
+      "types": "./src/testing/index.ts",
+      "import": "./src/testing/index.ts",
+      "default": "./src/testing/index.ts"
+    },
+    "./conformance": {
+      "types": "./src/conformance.ts",
+      "import": "./src/conformance.ts",
+      "default": "./src/conformance.ts"
+    }
+  },
+  "publishConfig": {
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "import": "./dist/index.js",
+        "default": "./dist/index.js"
+      },
+      "./testing": {
+        "types": "./dist/testing/index.d.ts",
+        "import": "./dist/testing/index.js",
+        "default": "./dist/testing/index.js"
+      },
+      "./conformance": {
+        "types": "./dist/conformance.d.ts",
+        "import": "./dist/conformance.js",
+        "default": "./dist/conformance.js"
+      }
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "oxlint src/",
+    "format:check": "oxfmt --check src/",
+    "clean": "rm -rf dist tsconfig.build.tsbuildinfo"
+  },
+  "dependencies": {
+    "@agentick/spec-next": "workspace:*",
+    "@agentick/utils-next": "workspace:*",
+    "effect": "^3.21.2"
+  }
+}

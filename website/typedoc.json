@@ -60,7 +60,8 @@
     "../packages-next/gateway",
     "../packages-next/utils",
     "../packages-next/pubsub",
-    "../packages-next/tasks"
+    "../packages-next/tasks",
+    "../packages-next/cluster"
   ],
   "out": "api",
   "plugin": ["typedoc-plugin-markdown", "typedoc-vitepress-theme"],

@@ -93,6 +93,7 @@ const PACKAGE_GROUPS: Array<{ label: string; packages: string[] }> = [
       "@agentick/sandbox-next",
       "@agentick/gateway-next",
       "@agentick/pubsub-next",
+      "@agentick/cluster-next",
     ],
   },
 ];
