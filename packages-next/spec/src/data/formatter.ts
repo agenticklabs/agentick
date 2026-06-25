@@ -161,7 +161,7 @@ export type Formatter = (blocks: readonly SemanticContentBlock[]) => readonly Co
  * Identity metadata attached to a {@link Formatter} so it can be
  * registered + looked up via {@link FormatterRef}.
  *
- * `defineFormatter` ({@link `@agentick/reconciler-react-next`}) returns a
+ * `createFormatter` ({@link `@agentick/formatters-next`}) returns a
  * `Formatter` decorated with this metadata as non-enumerable properties.
  */
 export interface FormatterIdentity {

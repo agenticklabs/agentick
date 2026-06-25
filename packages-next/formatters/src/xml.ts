@@ -15,7 +15,7 @@ import type {
   TextBlock,
 } from "@agentick/spec-next";
 
-import { defineFormatter } from "./define-formatter.js";
+import { createFormatter } from "./create-formatter.js";
 
 function escapeXml(s: string): string {
   return s
@@ -158,7 +158,7 @@ function formatBlock(block: SemanticContentBlock): ContentBlock {
   }
 }
 
-export const xmlFormatter = defineFormatter({
+export const xmlFormatter = createFormatter({
   id: "formatter.xml",
   format: "xml",
   render: (blocks) => blocks.map(formatBlock),

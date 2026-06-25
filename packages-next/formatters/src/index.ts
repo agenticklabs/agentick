@@ -9,17 +9,18 @@
  *   - {@link xmlFormatter}
  *   - {@link textFormatter}
  *
- * Custom formatters compose via {@link defineFormatter}.
+ * Custom formatters compose via {@link createFormatter}.
  *
  * @see docs/proposals/v2/blueprint/22-state-formatters-reconciler-shape.md §D2
+ * @see docs/proposals/v2/blueprint/36-define-vs-create-convention.md
  */
 
 export {
-  defineFormatter,
+  createFormatter,
   refOf,
-  type DefineFormatterInput,
+  type CreateFormatterInput,
   type DefinedFormatter,
-} from "./define-formatter.js";
+} from "./create-formatter.js";
 
 export { markdownFormatter } from "./markdown.js";
 export { xmlFormatter } from "./xml.js";
@@ -28,7 +29,7 @@ export { textFormatter } from "./text.js";
 import { markdownFormatter as md } from "./markdown.js";
 import { xmlFormatter as xml } from "./xml.js";
 import { textFormatter as txt } from "./text.js";
-import type { DefinedFormatter } from "./define-formatter.js";
+import type { DefinedFormatter } from "./create-formatter.js";
 
 /**
  * Built-in formatter registry. Pass into `ReconcilerHarnessOptions.formatters`

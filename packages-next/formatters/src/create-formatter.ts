@@ -1,18 +1,19 @@
 /**
- * `defineFormatter` — author entry point for content formatters.
+ * `createFormatter` — author entry point for content formatters.
  *
  * A {@link Formatter} is a pure function `(SemanticContentBlock[]) →
- * ContentBlock[]`. `defineFormatter` decorates the render function with
+ * ContentBlock[]`. `createFormatter` decorates the render function with
  * identity metadata (`id`, `format`, `version`) so the reconciler's
  * formatter registry can dispatch by {@link FormatterRef} and so traces
  * can record which formatter ran.
  *
- * Mirrors `createTool` in the v2 `create__` family — formatters need
- * no parent-substrate to construct, so per ADR 36 the verb is `create`,
- * not `define`. This file's rename (define-formatter.ts → create-formatter.ts)
- * lands in the next slice.
+ * Per ADR 36 (define vs create): formatters need no parent-harness
+ * substrate to construct, so the verb is `create`, not `define`. The
+ * return type {@link DefinedFormatter} keeps its name — type names are
+ * not covered by the convention.
  *
  * @see docs/proposals/v2/blueprint/22-state-formatters-reconciler-shape.md §D2 + §D6
+ * @see docs/proposals/v2/blueprint/36-define-vs-create-convention.md
  */
 
 import type {
@@ -23,7 +24,7 @@ import type {
   SemanticContentBlock,
 } from "@agentick/spec-next";
 
-export interface DefineFormatterInput extends FormatterIdentity {
+export interface CreateFormatterInput extends FormatterIdentity {
   readonly render: (blocks: readonly SemanticContentBlock[]) => readonly ContentBlock[];
 }
 
@@ -36,7 +37,7 @@ export interface DefinedFormatter extends Formatter {
   readonly __identity: FormatterIdentity;
 }
 
-export function defineFormatter(spec: DefineFormatterInput): DefinedFormatter {
+export function createFormatter(spec: CreateFormatterInput): DefinedFormatter {
   const identity: FormatterIdentity = {
     id: spec.id,
     format: spec.format,

@@ -1,7 +1,7 @@
 # @agentick/formatters-next
 
 Pure-function content formatters for Agentick v2. Ships the
-`defineFormatter` builder plus markdown / xml / text reference
+`createFormatter` builder plus markdown / xml / text reference
 formatters. The reconciler harness dispatches by `FormatterRef` to
 turn semantic content into wire-ready prompts for the model.
 
@@ -69,15 +69,18 @@ provider format.
 
 Imported from `@agentick/spec-next`.
 
-### `defineFormatter(spec)`
+### `createFormatter(spec)`
 
 Decorate a render function with identity metadata so the reconciler's
-registry can dispatch by `FormatterRef`.
+registry can dispatch by `FormatterRef`. Per [ADR
+36](../../docs/proposals/v2/blueprint/36-define-vs-create-convention.md):
+formatters need no parent-substrate to construct, so the verb is
+`create`, not `define`.
 
 ```ts
-import { defineFormatter } from "@agentick/formatters-next";
+import { createFormatter } from "@agentick/formatters-next";
 
-const upperCaseFormatter = defineFormatter({
+const upperCaseFormatter = createFormatter({
   id: "demo.uppercase",
   format: "markdown",
   version: "1.0.0",
@@ -87,11 +90,12 @@ const upperCaseFormatter = defineFormatter({
 ```
 
 The returned `DefinedFormatter` has a non-enumerable `__identity`
-property carrying `{ id, format, version? }`.
+property carrying `{ id, format, version? }`. (The return-type name
+`DefinedFormatter` stays — ADR 36 covers function names, not type names.)
 
 ### `markdownFormatter` · `xmlFormatter` · `textFormatter`
 
-Reference formatters. Each is itself the result of a `defineFormatter`
+Reference formatters. Each is itself the result of a `createFormatter`
 call.
 
 | Formatter           | Semantic input                                                                           | Output style |
@@ -145,7 +149,7 @@ const cachedMarkdown = withCache(markdownFormatter);
 ```ts
 import { markdownFormatter } from "@agentick/formatters-next";
 
-export const anthropicCacheFormatter = defineFormatter({
+export const anthropicCacheFormatter = createFormatter({
   id: "formatter.anthropic-cache",
   format: "markdown",
   render: (blocks) => {

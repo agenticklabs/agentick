@@ -23,7 +23,7 @@ Reconciler harness          spec/protocol/compiler.ts        @agentick/reconcile
 Formatters (pure functions)  spec/data/formatter.ts          @agentick/formatters-next
                              (Formatter type)                 (ships markdownFormatter,
                                                               xmlFormatter, textFormatter,
-                                                              defineFormatter; one consolidated
+                                                              createFormatter; one consolidated
                                                               package — see ADR 22)
 
 Executor harness          spec/protocol/executor.ts        @agentick/executor-anthropic-next

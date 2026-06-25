@@ -83,22 +83,22 @@ interface SemanticNode {
 - Nested formatter switching via `SemanticNode.rendererRef` — the
   reconciler resolves the ref against its formatter registry.
 
-**`defineFormatter` exported from `@agentick/reconciler-react-next`:**
+**`createFormatter` exported from `@agentick/formatters-next`** (per [ADR 36](36-define-vs-create-convention.md) — formatters need no parent-substrate, so the verb is `create`):
 
 ```ts
-interface DefineFormatterInput {
+interface CreateFormatterInput {
   readonly id: string;
   readonly format: "markdown" | "xml" | "text" | "json" | (string & {});
   readonly version?: string;
   readonly render: Formatter;
 }
 
-function defineFormatter(spec: DefineFormatterInput): Formatter;
+function createFormatter(spec: CreateFormatterInput): Formatter;
 ```
 
 **Reference formatters** ship as functions, no harness wrapping:
 
-- `@agentick/formatter-markdown` — `defineFormatter({...})` export
+- `@agentick/formatter-markdown` — `createFormatter({...})` export
 - `@agentick/formatter-xml`
 - `@agentick/formatter-text`
 
@@ -129,7 +129,7 @@ real second consumer guesses right.
 - v1 wire-compat is the identity function for text content.
 - Spec doc `04-formatter-harness.md` → `04-formatters.md` rewrite.
 - Reconciler-react owns the formatter registry, the fold step, and
-  `defineFormatter`. Core extraction is deferred.
+  `createFormatter`. Core extraction is deferred.
 
 ## Implementation order
 
@@ -137,7 +137,7 @@ real second consumer guesses right.
    session wires it across mounts, snapshot round-trip test. Drop
    `ReconcilerSnapshot.hookStates`. (~half day)
 
-2. **Formatters + `defineFormatter` + markdown default** — wire the
+2. **Formatters + `createFormatter` + markdown default** — wire the
    formatter registry slot, build the three reference formatters, swap out
    the private `serializeTreeToString`. Rewrite `04-formatters.md`.
    (~1 day)

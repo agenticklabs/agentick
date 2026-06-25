@@ -11,7 +11,7 @@ import React from "react";
 import { describe, expect, it } from "vitest";
 
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
-import { defineFormatter, type DefinedFormatter } from "@agentick/formatters-next";
+import { createFormatter, type DefinedFormatter } from "@agentick/formatters-next";
 
 import { ReconcilerHarness } from "../harness/reconciler-harness.js";
 import { fakeBridges } from "@agentick/reconciler-next";
@@ -30,7 +30,7 @@ async function makeHarness(options: ConstructorParameters<typeof ReconcilerHarne
 
 describe("ReconcilerHarness — formatter registry slot", () => {
   it("uses custom formatters when supplied via options", async () => {
-    const shoutFormatter: DefinedFormatter = defineFormatter({
+    const shoutFormatter: DefinedFormatter = createFormatter({
       id: "shout",
       format: "markdown",
       render: (blocks) =>

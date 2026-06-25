@@ -518,7 +518,7 @@ graph LR
     E3["devtools<br/>OTel exporter<br/>logging plugin"]
     E4["formatters<br/>semantic HTML<br/>content-block parsers"]
     E5["gates"]
-    E6["createTool<br/>defineFormatter"]
+    E6["createTool<br/>createFormatter"]
   end
 
   L1 --> E1

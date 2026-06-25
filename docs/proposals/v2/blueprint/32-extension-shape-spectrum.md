@@ -16,7 +16,7 @@ spectrum of six shapes, ordered by weight:
 3. **Pure bus subscriber** — no state, just listens
 4. **Reconciler contributor** — render-time output transform
 5. **Descriptor + hook** — declarative typed config composing over an existing harness
-6. **Tool / formatter** — first-class registration via `createTool` / `defineFormatter`
+6. **Tool / formatter** — first-class registration via `createTool` / `createFormatter`
 
 The formal `AppExtension` / `SessionExtension` / `GatewayExtension`
 interface is **shape-agnostic** — it imposes timing (an `install(installer)`
@@ -239,7 +239,7 @@ to a harness.
 
 ### 6. Tool / formatter registration
 
-**Cost.** A `createTool(...)` call or `defineFormatter(...)` call.
+**Cost.** A `createTool(...)` call or `createFormatter(...)` call.
 Inline in JSX or in extension install. No package or formal
 extension needed for adopter-defined tools.
 
@@ -295,7 +295,7 @@ existing primitive?
 
 Is it a tool the model invokes or a formatter the reconciler
 applies?
-  YES → Shape 6: createTool / defineFormatter.
+  YES → Shape 6: createTool / createFormatter.
 ```
 
 **When in doubt, default to the lighter shape.** Promoting a

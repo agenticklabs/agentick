@@ -8,7 +8,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { SemanticContentBlock, SemanticNode } from "@agentick/spec-next";
-import { defineFormatter, markdownFormatter, textFormatter, xmlFormatter } from "../index.js";
+import { createFormatter, markdownFormatter, textFormatter, xmlFormatter } from "../index.js";
 
 function textBlock(text: string): SemanticContentBlock {
   return { type: "text", text } as SemanticContentBlock;
@@ -18,9 +18,9 @@ function semantic(node: SemanticNode): SemanticContentBlock {
   return { type: "text", text: "", semanticNode: node } as SemanticContentBlock;
 }
 
-describe("defineFormatter", () => {
+describe("createFormatter", () => {
   it("attaches identity metadata", () => {
-    const fmt = defineFormatter({
+    const fmt = createFormatter({
       id: "test.json",
       format: "json",
       render: (blocks) => [...blocks],
@@ -30,7 +30,7 @@ describe("defineFormatter", () => {
   });
 
   it("optional version is preserved", () => {
-    const fmt = defineFormatter({
+    const fmt = createFormatter({
       id: "test.v",
       format: "markdown",
       version: "1.2.3",

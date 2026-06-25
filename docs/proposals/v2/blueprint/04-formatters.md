@@ -85,12 +85,14 @@ Behavior:
   ToolUse, ToolResult, etc.) pass through unchanged. The provider
   adapter handles their wire encoding.
 
-## `defineFormatter`
+## `createFormatter`
 
-Author entry point in `@agentick/formatters-next`:
+Author entry point in `@agentick/formatters-next`. Per [ADR 36](36-define-vs-create-convention.md),
+formatters use the `create` verb because they need no parent-substrate
+to construct.
 
 ```ts
-const customFormatter = defineFormatter({
+const customFormatter = createFormatter({
   id: "my.formatter",
   format: "markdown",
   version: "1.0.0",
@@ -127,7 +129,7 @@ flat `ContentBlock[]` only.
 
 ```
 @agentick/formatters-next
-  defineFormatter
+  createFormatter
   refOf
   markdownFormatter          (default for the reconciler)
   xmlFormatter
@@ -210,7 +212,7 @@ middleware import `compose` from any FP utility library.
 
 ```ts
 // formatter-anthropic-cache.ts
-export const anthropicCacheFormatter = defineFormatter({
+export const anthropicCacheFormatter = createFormatter({
   id: "formatter.anthropic-cache",
   format: "markdown",
   render: (blocks) => {

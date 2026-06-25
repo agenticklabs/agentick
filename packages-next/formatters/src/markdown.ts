@@ -25,7 +25,7 @@ import type {
   TextBlock,
 } from "@agentick/spec-next";
 
-import { defineFormatter } from "./define-formatter.js";
+import { createFormatter } from "./create-formatter.js";
 
 // ============================================================================
 // Semantic node walker
@@ -171,7 +171,7 @@ function formatBlock(block: SemanticContentBlock): ContentBlock {
   }
 }
 
-export const markdownFormatter = defineFormatter({
+export const markdownFormatter = createFormatter({
   id: "formatter.markdown",
   format: "markdown",
   render: (blocks) => blocks.map(formatBlock),

@@ -12,7 +12,7 @@ import type {
   TextBlock,
 } from "@agentick/spec-next";
 
-import { defineFormatter } from "./define-formatter.js";
+import { createFormatter } from "./create-formatter.js";
 
 function formatNode(node: SemanticNode): string {
   if (node.text !== undefined && node.semantic === undefined) {
@@ -80,7 +80,7 @@ function formatBlock(block: SemanticContentBlock): ContentBlock {
   }
 }
 
-export const textFormatter = defineFormatter({
+export const textFormatter = createFormatter({
   id: "formatter.text",
   format: "text",
   render: (blocks) => blocks.map(formatBlock),
