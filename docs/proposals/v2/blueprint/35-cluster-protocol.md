@@ -6,9 +6,11 @@
 
 ## TL;DR
 
-Cluster mode is a **substrate wrapper** sitting at one well-defined seam: the moment `createApp` finishes building its local `bus / inbox / journal` and is about to expose them to the AppHarness, the cluster (if configured) wraps them with cluster-aware variants that add cross-node transport while preserving local fan-out for node-local subscribers. Everything else in the harness tree is unchanged.
+Cluster mode is a **substrate wrapper** sitting at one well-defined seam: the moment the gateway (canonical) or app (fallback) finishes building its local `bus / inbox / journal`, the cluster (if configured) wraps them with cluster-aware variants that add cross-node transport while preserving local fan-out for node-local subscribers. Children inherit the wrapped substrate via the factory-pattern parent-chain; everything else in the harness tree is unchanged.
 
-The cluster protocol ships as four typed seams (`ClusterTransport`, `ClusterMembership`, `ClusterPartitioning`, optional `DurableJournal`), each authored via a `defineCluster*` helper that takes a Promise-flavored implementation and produces a `Factory<X, P>`. Adapter authors write boring `async` methods + callback-based subscriptions; the helper bridges to the framework's Effect-typed internal Tag service. Power users who want Effect/Layer composition for their adapter drop into a `/effect` subpath export.
+Cluster is **not** a harness. It emits diagnostic events on the bus it wraps (`surface: "cluster"` — node membership, partition state, routing failures, transport reconnects), visible to any subscriber. State queries flow through a thin read-only `Cluster` value the adopter can access from the harness it's configured on.
+
+The cluster protocol ships as five typed seams (`ClusterTransport`, `ClusterMembership`, `ClusterPartitioning`, `ClusterCodec`, optional `DurableJournal`), each authored via a `defineCluster*` helper that takes a Promise-flavored implementation and produces a `Factory<X, P>`. Adapter authors write boring `async` methods + callback-based subscriptions; the helper bridges to the framework's Effect-typed internal Tag service. Power users who want Effect/Layer composition for their adapter drop into a `/effect` subpath export.
 
 Four-rung ladder for what cluster mode buys, opt-in per deployment:
 
@@ -21,40 +23,81 @@ Four-rung ladder for what cluster mode buys, opt-in per deployment:
 
 ### 1. The substrate seam
 
-`createApp({ cluster })` adds one optional slot on `AppHarnessOptions`:
+Per ADR 31 (Gateway is the runtime root that owns top-level substrate), the **canonical placement for the `cluster` slot is `GatewayHarnessOptions`**. Gateway wraps its own substrate with the cluster; AppHarness inherits that wrapped substrate via the factory-pattern parent-chain; sessions inherit from their app. One configuration point, propagates the whole way down.
+
+The slot also lives on `AppHarnessOptions` for two cases: (a) test scaffolding that doesn't stand up a gateway, (b) the rare case of differently-clustered apps under one gateway. Same `ClusterFactory` shape at both sites; gateway is the production default.
 
 ```typescript
-export interface AppHarnessOptions<P = unknown> {
+// Canonical placement (production):
+export interface GatewayHarnessOptions {
   // ... existing fields ...
   readonly journal?: OperationJournal | OperationJournalFactory<HarnessShell>;
   readonly bus?: EventBus | EventBusFactory<HarnessShell>;
   readonly inbox?: MessageInbox | MessageInboxFactory<HarnessShell>;
   /**
-   * Cluster wrapper (ADR 35). When set, the local bus/inbox/journal
-   * (built from the slots above OR defaulted) are wrapped with the
-   * cluster's transport so cross-node events / messages route via the
-   * configured wire. Absent → local-only behavior; no wrapping; no
-   * cluster overhead.
+   * Cluster wrapper (ADR 35). When set, the gateway's local
+   * bus/inbox/journal (built from the slots above OR defaulted) are
+   * wrapped with the cluster's transport so cross-node events / messages
+   * route via the configured wire. Apps under this gateway inherit the
+   * wrapped substrate via the factory-pattern parent-chain.
+   * Absent → local-only behavior; zero cluster overhead.
    */
+  readonly cluster?: ClusterFactory;
+}
+
+// Fallback placement (test / no-gateway / per-app override):
+export interface AppHarnessOptions<P = unknown> {
+  // ... existing fields ...
   readonly cluster?: ClusterFactory;
 }
 ```
 
-Construction sequence inside `createApp`:
+Construction sequence (wherever the slot is set):
 
 1. Build local substrate (defaults or adopter-supplied via `bus / inbox / journal` slots) — unchanged.
-2. If `cluster` is set, run `cluster(appShell)`. The factory receives the partially-constructed app shell INCLUDING the local substrate. It wraps and returns a `Cluster` object whose `.bus / .inbox / .journal` are cluster-aware versions of the locals.
-3. The AppHarness's effective substrate becomes the cluster-wrapped versions.
+2. If `cluster` is set, run `cluster(parentShell)`. The factory receives the partially-constructed shell INCLUDING the local substrate. It wraps and returns a `Cluster` object whose `.bus / .inbox / .journal` are cluster-aware versions of the locals.
+3. The harness's effective substrate becomes the cluster-wrapped versions; children inherit via the factory pattern.
 4. Sessions, harnesses, MCP clients, devtools, the reconciler — everything downstream — construct as today, blind to whether substrate is local or cluster-wrapped.
-5. On `app.closeApp()`, the cluster's close is invoked (LIFO, per `parent.onClose(...)`).
+5. On harness close, the cluster's close is invoked (LIFO, per `parent.onClose(...)`).
 
-The cluster boundary is **entirely at this seam**. No harness below the AppHarness layer has any cluster-awareness in its code.
+The cluster boundary is **entirely at this seam**. No harness below the cluster-defining layer has any cluster-awareness in its code.
 
 **Without `cluster` set**, steps 2–3 are skipped. Substrate behaves exactly as it does today. Local single-node deployments pay zero cluster cost.
 
+### 1a. Observability surface — bus events, not a harness
+
+Cluster is **not** a harness. A harness needs substrate to construct; cluster IS the substrate-wrapping layer. Making it a harness creates circularity (parent provides substrate; cluster wraps substrate; what's cluster's parent?).
+
+But cluster is also **not fully invisible**. It emits diagnostic events on the bus it wraps, with `surface: "cluster"`:
+
+- `cluster:node:joined` / `cluster:node:lost`
+- `cluster:partition:detected` / `cluster:partition:healed`
+- `cluster:routing:dropped` (message couldn't reach destination)
+- `cluster:transport:reconnecting` / `cluster:transport:reconnected`
+- `cluster:journal:backpressure` (durable journal write-back-pressure, rung d)
+
+Anyone subscribed to the bus (devtools, management dashboard, OTel exporter, the adopter's own monitoring) sees these naturally. Telemetry flows through the same path as everything else — no new export surface, no new subscription model.
+
+Adopters that need to query cluster state (not just observe events) read it from the materialized `Cluster` value — a thin read-only object exposing:
+
+```typescript
+export interface Cluster {
+  readonly bus: EventBus;
+  readonly inbox: MessageInbox;
+  readonly journal: OperationJournal;
+  readonly currentNode: NodeId;
+  nodes(): Promise<readonly NodeId[]>;
+  /** Maps an address → owning node, via the configured partitioning. */
+  ownerOf(address: string): Promise<NodeId>;
+  close(): Promise<void>;
+}
+```
+
+Read-only. No methods that mutate cluster state — partitioning rebalances, transport reconnects, membership transitions all happen internally as the underlying adapters drive them.
+
 ### 2. The protocol package surface
 
-`@agentick/cluster-next` exports four typed seam interfaces and four corresponding `defineCluster*` authoring helpers.
+`@agentick/cluster-next` exports five typed seam interfaces and five corresponding `defineCluster*` authoring helpers.
 
 ```typescript
 // Seam: cross-node wire transport.
@@ -91,14 +134,26 @@ export interface DurableJournal extends OperationJournal {
   replay(from: JournalOffset): AsyncIterable<JournalEntry>;
 }
 
+// Seam: wire serialization. Translates between the framework's typed
+// envelope shapes and the bytes/string transports send on the wire.
+// Sits at the edges of every transport call — transports never
+// JSON.stringify or msgpack-encode directly. Swappable per cluster:
+// JSON for debuggable default, MessagePack for performance, protobuf
+// for strict schemas.
+export interface ClusterCodec {
+  encode(env: MessageEnvelope | EventEnvelope): Uint8Array | string;
+  decode(raw: Uint8Array | string): MessageEnvelope | EventEnvelope;
+}
+
 // Authoring helpers — one per seam. Each takes a Promise-flavored
 // implementation and returns the factory the framework consumes.
 export function defineClusterTransport(impl: ClusterTransport): ClusterTransportFactory;
 export function defineClusterMembership(impl: ClusterMembership): ClusterMembershipFactory;
 export function defineClusterPartitioning(impl: ClusterPartitioning): ClusterPartitioningFactory;
 export function defineClusterJournal(impl: DurableJournal): DurableJournalFactory;
+export function defineClusterCodec(impl: ClusterCodec): ClusterCodecFactory;
 
-// Top-level: bundles the four seams + nodeId into a single cluster factory.
+// Top-level: bundles the seams + nodeId into a single cluster factory.
 export function defineCluster(spec: DefineClusterConfig): ClusterFactory;
 ```
 
@@ -118,6 +173,12 @@ export interface DefineClusterConfig {
   readonly membership: ClusterMembershipFactory;
   readonly partitioning?: ClusterPartitioningFactory;  // default: consistent-hash on sessionId
   readonly journal?: DurableJournalFactory;             // rung (d); optional
+  /**
+   * Wire serialization codec. Default: JSON (universal, debuggable).
+   * Swap for MessagePack (performance), protobuf (strict schemas), or
+   * a custom codec for non-standard wires.
+   */
+  readonly codec?: ClusterCodecFactory;
   /**
    * Default delivery mode for bus subscriptions. Adopters can override
    * per-subscription.
@@ -284,6 +345,15 @@ Each rung is opt-in via the choice of transport / membership / journal adapters.
 | (c) | Multi-tenant isolation | Same transports as (b); adopter writes custom `defineClusterPartitioning` |
 | (d) | Durable execution | `@agentick/cluster-effect-next` (wraps `@effect/cluster`), or a custom `DurableJournal` adapter |
 
+**Wire codec adapter packages** (cross-cutting; any rung):
+
+| Codec | Use case | Package |
+|---|---|---|
+| JSON | Default — debuggable, universal | bundled in `@agentick/cluster-next` |
+| MessagePack | Performance-sensitive deployments | `@agentick/cluster-codec-msgpack-next` |
+| Protobuf | Strict schema enforcement; multi-language clusters | `@agentick/cluster-codec-protobuf-next` (ships .proto schemas alongside) |
+| Custom | Adopter-defined wire (e.g., FlatBuffers, CBOR, encrypted-at-rest variants) | `defineClusterCodec` in adopter code |
+
 Rung (d) requires reconciler-level work (continuation primitives, idempotency keys on tool dispatches, replay-safe side-effect markers) that isn't shipped in v2.0. The seam (`DurableJournal` factory slot) ships now so adapters can be built and tested incrementally; the framework consumes the slot once continuation primitives land.
 
 ### 9. In-process testing
@@ -295,7 +365,7 @@ Rung (d) requires reconciler-level work (continuation primitives, idempotency ke
 - **No `Resolvable<T>` exported type.** Lazy config resolution is per-field inline (`T | (() => T | Promise<T>)`); resolution is a one-line helper. Per ADR 36.
 - **No new harness type.** Cluster wraps substrate; it doesn't add a new harness level. ADR 11's "App Supervisor as singleton entity" is the cross-node coordination story when needed and lives at the application level using cluster primitives, not as a new framework concept.
 - **No automatic session migration on failure.** v2.0: sessions vanish when their owning node dies; clients see disconnect + retry. Recovery via journal replay is rung (d) / v2.x.
-- **No automatic schema versioning of cluster envelopes.** Cluster wire payloads ARE the framework's existing `MessageEnvelope` and `EventEnvelope` shapes — they're already JSON-serializable, already versioned via spec evolution. Adapters serialize/deserialize the same way.
+- **No automatic schema versioning of cluster envelopes.** Cluster wire payloads ARE the framework's existing `MessageEnvelope` and `EventEnvelope` shapes — already versioned via spec evolution. The wire SERIALIZATION (JSON / MessagePack / protobuf) is swappable per `ClusterCodec`; schema-versioned codecs (protobuf) can enforce strict versioning where adopters need it.
 - **No `@effect/cluster` coupling in the protocol.** It becomes ONE adapter for rung (d), not the foundation. Adopters who don't want it never see it.
 
 ## Conformance
@@ -319,7 +389,7 @@ None for existing v2 code. This is greenfield. The single substrate-seam hook in
 
 These don't block the protocol shape but should be settled before adapter packages ship:
 
-1. **Wire envelope format** — JSON + base64 (cheap, debuggable) vs MessagePack (faster, opaque). Probably JSON for v1; revisit if perf shows up as a problem.
+1. **~~Wire envelope format~~** — resolved via `ClusterCodec` seam. JSON is the bundled default; MessagePack / protobuf / custom codecs swap in via the codec slot.
 2. **Failure semantics for `broadcast`** — partial node failure: do we report which nodes received, or just resolve when ack-or-timeout passes? Probably the latter; transports that need stronger guarantees can add their own RPC.
 3. **Cluster bus replay** — `LocalEventBus`'s `replay` option (#176) doesn't extend to remote subscribers naturally. Adapters that support replay (e.g., Redis Streams) expose it; others don't. Document per adapter.
 
