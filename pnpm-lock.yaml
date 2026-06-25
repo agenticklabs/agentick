@@ -473,6 +473,18 @@ importers:
         specifier: workspace:*
         version: link:../runtime
 
+  packages-next/cluster-broker:
+    dependencies:
+      '@agentick/cluster-next':
+        specifier: workspace:*
+        version: link:../cluster
+      '@agentick/spec-next':
+        specifier: workspace:*
+        version: link:../spec
+      '@agentick/utils-next':
+        specifier: workspace:*
+        version: link:../utils
+
   packages-next/elicitation:
     dependencies:
       '@agentick/runtime-next':
