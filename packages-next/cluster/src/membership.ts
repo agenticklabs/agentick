@@ -41,9 +41,13 @@ export interface ClusterMembership {
    * carrying the current member list (so subscribers don't need
    * a separate initial `nodes()` call).
    *
-   * Returns an unsubscribe function. Calling it MUST NOT throw.
+   * Returns an async unsubscribe function. Awaiting the returned
+   * promise guarantees the underlying registry/heartbeat handles
+   * have been released. Calling it MUST NOT throw; transient
+   * errors during cleanup are surfaced via cluster diagnostic
+   * events, not thrown.
    */
-  onChange(handler: (change: MembershipChange) => void): () => void;
+  onChange(handler: (change: MembershipChange) => void): () => Promise<void>;
 
   /**
    * Cooperative close. Withdraws `currentNode` from the cluster's

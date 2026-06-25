@@ -67,18 +67,26 @@ export interface ClusterTransport {
   /**
    * Subscribe to inbound messages matching `filter`. The
    * `onMessage` callback fires per delivered envelope. The returned
-   * function unsubscribes; calling it MUST NOT throw.
+   * function unsubscribes; awaiting the returned promise guarantees
+   * the underlying transport-level resources (Redis SUBSCRIBE
+   * registrations, NATS subscription handles, IPC socket
+   * listeners) have been released. Calling unsubscribe MUST NOT
+   * throw; transient async errors during cleanup are swallowed by
+   * the adapter and surfaced via the cluster's diagnostic events.
    *
    * Adapters MAY deliver messages synchronously OR asynchronously
    * from the callback's POV. Subscribers MUST handle either.
    */
-  subscribeInbox(filter: AddressFilter, onMessage: (env: MessageEnvelope) => void): () => void;
+  subscribeInbox(
+    filter: AddressFilter,
+    onMessage: (env: MessageEnvelope) => void,
+  ): () => Promise<void>;
 
   /**
    * Subscribe to inbound events matching `filter`. Same shape as
    * {@link subscribeInbox}; the callback fires per delivered event.
    */
-  subscribeBus(filter: EventFilter, onEvent: (env: EventEnvelope) => void): () => void;
+  subscribeBus(filter: EventFilter, onEvent: (env: EventEnvelope) => void): () => Promise<void>;
 
   /**
    * Cooperative close. Drops every subscription; flushes any

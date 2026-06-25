@@ -146,3 +146,27 @@ implemented.
 - **Rung (d) durability is documented but not implementable** until
   the framework's continuation primitives ship (v2.x). The
   `DurableJournal` seam exists so adapters can build incrementally.
+
+### IPC broker leader re-election (Phase 4 concern)
+
+The `@agentick/cluster-ipc-next` adapter (Phase 4) elects ONE process
+as the broker; other processes connect as clients. If the broker dies,
+clients lose their wire — the cluster's transport effectively
+partitions until a new broker exists.
+
+Two recovery paths the adapter supports, ranked by what Phase 4 ships:
+
+1. **External supervisor restarts the broker** (PM2, Kubernetes,
+   systemd, Docker restart policy). Clients detect disconnect, retry
+   with exponential backoff, reconnect once the broker is back up.
+   The adapter does nothing special — the orchestrator handles
+   restart. **This is the Phase 4 default.**
+2. **Internal re-election** — file-lock on the socket path (Unix) or
+   bind-on-port race (TCP); first-to-acquire becomes the new broker;
+   others connect to the new winner. More complex; lands if real
+   demand surfaces for self-contained clustering without external
+   supervisor.
+
+Either way, the protocol layer doesn't care — `ClusterMembership`
+just emits `lost` for the old broker + `joined` for the new one;
+framework reacts naturally via the membership stream.

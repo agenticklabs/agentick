@@ -16,24 +16,29 @@ import type { EventEnvelope, MessageEnvelope } from "@agentick/spec-next";
  * framework calls `encode` once per outbound, `decode` once per
  * inbound.
  *
- * The return type of `encode` is `Uint8Array | string` so binary
- * codecs (MessagePack, protobuf, FlatBuffers) and text codecs (JSON)
- * coexist. Transports MUST handle either — most adapters do
- * `if (typeof raw === "string") ... else ...` once at the IO
- * boundary and never branch again.
+ * The codec speaks bytes (`Uint8Array`) in both directions. Text
+ * codecs (JSON) wrap with `TextEncoder` / `TextDecoder` internally:
+ *
+ *   encode(env) → new TextEncoder().encode(JSON.stringify(env))
+ *   decode(raw) → JSON.parse(new TextDecoder().decode(raw))
+ *
+ * The uniform bytes interface keeps transports simple — TCP, IPC,
+ * Redis pub/sub, NATS, WebSocket all speak bytes uniformly with no
+ * per-codec branching. Adopters that need debug-friendly inspection
+ * decode bytes themselves at observation points (e.g.
+ * `new TextDecoder().decode(raw)` if they know the codec is JSON).
  */
 export interface ClusterCodec {
   /**
-   * Serialize an envelope to bytes/string for the wire. Adapters
-   * MUST NOT mutate `env`. The chosen representation is opaque to
-   * the framework — codec + transport pair on both sides MUST agree
-   * on the encoding (typically by being the same codec
-   * implementation).
+   * Serialize an envelope to bytes for the wire. Adapters MUST NOT
+   * mutate `env`. The chosen representation is opaque to the
+   * framework — codec + transport pair on both sides MUST agree on
+   * the encoding (typically by being the same codec implementation).
    */
-  encode(env: MessageEnvelope | EventEnvelope): Uint8Array | string;
+  encode(env: MessageEnvelope | EventEnvelope): Uint8Array;
 
   /**
-   * Deserialize wire bytes/string back into a typed envelope.
+   * Deserialize wire bytes back into a typed envelope.
    * Implementations MUST reject malformed input — return a parsed
    * envelope OR throw. The framework's cluster layer catches throws
    * and routes them to `cluster:wire:decode-failed` diagnostic
@@ -45,5 +50,5 @@ export interface ClusterCodec {
    * `subscribeBus`) the bytes arrived on, and casts at the
    * subscription handler.
    */
-  decode(raw: Uint8Array | string): MessageEnvelope | EventEnvelope;
+  decode(raw: Uint8Array): MessageEnvelope | EventEnvelope;
 }
