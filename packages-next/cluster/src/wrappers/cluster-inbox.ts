@@ -22,17 +22,35 @@
  *     the registered handler, then ships the discriminated outcome
  *     back via a {@link CLUSTER_ASK_RESPONSE_TYPE} envelope addressed
  *     at `@cluster/asks:<asker-node>`. The asker's wrapper looks up
- *     the pending correlationId, resolves the `Deferred`, and the
- *     `ask` Effect completes with the original {@link MessageHandlerError}
- *     shape preserved (failure round-trips structurally, not stringly).
+ *     the pending correlationId, resolves the Deferred, and the
+ *     `ask` Effect completes with the original typed error preserved
+ *     (both `MessageHandlerError` and `InboxError` round-trip
+ *     structurally — see {@link ClusterAskResponsePayload}).
  *
  * Inbound dispatch (`transport.subscribeInbox({})` callback):
- *   - `@cluster/ask`           → unwrap, run local.ask, send response back
- *   - `@cluster/ask-response`  → resolve pending Deferred by correlationId
+ *   - `@cluster/ask`           → validate, unwrap, run local.ask, ship reply
+ *   - `@cluster/ask-response`  → validate, resolve pending Deferred by correlationId
  *   - everything else (adopter tells / forwarded sends) → `local.send`
  *     so the registered handler picks it up exactly as if it had
  *     arrived locally. Idempotency is preserved (the original
  *     `messageId` is carried through).
+ *
+ * The cluster-internal namespace `@cluster/*` is RESERVED. `register`,
+ * `send`, and `ask` reject adopter use of that prefix with
+ * `RoutingFailed`. Without enforcement, adopter code could register
+ * a handler at `@cluster/asks:node-X` and intercept ask responses,
+ * or send a forged `@cluster/ask-response` envelope to resolve a
+ * pending Deferred with attacker-controlled data.
+ *
+ * Wire payloads are validated at the inbound boundary. Any envelope
+ * that fails the shape check emits `cluster:ask:invalid-payload` and
+ * is dropped — we never trust the `unknown` payload past a runtime
+ * validator.
+ *
+ * Caller-interrupt cleanup: `askRemote` returns an `Effect.async` with
+ * a cancel hook that clears the pendingAsks entry + timeoutHandle
+ * when the asker's Effect is interrupted. Without this, a fiber
+ * cancellation orphans the Map entry until the timeout fires.
  *
  * Diagnostics emitted on the LOCAL bus (`surface: "cluster"`):
  *   - `cluster:transport:send:failed`         transport.send rejected
@@ -40,15 +58,9 @@
  *   - `cluster:ask:dispatched`                remote ask forwarded
  *   - `cluster:ask:resolved`                  remote ask completed
  *   - `cluster:ask:timeout`                   remote ask exceeded timeoutMs
+ *   - `cluster:ask:interrupted`               asker interrupted before response
  *   - `cluster:ask:response-orphaned`         response arrived past pending entry
- *
- * Scope notes:
- *   - `register` is local-only — registration state isn't gossiped
- *     across the cluster. Addresses MUST live on their partition-owner;
- *     adopters who put a handler on the wrong node will simply not
- *     receive cross-node deliveries (the transport's `subscribeInbox`
- *     receives them, `local.send` returns `AddressNotFound`, the
- *     wrapper emits `cluster:routing:address-not-found`).
+ *   - `cluster:ask:invalid-payload`           wire payload failed shape validation
  *
  * @see docs/proposals/v2/blueprint/35-cluster-protocol.md §6
  */
@@ -75,9 +87,14 @@ import { DiagnosticEmitter, makeDiagnostics } from "./diagnostics.js";
 import {
   CLUSTER_ASK_RESPONSE_TYPE,
   CLUSTER_ASK_TYPE,
+  CLUSTER_NS_PREFIX,
   clusterReplyAddress,
   isClusterAskRequest,
+  isClusterAskRequestPayload,
   isClusterAskResponse,
+  isClusterAskResponsePayload,
+  isInboxError,
+  isMessageHandlerError,
   type ClusterAskRequestPayload,
   type ClusterAskResponsePayload,
 } from "./internal-wire.js";
@@ -99,7 +116,8 @@ export interface ClusterInboxOptions {
 
 /**
  * Internal pending-ask entry. Held in the wrapper's correlationId map
- * until the response envelope arrives or the timeout fires.
+ * until the response envelope arrives, the timeout fires, or the
+ * asker's Effect is interrupted.
  */
 interface PendingAsk {
   readonly resolve: (value: unknown) => void;
@@ -116,7 +134,8 @@ export class ClusterInbox implements MessageInbox {
 
   /**
    * Correlation registry for outbound asks awaiting a response from
-   * a remote node. Cleared on response arrival or timeout.
+   * a remote node. Cleared on response arrival, timeout, or caller
+   * interrupt.
    */
   private readonly pendingAsks = new Map<string, PendingAsk>();
 
@@ -130,9 +149,6 @@ export class ClusterInbox implements MessageInbox {
     this.currentNode = opts.currentNode;
     this.diag = makeDiagnostics({ localBus: opts.localBus, currentNode: opts.currentNode });
 
-    // Inbound dispatch: every cross-node message routed to this node's
-    // address space (whether an adopter tell, a cluster-internal ask
-    // request, or a cluster-internal ask response) arrives here.
     this.inboundUnsubscribe = this.transport.subscribeInbox({}, (env) => {
       this.dispatchInbound(env);
     });
@@ -148,6 +164,14 @@ export class ClusterInbox implements MessageInbox {
     address: string,
     handler: MessageHandler<T, R>,
   ): Effect.Effect<Unsubscribe, InboxError, never> {
+    if (address.startsWith(CLUSTER_NS_PREFIX)) {
+      return Effect.fail<InboxError>({
+        _tag: "RoutingFailed",
+        cause: new Error(
+          `address "${address}" uses reserved cluster namespace "${CLUSTER_NS_PREFIX}"`,
+        ),
+      });
+    }
     return this.local.register(address, handler);
   }
 
@@ -157,12 +181,12 @@ export class ClusterInbox implements MessageInbox {
   ): Effect.Effect<MessageAck, InboxError, never> {
     return Effect.suspend((): Effect.Effect<MessageAck, InboxError, never> => {
       if (this.closed) return Effect.fail({ _tag: "InboxClosed" });
+      const guard = this.guardReservedNamespace(address, input.type);
+      if (guard) return Effect.fail(guard);
       return Effect.flatMap(
         Effect.promise(() => this.resolveOwner(address)),
         (owner) => {
-          if (owner === this.currentNode) {
-            return this.local.send(address, input);
-          }
+          if (owner === this.currentNode) return this.local.send(address, input);
           return this.sendRemote(owner, address, input);
         },
       );
@@ -176,12 +200,12 @@ export class ClusterInbox implements MessageInbox {
   ): Effect.Effect<R, InboxError | MessageHandlerError, never> {
     return Effect.suspend((): Effect.Effect<R, InboxError | MessageHandlerError, never> => {
       if (this.closed) return Effect.fail<InboxError>({ _tag: "InboxClosed" });
+      const guard = this.guardReservedNamespace(address, input.type);
+      if (guard) return Effect.fail(guard);
       return Effect.flatMap(
         Effect.promise(() => this.resolveOwner(address)),
         (owner): Effect.Effect<R, InboxError | MessageHandlerError, never> => {
-          if (owner === this.currentNode) {
-            return this.local.ask<T, R>(address, input, options);
-          }
+          if (owner === this.currentNode) return this.local.ask<T, R>(address, input, options);
           return this.askRemote<T, R>(owner, address, input, options);
         },
       );
@@ -213,6 +237,29 @@ export class ClusterInbox implements MessageInbox {
   // ============================================================================
   // Internals — outbound
   // ============================================================================
+
+  /**
+   * Reject adopter attempts to use the reserved cluster namespace at
+   * the address or type level. Returns the error to fail with, or
+   * `null` to allow the operation.
+   */
+  private guardReservedNamespace(address: string, type: string): InboxError | null {
+    if (address.startsWith(CLUSTER_NS_PREFIX)) {
+      return {
+        _tag: "RoutingFailed",
+        cause: new Error(
+          `address "${address}" uses reserved cluster namespace "${CLUSTER_NS_PREFIX}"`,
+        ),
+      };
+    }
+    if (type.startsWith(CLUSTER_NS_PREFIX)) {
+      return {
+        _tag: "RoutingFailed",
+        cause: new Error(`type "${type}" uses reserved cluster namespace "${CLUSTER_NS_PREFIX}"`),
+      };
+    }
+    return null;
+  }
 
   private async resolveOwner(address: string): Promise<NodeId> {
     const shardKey = this.partitioning.shardKeyFor(address);
@@ -248,7 +295,8 @@ export class ClusterInbox implements MessageInbox {
   /**
    * Cross-node ask: wrap the asker's envelope in `@cluster/ask`,
    * register a pending correlationId, ship via transport. The
-   * response (or timeout) resolves the returned Effect.
+   * response (or timeout, or caller interrupt) resolves the returned
+   * Effect.
    */
   private askRemote<T, R>(
     owner: NodeId,
@@ -259,7 +307,6 @@ export class ClusterInbox implements MessageInbox {
     const correlationId = ulid();
     const timeoutMs = options?.timeoutMs ?? 30_000;
 
-    // Wrap the adopter's envelope as a cluster-internal ask request.
     const askPayload: ClusterAskRequestPayload<T> = {
       innerType: input.type,
       ...(input.payload !== undefined ? { innerPayload: input.payload } : {}),
@@ -296,11 +343,11 @@ export class ClusterInbox implements MessageInbox {
         timeoutHandle,
       });
 
-      // Fire the wire send. If the transport rejects, we never get a
-      // response — clean up the pending entry + timer immediately.
+      // Fire the wire send. Transport rejection cleans up + fails the
+      // pending entry immediately.
       this.transport.send(owner, env as MessageEnvelope).catch((cause) => {
         const pending = this.pendingAsks.get(correlationId);
-        if (!pending) return; // already resolved/timed-out
+        if (!pending) return;
         this.pendingAsks.delete(correlationId);
         clearTimeout(pending.timeoutHandle);
         this.diag.emit("cluster:transport:send:failed", {
@@ -322,6 +369,17 @@ export class ClusterInbox implements MessageInbox {
         correlationId,
         timeoutMs,
       });
+
+      // Cancel hook: fires on Fiber.interrupt of the asker's surrounding
+      // scope. Clear the pending entry + timeout so they don't leak
+      // until the timeout naturally fires.
+      return Effect.sync(() => {
+        const pending = this.pendingAsks.get(correlationId);
+        if (!pending) return;
+        this.pendingAsks.delete(correlationId);
+        clearTimeout(pending.timeoutHandle);
+        this.diag.emit("cluster:ask:interrupted", { target: owner, address, correlationId });
+      });
     });
   }
 
@@ -329,45 +387,47 @@ export class ClusterInbox implements MessageInbox {
   // Internals — inbound
   // ============================================================================
 
-  /**
-   * Dispatch an inbound envelope. Three branches:
-   *   - `@cluster/ask`            request → run local.ask, send response back
-   *   - `@cluster/ask-response`   resolve pending correlationId
-   *   - everything else           regular tell → local.send
-   */
   private dispatchInbound(env: MessageEnvelope): void {
     if (this.closed) return;
 
     if (isClusterAskRequest(env)) {
-      this.handleInboundAskRequest(env as MessageEnvelope<ClusterAskRequestPayload>);
+      this.handleInboundAskRequest(env);
       return;
     }
 
     if (isClusterAskResponse(env)) {
-      this.handleInboundAskResponse(env as MessageEnvelope<ClusterAskResponsePayload>);
+      this.handleInboundAskResponse(env);
       return;
     }
 
-    // Adopter tell — route to local handler.
     this.dispatchAdopterTell(env);
   }
 
   /**
-   * Server side of a cross-node ask: run the asker's request against
-   * the locally-registered handler, then ship the discriminated
-   * outcome back. Failures of the handler (typed `MessageHandlerError`)
-   * survive the round-trip; runtime defects flatten to the same.
+   * Server side of a cross-node ask. The inbound envelope is treated
+   * as `unknown` payload until validated; we never feed an unchecked
+   * payload into `local.ask`.
    */
-  private handleInboundAskRequest(env: MessageEnvelope<ClusterAskRequestPayload>): void {
-    const askPayload = env.payload;
-    if (!askPayload || !env.from || !env.correlationId) {
-      this.diag.emit("cluster:ask:malformed-request", {
+  private handleInboundAskRequest(env: MessageEnvelope): void {
+    if (!env.from || !env.correlationId) {
+      this.diag.emit("cluster:ask:invalid-payload", {
+        side: "request",
         messageId: env.messageId,
-        address: env.addressedTo,
+        reason: "missing-from-or-correlation",
+      });
+      return;
+    }
+    if (!isClusterAskRequestPayload(env.payload)) {
+      this.diag.emit("cluster:ask:invalid-payload", {
+        side: "request",
+        messageId: env.messageId,
+        correlationId: env.correlationId,
+        reason: "payload-shape",
       });
       return;
     }
 
+    const askPayload = env.payload;
     const innerInput: MessageEnvelopeInput = {
       type: askPayload.innerType,
       ...(askPayload.innerPayload !== undefined ? { payload: askPayload.innerPayload } : {}),
@@ -380,8 +440,6 @@ export class ClusterInbox implements MessageInbox {
         : {}),
     };
 
-    // Mirror the asker's timeout so the receiver doesn't wait
-    // indefinitely when the asker has already given up.
     const askOptions: AskOptions | undefined =
       askPayload.timeoutMs !== undefined ? { timeoutMs: askPayload.timeoutMs } : undefined;
 
@@ -389,10 +447,8 @@ export class ClusterInbox implements MessageInbox {
       Effect.matchCauseEffect({
         onSuccess: (value): Effect.Effect<void, never, never> =>
           this.shipAskResponse(env, { _tag: "success", value }),
-        onFailure: (cause): Effect.Effect<void, never, never> => {
-          const failure = causeToAskFailure(cause);
-          return this.shipAskResponse(env, failure);
-        },
+        onFailure: (cause): Effect.Effect<void, never, never> =>
+          this.shipAskResponse(env, causeToAskFailure(cause)),
       }),
     );
 
@@ -400,13 +456,13 @@ export class ClusterInbox implements MessageInbox {
   }
 
   /**
-   * Asker side: a response envelope arrived. Look up its
-   * correlationId, clear the timeout, and resolve/reject the pending
-   * Effect. Orphaned responses (no pending entry — timeout already
-   * fired, or response from an unknown correlationId) emit a
-   * diagnostic and are dropped.
+   * Asker side: a response envelope arrived. Validate the payload
+   * shape before trusting it; look up its correlationId; clear the
+   * timeout; resolve/reject the pending Effect with a typed error
+   * (both `MessageHandlerError` and `InboxError` round-trip
+   * structurally — see {@link ClusterAskResponsePayload}).
    */
-  private handleInboundAskResponse(env: MessageEnvelope<ClusterAskResponsePayload>): void {
+  private handleInboundAskResponse(env: MessageEnvelope): void {
     if (!env.correlationId) {
       this.diag.emit("cluster:ask:response-orphaned", {
         messageId: env.messageId,
@@ -422,33 +478,49 @@ export class ClusterInbox implements MessageInbox {
       });
       return;
     }
+
+    // Validate the payload before consuming it. A malformed payload
+    // is dropped + diagnosed; the pending entry stays so the timeout
+    // can eventually fire (or close() clears it). Without this the
+    // asker would resolve to `undefined` or a corrupted value typed
+    // as R.
+    if (!isClusterAskResponsePayload(env.payload)) {
+      this.diag.emit("cluster:ask:invalid-payload", {
+        side: "response",
+        messageId: env.messageId,
+        correlationId: env.correlationId,
+        reason: "payload-shape",
+      });
+      return;
+    }
+
     this.pendingAsks.delete(env.correlationId);
     clearTimeout(pending.timeoutHandle);
 
     const payload = env.payload;
-    if (!payload) {
-      pending.reject({
-        _tag: "RoutingFailed",
-        cause: new Error("cluster ask-response had no payload"),
-      });
-      return;
-    }
     this.diag.emit("cluster:ask:resolved", {
       correlationId: env.correlationId,
       outcome: payload._tag,
     });
-    if (payload._tag === "success") {
-      pending.resolve(payload.value);
-    } else if (payload._tag === "fail") {
-      pending.reject(payload.error);
-    } else {
-      // interrupt → surface as InboxClosed-style routing failure so
-      // adopter sees a non-success outcome without inventing a new
-      // tag in the spec.
-      pending.reject({
-        _tag: "RoutingFailed",
-        cause: new Error("remote handler was interrupted"),
-      });
+    switch (payload._tag) {
+      case "success":
+        pending.resolve(payload.value);
+        return;
+      case "handler-fail":
+        pending.reject(payload.error);
+        return;
+      case "routing-fail":
+        pending.reject(payload.error);
+        return;
+      case "interrupt":
+        // Remote handler's fiber was interrupted (e.g., remote inbox
+        // closed mid-call). Surface as RoutingFailed so adopter sees
+        // a non-success outcome without inventing a new spec tag.
+        pending.reject({
+          _tag: "RoutingFailed",
+          cause: new Error("remote handler was interrupted"),
+        });
+        return;
     }
   }
 
@@ -479,9 +551,9 @@ export class ClusterInbox implements MessageInbox {
               });
             }
             // InboxClosed during teardown is expected — silent.
-            // RoutingFailed / other tags fall through silently as
-            // well; the LOCAL inbox's onTellError pathway already
-            // surfaces handler-side problems.
+            // RoutingFailed / other tags fall through silently; the
+            // LOCAL inbox's onTellError pathway already surfaces
+            // handler-side problems.
           }),
         ),
       ),
@@ -495,14 +567,15 @@ export class ClusterInbox implements MessageInbox {
    * shipResponse outcome.
    */
   private shipAskResponse(
-    request: MessageEnvelope<ClusterAskRequestPayload>,
+    request: MessageEnvelope,
     payload: ClusterAskResponsePayload,
   ): Effect.Effect<void, never, never> {
     return Effect.sync(() => {
       const askerReplyAddress = request.from ?? clusterReplyAddress("unknown");
       const askerNode = extractAskerNode(askerReplyAddress);
       if (!askerNode || !request.correlationId) {
-        this.diag.emit("cluster:ask:malformed-request", {
+        this.diag.emit("cluster:ask:invalid-payload", {
+          side: "request",
           messageId: request.messageId,
           reason: "missing-from-or-correlation",
         });
@@ -568,11 +641,16 @@ function extractAskerNode(replyAddress: string): NodeId | null {
 }
 
 /**
- * Map an Effect `Cause` from a local.ask invocation to the wire-side
- * response payload. Typed handler failures (`Effect.fail` with the
- * `MessageHandlerError` shape) survive round-trip; unexpected
- * failures (defects, runtime errors) collapse into a synthetic
- * `MessageHandlerError`.
+ * Map an Effect `Cause` from a `local.ask` invocation to the wire-side
+ * response payload. The `E` channel of `local.ask` is
+ * `InboxError | MessageHandlerError`; both are preserved structurally
+ * across the wire via the discriminated `handler-fail` vs
+ * `routing-fail` tags on {@link ClusterAskResponsePayload}.
+ *
+ *   - Interrupt-only causes  → `{ _tag: "interrupt" }`
+ *   - `MessageHandlerError`  → `{ _tag: "handler-fail", error }`
+ *   - `InboxError`           → `{ _tag: "routing-fail", error }`
+ *   - Defects / unknowns     → synthesized `HandlerError` (`handler-fail`)
  */
 function causeToAskFailure(
   cause: Cause.Cause<InboxError | MessageHandlerError>,
@@ -582,31 +660,14 @@ function causeToAskFailure(
   }
   const failure = Cause.failureOption(cause);
   if (failure._tag === "Some") {
-    // The Effect's `E` channel includes both `InboxError` (routing-side)
-    // and `MessageHandlerError` (handler-side). Only the latter is a
-    // valid wire payload for a remote handler failure — InboxError
-    // bubbling here means the local.ask itself failed before reaching
-    // the handler (no registration, inbox closed). Synthesize a
-    // `HandlerError` for the asker so the wire payload stays typed.
     const value = failure.value;
-    if (isMessageHandlerError(value)) {
-      return { _tag: "fail", error: value };
-    }
-    return {
-      _tag: "fail",
-      error: { _tag: "HandlerError", cause: value },
-    };
+    if (isMessageHandlerError(value)) return { _tag: "handler-fail", error: value };
+    if (isInboxError(value)) return { _tag: "routing-fail", error: value };
   }
-  // Defect — synthesize a HandlerError so the asker sees a typed
-  // failure rather than an opaque routing problem.
+  // Defect / unknown — synthesize a HandlerError so the asker sees a
+  // typed failure rather than nothing.
   return {
-    _tag: "fail",
+    _tag: "handler-fail",
     error: { _tag: "HandlerError", cause: new Error(Cause.pretty(cause)) },
   };
-}
-
-function isMessageHandlerError(value: unknown): value is MessageHandlerError {
-  if (typeof value !== "object" || value === null) return false;
-  const tag = (value as { _tag?: unknown })._tag;
-  return tag === "HandlerError" || tag === "InvalidPayload";
 }

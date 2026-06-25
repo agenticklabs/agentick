@@ -51,6 +51,7 @@ import type {
   ProtocolEvent,
   SubscribeOptions,
 } from "@agentick/spec-next";
+import { isObject } from "@agentick/utils-next";
 
 import type { ClusterTransport } from "../transport.js";
 import type { NodeId } from "../types.js";
@@ -216,6 +217,16 @@ export class ClusterEventBus implements EventBus {
 
   private async onRemoteEvent(env: ProtocolEvent): Promise<void> {
     if (this.closed) return;
+    // Wire-boundary shape validation. A misbehaving transport adapter
+    // (or a wire bit-flip on an unreliable codec) could deliver garbage;
+    // letting it through to `local.append` corrupts the ring buffer
+    // and breaks every downstream subscriber.
+    if (!isValidProtocolEvent(env)) {
+      this.diag.emit("cluster:event:malformed", {
+        reason: "shape-validation",
+      });
+      return;
+    }
     // Defense-in-depth: drop self-echo even if a transport adapter
     // misbehaves. The conformance suite requires no echo, but we
     // don't trust the wire to enforce it.
@@ -225,4 +236,23 @@ export class ClusterEventBus implements EventBus {
     // bus so every local subscriber sees them uniformly.
     await Effect.runPromise(this.local.append(env));
   }
+}
+
+/**
+ * Minimal shape check for an inbound `ProtocolEvent`. Defensive
+ * boundary — the wire could deliver garbage. We require the
+ * load-bearing fields (`id`, `surface`, `name`, `phase`, `timestamp`,
+ * `scope`) to be present and well-typed. Optional fields aren't
+ * validated since they're, well, optional — downstream subscribers'
+ * matchers handle them.
+ */
+function isValidProtocolEvent(env: unknown): env is ProtocolEvent {
+  if (!isObject(env)) return false;
+  if (typeof env.id !== "string") return false;
+  if (typeof env.surface !== "string") return false;
+  if (typeof env.name !== "string") return false;
+  if (typeof env.phase !== "string") return false;
+  if (typeof env.timestamp !== "number") return false;
+  if (!isObject(env.scope)) return false;
+  return true;
 }

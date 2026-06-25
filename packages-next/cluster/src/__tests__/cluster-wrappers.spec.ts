@@ -11,7 +11,7 @@
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { Cause, Effect, Stream } from "effect";
+import { Cause, Effect, Fiber, Stream } from "effect";
 import { LocalEventBus, LocalInbox, MemoryJournal, compileQuery } from "@agentick/runtime-next";
 import type { EventQuery, MessageHandlerError, ProtocolEvent } from "@agentick/spec-next";
 import type { MembershipChange } from "../types.js";
@@ -449,7 +449,12 @@ describe("ClusterInbox — inbox wrapping", () => {
     }
   });
 
-  it("remote ask: timeout fires AskTimeout when the owner doesn't reply", async () => {
+  it("remote ask: routing-side InboxError (AddressNotFound) round-trips with original tag", async () => {
+    // Node B exists but never registers a handler. local.ask on B
+    // fails with InboxError { _tag: "AddressNotFound" }; the wrapper's
+    // causeToAskFailure routes that to a `routing-fail` payload; A
+    // reconstructs the typed InboxError and rejects the pending
+    // Effect with the original tag preserved.
     const partitioning = {
       shardKeyFor: (address: string): string => address,
       nodeFor: async (): Promise<string> => "node-B",
@@ -460,10 +465,6 @@ describe("ClusterInbox — inbox wrapping", () => {
       membership: staticMembership(["node-A", "node-B"], "node-A"),
       partitioning: () => partitioning,
     })(nodeA.parent);
-    // Node B exists but has no registered handler at the queried
-    // address — local.ask on B will fail with AddressNotFound, which
-    // round-trips back to A as a HandlerError wrapping the routing
-    // error. We bound timeoutMs short so the test runs quickly.
     await defineCluster({
       nodeId: "node-B",
       transport: localClusterTransport({ registry, nodeId: "node-B" }),
@@ -472,9 +473,18 @@ describe("ClusterInbox — inbox wrapping", () => {
     })(nodeB.parent);
 
     const exit = await Effect.runPromiseExit(
-      clusterA.inbox.ask("calc:no-handler-anywhere", { type: "query" }, { timeoutMs: 100 }),
+      clusterA.inbox.ask("calc:no-handler", { type: "query" }, { timeoutMs: 1_000 }),
     );
     expect(exit._tag).toBe("Failure");
+    if (exit._tag === "Failure") {
+      const failureOpt = Cause.failureOption(exit.cause);
+      expect(failureOpt._tag).toBe("Some");
+      if (failureOpt._tag === "Some") {
+        // The InboxError typed tag survived; it did NOT collapse to a
+        // synthesized HandlerError or to RoutingFailed.
+        expect((failureOpt.value as { _tag: string })._tag).toBe("AddressNotFound");
+      }
+    }
   });
 
   // ----------------- Phase 3.1: diagnostic events -----------------
@@ -652,6 +662,576 @@ function defineFailingTransport() {
     },
     async close() {},
   });
+}
+
+// ---------------------------------------------------------------------------
+// Phase 3.2: namespace enforcement
+// ---------------------------------------------------------------------------
+
+describe("ClusterInbox — reserved namespace enforcement", () => {
+  let registry: LocalClusterRegistry;
+  let nodeA: NodeRig;
+
+  beforeEach(() => {
+    registry = createLocalClusterRegistry();
+    nodeA = mkNode("node-A");
+  });
+
+  afterEach(async () => {
+    await teardownNode(nodeA);
+  });
+
+  async function makeClusterA() {
+    return defineCluster({
+      nodeId: "node-A",
+      transport: localClusterTransport({ registry, nodeId: "node-A" }),
+      membership: staticMembership(["node-A"], "node-A"),
+    })(nodeA.parent);
+  }
+
+  it("register: rejects @cluster/-prefixed address with RoutingFailed", async () => {
+    const cluster = await makeClusterA();
+    const exit = await Effect.runPromiseExit(
+      cluster.inbox.register("@cluster/asks:node-evil", () => Effect.succeed(undefined)),
+    );
+    expect(exit._tag).toBe("Failure");
+    if (exit._tag === "Failure") {
+      const failureOpt = Cause.failureOption(exit.cause);
+      if (failureOpt._tag === "Some") {
+        expect((failureOpt.value as { _tag: string })._tag).toBe("RoutingFailed");
+      }
+    }
+  });
+
+  it("send: rejects @cluster/-prefixed address", async () => {
+    const cluster = await makeClusterA();
+    const exit = await Effect.runPromiseExit(
+      cluster.inbox.send("@cluster/asks:node-A", { type: "adopter-message" }),
+    );
+    expect(exit._tag).toBe("Failure");
+  });
+
+  it("send: rejects @cluster/-prefixed message type", async () => {
+    const cluster = await makeClusterA();
+    const exit = await Effect.runPromiseExit(
+      cluster.inbox.send("calc:foo", { type: "@cluster/ask-response" }),
+    );
+    expect(exit._tag).toBe("Failure");
+  });
+
+  it("ask: rejects @cluster/-prefixed address", async () => {
+    const cluster = await makeClusterA();
+    const exit = await Effect.runPromiseExit(
+      cluster.inbox.ask("@cluster/asks:node-A", { type: "spoof" }),
+    );
+    expect(exit._tag).toBe("Failure");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Phase 3.2: caller-interrupt cleanup (Effect.async cancel hook)
+// ---------------------------------------------------------------------------
+
+describe("ClusterInbox — askRemote caller-interrupt cleanup", () => {
+  let registry: LocalClusterRegistry;
+  let nodeA: NodeRig;
+  let nodeB: NodeRig;
+
+  beforeEach(() => {
+    registry = createLocalClusterRegistry();
+    nodeA = mkNode("node-A");
+    nodeB = mkNode("node-B");
+  });
+
+  afterEach(async () => {
+    await teardownNode(nodeA);
+    await teardownNode(nodeB);
+  });
+
+  it("emits cluster:ask:interrupted when the asker is interrupted before response", async () => {
+    const partitioning = {
+      shardKeyFor: (address: string): string => address,
+      nodeFor: async (): Promise<string> => "node-B",
+    };
+    const clusterA = await defineCluster({
+      nodeId: "node-A",
+      transport: localClusterTransport({ registry, nodeId: "node-A" }),
+      membership: staticMembership(["node-A", "node-B"], "node-A"),
+      partitioning: () => partitioning,
+    })(nodeA.parent);
+    const clusterB = await defineCluster({
+      nodeId: "node-B",
+      transport: localClusterTransport({ registry, nodeId: "node-B" }),
+      membership: staticMembership(["node-A", "node-B"], "node-B"),
+      partitioning: () => partitioning,
+    })(nodeB.parent);
+
+    // Register a handler on B that NEVER completes (so the asker
+    // can be interrupted while pending).
+    await Effect.runPromise(clusterB.inbox.register("calc:slow", () => Effect.never));
+
+    const seen: string[] = [];
+    const diagFiber = Effect.runFork(
+      nodeA.parent.bus
+        .subscribe({ surface: "cluster", name: { exact: "cluster:ask:interrupted" } })
+        .pipe(
+          Stream.take(1),
+          Stream.tap((env) => Effect.sync(() => seen.push(env.name))),
+          Stream.runDrain,
+        ),
+    );
+    await flushMicrotasks();
+
+    // Fire ask in a fiber, then interrupt it. The cancel hook on
+    // Effect.async clears the pendingAsks entry + timeoutHandle and
+    // emits cluster:ask:interrupted.
+    const askFiber = Effect.runFork(
+      clusterA.inbox.ask("calc:slow", { type: "go" }, { timeoutMs: 30_000 }),
+    );
+    await flushMicrotasks();
+    await flushMicrotasks();
+    await Effect.runPromise(Fiber.interrupt(askFiber));
+    await flushMicrotasks();
+
+    await Effect.runPromise(Effect.fromFiber(diagFiber));
+    expect(seen).toEqual(["cluster:ask:interrupted"]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Phase 3.2: wire payload validation
+// ---------------------------------------------------------------------------
+
+describe("ClusterInbox — wire payload validation", () => {
+  let registry: LocalClusterRegistry;
+  let nodeA: NodeRig;
+  let nodeB: NodeRig;
+
+  beforeEach(() => {
+    registry = createLocalClusterRegistry();
+    nodeA = mkNode("node-A");
+    nodeB = mkNode("node-B");
+  });
+
+  afterEach(async () => {
+    await teardownNode(nodeA);
+    await teardownNode(nodeB);
+  });
+
+  it("emits cluster:ask:invalid-payload on malformed inbound request", async () => {
+    // Two clusters wired up. We'll bypass the wrapper's outbound path
+    // and inject a malformed @cluster/ask envelope directly through
+    // the transport so we can verify the receiver's validation.
+    const partitioning = {
+      shardKeyFor: (address: string): string => address,
+      nodeFor: async (): Promise<string> => "node-B",
+    };
+    const transportA = localClusterTransport({ registry, nodeId: "node-A" });
+    const transportB = localClusterTransport({ registry, nodeId: "node-B" });
+    await defineCluster({
+      nodeId: "node-A",
+      transport: transportA,
+      membership: staticMembership(["node-A", "node-B"], "node-A"),
+      partitioning: () => partitioning,
+    })(nodeA.parent);
+    await defineCluster({
+      nodeId: "node-B",
+      transport: transportB,
+      membership: staticMembership(["node-A", "node-B"], "node-B"),
+      partitioning: () => partitioning,
+    })(nodeB.parent);
+
+    const seen: string[] = [];
+    const fiber = Effect.runFork(
+      nodeB.parent.bus
+        .subscribe({ surface: "cluster", name: { exact: "cluster:ask:invalid-payload" } })
+        .pipe(
+          Stream.take(1),
+          Stream.tap((env) => Effect.sync(() => seen.push(env.name))),
+          Stream.runDrain,
+        ),
+    );
+    await flushMicrotasks();
+
+    // Build a transport-A handle so we can send a wire-malformed
+    // ask request to B. The transport factory captured at construction
+    // is what's already wired into A's cluster — we just need
+    // ANOTHER handle to the registry for direct injection. Easier:
+    // construct a fresh fixture transport for "wire injector" role.
+    const injector = await localClusterTransport({
+      registry,
+      nodeId: "wire-injector",
+    })({
+      id: "injector",
+      bus: new LocalEventBus(),
+      inbox: new LocalInbox(),
+      journal: new MemoryJournal(),
+      onClose() {},
+    });
+
+    // Send an @cluster/ask envelope with a payload that doesn't match
+    // ClusterAskRequestPayload shape (missing innerType string).
+    await injector.send("node-B", {
+      addressedTo: "calc:foo",
+      type: "@cluster/ask",
+      messageId: "evil-1",
+      timestamp: 0,
+      from: "@cluster/asks:wire-injector",
+      correlationId: "evil-corr-1",
+      payload: { not: "valid", innerType: 42 },
+    });
+
+    await flushMicrotasks();
+    await flushMicrotasks();
+    await Effect.runPromise(Effect.fromFiber(fiber));
+    expect(seen).toEqual(["cluster:ask:invalid-payload"]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Phase 3.2: bus inbound shape validation
+// ---------------------------------------------------------------------------
+
+describe("ClusterEventBus — inbound shape validation", () => {
+  let registry: LocalClusterRegistry;
+  let nodeA: NodeRig;
+  let nodeB: NodeRig;
+
+  beforeEach(() => {
+    registry = createLocalClusterRegistry();
+    nodeA = mkNode("node-A");
+    nodeB = mkNode("node-B");
+  });
+
+  afterEach(async () => {
+    await teardownNode(nodeA);
+    await teardownNode(nodeB);
+  });
+
+  it("emits cluster:event:malformed and drops invalid inbound events", async () => {
+    await defineCluster({
+      nodeId: "node-A",
+      transport: localClusterTransport({ registry, nodeId: "node-A" }),
+      membership: staticMembership(["node-A", "node-B"], "node-A"),
+      fanoutMode: "cluster-wide-default",
+    })(nodeA.parent);
+
+    const seen: string[] = [];
+    const fiber = Effect.runFork(
+      nodeA.parent.bus
+        .subscribe({ surface: "cluster", name: { exact: "cluster:event:malformed" } })
+        .pipe(
+          Stream.take(1),
+          Stream.tap((env) => Effect.sync(() => seen.push(env.name))),
+          Stream.runDrain,
+        ),
+    );
+    await flushMicrotasks();
+
+    // Inject a malformed event via a peer transport (missing `surface`).
+    const injector = await localClusterTransport({
+      registry,
+      nodeId: "node-B",
+    })({
+      id: "injector",
+      bus: new LocalEventBus(),
+      inbox: new LocalInbox(),
+      journal: new MemoryJournal(),
+      onClose() {},
+    });
+    await injector.broadcast({
+      id: "evil",
+      // surface intentionally missing
+      name: "tool:test:bogus",
+      phase: "delta",
+      timestamp: 0,
+      scope: {},
+    } as unknown as ProtocolEvent);
+
+    await flushMicrotasks();
+    await flushMicrotasks();
+    await Effect.runPromise(Effect.fromFiber(fiber));
+    expect(seen).toEqual(["cluster:event:malformed"]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Phase 3.2: membership → partitioning end-to-end
+// ---------------------------------------------------------------------------
+
+describe("defineCluster — membership deltas propagate to partitioning", () => {
+  let registry: LocalClusterRegistry;
+  let nodeA: NodeRig;
+
+  beforeEach(() => {
+    registry = createLocalClusterRegistry();
+    nodeA = mkNode("node-A");
+  });
+
+  afterEach(async () => {
+    await teardownNode(nodeA);
+  });
+
+  it("ownerOf observes a node added to the cluster after construction", async () => {
+    let liveNodes: string[] = ["node-A"];
+    const membershipFactory = defineClusterMembership({
+      currentNode: "node-A",
+      async nodes() {
+        // Return the LIVE list so consistent-hash partitioning sees
+        // topology changes the moment they happen.
+        return liveNodes;
+      },
+      onChange(handler) {
+        handler({ kind: "snapshot", nodes: liveNodes, at: "0" });
+        return async () => {};
+      },
+      async close() {},
+    });
+
+    const cluster = await defineCluster({
+      nodeId: "node-A",
+      transport: localClusterTransport({ registry, nodeId: "node-A" }),
+      membership: membershipFactory,
+    })(nodeA.parent);
+
+    // Initial state: only node-A. ownerOf for any address must be A.
+    const ownerBefore = await cluster.ownerOf("tasks:s-1");
+    expect(ownerBefore).toBe("node-A");
+
+    // Grow the cluster.
+    liveNodes = ["node-A", "node-B", "node-C"];
+
+    // Find at least one address whose owner is now NOT node-A — this
+    // proves the consistent-hash impl saw the live membership state
+    // and rebalanced. Sweep a wide address space so the statistical
+    // chance of all 100 mapping back to A is effectively zero
+    // (~1/3^100).
+    let observedNonA = false;
+    for (let i = 0; i < 100; i++) {
+      const owner = await cluster.ownerOf(`tasks:s-${i}`);
+      if (owner !== "node-A") {
+        observedNonA = true;
+        break;
+      }
+    }
+    expect(observedNonA).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Phase 3.2: remaining diagnostic event coverage
+// ---------------------------------------------------------------------------
+
+describe("ClusterInbox — ask lifecycle diagnostics", () => {
+  let registry: LocalClusterRegistry;
+  let nodeA: NodeRig;
+  let nodeB: NodeRig;
+
+  beforeEach(() => {
+    registry = createLocalClusterRegistry();
+    nodeA = mkNode("node-A");
+    nodeB = mkNode("node-B");
+  });
+
+  afterEach(async () => {
+    await teardownNode(nodeA);
+    await teardownNode(nodeB);
+  });
+
+  it("emits cluster:ask:dispatched + cluster:ask:resolved on happy-path remote ask", async () => {
+    const partitioning = {
+      shardKeyFor: (address: string): string => address,
+      nodeFor: async (): Promise<string> => "node-B",
+    };
+    const clusterA = await defineCluster({
+      nodeId: "node-A",
+      transport: localClusterTransport({ registry, nodeId: "node-A" }),
+      membership: staticMembership(["node-A", "node-B"], "node-A"),
+      partitioning: () => partitioning,
+    })(nodeA.parent);
+    const clusterB = await defineCluster({
+      nodeId: "node-B",
+      transport: localClusterTransport({ registry, nodeId: "node-B" }),
+      membership: staticMembership(["node-A", "node-B"], "node-B"),
+      partitioning: () => partitioning,
+    })(nodeB.parent);
+
+    await Effect.runPromise(
+      clusterB.inbox.register("calc:echo", (env) => Effect.succeed(env.payload)),
+    );
+
+    const seen: string[] = [];
+    const fiber = Effect.runFork(
+      nodeA.parent.bus.subscribe({ surface: "cluster", name: { prefix: "cluster:ask:" } }).pipe(
+        Stream.take(2),
+        Stream.tap((env) => Effect.sync(() => seen.push(env.name))),
+        Stream.runDrain,
+      ),
+    );
+    await flushMicrotasks();
+
+    await Effect.runPromise(
+      clusterA.inbox.ask("calc:echo", { type: "x", payload: 42 }).pipe(Effect.orDie),
+    );
+
+    await Effect.runPromise(Effect.fromFiber(fiber));
+    expect(seen).toEqual(["cluster:ask:dispatched", "cluster:ask:resolved"]);
+  });
+
+  it("emits cluster:ask:timeout when remote handler doesn't reply within timeoutMs", async () => {
+    const partitioning = {
+      shardKeyFor: (address: string): string => address,
+      nodeFor: async (): Promise<string> => "node-B",
+    };
+    const clusterA = await defineCluster({
+      nodeId: "node-A",
+      transport: localClusterTransport({ registry, nodeId: "node-A" }),
+      membership: staticMembership(["node-A", "node-B"], "node-A"),
+      partitioning: () => partitioning,
+    })(nodeA.parent);
+    const clusterB = await defineCluster({
+      nodeId: "node-B",
+      transport: localClusterTransport({ registry, nodeId: "node-B" }),
+      membership: staticMembership(["node-A", "node-B"], "node-B"),
+      partitioning: () => partitioning,
+    })(nodeB.parent);
+
+    // Handler never completes — drives the asker into the timeout
+    // branch (not the no-handler branch).
+    await Effect.runPromise(clusterB.inbox.register("calc:stuck", () => Effect.never));
+
+    const seen: string[] = [];
+    const fiber = Effect.runFork(
+      nodeA.parent.bus
+        .subscribe({ surface: "cluster", name: { exact: "cluster:ask:timeout" } })
+        .pipe(
+          Stream.take(1),
+          Stream.tap((env) => Effect.sync(() => seen.push(env.name))),
+          Stream.runDrain,
+        ),
+    );
+    await flushMicrotasks();
+
+    await Effect.runPromiseExit(
+      clusterA.inbox.ask("calc:stuck", { type: "go" }, { timeoutMs: 50 }),
+    );
+    await Effect.runPromise(Effect.fromFiber(fiber));
+    expect(seen).toEqual(["cluster:ask:timeout"]);
+  });
+
+  it("emits cluster:ask:response-orphaned when a response arrives past pending-entry", async () => {
+    // Build the asker side only — we'll inject a forged ask-response
+    // envelope via a peer transport with a correlationId that has no
+    // pending entry. The wrapper must emit response-orphaned and drop.
+    const partitioning = {
+      shardKeyFor: (address: string): string => address,
+      nodeFor: async (): Promise<string> => "node-A",
+    };
+    await defineCluster({
+      nodeId: "node-A",
+      transport: localClusterTransport({ registry, nodeId: "node-A" }),
+      membership: staticMembership(["node-A", "node-injector"], "node-A"),
+      partitioning: () => partitioning,
+    })(nodeA.parent);
+
+    const seen: string[] = [];
+    const fiber = Effect.runFork(
+      nodeA.parent.bus
+        .subscribe({ surface: "cluster", name: { exact: "cluster:ask:response-orphaned" } })
+        .pipe(
+          Stream.take(1),
+          Stream.tap((env) => Effect.sync(() => seen.push(env.name))),
+          Stream.runDrain,
+        ),
+    );
+    await flushMicrotasks();
+
+    const injector = await localClusterTransport({
+      registry,
+      nodeId: "node-injector",
+    })({
+      id: "injector",
+      bus: new LocalEventBus(),
+      inbox: new LocalInbox(),
+      journal: new MemoryJournal(),
+      onClose() {},
+    });
+
+    await injector.send("node-A", {
+      addressedTo: clusterReplyAddressForTests("node-A"),
+      type: "@cluster/ask-response",
+      messageId: "ghost",
+      timestamp: 0,
+      correlationId: "no-such-pending",
+      from: clusterReplyAddressForTests("node-injector"),
+      payload: { _tag: "success", value: 0 },
+    });
+
+    await flushMicrotasks();
+    await flushMicrotasks();
+    await Effect.runPromise(Effect.fromFiber(fiber));
+    expect(seen).toEqual(["cluster:ask:response-orphaned"]);
+  });
+});
+
+describe("ClusterEventBus — broadcast failure diagnostic", () => {
+  let nodeA: NodeRig;
+
+  beforeEach(() => {
+    nodeA = mkNode("node-A");
+  });
+
+  afterEach(async () => {
+    await teardownNode(nodeA);
+  });
+
+  it("emits cluster:transport:broadcast:failed when transport.broadcast rejects", async () => {
+    const failing = defineFailingTransport();
+
+    const seen: string[] = [];
+    const fiber = Effect.runFork(
+      nodeA.parent.bus
+        .subscribe({
+          surface: "cluster",
+          name: { exact: "cluster:transport:broadcast:failed" },
+        })
+        .pipe(
+          Stream.take(1),
+          Stream.tap((env) => Effect.sync(() => seen.push(env.name))),
+          Stream.runDrain,
+        ),
+    );
+    await flushMicrotasks();
+
+    const cluster = await defineCluster({
+      nodeId: "node-A",
+      transport: failing,
+      membership: staticMembership(["node-A"], "node-A"),
+    })(nodeA.parent);
+
+    await Effect.runPromise(
+      cluster.bus.append({
+        id: "x",
+        surface: "tool",
+        name: "tool:dispatch:started",
+        phase: "delta",
+        timestamp: 0,
+        scope: {},
+      }),
+    );
+
+    await Effect.runPromise(Effect.fromFiber(fiber));
+    expect(seen).toEqual(["cluster:transport:broadcast:failed"]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Test helpers — failing transport for diagnostic coverage
+// ---------------------------------------------------------------------------
+
+/** Mirror of the production `clusterReplyAddress` helper for test injection. */
+function clusterReplyAddressForTests(nodeId: string): string {
+  return `@cluster/asks:${nodeId}`;
 }
 
 // Silence the unused-import lint — these types are used in inferred

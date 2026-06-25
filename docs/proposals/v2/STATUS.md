@@ -1,7 +1,35 @@
 # Agentick v2 — Implementation Status
 
 **Branch:** `feat/v2`
-**Last updated:** 2026-06-25 (later) — **Cluster Phase 3.1 — cross-node `ask` + membership reactivity + transport diagnostics + loud routing.** Closes the load-bearing gaps the Phase 3 retrospective surfaced. Six parts:
+**Last updated:** 2026-06-25 (later still) — **Cluster Phase 3.2 — safety pass: Effect.async cancel, wire validation, namespace enforcement, InboxError round-trip, spec-evolution-safe guards.** Closes the load-bearing gaps the Phase 3.1 retrospective surfaced. Eight items:
+
+1. **`Effect.async` cancel hook in `askRemote`.** Returns `Effect.sync(() => { ... })` from the register callback. On caller-interrupt (`Fiber.interrupt`, scope close, etc.) the hook fires: clear the timeoutHandle, delete from pendingAsks, emit `cluster:ask:interrupted`. Pre-3.2, interrupted asks orphaned the Map entry + timer until the timeout naturally fired — under load that's one leak per interrupt.
+
+2. **Wire payload validation at the cluster boundary.** New `isClusterAskRequestPayload` / `isClusterAskResponsePayload` runtime validators in `internal-wire.ts`. `handleInboundAskRequest` rejects malformed requests with `cluster:ask:invalid-payload` (drops envelope; doesn't feed garbage into `local.ask`). `handleInboundAskResponse` validates before resolving the pending Deferred — pre-3.2 a wire-corrupted or attacker-controlled response could deliver a value typed as `R` without any check.
+
+3. **`@cluster/` namespace enforcement.** `ClusterInbox.register` rejects `address.startsWith("@cluster/")` with `RoutingFailed`. `send` and `ask` reject both reserved addresses AND reserved message types. Pre-3.2 the namespace was documented as reserved but not enforced — an attacker (or careless adopter) could register a handler at `@cluster/asks:node-X` to intercept ask responses, or send a forged `@cluster/ask-response` envelope to resolve a pending Deferred with attacker-controlled data.
+
+4. **InboxError round-trip fidelity.** `ClusterAskResponsePayload` now discriminates `handler-fail` vs `routing-fail`. `causeToAskFailure` recognizes both `MessageHandlerError` AND `InboxError` separately and ships the correct tag. Asker reconstructs the typed error with the original `_tag` preserved (`AddressNotFound`, `RoutingFailed`, `InboxClosed`, `AskTimeout` all round-trip). Pre-3.2 only `MessageHandlerError` was preserved; `InboxError` from remote `local.ask` collapsed into a synthesized `HandlerError` wrapping the original — caller couldn't distinguish "remote handler failed" from "remote inbox was unreachable."
+
+5. **Membership-partitioning integration test.** New end-to-end test wires a live-mutable `membership.nodes()` and verifies `ownerOf` observes new nodes after a topology join. Sweeps 100 addresses to statistically prove rebalance. Pre-3.2 the membership-reactivity test only proved bus event emission while the mocked `nodes()` returned a static list — partitioning behavior under topology change was one spot-check away from regression.
+
+6. **Diagnostic event coverage.** Pinned tests for `cluster:ask:dispatched`, `cluster:ask:resolved`, `cluster:ask:timeout` (real handler-stuck timeout, not no-handler proxy), `cluster:ask:response-orphaned` (forged response envelope), `cluster:ask:invalid-payload`, `cluster:ask:interrupted`, `cluster:transport:broadcast:failed`, `cluster:event:malformed`. Pre-3.2 only `cluster:transport:send:failed` and `cluster:routing:address-not-found` had tests — "Every claim needs a test" memory rule violated. Now every documented diagnostic has a verifying test.
+
+7. **Spec-evolution-safe type guards.** `isMessageHandlerError` / `isInboxError` use `Record<TagUnion, true>` initializers — the TypeScript compiler enforces that the Record covers every tag in the union. If spec adds a tag to `MessageHandlerError`, the initializer fails to compile until the guard is updated. Pre-3.2 the guard was hand-rolled (`tag === "HandlerError" || tag === "InvalidPayload"`); a new spec tag would silently downgrade to a synthesized `HandlerError` defect path. Same pattern for `InboxError`.
+
+8. **`ClusterEventBus.onRemoteEvent` shape validation.** `isValidProtocolEvent` minimum shape check (`id`/`surface`/`name`/`phase`/`timestamp`/`scope`) before `local.append`. Garbage from a misbehaving transport adapter emits `cluster:event:malformed` and drops; pre-3.2 it would corrupt the ring buffer.
+
+**Bonus:** Replaced hand-rolled `typeof value !== "object" || value === null` checks throughout with `isObject` from `@agentick/utils-next`. The predicates package owns the canonical type guards; cluster wrappers consume them instead of re-rolling. Caught by user mid-implementation.
+
+**`@agentick/pubsub-next` audit:** Checked all pub-sub-shaped code in the cluster package. (a) `pendingAsks` is one-shot Deferred-by-correlation — not pub-sub. (b) `DiagnosticEmitter` publishes through the canonical `EventBus`. (c) `LocalClusterRegistry` (testing fixture only) has filter-aware fan-out — `KeyedNotifier` doesn't model subscription-side filters, so refactoring would restructure the registry/transport boundary rather than simplify it. No production pub-sub hand-rolls; the registry's pattern is the right primitive for its filter contract.
+
+**Workspace:** 57/57 across cluster-next (12 new tests added in Phase 3.2: namespace enforcement × 4, caller-interrupt cleanup × 1, wire validation × 1, bus shape validation × 1, membership-partitioning × 1, ask lifecycle diagnostics × 3, broadcast failure × 1). Typecheck + oxlint + oxfmt clean.
+
+**Phase 3 retrospectives → 3.1 → 3.2 closed the load-bearing gaps surfaced by each iteration.** The cluster package is now ready for Phase 4 adapters to depend on: cross-node ask works with full typed-error fidelity, interrupt-safe, payload-validated, namespace-enforced; every documented diagnostic is test-pinned; spec evolution is compiler-caught; bus inbound is shape-guarded.
+
+**Next:** Phase 4 — `@agentick/cluster-ipc-next`. First real adapter; cross-runtime broker over Unix socket / TCP localhost. With Phase 3.2's wire-validation contract and diagnostic surface in place, the adapter has a clear safety bar.
+
+**Previously, 2026-06-25 (later) — Cluster Phase 3.1 — cross-node `ask` + membership reactivity + transport diagnostics + loud routing.** Closes the load-bearing gaps the Phase 3 retrospective surfaced. Six parts:
 
 1. **`ulid` moved from runtime-next to utils-next.** The cluster wrappers (and future cross-cluster adapter packages) need monotonic ids without pulling in the in-process substrate impls. The canonical implementation lives in `@agentick/utils-next/src/ulid.ts`; `@agentick/runtime-next/src/substrate/ulid.ts` is now a re-export so existing call sites (`LocalInbox`, `MemoryJournal`) keep their import path. 253/253 across runtime-next + utils-next.
 

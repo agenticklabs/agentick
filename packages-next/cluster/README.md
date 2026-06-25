@@ -6,19 +6,30 @@ transport implementations. Adapter packages
 (`@agentick/cluster-ipc-next`, `@agentick/cluster-redis-next`, etc.)
 provide the actual wire.
 
-**Status:** Phase 3.1 — wrappers + cross-node ask + diagnostics
-landed. `ClusterEventBus` / `ClusterInbox` wrap the parent's local
-substrate and route across the cluster transport. Remote `ask` works
-end-to-end via a cluster-internal `@cluster/ask` / `@cluster/ask-response`
-wire framing with correlationId-keyed pending-deferred registry; typed
-`MessageHandlerError` survives the round-trip. `defineCluster`
-subscribes `membership.onChange` and emits `cluster:membership:*`
-diagnostics on every topology transition. Transport failures
-(`broadcast`, `send`) emit `cluster:transport:*:failed` diagnostics
-instead of vanishing. Inbound routes to unregistered addresses emit
-`cluster:routing:address-not-found` instead of silent drop. Phase 4
-(`@agentick/cluster-ipc-next`, first real adapter) and Phase 5
-(createGateway / createApp substrate-seam integration) are next.
+**Status:** Phase 3.2 — wrappers + cross-node ask + diagnostics +
+safety pass. `ClusterEventBus` / `ClusterInbox` wrap the parent's
+local substrate and route across the cluster transport. Remote
+`ask` works end-to-end via a cluster-internal `@cluster/ask` /
+`@cluster/ask-response` wire framing with correlationId-keyed
+pending-deferred registry. Both `MessageHandlerError` AND `InboxError`
+round-trip structurally — typed failure tags preserved across the
+wire. `Effect.async` cancel hook fires on caller-interrupt so
+interrupted asks don't leak pending entries / timeouts. Wire payloads
+are runtime-validated at the inbound boundary; malformed envelopes
+emit `cluster:ask:invalid-payload` and drop. The `@cluster/`
+namespace is enforced at `register` / `send` / `ask` — adopters
+attempting to use reserved addresses or types get `RoutingFailed`
+with a clear pointer (closes the response-spoofing footgun). Type
+guards for `MessageHandlerError` / `InboxError` use spec-evolution-safe
+exhaustive `Record` checks. `defineCluster` subscribes
+`membership.onChange` and emits `cluster:membership:*` diagnostics
+on every topology transition. Transport failures (`broadcast`, `send`)
+emit `cluster:transport:*:failed` diagnostics. Inbound routes to
+unregistered addresses emit `cluster:routing:address-not-found`.
+Bus inbound shape-validates before re-appending; malformed events
+emit `cluster:event:malformed`. Phase 4 (`@agentick/cluster-ipc-next`,
+first real adapter) and Phase 5 (createGateway / createApp
+substrate-seam integration) are next.
 
 **Design:** [ADR 35 — cluster protocol](../../docs/proposals/v2/blueprint/35-cluster-protocol.md) ·
 [ADR 11 — cluster vision](../../docs/proposals/v2/blueprint/11-cluster.md)
@@ -69,6 +80,7 @@ today — pure local substrate, zero overhead.
 | 2 | `defineCluster*` impls + JSON codec + `LocalClusterTransport` fixture + conformance suite | **shipped** |
 | 3 | `ClusterEventBus` / `ClusterInbox` wrapper impls + diagnostic event emission | **shipped** |
 | 3.1 | Cross-node `ask` + membership reactivity + transport diagnostics + loud routing | **shipped** |
+| 3.2 | Effect.async cancel + wire validation + namespace enforcement + InboxError round-trip + spec-evolution-safe guards | **shipped** |
 | 4 | `@agentick/cluster-ipc-next` — cross-runtime broker (first real adapter) | pending |
 | 5 | Gateway/App substrate-seam integration + Otto cluster demo | pending |
 | 6 | `@agentick/cluster-redis-next` — cross-machine via Redis | pending |
