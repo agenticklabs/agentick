@@ -124,7 +124,7 @@ describe("defineCluster — composition", () => {
     expect(a).toBe(b);
   });
 
-  it("bus / inbox / journal are pass-through from parent (Phase 2 — no wrapping yet)", async () => {
+  it("bus / inbox are cluster-wrapped; journal is pass-through (Phase 3)", async () => {
     const parent = mkParent();
     const factory = defineCluster({
       nodeId: "n1",
@@ -132,8 +132,11 @@ describe("defineCluster — composition", () => {
       membership: staticMembership(["n1"], "n1"),
     });
     const cluster = await factory(parent);
-    expect(cluster.bus).toBe(parent.bus);
-    expect(cluster.inbox).toBe(parent.inbox);
+    // Bus and inbox are NEW wrapper instances — distinct from the
+    // parent's local impls. The wrappers compose the locals internally.
+    expect(cluster.bus).not.toBe(parent.bus);
+    expect(cluster.inbox).not.toBe(parent.inbox);
+    // Journal: no DurableJournal supplied → pass-through.
     expect(cluster.journal).toBe(parent.journal);
   });
 
@@ -197,12 +200,14 @@ describe("defineCluster — adapter onClose registration", () => {
     });
     await factory(parent);
 
-    // Two handlers registered (transport + membership; partitioning
-    // and codec have no lifecycle).
-    expect(handlers.length).toBe(2);
-    // Fire them in order — defineCluster's factory body registered
-    // transport first, then membership.
+    // Four handlers registered: transport, membership, bus wrapper,
+    // inbox wrapper. (Partitioning and codec have no lifecycle.)
+    expect(handlers.length).toBe(4);
+    // Fire them in registration order — defineCluster registers
+    // transport first, then membership, then bus, then inbox.
     for (const h of handlers) await h();
+    // Only the adapters announce themselves; bus/inbox wrappers
+    // close silently (their cleanup is unwiring transport subs).
     expect(closeCalls).toEqual(["transport", "membership"]);
   });
 });

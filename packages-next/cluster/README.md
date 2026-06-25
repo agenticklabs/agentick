@@ -6,9 +6,12 @@ transport implementations. Adapter packages
 (`@agentick/cluster-ipc-next`, `@agentick/cluster-redis-next`, etc.)
 provide the actual wire.
 
-**Status:** Phase 1 (protocol scaffold). Types and helper signatures
-land in this slice; the `defineCluster*` impls + JSON codec +
-`LocalClusterTransport` fixture + conformance suite ship in Phase 2.
+**Status:** Phase 3 — wrappers landed. `ClusterEventBus` /
+`ClusterInbox` wrap the parent's local substrate and route across the
+cluster transport. Diagnostic `cluster:wrap:*` events emit on the
+wrapped bus at construction/teardown. Phase 4 (`@agentick/cluster-ipc-next`,
+first real adapter) and Phase 5 (createGateway/createApp substrate-seam
+integration) are next.
 
 **Design:** [ADR 35 — cluster protocol](../../docs/proposals/v2/blueprint/35-cluster-protocol.md) ·
 [ADR 11 — cluster vision](../../docs/proposals/v2/blueprint/11-cluster.md)
@@ -56,8 +59,8 @@ today — pure local substrate, zero overhead.
 | Phase | Scope | Status |
 |---|---|---|
 | 1 | Protocol scaffold — types, factory shapes, helper signatures | **shipped** |
-| 2 | `defineCluster*` impls + JSON codec + `LocalClusterTransport` fixture + conformance suite | pending |
-| 3 | `ClusterEventBus` / `ClusterInbox` wrapper impls + diagnostic event emission | pending |
+| 2 | `defineCluster*` impls + JSON codec + `LocalClusterTransport` fixture + conformance suite | **shipped** |
+| 3 | `ClusterEventBus` / `ClusterInbox` wrapper impls + diagnostic event emission | **shipped** |
 | 4 | `@agentick/cluster-ipc-next` — cross-runtime broker (first real adapter) | pending |
 | 5 | Gateway/App substrate-seam integration + Otto cluster demo | pending |
 | 6 | `@agentick/cluster-redis-next` — cross-machine via Redis | pending |
@@ -124,25 +127,51 @@ adopter monitoring) sees them through the standard subscription path.
 
 ## Verified by
 
-Phase 1 (this slice): nothing yet — type-only scaffold. Phase 2 +
-later adapter packages get the conformance suite once it's
-implemented.
+- `src/__tests__/json-codec.spec.ts` — JSON codec round-trips
+  `MessageEnvelope` / `EventEnvelope` through encode → decode.
+- `src/__tests__/consistent-hash-partitioning.spec.ts` — default
+  partitioning is deterministic, balanced, FNV-1a-hashed.
+- `src/__tests__/define.spec.ts` — `defineCluster` composes seams,
+  resolves lazy `nodeId`, wraps bus/inbox, registers all close
+  handlers with the parent.
+- `src/__tests__/conformance-against-local.spec.ts` — the conformance
+  suite passes against `LocalClusterTransport`.
+- `src/__tests__/cluster-wrappers.spec.ts` — `ClusterEventBus` honors
+  `cluster-wide-default` (remote events visible) and
+  `node-local-default` (remote events dropped); emits
+  `cluster:wrap:installed` diagnostic. `ClusterInbox` routes local
+  `send` to the local inbox and remote `send` over the transport;
+  `ask` is local-only (Phase 3) — remote ask fails with a clear
+  Phase 3b pointer.
 
 ## Roadmap & known gaps
 
-- **`defineClusterX(impl)` helpers throw "not yet implemented"** at
-  runtime — Phase 1 ships signatures only. Phase 2 lands the
-  Promise/callback → Effect-Layer bridge that makes them work.
-- **`LocalClusterTransport` fixture not yet shipped.** The
-  `/testing` subpath is currently empty; Phase 2 lands the
-  in-memory multi-node simulator.
-- **No conformance suite body.** `runClusterTransportConformance`
-  is a thrown stub. Phase 2 lands the suite.
+- **Cross-node `ask` is not yet supported** — request/response
+  correlation across the cluster requires the
+  `RequestResponseRegistry` pattern wired through the transport.
+  Phase 3b lands this. Until then: keep `ask` partitions node-local.
+- **`subscribe` always returns the LOCAL bus stream.** In
+  `node-local-default` mode this is correct — only local events are
+  visible. In `cluster-wide-default` it works because remote events
+  are re-appended into the local bus. A future "cluster-wide
+  subscriber opt-in" path (per-subscription cross-cluster flag)
+  would let a single bus serve both audiences without flipping the
+  global default. Phase 3+.
+- **`publishLazy` over-builds in `cluster-wide-default` mode.** The
+  wrapper can't probe remote nodes' subscriber indexes from here, so
+  it always builds when fan-out crosses the wire. Adopters with hot
+  publishers can keep `fanoutMode: "node-local-default"` to retain
+  the short-circuit.
+- **Codec is constructed but not yet routed through** — the local
+  fixture transport stays in-process and doesn't serialize. Adapter
+  packages (cluster-ipc-next, cluster-redis-next) consume the codec
+  for their wire serialization in Phase 4+.
 - **Cluster substrate seam not yet wired into `createGateway` /
   `createApp`.** ADR 35 §1 describes the integration; Phase 5
-  implements it.
-- **No real adapter packages.** `@agentick/cluster-ipc-next` is
-  the first; Phase 4.
+  implements it. Until then, adopters must construct the cluster
+  manually against a parent shell.
+- **No real adapter packages.** `@agentick/cluster-ipc-next` is the
+  first; Phase 4.
 - **Rung (d) durability is documented but not implementable** until
   the framework's continuation primitives ship (v2.x). The
   `DurableJournal` seam exists so adapters can build incrementally.

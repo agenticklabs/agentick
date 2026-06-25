@@ -17,6 +17,8 @@
 import { consistentHashPartitioning } from "./builtins/consistent-hash-partitioning.js";
 import { jsonCodec } from "./builtins/json-codec.js";
 import type { Cluster, ClusterFactory, ClusterParent } from "./cluster.js";
+import { ClusterEventBus } from "./wrappers/cluster-event-bus.js";
+import { ClusterInbox } from "./wrappers/cluster-inbox.js";
 import type { ClusterCodec } from "./codec.js";
 import type {
   ClusterCodecFactory,
@@ -198,15 +200,10 @@ export function defineCluster(spec: DefineClusterConfig): ClusterFactory {
     const nodeId = typeof spec.nodeId === "function" ? await spec.nodeId() : spec.nodeId;
 
     // Construct seams. Each factory may return sync / Promise /
-    // Effect; for Phase 2 we only support sync + Promise (Effect
-    // returns from adapter factories land in Phase 3 alongside the
-    // wrapper impls that need them).
-    // Transport constructed for its onClose side-effect (registered
-    // via parent.onClose by defineClusterTransport); Phase 3's wrapper
-    // impls (ClusterEventBus / ClusterInbox) will read it for actual
-    // cross-node routing. For Phase 2 the construction itself is the
-    // load-bearing observable behavior.
-    const _transport = await resolveFactoryAsync(spec.transport, parent);
+    // Effect; Phase 3 supports sync + Promise (Effect-returning
+    // adapter factories will land alongside the Effect-Tag interface
+    // exposed under the `/effect` subpath escape hatch).
+    const transport = await resolveFactoryAsync(spec.transport, parent);
     const membership = await resolveFactoryAsync(spec.membership, parent);
 
     // Partitioning: explicit > default (consistent-hash on membership).
@@ -214,11 +211,12 @@ export function defineCluster(spec: DefineClusterConfig): ClusterFactory {
       ? await resolveFactoryAsync(spec.partitioning, parent)
       : await resolveFactoryAsync(consistentHashPartitioning(membership), parent);
 
-    // Codec: explicit > default (JSON). Constructed here so the
-    // chosen codec is realized before the cluster value resolves.
-    // Phase 3's wrapper impls read it from the spec when wiring
-    // ClusterEventBus / ClusterInbox; for Phase 2 the construction
-    // itself is the load-bearing observable behavior.
+    // Codec: explicit > default (JSON). Realized here so adapters
+    // that swap codecs (msgpack/protobuf) are visible at construction.
+    // Phase 3's wrappers don't yet route through the codec (the local
+    // fixture transport sends in-process); cross-process adapters will
+    // consume it from `spec.codec` directly. The construction itself is
+    // the load-bearing observable behavior.
     const _codec = spec.codec
       ? await resolveFactoryAsync(spec.codec, parent)
       : await resolveFactoryAsync(jsonCodec(), parent);
@@ -226,12 +224,34 @@ export function defineCluster(spec: DefineClusterConfig): ClusterFactory {
     // Journal: optional — defaults to parent's journal pass-through.
     const journal = spec.journal ? await resolveFactoryAsync(spec.journal, parent) : parent.journal;
 
-    // For Phase 2, bus and inbox are PASS-THROUGH. Phase 3 lands
-    // ClusterEventBus / ClusterInbox wrappers that consult the
-    // transport / membership / partitioning to route cross-node.
+    // Phase 3: wrap the parent's local substrate with cluster-aware
+    // bus + inbox. Locally registered subscribers / handlers see
+    // events / messages from BOTH this node and the cluster (subject
+    // to fanout mode for the bus; partitioning for the inbox).
+    const fanoutMode = spec.fanoutMode ?? "node-local-default";
+    const bus = new ClusterEventBus({
+      local: parent.bus,
+      transport,
+      currentNode: nodeId,
+      fanoutMode,
+    });
+    const inbox = new ClusterInbox({
+      local: parent.inbox,
+      transport,
+      partitioning,
+      currentNode: nodeId,
+    });
+
+    // Register wrapper closes with the parent so they tear down in
+    // the same LIFO chain as the underlying seams. Order: inbox →
+    // bus (mirror of construction). Transport and membership are
+    // closed via their own defineClusterX onClose registration.
+    parent.onClose(() => bus.close());
+    parent.onClose(() => inbox.close());
+
     const cluster: Cluster = {
-      bus: parent.bus,
-      inbox: parent.inbox,
+      bus,
+      inbox,
       journal,
       currentNode: nodeId,
       nodes: () => membership.nodes(),
@@ -239,15 +259,13 @@ export function defineCluster(spec: DefineClusterConfig): ClusterFactory {
         return partitioning.nodeFor(partitioning.shardKeyFor(address));
       },
       async close() {
-        // Seam close()s register via parent.onClose during each
-        // factory call; this aggregator just runs the top-level
-        // teardown (no-op for Phase 2 since all close registration
-        // is already in parent.onClose).
-        // Codec is stateless; partitioning has no lifecycle.
-        // Membership and transport closes are registered via
-        // parent.onClose so they fire from the LIFO close chain
-        // naturally when the parent harness closes.
-        await Promise.resolve();
+        // Defensive top-level close — fires the wrapper closes
+        // synchronously even when the parent harness lifecycle
+        // hasn't run. The wrappers are idempotent on double-close,
+        // so this is safe whether or not parent.onClose has already
+        // run.
+        await inbox.close();
+        await bus.close();
       },
     };
 
