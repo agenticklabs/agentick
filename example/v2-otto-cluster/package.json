@@ -1,0 +1,24 @@
+{
+  "name": "example-v2-otto-cluster",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Phase 4 cluster proof-point — 3 forked workers coordinate via a Unix-socket cluster with auto-elect + re-election. No docker, no real model. Demonstrates the single-host multi-worker deployment tier end-to-end.",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx --tsconfig tsconfig.json src/index.ts",
+    "start": "tsx --tsconfig tsconfig.json src/index.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@agentick/cluster-broker-next": "workspace:*",
+    "@agentick/cluster-net-next": "workspace:*",
+    "@agentick/cluster-next": "workspace:*",
+    "@agentick/runtime-next": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.5.4",
+    "esbuild": "^0.27.3",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3"
+  }
+}

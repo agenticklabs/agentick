@@ -318,6 +318,34 @@ importers:
         specifier: ^5.7.3
         version: 5.9.3
 
+  example/v2-otto-cluster:
+    dependencies:
+      '@agentick/cluster-broker-next':
+        specifier: workspace:*
+        version: link:../../packages-next/cluster-broker
+      '@agentick/cluster-net-next':
+        specifier: workspace:*
+        version: link:../../packages-next/cluster-net
+      '@agentick/cluster-next':
+        specifier: workspace:*
+        version: link:../../packages-next/cluster
+      '@agentick/runtime-next':
+        specifier: workspace:*
+        version: link:../../packages-next/runtime
+    devDependencies:
+      '@types/node':
+        specifier: ^22.5.4
+        version: 22.19.7
+      esbuild:
+        specifier: ^0.27.3
+        version: 0.27.3
+      tsx:
+        specifier: ^4.19.2
+        version: 4.21.0
+      typescript:
+        specifier: ^5.7.3
+        version: 5.9.3
+
   example/v2-real:
     dependencies:
       '@agentick/app-next':
@@ -3791,6 +3819,7 @@ packages:
   '@smithy/util-retry@4.3.6':
     resolution: {integrity: sha512-p6/FO1n2KxMeQyna067i0uJ6TSbb165ZhnRtCpWh4Foxqbfc6oW+XITaL8QkFJj3KFnDe2URt4gOhgU06EP9ew==}
     engines: {node: '>=18.0.0'}
+    deprecated: '@smithy/util-retry v4.3.6 contains a bug in Adaptive Retry, see https://github.com/smithy-lang/smithy-typescript/issues/1993. Upgrade to 4.3.7+'
 
   '@smithy/util-stream@4.5.25':
     resolution: {integrity: sha512-/PFpG4k8Ze8Ei+mMKj3oiPICYekthuzePZMgZbCqMiXIHHf4n2aZ4Ps0aSRShycFTGuj/J6XldmC0x0DwednIA==}
@@ -6086,7 +6115,6 @@ packages:
 
   onnxruntime-node@1.21.0:
     resolution: {integrity: sha512-NeaCX6WW2L8cRCSqy3bInlo5ojjQqu2fD3D+9W5qb5irwxhEyWKXeH2vZ8W9r6VxaMPUan+4/7NDwZMtouZxEw==}
-    os: [win32, darwin, linux]
 
   onnxruntime-web@1.22.0-dev.20250409-89f8206ba4:
     resolution: {integrity: sha512-0uS76OPgH0hWCPrFKlL8kYVV7ckM7t/36HfbgoFw6Nd0CZVVbQC4PkrR8mBX8LtNUFZO25IQBqV2Hx2ho3FlbQ==}
@@ -10111,14 +10139,14 @@ snapshots:
       chai: 6.2.2
       tinyrainbow: 3.0.3
 
-  '@vitest/mocker@4.0.18(msw@2.14.6(@types/node@22.19.7)(typescript@5.9.3))(vite@6.4.1(@types/node@22.19.7)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.4))':
+  '@vitest/mocker@4.0.18(msw@2.14.6(@types/node@22.19.7)(typescript@5.9.3))(vite@6.4.1(@types/node@25.0.9)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.4))':
     dependencies:
       '@vitest/spy': 4.0.18
       estree-walker: 3.0.3
       magic-string: 0.30.21
     optionalDependencies:
       msw: 2.14.6(@types/node@22.19.7)(typescript@5.9.3)
-      vite: 6.4.1(@types/node@22.19.7)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.4)
+      vite: 6.4.1(@types/node@25.0.9)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.4)
 
   '@vitest/mocker@4.0.18(msw@2.14.6(@types/node@25.0.9)(typescript@5.9.3))(vite@6.4.1(@types/node@25.0.9)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.4))':
     dependencies:
@@ -13632,7 +13660,7 @@ snapshots:
   vitest@4.0.18(@opentelemetry/api@1.9.0)(@types/node@22.19.7)(happy-dom@17.6.3)(jiti@2.6.1)(msw@2.14.6(@types/node@22.19.7)(typescript@5.9.3))(tsx@4.21.0)(yaml@2.8.4):
     dependencies:
       '@vitest/expect': 4.0.18
-      '@vitest/mocker': 4.0.18(msw@2.14.6(@types/node@22.19.7)(typescript@5.9.3))(vite@6.4.1(@types/node@22.19.7)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.4))
+      '@vitest/mocker': 4.0.18(msw@2.14.6(@types/node@22.19.7)(typescript@5.9.3))(vite@6.4.1(@types/node@25.0.9)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.4))
       '@vitest/pretty-format': 4.0.18
       '@vitest/runner': 4.0.18
       '@vitest/snapshot': 4.0.18
