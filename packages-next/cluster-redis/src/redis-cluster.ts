@@ -1,0 +1,131 @@
+/**
+ * High-level Redis cluster factories.
+ *
+ *   - `redisClusterNode(opts)` — bundles a {transport, membership}
+ *     factory pair backed by Redis pub/sub + SET-with-TTL.
+ *   - `redisTransport(opts)` / `redisMembership(opts)` — standalone
+ *     factories.
+ *   - `defineRedisCluster(opts)` — top-level convenience wrapping
+ *     `defineCluster + redisClusterNode`.
+ *
+ * Adopter-facing API mirrors `defineTcpCluster` / `defineWsCluster`
+ * for consistency. Unlike the broker-based wires, there's NO
+ * `redisBroker(...)` — Redis IS the broker; every node is symmetric.
+ *
+ * Connections: one node gets THREE ioredis clients —
+ *   - pub (regular commands; PUBLISH + membership SET/EXPIRE)
+ *     also used by membership (the same client; multi-purpose
+ *     non-pub/sub channel).
+ *   - sub (subscriber mode; SUBSCRIBE/MESSAGE only).
+ * The split is required by Redis pub/sub semantics: a connection in
+ * subscriber mode can't issue most regular commands.
+ */
+
+import {
+  createJsonCodec,
+  defineCluster,
+  type ClusterCodec,
+  type ClusterFactory,
+  type ClusterMembershipFactory,
+  type ClusterPartitioningFactory,
+  type ClusterTransportFactory,
+  type DurableJournalFactory,
+  type NodeId,
+} from "@agentick/cluster-next";
+
+import type { RedisLikeClient } from "./redis-client-shape.js";
+import { createRedisMembership } from "./redis-membership.js";
+import { createRedisTransport } from "./redis-transport.js";
+
+export interface RedisClusterNodeOptions {
+  readonly nodeId: NodeId;
+  /**
+   * The publish/regular-command ioredis client. Used by transport
+   * (PUBLISH) AND membership (SET/SREM/EXPIRE).
+   */
+  readonly pubClient: RedisLikeClient;
+  /**
+   * The subscribe-mode ioredis client. Held in SUBSCRIBE mode by
+   * the transport; the membership impl doesn't touch it.
+   */
+  readonly subClient: RedisLikeClient;
+  readonly codec?: ClusterCodec;
+  /** Shared key/channel prefix. Default `"agentick:"`. */
+  readonly keyPrefix?: string;
+  /** Liveness TTL (seconds). Default 30. */
+  readonly heartbeatTtlSec?: number;
+  /** Heartbeat renewal interval (ms). Default 10_000. */
+  readonly heartbeatIntervalMs?: number;
+  /** Member-change poll interval (ms). Default 5000. */
+  readonly pollIntervalMs?: number;
+  readonly onDiagnostic?: (name: string, payload?: unknown) => void;
+}
+
+export interface RedisClusterNode {
+  readonly transport: ClusterTransportFactory;
+  readonly membership: ClusterMembershipFactory;
+}
+
+export function redisClusterNode(opts: RedisClusterNodeOptions): RedisClusterNode {
+  const codec = opts.codec ?? createJsonCodec();
+  return {
+    transport: (parent) => {
+      const t = createRedisTransport({
+        nodeId: opts.nodeId,
+        pubClient: opts.pubClient,
+        subClient: opts.subClient,
+        codec,
+        ...(opts.keyPrefix !== undefined ? { keyPrefix: opts.keyPrefix } : {}),
+        ...(opts.onDiagnostic !== undefined ? { onDiagnostic: opts.onDiagnostic } : {}),
+      });
+      parent.onClose(() => t.close());
+      return t;
+    },
+    membership: (parent) => {
+      const m = createRedisMembership({
+        nodeId: opts.nodeId,
+        client: opts.pubClient,
+        ...(opts.keyPrefix !== undefined ? { keyPrefix: opts.keyPrefix } : {}),
+        ...(opts.heartbeatTtlSec !== undefined ? { heartbeatTtlSec: opts.heartbeatTtlSec } : {}),
+        ...(opts.heartbeatIntervalMs !== undefined
+          ? { heartbeatIntervalMs: opts.heartbeatIntervalMs }
+          : {}),
+        ...(opts.pollIntervalMs !== undefined ? { pollIntervalMs: opts.pollIntervalMs } : {}),
+        ...(opts.onDiagnostic !== undefined ? { onDiagnostic: opts.onDiagnostic } : {}),
+      });
+      parent.onClose(() => m.close());
+      return m;
+    },
+  };
+}
+
+export function redisTransport(opts: RedisClusterNodeOptions): ClusterTransportFactory {
+  return redisClusterNode(opts).transport;
+}
+
+export function redisMembership(opts: RedisClusterNodeOptions): ClusterMembershipFactory {
+  return redisClusterNode(opts).membership;
+}
+
+// ============================================================================
+// defineRedisCluster — top-level convenience
+// ============================================================================
+
+export interface DefineRedisClusterOptions extends RedisClusterNodeOptions {
+  readonly partitioning?: ClusterPartitioningFactory;
+  readonly journal?: DurableJournalFactory;
+  readonly fanoutMode?: "node-local-default" | "cluster-wide-default";
+}
+
+export function defineRedisCluster(opts: DefineRedisClusterOptions): ClusterFactory {
+  const node = redisClusterNode(opts);
+  return defineCluster({
+    nodeId: opts.nodeId,
+    transport: node.transport,
+    membership: node.membership,
+    ...(opts.partitioning !== undefined ? { partitioning: opts.partitioning } : {}),
+    ...(opts.journal !== undefined ? { journal: opts.journal } : {}),
+    ...(opts.codec !== undefined ? { codec: () => opts.codec! } : {}),
+    ...(opts.fanoutMode !== undefined ? { fanoutMode: opts.fanoutMode } : {}),
+  });
+}
