@@ -28,18 +28,22 @@
 
 import { reactReconciler } from "@agentick/reconciler-react-next";
 
-import { createApp as baseCreateApp, type AppHarnessOptions } from "./create-app.js";
+import {
+  createApp as baseCreateApp,
+  type AppHarnessOptions,
+  type CreateAppOptions,
+} from "./create-app.js";
 import { AppHarness } from "./harness.js";
 
 export async function createApp<P = unknown>(
   rootElement: unknown,
-  options: Omit<AppHarnessOptions<P>, "rootElement" | "reconciler"> &
-    Partial<Pick<AppHarnessOptions<P>, "reconciler">>,
+  options: Omit<CreateAppOptions<P>, "reconciler"> &
+    Partial<Pick<CreateAppOptions<P>, "reconciler">>,
 ): Promise<AppHarness<P>> {
   return baseCreateApp(rootElement, {
     reconciler: reactReconciler(),
     ...options,
-  } as Omit<AppHarnessOptions<P>, "rootElement">);
+  } as CreateAppOptions<P>);
 }
 
 // Re-export the rest of the public surface so adopters can pull

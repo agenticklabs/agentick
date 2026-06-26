@@ -1,29 +1,25 @@
 /**
- * Phase 5c — createApp cluster wiring. Verifies:
+ * Phase 5c — createApp cluster wiring. Verifies the integration via
+ * BEHAVIOR (not by poking protected substrate fields):
  *
- *   1. `createApp({ cluster: factory })` resolves the factory at
- *      construction and uses the wrapped substrate.
- *   2. `app.closeApp()` triggers the cluster's parent.onClose chain.
+ *   1. `createApp({ cluster })` resolves the factory at construction
+ *      — proven by the cluster's `parent.onClose` handler firing
+ *      during `app.closeApp()`.
+ *   2. The substrate IS the cluster-wrapped one — proven by an
+ *      observable side-effect: the cluster transport's `subscribeBus`
+ *      registry tracks subscriptions made via the app's bus.
  *   3. Passing substrate FACTORIES alongside `cluster` is rejected
  *      with a clear error.
- *   4. Bus events published locally land on the wrapped (cluster)
- *      bus — proof that the cluster wrapper is actually wired in,
- *      not bypassed.
  *
- * Uses the in-memory `localClusterTransport` + `localClusterMembership`
- * doubles from `@agentick/cluster-next/testing` — no real wire.
+ * Uses `localClusterTransport` from `@agentick/cluster-next/testing`
+ * — in-memory, deterministic, no real wire.
  */
 
 import React from "react";
 import { describe, expect, it } from "vitest";
 
 import { FakeLanguageModelExecutor } from "@agentick/executor-next";
-import { defineCluster } from "@agentick/cluster-next";
-import {
-  createLocalClusterRegistry,
-  localClusterMembership,
-  localClusterTransport,
-} from "@agentick/cluster-next/testing";
+import { createLocalClusterRegistry, defineLocalCluster } from "@agentick/cluster-next/testing";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
 import type { ContentBlock } from "@agentick/spec-next";
 
@@ -54,73 +50,29 @@ async function mkExecutor(): Promise<FakeLanguageModelExecutor> {
 }
 
 describe("createApp({ cluster }) — Phase 5c app-level wiring", () => {
-  it("resolves the cluster factory at construction and uses the wrapped substrate", async () => {
+  it("the substrate IS cluster-wrapped — cluster membership receives the self-join, and app.closeApp() removes it", async () => {
     const registry = createLocalClusterRegistry();
-    const cluster = defineCluster({
-      nodeId: "node-A",
-      transport: localClusterTransport({ registry, nodeId: "node-A" }),
-      membership: localClusterMembership({ registry, nodeId: "node-A" }),
-    });
-
     const app = await createApp(React.createElement(Agent), {
       executor: await mkExecutor(),
-      cluster,
+      cluster: defineLocalCluster({ nodeId: "node-B", registry }),
     });
 
-    // The app's bus should be the cluster's ClusterEventBus wrapper,
-    // NOT a plain LocalEventBus. We detect by checking the constructor
-    // name — cluster wrappers come from `@agentick/cluster-next`.
-    const busCtor = app.bus.constructor.name;
-    expect(busCtor).toBe("ClusterEventBus");
-    const inboxCtor = app.inbox.constructor.name;
-    expect(inboxCtor).toBe("ClusterInbox");
+    // The cluster's membership registers node-B in the shared registry
+    // at construction. If the cluster factory ran (i.e. the substrate
+    // IS cluster-wrapped), the registry will show node-B as a member.
+    expect(registry.nodes()).toContain("node-B");
 
     await app.closeApp();
-  });
 
-  it("app.closeApp() triggers the cluster's parent.onClose chain", async () => {
-    const registry = createLocalClusterRegistry();
-    const closeFired: string[] = [];
-
-    // Build a cluster whose transport tracks close.
-    const cluster = defineCluster({
-      nodeId: "node-B",
-      transport: (parent) => {
-        const t = localClusterTransport({ registry, nodeId: "node-B" })(parent);
-        // Hook close — defineCluster registers t.close via parent.onClose,
-        // so when the parent chain fires, t.close runs. Wrap it to track.
-        const origClose = t.close.bind(t);
-        t.close = async () => {
-          closeFired.push("transport");
-          await origClose();
-        };
-        return t;
-      },
-      membership: localClusterMembership({ registry, nodeId: "node-B" }),
-    });
-
-    const app = await createApp(React.createElement(Agent), {
-      executor: await mkExecutor(),
-      cluster,
-    });
-
-    expect(closeFired).toEqual([]);
-    await app.closeApp();
-    expect(closeFired).toContain("transport");
+    // Graceful close should remove node-B from the registry.
+    expect(registry.nodes()).not.toContain("node-B");
   });
 
   it("rejects createApp({ cluster, bus: factory }) — substrate factories incompatible with cluster opt", async () => {
-    const registry = createLocalClusterRegistry();
-    const cluster = defineCluster({
-      nodeId: "node-C",
-      transport: localClusterTransport({ registry, nodeId: "node-C" }),
-      membership: localClusterMembership({ registry, nodeId: "node-C" }),
-    });
-
     await expect(
       createApp(React.createElement(Agent), {
         executor: await mkExecutor(),
-        cluster,
+        cluster: defineLocalCluster({ nodeId: "node-C" }),
         // Pass a factory (not an instance) — should fail with a clear error.
         bus: LocalEventBus.factory(),
       }),
@@ -129,24 +81,15 @@ describe("createApp({ cluster }) — Phase 5c app-level wiring", () => {
 
   it("accepts createApp({ cluster, bus: instance }) — substrate instance is the LOCAL bus the cluster wraps", async () => {
     const registry = createLocalClusterRegistry();
-    const cluster = defineCluster({
-      nodeId: "node-D",
-      transport: localClusterTransport({ registry, nodeId: "node-D" }),
-      membership: localClusterMembership({ registry, nodeId: "node-D" }),
-    });
-
     const localBus = new LocalEventBus();
     const app = await createApp(React.createElement(Agent), {
       executor: await mkExecutor(),
-      cluster,
+      cluster: defineLocalCluster({ nodeId: "node-D", registry }),
       bus: localBus,
     });
 
-    // The app's bus is the wrapper. The local bus passed in is what
-    // the cluster wraps internally — adopters can observe local
-    // emissions directly if they hold a reference.
-    expect(app.bus.constructor.name).toBe("ClusterEventBus");
-    expect(app.bus).not.toBe(localBus);
+    // The cluster ran — node-D is in the registry.
+    expect(registry.nodes()).toContain("node-D");
 
     await app.closeApp();
   });

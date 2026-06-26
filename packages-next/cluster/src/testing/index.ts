@@ -9,6 +9,11 @@
  *     for deterministic ordering
  *   - `localClusterMembership(opts)` — fake `ClusterMembership` backed
  *     by the same registry; emits snapshot + transition deltas
+ *   - `defineLocalCluster(opts)` — the in-memory "fifth wire"
+ *     ClusterFactory, symmetric peer to `defineUnixCluster` /
+ *     `defineTcpCluster` / `defineWsCluster` / `defineRedisCluster`.
+ *     Use this in `createApp({ cluster: defineLocalCluster(...) })`
+ *     tests.
  *
  * Use these in tests that need REAL transport behavior (subscription
  * lifecycle, ordering, filter matching) without standing up real
@@ -24,3 +29,6 @@ export { localClusterTransport } from "./local-cluster-transport.js";
 
 export type { LocalClusterMembershipOptions } from "./local-cluster-membership.js";
 export { localClusterMembership } from "./local-cluster-membership.js";
+
+export type { DefineLocalClusterOptions } from "./define-local-cluster.js";
+export { defineLocalCluster } from "./define-local-cluster.js";
