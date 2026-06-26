@@ -584,6 +584,25 @@ importers:
         specifier: workspace:*
         version: link:../utils
 
+  packages-next/compiler-react:
+    dependencies:
+      '@agentick/compiler-next':
+        specifier: workspace:*
+        version: link:../compiler
+      '@agentick/spec-next':
+        specifier: workspace:*
+        version: link:../spec
+      '@agentick/utils-next':
+        specifier: workspace:*
+        version: link:../utils
+    devDependencies:
+      '@types/react':
+        specifier: ^19.2.5
+        version: 19.2.13
+      react:
+        specifier: ^19.2.4
+        version: 19.2.4
+
   packages-next/elicitation:
     dependencies:
       '@agentick/runtime-next':
