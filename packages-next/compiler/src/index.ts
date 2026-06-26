@@ -37,3 +37,6 @@ export {
   textBlock,
 } from "./intrinsics.js";
 export type { MessageProps, SectionProps } from "./intrinsics.js";
+
+export { format } from "./format.js";
+export type { FormatOptions } from "./format.js";

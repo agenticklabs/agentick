@@ -574,6 +574,9 @@ importers:
 
   packages-next/compiler:
     dependencies:
+      '@agentick/formatters-next':
+        specifier: workspace:*
+        version: link:../formatters
       '@agentick/spec-next':
         specifier: workspace:*
         version: link:../spec
